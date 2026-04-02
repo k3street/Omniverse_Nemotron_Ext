@@ -1,0 +1,20 @@
+[package]
+version = "1.0.0"
+category = "Assistants"
+title = "Isaac Assist"
+description = "Multimodal AI assistant with local/cloud LLM fallback and real-time Voice+Vision integration."
+authors = ["NVIDIA Omniverse Community"]
+repository = "https://github.com/isaac-sim/IsaacSim"
+keywords = ["isaac", "assist", "ai", "llm", "multimodal", "livekit"]
+changelog = "Docs/01_EXTENSION_SHELL.md"
+readme = "Docs/00_INDEX.md"
+icon = "" # Add an icon later
+
+[dependencies]
+"omni.kit.uiapp" = {}
+"omni.ui" = {}
+"omni.ext" = {}
+"omni.kit.viewport.utility" = {} # Required for LiveKit WebRTC viewport grabbing
+
+[[python.module]]
+name = "omni.isaac.assist"

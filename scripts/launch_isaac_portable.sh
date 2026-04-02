@@ -28,9 +28,20 @@ if [ -z "$ISAAC_SIM_PATH" ] || [ ! -f "$ISAAC_SIM_PATH/isaac-sim.sh" ]; then
     exit 1
 fi
 
-# 2. Get absolute path to the extension directory in this repo
+# 2. Extract version and set the correct extension directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EXT_PATH="$(dirname "$SCRIPT_DIR")/exts"
+
+# Fast heuristic: if "6.0" is in the path, use the 6.0 extension bucket
+if [[ "$ISAAC_SIM_PATH" == *"6.0"* ]]; then
+    EXT_ROOT="$SCRIPT_DIR/../exts/isaac_6.0"
+    echo "🔄 Detected Isaac Sim 6.0! Auto-selecting 6.0 extensions."
+else
+    EXT_ROOT="$SCRIPT_DIR/../exts/isaac_5.1"
+    echo "🔄 Detected Isaac Sim 5.1 (or default)! Auto-selecting 5.1 extensions."
+fi
+
+# Resolve absolute path
+EXT_PATH=$(realpath "$EXT_ROOT")
 
 # Ensure path resolution works
 if [ ! -d "$EXT_PATH/omni.isaac.assist" ]; then
