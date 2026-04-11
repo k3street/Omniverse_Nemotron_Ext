@@ -19,5 +19,6 @@ class Config:
         self.livekit_url = os.environ.get("LIVEKIT_URL", "")
         self.livekit_api_key = os.environ.get("LIVEKIT_API_KEY", "")
         self.livekit_api_secret = os.environ.get("LIVEKIT_API_SECRET", "")
+        self.contribute_data = os.environ.get("CONTRIBUTE_DATA", "False").lower() == "true"
 
 config = Config()

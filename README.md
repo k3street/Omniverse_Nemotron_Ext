@@ -19,6 +19,7 @@ Welcome to the central repository for the **Isaac Assist** Omniverse Extension a
 - [x] **06_PATCH_PLANNER**: Repair execution engine.
 - [x] **07_APPROVAL_ENGINE**: Dry-run UI dialogs for user governance over USD edits.
 
-## Phase 4: Long-term Memory (Weeks 12–14)
-- [ ] **08_KNOWLEDGE_BASE**: Local experiential memory persisting fixes over time.
-- [ ] **09_TELEMETRY_EVAL**: Evaluation and offline RLHF telemetry piping.
+## Phase 4: Long-term Memory & Fine-Tuning (Weeks 12–14)
+- [x] **08_KNOWLEDGE_BASE**: Local experiential memory persisting fixes over time dynamically by Omniverse version.
+- [x] **09_SETTINGS_MANAGER**: Model agnostic settings management, `ollama pull` trigger capabilities, API keys.
+- [x] **10_FINETUNE_EXPORTER**: Data pipelines extracting Knowledge Base contexts to train Qwen/Gemma local models via Unsloth, as well as Gemini 3.1 via GCP Vertex AI APIs.
