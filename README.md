@@ -17,7 +17,7 @@ Welcome to the central repository for the **Isaac Assist** Omniverse Extension a
 
 ## Phase 3: Planning & Safety (Weeks 9–11)
 - [x] **06_PATCH_PLANNER**: Repair execution engine.
-- [ ] **07_APPROVAL_ENGINE**: Dry-run UI dialogs for user governance over USD edits.
+- [x] **07_APPROVAL_ENGINE**: Dry-run UI dialogs for user governance over USD edits.
 
 ## Phase 4: Long-term Memory (Weeks 12–14)
 - [ ] **08_KNOWLEDGE_BASE**: Local experiential memory persisting fixes over time.

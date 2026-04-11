@@ -13,6 +13,7 @@ from .snapshots.routes import router as snapshot_router
 from .retrieval.routes import router as retrieval_router
 from .analysis.routes import router as analysis_router
 from .planner.routes import router as planner_router
+from .governance.routes import router as governance_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ app.include_router(snapshot_router, prefix="/api/v1/snapshots", tags=["Snapshot 
 app.include_router(retrieval_router, prefix="/api/v1/retrieval", tags=["Source Registry RAG"])
 app.include_router(analysis_router, prefix="/api/v1/analysis", tags=["Stage Analyzer"])
 app.include_router(planner_router, prefix="/api/v1/plans", tags=["Patch Planner"])
+app.include_router(governance_router, prefix="/api/v1/governance", tags=["Approval Engine"])
 
 @app.get("/health")
 async def health_check():
