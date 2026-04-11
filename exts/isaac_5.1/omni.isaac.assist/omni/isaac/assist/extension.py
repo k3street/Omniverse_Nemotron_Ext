@@ -2,8 +2,9 @@ import omni.ext
 import omni.ui as ui
 import carb
 
-# Module-level ref prevents garbage collection
+# Module-level refs prevent garbage collection
 _window = None
+_rpc_server = None
 
 
 class IsaacAssistExtension(omni.ext.IExt):
@@ -13,17 +14,34 @@ class IsaacAssistExtension(omni.ext.IExt):
     """
 
     def on_startup(self, ext_id):
-        global _window
+        global _window, _rpc_server
         carb.log_warn("[IsaacAssist] on_startup")
 
-        # Lazy-import telemetry so any failure is isolated
+        # ── 1. Attach console log listener ───────────────────────────────────
+        try:
+            from .context.console_log import attach_log_listener
+            attach_log_listener()
+        except Exception as e:
+            carb.log_warn(f"[IsaacAssist] Log listener skipped: {e}")
+
+        # ── 2. Start Kit RPC server (port 8001) ───────────────────────────────
+        try:
+            from .context.kit_rpc import KitRPCServer
+            _rpc_server = KitRPCServer()
+            _rpc_server.start()
+            self._rpc_server = _rpc_server
+        except Exception as e:
+            carb.log_warn(f"[IsaacAssist] Kit RPC skipped: {e}")
+            self._rpc_server = None
+
+        # ── 3. Lazy-init telemetry ────────────────────────────────────────────
         try:
             from .telemetry import init_telemetry
             init_telemetry()
         except Exception as e:
             carb.log_warn(f"[IsaacAssist] Telemetry skipped: {e}")
 
-        # Build the window
+        # ── 4. Build the chat window ──────────────────────────────────────────
         try:
             from .ui import ChatViewWindow
             _window = ChatViewWindow("Isaac Assist AI", width=440, height=660)
@@ -36,7 +54,7 @@ class IsaacAssistExtension(omni.ext.IExt):
             carb.log_error(traceback.format_exc())
             self._window = None
 
-        # Register Window menu entry (optional — graceful fallback)
+        # ── 5. Register Window menu entry ─────────────────────────────────────
         self._menu = None
         try:
             import omni.kit.menu.utils as mu
@@ -56,14 +74,34 @@ class IsaacAssistExtension(omni.ext.IExt):
             self._window.visible = True
 
     def on_shutdown(self):
-        global _window
+        global _window, _rpc_server
         carb.log_warn("[IsaacAssist] on_shutdown")
+
+        # Stop RPC server
+        if self._rpc_server is not None:
+            try:
+                self._rpc_server.stop()
+            except Exception:
+                pass
+            self._rpc_server = None
+            _rpc_server = None
+
+        # Detach log listener
+        try:
+            from .context.console_log import detach_log_listener
+            detach_log_listener()
+        except Exception:
+            pass
+
+        # Remove menu
         if self._menu is not None:
             try:
                 import omni.kit.menu.utils as mu
                 mu.remove_menu_items(self._menu, "Window")
             except Exception:
                 pass
+
+        # Destroy window
         if self._window is not None:
             self._window.destroy()
             self._window = None
