@@ -1,60 +1,56 @@
-from typing import Dict, List, Optional
-from .llm_ollama import OllamaProvider, LLMResponse
-import json
+from typing import Dict, List
+from .provider_factory import get_llm_provider
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class ChatOrchestrator:
     """
-    Manages building the context for Nemotron-Cascade-2 depending on the user query.
-    It links the live scene tree (textual), documentation, and chat interface.
+    Manages multi-turn chat sessions, injects stage context, and calls the
+    configured LLM provider (Ollama local or Gemini cloud).
     """
+
     def __init__(self):
-        # We assume the user has ran: ollama create isaac-assist-nemotron -f Modelfile
-        self.llm_provider = OllamaProvider(model="isaac-assist-nemotron")
-        
-    async def process_message(self, user_message: str, stage_context: str, selection_context: List[str], prior_history: List[Dict]) -> Dict:
+        self.llm_provider = get_llm_provider()
+        # Lightweight in-memory session history: {session_id: [msg, ...]}
+        self._history: Dict[str, List[Dict]] = {}
+
+    async def handle_message(self, session_id: str, user_message: str) -> str:
         """
-        Process an incoming user message, enrich it with stage data, and query Nemotron.
+        Primary entry point called by the route handler.
+        Returns the assistant's reply as a plain string.
         """
-        messages = []
-        # Replay conversation history
-        for msg in prior_history[-10:]: # keep context short
-            messages.append({"role": msg["role"], "content": msg["content"]})
-            
-        # Build current turn context
-        enriched_prompt = self._build_prompt(user_message, stage_context, selection_context)
-        
-        # Our recent history already includes the user_message from the DB, but we only want to 
-        # augment it with the stage background context on this active turn, not save the 
-        # giant stage context to memory.
-        if len(messages) > 0 and messages[-1]["role"] == "user":
-            messages[-1]["content"] = enriched_prompt
-        else:
-            messages.append({"role": "user", "content": enriched_prompt})
-        
-        # Invoke LLM
-        response = await self.llm_provider.complete(messages, {})
-        
-        self.memory.add_message(session_id, "assistant", response.text)
-        
-        return {
-            "text": response.text,
-            "actions": response.actions,
-            "intent": "general" # In a full system, we might have an intent classifier ahead of this
-        }
+        history = self._history.setdefault(session_id, [])
+        logger.info(f"[{session_id}] USER: {user_message}")
+
+        # Build the messages list for the LLM
+        messages = list(history[-10:])  # rolling context window
+        messages.append({"role": "user", "content": user_message})
+
+        try:
+            response = await self.llm_provider.complete(messages, {})
+            reply = response.text
+        except Exception as e:
+            logger.error(f"LLM provider error: {e}")
+            raise
+
+        logger.info(f"[{session_id}] ASSISTANT: {reply}")
+
+        # Persist to in-memory history
+        history.append({"role": "user", "content": user_message})
+        history.append({"role": "assistant", "content": reply})
+
+        return reply
 
     def _build_prompt(self, message: str, stage_context: str, selection_context: List[str]) -> str:
-        """
-        Embeds the USD textual 'vision' and the active selections directly into the prompt.
-        """
         prompt = ""
         if stage_context:
             prompt += f"Background Context - Active Stage Hierarchy:\n{stage_context}\n\n"
-            
         if selection_context:
-            prompt += f"User's Active Selections:\n"
+            prompt += "User's Active Selections:\n"
             for sel in selection_context:
                 prompt += f"- {sel}\n"
             prompt += "\n"
-            
         prompt += f"User Request: {message}\n"
         return prompt

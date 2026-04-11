@@ -18,7 +18,10 @@ class ChatViewWindow(ui.Window):
         self.delegate = delegate
         self.service = AssistServiceClient()
         self.webrtc = None
-        self._build_ui()
+        try:
+            self._build_ui()
+        except Exception as e:
+            logger.error(f"[IsaacAssist] _build_ui() failed: {e}", exc_info=True)
 
     def _build_ui(self):
         with self.frame:
@@ -29,7 +32,7 @@ class ChatViewWindow(ui.Window):
                     ui.Spacer()
                     
                     # Settings Toggle
-                    ui.Button(omni.ui.get_custom_glyph_code("cog") if hasattr(omni.ui, 'get_custom_glyph_code') else "Settings", width=30, clicked_fn=self._spawn_settings_window)
+                    ui.Button("⚙", width=30, clicked_fn=self._spawn_settings_window)
 
                     # LiveKit Stream Toggle
                     self.btn_livekit = ui.Button("Start Vision / Voice", width=150, clicked_fn=self._toggle_livekit)

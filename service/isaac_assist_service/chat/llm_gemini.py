@@ -11,23 +11,37 @@ class LLMResponse:
     text: str
     actions: List[Dict]
 
+SYSTEM_PROMPT = (
+    "You are Isaac Assist, an expert AI embedded inside NVIDIA Isaac Sim. "
+    "You help robotics engineers diagnose scene issues, generate USD patches, "
+    "and answer questions about Omniverse, PhysX, ROS2, and robot simulation. "
+    "Be concise and precise. When you suggest code, use Python that works inside "
+    "the Omniverse Kit scripting environment."
+)
+
 class GeminiProvider:
     """
-    LLM Provider implementation connecting to Google's Gemini API via REST.
+    LLM Provider connecting to Google's Gemini API (supports all v1beta models
+    including gemini-robotics-er-1.5).
     """
-    def __init__(self, api_key: str, model: str = "gemini-1.5-pro-latest"):
+    def __init__(self, api_key: str, model: str = "gemini-robotics-er-1.5"):
         self.api_key = api_key
         self.model = model
-        self.base_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+        self.base_url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{self.model}:generateContent?key={self.api_key}"
+        )
 
     async def complete(self, messages: List[Dict], context: Dict) -> LLMResponse:
         gemini_messages = self._format_messages(messages)
-        
+
         payload = {
+            "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
             "contents": gemini_messages,
             "generationConfig": {
-                "temperature": 0.2
-            }
+                "temperature": 0.2,
+                "maxOutputTokens": 2048,
+            },
         }
         
         async with aiohttp.ClientSession() as session:

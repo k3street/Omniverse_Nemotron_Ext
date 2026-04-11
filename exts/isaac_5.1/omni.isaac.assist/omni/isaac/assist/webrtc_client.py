@@ -1,9 +1,17 @@
 import asyncio
 import logging
-import omni.ui
-import omni.timeline
 
 logger = logging.getLogger(__name__)
+
+try:
+    import omni.ui
+except ImportError:
+    pass
+
+try:
+    import omni.timeline
+except ImportError:
+    logger.warning("[IsaacAssist] omni.timeline not available — this is fine.")
 
 try:
     from livekit import rtc
