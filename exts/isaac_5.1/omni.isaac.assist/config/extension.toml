@@ -13,8 +13,11 @@ icon = "" # Add an icon later
 [dependencies]
 "omni.kit.uiapp" = {}
 "omni.ui" = {}
-"omni.ext" = {}
-"omni.kit.viewport.utility" = {} # Required for LiveKit WebRTC viewport grabbing
+"omni.kit.pipapi" = {} # Auto-pip capabilities for runtime dependencies
+
+[python.pipapi]
+requirements = []
+use_online_index = true
 
 [[python.module]]
 name = "omni.isaac.assist"

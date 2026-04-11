@@ -22,6 +22,8 @@ class SettingsManager:
             "LOCAL_MODEL_NAME": config.local_model_name,
             "CLOUD_MODEL_NAME": config.cloud_model_name,
             "API_KEY_GEMINI": config.api_key_gemini,
+            "OPENAI_API_BASE": config.openai_api_base,
+            "OPENAI_API_KEY": config.openai_api_key,
             "CONTRIBUTE_DATA": str(config.contribute_data).lower()
         }
 

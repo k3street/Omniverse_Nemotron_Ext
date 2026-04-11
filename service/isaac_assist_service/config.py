@@ -16,6 +16,8 @@ class Config:
         self.local_model_name = os.environ.get("LOCAL_MODEL_NAME", "cosmos-reason-2:latest")
         self.cloud_model_name = os.environ.get("CLOUD_MODEL_NAME", "gemini-1.5-pro-latest")
         self.api_key_gemini = os.environ.get("API_KEY_GEMINI", "")
+        self.openai_api_base = os.environ.get("OPENAI_API_BASE", "http://localhost:11434/v1")
+        self.openai_api_key = os.environ.get("OPENAI_API_KEY", "sk-local")
         self.livekit_url = os.environ.get("LIVEKIT_URL", "")
         self.livekit_api_key = os.environ.get("LIVEKIT_API_KEY", "")
         self.livekit_api_secret = os.environ.get("LIVEKIT_API_SECRET", "")

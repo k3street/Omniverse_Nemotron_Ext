@@ -44,3 +44,43 @@ class AssistServiceClient:
         except Exception as e:
             logger.error(f"Error communicating with Assist Service: {e}")
             return {"error": str(e)}
+
+    async def generate_plan(self, user_query: str, findings: list = None) -> dict:
+        """ Submits findings/intent to the Swarm Plan Generator endpoint. """
+        url = f"{self.base_url}/api/v1/plans/generate"
+        payload = {
+            "finding_ids": [],
+            "user_request": user_query
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    return {"error": f"Failed (HTTP {response.status})"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def update_settings(self, settings_payload: dict) -> dict:
+        """ Updates `.env` variables via the unified Settings Manager """
+        url = f"{self.base_url}/api/v1/settings/update_env"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=settings_payload) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    return {"error": f"Failed (HTTP {response.status})"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def export_knowledge(self) -> dict:
+        """ Triggers JSONL finetuning extraction from the Knowledge Base """
+        url = f"{self.base_url}/api/v1/finetune/export"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    return {"error": f"Failed (HTTP {response.status})"}
+        except Exception as e:
+            return {"error": str(e)}

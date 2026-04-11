@@ -1,10 +1,17 @@
 import asyncio
 import logging
-from livekit import rtc
 import omni.ui
 import omni.timeline
 
 logger = logging.getLogger(__name__)
+
+try:
+    from livekit import rtc
+    _LIVEKIT_AVAILABLE = True
+except ImportError:
+    logger.warning("[IsaacAssist] livekit package not found — Voice/Vision features disabled. Install via: pip install livekit")
+    _LIVEKIT_AVAILABLE = False
+    rtc = None
 
 class ViewportWebRTCClient:
     """
@@ -16,12 +23,21 @@ class ViewportWebRTCClient:
         self.url = url
         self.api_key = api_key
         self.api_secret = api_secret
-        self.room = rtc.Room()
         self._streaming = False
-        self._video_source = rtc.VideoSource(640, 480) # Downscale for latency/API limits
+        if not _LIVEKIT_AVAILABLE:
+            logger.warning("[IsaacAssist] LiveKit disabled — skipping WebRTC setup.")
+            self.room = None
+            self._video_source = None
+            self._video_track = None
+            return
+        self.room = rtc.Room()
+        self._video_source = rtc.VideoSource(640, 480)
         self._video_track = rtc.LocalVideoTrack.create_video_track("viewport-screen", self._video_source)
-        
+
     async def connect_and_publish(self):
+        if not _LIVEKIT_AVAILABLE:
+            logger.warning("[IsaacAssist] LiveKit not available — skipping connect.")
+            return
         try:
             logger.info("Connecting to LiveKit Voice Room...")
             await self.room.connect(self.url, self.api_key) # Typically uses tokens natively, but simplified here

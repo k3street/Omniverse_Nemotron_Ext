@@ -1,7 +1,9 @@
 import omni.ext
 import omni.ui as ui
+import omni.kit.pipapi
 import logging
 from .ui import ChatViewWindow
+from .telemetry import init_telemetry, trace_error
 
 logger = logging.getLogger(__name__)
 
@@ -9,8 +11,14 @@ class IsaacAssistExtension(omni.ext.IExt):
     """
     Standard Omniverse Extension Entry Point (Compatible with 5.1 and 6.0 logic patterns)
     """
+    @trace_error("Extension_Startup")
     def on_startup(self, ext_id):
         logger.info("[omni.isaac.assist] Isaac Assist startup")
+
+        # Boot OpenTelemetry dependencies securely
+        omni.kit.pipapi.install("opentelemetry-api")
+        omni.kit.pipapi.install("opentelemetry-sdk")
+        init_telemetry()
 
         # Spawn the Chat Window
         self._window = ChatViewWindow("Isaac Assist AI", width=400, height=600)
