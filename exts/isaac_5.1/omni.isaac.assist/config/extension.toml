@@ -2,10 +2,10 @@
 version = "1.0.0"
 category = "Assistants"
 title = "Isaac Assist"
-description = "Multimodal AI assistant with local/cloud LLM fallback and real-time Voice+Vision integration."
-authors = ["NVIDIA Omniverse Community"]
-repository = "https://github.com/isaac-sim/IsaacSim"
-keywords = ["isaac", "assist", "ai", "llm", "multimodal", "livekit"]
+description = "Full natural-language control over Isaac Sim — USD authoring, OmniGraph, physics, materials, sensors, viewport, and debugging via LLM orchestration."
+authors = ["10Things, Inc."]
+repository = "http://www.10things.tech"
+keywords = ["isaac", "assist", "ai", "llm", "multimodal", "livekit", "omnigraph", "usd", "physics"]
 changelog = "Docs/01_EXTENSION_SHELL.md"
 readme = "Docs/00_INDEX.md"
 icon = "" # Add an icon later

@@ -80,6 +80,10 @@ class KitRPCServer:
         app.router.add_get("/context", self._handle_context)
         app.router.add_get("/capture", self._handle_capture)
         app.router.add_post("/exec_patch", self._handle_exec_patch)
+        app.router.add_get("/selection", self._handle_selection)
+        app.router.add_post("/sim_control", self._handle_sim_control)
+        app.router.add_post("/set_viewport_camera", self._handle_set_viewport_camera)
+        app.router.add_get("/list_prims", self._handle_list_prims)
 
         self._runner = web.AppRunner(app)
         await self._runner.setup()
@@ -154,5 +158,95 @@ class KitRPCServer:
             await _PATCH_QUEUE.put(body)
             carb.log_warn(f"[IsaacAssist] Patch queued for approval: {code[:80]}...")
             return web.json_response({"queued": True})
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_selection(self, request) -> "web.Response":
+        """Return the currently selected prim path(s) and properties."""
+        from aiohttp import web
+        try:
+            from .prim_properties import get_selected_prim_properties
+            sel = get_selected_prim_properties()
+            return web.json_response(sel)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_sim_control(self, request) -> "web.Response":
+        """
+        Control the simulation timeline.
+        Body: {"action": "play"|"pause"|"stop"|"step"|"reset", "step_count": N}
+        """
+        from aiohttp import web
+        try:
+            body = await request.json()
+            action = body.get("action", "").lower()
+            code_map = {
+                "play": "import omni.timeline; omni.timeline.get_timeline_interface().play()",
+                "pause": "import omni.timeline; omni.timeline.get_timeline_interface().pause()",
+                "stop": "import omni.timeline; omni.timeline.get_timeline_interface().stop()",
+                "reset": (
+                    "import omni.timeline\n"
+                    "tl = omni.timeline.get_timeline_interface()\n"
+                    "tl.stop(); tl.set_current_time(0)"
+                ),
+            }
+            if action == "step":
+                n = body.get("step_count", 1)
+                code = f"import omni.timeline\ntl = omni.timeline.get_timeline_interface()\nfor _ in range({n}): tl.forward_one_frame()"
+            elif action in code_map:
+                code = code_map[action]
+            else:
+                return web.json_response({"error": f"Unknown action: {action}"}, status=400)
+
+            await _PATCH_QUEUE.put({"code": code, "description": f"sim_control: {action}", "auto_approve": True})
+            return web.json_response({"ok": True, "action": action})
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_set_viewport_camera(self, request) -> "web.Response":
+        """
+        Switch the active viewport camera.
+        Body: {"camera_path": "/World/Camera"}
+        """
+        from aiohttp import web
+        try:
+            body = await request.json()
+            camera_path = body.get("camera_path", "")
+            if not camera_path:
+                return web.json_response({"error": "No camera_path provided"}, status=400)
+            code = (
+                "import omni.kit.viewport.utility\n"
+                f"omni.kit.viewport.utility.get_active_viewport().camera_path = '{camera_path}'"
+            )
+            await _PATCH_QUEUE.put({"code": code, "description": f"Set viewport camera to {camera_path}", "auto_approve": True})
+            return web.json_response({"ok": True, "camera_path": camera_path})
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_list_prims(self, request) -> "web.Response":
+        """
+        List prims, optionally filtered by type.
+        Query params: ?filter_type=Mesh&under_path=/World
+        """
+        from aiohttp import web
+        try:
+            from .stage_reader import get_stage_tree
+            tree = get_stage_tree()
+            filter_type = request.rel_url.query.get("filter_type")
+            under_path = request.rel_url.query.get("under_path", "/")
+
+            # Flatten tree to list of paths with types
+            prims = []
+            def _flatten(nodes, depth=0):
+                for n in nodes:
+                    path = n.get("path", "")
+                    ptype = n.get("type", "")
+                    if path.startswith(under_path):
+                        if not filter_type or ptype == filter_type:
+                            prims.append({"path": path, "type": ptype})
+                    _flatten(n.get("children", []), depth + 1)
+
+            _flatten(tree.get("tree", []))
+            return web.json_response({"prims": prims, "count": len(prims)})
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)

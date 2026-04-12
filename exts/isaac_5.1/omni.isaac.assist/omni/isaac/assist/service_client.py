@@ -19,7 +19,7 @@ class AssistServiceClient:
         self.base_url = base_url
         self.session_id = "default_session"
 
-    async def send_message(self, text: str) -> dict:
+    async def send_message(self, text: str, context: dict = None) -> dict:
         """ Sends a chat message to the orchestration service """
         if not HAS_AIOHTTP:
             logger.warning("aiohttp not installed in the Isaac Sim python environment. Mocking response.")
@@ -30,7 +30,7 @@ class AssistServiceClient:
         payload = {
             "session_id": self.session_id,
             "message": text,
-            "context": {}
+            "context": context or {}
         }
         
         try:

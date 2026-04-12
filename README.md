@@ -76,7 +76,7 @@ cp service/isaac_assist_service/.env.example service/isaac_assist_service/.env
 |---|---|---|
 | `LLM_MODE` | `local` | `local` (Ollama) or `cloud` (Gemini) |
 | `LOCAL_MODEL_NAME` | `cosmos-reason-2:latest` | Model name as shown in `ollama list` |
-| `CLOUD_MODEL_NAME` | `gemini-1.5-pro-latest` | Google GenAI model identifier |
+| `CLOUD_MODEL_NAME` | `gemini-robotics-er-1.5` | Google GenAI model identifier |
 | `API_KEY_GEMINI` | *(empty)* | Required when `LLM_MODE=cloud` |
 | `LIVEKIT_URL` | `ws://localhost:7880` | LiveKit server URL |
 

@@ -35,6 +35,10 @@ class Config:
         self.livekit_api_key    = os.environ.get("LIVEKIT_API_KEY", "")
         self.livekit_api_secret = os.environ.get("LIVEKIT_API_SECRET", "")
 
+        # ── MCP Server ───────────────────────────────────────────────────────
+        self.mcp_host = os.environ.get("MCP_HOST", "127.0.0.1")
+        self.mcp_port = int(os.environ.get("MCP_PORT", "8002"))
+
         # ── Misc ─────────────────────────────────────────────────────────────
         self.openai_api_base  = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
         self.contribute_data  = os.environ.get("CONTRIBUTE_DATA", "false").lower() == "true"

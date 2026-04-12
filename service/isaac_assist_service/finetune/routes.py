@@ -16,23 +16,31 @@ exporter = FinetuneExporter(kb)
 
 class ExportRequest(BaseModel):
     version: str
-    target_format: str # "unsloth" | "gemini"
+    target_format: str # "unsloth" | "gemini" | "openai" | "alpaca"
 
 @router.post("/export")
 async def export_dataset(req: ExportRequest):
     """
     Triggers an export of the version-specific memory bank into a JSONL format
-    specifically tailored for either Unsloth (ShareGPT Qwen/Gemma) or Gemini Vertex AI.
+    specifically tailored for Unsloth, Gemini, OpenAI, or Alpaca fine-tuning.
     """
     try:
-        if req.target_format == "unsloth":
-            path = exporter.export_unsloth_format(req.version)
-        elif req.target_format == "gemini":
-            path = exporter.export_gemini_format(req.version)
-        else:
-            raise HTTPException(status_code=400, detail="target_format must be 'unsloth' or 'gemini'")
-        
+        format_map = {
+            "unsloth": exporter.export_unsloth_format,
+            "gemini": exporter.export_gemini_format,
+            "openai": exporter.export_openai_format,
+            "alpaca": exporter.export_alpaca_format,
+        }
+        export_fn = format_map.get(req.target_format)
+        if not export_fn:
+            raise HTTPException(
+                status_code=400,
+                detail=f"target_format must be one of: {', '.join(format_map.keys())}"
+            )
+        path = export_fn(req.version)
         return {"status": "success", "file_path": str(path), "download_url": f"/api/v1/finetune/download?filepath={path}"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to export dataset: {e}")
         raise HTTPException(status_code=500, detail=str(e))

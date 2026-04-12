@@ -1,14 +1,81 @@
-from fastapi import APIRouter, HTTPException
-from typing import Dict, Any, List
+from fastapi import APIRouter, HTTPException, Query
+from typing import Dict, Any, List, Optional
 from .models import RetrievalQuery
 from .storage.fts_store import FTSStore
 from .indexer import DocumentIndexer
 from .source_registry import SourceRegistry
+import json
+from pathlib import Path
 
 router = APIRouter()
 store = FTSStore()
 registry = SourceRegistry()
 indexer = DocumentIndexer()
+
+# ── Product spec database ────────────────────────────────────────────────────
+_SPECS_PATH = Path(__file__).resolve().parents[2] / "workspace" / "knowledge" / "sensor_specs.jsonl"
+_specs_cache: Optional[List[Dict]] = None
+
+def _load_specs() -> List[Dict]:
+    global _specs_cache
+    if _specs_cache is not None:
+        return _specs_cache
+    specs = []
+    if _SPECS_PATH.exists():
+        for line in _SPECS_PATH.read_text().splitlines():
+            line = line.strip()
+            if line:
+                specs.append(json.loads(line))
+    _specs_cache = specs
+    return specs
+
+
+@router.get("/specs")
+def list_product_specs(
+    sensor_type: Optional[str] = Query(None, description="Filter by type: camera, lidar, imu, gripper, force_torque_sensor"),
+    manufacturer: Optional[str] = Query(None),
+):
+    """List all product specs, optionally filtered by type or manufacturer."""
+    specs = _load_specs()
+    if sensor_type:
+        specs = [s for s in specs if s.get("type") == sensor_type]
+    if manufacturer:
+        specs = [s for s in specs if manufacturer.lower() in s.get("manufacturer", "").lower()]
+    return {"specs": specs, "count": len(specs)}
+
+
+@router.get("/specs/lookup")
+def lookup_product_spec(product_name: str = Query(..., description="Product name to search for")):
+    """Fuzzy-match a product name against the sensor specs database."""
+    query = product_name.lower()
+    specs = _load_specs()
+
+    # Exact match
+    for s in specs:
+        if s["product"].lower() == query:
+            return {"found": True, "spec": s}
+
+    # Partial match
+    matches = [s for s in specs if query in s["product"].lower()]
+    if matches:
+        return {"found": True, "spec": matches[0],
+                "alternatives": [m["product"] for m in matches[1:4]]}
+
+    # Token match
+    tokens = query.split()
+    scored = []
+    for s in specs:
+        name_lower = s["product"].lower()
+        hits = sum(1 for t in tokens if t in name_lower)
+        if hits > 0:
+            scored.append((hits, s))
+    scored.sort(key=lambda x: -x[0])
+    if scored:
+        return {"found": True, "spec": scored[0][1],
+                "alternatives": [s["product"] for _, s in scored[1:4]]}
+
+    return {"found": False, "message": f"No specs found for '{product_name}'",
+            "available_types": list(set(s.get("type") for s in _load_specs()))}
 
 @router.get("/sources")
 def list_sources():

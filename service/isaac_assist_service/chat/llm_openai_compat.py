@@ -1,13 +1,14 @@
 import aiohttp
 import logging
 import json
-from dataclasses import dataclass
-from typing import List, Dict
+from dataclasses import dataclass, field
+from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
-    "You are Isaac Assist, an expert AI embedded inside NVIDIA Isaac Sim. "
+    "You are Isaac Assist, an expert AI embedded inside NVIDIA Isaac Sim — "
+    "authored by 10Things, Inc. (www.10things.tech). "
     "You help robotics engineers diagnose scene issues, generate USD patches, "
     "and answer questions about Omniverse, PhysX, ROS2, and robot simulation. "
     "Be concise and precise. When you suggest code, use Python that works inside "
@@ -25,13 +26,15 @@ PROVIDER_URLS = {
 @dataclass
 class LLMResponse:
     text: str
-    actions: List[Dict]
+    actions: List[Dict] = field(default_factory=list)
+    tool_calls: Optional[List[Dict]] = None
 
 
 class OpenAICompatProvider:
     """
     Generic OpenAI-compatible chat completion provider.
     Works with OpenAI, xAI Grok, and any OpenAI-compatible endpoint.
+    Supports tool/function calling when tools are provided in context.
     """
 
     def __init__(self, api_key: str, model: str, base_url: str):
@@ -40,15 +43,25 @@ class OpenAICompatProvider:
         self.base_url = base_url
 
     async def complete(self, messages: List[Dict], context: Dict) -> LLMResponse:
-        # Prepend system message
-        full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+        # Prepend system message if not already present
+        if not messages or messages[0].get("role") != "system":
+            system = getattr(self, "_system_override", None) or SYSTEM_PROMPT
+            full_messages = [{"role": "system", "content": system}] + messages
+        else:
+            full_messages = messages
 
         payload = {
             "model": self.model,
             "messages": full_messages,
-            "max_tokens": 2048,
+            "max_tokens": 4096,
             "temperature": 0.2,
         }
+
+        # Add tools if provided
+        tools = context.get("tools")
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -61,23 +74,45 @@ class OpenAICompatProvider:
                     if response.status != 200:
                         error_text = await response.text()
                         logger.error(f"API Error ({response.status}) from {self.base_url}: {error_text}")
-                        return LLMResponse(text=f"API error: {error_text}", actions=[])
+                        return LLMResponse(text=f"API error: {error_text}")
 
                     data = await response.json()
                     try:
-                        reply = data["choices"][0]["message"]["content"]
+                        choice = data["choices"][0]
+                        message = choice["message"]
+                        reply = message.get("content") or ""
+                        raw_tool_calls = message.get("tool_calls")
                     except (KeyError, IndexError):
-                        reply = "Parsing error: " + json.dumps(data)
+                        return LLMResponse(text="Parsing error: " + json.dumps(data))
 
-                    return LLMResponse(text=reply, actions=self._parse_actions(reply))
+                    # Parse tool calls if present
+                    tool_calls = None
+                    if raw_tool_calls:
+                        tool_calls = [
+                            {
+                                "id": tc.get("id", ""),
+                                "type": "function",
+                                "function": {
+                                    "name": tc["function"]["name"],
+                                    "arguments": tc["function"]["arguments"],
+                                },
+                            }
+                            for tc in raw_tool_calls
+                        ]
+
+                    return LLMResponse(
+                        text=reply,
+                        actions=self._parse_actions(reply),
+                        tool_calls=tool_calls,
+                    )
 
             except aiohttp.ClientError as e:
                 logger.error(f"Connection error to {self.base_url}: {e}")
-                return LLMResponse(text=f"Connection failed: {e}", actions=[])
+                return LLMResponse(text=f"Connection failed: {e}")
 
     def _parse_actions(self, text: str) -> List[Dict]:
         actions = []
-        if "```python" in text:
+        if text and "```python" in text:
             for block in text.split("```python")[1:]:
                 code = block.split("```")[0].strip()
                 if code:

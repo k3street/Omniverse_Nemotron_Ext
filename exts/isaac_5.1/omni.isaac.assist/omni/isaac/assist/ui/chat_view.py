@@ -63,19 +63,38 @@ class ChatViewWindow(ui.Window):
         text = self.input_field.model.get_value_as_string().strip()
         if not text:
             return
-            
+
         # Clear input
         self.input_field.model.set_value("")
-        
-        # Add to UI immediately
-        self._add_chat_bubble("You", text, is_user=True)
-        
+
+        # Capture current selection before dispatching
+        selected_prim_path = self._get_selected_prim_path()
+
+        # Add to UI immediately with selection chip
+        if selected_prim_path:
+            self._add_chat_bubble("You", f"[{selected_prim_path}] {text}", is_user=True)
+        else:
+            self._add_chat_bubble("You", text, is_user=True)
+
         # Dispatch async to service: use generate_plan for patching!
         # If it looks like a patching command, we trigger Swarm. Otherwise just general chat.
         if text.lower().startswith("patch") or text.lower().startswith("fix"):
             asyncio.ensure_future(self._handle_swarm_request(text))
         else:
-            asyncio.ensure_future(self._handle_service_request(text))
+            asyncio.ensure_future(self._handle_service_request(text, selected_prim_path=selected_prim_path))
+
+    def _get_selected_prim_path(self):
+        """Get the currently selected prim path, or None."""
+        try:
+            import omni.usd
+            ctx = omni.usd.get_context()
+            selection = ctx.get_selection()
+            paths = selection.get_selected_prim_paths()
+            if paths:
+                return paths[0]
+        except Exception:
+            pass
+        return None
 
     def _spawn_settings_window(self):
         self._settings_window = ui.Window("Isaac Assist Settings", width=400, height=300)
@@ -221,15 +240,25 @@ class ChatViewWindow(ui.Window):
             feedback_msg = f"System Report: The patch executed with the following output logs:\n```\n{captured_text}\n```"
             asyncio.ensure_future(self._handle_service_request(feedback_msg))
 
-    async def _handle_service_request(self, text: str):
-        response = await self.service.send_message(text)
-        
+    async def _handle_service_request(self, text: str, selected_prim_path: str = None):
+        context = {}
+        if selected_prim_path:
+            context["selected_prim_path"] = selected_prim_path
+        response = await self.service.send_message(text, context=context)
+
         if "error" in response:
             self._add_chat_bubble("System", response["error"], is_user=False, error=True)
         else:
             # Parse responses
             for msg in response.get("response_messages", []):
                 self._add_chat_bubble("Isaac Assist", msg.get("content", ""), is_user=False)
+
+            # Show approvable code patches
+            actions = response.get("actions_to_approve") or []
+            for action in actions:
+                code = action.get("code", "")
+                desc = action.get("description", "")
+                self._render_code_patch(code, desc)
 
     def _add_chat_bubble(self, sender: str, text: str, is_user: bool, error: bool = False):
         with self.chat_layout:
@@ -241,6 +270,27 @@ class ChatViewWindow(ui.Window):
                 with ui.VStack(margin=5):
                     ui.Label(sender, height=15, style={"color": 0xFFAAAAAA, "font_size": 12})
                     ui.Label(text, word_wrap=True, style={"color": text_color})
+
+    def _render_code_patch(self, code: str, description: str):
+        """Render a code patch card with approve/reject buttons."""
+        with self.chat_layout:
+            with ui.ZStack():
+                ui.Rectangle(style={"background_color": 0xFF1A2A35, "border_radius": 5})
+                with ui.VStack(margin=5, spacing=4):
+                    ui.Label("TOOL-GENERATED PATCH", height=15,
+                             style={"color": 0xFF00CCFF, "font_size": 12, "font_weight": "bold"})
+                    if description:
+                        ui.Label(description, word_wrap=True, style={"color": 0xFFBBBBBB, "font_size": 11})
+                    with ui.ZStack():
+                        ui.Rectangle(style={"background_color": 0xFF111111, "border_radius": 3})
+                        with ui.ScrollingFrame(height=120,
+                                               horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_OFF):
+                            ui.Label(code, style={"color": 0xFFDDDDFF, "font_family": "Courier"})
+                    with ui.HStack(height=25, spacing=8):
+                        ui.Button("Approve & Execute", style={"background_color": 0xFF22AA22},
+                                  clicked_fn=lambda c=code: self._execute_patch(c))
+                        ui.Button("Reject", style={"background_color": 0xFF666666},
+                                  clicked_fn=lambda: self._add_chat_bubble("System", "Patch rejected.", is_user=False))
 
     def _toggle_livekit(self):
         if self.webrtc and self.webrtc._streaming:

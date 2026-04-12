@@ -16,26 +16,44 @@ class ChatMessageRequest(BaseModel):
 @router.post("/message")
 async def send_message(req: ChatMessageRequest):
     """
-    Primary endpoint for the UI extension. It parses the intent,
-    reaches out to the configured LLM, and logs it to memory.
+    Primary endpoint for the UI extension. Classifies intent, calls LLM
+    with tool schemas, executes tool calls, and returns structured response.
     """
     try:
-        response_text = await orchestrator.handle_message(
+        result = await orchestrator.handle_message(
             session_id=req.session_id,
-            user_message=req.message
+            user_message=req.message,
+            context=req.context,
+            attachments=req.attachments,
         )
-        # Wrap response into the structured contract
-        return {
-            "intent": "general", # Intent parsing stubbed
-            "response_messages": [
+
+        # Build response messages
+        response_messages = [
+            {
+                "role": "assistant",
+                "message_type": "text",
+                "content": result["reply"],
+            }
+        ]
+
+        # Add code patches as separate approvable actions
+        actions_to_approve = None
+        if result.get("code_patches"):
+            actions_to_approve = [
                 {
-                    "role": "assistant",
-                    "message_type": "text",
-                    "content": response_text
+                    "type": "code_patch",
+                    "code": patch["code"],
+                    "description": patch["description"],
                 }
-            ],
-            "actions_to_approve": None,
-            "sources_consulted": []
+                for patch in result["code_patches"]
+            ]
+
+        return {
+            "intent": result["intent"],
+            "response_messages": response_messages,
+            "actions_to_approve": actions_to_approve,
+            "tool_calls": result.get("tool_calls", []),
+            "sources_consulted": [],
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

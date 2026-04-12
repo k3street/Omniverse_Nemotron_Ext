@@ -1,13 +1,14 @@
 import aiohttp
 import logging
 import json
-from dataclasses import dataclass
-from typing import List, Dict
+from dataclasses import dataclass, field
+from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
-    "You are Isaac Assist, an expert AI embedded inside NVIDIA Isaac Sim. "
+    "You are Isaac Assist, an expert AI embedded inside NVIDIA Isaac Sim — "
+    "authored by 10Things, Inc. (www.10things.tech). "
     "You help robotics engineers diagnose scene issues, generate USD patches, "
     "and answer questions about Omniverse, PhysX, ROS2, and robot simulation. "
     "Be concise and precise. When you suggest code, use Python that works inside "
@@ -18,12 +19,14 @@ SYSTEM_PROMPT = (
 @dataclass
 class LLMResponse:
     text: str
-    actions: List[Dict]
+    actions: List[Dict] = field(default_factory=list)
+    tool_calls: Optional[List[Dict]] = None
 
 
 class AnthropicProvider:
     """
     LLM Provider connecting to Anthropic's Claude API via REST.
+    Supports tool use / function calling.
     """
     API_URL = "https://api.anthropic.com/v1/messages"
     ANTHROPIC_VERSION = "2023-06-01"
@@ -33,12 +36,59 @@ class AnthropicProvider:
         self.model = model
 
     async def complete(self, messages: List[Dict], context: Dict) -> LLMResponse:
+        system = getattr(self, "_system_override", None) or SYSTEM_PROMPT
+
+        # Filter out system messages (Anthropic uses separate 'system' field)
+        filtered_msgs = [m for m in messages if m.get("role") != "system"]
+
+        # Convert tool-result messages to Anthropic format
+        anthropic_msgs = []
+        for m in filtered_msgs:
+            if m.get("role") == "tool":
+                anthropic_msgs.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": m.get("tool_call_id", ""),
+                        "content": m.get("content", ""),
+                    }]
+                })
+            elif m.get("role") == "assistant" and m.get("tool_calls"):
+                # Convert OpenAI-style tool_calls to Anthropic content blocks
+                content_blocks = []
+                if m.get("content"):
+                    content_blocks.append({"type": "text", "text": m["content"]})
+                for tc in m["tool_calls"]:
+                    args = tc["function"]["arguments"]
+                    content_blocks.append({
+                        "type": "tool_use",
+                        "id": tc.get("id", ""),
+                        "name": tc["function"]["name"],
+                        "input": json.loads(args) if isinstance(args, str) else args,
+                    })
+                anthropic_msgs.append({"role": "assistant", "content": content_blocks})
+            else:
+                anthropic_msgs.append({"role": m["role"], "content": m.get("content", "")})
+
         payload = {
             "model": self.model,
-            "max_tokens": 2048,
-            "system": SYSTEM_PROMPT,
-            "messages": messages,  # already in {"role": "user"/"assistant", "content": "..."} format
+            "max_tokens": 4096,
+            "system": system,
+            "messages": anthropic_msgs,
         }
+
+        # Convert OpenAI tool schema to Anthropic tool format
+        tools = context.get("tools")
+        if tools:
+            anthropic_tools = []
+            for t in tools:
+                fn = t.get("function", {})
+                anthropic_tools.append({
+                    "name": fn["name"],
+                    "description": fn.get("description", ""),
+                    "input_schema": fn.get("parameters", {"type": "object", "properties": {}}),
+                })
+            payload["tools"] = anthropic_tools
 
         headers = {
             "x-api-key": self.api_key,
@@ -52,23 +102,44 @@ class AnthropicProvider:
                     if response.status != 200:
                         error_text = await response.text()
                         logger.error(f"Anthropic API Error ({response.status}): {error_text}")
-                        return LLMResponse(text=f"Error from Claude: {error_text}", actions=[])
+                        return LLMResponse(text=f"Error from Claude: {error_text}")
 
                     data = await response.json()
-                    try:
-                        reply = data["content"][0]["text"]
-                    except (KeyError, IndexError):
-                        reply = "Parsing error: " + json.dumps(data)
-
-                    return LLMResponse(text=reply, actions=self._parse_actions(reply))
+                    return self._parse_response(data)
 
             except aiohttp.ClientError as e:
                 logger.error(f"Failed to connect to Anthropic API: {e}")
-                return LLMResponse(text="Failed to connect to Claude.", actions=[])
+                return LLMResponse(text="Failed to connect to Claude.")
+
+    def _parse_response(self, data: Dict) -> LLMResponse:
+        """Parse Anthropic response which may contain text and/or tool_use blocks."""
+        content_blocks = data.get("content", [])
+        text_parts = []
+        tool_calls = []
+
+        for block in content_blocks:
+            if block.get("type") == "text":
+                text_parts.append(block["text"])
+            elif block.get("type") == "tool_use":
+                tool_calls.append({
+                    "id": block.get("id", ""),
+                    "type": "function",
+                    "function": {
+                        "name": block["name"],
+                        "arguments": json.dumps(block.get("input", {})),
+                    },
+                })
+
+        text = "\n".join(text_parts)
+        return LLMResponse(
+            text=text,
+            actions=self._parse_actions(text),
+            tool_calls=tool_calls if tool_calls else None,
+        )
 
     def _parse_actions(self, text: str) -> List[Dict]:
         actions = []
-        if "```python" in text:
+        if text and "```python" in text:
             for block in text.split("```python")[1:]:
                 code = block.split("```")[0].strip()
                 if code:
