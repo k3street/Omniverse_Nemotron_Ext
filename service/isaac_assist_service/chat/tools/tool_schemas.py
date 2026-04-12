@@ -351,7 +351,7 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "import_robot",
-            "description": "Import a robot model from URDF, MJCF, or USD file. Can also load from the Isaac Sim asset library by name.",
+            "description": "Import a robot model from URDF, MJCF, or USD file. Supports loading by name (e.g., 'Franka', 'Spot', 'UR10', 'ANYmal_C') from the local asset library with 233+ robots available. Use format 'asset_library' when loading by name.",
             "parameters": {
                 "type": "object",
                 "properties": {

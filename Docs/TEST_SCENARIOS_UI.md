@@ -61,7 +61,7 @@ Each scenario below shows: **what to type** in the chat panel, **what to click**
 
 ### T03 — Create a Cylinder
 **Type:**
-> Create a cylinder at -1, 0, 0.5 named Pillar, height 1, radius 0.2
+> Create a cylinder at -1, 0, 0.5 named Pillar, height 1, radius 0.2 name it cilly_the_cylinder
 
 **Verify:** Cylinder appears at the specified position after approval.
 

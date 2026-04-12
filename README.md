@@ -183,13 +183,46 @@ Once Isaac Sim is open and the extension is enabled, the **Isaac Assist** panel 
 
 ## 7. Configuration Reference
 
-All backend configuration lives in `service/isaac_assist_service/.env`.  
-See `.env.example` for the full annotated template.
+Configuration is loaded in priority order (later files override earlier ones):
 
 ```
-service/isaac_assist_service/
-├── .env.example   ← copy this to .env
-└── .env           ← your local environment (git-ignored)
+.env                  ← repo root defaults (git-ignored)
+service/…/.env        ← service-level overrides (git-ignored)
+.env.local            ← YOUR personal overrides — highest priority (git-ignored)
+```
+
+**Quick start:** Copy the example file and fill in your values:
+
+```bash
+cp .env.local.example .env.local
+# Edit .env.local with your API keys and asset paths
+```
+
+See [`.env.local.example`](.env.local.example) for the full annotated template.
+
+#### Key settings
+
+| Variable | Example | Description |
+|---|---|---|
+| `LLM_MODE` | `anthropic` | `anthropic`, `openai`, `ollama`, or `gemini` |
+| `CLOUD_MODEL_NAME` | `claude-sonnet-4-6` | Model name for cloud providers |
+| `ANTHROPIC_API_KEY` | `sk-ant-xxx` | API key for your chosen provider |
+| `ASSETS_ROOT_PATH` | `/home/user/assets` | Path to Isaac Sim USD assets (local or Nucleus) |
+| `ASSETS_ROBOTS_SUBDIR` | `Collected_Robots` | Subdirectory containing robot USD files |
+| `LIVEKIT_URL` | `ws://localhost:7880` | LiveKit server (optional, for voice/vision) |
+| `CONTRIBUTE_DATA` | `false` | Log approved patches for fine-tuning |
+
+#### Asset path examples
+
+```bash
+# Local filesystem (recommended — works offline)
+ASSETS_ROOT_PATH=/home/user/Desktop/assets
+
+# NVIDIA Omniverse Nucleus server
+ASSETS_ROOT_PATH=omniverse://localhost/NVIDIA/Assets/Isaac/5.1
+
+# NVIDIA S3 hosted (requires network access)
+ASSETS_ROOT_PATH=https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1
 ```
 
 ---

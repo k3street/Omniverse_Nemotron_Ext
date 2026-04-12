@@ -52,6 +52,11 @@ Capabilities:
 
 When the user asks you to modify the scene, use the provided tools. For complex operations combine tools or use run_usd_script.
 Always use proper USD paths starting with '/'. Be concise. When you generate code, use the Kit/pxr Python APIs.
+
+Selection awareness: When the user has selected a prim in the viewport or stage tree, its path and
+properties are included in the context below. References like "this", "it", "the selected object",
+"make this bigger", "change its color", or "delete it" all refer to the selected prim.
+Use the selected prim's path directly when calling tools — do NOT ask the user to specify the path.
 """
 
 
@@ -105,8 +110,25 @@ class ChatOrchestrator:
         system_content += f"\nIsaac Sim version: {isaac_version}"
         if scene_context_text:
             system_content += f"\n\n--- LIVE SCENE CONTEXT ---\n{scene_context_text}"
-        if context and context.get("selected_prim_path"):
+        if context and context.get("selected_prim"):
+            sel = context["selected_prim"]
+            system_content += "\n\n## User's Current Selection (from viewport/stage)\n"
+            system_content += f"- Path: {sel.get('path', '?')}\n"
+            system_content += f"- Type: {sel.get('type', '?')}\n"
+            if sel.get('world_position'):
+                system_content += f"- Position: {sel['world_position']}\n"
+            if sel.get('physics'):
+                system_content += f"- Physics: {json.dumps(sel['physics'])}\n"
+            if sel.get('schemas'):
+                system_content += f"- Schemas: {', '.join(sel['schemas'][:10])}\n"
+            attrs = sel.get('attributes', {})
+            if attrs:
+                preview = dict(list(attrs.items())[:10])
+                system_content += f"- Key attributes: {json.dumps(preview, default=str)}\n"
+            system_content += '\nWhen the user says "this", "it", "the selected prim", "make this bigger", etc., they refer to this prim. Use its path directly.'
+        elif context and context.get("selected_prim_path"):
             system_content += f"\n\nUser's current selection: {context['selected_prim_path']}"
+            system_content += '\nWhen the user says "this", "it", etc., they refer to this selected prim.'
 
         # ── 3b. RAG: retrieve version-specific knowledge & code patterns ─────
         try:

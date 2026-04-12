@@ -67,8 +67,9 @@ class ChatViewWindow(ui.Window):
         # Clear input
         self.input_field.model.set_value("")
 
-        # Capture current selection before dispatching
-        selected_prim_path = self._get_selected_prim_path()
+        # Capture current selection on the Kit main thread (reliable)
+        selected_prim_info = self._get_selected_prim_info()
+        selected_prim_path = selected_prim_info.get("path") if selected_prim_info else None
 
         # Add to UI immediately with selection chip
         if selected_prim_path:
@@ -81,7 +82,7 @@ class ChatViewWindow(ui.Window):
         if text.lower().startswith("patch") or text.lower().startswith("fix"):
             asyncio.ensure_future(self._handle_swarm_request(text))
         else:
-            asyncio.ensure_future(self._handle_service_request(text, selected_prim_path=selected_prim_path))
+            asyncio.ensure_future(self._handle_service_request(text, selected_prim_info=selected_prim_info))
 
     def _get_selected_prim_path(self):
         """Get the currently selected prim path, or None."""
@@ -92,6 +93,17 @@ class ChatViewWindow(ui.Window):
             paths = selection.get_selected_prim_paths()
             if paths:
                 return paths[0]
+        except Exception:
+            pass
+        return None
+
+    def _get_selected_prim_info(self):
+        """Get full properties of the selected prim (runs on Kit main thread)."""
+        try:
+            from ..context.prim_properties import get_selected_prim_properties
+            info = get_selected_prim_properties()
+            if "error" not in info:
+                return info
         except Exception:
             pass
         return None
@@ -250,10 +262,11 @@ class ChatViewWindow(ui.Window):
             feedback_msg = f"System Report: The patch executed with the following output logs:\n```\n{captured_text}\n```"
             await self._handle_service_request(feedback_msg)
 
-    async def _handle_service_request(self, text: str, selected_prim_path: str = None):
+    async def _handle_service_request(self, text: str, selected_prim_info: dict = None):
         context = {}
-        if selected_prim_path:
-            context["selected_prim_path"] = selected_prim_path
+        if selected_prim_info:
+            context["selected_prim"] = selected_prim_info
+            context["selected_prim_path"] = selected_prim_info.get("path")
         response = await self.service.send_message(text, context=context)
 
         if "error" in response:

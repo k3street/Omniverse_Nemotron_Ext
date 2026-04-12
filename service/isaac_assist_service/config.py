@@ -3,10 +3,12 @@ import os
 
 class Config:
     def __init__(self):
-        # Load service-level .env first, then root .env as fallback
+        # Load env files in priority order (last loaded wins)
+        # .env (root) → service .env → .env.local (highest priority, overrides all)
         for env_path in [
-            os.path.join(os.path.dirname(__file__), ".env"),
             os.path.join(os.path.dirname(__file__), "..", "..", ".env"),  # repo root
+            os.path.join(os.path.dirname(__file__), ".env"),             # service-level
+            os.path.join(os.path.dirname(__file__), "..", "..", ".env.local"),  # user local overrides
         ]:
             env_path = os.path.normpath(env_path)
             if os.path.exists(env_path):
@@ -15,9 +17,7 @@ class Config:
                         line = line.strip()
                         if line and not line.startswith("#") and "=" in line:
                             key, val = line.split("=", 1)
-                            # Don't overwrite values already set (service .env takes priority)
-                            if key not in os.environ:
-                                os.environ[key] = val
+                            os.environ[key] = val  # later files override earlier ones
 
         # ── LLM routing ─────────────────────────────────────────────────────
         self.llm_mode = os.environ.get("LLM_MODE", "local")
@@ -42,6 +42,12 @@ class Config:
         # ── Misc ─────────────────────────────────────────────────────────────
         self.openai_api_base  = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
         self.contribute_data  = os.environ.get("CONTRIBUTE_DATA", "false").lower() == "true"
+
+        # ── Assets ───────────────────────────────────────────────────────────
+        # Local filesystem path to Isaac Sim assets (robots, environments, etc.)
+        # Also supports Nucleus server URLs: omniverse://localhost/NVIDIA/Assets/Isaac/5.1
+        self.assets_root_path = os.environ.get("ASSETS_ROOT_PATH", "")
+        self.assets_robots_subdir = os.environ.get("ASSETS_ROBOTS_SUBDIR", "Collected_Robots")
 
 
 config = Config()

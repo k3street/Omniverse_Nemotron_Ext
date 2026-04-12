@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from . import kit_tools
+from ...config import config
 
 logger = logging.getLogger(__name__)
 
@@ -214,10 +215,47 @@ def _gen_deformable_body(prim_path: str, params: Dict, density: float) -> str:
 
     return f"""\
 import omni.usd
-from pxr import UsdPhysics, PhysxSchema, UsdGeom
+import numpy as np
+from pxr import UsdPhysics, PhysxSchema, UsdGeom, Gf, Vt, Sdf
 
 stage = omni.usd.get_context().get_stage()
 prim = stage.GetPrimAtPath('{prim_path}')
+
+# Ensure prim is a valid subdivided Mesh (PhysX requires triangle data)
+if not prim.IsA(UsdGeom.Mesh):
+    # Replace implicit surface (Plane, Cube, etc.) with a subdivided Mesh
+    xform = UsdGeom.Xformable(prim)
+    pos = xform.GetLocalTransformation().IsIdentity() and Gf.Vec3d(0,0,0) or \\
+          xform.ComputeLocalToWorldTransform(0).ExtractTranslation()
+    stage.RemovePrim('{prim_path}')
+    prim = stage.DefinePrim('{prim_path}', 'Mesh')
+
+mesh = UsdGeom.Mesh(prim)
+pts = mesh.GetPointsAttr().Get()
+if pts is None or len(pts) < 9:
+    # Generate a 10x10 subdivided plane mesh
+    res = 10
+    size = 1.0
+    verts = []
+    for j in range(res + 1):
+        for i in range(res + 1):
+            x = (i / res - 0.5) * size
+            y = (j / res - 0.5) * size
+            verts.append(Gf.Vec3f(x, y, 0.0))
+    faces = []
+    counts = []
+    for j in range(res):
+        for i in range(res):
+            v0 = j * (res + 1) + i
+            v1 = v0 + 1
+            v2 = v0 + (res + 1) + 1
+            v3 = v0 + (res + 1)
+            faces.extend([v0, v1, v2])
+            faces.extend([v0, v2, v3])
+            counts.extend([3, 3])
+    mesh.GetPointsAttr().Set(Vt.Vec3fArray(verts))
+    mesh.GetFaceVertexCountsAttr().Set(Vt.IntArray(counts))
+    mesh.GetFaceVertexIndicesAttr().Set(Vt.IntArray(faces))
 
 # Apply deformable body
 deformable_api = PhysxSchema.PhysxDeformableBodyAPI.Apply(prim)
@@ -251,10 +289,45 @@ def _gen_deformable_surface(prim_path: str, params: Dict, density: float) -> str
 
     return f"""\
 import omni.usd
-from pxr import UsdPhysics, PhysxSchema, UsdGeom
+from pxr import UsdPhysics, PhysxSchema, UsdGeom, Gf, Vt, Sdf
 
 stage = omni.usd.get_context().get_stage()
 prim = stage.GetPrimAtPath('{prim_path}')
+
+# Ensure prim is a valid subdivided Mesh (PhysX cloth requires triangle data)
+if not prim.IsA(UsdGeom.Mesh):
+    xform = UsdGeom.Xformable(prim)
+    pos = xform.ComputeLocalToWorldTransform(0).ExtractTranslation()
+    stage.RemovePrim('{prim_path}')
+    prim = stage.DefinePrim('{prim_path}', 'Mesh')
+    UsdGeom.Xformable(prim).AddTranslateOp().Set(Gf.Vec3d(pos[0], pos[1], pos[2]))
+
+mesh = UsdGeom.Mesh(prim)
+pts = mesh.GetPointsAttr().Get()
+if pts is None or len(pts) < 9:
+    # Generate a 20x20 subdivided plane mesh for cloth simulation
+    res = 20
+    size = 1.0
+    verts = []
+    for j in range(res + 1):
+        for i in range(res + 1):
+            x = (i / res - 0.5) * size
+            y = (j / res - 0.5) * size
+            verts.append(Gf.Vec3f(x, y, 0.0))
+    faces = []
+    counts = []
+    for j in range(res):
+        for i in range(res):
+            v0 = j * (res + 1) + i
+            v1 = v0 + 1
+            v2 = v0 + (res + 1) + 1
+            v3 = v0 + (res + 1)
+            faces.extend([v0, v1, v2])
+            faces.extend([v0, v2, v3])
+            counts.extend([3, 3])
+    mesh.GetPointsAttr().Set(Vt.Vec3fArray(verts))
+    mesh.GetFaceVertexCountsAttr().Set(Vt.IntArray(counts))
+    mesh.GetFaceVertexIndicesAttr().Set(Vt.IntArray(faces))
 
 # Apply deformable surface (cloth)
 surface_api = PhysxSchema.PhysxDeformableSurfaceAPI.Apply(prim)
@@ -476,6 +549,36 @@ def _gen_import_robot(args: Dict) -> str:
     fmt = args.get("format", "usd")
     dest = args.get("dest_path", "/World/Robot")
 
+    # ── Asset directory from config (supports local path or Nucleus URL) ──
+    _LOCAL_ASSETS = config.assets_root_path
+    _ROBOTS_SUBDIR = config.assets_robots_subdir
+    _ROBOTS_DIR = f"{_LOCAL_ASSETS}/{_ROBOTS_SUBDIR}" if _LOCAL_ASSETS else ""
+
+    # Map common names → USD filenames within the robots subdirectory
+    _ROBOT_NAME_MAP = {
+        "franka": "franka.usd",
+        "panda": "franka.usd",
+        "franka_emika": "franka.usd",
+        "spot": "spot.usd",
+        "spot_with_arm": "spot_with_arm.usd",
+        "carter": "carter_v1.usd",
+        "jetbot": "jetbot.usd",
+        "kaya": "kaya.usd",
+        "ur10": "ur10.usd",
+        "ur5": "ur5e.usd",
+        "ur5e": "ur5e.usd",
+        "anymal": "anymal_c.usd",
+        "anymal_c": "anymal_c.usd",
+        "anymal_d": "anymal_d.usd",
+        "a1": "a1.usd",
+        "go1": "go1.usd",
+        "go2": "go2.usd",
+        "h1": "h1.usd",
+        "allegro": "allegro_hand.usd",
+        "ridgeback_franka": "ridgeback_franka.usd",
+        "humanoid": "humanoid.usd",
+    }
+
     if fmt == "urdf":
         return f"""\
 from omni.isaac.urdf import _urdf
@@ -486,22 +589,61 @@ result, prim_path = omni.kit.commands.execute(
     dest_path="{dest}",
 )
 """
-    if fmt == "asset_library":
+
+    # Resolve robot name for asset_library or named imports
+    name_lower = file_path.lower().replace(" ", "_").replace("-", "_")
+    local_file = _ROBOT_NAME_MAP.get(name_lower)
+
+    if not _LOCAL_ASSETS and (fmt == "asset_library" or local_file):
         return (
-            f"# Load '{file_path}' from Isaac Sim asset library\n"
-            f"import omni.isaac.nucleus\n"
-            f"assets_root = omni.isaac.nucleus.get_assets_root_path()\n"
-            f"import omni.usd\n"
-            f"stage = omni.usd.get_context().get_stage()\n"
-            f"prim = stage.DefinePrim('{dest}', 'Xform')\n"
-            f"prim.GetReferences().AddReference(assets_root + '/Isaac/Robots/{file_path}/{file_path}.usd')"
+            "# ERROR: ASSETS_ROOT_PATH is not configured in .env\n"
+            "# Set ASSETS_ROOT_PATH to your local assets folder or Nucleus URL.\n"
+            "# Example (local):   ASSETS_ROOT_PATH=/home/user/Desktop/assets\n"
+            "# Example (Nucleus): ASSETS_ROOT_PATH=omniverse://localhost/NVIDIA/Assets/Isaac/5.1\n"
+            "raise RuntimeError('ASSETS_ROOT_PATH not set in .env — cannot resolve robot assets')"
         )
-    # Default: USD reference
+
+    is_nucleus = _LOCAL_ASSETS.startswith("omniverse://")
+
+    if fmt == "asset_library" or local_file:
+        if local_file:
+            resolved = f"{_ROBOTS_DIR}/{local_file}"
+        else:
+            resolved = f"{_ROBOTS_DIR}/{file_path}.usd"
+
+        if is_nucleus:
+            # Nucleus URL — no local file check, USD resolves directly
+            return (
+                "import omni.usd\n"
+                "from pxr import UsdGeom, Gf\n\n"
+                "stage = omni.usd.get_context().get_stage()\n"
+                f"prim = stage.DefinePrim('{dest}', 'Xform')\n"
+                f"prim.GetReferences().AddReference('{resolved}')\n"
+                f"UsdGeom.Xformable(prim).AddTranslateOp().Set(Gf.Vec3d(0, 0, 0))"
+            )
+        else:
+            # Local filesystem — validate the file exists
+            return (
+                "import omni.usd\n"
+                "from pxr import UsdGeom, Gf\n"
+                "import os\n\n"
+                "stage = omni.usd.get_context().get_stage()\n"
+                f"asset_path = '{resolved}'\n"
+                "if not os.path.exists(asset_path):\n"
+                f"    raise FileNotFoundError(f'Robot asset not found: {{asset_path}}')\n"
+                f"prim = stage.DefinePrim('{dest}', 'Xform')\n"
+                "prim.GetReferences().AddReference(asset_path)\n"
+                f"UsdGeom.Xformable(prim).AddTranslateOp().Set(Gf.Vec3d(0, 0, 0))"
+            )
+
+    # Default: USD reference (absolute path or URL)
     return (
         "import omni.usd\n"
+        "from pxr import UsdGeom, Gf\n"
         "stage = omni.usd.get_context().get_stage()\n"
         f"prim = stage.DefinePrim('{dest}', 'Xform')\n"
-        f"prim.GetReferences().AddReference('{file_path}')"
+        f"prim.GetReferences().AddReference('{file_path}')\n"
+        f"UsdGeom.Xformable(prim).AddTranslateOp().Set(Gf.Vec3d(0, 0, 0))"
     )
 
 
