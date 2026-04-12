@@ -146,15 +146,21 @@ def _gen_apply_api_schema(args: Dict) -> str:
 def _gen_clone_prim(args: Dict) -> str:
     src = args["source_path"]
     tgt = args["target_path"]
+    pos = args.get("position")
     count = args.get("count", 1)
     spacing = args.get("spacing", 1.0)
     if count <= 1:
-        return (
-            "import omni.usd\n"
-            "from pxr import Sdf\n"
-            "stage = omni.usd.get_context().get_stage()\n"
-            f"Sdf.CopySpec(stage.GetRootLayer(), '{src}', stage.GetRootLayer(), '{tgt}')"
-        )
+        lines = [
+            "import omni.usd",
+            "from pxr import Sdf, UsdGeom, Gf",
+            "stage = omni.usd.get_context().get_stage()",
+            f"Sdf.CopySpec(stage.GetRootLayer(), '{src}', stage.GetRootLayer(), '{tgt}')",
+        ]
+        if pos:
+            lines.append(f"xf = UsdGeom.Xformable(stage.GetPrimAtPath('{tgt}'))")
+            lines.append("xf.ClearXformOpOrder()")
+            lines.append(f"xf.AddTranslateOp().Set(Gf.Vec3d({pos[0]}, {pos[1]}, {pos[2]}))")
+        return "\n".join(lines)
     lines = [
         "import omni.usd",
         "from pxr import Sdf, UsdGeom, Gf",
@@ -358,13 +364,6 @@ def _gen_create_omnigraph(args: Dict) -> str:
     connections = args.get("connections", [])
     values = args.get("values", {})
 
-    og_type_map = {
-        "action_graph": "og.GraphBackingType.GRAPH_BACKING_TYPE_FLATCACHING",
-        "push_graph": "og.GraphBackingType.GRAPH_BACKING_TYPE_PUSH",
-        "lazy_graph": "og.GraphBackingType.GRAPH_BACKING_TYPE_FLATCACHING",
-    }
-    backing = og_type_map.get(graph_type, og_type_map["action_graph"])
-
     node_defs = ",\n            ".join(
         f"og.Controller.node('{n['name']}', '{n['type']}')" for n in nodes
     ) if nodes else ""
@@ -373,25 +372,24 @@ def _gen_create_omnigraph(args: Dict) -> str:
         f"og.Controller.connect('{c['source']}', '{c['target']}')" for c in connections
     ) if connections else ""
 
-    val_defs = ""
-    if values:
-        val_entries = ",\n            ".join(
-            f"og.Controller.attribute('{k}'): {repr(v)}" for k, v in values.items()
-        )
-        val_defs = f"""
-        og.Controller.attribute_values = {{
-            {val_entries}
-        }}"""
-
     return f"""\
 import omni.graph.core as og
+
+# Resolve backing type: FABRIC_SHARED (Isaac Sim 5.x+) replaces deprecated FLATCACHING
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]  # fallback to first available
 
 keys = og.Controller.Keys
 (graph, nodes, _, _) = og.Controller.edit(
     {{
         "graph_path": "{graph_path}",
         "evaluator_name": "execution",
-        "pipeline_stage": {backing},
+        "pipeline_stage": _backing,
     }},
     {{
         keys.CREATE_NODES: [

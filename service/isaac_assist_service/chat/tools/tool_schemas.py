@@ -92,12 +92,13 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "clone_prim",
-            "description": "Duplicate a prim to a new path, or create a grid of copies.",
+            "description": "Duplicate a prim to a new path, or create a grid of copies. Optionally set a new position for the clone.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "source_path": {"type": "string"},
                     "target_path": {"type": "string"},
+                    "position": {"type": "array", "items": {"type": "number"}, "description": "XYZ position for the cloned prim [x, y, z]"},
                     "count": {"type": "integer", "description": "Number of copies (for grid patterns)"},
                     "spacing": {"type": "number", "description": "Distance between copies in meters"},
                 },

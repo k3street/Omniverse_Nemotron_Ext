@@ -52,6 +52,10 @@ Complete natural-language control over every Isaac Sim capability — USD author
 | **Multi-viewport / camera switching** — "show me the wrist camera" | P2 |
 | **Undo/redo narration** — LLM explains what it did, user can Ctrl+Z | P2 |
 | **Fine-tune data capture** — every chat→action pair stored for training | P2 |
+| **NL scene builder** — "build a kitchen with my robot" → full spatial layout from asset catalog | P0 |
+| **Image-to-USD pipeline** — upload photo → generate 3D mesh → place in scene | P1 |
+| **Asset catalog search** — fuzzy-match local/Nucleus assets by name, tag, type | P0 |
+| **Chat file upload** — 📎 button for images, OBJ, GLB, USD files | P1 |
 
 ---
 
@@ -255,6 +259,122 @@ Complete natural-language control over every Isaac Sim capability — USD author
 
 ---
 
+## Phase 6 — Intelligent Scene Builder & Image-to-USD Pipeline (Weeks 17–22)
+
+### 6A — Scene Blueprint Builder (NL → Full Scene)
+
+**Goal:** The user describes a scene in plain English, and the system designs a spatial blueprint, resolves assets from the local catalog / Nucleus, places everything with physically correct positioning, self-QAs, and lets the user iterate.
+
+**User flow:** _"Build a house and put my Unitree G1 robot with kitchen items"_
+
+```
+User types: "Build a house and put my Unitree G1 robot with kitchen items"
+→ Phase 1 — Blueprint: LLM generates a spatial layout plan (rooms, dimensions, object list)
+→ Phase 2 — Asset Resolution: catalog_search matches assets (walls, floor, table, sink, G1 robot, etc.)
+→ Phase 3 — Placement: spatial planner positions objects logically (table on floor, sink against wall,
+   robot in walkable area, items ON surfaces not floating)
+→ Phase 4 — Self-QA: physics validator checks collisions, overlaps, floating objects, scale mismatches
+→ Phase 5 — Confirm: user sees the blueprint summary + preview, can approve/reject/modify per object
+→ Phase 6 — Iterate: "move the robot to the living room" or "add a fridge next to the sink"
+```
+
+#### Tasks
+
+- [ ] **6A.1** Tool: `catalog_search(query, asset_type, limit)` — fuzzy-match against local asset catalog + Nucleus browser
+  - Searches `ASSETS_ROOT_PATH` recursively for USD/USDZ files by name/tag
+  - Searches Nucleus if `NUCLEUS_SERVER` configured
+  - Returns ranked list: `[{path, name, type, thumbnail_b64, bounding_box}]`
+  - Caches directory listing for fast subsequent queries
+- [ ] **6A.2** Tool: `generate_scene_blueprint(description, available_assets)` — LLM-powered spatial planner
+  - Input: user description + asset catalog results
+  - Output: structured blueprint JSON:
+    ```json
+    {
+      "scene_name": "Kitchen with G1 Robot",
+      "rooms": [{"name": "kitchen", "bounds": [6, 4, 3], "objects": [...]}],
+      "objects": [
+        {"asset": "/assets/kitchen/table.usd", "position": [2, 1, 0], "rotation": [0, 0, 0], "purpose": "kitchen table"},
+        {"asset": "/assets/Collected_Robots/unitree_g1.usd", "position": [3, 2, 0], "rotation": [0, 90, 0], "purpose": "main robot"}
+      ],
+      "spatial_rules": ["robot has 1m clearance on all sides", "items placed ON surfaces, not floating"]
+    }
+    ```
+  - Uses LLM with spatial reasoning prompt + retrieved furniture/object dimensions
+- [ ] **6A.3** Tool: `validate_scene_blueprint(blueprint)` — physics & spatial QA
+  - Checks: bounding box overlaps, objects below ground, floating objects, scale mismatches (2m tall chair?), physics scene missing
+  - Returns: `{valid: bool, issues: [{object, problem, suggestion}]}`
+  - Auto-fixes trivial issues (snap to ground, remove clipping overlaps)
+- [ ] **6A.4** Tool: `build_scene_from_blueprint(blueprint, dry_run)` — executes the plan
+  - `dry_run=true`: generates code patches but doesn't execute — shows user a summary
+  - `dry_run=false`: creates all prims, adds references, positions, applies physics
+  - Each object is an individual code patch for granular approve/reject
+  - Groups related items (e.g., "kitchen cluster") for batch approval
+- [ ] **6A.5** Blueprint preview card in chat UI
+  - Shows object list with asset names, positions, and status (resolved / missing / ambiguous)
+  - Per-object approve/reject/modify buttons
+  - "Build All" button to approve the entire plan at once
+  - Highlights unresolved assets with suggestions
+- [ ] **6A.6** Iterative refinement loop
+  - After scene is built, user can say: "move the table 1m left", "replace the chair with a stool", "add another robot"
+  - System tracks the blueprint state, applies delta changes, re-validates
+  - Supports undo per blueprint step (not just per prim)
+- [ ] **6A.7** Asset thumbnail indexer
+  - On first run, renders 128px thumbnails of each USD asset in the catalog
+  - Stores in `workspace/knowledge/asset_thumbnails/` as PNGs
+  - Used for blueprint preview cards and LLM visual grounding
+
+### 6B — Image-to-USD Model Generation
+
+**Goal:** The user uploads an image through the chat panel, and the system generates a USD 3D model from it using an image-to-3D pipeline, then places it in the scene.
+
+**User flow:** _User clicks the image upload button, selects a photo of a coffee mug → system generates a 3D mesh → places it in the scene_
+
+```
+User clicks 📎 button → selects coffee_mug.jpg
+User types: "Create a 3D model from this image and place it at 0, 0, 1"
+→ Phase 1 — Upload: image sent to service as base64 in context
+→ Phase 2 — Generation: image-to-3D model generates mesh (TripoSR / InstantMesh / Trellis)
+→ Phase 3 — USD Conversion: mesh → OBJ/GLB → USD via omni.kit.asset_converter or trimesh
+→ Phase 4 — Placement: model imported as USD reference at specified position
+→ Phase 5 — Refinement: user can say "make it bigger", "rotate it", "add physics to it"
+```
+
+#### Tasks
+
+- [ ] **6B.1** Chat UI: file upload button (📎 icon) left of the text input
+  - Accepts: `.jpg`, `.png`, `.webp`, `.obj`, `.glb`, `.usd`, `.usda`, `.usdz`
+  - Images: sent as base64 to service `context.uploaded_image`
+  - 3D files: sent as file path to service `context.uploaded_model`
+  - Shows thumbnail preview chip above input bar
+- [ ] **6B.2** Service: image-to-3D generation endpoint
+  - `POST /api/v1/generate/image_to_3d` — accepts base64 image, returns mesh
+  - Backend options (configurable via `IMAGE_TO_3D_BACKEND` env var):
+    - `triposr` — TripoSR (local, runs on GPU, fast single-image)
+    - `instantmesh` — InstantMesh (local, higher quality, slower)
+    - `trellis` — Trellis (local, state-of-art)
+    - `api` — External API endpoint (user provides `IMAGE_TO_3D_API_URL`)
+  - Returns: `{mesh_path: "/tmp/generated/model.glb", format: "glb", vertices: N}`
+- [ ] **6B.3** Tool: `generate_3d_from_image(image_b64, output_name, backend)` — LLM-callable tool
+  - Invokes the generation pipeline
+  - Converts output to USD (via `omni.kit.asset_converter` or trimesh + UsdGeom.Mesh)
+  - Stores generated USD in `workspace/generated_models/{output_name}.usd`
+  - Returns path for subsequent placement
+- [ ] **6B.4** Tool: `import_generated_model(model_path, prim_path, position, scale)` — place the generated model
+  - Adds as USD reference at the target prim path
+  - Sets transform (position, rotation, scale)
+  - Optionally applies default material (OmniPBR with albedo from original image)
+- [ ] **6B.5** USD conversion utilities
+  - GLB → USD via `omni.kit.asset_converter` (preferred, runs in Kit)
+  - OBJ → USD via trimesh + pxr (fallback, runs in service)
+  - Automatic UV unwrapping and normal recalculation for generated meshes
+  - Scale normalization (generated models often need rescaling to real-world units)
+- [ ] **6B.6** Image preprocessing
+  - Background removal (rembg or SAM) before feeding to image-to-3D
+  - Multi-view estimation for better 3D reconstruction when single image is ambiguous
+  - Resolution normalization to model's expected input size
+
+---
+
 ## Tool Function Registry (Summary)
 
 All tools are exposed to the LLM via structured function-calling schemas. The LLM picks which tool(s) to call based on the user's message.
@@ -294,6 +414,12 @@ All tools are exposed to the LLM via structured function-calling schemas. The LL
 | `measure_distance` | 4D | Query |
 | `check_collisions` | 4D | Query |
 | `scene_summary` | 4D | Query |
+| `catalog_search` | 6A | Scene Builder |
+| `generate_scene_blueprint` | 6A | Scene Builder |
+| `validate_scene_blueprint` | 6A | Scene Builder |
+| `build_scene_from_blueprint` | 6A | Scene Builder |
+| `generate_3d_from_image` | 6B | Image-to-USD |
+| `import_generated_model` | 6B | Image-to-USD |
 
 ---
 
@@ -338,6 +464,64 @@ User types: "switch viewport to the overhead camera"
 → LLM calls: set_viewport_camera("/World/Cameras/overhead_cam")
 → Viewport switches instantly
 → LLM auto-captures and says: "Here's the overhead view. I can see 3 objects on the table."
+```
+
+### Flow 5: "Build a house and put my robot in the kitchen"
+```
+User types: "Build a house with a kitchen and put my Unitree G1 robot inside
+            with a table, chairs, sink, and some kitchen items"
+→ LLM calls: catalog_search("house walls floor kitchen", limit=20)
+→ Returns 15 matched assets (walls, floor tiles, cabinets, appliances)
+→ LLM calls: catalog_search("Unitree G1", asset_type="robot")
+→ Returns: {path: "~/Desktop/assets/Collected_Robots/unitree_g1.usd", bounding_box: [0.4, 0.3, 1.2]}
+→ LLM calls: generate_scene_blueprint({
+    description: "Kitchen room 6x4m with table, 4 chairs, sink, fridge,
+                  Unitree G1 robot with 1m clearance",
+    available_assets: [...]
+  })
+→ Returns blueprint: 12 objects with positions, rotations, spatial rules
+→ LLM calls: validate_scene_blueprint(blueprint)
+→ Returns: {valid: true, issues: [{object: "chair_3", problem: "clips with table leg",
+            suggestion: "shift 0.15m right"}]}
+→ Auto-fix applied. Blueprint preview card shown in chat:
+    ┌──────────────────────────────────────────┐
+    │ 🏠 Scene Blueprint: Kitchen with G1      │
+    │                                          │
+    │  ✅ Floor (6x4m)        → /World/Floor   │
+    │  ✅ Wall_North           → /World/Walls/N │
+    │  ✅ Wall_South           → /World/Walls/S │
+    │  ✅ Kitchen_Table        → /World/Table   │
+    │  ✅ Chair x4             → /World/Chairs/ │
+    │  ✅ Sink                 → /World/Sink    │
+    │  ✅ Unitree_G1           → /World/G1      │
+    │  ⚠️  Fridge (not found)  → suggest: box   │
+    │                                          │
+    │  [Build All] [Modify] [Cancel]           │
+    └──────────────────────────────────────────┘
+→ User clicks "Build All"
+→ 12 code patches generated, executed in order
+→ User: "move the robot closer to the table"
+→ LLM updates blueprint delta, re-validates, applies change
+```
+
+### Flow 6: "Turn this photo into a 3D model"
+```
+User clicks 📎 → selects photo of a coffee mug from desktop
+User types: "Create a 3D model from this image and put it on the table"
+→ context.uploaded_image = base64(coffee_mug.jpg)
+→ LLM calls: generate_3d_from_image(image_b64=..., output_name="coffee_mug", backend="triposr")
+→ Service: removes background → feeds to TripoSR → generates GLB mesh
+→ Service: converts GLB → USD via asset_converter
+→ Returns: {mesh_path: "workspace/generated_models/coffee_mug.usd", vertices: 12400}
+→ LLM calls: import_generated_model(
+    model_path="workspace/generated_models/coffee_mug.usd",
+    prim_path="/World/Table/CoffeeMug",
+    position=[2.1, 1.0, 0.76],  # on top of the table surface
+    scale=[0.1, 0.1, 0.1]       # normalize to real-world size
+  )
+→ Approval dialog → user executes → mug appears on the table
+→ User: "make it a bit bigger and add physics"
+→ LLM adjusts scale + applies RigidBodyAPI + CollisionAPI
 ```
 
 ---
