@@ -518,4 +518,20 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Knowledge Retrieval ──────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_knowledge",
+            "description": "Search the version-specific knowledge base for API patterns, code examples, and documentation. Use this when you need to verify correct API usage for the current Isaac Sim version.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query — e.g. 'create OmniPBR material', 'apply rigid body physics', 'OmniGraph ROS2 clock'"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
 ]

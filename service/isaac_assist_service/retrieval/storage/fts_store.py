@@ -37,7 +37,7 @@ class FTSStore:
         ''', (content, source_id, section_path, url, version_scope, trust_tier))
         self.conn.commit()
 
-    def search(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    def search(self, query: str, limit: int = 5, version_scope: str = None) -> List[Dict[str, Any]]:
         c = self.conn.cursor()
         # Simple BM25 ranking built into SQLite FTS5 extension.
         # We replace spaces with AND to enforce all words matching for higher quality MVP results.
@@ -46,13 +46,23 @@ class FTSStore:
             return []
             
         try:
-            c.execute('''
-                SELECT *, rank
-                FROM document_index
-                WHERE document_index MATCH ?
-                ORDER BY rank
-                LIMIT ?
-            ''', (formatted_query, limit))
+            if version_scope:
+                c.execute('''
+                    SELECT *, rank
+                    FROM document_index
+                    WHERE document_index MATCH ?
+                      AND version_scope IN (?, 'all')
+                    ORDER BY rank
+                    LIMIT ?
+                ''', (formatted_query, version_scope, limit))
+            else:
+                c.execute('''
+                    SELECT *, rank
+                    FROM document_index
+                    WHERE document_index MATCH ?
+                    ORDER BY rank
+                    LIMIT ?
+                ''', (formatted_query, limit))
             
             return [dict(row) for row in c.fetchall()]
         except sqlite3.OperationalError:

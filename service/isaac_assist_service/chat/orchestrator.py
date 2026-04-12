@@ -22,6 +22,13 @@ from .tools.kit_tools import (
 )
 from .tools.tool_schemas import ISAAC_SIM_TOOLS
 from .tools.tool_executor import execute_tool_call
+from ..retrieval.context_retriever import (
+    retrieve_context,
+    format_retrieved_context,
+    find_matching_patterns,
+    format_code_patterns,
+    detect_isaac_version,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -93,11 +100,30 @@ class ChatOrchestrator:
                 logger.warning(f"[{session_id}] Context fetch failed: {e}")
 
         # ── 3. Build system prompt with live context ─────────────────────────
+        isaac_version = detect_isaac_version()
         system_content = SYSTEM_PROMPT
+        system_content += f"\nIsaac Sim version: {isaac_version}"
         if scene_context_text:
             system_content += f"\n\n--- LIVE SCENE CONTEXT ---\n{scene_context_text}"
         if context and context.get("selected_prim_path"):
             system_content += f"\n\nUser's current selection: {context['selected_prim_path']}"
+
+        # ── 3b. RAG: retrieve version-specific knowledge & code patterns ─────
+        try:
+            rag_results = retrieve_context(user_message, version=isaac_version, limit=3)
+            rag_text = format_retrieved_context(rag_results)
+            if rag_text:
+                system_content += f"\n\n{rag_text}"
+        except Exception as e:
+            logger.warning(f"[{session_id}] RAG retrieval failed: {e}")
+
+        try:
+            patterns = find_matching_patterns(user_message, version=isaac_version, limit=3)
+            patterns_text = format_code_patterns(patterns)
+            if patterns_text:
+                system_content += f"\n\n{patterns_text}"
+        except Exception as e:
+            logger.warning(f"[{session_id}] Pattern matching failed: {e}")
 
         # ── 4. Build message list ────────────────────────────────────────────
         messages = [{"role": "system", "content": system_content}]

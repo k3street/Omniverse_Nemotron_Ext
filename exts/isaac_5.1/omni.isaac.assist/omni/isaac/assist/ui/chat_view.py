@@ -209,12 +209,22 @@ class ChatViewWindow(ui.Window):
                     ui.Label(script_code, style={"color": 0xFFDDDDFF, "font_family": "Courier"})
                 with ui.HStack(height=30, spacing=10):
                     ui.Button("EXECUTE PATCH", style={"background_color": 0xFFAA2222}, clicked_fn=lambda: self._execute_patch(script_code))
-                    ui.Button("REJECT", clicked_fn=lambda: self._approval_window.destroy())
+                    ui.Button("REJECT", clicked_fn=lambda: self._close_approval_window())
+
+    def _close_approval_window(self):
+        if hasattr(self, '_approval_window') and self._approval_window:
+            self._approval_window.destroy()
+            self._approval_window = None
+
+    def _execute_patch(self, script_code: str):
+        """Defers execution to next frame to avoid omni.ui draw-callback restrictions."""
+        asyncio.ensure_future(self._execute_patch_async(script_code))
 
     @trace_error("Swarm_Execution_Event")
-    def _execute_patch(self, script_code: str):
-        self._approval_window.destroy()
-        self._add_chat_bubble("System", "Executing Swarm patch within Omniverse...", is_user=False)
+    async def _execute_patch_async(self, script_code: str):
+        self._close_approval_window()
+        await asyncio.sleep(0)  # yield to exit draw callback
+        self._add_chat_bubble("System", "Executing patch within Omniverse...", is_user=False)
         
         output_buffer = io.StringIO()
         success = False
@@ -238,7 +248,7 @@ class ChatViewWindow(ui.Window):
         if captured_text:
             self._add_chat_bubble("Script Output", captured_text[:1500] + ("...\n[TRUNCATED]" if len(captured_text)>1500 else ""), is_user=False)
             feedback_msg = f"System Report: The patch executed with the following output logs:\n```\n{captured_text}\n```"
-            asyncio.ensure_future(self._handle_service_request(feedback_msg))
+            await self._handle_service_request(feedback_msg)
 
     async def _handle_service_request(self, text: str, selected_prim_path: str = None):
         context = {}
@@ -290,7 +300,12 @@ class ChatViewWindow(ui.Window):
                         ui.Button("Approve & Execute", style={"background_color": 0xFF22AA22},
                                   clicked_fn=lambda c=code: self._execute_patch(c))
                         ui.Button("Reject", style={"background_color": 0xFF666666},
-                                  clicked_fn=lambda: self._add_chat_bubble("System", "Patch rejected.", is_user=False))
+                                  clicked_fn=lambda: asyncio.ensure_future(self._deferred_chat_bubble("System", "Patch rejected.", is_user=False)))
+
+    async def _deferred_chat_bubble(self, sender: str, text: str, is_user: bool, error: bool = False):
+        """Defers _add_chat_bubble to next frame to avoid draw-callback restrictions."""
+        await asyncio.sleep(0)
+        self._add_chat_bubble(sender, text, is_user=is_user, error=error)
 
     def _toggle_livekit(self):
         if self.webrtc and self.webrtc._streaming:

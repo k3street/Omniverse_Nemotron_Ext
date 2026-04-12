@@ -14,6 +14,7 @@
 6. [Verify Everything Is Connected](#6-verify-everything-is-connected)
 7. [Configuration Reference](#7-configuration-reference)
 8. [Feature Modules](#8-feature-modules)
+9. [Contributing Data & Helping Train the Model](#9-contributing-data--helping-train-the-model)
 
 ---
 
@@ -210,6 +211,87 @@ The FastAPI service exposes the following REST API modules, all prefixed under `
 | `/finetune` | Fine-tuning Builder | Knowledge Base → training data pipeline |
 
 Full interactive documentation: **`http://localhost:8000/docs`**
+
+---
+
+## 9. Contributing Data & Helping Train the Model
+
+Isaac Assist uses a **version-aware knowledge base** to ground the LLM in verified, working code patterns for each Isaac Sim release. Community contributions to this knowledge base directly improve the quality of generated code for everyone — and can ultimately feed into a fine-tuned model purpose-built for Isaac Sim development.
+
+### 9.1 How the Knowledge Base Works
+
+The knowledge base lives in `workspace/knowledge/` and consists of:
+
+| File | Purpose |
+|---|---|
+| `code_patterns_5.1.0.jsonl` | Verified code snippets for Isaac Sim 5.1 |
+| `code_patterns_6.0.0.jsonl` | Verified code snippets for Isaac Sim 6.0 *(coming soon)* |
+| `knowledge_5.1.0.jsonl` | Indexed documentation chunks |
+
+When a user asks the LLM to perform an action, the system automatically retrieves relevant patterns for the active Isaac Sim version and injects them into the prompt. This means the LLM sees **working, tested code** rather than hallucinating outdated Kit commands.
+
+### 9.2 Contributing Code Patterns
+
+Code patterns are stored as JSONL (one JSON object per line). Each entry has this format:
+
+```json
+{
+  "title": "Short descriptive title",
+  "keywords": ["keyword1", "keyword2", "keyword3"],
+  "code": "import omni.usd\nfrom pxr import UsdGeom\n\n# ... working code ...",
+  "note": "Brief note about gotchas or why this approach is preferred."
+}
+```
+
+**To contribute a pattern:**
+
+1. Fork this repository
+2. Open the appropriate `workspace/knowledge/code_patterns_<version>.jsonl`
+3. Add your entry as a new line at the end of the file
+4. Test the code in the matching Isaac Sim version to confirm it works
+5. Submit a PR with:
+   - The JSONL entry
+   - Which Isaac Sim version you tested on
+   - A brief description of what the pattern does
+
+**Good pattern contributions:**
+- Working code for Isaac Sim APIs that are poorly documented
+- Patterns that replace broken or deprecated Kit commands with direct USD/pxr API calls
+- Robotics workflows (URDF import, joint drives, articulations)
+- Sensor setup (cameras, lidar, IMU)
+- OmniGraph node creation for ROS2 bridges
+- Physics tuning (solver iterations, collision groups, deformable parameters)
+
+> **Important:** All contributed patterns should use **direct pxr/USD Python APIs** rather than `omni.kit.commands.execute(...)` — Kit commands are unreliable across Isaac Sim versions.
+
+### 9.3 Contributing Documentation
+
+If you have Isaac Sim documentation, tutorials, or workflow notes, you can contribute them to the RAG index:
+
+1. Add `.md` or `.txt` files to `workspace/knowledge/`
+2. The indexer will chunk and store them in the full-text search index
+3. Submit a PR with your docs and the Isaac Sim version they apply to
+
+### 9.4 Fine-Tuning Data Pipeline
+
+Isaac Assist includes a built-in fine-tuning data pipeline. When the "Contribute Fine-Tuning Data" option is enabled in the extension settings, your chat interactions (prompts + approved code patches) are logged locally in `workspace/finetune_exports/`.
+
+**How this feeds into model training:**
+
+1. **Local collection** — Each approved code execution is recorded as an instruction/response pair
+2. **Export** — Use the "Export Training Data" button in settings (or `POST /api/v1/finetune/export`) to generate training-ready JSONL
+3. **Community aggregation** — Exported datasets can be contributed via PR to a shared training corpus
+4. **Fine-tuning** — The `scripts/tuning/` directory contains tooling for LoRA fine-tuning with [Unsloth](https://github.com/unslothai/unsloth) and GGUF export for local deployment via Ollama
+
+The long-term goal is a community-trained model that understands Isaac Sim's full API surface — every contributed pattern and training pair brings that closer.
+
+### 9.5 Contribution Guidelines
+
+- **One pattern per line** — keep the JSONL format strict (no trailing commas, valid JSON)
+- **Test before submitting** — every code pattern must be verified in the stated Isaac Sim version
+- **No API keys or secrets** — the secret redactor catches most, but double-check your contributions
+- **Version-tag your PR** — indicate which Isaac Sim version(s) your contribution targets
+- **Prefer minimal examples** — patterns should be self-contained and focused on one concept
 
 ---
 

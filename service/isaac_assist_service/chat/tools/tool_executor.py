@@ -108,11 +108,37 @@ def _gen_add_reference(args: Dict) -> str:
 
 
 def _gen_apply_api_schema(args: Dict) -> str:
+    schema = args['schema_name']
+    prim_path = args['prim_path']
+    # Map common schema names to their pxr module + class
+    SCHEMA_MAP = {
+        "PhysicsRigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
+        "UsdPhysics.RigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
+        "RigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
+        "PhysicsCollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
+        "UsdPhysics.CollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
+        "CollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
+        "PhysicsMassAPI": ("pxr.UsdPhysics", "MassAPI"),
+        "UsdPhysics.MassAPI": ("pxr.UsdPhysics", "MassAPI"),
+        "PhysxDeformableBodyAPI": ("pxr.PhysxSchema", "PhysxDeformableBodyAPI"),
+        "PhysxCollisionAPI": ("pxr.PhysxSchema", "PhysxCollisionAPI"),
+    }
+    if schema in SCHEMA_MAP:
+        mod, cls = SCHEMA_MAP[schema]
+        return (
+            f"from {mod} import {cls}\n"
+            "import omni.usd\n"
+            f"stage = omni.usd.get_context().get_stage()\n"
+            f"prim = stage.GetPrimAtPath('{prim_path}')\n"
+            f"{cls}.Apply(prim)"
+        )
+    # Fallback: try Kit command with correct name
     return (
         "import omni.usd\n"
         "import omni.kit.commands\n"
-        f"prim = omni.usd.get_context().get_stage().GetPrimAtPath('{args['prim_path']}')\n"
-        f"omni.kit.commands.execute('ApplyAPISchema', api='{args['schema_name']}', prims=[prim])"
+        f"stage = omni.usd.get_context().get_stage()\n"
+        f"prim = stage.GetPrimAtPath('{prim_path}')\n"
+        f"omni.kit.commands.execute('ApplyAPISchemaCommand', api='{schema}', prim=prim)"
     )
 
 
@@ -209,11 +235,10 @@ mat_api.CreateDampingAttr({damp})
 mat_api.CreateDensityAttr({density})
 
 # Bind material
-import omni.kit.commands
-omni.kit.commands.execute('BindMaterialCommand',
-    prim_path='{prim_path}',
-    material_path=mat_path,
-    strength='strongerThanDescendants')
+from pxr import UsdShade
+UsdShade.MaterialBindingAPI(prim).Bind(
+    UsdShade.Material(stage.GetPrimAtPath(mat_path)),
+    UsdShade.Tokens.strongerThanDescendants)
 """
 
 
@@ -246,11 +271,10 @@ mat_api.CreateDampingAttr({damp})
 mat_api.CreateDensityAttr({density})
 
 # Bind material
-import omni.kit.commands
-omni.kit.commands.execute('BindMaterialCommand',
-    prim_path='{prim_path}',
-    material_path=mat_path,
-    strength='strongerThanDescendants')
+from pxr import UsdShade
+UsdShade.MaterialBindingAPI(prim).Bind(
+    UsdShade.Material(stage.GetPrimAtPath(mat_path)),
+    UsdShade.Tokens.strongerThanDescendants)
 """
 
 
@@ -317,33 +341,46 @@ def _gen_create_material(args: Dict) -> str:
     opacity = args.get("opacity", 1.0)
     ior = args.get("ior", 1.5)
 
+    mdl_file = 'OmniPBR.mdl' if shader == 'OmniPBR' else f'{shader}.mdl'
+
     return f"""\
 import omni.usd
-import omni.kit.commands
 from pxr import UsdShade, Sdf, Gf
 
 stage = omni.usd.get_context().get_stage()
-omni.kit.commands.execute('CreateMdlMaterialPrimCommand',
-    mtl_url='OmniPBR.mdl' if '{shader}' == 'OmniPBR' else '{shader}.mdl',
-    mtl_name='{shader}',
-    mtl_path='{mat_path}')
 
-mat_prim = stage.GetPrimAtPath('{mat_path}')
-shader_prim = stage.GetPrimAtPath('{mat_path}/Shader')
-if shader_prim.IsValid():
-    shader_prim.GetAttribute('inputs:diffuse_color_constant').Set(Gf.Vec3f({color[0]}, {color[1]}, {color[2]}))
-    shader_prim.GetAttribute('inputs:metallic_constant').Set({metallic})
-    shader_prim.GetAttribute('inputs:reflection_roughness_constant').Set({roughness})
+# Create material prim
+mat_prim = stage.DefinePrim('{mat_path}', 'Material')
+mat = UsdShade.Material(mat_prim)
+
+# Create shader prim
+shader_prim = stage.DefinePrim('{mat_path}/Shader', 'Shader')
+shader = UsdShade.Shader(shader_prim)
+shader.CreateIdAttr('mdl')
+shader.CreateImplementationSourceAttr(UsdShade.Tokens.sourceAsset)
+shader.SetSourceAsset('{mdl_file}', 'mdl')
+shader.SetSourceAssetSubIdentifier('{shader}', 'mdl')
+
+# Set shader parameters
+shader.CreateInput('diffuse_color_constant', Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f({color[0]}, {color[1]}, {color[2]}))
+shader.CreateInput('metallic_constant', Sdf.ValueTypeNames.Float).Set({metallic})
+shader.CreateInput('reflection_roughness_constant', Sdf.ValueTypeNames.Float).Set({roughness})
+
+# Connect shader to material outputs
+mat.CreateSurfaceOutput('mdl').ConnectToSource(shader.ConnectableAPI(), 'out')
+mat.CreateVolumeOutput('mdl').ConnectToSource(shader.ConnectableAPI(), 'out')
+mat.CreateDisplacementOutput('mdl').ConnectToSource(shader.ConnectableAPI(), 'out')
 """
 
 
 def _gen_assign_material(args: Dict) -> str:
     return (
-        "import omni.kit.commands\n"
-        f"omni.kit.commands.execute('BindMaterialCommand',\n"
-        f"    prim_path='{args['prim_path']}',\n"
-        f"    material_path='{args['material_path']}',\n"
-        f"    strength='strongerThanDescendants')"
+        "import omni.usd\n"
+        "from pxr import UsdShade\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        f"mat = UsdShade.Material(stage.GetPrimAtPath('{args['material_path']}'))\n"
+        f"prim = stage.GetPrimAtPath('{args['prim_path']}')\n"
+        "UsdShade.MaterialBindingAPI(prim).Bind(mat, UsdShade.Tokens.strongerThanDescendants)"
     )
 
 
@@ -630,6 +667,45 @@ async def _handle_get_debug_info(args: Dict) -> Dict:
     }
 
 
+async def _handle_lookup_knowledge(args: Dict) -> Dict:
+    """Search the version-specific knowledge base for code patterns and docs."""
+    from ...retrieval.context_retriever import (
+        retrieve_context,
+        find_matching_patterns,
+        detect_isaac_version,
+    )
+    query = args.get("query", "")
+    version = detect_isaac_version()
+
+    # Search FTS index
+    fts_results = retrieve_context(query, version=version, limit=3)
+
+    # Search code patterns
+    patterns = find_matching_patterns(query, version=version, limit=3)
+
+    results = []
+    for r in fts_results:
+        results.append({
+            "source": r.get("source_id", "docs"),
+            "section": r.get("section_path", ""),
+            "content": r.get("content", "")[:600],
+        })
+    for p in patterns:
+        results.append({
+            "source": "code_patterns",
+            "title": p.get("title", ""),
+            "code": p.get("code", ""),
+            "note": p.get("note", ""),
+        })
+
+    return {
+        "version": version,
+        "query": query,
+        "results": results,
+        "count": len(results),
+    }
+
+
 # Data-only handlers (no code gen → return data directly to LLM)
 DATA_HANDLERS = {
     "lookup_product_spec": _handle_lookup_product_spec,
@@ -640,6 +716,7 @@ DATA_HANDLERS = {
     "list_all_prims": _handle_list_all_prims,
     "measure_distance": _handle_measure_distance,
     "get_debug_info": _handle_get_debug_info,
+    "lookup_knowledge": _handle_lookup_knowledge,
     "explain_error": None,  # handled inline by LLM (no tool execution)
     "ros2_list_topics": None,
     "ros2_publish": None,
