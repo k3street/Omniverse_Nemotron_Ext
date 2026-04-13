@@ -10,6 +10,27 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+class _UsdSafeEncoder(json.JSONEncoder):
+    """Fallback encoder that converts leftover USD/Gf types to primitives."""
+    def default(self, obj):
+        if hasattr(obj, '__float__'):
+            try:
+                return float(obj)
+            except Exception:
+                pass
+        if hasattr(obj, '__int__'):
+            try:
+                return int(obj)
+            except Exception:
+                pass
+        if hasattr(obj, '__iter__'):
+            try:
+                return [self.default(x) if not isinstance(x, (bool, int, float, str, list, dict, type(None))) else x for x in obj]
+            except Exception:
+                pass
+        return str(obj)
+
 class AssistServiceClient:
     """
     Connects the Extension UI to the external Python LiveKit/LLM orchestrator service.
@@ -18,6 +39,7 @@ class AssistServiceClient:
     def __init__(self, base_url: str = "http://localhost:8000"):
         self.base_url = base_url
         self.session_id = "default_session"
+        self._json_serialize = lambda obj: json.dumps(obj, cls=_UsdSafeEncoder)
 
     async def send_message(self, text: str, context: dict = None) -> dict:
         """ Sends a chat message to the orchestration service """
@@ -34,7 +56,7 @@ class AssistServiceClient:
         }
         
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(json_serialize=self._json_serialize) as session:
                 async with session.post(url, json=payload) as response:
                     if response.status == 200:
                         return await response.json()
@@ -53,7 +75,7 @@ class AssistServiceClient:
             "user_request": user_query
         }
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(json_serialize=self._json_serialize) as session:
                 async with session.post(url, json=payload) as response:
                     if response.status == 200:
                         return await response.json()
@@ -65,7 +87,7 @@ class AssistServiceClient:
         """ Updates `.env` variables via the unified Settings Manager """
         url = f"{self.base_url}/api/v1/settings/update_env"
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(json_serialize=self._json_serialize) as session:
                 async with session.post(url, json=settings_payload) as response:
                     if response.status == 200:
                         return await response.json()
@@ -77,7 +99,7 @@ class AssistServiceClient:
         """ Triggers JSONL finetuning extraction from the Knowledge Base """
         url = f"{self.base_url}/api/v1/finetune/export"
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(json_serialize=self._json_serialize) as session:
                 async with session.post(url) as response:
                     if response.status == 200:
                         return await response.json()

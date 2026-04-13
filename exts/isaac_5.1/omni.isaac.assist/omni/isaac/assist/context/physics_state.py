@@ -9,6 +9,29 @@ import carb
 from typing import Dict, Any, List, Optional
 
 
+def _safe(val: Any) -> Any:
+    """Convert USD/Gf types to JSON-safe Python primitives."""
+    if val is None:
+        return None
+    if isinstance(val, (bool,)):
+        return bool(val)
+    try:
+        if hasattr(val, '__float__'):
+            return float(val)
+    except (TypeError, ValueError):
+        pass
+    if isinstance(val, (int,)):
+        return int(val)
+    if isinstance(val, str):
+        return val
+    if hasattr(val, "__iter__"):
+        try:
+            return [_safe(x) for x in val]
+        except Exception:
+            pass
+    return str(val)
+
+
 def get_articulation_state(prim_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Returns joint positions, velocities, and world pose for the articulation
@@ -61,10 +84,10 @@ def get_articulation_state(prim_path: Optional[str] = None) -> Dict[str, Any]:
                             joints.append({
                                 "path": str(child.GetPath()),
                                 "drive_type": token,
-                                "target_position": drive.GetTargetPositionAttr().Get(),
-                                "target_velocity": drive.GetTargetVelocityAttr().Get(),
-                                "stiffness": drive.GetStiffnessAttr().Get(),
-                                "damping": drive.GetDampingAttr().Get(),
+                                "target_position": _safe(drive.GetTargetPositionAttr().Get()),
+                                "target_velocity": _safe(drive.GetTargetVelocityAttr().Get()),
+                                "stiffness": _safe(drive.GetStiffnessAttr().Get()),
+                                "damping": _safe(drive.GetDampingAttr().Get()),
                             })
 
         return {"prim_path": prim_path, "joints_usd": joints}

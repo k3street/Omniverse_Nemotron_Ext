@@ -73,7 +73,8 @@ def get_stage_tree(max_depth: int = 6) -> Dict[str, Any]:
             if prim.IsA(UsdGeom.Imageable):
                 vis_attr = UsdGeom.Imageable(prim).GetVisibilityAttr()
                 if vis_attr:
-                    node["visibility"] = vis_attr.Get()
+                    v = vis_attr.Get()
+                    node["visibility"] = str(v) if v is not None else None
 
             children = []
             for child in prim.GetChildren():

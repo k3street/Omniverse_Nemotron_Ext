@@ -52,18 +52,18 @@ def get_selected_prim_properties() -> Dict[str, Any]:
         if prim.IsA(UsdGeom.Xformable):
             xf = UsdGeom.XformCache(0).GetLocalToWorldTransform(prim)
             t = xf.ExtractTranslation()
-            result["world_position"] = [t[0], t[1], t[2]]
+            result["world_position"] = [float(t[0]), float(t[1]), float(t[2])]
 
         # ── Physics summary ───────────────────────────────────────────────────
         physics_info: Dict[str, Any] = {}
         if prim.HasAPI(UsdPhysics.RigidBodyAPI):
             rb = UsdPhysics.RigidBodyAPI(prim)
             physics_info["rigid_body"] = {
-                "enabled": rb.GetRigidBodyEnabledAttr().Get(),
+                "enabled": _serialize_val(rb.GetRigidBodyEnabledAttr().Get()),
             }
         if prim.HasAPI(UsdPhysics.MassAPI):
             mass = UsdPhysics.MassAPI(prim)
-            physics_info["mass"] = mass.GetMassAttr().Get()
+            physics_info["mass"] = _serialize_val(mass.GetMassAttr().Get())
         if physics_info:
             result["physics"] = physics_info
 
@@ -78,11 +78,26 @@ def _serialize_val(val: Any) -> Any:
     """Convert USD/Gf types to JSON-safe primitives."""
     if val is None:
         return None
-    if isinstance(val, (bool, int, float, str)):
+    if isinstance(val, (bool,)):
+        return bool(val)
+    if isinstance(val, (int,)):
+        return int(val)
+    if isinstance(val, (float,)):
+        return float(val)
+    if isinstance(val, str):
         return val
-    if hasattr(val, "__iter__") and not isinstance(val, str):
+    # Handle Gf numeric types (Gf.Half, etc.) that pass numeric checks
+    try:
+        if hasattr(val, '__float__'):
+            return float(val)
+        if hasattr(val, '__int__'):
+            return int(val)
+    except (TypeError, ValueError):
+        pass
+    # Iterable containers — recurse to convert inner elements
+    if hasattr(val, "__iter__"):
         try:
-            return list(val)
+            return [_serialize_val(x) for x in val]
         except Exception:
             pass
     return str(val)

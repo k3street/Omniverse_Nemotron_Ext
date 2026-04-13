@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 class SwarmPlanGenerator:
     """
-    Submits a PlanGenerationRequest to the MCP Coder->QA->Critic->PM swarm natively
-    located in ${HOME}/nvidia-isaac-llm. Returns parsed Extension actions.
+    Submits a PlanGenerationRequest to the MCP Coder->QA->Critic->PM swarm.
+    Returns parsed Extension actions.
     """
     async def generate_plan_async(self, req: PlanGenerationRequest, mock_findings: List[Dict[str, Any]]) -> PatchPlan:
             

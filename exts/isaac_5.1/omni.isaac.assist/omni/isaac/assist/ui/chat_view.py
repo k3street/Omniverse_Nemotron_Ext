@@ -209,7 +209,13 @@ class ChatViewWindow(ui.Window):
                             ui.Label(script_code, style={"color": 0xFFDDDDFF, "font_family": "Courier"})
                             
                     ui.Spacer(height=5)
-                    ui.Button("Review & Approve Execution", height=25, style={"background_color": 0xFF22AA22}, clicked_fn=lambda: self._prompt_approval(script_code))
+                    swarm_btn = ui.Button("Review & Approve Execution", height=25, style={"background_color": 0xFF22AA22}, clicked_fn=lambda: self._prompt_approval(script_code))
+                    def _on_swarm_approve(btn=swarm_btn):
+                        btn.text = "Review opened..."
+                        btn.enabled = False
+                        btn.set_style({"background_color": 0xFF666666})
+                        self._prompt_approval(script_code)
+                    swarm_btn.set_clicked_fn(_on_swarm_approve)
 
     def _prompt_approval(self, script_code: str):
         # Implementation of step 4: Spawn approval window
@@ -310,10 +316,18 @@ class ChatViewWindow(ui.Window):
                                                horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_OFF):
                             ui.Label(code, style={"color": 0xFFDDDDFF, "font_family": "Courier"})
                     with ui.HStack(height=25, spacing=8):
-                        ui.Button("Approve & Execute", style={"background_color": 0xFF22AA22},
+                        approve_btn = ui.Button("Approve & Execute", style={"background_color": 0xFF22AA22},
                                   clicked_fn=lambda c=code: self._execute_patch(c))
-                        ui.Button("Reject", style={"background_color": 0xFF666666},
+                        reject_btn = ui.Button("Reject", style={"background_color": 0xFF666666},
                                   clicked_fn=lambda: asyncio.ensure_future(self._deferred_chat_bubble("System", "Patch rejected.", is_user=False)))
+                        # Capture refs for post-click feedback
+                        def _on_approve(btn=approve_btn, rej=reject_btn, c=code):
+                            btn.text = "Executing..."
+                            btn.enabled = False
+                            btn.set_style({"background_color": 0xFF666666})
+                            rej.visible = False
+                            self._execute_patch(c)
+                        approve_btn.set_clicked_fn(_on_approve)
 
     async def _deferred_chat_bubble(self, sender: str, text: str, is_user: bool, error: bool = False):
         """Defers _add_chat_bubble to next frame to avoid draw-callback restrictions."""

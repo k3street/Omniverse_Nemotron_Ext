@@ -39,7 +39,7 @@ _ISAAC_SIM_DIRECT = [
 ]
 # Parent dirs whose versioned subdirs may contain an Isaac Sim install
 _ISAAC_SIM_PARENT_DIRS = [
-    Path("${HOME}/.local/share/ov/pkg"),
+    Path.home() / ".local" / "share" / "ov" / "pkg",
 ]
 
 

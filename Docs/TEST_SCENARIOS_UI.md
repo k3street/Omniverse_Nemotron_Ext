@@ -4,7 +4,7 @@
 
 ### Terminal 1: Start the FastAPI Service
 ```bash
-cd ${HOME}/Omniverse_Nemotron_Ext
+cd /path/to/Omniverse_Nemotron_Ext
 source service/.env 2>/dev/null; set -a; source .env 2>/dev/null; set +a
 uvicorn service.isaac_assist_service.main:app --host 0.0.0.0 --port 8000 --reload
 ```
@@ -12,7 +12,7 @@ Wait until you see `Uvicorn running on http://0.0.0.0:8000`.
 
 ### Terminal 2: Launch Isaac Sim
 ```bash
-cd ${HOME}/Omniverse_Nemotron_Ext
+cd /path/to/Omniverse_Nemotron_Ext
 ./launch_isaac_fixed.sh
 ```
 Wait for Isaac Sim to fully load (viewport shows the default ground plane or empty stage).

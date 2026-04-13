@@ -29,3 +29,6 @@ workspace/
 
 # Logs
 *.log
+
+# Personal launch scripts (use launch_isaac.sh.example as template)
+launch_isaac_fixed.sh
