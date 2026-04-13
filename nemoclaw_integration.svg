@@ -1,0 +1,138 @@
+<svg width="100%" viewBox="0 0 680 640" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>NemoClaw and OpenClaw integration with Isaac Assist</title>
+<desc>Architecture showing how user messages from chat apps flow through OpenClaw agent and NemoClaw sandbox to Isaac Assist's MCP server, FastAPI orchestrator, and into the Isaac Sim Kit process.</desc>
+
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 14px; font-weight: 500; }
+  .subtitle { font-size: 12px; font-weight: 400; }
+  .arr-line { stroke-width: 1.5; fill: none; }
+  .dashed-border { stroke-dasharray: 6 4; fill: none; }
+
+  .gray-box { fill: #F1EFE8; stroke: #5F5E5A; }
+  .gray-title { fill: #444441; }
+  .coral-outer { fill: #FAECE7; stroke: #993C1D; }
+  .coral-box { fill: #FAECE7; stroke: #993C1D; }
+  .coral-title { fill: #712B13; }
+  .coral-sub { fill: #993C1D; }
+  .teal-box { fill: #E1F5EE; stroke: #0F6E56; }
+  .teal-title { fill: #085041; }
+  .teal-sub { fill: #0F6E56; }
+  .purple-box { fill: #EEEDFE; stroke: #534AB7; }
+  .purple-title { fill: #3C3489; }
+  .purple-sub { fill: #534AB7; }
+  .green-box { fill: #EAF3DE; stroke: #3B6D11; }
+  .green-title { fill: #27500A; }
+  .green-sub { fill: #3B6D11; }
+  .amber-box { fill: #FAEEDA; stroke: #854F0B; }
+  .amber-title { fill: #633806; }
+  .amber-sub { fill: #854F0B; }
+  .arr-line { stroke: #5f5e5a; }
+  .label-text { fill: #5f5e5a; font-size: 12px; font-weight: 400; }
+  .dashed-border { stroke: #888780; }
+
+  @media (prefers-color-scheme: dark) {
+    .gray-box { fill: #444441; stroke: #B4B2A9; }
+    .gray-title { fill: #D3D1C7; }
+    .coral-outer { fill: #712B13; stroke: #F0997B; }
+    .coral-box { fill: #712B13; stroke: #F0997B; }
+    .coral-title { fill: #F5C4B3; }
+    .coral-sub { fill: #F0997B; }
+    .teal-box { fill: #085041; stroke: #5DCAA5; }
+    .teal-title { fill: #9FE1CB; }
+    .teal-sub { fill: #5DCAA5; }
+    .purple-box { fill: #3C3489; stroke: #AFA9EC; }
+    .purple-title { fill: #CECBF6; }
+    .purple-sub { fill: #AFA9EC; }
+    .green-box { fill: #27500A; stroke: #97C459; }
+    .green-title { fill: #C0DD97; }
+    .green-sub { fill: #97C459; }
+    .amber-box { fill: #633806; stroke: #EF9F27; }
+    .amber-title { fill: #FAC775; }
+    .amber-sub { fill: #EF9F27; }
+    .arr-line { stroke: #b4b2a9; }
+    .label-text { fill: #b4b2a9; }
+    .dashed-border { stroke: #888780; }
+  }
+</style>
+
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+
+<!-- User channels -->
+<rect class="gray-box" x="40" y="30" width="110" height="44" rx="8" stroke-width="0.5"/>
+<text class="title gray-title" x="95" y="52" text-anchor="middle" dominant-baseline="central">Telegram</text>
+<rect class="gray-box" x="170" y="30" width="110" height="44" rx="8" stroke-width="0.5"/>
+<text class="title gray-title" x="225" y="52" text-anchor="middle" dominant-baseline="central">Discord</text>
+<rect class="gray-box" x="300" y="30" width="100" height="44" rx="8" stroke-width="0.5"/>
+<text class="title gray-title" x="350" y="52" text-anchor="middle" dominant-baseline="central">Slack</text>
+<rect class="gray-box" x="420" y="30" width="110" height="44" rx="8" stroke-width="0.5"/>
+<text class="title gray-title" x="475" y="52" text-anchor="middle" dominant-baseline="central">WhatsApp</text>
+<rect class="gray-box" x="550" y="30" width="100" height="44" rx="8" stroke-width="0.5"/>
+<text class="title gray-title" x="600" y="52" text-anchor="middle" dominant-baseline="central">iMessage</text>
+
+<!-- Channel arrows -->
+<line class="arr-line" x1="95" y1="74" x2="95" y2="108" marker-end="url(#arrow)"/>
+<line class="arr-line" x1="225" y1="74" x2="225" y2="108" marker-end="url(#arrow)"/>
+<line class="arr-line" x1="350" y1="74" x2="350" y2="108" marker-end="url(#arrow)"/>
+<line class="arr-line" x1="475" y1="74" x2="475" y2="108" marker-end="url(#arrow)"/>
+<line class="arr-line" x1="600" y1="74" x2="600" y2="108" marker-end="url(#arrow)"/>
+
+<!-- NemoClaw sandbox (dashed container) -->
+<rect class="dashed-border" x="40" y="110" width="600" height="160" rx="20" stroke-width="0.5"/>
+<text class="title label-text" x="340" y="136" text-anchor="middle" style="font-weight:500">NemoClaw sandbox</text>
+<text class="subtitle label-text" x="340" y="154" text-anchor="middle">Landlock + seccomp + netns</text>
+
+<!-- OpenClaw Agent -->
+<rect class="coral-outer" x="70" y="170" width="250" height="80" rx="12" stroke-width="0.5"/>
+<text class="title coral-title" x="195" y="198" text-anchor="middle">OpenClaw agent</text>
+<text class="subtitle coral-sub" x="195" y="216" text-anchor="middle">OpenShell gateway</text>
+<text class="subtitle coral-sub" x="195" y="234" text-anchor="middle">Inference routing</text>
+
+<!-- Skills -->
+<rect class="coral-box" x="350" y="170" width="130" height="56" rx="8" stroke-width="0.5"/>
+<text class="title coral-title" x="415" y="190" text-anchor="middle" dominant-baseline="central">isaac-sim skill</text>
+<text class="subtitle coral-sub" x="415" y="210" text-anchor="middle" dominant-baseline="central">SKILL.md</text>
+<rect class="gray-box" x="500" y="170" width="120" height="56" rx="8" stroke-width="0.5"/>
+<text class="title gray-title" x="560" y="190" text-anchor="middle" dominant-baseline="central">Other skills</text>
+<text class="subtitle" x="560" y="210" text-anchor="middle" dominant-baseline="central" fill="#5F5E5A">GitHub, docs</text>
+
+<line class="arr-line" x1="320" y1="210" x2="348" y2="198" marker-end="url(#arrow)"/>
+
+<!-- MCP Server -->
+<rect class="teal-box" x="160" y="320" width="360" height="56" rx="12" stroke-width="0.5"/>
+<text class="title teal-title" x="340" y="340" text-anchor="middle" dominant-baseline="central">Isaac Assist MCP server</text>
+<text class="subtitle teal-sub" x="340" y="358" text-anchor="middle" dominant-baseline="central">JSON-RPC 2.0 / SSE — port 8002</text>
+
+<line class="arr-line" x1="340" y1="270" x2="340" y2="318" marker-end="url(#arrow)"/>
+<text class="label-text" x="348" y="298" text-anchor="start">MCP / HTTP</text>
+
+<!-- FastAPI -->
+<rect class="purple-box" x="100" y="426" width="480" height="56" rx="12" stroke-width="0.5"/>
+<text class="title purple-title" x="340" y="446" text-anchor="middle" dominant-baseline="central">FastAPI orchestration service</text>
+<text class="subtitle purple-sub" x="340" y="464" text-anchor="middle" dominant-baseline="central">Chat, RAG, governance, snapshots — port 8000</text>
+
+<line class="arr-line" x1="340" y1="376" x2="340" y2="424" marker-end="url(#arrow)"/>
+<text class="label-text" x="348" y="404" text-anchor="start">30+ tool schemas</text>
+
+<!-- Isaac Sim -->
+<rect class="green-box" x="140" y="532" width="400" height="80" rx="16" stroke-width="0.5"/>
+<text class="title green-title" x="340" y="560" text-anchor="middle">Isaac Sim (Kit process)</text>
+<text class="subtitle green-sub" x="340" y="580" text-anchor="middle">USD, PhysX, OmniGraph, viewport</text>
+<text class="subtitle green-sub" x="340" y="596" text-anchor="middle">Kit RPC — port 8001</text>
+
+<line class="arr-line" x1="340" y1="482" x2="340" y2="530" marker-end="url(#arrow)"/>
+<text class="label-text" x="348" y="510" text-anchor="start">Kit RPC (HTTP)</text>
+
+<!-- Nemotron -->
+<rect class="amber-box" x="550" y="320" width="110" height="80" rx="10" stroke-width="0.5"/>
+<text class="title amber-title" x="605" y="348" text-anchor="middle">Nemotron</text>
+<text class="subtitle amber-sub" x="605" y="366" text-anchor="middle">Super 120B</text>
+<text class="subtitle amber-sub" x="605" y="382" text-anchor="middle">via Ollama</text>
+
+<path d="M580 454 L605 454 L605 402" fill="none" class="arr-line" marker-end="url(#arrow)"/>
+
+</svg>

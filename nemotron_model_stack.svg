@@ -1,0 +1,115 @@
+<svg width="100%" viewBox="0 0 680 580" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>Nemotron model stack across hardware topology</title>
+<desc>Three-node deployment topology showing Nemotron Super 120B on DGX Spark as the brain, GPU workstation as the lab node, and Jetson Thor as edge with a verified three-model stack using MIG partitioning.</desc>
+
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 14px; font-weight: 500; }
+  .subtitle { font-size: 12px; font-weight: 400; }
+  .arr-line { stroke-width: 1.5; fill: none; }
+  .label-text { font-size: 12px; font-weight: 400; }
+
+  .purple-outer { fill: #EEEDFE; stroke: #534AB7; }
+  .purple-box { fill: #EEEDFE; stroke: #534AB7; }
+  .purple-title { fill: #3C3489; }
+  .purple-sub { fill: #534AB7; }
+  .teal-outer { fill: #E1F5EE; stroke: #0F6E56; }
+  .teal-box { fill: #E1F5EE; stroke: #0F6E56; }
+  .teal-title { fill: #085041; }
+  .teal-sub { fill: #0F6E56; }
+  .coral-outer { fill: #FAECE7; stroke: #993C1D; }
+  .coral-box { fill: #FAECE7; stroke: #993C1D; }
+  .coral-title { fill: #712B13; }
+  .coral-sub { fill: #993C1D; }
+  .gray-box { fill: #F1EFE8; stroke: #5F5E5A; }
+  .gray-title { fill: #444441; }
+  .gray-sub { fill: #5F5E5A; }
+  .arr-line { stroke: #5f5e5a; }
+  .label-text { fill: #5f5e5a; }
+
+  @media (prefers-color-scheme: dark) {
+    .purple-outer { fill: #3C3489; stroke: #AFA9EC; }
+    .purple-box { fill: #3C3489; stroke: #AFA9EC; }
+    .purple-title { fill: #CECBF6; }
+    .purple-sub { fill: #AFA9EC; }
+    .teal-outer { fill: #085041; stroke: #5DCAA5; }
+    .teal-box { fill: #085041; stroke: #5DCAA5; }
+    .teal-title { fill: #9FE1CB; }
+    .teal-sub { fill: #5DCAA5; }
+    .coral-outer { fill: #712B13; stroke: #F0997B; }
+    .coral-box { fill: #712B13; stroke: #F0997B; }
+    .coral-title { fill: #F5C4B3; }
+    .coral-sub { fill: #F0997B; }
+    .gray-box { fill: #444441; stroke: #B4B2A9; }
+    .gray-title { fill: #D3D1C7; }
+    .gray-sub { fill: #B4B2A9; }
+    .arr-line { stroke: #b4b2a9; }
+    .label-text { fill: #b4b2a9; }
+  }
+</style>
+
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+
+<!-- DGX Spark — Brain -->
+<rect class="purple-outer" x="40" y="30" width="280" height="200" rx="16" stroke-width="0.5"/>
+<text class="title purple-title" x="180" y="58" text-anchor="middle">DGX Spark (brain)</text>
+<text class="subtitle purple-sub" x="180" y="76" text-anchor="middle">Grace-Blackwell GB10</text>
+
+<rect class="purple-box" x="60" y="94" width="240" height="56" rx="8" stroke-width="0.5"/>
+<text class="title purple-title" x="180" y="114" text-anchor="middle" dominant-baseline="central">Nemotron Super 120B</text>
+<text class="subtitle purple-sub" x="180" y="134" text-anchor="middle" dominant-baseline="central">MoE orchestration model</text>
+
+<rect class="purple-box" x="60" y="164" width="240" height="50" rx="8" stroke-width="0.5"/>
+<text class="title purple-title" x="180" y="182" text-anchor="middle" dominant-baseline="central">Cosmos Reason 2-8B</text>
+<text class="subtitle purple-sub" x="180" y="200" text-anchor="middle" dominant-baseline="central">Adversarial critic</text>
+
+<!-- GPU Workstation — Lab -->
+<rect class="teal-outer" x="370" y="30" width="280" height="200" rx="16" stroke-width="0.5"/>
+<text class="title teal-title" x="510" y="58" text-anchor="middle">GPU workstation (lab)</text>
+<text class="subtitle teal-sub" x="510" y="76" text-anchor="middle">Training + simulation</text>
+
+<rect class="teal-box" x="390" y="94" width="240" height="56" rx="8" stroke-width="0.5"/>
+<text class="title teal-title" x="510" y="114" text-anchor="middle" dominant-baseline="central">Isaac Sim + Isaac Assist</text>
+<text class="subtitle teal-sub" x="510" y="134" text-anchor="middle" dominant-baseline="central">FastAPI + Kit RPC</text>
+
+<rect class="teal-box" x="390" y="164" width="240" height="50" rx="8" stroke-width="0.5"/>
+<text class="title teal-title" x="510" y="182" text-anchor="middle" dominant-baseline="central">LoRA fine-tuning</text>
+<text class="subtitle teal-sub" x="510" y="200" text-anchor="middle" dominant-baseline="central">Unsloth + GGUF export</text>
+
+<!-- Arrow: Brain to Lab -->
+<line class="arr-line" x1="320" y1="130" x2="388" y2="130" marker-end="url(#arrow)"/>
+<text class="label-text" x="338" y="120" text-anchor="start">Orchestrates</text>
+
+<!-- Jetson Thor — Edge -->
+<rect class="coral-outer" x="120" y="290" width="440" height="260" rx="16" stroke-width="0.5"/>
+<text class="title coral-title" x="340" y="318" text-anchor="middle">Jetson Thor (edge)</text>
+<text class="subtitle coral-sub" x="340" y="336" text-anchor="middle">MIG partitioning for deterministic isolation</text>
+
+<rect class="coral-box" x="150" y="356" width="180" height="70" rx="8" stroke-width="0.5"/>
+<text class="title coral-title" x="240" y="380" text-anchor="middle" dominant-baseline="central">Nemotron Voice Agent</text>
+<text class="subtitle coral-sub" x="240" y="400" text-anchor="middle" dominant-baseline="central">~22 GB VRAM</text>
+
+<rect class="coral-box" x="150" y="440" width="180" height="70" rx="8" stroke-width="0.5"/>
+<text class="title coral-title" x="240" y="464" text-anchor="middle" dominant-baseline="central">Qwen 3.5-35B-A3B</text>
+<text class="subtitle coral-sub" x="240" y="484" text-anchor="middle" dominant-baseline="central">~24 GB VRAM</text>
+
+<rect class="coral-box" x="360" y="356" width="170" height="70" rx="8" stroke-width="0.5"/>
+<text class="title coral-title" x="445" y="380" text-anchor="middle" dominant-baseline="central">GR00T N1.6-3B</text>
+<text class="subtitle coral-sub" x="445" y="400" text-anchor="middle" dominant-baseline="central">~6.2 GB VRAM</text>
+
+<rect class="gray-box" x="360" y="440" width="170" height="70" rx="8" stroke-width="0.5"/>
+<text class="title gray-title" x="445" y="464" text-anchor="middle" dominant-baseline="central">Robot control</text>
+<text class="subtitle gray-sub" x="445" y="484" text-anchor="middle" dominant-baseline="central">Whole-body policy</text>
+
+<!-- Arrows: Brain/Lab to Edge -->
+<path d="M180 230 L180 260 L180 288" fill="none" class="arr-line" marker-end="url(#arrow)"/>
+<text class="label-text" x="188" y="262" text-anchor="start">Deploys models</text>
+
+<path d="M510 230 L510 260 L510 288" fill="none" class="arr-line" marker-end="url(#arrow)"/>
+<text class="label-text" x="518" y="262" text-anchor="start">Sim data</text>
+
+</svg>

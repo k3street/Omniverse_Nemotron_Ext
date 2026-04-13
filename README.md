@@ -4,6 +4,16 @@
 
 ---
 
+## Architecture
+
+![Isaac Assist Architecture](isaac_assist_architecture.svg)
+
+![Nemotron Model Stack](nemotron_model_stack.svg)
+
+![NemoClaw Integration](nemoclaw_integration.svg)
+
+---
+
 ## Table of Contents
 
 1. [Prerequisites](#1-prerequisites)
