@@ -47,7 +47,7 @@ Omniverse_Nemotron_Ext/
 ├── infra/
 │   └── livekit/            # Self-hosted LiveKit voice stack (Docker Compose)
 ├── scripts/                # Utility scripts (doc scraping, data curation)
-├── launch_isaac_fixed.sh   # Recommended Isaac Sim launcher
+├── launch_isaac.sh         # Recommended Isaac Sim launcher
 └── requirements.txt        # Python backend dependencies
 ```
 
@@ -124,21 +124,21 @@ docker compose down
 
 ### 5.1 Using the launch script (recommended)
 
-The `launch_isaac_fixed.sh` script configures the correct ROS2 environment and registers the extension folder automatically.
+The `launch_isaac.sh` script configures the correct ROS2 environment and registers the extension folder automatically.
 
 ```bash
 # Launch Isaac Sim with an empty scene
-./launch_isaac_fixed.sh
+./launch_isaac.sh
 
 # Launch Isaac Sim and open a specific USD file
-./launch_isaac_fixed.sh /path/to/scene.usd
+./launch_isaac.sh /path/to/scene.usd
 ```
 
-To point at a custom Isaac Sim installation, set `ISAAC_SIM_PATH` before launching:
+To point at a custom Isaac Sim installation, set `ISAAC_SIM_PATH` in your `.env` file or export it before launching:
 
 ```bash
 export ISAAC_SIM_PATH=/path/to/your/isaac-sim
-./launch_isaac_fixed.sh
+./launch_isaac.sh
 ```
 
 The script auto-detects architecture (`x86_64` or `aarch64`) and sets default paths accordingly:

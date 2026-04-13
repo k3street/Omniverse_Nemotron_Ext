@@ -13,7 +13,7 @@ Wait until you see `Uvicorn running on http://0.0.0.0:8000`.
 ### Terminal 2: Launch Isaac Sim
 ```bash
 cd /path/to/Omniverse_Nemotron_Ext
-./launch_isaac_fixed.sh
+./launch_isaac.sh
 ```
 Wait for Isaac Sim to fully load (viewport shows the default ground plane or empty stage).
 

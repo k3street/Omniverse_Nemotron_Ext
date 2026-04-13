@@ -30,5 +30,5 @@ workspace/
 # Logs
 *.log
 
-# Personal launch scripts (use launch_isaac.sh.example as template)
+# Personal launch override (tracked version is launch_isaac.sh)
 launch_isaac_fixed.sh
