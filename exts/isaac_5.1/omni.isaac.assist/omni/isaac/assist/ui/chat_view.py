@@ -64,6 +64,9 @@ class ChatViewWindow(ui.Window):
         if not text:
             return
 
+        # Track for audit/knowledge logging
+        self._last_user_message = text
+
         # Clear input
         self.input_field.model.set_value("")
 
@@ -267,6 +270,19 @@ class ChatViewWindow(ui.Window):
             self._add_chat_bubble("Script Output", captured_text[:1500] + ("...\n[TRUNCATED]" if len(captured_text)>1500 else ""), is_user=False)
             feedback_msg = f"System Report: The patch executed with the following output logs:\n```\n{captured_text}\n```"
             await self._handle_service_request(feedback_msg)
+
+        # ── Log to audit trail + knowledge base ──────────────────────────
+        try:
+            user_msg = getattr(self, '_last_user_message', '')
+            await self.service.log_execution(
+                code=script_code,
+                success=success,
+                output=captured_text[:2000],
+                user_message=user_msg,
+            )
+        except Exception as log_err:
+            import carb
+            carb.log_warn(f"[IsaacAssist] Failed to log execution: {log_err}")
 
     async def _handle_service_request(self, text: str, selected_prim_info: dict = None):
         context = {}

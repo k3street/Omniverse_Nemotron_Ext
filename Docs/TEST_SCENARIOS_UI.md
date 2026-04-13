@@ -71,6 +71,13 @@ Each scenario below shows: **what to type** in the chat panel, **what to click**
 **Prerequisite:** T01 (MyCube exists)
 
 **Type:**
+### T08 — Make a Deformable Cloth
+**Type:**
+> Create a plane named ClothSheet at 0, 0, 3 and make it a deformable cloth
+
+**Expected:** Code patch creating a mesh plane and applying `PhysxSchema.PhysxDeformableBodyAPI` or cloth API. After approval:
+- Play the sim — the sheet should drape/fall softly rather than as a rigid body
+
 > Delete /World/MyCube
 
 **Expected:** Code patch using `stage.RemovePrim(...)`. After approval:
@@ -82,7 +89,14 @@ Each scenario below shows: **what to type** in the chat panel, **what to click**
 **Type:**
 > What's in the scene right now?
 
-**Expected:** Isaac Assist returns a text description listing prims currently in the stage. No code patch — just a text reply summarizing the scene hierarchy. This tests the `scene_summary` data handler.
+**Expected:** Isaac Assist returns a text description listing prims currently in the stage. No code patch — just a text rep
+### T08 — Make a Deformable Cloth
+**Type:**
+> Create a plane named ClothSheet at 0, 0, 3 and make it a deformable cloth
+
+**Expected:** Code patch creating a mesh plane and applying `PhysxSchema.PhysxDeformableBodyAPI` or cloth API. After approval:
+- Play the sim — the sheet should drape/fall softly rather than as a rigid body
+ly summarizing the scene hierarchy. This tests the `scene_summary` data handler.
 
 ---
 
@@ -349,6 +363,42 @@ _Skip this test if LiveKit is not configured._
 
 ---
 
+### T31 — Wire ROS2 JointState Graph for Franka
+**Prerequisite:** T11 (Franka robot loaded at `/World/Franka`). ROS2 bridge extension should be enabled.
+
+**Type:**
+> Wire a full ROS2 JointState publisher and subscriber OmniGraph for /World/Franka. Add a ROS2SubscribeJointState node on /joint_command, an IsaacArticulationController targeting /World/Franka, and a ROS2PublishJointState node publishing to /joint_states. Connect them all to the OnPlaybackTick in /World/FrankaROS2Graph.
+
+**Expected:** Code patch that:
+1. Adds `ROS2SubscribeJointState` node (subscribes to `/joint_command`)
+2. Adds `IsaacArticulationController` node (targets `/World/Franka`)
+3. Adds `ROS2PublishJointState` node (publishes to `/joint_states`)
+4. Wires all nodes from the existing `OnPlaybackTick` tick source
+
+**Verify after approval:**
+- `/World/FrankaROS2Graph` in the Stage tree now contains multiple OmniGraph nodes
+- Open **Window → Visual Scripting → Action Graph** and select `/World/FrankaROS2Graph` — nodes and connections visible
+- Play the sim → run `ros2 topic list` in a terminal — `/joint_states` and `/joint_command` topics should appear
+
+---
+
+### T32 — Send ROS2 Joint Command to Franka
+**Prerequisite:** T31 (ROS2 JointState graph wired), simulation playing
+
+**In a ROS2-sourced terminal, run:**
+```bash
+ros2 topic pub --once /joint_command sensor_msgs/msg/JointState \
+  "{header: {stamp: {sec: 0}, frame_id: ''}, name: ['panda_joint1','panda_joint2','panda_joint3','panda_joint4','panda_joint5','panda_joint6','panda_joint7'], position: [0.0, -0.5, 0.0, -1.5, 0.0, 1.2, 0.8], velocity: [], effort: []}"
+```
+
+**Verify:**
+- Franka arm moves to the commanded joint positions in the viewport
+- `ros2 topic echo /joint_states` shows updated position values matching the command
+
+_Skip T31–T32 if ROS2 is not installed or the ROS2 bridge extension is unavailable._
+
+---
+
 ## Summary Checklist
 
 | # | Category | Prompt | Requires Approval? |
@@ -383,6 +433,8 @@ _Skip this test if LiveKit is not configured._
 | T28 | Export | Training data | N/A (UI button) |
 | T29 | Physics | Gravity/timestep | ✅ |
 | T30 | LiveKit | Vision/Voice stream | N/A (optional) |
+| T31 | ROS2 | Wire JointState graph | ✅ |
+| T32 | ROS2 | Send joint command | N/A (external ROS2 cmd) |
 
 ## Troubleshooting
 

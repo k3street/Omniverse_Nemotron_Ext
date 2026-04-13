@@ -24,9 +24,13 @@ class KnowledgeBase:
         return self.storage_dir / f"knowledge_{clean_version}.jsonl"
 
     def add_entry(self, version: str, instruction: str, response: str, source: str = "audit"):
-        """Appends a new QA pair / instruction pair to the version-specific KB if opt-in is enabled."""
-        if not config.contribute_data:
-            logger.info("Data contribution opt-in is disabled. Skipping storing knowledge base entry.")
+        """Appends a new QA pair / instruction pair to the version-specific KB.
+        
+        Auto-error learning and audit sources always write.
+        User-contributed data (approved_patch) respects the contribute_data opt-in.
+        """
+        if source == "approved_patch" and not config.contribute_data:
+            logger.info("Data contribution opt-in is disabled. Skipping approved_patch KB entry.")
             return False
             
         file_path = self._get_file_path(version)

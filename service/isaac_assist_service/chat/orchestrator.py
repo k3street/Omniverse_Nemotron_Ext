@@ -11,6 +11,8 @@ Flow:
 from __future__ import annotations
 import json
 import logging
+import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from .provider_factory import get_llm_provider
@@ -29,8 +31,12 @@ from ..retrieval.context_retriever import (
     format_code_patterns,
     detect_isaac_version,
 )
+from ..governance.audit_log import AuditLogger
+from ..governance.models import AuditEntry
 
 logger = logging.getLogger(__name__)
+
+_audit = AuditLogger()
 
 # Maximum tool-call rounds per user message to prevent infinite loops
 MAX_TOOL_ROUNDS = 5
@@ -200,6 +206,23 @@ class ChatOrchestrator:
                         "code": result.get("code", ""),
                         "description": result.get("description", ""),
                     })
+
+                # ── Audit: log every tool call ────────────────────────────
+                try:
+                    _audit.log_entry(AuditEntry(
+                        entry_id=str(uuid.uuid4()),
+                        timestamp=datetime.utcnow(),
+                        event_type="tool_call",
+                        action_id=fn_name,
+                        target=json.dumps(fn_args, default=str)[:500],
+                        metadata={
+                            "session_id": session_id,
+                            "result_type": result.get("type", "unknown"),
+                            "user_message": user_message[:200],
+                        },
+                    ))
+                except Exception:
+                    pass  # audit must never block chat
 
                 # Append tool call + result to message history for next LLM round
                 messages.append({
