@@ -544,29 +544,36 @@ _Note: Requires Isaac Sim robot asset library. If the asset isn't found, Isaac A
 
 ---
 
-### T41 — Nova Carter: Physics + Anchor + ROS2 Twist Drive
-**Prerequisite:** T40 (Nova Carter loaded at `/World/NovaCarter`)
+### T41 — Nova Carter: Physics + ROS2 Differential Drive
+**Prerequisite:** T40 (Nova Carter loaded at `/World/NovaCarter`). Ground plane with collision (T07).
 
-**Step 1 — Anchor the robot:**
+_Nova Carter is a **differential-drive** wheeled robot: 2 powered front wheels + 2 free-spinning rear caster wheels. Do NOT use `fixedBase=True` — that pins the robot in place. Wheeled robots need to remain mobile._
+
+**Step 1 — Add physics and ensure wheels contact the ground:**
 **Type:**
-> Anchor /World/NovaCarter to the ground plane so it doesn't float
+> Add rigid body physics and collision to /World/NovaCarter so it sits on the ground plane under gravity. Make sure the wheels have colliders. Do NOT set fixedBase — this is a mobile robot that needs to drive.
 
-**Expected:** Code patch using `anchor_robot` tool — sets `PhysxArticulationAPI.fixedBase=True` and deletes rootJoint. After approval:
-- Play the sim — Nova Carter stays on the ground, wheels touch the surface
+**Expected:** Code patch that:
+- Applies `RigidBodyAPI` and `CollisionAPI` to the chassis/links as needed
+- Deletes any `rootJoint` (6-DOF free joint) that would cause instability
+- Does NOT set `fixedBase=True` (would prevent driving)
 
-**Step 2 — Wire ROS2 Twist drive graph:**
+**Verify:** Play the sim — Nova Carter drops onto the ground plane and rests on its 4 wheels (2 front drive + 2 rear casters). It should not float or fly away.
+
+**Step 2 — Wire ROS2 differential drive graph:**
 **Type:**
-> Create a ROS2 OmniGraph for /World/NovaCarter: subscribe to /cmd_vel (Twist), connect to a DifferentialController, then to an ArticulationController targeting the robot. Add a ROS2PublishOdometry node publishing to /odom. Use /World/CarterROS2Graph.
+> Create a ROS2 OmniGraph for /World/NovaCarter: subscribe to /cmd_vel (Twist), connect to a DifferentialController for the two front drive wheels, then to an ArticulationController targeting the robot. Add a ROS2PublishOdometry node publishing to /odom. Use /World/CarterROS2Graph.
 
 **Expected:** Code patch creating an action graph with:
 1. `OnPlaybackTick` tick source
 2. `ROS2SubscribeTwist` (subscribes to `/cmd_vel`)
-3. `DifferentialController` (converts twist to wheel velocities)
-4. `IsaacArticulationController` (targets `/World/NovaCarter`)
+3. `DifferentialController` (converts linear/angular twist to left/right front wheel velocities)
+4. `IsaacArticulationController` (targets `/World/NovaCarter`, drives the front wheel joints)
 5. `ROS2PublishOdometry` (publishes to `/odom`)
 
 **Verify after approval:**
 - `/World/CarterROS2Graph` exists in Stage tree with all nodes
+- DifferentialController should reference the two front wheel joints (rear casters are passive)
 - Play the sim → `ros2 topic list` shows `/cmd_vel` and `/odom`
 
 **Step 3 — Drive the robot:**
@@ -575,7 +582,7 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
   "{linear: {x: 0.5, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}"
 ```
 
-**Verify:** Nova Carter drives forward in the viewport.
+**Verify:** Nova Carter drives forward in the viewport. Rear caster wheels spin freely as the front wheels are powered.
 
 ---
 

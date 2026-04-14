@@ -71,9 +71,13 @@ CRITICAL API RULES for Isaac Sim 5.1:
 - OmniGraph node paths must use tuples: ("graph_path", "node_name"), NOT "graph_path/node_name"
 - isaacsim.core.cloner.GridCloner for batch cloning (≥4 copies), Sdf.CopySpec for small counts
 - For transforms on referenced prims, check if xformOps exist first, reuse them, only add new ops on freshly-defined prims
-- ROBOT ANCHORING: To anchor a robot, use the `anchor_robot` tool. NEVER move ArticulationRootAPI off
-  the root prim — it MUST stay on the robot root (e.g., /World/Franka) or the PhysX tensor API pattern
-  matching will fail with "did not match any articulations". Use PhysxArticulationAPI.fixedBase=True instead.
+- ROBOT ANCHORING: To anchor a stationary robot (e.g., Franka arm), use the `anchor_robot` tool with
+  fixedBase=True. NEVER move ArticulationRootAPI off the root prim — it MUST stay on the robot root
+  (e.g., /World/Franka) or the PhysX tensor API pattern matching will fail.
+  For WHEELED/MOBILE robots (e.g., Nova Carter, Jetbot): do NOT set fixedBase=True — they need to move.
+  Instead just delete the rootJoint and ensure rigid body + colliders are on the chassis and wheels.
+  Nova Carter is a differential-drive robot: 2 powered front wheels + 2 free-spinning rear caster wheels.
+  Use DifferentialController for wheeled robots, NOT fixedBase anchoring.
 - OmniGraph node types in Isaac Sim 5.1 use the `isaacsim.*` namespace, NOT legacy `omni.isaac.*`:
   • isaacsim.ros2.bridge.ROS2PublishJointState (NOT omni.isaac.ros2_bridge.ROS2PublishJointState)
   • isaacsim.ros2.bridge.ROS2SubscribeJointState (NOT omni.isaac.ros2_bridge.ROS2SubscribeJointState)

@@ -153,7 +153,7 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "anchor_robot",
-            "description": "Anchor a robot to the world or a specific surface. Sets PhysxArticulationAPI.fixedBase=True and deletes the rootJoint (6-DOF free joint) so the robot cannot float. Keeps ArticulationRootAPI on the root prim for tensor API compatibility.",
+            "description": "Anchor a STATIONARY robot (e.g., Franka arm) to the world or a surface. Sets PhysxArticulationAPI.fixedBase=True and deletes the rootJoint. Do NOT use for wheeled/mobile robots (Nova Carter, Jetbot) — they need to remain mobile. For mobile robots, just delete rootJoint and add physics without fixedBase.",
             "parameters": {
                 "type": "object",
                 "properties": {
