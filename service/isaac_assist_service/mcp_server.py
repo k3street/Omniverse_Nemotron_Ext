@@ -45,8 +45,10 @@ class MCPServer:
     def __init__(self) -> None:
         from .chat.tools.tool_schemas import ISAAC_SIM_TOOLS
         from .chat.tools.tool_executor import execute_tool_call
+        from .settings.manager import SettingsManager
         self._openai_tools = ISAAC_SIM_TOOLS
         self._executor = execute_tool_call
+        self._settings = SettingsManager()
         self._mcp_tools = self._convert_tools()
 
     # ── Tool conversion ─────────────────────────────────────────────────
@@ -61,6 +63,28 @@ class MCPServer:
                 "description": fn.get("description", ""),
                 "inputSchema": fn.get("parameters", {"type": "object", "properties": {}}),
             })
+
+        # Settings management tools for MCP clients
+        mcp_tools.append({
+            "name": "get_settings",
+            "description": "Retrieve current Isaac Assist configuration (LLM mode, model, auto-approve, etc.)",
+            "inputSchema": {"type": "object", "properties": {}},
+        })
+        mcp_tools.append({
+            "name": "update_settings",
+            "description": "Update Isaac Assist configuration. Keys: OPENAI_API_BASE, OPENAI_API_KEY, CLOUD_MODEL_NAME, LLM_MODE, CONTRIBUTE_DATA, AUTO_APPROVE",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "settings": {
+                        "type": "object",
+                        "description": "Key-value pairs to update, e.g. {\"AUTO_APPROVE\": \"true\"}",
+                        "additionalProperties": {"type": "string"},
+                    }
+                },
+                "required": ["settings"],
+            },
+        })
         return mcp_tools
 
     # ── JSON-RPC dispatch ───────────────────────────────────────────────
@@ -117,6 +141,26 @@ class MCPServer:
             return {
                 "content": [{"type": "text", "text": f"Unknown tool: {tool_name}"}],
                 "isError": True,
+            }
+
+        # Handle settings tools locally
+        if tool_name == "get_settings":
+            data = self._settings.get_settings()
+            return {
+                "content": [{"type": "text", "text": json.dumps(data, indent=2)}],
+                "isError": False,
+            }
+        if tool_name == "update_settings":
+            settings_dict = arguments.get("settings", {})
+            ok = self._settings.update_settings(settings_dict)
+            if not ok:
+                return {
+                    "content": [{"type": "text", "text": "Failed to update settings"}],
+                    "isError": True,
+                }
+            return {
+                "content": [{"type": "text", "text": json.dumps(self._settings.get_settings(), indent=2)}],
+                "isError": False,
             }
 
         result = await asyncio.to_thread(self._executor, tool_name, arguments)

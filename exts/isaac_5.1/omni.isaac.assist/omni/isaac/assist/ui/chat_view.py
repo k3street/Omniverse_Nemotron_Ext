@@ -18,6 +18,7 @@ class ChatViewWindow(ui.Window):
         self.delegate = delegate
         self.service = AssistServiceClient()
         self.webrtc = None
+        self._auto_approve = os.environ.get("AUTO_APPROVE", "false").lower() == "true"
         try:
             self._build_ui()
         except Exception as e:
@@ -141,6 +142,11 @@ class ChatViewWindow(ui.Window):
                     is_contrib = os.environ.get("CONTRIBUTE_DATA", "false").lower() == "true"
                     self.contribute_cb.model.set_value(is_contrib)
                     ui.Label("Contribute Fine-Tuning Data (Opt-In)", width=0)
+
+                with ui.HStack(height=20):
+                    self.auto_approve_cb = ui.CheckBox()
+                    self.auto_approve_cb.model.set_value(self._auto_approve)
+                    ui.Label("Auto-Approve Code Patches (skip approval dialog)", width=0)
                     
                 ui.Spacer(height=10)
                 
@@ -149,11 +155,13 @@ class ChatViewWindow(ui.Window):
                     ui.Button("Export Training Data", clicked_fn=self._export_data)
 
     def _save_settings(self):
+        self._auto_approve = self.auto_approve_cb.model.get_value_as_bool()
         payload = {
             "OPENAI_API_BASE": self.api_base_field.model.get_value_as_string(),
             "OPENAI_API_KEY": self.api_key_field.model.get_value_as_string(),
             "CLOUD_MODEL_NAME": self.model_field.model.get_value_as_string(),
-            "CONTRIBUTE_DATA": "true" if self.contribute_cb.model.get_value_as_bool() else "false"
+            "CONTRIBUTE_DATA": "true" if self.contribute_cb.model.get_value_as_bool() else "false",
+            "AUTO_APPROVE": "true" if self._auto_approve else "false"
         }
         self._add_chat_bubble("System", "Saving engine settings...", is_user=False)
         asyncio.ensure_future(self._handle_save_settings(payload))
@@ -193,7 +201,13 @@ class ChatViewWindow(ui.Window):
                 return
                 
             for action in actions:
-                self._render_patch_action(action, conf)
+                if self._auto_approve:
+                    script_code = action.get("new_value", "")
+                    if script_code:
+                        self._add_chat_bubble("System", f"Auto-approved swarm patch (confidence: {conf*100:.1f}%)", is_user=False)
+                        self._execute_patch(script_code)
+                else:
+                    self._render_patch_action(action, conf)
 
     def _render_patch_action(self, action: dict, confidence: float):
         script_code = action.get("new_value", "No code provided.")
@@ -306,7 +320,11 @@ class ChatViewWindow(ui.Window):
             for action in actions:
                 code = action.get("code", "")
                 desc = action.get("description", "")
-                self._render_code_patch(code, desc)
+                if self._auto_approve:
+                    self._add_chat_bubble("System", f"Auto-approved: {desc}", is_user=False)
+                    self._execute_patch(code)
+                else:
+                    self._render_code_patch(code, desc)
 
     def _add_chat_bubble(self, sender: str, text: str, is_user: bool, error: bool = False):
         with self.chat_layout:

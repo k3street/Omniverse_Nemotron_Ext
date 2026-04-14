@@ -24,7 +24,8 @@ class SettingsManager:
             "API_KEY_GEMINI": config.api_key_gemini,
             "OPENAI_API_BASE": config.openai_api_base,
             "OPENAI_API_KEY": config.openai_api_key,
-            "CONTRIBUTE_DATA": str(config.contribute_data).lower()
+            "CONTRIBUTE_DATA": str(config.contribute_data).lower(),
+            "AUTO_APPROVE": str(config.auto_approve).lower()
         }
 
     def update_settings(self, new_settings: Dict[str, str]) -> bool:

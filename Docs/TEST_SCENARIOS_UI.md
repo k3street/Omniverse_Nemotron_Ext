@@ -329,6 +329,7 @@ Messages starting with `patch` or `fix` route to the multi-agent swarm.
 - API Key field (password masked)
 - LLM Model field (should show `claude-sonnet-4-6` or your configured model)
 - "Contribute Fine-Tuning Data" checkbox
+- **"Auto-Approve Code Patches"** checkbox (default: unchecked)
 - **Save Settings** and **Export Training Data** buttons
 
 Click **Save Settings** → should see "Settings successfully updated dynamically" in chat.
@@ -399,6 +400,137 @@ _Skip T31–T32 if ROS2 is not installed or the ROS2 bridge extension is unavail
 
 ---
 
+### T33 — GPU-Batched Cloning (GridCloner)
+**Prerequisite:** A prim exists (e.g., `/World/Ball` from T02)
+
+**Type:**
+> Clone /World/Ball 20 times in a grid layout with collision filtering
+
+**Expected:** Code patch using `isaacsim.core.cloner.GridCloner` (not `Sdf.CopySpec`) because count ≥ 4. The code should:
+1. Define a `GridCloner` with spacing
+2. Call `generate_paths()` and `clone()`
+3. Apply `filter_collisions()` to prevent self-collision
+
+**Verify after approval:**
+- 20 copies of Ball arranged in a grid pattern in the viewport
+- Stage tree shows `/World/Ball_01` through `/World/Ball_20` (or similar)
+- Play the sim — cloned objects should not collide with each other if they overlap
+
+---
+
+### T34 — Motion Planning: Move Robot to Pose
+**Prerequisite:** T11 (Franka robot loaded at `/World/Franka`)
+
+**Type:**
+> Move the Franka end-effector to position 0.4, 0.3, 0.5 with the gripper pointing down
+
+**Expected:** Code patch using RMPflow (Lula) motion planning. The code should:
+1. Load the Franka RMPflow config from `isaacsim.robot_motion.motion_policy`
+2. Set a target pose for the end-effector
+3. Step the RMP to compute joint targets
+
+**Verify after approval:**
+- Play the sim — Franka arm smoothly moves to reach position (0.4, 0.3, 0.5)
+- End-effector orientation is approximately pointing down
+- No collision with the table/ground
+
+---
+
+### T35 — Multi-Waypoint Trajectory Planning
+**Prerequisite:** T11 (Franka robot loaded)
+
+**Type:**
+> Plan a trajectory for /World/Franka through these waypoints: pick at 0.4,0,0.2, lift to 0.4,0,0.5, place at -0.4,0,0.2
+
+**Expected:** Code patch using Lula RRT trajectory planner. The code should:
+1. Load the Franka URDF and robot description
+2. Plan through each waypoint sequentially
+3. Concatenate trajectory segments
+
+**Verify after approval:**
+- Play the sim — Franka arm follows the pick → lift → place path
+- Motion is smooth and collision-free
+
+---
+
+### T36 — Asset Catalog Search
+**Type:**
+> Search the asset catalog for UR10 robots
+
+**Expected:** Text reply (no code patch) listing matching assets from the catalog. Should include:
+- Asset name and USD path for UR10 variants
+- Confidence/match scores
+
+**Then type:**
+> Search for any wheeled robots
+
+**Verify:** Returns results for any available wheeled robot assets (e.g., Carter, Jetbot, Nova Carter). If no matches, Isaac Assist explains that no wheeled robots were found in the catalog.
+
+---
+
+### T37 — Natural Language Scene Builder
+**Type:**
+> Design a warehouse scene with a conveyor belt in the center, two Franka robots on either side, and a stack of boxes at the start of the conveyor
+
+**Expected flow:**
+1. First, a `generate_scene_blueprint` data response returns a JSON blueprint listing available assets and a recommended spatial layout
+2. Isaac Assist uses the blueprint to call `build_scene_from_blueprint` with a code patch
+3. The code patch creates all objects with correct positions and orientations
+
+**Verify after approval:**
+- Multiple prims appear forming a warehouse-like layout
+- Two robot prims placed on opposite sides
+- Box prims stacked at one end
+- Spatial arrangement is reasonable (no overlapping objects)
+
+---
+
+### T38 — IsaacLab RL Environment Setup
+**Type:**
+> Create an IsaacLab reinforcement learning environment for a Franka manipulation task — the robot should learn to pick up a cube
+
+**Expected flow:**
+1. Isaac Assist calls `create_isaaclab_env` (data handler) which returns a scaffolded `ManagerBasedRLEnv` config
+2. A follow-up code patch writes the environment Python file with:
+   - Observation space (joint positions, object pose)
+   - Action space (joint position targets)
+   - Reward function (distance to cube, grasp success)
+
+**Then type:**
+> Launch training for this environment with 512 parallel envs
+
+**Expected:** Code patch that launches `isaaclab.train` via subprocess with `--num_envs 512`. After approval:
+- A training process starts (may fail if IsaacLab is not installed — Isaac Assist should note this)
+- Check terminal output for training logs
+
+_Skip T38 if IsaacLab is not installed._
+
+---
+
+### T39 — Auto-Approve Mode
+1. Open Settings (⚙)
+2. Check **"Auto-Approve Code Patches"**
+3. Click **Save Settings**
+
+**Type:**
+> Create a cube named AutoCube at 0, 0, 1
+
+**Expected flow:**
+1. Isaac Assist responds with text
+2. Instead of showing an "Approve & Execute" card, a system message "Auto-approved: ..." appears
+3. The code executes immediately without user interaction
+
+**Verify:**
+- AutoCube appears in the viewport without clicking any approval button
+- The patch still gets logged to the audit trail
+
+**Then disable auto-approve:**
+1. Open Settings (⚙), uncheck "Auto-Approve Code Patches", Save
+2. Type: `Create a sphere named ManualBall at 1, 0, 1`
+3. **Verify:** An approval card appears again — auto-approve is off
+
+---
+
 ## Summary Checklist
 
 | # | Category | Prompt | Requires Approval? |
@@ -435,6 +567,13 @@ _Skip T31–T32 if ROS2 is not installed or the ROS2 bridge extension is unavail
 | T30 | LiveKit | Vision/Voice stream | N/A (optional) |
 | T31 | ROS2 | Wire JointState graph | ✅ |
 | T32 | ROS2 | Send joint command | N/A (external ROS2 cmd) |
+| T33 | Clone (batch) | GPU-batched GridCloner | ✅ |
+| T34 | Motion planning | Move robot to pose | ✅ |
+| T35 | Motion planning | Multi-waypoint trajectory | ✅ |
+| T36 | Data query | Asset catalog search | ❌ (text only) |
+| T37 | Scene builder | NL warehouse scene | ✅ |
+| T38 | IsaacLab RL | RL env + launch training | ✅ |
+| T39 | Settings | Auto-approve toggle | ✅ (then ❌) |
 
 ## Troubleshooting
 

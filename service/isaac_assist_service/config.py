@@ -41,8 +41,7 @@ class Config:
 
         # ── Misc ─────────────────────────────────────────────────────────────
         self.openai_api_base  = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
-        self.contribute_data  = os.environ.get("CONTRIBUTE_DATA", "false").lower() == "true"
-
+        self.contribute_data  = os.environ.get("CONTRIBUTE_DATA", "false").lower() == "true"        self.auto_approve     = os.environ.get("AUTO_APPROVE", "false").lower() == "true"
         # ── Assets ───────────────────────────────────────────────────────────
         # Local filesystem path to Isaac Sim assets (robots, environments, etc.)
         # Also supports Nucleus server URLs: omniverse://localhost/NVIDIA/Assets/Isaac/5.1
