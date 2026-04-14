@@ -92,15 +92,16 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "clone_prim",
-            "description": "Duplicate a prim to a new path, or create a grid of copies. Optionally set a new position for the clone.",
+            "description": "Duplicate a prim to a new path, or create a grid of copies. For count >= 4, uses GPU-batched isaacsim.core.cloner.GridCloner for fast parallel cloning with optional collision filtering (ideal for RL envs). For small counts, uses Sdf.CopySpec.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "source_path": {"type": "string"},
                     "target_path": {"type": "string"},
                     "position": {"type": "array", "items": {"type": "number"}, "description": "XYZ position for the cloned prim [x, y, z]"},
-                    "count": {"type": "integer", "description": "Number of copies (for grid patterns)"},
+                    "count": {"type": "integer", "description": "Number of copies (for grid patterns). Use >= 4 for GPU-batched cloner."},
                     "spacing": {"type": "number", "description": "Distance between copies in meters"},
+                    "collision_filter": {"type": "boolean", "description": "If true, filter collisions between clones (required for RL envs). Default false."},
                 },
                 "required": ["source_path", "target_path"],
             },
@@ -532,6 +533,155 @@ ISAAC_SIM_TOOLS = [
                     "query": {"type": "string", "description": "Search query — e.g. 'create OmniPBR material', 'apply rigid body physics', 'OmniGraph ROS2 clock'"},
                 },
                 "required": ["query"],
+            },
+        },
+    },
+
+    # ─── Motion Planning (RMPflow / Lula) ─────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "move_to_pose",
+            "description": "Move a robot end-effector to a target pose using motion planning (RMPflow or Lula RRT). Plans a collision-free trajectory and executes it. Much easier than setting individual joint targets — just specify where you want the end-effector to go.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root, e.g. '/World/Franka'"},
+                    "target_position": {"type": "array", "items": {"type": "number"}, "description": "Target XYZ position [x, y, z] in world space"},
+                    "target_orientation": {"type": "array", "items": {"type": "number"}, "description": "Target orientation as quaternion [w, x, y, z]. Optional — omit to keep current orientation."},
+                    "planner": {"type": "string", "enum": ["rmpflow", "lula_rrt"], "description": "Motion planner: 'rmpflow' (fast reactive) or 'lula_rrt' (global, obstacle-aware). Default: rmpflow"},
+                    "robot_type": {"type": "string", "description": "Robot name for auto-loading config: 'franka', 'ur10', 'ur5e', 'cobotta', 'rs007n'. If omitted, tries to auto-detect."},
+                },
+                "required": ["articulation_path", "target_position"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "plan_trajectory",
+            "description": "Plan a multi-waypoint trajectory for a robot arm without executing it. Returns the planned joint trajectory. Use move_to_pose for single-target moves.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string"},
+                    "waypoints": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "position": {"type": "array", "items": {"type": "number"}},
+                                "orientation": {"type": "array", "items": {"type": "number"}},
+                            },
+                            "required": ["position"],
+                        },
+                        "description": "List of target poses [{position: [x,y,z], orientation: [w,x,y,z]}, ...]",
+                    },
+                    "planner": {"type": "string", "enum": ["rmpflow", "lula_rrt"]},
+                    "robot_type": {"type": "string"},
+                },
+                "required": ["articulation_path", "waypoints"],
+            },
+        },
+    },
+
+    # ─── Asset Catalog Search ─────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "catalog_search",
+            "description": "Search for USD assets in the local Isaac Sim asset library and user directories by name, category, or description. Returns matching asset paths with metadata. Use this before importing objects to find the right asset.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query — e.g. 'table', 'warehouse shelf', 'Franka robot', 'kitchen', 'forklift'"},
+                    "asset_type": {"type": "string", "enum": ["robot", "prop", "environment", "sensor", "material", "any"], "description": "Filter by asset category. Default: 'any'"},
+                    "limit": {"type": "integer", "description": "Max results to return. Default: 10"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+
+    # ─── Scene Builder ────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_scene_blueprint",
+            "description": "Generate a spatial layout plan (blueprint) from a natural language scene description. Uses the asset catalog to resolve assets and computes physically correct positions. Returns a structured blueprint for review before building.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string", "description": "Natural language scene description — e.g. 'a kitchen with a table, 4 chairs, a Franka robot, and a fridge'"},
+                    "room_dimensions": {"type": "array", "items": {"type": "number"}, "description": "Room size [length, width, height] in meters. Default: auto from description."},
+                    "available_assets": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Pre-resolved asset list from catalog_search. If omitted, auto-searches.",
+                    },
+                },
+                "required": ["description"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "build_scene_from_blueprint",
+            "description": "Execute a scene blueprint — creates all prims, places assets, applies physics. The blueprint should come from generate_scene_blueprint. Each object becomes a code patch for individual approval.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "blueprint": {
+                        "type": "object",
+                        "description": "Scene blueprint from generate_scene_blueprint with objects, positions, and asset paths.",
+                    },
+                    "dry_run": {"type": "boolean", "description": "If true, generate code patches but don't execute. Default: false"},
+                },
+                "required": ["blueprint"],
+            },
+        },
+    },
+
+    # ─── IsaacLab RL Training ─────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "create_isaaclab_env",
+            "description": "Scaffold an IsaacLab reinforcement learning environment from the current scene. Generates env config, observation, action, and reward definitions. The created env can be trained with launch_training.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_name": {"type": "string", "description": "Name for the task — e.g. 'FrankaPickCube', 'QuadrupedLocomotion'"},
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation in the current scene"},
+                    "task_type": {"type": "string", "enum": ["manipulation", "locomotion", "navigation", "custom"], "description": "Task category — determines default observation/action spaces"},
+                    "num_envs": {"type": "integer", "description": "Number of parallel environments. Default: 64"},
+                    "env_spacing": {"type": "number", "description": "Spacing between environments in meters. Default: 2.0"},
+                    "reward_terms": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Reward components — e.g. ['reach_target', 'grasp_success', 'action_penalty']",
+                    },
+                },
+                "required": ["task_name", "robot_path", "task_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_training",
+            "description": "Launch an IsaacLab reinforcement learning training run. Requires a task created by create_isaaclab_env or one of the built-in IsaacLab tasks.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string", "description": "Task name — custom (from create_isaaclab_env) or built-in (e.g. 'Isaac-Reach-Franka-v0', 'Isaac-Velocity-Anymal-C-v0')"},
+                    "algo": {"type": "string", "enum": ["ppo", "sac", "td3", "rsl_rl"], "description": "RL algorithm. Default: ppo"},
+                    "num_steps": {"type": "integer", "description": "Total training timesteps. Default: 1000000"},
+                    "num_envs": {"type": "integer", "description": "Number of parallel envs. Default: 64"},
+                    "checkpoint_dir": {"type": "string", "description": "Directory for saving checkpoints. Default: workspace/rl_checkpoints/<task>"},
+                },
+                "required": ["task"],
             },
         },
     },

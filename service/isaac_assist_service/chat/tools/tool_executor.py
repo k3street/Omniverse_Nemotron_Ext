@@ -185,7 +185,10 @@ def _gen_clone_prim(args: Dict) -> str:
     pos = args.get("position")
     count = args.get("count", 1)
     spacing = args.get("spacing", 1.0)
+    collision_filter = args.get("collision_filter", False)
+
     if count <= 1:
+        # Single clone: Sdf.CopySpec (fast, simple)
         lines = [
             "import omni.usd",
             "from pxr import Sdf, UsdGeom, Gf",
@@ -197,16 +200,53 @@ def _gen_clone_prim(args: Dict) -> str:
             lines.append("xf.ClearXformOpOrder()")
             lines.append(f"xf.AddTranslateOp().Set(Gf.Vec3d({pos[0]}, {pos[1]}, {pos[2]}))")
         return "\n".join(lines)
+
+    if count < 4:
+        # Small count: Sdf.CopySpec loop (simpler)
+        lines = [
+            "import omni.usd",
+            "from pxr import Sdf, UsdGeom, Gf",
+            _SAFE_XFORM_SNIPPET,
+            "stage = omni.usd.get_context().get_stage()",
+            f"for i in range({count}):",
+            f"    dest = '{tgt}_' + str(i)",
+            f"    Sdf.CopySpec(stage.GetRootLayer(), '{src}', stage.GetRootLayer(), dest)",
+            f"    _safe_set_translate(stage.GetPrimAtPath(dest), (i * {spacing}, 0, 0))",
+        ]
+        return "\n".join(lines)
+
+    # Large count (>= 4): GPU-batched GridCloner from isaacsim.core.cloner
+    import math
+    grid_side = math.ceil(math.sqrt(count))
+    filter_str = "True" if collision_filter else "False"
     lines = [
         "import omni.usd",
-        "from pxr import Sdf, UsdGeom, Gf",
-        _SAFE_XFORM_SNIPPET,
+        "from pxr import UsdGeom, Gf",
+        "from isaacsim.core.cloner import GridCloner",
+        "",
         "stage = omni.usd.get_context().get_stage()",
-        f"for i in range({count}):",
-        f"    dest = '{tgt}_' + str(i)",
-        f"    Sdf.CopySpec(stage.GetRootLayer(), '{src}', stage.GetRootLayer(), dest)",
-        f"    _safe_set_translate(stage.GetPrimAtPath(dest), (i * {spacing}, 0, 0))",
+        "",
+        f"cloner = GridCloner(spacing={spacing})",
+        f"cloner.define_base_env('{src}')",
+        f"# Generate {count} target paths in a grid layout",
+        f"target_paths = cloner.generate_paths('{tgt}', {count})",
+        f"env_positions = cloner.clone(",
+        f"    source_prim_path='{src}',",
+        f"    prim_paths=target_paths,",
+        f"    copy_from_source=True,",
+        f")",
     ]
+    if collision_filter:
+        lines.extend([
+            "",
+            "# Filter collisions between clones (required for RL envs)",
+            f"cloner.filter_collisions(",
+            f"    physicsscene_path='/World/PhysicsScene',",
+            f"    collision_root_path='{tgt}',",
+            f"    prim_paths=target_paths,",
+            f")",
+        ])
+    lines.append(f"print(f'Cloned {count} envs from {src} using GridCloner')")
     return "\n".join(lines)
 
 
@@ -1016,3 +1056,570 @@ contact = ContactSensor(prim_path='{prim_path}/ContactSensor')
 
 # Register the sensor generator
 CODE_GEN_HANDLERS["add_sensor_to_prim"] = _gen_add_sensor
+
+
+# ── Motion Planning (RMPflow / Lula) ─────────────────────────────────────────
+
+# Robot config map: robot_type → (rmpflow_config_dir, robot_description_path, urdf_path, end_effector_frame)
+_MOTION_ROBOT_CONFIGS = {
+    "franka": {
+        "rmp_config": "franka/rmpflow",
+        "desc": "franka/robot_descriptor.yaml",
+        "urdf": "franka/lula_franka_gen.urdf",
+        "ee_frame": "panda_hand",
+    },
+    "ur10": {
+        "rmp_config": "universal_robots/ur10/rmpflow",
+        "desc": "universal_robots/ur10/robot_descriptor.yaml",
+        "urdf": "universal_robots/ur10/lula_ur10_gen.urdf",
+        "ee_frame": "ee_link",
+    },
+    "ur5e": {
+        "rmp_config": "universal_robots/ur5e/rmpflow",
+        "desc": "universal_robots/ur5e/robot_descriptor.yaml",
+        "urdf": "universal_robots/ur5e/lula_ur5e_gen.urdf",
+        "ee_frame": "ee_link",
+    },
+    "cobotta": {
+        "rmp_config": "denso/cobotta_pro_900/rmpflow",
+        "desc": "denso/cobotta_pro_900/robot_descriptor.yaml",
+        "urdf": "denso/cobotta_pro_900/lula_cobotta_gen.urdf",
+        "ee_frame": "onrobot_rg6_base_link",
+    },
+}
+
+
+def _gen_move_to_pose(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    target_pos = args["target_position"]
+    target_ori = args.get("target_orientation")
+    planner = args.get("planner", "rmpflow")
+    robot_type = args.get("robot_type", "franka").lower()
+
+    cfg = _MOTION_ROBOT_CONFIGS.get(robot_type, _MOTION_ROBOT_CONFIGS["franka"])
+    ee = cfg["ee_frame"]
+
+    if planner == "lula_rrt":
+        # Global planner — single-shot path plan
+        lines = [
+            "import omni.usd",
+            "import numpy as np",
+            "from isaacsim.robot_motion.motion_generation import LulaTaskSpaceTrajectoryGenerator",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "",
+            "# Load Lula RRT planner config",
+            f"rrt_config = interface_config_loader.load_supported_lula_rrt_config('{robot_type}')",
+            f"rrt = LulaTaskSpaceTrajectoryGenerator(**rrt_config)",
+            "",
+            f"target_pos = np.array({list(target_pos)})",
+        ]
+        if target_ori:
+            lines.append(f"target_ori = np.array({list(target_ori)})")
+        else:
+            lines.append("target_ori = None")
+        lines.extend([
+            "",
+            "# Compute trajectory",
+            f"trajectory = rrt.compute_task_space_trajectory_from_points(",
+            f"    [target_pos], [target_ori] if target_ori is not None else None",
+            f")",
+            "if trajectory is not None:",
+            "    print(f'Lula RRT: planned trajectory with {{len(trajectory)}} waypoints')",
+            "else:",
+            "    print('Lula RRT: failed to find path — try a different target or clear obstacles')",
+        ])
+        return "\n".join(lines)
+
+    # Default: RMPflow (reactive, real-time)
+    lines = [
+        "import omni.usd",
+        "import numpy as np",
+        "from isaacsim.robot_motion.motion_generation import RmpFlow",
+        "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+        "from isaacsim.core.prims import SingleArticulation",
+        "from isaacsim.core.api import World",
+        "",
+        "# Load RMPflow config for the robot",
+        f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+        "rmpflow = RmpFlow(**rmpflow_config)",
+        "",
+        f"# Get the articulation",
+        f"art = SingleArticulation(prim_path='{art_path}')",
+        "world = World.instance()",
+        "if world is None:",
+        "    from isaacsim.core.api import World",
+        "    world = World()",
+        "art.initialize()",
+        "",
+        "# Set target",
+        f"target_pos = np.array({list(target_pos)})",
+    ]
+    if target_ori:
+        lines.append(f"target_ori = np.array({list(target_ori)})")
+    else:
+        lines.append("target_ori = None")
+    lines.extend([
+        f"rmpflow.set_end_effector_target(target_pos, target_ori)",
+        "",
+        "# Get current joint state and compute action",
+        "joint_positions = art.get_joint_positions()",
+        "joint_velocities = art.get_joint_velocities()",
+        "action = rmpflow.get_next_articulation_action(",
+        "    joint_positions, joint_velocities",
+        ")",
+        "",
+        "# Apply joint targets",
+        "art.apply_action(action)",
+        f"print(f'RMPflow: moving {ee} to {{target_pos}} — action applied')",
+    ])
+    return "\n".join(lines)
+
+
+def _gen_plan_trajectory(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    waypoints = args["waypoints"]
+    robot_type = args.get("robot_type", "franka").lower()
+
+    positions_str = "[" + ", ".join(
+        f"np.array({list(wp['position'])})" for wp in waypoints
+    ) + "]"
+    orientations = [wp.get("orientation") for wp in waypoints]
+    has_ori = any(o is not None for o in orientations)
+    if has_ori:
+        ori_str = "[" + ", ".join(
+            f"np.array({list(o)})" if o else "None" for o in orientations
+        ) + "]"
+    else:
+        ori_str = "None"
+
+    lines = [
+        "import numpy as np",
+        "from isaacsim.robot_motion.motion_generation import LulaTaskSpaceTrajectoryGenerator",
+        "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+        "",
+        f"rrt_config = interface_config_loader.load_supported_lula_rrt_config('{robot_type}')",
+        f"planner = LulaTaskSpaceTrajectoryGenerator(**rrt_config)",
+        "",
+        f"positions = {positions_str}",
+        f"orientations = {ori_str}",
+        "",
+        "trajectory = planner.compute_task_space_trajectory_from_points(",
+        "    positions, orientations",
+        ")",
+        "if trajectory is not None:",
+        f"    print(f'Planned trajectory through {len(waypoints)} waypoints')",
+        "else:",
+        "    print('Failed to plan trajectory — try different waypoints')",
+    ]
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["move_to_pose"] = _gen_move_to_pose
+CODE_GEN_HANDLERS["plan_trajectory"] = _gen_plan_trajectory
+
+
+# ── Asset Catalog Search ─────────────────────────────────────────────────────
+
+_asset_index: Optional[List[Dict]] = None
+
+# Robot name map (module-level copy for catalog indexing)
+_CATALOG_ROBOTS = {
+    "franka": "franka.usd",
+    "panda": "franka.usd",
+    "spot": "spot.usd",
+    "spot_with_arm": "spot_with_arm.usd",
+    "carter": "carter_v1.usd",
+    "jetbot": "jetbot.usd",
+    "kaya": "kaya.usd",
+    "ur10": "ur10.usd",
+    "ur5e": "ur5e.usd",
+    "anymal_c": "anymal_c.usd",
+    "anymal_d": "anymal_d.usd",
+    "a1": "a1.usd",
+    "go1": "go1.usd",
+    "go2": "go2.usd",
+    "h1": "h1.usd",
+    "allegro_hand": "allegro_hand.usd",
+    "ridgeback_franka": "ridgeback_franka.usd",
+    "humanoid": "humanoid.usd",
+}
+
+
+def _build_asset_index() -> List[Dict]:
+    """Walk asset directories and build a searchable index of USD files."""
+    global _asset_index
+    if _asset_index is not None:
+        return _asset_index
+
+    index = []
+
+    # 1. Robots from the known robot name map
+    robots_dir = ""
+    assets_root = getattr(config, "assets_root_path", None)
+    robots_sub = getattr(config, "assets_robots_subdir", None)
+    if assets_root and robots_sub:
+        robots_dir = f"{assets_root}/{robots_sub}"
+    for name, filename in _CATALOG_ROBOTS.items():
+        index.append({
+            "name": name,
+            "type": "robot",
+            "path": f"{robots_dir}/{filename}" if robots_dir else filename,
+            "source": "robot_library",
+        })
+
+    # 2. Walk user asset dirs if configured
+    search_dirs = []
+    assets_root = getattr(config, "assets_root_path", None)
+    if assets_root:
+        search_dirs.append(Path(assets_root))
+
+    # 3. Walk workspace/knowledge for any asset manifests
+    manifest_path = _WORKSPACE / "knowledge" / "asset_manifest.jsonl"
+    if manifest_path.exists():
+        for line in manifest_path.read_text().splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    entry = json.loads(line)
+                    index.append(entry)
+                except json.JSONDecodeError:
+                    pass
+
+    # 4. Walk asset directories for USD/USDZ/USDA files
+    for d in search_dirs:
+        if not d.exists():
+            continue
+        try:
+            for f in d.rglob("*"):
+                if f.suffix.lower() in (".usd", ".usda", ".usdz"):
+                    rel = f.relative_to(d)
+                    name_parts = rel.stem.replace("_", " ").replace("-", " ")
+                    # Infer type from path
+                    path_str = str(rel).lower()
+                    if any(k in path_str for k in ("robot", "arm", "gripper", "manipulator")):
+                        atype = "robot"
+                    elif any(k in path_str for k in ("env", "room", "warehouse", "house", "kitchen")):
+                        atype = "environment"
+                    elif any(k in path_str for k in ("sensor", "camera", "lidar")):
+                        atype = "sensor"
+                    elif any(k in path_str for k in ("material", "mdl", "texture")):
+                        atype = "material"
+                    else:
+                        atype = "prop"
+                    index.append({
+                        "name": name_parts,
+                        "type": atype,
+                        "path": str(f),
+                        "source": "filesystem",
+                        "rel_path": str(rel),
+                    })
+        except PermissionError:
+            pass
+
+    _asset_index = index
+    return _asset_index
+
+
+async def _handle_catalog_search(args: Dict) -> Dict:
+    """Fuzzy-match assets by name, type, and path."""
+    query = args.get("query", "").lower()
+    asset_type = args.get("asset_type", "any").lower()
+    limit = args.get("limit", 10)
+
+    index = _build_asset_index()
+    scored = []
+    query_words = query.split()
+
+    for asset in index:
+        if asset_type != "any" and asset.get("type", "any") != asset_type:
+            continue
+
+        name = asset.get("name", "").lower()
+        path = asset.get("path", "").lower()
+        rel_path = asset.get("rel_path", "").lower()
+        searchable = f"{name} {path} {rel_path}"
+
+        # Score: exact match > all words present > partial
+        if query == name:
+            score = 100
+        elif all(w in searchable for w in query_words):
+            score = 70 + sum(10 for w in query_words if w in name)
+        elif any(w in searchable for w in query_words):
+            score = sum(10 for w in query_words if w in searchable)
+        else:
+            continue
+
+        scored.append((score, asset))
+
+    scored.sort(key=lambda x: -x[0])
+    results = [a for _, a in scored[:limit]]
+
+    return {
+        "query": args.get("query", ""),
+        "results": results,
+        "total_matches": len(scored),
+        "index_size": len(index),
+    }
+
+
+DATA_HANDLERS["catalog_search"] = _handle_catalog_search
+
+
+# ── Scene Builder ────────────────────────────────────────────────────────────
+
+def _gen_build_scene_from_blueprint(args: Dict) -> str:
+    """Generate code to build a scene from a structured blueprint."""
+    blueprint = args.get("blueprint", {})
+    objects = blueprint.get("objects", [])
+    dry_run = args.get("dry_run", False)
+
+    if not objects:
+        return "print('Empty blueprint — nothing to build')\n"
+
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdGeom, Gf, Sdf",
+        _SAFE_XFORM_SNIPPET,
+        "stage = omni.usd.get_context().get_stage()",
+        "",
+    ]
+
+    for i, obj in enumerate(objects):
+        name = obj.get("name", f"object_{i}")
+        asset_path = obj.get("asset_path", "")
+        prim_path = obj.get("prim_path", f"/World/{name}")
+        pos = obj.get("position", [0, 0, 0])
+        rot = obj.get("rotation", [0, 0, 0])
+        scale = obj.get("scale", [1, 1, 1])
+        prim_type = obj.get("prim_type")  # for simple prims (Cube, etc.)
+
+        lines.append(f"# --- {name} ---")
+        if asset_path:
+            # Import via USD reference
+            lines.append(f"prim = stage.DefinePrim('{prim_path}', 'Xform')")
+            lines.append(f"prim.GetReferences().AddReference('{asset_path}')")
+        elif prim_type:
+            lines.append(f"prim = stage.DefinePrim('{prim_path}', '{prim_type}')")
+        else:
+            lines.append(f"prim = stage.DefinePrim('{prim_path}', 'Xform')")
+
+        lines.append(f"_safe_set_translate(prim, ({pos[0]}, {pos[1]}, {pos[2]}))")
+        if rot != [0, 0, 0]:
+            lines.append(f"_safe_set_rotate_xyz(prim, ({rot[0]}, {rot[1]}, {rot[2]}))")
+        if scale != [1, 1, 1]:
+            lines.append(f"_safe_set_scale(prim, ({scale[0]}, {scale[1]}, {scale[2]}))")
+        lines.append("")
+
+    lines.append(f"print('Scene built: {len(objects)} objects placed')")
+
+    if dry_run:
+        return f"# DRY RUN — code preview only\n" + "\n".join(lines)
+    return "\n".join(lines)
+
+
+async def _handle_generate_scene_blueprint(args: Dict) -> Dict:
+    """Generate a scene blueprint (data, not code). The LLM fills in the spatial layout."""
+    description = args.get("description", "")
+    room_dims = args.get("room_dimensions")
+    available = args.get("available_assets")
+
+    # If no assets provided, search the catalog
+    if not available:
+        catalog_result = await _handle_catalog_search({"query": description, "limit": 20})
+        available = catalog_result.get("results", [])
+
+    return {
+        "type": "blueprint_request",
+        "description": description,
+        "room_dimensions": room_dims or [6, 6, 3],
+        "available_assets": available,
+        "instructions": (
+            "Based on the description and available assets, generate a blueprint JSON with: "
+            "objects: [{name, asset_path (from available_assets), prim_path (/World/Name), "
+            "position [x,y,z], rotation [rx,ry,rz], scale [sx,sy,sz]}]. "
+            "Ensure objects don't overlap, items sit ON surfaces (not floating), "
+            "robots have 1m clearance. Then call build_scene_from_blueprint with the blueprint."
+        ),
+    }
+
+
+DATA_HANDLERS["generate_scene_blueprint"] = _handle_generate_scene_blueprint
+CODE_GEN_HANDLERS["build_scene_from_blueprint"] = _gen_build_scene_from_blueprint
+
+
+# ── IsaacLab RL Training ─────────────────────────────────────────────────────
+
+_RL_TASK_TEMPLATES = {
+    "manipulation": {
+        "obs": ["joint_pos", "joint_vel", "ee_pos", "ee_ori", "target_pos", "target_rel"],
+        "actions": "joint_positions",
+        "rewards": ["reach_target", "grasp_success", "action_penalty", "is_terminated"],
+    },
+    "locomotion": {
+        "obs": ["base_lin_vel", "base_ang_vel", "projected_gravity", "joint_pos", "joint_vel", "actions"],
+        "actions": "joint_positions",
+        "rewards": ["track_lin_vel", "track_ang_vel", "feet_air_time", "action_rate", "is_terminated"],
+    },
+    "navigation": {
+        "obs": ["base_pos", "base_ori", "base_lin_vel", "target_pos", "target_rel", "lidar_scan"],
+        "actions": "base_velocity",
+        "rewards": ["reach_goal", "collision_penalty", "progress_to_goal", "action_penalty"],
+    },
+    "custom": {
+        "obs": ["joint_pos", "joint_vel"],
+        "actions": "joint_positions",
+        "rewards": ["task_success", "action_penalty"],
+    },
+}
+
+
+async def _handle_create_isaaclab_env(args: Dict) -> Dict:
+    """Generate an IsaacLab env scaffold — returns config as data for the LLM to refine."""
+    task_name = args["task_name"]
+    robot_path = args["robot_path"]
+    task_type = args.get("task_type", "manipulation")
+    num_envs = args.get("num_envs", 64)
+    env_spacing = args.get("env_spacing", 2.0)
+    reward_terms = args.get("reward_terms")
+
+    template = _RL_TASK_TEMPLATES.get(task_type, _RL_TASK_TEMPLATES["custom"])
+    if reward_terms:
+        template = {**template, "rewards": reward_terms}
+
+    env_config = {
+        "task_name": task_name,
+        "robot_path": robot_path,
+        "task_type": task_type,
+        "num_envs": num_envs,
+        "env_spacing": env_spacing,
+        "observation_space": template["obs"],
+        "action_space": template["actions"],
+        "reward_terms": template["rewards"],
+        "episode_length": 500,
+        "decimation": 2,
+        "physics_dt": 1.0 / 120.0,
+    }
+
+    # Generate the Python env class code
+    env_code = _generate_isaaclab_env_code(env_config)
+
+    return {
+        "type": "isaaclab_env",
+        "task_name": task_name,
+        "config": env_config,
+        "generated_code": env_code,
+        "instructions": (
+            f"IsaacLab env '{task_name}' scaffolded with {num_envs} parallel envs. "
+            f"Observations: {template['obs']}. Actions: {template['actions']}. "
+            f"Rewards: {template['rewards']}. "
+            "You can now call launch_training to start training, or refine the config."
+        ),
+    }
+
+
+def _generate_isaaclab_env_code(cfg: Dict) -> str:
+    """Generate a minimal IsaacLab ManagerBasedRLEnv config file."""
+    task = cfg["task_name"]
+    robot = cfg["robot_path"]
+    obs = cfg["observation_space"]
+    acts = cfg["action_space"]
+    rewards = cfg["reward_terms"]
+    num_envs = cfg["num_envs"]
+    spacing = cfg["env_spacing"]
+    ep_len = cfg["episode_length"]
+    decimation = cfg["decimation"]
+
+    obs_terms = "\n".join(f'        "{o}": ObsTerm(func=mdp.{o}),' for o in obs)
+    reward_terms = "\n".join(
+        f'        "{r}": RewTerm(func=mdp.{r}, weight=1.0),' for r in rewards
+    )
+
+    return f'''"""IsaacLab RL environment: {task}
+Auto-generated by Isaac Assist.
+"""
+import isaaclab.envs.mdp as mdp
+from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.managers import (
+    ObservationGroupCfg,
+    ObservationTermCfg as ObsTerm,
+    RewardTermCfg as RewTerm,
+    SceneEntityCfg,
+)
+from isaaclab.scene import InteractiveSceneCfg
+
+
+class {task}EnvCfg(ManagerBasedRLEnvCfg):
+    """Configuration for {task} environment."""
+
+    # Scene
+    scene = InteractiveSceneCfg(
+        num_envs={num_envs},
+        env_spacing={spacing},
+    )
+
+    # Observations
+    observations = ObservationGroupCfg(
+{obs_terms}
+    )
+
+    # Actions
+    actions = mdp.{acts}
+
+    # Rewards
+    rewards = {{
+{reward_terms}
+    }}
+
+    # Episode
+    episode_length_s = {ep_len} * {decimation} / 120.0
+    decimation = {decimation}
+'''
+
+
+def _gen_launch_training(args: Dict) -> str:
+    """Generate code to launch an IsaacLab training run."""
+    task = args["task"]
+    algo = args.get("algo", "ppo")
+    num_steps = args.get("num_steps", 1_000_000)
+    num_envs = args.get("num_envs", 64)
+    ckpt_dir = args.get("checkpoint_dir", f"workspace/rl_checkpoints/{task}")
+
+    # Map algos to IsaacLab train script args
+    algo_map = {
+        "ppo": "rsl_rl",
+        "sac": "skrl",
+        "td3": "skrl",
+        "rsl_rl": "rsl_rl",
+    }
+    runner = algo_map.get(algo, "rsl_rl")
+
+    lines = [
+        "import subprocess",
+        "import sys",
+        "import os",
+        "",
+        f"task = '{task}'",
+        f"algo = '{algo}'",
+        f"num_envs = {num_envs}",
+        f"max_iterations = {num_steps // (num_envs * 24)}  # steps / (envs * horizon)",
+        f"log_dir = '{ckpt_dir}'",
+        "os.makedirs(log_dir, exist_ok=True)",
+        "",
+        "# Launch IsaacLab training",
+        "cmd = [",
+        "    sys.executable, '-m',",
+        f"    'isaaclab.train',",
+        f"    '--task', task,",
+        f"    '--num_envs', str(num_envs),",
+        f"    '--max_iterations', str(max_iterations),",
+        f"    '--log_dir', log_dir,",
+        "]",
+        "print(f'Launching training: {" ".join(cmd)}')",
+        "proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)",
+        "print(f'Training started (PID: {proc.pid}). Checkpoints → {log_dir}')",
+    ]
+    return "\n".join(lines)
+
+
+DATA_HANDLERS["create_isaaclab_env"] = _handle_create_isaaclab_env
+CODE_GEN_HANDLERS["launch_training"] = _gen_launch_training

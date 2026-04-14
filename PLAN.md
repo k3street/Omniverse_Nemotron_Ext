@@ -24,38 +24,122 @@ Complete natural-language control over every Isaac Sim capability — USD author
 | Console/carb log capture | ✅ Running |
 | Stage tree & prim property read | ✅ Running |
 | Selected-prim inspector | ✅ Running |
-| USD patch executor (exec in Kit) | ✅ Basic |
-| Swarm patch planner (coder/critic/QA agents) | ✅ Basic |
+| USD patch executor (exec in Kit) | ✅ Running |
+| Swarm patch planner (coder/critic/QA agents) | ✅ Running |
 | LiveKit WebRTC viewport streaming | ⚠️ Scaffold only |
 | Physics articulation state read | ✅ Running |
 | Governance / approval dialogs | ✅ Running |
 | Snapshots / rollback | ✅ Running |
+| Selection-aware chat context — auto-inject prim into turn | ✅ Running |
+| OmniGraph node creation — `og.Controller.edit()` via NL | ✅ Running |
+| Deformable/soft-body mesh — cloth, sponge, rubber, gel, rope | ✅ Running |
+| Product spec lookup — sensor_specs.jsonl fuzzy match | ✅ Running |
+| Material authoring — OmniPBR/MDL create & assign | ✅ Running |
+| Full USD code gen & execution — arbitrary pxr Python | ✅ Running |
+| Console error diagnosis — read errors + explain_error tool | ✅ Running |
+| Simulation control — play/pause/stop/step/reset + physics params | ✅ Running |
+| Import pipeline — URDF/MJCF/USD/asset_library (20+ robots) | ✅ Running |
+| Multi-viewport / camera switching | ✅ Running |
+| Session reset / new scene button | ✅ Running |
 
 ---
 
 ## What's Missing (Gap Analysis)
 
+### Partial — Implemented But Incomplete
+
+| Gap | Status | What's Missing |
+|---|---|---|
+| **Viewport visual feedback** — show LLM what the user sees per turn | ⚠️ Tool-call only | LLM must call `capture_viewport` explicitly; not auto-injected per chat turn |
+| **Replicator / SDG** — synthetic data generation from chat | ⚠️ Basic only | Annotators + BasicWriter work; no domain randomization, no custom annotators |
+| **ROS2 bridge control** — topic pub/sub from chat | ⚠️ Schema only | Tool schemas defined but handlers are stubs (`None`); no actual ROS2 bridge code |
+| **Undo/redo narration** — LLM explains what it did, user can Ctrl+Z | ⚠️ Undo works | All mutations go through `omni.kit.commands` (Ctrl+Z); no per-action LLM narration |
+| **Fine-tune data capture** — every chat→action pair stored for training | ⚠️ Patches only | Code patches logged via `/log_execution`; tool-call chat→action pairs NOT captured |
+
+### Missing — Not Yet Implemented
+
 | Gap | Priority |
 |---|---|
-| **Selection-aware chat context** — auto-inject clicked prim into chat turn | P0 |
-| **Viewport visual feedback** — show LLM what the user sees per turn | P0 |
-| **OmniGraph node creation** — create/wire action graphs via natural language | P0 |
-| **Deformable/soft-body mesh creation** — cloth, sponge, rubber from text | P0 |
-| **Product spec lookup** — fetch real camera/sensor datasheets from the web | P0 |
-| **Material authoring** — MDL/OmniPBR material creation & assignment | P1 |
-| **Full USD code generation & execution** — arbitrary pxr Python | P1 |
-| **Console error diagnosis** — "what's wrong?" reads errors, suggests fixes | P1 |
-| **Simulation control** — play/pause/step/reset from chat | P1 |
-| **Import pipeline** — URDF/MJCF/USD reference from chat | P1 |
-| **Replicator / SDG** — synthetic data generation from chat | P2 |
-| **ROS2 bridge control** — topic pub/sub from chat | P2 |
-| **Multi-viewport / camera switching** — "show me the wrist camera" | P2 |
-| **Undo/redo narration** — LLM explains what it did, user can Ctrl+Z | P2 |
-| **Fine-tune data capture** — every chat→action pair stored for training | P2 |
 | **NL scene builder** — "build a kitchen with my robot" → full spatial layout from asset catalog | P0 |
-| **Image-to-USD pipeline** — upload photo → generate 3D mesh → place in scene | P1 |
 | **Asset catalog search** — fuzzy-match local/Nucleus assets by name, tag, type | P0 |
+| **IsaacLab RL training** — env scaffolding, training launch, live metrics from chat | P0 |
+| **Motion planning (RMPflow/Lula)** — "move arm to this pose" via `isaacsim.robot_motion` | P0 |
+| **GPU-batched cloning** — replace naive clone loop with `isaacsim.core.cloner` | P0 |
+| **Image-to-USD pipeline** — upload photo → generate 3D mesh → place in scene | P1 |
 | **Chat file upload** — 📎 button for images, OBJ, GLB, USD files | P1 |
+| **XR teleoperation** — WebRTC hand-tracking → joint control via LiveKit | P1 |
+| **IsaacLab-Arena environments** — composable multi-robot benchmark arenas | P1 |
+| **Debug draw visualization** — draw paths, waypoints, bounding boxes in viewport via `omni.isaac.debug_draw` | P1 |
+| **Cortex behavior trees** — reactive pick-and-place via `isaacsim.cortex.framework` | P1 |
+| **Robot assembler** — "attach this gripper to the arm" via `isaacsim.robot_setup.assembler` | P1 |
+| **Gain tuner** — auto-tune articulation PD gains via `isaacsim.robot_setup.gain_tuner` | P1 |
+| **Occupancy map gen** — 2D walkable-area maps via `isaacsim.asset.gen.omap` | P1 |
+| **RL policy deployment** — load trained policies via `isaacsim.robot.policy.examples` | P1 |
+| **URDF importer migration** — switch legacy `omni.isaac.urdf` to `isaacsim.asset.importer.urdf` | P1 |
+| **Replicator DR nodes** — use built-in DR OmniGraph nodes via `isaacsim.replicator.domain_randomization` | P1 |
+| **Manipulator abstractions** — gripper/end-effector wrappers via `isaacsim.robot.manipulators` | P1 |
+| **Eureka reward generation** — LLM-authored reward functions with iterative refinement | P2 |
+| **IsaacSimZMQ bridge** — ZMQ pub/sub for external process comms | P2 |
+| **GR00T N1 policy eval** — deploy foundation policies and evaluate in sim | P2 |
+| **Grasp editor** — author grasp poses via `isaacsim.robot_setup.grasp_editor` | P2 |
+| **Camera inspector** — inspect/modify all camera properties via `isaacsim.util.camera_inspector` | P2 |
+| **Mesh merge utility** — combine meshes into one prim via `isaacsim.util.merge_mesh` | P2 |
+| **Conveyor belt gen** — create conveyor systems via `isaacsim.asset.gen.conveyor` | P2 |
+| **Grasping SDG workflow** — full grasping data gen via `isaacsim.replicator.grasping` | P2 |
+| **Robot wizard** — guided import + config via `isaacsim.robot_setup.wizard` | P2 |
+| **Wheeled robot utils** — differential drive, nav via `isaacsim.robot.wheeled_robots` | P2 |
+| **Surface gripper** — suction/magnetic gripper modeling via `isaacsim.robot.surface_gripper` | P2 |
+| **ROS2 TF viewer** — show transform tree in viewport via `isaacsim.ros2.tf_viewer` | P2 |
+| **IsaacAutomator cloud deploy** — one-click cloud launch of headless Isaac Sim | P3 |
+
+---
+
+## Extension Audit (Isaac Sim 5.1 API)
+
+Audit of all `isaacsim.*` extensions available vs. currently used.
+
+### Currently Used (10 extensions)
+
+| Extension | Usage |
+|---|---|
+| `omni.usd` | Pervasive — stage access, prim creation, attribute reads |
+| `omni.kit.commands` | All undoable mutations (CreateMeshPrim, DeletePrims, ApplyAPISchema, etc.) |
+| `omni.timeline` | Play/pause/stop simulation control |
+| `omni.ui` | Entire chat panel UI |
+| `omni.ext` | Extension lifecycle (on_startup/on_shutdown) |
+| `omni.graph.core` / `og.Controller` | OmniGraph creation and wiring |
+| `omni.replicator.core` | Basic Replicator/SDG pipeline |
+| `omni.isaac.sensor` | LidarRtx, IMUSensor, ContactSensor |
+| `omni.isaac.urdf` | Legacy URDF import (needs migration to `isaacsim.asset.importer.urdf`) |
+| `isaacsim.core.prims` | SingleArticulation for physics state reads |
+
+### High-Value Unused Extensions
+
+| Extension | Impact | Effort | Phase |
+|---|---|---|---|
+| `isaacsim.core.cloner` | GPU-batched env cloning, collision filtering — critical for RL | Low | 8A |
+| `isaacsim.robot_motion.motion_generation` | RMPflow/Lula motion planning — "move arm to pose" | Medium | 8B |
+| `isaacsim.cortex.framework` | Behavior-tree reactive control — pick-and-place without raw joints | Medium | 8C |
+| `omni.isaac.debug_draw` | Runtime debug viz (lines, spheres, arrows in viewport) | Low | 8A |
+| `isaacsim.asset.gen.omap` | 2D occupancy map generation for navigation | Low | 8A |
+| `isaacsim.robot_setup.assembler` | Compose multi-body robots from parts | Medium | 8D |
+| `isaacsim.robot_setup.gain_tuner` | Auto-tune PD gains for articulations | Low | 8D |
+| `isaacsim.robot_setup.grasp_editor` | Author grasp poses interactively | Medium | 8D |
+| `isaacsim.robot_setup.wizard` | Guided robot import + configuration | Medium | 8D |
+| `isaacsim.replicator.domain_randomization` | Pre-built DR OmniGraph nodes | Low | 7B |
+| `isaacsim.replicator.grasping` | Full grasping SDG workflow | Medium | 7B |
+| `isaacsim.robot.policy.examples` | RL policy inference deployment | Low | 7A |
+| `isaacsim.robot.manipulators` | Gripper/end-effector abstractions | Medium | 8C |
+| `isaacsim.robot.surface_gripper` | Suction/magnetic gripper modeling | Low | 8C |
+| `isaacsim.robot.wheeled_robots` | Differential drive, nav utilities | Low | 8E |
+| `isaacsim.util.merge_mesh` | Combine meshes — cleanup after image-to-3D gen | Low | 6B |
+| `isaacsim.util.camera_inspector` | Inspect/modify all camera properties | Low | 8A |
+| `isaacsim.asset.gen.conveyor` | Conveyor belt creation for warehouse sims | Low | 8E |
+| `isaacsim.sensors.physics` | Physics-based contact, effort, IMU sensors | Low | 8A |
+| `isaacsim.sensors.rtx` | RTX lidar/radar APIs | Low | 8A |
+| `isaacsim.ros2.tf_viewer` | TF transform tree visualization | Low | 4B |
+| `isaacsim.asset.importer.urdf` | Modern URDF importer (replace legacy) | Low | 3 |
+| `isaacsim.asset.importer.mjcf` | Modern MJCF importer | Low | 3 |
 
 ---
 
@@ -375,6 +459,285 @@ User types: "Create a 3D model from this image and place it at 0, 0, 1"
 
 ---
 
+## Phase 7 — Isaac Sim Ecosystem Integration (Weeks 23–30)
+
+### 7A — IsaacLab Reinforcement Learning (Tier 1)
+
+**Goal:** Scaffold RL training environments, launch training runs, and stream live metrics — all from the chat panel. Integrates with [IsaacLab](https://github.com/isaac-sim/IsaacLab) (6.9k ★).
+
+#### Tasks
+
+- [ ] **7A.1** Tool: `create_isaaclab_env(task_name, num_envs, env_spacing, params)` — scaffold an IsaacLab `DirectRLEnv` or `ManagerBasedRLEnv` from natural language
+  - Generates `__init__.py`, `env_cfg.py`, reward/observation/action config
+  - Links to the robot and objects already in the current scene
+- [ ] **7A.2** Tool: `launch_training(task, algo, num_steps, checkpoint_dir)` — kick off `rsl_rl`, `rl_games`, or `skrl` training
+  - Spawns subprocess or submits to cloud (via IsaacAutomator, see 7H)
+  - Streams stdout / TensorBoard scalars back to the chat panel
+- [ ] **7A.3** Tool: `show_training_metrics(run_id)` — render reward curve, episode length, success rate inline in the chat
+  - Reads TensorBoard event files or WandB API
+- [ ] **7A.4** Tool: `deploy_policy(checkpoint, articulation_path)` — load a trained ONNX/JIT policy and run inference in sim
+  - Wraps the policy in an OmniGraph action-graph tick loop
+- [ ] **7A.5** Tool: `evaluate_policy(checkpoint, num_episodes)` — run N episodes headless, report success rate and metrics
+- [ ] **7A.6** RL task template library: pick-and-place, locomotion, cabinet open/close, in-hand reorientation — each pre-wired with reward terms
+
+### 7B — Enhanced Replicator / Synthetic Data Generation (Tier 1)
+
+**Goal:** Extend Phase 4A with full domain-randomization authoring, dataset export, and integration with NVIDIA TAO / Omniverse Farm. Integrates with [OmniReplicator](https://github.com/isaac-sim/OmniIsaacGymEnvs).
+
+#### Tasks
+
+- [ ] **7B.1** Tool: `create_sdg_pipeline(annotators, randomizers, output_format, num_frames)` — full Replicator pipeline from natural language
+  - Annotators: bounding_box_2d, semantic_segmentation, depth, normals, instance_seg, occlusion, keypoints
+  - Output formats: KITTI, COCO, TFRecord, raw NumPy
+- [ ] **7B.2** Tool: `add_domain_randomizer(target, randomizer_type, params)` — add/modify randomization
+  - Types: pose, texture, lighting, camera, distractors, material properties
+  - "randomize lighting between 500–2000 lux with color jitter" → structured config
+- [ ] **7B.3** Tool: `preview_sdg(num_samples)` — render a few sample frames and display annotated images in the chat
+- [ ] **7B.4** Tool: `export_dataset(pipeline_id, output_dir, cloud_upload)` — run full generation, optionally upload to S3/GCS
+- [ ] **7B.5** Integration with Omniverse Farm for distributed rendering at scale
+
+### 7C — XR Teleoperation (Tier 1)
+
+**Goal:** Stream viewport via LiveKit WebRTC and map XR hand-tracking / controller inputs to robot joint targets in real-time. Extends the existing LiveKit scaffold.
+
+#### Tasks
+
+- [ ] **7C.1** Tool: `start_teleop_session(robot_path, input_device, stream_quality)` — open a WebRTC teleop channel
+  - `input_device`: quest_3, vision_pro, spacemouse, keyboard
+  - Starts LiveKit room, streams viewport, maps input to joint targets
+- [ ] **7C.2** Tool: `configure_teleop_mapping(device_axes, joint_names, gains)` — customize axis-to-joint mapping
+- [ ] **7C.3** Tool: `record_teleop_demo(output_path)` — record joint trajectories as USD TimeSamples for demonstration data
+- [ ] **7C.4** Hand-tracking retargeting: Apple Vision Pro / Meta Quest hand landmarks → robot end-effector IK
+- [ ] **7C.5** Chat integration: "start teleop with my Quest" → auto-configures, opens browser link to WebRTC viewer
+
+### 7D — IsaacLab-Arena Composable Environments (Tier 2)
+
+**Goal:** One-command multi-robot benchmark arenas. Integrates with [IsaacLab-Arena](https://github.com/isaac-sim/IsaacLab-Arena).
+
+#### Tasks
+
+- [ ] **7D.1** Tool: `create_arena(arena_type, robots, task, num_envs)` — spawn composable arenas
+  - Arena types: flat_ground, maze, obstacle_course, warehouse, tabletop
+  - Multiple robots with different policies competing or cooperating
+- [ ] **7D.2** Tool: `add_arena_robot(arena_id, robot_asset, spawn_position, policy)` — add a robot to an existing arena
+- [ ] **7D.3** Tool: `run_arena_benchmark(arena_id, num_episodes, metrics)` — run and compare multi-agent performance
+- [ ] **7D.4** Leaderboard view in chat: ranked performance table across robot/policy combos
+
+### 7E — Eureka LLM Reward Generation (Tier 2)
+
+**Goal:** LLM writes reward functions, evaluates them in sim, and iteratively refines. Integrates with [Eureka](https://github.com/isaac-sim/Eureka).
+
+#### Tasks
+
+- [ ] **7E.1** Tool: `generate_reward(task_description, env_obs_space)` — LLM produces a Python reward function
+  - Uses the Eureka evolutionary strategy: generate K candidates, evaluate, select, mutate
+- [ ] **7E.2** Tool: `evaluate_reward(reward_code, env, num_episodes)` — run the reward in IsaacLab, return fitness score
+- [ ] **7E.3** Tool: `iterate_reward(prev_reward, feedback)` — LLM refines the reward based on training curves and failure modes
+- [ ] **7E.4** User flow: "teach my robot to open the cabinet" → LLM generates reward → trains → shows results → user says "it keeps dropping the handle" → LLM refines reward → re-trains
+
+### 7F — IsaacSimZMQ External Comms Bridge (Tier 2)
+
+**Goal:** Bidirectional ZMQ messaging between Isaac Sim and external processes (Python, C++, ROS-less setups). Integrates with [IsaacSimZMQ](https://github.com/isaac-sim/IsaacSimZMQ).
+
+#### Tasks
+
+- [ ] **7F.1** Tool: `start_zmq_bridge(pub_port, sub_port, topics)` — start ZMQ pub/sub sockets inside Kit
+- [ ] **7F.2** Tool: `zmq_publish(topic, data)` — push sensor data / joint states to external consumers
+- [ ] **7F.3** Tool: `zmq_subscribe(topic, callback_script)` — receive commands from external processes
+- [ ] **7F.4** Tool: `zmq_list_connections()` — show active ZMQ links and throughput stats
+- [ ] **7F.5** User flow: "stream the lidar data over ZMQ to my Python training script" → auto-configures pub socket + topic
+
+### 7G — GR00T N1 Foundation Policy Evaluation (Tier 3)
+
+**Goal:** Deploy NVIDIA GR00T N1 foundation robot policies in Isaac Sim and benchmark them on custom scenes.
+
+#### Tasks
+
+- [ ] **7G.1** Tool: `load_groot_policy(model_id, robot_path)` — download and attach a GR00T N1 checkpoint
+- [ ] **7G.2** Tool: `evaluate_groot(model_id, task, num_episodes)` — run zero-shot or fine-tuned policy, report metrics
+- [ ] **7G.3** Tool: `finetune_groot(model_id, demo_data, num_steps)` — fine-tune on user's teleop demonstrations (from 7C.3)
+- [ ] **7G.4** Comparison dashboard: "compare GR00T N1 vs my RL policy on the pick-and-place task"
+
+### 7H — IsaacAutomator Cloud Deployment (Tier 3)
+
+**Goal:** Launch headless Isaac Sim instances on cloud GPUs for training, SDG, and evaluation at scale. Integrates with [IsaacAutomator](https://github.com/isaac-sim/IsaacAutomator).
+
+#### Tasks
+
+- [ ] **7H.1** Tool: `cloud_launch(instance_type, num_gpus, isaac_version, script)` — spin up cloud instances
+  - Providers: AWS, GCP, Azure, OVHcloud (via IsaacAutomator Terraform configs)
+- [ ] **7H.2** Tool: `cloud_status(job_id)` — check running jobs, GPU utilization, estimated time remaining
+- [ ] **7H.3** Tool: `cloud_download_results(job_id, output_dir)` — pull checkpoints / datasets back to local
+- [ ] **7H.4** Tool: `cloud_teardown(job_id)` — terminate instances to avoid runaway costs
+- [ ] **7H.5** Cost estimator: "how much would it cost to train for 10M steps on 4×A100?" → estimates shown in chat before launch
+
+---
+
+## Phase 8 — Native Extension Integration (Weeks 31–38)
+
+**Goal:** Wrap the high-value Isaac Sim built-in extensions as LLM-callable tools, replacing manual/legacy approaches with the official APIs. This eliminates raw USD scripting for common operations and gives the LLM access to Isaac Sim's full built-in capability surface.
+
+### 8A — Quick Wins: Cloner, Debug Draw, Occupancy Map, Camera Inspector, Sensor APIs (Weeks 31–32)
+
+**Goal:** Low-effort, high-impact integrations that immediately improve existing tools.
+
+#### Tasks
+
+- [ ] **8A.1** Tool: `clone_envs(source_path, num_envs, spacing, collision_filter)` — GPU-batched environment cloning
+  - Uses `isaacsim.core.cloner.Cloner` for efficient parallel env creation
+  - Auto-filters collisions between clones (critical for RL)
+  - Replaces the naive for-loop in current `_gen_clone_prim`
+  - User flow: "clone this robot setup 1024 times for training" → instant parallel clone
+- [ ] **8A.2** Tool: `debug_draw(draw_type, points, color, lifetime)` — runtime visualization in viewport
+  - Uses `omni.isaac.debug_draw` extension
+  - `draw_type`: lines, points, spheres, arrows, boxes, text
+  - "show me the robot's planned path" → draws trajectory as colored line in viewport
+  - "highlight all collision contacts" → draws red spheres at contact points
+  - Auto-clears after configurable lifetime (default 5s)
+- [ ] **8A.3** Tool: `generate_occupancy_map(origin, dimensions, resolution, height_range)` — 2D occupancy map
+  - Uses `isaacsim.asset.gen.omap` to ray-cast the scene
+  - Returns PNG image of walkable/obstacle areas displayed inline in chat
+  - "show me a 2D map of the warehouse floor" → overhead occupancy grid
+  - Supports custom height thresholds for multi-level environments
+- [ ] **8A.4** Tool: `inspect_camera(camera_path)` / `configure_camera(camera_path, params)` — camera property management
+  - Uses `isaacsim.util.camera_inspector` API
+  - Reads: focal length, aperture, clipping range, resolution, lens distortion, projection type
+  - Writes: any camera attribute — "set the wrist camera to 120° FOV fisheye"
+  - Returns structured JSON for LLM reasoning about camera setup
+- [ ] **8A.5** Migrate sensor tools to native APIs:
+  - Switch `omni.isaac.sensor.LidarRtx` → `isaacsim.sensors.rtx` for RTX lidar/radar
+  - Switch `omni.isaac.sensor.IMUSensor` → `isaacsim.sensors.physics` for physics-based sensors
+  - Add `isaacsim.sensors.physx` for PhysX-raycast-based proximity and lightbeam sensors
+  - New tool: `create_proximity_sensor(prim_path, range, fov)` — detect nearby objects
+  - New tool: `create_lightbeam_sensor(prim_path, beam_config)` — industrial light curtain simulation
+
+### 8B — Motion Planning: RMPflow & Lula (Weeks 33–34)
+
+**Goal:** Replace raw joint-target commands with intelligent motion planning. "Move the arm to grab the cup" instead of specifying 7 joint angles.
+
+#### Tasks
+
+- [ ] **8B.1** Tool: `move_to_pose(articulation_path, target_position, target_orientation, planner)` — end-effector motion planning
+  - Uses `isaacsim.robot_motion.motion_generation` with RMPflow (reactive) or Lula RRT (global)
+  - `planner`: `rmpflow` (fast, reactive, local), `lula_rrt` (global, obstacle-aware), `lula_cspace` (C-space trajectory)
+  - Automatically loads robot description from XRDF/URDF
+  - User flow: "move the Franka gripper to position [0.5, 0.2, 0.3]" → plans and executes collision-free trajectory
+- [ ] **8B.2** Tool: `plan_trajectory(articulation_path, waypoints, planner)` — multi-waypoint trajectory planning
+  - Input: list of target poses → output: smooth joint trajectory
+  - Preview mode: draws planned path via `debug_draw` (8A.2) before execution
+  - "plan a path from the home position to the bin, then to the shelf" → visualized trajectory → approve → execute
+- [ ] **8B.3** Tool: `set_motion_policy(articulation_path, policy_type, params)` — configure motion behavior
+  - Collision avoidance spheres, joint limits, velocity limits, workspace boundaries
+  - "keep the arm away from the table while moving" → adds table as collision obstacle
+- [ ] **8B.4** Tool: `generate_robot_description(articulation_path, output_path)` — auto-generate XRDF/Lula robot description
+  - Uses `isaacsim.robot_setup.xrdf_editor` to create the YAML needed by motion planners
+  - Required before first motion planning call — can auto-detect and generate
+- [ ] **8B.5** IK solver integration: single-shot inverse kinematics without full trajectory planning
+  - "what joint angles put the gripper at [0.5, 0, 0.3]?" → returns joint config
+  - Useful for teleop target computation (feeds into Phase 7C)
+
+### 8C — Cortex Behaviors & Manipulation (Weeks 33–34)
+
+**Goal:** Enable reactive, task-level robot control through behavior trees and built-in manipulation abstractions.
+
+#### Tasks
+
+- [ ] **8C.1** Tool: `create_behavior(articulation_path, behavior_type, params)` — attach Cortex behavior to a robot
+  - Uses `isaacsim.cortex.framework` decider networks
+  - `behavior_type`: pick_and_place, stacking, peg_insertion, reactive_avoid, follow_target
+  - Internally wires: perception → decision → motion generation → gripper control
+  - "make the Franka pick up the red cube and place it in the bin" → full behavior pipeline
+- [ ] **8C.2** Tool: `create_gripper(articulation_path, gripper_type, params)` — configure grippers
+  - Wraps `isaacsim.robot.manipulators` for parallel/finger grippers
+  - Wraps `isaacsim.robot.surface_gripper` for suction/magnetic grippers
+  - `gripper_type`: parallel_jaw, suction, magnetic, custom
+  - Auto-detects gripper joints from articulation structure
+- [ ] **8C.3** Tool: `grasp_object(robot_path, target_prim, grasp_type)` — execute a grasp
+  - Uses `isaacsim.robot_setup.grasp_editor` authored grasps or auto-computed approach vectors
+  - Plans approach → pre-grasp → grasp → lift sequence via motion planner (8B)
+  - "pick up the mug with a top-down grasp" → full grasp execution
+- [ ] **8C.4** Tool: `define_grasp_pose(robot_path, object_path, gripper_offset, approach_dir)` — author custom grasp
+  - Uses `isaacsim.robot_setup.grasp_editor` API — stores as reusable grasp definition
+  - "define a side grasp for the bottle" → interactive grasp authoring in viewport
+- [ ] **8C.5** Behavior tree editor integration:
+  - "show me the current behavior tree" → renders tree structure in chat as formatted text
+  - "add a 'check gripper closed' guard before the lift step" → modifies active behavior
+
+### 8D — Robot Setup Suite (Weeks 35–36)
+
+**Goal:** Wrap the robot setup extensions as tools for one-command robot import, configuration, and assembly.
+
+#### Tasks
+
+- [ ] **8D.1** Tool: `robot_wizard(asset_path, config)` — full guided robot import and configuration
+  - Uses `isaacsim.robot_setup.wizard` workflow
+  - Auto-detects: joint types, drive modes, collision meshes, self-collision groups
+  - Applies sensible defaults for drive stiffness/damping based on robot type
+  - "import my_robot.urdf and configure it for manipulation" → full setup in one command
+- [ ] **8D.2** Tool: `tune_gains(articulation_path, method, target_performance)` — auto-tune PD gains
+  - Uses `isaacsim.robot_setup.gain_tuner`
+  - `method`: manual (set values), auto_step (step response tuning), auto_trajectory (trajectory tracking)
+  - "the arm is oscillating, tune the gains" → runs step response → adjusts kp/kd → reports improvement
+- [ ] **8D.3** Tool: `assemble_robot(base_path, attachment_path, mount_frame, joint_type)` — compose robots from parts
+  - Uses `isaacsim.robot_setup.assembler`
+  - "attach the Robotiq gripper to the UR10 wrist flange" → creates fixed joint, merges articulation
+  - Supports: fixed mount, revolute joint, prismatic joint
+  - Auto-aligns mount frames if XRDF/URDF specifies tool flange
+- [ ] **8D.4** Tool: `configure_self_collision(articulation_path, mode)` — self-collision filtering
+  - `mode`: auto (detect adjacent links), manual (specify pairs), disable
+  - "enable self-collision but skip adjacent links" → auto-configures collision pairs
+- [ ] **8D.5** Tool: `migrate_urdf_importer(prim_path)` — migrate legacy `omni.isaac.urdf` imports to `isaacsim.asset.importer.urdf`
+  - Updates import paths, config structures, and joint drive API calls
+  - Also supports `isaacsim.asset.importer.mjcf` for MuJoCo files
+  - Runs as transparent upgrade — existing robot import tool calls route to new API
+
+### 8E — Wheeled Robots & Conveyor Systems (Weeks 37–38)
+
+**Goal:** Built-in support for mobile robots and industrial automation primitives.
+
+#### Tasks
+
+- [ ] **8E.1** Tool: `create_wheeled_robot(robot_path, drive_type, wheel_config)` — configure wheeled robot control
+  - Uses `isaacsim.robot.wheeled_robots`
+  - `drive_type`: differential, ackermann, mecanum, omnidirectional
+  - Auto-creates OmniGraph with DifferentialController / HolonomicController nodes
+  - "set up the Jetbot for differential drive" → controller + OmniGraph ready
+- [ ] **8E.2** Tool: `navigate_to(robot_path, target_position, planner)` — 2D navigation for mobile robots
+  - Combines occupancy map (8A.3) + path planning (A*, RRT) + drive controller
+  - "drive the robot to the loading dock" → path planned, visualized, executed
+- [ ] **8E.3** Tool: `create_conveyor(mesh_path, speed, direction)` — set up conveyor belt
+  - Uses `isaacsim.asset.gen.conveyor` extension
+  - Turns any mesh into a conveyor via rigid body velocity injection
+  - "make this belt move at 0.5 m/s towards the robot" → conveyor active
+- [ ] **8E.4** Tool: `create_conveyor_track(waypoints, belt_width, speed)` — create conveyor track from path
+  - Uses `isaacsim.asset.gen.conveyor.ui` track tool API
+  - Creates a system of connected conveyor segments following a path
+  - "create a conveyor track from station A to station B with a 90° turn" → full track system
+- [ ] **8E.5** Tool: `merge_meshes(prim_paths, output_path)` — combine multiple meshes into one
+  - Uses `isaacsim.util.merge_mesh` utility
+  - Resets origin, combines materials, deduplicates vertices
+  - "merge all the shelf parts into a single mesh" → cleaner scene hierarchy
+
+### 8F — ROS2 Deep Integration (Weeks 37–38)
+
+**Goal:** Go beyond basic topic pub/sub — expose TF trees, URDF publishing, and full bridge configuration.
+
+#### Tasks
+
+- [ ] **8F.1** Tool: `show_tf_tree(root_frame)` — visualize ROS2 TF transform tree
+  - Uses `isaacsim.ros2.tf_viewer` to render the tree in the viewport
+  - Also returns text-formatted tree in the chat panel
+  - "show me the TF tree for the robot" → viewport overlay + chat summary
+- [ ] **8F.2** Tool: `publish_robot_description(articulation_path, topic)` — publish URDF to `/robot_description`
+  - Uses `isaacsim.ros2.urdf` to export and publish
+  - Auto-generates URDF from the USD articulation
+- [ ] **8F.3** Tool: `configure_ros2_bridge(config)` — batch-configure multiple ROS2 pub/sub connections
+  - Generates the OmniGraph action graph with all configured topics/services
+  - "set up ROS2 bridge: publish joint states, subscribe to cmd_vel, publish camera images" → full bridge in one command
+- [ ] **8F.4** Extension integration: wire `isaacsim.replicator.domain_randomization` DR nodes into ROS2 pipelines for sim-to-real transfer
+
+---
+
 ## Tool Function Registry (Summary)
 
 All tools are exposed to the LLM via structured function-calling schemas. The LLM picks which tool(s) to call based on the user's message.
@@ -420,6 +783,60 @@ All tools are exposed to the LLM via structured function-calling schemas. The LL
 | `build_scene_from_blueprint` | 6A | Scene Builder |
 | `generate_3d_from_image` | 6B | Image-to-USD |
 | `import_generated_model` | 6B | Image-to-USD |
+| `create_isaaclab_env` | 7A | RL / IsaacLab |
+| `launch_training` | 7A | RL / IsaacLab |
+| `show_training_metrics` | 7A | RL / IsaacLab |
+| `deploy_policy` | 7A | RL / IsaacLab |
+| `evaluate_policy` | 7A | RL / IsaacLab |
+| `create_sdg_pipeline` | 7B | Replicator / SDG |
+| `add_domain_randomizer` | 7B | Replicator / SDG |
+| `preview_sdg` | 7B | Replicator / SDG |
+| `export_dataset` | 7B | Replicator / SDG |
+| `start_teleop_session` | 7C | XR Teleop |
+| `configure_teleop_mapping` | 7C | XR Teleop |
+| `record_teleop_demo` | 7C | XR Teleop |
+| `create_arena` | 7D | Arena / Multi-Agent |
+| `run_arena_benchmark` | 7D | Arena / Multi-Agent |
+| `generate_reward` | 7E | Eureka / Reward |
+| `evaluate_reward` | 7E | Eureka / Reward |
+| `iterate_reward` | 7E | Eureka / Reward |
+| `start_zmq_bridge` | 7F | ZMQ Comms |
+| `zmq_publish` | 7F | ZMQ Comms |
+| `zmq_subscribe` | 7F | ZMQ Comms |
+| `load_groot_policy` | 7G | GR00T N1 |
+| `evaluate_groot` | 7G | GR00T N1 |
+| `finetune_groot` | 7G | GR00T N1 |
+| `cloud_launch` | 7H | Cloud Deploy |
+| `cloud_status` | 7H | Cloud Deploy |
+| `cloud_download_results` | 7H | Cloud Deploy |
+| `cloud_teardown` | 7H | Cloud Deploy |
+| `clone_envs` | 8A | Cloner |
+| `debug_draw` | 8A | Visualization |
+| `generate_occupancy_map` | 8A | Navigation |
+| `inspect_camera` | 8A | Sensors |
+| `configure_camera` | 8A | Sensors |
+| `create_proximity_sensor` | 8A | Sensors |
+| `create_lightbeam_sensor` | 8A | Sensors |
+| `move_to_pose` | 8B | Motion Planning |
+| `plan_trajectory` | 8B | Motion Planning |
+| `set_motion_policy` | 8B | Motion Planning |
+| `generate_robot_description` | 8B | Robot Setup |
+| `create_behavior` | 8C | Cortex / Behaviors |
+| `create_gripper` | 8C | Manipulation |
+| `grasp_object` | 8C | Manipulation |
+| `define_grasp_pose` | 8C | Manipulation |
+| `robot_wizard` | 8D | Robot Setup |
+| `tune_gains` | 8D | Robot Setup |
+| `assemble_robot` | 8D | Robot Setup |
+| `configure_self_collision` | 8D | Robot Setup |
+| `create_wheeled_robot` | 8E | Mobile Robots |
+| `navigate_to` | 8E | Mobile Robots |
+| `create_conveyor` | 8E | Industrial |
+| `create_conveyor_track` | 8E | Industrial |
+| `merge_meshes` | 8E | Mesh Utils |
+| `show_tf_tree` | 8F | ROS2 |
+| `publish_robot_description` | 8F | ROS2 |
+| `configure_ros2_bridge` | 8F | ROS2 |
 
 ---
 
@@ -458,7 +875,82 @@ User types: "the robot keeps falling through the ground, help"
 → Approval → fixed
 ```
 
-### Flow 4: "Show me what the overhead camera sees"
+### Flow 4: "Move the arm to grab the cup"
+```
+User clicks /World/Franka in viewport
+User types: "move the arm to grab the coffee cup on the table"
+→ LLM sees context: selected_prim=/World/Franka, type=Articulation
+→ LLM calls: move_to_pose("/World/Franka", target_position=[0.5, 0.2, 0.15],
+              target_orientation=[0, 1, 0, 0], planner="rmpflow")
+→ Internally: loads XRDF robot description, initializes RMPflow,
+   plans collision-free trajectory to cup position
+→ LLM calls: debug_draw("lines", trajectory_points, color="green", lifetime=5)
+→ Green trajectory appears in viewport
+→ Approval → arm moves smoothly to cup
+→ LLM calls: grasp_object("/World/Franka", "/World/Table/CoffeeCup", "top_down")
+→ Gripper closes, cup lifted
+```
+
+### Flow 5: "Clone this 1024 times for training"
+```
+User types: "clone this robot setup 1024 times in a grid for RL training"
+→ LLM calls: clone_envs("/World/Env_0", num_envs=1024, spacing=2.0,
+              collision_filter=true)
+→ Internally: isaacsim.core.cloner.Cloner creates 1024 envs in parallel on GPU
+→ Auto-filters inter-environment collisions
+→ Done in <1s (vs ~30s with naive for-loop clone)
+```
+
+### Flow 6: "Show me a map of the warehouse"
+```
+User types: "generate a 2D occupancy map of the warehouse floor"
+→ LLM calls: generate_occupancy_map(origin=[0,0,0], dimensions=[20,20],
+              resolution=0.05, height_range=[0.1, 2.0])
+→ Internally: isaacsim.asset.gen.omap ray-casts the scene at 5cm resolution
+→ Returns PNG occupancy grid — obstacles in black, free space in white
+→ Image displayed inline in chat
+→ LLM: "The warehouse has a clear 3m corridor along the north wall.
+         I can plan a path for the robot through there."
+```
+
+### Flow 7: "Tune the arm, it's oscillating"
+```
+User types: "the robot arm is oscillating when it moves, fix the gains"
+→ LLM calls: tune_gains("/World/Franka", method="auto_step",
+              target_performance={overshoot: 0.05, settling_time: 0.3})
+→ Internally: isaacsim.robot_setup.gain_tuner runs step response on each joint
+→ Returns before/after kp/kd values + settling time improvement
+→ LLM: "Reduced overshoot from 23% to 4%. Joint 4 kp: 800→520, kd: 40→65."
+→ Approval → gains applied
+```
+
+### Flow 8: "Set up the Jetbot for differential drive"
+```
+User types: "configure the Jetbot for differential drive and drive it to the corner"
+→ LLM calls: create_wheeled_robot("/World/Jetbot", drive_type="differential",
+              wheel_config={radius: 0.03, separation: 0.12})
+→ OmniGraph DifferentialController node created and wired
+→ LLM calls: navigate_to("/World/Jetbot", target=[5.0, 5.0], planner="astar")
+→ Generates occupancy map → plans path → executes differential drive commands
+→ Jetbot drives to the corner avoiding obstacles
+```
+
+### Flow 9: "Attach the Robotiq gripper to the UR10"
+```
+User types: "attach the Robotiq 2F-85 gripper to the UR10 tool flange"
+→ LLM calls: assemble_robot(
+    base_path="/World/UR10",
+    attachment_path="/World/Robotiq_2F85",
+    mount_frame="tool0",
+    joint_type="fixed"
+  )
+→ Internally: isaacsim.robot_setup.assembler merges articulations,
+   creates fixed joint at tool flange, updates collision groups
+→ Approval → unified robot with working gripper
+→ LLM: "Gripper attached. 8 DOF total (6 arm + 2 finger)."
+```
+
+### Flow 10: "Show me what the overhead camera sees"
 ```
 User types: "switch viewport to the overhead camera"
 → LLM calls: set_viewport_camera("/World/Cameras/overhead_cam")
@@ -466,7 +958,7 @@ User types: "switch viewport to the overhead camera"
 → LLM auto-captures and says: "Here's the overhead view. I can see 3 objects on the table."
 ```
 
-### Flow 5: "Build a house and put my robot in the kitchen"
+### Flow 11: "Build a house and put my robot in the kitchen"
 ```
 User types: "Build a house with a kitchen and put my Unitree G1 robot inside
             with a table, chairs, sink, and some kitchen items"
@@ -504,7 +996,7 @@ User types: "Build a house with a kitchen and put my Unitree G1 robot inside
 → LLM updates blueprint delta, re-validates, applies change
 ```
 
-### Flow 6: "Turn this photo into a 3D model"
+### Flow 12: "Turn this photo into a 3D model"
 ```
 User clicks 📎 → selects photo of a coffee mug from desktop
 User types: "Create a 3D model from this image and put it on the table"
