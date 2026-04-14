@@ -685,4 +685,67 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+    # ─── Vision (Gemini Robotics-ER) ──────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "vision_detect_objects",
+            "description": "Use the Gemini Robotics-ER vision model to detect and locate objects in the current viewport image. Returns normalized 2D points and labels. Use this when the user asks 'what objects are in the scene', 'find the robot', 'locate the cube', etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "labels": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of specific object names to search for (e.g. ['robot', 'cube', 'table']). If omitted, detects all visible objects.",
+                    },
+                    "max_objects": {"type": "integer", "description": "Max objects to return. Default: 10"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "vision_bounding_boxes",
+            "description": "Use the Gemini Robotics-ER vision model to detect objects and return 2D bounding boxes from the viewport. Returns [ymin, xmin, ymax, xmax] coordinates normalized 0-1000.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "max_objects": {"type": "integer", "description": "Max objects to detect. Default: 25"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "vision_plan_trajectory",
+            "description": "Use the Gemini Robotics-ER vision model to plan a 2D trajectory from the current viewport image. Given a task instruction, returns a sequence of points the robot should follow. Use for visual pick-and-place planning.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "instruction": {"type": "string", "description": "Natural language task description — e.g. 'move the red pen to the organizer on the left'"},
+                    "num_points": {"type": "integer", "description": "Number of trajectory waypoints. Default: 15"},
+                },
+                "required": ["instruction"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "vision_analyze_scene",
+            "description": "Use the Gemini Robotics-ER vision model for free-form spatial reasoning about the viewport. Ask questions like 'what object should I move to make room?', 'how full is the container?', 'describe the workspace layout'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "Natural language question about the scene"},
+                },
+                "required": ["question"],
+            },
+        },
+    },
 ]

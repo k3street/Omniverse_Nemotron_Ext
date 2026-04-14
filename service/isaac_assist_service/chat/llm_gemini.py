@@ -26,7 +26,7 @@ class GeminiProvider:
     LLM Provider connecting to Google's Gemini API (supports all v1beta models
     including gemini-robotics-er-1.5). Supports tool/function calling.
     """
-    def __init__(self, api_key: str, model: str = "gemini-robotics-er-1.5"):
+    def __init__(self, api_key: str, model: str = "gemini-robotics-er-1.6-preview"):
         self.api_key = api_key
         self.model = model
         self.base_url = (

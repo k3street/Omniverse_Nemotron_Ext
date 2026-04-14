@@ -215,7 +215,7 @@ See [`.env.local.example`](.env.local.example) for the full annotated template.
 | Variable | Example | Description |
 |---|---|---|
 | `LLM_MODE` | `anthropic` | `anthropic`, `openai`, `ollama`, or `gemini` |
-| `CLOUD_MODEL_NAME` | `claude-sonnet-4-6` | Model name for cloud providers |
+| `CLOUD_MODEL_NAME` | `claude-opus-4-6` | Model name for cloud providers |
 | `ANTHROPIC_API_KEY` | `sk-ant-xxx` | API key for your chosen provider |
 | `ASSETS_ROOT_PATH` | `/home/user/assets` | Path to Isaac Sim USD assets (local or Nucleus) |
 | `ASSETS_ROBOTS_SUBDIR` | `Collected_Robots` | Subdirectory containing robot USD files |

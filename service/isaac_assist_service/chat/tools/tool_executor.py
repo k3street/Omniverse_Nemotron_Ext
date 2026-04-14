@@ -1623,3 +1623,66 @@ def _gen_launch_training(args: Dict) -> str:
 
 DATA_HANDLERS["create_isaaclab_env"] = _handle_create_isaaclab_env
 CODE_GEN_HANDLERS["launch_training"] = _gen_launch_training
+
+
+# ─── Vision tools (Gemini Robotics-ER 1.6) ──────────────────────────────────
+
+async def _get_viewport_bytes() -> tuple:
+    """Capture the viewport and return (raw_bytes, mime_type)."""
+    result = await kit_tools.get_viewport_image(max_dim=1280)
+    b64 = result.get("image_b64") or result.get("data", "")
+    if not b64:
+        return None, None
+    import base64
+    return base64.b64decode(b64), "image/png"
+
+
+def _get_vision_provider():
+    from ..vision_gemini import GeminiVisionProvider
+    return GeminiVisionProvider()
+
+
+async def _handle_vision_detect_objects(args: Dict) -> Dict:
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
+    vp = _get_vision_provider()
+    labels = args.get("labels")
+    max_obj = args.get("max_objects", 10)
+    detections = await vp.detect_objects(img, mime, labels=labels, max_objects=max_obj)
+    return {"detections": detections, "count": len(detections), "model": vp.model}
+
+
+async def _handle_vision_bounding_boxes(args: Dict) -> Dict:
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
+    vp = _get_vision_provider()
+    boxes = await vp.detect_bounding_boxes(img, mime, max_objects=args.get("max_objects", 25))
+    return {"bounding_boxes": boxes, "count": len(boxes), "model": vp.model}
+
+
+async def _handle_vision_plan_trajectory(args: Dict) -> Dict:
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
+    vp = _get_vision_provider()
+    points = await vp.plan_trajectory(
+        img, args["instruction"], num_points=args.get("num_points", 15), mime_type=mime,
+    )
+    return {"trajectory": points, "num_points": len(points), "model": vp.model}
+
+
+async def _handle_vision_analyze_scene(args: Dict) -> Dict:
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
+    vp = _get_vision_provider()
+    analysis = await vp.analyze_scene(img, args["question"], mime_type=mime)
+    return {"analysis": analysis, "model": vp.model}
+
+
+DATA_HANDLERS["vision_detect_objects"] = _handle_vision_detect_objects
+DATA_HANDLERS["vision_bounding_boxes"] = _handle_vision_bounding_boxes
+DATA_HANDLERS["vision_plan_trajectory"] = _handle_vision_plan_trajectory
+DATA_HANDLERS["vision_analyze_scene"] = _handle_vision_analyze_scene

@@ -28,6 +28,7 @@ class SettingsManager:
             "LLM_MODE": config.llm_mode,
             "LOCAL_MODEL_NAME": config.local_model_name,
             "CLOUD_MODEL_NAME": config.cloud_model_name,
+            "VISION_MODEL_NAME": config.vision_model_name,
             "API_KEY_GEMINI": config.api_key_gemini,
             "OPENAI_API_BASE": config.openai_api_base,
             "OPENAI_API_KEY": config.api_key_openai,
