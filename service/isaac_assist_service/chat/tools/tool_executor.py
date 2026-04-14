@@ -54,6 +54,42 @@ def _load_deformable_presets() -> Dict:
     return _deformable_presets
 
 
+# ── Safe xform helper (inlined into generated code) ─────────────────────────
+# Referenced USD assets (e.g. robots) often already have xform ops.
+# Calling AddTranslateOp() again crashes with "Error in AddXformOp".
+# This snippet is injected into generated code to safely set transforms.
+
+_SAFE_XFORM_SNIPPET = '''\
+
+def _safe_set_translate(prim, pos):
+    """Set translate, reusing existing op if present."""
+    xf = UsdGeom.Xformable(prim)
+    for op in xf.GetOrderedXformOps():
+        if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+            op.Set(Gf.Vec3d(*pos))
+            return
+    xf.AddTranslateOp().Set(Gf.Vec3d(*pos))
+
+def _safe_set_scale(prim, s):
+    """Set scale, reusing existing op if present."""
+    xf = UsdGeom.Xformable(prim)
+    for op in xf.GetOrderedXformOps():
+        if op.GetOpType() == UsdGeom.XformOp.TypeScale:
+            op.Set(Gf.Vec3d(*s))
+            return
+    xf.AddScaleOp().Set(Gf.Vec3d(*s))
+
+def _safe_set_rotate_xyz(prim, r):
+    """Set rotateXYZ, reusing existing op if present."""
+    xf = UsdGeom.Xformable(prim)
+    for op in xf.GetOrderedXformOps():
+        if op.GetOpType() == UsdGeom.XformOp.TypeRotateXYZ:
+            op.Set(Gf.Vec3d(*r))
+            return
+    xf.AddRotateXYZOp().Set(Gf.Vec3d(*r))
+'''
+
+
 # ── Code generation helpers ──────────────────────────────────────────────────
 
 def _gen_create_prim(args: Dict) -> str:
@@ -65,16 +101,16 @@ def _gen_create_prim(args: Dict) -> str:
     lines = [
         "import omni.usd",
         "from pxr import UsdGeom, Gf",
-        "",
+        _SAFE_XFORM_SNIPPET,
         "stage = omni.usd.get_context().get_stage()",
         f"prim = stage.DefinePrim('{prim_path}', '{prim_type}')",
     ]
     if pos:
-        lines.append(f"UsdGeom.Xformable(prim).AddTranslateOp().Set(Gf.Vec3d({pos[0]}, {pos[1]}, {pos[2]}))")
+        lines.append(f"_safe_set_translate(prim, ({pos[0]}, {pos[1]}, {pos[2]}))")
     if scale:
-        lines.append(f"UsdGeom.Xformable(prim).AddScaleOp().Set(Gf.Vec3d({scale[0]}, {scale[1]}, {scale[2]}))")
+        lines.append(f"_safe_set_scale(prim, ({scale[0]}, {scale[1]}, {scale[2]}))")
     if rot:
-        lines.append(f"UsdGeom.Xformable(prim).AddRotateXYZOp().Set(Gf.Vec3d({rot[0]}, {rot[1]}, {rot[2]}))")
+        lines.append(f"_safe_set_rotate_xyz(prim, ({rot[0]}, {rot[1]}, {rot[2]}))")
     return "\n".join(lines)
 
 
@@ -164,12 +200,12 @@ def _gen_clone_prim(args: Dict) -> str:
     lines = [
         "import omni.usd",
         "from pxr import Sdf, UsdGeom, Gf",
+        _SAFE_XFORM_SNIPPET,
         "stage = omni.usd.get_context().get_stage()",
         f"for i in range({count}):",
         f"    dest = '{tgt}_' + str(i)",
         f"    Sdf.CopySpec(stage.GetRootLayer(), '{src}', stage.GetRootLayer(), dest)",
-        f"    xf = UsdGeom.Xformable(stage.GetPrimAtPath(dest))",
-        f"    xf.AddTranslateOp().Set(Gf.Vec3d(i * {spacing}, 0, 0))",
+        f"    _safe_set_translate(stage.GetPrimAtPath(dest), (i * {spacing}, 0, 0))",
     ]
     return "\n".join(lines)
 
@@ -364,12 +400,14 @@ def _gen_create_omnigraph(args: Dict) -> str:
     connections = args.get("connections", [])
     values = args.get("values", {})
 
+    # Use plain tuples — og.Controller.node() resolves to a path string
+    # which fails inside og.Controller.edit(); tuples are the correct format.
     node_defs = ",\n            ".join(
-        f"og.Controller.node('{n['name']}', '{n['type']}')" for n in nodes
+        f"('{n['name']}', '{n['type']}')" for n in nodes
     ) if nodes else ""
 
     conn_defs = ",\n            ".join(
-        f"og.Controller.connect('{c['source']}', '{c['target']}')" for c in connections
+        f"('{c['source']}', '{c['target']}')" for c in connections
     ) if connections else ""
 
     return f"""\
@@ -508,17 +546,16 @@ def _gen_teleport_prim(args: Dict) -> str:
     lines = [
         "import omni.usd",
         "from pxr import UsdGeom, Gf",
+        _SAFE_XFORM_SNIPPET,
         "stage = omni.usd.get_context().get_stage()",
         f"prim = stage.GetPrimAtPath('{prim_path}')",
-        "xf = UsdGeom.Xformable(prim)",
     ]
     pos = args.get("position")
     rot = args.get("rotation_euler")
     if pos:
-        lines.append("xf.ClearXformOpOrder()")
-        lines.append(f"xf.AddTranslateOp().Set(Gf.Vec3d({pos[0]}, {pos[1]}, {pos[2]}))")
+        lines.append(f"_safe_set_translate(prim, ({pos[0]}, {pos[1]}, {pos[2]}))")
     if rot:
-        lines.append(f"xf.AddRotateXYZOp().Set(Gf.Vec3d({rot[0]}, {rot[1]}, {rot[2]}))")
+        lines.append(f"_safe_set_rotate_xyz(prim, ({rot[0]}, {rot[1]}, {rot[2]}))")
     return "\n".join(lines)
 
 
@@ -613,35 +650,38 @@ result, prim_path = omni.kit.commands.execute(
             # Nucleus URL — no local file check, USD resolves directly
             return (
                 "import omni.usd\n"
-                "from pxr import UsdGeom, Gf\n\n"
-                "stage = omni.usd.get_context().get_stage()\n"
+                "from pxr import UsdGeom, Gf\n"
+                + _SAFE_XFORM_SNIPPET +
+                "\nstage = omni.usd.get_context().get_stage()\n"
                 f"prim = stage.DefinePrim('{dest}', 'Xform')\n"
                 f"prim.GetReferences().AddReference('{resolved}')\n"
-                f"UsdGeom.Xformable(prim).AddTranslateOp().Set(Gf.Vec3d(0, 0, 0))"
+                f"_safe_set_translate(prim, (0, 0, 0))"
             )
         else:
             # Local filesystem — validate the file exists
             return (
                 "import omni.usd\n"
                 "from pxr import UsdGeom, Gf\n"
-                "import os\n\n"
-                "stage = omni.usd.get_context().get_stage()\n"
+                "import os\n"
+                + _SAFE_XFORM_SNIPPET +
+                "\nstage = omni.usd.get_context().get_stage()\n"
                 f"asset_path = '{resolved}'\n"
                 "if not os.path.exists(asset_path):\n"
                 f"    raise FileNotFoundError(f'Robot asset not found: {{asset_path}}')\n"
                 f"prim = stage.DefinePrim('{dest}', 'Xform')\n"
                 "prim.GetReferences().AddReference(asset_path)\n"
-                f"UsdGeom.Xformable(prim).AddTranslateOp().Set(Gf.Vec3d(0, 0, 0))"
+                f"_safe_set_translate(prim, (0, 0, 0))"
             )
 
     # Default: USD reference (absolute path or URL)
     return (
         "import omni.usd\n"
         "from pxr import UsdGeom, Gf\n"
-        "stage = omni.usd.get_context().get_stage()\n"
+        + _SAFE_XFORM_SNIPPET +
+        "\nstage = omni.usd.get_context().get_stage()\n"
         f"prim = stage.DefinePrim('{dest}', 'Xform')\n"
         f"prim.GetReferences().AddReference('{file_path}')\n"
-        f"UsdGeom.Xformable(prim).AddTranslateOp().Set(Gf.Vec3d(0, 0, 0))"
+        f"_safe_set_translate(prim, (0, 0, 0))"
     )
 
 
@@ -951,11 +991,11 @@ cam.GetClippingRangeAttr().Set(Gf.Vec2f(0.01, 1000.0))
         return f"""\
 import omni.usd
 from pxr import UsdGeom, Gf
-
+{_SAFE_XFORM_SNIPPET}
 stage = omni.usd.get_context().get_stage()
 lidar_path = '{prim_path}/RTXLidar'
 lidar_prim = stage.DefinePrim(lidar_path, 'Camera')
-UsdGeom.Xformable(lidar_prim).AddTranslateOp().Set(Gf.Vec3d(0, 0, 0.1))
+_safe_set_translate(lidar_prim, (0, 0, 0.1))
 
 # Configure RTX Lidar via Isaac Sim extension
 from omni.isaac.sensor import LidarRtx

@@ -128,3 +128,18 @@ class AssistServiceClient:
         except Exception as e:
             logger.warning(f"Failed to log execution: {e}")
             return {"error": str(e)}
+
+    async def reset_session(self) -> dict:
+        """Clear conversation history and open a new empty stage."""
+        if not HAS_AIOHTTP:
+            return {"status": "skipped"}
+        url = f"{self.base_url}/api/v1/chat/reset"
+        payload = {"session_id": self.session_id}
+        try:
+            async with aiohttp.ClientSession(json_serialize=self._json_serialize) as session:
+                async with session.post(url, json=payload) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    return {"error": f"Failed (HTTP {response.status})"}
+        except Exception as e:
+            return {"error": str(e)}

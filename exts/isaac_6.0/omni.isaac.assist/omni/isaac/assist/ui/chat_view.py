@@ -23,6 +23,9 @@ class ChatViewWindow(ui.Window):
                 with ui.HStack(height=30, spacing=4):
                     ui.Label("Isaac Assist (Local Mode)", width=0, style={"color": 0xFF888888})
                     ui.Spacer()
+
+                    # New Scene — clears stage + chat history
+                    ui.Button("🗑 New Scene", width=100, clicked_fn=self._new_scene)
                     
                     # LiveKit Stream Toggle
                     self.btn_livekit = ui.Button("Start Vision / Voice", width=150, clicked_fn=self._toggle_livekit)
@@ -83,6 +86,31 @@ class ChatViewWindow(ui.Window):
                 with ui.VStack(margin=5):
                     ui.Label(sender, height=15, style={"color": 0xFFAAAAAA, "font_size": 12})
                     ui.Label(text, word_wrap=True, style={"color": text_color})
+
+    def _new_scene(self):
+        """Clear the stage and reset conversation history."""
+        asyncio.ensure_future(self._new_scene_async())
+
+    async def _new_scene_async(self):
+        # 1. Open a fresh USD stage
+        try:
+            import omni.usd
+            omni.usd.get_context().new_stage()
+        except Exception as e:
+            logger.error(f"[IsaacAssist] new_stage failed: {e}")
+
+        # 2. Clear server-side conversation history
+        try:
+            resp = await self.service.reset_session()
+            if "error" in resp:
+                logger.warning(f"[IsaacAssist] reset_session error: {resp['error']}")
+        except Exception as e:
+            logger.warning(f"[IsaacAssist] reset_session call failed: {e}")
+
+        # 3. Clear the chat UI
+        self.chat_layout.clear()
+        await asyncio.sleep(0)
+        self._add_chat_bubble("System", "New scene created. Chat history cleared.", is_user=False)
 
     def _toggle_livekit(self):
         if self.webrtc and self.webrtc._streaming:

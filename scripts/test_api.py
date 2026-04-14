@@ -10,6 +10,7 @@ import time
 import requests
 
 BASE = "http://localhost:8000/api/v1/chat/message"
+RESET_URL = "http://localhost:8000/api/v1/chat/reset"
 TIMEOUT = 120  # seconds per request
 
 TESTS = [
@@ -119,6 +120,45 @@ TESTS = [
 ]
 
 
+def run_reset_test() -> dict:
+    """Test the /chat/reset endpoint — send a message, reset, verify cleared."""
+    result = {"id": "T_RESET", "name": "Reset Session", "pass": True, "errors": []}
+    session_id = f"autotest_reset_{int(time.time())}"
+
+    # 1. Send a message to create history
+    try:
+        resp = requests.post(BASE, json={
+            "session_id": session_id,
+            "message": "Hello",
+            "context": {},
+        }, timeout=TIMEOUT)
+        if resp.status_code != 200:
+            result["pass"] = False
+            result["errors"].append(f"Setup message failed: HTTP {resp.status_code}")
+            return result
+    except Exception as e:
+        result["pass"] = False
+        result["errors"].append(f"Setup message failed: {e}")
+        return result
+
+    # 2. Reset the session
+    try:
+        resp = requests.post(RESET_URL, json={"session_id": session_id}, timeout=30)
+        if resp.status_code != 200:
+            result["pass"] = False
+            result["errors"].append(f"Reset returned HTTP {resp.status_code}: {resp.text[:200]}")
+            return result
+        data = resp.json()
+        if data.get("status") != "ok":
+            result["pass"] = False
+            result["errors"].append(f"Reset response unexpected: {data}")
+    except Exception as e:
+        result["pass"] = False
+        result["errors"].append(f"Reset request failed: {e}")
+
+    return result
+
+
 def run_test(test: dict) -> dict:
     tid = test["id"]
     session = f"autotest_{tid}_{int(time.time())}"
@@ -218,6 +258,21 @@ def main():
     results = []
     passed = 0
     failed = 0
+
+    # Run the reset endpoint test first
+    print(f"\n{'─' * 50}")
+    print("Running T_RESET: Reset Session...")
+    sys.stdout.flush()
+    r = run_reset_test()
+    results.append(r)
+    if r["pass"]:
+        passed += 1
+        print("  ✅ PASS  /chat/reset endpoint works")
+    else:
+        failed += 1
+        print("  ❌ FAIL")
+        for e in r["errors"]:
+            print(f"     → {e}")
 
     for test in TESTS:
         print(f"\n{'─' * 50}")

@@ -76,6 +76,10 @@ class ChatOrchestrator:
         self.llm_provider = get_llm_provider()
         self._history: Dict[str, List[Dict]] = {}
 
+    def reset_session(self, session_id: str):
+        """Clear in-memory conversation history for a session."""
+        self._history.pop(session_id, None)
+
     async def handle_message(
         self,
         session_id: str,

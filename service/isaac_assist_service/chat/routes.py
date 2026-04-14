@@ -24,6 +24,27 @@ class ChatMessageRequest(BaseModel):
     attachments: Optional[List[str]] = []
     context: Optional[Dict[str, Any]] = None
 
+
+class ResetSessionRequest(BaseModel):
+    session_id: str = "default_session"
+
+
+@router.post("/reset")
+async def reset_session(req: ResetSessionRequest):
+    """
+    Clear conversation history for a session so the user can start fresh.
+    Resets both in-memory chat context and persisted conversation logs.
+    """
+    from ..memory import MemoryManager
+    try:
+        orchestrator.reset_session(req.session_id)
+        MemoryManager().clear_session(req.session_id)
+        logger.info(f"[reset] Session '{req.session_id}' cleared")
+        return {"status": "ok", "message": "Session history cleared."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/message")
 async def send_message(req: ChatMessageRequest):
     """

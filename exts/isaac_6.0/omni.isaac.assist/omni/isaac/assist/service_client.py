@@ -19,6 +19,21 @@ class AssistServiceClient:
         self.base_url = base_url
         self.session_id = "default_session"
 
+    async def reset_session(self) -> dict:
+        """Clear conversation history and open a new empty stage."""
+        if not HAS_AIOHTTP:
+            return {"status": "skipped"}
+        url = f"{self.base_url}/api/v1/chat/reset"
+        payload = {"session_id": self.session_id}
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    return {"error": f"Failed (HTTP {response.status})"}
+        except Exception as e:
+            return {"error": str(e)}
+
     async def send_message(self, text: str) -> dict:
         """ Sends a chat message to the orchestration service """
         if not HAS_AIOHTTP:

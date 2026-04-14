@@ -30,5 +30,10 @@ workspace/
 # Logs
 *.log
 
+# Screen recordings
+*.mkv
+*.mp4
+*.avi
+
 # Personal launch override (tracked version is launch_isaac.sh)
 launch_isaac_fixed.sh

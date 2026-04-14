@@ -42,3 +42,11 @@ class MemoryManager:
             
         # Reverse to get chronological order
         return [{"role": row[0], "content": row[1]} for row in reversed(rows)]
+
+    def clear_session(self, session_id: str):
+        """Delete all conversation history for a given session."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "DELETE FROM conversation_logs WHERE session_id = ?",
+                (session_id,)
+            )
