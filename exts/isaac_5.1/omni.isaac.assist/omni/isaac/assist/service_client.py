@@ -85,10 +85,10 @@ class AssistServiceClient:
 
     async def update_settings(self, settings_payload: dict) -> dict:
         """ Updates `.env` variables via the unified Settings Manager """
-        url = f"{self.base_url}/api/v1/settings/update_env"
+        url = f"{self.base_url}/api/v1/settings/"
         try:
             async with aiohttp.ClientSession(json_serialize=self._json_serialize) as session:
-                async with session.post(url, json=settings_payload) as response:
+                async with session.post(url, json={"settings": settings_payload}) as response:
                     if response.status == 200:
                         return await response.json()
                     return {"error": f"Failed (HTTP {response.status})"}

@@ -10,7 +10,14 @@ from service.isaac_assist_service.config import config
 
 class SettingsManager:
     """Manages reading and writing configuration settings to the .env file."""
-    
+
+    # Map env var names to config attribute names where they differ
+    _ENV_TO_ATTR = {
+        "OPENAI_API_KEY": "api_key_openai",
+        "API_KEY_GEMINI": "api_key_gemini",
+    }
+    _BOOL_KEYS = {"CONTRIBUTE_DATA", "AUTO_APPROVE"}
+
     def __init__(self):
         # We target the .env located right next to the main config.py
         self.env_path = Path(os.path.dirname(os.path.dirname(__file__))) / ".env"
@@ -23,7 +30,7 @@ class SettingsManager:
             "CLOUD_MODEL_NAME": config.cloud_model_name,
             "API_KEY_GEMINI": config.api_key_gemini,
             "OPENAI_API_BASE": config.openai_api_base,
-            "OPENAI_API_KEY": config.openai_api_key,
+            "OPENAI_API_KEY": config.api_key_openai,
             "CONTRIBUTE_DATA": str(config.contribute_data).lower(),
             "AUTO_APPROVE": str(config.auto_approve).lower()
         }
@@ -56,7 +63,11 @@ class SettingsManager:
                     
                 # Dynamically patch live settings
                 os.environ[key] = val
-                setattr(config, key.lower(), val)
+                attr = self._ENV_TO_ATTR.get(key, key.lower())
+                if key in self._BOOL_KEYS:
+                    setattr(config, attr, val.lower() == "true")
+                else:
+                    setattr(config, attr, val)
                 
             with open(self.env_path, "w", encoding="utf-8") as f:
                 f.writelines(lines)
