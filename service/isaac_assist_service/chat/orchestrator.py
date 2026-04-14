@@ -89,6 +89,11 @@ class ChatOrchestrator:
         self.llm_provider = get_llm_provider()
         self._history: Dict[str, List[Dict]] = {}
 
+    def refresh_provider(self):
+        """Reinitialize the LLM provider from current config (after settings change)."""
+        self.llm_provider = get_llm_provider()
+        logger.info("LLM provider reinitialized: %s", type(self.llm_provider).__name__)
+
     def reset_session(self, session_id: str):
         """Clear in-memory conversation history for a session."""
         self._history.pop(session_id, None)

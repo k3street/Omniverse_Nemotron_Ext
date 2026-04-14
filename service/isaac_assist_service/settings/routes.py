@@ -29,7 +29,11 @@ async def update_settings(req: SettingsUpdateRequest):
     success = settings_manager.update_settings(req.settings)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to write new settings to .env file")
-    
+
+    # Reinitialize the LLM provider so model/key changes take effect immediately
+    from ..chat.routes import orchestrator
+    orchestrator.refresh_provider()
+
     return {"status": "success", "settings": settings_manager.get_settings()}
 
 def run_ollama_pull(model_name: str):
