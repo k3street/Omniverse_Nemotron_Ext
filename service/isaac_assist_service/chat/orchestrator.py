@@ -33,10 +33,12 @@ from ..retrieval.context_retriever import (
 )
 from ..governance.audit_log import AuditLogger
 from ..governance.models import AuditEntry
+from ..knowledge.knowledge_base import KnowledgeBase
 
 logger = logging.getLogger(__name__)
 
 _audit = AuditLogger()
+_kb = KnowledgeBase()
 
 # Maximum tool-call rounds per user message to prevent infinite loops
 MAX_TOOL_ROUNDS = 5
@@ -58,6 +60,17 @@ Capabilities:
 
 When the user asks you to modify the scene, use the provided tools. For complex operations combine tools or use run_usd_script.
 Always use proper USD paths starting with '/'. Be concise. When you generate code, use the Kit/pxr Python APIs.
+
+CRITICAL API RULES for Isaac Sim 5.1:
+- NEVER call AddTranslateOp()/AddRotateXYZOp()/AddScaleOp() on prims that already have xformOps
+  (e.g. referenced robots). Instead, reuse existing ops: xformable.GetOrderedXformOps() and call Set() on them.
+  Use helper: op = next((o for o in xformable.GetOrderedXformOps() if o.GetOpType() == UsdGeom.XformOp.TypeTranslate), None)
+- Always import modules at the top of generated code:
+  import omni.usd; from pxr import Usd, UsdGeom, UsdPhysics, Gf, Sdf
+- Always get stage via: stage = omni.usd.get_context().get_stage()
+- OmniGraph node paths must use tuples: ("graph_path", "node_name"), NOT "graph_path/node_name"
+- isaacsim.core.cloner.GridCloner for batch cloning (≥4 copies), Sdf.CopySpec for small counts
+- For transforms on referenced prims, check if xformOps exist first, reuse them, only add new ops on freshly-defined prims
 
 Selection awareness: When the user has selected a prim in the viewport or stage tree, its path and
 properties are included in the context below. References like "this", "it", "the selected object",
@@ -156,6 +169,17 @@ class ChatOrchestrator:
                 system_content += f"\n\n{patterns_text}"
         except Exception as e:
             logger.warning(f"[{session_id}] Pattern matching failed: {e}")
+
+        # ── 3c. Inject known error learnings so the LLM avoids past mistakes ──
+        try:
+            error_learnings = _kb.get_error_learnings(
+                isaac_version, user_message, limit=5
+            )
+            error_text = _kb.format_error_learnings(error_learnings)
+            if error_text:
+                system_content += f"\n\n{error_text}"
+        except Exception as e:
+            logger.warning(f"[{session_id}] Error learning retrieval failed: {e}")
 
         # ── 4. Build message list ────────────────────────────────────────────
         messages = [{"role": "system", "content": system_content}]

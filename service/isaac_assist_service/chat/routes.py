@@ -127,7 +127,7 @@ async def log_execution(req: LogExecutionRequest):
 
     # ── 2. Knowledge base learning (always — errors AND successes) ───────
     if not req.success and req.output:
-        # Extract the error for the knowledge base
+        # Extract the error for the knowledge base (with dedup)
         instruction = (
             f"When asked: '{req.user_message}'\n"
             f"This code was generated but FAILED:\n```python\n{req.code[:1000]}\n```\n"
@@ -141,8 +141,12 @@ async def log_execution(req: LogExecutionRequest):
             "The error indicates a runtime incompatibility. "
             "Find an alternative approach or fix the specific issue."
         )
-        _kb.add_entry(version, instruction, response, source="auto_error_learning")
-        logger.info(f"[knowledge] Auto-learned error pattern for v{version}")
+        added = _kb.add_error(version, instruction, response,
+                              error_output=req.output)
+        if added:
+            logger.info(f"[knowledge] Auto-learned NEW error pattern for v{version}")
+        else:
+            logger.info(f"[knowledge] Skipped duplicate error for v{version}")
 
     elif req.success and req.user_message:
         # Successful patches become positive examples
