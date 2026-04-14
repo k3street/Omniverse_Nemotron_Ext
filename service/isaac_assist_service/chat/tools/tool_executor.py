@@ -433,6 +433,23 @@ UsdShade.MaterialBindingAPI(prim).Bind(
 """
 
 
+# Isaac Sim 5.1 OmniGraph node type mapping:
+# The LLM often uses legacy omni.isaac.* prefixes. Remap to the correct isaacsim.* types.
+_OG_NODE_TYPE_MAP = {
+    # ROS2 bridge nodes (Isaac Sim 5.1 uses isaacsim.ros2.bridge.*)
+    "omni.isaac.ros2_bridge.ROS2Context": "isaacsim.ros2.bridge.ROS2Context",
+    "omni.isaac.ros2_bridge.ROS2PublishClock": "isaacsim.ros2.bridge.ROS2PublishClock",
+    "omni.isaac.ros2_bridge.ROS2PublishJointState": "isaacsim.ros2.bridge.ROS2PublishJointState",
+    "omni.isaac.ros2_bridge.ROS2SubscribeJointState": "isaacsim.ros2.bridge.ROS2SubscribeJointState",
+    "omni.isaac.ros2_bridge.ROS2PublishTransformTree": "isaacsim.ros2.bridge.ROS2PublishTransformTree",
+    "omni.isaac.ros2_bridge.ROS2PublishImage": "isaacsim.ros2.bridge.ROS2PublishImage",
+    # ArticulationController is in core.nodes, NOT ros2.bridge
+    "omni.isaac.ros2_bridge.ROS2ArticulationController": "isaacsim.core.nodes.IsaacArticulationController",
+    "isaacsim.ros2.bridge.ROS2ArticulationController": "isaacsim.core.nodes.IsaacArticulationController",
+    "omni.isaac.core_nodes.IsaacArticulationController": "isaacsim.core.nodes.IsaacArticulationController",
+}
+
+
 def _gen_create_omnigraph(args: Dict) -> str:
     graph_path = args["graph_path"]
     graph_type = args.get("graph_type", "action_graph")
@@ -442,13 +459,31 @@ def _gen_create_omnigraph(args: Dict) -> str:
 
     # Use plain tuples — og.Controller.node() resolves to a path string
     # which fails inside og.Controller.edit(); tuples are the correct format.
+    # Also remap legacy node type IDs to Isaac Sim 5.1 equivalents.
     node_defs = ",\n            ".join(
-        f"('{n['name']}', '{n['type']}')" for n in nodes
+        f"('{n['name']}', '{_OG_NODE_TYPE_MAP.get(n['type'], n['type'])}')" for n in nodes
     ) if nodes else ""
 
     conn_defs = ",\n            ".join(
         f"('{c['source']}', '{c['target']}')" for c in connections
     ) if connections else ""
+
+    # SET_VALUES for node attribute configuration (e.g. robotPath, topicName)
+    val_defs = ""
+    if values:
+        val_items = []
+        for attr_path, val in values.items():
+            if isinstance(val, str):
+                val_items.append(f"            ('{attr_path}', '{val}')")
+            else:
+                val_items.append(f"            ('{attr_path}', {val})")
+        val_defs = ",\n".join(val_items)
+
+    set_values_block = ""
+    if val_defs:
+        set_values_block = f"""        keys.SET_VALUES: [
+{val_defs}
+        ],"""
 
     return f"""\
 import omni.graph.core as og
@@ -476,6 +511,7 @@ keys = og.Controller.Keys
         keys.CONNECT: [
             {conn_defs}
         ],
+{set_values_block}
     }},
 )
 """
@@ -725,6 +761,82 @@ result, prim_path = omni.kit.commands.execute(
     )
 
 
+# ── Robot anchoring ──────────────────────────────────────────────────────────
+# Isaac Sim robot USD assets contain a "rootJoint" (6-DOF free joint) that
+# allows them to float freely. To anchor a robot:
+# 1. Set PhysxArticulationAPI.fixedBase = True (keeps ArticulationRootAPI on root)
+# 2. Delete the rootJoint (free joint)
+# 3. Optionally create a FixedJoint to attach to a specific surface
+# CRITICAL: Do NOT move ArticulationRootAPI — it must stay on the root prim
+# or the tensor API pattern '/World/Robot' will fail with
+# "Pattern did not match any articulations".
+
+def _gen_anchor_robot(args: Dict) -> str:
+    robot_path = args["robot_path"]
+    anchor_surface = args.get("anchor_surface_path", "")
+    base_link = args.get("base_link_name", "panda_link0")
+    position = args.get("position")  # world position where robot sits
+
+    # Build optional FixedJoint block for anchoring to a surface
+    fixed_joint_block = ""
+    if anchor_surface:
+        local_pos_line = ""
+        if position:
+            local_pos_line = f"\n    anchor_prim.GetAttribute('physics:localPos0').Set(Gf.Vec3f({position[0]}, {position[1]}, {position[2]}))"
+        fixed_joint_block = f"""
+# Step 3: Create FixedJoint to attach to surface (excluded from articulation tree)
+anchor_path = robot_path + '/AnchorJoint'
+anchor_prim = stage.GetPrimAtPath(anchor_path)
+if not anchor_prim.IsValid():
+    anchor_prim = stage.DefinePrim(anchor_path, 'PhysicsFixedJoint')
+    print(f"Created FixedJoint at {{anchor_path}}")
+else:
+    print(f"Reconfigured existing FixedJoint at {{anchor_path}}")
+
+body0_rel = anchor_prim.GetRelationship('physics:body0')
+if not body0_rel:
+    body0_rel = anchor_prim.CreateRelationship('physics:body0')
+body0_rel.SetTargets([Sdf.Path('{anchor_surface}')])
+
+body1_rel = anchor_prim.GetRelationship('physics:body1')
+if not body1_rel:
+    body1_rel = anchor_prim.CreateRelationship('physics:body1')
+body1_rel.SetTargets([Sdf.Path(base_link_path)])
+
+anchor_prim.GetAttribute('physics:excludeFromArticulation').Set(True)
+anchor_prim.GetAttribute('physics:jointEnabled').Set(True){local_pos_line}
+print(f"Anchored to {anchor_surface}")
+"""
+
+    return f"""\
+import omni.usd
+from pxr import Usd, UsdPhysics, PhysxSchema, Gf, Sdf
+
+stage = omni.usd.get_context().get_stage()
+robot_path = '{robot_path}'
+base_link_path = robot_path + '/{base_link}'
+robot_prim = stage.GetPrimAtPath(robot_path)
+
+# Step 1: Set fixedBase=True on PhysxArticulationAPI
+# This tells PhysX the root link is immovable (no need to move ArticulationRootAPI)
+if not robot_prim.HasAPI(PhysxSchema.PhysxArticulationAPI):
+    PhysxSchema.PhysxArticulationAPI.Apply(robot_prim)
+artic_api = PhysxSchema.PhysxArticulationAPI(robot_prim)
+artic_api.CreateFixedBaseAttr(True)
+print("Set fixedBase=True on PhysxArticulationAPI")
+
+# Step 2: Delete the rootJoint (6-DOF free joint that lets the robot float)
+root_joint_path = robot_path + '/rootJoint'
+rj = stage.GetPrimAtPath(root_joint_path)
+if rj.IsValid():
+    stage.RemovePrim(root_joint_path)
+    print(f"Deleted {{root_joint_path}} (6-DOF free joint)")
+{fixed_joint_block}
+print(f"Robot at {{robot_path}} is now anchored (fixedBase=True)")
+print(f"ArticulationRootAPI remains on {{robot_path}} — tensor API patterns will work")
+"""
+
+
 def _gen_set_viewport_camera(args: Dict) -> str:
     return (
         "import omni.kit.viewport.utility\n"
@@ -781,6 +893,7 @@ CODE_GEN_HANDLERS = {
     "teleport_prim": _gen_teleport_prim,
     "set_joint_targets": _gen_set_joint_targets,
     "import_robot": _gen_import_robot,
+    "anchor_robot": _gen_anchor_robot,
     "set_viewport_camera": _gen_set_viewport_camera,
     "configure_sdg": _gen_configure_sdg,
 }

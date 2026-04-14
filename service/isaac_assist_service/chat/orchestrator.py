@@ -71,6 +71,16 @@ CRITICAL API RULES for Isaac Sim 5.1:
 - OmniGraph node paths must use tuples: ("graph_path", "node_name"), NOT "graph_path/node_name"
 - isaacsim.core.cloner.GridCloner for batch cloning (≥4 copies), Sdf.CopySpec for small counts
 - For transforms on referenced prims, check if xformOps exist first, reuse them, only add new ops on freshly-defined prims
+- ROBOT ANCHORING: To anchor a robot, use the `anchor_robot` tool. NEVER move ArticulationRootAPI off
+  the root prim — it MUST stay on the robot root (e.g., /World/Franka) or the PhysX tensor API pattern
+  matching will fail with "did not match any articulations". Use PhysxArticulationAPI.fixedBase=True instead.
+- OmniGraph node types in Isaac Sim 5.1 use the `isaacsim.*` namespace, NOT legacy `omni.isaac.*`:
+  • isaacsim.ros2.bridge.ROS2PublishJointState (NOT omni.isaac.ros2_bridge.ROS2PublishJointState)
+  • isaacsim.ros2.bridge.ROS2SubscribeJointState (NOT omni.isaac.ros2_bridge.ROS2SubscribeJointState)
+  • isaacsim.core.nodes.IsaacArticulationController (NOT omni.isaac.ros2_bridge.ROS2ArticulationController)
+  • isaacsim.ros2.bridge.ROS2Context for ROS2 clock/context setup
+- OmniGraph ArticulationController: Set the robot path via SET_VALUES with "inputs:robotPath",
+  NOT "inputs:usePath" (which does not exist as an attribute).
 
 Selection awareness: When the user has selected a prim in the viewport or stage tree, its path and
 properties are included in the context below. References like "this", "it", "the selected object",

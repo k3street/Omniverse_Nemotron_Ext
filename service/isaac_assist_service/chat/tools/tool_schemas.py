@@ -148,6 +148,25 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Robot anchoring ─────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "anchor_robot",
+            "description": "Anchor a robot to the world or a specific surface. Sets PhysxArticulationAPI.fixedBase=True and deletes the rootJoint (6-DOF free joint) so the robot cannot float. Keeps ArticulationRootAPI on the root prim for tensor API compatibility.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path to the robot root prim (e.g., '/World/Franka')"},
+                    "anchor_surface_path": {"type": "string", "description": "Optional USD path to the surface prim to anchor to (e.g., '/World/Table')"},
+                    "base_link_name": {"type": "string", "description": "Name of the robot base link (default: 'panda_link0')"},
+                    "position": {"type": "array", "items": {"type": "number"}, "description": "[x, y, z] world position for the anchor"},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+
     # ─── OmniGraph ────────────────────────────────────────────────────────────
     {
         "type": "function",
