@@ -186,6 +186,17 @@ class ChatOrchestrator:
         except Exception as e:
             logger.warning(f"[{session_id}] Error learning retrieval failed: {e}")
 
+        # ── 3d. Inject proven successful patterns so the LLM prefers them ──
+        try:
+            success_learnings = _kb.get_success_learnings(
+                isaac_version, user_message, limit=3
+            )
+            success_text = _kb.format_success_learnings(success_learnings)
+            if success_text:
+                system_content += f"\n\n{success_text}"
+        except Exception as e:
+            logger.warning(f"[{session_id}] Success learning retrieval failed: {e}")
+
         # ── 4. Build message list ────────────────────────────────────────────
         messages = [{"role": "system", "content": system_content}]
         messages.extend(history[-10:])  # rolling context window

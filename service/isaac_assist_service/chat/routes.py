@@ -125,6 +125,15 @@ async def log_execution(req: LogExecutionRequest):
     _audit.log_entry(entry)
     logger.info(f"[audit] Patch {'SUCCESS' if req.success else 'FAIL'}: {req.code[:80]}...")
 
+    # ── Auto-compact periodically ────────────────────────────────────────
+    global _log_counter
+    _log_counter += 1
+    if _log_counter % _COMPACT_EVERY == 0:
+        try:
+            _kb.compact(version)
+        except Exception as ce:
+            logger.warning(f"[knowledge] Auto-compaction failed: {ce}")
+
     # ── 2. Knowledge base learning (always — errors AND successes) ───────
     if not req.success and req.output:
         # Extract the error for the knowledge base (with dedup)
@@ -149,10 +158,27 @@ async def log_execution(req: LogExecutionRequest):
             logger.info(f"[knowledge] Skipped duplicate error for v{version}")
 
     elif req.success and req.user_message:
-        # Successful patches become positive examples
+        # Successful patches become positive examples for the LLM
         instruction = req.user_message
         response = f"```python\n{req.code[:1500]}\n```"
-        _kb.add_entry(version, instruction, response, source="approved_patch")
+        _kb.add_success(version, instruction, response,
+                        code=req.code)
         logger.info(f"[knowledge] Logged successful patch for v{version}")
 
     return {"status": "logged", "success": req.success}
+
+
+# ── Compaction ───────────────────────────────────────────────────────────
+_log_counter: int = 0
+_COMPACT_EVERY: int = 50  # auto-compact after every N logged executions
+
+
+@router.post("/compact_knowledge")
+async def compact_knowledge():
+    """
+    Manually trigger knowledge base compaction.
+    Deduplicates entries, trims old ones, rewrites atomically.
+    """
+    version = detect_isaac_version()
+    result = _kb.compact(version)
+    return {"status": "compacted", "version": version, **result}

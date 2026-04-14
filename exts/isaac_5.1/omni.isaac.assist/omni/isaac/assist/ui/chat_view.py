@@ -270,8 +270,12 @@ class ChatViewWindow(ui.Window):
         
         try:
             with contextlib.redirect_stdout(output_buffer), contextlib.redirect_stderr(output_buffer):
-                # Native executing inside Omniverse
-                exec(script_code)
+                # Use an explicit globals dict so that functions defined in the
+                # script can see top-level imports (e.g. UsdGeom, Gf).  A bare
+                # exec(code) inside an async method puts imports into the
+                # *function* locals — inner defs can't close over those.
+                exec_globals = {"__builtins__": __builtins__}
+                exec(script_code, exec_globals)
                 
             success = True
             captured_text = output_buffer.getvalue().strip()

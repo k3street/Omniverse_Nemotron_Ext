@@ -43,7 +43,7 @@ class KnowledgeBase:
     def add_entry(self, version: str, instruction: str, response: str, source: str = "audit"):
         """Appends a new QA pair / instruction pair to the version-specific KB.
         
-        Auto-error learning and audit sources always write.
+        Local learning sources (auto_error_learning, auto_success_learning) always write.
         User-contributed data (approved_patch) respects the contribute_data opt-in.
         """
         if source == "approved_patch" and not config.contribute_data:
@@ -175,3 +175,143 @@ class KnowledgeBase:
             lines.append(inst[:600])
             lines.append(f"FIX: {resp}")
         return "\n".join(lines)
+
+    # ── Success learning ─────────────────────────────────────────────────
+
+    def _success_sig(self, user_message: str) -> str:
+        """Normalize a user message into a dedup key for successes."""
+        return user_message.strip().lower()[:200]
+
+    def add_success(self, version: str, instruction: str, response: str,
+                    code: str = "") -> bool:
+        """Add a successful execution pattern, skipping near-duplicates."""
+        sig = self._success_sig(instruction)
+        key = f"{version}:success"
+        if key not in self._known_errors:
+            # Lazy-load existing success sigs
+            sigs: Set[str] = set()
+            for entry in self.get_entries(version):
+                if entry.get("source") == "auto_success_learning":
+                    sigs.add(self._success_sig(entry.get("instruction", "")))
+            self._known_errors[key] = sigs
+        if sig in self._known_errors[key]:
+            logger.info(f"[knowledge] Skipping duplicate success: {sig[:60]}")
+            return False
+        self._known_errors[key].add(sig)
+        return self.add_entry(version, instruction, response,
+                              source="auto_success_learning")
+
+    def get_success_learnings(self, version: str, user_message: str,
+                              limit: int = 3) -> List[Dict[str, str]]:
+        """
+        Retrieve successful code patterns relevant to a user message.
+        Returns the most relevant proven-working examples.
+        """
+        entries = self.get_entries(version)
+        successes = [e for e in entries if e.get("source") == "auto_success_learning"]
+        if not successes:
+            return []
+
+        msg_words = set(user_message.lower().split())
+        scored = []
+        for e in successes:
+            inst = e.get("instruction", "")
+            inst_words = set(inst.lower().split())
+            overlap = len(msg_words & inst_words)
+            if overlap > 0:
+                scored.append((overlap, e))
+        scored.sort(key=lambda x: -x[0])
+        return [e for _, e in scored[:limit]]
+
+    def format_success_learnings(self, learnings: List[Dict[str, str]]) -> str:
+        """Format success learnings for LLM system prompt injection."""
+        if not learnings:
+            return ""
+        lines = [
+            "--- PROVEN WORKING PATTERNS (from successful executions — PREFER these) ---"
+        ]
+        for i, e in enumerate(learnings, 1):
+            inst = e.get("instruction", "")
+            resp = e.get("response", "")
+            lines.append(f"\n[WORKING EXAMPLE {i}] User asked: {inst[:200]}")
+            lines.append(resp[:800])
+        return "\n".join(lines)
+
+    # ── Compaction ───────────────────────────────────────────────────────
+
+    def compact(self, version: str, max_errors: int = 20,
+                max_successes: int = 30, max_other: int = 50) -> Dict[str, int]:
+        """
+        Compact the knowledge file for a version by:
+        1. Deduplicating error entries by signature
+        2. Deduplicating success entries by user message
+        3. Keeping only the most recent N entries per source type
+        4. Rewriting the file atomically
+
+        Returns counts of entries before and after.
+        """
+        entries = self.get_entries(version)
+        if not entries:
+            return {"before": 0, "after": 0}
+
+        before = len(entries)
+        kept: List[Dict] = []
+
+        # Separate by source
+        errors = []
+        successes = []
+        other = []
+        for e in entries:
+            src = e.get("source", "")
+            if src == "auto_error_learning":
+                errors.append(e)
+            elif src == "auto_success_learning":
+                successes.append(e)
+            else:
+                other.append(e)
+
+        # Dedup errors by signature
+        seen_err: Set[str] = set()
+        for e in reversed(errors):  # keep most recent
+            inst = e.get("instruction", "")
+            sig = _error_signature(inst)
+            if sig not in seen_err:
+                seen_err.add(sig)
+                kept.append(e)
+            if len([x for x in kept if x.get("source") == "auto_error_learning"]) >= max_errors:
+                break
+
+        # Dedup successes by user message
+        seen_suc: Set[str] = set()
+        for e in reversed(successes):  # keep most recent
+            sig = self._success_sig(e.get("instruction", ""))
+            if sig not in seen_suc:
+                seen_suc.add(sig)
+                kept.append(e)
+            if len([x for x in kept if x.get("source") == "auto_success_learning"]) >= max_successes:
+                break
+
+        # Keep most recent other entries
+        kept.extend(other[-max_other:])
+
+        # Rewrite atomically
+        file_path = self._get_file_path(version)
+        tmp = file_path.with_suffix(".jsonl.tmp")
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                for e in kept:
+                    f.write(json.dumps(e) + "\n")
+            tmp.replace(file_path)
+        except Exception as exc:
+            logger.error(f"Compaction failed for {version}: {exc}")
+            if tmp.exists():
+                tmp.unlink()
+            return {"before": before, "after": before}
+
+        # Reset caches
+        self._known_errors.pop(version, None)
+        self._known_errors.pop(f"{version}:success", None)
+
+        after = len(kept)
+        logger.info(f"[knowledge] Compacted v{version}: {before} → {after} entries")
+        return {"before": before, "after": after}
