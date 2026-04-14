@@ -531,6 +531,164 @@ _Skip T38 if IsaacLab is not installed._
 
 ---
 
+### T40 — Import Nova Carter Robot
+**Type:**
+> Import a Nova Carter robot at position 0, 0, 0
+
+**Expected:** Code patch using a USD reference to the Nova Carter asset. After approval:
+- A Nova Carter wheeled robot appears at the origin
+- `/World/NovaCarter` (or similar) in the Stage tree
+- Differential drive base and sensor mounts visible
+
+_Note: Requires Isaac Sim robot asset library. If the asset isn't found, Isaac Assist should explain._
+
+---
+
+### T41 — Nova Carter: Physics + Anchor + ROS2 Twist Drive
+**Prerequisite:** T40 (Nova Carter loaded at `/World/NovaCarter`)
+
+**Step 1 — Anchor the robot:**
+**Type:**
+> Anchor /World/NovaCarter to the ground plane so it doesn't float
+
+**Expected:** Code patch using `anchor_robot` tool — sets `PhysxArticulationAPI.fixedBase=True` and deletes rootJoint. After approval:
+- Play the sim — Nova Carter stays on the ground, wheels touch the surface
+
+**Step 2 — Wire ROS2 Twist drive graph:**
+**Type:**
+> Create a ROS2 OmniGraph for /World/NovaCarter: subscribe to /cmd_vel (Twist), connect to a DifferentialController, then to an ArticulationController targeting the robot. Add a ROS2PublishOdometry node publishing to /odom. Use /World/CarterROS2Graph.
+
+**Expected:** Code patch creating an action graph with:
+1. `OnPlaybackTick` tick source
+2. `ROS2SubscribeTwist` (subscribes to `/cmd_vel`)
+3. `DifferentialController` (converts twist to wheel velocities)
+4. `IsaacArticulationController` (targets `/World/NovaCarter`)
+5. `ROS2PublishOdometry` (publishes to `/odom`)
+
+**Verify after approval:**
+- `/World/CarterROS2Graph` exists in Stage tree with all nodes
+- Play the sim → `ros2 topic list` shows `/cmd_vel` and `/odom`
+
+**Step 3 — Drive the robot:**
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
+  "{linear: {x: 0.5, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}"
+```
+
+**Verify:** Nova Carter drives forward in the viewport.
+
+---
+
+### T42 — Add RealSense Camera to Nova Carter
+**Prerequisite:** T40 (Nova Carter loaded)
+
+**Type:**
+> Add an Intel RealSense D435i camera to /World/NovaCarter/chassis_link, positioned at 0.2, 0, 0.15 facing forward
+
+**Expected:** Code patch using `add_sensor_to_prim` with `product_name: "RealSense D435i"`. After approval:
+- A camera prim appears under `/World/NovaCarter/chassis_link/RealSenseD435i` (or similar)
+- Camera FOV: 87°, resolution: 1280×720 (from product spec)
+
+**Then wire ROS2 image publishing:**
+**Type:**
+> Create a ROS2 camera publisher OmniGraph at /World/CameraROS2Graph: create a render product from /World/NovaCarter/chassis_link/RealSenseD435i, then publish RGB to /carter/camera/rgb and depth to /carter/camera/depth
+
+**Verify after approval:**
+- Play the sim → `ros2 topic list` shows `/carter/camera/rgb` and `/carter/camera/depth`
+- `ros2 topic hz /carter/camera/rgb` shows ~30 Hz
+
+---
+
+### T43 — Vision Spatial Awareness (Gemini Robotics-ER)
+**Prerequisite:** T40 + T42 (Nova Carter with RealSense camera in a scene with objects)
+
+First, add some objects to the scene:
+**Type:**
+> Create a red cube named TargetBox at 2, 0, 0.25 with size 0.5. Create a blue cylinder named Obstacle at 1, 0.5, 0.5.
+
+Approve the patches. Then:
+
+**Step 1 — Object detection from viewport:**
+**Type:**
+> Use vision to detect all objects in the current viewport
+
+**Expected:** Text reply listing detected objects with normalized 2D coordinates (from `vision_detect_objects`):
+- TargetBox, Obstacle, NovaCarter, ground plane, etc.
+
+**Step 2 — Spatial reasoning:**
+**Type:**
+> Looking at the scene, what is to the right of the red cube? And how far is the blue cylinder from the robot?
+
+**Expected:** Text reply from `vision_analyze_scene` with spatial analysis:
+- Describes relative positions of objects
+- Estimates distances based on visual cues
+
+**Step 3 — Bounding boxes:**
+**Type:**
+> Get bounding boxes for all objects in the viewport
+
+**Expected:** Returns `vision_bounding_boxes` data with [ymin, xmin, ymax, xmax] coordinates for each detected object.
+
+---
+
+### T44 — Vision-Guided Navigation Command
+**Prerequisite:** T41 + T43 (Nova Carter with ROS2 drive + vision + objects in scene)
+
+**Type:**
+> Look at the scene and plan a trajectory to drive the robot to the right side of the red cube, avoiding the blue cylinder
+
+**Expected flow:**
+1. Isaac Assist calls `vision_analyze_scene` to understand the spatial layout
+2. Calls `vision_plan_trajectory` with instruction "drive to the right side of the red cube, avoiding the blue cylinder"
+3. Returns a sequence of 2D waypoints forming a collision-free path
+4. Optionally generates a code patch to publish the waypoints as ROS2 nav goals
+
+**Verify:**
+- Trajectory points form a reasonable path that curves around the cylinder
+- If code patch published, `ros2 topic echo /cmd_vel` shows changing velocity commands
+
+**Then type:**
+> Describe what the robot's onboard camera can see right now
+
+**Expected:** `vision_analyze_scene` with the question, returning a spatial description of the scene from the viewport perspective (objects, relative positions, distances).
+
+_Skip T43–T44 if Gemini API key is not configured._
+
+---
+
+### T45 — Export Scene Package
+**Prerequisite:** Several patches approved and executed in the session (e.g., T01–T03 or T40–T42)
+
+**Type:**
+> Export this scene as a project package named "carter_navigation_demo"
+
+**Expected flow:**
+1. Isaac Assist calls `export_scene_package` with scene_name "carter_navigation_demo"
+2. Text reply confirms export with file list
+
+**Verify:**
+- Directory `workspace/scene_exports/carter_navigation_demo/` created with:
+  - `scene_setup.py` — all approved patches as a single runnable Python script
+  - `README.md` — scene description, robot list, ROS2 topics, usage instructions
+  - `ros2_topics.yaml` — detected ROS2 topics and OmniGraph node types
+  - `ros2_launch.py` — ROS2 launch file template (if ROS2 nodes were used)
+- `scene_setup.py` is valid Python (runs without syntax errors)
+- `README.md` lists the correct robots and topics
+
+**Via API (optional verification):**
+```bash
+curl -X POST http://localhost:8000/api/v1/chat/export_scene \
+  -H "Content-Type: application/json" \
+  -d '{"scene_name": "carter_navigation_demo", "session_id": "default_session"}'
+```
+
+**Download a file:**
+```bash
+curl "http://localhost:8000/api/v1/chat/export_scene/download?filepath=workspace/scene_exports/carter_navigation_demo/scene_setup.py" -o scene_setup.py
+```
+
+---
+
 ## Summary Checklist
 
 | # | Category | Prompt | Requires Approval? |
@@ -574,6 +732,12 @@ _Skip T38 if IsaacLab is not installed._
 | T37 | Scene builder | NL warehouse scene | ✅ |
 | T38 | IsaacLab RL | RL env + launch training | ✅ |
 | T39 | Settings | Auto-approve toggle | ✅ (then ❌) |
+| T40 | Import | Nova Carter robot | ✅ |
+| T41 | ROS2 + Physics | Carter anchor + Twist drive | ✅ |
+| T42 | Sensor + ROS2 | RealSense camera + image pub | ✅ |
+| T43 | Vision | Spatial awareness (Gemini ER) | ❌ (data only) |
+| T44 | Vision + Nav | Vision-guided navigation | ❌ (data) / ✅ (nav patch) |
+| T45 | Export | Scene package export | ❌ (data only) |
 
 ## Troubleshooting
 

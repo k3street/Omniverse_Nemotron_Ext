@@ -767,4 +767,21 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Scene Export ─────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
+                },
+                "required": [],
+            },
+        },
+    },
 ]

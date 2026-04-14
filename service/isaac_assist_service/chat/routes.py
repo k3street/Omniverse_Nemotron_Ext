@@ -182,3 +182,44 @@ async def compact_knowledge():
     version = detect_isaac_version()
     result = _kb.compact(version)
     return {"status": "compacted", "version": version, **result}
+
+
+class ExportSceneRequest(BaseModel):
+    session_id: str = "default_session"
+    scene_name: str = "exported_scene"
+
+
+@router.post("/export_scene")
+async def export_scene(req: ExportSceneRequest):
+    """
+    Export the current session's scene as a reusable file package.
+    Returns paths to generated scene_setup.py, README.md, ros2_topics.yaml, ros2_launch.py.
+    """
+    from .tools.tool_executor import execute_tool_call
+    try:
+        result = await execute_tool_call("export_scene_package", {
+            "session_id": req.session_id,
+            "scene_name": req.scene_name,
+        })
+        return result
+    except Exception as e:
+        logger.error(f"Failed to export scene: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/export_scene/download")
+async def download_scene_file(filepath: str):
+    """
+    Download a specific file from a scene export.
+    filepath must be under workspace/scene_exports/.
+    """
+    import os
+    from fastapi.responses import FileResponse
+    # Security: ensure path is under workspace/scene_exports/
+    real_path = os.path.realpath(filepath)
+    allowed_dir = os.path.realpath("workspace/scene_exports")
+    if not real_path.startswith(allowed_dir):
+        raise HTTPException(status_code=403, detail="Access denied: path must be under workspace/scene_exports/")
+    if not os.path.exists(real_path):
+        raise HTTPException(status_code=404, detail="File not found. Did you export first?")
+    return FileResponse(real_path, filename=os.path.basename(real_path))

@@ -673,6 +673,8 @@ def _gen_import_robot(args: Dict) -> str:
         "spot": "spot.usd",
         "spot_with_arm": "spot_with_arm.usd",
         "carter": "carter_v1.usd",
+        "nova_carter": "nova_carter.usd",
+        "carter_v2": "carter_v2.usd",
         "jetbot": "jetbot.usd",
         "kaya": "kaya.usd",
         "ur10": "ur10.usd",
@@ -1799,3 +1801,181 @@ DATA_HANDLERS["vision_detect_objects"] = _handle_vision_detect_objects
 DATA_HANDLERS["vision_bounding_boxes"] = _handle_vision_bounding_boxes
 DATA_HANDLERS["vision_plan_trajectory"] = _handle_vision_plan_trajectory
 DATA_HANDLERS["vision_analyze_scene"] = _handle_vision_analyze_scene
+
+
+# ── Scene Package Export ─────────────────────────────────────────────────────
+# Collects all approved code patches from the audit log for a session,
+# then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
+# README.md, and a ros2_topics.yaml listing detected topics.
+
+async def _handle_export_scene_package(args: Dict) -> Dict:
+    """Export the current session's scene setup as a reusable file package."""
+    from pathlib import Path
+    from datetime import datetime as _dt
+    from ..routes import _audit
+
+    session_id = args.get("session_id", "default_session")
+    scene_name = args.get("scene_name", "exported_scene")
+    # Sanitize scene_name for filesystem
+    safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in scene_name)
+
+    out_dir = Path("workspace/scene_exports") / safe_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Collect approved patches from audit log ──────────────────────────
+    entries = _audit.query_logs(limit=500, event_type="patch_executed")
+    patches = []
+    for e in entries:
+        meta = e.metadata or {}
+        if meta.get("success") and meta.get("session_id", "default_session") == session_id:
+            code = meta.get("code", "")
+            if code:
+                patches.append({
+                    "description": meta.get("user_message", ""),
+                    "code": code,
+                })
+
+    if not patches:
+        # Fallback: grab all successful patches regardless of session
+        for e in entries:
+            meta = e.metadata or {}
+            if meta.get("success") and meta.get("code"):
+                patches.append({
+                    "description": meta.get("user_message", ""),
+                    "code": meta["code"],
+                })
+
+    # ── scene_setup.py ───────────────────────────────────────────────────
+    setup_lines = [
+        '"""',
+        f'Scene Setup: {scene_name}',
+        f'Auto-exported by Isaac Assist on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}',
+        f'Patches: {len(patches)}',
+        '"""',
+        'import omni.usd',
+        'from pxr import Usd, UsdGeom, UsdPhysics, PhysxSchema, Gf, Sdf, UsdShade',
+        '',
+        'stage = omni.usd.get_context().get_stage()',
+        '',
+    ]
+    for i, p in enumerate(patches):
+        desc = p["description"] or f"Step {i+1}"
+        setup_lines.append(f'# ── Step {i+1}: {desc}')
+        setup_lines.append(p["code"].rstrip())
+        setup_lines.append('')
+    setup_lines.append('print("Scene setup complete.")')
+    scene_py = "\n".join(setup_lines)
+    (out_dir / "scene_setup.py").write_text(scene_py, encoding="utf-8")
+
+    # ── Detect ROS2 topics from OmniGraph patterns in code ───────────────
+    import re as _re
+    ros2_topics = set()
+    og_node_types = set()
+    robot_paths = set()
+    for p in patches:
+        code = p["code"]
+        # topics: /joint_states, /joint_command, /clock, /tf, etc.
+        ros2_topics.update(_re.findall(r"""['\"](/[a-zA-Z_][a-zA-Z0-9_/]*)['\"]\s*""", code))
+        # OmniGraph node types
+        og_node_types.update(_re.findall(r"""['\"](?:isaacsim|omni\.isaac)\.[a-zA-Z0-9_.]+['\"]""", code))
+        # Robot paths
+        robot_paths.update(_re.findall(r"""['\"](/World/[A-Z][a-zA-Z0-9_]*)['\"]\s*""", code))
+    # Filter to ROS2-style topics only (not USD paths, not physics scene attrs)
+    _NON_TOPIC_PREFIXES = ("/World", "/Physics", "/Collision", "/persistent", "/Render", "/OmniKit")
+    ros2_topics = sorted(
+        t for t in ros2_topics
+        if not any(t.startswith(p) for p in _NON_TOPIC_PREFIXES)
+        and len(t) > 2  # skip bare "/"
+        and not t.endswith(".usd")
+    )
+
+    # ── ros2_topics.yaml ─────────────────────────────────────────────────
+    if ros2_topics or og_node_types:
+        topic_lines = [f"# ROS2 Topics detected in scene: {scene_name}", "topics:"]
+        for t in sorted(ros2_topics):
+            topic_lines.append(f"  - name: \"{t}\"")
+        topic_lines.append("")
+        topic_lines.append("omnigraph_node_types:")
+        for nt in sorted(og_node_types):
+            topic_lines.append(f"  - {nt}")
+        (out_dir / "ros2_topics.yaml").write_text("\n".join(topic_lines) + "\n", encoding="utf-8")
+
+    # ── ros2_launch.py (if ROS2 topics detected) ────────────────────────
+    has_ros2 = bool(ros2_topics)
+    if has_ros2:
+        launch_lines = [
+            '"""',
+            f'ROS2 Launch File for scene: {scene_name}',
+            f'Auto-generated by Isaac Assist on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}',
+            '"""',
+            'from launch import LaunchDescription',
+            'from launch_ros.actions import Node',
+            '',
+            '',
+            'def generate_launch_description():',
+            '    return LaunchDescription([',
+        ]
+        # Add placeholder nodes for each topic
+        for t in sorted(ros2_topics):
+            node_name = t.strip("/").replace("/", "_")
+            launch_lines.append(f'        # Topic: {t}')
+            launch_lines.append(f'        # Node("{node_name}") — configure publisher/subscriber as needed')
+        launch_lines.append('    ])')
+        (out_dir / "ros2_launch.py").write_text("\n".join(launch_lines) + "\n", encoding="utf-8")
+
+    # ── README.md ────────────────────────────────────────────────────────
+    robot_list = ", ".join(f"`{r}`" for r in sorted(robot_paths)) or "None detected"
+    topic_list = "\n".join(f"- `{t}`" for t in sorted(ros2_topics)) or "- None detected"
+    readme = f"""# {scene_name}
+
+Auto-exported by **Isaac Assist** on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}.
+
+## Scene Summary
+
+- **Patches applied:** {len(patches)}
+- **Robots:** {robot_list}
+- **ROS2 Topics:**
+{topic_list}
+
+## Files
+
+| File | Description |
+|------|-------------|
+| `scene_setup.py` | All approved code patches as a single runnable script |
+| `ros2_topics.yaml` | Detected ROS2 topics and OmniGraph node types |
+{"| `ros2_launch.py` | ROS2 launch file template |" if has_ros2 else ""}
+| `README.md` | This file |
+
+## Usage
+
+### Replay Scene in Isaac Sim
+```python
+# In Isaac Sim Script Editor or via Kit RPC:
+exec(open("{out_dir}/scene_setup.py").read())
+```
+
+### ROS2 Topics
+{"Launch the ROS2 nodes alongside Isaac Sim:" if has_ros2 else "No ROS2 topics detected in this scene."}
+{"```bash" if has_ros2 else ""}
+{"ros2 launch " + str(out_dir / "ros2_launch.py") if has_ros2 else ""}
+{"```" if has_ros2 else ""}
+"""
+    (out_dir / "README.md").write_text(readme, encoding="utf-8")
+
+    files_written = ["scene_setup.py", "README.md"]
+    if ros2_topics or og_node_types:
+        files_written.append("ros2_topics.yaml")
+    if has_ros2:
+        files_written.append("ros2_launch.py")
+
+    return {
+        "export_dir": str(out_dir),
+        "files": files_written,
+        "patch_count": len(patches),
+        "ros2_topics": ros2_topics,
+        "robots_detected": sorted(robot_paths),
+        "message": f"Exported {len(patches)} patches to {out_dir}/ — files: {', '.join(files_written)}",
+    }
+
+
+DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
