@@ -878,6 +878,157 @@ with rep.new_layer():
 """
 
 
+# ── Clone Envs (GridCloner) ──────────────────────────────────────────────────
+
+def _gen_clone_envs(args: Dict) -> str:
+    source_path = args["source_path"]
+    num_envs = args["num_envs"]
+    spacing = args.get("spacing", 2.5)
+    collision_filter = args.get("collision_filter", True)
+
+    lines = [
+        "from isaacsim.core.cloner import GridCloner",
+        "",
+        f"cloner = GridCloner(spacing={spacing})",
+        'cloner.define_base_env("/World/envs")',
+        f'prim_paths = cloner.generate_paths("/World/envs/env", {num_envs})',
+        "positions = cloner.clone(",
+        f"    source_prim_path='{source_path}',",
+        "    prim_paths=prim_paths,",
+        "    replicate_physics=True,  # CRITICAL for performance",
+        ")",
+    ]
+    if collision_filter:
+        lines.extend([
+            "# Collision filtering is a SEPARATE step:",
+            "cloner.filter_collisions(",
+            "    physicsscene_path='/World/PhysicsScene',",
+            "    collision_root_path='/World/collisionGroups',",
+            "    prim_paths=prim_paths,",
+            ")",
+        ])
+    lines.append(f"print(f'Cloned {num_envs} environments from {source_path}')")
+    return "\n".join(lines)
+
+
+# ── Debug Draw ──────────────────────────────────────────────────────────────
+
+def _gen_debug_draw(args: Dict) -> str:
+    draw_type = args["draw_type"]
+    points = args["points"]
+    color = args.get("color", [1, 0, 0, 1])
+    size = args.get("size", 5)
+    lifetime = args.get("lifetime", 0)
+
+    lines = [
+        "from isaacsim.util.debug_draw import _debug_draw",
+        "",
+        "draw = _debug_draw.acquire_debug_draw_interface()",
+    ]
+
+    if draw_type == "points":
+        lines.append(f"points = {points}")
+        lines.append(f"colors = [{color}] * len(points)")
+        lines.append(f"sizes = [{size}] * len(points)")
+        lines.append("draw.draw_points(points, colors, sizes)")
+    elif draw_type == "lines":
+        # Points come as pairs: [start, end, start, end, ...]
+        lines.append(f"all_pts = {points}")
+        lines.append("start_points = all_pts[0::2]")
+        lines.append("end_points = all_pts[1::2]")
+        lines.append(f"colors = [{color}] * len(start_points)")
+        lines.append(f"sizes = [{size}] * len(start_points)")
+        lines.append("draw.draw_lines(start_points, end_points, colors, sizes)")
+    elif draw_type == "lines_spline":
+        lines.append(f"points = {points}")
+        lines.append(f"color = {color}")
+        lines.append(f"width = {size}")
+        lines.append("draw.draw_lines_spline(points, color, width, closed=False)")
+
+    if lifetime > 0:
+        lines.extend([
+            "",
+            "# Schedule auto-clear",
+            "import asyncio",
+            f"asyncio.get_event_loop().call_later({lifetime}, draw.clear_points)",
+        ])
+
+    return "\n".join(lines)
+
+
+# ── Occupancy Map ───────────────────────────────────────────────────────────
+
+def _gen_generate_occupancy_map(args: Dict) -> str:
+    origin = args.get("origin", [0, 0])
+    dimensions = args.get("dimensions", [10, 10])
+    resolution = args.get("resolution", 0.05)
+    height_range = args.get("height_range", [0, 2])
+
+    return f"""\
+from isaacsim.asset.gen.omap import MapGenerator
+import carb
+
+gen = MapGenerator()
+gen.update_settings(cell_size={resolution})
+gen.set_transform(
+    origin=carb.Float3({origin[0]}, {origin[1]}, 0),
+    min_bound=carb.Float3({-dimensions[0]/2}, {-dimensions[1]/2}, {height_range[0]}),
+    max_bound=carb.Float3({dimensions[0]/2}, {dimensions[1]/2}, {height_range[1]}),
+)
+gen.generate2d()
+buffer = gen.get_buffer()
+print(f"Occupancy map generated: {int(dimensions[0]/resolution)} x {int(dimensions[1]/resolution)} cells")
+"""
+
+
+# ── Camera inspection / configuration ───────────────────────────────────────
+
+def _gen_inspect_camera(args: Dict) -> str:
+    camera_path = args["camera_path"]
+    return f"""\
+import omni.usd
+from pxr import UsdGeom
+import json
+
+stage = omni.usd.get_context().get_stage()
+cam = UsdGeom.Camera(stage.GetPrimAtPath('{camera_path}'))
+result = {{
+    'camera_path': '{camera_path}',
+    'focal_length': cam.GetFocalLengthAttr().Get(),
+    'horizontal_aperture': cam.GetHorizontalApertureAttr().Get(),
+    'vertical_aperture': cam.GetVerticalApertureAttr().Get(),
+    'clipping_range': list(cam.GetClippingRangeAttr().Get()),
+    'focus_distance': cam.GetFocusDistanceAttr().Get(),
+    'projection': cam.GetProjectionAttr().Get(),
+}}
+print(json.dumps(result))
+"""
+
+
+def _gen_configure_camera(args: Dict) -> str:
+    camera_path = args["camera_path"]
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdGeom, Gf",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        f"cam = UsdGeom.Camera(stage.GetPrimAtPath('{camera_path}'))",
+    ]
+    if "focal_length" in args:
+        lines.append(f"cam.GetFocalLengthAttr().Set({args['focal_length']})")
+    if "horizontal_aperture" in args:
+        lines.append(f"cam.GetHorizontalApertureAttr().Set({args['horizontal_aperture']})")
+    if "vertical_aperture" in args:
+        lines.append(f"cam.GetVerticalApertureAttr().Set({args['vertical_aperture']})")
+    if "clipping_range" in args:
+        cr = args["clipping_range"]
+        lines.append(f"cam.GetClippingRangeAttr().Set(Gf.Vec2f({cr[0]}, {cr[1]}))")
+    if "focus_distance" in args:
+        lines.append(f"cam.GetFocusDistanceAttr().Set({args['focus_distance']})")
+    lines.append(f"print(f'Camera {camera_path} configured')")
+    return "\n".join(lines)
+
+
 # ── Code generation dispatch ─────────────────────────────────────────────────
 
 CODE_GEN_HANDLERS = {
@@ -899,6 +1050,10 @@ CODE_GEN_HANDLERS = {
     "anchor_robot": _gen_anchor_robot,
     "set_viewport_camera": _gen_set_viewport_camera,
     "configure_sdg": _gen_configure_sdg,
+    "clone_envs": _gen_clone_envs,
+    "debug_draw": _gen_debug_draw,
+    "generate_occupancy_map": _gen_generate_occupancy_map,
+    "configure_camera": _gen_configure_camera,
 }
 
 
@@ -1054,7 +1209,19 @@ DATA_HANDLERS = {
     "get_debug_info": _handle_get_debug_info,
     "lookup_knowledge": _handle_lookup_knowledge,
     "explain_error": None,  # handled inline by LLM (no tool execution)
+    "inspect_camera": None,  # placeholder — registered after definition below
 }
+
+# ── Camera inspection (DATA handler — reads camera attrs via Kit RPC) ───────
+
+async def _handle_inspect_camera(args: Dict) -> Dict:
+    camera_path = args["camera_path"]
+    code = _gen_inspect_camera(args)
+    return await kit_tools.queue_exec_patch(code, f"Inspect camera at {camera_path}")
+
+
+DATA_HANDLERS["inspect_camera"] = _handle_inspect_camera
+
 
 # ── ROS2 live handlers (via rosbridge / ros-mcp) ────────────────────────────
 try:

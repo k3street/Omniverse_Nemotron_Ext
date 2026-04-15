@@ -892,6 +892,126 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Environment Cloning ─────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "clone_envs",
+            "description": "Clone a source environment prim into a grid of N parallel environments using isaacsim.core.cloner.GridCloner. Ideal for RL training with replicated physics and optional inter-env collision filtering.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source_path": {"type": "string", "description": "USD path to the source environment prim, e.g. '/World/envs/env_0'"},
+                    "num_envs": {"type": "integer", "description": "Number of environment clones to create"},
+                    "spacing": {"type": "number", "description": "Distance between environments in meters. Default: 2.5"},
+                    "collision_filter": {"type": "boolean", "description": "If true, filter inter-environment collisions. Default: true"},
+                },
+                "required": ["source_path", "num_envs"],
+            },
+        },
+    },
+
+    # ─── Debug Draw ──────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "debug_draw",
+            "description": "Draw debug visualizations (points, lines, spline curves) in the viewport using isaacsim.util.debug_draw. Only supports points, lines, and lines_spline — no spheres, arrows, boxes, or text.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "draw_type": {
+                        "type": "string",
+                        "enum": ["points", "lines", "lines_spline"],
+                        "description": "Type of drawing: 'points' for individual points, 'lines' for paired start/end line segments, 'lines_spline' for a smooth spline curve",
+                    },
+                    "points": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "number"}},
+                        "description": "Coordinates: [[x,y,z], ...] for points/spline, or [[x1,y1,z1],[x2,y2,z2],...] pairs for lines",
+                    },
+                    "color": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "RGBA color [r, g, b, a] 0-1. Default: [1, 0, 0, 1] (red)",
+                    },
+                    "size": {"type": "number", "description": "Point size or line width. Default: 5"},
+                    "lifetime": {"type": "number", "description": "Seconds before auto-clear. 0 = persistent. Default: 0"},
+                },
+                "required": ["draw_type", "points"],
+            },
+        },
+    },
+
+    # ─── Occupancy Map ───────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_occupancy_map",
+            "description": "Generate a 2D occupancy map of the scene using ray casting. Useful for navigation planning, obstacle detection, and workspace analysis.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "origin": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "XY origin of the map [x, y]. Default: [0, 0]",
+                    },
+                    "dimensions": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Width and height of the map in meters [w, h]. Default: [10, 10]",
+                    },
+                    "resolution": {"type": "number", "description": "Cell size in meters. Default: 0.05"},
+                    "height_range": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Min/max Z for ray casting [min_z, max_z]. Default: [0, 2]",
+                    },
+                },
+            },
+        },
+    },
+
+    # ─── Camera Inspection / Configuration ───────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "inspect_camera",
+            "description": "Read and return the current properties of a USD camera prim: focal length, aperture, clipping range, focus distance, and projection type.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "camera_path": {"type": "string", "description": "USD path to the camera prim, e.g. '/World/Camera'"},
+                },
+                "required": ["camera_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_camera",
+            "description": "Set camera properties on a USD camera prim: focal length, aperture, clipping range, focus distance.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "camera_path": {"type": "string", "description": "USD path to the camera prim"},
+                    "focal_length": {"type": "number", "description": "Focal length in mm"},
+                    "horizontal_aperture": {"type": "number", "description": "Horizontal aperture in mm"},
+                    "vertical_aperture": {"type": "number", "description": "Vertical aperture in mm"},
+                    "clipping_range": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Near and far clipping planes [near, far] in scene units",
+                    },
+                    "focus_distance": {"type": "number", "description": "Focus distance in scene units"},
+                },
+                "required": ["camera_path"],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",
