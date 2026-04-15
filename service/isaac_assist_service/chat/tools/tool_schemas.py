@@ -942,4 +942,48 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Smart Debugging (Phase 2 Addendum) ──────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_physics_error",
+            "description": "Pattern-match a PhysX/physics error message against the Top 20 known errors. Returns the affected prim path (if identifiable), error category, specific fix instructions, and severity. Deduplicates repeated errors.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "error_text": {"type": "string", "description": "The physics error message(s) to diagnose. Can include multiple lines."},
+                },
+                "required": ["error_text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "trace_config",
+            "description": "Parse IsaacLab @configclass files to trace a parameter's resolution chain. Returns the final value and each source file + line where the parameter was defined or overridden.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "param_name": {"type": "string", "description": "Dotted parameter name to trace, e.g. 'sim.dt' or 'robot.actuators.stiffness'"},
+                    "env_source_path": {"type": "string", "description": "Path to the IsaacLab environment source file to start tracing from"},
+                },
+                "required": ["param_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_physics_health",
+            "description": "Generate code that performs a comprehensive physics health check on the current scene. Detects missing CollisionAPI, invalid inertia tensors, extreme mass ratios, infinite joint limits, missing PhysicsScene, and metersPerUnit mismatches.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "Optional: check a specific robot articulation instead of the whole scene"},
+                },
+            },
+        },
+    },
 ]

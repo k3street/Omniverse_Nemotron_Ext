@@ -2232,3 +2232,474 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Smart Debugging (Phase 2 Addendum) ─────────────────────────────────────
+
+# ─── 2.X1: diagnose_physics_error (DATA handler) ──────────────────────────
+
+# Top 20 known PhysX error patterns: (regex_pattern, category, fix, severity)
+import re as _re
+
+_PHYSX_ERROR_PATTERNS = [
+    {
+        "pattern": r"negative mass",
+        "category": "mass_configuration",
+        "fix": "Set the mass to a positive value via UsdPhysics.MassAPI. Check that density and volume are both positive.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"joint limit exceeded",
+        "category": "joint_limits",
+        "fix": "Increase the joint limit range or add damping to prevent overshoot. Check RevoluteJoint.LowerLimitAttr/UpperLimitAttr.",
+        "severity": "warning",
+        "prim_regex": r"joint[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"collision mesh invalid|degenerate triangle|invalid mesh",
+        "category": "collision_mesh",
+        "fix": "Regenerate the collision mesh with convex decomposition. Remove degenerate (zero-area) triangles from the source mesh.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"solver diverge|solver divergence|simulation diverge",
+        "category": "solver_divergence",
+        "fix": "Lower the physics timestep (e.g. 1/120 instead of 1/60), increase solver iterations (positionIterations=16, velocityIterations=4), or reduce extreme mass ratios.",
+        "severity": "critical",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"invalid inertia|zero inertia|non-positive inertia",
+        "category": "inertia_tensor",
+        "fix": "Set a valid diagonal inertia tensor via MassAPI.DiagonalInertiaAttr. All components must be > 0.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"missing collision|no collision api|CollisionAPI not applied",
+        "category": "missing_collision",
+        "fix": "Apply UsdPhysics.CollisionAPI to the mesh prim: UsdPhysics.CollisionAPI.Apply(prim).",
+        "severity": "error",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"PhysicsScene.*not found|no physics scene",
+        "category": "missing_physics_scene",
+        "fix": "Create a PhysicsScene prim: stage.DefinePrim('/World/PhysicsScene', 'PhysicsScene'). Apply UsdPhysics.Scene API.",
+        "severity": "critical",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"mass ratio|extreme mass ratio",
+        "category": "mass_ratio",
+        "fix": "Reduce the mass ratio between contacting bodies to below 100:1. Consider using articulations instead of free bodies for robot links.",
+        "severity": "warning",
+        "prim_regex": r"(?:between|bodies)[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"articulation.*loop|closed loop|kinematic loop",
+        "category": "articulation_loop",
+        "fix": "PhysX does not support closed-loop articulations. Break the loop by removing one joint or using a D6 joint with a spring constraint instead.",
+        "severity": "critical",
+        "prim_regex": r"articulation[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"self.intersection|self.penetration|initial overlap|interpenetration",
+        "category": "initial_overlap",
+        "fix": "Move the overlapping bodies apart before starting simulation. Use debug draw to visualize collision shapes.",
+        "severity": "warning",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"too many contacts|contact buffer overflow",
+        "category": "contact_overflow",
+        "fix": "Increase PhysxScene.maxNbContactDataBlocks or simplify collision geometry. Consider using collision filtering.",
+        "severity": "error",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"gpu.*memory|cuda.*out of memory|gpu.*buffer",
+        "category": "gpu_memory",
+        "fix": "Reduce the number of collision pairs, lower particle counts, or use simpler collision shapes (convex hull instead of triangle mesh).",
+        "severity": "critical",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"fixed base.*missing|no fixed base|floating base",
+        "category": "fixed_base",
+        "fix": "Set PhysxArticulationAPI.fixedBase=True on the articulation root prim for stationary robots.",
+        "severity": "warning",
+        "prim_regex": r"articulation[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"nan|NaN detected|not a number",
+        "category": "nan_values",
+        "fix": "NaN typically indicates numerical instability. Check for zero-mass bodies, extreme forces, or missing gravity direction. Lower timestep and increase solver iterations.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"joint drive.*target|drive target out of range",
+        "category": "drive_target",
+        "fix": "Ensure joint drive targets are within the joint limit range. Clamp target values to [lowerLimit, upperLimit].",
+        "severity": "warning",
+        "prim_regex": r"joint[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"invalid transform|singular matrix|non-finite transform",
+        "category": "invalid_transform",
+        "fix": "Reset the prim transform to identity. Check for zero-scale axes or non-orthogonal rotation matrices.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"broadphase.*overflow|pair buffer.*full",
+        "category": "broadphase_overflow",
+        "fix": "Increase PhysxScene.maxBiasCoefficient or reduce the number of dynamic objects. Use collision groups to limit pair generation.",
+        "severity": "error",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"unstable simulation|jitter|oscillat",
+        "category": "simulation_instability",
+        "fix": "Increase solver iterations, add damping to joints, or lower the physics timestep. Check for stiff springs without adequate damping.",
+        "severity": "warning",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"metersPerUnit.*mismatch|scale mismatch|unit mismatch",
+        "category": "unit_mismatch",
+        "fix": "Ensure all referenced assets use the same metersPerUnit. Set UsdGeom.SetStageMetersPerUnit(stage, 1.0) or scale the referenced asset.",
+        "severity": "error",
+        "prim_regex": r"asset[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"exceeded velocity|velocity clamp|max velocity",
+        "category": "velocity_exceeded",
+        "fix": "Increase PhysxRigidBodyAPI.maxLinearVelocity or reduce applied forces. Default max is 100 m/s.",
+        "severity": "warning",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+]
+
+
+async def _handle_diagnose_physics_error(args: Dict) -> Dict:
+    """Pattern-match against known PhysX errors and return diagnosis."""
+    error_text = args.get("error_text", "")
+    if not error_text.strip():
+        return {"matches": [], "message": "No error text provided."}
+
+    matches = []
+    seen_categories = set()
+
+    # Split into lines for deduplication counting
+    lines = error_text.strip().splitlines()
+
+    for entry in _PHYSX_ERROR_PATTERNS:
+        pattern = entry["pattern"]
+        if not _re.search(pattern, error_text, _re.IGNORECASE):
+            continue
+
+        # Count occurrences across lines
+        count = sum(
+            1 for line in lines
+            if _re.search(pattern, line, _re.IGNORECASE)
+        )
+        # Fallback: at least 1 if it matched the full text
+        count = max(count, 1)
+
+        # Try to extract prim path
+        prim_path = None
+        if entry.get("prim_regex"):
+            m = _re.search(entry["prim_regex"], error_text, _re.IGNORECASE)
+            if m:
+                prim_path = m.group(1)
+
+        if entry["category"] not in seen_categories:
+            seen_categories.add(entry["category"])
+            matches.append({
+                "category": entry["category"],
+                "severity": entry["severity"],
+                "fix": entry["fix"],
+                "prim_path": prim_path,
+                "occurrences": count,
+                "dedup_hint": f"This error appeared {count} time(s)." if count > 1 else None,
+            })
+
+    if not matches:
+        return {
+            "matches": [],
+            "message": "No known PhysX error patterns matched. The error may be application-specific or from a non-physics subsystem.",
+        }
+
+    return {
+        "matches": matches,
+        "total_patterns_checked": len(_PHYSX_ERROR_PATTERNS),
+        "message": f"Matched {len(matches)} known error pattern(s).",
+    }
+
+
+DATA_HANDLERS["diagnose_physics_error"] = _handle_diagnose_physics_error
+
+
+# ─── 2.X2: trace_config (DATA handler) ────────────────────────────────────
+
+async def _handle_trace_config(args: Dict) -> Dict:
+    """Parse IsaacLab @configclass files to trace parameter resolution chain."""
+    import ast
+
+    param_name = args.get("param_name", "")
+    env_source_path = args.get("env_source_path", "")
+
+    if not param_name:
+        return {"error": "param_name is required"}
+
+    parts = param_name.split(".")
+    target_attr = parts[-1]
+
+    resolution_chain: List[Dict] = []
+    final_value = None
+
+    def _trace_in_source(source_text: str, source_path: str) -> None:
+        """Walk AST looking for assignments to the target parameter."""
+        nonlocal final_value
+        try:
+            tree = ast.parse(source_text, filename=source_path)
+        except SyntaxError:
+            return
+
+        for node in ast.walk(tree):
+            # Match class-level assignments in @configclass: e.g. `dt = 0.01`
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                if node.target.id == target_attr and node.value is not None:
+                    try:
+                        value = ast.literal_eval(node.value)
+                    except (ValueError, TypeError):
+                        value = ast.dump(node.value)
+                    status = "overridden" if resolution_chain else "active"
+                    if resolution_chain:
+                        # Mark previous entry as overridden
+                        for prev in resolution_chain:
+                            if prev["status"] == "active":
+                                prev["status"] = "overridden"
+                    resolution_chain.append({
+                        "source_file": source_path,
+                        "line": node.lineno,
+                        "value": value,
+                        "status": "active",
+                    })
+                    final_value = value
+
+            # Match simple assignment: e.g. `self.dt = 0.01` or `dt = 0.01`
+            if isinstance(node, ast.Assign):
+                for t in node.targets:
+                    name = None
+                    if isinstance(t, ast.Name):
+                        name = t.id
+                    elif isinstance(t, ast.Attribute):
+                        name = t.attr
+                    if name == target_attr:
+                        try:
+                            value = ast.literal_eval(node.value)
+                        except (ValueError, TypeError):
+                            value = ast.dump(node.value)
+                        for prev in resolution_chain:
+                            if prev["status"] == "active":
+                                prev["status"] = "overridden"
+                        resolution_chain.append({
+                            "source_file": source_path,
+                            "line": node.lineno,
+                            "value": value,
+                            "status": "active",
+                        })
+                        final_value = value
+
+    # If a source path is provided, read it
+    if env_source_path:
+        source_path = Path(env_source_path)
+        if source_path.exists():
+            source_text = source_path.read_text(encoding="utf-8")
+            _trace_in_source(source_text, str(source_path))
+
+            # Look for imports/base classes to trace the chain further
+            try:
+                tree = ast.parse(source_text, filename=str(source_path))
+                for node in ast.walk(tree):
+                    if isinstance(node, (ast.Import, ast.ImportFrom)):
+                        if isinstance(node, ast.ImportFrom) and node.module:
+                            # Try to resolve relative imports to find parent configs
+                            parent_module = node.module
+                            parent_path = source_path.parent / (parent_module.replace(".", "/") + ".py")
+                            if parent_path.exists():
+                                parent_text = parent_path.read_text(encoding="utf-8")
+                                _trace_in_source(parent_text, str(parent_path))
+            except SyntaxError:
+                pass
+        else:
+            return {
+                "error": f"Source file not found: {env_source_path}",
+                "param_name": param_name,
+            }
+
+    return {
+        "param_name": param_name,
+        "final_value": final_value,
+        "resolution_chain": resolution_chain,
+        "message": (
+            f"Traced '{param_name}' through {len(resolution_chain)} source(s)."
+            if resolution_chain
+            else f"Parameter '{param_name}' not found in the provided source(s)."
+        ),
+    }
+
+
+DATA_HANDLERS["trace_config"] = _handle_trace_config
+
+
+# ─── 2.X3: check_physics_health (CODE_GEN handler) ────────────────────────
+
+def _gen_check_physics_health(args: Dict) -> str:
+    """Generate code that checks physics health of the scene."""
+    articulation_path = args.get("articulation_path")
+
+    scope_filter = ""
+    if articulation_path:
+        scope_filter = f"""
+# Scope check to a specific articulation
+scope_root = stage.GetPrimAtPath('{articulation_path}')
+if not scope_root.IsValid():
+    issues.append({{
+        'prim': '{articulation_path}',
+        'severity': 'critical',
+        'issue': 'Articulation prim not found',
+        'fix': 'Verify the articulation path exists in the stage',
+    }})
+    all_prims = []
+else:
+    all_prims = [scope_root] + list(scope_root.GetAllDescendants())
+"""
+    else:
+        scope_filter = """
+# Check all prims in the stage
+root = stage.GetPseudoRoot()
+all_prims = [root] + list(root.GetAllDescendants())
+"""
+
+    return f"""\
+import omni.usd
+import json
+from pxr import UsdGeom, UsdPhysics, Gf, PhysxSchema
+
+stage = omni.usd.get_context().get_stage()
+issues = []
+{scope_filter}
+# 1. Check for missing PhysicsScene prim
+physics_scenes = [p for p in all_prims if p.IsA(UsdPhysics.Scene) or p.GetTypeName() == 'PhysicsScene']
+if not physics_scenes:
+    issues.append({{
+        'prim': '/World/PhysicsScene',
+        'severity': 'critical',
+        'issue': 'Missing PhysicsScene prim',
+        'fix': "Create a PhysicsScene: stage.DefinePrim('/World/PhysicsScene', 'PhysicsScene')",
+    }})
+
+# 2. Check for missing CollisionAPI on mesh prims with RigidBodyAPI
+for prim in all_prims:
+    if not prim.IsValid():
+        continue
+
+    # Missing CollisionAPI on mesh prims that have RigidBodyAPI
+    if prim.IsA(UsdGeom.Mesh) and prim.HasAPI(UsdPhysics.RigidBodyAPI):
+        if not prim.HasAPI(UsdPhysics.CollisionAPI):
+            issues.append({{
+                'prim': str(prim.GetPath()),
+                'severity': 'error',
+                'issue': 'Mesh has RigidBodyAPI but no CollisionAPI',
+                'fix': 'Apply CollisionAPI: UsdPhysics.CollisionAPI.Apply(prim)',
+            }})
+
+    # 3. Invalid inertia tensors (zero or negative)
+    if prim.HasAPI(UsdPhysics.MassAPI):
+        mass_api = UsdPhysics.MassAPI(prim)
+        inertia = mass_api.GetDiagonalInertiaAttr().Get()
+        if inertia is not None:
+            if any(v <= 0 for v in inertia):
+                issues.append({{
+                    'prim': str(prim.GetPath()),
+                    'severity': 'critical',
+                    'issue': f'Invalid inertia tensor: {{inertia}} (zero or negative components)',
+                    'fix': 'Set all diagonal inertia components to positive values',
+                }})
+        mass = mass_api.GetMassAttr().Get()
+        if mass is not None and mass <= 0:
+            issues.append({{
+                'prim': str(prim.GetPath()),
+                'severity': 'critical',
+                'issue': f'Invalid mass: {{mass}} (must be > 0)',
+                'fix': 'Set mass to a positive value',
+            }})
+
+# 4. Extreme mass ratios (>100:1 between rigid bodies)
+mass_map = {{}}
+for prim in all_prims:
+    if not prim.IsValid():
+        continue
+    if prim.HasAPI(UsdPhysics.MassAPI):
+        m = UsdPhysics.MassAPI(prim).GetMassAttr().Get()
+        if m is not None and m > 0:
+            mass_map[str(prim.GetPath())] = m
+if len(mass_map) >= 2:
+    masses = list(mass_map.values())
+    max_m = max(masses)
+    min_m = min(masses)
+    if min_m > 0 and max_m / min_m > 100:
+        issues.append({{
+            'prim': 'scene-wide',
+            'severity': 'warning',
+            'issue': f'Extreme mass ratio: {{max_m/min_m:.1f}}:1 (max={{max_m}}, min={{min_m}})',
+            'fix': 'Reduce mass ratio to below 100:1 for stable simulation',
+        }})
+
+# 5. Joint limits set to +/-inf
+for prim in all_prims:
+    if not prim.IsValid():
+        continue
+    if prim.HasAPI(UsdPhysics.RevoluteJointAPI):
+        joint = UsdPhysics.RevoluteJoint(prim)
+        lower = joint.GetLowerLimitAttr().Get()
+        upper = joint.GetUpperLimitAttr().Get()
+        if lower is not None and upper is not None:
+            if abs(lower) > 1e30 or abs(upper) > 1e30:
+                issues.append({{
+                    'prim': str(prim.GetPath()),
+                    'severity': 'warning',
+                    'issue': f'Joint limits effectively infinite: lower={{lower}}, upper={{upper}}',
+                    'fix': 'Set finite joint limits (e.g. -180 to 180 degrees)',
+                }})
+
+# 6. metersPerUnit mismatch on stage
+meters_per_unit = UsdGeom.GetStageMetersPerUnit(stage)
+if meters_per_unit != 1.0 and meters_per_unit != 0.01:
+    issues.append({{
+        'prim': 'stage',
+        'severity': 'warning',
+        'issue': f'Unusual metersPerUnit: {{meters_per_unit}} (expected 1.0 for meters or 0.01 for cm)',
+        'fix': 'Set UsdGeom.SetStageMetersPerUnit(stage, 1.0) for meter scale',
+    }})
+
+# Summary
+result = {{
+    'healthy': len(issues) == 0,
+    'issue_count': len(issues),
+    'issues': issues,
+    'critical_count': sum(1 for i in issues if i['severity'] == 'critical'),
+    'error_count': sum(1 for i in issues if i['severity'] == 'error'),
+    'warning_count': sum(1 for i in issues if i['severity'] == 'warning'),
+}}
+print(json.dumps(result, indent=2))
+"""
+
+
+CODE_GEN_HANDLERS["check_physics_health"] = _gen_check_physics_health
