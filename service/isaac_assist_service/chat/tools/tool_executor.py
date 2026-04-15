@@ -2232,3 +2232,265 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Workspace & Singularity (Phase 8B Addendum) ─────────────────────────────
+
+def _gen_show_workspace(args: Dict) -> str:
+    """Generate code to visualize robot workspace with manipulability gradient."""
+    art_path = args["articulation_path"]
+    resolution = args.get("resolution", 500000)
+    color_mode = args.get("color_mode", "manipulability")
+
+    return f"""\
+import omni.usd
+import numpy as np
+from pxr import UsdPhysics
+from isaacsim.util.debug_draw import _debug_draw
+
+stage = omni.usd.get_context().get_stage()
+art_prim = stage.GetPrimAtPath('{art_path}')
+if not art_prim.IsValid():
+    raise RuntimeError('Articulation not found: {art_path}')
+
+# Collect revolute joint limits
+joints = []
+for desc in art_prim.GetAllDescendants():
+    if desc.HasAPI(UsdPhysics.RevoluteJointAPI) or desc.IsA(UsdPhysics.RevoluteJoint):
+        lo_attr = desc.GetAttribute('physics:lowerLimit')
+        hi_attr = desc.GetAttribute('physics:upperLimit')
+        lo = np.radians(lo_attr.Get() if lo_attr and lo_attr.Get() is not None else -180.0)
+        hi = np.radians(hi_attr.Get() if hi_attr and hi_attr.Get() is not None else 180.0)
+        joints.append({{'name': desc.GetName(), 'lower': lo, 'upper': hi}})
+
+n_joints = len(joints)
+if n_joints == 0:
+    raise RuntimeError('No revolute joints found')
+
+n_samples = min({resolution}, 500000)
+print(f'Sampling {{n_samples}} configurations across {{n_joints}} joints...')
+
+# Random joint configs within limits
+q_samples = np.zeros((n_samples, n_joints))
+for i, j in enumerate(joints):
+    q_samples[:, i] = np.random.uniform(j['lower'], j['upper'], n_samples)
+
+# Forward kinematics using Lula
+from isaacsim.robot_motion.motion_generation import LulaKinematicsSolver
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+
+try:
+    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config('{art_path}'.split('/')[-1].lower())
+    kin = LulaKinematicsSolver(**kin_config)
+except Exception:
+    print('Robot not in pre-supported list — cannot compute FK')
+    raise
+
+ee_positions = []
+manipulability = []
+eps = 1e-4
+
+for q in q_samples[:min(n_samples, 50000)]:  # cap for Jacobian computation
+    # FK
+    pos, _ = kin.compute_forward_kinematics('{art_path}'.split('/')[-1], q)
+    ee_positions.append(pos)
+
+    # Numerical Jacobian for manipulability
+    J = np.zeros((3, n_joints))
+    for k in range(n_joints):
+        q_plus = q.copy(); q_plus[k] += eps
+        pos_plus, _ = kin.compute_forward_kinematics('{art_path}'.split('/')[-1], q_plus)
+        J[:, k] = (np.array(pos_plus) - np.array(pos)) / eps
+    w = np.sqrt(max(np.linalg.det(J @ J.T), 0))
+    manipulability.append(w)
+
+ee_positions = np.array(ee_positions)
+manipulability = np.array(manipulability)
+
+# Color mapping
+if '{color_mode}' == 'reachability':
+    colors = [(0, 1, 0, 0.5)] * len(ee_positions)  # green
+elif '{color_mode}' == 'singularity_distance':
+    w_norm = manipulability / (manipulability.max() + 1e-10)
+    colors = [(1 - v, v, 0, 0.5) for v in w_norm]  # red=singularity, green=safe
+else:  # manipulability
+    w_norm = manipulability / (manipulability.max() + 1e-10)
+    colors = [(1 - v, v, 0, 0.5) for v in w_norm]  # green=high, red=low
+
+# Draw
+draw = _debug_draw.acquire_debug_draw_interface()
+draw.clear_points()
+points = [(float(p[0]), float(p[1]), float(p[2])) for p in ee_positions]
+draw.draw_points(points, colors, [3] * len(points))
+print(f'Workspace visualized: {{len(points)}} points, mode={color_mode}')
+"""
+
+CODE_GEN_HANDLERS["show_workspace"] = _gen_show_workspace
+
+
+def _gen_check_singularity(args: Dict) -> str:
+    """Generate code to check singularity at a target pose via Jacobian SVD."""
+    art_path = args["articulation_path"]
+    target_pos = args["target_position"]
+    target_ori = args.get("target_orientation")
+
+    ori_code = f"np.array({list(target_ori)})" if target_ori else "None"
+
+    return f"""\
+import numpy as np
+from isaacsim.robot_motion.motion_generation import LulaKinematicsSolver, ArticulationKinematicsSolver
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+import json
+
+robot_name = '{art_path}'.split('/')[-1].lower()
+target_pos = np.array({list(target_pos)})
+target_ori = {ori_code}
+
+# Load kinematics
+try:
+    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config(robot_name)
+    kin = LulaKinematicsSolver(**kin_config)
+except Exception:
+    print(json.dumps({{"status": "error", "message": "Robot not in supported list"}}))
+    raise
+
+# Solve IK
+art = SingleArticulation('{art_path}')
+art_kin = ArticulationKinematicsSolver(art, kin, kin.get_all_frame_names()[-1])
+action, success = art_kin.compute_inverse_kinematics(
+    target_position=target_pos,
+    target_orientation=target_ori,
+)
+
+if not success:
+    print(json.dumps({{"status": "unreachable", "message": "IK failed — target may be outside workspace"}}))
+else:
+    q = np.array(action.joint_positions)
+    n_joints = len(q)
+    eps = 1e-4
+
+    # Numerical Jacobian (6 x n_joints)
+    J = np.zeros((6, n_joints))
+    ee_frame = kin.get_all_frame_names()[-1]
+    pos0, ori0 = kin.compute_forward_kinematics(ee_frame, q)
+    pos0, ori0 = np.array(pos0), np.array(ori0)
+    for k in range(n_joints):
+        q_plus = q.copy(); q_plus[k] += eps
+        pos_p, ori_p = kin.compute_forward_kinematics(ee_frame, q_plus)
+        J[:3, k] = (np.array(pos_p) - pos0) / eps
+        J[3:, k] = (np.array(ori_p) - ori0) / eps
+
+    # SVD condition number
+    _, sigma, _ = np.linalg.svd(J)
+    condition = sigma[0] / max(sigma[-1], 1e-10)
+
+    # Heuristic pre-filters (common 6/7-DOF robots)
+    warnings = []
+    if n_joints >= 5 and abs(q[4]) < np.radians(10):
+        warnings.append('Joint 5 near zero — possible wrist singularity')
+    if n_joints >= 3 and abs(q[2]) < np.radians(8):
+        warnings.append('Joint 3 near extension — possible elbow singularity')
+
+    if condition < 50:
+        status = 'safe'
+    elif condition < 100:
+        status = 'warning'
+    else:
+        status = 'danger'
+
+    result = {{
+        'status': status,
+        'condition_number': round(float(condition), 2),
+        'singular_values': [round(float(s), 4) for s in sigma],
+        'warnings': warnings,
+        'joint_config': [round(float(v), 4) for v in q],
+    }}
+    if status == 'warning':
+        result['message'] = 'Near singularity — motion may be unpredictable'
+    elif status == 'danger':
+        result['message'] = 'At singularity — choose a different target pose'
+
+    print(json.dumps(result))
+"""
+
+CODE_GEN_HANDLERS["check_singularity"] = _gen_check_singularity
+
+
+def _gen_monitor_joint_effort(args: Dict) -> str:
+    """Generate code to monitor joint efforts over time via physics callback."""
+    art_path = args["articulation_path"]
+    duration = args.get("duration_seconds", 5.0)
+
+    return f"""\
+import omni.physx
+import omni.usd
+import numpy as np
+import json
+import time
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+art_prim = stage.GetPrimAtPath('{art_path}')
+if not art_prim.IsValid():
+    raise RuntimeError('Articulation not found: {art_path}')
+
+# Collect joint info
+joint_names = []
+effort_limits = []
+for desc in art_prim.GetAllDescendants():
+    if desc.HasAPI(UsdPhysics.RevoluteJointAPI) or desc.IsA(UsdPhysics.RevoluteJoint):
+        joint_names.append(desc.GetName())
+        max_force = desc.GetAttribute('drive:angular:physics:maxForce')
+        effort_limits.append(max_force.Get() if max_force and max_force.Get() else 1000.0)
+
+n_joints = len(joint_names)
+if n_joints == 0:
+    print(json.dumps({{"error": "No joints found"}}))
+else:
+    _monitor_data = {{
+        'positions': [], 'velocities': [], 'efforts': [],
+        'start_time': time.time(), 'duration': {duration},
+    }}
+
+    def _monitor_step(dt):
+        from isaacsim.core.prims import SingleArticulation
+        art = SingleArticulation('{art_path}')
+        _monitor_data['positions'].append(art.get_joint_positions().tolist())
+        _monitor_data['velocities'].append(art.get_joint_velocities().tolist())
+        _monitor_data['efforts'].append(art.get_applied_joint_efforts().tolist())
+
+        elapsed = time.time() - _monitor_data['start_time']
+        if elapsed >= _monitor_data['duration']:
+            omni.physx.get_physx_interface().get_simulation_event_stream().unsubscribe(_monitor_sub)
+
+            # Compute stats
+            efforts = np.array(_monitor_data['efforts'])
+            results = []
+            for i in range(min(n_joints, efforts.shape[1])):
+                e = efforts[:, i]
+                limit = effort_limits[i] if i < len(effort_limits) else 1000.0
+                utilization = float(np.max(np.abs(e))) / max(limit, 1e-6)
+                results.append({{
+                    'joint': joint_names[i] if i < len(joint_names) else f'joint_{{i}}',
+                    'max_effort': round(float(np.max(np.abs(e))), 2),
+                    'mean_effort': round(float(np.mean(np.abs(e))), 2),
+                    'effort_limit': limit,
+                    'utilization_pct': round(utilization * 100, 1),
+                    'near_limit': utilization > 0.9,
+                }})
+
+            flagged = [r for r in results if r['near_limit']]
+            print(json.dumps({{
+                'joints': results,
+                'duration_s': round(elapsed, 1),
+                'samples': len(_monitor_data['efforts']),
+                'flagged_joints': len(flagged),
+                'message': f'{{len(flagged)}} joints near effort limit (>90%)' if flagged else 'All joints within limits',
+            }}))
+
+    _monitor_sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_monitor_step)
+    print(f'Monitoring joint efforts for {duration}s...')
+"""
+
+CODE_GEN_HANDLERS["monitor_joint_effort"] = _gen_monitor_joint_effort
