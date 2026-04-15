@@ -163,7 +163,7 @@ class MCPServer:
                 "isError": False,
             }
 
-        result = await asyncio.to_thread(self._executor, tool_name, arguments)
+        result = await self._executor(tool_name, arguments)
 
         if result.get("type") == "error":
             return {

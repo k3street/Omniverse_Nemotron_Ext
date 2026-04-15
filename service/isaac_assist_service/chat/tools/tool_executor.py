@@ -1087,8 +1087,17 @@ try:
 except ImportError:
     logger.warning("[ToolExecutor] ros-mcp not installed — ROS2 live tools disabled (pip install ros-mcp)")
     DATA_HANDLERS.update({
+        "ros2_connect": None,
         "ros2_list_topics": None,
+        "ros2_get_topic_type": None,
+        "ros2_get_message_type": None,
+        "ros2_subscribe_once": None,
         "ros2_publish": None,
+        "ros2_publish_sequence": None,
+        "ros2_list_services": None,
+        "ros2_call_service": None,
+        "ros2_list_nodes": None,
+        "ros2_get_node_details": None,
     })
 
 

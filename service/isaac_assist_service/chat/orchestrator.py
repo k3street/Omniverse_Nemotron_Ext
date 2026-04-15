@@ -242,6 +242,10 @@ class ChatOrchestrator:
         executed_tools: List[Dict] = []
         code_patches: List[Dict] = []
 
+        # Per-tool call limits to prevent the LLM from spamming the same tool
+        _TOOL_CALL_LIMITS = {"lookup_knowledge": 2}
+        tool_call_counts: Dict[str, int] = {}
+
         max_rounds = config.max_tool_rounds
         for round_idx in range(max_rounds):
             try:
@@ -275,8 +279,19 @@ class ChatOrchestrator:
                 fn_args = json.loads(fn_args_raw) if isinstance(fn_args_raw, str) else fn_args_raw
                 tc_id = tc.get("id", f"call_{round_idx}_{fn_name}")
 
-                logger.info(f"[{session_id}] TOOL CALL: {fn_name}({json.dumps(fn_args)[:150]})")
-                result = await execute_tool_call(fn_name, fn_args)
+                # Enforce per-tool call limits
+                tool_call_counts[fn_name] = tool_call_counts.get(fn_name, 0) + 1
+                limit = _TOOL_CALL_LIMITS.get(fn_name)
+                if limit and tool_call_counts[fn_name] > limit:
+                    logger.info(f"[{session_id}] Throttled {fn_name} (called {tool_call_counts[fn_name]}x, limit {limit})")
+                    result = {
+                        "type": "error",
+                        "error": f"{fn_name} already called {limit} times this turn. "
+                                 "Use the results you already have and proceed with your answer.",
+                    }
+                else:
+                    logger.info(f"[{session_id}] TOOL CALL: {fn_name}({json.dumps(fn_args)[:150]})")
+                    result = await execute_tool_call(fn_name, fn_args)
 
                 executed_tools.append({
                     "tool": fn_name,

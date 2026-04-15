@@ -37,3 +37,4 @@ workspace/
 
 # Personal launch override (tracked version is launch_isaac.sh)
 launch_isaac_fixed.sh
+=3.0.0

@@ -71,9 +71,18 @@ def get_distiller_provider():
     """
     Return a small / fast LLM provider for context compression.
 
-    Uses DISTILLER_MODEL_NAME (defaults to LOCAL_MODEL_NAME via Ollama).
-    If the main mode is local, reuses the same Ollama instance.
-    If a dedicated distiller model is configured, always uses Ollama for it.
+    Strategy:
+      1. If DISTILLER_MODEL_NAME is explicitly set → use Ollama (user wants local distiller)
+      2. If LLM_MODE is local → use Ollama with LOCAL_MODEL_NAME
+      3. Otherwise → reuse the main cloud provider (works even when Ollama is not running)
     """
-    model = config.distiller_model_name or config.local_model_name
-    return OllamaProvider(model=model)
+    if config.distiller_model_name:
+        # Explicit distiller model configured — always use Ollama for it
+        return OllamaProvider(model=config.distiller_model_name)
+
+    mode = config.llm_mode.lower()
+    if mode == "local":
+        return OllamaProvider(model=config.local_model_name)
+
+    # Cloud modes: reuse the main provider so compression works without Ollama
+    return get_llm_provider()
