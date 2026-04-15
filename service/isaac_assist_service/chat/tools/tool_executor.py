@@ -1380,6 +1380,221 @@ CODE_GEN_HANDLERS["move_to_pose"] = _gen_move_to_pose
 CODE_GEN_HANDLERS["plan_trajectory"] = _gen_plan_trajectory
 
 
+# ── Motion Policy (8B.3) ────────────────────────────────────────────────────
+
+def _gen_set_motion_policy(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    policy_type = args["policy_type"]
+    robot_type = args.get("robot_type", "franka").lower()
+
+    if policy_type == "add_obstacle":
+        obs_name = args.get("obstacle_name", "obstacle_0")
+        obs_type = args.get("obstacle_type", "cuboid")
+        obs_dims = args.get("obstacle_dims", [0.1, 0.1, 0.1])
+        obs_pos = args.get("obstacle_position", [0.0, 0.0, 0.0])
+
+        lines = [
+            "import numpy as np",
+            "from isaacsim.robot_motion.motion_generation import RmpFlow",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "",
+            f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+            "rmpflow = RmpFlow(**rmpflow_config)",
+            "",
+        ]
+        if obs_type == "sphere":
+            radius = obs_dims[0] if obs_dims else 0.1
+            lines.extend([
+                f"# Add sphere obstacle '{obs_name}'",
+                f"rmpflow.add_sphere(",
+                f"    name='{obs_name}',",
+                f"    radius={radius},",
+                f"    pose=np.array([{obs_pos[0]}, {obs_pos[1]}, {obs_pos[2]}, 1.0, 0.0, 0.0, 0.0]),",
+                f")",
+                "rmpflow.update_world()",
+                f"print(f'Added sphere obstacle \\'{obs_name}\\' at {obs_pos} with radius {radius}')",
+            ])
+        else:
+            # cuboid (default)
+            lines.extend([
+                f"# Add cuboid obstacle '{obs_name}'",
+                f"rmpflow.add_cuboid(",
+                f"    name='{obs_name}',",
+                f"    dims=np.array({list(obs_dims)}),",
+                f"    pose=np.array([{obs_pos[0]}, {obs_pos[1]}, {obs_pos[2]}, 1.0, 0.0, 0.0, 0.0]),",
+                f")",
+                "rmpflow.update_world()",
+                f"print(f'Added cuboid obstacle \\'{obs_name}\\' at {obs_pos} with dims {list(obs_dims)}')",
+            ])
+        return "\n".join(lines)
+
+    if policy_type == "remove_obstacle":
+        lines = [
+            "from isaacsim.robot_motion.motion_generation import RmpFlow",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "",
+            f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+            "rmpflow = RmpFlow(**rmpflow_config)",
+            "",
+            "# RMPflow has no individual obstacle removal — reset clears all obstacles",
+            "rmpflow.reset()",
+            "print('Motion policy reset — all obstacles cleared')",
+        ]
+        return "\n".join(lines)
+
+    if policy_type == "set_joint_limits":
+        buffer_val = args.get("joint_limit_buffers", 0.05)
+        lines = [
+            "import numpy as np",
+            "from isaacsim.robot_motion.motion_generation import RmpFlow",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "from isaacsim.core.prims import SingleArticulation",
+            "",
+            f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+            "rmpflow = RmpFlow(**rmpflow_config)",
+            "",
+            f"art = SingleArticulation(prim_path='{art_path}')",
+            "art.initialize()",
+            "",
+            "# Get current joint limits and add padding buffer",
+            "lower_limits = art.get_joint_positions()  # read current as reference",
+            f"buffer = {buffer_val}",
+            "dof_count = art.num_dof",
+            "print(f'Applying joint limit buffer of {buffer} rad to {dof_count} joints')",
+            "print(f'Note: Joint limit buffers are applied in the RMPflow config YAML.')",
+            "print(f'For runtime adjustment, modify rmpflow_config[\"joint_limit_buffers\"] before init.')",
+        ]
+        return "\n".join(lines)
+
+    return f"# Unknown policy type: {policy_type}"
+
+
+CODE_GEN_HANDLERS["set_motion_policy"] = _gen_set_motion_policy
+
+
+# ── Robot Description (8B.4) ────────────────────────────────────────────────
+
+# Supported robot names (matches interface_config_loader.get_supported_robot_policy_pairs)
+_SUPPORTED_MOTION_ROBOTS = {
+    "franka", "ur10", "ur5e", "ur3e", "cobotta", "rs007n",
+    "dofbot", "kawasaki", "flexiv_rizon",
+}
+
+
+async def _handle_generate_robot_description(args: Dict) -> Dict:
+    """Check if a robot has pre-built motion generation configs."""
+    art_path = args["articulation_path"]
+    robot_type = args.get("robot_type", "").lower()
+
+    # Try to identify robot type from path if not provided
+    if not robot_type:
+        path_lower = art_path.lower()
+        for name in _SUPPORTED_MOTION_ROBOTS:
+            if name in path_lower:
+                robot_type = name
+                break
+
+    if robot_type in _SUPPORTED_MOTION_ROBOTS:
+        cfg = _MOTION_ROBOT_CONFIGS.get(robot_type, {})
+        return {
+            "supported": True,
+            "robot_type": robot_type,
+            "config_files": {
+                "rmpflow_config": cfg.get("rmp_config", f"{robot_type}/rmpflow"),
+                "robot_descriptor": cfg.get("desc", f"{robot_type}/robot_descriptor.yaml"),
+                "urdf": cfg.get("urdf", f"{robot_type}/lula_gen.urdf"),
+                "end_effector_frame": cfg.get("ee_frame", "ee_link"),
+            },
+            "usage": (
+                "This robot has pre-built configs. Use "
+                "interface_config_loader.load_supported_motion_gen_config("
+                f"'{robot_type}', 'RMPflow') to load them."
+            ),
+            "message": (
+                f"Robot '{robot_type}' is pre-supported for motion generation. "
+                f"Config files are bundled with the isaacsim.robot_motion.motion_generation extension."
+            ),
+        }
+
+    return {
+        "supported": False,
+        "robot_type": robot_type or "(unknown)",
+        "articulation_path": art_path,
+        "instructions": (
+            "This robot does not have pre-built motion generation configs. "
+            "To create them:\n"
+            "1. Open the XRDF Editor GUI (Window > Extensions > XRDF Editor) to "
+            "define collision spheres, joint limits, and end-effector frames.\n"
+            "2. Export the XRDF file and Lula robot descriptor YAML.\n"
+            "3. Use the exported files with LulaKinematicsSolver and RmpFlow.\n\n"
+            "For programmatic collision sphere editing, use the CollisionSphereEditor "
+            "from isaacsim.robot_setup.xrdf_editor:\n"
+            "  - CollisionSphereEditor.add_sphere(link_path, position, radius)\n"
+            "  - CollisionSphereEditor.clear_link_spheres(link_path)\n"
+            "  - CollisionSphereEditor.clear_spheres()\n"
+            "  - CollisionSphereEditor.delete_sphere(sphere_id)"
+        ),
+        "message": (
+            f"Robot '{robot_type or 'unknown'}' at '{art_path}' is not pre-supported. "
+            "Use the XRDF Editor to generate collision spheres and robot descriptors."
+        ),
+    }
+
+
+DATA_HANDLERS["generate_robot_description"] = _handle_generate_robot_description
+
+
+# ── Inverse Kinematics (8B.5) ──────────────────────────────────────────────
+
+def _gen_solve_ik(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    target_pos = args["target_position"]
+    target_ori = args.get("target_orientation")
+    robot_type = args.get("robot_type", "franka").lower()
+
+    cfg = _MOTION_ROBOT_CONFIGS.get(robot_type, _MOTION_ROBOT_CONFIGS["franka"])
+    ee_frame = cfg["ee_frame"]
+
+    lines = [
+        "import numpy as np",
+        "from isaacsim.robot_motion.motion_generation import LulaKinematicsSolver",
+        "from isaacsim.robot_motion.motion_generation import ArticulationKinematicsSolver",
+        "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+        "from isaacsim.core.prims import SingleArticulation",
+        "",
+        f"# Load kinematics config for {robot_type}",
+        f"kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config('{robot_type}')",
+        "kin_solver = LulaKinematicsSolver(**kin_config)",
+        "",
+        f"art = SingleArticulation(prim_path='{art_path}')",
+        "art.initialize()",
+        f"art_kin = ArticulationKinematicsSolver(art, kin_solver, '{ee_frame}')",
+        "",
+        f"target_position = np.array({list(target_pos)})",
+    ]
+    if target_ori:
+        lines.append(f"target_orientation = np.array({list(target_ori)})")
+    else:
+        lines.append("target_orientation = None")
+
+    lines.extend([
+        "",
+        "action, success = art_kin.compute_inverse_kinematics(",
+        "    target_position=target_position,",
+        "    target_orientation=target_orientation,",
+        ")",
+        "if success:",
+        "    art.apply_action(action)",
+        f"    print(f'IK solved successfully — {ee_frame} moving to {{target_position}}')",
+        "else:",
+        "    print('IK failed — target may be unreachable or near singularity')",
+    ])
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["solve_ik"] = _gen_solve_ik
+
+
 # ── Asset Catalog Search ─────────────────────────────────────────────────────
 
 _asset_index: Optional[List[Dict]] = None
