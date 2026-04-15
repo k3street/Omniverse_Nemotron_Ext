@@ -1019,6 +1019,84 @@ Stop the service and restart with:
 
 ---
 
+### T59 — Browse Nucleus Content Library
+**Prerequisite:** Isaac Sim running (Terminal 2). A Nucleus server accessible (local or cloud).
+
+_This test uses `omni.client` inside Isaac Sim's runtime (via Kit RPC) to browse Omniverse Nucleus server directories. The content library contains thousands of USD assets — robots, environments, props, materials._
+
+**Type:**
+> Browse the Isaac Sim content library for available robots
+
+**Expected:** Isaac Assist calls `nucleus_browse` with path `/NVIDIA/Assets/Isaac/5.1/Robots`. Returns a list of folders/files:
+- `Franka/`, `UR10/`, `Jetbot/`, `Carter/`, `Spot/`, etc.
+
+**Then type:**
+> Show me what's inside the Franka folder on Nucleus
+
+**Expected:** Calls `nucleus_browse` with path `/NVIDIA/Assets/Isaac/5.1/Robots/Franka`. Returns USD files:
+- `franka.usd`, `franka_instanceable.usd`, etc.
+
+**Then try environments:**
+> Browse the Nucleus content library for warehouse environments
+
+**Expected:** Calls `nucleus_browse` with path `/NVIDIA/Assets/Isaac/5.1/Environments` or similar. Returns available environment folders.
+
+_Skip T59 if no Nucleus server is accessible. The tool will return a connection error — Isaac Assist should explain this._
+
+---
+
+### T60 — Download Asset from Nucleus
+**Prerequisite:** T59 (Nucleus browsable). Isaac Sim running.
+
+**Type:**
+> Download the UR10 robot from Nucleus to my local assets folder
+
+**Expected flow:**
+1. Isaac Assist calls `nucleus_browse` to find the UR10 path
+2. Calls `download_asset` with `nucleus_url: "omniverse://localhost/NVIDIA/Assets/Isaac/5.1/Robots/UR10/ur10.usd"`
+3. Asset is copied to `Desktop/assets/Nucleus_Downloads/Robots/UR10/ur10.usd`
+4. Registered in `asset_catalog.json` with category "robot"
+
+**Verify:**
+- File exists at `~/Desktop/assets/Nucleus_Downloads/Robots/UR10/ur10.usd`
+- Run: `python3 -c "import json; c=json.load(open('$HOME/Desktop/assets/asset_catalog.json')); print([a for a in c['assets'] if 'nucleus_download' in a.get('tags',[])][-1])"`
+- The new entry has `"nucleus_source"` field and `"nucleus_download"` tag
+
+**Then try a duplicate download:**
+> Download the UR10 robot from Nucleus again
+
+**Expected:** Returns `"status": "already_exists"` with the local path — no re-download.
+
+---
+
+### T61 — Nucleus Search → Download → Import (End-to-End)
+**Prerequisite:** Isaac Sim running. Nucleus accessible. Fresh scene.
+
+_This test chains the full workflow: search the catalog, download a missing asset, then import it into the scene._
+
+**Type:**
+> I need a Ridgeback robot with a Franka arm. Search for it, download it if needed, and import it at the origin.
+
+**Expected flow:**
+1. Isaac Assist calls `catalog_search` with query "ridgeback franka"
+2. If found locally → calls `import_robot` directly
+3. If NOT found locally → calls `nucleus_browse` to locate it on Nucleus → calls `download_asset` → then `import_robot`
+4. Code patch references the local path for the USD
+
+**Verify after approval:**
+- Robot appears at the origin in the viewport
+- The asset is now in the local catalog (searchable for future sessions)
+- `catalog_search` for "ridgeback franka" returns the local path
+
+**Via API (catalog verification):**
+```bash
+curl -s -X POST http://localhost:8000/api/v1/chat/message \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "test", "message": "Search the asset catalog for ridgeback"}' | python3 -m json.tool
+```
+
+---
+
 ## Summary Checklist
 
 | # | Category | Prompt | Requires Approval? |
@@ -1081,6 +1159,9 @@ Stop the service and restart with:
 | T56 | ROS2 Live | Service discovery & call | ❌ (data only) |
 | T57 | ROS2 Live | End-to-end pipeline + ROS2 | ✅ (auto-approve) + ❌ (data) |
 | T58 | Settings | LLM mode switch (cloud ↔ local) | N/A (API + chat verify) |
+| T59 | Nucleus | Browse content library | ❌ (data only) |
+| T60 | Nucleus | Download asset to local | ❌ (data only) |
+| T61 | Nucleus | Search → Download → Import | ✅ (import patch) |
 
 ## Troubleshooting
 
@@ -1095,3 +1176,5 @@ Stop the service and restart with:
 | "No response from rosbridge" | rosbridge_server not running → start it: `ros2 launch rosbridge_server rosbridge_websocket_launch.xml` |
 | ROS2 tools return "Connection refused" | Check `ROSBRIDGE_HOST`/`ROSBRIDGE_PORT` in `.env` match rosbridge config (default: 127.0.0.1:9090) |
 | "ros-mcp not installed" warning in logs | Run `pip install ros-mcp` in the service Python environment |
+| "Kit RPC failed" on Nucleus browse | Isaac Sim not running or Nucleus server not accessible — check `omniverse://localhost` in content browser |
+| Download returns "copy failed" | Nucleus server may require authentication — check Omniverse Hub login |

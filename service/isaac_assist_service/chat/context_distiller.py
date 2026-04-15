@@ -69,7 +69,7 @@ TOOL_CATEGORIES: Dict[str, List[str]] = {
     "knowledge": ["lookup_knowledge"],
     "scene_builder": [
         "generate_scene_blueprint", "build_scene_from_blueprint",
-        "catalog_search",
+        "catalog_search", "nucleus_browse", "download_asset",
     ],
     "rl_training": ["create_isaaclab_env", "launch_training"],
     "sdg": ["configure_sdg"],
@@ -105,6 +105,8 @@ _KEYWORD_CATEGORIES: List[tuple] = [
      {"knowledge"}),
     (re.compile(r"warehouse|kitchen|scene.?build|blueprint|layout|design.?a", re.I),
      {"scene_builder", "usd_core"}),
+    (re.compile(r"nucleus|content.?library|browse.?asset|download.?asset|omniverse://|pull.?asset", re.I),
+     {"scene_builder"}),
     (re.compile(r"isaaclab|reinforcement|rl|train|gymnasium", re.I),
      {"rl_training"}),
     (re.compile(r"replicator|synth|dataset|annotator|sdg", re.I),

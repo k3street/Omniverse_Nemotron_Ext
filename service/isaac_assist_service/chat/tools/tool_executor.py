@@ -1417,19 +1417,38 @@ _CATALOG_ROBOTS = {
 
 
 def _build_asset_index() -> List[Dict]:
-    """Walk asset directories and build a searchable index of USD files."""
+    """Build searchable index from asset_catalog.json (fast) + known robots."""
     global _asset_index
     if _asset_index is not None:
         return _asset_index
 
     index = []
+    assets_root = getattr(config, "assets_root_path", None) or ""
+    robots_sub = getattr(config, "assets_robots_subdir", None) or "Collected_Robots"
+    robots_dir = f"{assets_root}/{robots_sub}" if assets_root else ""
 
-    # 1. Robots from the known robot name map
-    robots_dir = ""
-    assets_root = getattr(config, "assets_root_path", None)
-    robots_sub = getattr(config, "assets_robots_subdir", None)
-    if assets_root and robots_sub:
-        robots_dir = f"{assets_root}/{robots_sub}"
+    # 1. Load asset_catalog.json (5,000+ entries with rich metadata)
+    catalog_path = Path(assets_root) / "asset_catalog.json" if assets_root else None
+    catalog_loaded = False
+    if catalog_path and catalog_path.exists():
+        try:
+            catalog = json.loads(catalog_path.read_text())
+            for entry in catalog.get("assets", []):
+                tags = entry.get("tags", [])
+                index.append({
+                    "name": entry.get("name", ""),
+                    "type": entry.get("category", "prop"),
+                    "path": entry.get("usd_path", ""),
+                    "rel_path": entry.get("relative_path", ""),
+                    "tags": tags,
+                    "source": "asset_catalog",
+                })
+            catalog_loaded = True
+            logger.info(f"[AssetIndex] Loaded {len(index)} entries from asset_catalog.json")
+        except Exception as e:
+            logger.warning(f"[AssetIndex] Failed to load asset_catalog.json: {e}")
+
+    # 2. Always add the known robot name map (canonical names → files)
     for name, filename in _CATALOG_ROBOTS.items():
         index.append({
             "name": name,
@@ -1438,54 +1457,46 @@ def _build_asset_index() -> List[Dict]:
             "source": "robot_library",
         })
 
-    # 2. Walk user asset dirs if configured
-    search_dirs = []
-    assets_root = getattr(config, "assets_root_path", None)
-    if assets_root:
-        search_dirs.append(Path(assets_root))
-
-    # 3. Walk workspace/knowledge for any asset manifests
+    # 3. JSONL manifest (user-added entries)
     manifest_path = _WORKSPACE / "knowledge" / "asset_manifest.jsonl"
     if manifest_path.exists():
         for line in manifest_path.read_text().splitlines():
             line = line.strip()
             if line:
                 try:
-                    entry = json.loads(line)
-                    index.append(entry)
+                    index.append(json.loads(line))
                 except json.JSONDecodeError:
                     pass
 
-    # 4. Walk asset directories for USD/USDZ/USDA files
-    for d in search_dirs:
-        if not d.exists():
-            continue
-        try:
-            for f in d.rglob("*"):
-                if f.suffix.lower() in (".usd", ".usda", ".usdz"):
-                    rel = f.relative_to(d)
-                    name_parts = rel.stem.replace("_", " ").replace("-", " ")
-                    # Infer type from path
-                    path_str = str(rel).lower()
-                    if any(k in path_str for k in ("robot", "arm", "gripper", "manipulator")):
-                        atype = "robot"
-                    elif any(k in path_str for k in ("env", "room", "warehouse", "house", "kitchen")):
-                        atype = "environment"
-                    elif any(k in path_str for k in ("sensor", "camera", "lidar")):
-                        atype = "sensor"
-                    elif any(k in path_str for k in ("material", "mdl", "texture")):
-                        atype = "material"
-                    else:
-                        atype = "prop"
-                    index.append({
-                        "name": name_parts,
-                        "type": atype,
-                        "path": str(f),
-                        "source": "filesystem",
-                        "rel_path": str(rel),
-                    })
-        except PermissionError:
-            pass
+    # 4. Filesystem walk only if catalog wasn't loaded (slow fallback)
+    if not catalog_loaded and assets_root:
+        search_dir = Path(assets_root)
+        if search_dir.exists():
+            try:
+                for f in search_dir.rglob("*"):
+                    if f.suffix.lower() in (".usd", ".usda", ".usdz"):
+                        rel = f.relative_to(search_dir)
+                        name_parts = rel.stem.replace("_", " ").replace("-", " ")
+                        path_str = str(rel).lower()
+                        if any(k in path_str for k in ("robot", "arm", "gripper", "manipulator")):
+                            atype = "robot"
+                        elif any(k in path_str for k in ("env", "room", "warehouse", "house", "kitchen")):
+                            atype = "environment"
+                        elif any(k in path_str for k in ("sensor", "camera", "lidar")):
+                            atype = "sensor"
+                        elif any(k in path_str for k in ("material", "mdl", "texture")):
+                            atype = "material"
+                        else:
+                            atype = "prop"
+                        index.append({
+                            "name": name_parts,
+                            "type": atype,
+                            "path": str(f),
+                            "source": "filesystem",
+                            "rel_path": str(rel),
+                        })
+            except PermissionError:
+                pass
 
     _asset_index = index
     return _asset_index
@@ -1508,7 +1519,8 @@ async def _handle_catalog_search(args: Dict) -> Dict:
         name = asset.get("name", "").lower()
         path = asset.get("path", "").lower()
         rel_path = asset.get("rel_path", "").lower()
-        searchable = f"{name} {path} {rel_path}"
+        tags = " ".join(asset.get("tags", [])).lower() if asset.get("tags") else ""
+        searchable = f"{name} {path} {rel_path} {tags}"
 
         # Score: exact match > all words present > partial
         if query == name:
@@ -1534,6 +1546,191 @@ async def _handle_catalog_search(args: Dict) -> Dict:
 
 
 DATA_HANDLERS["catalog_search"] = _handle_catalog_search
+
+
+# ── Nucleus Browse & Download ────────────────────────────────────────────────
+
+async def _handle_nucleus_browse(args: Dict) -> Dict:
+    """Browse a Nucleus server directory via Kit RPC (omni.client inside Isaac Sim)."""
+    nucleus_path = args.get("path", "/NVIDIA/Assets/Isaac/5.1")
+    # Sanitize: strip shell metacharacters, only allow alphanumeric + / . _ -
+    import re as _re
+    if not _re.match(r'^[a-zA-Z0-9/_. :-]+$', nucleus_path):
+        return {"error": "Invalid path characters"}
+
+    server = args.get("server", "omniverse://localhost")
+    if not _re.match(r'^omniverse://[a-zA-Z0-9._-]+(:\d+)?$', server):
+        return {"error": "Invalid Nucleus server URL. Expected format: omniverse://hostname"}
+
+    full_path = f"{server}{nucleus_path}"
+    limit = min(args.get("limit", 50), 200)
+
+    code = f"""
+import omni.client
+import json
+
+result, entries = omni.client.list("{full_path}")
+items = []
+if result == omni.client.Result.OK:
+    for entry in entries[:{limit}]:
+        items.append({{
+            "name": entry.relative_path,
+            "size": entry.size,
+            "is_folder": entry.flags & omni.client.ItemFlags.CAN_HAVE_CHILDREN != 0,
+            "modified_time": str(entry.modified_time) if hasattr(entry, 'modified_time') else "",
+        }})
+print(json.dumps({{"status": str(result), "path": "{full_path}", "items": items, "count": len(items)}}))
+"""
+    result = await kit_tools.exec_sync(code, timeout=15)
+    if not result.get("success"):
+        return {"error": f"Kit RPC failed: {result.get('output', 'unknown')}",
+                "hint": "Is Isaac Sim running? Is a Nucleus server accessible?"}
+
+    output = result.get("output", "").strip()
+    # Parse the last line as JSON (exec_sync may include other prints)
+    for line in reversed(output.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                pass
+    return {"error": "Failed to parse Nucleus response", "raw_output": output[:500]}
+
+
+async def _handle_download_asset(args: Dict) -> Dict:
+    """Download asset from Nucleus to local Desktop/assets and register in catalog."""
+    import re as _re
+
+    nucleus_url = args.get("nucleus_url", "")
+    # Validate URL format
+    if not nucleus_url.startswith("omniverse://"):
+        return {"error": "nucleus_url must start with omniverse://"}
+    if not _re.match(r'^omniverse://[a-zA-Z0-9._:-]+/[a-zA-Z0-9/_. -]+$', nucleus_url):
+        return {"error": "Invalid nucleus_url format"}
+
+    assets_root = getattr(config, "assets_root_path", "") or ""
+    if not assets_root:
+        return {"error": "ASSETS_ROOT_PATH not configured in .env"}
+
+    # Determine local destination
+    # omniverse://localhost/NVIDIA/Assets/Isaac/5.1/Robots/Franka/franka.usd
+    # → Desktop/assets/Nucleus_Downloads/Robots/Franka/franka.usd
+    subdir = args.get("local_subdir", "")
+    if not subdir:
+        # Auto-derive from Nucleus path: strip server + /NVIDIA/Assets/Isaac/X.X/
+        path_part = nucleus_url.split("/", 3)[-1] if "/" in nucleus_url else ""
+        # Remove common prefixes
+        for prefix in ("NVIDIA/Assets/Isaac/5.1/", "NVIDIA/Assets/Isaac/", "NVIDIA/Assets/", "NVIDIA/"):
+            if path_part.startswith(prefix):
+                path_part = path_part[len(prefix):]
+                break
+        subdir = f"Nucleus_Downloads/{path_part}" if path_part else "Nucleus_Downloads"
+
+    # Extract just the directory part (not filename)
+    if subdir.endswith(".usd") or subdir.endswith(".usda") or subdir.endswith(".usdz"):
+        subdir = str(Path(subdir).parent)
+
+    local_dir = Path(assets_root) / subdir
+    filename = nucleus_url.rsplit("/", 1)[-1]
+    # Sanitize filename
+    filename = _re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+    local_path = local_dir / filename
+
+    if local_path.exists():
+        return {
+            "status": "already_exists",
+            "local_path": str(local_path),
+            "message": f"Asset already downloaded at {local_path}",
+        }
+
+    # Escape paths for code injection safety
+    safe_nucleus = nucleus_url.replace('"', '').replace("'", "").replace("\\", "")
+    safe_local = str(local_path).replace('"', '').replace("'", "").replace("\\", "")
+    safe_dir = str(local_dir).replace('"', '').replace("'", "").replace("\\", "")
+
+    code = f"""
+import omni.client
+import os
+import json
+
+os.makedirs("{safe_dir}", exist_ok=True)
+result = omni.client.copy("{safe_nucleus}", "{safe_local}")
+if result == omni.client.Result.OK:
+    size = os.path.getsize("{safe_local}") if os.path.exists("{safe_local}") else 0
+    print(json.dumps({{"status": "ok", "local_path": "{safe_local}", "size": size}}))
+else:
+    print(json.dumps({{"status": "error", "result": str(result), "nucleus_url": "{safe_nucleus}"}}))
+"""
+    result = await kit_tools.exec_sync(code, timeout=60)
+    if not result.get("success"):
+        return {"error": f"Kit RPC download failed: {result.get('output', 'unknown')}"}
+
+    output = result.get("output", "").strip()
+    dl_result = None
+    for line in reversed(output.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                dl_result = json.loads(line)
+                break
+            except json.JSONDecodeError:
+                pass
+
+    if not dl_result or dl_result.get("status") != "ok":
+        return {"error": "Download failed", "details": dl_result or output[:500]}
+
+    # Register in asset_catalog.json
+    catalog_path = Path(assets_root) / "asset_catalog.json"
+    asset_name = Path(filename).stem.replace("_", " ").replace("-", " ")
+    # Infer category from path
+    path_lower = nucleus_url.lower()
+    if any(k in path_lower for k in ("robot", "arm", "gripper", "manipulator")):
+        category = "robot"
+    elif any(k in path_lower for k in ("env", "room", "warehouse", "scene")):
+        category = "scene"
+    elif any(k in path_lower for k in ("sensor", "camera", "lidar")):
+        category = "sensor"
+    elif any(k in path_lower for k in ("prop", "object", "furniture")):
+        category = "prop"
+    else:
+        category = args.get("category", "prop")
+
+    new_entry = {
+        "name": asset_name,
+        "usd_path": str(local_path),
+        "relative_path": str(local_path.relative_to(Path(assets_root))),
+        "category": category,
+        "tags": [w for w in asset_name.lower().split() if len(w) > 1] + ["nucleus_download"],
+        "nucleus_source": nucleus_url,
+        "meters_per_unit": 1.0,
+    }
+
+    if catalog_path.exists():
+        try:
+            catalog = json.loads(catalog_path.read_text())
+            catalog["assets"].append(new_entry)
+            catalog["metadata"]["total_assets"] = len(catalog["assets"])
+            catalog_path.write_text(json.dumps(catalog, indent=2))
+        except Exception as e:
+            logger.warning(f"[DownloadAsset] Failed to update catalog: {e}")
+
+    # Invalidate cached asset index so next search picks up the new entry
+    global _asset_index
+    _asset_index = None
+
+    return {
+        "status": "downloaded",
+        "local_path": str(local_path),
+        "size": dl_result.get("size", 0),
+        "category": category,
+        "nucleus_source": nucleus_url,
+        "message": f"Downloaded {filename} to {local_path} ({dl_result.get('size', 0)} bytes). Registered in asset catalog.",
+    }
+
+
+DATA_HANDLERS["nucleus_browse"] = _handle_nucleus_browse
+DATA_HANDLERS["download_asset"] = _handle_download_asset
 
 
 # ── Scene Builder ────────────────────────────────────────────────────────────
