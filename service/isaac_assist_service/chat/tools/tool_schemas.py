@@ -908,4 +908,72 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Eureka: LLM Reward Generation ───────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_reward",
+            "description": "Generate a Eureka-style LLM reward function configuration for a DirectRLEnv. Reads the environment source code and produces the initial reward generation prompt with Eureka hyperparameters. Only works with DirectRLEnv (NOT ManagerBasedRLEnv).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_description": {"type": "string", "description": "Natural language description of the RL task — e.g. 'make the robot arm reach a target position'"},
+                    "env_source_path": {"type": "string", "description": "Path to the DirectRLEnv Python file — e.g. '/workspace/envs/reach_env.py'"},
+                    "num_candidates": {"type": "integer", "description": "Number of reward candidates per iteration (K). Default: 4"},
+                    "num_iterations": {"type": "integer", "description": "Number of Eureka evolution iterations. Default: 5"},
+                },
+                "required": ["task_description", "env_source_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "evaluate_reward",
+            "description": "Evaluate a candidate reward function by launching a short training run and collecting per-component metrics. Writes the reward code to a temp file, runs training as a subprocess, and returns fitness + component breakdown.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reward_code": {"type": "string", "description": "Python reward function code to evaluate"},
+                    "env_id": {"type": "string", "description": "Gymnasium environment ID — e.g. 'Isaac-Reach-Franka-Direct-v0'"},
+                    "num_steps": {"type": "integer", "description": "Training steps per candidate. Default: 1000"},
+                },
+                "required": ["reward_code", "env_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "iterate_reward",
+            "description": "Generate a mutation prompt for the next Eureka iteration. Combines the previous reward function, per-component training metrics, and optional user feedback into a structured prompt for the LLM to produce an improved reward.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prev_reward_code": {"type": "string", "description": "Previous iteration's reward function code"},
+                    "metrics": {
+                        "type": "object",
+                        "description": "Training metrics: { fitness: float, components: { name: { mean: [float], converged: bool } }, task_success_rate: float }",
+                    },
+                    "user_feedback": {"type": "string", "description": "Optional user feedback — e.g. 'it keeps dropping the handle'"},
+                },
+                "required": ["prev_reward_code", "metrics"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "eureka_status",
+            "description": "Get the current status of a running Eureka reward optimization run. Returns iteration progress, best fitness so far, and candidates evaluated.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "run_id": {"type": "string", "description": "Eureka run identifier"},
+                },
+                "required": ["run_id"],
+            },
+        },
+    },
 ]

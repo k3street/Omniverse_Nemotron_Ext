@@ -2026,3 +2026,218 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ─── Eureka: LLM Reward Generation ─────────────────────────────────────────
+
+# In-memory store for Eureka run status (keyed by run_id)
+_eureka_runs: Dict[str, Dict] = {}
+
+
+def _format_component_metrics(metrics: Dict) -> str:
+    """Format per-component training metrics for the mutation prompt."""
+    components = metrics.get("components", {})
+    if not components:
+        return "No component metrics available."
+    lines = []
+    for name, data in components.items():
+        mean_vals = data.get("mean", [])
+        converged = data.get("converged", False)
+        mean_str = ", ".join(f"{v:.4f}" for v in mean_vals[-5:]) if mean_vals else "N/A"
+        status = "converged" if converged else "not converged"
+        lines.append(f"  {name}: mean=[{mean_str}] ({status})")
+    return "\n".join(lines)
+
+
+def _build_mutation_prompt(prev_reward: str, metrics: Dict, user_feedback: Optional[str]) -> str:
+    prompt = f"""Previous reward function:
+{prev_reward}
+
+Training metrics per component:
+{_format_component_metrics(metrics)}
+
+Task success rate: {metrics.get('task_success_rate', 'N/A')}
+"""
+    if user_feedback:
+        prompt += f"\nUser feedback: {user_feedback}\n"
+    prompt += "\nBased on this data, generate an improved reward function."
+    return prompt
+
+
+async def _handle_generate_reward(args: Dict) -> Dict:
+    """Generate Eureka reward configuration and initial prompt for a DirectRLEnv."""
+    task_description = args["task_description"]
+    env_source_path = args["env_source_path"]
+    num_candidates = args.get("num_candidates", 4)
+    num_iterations = args.get("num_iterations", 5)
+
+    # Read environment source code
+    env_path = Path(env_source_path)
+    if env_path.exists():
+        env_source = env_path.read_text()
+    else:
+        env_source = f"# [File not found: {env_source_path}]\n# Provide the DirectRLEnv source code manually."
+
+    # Validate it's a DirectRLEnv (not ManagerBasedRLEnv)
+    if "ManagerBasedRLEnv" in env_source:
+        return {
+            "error": "Eureka reward generation only works with DirectRLEnv, not ManagerBasedRLEnv. "
+                     "DirectRLEnv exposes compute_reward() which Eureka can override.",
+        }
+
+    # Build the initial reward generation prompt
+    initial_prompt = f"""You are a reward function engineer for reinforcement learning.
+
+Task description: {task_description}
+
+Environment source code:
+```python
+{env_source}
+```
+
+Generate {num_candidates} diverse reward function candidates.
+Each candidate must:
+1. Be a standalone Python function: def compute_reward(self) -> torch.Tensor
+2. Use only tensors available in self (observations, actions, targets, etc.)
+3. Return a scalar reward tensor of shape (num_envs,)
+4. Include per-component breakdown as a dict for analysis
+5. Avoid sparse rewards — use dense, shaped rewards
+
+Return each candidate as a separate code block.
+"""
+
+    eureka_config = {
+        "task_description": task_description,
+        "env_source_path": env_source_path,
+        "num_candidates": num_candidates,
+        "num_iterations": num_iterations,
+        "env_type": "DirectRLEnv",
+        "initial_prompt": initial_prompt,
+        "env_source_included": env_path.exists(),
+    }
+
+    return eureka_config
+
+
+def _gen_evaluate_reward(args: Dict) -> str:
+    """Generate code to evaluate a candidate reward function via short training."""
+    reward_code = args["reward_code"]
+    env_id = args["env_id"]
+    num_steps = args.get("num_steps", 1000)
+
+    # Escape the reward code for embedding in a string
+    escaped_reward = reward_code.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+
+    return f"""\
+import os
+import sys
+import json
+import tempfile
+import subprocess
+from pathlib import Path
+
+# 1. Write the candidate reward function to a temp file
+reward_code = '''{reward_code}'''
+
+reward_dir = tempfile.mkdtemp(prefix='eureka_reward_')
+reward_path = os.path.join(reward_dir, 'reward_fn.py')
+with open(reward_path, 'w') as f:
+    f.write(reward_code)
+
+print(f'Reward function written to {{reward_path}}')
+
+# 2. Launch training subprocess with the custom reward
+env_id = '{env_id}'
+num_steps = {num_steps}
+
+cmd = [
+    sys.executable, '-m', 'isaaclab.train',
+    '--task', env_id,
+    '--num_envs', '16',
+    '--max_iterations', str(num_steps // 16),
+    '--custom_reward', reward_path,
+    '--headless',
+]
+
+print(f'Launching evaluation: {{" ".join(cmd)}}')
+proc = subprocess.Popen(
+    cmd,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    text=True,
+    cwd=reward_dir,
+)
+stdout, _ = proc.communicate(timeout=300)
+
+# 3. Parse training metrics from stdout
+results = {{
+    'env_id': env_id,
+    'num_steps': num_steps,
+    'reward_path': reward_path,
+    'return_code': proc.returncode,
+    'stdout_tail': stdout[-2000:] if stdout else '',
+}}
+
+# 4. Look for metrics JSON in output
+metrics_path = os.path.join(reward_dir, 'metrics.json')
+if os.path.exists(metrics_path):
+    with open(metrics_path) as f:
+        metrics = json.load(f)
+    results['fitness'] = metrics.get('fitness', 0.0)
+    results['components'] = metrics.get('components', {{}})
+    results['task_success_rate'] = metrics.get('task_success_rate', 0.0)
+else:
+    results['fitness'] = 0.0
+    results['components'] = {{}}
+    results['task_success_rate'] = 0.0
+    results['note'] = 'No metrics.json found — training may have failed'
+
+print(f'Evaluation complete: fitness={{results["fitness"]:.4f}}, success={{results["task_success_rate"]:.2%}}')
+print(json.dumps(results, indent=2))
+"""
+
+
+async def _handle_iterate_reward(args: Dict) -> Dict:
+    """Generate a mutation prompt for the next Eureka iteration."""
+    prev_reward_code = args["prev_reward_code"]
+    metrics = args["metrics"]
+    user_feedback = args.get("user_feedback")
+
+    mutation_prompt = _build_mutation_prompt(prev_reward_code, metrics, user_feedback)
+
+    return {
+        "mutation_prompt": mutation_prompt,
+        "prev_fitness": metrics.get("fitness", "N/A"),
+        "prev_success_rate": metrics.get("task_success_rate", "N/A"),
+        "components_analyzed": list(metrics.get("components", {}).keys()),
+        "has_user_feedback": user_feedback is not None,
+    }
+
+
+async def _handle_eureka_status(args: Dict) -> Dict:
+    """Return current status of a Eureka optimization run."""
+    run_id = args["run_id"]
+
+    if run_id in _eureka_runs:
+        run = _eureka_runs[run_id]
+        return {
+            "run_id": run_id,
+            "status": run.get("status", "unknown"),
+            "current_iteration": run.get("current_iteration", 0),
+            "total_iterations": run.get("total_iterations", 0),
+            "candidates_evaluated": run.get("candidates_evaluated", 0),
+            "best_fitness": run.get("best_fitness", 0.0),
+            "best_reward_code": run.get("best_reward_code"),
+        }
+
+    return {
+        "run_id": run_id,
+        "status": "not_found",
+        "message": f"No Eureka run found with ID '{run_id}'. Start one with generate_reward first.",
+    }
+
+
+DATA_HANDLERS["generate_reward"] = _handle_generate_reward
+DATA_HANDLERS["iterate_reward"] = _handle_iterate_reward
+DATA_HANDLERS["eureka_status"] = _handle_eureka_status
+CODE_GEN_HANDLERS["evaluate_reward"] = _gen_evaluate_reward
