@@ -48,8 +48,18 @@ def get_llm_provider():
             model=config.cloud_model_name,
         )
 
-    # Default → local Ollama
-    return OllamaProvider(model=config.local_model_name)
+    # Default → local Ollama via OpenAI-compatible endpoint
+    # Uses /v1/chat/completions instead of /api/chat to avoid
+    # Qwen 3.5 tool-call JSON parsing bugs in the native Ollama API.
+    # See: https://github.com/ollama/ollama/issues/14493
+    ollama_base = config.openai_api_base.rstrip("/")
+    if not ollama_base.endswith("/chat/completions"):
+        ollama_base += "/chat/completions"
+    return OpenAICompatProvider(
+        api_key="ollama",  # Ollama ignores auth
+        model=config.local_model_name,
+        base_url=ollama_base,
+    )
 
 
 def _require(value: str, key_name: str, mode: str):

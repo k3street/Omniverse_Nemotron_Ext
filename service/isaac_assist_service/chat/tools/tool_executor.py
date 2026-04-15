@@ -1054,9 +1054,42 @@ DATA_HANDLERS = {
     "get_debug_info": _handle_get_debug_info,
     "lookup_knowledge": _handle_lookup_knowledge,
     "explain_error": None,  # handled inline by LLM (no tool execution)
-    "ros2_list_topics": None,
-    "ros2_publish": None,
 }
+
+# ── ROS2 live handlers (via rosbridge / ros-mcp) ────────────────────────────
+try:
+    from .ros_mcp_tools import (
+        handle_ros2_connect,
+        handle_ros2_list_topics,
+        handle_ros2_get_topic_type,
+        handle_ros2_get_message_type,
+        handle_ros2_subscribe_once,
+        handle_ros2_publish,
+        handle_ros2_publish_sequence,
+        handle_ros2_list_services,
+        handle_ros2_call_service,
+        handle_ros2_list_nodes,
+        handle_ros2_get_node_details,
+    )
+    DATA_HANDLERS.update({
+        "ros2_connect": handle_ros2_connect,
+        "ros2_list_topics": handle_ros2_list_topics,
+        "ros2_get_topic_type": handle_ros2_get_topic_type,
+        "ros2_get_message_type": handle_ros2_get_message_type,
+        "ros2_subscribe_once": handle_ros2_subscribe_once,
+        "ros2_publish": handle_ros2_publish,
+        "ros2_publish_sequence": handle_ros2_publish_sequence,
+        "ros2_list_services": handle_ros2_list_services,
+        "ros2_call_service": handle_ros2_call_service,
+        "ros2_list_nodes": handle_ros2_list_nodes,
+        "ros2_get_node_details": handle_ros2_get_node_details,
+    })
+except ImportError:
+    logger.warning("[ToolExecutor] ros-mcp not installed — ROS2 live tools disabled (pip install ros-mcp)")
+    DATA_HANDLERS.update({
+        "ros2_list_topics": None,
+        "ros2_publish": None,
+    })
 
 
 # ── Main dispatch ────────────────────────────────────────────────────────────

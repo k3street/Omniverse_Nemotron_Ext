@@ -58,6 +58,7 @@ Omniverse_Nemotron_Ext/
 │   └── livekit/            # Self-hosted LiveKit voice stack (Docker Compose)
 ├── scripts/                # Utility scripts (doc scraping, data curation)
 ├── launch_isaac.sh         # Recommended Isaac Sim launcher
+├── launch_service.sh       # FastAPI service launcher (interactive mode picker)
 └── requirements.txt        # Python backend dependencies
 ```
 
@@ -85,27 +86,48 @@ cp service/isaac_assist_service/.env.example service/isaac_assist_service/.env
 
 | Variable | Default | Description |
 |---|---|---|
-| `LLM_MODE` | `local` | `local` (Ollama) or `cloud` (Gemini) |
-| `LOCAL_MODEL_NAME` | `cosmos-reason-2:latest` | Model name as shown in `ollama list` |
-| `CLOUD_MODEL_NAME` | `gemini-robotics-er-1.5` | Google GenAI model identifier |
+| `LLM_MODE` | `local` | `local` (Ollama), `anthropic` (Claude), `cloud` (Gemini), `openai`, or `grok` (xAI) |
+| `LOCAL_MODEL_NAME` | `qwen3.5:35b` | Model name as shown in `ollama list` |
+| `CLOUD_MODEL_NAME` | `claude-opus-4-6` | Cloud model identifier (used by all non-local modes) |
+| `ANTHROPIC_API_KEY` | *(empty)* | Required when `LLM_MODE=anthropic` |
 | `API_KEY_GEMINI` | *(empty)* | Required when `LLM_MODE=cloud` |
+| `OPENAI_API_KEY` | *(empty)* | Required when `LLM_MODE=openai` |
+| `GROK_API_KEY` | *(empty)* | Required when `LLM_MODE=grok` |
+| `ROSBRIDGE_HOST` | `127.0.0.1` | rosbridge WebSocket host (for live ROS2 tools) |
+| `ROSBRIDGE_PORT` | `9090` | rosbridge WebSocket port |
 | `LIVEKIT_URL` | `ws://localhost:7880` | LiveKit server URL |
 
 #### Pull the local model (if using `LLM_MODE=local`)
 
 ```bash
-ollama pull cosmos-reason-2:latest
+ollama pull qwen3.5:35b
 ```
 
 ### 3.3 Start the service
 
 ```bash
 cd /path/to/Omniverse_Nemotron_Ext
-uvicorn service.isaac_assist_service.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Interactive mode picker (recommended)
+./launch_service.sh
+
+# Or pass the LLM mode directly
+./launch_service.sh anthropic   # Claude
+./launch_service.sh local       # Ollama (local GPU)
+./launch_service.sh cloud       # Gemini
+./launch_service.sh openai      # OpenAI
+./launch_service.sh grok        # xAI Grok
 ```
 
 The service starts at **`http://localhost:8000`**.  
 Interactive API docs are available at **`http://localhost:8000/docs`**.
+
+#### Hot-switch LLM mode at runtime (no restart needed)
+
+```bash
+curl -X PUT http://localhost:8000/api/v1/settings/llm_mode \
+  -H "Content-Type: application/json" -d '{"mode": "local"}'
+```
 
 ---
 
@@ -178,7 +200,7 @@ If you prefer to load the extension manually inside Isaac Sim:
 
 ```bash
 curl http://localhost:8000/health
-# Expected: {"status":"ok","service":"isaac-assist-backend"}
+# Expected: {"status":"ok","service":"isaac-assist-backend","llm_mode":"anthropic","model":"claude-opus-4-6"}
 ```
 
 ### Check the Extension UI
@@ -251,6 +273,8 @@ The FastAPI service exposes the following REST API modules, all prefixed under `
 | `/plans` | Patch Planner | Repair plan generation and execution engine |
 | `/governance` | Approval Engine | Dry-run UI dialogs for user-governed USD edits |
 | `/settings` | Configuration Options | Model switching, Ollama pull triggers, API keys |
+| `/settings/llm_mode` | LLM Mode Switch | `GET` current mode, `PUT` to hot-switch provider |
+| `/chat/pipeline/plan` | Pipeline Planner | Template-based multi-phase autonomous scene builder |
 | `/finetune` | Fine-tuning Builder | Knowledge Base → training data pipeline |
 
 Full interactive documentation: **`http://localhost:8000/docs`**

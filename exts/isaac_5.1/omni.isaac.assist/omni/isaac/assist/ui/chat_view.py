@@ -84,9 +84,12 @@ class ChatViewWindow(ui.Window):
         else:
             self._add_chat_bubble("You", text, is_user=True)
 
-        # Dispatch async to service: use generate_plan for patching!
-        # If it looks like a patching command, we trigger Swarm. Otherwise just general chat.
-        if text.lower().startswith("patch") or text.lower().startswith("fix"):
+        # Dispatch async to service: route by prefix
+        if text.lower().startswith("pipeline:") or text.lower().startswith("pipeline "):
+            # Strip prefix for the pipeline planner
+            pipeline_prompt = text.split(":", 1)[1].strip() if ":" in text else text.split(" ", 1)[1].strip()
+            asyncio.ensure_future(self._handle_pipeline_request(pipeline_prompt))
+        elif text.lower().startswith("patch") or text.lower().startswith("fix"):
             asyncio.ensure_future(self._handle_swarm_request(text))
         else:
             asyncio.ensure_future(self._handle_service_request(text, selected_prim_info=selected_prim_info))
@@ -147,6 +150,11 @@ class ChatViewWindow(ui.Window):
                     self.auto_approve_cb = ui.CheckBox()
                     self.auto_approve_cb.model.set_value(self._auto_approve)
                     ui.Label("Auto-Approve Code Patches (skip approval dialog)", width=0)
+
+                with ui.HStack(height=20):
+                    ui.Label("Max Tool Rounds:", width=150)
+                    self.max_tool_rounds_field = ui.IntField()
+                    self.max_tool_rounds_field.model.set_value(int(os.environ.get("MAX_TOOL_ROUNDS", "10")))
                     
                 ui.Spacer(height=10)
                 
@@ -161,7 +169,8 @@ class ChatViewWindow(ui.Window):
             "OPENAI_API_KEY": self.api_key_field.model.get_value_as_string(),
             "CLOUD_MODEL_NAME": self.model_field.model.get_value_as_string(),
             "CONTRIBUTE_DATA": "true" if self.contribute_cb.model.get_value_as_bool() else "false",
-            "AUTO_APPROVE": "true" if self._auto_approve else "false"
+            "AUTO_APPROVE": "true" if self._auto_approve else "false",
+            "MAX_TOOL_ROUNDS": str(self.max_tool_rounds_field.model.get_value_as_int())
         }
         self._add_chat_bubble("System", "Saving engine settings...", is_user=False)
         asyncio.ensure_future(self._handle_save_settings(payload))
@@ -208,6 +217,178 @@ class ChatViewWindow(ui.Window):
                         self._execute_patch(script_code)
                 else:
                     self._render_patch_action(action, conf)
+
+    # ── Pipeline Executor ────────────────────────────────────────────────────
+
+    async def _handle_pipeline_request(self, prompt: str):
+        """
+        Autonomous multi-phase pipeline executor.
+        1. Gets a structured plan from the service
+        2. Executes each phase sequentially with verification
+        3. On failure, asks the LLM to fix and retries once
+        """
+        self._add_chat_bubble("Pipeline", f"Generating pipeline plan for: {prompt}", is_user=False)
+
+        # Step 1: Get plan
+        plan = await self.service.get_pipeline_plan(prompt)
+        if "error" in plan:
+            self._add_chat_bubble("Pipeline", f"Planning failed: {plan['error']}", is_user=False, error=True)
+            return
+
+        title = plan.get("title", "Unnamed Pipeline")
+        phases = plan.get("phases", [])
+        total = len(phases)
+        source = plan.get("source", "unknown")
+
+        self._add_chat_bubble("Pipeline",
+            f"Plan: {title}  ({total} phases, source: {source})",
+            is_user=False)
+
+        # Step 2: Execute each phase
+        results = []
+        for phase in phases:
+            phase_id = phase.get("id", "?")
+            phase_name = phase.get("name", "Unnamed")
+            phase_prompt = phase.get("prompt", "")
+            verification = phase.get("verification")
+            retry_hint = phase.get("retry_hint")
+            is_data_only = phase.get("is_data_only", False)
+
+            self._add_chat_bubble("Pipeline",
+                f"Phase {phase_id}/{total}: {phase_name}",
+                is_user=False)
+
+            # Send phase prompt to the regular chat orchestrator
+            response = await self.service.send_message(phase_prompt)
+
+            if "error" in response:
+                self._add_chat_bubble("Pipeline",
+                    f"Phase {phase_id} service error: {response['error']}",
+                    is_user=False, error=True)
+                results.append({"phase": phase_id, "name": phase_name, "status": "error"})
+                continue
+
+            # Show the LLM's reply
+            for msg in response.get("response_messages", []):
+                content = msg.get("content", "")
+                if content:
+                    self._add_chat_bubble("Isaac Assist", content, is_user=False)
+
+            # Execute code patches (if any)
+            patches = response.get("actions_to_approve") or []
+            phase_success = True
+            phase_output = []
+
+            for i, action in enumerate(patches):
+                code = action.get("code", "")
+                desc = action.get("description", "")
+                if not code:
+                    continue
+
+                self._add_chat_bubble("Pipeline",
+                    f"  Executing patch {i+1}/{len(patches)}: {desc[:80]}",
+                    is_user=False)
+
+                # Execute synchronously on main thread and capture output
+                success, output = await self._execute_patch_sync(code)
+
+                if output:
+                    self._add_chat_bubble("Script Output",
+                        output[:800] + ("..." if len(output) > 800 else ""),
+                        is_user=False)
+
+                # Log to knowledge base
+                try:
+                    await self.service.log_execution(
+                        code=code, success=success,
+                        output=output[:2000], user_message=phase_prompt,
+                    )
+                except Exception:
+                    pass
+
+                if not success:
+                    phase_success = False
+                    phase_output.append(f"FAILED: {desc} — {output[:200]}")
+
+                    # Retry once with the error + hint
+                    if retry_hint:
+                        self._add_chat_bubble("Pipeline",
+                            f"  Retrying with fix hint...",
+                            is_user=False)
+                        retry_prompt = (
+                            f"The previous phase '{phase_name}' had an error:\n"
+                            f"{output[:500]}\n\n"
+                            f"Hint: {retry_hint}\n\n"
+                            f"Please fix the issue and regenerate the code."
+                        )
+                        retry_resp = await self.service.send_message(retry_prompt)
+                        retry_patches = retry_resp.get("actions_to_approve") or []
+                        for rp in retry_patches:
+                            rcode = rp.get("code", "")
+                            if rcode:
+                                rsuccess, routput = await self._execute_patch_sync(rcode)
+                                if rsuccess:
+                                    phase_success = True
+                                    self._add_chat_bubble("Pipeline",
+                                        f"  Retry successful!",
+                                        is_user=False)
+                                    break
+                else:
+                    phase_output.append(f"OK: {desc}")
+
+            # Verification (optional)
+            if verification and not is_data_only and phase_success:
+                self._add_chat_bubble("Pipeline",
+                    f"  Verifying: {verification[:100]}",
+                    is_user=False)
+                verify_resp = await self.service.send_message(
+                    f"Verify: {verification} Check the scene summary and report any issues."
+                )
+                for msg in verify_resp.get("response_messages", []):
+                    content = msg.get("content", "")
+                    if content:
+                        self._add_chat_bubble("Verification", content, is_user=False)
+
+            status = "ok" if phase_success else "failed"
+            status_icon = "✅" if phase_success else "❌"
+            self._add_chat_bubble("Pipeline",
+                f"{status_icon} Phase {phase_id}: {phase_name} — {status}",
+                is_user=False)
+            results.append({"phase": phase_id, "name": phase_name, "status": status})
+
+            # Allow Kit to process a frame between phases
+            await asyncio.sleep(0.1)
+
+        # Step 3: Summary
+        ok_count = sum(1 for r in results if r["status"] == "ok")
+        fail_count = total - ok_count
+        summary = f"Pipeline complete: {ok_count}/{total} phases succeeded"
+        if fail_count:
+            summary += f", {fail_count} failed"
+            failed_names = [r["name"] for r in results if r["status"] != "ok"]
+            summary += f" ({', '.join(failed_names)})"
+
+        self._add_chat_bubble("Pipeline", summary, is_user=False)
+
+    async def _execute_patch_sync(self, code: str) -> tuple:
+        """
+        Execute code on the main thread and return (success: bool, output: str).
+        Unlike _execute_patch_async, this does NOT trigger feedback messages —
+        the pipeline executor manages the conversation flow itself.
+        """
+        await asyncio.sleep(0)  # yield to exit any draw callback
+
+        output_buffer = io.StringIO()
+        success = False
+        try:
+            with contextlib.redirect_stdout(output_buffer), contextlib.redirect_stderr(output_buffer):
+                exec_globals = {"__builtins__": __builtins__}
+                exec(code, exec_globals)
+            success = True
+        except Exception as e:
+            output_buffer.write(f"\nRuntime Exception: {e}")
+
+        return success, output_buffer.getvalue().strip()
 
     def _render_patch_action(self, action: dict, confidence: float):
         script_code = action.get("new_value", "No code provided.")

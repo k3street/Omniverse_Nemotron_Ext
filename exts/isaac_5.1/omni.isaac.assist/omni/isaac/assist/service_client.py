@@ -83,6 +83,23 @@ class AssistServiceClient:
         except Exception as e:
             return {"error": str(e)}
 
+    async def get_pipeline_plan(self, prompt: str) -> dict:
+        """Get a structured multi-phase pipeline plan from the service."""
+        url = f"{self.base_url}/api/v1/chat/pipeline/plan"
+        payload = {
+            "prompt": prompt,
+            "session_id": self.session_id,
+        }
+        try:
+            async with aiohttp.ClientSession(json_serialize=self._json_serialize) as session:
+                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=60)) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    body = await response.text()
+                    return {"error": f"Pipeline plan failed (HTTP {response.status}): {body[:200]}"}
+        except Exception as e:
+            return {"error": str(e)}
+
     async def update_settings(self, settings_payload: dict) -> dict:
         """ Updates `.env` variables via the unified Settings Manager """
         url = f"{self.base_url}/api/v1/settings/"

@@ -11,13 +11,72 @@ Lifecycle:
 """
 from __future__ import annotations
 import asyncio
+import contextlib
+import io
 import json
+import queue as stdlib_queue
 import threading
 import carb
 from typing import Optional
 
 _PATCH_QUEUE: asyncio.Queue = asyncio.Queue()  # pending code patches awaiting approval
 _server_instance: Optional["KitRPCServer"] = None
+
+# ── Synchronous execution queue (main-thread dispatch) ────────────────────────
+# Items are (code: str, result_holder: dict) where result_holder has:
+#   "result": None | {"success": bool, "output": str}
+#   "event":  threading.Event
+_SYNC_EXEC_QUEUE: stdlib_queue.Queue = stdlib_queue.Queue()
+_exec_sub = None  # Kit update subscription handle
+
+
+def _kit_exec_tick(event):
+    """
+    Called every frame on Kit's main thread via the update event stream.
+    Drains the sync execution queue and runs code in Kit's Python context.
+    """
+    while True:
+        try:
+            code, result_holder = _SYNC_EXEC_QUEUE.get_nowait()
+        except stdlib_queue.Empty:
+            break
+
+        output_buf = io.StringIO()
+        success = False
+        try:
+            with contextlib.redirect_stdout(output_buf), contextlib.redirect_stderr(output_buf):
+                exec_globals = {"__builtins__": __builtins__}
+                exec(code, exec_globals)
+            success = True
+        except Exception as e:
+            output_buf.write(f"\nError: {e}")
+
+        result_holder["result"] = {
+            "success": success,
+            "output": output_buf.getvalue(),
+        }
+        result_holder["event"].set()
+
+
+def start_exec_tick():
+    """Register the main-thread execution tick. Call from extension on_startup."""
+    global _exec_sub
+    try:
+        import omni.kit.app
+        _exec_sub = (
+            omni.kit.app.get_app()
+            .get_update_event_stream()
+            .create_subscription_to_pop(_kit_exec_tick, name="IsaacAssist-ExecSync")
+        )
+        carb.log_warn("[IsaacAssist] Registered main-thread exec_sync tick")
+    except Exception as e:
+        carb.log_warn(f"[IsaacAssist] Failed to register exec_sync tick: {e}")
+
+
+def stop_exec_tick():
+    """Unregister the main-thread execution tick."""
+    global _exec_sub
+    _exec_sub = None
 
 
 def get_server() -> Optional["KitRPCServer"]:
@@ -80,6 +139,7 @@ class KitRPCServer:
         app.router.add_get("/context", self._handle_context)
         app.router.add_get("/capture", self._handle_capture)
         app.router.add_post("/exec_patch", self._handle_exec_patch)
+        app.router.add_post("/exec_sync", self._handle_exec_sync)
         app.router.add_get("/selection", self._handle_selection)
         app.router.add_post("/sim_control", self._handle_sim_control)
         app.router.add_post("/set_viewport_camera", self._handle_set_viewport_camera)
@@ -158,6 +218,39 @@ class KitRPCServer:
             await _PATCH_QUEUE.put(body)
             carb.log_warn(f"[IsaacAssist] Patch queued for approval: {code[:80]}...")
             return web.json_response({"queued": True})
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_exec_sync(self, request) -> "web.Response":
+        """
+        Execute Python code synchronously on Kit's main thread and return
+        stdout/stderr + success flag.  Used by the pipeline executor.
+        Body: {"code": "...", "timeout": 30}
+        """
+        from aiohttp import web
+        try:
+            body = await request.json()
+            code = body.get("code", "").strip()
+            timeout = body.get("timeout", 30)
+            if not code:
+                return web.json_response({"error": "No code provided"}, status=400)
+
+            result_holder = {"result": None, "event": threading.Event()}
+            _SYNC_EXEC_QUEUE.put((code, result_holder))
+
+            # Wait on a thread so we don't block the aiohttp event loop
+            loop = asyncio.get_event_loop()
+            completed = await loop.run_in_executor(
+                None, lambda: result_holder["event"].wait(timeout=timeout)
+            )
+
+            if not completed or result_holder["result"] is None:
+                return web.json_response(
+                    {"success": False, "output": "Execution timed out", "error": "timeout"},
+                    status=504,
+                )
+
+            return web.json_response(result_holder["result"])
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 

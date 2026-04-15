@@ -5,6 +5,7 @@ from datetime import datetime
 import uuid
 import logging
 from .orchestrator import ChatOrchestrator
+from .pipeline import PipelinePlanner
 from ..governance.audit_log import AuditLogger
 from ..governance.models import AuditEntry
 from ..knowledge.knowledge_base import KnowledgeBase
@@ -223,3 +224,36 @@ async def download_scene_file(filepath: str):
     if not os.path.exists(real_path):
         raise HTTPException(status_code=404, detail="File not found. Did you export first?")
     return FileResponse(real_path, filename=os.path.basename(real_path))
+
+
+# ── Pipeline Planning ────────────────────────────────────────────────────
+
+class PipelinePlanRequest(BaseModel):
+    prompt: str
+    session_id: str = "default_session"
+
+_planner = PipelinePlanner()
+
+@router.post("/pipeline/plan")
+async def pipeline_plan(req: PipelinePlanRequest):
+    """
+    Generate a structured multi-phase pipeline plan from a high-level prompt.
+    If a known robot template matches, returns immediately.
+    Otherwise falls back to LLM-generated plan.
+    """
+    plan = _planner.plan(req.prompt)
+
+    if plan.get("needs_llm"):
+        # Fall back to LLM-generated plan
+        try:
+            from .provider_factory import get_llm_provider
+            provider = get_llm_provider()
+            plan = await _planner.plan_with_llm(req.prompt, provider)
+        except Exception as e:
+            logger.error(f"LLM pipeline planning failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Pipeline planning failed: {e}")
+
+    if "error" in plan:
+        raise HTTPException(status_code=422, detail=plan["error"])
+
+    return plan

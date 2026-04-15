@@ -43,7 +43,13 @@ TOOL_CATEGORIES: Dict[str, List[str]] = {
         "import_robot", "anchor_robot", "set_joint_targets",
         "get_articulation_state",
     ],
-    "omnigraph_ros2": ["create_omnigraph", "ros2_list_topics", "ros2_publish"],
+    "omnigraph_ros2": [
+        "create_omnigraph", "ros2_connect", "ros2_list_topics",
+        "ros2_get_topic_type", "ros2_get_message_type",
+        "ros2_subscribe_once", "ros2_publish", "ros2_publish_sequence",
+        "ros2_list_services", "ros2_call_service",
+        "ros2_list_nodes", "ros2_get_node_details",
+    ],
     "camera_viewport": [
         "create_prim", "set_viewport_camera", "capture_viewport",
     ],

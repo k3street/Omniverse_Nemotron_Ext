@@ -26,9 +26,10 @@ class IsaacAssistExtension(omni.ext.IExt):
 
         # ── 2. Start Kit RPC server (port 8001) ───────────────────────────────
         try:
-            from .context.kit_rpc import KitRPCServer
+            from .context.kit_rpc import KitRPCServer, start_exec_tick
             _rpc_server = KitRPCServer()
             _rpc_server.start()
+            start_exec_tick()  # Register main-thread sync execution handler
             self._rpc_server = _rpc_server
         except Exception as e:
             carb.log_warn(f"[IsaacAssist] Kit RPC skipped: {e}")
@@ -80,6 +81,8 @@ class IsaacAssistExtension(omni.ext.IExt):
         # Stop RPC server
         if self._rpc_server is not None:
             try:
+                from .context.kit_rpc import stop_exec_tick
+                stop_exec_tick()
                 self._rpc_server.stop()
             except Exception:
                 pass

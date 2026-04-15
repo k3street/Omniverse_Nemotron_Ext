@@ -48,9 +48,37 @@ app.include_router(finetune_router, prefix="/api/v1/finetune", tags=["Fine-tunin
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "isaac-assist-backend"}
+    from .config import config
+    return {
+        "status": "ok",
+        "service": "isaac-assist-backend",
+        "llm_mode": config.llm_mode,
+        "model": config.cloud_model_name if config.llm_mode != "local" else config.local_model_name,
+    }
 
 if __name__ == "__main__":
+    import argparse
     import uvicorn
-    # Typically running on 8000 locally
-    uvicorn.run("service.isaac_assist_service.main:app", host="0.0.0.0", port=8000, reload=True)
+
+    VALID_MODES = ["local", "cloud", "anthropic", "openai", "grok"]
+
+    parser = argparse.ArgumentParser(description="Isaac Assist Service")
+    parser.add_argument(
+        "--mode", "-m",
+        choices=VALID_MODES,
+        default=None,
+        help="LLM provider mode (overrides LLM_MODE in .env)",
+    )
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--reload", action="store_true", default=True)
+    args = parser.parse_args()
+
+    if args.mode:
+        import os
+        os.environ["LLM_MODE"] = args.mode
+        # Re-init config so the provider factory picks it up
+        from .config import config as _cfg
+        _cfg.llm_mode = args.mode
+
+    uvicorn.run("service.isaac_assist_service.main:app", host=args.host, port=args.port, reload=args.reload)

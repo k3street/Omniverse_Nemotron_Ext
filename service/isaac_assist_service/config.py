@@ -41,10 +41,15 @@ class Config:
         self.mcp_host = os.environ.get("MCP_HOST", "127.0.0.1")
         self.mcp_port = int(os.environ.get("MCP_PORT", "8002"))
 
+        # ── ROS Bridge (ros-mcp integration) ─────────────────────────────────
+        self.rosbridge_host = os.environ.get("ROSBRIDGE_HOST", "127.0.0.1")
+        self.rosbridge_port = int(os.environ.get("ROSBRIDGE_PORT", "9090"))
+
         # ── Misc ─────────────────────────────────────────────────────────────
         self.openai_api_base  = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
         self.contribute_data  = os.environ.get("CONTRIBUTE_DATA", "false").lower() == "true"
         self.auto_approve     = os.environ.get("AUTO_APPROVE", "false").lower() == "true"
+        self.max_tool_rounds = int(os.environ.get("MAX_TOOL_ROUNDS", "10"))
         # ── Assets ───────────────────────────────────────────────────────────
         # Local filesystem path to Isaac Sim assets (robots, environments, etc.)
         # Also supports Nucleus server URLs: omniverse://localhost/NVIDIA/Assets/Isaac/5.1

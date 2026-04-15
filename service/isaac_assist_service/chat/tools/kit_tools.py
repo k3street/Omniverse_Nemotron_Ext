@@ -65,6 +65,28 @@ async def queue_exec_patch(code: str, description: str = "") -> Dict[str, Any]:
     return await _post("/exec_patch", {"code": code, "description": description})
 
 
+async def exec_sync(code: str, timeout: float = 30) -> Dict[str, Any]:
+    """
+    Execute Python code synchronously on Kit's main thread.
+    Returns {"success": bool, "output": str}.
+    Used by the pipeline executor for phased execution with verification.
+    """
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{KIT_RPC_BASE}/exec_sync",
+                json={"code": code, "timeout": timeout},
+                timeout=aiohttp.ClientTimeout(total=timeout + 5),
+            ) as resp:
+                if resp.status != 200:
+                    return {"success": False, "output": f"Kit RPC /exec_sync returned {resp.status}"}
+                return await resp.json()
+    except Exception as e:
+        logger.warning(f"[KitTools] exec_sync failed: {e}")
+        return {"success": False, "output": str(e)}
+
+
 def format_stage_context_for_llm(ctx: Dict[str, Any]) -> str:
     """
     Converts the raw context snapshot into a compact text block

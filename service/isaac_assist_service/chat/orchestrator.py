@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from .provider_factory import get_llm_provider, get_distiller_provider
 from .intent_router import classify_intent
+from ..config import config
 from .context_distiller import (
     ConversationKnowledge,
     DistilledContext,
@@ -45,9 +46,6 @@ logger = logging.getLogger(__name__)
 
 _audit = AuditLogger()
 _kb = KnowledgeBase()
-
-# Maximum tool-call rounds per user message to prevent infinite loops
-MAX_TOOL_ROUNDS = 5
 
 SYSTEM_PROMPT = """\
 You are Isaac Assist, an expert AI embedded inside NVIDIA Isaac Sim — authored by 10Things, Inc. (www.10things.tech).
@@ -244,7 +242,8 @@ class ChatOrchestrator:
         executed_tools: List[Dict] = []
         code_patches: List[Dict] = []
 
-        for round_idx in range(MAX_TOOL_ROUNDS):
+        max_rounds = config.max_tool_rounds
+        for round_idx in range(max_rounds):
             try:
                 response = await self.llm_provider.complete(
                     messages, {"tools": selected_tools}
@@ -264,6 +263,11 @@ class ChatOrchestrator:
             ]
             if not real_tool_calls:
                 break
+
+            # Build one assistant message with ALL tool calls from this round,
+            # then append individual tool-result messages (OpenAI API format).
+            assistant_tool_calls = []
+            tool_results = []
 
             for tc in real_tool_calls:
                 fn_name = tc.get("function", {}).get("name") or tc.get("name", "")
@@ -286,10 +290,8 @@ class ChatOrchestrator:
                         "description": result.get("description", ""),
                     })
 
-                # Update session knowledge from this tool call
                 update_knowledge_from_tool(knowledge, fn_name, fn_args, result)
 
-                # ── Audit: log every tool call ────────────────────────────
                 try:
                     _audit.log_entry(AuditEntry(
                         entry_id=str(uuid.uuid4()),
@@ -306,23 +308,26 @@ class ChatOrchestrator:
                 except Exception:
                     pass  # audit must never block chat
 
-                # Append tool call + result to message history for next LLM round
-                messages.append({
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [{
-                        "id": tc_id,
-                        "type": "function",
-                        "function": {"name": fn_name, "arguments": json.dumps(fn_args)},
-                    }],
+                assistant_tool_calls.append({
+                    "id": tc_id,
+                    "type": "function",
+                    "function": {"name": fn_name, "arguments": json.dumps(fn_args)},
                 })
-                messages.append({
+                tool_results.append({
                     "role": "tool",
                     "tool_call_id": tc_id,
                     "content": json.dumps(result, default=str),
                 })
+
+            # Single assistant message for all parallel tool calls in this round
+            messages.append({
+                "role": "assistant",
+                "content": None,
+                "tool_calls": assistant_tool_calls,
+            })
+            messages.extend(tool_results)
         else:
-            logger.warning(f"[{session_id}] Hit max tool rounds ({MAX_TOOL_ROUNDS})")
+            logger.warning(f"[{session_id}] Hit max tool rounds ({max_rounds})")
 
         reply = response.text or ""
         logger.info(f"[{session_id}] ASSISTANT: {reply[:200]}")

@@ -17,6 +17,7 @@ class SettingsManager:
         "API_KEY_GEMINI": "api_key_gemini",
     }
     _BOOL_KEYS = {"CONTRIBUTE_DATA", "AUTO_APPROVE"}
+    _INT_KEYS  = {"MAX_TOOL_ROUNDS"}
 
     def __init__(self):
         # We target the .env located right next to the main config.py
@@ -33,7 +34,8 @@ class SettingsManager:
             "OPENAI_API_BASE": config.openai_api_base,
             "OPENAI_API_KEY": config.api_key_openai,
             "CONTRIBUTE_DATA": str(config.contribute_data).lower(),
-            "AUTO_APPROVE": str(config.auto_approve).lower()
+            "AUTO_APPROVE": str(config.auto_approve).lower(),
+            "MAX_TOOL_ROUNDS": str(config.max_tool_rounds)
         }
 
     def update_settings(self, new_settings: Dict[str, str]) -> bool:
@@ -67,6 +69,8 @@ class SettingsManager:
                 attr = self._ENV_TO_ATTR.get(key, key.lower())
                 if key in self._BOOL_KEYS:
                     setattr(config, attr, val.lower() == "true")
+                elif key in self._INT_KEYS:
+                    setattr(config, attr, int(val))
                 else:
                     setattr(config, attr, val)
                 

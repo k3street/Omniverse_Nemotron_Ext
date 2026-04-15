@@ -514,28 +514,152 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
-    # ─── ROS2 ─────────────────────────────────────────────────────────────────
+    # ─── ROS2 (live interaction via rosbridge / ros-mcp) ─────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "ros2_connect",
+            "description": "Configure the rosbridge WebSocket connection. Call this to point at a different rosbridge host/port or to verify connectivity. Default: 127.0.0.1:9090.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ip": {"type": "string", "description": "Rosbridge server IP. Default: 127.0.0.1"},
+                    "port": {"type": "integer", "description": "Rosbridge server port. Default: 9090"},
+                },
+                "required": [],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
             "name": "ros2_list_topics",
-            "description": "List all active ROS2 topics visible from Isaac Sim.",
+            "description": "List all active ROS2 topics with their message types. Connects to rosbridge to get live data — use this to verify OmniGraph ROS2 nodes are publishing after setup.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
     {
         "type": "function",
         "function": {
-            "name": "ros2_publish",
-            "description": "Publish a message to a ROS2 topic.",
+            "name": "ros2_get_topic_type",
+            "description": "Get the message type for a specific ROS2 topic (e.g. /cmd_vel → geometry_msgs/msg/Twist).",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "topic": {"type": "string"},
-                    "msg_type": {"type": "string", "description": "e.g. 'geometry_msgs/msg/Twist'"},
-                    "data": {"type": "object"},
+                    "topic": {"type": "string", "description": "Topic name, e.g. '/cmd_vel'"},
+                },
+                "required": ["topic"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ros2_get_message_type",
+            "description": "Get the full field structure of a ROS2 message type (e.g. 'geometry_msgs/Twist' → linear.x, linear.y, ...).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message_type": {"type": "string", "description": "Message type, e.g. 'geometry_msgs/Twist' or 'sensor_msgs/JointState'"},
+                },
+                "required": ["message_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ros2_subscribe_once",
+            "description": "Subscribe to a ROS2 topic and return the first message received. Use this to verify a topic is publishing data (e.g. read /joint_states after wiring an OmniGraph).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "description": "Topic name, e.g. '/joint_states'"},
+                    "msg_type": {"type": "string", "description": "Message type, e.g. 'sensor_msgs/msg/JointState'"},
+                    "timeout": {"type": "number", "description": "Seconds to wait for a message. Default: 5.0"},
+                },
+                "required": ["topic", "msg_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ros2_publish",
+            "description": "Publish a single message to a ROS2 topic. Use for one-shot commands like a single Twist or JointState.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "description": "Topic name, e.g. '/cmd_vel'"},
+                    "msg_type": {"type": "string", "description": "Message type, e.g. 'geometry_msgs/msg/Twist'"},
+                    "data": {"type": "object", "description": "Message payload as JSON, e.g. {\"linear\": {\"x\": 0.5}}"},
                 },
                 "required": ["topic", "msg_type", "data"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ros2_publish_sequence",
+            "description": "Publish a sequence of messages with durations — ideal for driving robots. With rate_hz>0, messages are published continuously at that rate for each duration (required for diff_drive controllers). Example: drive forward 2s then stop.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "description": "Topic name, e.g. '/cmd_vel'"},
+                    "msg_type": {"type": "string", "description": "Message type, e.g. 'geometry_msgs/msg/Twist'"},
+                    "messages": {"type": "array", "items": {"type": "object"}, "description": "List of message payloads"},
+                    "durations": {"type": "array", "items": {"type": "number"}, "description": "Duration in seconds for each message"},
+                    "rate_hz": {"type": "number", "description": "Publishing rate in Hz. 0 = publish once per step. >0 = continuous at that rate. Default: 10"},
+                },
+                "required": ["topic", "msg_type", "messages", "durations"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ros2_list_services",
+            "description": "List all available ROS2 services.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ros2_call_service",
+            "description": "Call a ROS2 service with specified request data. Use get_service_details first to find the correct type and request fields.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "service_name": {"type": "string", "description": "Service name, e.g. '/reset_world'"},
+                    "service_type": {"type": "string", "description": "Service type, e.g. 'std_srvs/srv/Empty'"},
+                    "request": {"type": "object", "description": "Request payload. {} for parameterless services."},
+                    "timeout": {"type": "number", "description": "Timeout in seconds. Default: 5.0"},
+                },
+                "required": ["service_name", "service_type", "request"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ros2_list_nodes",
+            "description": "List all currently running ROS2 nodes. Use to verify Isaac Sim's ROS2 bridge nodes are active.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ros2_get_node_details",
+            "description": "Get detailed information about a ROS2 node including its publishers, subscribers, and services.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "node": {"type": "string", "description": "Node name, e.g. '/isaac_sim'"},
+                },
+                "required": ["node"],
             },
         },
     },

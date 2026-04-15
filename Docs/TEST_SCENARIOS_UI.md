@@ -5,10 +5,17 @@
 ### Terminal 1: Start the FastAPI Service
 ```bash
 cd /path/to/Omniverse_Nemotron_Ext
-source service/.env 2>/dev/null; set -a; source .env 2>/dev/null; set +a
-uvicorn service.isaac_assist_service.main:app --host 0.0.0.0 --port 8000 --reload
+./launch_service.sh              # Interactive menu — pick local/anthropic/cloud/openai/grok
+./launch_service.sh anthropic    # Or pass mode directly (no menu)
+./launch_service.sh local        # Ollama on local GPU
 ```
 Wait until you see `Uvicorn running on http://0.0.0.0:8000`.
+
+**Hot-switch without restart** (while the service is already running):
+```bash
+curl -X PUT http://localhost:8000/api/v1/settings/llm_mode \
+  -H "Content-Type: application/json" -d '{"mode": "local"}'
+```
 
 ### Terminal 2: Launch Isaac Sim
 ```bash
@@ -16,6 +23,15 @@ cd /path/to/Omniverse_Nemotron_Ext
 ./launch_isaac.sh
 ```
 Wait for Isaac Sim to fully load (viewport shows the default ground plane or empty stage).
+
+### Terminal 3: Launch Rosbridge (for ROS2 live tools T52–T57)
+```bash
+source /opt/ros/${ROS_DISTRO}/setup.bash
+ros2 launch rosbridge_server rosbridge_websocket_launch.xml
+```
+Wait until you see `Rosbridge WebSocket server started on port 9090`. This bridges ROS2 topics/services over WebSocket so Isaac Assist can interact with live ROS2 data.
+
+_Skip Terminal 3 if you don't need ROS2 live tools (T52–T57). The remaining tests work without rosbridge._
 
 ### Open the Chat Panel
 **Window → Isaac Assist** (menu bar). The "Isaac Assist AI" panel should appear docked to the right.
@@ -696,6 +712,313 @@ curl "http://localhost:8000/api/v1/chat/export_scene/download?filepath=workspace
 
 ---
 
+### T46 — Pipeline: Nova Carter in a Home (Autonomous)
+**Prerequisite:** Fresh scene (click 🗑 New Scene), `AUTO_APPROVE=true` in Settings.
+
+_This test uses the **Pipeline Executor** — a multi-phase autonomous planner that builds an entire ROS2-enabled robot simulation from a single prompt. Each phase executes sequentially with verification between steps._
+
+**Type:**
+> pipeline: Nova Carter in a home environment
+
+**Expected flow:**
+1. Chat shows "Generating pipeline plan for: Nova Carter in a home environment"
+2. Chat shows "Plan: Nova Carter — Home Pipeline (5 phases, source: template)"
+3. **Phase 1 — Scene Setup:** Ground plane + walls + table + shelf + chair created with collision
+4. **Phase 2 — Robot Import:** Nova Carter imported at origin with physics (no fixedBase)
+5. **Phase 3 — ROS2 Differential Drive:** OmniGraph at `/World/CarterROS2Graph` with Twist→DifferentialController→ArticulationController→Odometry
+6. **Phase 4 — Sensor Setup:** RealSense D435i camera attached to chassis
+7. **Phase 5 — Final Verification:** Scene summary listing all prims, physics, OmniGraph nodes
+
+Each phase shows ✅ or ❌ status. If a phase fails, it retries once with a fix hint.
+
+**Verify:**
+- Final summary: "Pipeline complete: 5/5 phases succeeded"
+- Viewport shows a room with furniture and a Nova Carter robot
+- Stage tree has `/World/CarterROS2Graph` with OmniGraph nodes
+- Play the sim → `ros2 topic list` shows `/cmd_vel` and `/odom`
+- Drive the robot:
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
+  "{linear: {x: 0.5, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}"
+```
+
+---
+
+### T47 — Pipeline: Jetbot in a Warehouse
+**Prerequisite:** Fresh scene, `AUTO_APPROVE=true`.
+
+**Type:**
+> pipeline: Jetbot in a warehouse
+
+**Expected flow:**
+1. 5-phase pipeline (Scene Setup → Robot Import → ROS2 Drive → Camera → Verification)
+2. Warehouse environment: shelves, conveyor placeholder, stacked boxes
+3. Jetbot with differential drive OmniGraph at `/World/JetbotROS2Graph`
+
+**Verify:**
+- Jetbot appears in a warehouse-like scene
+- ROS2 topics `/cmd_vel` and `/odom` available after playing the sim
+
+---
+
+### T48 — Pipeline: Franka Arm in an Office
+**Prerequisite:** Fresh scene, `AUTO_APPROVE=true`.
+
+**Type:**
+> pipeline: Franka robot picking things in an office
+
+**Expected flow:**
+1. 4-phase pipeline (Scene Setup → Robot Import → ROS2 JointState → Verification)
+2. Office environment: desks, chairs, cabinet + a table + target cube
+3. Franka imported with `fixedBase=True` (stationary arm)
+4. ROS2 JointState graph at `/World/FrankaROS2Graph`
+
+**Verify:**
+- Franka arm at origin with a small cube on a nearby table
+- `ros2 topic list` shows `/joint_states` and `/joint_command`
+- Send a joint command:
+```bash
+ros2 topic pub --once /joint_command sensor_msgs/msg/JointState \
+  "{name: ['panda_joint1','panda_joint2','panda_joint3','panda_joint4','panda_joint5','panda_joint6','panda_joint7'], position: [0.0, -0.5, 0.0, -1.5, 0.0, 1.2, 0.8]}"
+```
+
+---
+
+### T49 — Pipeline: Unitree G1 Humanoid
+**Prerequisite:** Fresh scene, `AUTO_APPROVE=true`.
+
+**Type:**
+> pipeline: Unitree G1 in a home
+
+**Expected flow:**
+1. 4-phase pipeline (Scene Setup → Robot Import → ROS2 JointState → Verification)
+2. Home environment with walls, furniture
+3. G1 humanoid imported without fixedBase
+4. JointState ROS2 graph at `/World/G1ROS2Graph`
+
+**Verify:**
+- G1 robot standing in a room
+- Joint states publishable via ROS2
+
+_Note: If the G1 asset is not in the catalog, Phase 2 will search for alternatives. May fall back to a generic humanoid._
+
+---
+
+### T50 — Pipeline Error Recovery
+**Prerequisite:** Fresh scene, `AUTO_APPROVE=true`.
+
+This tests the pipeline's retry mechanism. Intentionally corrupt the scene between phases.
+
+1. **Type:**
+> pipeline: Nova Carter in a simple environment
+
+2. While Phase 1 is running, do nothing — let it complete.
+3. After Phase 2 starts, watch the chat.
+4. If any phase shows ❌, verify:
+   - "Retrying with fix hint..." message appears
+   - The retry attempts to correct the issue
+   - Final summary shows the retry result
+
+**Verify:**
+- Failed phases show retry attempts
+- Knowledge base learns from failures (`/api/v1/chat/log_execution` called with `success: false`)
+
+---
+
+### T51 — Pipeline via API (Headless)
+**Prerequisite:** FastAPI service running. Isaac Sim with Kit RPC running (port 8001).
+
+This tests the pipeline plan endpoint directly, without the extension UI.
+
+**Step 1 — Get a plan:**
+```bash
+curl -s -X POST http://localhost:8000/api/v1/chat/pipeline/plan \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Nova Carter in a warehouse"}' | python3 -m json.tool
+```
+
+**Expected:** JSON with `title`, `phases` array (5 items), `source: "template"`.
+
+**Step 2 — Execute phases manually:**
+For each phase in the plan, send the phase prompt to `/api/v1/chat/message`:
+```bash
+curl -s -X POST http://localhost:8000/api/v1/chat/message \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "pipeline_test", "message": "<phase prompt here>"}' | python3 -m json.tool
+```
+
+**Verify:** Each phase returns `actions_to_approve` with code patches.
+
+---
+
+### T52 — ROS2 Connect (rosbridge)
+**Prerequisite:** Rosbridge running (Terminal 3).
+
+**Type:**
+> Connect to the ROS2 system on localhost port 9090
+
+**Expected:** Isaac Assist calls `ros2_connect`. Text reply confirms:
+- WebSocket target set to 127.0.0.1:9090
+- Connectivity test passes (ping OK, port open)
+
+**Then type (with wrong port to test error handling):**
+> Connect to rosbridge on 127.0.0.1 port 1234
+
+**Expected:** Text reply showing port is closed or connection refused.
+
+---
+
+### T53 — ROS2 List Topics & Nodes
+**Prerequisite:** T52 (rosbridge connected). Isaac Sim playing with at least one ROS2 OmniGraph (e.g., from T19, T31, or T41).
+
+**Type:**
+> What ROS2 topics are available right now?
+
+**Expected:** Isaac Assist calls `ros2_list_topics`. Text reply lists all active topics with their types:
+- `/clock` — `rosgraph_msgs/msg/Clock`
+- `/joint_states` — `sensor_msgs/msg/JointState` (if Franka graph wired)
+- `/cmd_vel` — `geometry_msgs/msg/Twist` (if Nova Carter graph wired)
+- etc.
+
+**Then type:**
+> What ROS2 nodes are running?
+
+**Expected:** Calls `ros2_list_nodes`. Lists active nodes (rosbridge, Isaac Sim bridge nodes).
+
+---
+
+### T54 — ROS2 Subscribe & Verify Data Flow
+**Prerequisite:** T53 (topics visible). Simulation playing.
+
+**Type:**
+> Read one message from /clock
+
+**Expected:** Calls `ros2_subscribe_once` with topic `/clock` and type `rosgraph_msgs/msg/Clock`. Returns the clock message with `sec` and `nanosec` fields.
+
+**If a Franka ROS2 graph is active (T31):**
+> Read the current joint states from /joint_states
+
+**Expected:** Returns a JointState message with joint names and position values.
+
+---
+
+### T55 — ROS2 Publish & Drive Robot
+**Prerequisite:** T41 or T47 (a robot with `/cmd_vel` subscriber and differential drive OmniGraph). Simulation playing.
+
+**Type:**
+> Publish a Twist message to /cmd_vel with linear x=0.5 to drive the robot forward
+
+**Expected:** Calls `ros2_publish`. The robot moves forward briefly in the viewport.
+
+**Then type:**
+> Drive the robot forward for 3 seconds, then turn left for 2 seconds, then stop
+
+**Expected:** Calls `ros2_publish_sequence` with 3 messages at 10 Hz:
+1. `{linear: {x: 0.5}}` for 3s
+2. `{angular: {z: 0.5}}` for 2s
+3. `{linear: {x: 0.0}, angular: {z: 0.0}}` for 0.5s (stop)
+
+**Verify:** Robot drives forward, turns left, then stops in the viewport.
+
+---
+
+### T56 — ROS2 Service Discovery & Call
+**Prerequisite:** T52 (rosbridge connected). Simulation playing.
+
+**Type:**
+> List all available ROS2 services
+
+**Expected:** Calls `ros2_list_services`. Text reply lists services from rosapi and any Isaac Sim services.
+
+**Then type:**
+> What type is the /rosapi/topics service?
+
+**Expected:** Returns the service type for the rosapi topics introspection service.
+
+---
+
+### T57 — ROS2 Integration Pipeline (End-to-End)
+**Prerequisite:** Fresh scene. `AUTO_APPROVE=true`. Rosbridge running.
+
+_This test combines the pipeline executor with live ROS2 verification using the new ros-mcp tools._
+
+**Step 1 — Build the scene:**
+> pipeline: Nova Carter in a home environment
+
+Wait for all 5 phases to complete.
+
+**Step 2 — Verify ROS2 is working:**
+> List all ROS2 topics
+
+**Expected:** Topics include `/cmd_vel`, `/odom`, and any camera topics.
+
+**Step 3 — Read live data:**
+> Subscribe to /odom and show me the current position
+
+**Expected:** Returns an Odometry message with position data.
+
+**Step 4 — Drive the robot:**
+> Drive the Nova Carter forward for 2 seconds at 0.3 m/s then stop
+
+**Expected:** Robot moves in viewport. Subsequent `/odom` read shows changed position.
+
+**Step 5 — Confirm position changed:**
+> Read /odom again
+
+**Expected:** Position values differ from Step 3.
+
+_Skip T52–T57 if rosbridge is not installed or ROS2 is not available._
+
+---
+
+### T58 — LLM Mode Switching (Cloud ↔ Local)
+
+_Tests the ability to switch between LLM providers at startup and at runtime._
+
+**Step 1 — Check current mode:**
+```bash
+curl -s http://localhost:8000/health | python3 -m json.tool
+```
+**Expected:** JSON with `llm_mode` and `model` fields showing the active provider.
+
+**Step 2 — Hot-switch to local (Ollama):**
+```bash
+curl -s -X PUT http://localhost:8000/api/v1/settings/llm_mode \
+  -H "Content-Type: application/json" -d '{"mode": "local"}' | python3 -m json.tool
+```
+**Expected:** `{"status": "success", "llm_mode": "local", "model": "qwen3.5:35b"}`
+
+**Step 3 — Verify in chat panel:**
+Type: `Hello, what model are you?`
+**Expected:** Response comes from the local Ollama model.
+
+**Step 4 — Switch to Claude:**
+```bash
+curl -s -X PUT http://localhost:8000/api/v1/settings/llm_mode \
+  -H "Content-Type: application/json" -d '{"mode": "anthropic"}' | python3 -m json.tool
+```
+**Expected:** `{"status": "success", "llm_mode": "anthropic", "model": "claude-opus-4-6"}`
+
+**Step 5 — Verify in chat again:**
+Type: `Hello, what model are you?`
+**Expected:** Response comes from Claude.
+
+**Step 6 — Test invalid mode rejection:**
+```bash
+curl -s -X PUT http://localhost:8000/api/v1/settings/llm_mode \
+  -H "Content-Type: application/json" -d '{"mode": "banana"}' | python3 -m json.tool
+```
+**Expected:** `400` error: `"Invalid mode 'banana'. Choose from: local, cloud, anthropic, openai, grok"`
+
+**Step 7 — Startup with mode flag:**
+Stop the service and restart with:
+```bash
+./launch_service.sh anthropic
+```
+**Verify:** Health check shows `llm_mode: "anthropic"` without any manual API call.
+
+---
+
 ## Summary Checklist
 
 | # | Category | Prompt | Requires Approval? |
@@ -745,6 +1068,19 @@ curl "http://localhost:8000/api/v1/chat/export_scene/download?filepath=workspace
 | T43 | Vision | Spatial awareness (Gemini ER) | ❌ (data only) |
 | T44 | Vision + Nav | Vision-guided navigation | ❌ (data) / ✅ (nav patch) |
 | T45 | Export | Scene package export | ❌ (data only) |
+| T46 | Pipeline | Nova Carter home (autonomous) | ✅ (auto-approve) |
+| T47 | Pipeline | Jetbot warehouse (autonomous) | ✅ (auto-approve) |
+| T48 | Pipeline | Franka office (autonomous) | ✅ (auto-approve) |
+| T49 | Pipeline | Unitree G1 home (autonomous) | ✅ (auto-approve) |
+| T50 | Pipeline | Error recovery / retry | ✅ (auto-approve) |
+| T51 | Pipeline | API-only headless plan | N/A (API test) |
+| T52 | ROS2 Live | Connect to rosbridge | ❌ (data only) |
+| T53 | ROS2 Live | List topics & nodes | ❌ (data only) |
+| T54 | ROS2 Live | Subscribe & verify data | ❌ (data only) |
+| T55 | ROS2 Live | Publish & drive robot | ❌ (data only) |
+| T56 | ROS2 Live | Service discovery & call | ❌ (data only) |
+| T57 | ROS2 Live | End-to-end pipeline + ROS2 | ✅ (auto-approve) + ❌ (data) |
+| T58 | Settings | LLM mode switch (cloud ↔ local) | N/A (API + chat verify) |
 
 ## Troubleshooting
 
@@ -756,3 +1092,6 @@ curl "http://localhost:8000/api/v1/chat/export_scene/download?filepath=workspace
 | Code patch fails on execution | Check Isaac Sim console (Window → Console) for Python errors |
 | Chat panel not visible | Window → Isaac Assist (menu bar) |
 | Extension not loaded | Verify `--ext-folder` path in launch script matches your extension directory |
+| "No response from rosbridge" | rosbridge_server not running → start it: `ros2 launch rosbridge_server rosbridge_websocket_launch.xml` |
+| ROS2 tools return "Connection refused" | Check `ROSBRIDGE_HOST`/`ROSBRIDGE_PORT` in `.env` match rosbridge config (default: 127.0.0.1:9090) |
+| "ros-mcp not installed" warning in logs | Run `pip install ros-mcp` in the service Python environment |
