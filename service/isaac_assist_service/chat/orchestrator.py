@@ -85,6 +85,18 @@ CRITICAL API RULES for Isaac Sim 5.1:
   • isaacsim.ros2.bridge.ROS2Context for ROS2 clock/context setup
 - OmniGraph ArticulationController: Set the robot path via SET_VALUES with "inputs:robotPath",
   NOT "inputs:usePath" (which does not exist as an attribute).
+- OmniGraph TYPE COMPATIBILITY: ROS2SubscribeTwist outputs double3 vectors (linearVelocity, angularVelocity)
+  but DifferentialController expects scalar doubles. You CANNOT wire them directly.
+  Use an OmniGraph Break3Vector node to extract components: linearVelocity.x → linear speed,
+  angularVelocity.z → angular speed. Or use a Python script node to extract the scalar values.
+- COLLISION APPROXIMATION on robot wheels: Isaac Sim robot USD wheel meshes use triangle mesh collision
+  by default, which PhysX rejects for dynamic bodies. Always set collision approximation to "convexHull"
+  on wheel prims: `prim.GetAttribute("physics:approximation").Set("convexHull")`
+  Affected parts on Nova Carter: wheel_left, wheel_right, caster_swivel_left, caster_swivel_right,
+  caster_wheel_left, caster_wheel_right.
+- Nova Carter joint names: front drive wheels are "joint_wheel_left" and "joint_wheel_right".
+  Rear casters are "joint_caster_swivel_left/right" and "joint_caster_wheel_left/right" (passive).
+  DifferentialController should target only the two front drive joints.
 
 Selection awareness: When the user has selected a prim in the viewport or stage tree, its path and
 properties are included in the context below. References like "this", "it", "the selected object",
