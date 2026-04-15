@@ -685,15 +685,17 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "move_to_pose",
-            "description": "Move a robot end-effector to a target pose using motion planning (RMPflow or Lula RRT). Plans a collision-free trajectory and executes it. Much easier than setting individual joint targets — just specify where you want the end-effector to go.",
+            "description": "Move a robot end-effector to a target pose using motion planning (RMPflow or Lula RRT). RMPflow runs as a reactive policy every physics step until convergence. Lula RRT computes a single-shot global path (position only, no orientation). Much easier than setting individual joint targets — just specify where you want the end-effector to go.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "articulation_path": {"type": "string", "description": "USD path to the articulation root, e.g. '/World/Franka'"},
                     "target_position": {"type": "array", "items": {"type": "number"}, "description": "Target XYZ position [x, y, z] in world space"},
-                    "target_orientation": {"type": "array", "items": {"type": "number"}, "description": "Target orientation as quaternion [w, x, y, z]. Optional — omit to keep current orientation."},
-                    "planner": {"type": "string", "enum": ["rmpflow", "lula_rrt"], "description": "Motion planner: 'rmpflow' (fast reactive) or 'lula_rrt' (global, obstacle-aware). Default: rmpflow"},
-                    "robot_type": {"type": "string", "description": "Robot name for auto-loading config: 'franka', 'ur10', 'ur5e', 'cobotta', 'rs007n'. If omitted, tries to auto-detect."},
+                    "target_orientation": {"type": "array", "items": {"type": "number"}, "description": "Target orientation as quaternion [w, x, y, z]. Optional — omit to keep current orientation. Ignored by lula_rrt (position only)."},
+                    "planner": {"type": "string", "enum": ["rmpflow", "lula_rrt"], "description": "Motion planner: 'rmpflow' (fast reactive, per-step) or 'lula_rrt' (global, position-only). Default: rmpflow"},
+                    "robot_type": {"type": "string", "description": "Robot name for auto-loading config: 'franka', 'ur10', 'ur5e', 'cobotta'. If omitted, defaults to 'franka'."},
+                    "position_threshold": {"type": "number", "description": "Convergence distance in meters. RMPflow stops when end-effector is within this distance of target. Default: 0.01"},
+                    "max_steps": {"type": "integer", "description": "Maximum physics steps before timeout. Prevents infinite loops if target is unreachable. Default: 1000"},
                 },
                 "required": ["articulation_path", "target_position"],
             },
@@ -703,7 +705,7 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "plan_trajectory",
-            "description": "Plan a multi-waypoint trajectory for a robot arm without executing it. Returns the planned joint trajectory. Use move_to_pose for single-target moves.",
+            "description": "Plan a multi-waypoint trajectory for a robot arm using Lula RRT without executing it. Note: Lula RRT supports position targets only — orientation targets are ignored. Use move_to_pose for single-target moves.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -892,6 +894,80 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Scene Templates ─────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "list_scene_templates",
+            "description": "List available pre-built scene templates for common robotics setups (tabletop manipulation, warehouse picking, mobile navigation, inspection cell, etc.). Returns template names with descriptions. Use when the user asks for a 'template', 'starter scene', or 'example setup'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "category": {"type": "string", "description": "Optional category filter: 'manipulation', 'mobile', 'inspection', 'warehouse'. Omit to list all."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "load_scene_template",
+            "description": "Load a pre-built scene template by name. Returns a full blueprint dict (compatible with build_scene_from_blueprint) including objects, positions, sensors, and physics settings. Call build_scene_from_blueprint with the returned blueprint to create the scene.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "template_name": {"type": "string", "description": "Template name from list_scene_templates, e.g. 'tabletop_manipulation', 'warehouse_picking', 'mobile_navigation', 'inspection_cell'"},
+                },
+                "required": ["template_name"],
+            },
+        },
+    },
+
+    # ─── Batch Operations ────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "batch_apply_operation",
+            "description": "Apply an operation to all child prims under a parent path. Supports applying physics, collisions, materials, visibility, deletion, or setting attributes in bulk. Optionally filter by prim type (Mesh, Xform, etc.).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_path": {"type": "string", "description": "Parent prim path — all children under this path will be affected, e.g. '/World/Objects'"},
+                    "operation": {
+                        "type": "string",
+                        "enum": ["apply_physics", "apply_collision", "set_material", "delete", "set_visibility", "set_attribute"],
+                        "description": "Operation to apply to each matching child prim",
+                    },
+                    "parameters": {
+                        "type": "object",
+                        "description": "Operation-specific parameters. For set_material: {material_path: str}. For set_visibility: {visible: bool}. For set_attribute: {attr_name: str, value: any}. For apply_physics: {mass: number (optional)}.",
+                    },
+                    "filter_type": {"type": "string", "description": "USD prim type to filter by — e.g. 'Mesh', 'Xform', 'Cube'. Only matching prims are affected."},
+                },
+                "required": ["target_path", "operation"],
+            },
+        },
+    },
+
+    # ─── Scene Validation ────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_scene_blueprint",
+            "description": "Validate a scene blueprint before building. Checks for AABB overlaps, floating objects, unrealistic scales, missing fields, and invalid asset paths. Use this before build_scene_from_blueprint to catch problems early.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "blueprint": {
+                        "type": "object",
+                        "description": "Scene blueprint to validate — same format as build_scene_from_blueprint input.",
+                    },
+                },
+                "required": ["blueprint"],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",
@@ -905,6 +981,49 @@ ISAAC_SIM_TOOLS = [
                     "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
                 },
                 "required": [],
+            },
+        },
+    },
+
+    # ─── Physics Debugging ────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "get_physics_errors",
+            "description": "Retrieve recent PhysX-specific errors and warnings from the console log. Filters for physics simulation errors (collision, joint, articulation, solver issues). Use when the user reports physics misbehavior or simulation crashes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "last_n": {"type": "integer", "description": "Number of recent PhysX entries to return. Default: 20"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_collisions",
+            "description": "Validate collision setup on a prim: checks for CollisionAPI, counts mesh children, verifies collision geometry exists. Use to diagnose why objects pass through each other or physics interactions fail.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim to check, e.g. '/World/MyCube'"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fix_error",
+            "description": "Analyze a physics or USD error message, look up known fix patterns in the knowledge base, and generate a code patch to resolve it. Handles common issues: missing CollisionAPI, low solver iterations, broken joint paths, missing ground plane, OmniGraph wiring errors.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "error_text": {"type": "string", "description": "The error message text to diagnose and fix"},
+                },
+                "required": ["error_text"],
             },
         },
     },

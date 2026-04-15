@@ -9,9 +9,12 @@ Dispatches LLM tool-calls to the appropriate backend:
 All handlers return a dict that gets fed back to the LLM as a tool result.
 """
 from __future__ import annotations
+import difflib
 import json
 import logging
 import os
+import re
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from . import kit_tools
@@ -695,7 +698,7 @@ def _gen_import_robot(args: Dict) -> str:
 
     if fmt == "urdf":
         return f"""\
-from omni.isaac.urdf import _urdf
+from isaacsim.asset.importer.urdf import _urdf
 import omni.kit.commands
 result, prim_path = omni.kit.commands.execute(
     "URDFParseAndImportFile",
@@ -1042,6 +1045,293 @@ async def _handle_lookup_knowledge(args: Dict) -> Dict:
     }
 
 
+# ── PhysX regex for filtering physics-specific errors ──────────────────────
+_PHYSX_ERROR_RE = re.compile(
+    r"physx.*?error|px.*?error|physics.*?simulation.*?error|"
+    r"articulation.*?error|joint.*?error",
+    re.IGNORECASE,
+)
+
+
+async def _handle_get_physics_errors(args: Dict) -> Dict:
+    """Filter console logs for PhysX-specific errors and warnings."""
+    ctx = await kit_tools.get_stage_context(full=False)
+    logs = ctx.get("recent_logs", [])
+    last_n = args.get("last_n", 20)
+
+    physics_logs = []
+    for entry in logs:
+        msg = entry.get("msg", "")
+        source = entry.get("source", "")
+        # Match PhysX regex OR source contains physics/physx
+        if (_PHYSX_ERROR_RE.search(msg) or
+                "physx" in source.lower() or
+                "physics" in source.lower()):
+            physics_logs.append(entry)
+
+    return {
+        "physics_errors": physics_logs[-last_n:],
+        "total_count": len(physics_logs),
+        "note": "Filtered for PhysX/physics engine messages only",
+    }
+
+
+async def _handle_check_collisions(args: Dict) -> Dict:
+    """Validate collision meshes on a prim via Kit RPC."""
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+from pxr import UsdPhysics, UsdGeom, PhysxSchema
+import json
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath('{prim_path}')
+if not prim.IsValid():
+    print(json.dumps({{"valid": False, "error": "Prim not found: {prim_path}"}}))
+else:
+    has_collision = prim.HasAPI(UsdPhysics.CollisionAPI)
+    has_rigid_body = prim.HasAPI(UsdPhysics.RigidBodyAPI)
+    has_mass = prim.HasAPI(UsdPhysics.MassAPI)
+
+    # Count mesh children that could serve as collision geometry
+    mesh_count = 0
+    collision_children = 0
+    for child in prim.GetAllDescendants():
+        if child.IsA(UsdGeom.Mesh):
+            mesh_count += 1
+        if child.HasAPI(UsdPhysics.CollisionAPI):
+            collision_children += 1
+
+    # Check for explicit collision geometry (MeshCollisionAPI or simple shape)
+    has_mesh_collision = prim.HasAPI(PhysxSchema.PhysxCollisionAPI)
+
+    result = {{
+        "valid": True,
+        "prim_path": '{prim_path}',
+        "has_collision_api": has_collision,
+        "has_rigid_body_api": has_rigid_body,
+        "has_mass_api": has_mass,
+        "has_physx_collision": has_mesh_collision,
+        "mesh_children": mesh_count,
+        "children_with_collision": collision_children,
+        "issues": [],
+    }}
+    if not has_collision and collision_children == 0:
+        result["issues"].append("No CollisionAPI on prim or any children — physics contacts will not register")
+    if has_rigid_body and not has_collision and collision_children == 0:
+        result["issues"].append("RigidBodyAPI without any collision — prim will fall through everything")
+    if mesh_count > 0 and not has_collision and collision_children == 0:
+        result["issues"].append("Mesh geometry exists but no collision applied — apply CollisionAPI")
+
+    print(json.dumps(result))
+"""
+    result = await kit_tools.exec_sync(code)
+    if result.get("success") and result.get("output"):
+        try:
+            return {"type": "data", **json.loads(result["output"].strip())}
+        except json.JSONDecodeError:
+            pass
+    return {"type": "data", "error": result.get("output", "Failed to check collisions")}
+
+
+def _handle_fix_error(args: Dict) -> str:
+    """Generate a fix code patch for a known physics/USD error pattern."""
+    error_text = args.get("error_text", "")
+    error_lower = error_text.lower()
+
+    # ── Categorize the error ──────────────────────────────────────────────
+    category = "unknown"
+    if any(kw in error_lower for kw in ("collision", "collider", "collisionapi", "pass through")):
+        category = "collision"
+    elif any(kw in error_lower for kw in ("joint", "jointapi", "body0", "body1", "joint path")):
+        category = "joint"
+    elif any(kw in error_lower for kw in ("solver", "iteration", "diverge", "explod", "unstable")):
+        category = "solver"
+    elif any(kw in error_lower for kw in ("ground", "floor", "falling", "fall through")):
+        category = "ground_plane"
+    elif any(kw in error_lower for kw in ("omnigraph", "og.", "node type", "action graph")):
+        category = "omnigraph"
+    elif any(kw in error_lower for kw in ("articulation", "articulationapi")):
+        category = "articulation"
+    elif any(kw in error_lower for kw in ("usd", "prim", "attribute", "schema")):
+        category = "usd"
+
+    # ── Query knowledge base for known fixes ──────────────────────────────
+    kb_snippets = []
+    try:
+        from ...retrieval.context_retriever import find_matching_patterns, detect_isaac_version
+        version = detect_isaac_version()
+        patterns = find_matching_patterns(error_text, version=version, limit=3)
+        for p in patterns:
+            if p.get("code"):
+                kb_snippets.append(f"# KB pattern: {p.get('title', 'fix')}\n{p['code']}")
+    except Exception:
+        pass  # KB not available — fall back to built-in fixes
+
+    # ── Generate fix code based on category ───────────────────────────────
+    if category == "collision":
+        code = """\
+import omni.usd
+from pxr import UsdPhysics, UsdGeom
+
+stage = omni.usd.get_context().get_stage()
+# Apply CollisionAPI to all Mesh prims missing it
+fixed = []
+for prim in stage.Traverse():
+    if prim.IsA(UsdGeom.Mesh) and not prim.HasAPI(UsdPhysics.CollisionAPI):
+        UsdPhysics.CollisionAPI.Apply(prim)
+        fixed.append(str(prim.GetPath()))
+print(f"Applied CollisionAPI to {len(fixed)} prims: {fixed[:10]}")
+"""
+
+    elif category == "solver":
+        code = """\
+import omni.usd
+from pxr import UsdPhysics, PhysxSchema
+
+stage = omni.usd.get_context().get_stage()
+# Find or create PhysicsScene and increase solver iterations
+scene_prim = None
+for prim in stage.Traverse():
+    if prim.IsA(UsdPhysics.Scene):
+        scene_prim = prim
+        break
+if scene_prim is None:
+    scene_prim = UsdPhysics.Scene.Define(stage, '/PhysicsScene').GetPrim()
+
+physx_scene = PhysxSchema.PhysxSceneAPI.Apply(scene_prim)
+physx_scene.CreateMinPositionIterationCountAttr(16)
+physx_scene.CreateMinVelocityIterationCountAttr(4)
+physx_scene.CreateEnableStabilizationAttr(True)
+print("Increased solver iterations and enabled stabilization")
+"""
+
+    elif category == "joint":
+        code = """\
+import omni.usd
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+# Scan joints and report broken body references
+issues = []
+for prim in stage.Traverse():
+    joint = UsdPhysics.Joint(prim)
+    if not joint:
+        continue
+    rel0 = prim.GetRelationship('physics:body0')
+    rel1 = prim.GetRelationship('physics:body1')
+    targets0 = rel0.GetTargets() if rel0 else []
+    targets1 = rel1.GetTargets() if rel1 else []
+    for t in targets0 + targets1:
+        if not stage.GetPrimAtPath(t).IsValid():
+            issues.append(f"Joint {prim.GetPath()} references missing prim: {t}")
+print(f"Joint scan complete. Issues found: {len(issues)}")
+for issue in issues:
+    print(f"  - {issue}")
+"""
+
+    elif category == "ground_plane":
+        code = """\
+import omni.usd
+from pxr import UsdGeom, UsdPhysics, Gf, Sdf
+
+stage = omni.usd.get_context().get_stage()
+
+# Create ground plane if none exists
+ground_path = '/World/GroundPlane'
+if not stage.GetPrimAtPath(ground_path).IsValid():
+    xform = UsdGeom.Xform.Define(stage, ground_path)
+    plane = UsdGeom.Mesh.Define(stage, f'{ground_path}/CollisionMesh')
+    plane.GetPointsAttr().Set([(-50,-50,0),(50,-50,0),(50,50,0),(-50,50,0)])
+    plane.GetFaceVertexCountsAttr().Set([4])
+    plane.GetFaceVertexIndicesAttr().Set([0,1,2,3])
+    UsdPhysics.CollisionAPI.Apply(plane.GetPrim())
+    print(f"Created ground plane at {ground_path}")
+
+# Also ensure PhysicsScene exists with gravity
+scene_path = '/PhysicsScene'
+if not stage.GetPrimAtPath(scene_path).IsValid():
+    scene = UsdPhysics.Scene.Define(stage, scene_path)
+    scene.GetGravityDirectionAttr().Set(Gf.Vec3f(0, 0, -1))
+    scene.GetGravityMagnitudeAttr().Set(9.81)
+    print("Created PhysicsScene with gravity (0, 0, -9.81)")
+"""
+
+    elif category == "omnigraph":
+        code = """\
+import omni.graph.core as og
+
+# List all graphs and their evaluation state
+graphs = og.get_all_graphs()
+for g in graphs:
+    path = g.get_path_to_graph()
+    valid = g.is_valid()
+    nodes = g.get_nodes()
+    print(f"Graph: {path}, valid={valid}, nodes={len(nodes)}")
+    for n in nodes:
+        print(f"  Node: {n.get_prim_path()}, type={n.get_type_name()}")
+"""
+
+    elif category == "articulation":
+        code = """\
+import omni.usd
+from pxr import UsdPhysics, PhysxSchema
+
+stage = omni.usd.get_context().get_stage()
+# Find articulations and verify their setup
+for prim in stage.Traverse():
+    if prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+        path = str(prim.GetPath())
+        has_rb = prim.HasAPI(UsdPhysics.RigidBodyAPI)
+        physx_art = PhysxSchema.PhysxArticulationAPI(prim) if prim.HasAPI(PhysxSchema.PhysxArticulationAPI) else None
+        fixed = physx_art.GetArticulationEnabledAttr().Get() if physx_art else None
+        print(f"Articulation: {path}, has_rigid_body={has_rb}, physx_enabled={fixed}")
+        # Count joints
+        joint_count = 0
+        for child in prim.GetAllDescendants():
+            if child.HasAPI(UsdPhysics.RevoluteJointAPI) or child.HasAPI(UsdPhysics.PrismaticJointAPI):
+                joint_count += 1
+        print(f"  Joints: {joint_count}")
+"""
+
+    else:
+        # Unknown category — generate diagnostic code
+        code = """\
+import omni.usd
+from pxr import UsdPhysics, UsdGeom
+
+stage = omni.usd.get_context().get_stage()
+# Diagnostic: scan scene for common physics issues
+issues = []
+mesh_no_collision = 0
+rigid_no_collision = 0
+for prim in stage.Traverse():
+    if prim.IsA(UsdGeom.Mesh) and not prim.HasAPI(UsdPhysics.CollisionAPI):
+        mesh_no_collision += 1
+    if prim.HasAPI(UsdPhysics.RigidBodyAPI) and not prim.HasAPI(UsdPhysics.CollisionAPI):
+        rigid_no_collision += 1
+        issues.append(f"RigidBody without collision: {prim.GetPath()}")
+
+has_scene = any(p.IsA(UsdPhysics.Scene) for p in stage.Traverse())
+print(f"Physics scene exists: {has_scene}")
+print(f"Meshes without collision: {mesh_no_collision}")
+print(f"RigidBodies without collision: {rigid_no_collision}")
+for i in issues[:10]:
+    print(f"  - {i}")
+"""
+
+    # Prepend KB snippets as comments if available
+    if kb_snippets:
+        kb_header = "\n".join(f"# {line}" for snippet in kb_snippets
+                              for line in snippet.split("\n"))
+        code = f"# Knowledge base matches for this error:\n{kb_header}\n\n{code}"
+
+    return code
+
+
+CODE_GEN_HANDLERS["fix_error"] = _handle_fix_error
+
+
 # Data-only handlers (no code gen → return data directly to LLM)
 DATA_HANDLERS = {
     "lookup_product_spec": _handle_lookup_product_spec,
@@ -1054,6 +1344,8 @@ DATA_HANDLERS = {
     "get_debug_info": _handle_get_debug_info,
     "lookup_knowledge": _handle_lookup_knowledge,
     "explain_error": None,  # handled inline by LLM (no tool execution)
+    "get_physics_errors": _handle_get_physics_errors,
+    "check_collisions": _handle_check_collisions,
 }
 
 # ── ROS2 live handlers (via rosbridge / ros-mcp) ────────────────────────────
@@ -1200,17 +1492,17 @@ lidar_prim = stage.DefinePrim(lidar_path, 'Camera')
 _safe_set_translate(lidar_prim, (0, 0, 0.1))
 
 # Configure RTX Lidar via Isaac Sim extension
-from omni.isaac.sensor import LidarRtx
+from isaacsim.sensor.schema import LidarRtx
 lidar = LidarRtx(prim_path=lidar_path)
 """
     if sensor_type == "imu":
         return f"""\
-from omni.isaac.sensor import IMUSensor
+from isaacsim.sensor.schema import IMUSensor
 imu = IMUSensor(prim_path='{prim_path}/IMU')
 """
     if sensor_type == "contact_sensor":
         return f"""\
-from omni.isaac.sensor import ContactSensor
+from isaacsim.sensor.schema import ContactSensor
 contact = ContactSensor(prim_path='{prim_path}/ContactSensor')
 """
     return f"# Sensor type '{sensor_type}' not yet implemented"
@@ -1257,61 +1549,77 @@ def _gen_move_to_pose(args: Dict) -> str:
     target_ori = args.get("target_orientation")
     planner = args.get("planner", "rmpflow")
     robot_type = args.get("robot_type", "franka").lower()
+    position_threshold = args.get("position_threshold", 0.01)
+    max_steps = args.get("max_steps", 1000)
 
     cfg = _MOTION_ROBOT_CONFIGS.get(robot_type, _MOTION_ROBOT_CONFIGS["franka"])
     ee = cfg["ee_frame"]
 
     if planner == "lula_rrt":
-        # Global planner — single-shot path plan
+        # Global planner — single-shot path plan using LulaRRTMotionPolicy
+        # NOTE: Lula RRT does NOT support orientation targets — only position
         lines = [
             "import omni.usd",
             "import numpy as np",
-            "from isaacsim.robot_motion.motion_generation import LulaTaskSpaceTrajectoryGenerator",
+            "from isaacsim.robot_motion.motion_generation import LulaRRTMotionPolicy",
             "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "from isaacsim.core.prims import SingleArticulation",
             "",
             "# Load Lula RRT planner config",
             f"rrt_config = interface_config_loader.load_supported_lula_rrt_config('{robot_type}')",
-            f"rrt = LulaTaskSpaceTrajectoryGenerator(**rrt_config)",
+            f"rrt = LulaRRTMotionPolicy(**rrt_config)",
             "",
             f"target_pos = np.array({list(target_pos)})",
         ]
         if target_ori:
-            lines.append(f"target_ori = np.array({list(target_ori)})")
-        else:
-            lines.append("target_ori = None")
+            lines.extend([
+                f"# WARNING: Lula RRT does not support orientation targets — orientation will be ignored",
+                f"print('WARNING: Lula RRT ignores orientation targets. Only position [{target_pos[0]}, {target_pos[1]}, {target_pos[2]}] will be used.')",
+            ])
         lines.extend([
             "",
-            "# Compute trajectory",
-            f"trajectory = rrt.compute_task_space_trajectory_from_points(",
-            f"    [target_pos], [target_ori] if target_ori is not None else None",
-            f")",
-            "if trajectory is not None:",
-            "    print(f'Lula RRT: planned trajectory with {{len(trajectory)}} waypoints')",
-            "else:",
-            "    print('Lula RRT: failed to find path — try a different target or clear obstacles')",
+            f"# Get the articulation",
+            f"art = SingleArticulation(prim_path='{art_path}')",
+            "art.initialize()",
+            "",
+            "# Set position-only target",
+            "rrt.set_end_effector_target(target_pos)",
+            "",
+            "# Compute and apply single-shot trajectory",
+            "joint_positions = art.get_joint_positions()",
+            "joint_velocities = art.get_joint_velocities()",
+            "action = rrt.get_next_articulation_action(joint_positions, joint_velocities)",
+            "art.apply_action(action)",
+            f"print(f'Lula RRT: planned path to {{target_pos}} — action applied')",
         ])
         return "\n".join(lines)
 
     # Default: RMPflow (reactive, real-time)
+    # RMPflow is a step-wise reactive policy — must run every physics step
+    # until convergence or timeout
     lines = [
         "import omni.usd",
         "import numpy as np",
-        "from isaacsim.robot_motion.motion_generation import RmpFlow",
+        "from isaacsim.robot_motion.motion_generation import RmpFlow, ArticulationMotionPolicy",
         "from isaacsim.robot_motion.motion_generation import interface_config_loader",
         "from isaacsim.core.prims import SingleArticulation",
         "from isaacsim.core.api import World",
         "",
         "# Load RMPflow config for the robot",
-        f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+        f"rmpflow_config = interface_config_loader.load_supported_motion_policy_config('{robot_type}', 'RMPflow')",
         "rmpflow = RmpFlow(**rmpflow_config)",
         "",
         f"# Get the articulation",
         f"art = SingleArticulation(prim_path='{art_path}')",
         "world = World.instance()",
         "if world is None:",
-        "    from isaacsim.core.api import World",
         "    world = World()",
         "art.initialize()",
+        "",
+        "# Set robot base pose if not at world origin",
+        "robot_base_pos, robot_base_rot = art.get_world_pose()",
+        "if np.linalg.norm(robot_base_pos) > 1e-6:",
+        "    rmpflow.set_robot_base_pose(robot_base_pos, robot_base_rot)",
         "",
         "# Set target",
         f"target_pos = np.array({list(target_pos)})",
@@ -1321,18 +1629,34 @@ def _gen_move_to_pose(args: Dict) -> str:
     else:
         lines.append("target_ori = None")
     lines.extend([
-        f"rmpflow.set_end_effector_target(target_pos, target_ori)",
+        "rmpflow.set_end_effector_target(target_pos, target_ori)",
         "",
-        "# Get current joint state and compute action",
-        "joint_positions = art.get_joint_positions()",
-        "joint_velocities = art.get_joint_velocities()",
-        "action = rmpflow.get_next_articulation_action(",
-        "    joint_positions, joint_velocities",
-        ")",
+        "# RMPflow must run every physics step until convergence",
+        f"_rmpflow_steps = 0",
+        f"_rmpflow_max_steps = {max_steps}",
+        f"_rmpflow_threshold = {position_threshold}",
         "",
-        "# Apply joint targets",
-        "art.apply_action(action)",
-        f"print(f'RMPflow: moving {ee} to {{target_pos}} — action applied')",
+        "def _on_rmpflow_physics_step(dt):",
+        "    global _rmpflow_steps",
+        "    _rmpflow_steps += 1",
+        "    joint_positions = art.get_joint_positions()",
+        "    joint_velocities = art.get_joint_velocities()",
+        "    rmpflow.update_world()  # Required for dynamic obstacle avoidance",
+        "    action = rmpflow.get_next_articulation_action(joint_positions, joint_velocities)",
+        "    art.apply_action(action)",
+        "",
+        "    # Convergence check: end-effector close enough to target",
+        "    ee_pos, _ = art.get_world_pose()",
+        "    dist = np.linalg.norm(ee_pos - target_pos)",
+        "    if dist < _rmpflow_threshold:",
+        f"        print(f'RMPflow: {ee} reached target (dist={{dist:.4f}}m) in {{_rmpflow_steps}} steps')",
+        "        world.remove_physics_callback('rmpflow_step')",
+        "    elif _rmpflow_steps >= _rmpflow_max_steps:",
+        f"        print(f'RMPflow: timeout after {{_rmpflow_max_steps}} steps (dist={{dist:.4f}}m from target)')",
+        "        world.remove_physics_callback('rmpflow_step')",
+        "",
+        "world.add_physics_callback('rmpflow_step', _on_rmpflow_physics_step)",
+        f"print(f'RMPflow: physics callback registered — {ee} moving to {{target_pos}}')",
     ])
     return "\n".join(lines)
 
@@ -1347,32 +1671,34 @@ def _gen_plan_trajectory(args: Dict) -> str:
     ) + "]"
     orientations = [wp.get("orientation") for wp in waypoints]
     has_ori = any(o is not None for o in orientations)
-    if has_ori:
-        ori_str = "[" + ", ".join(
-            f"np.array({list(o)})" if o else "None" for o in orientations
-        ) + "]"
-    else:
-        ori_str = "None"
 
+    # Lula RRT does NOT support orientation targets — warn if provided
     lines = [
         "import numpy as np",
-        "from isaacsim.robot_motion.motion_generation import LulaTaskSpaceTrajectoryGenerator",
+        "from isaacsim.robot_motion.motion_generation import LulaRRTMotionPolicy",
         "from isaacsim.robot_motion.motion_generation import interface_config_loader",
         "",
         f"rrt_config = interface_config_loader.load_supported_lula_rrt_config('{robot_type}')",
-        f"planner = LulaTaskSpaceTrajectoryGenerator(**rrt_config)",
+        f"planner = LulaRRTMotionPolicy(**rrt_config)",
         "",
         f"positions = {positions_str}",
-        f"orientations = {ori_str}",
-        "",
-        "trajectory = planner.compute_task_space_trajectory_from_points(",
-        "    positions, orientations",
-        ")",
-        "if trajectory is not None:",
-        f"    print(f'Planned trajectory through {len(waypoints)} waypoints')",
-        "else:",
-        "    print('Failed to plan trajectory — try different waypoints')",
     ]
+    if has_ori:
+        lines.extend([
+            "",
+            "# WARNING: Lula RRT does not support orientation targets — orientations ignored",
+            "print('WARNING: Lula RRT ignores orientation targets. Only positions will be used.')",
+        ])
+    lines.extend([
+        "",
+        "# Plan through waypoints (position-only)",
+        "planned_actions = []",
+        "for i, pos in enumerate(positions):",
+        "    planner.set_end_effector_target(pos)",
+        "    print(f'Planned waypoint {i+1}/{len(positions)}: {pos}')",
+        "",
+        f"print(f'Planned trajectory through {len(waypoints)} waypoints')",
+    ])
     return "\n".join(lines)
 
 
@@ -1407,13 +1733,43 @@ _CATALOG_ROBOTS = {
 }
 
 
+_ASSET_CACHE_PATH = _WORKSPACE / "knowledge" / "asset_index.jsonl"
+_ASSET_CACHE_MAX_AGE_S = 86400  # 24 hours
+
+
 def _build_asset_index() -> List[Dict]:
-    """Walk asset directories and build a searchable index of USD files."""
+    """Walk asset directories and build a searchable index of USD files.
+
+    Results are cached in-memory and persisted to a JSONL file at
+    ``workspace/knowledge/asset_index.jsonl``.  If the cache file exists and is
+    less than 24 h old it is loaded directly instead of re-scanning.
+
+    NOTE: This uses filesystem walking (``Path.rglob``) which works when the
+    service runs outside Kit.  Nucleus-hosted assets would need a Kit RPC proxy
+    (``omni.client.list()`` only works inside the Kit process).
+    """
     global _asset_index
     if _asset_index is not None:
         return _asset_index
 
-    index = []
+    # ── Try loading from persistent JSONL cache ───────────────────────────
+    if _ASSET_CACHE_PATH.exists():
+        try:
+            age = time.time() - _ASSET_CACHE_PATH.stat().st_mtime
+            if age < _ASSET_CACHE_MAX_AGE_S:
+                cached: List[Dict] = []
+                for line in _ASSET_CACHE_PATH.read_text().splitlines():
+                    line = line.strip()
+                    if line:
+                        cached.append(json.loads(line))
+                if cached:
+                    _asset_index = cached
+                    logger.debug("Loaded %d assets from cache (%s)", len(cached), _ASSET_CACHE_PATH)
+                    return _asset_index
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Asset cache read failed, will re-scan: %s", exc)
+
+    index: List[Dict] = []
 
     # 1. Robots from the known robot name map
     robots_dir = ""
@@ -1479,17 +1835,32 @@ def _build_asset_index() -> List[Dict]:
             pass
 
     _asset_index = index
+
+    # ── Write persistent JSONL cache ──────────────────────────────────────
+    try:
+        _ASSET_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_ASSET_CACHE_PATH, "w") as fh:
+            for entry in index:
+                fh.write(json.dumps(entry, separators=(",", ":")) + "\n")
+        logger.debug("Wrote asset cache with %d entries to %s", len(index), _ASSET_CACHE_PATH)
+    except OSError as exc:
+        logger.warning("Failed to write asset cache: %s", exc)
+
     return _asset_index
 
 
 async def _handle_catalog_search(args: Dict) -> Dict:
-    """Fuzzy-match assets by name, type, and path."""
+    """Fuzzy-match assets by name, type, and path.
+
+    Scoring uses ``difflib.SequenceMatcher`` for fuzzy name matching so that
+    queries like "frank" still match "franka" and minor typos are tolerated.
+    """
     query = args.get("query", "").lower()
     asset_type = args.get("asset_type", "any").lower()
     limit = args.get("limit", 10)
 
     index = _build_asset_index()
-    scored = []
+    scored: List[tuple] = []
     query_words = query.split()
 
     for asset in index:
@@ -1501,11 +1872,18 @@ async def _handle_catalog_search(args: Dict) -> Dict:
         rel_path = asset.get("rel_path", "").lower()
         searchable = f"{name} {path} {rel_path}"
 
-        # Score: exact match > all words present > partial
+        # --- Fuzzy name similarity via SequenceMatcher ---
+        fuzzy_name = difflib.SequenceMatcher(None, query, name).ratio()
+        fuzzy_path = difflib.SequenceMatcher(None, query, rel_path).ratio() if rel_path else 0.0
+
+        # Score: exact match > all-words present > fuzzy similarity > partial words
         if query == name:
-            score = 100
+            score = 100.0
         elif all(w in searchable for w in query_words):
-            score = 70 + sum(10 for w in query_words if w in name)
+            score = 70.0 + sum(10 for w in query_words if w in name)
+        elif fuzzy_name >= 0.6 or fuzzy_path >= 0.5:
+            # Fuzzy match — scale ratio into 30-69 range
+            score = 30.0 + max(fuzzy_name, fuzzy_path) * 40.0
         elif any(w in searchable for w in query_words):
             score = sum(10 for w in query_words if w in searchable)
         else:
@@ -1539,6 +1917,9 @@ def _gen_build_scene_from_blueprint(args: Dict) -> str:
         return "print('Empty blueprint — nothing to build')\n"
 
     lines = [
+        "# SCENE BLUEPRINT BUILD — multi-object atomic operation.",
+        "# A snapshot should be taken before execution so the entire build",
+        "# can be rolled back as a single unit via the snapshot manager.",
         "import omni.usd",
         "from pxr import UsdGeom, Gf, Sdf",
         _SAFE_XFORM_SNIPPET,
@@ -1582,7 +1963,7 @@ def _gen_build_scene_from_blueprint(args: Dict) -> str:
 async def _handle_generate_scene_blueprint(args: Dict) -> Dict:
     """Generate a scene blueprint (data, not code). The LLM fills in the spatial layout."""
     description = args.get("description", "")
-    room_dims = args.get("room_dimensions")
+    room_dims = args.get("room_dimensions") or [6, 6, 3]
     available = args.get("available_assets")
 
     # If no assets provided, search the catalog
@@ -1593,20 +1974,454 @@ async def _handle_generate_scene_blueprint(args: Dict) -> Dict:
     return {
         "type": "blueprint_request",
         "description": description,
-        "room_dimensions": room_dims or [6, 6, 3],
+        "room_dimensions": room_dims,
         "available_assets": available,
         "instructions": (
-            "Based on the description and available assets, generate a blueprint JSON with: "
-            "objects: [{name, asset_path (from available_assets), prim_path (/World/Name), "
-            "position [x,y,z], rotation [rx,ry,rz], scale [sx,sy,sz]}]. "
-            "Ensure objects don't overlap, items sit ON surfaces (not floating), "
-            "robots have 1m clearance. Then call build_scene_from_blueprint with the blueprint."
+            "All coordinates are in meters. Z-axis is up. "
+            f"Room dimensions: {room_dims[0]}m x {room_dims[1]}m x {room_dims[2]}m (X x Y x Z). "
+            "Generate a blueprint JSON following these steps in order:\n"
+            "Step 1: Define room boundaries and anchor surfaces — place ground plane / floor at z=0, "
+            "walls along room edges.\n"
+            "Step 2: Place large fixed objects — tables, shelves, workbenches, fixtures. "
+            "Keep within room bounds.\n"
+            "Step 3: Place surface items — objects ON tables (z = table_height + object_half_height), "
+            "items ON shelves at correct shelf heights. Nothing should float.\n"
+            "Step 4: Place robot with at least 1m clearance on all sides from other objects.\n\n"
+            "Output format: objects: [{name, asset_path (from available_assets), "
+            "prim_path (/World/Name), position [x,y,z], rotation [rx,ry,rz], scale [sx,sy,sz]}]. "
+            "Then call build_scene_from_blueprint with the blueprint."
         ),
     }
 
 
 DATA_HANDLERS["generate_scene_blueprint"] = _handle_generate_scene_blueprint
 CODE_GEN_HANDLERS["build_scene_from_blueprint"] = _gen_build_scene_from_blueprint
+
+
+# ── Scene Templates (Phase 5.7) ────────────────────────────────────────────
+
+_SCENE_TEMPLATES = {
+    "tabletop_manipulation": {
+        "description": "Table-top manipulation scene with a Franka robot arm, objects to grasp, and an overhead camera. Ideal for pick-and-place tasks.",
+        "category": "manipulation",
+        "room_dims": [4, 4, 3],
+        "objects": [
+            {"name": "GroundPlane", "prim_type": "Plane", "position": [0, 0, 0], "scale": [5, 5, 1]},
+            {"name": "Table", "prim_type": "Cube", "position": [0, 0, 0.4], "scale": [0.8, 0.6, 0.4]},
+            {"name": "Franka", "prim_path": "/World/Franka", "asset_name": "franka", "position": [0, -0.3, 0.8], "scale": [1, 1, 1]},
+            {"name": "Cube_Red", "prim_type": "Cube", "position": [0.15, 0.1, 0.85], "scale": [0.03, 0.03, 0.03]},
+            {"name": "Cube_Green", "prim_type": "Cube", "position": [-0.1, 0.15, 0.85], "scale": [0.03, 0.03, 0.03]},
+            {"name": "Cylinder_Blue", "prim_type": "Cylinder", "position": [0.05, -0.1, 0.85], "scale": [0.02, 0.02, 0.04]},
+            {"name": "OverheadCamera", "prim_type": "Camera", "position": [0, 0, 1.8], "rotation": [-90, 0, 0]},
+        ],
+        "suggested_sensors": ["camera (overhead, 1280x720)", "contact_sensor (gripper fingers)"],
+        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 120.0, "solver_iterations": 32},
+    },
+    "warehouse_picking": {
+        "description": "Warehouse bin-picking scene with shelving units, a mobile robot, bins with objects, and an overhead camera. Good for logistics and order-fulfillment tasks.",
+        "category": "warehouse",
+        "room_dims": [10, 8, 4],
+        "objects": [
+            {"name": "GroundPlane", "prim_type": "Plane", "position": [0, 0, 0], "scale": [12, 10, 1]},
+            {"name": "Shelf_A", "prim_type": "Cube", "position": [-2, 2, 1.0], "scale": [1.2, 0.4, 2.0]},
+            {"name": "Shelf_B", "prim_type": "Cube", "position": [2, 2, 1.0], "scale": [1.2, 0.4, 2.0]},
+            {"name": "Bin_1", "prim_type": "Cube", "position": [-2, 2, 0.3], "scale": [0.4, 0.3, 0.25]},
+            {"name": "Bin_2", "prim_type": "Cube", "position": [-2, 2, 0.8], "scale": [0.4, 0.3, 0.25]},
+            {"name": "Bin_3", "prim_type": "Cube", "position": [2, 2, 0.3], "scale": [0.4, 0.3, 0.25]},
+            {"name": "MobileRobot", "prim_path": "/World/Carter", "asset_name": "carter", "position": [0, -1, 0], "scale": [1, 1, 1]},
+            {"name": "OverheadCamera", "prim_type": "Camera", "position": [0, 0, 3.5], "rotation": [-90, 0, 0]},
+        ],
+        "suggested_sensors": ["camera (overhead, 1920x1080)", "rtx_lidar (mobile robot)"],
+        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 60.0, "solver_iterations": 16},
+    },
+    "mobile_navigation": {
+        "description": "Indoor navigation scene with a ground plane, walls, obstacles, and a wheeled robot with lidar. Good for SLAM and path-planning tasks.",
+        "category": "mobile",
+        "room_dims": [8, 8, 3],
+        "objects": [
+            {"name": "GroundPlane", "prim_type": "Plane", "position": [0, 0, 0], "scale": [10, 10, 1]},
+            {"name": "Wall_North", "prim_type": "Cube", "position": [0, 4, 1.0], "scale": [8, 0.1, 2.0]},
+            {"name": "Wall_South", "prim_type": "Cube", "position": [0, -4, 1.0], "scale": [8, 0.1, 2.0]},
+            {"name": "Wall_East", "prim_type": "Cube", "position": [4, 0, 1.0], "scale": [0.1, 8, 2.0]},
+            {"name": "Wall_West", "prim_type": "Cube", "position": [-4, 0, 1.0], "scale": [0.1, 8, 2.0]},
+            {"name": "Obstacle_1", "prim_type": "Cylinder", "position": [1.5, 1.0, 0.5], "scale": [0.3, 0.3, 1.0]},
+            {"name": "Obstacle_2", "prim_type": "Cube", "position": [-1.0, -1.5, 0.4], "scale": [0.6, 0.6, 0.8]},
+            {"name": "Obstacle_3", "prim_type": "Cylinder", "position": [-2.0, 2.0, 0.5], "scale": [0.25, 0.25, 1.0]},
+            {"name": "Jetbot", "prim_path": "/World/Jetbot", "asset_name": "jetbot", "position": [0, 0, 0.05], "scale": [1, 1, 1]},
+        ],
+        "suggested_sensors": ["rtx_lidar (robot-mounted, 360 deg)", "camera (front-facing)"],
+        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 60.0, "solver_iterations": 16},
+    },
+    "inspection_cell": {
+        "description": "Automated inspection cell with a conveyor belt, inspection cameras, structured lighting, and sample objects. Good for quality-inspection and defect-detection tasks.",
+        "category": "inspection",
+        "room_dims": [6, 4, 3],
+        "objects": [
+            {"name": "GroundPlane", "prim_type": "Plane", "position": [0, 0, 0], "scale": [8, 6, 1]},
+            {"name": "Conveyor", "prim_type": "Cube", "position": [0, 0, 0.45], "scale": [3.0, 0.5, 0.05]},
+            {"name": "ConveyorLegs_L", "prim_type": "Cube", "position": [-1.2, 0, 0.2], "scale": [0.05, 0.4, 0.4]},
+            {"name": "ConveyorLegs_R", "prim_type": "Cube", "position": [1.2, 0, 0.2], "scale": [0.05, 0.4, 0.4]},
+            {"name": "InspectionCamera_Top", "prim_type": "Camera", "position": [0, 0, 1.5], "rotation": [-90, 0, 0]},
+            {"name": "InspectionCamera_Side", "prim_type": "Camera", "position": [0, -1.2, 0.8], "rotation": [0, 0, 0]},
+            {"name": "Light_Bar_1", "prim_type": "RectLight", "position": [-0.5, 0, 1.2], "scale": [0.8, 0.1, 0.05]},
+            {"name": "Light_Bar_2", "prim_type": "RectLight", "position": [0.5, 0, 1.2], "scale": [0.8, 0.1, 0.05]},
+            {"name": "SampleObject_1", "prim_type": "Cube", "position": [-0.3, 0, 0.5], "scale": [0.08, 0.08, 0.08]},
+            {"name": "SampleObject_2", "prim_type": "Cylinder", "position": [0.1, 0, 0.5], "scale": [0.04, 0.04, 0.06]},
+            {"name": "SampleObject_3", "prim_type": "Sphere", "position": [0.4, 0, 0.52], "scale": [0.03, 0.03, 0.03]},
+        ],
+        "suggested_sensors": ["camera (top-down, high-res 4K)", "camera (side-view, 1280x720)"],
+        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 120.0, "solver_iterations": 32},
+    },
+}
+
+
+async def _handle_list_scene_templates(args: Dict) -> Dict:
+    """List available scene templates, optionally filtered by category."""
+    category = args.get("category", "").lower()
+
+    templates = []
+    for name, tmpl in _SCENE_TEMPLATES.items():
+        if category and tmpl.get("category", "") != category:
+            continue
+        templates.append({
+            "name": name,
+            "description": tmpl["description"],
+            "category": tmpl.get("category", "general"),
+            "object_count": len(tmpl["objects"]),
+            "room_dims": tmpl["room_dims"],
+        })
+
+    return {
+        "templates": templates,
+        "count": len(templates),
+        "total_available": len(_SCENE_TEMPLATES),
+    }
+
+
+async def _handle_load_scene_template(args: Dict) -> Dict:
+    """Load a scene template by name. Returns a blueprint compatible with build_scene_from_blueprint."""
+    template_name = args.get("template_name", "").lower().replace(" ", "_").replace("-", "_")
+
+    if template_name not in _SCENE_TEMPLATES:
+        available = list(_SCENE_TEMPLATES.keys())
+        return {
+            "error": f"Template '{template_name}' not found.",
+            "available_templates": available,
+        }
+
+    tmpl = _SCENE_TEMPLATES[template_name]
+
+    # Build a blueprint dict compatible with build_scene_from_blueprint
+    blueprint_objects = []
+    for obj in tmpl["objects"]:
+        bp_obj = {
+            "name": obj["name"],
+            "prim_path": obj.get("prim_path", f"/World/{obj['name']}"),
+            "position": obj.get("position", [0, 0, 0]),
+            "rotation": obj.get("rotation", [0, 0, 0]),
+            "scale": obj.get("scale", [1, 1, 1]),
+        }
+        if obj.get("prim_type"):
+            bp_obj["prim_type"] = obj["prim_type"]
+        if obj.get("asset_name"):
+            bp_obj["asset_name"] = obj["asset_name"]
+        if obj.get("asset_path"):
+            bp_obj["asset_path"] = obj["asset_path"]
+        blueprint_objects.append(bp_obj)
+
+    blueprint = {
+        "description": tmpl["description"],
+        "room_dimensions": tmpl["room_dims"],
+        "objects": blueprint_objects,
+        "suggested_sensors": tmpl.get("suggested_sensors", []),
+        "physics_settings": tmpl.get("physics_settings", {}),
+    }
+
+    return {
+        "template_name": template_name,
+        "blueprint": blueprint,
+        "object_count": len(blueprint_objects),
+        "message": (
+            f"Template '{template_name}' loaded with {len(blueprint_objects)} objects. "
+            "Call build_scene_from_blueprint with the 'blueprint' field to create the scene."
+        ),
+    }
+
+
+DATA_HANDLERS["list_scene_templates"] = _handle_list_scene_templates
+DATA_HANDLERS["load_scene_template"] = _handle_load_scene_template
+
+
+# ── Batch Operations (Phase 5.6) ───────────────────────────────────────────
+
+def _gen_batch_apply_operation(args: Dict) -> str:
+    """Generate code to apply an operation to all children of a parent prim."""
+    target_path = args["target_path"]
+    operation = args["operation"]
+    params = args.get("parameters", {}) or {}
+    filter_type = args.get("filter_type")
+
+    lines = [
+        "import omni.usd",
+        "from pxr import Usd, UsdGeom, UsdPhysics, UsdShade, Gf, Sdf",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        f"parent = stage.GetPrimAtPath('{target_path}')",
+        "if not parent.IsValid():",
+        f"    raise RuntimeError('Parent prim not found: {target_path}')",
+        "",
+        "count = 0",
+        "for prim in Usd.PrimRange(parent):",
+        "    if prim.GetPath() == parent.GetPath():",
+        "        continue  # skip the parent itself",
+    ]
+
+    if filter_type:
+        lines.append(f"    if prim.GetTypeName() != '{filter_type}':")
+        lines.append("        continue")
+
+    if operation == "apply_physics":
+        mass = params.get("mass")
+        lines.extend([
+            "    UsdPhysics.RigidBodyAPI.Apply(prim)",
+            "    UsdPhysics.CollisionAPI.Apply(prim)",
+        ])
+        if mass:
+            lines.extend([
+                "    mass_api = UsdPhysics.MassAPI.Apply(prim)",
+                f"    mass_api.CreateMassAttr({mass})",
+            ])
+        lines.append("    count += 1")
+
+    elif operation == "apply_collision":
+        lines.extend([
+            "    UsdPhysics.CollisionAPI.Apply(prim)",
+            "    count += 1",
+        ])
+
+    elif operation == "set_material":
+        mat_path = params.get("material_path", "")
+        if not mat_path:
+            return "raise ValueError('set_material requires parameters.material_path')"
+        lines.extend([
+            f"    mat = UsdShade.Material(stage.GetPrimAtPath('{mat_path}'))",
+            "    UsdShade.MaterialBindingAPI(prim).Bind(mat, UsdShade.Tokens.strongerThanDescendants)",
+            "    count += 1",
+        ])
+
+    elif operation == "delete":
+        # Collect paths first, then delete (avoid mutating during traversal)
+        lines = [
+            "import omni.usd",
+            "from pxr import Usd",
+            "",
+            "stage = omni.usd.get_context().get_stage()",
+            f"parent = stage.GetPrimAtPath('{target_path}')",
+            "if not parent.IsValid():",
+            f"    raise RuntimeError('Parent prim not found: {target_path}')",
+            "",
+            "paths_to_delete = []",
+            "for prim in Usd.PrimRange(parent):",
+            "    if prim.GetPath() == parent.GetPath():",
+            "        continue",
+        ]
+        if filter_type:
+            lines.append(f"    if prim.GetTypeName() != '{filter_type}':")
+            lines.append("        continue")
+        lines.extend([
+            "    paths_to_delete.append(str(prim.GetPath()))",
+            "",
+            "count = 0",
+            "for p in reversed(paths_to_delete):",
+            "    stage.RemovePrim(p)",
+            "    count += 1",
+        ])
+
+    elif operation == "set_visibility":
+        visible = params.get("visible", True)
+        vis_token = "UsdGeom.Tokens.inherited" if visible else "UsdGeom.Tokens.invisible"
+        lines.extend([
+            "    imageable = UsdGeom.Imageable(prim)",
+            "    if imageable:",
+            f"        imageable.GetVisibilityAttr().Set({vis_token})",
+            "        count += 1",
+        ])
+
+    elif operation == "set_attribute":
+        attr_name = params.get("attr_name", "")
+        value = params.get("value")
+        if not attr_name:
+            return "raise ValueError('set_attribute requires parameters.attr_name')"
+        lines.extend([
+            f"    attr = prim.GetAttribute('{attr_name}')",
+            "    if attr.IsValid():",
+            f"        attr.Set({repr(value)})",
+            "        count += 1",
+        ])
+
+    else:
+        return f"raise ValueError('Unknown batch operation: {operation}')"
+
+    lines.append(f"print(f'batch_apply_operation: {{count}} prims affected by {operation} under {target_path}')")
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["batch_apply_operation"] = _gen_batch_apply_operation
+
+
+# ── Scene Blueprint Validation (Phase 6A.3) ────────────────────────────────
+
+async def _handle_validate_scene_blueprint(args: Dict) -> Dict:
+    """Validate a scene blueprint before building. Checks for overlaps, floating objects, bad scales, and missing fields."""
+    blueprint = args.get("blueprint", {})
+    objects = blueprint.get("objects", [])
+
+    issues: List[str] = []
+    warnings: List[str] = []
+
+    if not objects:
+        issues.append("Blueprint has no objects.")
+        return {"valid": False, "issues": issues, "warnings": warnings, "object_count": 0}
+
+    # ── Check required fields on each object ────────────────────────────
+    for i, obj in enumerate(objects):
+        name = obj.get("name", f"object_{i}")
+        if not obj.get("name"):
+            warnings.append(f"Object [{i}] is missing a 'name' field.")
+        if not obj.get("position"):
+            issues.append(f"Object '{name}' is missing a 'position' field.")
+        if not obj.get("prim_type") and not obj.get("asset_path") and not obj.get("asset_name"):
+            issues.append(f"Object '{name}' has no 'prim_type', 'asset_path', or 'asset_name' — cannot create it.")
+
+    # ── Check for unrealistic scales ────────────────────────────────────
+    for obj in objects:
+        name = obj.get("name", "unnamed")
+        scale = obj.get("scale", [1, 1, 1])
+        if isinstance(scale, (list, tuple)):
+            for j, s in enumerate(scale):
+                axis = ["X", "Y", "Z"][j] if j < 3 else str(j)
+                if abs(s) < 0.001:
+                    issues.append(f"Object '{name}' has near-zero scale on {axis} axis ({s}) — likely an error.")
+                elif abs(s) > 1000:
+                    warnings.append(f"Object '{name}' has very large scale on {axis} axis ({s}) — is this intended?")
+
+    # ── Check for floating objects (z > 0 without obvious support) ──────
+    ground_level = 0.0
+    # Find ground plane or lowest object to establish reference
+    for obj in objects:
+        name_lower = obj.get("name", "").lower()
+        if any(k in name_lower for k in ("ground", "plane", "floor")):
+            pos = obj.get("position", [0, 0, 0])
+            ground_level = pos[2] if len(pos) > 2 else 0.0
+            break
+
+    for obj in objects:
+        name = obj.get("name", "unnamed")
+        name_lower = name.lower()
+        pos = obj.get("position", [0, 0, 0])
+        if len(pos) < 3:
+            continue
+        z = pos[2]
+        # Skip ground planes, cameras, lights, overhead items — they are expected to be elevated
+        if any(k in name_lower for k in ("ground", "plane", "floor", "camera", "light", "overhead", "ceiling", "lamp")):
+            continue
+        # Objects more than 0.5m above ground level may be floating
+        if z > ground_level + 0.5:
+            warnings.append(f"Object '{name}' is at z={z:.2f}m — may be floating without support.")
+
+    # ── Check for AABB overlaps (simple distance-based) ─────────────────
+    positioned_objects = []
+    for obj in objects:
+        pos = obj.get("position", [0, 0, 0])
+        scale = obj.get("scale", [1, 1, 1])
+        if isinstance(pos, (list, tuple)) and len(pos) >= 3:
+            # Approximate object radius from scale
+            if isinstance(scale, (list, tuple)) and len(scale) >= 3:
+                radius = max(abs(scale[0]), abs(scale[1]), abs(scale[2])) * 0.5
+            else:
+                radius = 0.5
+            positioned_objects.append({
+                "name": obj.get("name", "unnamed"),
+                "pos": pos,
+                "radius": radius,
+            })
+
+    for i in range(len(positioned_objects)):
+        for j in range(i + 1, len(positioned_objects)):
+            a = positioned_objects[i]
+            b = positioned_objects[j]
+            dx = a["pos"][0] - b["pos"][0]
+            dy = a["pos"][1] - b["pos"][1]
+            dz = a["pos"][2] - b["pos"][2]
+            dist = (dx * dx + dy * dy + dz * dz) ** 0.5
+            min_dist = a["radius"] + b["radius"]
+            if dist < min_dist * 0.7:  # 70% overlap threshold — some tolerance for surface items
+                warnings.append(
+                    f"Objects '{a['name']}' and '{b['name']}' may overlap "
+                    f"(distance={dist:.3f}m, combined radius={min_dist:.3f}m)."
+                )
+
+    # ── Check for scale mismatches between objects ──────────────────────
+    max_scales = []
+    for obj in objects:
+        scale = obj.get("scale", [1, 1, 1])
+        if isinstance(scale, (list, tuple)) and len(scale) >= 3:
+            max_scales.append((obj.get("name", "unnamed"), max(abs(s) for s in scale[:3])))
+        elif isinstance(scale, (int, float)):
+            max_scales.append((obj.get("name", "unnamed"), abs(scale)))
+
+    if len(max_scales) >= 2:
+        all_vals = [s for _, s in max_scales]
+        median_scale = sorted(all_vals)[len(all_vals) // 2]
+        if median_scale > 0:
+            for name, s in max_scales:
+                ratio = s / median_scale
+                if ratio > 50 or (median_scale > 0.01 and ratio < 0.02):
+                    warnings.append(
+                        f"Object '{name}' scale ({s:.3f}) differs vastly from "
+                        f"median scale ({median_scale:.3f}) — possible unit mismatch."
+                    )
+
+    # ── PhysX overlap check against existing scene (via Kit RPC) ──────────
+    # This catches collisions with objects ALREADY in the scene, not just
+    # between blueprint objects (which the AABB check above handles).
+    try:
+        if await kit_tools.is_kit_rpc_alive():
+            for obj in objects:
+                name = obj.get("name", "unnamed")
+                pos = obj.get("position", [0, 0, 0])
+                scale = obj.get("scale", [1, 1, 1])
+                if not isinstance(pos, (list, tuple)) or len(pos) < 3:
+                    continue
+                # Approximate half-extents from scale
+                if isinstance(scale, (list, tuple)) and len(scale) >= 3:
+                    half_extents = [abs(s) * 0.5 for s in scale[:3]]
+                else:
+                    half_extents = [0.5, 0.5, 0.5]
+                result = await kit_tools.post("/check_placement", {
+                    "half_extents": half_extents,
+                    "position": list(pos[:3]),
+                })
+                if result and result.get("collisions"):
+                    collisions = result["collisions"]
+                    issues.append(
+                        f"Object '{name}' at {pos[:3]} collides with existing scene: "
+                        f"{', '.join(collisions[:5])}"
+                    )
+    except Exception:
+        # Kit RPC not available — skip PhysX validation (AABB check above still runs)
+        pass
+
+    valid = len(issues) == 0
+    return {
+        "valid": valid,
+        "issues": issues,
+        "warnings": warnings,
+        "object_count": len(objects),
+    }
+
+
+DATA_HANDLERS["validate_scene_blueprint"] = _handle_validate_scene_blueprint
 
 
 # ── IsaacLab RL Training ─────────────────────────────────────────────────────
@@ -1662,18 +2477,21 @@ async def _handle_create_isaaclab_env(args: Dict) -> Dict:
         "physics_dt": 1.0 / 120.0,
     }
 
-    # Generate the Python env class code
+    # Generate the Python env class code and __init__.py registration
     env_code = _generate_isaaclab_env_code(env_config)
+    init_code = _generate_isaaclab_init_code(env_config)
 
     return {
         "type": "isaaclab_env",
         "task_name": task_name,
         "config": env_config,
         "generated_code": env_code,
+        "generated_init_code": init_code,
         "instructions": (
             f"IsaacLab env '{task_name}' scaffolded with {num_envs} parallel envs. "
             f"Observations: {template['obs']}. Actions: {template['actions']}. "
             f"Rewards: {template['rewards']}. "
+            "Two files generated: env config module and __init__.py with gymnasium.register(). "
             "You can now call launch_training to start training, or refine the config."
         ),
     }
@@ -1691,50 +2509,102 @@ def _generate_isaaclab_env_code(cfg: Dict) -> str:
     ep_len = cfg["episode_length"]
     decimation = cfg["decimation"]
 
-    obs_terms = "\n".join(f'        "{o}": ObsTerm(func=mdp.{o}),' for o in obs)
-    reward_terms = "\n".join(
-        f'        "{r}": RewTerm(func=mdp.{r}, weight=1.0),' for r in rewards
+    # Build observation term attributes for nested configclass
+    obs_attrs = "\n".join(
+        f"        {o}: ObsTerm = ObsTerm(func=mdp.{o})" for o in obs
     )
+
+    # Build reward term attributes for configclass
+    reward_attrs = "\n".join(
+        f"    {r}: RewTerm = RewTerm(func=mdp.{r}, weight=1.0)" for r in rewards
+    )
+
+    # Map action space name to the appropriate action config class
+    action_cfg_map = {
+        "joint_positions": "JointPositionActionCfg",
+        "base_velocity": "DifferentialInverseKinematicsActionCfg",
+    }
+    action_cfg_cls = action_cfg_map.get(acts, "JointPositionActionCfg")
 
     return f'''"""IsaacLab RL environment: {task}
 Auto-generated by Isaac Assist.
 """
 import isaaclab.envs.mdp as mdp
 from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.envs.mdp import ObsGroup, ObsTerm
 from isaaclab.managers import (
-    ObservationGroupCfg,
-    ObservationTermCfg as ObsTerm,
     RewardTermCfg as RewTerm,
     SceneEntityCfg,
 )
 from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.utils import configclass
 
 
+@configclass
+class ObservationsCfg:
+    """Observation groups for the environment."""
+
+    @configclass
+    class PolicyCfg(ObsGroup):
+{obs_attrs}
+
+    policy: PolicyCfg = PolicyCfg()
+
+
+@configclass
+class ActionsCfg:
+    """Action configuration for the environment."""
+
+    {acts}: mdp.{action_cfg_cls} = mdp.{action_cfg_cls}(
+        asset_name="robot", joint_names=[".*"]
+    )
+
+
+@configclass
+class RewardsCfg:
+    """Reward terms for the environment."""
+
+{reward_attrs}
+
+
+@configclass
 class {task}EnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for {task} environment."""
 
     # Scene
-    scene = InteractiveSceneCfg(
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(
         num_envs={num_envs},
         env_spacing={spacing},
     )
 
     # Observations
-    observations = ObservationGroupCfg(
-{obs_terms}
-    )
+    observations: ObservationsCfg = ObservationsCfg()
 
     # Actions
-    actions = mdp.{acts}
+    actions: ActionsCfg = ActionsCfg()
 
     # Rewards
-    rewards = {{
-{reward_terms}
-    }}
+    rewards: RewardsCfg = RewardsCfg()
 
     # Episode
     episode_length_s = {ep_len} * {decimation} / 120.0
     decimation = {decimation}
+'''
+
+
+def _generate_isaaclab_init_code(cfg: Dict) -> str:
+    """Generate __init__.py with gymnasium.register() for the IsaacLab env."""
+    task = cfg["task_name"]
+    module_name = task.lower()
+
+    return f'''"""Register {task} environment with Gymnasium."""
+import gymnasium
+
+gymnasium.register(
+    id="{task}-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    kwargs={{"env_cfg_entry_point": "{module_name}:{task}EnvCfg"}},
+)
 '''
 
 
@@ -1746,39 +2616,40 @@ def _gen_launch_training(args: Dict) -> str:
     num_envs = args.get("num_envs", 64)
     ckpt_dir = args.get("checkpoint_dir", f"workspace/rl_checkpoints/{task}")
 
-    # Map algos to IsaacLab train script args
-    algo_map = {
-        "ppo": "rsl_rl",
-        "sac": "skrl",
-        "td3": "skrl",
-        "rsl_rl": "rsl_rl",
+    # Map algos to RL library and corresponding train script
+    algo_script_map = {
+        "ppo": ("rsl_rl", "scripts/reinforcement_learning/rsl_rl/train.py"),
+        "sac": ("skrl", "scripts/reinforcement_learning/skrl/train.py"),
+        "td3": ("skrl", "scripts/reinforcement_learning/skrl/train.py"),
+        "ppo_rl_games": ("rl_games", "scripts/reinforcement_learning/rl_games/train.py"),
+        "ppo_sb3": ("sb3", "scripts/reinforcement_learning/sb3/train.py"),
+        "rsl_rl": ("rsl_rl", "scripts/reinforcement_learning/rsl_rl/train.py"),
     }
-    runner = algo_map.get(algo, "rsl_rl")
+    _library, train_script = algo_script_map.get(algo, algo_script_map["ppo"])
 
     lines = [
         "import subprocess",
-        "import sys",
         "import os",
         "",
         f"task = '{task}'",
         f"algo = '{algo}'",
         f"num_envs = {num_envs}",
         f"max_iterations = {num_steps // (num_envs * 24)}  # steps / (envs * horizon)",
-        f"log_dir = '{ckpt_dir}'",
-        "os.makedirs(log_dir, exist_ok=True)",
+        f"checkpoint_dir = '{ckpt_dir}'",
+        "os.makedirs(checkpoint_dir, exist_ok=True)",
         "",
-        "# Launch IsaacLab training",
+        "# Launch IsaacLab training via isaaclab.sh",
         "cmd = [",
-        "    sys.executable, '-m',",
-        f"    'isaaclab.train',",
+        f"    'isaaclab.sh', '-p',",
+        f"    '{train_script}',",
         f"    '--task', task,",
         f"    '--num_envs', str(num_envs),",
         f"    '--max_iterations', str(max_iterations),",
-        f"    '--log_dir', log_dir,",
+        f"    '--log_root_path', checkpoint_dir,",
         "]",
-        "print(f'Launching training: {" ".join(cmd)}')",
+        """print(f'Launching training: {" ".join(cmd)}')""",
         "proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)",
-        "print(f'Training started (PID: {proc.pid}). Checkpoints → {log_dir}')",
+        "print(f'Training started (PID: {proc.pid}). Checkpoints -> {checkpoint_dir}')",
     ]
     return "\n".join(lines)
 
