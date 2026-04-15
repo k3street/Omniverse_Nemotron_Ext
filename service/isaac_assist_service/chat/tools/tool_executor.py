@@ -1850,6 +1850,288 @@ DATA_HANDLERS["vision_plan_trajectory"] = _handle_vision_plan_trajectory
 DATA_HANDLERS["vision_analyze_scene"] = _handle_vision_analyze_scene
 
 
+# ── GR00T N1 Foundation Policy ───────────────────────────────────────────────
+
+# Embodiment presets: observation/action configs for supported robots
+_GROOT_EMBODIMENTS = {
+    "LIBERO_PANDA": {
+        "obs_type": "rgb+proprio",
+        "action_dim": 7,
+        "description": "Franka Panda in LIBERO benchmark",
+        "vram_gb": 24,
+    },
+    "OXE_WIDOWX": {
+        "obs_type": "rgb+proprio",
+        "action_dim": 7,
+        "description": "WidowX from Open X-Embodiment",
+        "vram_gb": 24,
+    },
+    "UNITREE_G1": {
+        "obs_type": "rgb+proprio",
+        "action_dim": 29,
+        "description": "Unitree G1 humanoid",
+        "vram_gb": 24,
+    },
+    "custom": {
+        "obs_type": "rgb+proprio",
+        "action_dim": None,
+        "description": "Custom embodiment — configure manually",
+        "vram_gb": 24,
+    },
+}
+
+
+async def _handle_load_groot_policy(args: Dict) -> Dict:
+    """Return download/launch commands for GR00T N1 policy server."""
+    model_id = args.get("model_id", "nvidia/GR00T-N1.6-3B")
+    robot_path = args["robot_path"]
+    embodiment_key = args.get("embodiment", "custom")
+
+    embodiment = _GROOT_EMBODIMENTS.get(embodiment_key, _GROOT_EMBODIMENTS["custom"])
+
+    # VRAM check — estimate based on model size
+    estimated_vram = embodiment.get("vram_gb", 24)
+
+    return {
+        "model_id": model_id,
+        "robot_path": robot_path,
+        "embodiment": embodiment_key,
+        "embodiment_config": embodiment,
+        "download_command": (
+            f"from huggingface_hub import snapshot_download; "
+            f"snapshot_download('{model_id}', local_dir='workspace/groot_models/{model_id.split('/')[-1]}')"
+        ),
+        "launch_command": (
+            f"python -m gr00t.deploy.policy_server "
+            f"--model-path workspace/groot_models/{model_id.split('/')[-1]} "
+            f"--embodiment {embodiment_key} "
+            f"--port 50051"
+        ),
+        "vram_required_gb": estimated_vram,
+        "vram_check": "ok" if estimated_vram <= 24 else "insufficient",
+        "error": (
+            f"Insufficient VRAM: GR00T N1 requires >= 24 GB VRAM. "
+            f"Consider using NVIDIA Cloud (brev.dev/nvidia) or a multi-GPU setup."
+        ) if estimated_vram > 24 else None,
+        "instructions": (
+            f"1. Download model: {model_id}\n"
+            f"2. Launch policy server on port 50051\n"
+            f"3. Robot at {robot_path} will connect via gRPC\n"
+            f"4. Embodiment: {embodiment_key} ({embodiment['description']})"
+        ),
+    }
+
+
+def _gen_evaluate_groot(args: Dict) -> str:
+    """Generate code to run closed-loop GR00T N1 evaluation."""
+    model_id = args.get("model_id", "nvidia/GR00T-N1.6-3B")
+    task = args["task"]
+    num_episodes = args.get("num_episodes", 50)
+    checkpoint = args.get("checkpoint")
+
+    model_path_expr = (
+        f"'{checkpoint}'" if checkpoint
+        else f"'workspace/groot_models/{model_id.split('/')[-1]}'"
+    )
+
+    return f"""\
+import subprocess
+import sys
+import os
+import json
+
+model_path = {model_path_expr}
+task = '{task}'
+num_episodes = {num_episodes}
+results_dir = 'workspace/groot_eval_results'
+os.makedirs(results_dir, exist_ok=True)
+
+# Step 1: Launch GR00T policy server as background process
+server_cmd = [
+    sys.executable, '-m', 'gr00t.deploy.policy_server',
+    '--model-path', model_path,
+    '--port', '50051',
+]
+print(f'Launching GR00T policy server: {{" ".join(server_cmd)}}')
+server_proc = subprocess.Popen(server_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+# Step 2: Run IsaacLabEvalTasks evaluation
+eval_cmd = [
+    sys.executable, '-m', 'gr00t.eval.isaac_lab',
+    '--task', task,
+    '--num-episodes', str(num_episodes),
+    '--policy-server', 'localhost:50051',
+    '--results-dir', results_dir,
+]
+print(f'Running evaluation: {{" ".join(eval_cmd)}}')
+eval_proc = subprocess.Popen(eval_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+eval_proc.wait()
+
+# Step 3: Collect results
+results_file = os.path.join(results_dir, f'{{task}}_results.json')
+if os.path.exists(results_file):
+    with open(results_file) as f:
+        metrics = json.load(f)
+    print(f'Evaluation complete: success_rate={{metrics.get("success_rate", "N/A")}}')
+    print(f'Task metrics: {{json.dumps(metrics.get("task_metrics", {{}}), indent=2)}}')
+else:
+    print(f'Results file not found at {{results_file}}')
+
+# Step 4: Cleanup policy server
+server_proc.terminate()
+print(f'Policy server terminated (PID: {{server_proc.pid}})')
+"""
+
+
+def _gen_finetune_groot(args: Dict) -> str:
+    """Generate code to fine-tune GR00T N1 on demo data."""
+    model_id = args.get("model_id", "nvidia/GR00T-N1.6-3B")
+    demo_data = args["demo_data"]
+    num_steps = args.get("num_steps", 10000)
+    lora = args.get("lora", True)
+    output_dir = args.get("output_dir", "workspace/groot_checkpoints")
+
+    vram_note = (
+        "# LoRA fine-tuning: ~25 GB VRAM (1x RTX 4090 sufficient)"
+        if lora else
+        "# Full fine-tuning: ~48 GB VRAM (2x RTX 4090 or 1x A100 recommended)"
+    )
+
+    lora_flags = (
+        "    '--use-lora',\n"
+        "    '--lora-rank', '16',\n"
+        "    '--lora-alpha', '32',\n"
+    ) if lora else ""
+
+    return f"""\
+import subprocess
+import sys
+import os
+
+model_id = '{model_id}'
+demo_data = '{demo_data}'
+num_steps = {num_steps}
+output_dir = '{output_dir}'
+{vram_note}
+
+os.makedirs(output_dir, exist_ok=True)
+
+# VRAM check
+try:
+    import torch
+    if torch.cuda.is_available():
+        vram_gb = torch.cuda.get_device_properties(0).total_mem / (1024**3)
+        min_vram = {'25' if lora else '48'}
+        if vram_gb < min_vram:
+            print(f'WARNING: {{vram_gb:.1f}} GB VRAM detected, {{min_vram}} GB recommended.')
+            print('Consider using NVIDIA Cloud (brev.dev/nvidia) or multi-GPU setup.')
+except ImportError:
+    pass
+
+# Launch fine-tuning
+cmd = [
+    sys.executable, '-m', 'gr00t.finetune.train',
+    '--model-id', model_id,
+    '--demo-data', demo_data,
+    '--num-steps', str(num_steps),
+    '--output-dir', output_dir,
+{lora_flags}]
+print(f'Launching GR00T fine-tuning: {{" ".join(cmd)}}')
+proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+print(f'Fine-tuning started (PID: {{proc.pid}}). Checkpoints → {{output_dir}}')
+"""
+
+
+async def _handle_compare_policies(args: Dict) -> Dict:
+    """Format a comparison table from multiple GR00T policy evaluation results."""
+    results = args.get("results", [])
+
+    if not results:
+        return {
+            "comparison_table": "No results to compare.",
+            "entries": [],
+            "count": 0,
+        }
+
+    # Determine all metric columns
+    metric_cols = set()
+    for r in results:
+        tm = r.get("task_metrics", {})
+        metric_cols.update(tm.keys())
+    metric_cols = sorted(metric_cols)
+
+    # Build comparison entries
+    entries = []
+    for r in results:
+        entry = {
+            "policy_name": r.get("policy_name", "unnamed"),
+            "model_id": r.get("model_id", "N/A"),
+            "success_rate": r.get("success_rate", 0.0),
+            "training_data_size": r.get("training_data_size", "N/A"),
+            "observation_type": r.get("observation_type", "N/A"),
+        }
+        for col in metric_cols:
+            entry[col] = r.get("task_metrics", {}).get(col, "N/A")
+        entries.append(entry)
+
+    # Sort by success_rate descending
+    entries.sort(key=lambda e: -e["success_rate"])
+
+    # Build formatted table
+    header_cols = ["Policy", "Model", "Success Rate", "Train Data", "Obs Type"]
+    header_cols.extend(metric_cols)
+
+    rows = []
+    for e in entries:
+        row = [
+            e["policy_name"],
+            e["model_id"],
+            f"{e['success_rate']:.1%}",
+            e["training_data_size"],
+            e["observation_type"],
+        ]
+        for col in metric_cols:
+            val = e.get(col, "N/A")
+            if isinstance(val, float):
+                row.append(f"{val:.3f}")
+            else:
+                row.append(str(val))
+        rows.append(row)
+
+    # Calculate column widths
+    col_widths = [len(h) for h in header_cols]
+    for row in rows:
+        for i, val in enumerate(row):
+            col_widths[i] = max(col_widths[i], len(val))
+
+    # Format table
+    sep = "+-" + "-+-".join("-" * w for w in col_widths) + "-+"
+    header_line = "| " + " | ".join(h.ljust(w) for h, w in zip(header_cols, col_widths)) + " |"
+    table_lines = [sep, header_line, sep]
+    for row in rows:
+        table_lines.append("| " + " | ".join(v.ljust(w) for v, w in zip(row, col_widths)) + " |")
+    table_lines.append(sep)
+
+    return {
+        "comparison_table": "\n".join(table_lines),
+        "entries": entries,
+        "count": len(entries),
+        "metric_columns": metric_cols,
+        "dimensions": [
+            "zero-shot generalization (success_rate without task-specific training)",
+            "single-task performance (success_rate with fine-tuning)",
+            "training data needed (training_data_size)",
+            "observation type (observation_type: rgb, rgb+proprio, proprio)",
+        ],
+    }
+
+
+DATA_HANDLERS["load_groot_policy"] = _handle_load_groot_policy
+DATA_HANDLERS["compare_policies"] = _handle_compare_policies
+CODE_GEN_HANDLERS["evaluate_groot"] = _gen_evaluate_groot
+CODE_GEN_HANDLERS["finetune_groot"] = _gen_finetune_groot
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
