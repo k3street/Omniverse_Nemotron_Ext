@@ -55,3 +55,15 @@ def get_llm_provider():
 def _require(value: str, key_name: str, mode: str):
     if not value:
         raise ValueError(f"LLM_MODE={mode} but {key_name} is missing from .env")
+
+
+def get_distiller_provider():
+    """
+    Return a small / fast LLM provider for context compression.
+
+    Uses DISTILLER_MODEL_NAME (defaults to LOCAL_MODEL_NAME via Ollama).
+    If the main mode is local, reuses the same Ollama instance.
+    If a dedicated distiller model is configured, always uses Ollama for it.
+    """
+    model = config.distiller_model_name or config.local_model_name
+    return OllamaProvider(model=model)

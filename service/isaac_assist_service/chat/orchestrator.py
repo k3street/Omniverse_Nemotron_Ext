@@ -15,8 +15,14 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from .provider_factory import get_llm_provider
+from .provider_factory import get_llm_provider, get_distiller_provider
 from .intent_router import classify_intent
+from .context_distiller import (
+    ConversationKnowledge,
+    DistilledContext,
+    distill_context,
+    update_knowledge_from_tool,
+)
 from .tools.kit_tools import (
     get_stage_context,
     format_stage_context_for_llm,
@@ -109,20 +115,34 @@ class ChatOrchestrator:
     """
     Manages multi-turn chat sessions, injects stage context, and calls the
     configured LLM provider with tool-calling support.
+
+    Uses a two-stage context distillation pipeline:
+      Stage 1 — deterministic tool/rule selection + small-LLM history compression
+      Stage 2 — main LLM call with compact prompt (~40-60% fewer tokens)
     """
 
     def __init__(self):
         self.llm_provider = get_llm_provider()
+        try:
+            self._distiller_provider = get_distiller_provider()
+        except Exception:
+            self._distiller_provider = None
         self._history: Dict[str, List[Dict]] = {}
+        self._knowledge: Dict[str, ConversationKnowledge] = {}
 
     def refresh_provider(self):
         """Reinitialize the LLM provider from current config (after settings change)."""
         self.llm_provider = get_llm_provider()
+        try:
+            self._distiller_provider = get_distiller_provider()
+        except Exception:
+            self._distiller_provider = None
         logger.info("LLM provider reinitialized: %s", type(self.llm_provider).__name__)
 
     def reset_session(self, session_id: str):
         """Clear in-memory conversation history for a session."""
         self._history.pop(session_id, None)
+        self._knowledge.pop(session_id, None)
 
     async def handle_message(
         self,
@@ -144,6 +164,9 @@ class ChatOrchestrator:
         }
         """
         history = self._history.setdefault(session_id, [])
+        knowledge = self._knowledge.setdefault(
+            session_id, ConversationKnowledge(session_id=session_id)
+        )
         logger.info(f"[{session_id}] USER: {user_message}")
 
         # ── 1. Classify intent ───────────────────────────────────────────────
@@ -158,75 +181,64 @@ class ChatOrchestrator:
             except Exception as e:
                 logger.warning(f"[{session_id}] Context fetch failed: {e}")
 
-        # ── 3. Build system prompt with live context ─────────────────────────
+        # ── 3. Collect RAG / KB data (fetched before distillation) ───────────
         isaac_version = detect_isaac_version()
-        system_content = SYSTEM_PROMPT
-        system_content += f"\nIsaac Sim version: {isaac_version}"
-        if scene_context_text:
-            system_content += f"\n\n--- LIVE SCENE CONTEXT ---\n{scene_context_text}"
-        if context and context.get("selected_prim"):
-            sel = context["selected_prim"]
-            system_content += "\n\n## User's Current Selection (from viewport/stage)\n"
-            system_content += f"- Path: {sel.get('path', '?')}\n"
-            system_content += f"- Type: {sel.get('type', '?')}\n"
-            if sel.get('world_position'):
-                system_content += f"- Position: {sel['world_position']}\n"
-            if sel.get('physics'):
-                system_content += f"- Physics: {json.dumps(sel['physics'])}\n"
-            if sel.get('schemas'):
-                system_content += f"- Schemas: {', '.join(sel['schemas'][:10])}\n"
-            attrs = sel.get('attributes', {})
-            if attrs:
-                preview = dict(list(attrs.items())[:10])
-                system_content += f"- Key attributes: {json.dumps(preview, default=str)}\n"
-            system_content += '\nWhen the user says "this", "it", "the selected prim", "make this bigger", etc., they refer to this prim. Use its path directly.'
-        elif context and context.get("selected_prim_path"):
-            system_content += f"\n\nUser's current selection: {context['selected_prim_path']}"
-            system_content += '\nWhen the user says "this", "it", etc., they refer to this selected prim.'
+        rag_text = ""
+        patterns_text = ""
+        error_learnings_text = ""
+        success_learnings_text = ""
 
-        # ── 3b. RAG: retrieve version-specific knowledge & code patterns ─────
         try:
             rag_results = retrieve_context(user_message, version=isaac_version, limit=3)
             rag_text = format_retrieved_context(rag_results)
-            if rag_text:
-                system_content += f"\n\n{rag_text}"
         except Exception as e:
             logger.warning(f"[{session_id}] RAG retrieval failed: {e}")
 
         try:
             patterns = find_matching_patterns(user_message, version=isaac_version, limit=3)
             patterns_text = format_code_patterns(patterns)
-            if patterns_text:
-                system_content += f"\n\n{patterns_text}"
         except Exception as e:
             logger.warning(f"[{session_id}] Pattern matching failed: {e}")
 
-        # ── 3c. Inject known error learnings so the LLM avoids past mistakes ──
         try:
-            error_learnings = _kb.get_error_learnings(
-                isaac_version, user_message, limit=5
-            )
-            error_text = _kb.format_error_learnings(error_learnings)
-            if error_text:
-                system_content += f"\n\n{error_text}"
+            error_learnings = _kb.get_error_learnings(isaac_version, user_message, limit=3)
+            error_learnings_text = _kb.format_error_learnings(error_learnings)
         except Exception as e:
             logger.warning(f"[{session_id}] Error learning retrieval failed: {e}")
 
-        # ── 3d. Inject proven successful patterns so the LLM prefers them ──
         try:
-            success_learnings = _kb.get_success_learnings(
-                isaac_version, user_message, limit=3
-            )
-            success_text = _kb.format_success_learnings(success_learnings)
-            if success_text:
-                system_content += f"\n\n{success_text}"
+            success_learnings = _kb.get_success_learnings(isaac_version, user_message, limit=2)
+            success_learnings_text = _kb.format_success_learnings(success_learnings)
         except Exception as e:
             logger.warning(f"[{session_id}] Success learning retrieval failed: {e}")
 
-        # ── 4. Build message list ────────────────────────────────────────────
-        messages = [{"role": "system", "content": system_content}]
-        messages.extend(history[-10:])  # rolling context window
-        messages.append({"role": "user", "content": user_message})
+        # ── 4. DISTILL: build compact context via the distillation pipeline ──
+        selected_prim = context.get("selected_prim") if context else None
+        selected_prim_path = context.get("selected_prim_path") if context else None
+
+        distilled = await distill_context(
+            intent=intent,
+            user_message=user_message,
+            history=history,
+            knowledge=knowledge,
+            scene_context=scene_context_text,
+            selected_prim=selected_prim,
+            selected_prim_path=selected_prim_path,
+            isaac_version=isaac_version,
+            rag_text=rag_text,
+            patterns_text=patterns_text,
+            error_learnings_text=error_learnings_text,
+            success_learnings_text=success_learnings_text,
+            small_provider=self._distiller_provider,
+        )
+
+        messages = distilled.messages
+        selected_tools = distilled.tools
+
+        logger.info(
+            f"[{session_id}] Distilled: ~{distilled.token_estimate} tokens, "
+            f"{len(selected_tools)} tools"
+        )
 
         # ── 5. Tool-calling loop ─────────────────────────────────────────────
         executed_tools: List[Dict] = []
@@ -235,7 +247,7 @@ class ChatOrchestrator:
         for round_idx in range(MAX_TOOL_ROUNDS):
             try:
                 response = await self.llm_provider.complete(
-                    messages, {"tools": ISAAC_SIM_TOOLS}
+                    messages, {"tools": selected_tools}
                 )
             except Exception as e:
                 logger.error(f"LLM provider error: {e}")
@@ -244,10 +256,8 @@ class ChatOrchestrator:
             # Check if the LLM wants to call tools
             tool_calls = getattr(response, "tool_calls", None) or response.actions
             if not tool_calls or not isinstance(tool_calls, list):
-                # No tool calls — we have the final text response
                 break
 
-            # Only process actual tool-call dicts (not code_snippet actions)
             real_tool_calls = [
                 tc for tc in tool_calls
                 if isinstance(tc, dict) and tc.get("type") != "code_snippet"
@@ -255,7 +265,6 @@ class ChatOrchestrator:
             if not real_tool_calls:
                 break
 
-            # Execute each tool call
             for tc in real_tool_calls:
                 fn_name = tc.get("function", {}).get("name") or tc.get("name", "")
                 fn_args_raw = tc.get("function", {}).get("arguments") or tc.get("arguments", "{}")
@@ -276,6 +285,9 @@ class ChatOrchestrator:
                         "code": result.get("code", ""),
                         "description": result.get("description", ""),
                     })
+
+                # Update session knowledge from this tool call
+                update_knowledge_from_tool(knowledge, fn_name, fn_args, result)
 
                 # ── Audit: log every tool call ────────────────────────────
                 try:
