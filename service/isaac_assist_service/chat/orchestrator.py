@@ -193,7 +193,7 @@ class ChatOrchestrator:
             logger.warning(f"[{session_id}] RAG retrieval failed: {e}")
 
         try:
-            patterns = find_matching_patterns(user_message, version=isaac_version, limit=3)
+            patterns = find_matching_patterns(user_message, version=isaac_version, limit=5)
             patterns_text = format_code_patterns(patterns)
         except Exception as e:
             logger.warning(f"[{session_id}] Pattern matching failed: {e}")

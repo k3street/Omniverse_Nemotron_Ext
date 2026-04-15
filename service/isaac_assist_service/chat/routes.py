@@ -9,7 +9,7 @@ from .pipeline import PipelinePlanner
 from ..governance.audit_log import AuditLogger
 from ..governance.models import AuditEntry
 from ..knowledge.knowledge_base import KnowledgeBase
-from ..retrieval.context_retriever import detect_isaac_version
+from ..retrieval.context_retriever import detect_isaac_version, save_pattern_from_success
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +165,13 @@ async def log_execution(req: LogExecutionRequest):
         _kb.add_success(version, instruction, response,
                         code=req.code)
         logger.info(f"[knowledge] Logged successful patch for v{version}")
+
+        # Also save as a reusable code pattern (auto-capture)
+        save_pattern_from_success(
+            version=version,
+            user_message=req.user_message,
+            code=req.code,
+        )
 
     return {"status": "logged", "success": req.success}
 

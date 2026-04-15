@@ -18,7 +18,8 @@ lora_model/
 *.gguf
 data/
 outputs/
-workspace/
+workspace/*
+!workspace/knowledge/
 
 # IDEs
 .idea/

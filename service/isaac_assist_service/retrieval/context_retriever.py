@@ -101,7 +101,8 @@ def _load_patterns(version: str) -> List[Dict]:
 
 def find_matching_patterns(user_message: str, version: str = None, limit: int = 3) -> List[Dict]:
     """
-    Simple keyword matching against code patterns.
+    Keyword matching against code patterns.
+    Multi-word keywords score 2x (more specific = more relevant).
     Returns patterns whose 'keywords' overlap with the user message.
     """
     if version is None:
@@ -115,7 +116,12 @@ def find_matching_patterns(user_message: str, version: str = None, limit: int = 
     scored = []
     for p in patterns:
         keywords = p.get("keywords", [])
-        score = sum(1 for kw in keywords if kw.lower() in msg_lower)
+        score = 0
+        for kw in keywords:
+            kw_lower = kw.lower()
+            if kw_lower in msg_lower:
+                # Multi-word keywords are more specific → score 2x
+                score += 2 if " " in kw_lower else 1
         if score > 0:
             scored.append((score, p))
 
@@ -138,3 +144,80 @@ def format_code_patterns(patterns: List[Dict]) -> str:
             lines.append(f"Note: {note}")
         lines.append(f"```python\n{code}\n```")
     return "\n".join(lines)
+
+
+# ── Keyword extraction for auto-captured patterns ─────────────────────────
+
+_KEYWORD_VOCAB = [
+    "cube", "sphere", "cylinder", "plane", "mesh", "prim", "xform", "light", "dome",
+    "camera", "viewport", "sensor", "realsense", "lidar",
+    "material", "color", "glass", "metallic", "pbr",
+    "physics", "rigid body", "collision", "deformable", "cloth", "gravity",
+    "robot", "franka", "carter", "nova carter", "jetbot", "ur10", "g1", "go2",
+    "omnigraph", "ros2", "cmd_vel", "twist", "joint state", "clock", "odom",
+    "differential", "articulation", "joint", "wheel",
+    "clone", "grid", "duplicate",
+    "import", "reference", "asset",
+    "play", "pause", "stop", "simulation",
+    "move", "teleport", "translate", "scale", "rotate", "transform",
+    "delete", "remove",
+    "anchor", "fixed base",
+    "scene", "ground", "floor",
+]
+
+
+def _extract_keywords(user_message: str, code: str) -> List[str]:
+    """Extract keywords from a user message + code for pattern matching."""
+    combined = (user_message + " " + code).lower()
+    return [kw for kw in _KEYWORD_VOCAB if kw in combined]
+
+
+def save_pattern_from_success(
+    version: str,
+    user_message: str,
+    code: str,
+    note: str = "Auto-captured from successful execution.",
+) -> bool:
+    """
+    Save a successfully executed code patch as a reusable code pattern.
+    Deduplicates by checking if a pattern with >=70% keyword overlap exists.
+    Invalidates the in-memory cache so the new pattern is used immediately.
+    """
+    keywords = _extract_keywords(user_message, code)
+    if len(keywords) < 2:
+        return False  # too generic to be useful
+
+    # Check for near-duplicate
+    existing = _load_patterns(version)
+    new_kw_set = set(keywords)
+    for p in existing:
+        existing_kw_set = set(k.lower() for k in p.get("keywords", []))
+        if existing_kw_set and new_kw_set:
+            overlap = len(new_kw_set & existing_kw_set)
+            if overlap / max(len(new_kw_set), len(existing_kw_set)) > 0.7:
+                logger.info(f"[patterns] Skipping near-duplicate: {user_message[:60]}")
+                return False
+
+    title = user_message[:80].strip()
+    if not title.endswith((".", "?", "!")):
+        title = title.rstrip(",;: ")
+
+    pattern = {
+        "title": title,
+        "keywords": keywords,
+        "code": code[:3000],
+        "note": note,
+        "source": "auto_captured",
+    }
+
+    pattern_file = os.path.join(PATTERNS_DIR, f"code_patterns_{version}.jsonl")
+    try:
+        with open(pattern_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(pattern) + "\n")
+        # Invalidate cache so the new pattern is found on next query
+        _CODE_PATTERNS.pop(version, None)
+        logger.info(f"[patterns] Auto-captured: {title} ({len(keywords)} keywords)")
+        return True
+    except Exception as e:
+        logger.warning(f"[patterns] Failed to save pattern: {e}")
+        return False
