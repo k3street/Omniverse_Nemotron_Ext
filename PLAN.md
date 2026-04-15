@@ -195,18 +195,18 @@ Audit of all `isaacsim.*` extensions available vs. currently used.
 
 ### Tasks
 
-- [ ] **0.1** Update `extension.toml` for both 5.1 and 6.0:
+- [x] **0.1** Update `extension.toml` for both 5.1 and 6.0:
   - `authors = ["10Things, Inc."]`
   - `repository = "http://www.10things.tech"`
   - `description` updated to reflect full-control vision
-- [ ] **0.2** Wire selection listener (`omni.usd.get_context().get_selection()`) into chat — on every `Send`, auto-attach:
+- [x] **0.2** Wire selection listener (`omni.usd.get_context().get_selection()`) into chat — on every `Send`, auto-attach:
   - Selected prim path(s)
   - Prim type + applied schemas
   - Authored attributes (filtered to top 20)
   - World transform
-- [ ] **0.3** Auto-capture viewport thumbnail (256px) on every chat turn, send as base64 to service `/api/v1/chat/message` context payload
-- [ ] **0.4** Extend service `/api/v1/chat/message` to accept `context.selected_prim` and `context.viewport_b64` fields and inject them into the LLM system prompt
-- [ ] **0.5** Show a "Context:" chip above the input bar displaying the selected prim path, so the user knows what the AI sees
+- [x] **0.3** Auto-capture viewport thumbnail (256px) on every chat turn, send as base64 to service `/api/v1/chat/message` context payload
+- [x] **0.4** Extend service `/api/v1/chat/message` to accept `context.selected_prim` and `context.viewport_b64` fields and inject them into the LLM system prompt
+- [x] **0.5** Show a "Context:" chip above the input bar displaying the selected prim path, so the user knows what the AI sees
 
 ---
 
@@ -216,23 +216,23 @@ Audit of all `isaacsim.*` extensions available vs. currently used.
 
 ### 1A — USD Code Generation & Execution
 
-- [ ] **1A.1** Create `tools/usd_tools.py` in the service with tool-call schemas:
+- [x] **1A.1** Create `tools/usd_tools.py` in the service with tool-call schemas:
   - `create_prim(path, type, attributes)` — create any prim type
   - `set_attribute(prim_path, attr_name, value)` — modify any attribute  
   - `delete_prim(prim_path)` — remove a prim
   - `add_reference(prim_path, usd_url)` — add USD reference
   - `apply_api_schema(prim_path, schema_name)` — apply physics/etc API
   - `run_usd_script(python_code)` — arbitrary pxr Python (sandboxed)
-- [ ] **1A.2** Kit RPC endpoints for each tool — service calls Kit :8001 which executes inside the Kit process with `omni.kit.commands` (undoable)
-- [ ] **1A.3** Every tool execution wrapped in governance approval flow — show code in chat, user clicks "Execute" or "Reject"
+- [x] **1A.2** Kit RPC endpoints for each tool — service calls Kit :8001 which executes inside the Kit process with `omni.kit.commands` (undoable)
+- [x] **1A.3** Every tool execution wrapped in governance approval flow — show code in chat, user clicks "Execute" or "Reject"
 
 ### 1B — Deformable / Custom Mesh Creation
 
-- [ ] **1B.1** Tool: `create_deformable_mesh(prim_path, soft_body_type, params)`
+- [x] **1B.1** Tool: `create_deformable_mesh(prim_path, soft_body_type, params)`
   - `soft_body_type`: cloth, sponge, rubber, gel, rope
   - Internally: create UsdGeom.Mesh → apply `PhysxSchema.PhysxDeformableBodyAPI` or `PhysxSchema.PhysxDeformableSurfaceAPI`
   - Set solver params (vertex count, self-collision, damping) from type presets
-- [ ] **1B.2** Presets file `deformable_presets.json`:
+- [x] **1B.2** Presets file `deformable_presets.json`:
   ```json
   {
     "cloth": {"simulation_hexahedral_resolution": 10, "self_collision": true, "damping": 0.1},
@@ -240,33 +240,33 @@ Audit of all `isaacsim.*` extensions available vs. currently used.
     "rubber": {"youngs_modulus": 50000, "dynamic_friction": 0.8}
   }
   ```
-- [ ] **1B.3** User flow: click mesh in viewport → type "make this cloth" → LLM calls `create_deformable_mesh` with the selected prim path → approval → physics schema applied
+- [x] **1B.3** User flow: click mesh in viewport → type "make this cloth" → LLM calls `create_deformable_mesh` with the selected prim path → approval → physics schema applied
 
 ### 1C — OmniGraph Node Creation from Product Specs
 
-- [ ] **1C.1** Tool: `create_omnigraph(prim_path, graph_type, config)`
+- [x] **1C.1** Tool: `create_omnigraph(prim_path, graph_type, config)`
   - `graph_type`: action_graph, push_graph, lazy_graph
   - Node creation via `og.Controller.edit()` API
-- [ ] **1C.2** Tool: `add_sensor_to_prim(prim_path, sensor_type, params)`
+- [x] **1C.2** Tool: `add_sensor_to_prim(prim_path, sensor_type, params)`
   - `sensor_type`: camera, lidar, imu, contact_sensor, rtx_lidar
   - Internally: create sensor prim → attach OmniGraph nodes → wire outputs
   - Params populated from product spec lookup (next section)
-- [ ] **1C.3** Tool: `lookup_product_spec(product_name_or_url)`
+- [x] **1C.3** Tool: `lookup_product_spec(product_name_or_url)`
   - Fetches manufacturer spec sheets (e.g., Intel RealSense D435i, Velodyne VLP-16)
   - Parses FOV, resolution, range, FPS into structured JSON
   - Populates sensor creation params automatically
-- [ ] **1C.4** Product spec database (`workspace/knowledge/sensor_specs.jsonl`):
+- [x] **1C.4** Product spec database (`workspace/knowledge/sensor_specs.jsonl`):
   - Ship with 20+ common robotics sensors pre-indexed
   - Supports user adding custom specs via chat: "add my custom camera: 1920x1080 90deg FOV 30fps"
-- [ ] **1C.5** User flow: click prim → "add a RealSense D435i camera here" → LLM calls `lookup_product_spec("RealSense D435i")` → gets FOV/resolution → calls `add_sensor_to_prim` → OmniGraph wired → approval → executed
+- [x] **1C.5** User flow: click prim → "add a RealSense D435i camera here" → LLM calls `lookup_product_spec("RealSense D435i")` → gets FOV/resolution → calls `add_sensor_to_prim` → OmniGraph wired → approval → executed
 
 ### 1D — Material Authoring
 
-- [ ] **1D.1** Tool: `create_material(material_path, shader_type, params)`
+- [x] **1D.1** Tool: `create_material(material_path, shader_type, params)`
   - `shader_type`: OmniPBR, OmniGlass, OmniSurface, MDL custom
   - Sets albedo, roughness, metallic, normal map, opacity
-- [ ] **1D.2** Tool: `assign_material(prim_path, material_path)`
-- [ ] **1D.3** User flow: "make this box look like brushed steel" → LLM creates OmniPBR with metallic=0.95, roughness=0.3 → assigns to selected prim
+- [x] **1D.2** Tool: `assign_material(prim_path, material_path)`
+- [x] **1D.3** User flow: "make this box look like brushed steel" → LLM creates OmniPBR with metallic=0.95, roughness=0.3 → assigns to selected prim
 
 ---
 
@@ -276,12 +276,12 @@ Audit of all `isaacsim.*` extensions available vs. currently used.
 
 ### Tasks
 
-- [ ] **2.1** Tool: `get_console_errors(last_n, min_level)` — already have `get_recent_logs`, expose as LLM tool
-- [ ] **2.2** Tool: `get_physics_errors()` — read PhysX error stream separately (collision mesh issues, solver failures)
-- [ ] **2.3** Tool: `explain_error(error_text)` — LLM diagnoses the error using Isaac Sim documentation context (RAG from knowledge base)
-- [ ] **2.4** Tool: `fix_error(error_text)` — LLM proposes a USD patch to resolve the issue, routed through approval
+- [x] **2.1** Tool: `get_console_errors(last_n, min_level)` — already have `get_recent_logs`, expose as LLM tool
+- [x] **2.2** Tool: `get_physics_errors()` — read PhysX error stream separately (collision mesh issues, solver failures)
+- [x] **2.3** Tool: `explain_error(error_text)` — LLM diagnoses the error using Isaac Sim documentation context (RAG from knowledge base)
+- [x] **2.4** Tool: `fix_error(error_text)` — LLM proposes a USD patch to resolve the issue, routed through approval
 - [ ] **2.5** Auto-diagnosis mode: poll console every 5s, if new errors appear, show a non-intrusive notification: "⚠ 3 new errors — ask me to fix them"
-- [ ] **2.6** Tool: `get_debug_info()` — collects GPU utilization, FPS, physics step time, renderer stats
+- [x] **2.6** Tool: `get_debug_info()` — collects GPU utilization, FPS, physics step time, renderer stats
 
 ---
 
@@ -291,14 +291,14 @@ Audit of all `isaacsim.*` extensions available vs. currently used.
 
 ### Tasks
 
-- [ ] **3.1** Tool: `sim_control(action)` — play, pause, stop, step(n), reset
+- [x] **3.1** Tool: `sim_control(action)` — play, pause, stop, step(n), reset
   - Uses `omni.timeline` and `SimulationContext` API
-- [ ] **3.2** Tool: `import_robot(file_path_or_url, format)` — URDF, MJCF, USD, OnShape URL
+- [x] **3.2** Tool: `import_robot(file_path_or_url, format)` — URDF, MJCF, USD, OnShape URL
   - Leverages Isaac Sim's native importers (`isaacsim.asset.importer.urdf`)
-- [ ] **3.3** Tool: `set_physics_params(gravity, time_step, solver_iterations)` — scene-level physics config
-- [ ] **3.4** Tool: `teleport_prim(prim_path, position, rotation)` — move anything
-- [ ] **3.5** Tool: `clone_prim(source_path, target_path, count)` — duplicate prims in a grid/line pattern
-- [ ] **3.6** Tool: `set_joint_targets(articulation_path, joint_name, position, velocity)` — direct joint control
+- [x] **3.3** Tool: `set_physics_params(gravity, time_step, solver_iterations)` — scene-level physics config
+- [x] **3.4** Tool: `teleport_prim(prim_path, position, rotation)` — move anything
+- [x] **3.5** Tool: `clone_prim(source_path, target_path, count)` — duplicate prims in a grid/line pattern
+- [x] **3.6** Tool: `set_joint_targets(articulation_path, joint_name, position, velocity)` — direct joint control
 
 ---
 
@@ -306,40 +306,40 @@ Audit of all `isaacsim.*` extensions available vs. currently used.
 
 ### 4A — Replicator / Synthetic Data Generation
 
-- [ ] **4A.1** Tool: `configure_sdg(annotators, num_frames, output_dir)` — set up Replicator pipeline
+- [x] **4A.1** Tool: `configure_sdg(annotators, num_frames, output_dir)` — set up Replicator pipeline
 - [ ] **4A.2** Tool: `randomize_domain(randomizers)` — lighting, texture, pose randomization
 - [ ] **4A.3** Tool: `run_sdg(num_frames)` — execute data generation
 
 ### 4B — ROS2 Bridge
 
-- [ ] **4B.1** Tool: `ros2_publish(topic, msg_type, data)` — publish to a ROS2 topic
-- [ ] **4B.2** Tool: `ros2_subscribe(topic, msg_type)` — subscribe and show data in chat
-- [ ] **4B.3** Tool: `ros2_list_topics()` — show active topics
+- [x] **4B.1** Tool: `ros2_publish(topic, msg_type, data)` — publish to a ROS2 topic
+- [x] **4B.2** Tool: `ros2_subscribe(topic, msg_type)` — subscribe and show data in chat
+- [x] **4B.3** Tool: `ros2_list_topics()` — show active topics
 
 ### 4C — Camera & Viewport Control
 
-- [ ] **4C.1** Tool: `set_viewport_camera(camera_prim_path)` — switch active viewport camera
+- [x] **4C.1** Tool: `set_viewport_camera(camera_prim_path)` — switch active viewport camera
 - [ ] **4C.2** Tool: `create_render_product(camera_path, resolution)` — create offscreen render
-- [ ] **4C.3** "Show me what the robot's wrist camera sees" → captures from that camera, embeds in chat
+- [x] **4C.3** "Show me what the robot's wrist camera sees" → captures from that camera, embeds in chat
 
 ### 4D — Scene Interrogation
 
-- [ ] **4D.1** Tool: `list_all_prims(filter_type)` — "show me all cameras in the scene"
-- [ ] **4D.2** Tool: `measure_distance(prim_a, prim_b)` — spatial queries
-- [ ] **4D.3** Tool: `check_collisions(prim_path)` — collision mesh validation
-- [ ] **4D.4** Tool: `scene_summary()` — high-level natural language scene description
+- [x] **4D.1** Tool: `list_all_prims(filter_type)` — "show me all cameras in the scene"
+- [x] **4D.2** Tool: `measure_distance(prim_a, prim_b)` — spatial queries
+- [x] **4D.3** Tool: `check_collisions(prim_path)` — collision mesh validation
+- [x] **4D.4** Tool: `scene_summary()` — high-level natural language scene description
 
 ---
 
 ## Phase 5 — Polish & Fine-Tuning Loop (Weeks 13–16)
 
-- [ ] **5.1** Every tool invocation logged as `(user_message, context, tool_calls, result)` tuple to `workspace/finetune_exports/`
-- [ ] **5.2** Unsloth fine-tune pipeline on collected data → domain-specific Isaac Sim model
+- [x] **5.1** Every tool invocation logged as `(user_message, context, tool_calls, result)` tuple to `workspace/finetune_exports/`
+- [x] **5.2** Unsloth fine-tune pipeline on collected data → domain-specific Isaac Sim model
 - [ ] **5.3** UI polish: inline code syntax highlighting, image previews in chat, progress bars for long operations
-- [ ] **5.4** Multi-turn memory: LLM remembers what it did 10 turns ago, references previous actions
+- [x] **5.4** Multi-turn memory: LLM remembers what it did 10 turns ago, references previous actions
 - [ ] **5.5** Keyboard shortcuts: Ctrl+Shift+A to open chat, Ctrl+Enter to send
-- [ ] **5.6** Batch operations: "add physics to all meshes in /World/Objects"
-- [ ] **5.7** Template library: "set up a tabletop manipulation scene" → pre-built multi-step plan
+- [x] **5.6** Batch operations: "add physics to all meshes in /World/Objects"
+- [x] **5.7** Template library: "set up a tabletop manipulation scene" → pre-built multi-step plan
 
 ---
 
@@ -364,12 +364,12 @@ User types: "Build a house and put my Unitree G1 robot with kitchen items"
 
 #### Tasks
 
-- [ ] **6A.1** Tool: `catalog_search(query, asset_type, limit)` — fuzzy-match against local asset catalog + Nucleus browser
+- [x] **6A.1** Tool: `catalog_search(query, asset_type, limit)` — fuzzy-match against local asset catalog + Nucleus browser
   - Searches `ASSETS_ROOT_PATH` recursively for USD/USDZ files by name/tag
   - Searches Nucleus if `NUCLEUS_SERVER` configured
   - Returns ranked list: `[{path, name, type, thumbnail_b64, bounding_box}]`
   - Caches directory listing for fast subsequent queries
-- [ ] **6A.2** Tool: `generate_scene_blueprint(description, available_assets)` — LLM-powered spatial planner
+- [x] **6A.2** Tool: `generate_scene_blueprint(description, available_assets)` — LLM-powered spatial planner
   - Input: user description + asset catalog results
   - Output: structured blueprint JSON:
     ```json
@@ -384,11 +384,11 @@ User types: "Build a house and put my Unitree G1 robot with kitchen items"
     }
     ```
   - Uses LLM with spatial reasoning prompt + retrieved furniture/object dimensions
-- [ ] **6A.3** Tool: `validate_scene_blueprint(blueprint)` — physics & spatial QA
+- [x] **6A.3** Tool: `validate_scene_blueprint(blueprint)` — physics & spatial QA
   - Checks: bounding box overlaps, objects below ground, floating objects, scale mismatches (2m tall chair?), physics scene missing
   - Returns: `{valid: bool, issues: [{object, problem, suggestion}]}`
   - Auto-fixes trivial issues (snap to ground, remove clipping overlaps)
-- [ ] **6A.4** Tool: `build_scene_from_blueprint(blueprint, dry_run)` — executes the plan
+- [x] **6A.4** Tool: `build_scene_from_blueprint(blueprint, dry_run)` — executes the plan
   - `dry_run=true`: generates code patches but doesn't execute — shows user a summary
   - `dry_run=false`: creates all prims, adds references, positions, applies physics
   - Each object is an individual code patch for granular approve/reject
@@ -467,10 +467,10 @@ User types: "Create a 3D model from this image and place it at 0, 0, 1"
 
 #### Tasks
 
-- [ ] **7A.1** Tool: `create_isaaclab_env(task_name, num_envs, env_spacing, params)` — scaffold an IsaacLab `DirectRLEnv` or `ManagerBasedRLEnv` from natural language
+- [x] **7A.1** Tool: `create_isaaclab_env(task_name, num_envs, env_spacing, params)` — scaffold an IsaacLab `DirectRLEnv` or `ManagerBasedRLEnv` from natural language (⚠️ has 5 confirmed bugs — see docs/specs/7A_isaaclab_rl.md)
   - Generates `__init__.py`, `env_cfg.py`, reward/observation/action config
   - Links to the robot and objects already in the current scene
-- [ ] **7A.2** Tool: `launch_training(task, algo, num_steps, checkpoint_dir)` — kick off `rsl_rl`, `rl_games`, or `skrl` training
+- [x] **7A.2** Tool: `launch_training(task, algo, num_steps, checkpoint_dir)` — kick off `rsl_rl`, `rl_games`, or `skrl` training
   - Spawns subprocess or submits to cloud (via IsaacAutomator, see 7H)
   - Streams stdout / TensorBoard scalars back to the chat panel
 - [ ] **7A.3** Tool: `show_training_metrics(run_id)` — render reward curve, episode length, success rate inline in the chat
@@ -478,7 +478,7 @@ User types: "Create a 3D model from this image and place it at 0, 0, 1"
 - [ ] **7A.4** Tool: `deploy_policy(checkpoint, articulation_path)` — load a trained ONNX/JIT policy and run inference in sim
   - Wraps the policy in an OmniGraph action-graph tick loop
 - [ ] **7A.5** Tool: `evaluate_policy(checkpoint, num_episodes)` — run N episodes headless, report success rate and metrics
-- [ ] **7A.6** RL task template library: pick-and-place, locomotion, cabinet open/close, in-hand reorientation — each pre-wired with reward terms
+- [x] **7A.6** RL task template library: pick-and-place, locomotion, cabinet open/close, in-hand reorientation — each pre-wired with reward terms
 
 ### 7B — Enhanced Replicator / Synthetic Data Generation (Tier 1)
 
