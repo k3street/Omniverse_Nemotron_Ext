@@ -2026,3 +2026,59 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Fine-Tune Flywheel (DATA handlers) ─────────────────────────────────────
+
+from ...finetune.turn_recorder import TurnRecorder
+
+_turn_recorder = TurnRecorder()
+
+
+async def _handle_record_feedback(args: Dict) -> Dict:
+    """Link user feedback to a previously recorded turn."""
+    session_id = args["session_id"]
+    turn_id = args["turn_id"]
+    approved = args["approved"]
+    edited = args.get("edited", False)
+    correction = args.get("correction")
+    return _turn_recorder.record_feedback(
+        session_id=session_id,
+        turn_id=turn_id,
+        approved=approved,
+        edited=edited,
+        correction=correction,
+    )
+
+
+async def _handle_export_finetune_data(args: Dict) -> Dict:
+    """Export recorded turns to a provider-specific fine-tuning format."""
+    fmt = args["format"]
+    min_quality = args.get("min_quality", "approved_successful")
+    output_path = args.get("output_path")
+    return _turn_recorder.export(
+        fmt=fmt,
+        min_quality=min_quality,
+        output_path=output_path,
+    )
+
+
+async def _handle_finetune_stats(args: Dict) -> Dict:
+    """Return aggregate statistics about recorded fine-tuning data."""
+    return _turn_recorder.get_stats()
+
+
+async def _handle_redact_finetune_data(args: Dict) -> Dict:
+    """Run the redaction pipeline on an existing JSONL file."""
+    input_path = args["input_path"]
+    output_path = args.get("output_path")
+    return _turn_recorder.redact_file(
+        input_path=input_path,
+        output_path=output_path,
+    )
+
+
+DATA_HANDLERS["record_feedback"] = _handle_record_feedback
+DATA_HANDLERS["export_finetune_data"] = _handle_export_finetune_data
+DATA_HANDLERS["finetune_stats"] = _handle_finetune_stats
+DATA_HANDLERS["redact_finetune_data"] = _handle_redact_finetune_data
