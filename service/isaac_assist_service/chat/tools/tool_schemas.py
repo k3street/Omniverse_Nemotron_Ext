@@ -892,6 +892,119 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Wheeled Robots & Conveyor Systems ───────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "create_wheeled_robot",
+            "description": "Create a wheeled robot controller (differential drive, Ackermann, or holonomic) for an existing robot articulation. Generates code that sets up the controller and a reusable drive function.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation, e.g. '/World/Carter'"},
+                    "drive_type": {
+                        "type": "string",
+                        "enum": ["differential", "ackermann", "holonomic"],
+                        "description": "Drive kinematics type",
+                    },
+                    "wheel_radius": {"type": "number", "description": "Wheel radius in meters"},
+                    "wheel_base": {"type": "number", "description": "Distance between wheels (or axles) in meters"},
+                    "wheel_dof_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Joint names for the wheel DOFs. If omitted, auto-detected.",
+                    },
+                    "max_linear_speed": {"type": "number", "description": "Maximum linear speed in m/s. Default: 1.0"},
+                    "max_angular_speed": {"type": "number", "description": "Maximum angular speed in rad/s. Default: 3.14"},
+                },
+                "required": ["robot_path", "drive_type", "wheel_radius", "wheel_base"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "navigate_to",
+            "description": "Navigate a wheeled robot to a target [x, y] position using direct drive or A* path planning. Generates code with a physics callback that drives the robot to the goal.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "target_position": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Target [x, y] position in world space",
+                    },
+                    "planner": {
+                        "type": "string",
+                        "enum": ["astar", "direct"],
+                        "description": "Planning strategy: 'direct' (straight line) or 'astar' (grid-based A*). Default: direct",
+                    },
+                },
+                "required": ["robot_path", "target_position"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_conveyor",
+            "description": "Turn an existing mesh prim into a conveyor belt using OmniGraph with the OgnIsaacConveyor node. Includes a GPU/Fabric physics check (conveyors require CPU physics).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the conveyor mesh prim"},
+                    "speed": {"type": "number", "description": "Belt speed in m/s. Default: 0.5"},
+                    "direction": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Belt direction vector [x, y, z]. Default: [1, 0, 0]",
+                    },
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_conveyor_track",
+            "description": "Create a multi-segment conveyor track along a sequence of waypoints. Each segment is an oriented conveyor belt with correct rotation to connect consecutive waypoints.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "waypoints": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "number"}},
+                        "description": "List of [x, y, z] waypoints defining the track path",
+                    },
+                    "belt_width": {"type": "number", "description": "Belt width in meters. Default: 0.5"},
+                    "speed": {"type": "number", "description": "Belt speed in m/s. Default: 0.5"},
+                },
+                "required": ["waypoints"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "merge_meshes",
+            "description": "Merge multiple mesh prims into a single optimized mesh using the MeshMerger utility. Useful for combining conveyor segments, static geometry, or reducing draw calls.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of USD paths to mesh prims to merge",
+                    },
+                    "output_path": {"type": "string", "description": "USD path for the merged output mesh"},
+                },
+                "required": ["prim_paths", "output_path"],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",

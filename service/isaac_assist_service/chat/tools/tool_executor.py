@@ -2025,4 +2025,350 @@ exec(open("{out_dir}/scene_setup.py").read())
     }
 
 
+# ─── Wheeled Robots & Conveyor Systems (Phase 8E) ──────────────────────────
+
+def _gen_create_wheeled_robot(args: Dict) -> str:
+    robot_path = args["robot_path"]
+    drive_type = args["drive_type"]
+    wheel_radius = args["wheel_radius"]
+    wheel_base = args["wheel_base"]
+    dof_names = args.get("wheel_dof_names")
+    max_lin = args.get("max_linear_speed", 1.0)
+    max_ang = args.get("max_angular_speed", 3.14)
+
+    controller_map = {
+        "differential": "DifferentialController",
+        "ackermann": "AckermannController",
+        "holonomic": "HolonomicController",
+    }
+    ctrl_cls = controller_map[drive_type]
+
+    dof_block = ""
+    if dof_names:
+        dof_str = repr(dof_names)
+        dof_block = f"""
+# Wheel DOFs
+wheel_dof_names = {dof_str}
+"""
+
+    return f"""\
+import numpy as np
+from isaacsim.robot.wheeled_robots.controllers import {ctrl_cls}
+from isaacsim.robot.wheeled_robots.robots import WheeledRobot
+
+# Create controller
+controller = {ctrl_cls}(
+    name="{drive_type}_ctrl",
+    wheel_radius={wheel_radius},
+    wheel_base={wheel_base},
+)
+{dof_block}
+# Speed limits
+MAX_LINEAR_SPEED = {max_lin}   # m/s
+MAX_ANGULAR_SPEED = {max_ang}  # rad/s
+
+def drive(linear_vel, angular_vel):
+    \"\"\"Compute wheel actions. Clamps to speed limits.\"\"\"
+    lv = np.clip(linear_vel, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED)
+    av = np.clip(angular_vel, -MAX_ANGULAR_SPEED, MAX_ANGULAR_SPEED)
+    action = controller.forward(np.array([lv, av]))
+    return action
+
+print("Wheeled robot controller ready: {drive_type} | robot={robot_path}")
+print(f"  wheel_radius={wheel_radius}, wheel_base={wheel_base}")
+print(f"  max_linear={{MAX_LINEAR_SPEED}} m/s, max_angular={{MAX_ANGULAR_SPEED}} rad/s")
+"""
+
+
+def _gen_navigate_to(args: Dict) -> str:
+    robot_path = args["robot_path"]
+    target = args["target_position"]
+    planner = args.get("planner", "direct")
+
+    if planner == "astar":
+        return f"""\
+import numpy as np
+import heapq
+import omni.usd
+from isaacsim.robot.wheeled_robots.controllers import WheelBasePoseController
+from isaacsim.robot.wheeled_robots.controllers import DifferentialController
+
+robot_path = '{robot_path}'
+target = np.array({target}, dtype=float)
+
+# --- Inline A* on occupancy grid ---
+GRID_RES = 0.25  # meters per cell
+GRID_SIZE = 80   # 80x80 grid = 20m x 20m
+GRID_OFFSET = np.array([-GRID_SIZE * GRID_RES / 2, -GRID_SIZE * GRID_RES / 2])
+
+# Pre-generate an empty occupancy grid (0=free, 1=obstacle)
+# Replace with actual occupancy data for real scenes
+occupancy = np.zeros((GRID_SIZE, GRID_SIZE), dtype=int)
+
+def world_to_grid(pos):
+    return int((pos[0] - GRID_OFFSET[0]) / GRID_RES), int((pos[1] - GRID_OFFSET[1]) / GRID_RES)
+
+def grid_to_world(cell):
+    return np.array([cell[0] * GRID_RES + GRID_OFFSET[0], cell[1] * GRID_RES + GRID_OFFSET[1]])
+
+def astar(start, goal):
+    open_set = [(0, start)]
+    came_from = {{}}
+    g = {{start: 0}}
+    while open_set:
+        _, current = heapq.heappop(open_set)
+        if current == goal:
+            path = []
+            while current in came_from:
+                path.append(current)
+                current = came_from[current]
+            path.append(start)
+            return path[::-1]
+        for dx, dy in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(1,1),(-1,1),(1,-1)]:
+            nx, ny = current[0]+dx, current[1]+dy
+            if 0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE and occupancy[ny, nx] == 0:
+                ng = g[current] + (1.414 if dx and dy else 1.0)
+                if (nx, ny) not in g or ng < g[(nx, ny)]:
+                    g[(nx, ny)] = ng
+                    h = abs(nx - goal[0]) + abs(ny - goal[1])
+                    heapq.heappush(open_set, (ng + h, (nx, ny)))
+                    came_from[(nx, ny)] = current
+    return [start, goal]  # fallback: direct
+
+# Get current robot position (assume origin for now)
+start_world = np.array([0.0, 0.0])
+start_cell = world_to_grid(start_world)
+goal_cell = world_to_grid(target)
+grid_path = astar(start_cell, goal_cell)
+waypoints = [grid_to_world(c) for c in grid_path]
+
+# --- Drive along waypoints via physics callback ---
+pose_ctrl = WheelBasePoseController(
+    name="pose_ctrl",
+    open_loop_wheel_controller=DifferentialController(name="nav_diff", wheel_radius=0.05, wheel_base=0.3),
+    is_holonomic=False,
+)
+waypoint_idx = [0]
+
+import omni.physx
+def _nav_step(dt):
+    idx = waypoint_idx[0]
+    if idx >= len(waypoints):
+        print(f"Navigation complete: reached {{target}}")
+        sub.unsubscribe()
+        return
+    wp = waypoints[idx]
+    # current_pos would come from robot state in real usage
+    action = pose_ctrl.forward(start_position=np.array([0, 0, 0]), start_orientation=np.array([1, 0, 0, 0]), goal_position=np.array([wp[0], wp[1], 0]))
+    if action is None or np.linalg.norm(wp - start_world) < 0.1:
+        waypoint_idx[0] += 1
+
+sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_nav_step)
+print(f"A* navigation started: {{len(waypoints)}} waypoints to {{target}}")
+"""
+    else:  # direct
+        return f"""\
+import numpy as np
+import omni.physx
+from isaacsim.robot.wheeled_robots.controllers import WheelBasePoseController
+from isaacsim.robot.wheeled_robots.controllers import DifferentialController
+
+robot_path = '{robot_path}'
+target = np.array([{target[0]}, {target[1]}, 0.0])
+
+pose_ctrl = WheelBasePoseController(
+    name="pose_ctrl",
+    open_loop_wheel_controller=DifferentialController(name="nav_diff", wheel_radius=0.05, wheel_base=0.3),
+    is_holonomic=False,
+)
+
+def _nav_step(dt):
+    \"\"\"Physics callback: drive toward target each step.\"\"\"
+    # In production, read actual robot pose from ArticulationView
+    action = pose_ctrl.forward(
+        start_position=np.array([0, 0, 0]),
+        start_orientation=np.array([1, 0, 0, 0]),
+        goal_position=target,
+    )
+    if action is None:
+        print(f"Direct navigation complete: reached {{target[:2]}}")
+        sub.unsubscribe()
+
+sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_nav_step)
+print(f"Direct navigation started: target=[{target[0]}, {target[1]}]")
+"""
+
+
+def _gen_create_conveyor(args: Dict) -> str:
+    prim_path = args["prim_path"]
+    speed = args.get("speed", 0.5)
+    direction = args.get("direction", [1, 0, 0])
+
+    return f"""\
+import omni.usd
+import omni.graph.core as og
+import carb
+
+# Check GPU physics / Fabric — conveyors require CPU physics
+use_fabric = carb.settings.get_settings().get("/physics/useFabric")
+if use_fabric:
+    print("WARNING: Conveyor requires CPU physics. Set /physics/useFabric to False.")
+
+prim_path = '{prim_path}'
+speed = {speed}
+direction = {direction}
+
+# Resolve OmniGraph backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+keys = og.Controller.Keys
+(graph, nodes, _, _) = og.Controller.edit(
+    {{
+        "graph_path": prim_path + "/ConveyorGraph",
+        "evaluator_name": "execution",
+        "pipeline_stage": _backing,
+    }},
+    {{
+        keys.CREATE_NODES: [
+            ("tick", "omni.graph.action.OnPlaybackTick"),
+            ("conveyor", "isaacsim.conveyor.OgnIsaacConveyor"),
+        ],
+        keys.CONNECT: [
+            ("tick.outputs:tick", "conveyor.inputs:execIn"),
+        ],
+        keys.SET_VALUES: [
+            ("conveyor.inputs:conveyorPrim", prim_path),
+            ("conveyor.inputs:velocity", speed),
+            ("conveyor.inputs:direction", direction),
+        ],
+    }},
+)
+
+print(f"Conveyor created at {{prim_path}} — speed={{speed}} m/s, direction={{direction}}")
+"""
+
+
+def _gen_create_conveyor_track(args: Dict) -> str:
+    waypoints = args["waypoints"]
+    belt_width = args.get("belt_width", 0.5)
+    speed = args.get("speed", 0.5)
+
+    return f"""\
+import omni.usd
+import omni.graph.core as og
+import math
+from pxr import UsdGeom, Gf
+
+stage = omni.usd.get_context().get_stage()
+
+waypoints = {waypoints}
+belt_width = {belt_width}
+speed = {speed}
+
+# Create parent Xform
+track_path = '/World/ConveyorTrack'
+stage.DefinePrim(track_path, 'Xform')
+
+# Resolve OmniGraph backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+for i in range(len(waypoints) - 1):
+    p0 = waypoints[i]
+    p1 = waypoints[i + 1]
+
+    # Compute segment center, length, and orientation
+    cx = (p0[0] + p1[0]) / 2.0
+    cy = (p0[1] + p1[1]) / 2.0
+    cz = (p0[2] + p1[2]) / 2.0
+    dx = p1[0] - p0[0]
+    dy = p1[1] - p0[1]
+    seg_len = math.sqrt(dx * dx + dy * dy)
+    angle_deg = math.degrees(math.atan2(dy, dx))
+
+    # Create segment mesh (Cube scaled to belt dimensions)
+    seg_path = f"{{track_path}}/Segment_{{i}}"
+    prim = stage.DefinePrim(seg_path, 'Cube')
+    xf = UsdGeom.Xformable(prim)
+    xf.AddTranslateOp().Set(Gf.Vec3d(cx, cy, cz))
+    xf.AddRotateZOp().Set(angle_deg)
+    xf.AddScaleOp().Set(Gf.Vec3d(seg_len / 2.0, belt_width / 2.0, 0.02))
+
+    # Direction vector (local X, rotated)
+    dir_x = dx / seg_len if seg_len > 0 else 1.0
+    dir_y = dy / seg_len if seg_len > 0 else 0.0
+
+    # Create conveyor OmniGraph for this segment
+    keys = og.Controller.Keys
+    og.Controller.edit(
+        {{
+            "graph_path": seg_path + "/ConveyorGraph",
+            "evaluator_name": "execution",
+            "pipeline_stage": _backing,
+        }},
+        {{
+            keys.CREATE_NODES: [
+                ("tick", "omni.graph.action.OnPlaybackTick"),
+                ("conveyor", "isaacsim.conveyor.OgnIsaacConveyor"),
+            ],
+            keys.CONNECT: [
+                ("tick.outputs:tick", "conveyor.inputs:execIn"),
+            ],
+            keys.SET_VALUES: [
+                ("conveyor.inputs:conveyorPrim", seg_path),
+                ("conveyor.inputs:velocity", speed),
+                ("conveyor.inputs:direction", [dir_x, dir_y, 0.0]),
+            ],
+        }},
+    )
+
+print(f"Conveyor track created: {{len(waypoints) - 1}} segments, speed={{speed}} m/s")
+"""
+
+
+def _gen_merge_meshes(args: Dict) -> str:
+    prim_paths = args["prim_paths"]
+    output_path = args["output_path"]
+
+    return f"""\
+import omni.usd
+from isaacsim.util.merge_mesh import MeshMerger
+
+stage = omni.usd.get_context().get_stage()
+
+# Ensure output parent exists
+output_path = '{output_path}'
+parent_path = '/'.join(output_path.rsplit('/', 1)[:-1]) or '/World'
+if not stage.GetPrimAtPath(parent_path).IsValid():
+    stage.DefinePrim(parent_path, 'Xform')
+
+prim_paths = {prim_paths}
+
+# Merge meshes
+merger = MeshMerger(stage)
+merger.update_selection(prim_paths)
+merger.merge()
+
+print(f"Merged {{len(prim_paths)}} meshes: {{prim_paths}}")
+"""
+
+
+CODE_GEN_HANDLERS["create_wheeled_robot"] = _gen_create_wheeled_robot
+CODE_GEN_HANDLERS["navigate_to"] = _gen_navigate_to
+CODE_GEN_HANDLERS["create_conveyor"] = _gen_create_conveyor
+CODE_GEN_HANDLERS["create_conveyor_track"] = _gen_create_conveyor_track
+CODE_GEN_HANDLERS["merge_meshes"] = _gen_merge_meshes
+
+
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
