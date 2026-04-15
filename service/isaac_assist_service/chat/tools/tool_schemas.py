@@ -926,6 +926,52 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── SDG Quality (Phase 7B Addendum) ────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_annotations",
+            "description": "Cross-check SDG annotations for common issues: bounding boxes outside image bounds, duplicate instance IDs, zero-area boxes, and missing declared classes. Returns a health report with per-issue details.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "num_samples": {"type": "integer", "description": "Number of annotation samples to validate. Default: 10", "default": 10},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_randomization",
+            "description": "Analyze domain randomization parameter distributions from an SDG run. Returns per-parameter statistics (min, max, mean, std) and flags misconfiguration like near-constant values or collapsed ranges.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "num_samples": {"type": "integer", "description": "Number of DR samples to analyze. Default: 50", "default": 50},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_domain_gap",
+            "description": "Compare synthetic and real image datasets to diagnose domain gap issues. Returns a FID-like similarity score, per-class distribution differences, and suggested DR adjustments to reduce the gap.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "synthetic_dir": {"type": "string", "description": "Path to synthetic image dataset directory"},
+                    "real_dir": {"type": "string", "description": "Path to real image dataset directory"},
+                    "model_checkpoint": {"type": "string", "description": "Optional path to a model checkpoint for feature extraction"},
+                },
+                "required": ["synthetic_dir", "real_dir"],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",
