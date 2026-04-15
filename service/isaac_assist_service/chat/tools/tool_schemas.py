@@ -908,4 +908,63 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── ROS2 Deep Integration (Phase 8F) ────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "show_tf_tree",
+            "description": "Visualize the ROS2 TF transform tree from a given root frame. Creates a ROS2PublishTransformTree OmniGraph node if missing, acquires the TF listener, and prints the tree hierarchy.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "root_frame": {"type": "string", "description": "Root TF frame to start from. Default: 'world'"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "publish_robot_description",
+            "description": "Publish a simplified URDF robot description to a ROS2 topic with TRANSIENT_LOCAL durability. Reads the USD articulation structure and generates a URDF string with link names, joint types, and transforms. For full-fidelity URDF export, use Isaac Sim's URDF Exporter UI.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root, e.g. '/World/Franka'"},
+                    "topic": {"type": "string", "description": "ROS2 topic to publish on. Default: '/robot_description'"},
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_ros2_bridge",
+            "description": "Configure an OmniGraph-based ROS2 bridge for multiple sensors. Creates a ROS2Context node and wires up publisher nodes for cameras, lidar, IMU, clock, and joint states. Handles Isaac Sim version namespace differences automatically.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sensors": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string", "enum": ["camera", "lidar", "imu", "clock", "joint_state"], "description": "Sensor type"},
+                                "prim_path": {"type": "string", "description": "USD path to the sensor or robot prim"},
+                                "topic_name": {"type": "string", "description": "ROS2 topic name for this sensor"},
+                                "frame_id": {"type": "string", "description": "TF frame ID for the sensor"},
+                            },
+                            "required": ["type"],
+                        },
+                        "description": "List of sensors to bridge",
+                    },
+                    "ros2_domain_id": {"type": "integer", "description": "ROS2 domain ID. Default: 0"},
+                },
+                "required": ["sensors"],
+            },
+        },
+    },
 ]
