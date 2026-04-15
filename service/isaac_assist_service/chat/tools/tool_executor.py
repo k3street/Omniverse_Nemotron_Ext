@@ -1982,7 +1982,7 @@ def _gen_launch_training(args: Dict) -> str:
         f"    '--max_iterations', str(max_iterations),",
         f"    '--log_dir', log_dir,",
         "]",
-        "print(f'Launching training: {" ".join(cmd)}')",
+        "print('Launching training: ' + ' '.join(cmd))",
         "proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)",
         "print(f'Training started (PID: {proc.pid}). Checkpoints → {log_dir}')",
     ]
@@ -2232,3 +2232,664 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Phase 2 Addendum: Smart Debugging ───────────────────────────────────────
+
+import ast as _ast
+import re as _re
+
+# ── 2.X1 diagnose_physics_error (DATA handler) ─────────────────────────────
+
+_PHYSX_ERROR_PATTERNS = [
+    {
+        "pattern": r"negative mass.*?(?:prim|on):\s*(\S+)",
+        "category": "mass_configuration",
+        "severity": "critical",
+        "fix": "Set a positive mass value using UsdPhysics.MassAPI. Ensure density or mass > 0.",
+    },
+    {
+        "pattern": r"(?:collision mesh|collision geometry) invalid.*?(?:prim|on):\s*(\S+)",
+        "category": "collision_mesh",
+        "severity": "error",
+        "fix": "Re-generate or simplify the collision mesh. Apply UsdPhysics.MeshCollisionAPI and set approximation to 'convexHull'.",
+    },
+    {
+        "pattern": r"solver divergence",
+        "category": "solver_divergence",
+        "severity": "warning",
+        "fix": "Reduce physics timestep (increase timeStepsPerSecond), lower solver iteration count, or check for extreme mass ratios between contacting bodies.",
+    },
+    {
+        "pattern": r"joint limit exceeded.*?(?:prim|on):\s*(\S+)",
+        "category": "joint_limit",
+        "severity": "warning",
+        "fix": "Verify joint limits in the URDF/USD. Set realistic lower/upper limits on revolute and prismatic joints.",
+    },
+    {
+        "pattern": r"invalid inertia.*?(?:prim|on):\s*(\S+)",
+        "category": "inertia",
+        "severity": "critical",
+        "fix": "Set valid diagonal inertia values. All eigenvalues must be positive. Use UsdPhysics.MassAPI to set diagonalInertia.",
+    },
+    {
+        "pattern": r"articulation.*?(?:exceeds|exceeded).*?(?:prim|on):\s*(\S+)",
+        "category": "articulation_error",
+        "severity": "error",
+        "fix": "Check the articulation tree for cycles or disconnected links. Ensure ArticulationRootAPI is applied to exactly one prim.",
+    },
+]
+
+
+async def _handle_diagnose_physics_error(args: Dict) -> Dict:
+    """Pattern-match PhysX error text against known error patterns."""
+    error_text = args.get("error_text", "")
+    if not error_text:
+        return {"matches": [], "message": "No error text provided."}
+
+    seen: Dict[str, Dict] = {}  # category → match info
+    for pat_def in _PHYSX_ERROR_PATTERNS:
+        for m in _re.finditer(pat_def["pattern"], error_text, _re.IGNORECASE):
+            cat = pat_def["category"]
+            prim_path = m.group(1) if m.lastindex and m.lastindex >= 1 else None
+            if cat not in seen:
+                seen[cat] = {
+                    "category": cat,
+                    "severity": pat_def["severity"],
+                    "prim_path": prim_path,
+                    "fix": pat_def["fix"],
+                    "occurrences": 1,
+                    "dedup_hint": None,
+                }
+            else:
+                seen[cat]["occurrences"] += 1
+
+    # Add dedup hints
+    for info in seen.values():
+        if info["occurrences"] > 1:
+            info["dedup_hint"] = f"Same error occurred {info['occurrences']} times — likely parallel envs."
+
+    matches = list(seen.values())
+    if not matches:
+        return {"matches": [], "message": "No known PhysX error patterns matched."}
+    return {"matches": matches, "message": f"Found {len(matches)} error pattern(s)."}
+
+
+DATA_HANDLERS["diagnose_physics_error"] = _handle_diagnose_physics_error
+
+
+# ── 2.X2 trace_config (DATA handler) ───────────────────────────────────────
+
+async def _handle_trace_config(args: Dict) -> Dict:
+    """AST-based parameter tracing for IsaacLab config files."""
+    param_name = args.get("param_name", "")
+    env_source_path = args.get("env_source_path", "")
+
+    if not param_name:
+        return {"error": "param_name is required."}
+
+    if not env_source_path:
+        return {"error": "env_source_path is required."}
+
+    source_path = Path(env_source_path)
+    if not source_path.exists():
+        return {"error": f"Source file not found: {env_source_path}"}
+
+    # Parse the last segment of dotted param name for matching
+    target_attr = param_name.split(".")[-1]
+
+    try:
+        source_text = source_path.read_text(encoding="utf-8")
+        tree = _ast.parse(source_text)
+    except Exception as e:
+        return {"error": f"Failed to parse {env_source_path}: {e}"}
+
+    chain = []
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.AnnAssign) and isinstance(node.target, _ast.Name):
+            if node.target.id == target_attr and node.value is not None:
+                try:
+                    value = _ast.literal_eval(node.value)
+                except Exception:
+                    value = _ast.dump(node.value)
+                chain.append({
+                    "source": f"{source_path.name}:{node.lineno}",
+                    "value": value,
+                    "status": "active",
+                    "line": node.lineno,
+                })
+        elif isinstance(node, _ast.Assign):
+            for target in node.targets:
+                name = None
+                if isinstance(target, _ast.Name):
+                    name = target.id
+                elif isinstance(target, _ast.Attribute):
+                    name = target.attr
+                if name == target_attr:
+                    try:
+                        value = _ast.literal_eval(node.value)
+                    except Exception:
+                        value = _ast.dump(node.value)
+                    chain.append({
+                        "source": f"{source_path.name}:{node.lineno}",
+                        "value": value,
+                        "status": "active",
+                        "line": node.lineno,
+                    })
+
+    if not chain:
+        return {
+            "param": param_name,
+            "final_value": None,
+            "resolution_chain": [],
+            "message": f"Parameter '{param_name}' not found in {source_path.name}.",
+        }
+
+    # Mark all but last as overridden
+    for entry in chain[:-1]:
+        entry["status"] = "overridden"
+
+    return {
+        "param": param_name,
+        "final_value": chain[-1]["value"],
+        "resolution_chain": chain,
+        "message": f"Resolved '{param_name}' → {chain[-1]['value']}",
+    }
+
+
+DATA_HANDLERS["trace_config"] = _handle_trace_config
+
+
+# ── 2.X3 check_physics_health (CODE_GEN handler) ──────────────────────────
+
+def _gen_check_physics_health(args: Dict) -> str:
+    """Generate code to audit physics health of the stage or a specific articulation."""
+    art_path = args.get("articulation_path")
+
+    if art_path:
+        scope_code = f"""\
+root = stage.GetPrimAtPath('{art_path}')
+if not root.IsValid():
+    raise RuntimeError('Prim not found: {art_path}')
+prims_to_check = [root] + list(root.GetAllDescendants())"""
+    else:
+        scope_code = """\
+root = stage.GetPseudoRoot()
+prims_to_check = list(stage.Traverse())"""
+
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics, UsdGeom, PhysxSchema, Gf
+import json
+
+stage = omni.usd.get_context().get_stage()
+issues = []
+
+{scope_code}
+
+meters_per_unit = UsdGeom.GetStageMetersPerUnit(stage)
+if abs(meters_per_unit - 0.01) > 0.001 and abs(meters_per_unit - 1.0) > 0.001:
+    issues.append({{
+        'prim': '/',
+        'severity': 'warning',
+        'issue': f'metersPerUnit={{meters_per_unit}} — expected 0.01 (cm) or 1.0 (m)',
+        'fix': "UsdGeom.SetStageMetersPerUnit(stage, 0.01)"
+    }})
+
+for prim in prims_to_check:
+    path = str(prim.GetPath())
+
+    # Check for missing CollisionAPI on rigid bodies
+    if prim.HasAPI(UsdPhysics.RigidBodyAPI) and not prim.HasAPI(UsdPhysics.CollisionAPI):
+        has_child_collision = any(
+            c.HasAPI(UsdPhysics.CollisionAPI) for c in prim.GetAllDescendants()
+        )
+        if not has_child_collision:
+            issues.append({{
+                'prim': path,
+                'severity': 'warning',
+                'issue': 'RigidBodyAPI without CollisionAPI (or child collision)',
+                'fix': f"UsdPhysics.CollisionAPI.Apply(stage.GetPrimAtPath('{{path}}'))"
+            }})
+
+    # Check for zero mass
+    if prim.HasAPI(UsdPhysics.MassAPI):
+        mass_attr = prim.GetAttribute('physics:mass')
+        if mass_attr and mass_attr.Get() is not None and mass_attr.Get() == 0.0:
+            issues.append({{
+                'prim': path,
+                'severity': 'error',
+                'issue': 'Zero mass on link — will cause simulation instability',
+                'fix': f"stage.GetPrimAtPath('{{path}}').GetAttribute('physics:mass').Set(1.0)"
+            }})
+
+    # Check for extreme inertia via DiagonalInertiaAttr
+    if prim.HasAPI(UsdPhysics.MassAPI):
+        mass_api = UsdPhysics.MassAPI(prim)
+        inertia_attr = mass_api.GetDiagonalInertiaAttr()
+        if inertia_attr and inertia_attr.Get() is not None:
+            inertia = inertia_attr.Get()
+            vals = [float(v) for v in inertia]
+            if any(v <= 0 for v in vals):
+                issues.append({{
+                    'prim': path,
+                    'severity': 'critical',
+                    'issue': f'Non-positive diagonal inertia: {{vals}}',
+                    'fix': f"UsdPhysics.MassAPI(stage.GetPrimAtPath('{{path}}')).GetDiagonalInertiaAttr().Set(Gf.Vec3f(0.01, 0.01, 0.01))"
+                }})
+            elif len(vals) >= 2 and max(vals) / max(min(vals), 1e-12) > 1000:
+                issues.append({{
+                    'prim': path,
+                    'severity': 'warning',
+                    'issue': f'Extreme inertia ratio: {{max(vals)/min(vals):.0f}}:1',
+                    'fix': 'Review inertia values — extreme ratios cause solver instability'
+                }})
+
+    # Check for infinite joint limits
+    if prim.IsA(UsdPhysics.RevoluteJoint) or prim.HasAPI(UsdPhysics.RevoluteJointAPI):
+        lower = prim.GetAttribute('physics:lowerLimit')
+        upper = prim.GetAttribute('physics:upperLimit')
+        if lower and upper:
+            lo_val = lower.Get()
+            hi_val = upper.Get()
+            if lo_val is not None and hi_val is not None:
+                if abs(lo_val) > 1e6 or abs(hi_val) > 1e6:
+                    issues.append({{
+                        'prim': path,
+                        'severity': 'warning',
+                        'issue': f'Joint limits appear infinite: [{{lo_val}}, {{hi_val}}]',
+                        'fix': f"Set realistic joint limits on '{{path}}'"
+                    }})
+
+# Check metersPerUnit
+print(json.dumps({{'issues': issues, 'total': len(issues), 'metersPerUnit': meters_per_unit}}))
+"""
+
+
+CODE_GEN_HANDLERS["check_physics_health"] = _gen_check_physics_health
+
+
+# ── 2.X4 generate_robot_description (DATA handler) ────────────────────────
+
+_ROBOT_DESCRIPTION_CONFIGS = {
+    "franka": {
+        "rmpflow_config": "franka/rmpflow",
+        "robot_descriptor": "franka/robot_descriptor.yaml",
+        "urdf": "franka/lula_franka_gen.urdf",
+        "end_effector_frame": "panda_hand",
+    },
+    "ur10": {
+        "rmpflow_config": "universal_robots/ur10/rmpflow",
+        "robot_descriptor": "universal_robots/ur10/robot_descriptor.yaml",
+        "urdf": "universal_robots/ur10/lula_ur10_gen.urdf",
+        "end_effector_frame": "ee_link",
+    },
+    "ur5": {
+        "rmpflow_config": "universal_robots/ur5e/rmpflow",
+        "robot_descriptor": "universal_robots/ur5e/robot_descriptor.yaml",
+        "urdf": "universal_robots/ur5e/lula_ur5e_gen.urdf",
+        "end_effector_frame": "ee_link",
+    },
+    "ur5e": {
+        "rmpflow_config": "universal_robots/ur5e/rmpflow",
+        "robot_descriptor": "universal_robots/ur5e/robot_descriptor.yaml",
+        "urdf": "universal_robots/ur5e/lula_ur5e_gen.urdf",
+        "end_effector_frame": "ee_link",
+    },
+    "cobotta": {
+        "rmpflow_config": "denso/cobotta_pro_900/rmpflow",
+        "robot_descriptor": "denso/cobotta_pro_900/robot_descriptor.yaml",
+        "urdf": "denso/cobotta_pro_900/lula_cobotta_pro_900_gen.urdf",
+        "end_effector_frame": "onrobot_rg6_base_link",
+    },
+}
+
+# Robot name detection patterns for auto-detect from articulation path
+_ROBOT_NAME_PATTERNS = {
+    "franka": ["franka", "panda"],
+    "ur10": ["ur10"],
+    "ur5": ["ur5"],
+    "ur5e": ["ur5e"],
+    "cobotta": ["cobotta"],
+}
+
+
+def _detect_robot_type(articulation_path: str) -> Optional[str]:
+    """Auto-detect robot type from articulation path."""
+    path_lower = articulation_path.lower()
+    for robot_type, patterns in _ROBOT_NAME_PATTERNS.items():
+        for pat in patterns:
+            if pat in path_lower:
+                return robot_type
+    return None
+
+
+async def _handle_generate_robot_description(args: Dict) -> Dict:
+    """Return config file paths for a known robot, or instructions for custom robots."""
+    art_path = args["articulation_path"]
+    robot_type = args.get("robot_type", "")
+
+    # Auto-detect from path if not provided
+    if not robot_type:
+        robot_type = _detect_robot_type(art_path)
+
+    if robot_type and robot_type in _ROBOT_DESCRIPTION_CONFIGS:
+        cfg = _ROBOT_DESCRIPTION_CONFIGS[robot_type]
+        return {
+            "supported": True,
+            "robot_type": robot_type,
+            "articulation_path": art_path,
+            "config_files": cfg,
+            "message": f"Robot '{robot_type}' is pre-supported. Config files are available.",
+        }
+
+    return {
+        "supported": False,
+        "robot_type": robot_type or "unknown",
+        "articulation_path": art_path,
+        "instructions": (
+            "This robot is not pre-supported. Use the XRDF Editor to create a robot descriptor, "
+            "then use CollisionSphereEditor to generate collision spheres for motion planning."
+        ),
+        "message": f"Robot '{robot_type or 'unknown'}' is not pre-supported.",
+    }
+
+
+DATA_HANDLERS["generate_robot_description"] = _handle_generate_robot_description
+
+
+# ── Phase 3 Addendum: URDF Post-Processor ──────────────────────────────────
+
+# ── 3.X1 verify_import (CODE_GEN handler) ──────────────────────────────────
+
+def _gen_verify_import(args: Dict) -> str:
+    """Generate code that audits a URDF-imported articulation for common issues."""
+    art_path = args["articulation_path"]
+
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics, UsdGeom, PhysxSchema, Gf
+import json
+
+stage = omni.usd.get_context().get_stage()
+root = stage.GetPrimAtPath('{art_path}')
+if not root.IsValid():
+    raise RuntimeError('Articulation not found: {art_path}')
+
+issues = []
+all_prims = [root] + list(root.GetAllDescendants())
+
+# Check 1: ArticulationRootAPI
+has_art_root = False
+for prim in all_prims:
+    if prim.HasAPI(PhysxSchema.PhysxArticulationAPI) or prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+        has_art_root = True
+        break
+if not has_art_root:
+    issues.append({{
+        'prim': '{art_path}',
+        'severity': 'critical',
+        'issue': 'Missing ArticulationRootAPI — robot will not simulate as articulation',
+        'fix': "PhysxSchema.PhysxArticulationAPI.Apply(stage.GetPrimAtPath('{art_path}'))"
+    }})
+
+# Check 2: metersPerUnit
+meters_per_unit = UsdGeom.GetStageMetersPerUnit(stage)
+if abs(meters_per_unit - 0.01) > 0.001 and abs(meters_per_unit - 1.0) > 0.001:
+    issues.append({{
+        'prim': '/',
+        'severity': 'warning',
+        'issue': f'Stage metersPerUnit={{meters_per_unit}} — expected 0.01 (cm) or 1.0 (m)',
+        'fix': 'UsdGeom.SetStageMetersPerUnit(stage, 0.01)'
+    }})
+
+# Check 3: Missing CollisionAPI on links
+for prim in all_prims:
+    path = str(prim.GetPath())
+    if prim.HasAPI(UsdPhysics.RigidBodyAPI) and not prim.HasAPI(UsdPhysics.CollisionAPI):
+        has_child_collision = any(
+            c.HasAPI(UsdPhysics.CollisionAPI) for c in prim.GetAllDescendants()
+        )
+        if not has_child_collision:
+            issues.append({{
+                'prim': path,
+                'severity': 'warning',
+                'issue': 'Link has RigidBodyAPI but no CollisionAPI',
+                'fix': f"UsdPhysics.CollisionAPI.Apply(stage.GetPrimAtPath('{{path}}'))"
+            }})
+
+# Check 4: Zero-mass links
+for prim in all_prims:
+    path = str(prim.GetPath())
+    if prim.HasAPI(UsdPhysics.MassAPI):
+        mass_attr = prim.GetAttribute('physics:mass')
+        if mass_attr and mass_attr.Get() is not None and mass_attr.Get() == 0.0:
+            issues.append({{
+                'prim': path,
+                'severity': 'error',
+                'issue': 'Zero mass on link — causes simulation instability',
+                'fix': f"stage.GetPrimAtPath('{{path}}').GetAttribute('physics:mass').Set(1.0)"
+            }})
+
+# Check 5: Infinite joint limits
+for prim in all_prims:
+    path = str(prim.GetPath())
+    if prim.IsA(UsdPhysics.RevoluteJoint) or prim.HasAPI(UsdPhysics.RevoluteJointAPI):
+        lower = prim.GetAttribute('physics:lowerLimit')
+        upper = prim.GetAttribute('physics:upperLimit')
+        if lower and upper:
+            lo_val = lower.Get()
+            hi_val = upper.Get()
+            if lo_val is not None and hi_val is not None:
+                if abs(lo_val) > 1e6 or abs(hi_val) > 1e6:
+                    issues.append({{
+                        'prim': path,
+                        'severity': 'warning',
+                        'issue': f'Infinite joint limits: [{{lo_val}}, {{hi_val}}]',
+                        'fix': f"Set finite joint limits on '{{path}}'"
+                    }})
+
+# Check 6: Extreme inertia ratios
+inertia_vals = []
+for prim in all_prims:
+    path = str(prim.GetPath())
+    if prim.HasAPI(UsdPhysics.MassAPI):
+        diag = prim.GetAttribute('physics:diagonalInertia')
+        if diag and diag.Get() is not None:
+            vals = [float(v) for v in diag.Get()]
+            inertia_vals.extend(vals)
+            if any(v <= 0 for v in vals):
+                issues.append({{
+                    'prim': path,
+                    'severity': 'critical',
+                    'issue': f'Non-positive inertia: {{vals}}',
+                    'fix': f"stage.GetPrimAtPath('{{path}}').GetAttribute('physics:diagonalInertia').Set(Gf.Vec3f(0.01, 0.01, 0.01))"
+                }})
+
+if len(inertia_vals) >= 2:
+    pos_vals = [v for v in inertia_vals if v > 0]
+    if pos_vals and max(pos_vals) / min(pos_vals) > 1000:
+        issues.append({{
+            'prim': '{art_path}',
+            'severity': 'warning',
+            'issue': f'Extreme inertia ratio across links: {{max(pos_vals)/min(pos_vals):.0f}}:1',
+            'fix': 'Review inertia values — extreme ratios cause PhysX solver instability'
+        }})
+
+print(json.dumps({{'articulation_path': '{art_path}', 'issues': issues, 'total': len(issues)}}))
+"""
+
+
+CODE_GEN_HANDLERS["verify_import"] = _gen_verify_import
+
+
+# ── 3.X2 apply_robot_fix_profile (DATA handler) ───────────────────────────
+
+_ROBOT_FIX_PROFILES = {
+    "franka": {
+        "robot_name": "franka",
+        "display_name": "Franka Emika Panda",
+        "known_issues": [
+            "rootJoint creates unwanted floating base — delete it",
+            "Default drive stiffness too low for position control",
+            "panda_hand and finger links often missing CollisionAPI",
+        ],
+        "fixes": [
+            {
+                "description": "Delete rootJoint to allow fixedBase anchoring",
+                "code": "stage.RemovePrim('{art_path}/rootJoint')",
+            },
+            {
+                "description": "Set fixedBase for stationary arm",
+                "code": "PhysxSchema.PhysxArticulationAPI.Apply(stage.GetPrimAtPath('{art_path}')).CreateEnabledSelfCollisionsAttr(False)",
+            },
+            {
+                "description": "Set drive stiffness Kp=1000, Kd=100 on all joints",
+                "code": "# Apply Kp=1000, Kd=100 to all revolute joints",
+            },
+            {
+                "description": "Add CollisionAPI to hand and finger links",
+                "code": "# Apply CollisionAPI to panda_hand, panda_leftfinger, panda_rightfinger",
+            },
+        ],
+        "drive_gains": {"kp": 1000, "kd": 100},
+    },
+    "ur5": {
+        "robot_name": "ur5",
+        "display_name": "Universal Robots UR5",
+        "known_issues": [
+            "Joint limits often imported as ±infinity",
+            "Missing collision meshes on wrist links",
+        ],
+        "fixes": [
+            {
+                "description": "Set finite joint limits (±2π for revolute joints)",
+                "code": "# Set lowerLimit=-6.283, upperLimit=6.283 on all revolute joints",
+            },
+            {
+                "description": "Add CollisionAPI to wrist links",
+                "code": "# Apply CollisionAPI to wrist_1_link, wrist_2_link, wrist_3_link",
+            },
+        ],
+        "drive_gains": {"kp": 800, "kd": 80},
+    },
+    "ur10": {
+        "robot_name": "ur10",
+        "display_name": "Universal Robots UR10",
+        "known_issues": [
+            "Joint limits often imported as ±infinity",
+            "Missing collision meshes on wrist links",
+            "Default mass values may be incorrect for UR10 (heavier than UR5)",
+        ],
+        "fixes": [
+            {
+                "description": "Set finite joint limits (±2π for revolute joints)",
+                "code": "# Set lowerLimit=-6.283, upperLimit=6.283 on all revolute joints",
+            },
+            {
+                "description": "Add CollisionAPI to wrist links",
+                "code": "# Apply CollisionAPI to wrist_1_link, wrist_2_link, wrist_3_link",
+            },
+        ],
+        "drive_gains": {"kp": 1000, "kd": 100},
+    },
+    "g1": {
+        "robot_name": "g1",
+        "display_name": "Unitree G1 Humanoid",
+        "known_issues": [
+            "Many links imported with zero mass",
+            "Extreme inertia ratios between torso and finger links",
+            "Self-collision filtering needed for dense link structure",
+        ],
+        "fixes": [
+            {
+                "description": "Set minimum mass (0.1 kg) on zero-mass links",
+                "code": "# Set mass=0.1 on all links where mass==0",
+            },
+            {
+                "description": "Enable self-collision filtering",
+                "code": "PhysxSchema.PhysxArticulationAPI.Apply(root).CreateEnabledSelfCollisionsAttr(True)",
+            },
+        ],
+        "drive_gains": {"kp": 500, "kd": 50},
+    },
+    "allegro": {
+        "robot_name": "allegro",
+        "display_name": "Allegro Hand",
+        "known_issues": [
+            "Very small link masses cause solver instability",
+            "Finger joint limits must be carefully bounded",
+            "CollisionAPI often missing on fingertip links",
+        ],
+        "fixes": [
+            {
+                "description": "Set minimum mass (0.01 kg) on finger links",
+                "code": "# Set mass=0.01 on all finger links",
+            },
+            {
+                "description": "Add CollisionAPI to all fingertip links",
+                "code": "# Apply CollisionAPI to all *_tip links",
+            },
+        ],
+        "drive_gains": {"kp": 100, "kd": 10},
+    },
+}
+
+# Auto-detect patterns for robot name from path
+_FIX_PROFILE_PATTERNS = {
+    "franka": ["franka", "panda"],
+    "ur5": ["ur5"],
+    "ur10": ["ur10"],
+    "g1": ["g1", "unitree_g1"],
+    "allegro": ["allegro"],
+}
+
+
+def _detect_robot_for_fix(articulation_path: str) -> Optional[str]:
+    """Auto-detect robot name from articulation path for fix profile lookup."""
+    path_lower = articulation_path.lower()
+    for robot_name, patterns in _FIX_PROFILE_PATTERNS.items():
+        for pat in patterns:
+            if pat in path_lower:
+                return robot_name
+    return None
+
+
+async def _handle_apply_robot_fix_profile(args: Dict) -> Dict:
+    """Look up known robot import issues and return a fix profile."""
+    art_path = args["articulation_path"]
+    robot_name = args.get("robot_name", "")
+
+    # Auto-detect from path if not provided
+    if not robot_name:
+        robot_name = _detect_robot_for_fix(art_path)
+
+    if not robot_name or robot_name not in _ROBOT_FIX_PROFILES:
+        return {
+            "found": False,
+            "robot_name": robot_name or "unknown",
+            "articulation_path": art_path,
+            "message": (
+                f"No fix profile found for '{robot_name or 'unknown'}'. "
+                f"Known robots: {', '.join(sorted(_ROBOT_FIX_PROFILES.keys()))}. "
+                f"Use verify_import to diagnose issues instead."
+            ),
+        }
+
+    profile = _ROBOT_FIX_PROFILES[robot_name].copy()
+    # Substitute articulation path into fix code templates
+    fixes = []
+    for fix in profile["fixes"]:
+        fixes.append({
+            "description": fix["description"],
+            "code": fix["code"].replace("{art_path}", art_path),
+        })
+    profile["fixes"] = fixes
+    profile["articulation_path"] = art_path
+    profile["found"] = True
+    profile["message"] = f"Fix profile for '{profile['display_name']}' — {len(fixes)} fixes available."
+
+    return profile
+
+
+DATA_HANDLERS["apply_robot_fix_profile"] = _handle_apply_robot_fix_profile

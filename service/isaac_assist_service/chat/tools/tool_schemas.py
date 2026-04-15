@@ -942,4 +942,94 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Phase 2 Addendum: Smart Debugging ───────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_physics_error",
+            "description": "Pattern-match a PhysX error string against known error patterns. Returns matched categories with prim paths, severity, and specific fix instructions. Deduplicates repeated errors from parallel envs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "error_text": {"type": "string", "description": "The PhysX error text to diagnose"},
+                },
+                "required": ["error_text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "trace_config",
+            "description": "Trace the resolution chain for an IsaacLab config parameter. Shows where a parameter is defined, overridden, and its final value. Useful for debugging 'wrong value' issues in RL training configs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "param_name": {"type": "string", "description": "Dotted parameter name, e.g. 'sim.dt', 'scene.table.friction'"},
+                    "env_source_path": {"type": "string", "description": "Path to the IsaacLab env config Python file"},
+                },
+                "required": ["param_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_physics_health",
+            "description": "Run a pre-flight physics health check on the stage or a specific articulation. Checks for missing CollisionAPI, zero mass, infinite joint limits, invalid inertia, and metersPerUnit mismatches.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "Optional USD path to scope the check to a specific articulation"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_robot_description",
+            "description": "Get config file paths (RMPflow, robot descriptor, URDF) for a known robot type. For unknown robots, returns instructions to create configs manually using XRDF Editor and CollisionSphereEditor.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root"},
+                    "robot_type": {"type": "string", "description": "Robot type: 'franka', 'ur10', 'ur5e', 'cobotta'. If omitted, auto-detected from path."},
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
+
+    # ─── Phase 3 Addendum: URDF Post-Processor ──────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "verify_import",
+            "description": "Audit a URDF-imported articulation for common post-import issues: missing CollisionAPI on links, zero-mass links, infinite joint limits, missing ArticulationRootAPI, metersPerUnit mismatch, and extreme inertia ratios. Returns a JSON issues list with prim paths, severity, and fix commands.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the imported articulation root, e.g. '/World/Robot'"},
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_robot_fix_profile",
+            "description": "Look up known import issues for a specific robot model and return a fix profile with pre-built fix commands. Supports: Franka, UR5, UR10, G1, Allegro. For unknown robots, suggests using verify_import instead.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root"},
+                    "robot_name": {"type": "string", "description": "Robot name: 'franka', 'ur5', 'ur10', 'g1', 'allegro'. If omitted, auto-detected from path."},
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
 ]
