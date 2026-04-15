@@ -1850,6 +1850,254 @@ DATA_HANDLERS["vision_plan_trajectory"] = _handle_vision_plan_trajectory
 DATA_HANDLERS["vision_analyze_scene"] = _handle_vision_analyze_scene
 
 
+# ── Robot Setup Suite (Phase 8D) ─────────────────────────────────────────
+
+# Default drive parameters per robot type
+_ROBOT_TYPE_DEFAULTS = {
+    "manipulator": {"stiffness": 1000, "damping": 100},
+    "mobile":      {"stiffness": 500,  "damping": 50},
+    "humanoid":    {"stiffness": 800,  "damping": 80},
+}
+
+
+def _gen_robot_wizard(args: Dict) -> str:
+    asset_path = args["asset_path"]
+    robot_type = args.get("robot_type", "manipulator")
+    defaults = _ROBOT_TYPE_DEFAULTS.get(robot_type, _ROBOT_TYPE_DEFAULTS["manipulator"])
+    stiffness = args.get("drive_stiffness", defaults["stiffness"])
+    damping = args.get("drive_damping", defaults["damping"])
+
+    is_urdf = asset_path.lower().endswith(".urdf")
+
+    if is_urdf:
+        import_block = f"""\
+# Step 1: Import robot from URDF
+from isaacsim.asset.importer.urdf import import_urdf, ImportConfig
+cfg = ImportConfig()
+cfg.convex_decomposition = False  # use convex hull
+dest_path = import_urdf('{asset_path}', cfg)
+print(f"Imported URDF → {{dest_path}}")
+"""
+    else:
+        import_block = f"""\
+# Step 1: Import robot from USD
+dest_path = '/World/Robot'
+prim = stage.DefinePrim(dest_path, 'Xform')
+prim.GetReferences().AddReference('{asset_path}')
+print(f"Loaded USD asset → {{dest_path}}")
+"""
+
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics, PhysxSchema, UsdGeom, Gf
+
+stage = omni.usd.get_context().get_stage()
+
+{import_block}
+# Step 2: Apply drive defaults for {robot_type} (Kp={stiffness}, Kd={damping})
+robot_prim = stage.GetPrimAtPath(dest_path)
+joint_count = 0
+for child in robot_prim.GetAllDescendants():
+    if child.HasAPI(UsdPhysics.DriveAPI):
+        for drive_type in ['angular', 'linear']:
+            drive = UsdPhysics.DriveAPI.Get(child, drive_type)
+            if drive:
+                drive.GetStiffnessAttr().Set({stiffness})
+                drive.GetDampingAttr().Set({damping})
+                joint_count += 1
+print(f"Applied Kp={stiffness}, Kd={damping} to {{joint_count}} drives")
+
+# Step 3: Apply convex-hull collision meshes
+collision_count = 0
+for child in robot_prim.GetAllDescendants():
+    if child.IsA(UsdGeom.Mesh):
+        if not child.HasAPI(UsdPhysics.CollisionAPI):
+            UsdPhysics.CollisionAPI.Apply(child)
+        if not child.HasAPI(PhysxSchema.PhysxCollisionAPI):
+            PhysxSchema.PhysxCollisionAPI.Apply(child)
+        coll_api = PhysxSchema.PhysxCollisionAPI(child)
+        coll_api.CreateContactOffsetAttr(0.02)
+        collision_count += 1
+print(f"Applied convex-hull collision to {{collision_count}} meshes")
+
+# Summary
+print(f"Robot setup complete: type={robot_type}, drives={{joint_count}}, collisions={{collision_count}}")
+"""
+
+
+def _gen_tune_gains(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    method = args.get("method", "manual")
+    joint_name = args.get("joint_name")
+    kp = args.get("kp", 1000)
+    kd = args.get("kd", 100)
+    test_mode = args.get("test_mode", "step")
+
+    if method == "step_response":
+        mode_map = {"sinusoidal": "SINUSOIDAL", "step": "STEP"}
+        mode_str = mode_map.get(test_mode, "STEP")
+        return f"""\
+import omni.usd
+from pxr import UsdPhysics
+from isaacsim.robot_setup.gain_tuner import GainTuner, GainsTestMode
+from isaacsim.core.api import World
+
+stage = omni.usd.get_context().get_stage()
+
+# Initialize GainTuner
+tuner = GainTuner()
+tuner.setup('{art_path}')
+
+# Configure test parameters
+test_params = {{"mode": GainsTestMode.{mode_str}}}
+tuner.initialize_gains_test(test_params)
+
+# Run test loop
+world = World.instance() or World()
+dt = 1.0 / 60.0
+step = 0
+while not tuner.update_gains_test(dt):
+    world.step()
+    step += 1
+
+# Compute error metrics
+pos_rmse, vel_rmse = tuner.compute_gains_test_error_terms()
+print(f"GainTuner test complete after {{step}} steps")
+print(f"Position RMSE: {{pos_rmse:.6f}}")
+print(f"Velocity RMSE: {{vel_rmse:.6f}}")
+"""
+
+    # Manual method: set gains directly via DriveAPI
+    if joint_name:
+        return f"""\
+import omni.usd
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+joint_prim = stage.GetPrimAtPath('{art_path}/{joint_name}')
+
+# Set drive gains for {joint_name}
+for drive_type in ['angular', 'linear']:
+    drive = UsdPhysics.DriveAPI.Get(joint_prim, drive_type)
+    if drive:
+        drive.GetStiffnessAttr().Set({kp})
+        drive.GetDampingAttr().Set({kd})
+        print(f"Set {{drive_type}} drive on {joint_name}: Kp={kp}, Kd={kd}")
+"""
+
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+robot_prim = stage.GetPrimAtPath('{art_path}')
+
+# Set drive gains for all joints
+joint_count = 0
+for child in robot_prim.GetAllDescendants():
+    if child.HasAPI(UsdPhysics.DriveAPI):
+        for drive_type in ['angular', 'linear']:
+            drive = UsdPhysics.DriveAPI.Get(child, drive_type)
+            if drive:
+                drive.GetStiffnessAttr().Set({kp})
+                drive.GetDampingAttr().Set({kd})
+                joint_count += 1
+print(f"Set Kp={kp}, Kd={kd} on {{joint_count}} drives")
+"""
+
+
+def _gen_assemble_robot(args: Dict) -> str:
+    base_path = args["base_path"]
+    attachment_path = args["attachment_path"]
+    base_mount = args["base_mount"]
+    attach_mount = args["attach_mount"]
+
+    return f"""\
+import omni.usd
+from isaacsim.robot_setup.assembler import RobotAssembler
+
+stage = omni.usd.get_context().get_stage()
+
+# Assemble robot: attach {attachment_path} to {base_path}
+assembler = RobotAssembler()
+assembled = assembler.assemble(
+    base_robot_path='{base_path}',
+    attach_robot_path='{attachment_path}',
+    base_robot_mount_frame='{base_mount}',
+    attach_robot_mount_frame='{attach_mount}',
+    fixed_joint_offset=None,
+    fixed_joint_orient=None,
+    single_robot=True,
+)
+print(f"Assembled: {{assembled}}")
+print(f"Base: {base_path} (mount: {base_mount})")
+print(f"Attachment: {attachment_path} (mount: {attach_mount})")
+"""
+
+
+def _gen_configure_self_collision(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    mode = args["mode"]
+    filtered_pairs = args.get("filtered_pairs", [])
+
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdPhysics, PhysxSchema",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        f"robot_prim = stage.GetPrimAtPath('{art_path}')",
+        "",
+    ]
+
+    if mode == "auto":
+        lines.extend([
+            "# Auto mode: keep defaults (adjacent links already skip collision)",
+            f"print('Self-collision for {art_path}: auto (default PhysX behavior)')",
+        ])
+    elif mode == "enable":
+        lines.extend([
+            "# Enable self-collision on the articulation",
+            "if not robot_prim.HasAPI(PhysxSchema.PhysxArticulationAPI):",
+            "    PhysxSchema.PhysxArticulationAPI.Apply(robot_prim)",
+            "artic_api = PhysxSchema.PhysxArticulationAPI(robot_prim)",
+            "artic_api.CreateEnabledSelfCollisionsAttr(True)",
+            f"print('Self-collision ENABLED for {art_path}')",
+        ])
+    elif mode == "disable":
+        lines.extend([
+            "# Disable self-collision on the articulation",
+            "if not robot_prim.HasAPI(PhysxSchema.PhysxArticulationAPI):",
+            "    PhysxSchema.PhysxArticulationAPI.Apply(robot_prim)",
+            "artic_api = PhysxSchema.PhysxArticulationAPI(robot_prim)",
+            "artic_api.CreateEnabledSelfCollisionsAttr(False)",
+            f"print('Self-collision DISABLED for {art_path}')",
+        ])
+
+    if filtered_pairs:
+        lines.extend([
+            "",
+            "# Apply collision filtering for specified link pairs",
+        ])
+        for pair in filtered_pairs:
+            if len(pair) == 2:
+                lines.extend([
+                    f"link_a = stage.GetPrimAtPath('{pair[0]}')",
+                    f"link_b = stage.GetPrimAtPath('{pair[1]}')",
+                    "filteredPairsAPI = UsdPhysics.FilteredPairsAPI.Apply(robot_prim)",
+                    f"filteredPairsAPI.GetFilteredPairsRel().AddTarget('{pair[0]}')",
+                    f"filteredPairsAPI.GetFilteredPairsRel().AddTarget('{pair[1]}')",
+                    f"print(f'Filtered collision pair: {pair[0]} <-> {pair[1]}')",
+                ])
+
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["robot_wizard"] = _gen_robot_wizard
+CODE_GEN_HANDLERS["tune_gains"] = _gen_tune_gains
+CODE_GEN_HANDLERS["assemble_robot"] = _gen_assemble_robot
+CODE_GEN_HANDLERS["configure_self_collision"] = _gen_configure_self_collision
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),

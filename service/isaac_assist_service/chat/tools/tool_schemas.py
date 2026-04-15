@@ -892,6 +892,97 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Robot Setup Suite (Phase 8D) ────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "robot_wizard",
+            "description": "Import a robot from URDF/USD, apply sensible drive defaults based on robot type (manipulator, mobile, humanoid), apply convex-hull collision meshes, and print a configuration summary.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "asset_path": {"type": "string", "description": "Path to URDF or USD robot file"},
+                    "robot_type": {
+                        "type": "string",
+                        "enum": ["manipulator", "mobile", "humanoid"],
+                        "description": "Robot category — determines default drive stiffness/damping. Default: manipulator",
+                    },
+                    "drive_stiffness": {"type": "number", "description": "Override default Kp (position gain)"},
+                    "drive_damping": {"type": "number", "description": "Override default Kd (damping gain)"},
+                },
+                "required": ["asset_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "tune_gains",
+            "description": "Tune joint drive gains for a robot articulation. 'manual' mode sets Kp/Kd directly via UsdPhysics.DriveAPI. 'step_response' mode runs an automated test using the GainTuner extension and reports RMSE.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root"},
+                    "method": {
+                        "type": "string",
+                        "enum": ["manual", "step_response"],
+                        "description": "Tuning method. Default: manual",
+                    },
+                    "joint_name": {"type": "string", "description": "Specific joint name (omit for all joints)"},
+                    "kp": {"type": "number", "description": "Position gain (for manual method)"},
+                    "kd": {"type": "number", "description": "Damping gain (for manual method)"},
+                    "test_mode": {
+                        "type": "string",
+                        "enum": ["sinusoidal", "step"],
+                        "description": "Test signal type for step_response method. Default: step",
+                    },
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "assemble_robot",
+            "description": "Assemble a robot by attaching a tool or gripper to a base robot using a fixed joint. Uses the RobotAssembler extension to compose base + attachment at specified mount frames.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "base_path": {"type": "string", "description": "USD path to the base robot"},
+                    "attachment_path": {"type": "string", "description": "USD path to the attachment (gripper/tool)"},
+                    "base_mount": {"type": "string", "description": "Mount frame name on the base robot (e.g. 'panda_hand')"},
+                    "attach_mount": {"type": "string", "description": "Mount frame name on the attachment (e.g. 'tool_base')"},
+                },
+                "required": ["base_path", "attachment_path", "base_mount", "attach_mount"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_self_collision",
+            "description": "Configure self-collision behavior for a robot articulation. 'auto' keeps defaults (adjacent links skip collision). 'enable'/'disable' explicitly sets the enabledSelfCollisions flag. Optionally filter specific link pairs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["auto", "enable", "disable"],
+                        "description": "Self-collision mode",
+                    },
+                    "filtered_pairs": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "string"}},
+                        "description": "Pairs of link paths to filter from collision checks, e.g. [['/link1', '/link2']]",
+                    },
+                },
+                "required": ["articulation_path", "mode"],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",
