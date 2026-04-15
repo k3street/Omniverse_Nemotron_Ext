@@ -1776,7 +1776,8 @@ def _gen_launch_training(args: Dict) -> str:
         f"    '--max_iterations', str(max_iterations),",
         f"    '--log_dir', log_dir,",
         "]",
-        "print(f'Launching training: {" ".join(cmd)}')",
+        "cmd_str = ' '.join(cmd)",
+        "print(f'Launching training: {cmd_str}')",
         "proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)",
         "print(f'Training started (PID: {proc.pid}). Checkpoints → {log_dir}')",
     ]
@@ -2026,3 +2027,257 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── IsaacAutomator Cloud Deployment ─────────────────────────────────────────
+
+_CLOUD_PRICING = {
+    ("aws", "g5.2xlarge"): {"price_per_hour": 1.21, "gpu": "A10G"},
+    ("aws", "g6e.2xlarge"): {"price_per_hour": 2.50, "gpu": "L40S"},
+    ("gcp", "g2-standard-8"): {"price_per_hour": 1.35, "gpu": "L4"},
+    ("azure", "NCasT4_v3"): {"price_per_hour": 1.10, "gpu": "T4"},
+}
+
+_CLOUD_SCRIPT_ALLOWLIST = {"training", "sdg", "evaluation", "headless_sim"}
+
+# In-memory job tracking (placeholder for real cloud API integration)
+_cloud_jobs: Dict[str, Dict] = {}
+
+
+async def _handle_cloud_launch(args: Dict) -> Dict:
+    """Return structured deployment info for IsaacAutomator cloud launch.
+    Always requires approval regardless of auto-approve setting.
+    """
+    provider = args["provider"]
+    instance_type = args["instance_type"]
+    isaac_version = args.get("isaac_version", "5.1.0")
+    script_template = args.get("script_template", "training")
+    num_gpus = args.get("num_gpus", 1)
+
+    # Validate script template against allowlist
+    if script_template not in _CLOUD_SCRIPT_ALLOWLIST:
+        return {
+            "error": f"Unknown script_template '{script_template}'. "
+                     f"Allowed: {sorted(_CLOUD_SCRIPT_ALLOWLIST)}",
+        }
+
+    # Lookup pricing
+    pricing_key = (provider, instance_type)
+    pricing = _CLOUD_PRICING.get(pricing_key)
+    if pricing:
+        price_per_hour = pricing["price_per_hour"]
+        gpu_model = pricing["gpu"]
+    else:
+        price_per_hour = None
+        gpu_model = "unknown"
+
+    # Prerequisites per provider
+    prerequisites = {
+        "aws": [
+            "NGC API key configured (ngc config set)",
+            "AWS IAM credentials with EC2 and S3 permissions",
+            "GPU quota approved for the target region",
+            "IsaacAutomator cloned and configured",
+        ],
+        "gcp": [
+            "NGC API key configured (ngc config set)",
+            "GCP service account with Compute Engine permissions",
+            "GPU quota approved for the target zone",
+            "IsaacAutomator cloned and configured",
+        ],
+        "azure": [
+            "NGC API key configured (ngc config set)",
+            "Azure subscription with GPU VM quota",
+            "Azure CLI authenticated (az login)",
+            "IsaacAutomator cloned and configured",
+        ],
+    }
+
+    import uuid
+    job_id = f"cloud-{provider}-{uuid.uuid4().hex[:8]}"
+
+    deploy_command = (
+        f"./deploy-{provider} "
+        f"--instance-type {instance_type} "
+        f"--isaac-version {isaac_version} "
+        f"--script {script_template} "
+        f"--num-gpus {num_gpus}"
+    )
+
+    result = {
+        "job_id": job_id,
+        "deploy_command": deploy_command,
+        "provider": provider,
+        "instance_type": instance_type,
+        "isaac_version": isaac_version,
+        "script_template": script_template,
+        "num_gpus": num_gpus,
+        "gpu_model": gpu_model,
+        "estimated_cost_per_hour": price_per_hour,
+        "prerequisites": prerequisites.get(provider, []),
+        "always_require_approval": True,
+        "message": (
+            f"Ready to deploy {instance_type} ({gpu_model}) on {provider.upper()} "
+            f"with Isaac Sim {isaac_version}. "
+            + (f"Estimated cost: ${price_per_hour:.2f}/hr. " if price_per_hour else "Cost: unknown instance type. ")
+            + "Review the prerequisites and approve to proceed."
+        ),
+    }
+
+    # Track job (placeholder)
+    _cloud_jobs[job_id] = {
+        "status": "pending_approval",
+        "provider": provider,
+        "instance_type": instance_type,
+        "gpu_model": gpu_model,
+        "price_per_hour": price_per_hour,
+    }
+
+    return result
+
+
+async def _handle_cloud_status(args: Dict) -> Dict:
+    """Check the status of a cloud job."""
+    job_id = args["job_id"]
+
+    if job_id in _cloud_jobs:
+        job = _cloud_jobs[job_id]
+        return {
+            "job_id": job_id,
+            "status": job.get("status", "unknown"),
+            "gpu_utilization": job.get("gpu_utilization", "N/A"),
+            "estimated_remaining": job.get("estimated_remaining", "N/A"),
+            "cost_so_far": job.get("cost_so_far", "N/A"),
+        }
+
+    return {
+        "job_id": job_id,
+        "status": "not_found",
+        "gpu_utilization": None,
+        "estimated_remaining": None,
+        "cost_so_far": None,
+        "message": f"No cloud job found with ID '{job_id}'. It may have been terminated or the ID is incorrect.",
+    }
+
+
+async def _handle_cloud_teardown(args: Dict) -> Dict:
+    """Return teardown command for a cloud instance. Always requires approval."""
+    job_id = args["job_id"]
+
+    job = _cloud_jobs.get(job_id)
+    if job:
+        provider = job.get("provider", "unknown")
+        teardown_command = f"./destroy-{provider} --job-id {job_id}"
+        price = job.get("price_per_hour")
+        cost_warning = ""
+        if price and job.get("status") in ("running", "pending_approval"):
+            cost_warning = (
+                f"WARNING: Instance is still active at ${price:.2f}/hr. "
+                "Teardown will terminate the instance and stop billing."
+            )
+        return {
+            "job_id": job_id,
+            "teardown_command": teardown_command,
+            "provider": provider,
+            "always_require_approval": True,
+            "cost_warning": cost_warning,
+            "message": f"Ready to tear down {provider.upper()} instance {job_id}. Approve to proceed.",
+        }
+
+    return {
+        "job_id": job_id,
+        "teardown_command": f"./destroy-unknown --job-id {job_id}",
+        "provider": "unknown",
+        "always_require_approval": True,
+        "cost_warning": "",
+        "message": f"Job '{job_id}' not found in local tracking. Command generated but may fail.",
+    }
+
+
+async def _handle_cloud_estimate_cost(args: Dict) -> Dict:
+    """Estimate cost for a cloud GPU instance over a given duration."""
+    provider = args["provider"]
+    instance_type = args["instance_type"]
+    hours = args["hours"]
+
+    pricing_key = (provider, instance_type)
+    pricing = _CLOUD_PRICING.get(pricing_key)
+
+    if pricing:
+        price_per_hour = pricing["price_per_hour"]
+        gpu = pricing["gpu"]
+        cost_usd = round(price_per_hour * hours, 2)
+        return {
+            "cost_usd": cost_usd,
+            "price_per_hour": price_per_hour,
+            "provider": provider,
+            "instance_type": instance_type,
+            "gpu": gpu,
+            "hours": hours,
+            "message": f"{instance_type} ({gpu}) on {provider.upper()}: ${cost_usd:.2f} for {hours}h @ ${price_per_hour:.2f}/hr",
+        }
+
+    return {
+        "cost_usd": None,
+        "price_per_hour": None,
+        "provider": provider,
+        "instance_type": instance_type,
+        "gpu": "unknown",
+        "hours": hours,
+        "message": (
+            f"Instance type '{instance_type}' on {provider.upper()} not found in pricing table. "
+            f"Known types: {[f'{p}/{t}' for (p, t) in _CLOUD_PRICING.keys()]}"
+        ),
+    }
+
+
+def _gen_cloud_download_results(args: Dict) -> str:
+    """Generate code to download results from a cloud instance."""
+    job_id = args["job_id"]
+    output_dir = args.get("output_dir", "workspace/cloud_results")
+
+    return f'''\
+import subprocess
+import os
+
+job_id = "{job_id}"
+output_dir = "{output_dir}"
+os.makedirs(output_dir, exist_ok=True)
+
+# IsaacAutomator stores results on the cloud instance at /results/
+# Retrieve the instance IP from the deployment state
+state_file = f"deployments/{{job_id}}/state.json"
+if os.path.exists(state_file):
+    import json
+    with open(state_file) as f:
+        state = json.load(f)
+    instance_ip = state.get("instance_ip", "UNKNOWN_IP")
+    key_path = state.get("ssh_key", "~/.ssh/isaacautomator")
+else:
+    instance_ip = "UNKNOWN_IP"
+    key_path = "~/.ssh/isaacautomator"
+    print(f"WARNING: State file not found at {{state_file}}. Set instance_ip manually.")
+
+# Download results via rsync
+cmd = [
+    "rsync", "-avz", "--progress",
+    "-e", f"ssh -i {{key_path}} -o StrictHostKeyChecking=no",
+    f"ubuntu@{{instance_ip}}:/results/",
+    output_dir + "/",
+]
+print(f"Downloading results: {{' '.join(cmd)}}")
+proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+stdout, _ = proc.communicate()
+print(stdout.decode() if stdout else "")
+if proc.returncode == 0:
+    print(f"Results downloaded to {{output_dir}}/")
+else:
+    print(f"Download failed (exit code {{proc.returncode}}). Check IP and SSH key.")
+'''
+
+
+DATA_HANDLERS["cloud_launch"] = _handle_cloud_launch
+DATA_HANDLERS["cloud_status"] = _handle_cloud_status
+DATA_HANDLERS["cloud_teardown"] = _handle_cloud_teardown
+DATA_HANDLERS["cloud_estimate_cost"] = _handle_cloud_estimate_cost
+CODE_GEN_HANDLERS["cloud_download_results"] = _gen_cloud_download_results
