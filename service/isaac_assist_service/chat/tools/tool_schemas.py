@@ -908,4 +908,110 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── XR Teleoperation ────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "start_teleop_session",
+            "description": "Start an XR teleoperation session for a robot. Configures a WebSocket bridge for control data, sets up viewport streaming, creates a physics callback for receiving and applying joint commands with watchdog safety, and returns the connection URL for the XR client.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation, e.g. '/World/Franka'"},
+                    "input_device": {
+                        "type": "string",
+                        "enum": ["quest_3", "vision_pro", "spacemouse", "keyboard"],
+                        "description": "XR input device type. Default: 'keyboard'",
+                    },
+                    "stream_quality": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                        "description": "Viewport streaming quality preset. Default: 'medium'",
+                    },
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_teleop_mapping",
+            "description": "Configure the mapping between XR input device axes and robot joints for teleoperation. Sets up axis-to-joint mapping with position and velocity gains.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "device_axes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Axis names from the input device, e.g. ['left_x', 'left_y', 'right_x', 'right_y', 'trigger_left', 'trigger_right']",
+                    },
+                    "joint_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Target joint names on the robot, e.g. ['panda_joint1', 'panda_joint2', ...]",
+                    },
+                    "gains": {
+                        "type": "object",
+                        "properties": {
+                            "position": {"type": "number", "description": "Position gain multiplier"},
+                            "velocity": {"type": "number", "description": "Velocity gain multiplier"},
+                        },
+                        "description": "Control gains for the mapping",
+                    },
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "record_teleop_demo",
+            "description": "Record a teleoperation demonstration to an HDF5 file with robomimic-compatible schema. Captures joint positions, velocities, and end-effector poses per timestep using a physics callback.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "output_path": {"type": "string", "description": "File path for the output HDF5 recording, e.g. '/tmp/demo_001.hdf5'"},
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "frequency_hz": {"type": "integer", "description": "Recording frequency in Hz. Default: 30"},
+                },
+                "required": ["output_path", "robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stop_teleop_session",
+            "description": "Stop the active XR teleoperation session. Removes all teleop physics callbacks, zeros joint velocities for safety, stops viewport streaming, closes WebSocket connections, and finalizes any active HDF5 recording.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "teleop_safety_config",
+            "description": "Configure safety parameters for the active teleoperation session: watchdog timeout, maximum joint velocity cap, and workspace position limits.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "watchdog_timeout_ms": {"type": "integer", "description": "Watchdog timeout in milliseconds. Robot holds last command until timeout, then zeros velocity. Default: 500"},
+                    "max_joint_velocity": {"type": "number", "description": "Maximum joint velocity cap in rad/s"},
+                    "workspace_limits": {
+                        "type": "object",
+                        "properties": {
+                            "min": {"type": "array", "items": {"type": "number"}, "description": "[x, y, z] minimum workspace corner"},
+                            "max": {"type": "array", "items": {"type": "number"}, "description": "[x, y, z] maximum workspace corner"},
+                        },
+                        "description": "Axis-aligned bounding box for workspace limits",
+                    },
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
 ]
