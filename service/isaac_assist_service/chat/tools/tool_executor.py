@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from . import kit_tools
+from .patch_validator import validate_patch, format_issues_for_llm, has_blocking_issues
 from ...config import config
 
 logger = logging.getLogger(__name__)
@@ -1088,6 +1089,12 @@ async def execute_tool_call(
         if tool_name == "run_usd_script":
             code = arguments.get("code", "")
             desc = arguments.get("description", "Run custom script")
+            # Pre-flight validation
+            issues = validate_patch(code)
+            if has_blocking_issues(issues):
+                msg = format_issues_for_llm(issues)
+                logger.warning(f"[ToolExecutor] Patch blocked for {tool_name}: {msg}")
+                return {"type": "error", "error": msg, "code": code, "validation_blocked": True}
             result = await kit_tools.queue_exec_patch(code, desc)
             return {"type": "code_patch", "code": code, "description": desc, "queued": result.get("queued", False)}
 
@@ -1096,6 +1103,13 @@ async def execute_tool_call(
             gen_fn = CODE_GEN_HANDLERS[tool_name]
             code = gen_fn(arguments)
             desc = f"{tool_name}({', '.join(f'{k}={v!r}' for k, v in list(arguments.items())[:3])})"
+
+            # Pre-flight validation
+            issues = validate_patch(code)
+            if has_blocking_issues(issues):
+                msg = format_issues_for_llm(issues)
+                logger.warning(f"[ToolExecutor] Patch blocked for {tool_name}: {msg}")
+                return {"type": "error", "error": msg, "code": code, "validation_blocked": True}
 
             # Add sensor spec auto-lookup for add_sensor_to_prim
             if tool_name == "add_sensor_to_prim" and arguments.get("product_name"):

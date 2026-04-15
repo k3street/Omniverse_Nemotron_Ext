@@ -110,6 +110,9 @@ def level_0():
     section("L0: Intent Router Constants")
     _test_intent_router()
 
+    section("L0: Patch Validator")
+    _test_patch_validator()
+
 
 # ── Syntax ───────────────────────────────────────────────────────────────────
 
@@ -272,6 +275,10 @@ def _test_code_generators():
 
     # Provide kit_tools stub
     ns["kit_tools"] = mock_kit
+    # Provide patch_validator stubs (these are tested separately)
+    ns["validate_patch"] = lambda code: []
+    ns["format_issues_for_llm"] = lambda issues: ""
+    ns["has_blocking_issues"] = lambda issues: False
 
     try:
         exec(compile(patched_src, str(exec_path), "exec"), ns)
@@ -556,6 +563,136 @@ def _test_intent_router():
         ok("intent:examples_defined")
     else:
         fail("intent:examples_defined", "no INTENT_EXAMPLES")
+
+
+def _test_patch_validator():
+    """Validate the pre-flight patch validator catches known-bad patterns."""
+    sys.path.insert(0, str(ROOT))
+    val_path = SERVICE / "chat" / "tools" / "patch_validator.py"
+    ns: Dict[str, Any] = {}
+    exec(compile(val_path.read_text(), val_path, "exec"), ns)
+    validate_patch = ns["validate_patch"]
+    has_blocking = ns["has_blocking_issues"]
+    format_issues = ns["format_issues_for_llm"]
+
+    # 1. Clean code should pass
+    clean = "import omni.usd\nstage = omni.usd.get_context().get_stage()\nstage.RemovePrim('/World/Foo')"
+    issues = validate_patch(clean)
+    blocking = [i for i in issues if i.severity == "error"]
+    if not blocking:
+        ok("validator:clean_code_passes")
+    else:
+        fail("validator:clean_code_passes", f"false positive: {blocking[0].rule}")
+
+    # 2. Catch double3→double direct wiring
+    bad_og = """
+og.Controller.Keys.CONNECT: [
+    ('SubscribeTwist.outputs:linearVelocity', 'DiffController.inputs:linearVelocity'),
+    ('SubscribeTwist.outputs:angularVelocity', 'DiffController.inputs:angularVelocity'),
+]"""
+    issues = validate_patch(bad_og)
+    if any(i.rule == "og_double3_to_double" for i in issues):
+        ok("validator:og_double3_to_double")
+    else:
+        fail("validator:og_double3_to_double", "not caught")
+
+    # 3. Catch legacy namespace
+    bad_ns = """og.Controller.Keys.CREATE_NODES: [
+    ('ROS2Context', 'omni.isaac.ros2_bridge.ROS2Context'),
+]"""
+    issues = validate_patch(bad_ns)
+    if any(i.rule == "og_legacy_namespace" for i in issues):
+        ok("validator:og_legacy_namespace")
+    else:
+        fail("validator:og_legacy_namespace", "not caught")
+
+    # 4. Catch wrong Carter joint names
+    bad_joints = """
+# NovaCarter drive joints
+joint_names = ['joint_drive_fl', 'joint_drive_fr']
+"""
+    issues = validate_patch(bad_joints)
+    if any(i.rule == "carter_wrong_joints" for i in issues):
+        ok("validator:carter_wrong_joints")
+    else:
+        fail("validator:carter_wrong_joints", "not caught")
+
+    # 5. Catch missing import omni.usd
+    bad_import = "stage = omni.usd.get_context().get_stage()\nstage.RemovePrim('/World/Foo')"
+    issues = validate_patch(bad_import)
+    if any(i.rule == "missing_import_omni_usd" for i in issues):
+        ok("validator:missing_import_omni_usd")
+    else:
+        fail("validator:missing_import_omni_usd", "not caught")
+
+    # 6. Catch DiffController.outputs:execOut (doesn't exist)
+    bad_exec = """('DiffController.outputs:execOut', 'ArticulationController.inputs:execIn')"""
+    issues = validate_patch(bad_exec)
+    if any(i.rule == "og_diff_no_exec_out" for i in issues):
+        ok("validator:og_diff_no_exec_out")
+    else:
+        fail("validator:og_diff_no_exec_out", "not caught")
+
+    # 7. Catch ArticulationController.inputs:usePath
+    bad_usepath = """og.Controller.attribute('ArticulationController.inputs:usePath')"""
+    issues = validate_patch(bad_usepath)
+    if any(i.rule == "og_use_path_missing" for i in issues):
+        ok("validator:og_use_path_missing")
+    else:
+        fail("validator:og_use_path_missing", "not caught")
+
+    # 8. Catch bad OG API methods
+    bad_api = "for node in nodes:\n    path = node.get_node_path()"
+    issues = validate_patch(bad_api)
+    if any(i.rule == "og_bad_api" for i in issues):
+        ok("validator:og_bad_api")
+    else:
+        fail("validator:og_bad_api", "not caught")
+
+    # 9. Catch CreateAttribute with wrong signature
+    bad_attr = "prim.CreateAttribute('myAttr', Gf.Vec3d)"
+    issues = validate_patch(bad_attr)
+    if any(i.rule == "usd_create_attr_signature" for i in issues):
+        ok("validator:usd_create_attr_signature")
+    else:
+        fail("validator:usd_create_attr_signature", "not caught")
+
+    # 10. format_issues_for_llm returns non-empty for errors
+    issues = validate_patch(bad_og)
+    formatted = format_issues(issues)
+    if "PRE-FLIGHT VALIDATION FAILED" in formatted:
+        ok("validator:format_issues_output")
+    else:
+        fail("validator:format_issues_output", "bad format")
+
+    # 11. has_blocking_issues
+    issues = validate_patch(bad_og)
+    if has_blocking(issues):
+        ok("validator:has_blocking_issues")
+    else:
+        fail("validator:has_blocking_issues", "should be blocking")
+
+    # 12. Clean omnigraph code (with Break3Vector) should pass
+    good_og = """
+import omni.graph.core as og
+keys = og.Controller.Keys
+og.Controller.edit('/World/Graph', {
+    keys.CREATE_NODES: [
+        ('SubscribeTwist', 'isaacsim.ros2.bridge.ROS2SubscribeTwist'),
+        ('BreakLinear', 'omni.graph.nodes.BreakVector3'),
+        ('DiffController', 'isaacsim.robot.wheeled_robots.DifferentialController'),
+    ],
+    keys.CONNECT: [
+        ('SubscribeTwist.outputs:linearVelocity', 'BreakLinear.inputs:tuple'),
+        ('BreakLinear.outputs:x', 'DiffController.inputs:linearVelocity'),
+    ],
+})"""
+    issues = validate_patch(good_og)
+    blocking = [i for i in issues if i.severity == "error"]
+    if not blocking:
+        ok("validator:good_og_passes")
+    else:
+        fail("validator:good_og_passes", f"false positive: {blocking[0].rule}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
