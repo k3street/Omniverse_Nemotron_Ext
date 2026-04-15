@@ -892,6 +892,26 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── ZMQ Sensor Streaming ────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_zmq_stream",
+            "description": "Configure a ZMQ PUB sensor stream from a camera or lidar prim using NVIDIA's C++ OgnIsaacBridgeZMQNode. Wires an OmniGraph that ticks on playback, captures sensor data via CameraHelper, and publishes via ZMQ on 127.0.0.1. No Python-level ZMQ sockets — all I/O through the C++ OmniGraph node.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "camera_prim": {"type": "string", "description": "USD path to the camera or lidar prim, e.g. '/World/Camera'"},
+                    "pub_port": {"type": "integer", "description": "ZMQ PUB port (1024-65535). Default: 5555", "default": 5555},
+                    "resolution": {"type": "array", "items": {"type": "integer"}, "description": "Downscale resolution [width, height]. Default: [640, 480]", "default": [640, 480]},
+                    "fps": {"type": "integer", "description": "Target frame rate. Default: 30", "default": 30},
+                    "compression": {"type": "string", "enum": ["none", "jpeg"], "description": "Compression mode. Default: jpeg", "default": "jpeg"},
+                },
+                "required": ["camera_prim"],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",
