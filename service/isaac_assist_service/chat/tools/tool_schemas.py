@@ -513,6 +513,89 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_sdg_pipeline",
+            "description": "Create a full Omniverse Replicator synthetic data generation pipeline with camera, render product, annotators, and a dataset writer (COCO, KITTI, Basic, or NumPy). Generates omni.replicator.core Python code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "annotators": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["bounding_box_2d", "bounding_box_3d", "semantic_segmentation", "instance_segmentation", "depth", "normals", "occlusion"],
+                        },
+                        "description": "List of annotators to attach to the render product",
+                    },
+                    "output_format": {
+                        "type": "string",
+                        "enum": ["coco", "kitti", "basic", "numpy"],
+                        "description": "Output writer format: 'coco' (CocoWriter), 'kitti' (KittiWriter), 'basic' (BasicWriter), 'numpy' (BasicWriter with raw arrays)",
+                    },
+                    "num_frames": {"type": "integer", "description": "Number of frames to generate. Default: 100"},
+                    "output_dir": {"type": "string", "description": "Directory for output data. Default: '/tmp/sdg_output'"},
+                    "camera_position": {"type": "array", "items": {"type": "number"}, "description": "Camera XYZ position [x, y, z]. Default: [0, 0, 5]"},
+                    "camera_look_at": {"type": "array", "items": {"type": "number"}, "description": "Camera look-at target [x, y, z]. Default: [0, 0, 0]"},
+                    "resolution": {"type": "array", "items": {"type": "integer"}, "description": "Render resolution [width, height]. Default: [1280, 720]"},
+                },
+                "required": ["annotators", "output_format"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_domain_randomizer",
+            "description": "Add a domain randomization node to the Replicator graph. Randomizes pose, texture, color, lighting, material properties, or visibility for prims matching a path pattern. Generates omni.replicator.core Python code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Prim path pattern for target prims, e.g. '/World/Objects/.*'"},
+                    "randomizer_type": {
+                        "type": "string",
+                        "enum": ["pose", "texture", "lighting", "color", "material_properties", "visibility"],
+                        "description": "Type of domain randomization to apply",
+                    },
+                    "params": {
+                        "type": "object",
+                        "description": "Type-specific parameters. Pose: min_angle, max_angle, surface_prim. Color: color_min [r,g,b], color_max [r,g,b]. Lighting: intensity_min, intensity_max. Material: roughness_min, roughness_max, metallic_min, metallic_max. Visibility: probability.",
+                    },
+                },
+                "required": ["target", "randomizer_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "preview_sdg",
+            "description": "Generate a small number of sample frames from the current Replicator pipeline to preview results without running the full dataset generation. Uses rep.orchestrator.step() to avoid blocking the Kit UI.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "num_samples": {"type": "integer", "description": "Number of preview frames to generate. Default: 3"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "export_dataset",
+            "description": "Run full Replicator dataset generation using an async step-loop that yields to the Kit UI periodically to avoid freezing. Use after setting up a pipeline with create_sdg_pipeline.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "output_dir": {"type": "string", "description": "Directory for output data"},
+                    "num_frames": {"type": "integer", "description": "Total number of frames to generate"},
+                    "step_batch": {"type": "integer", "description": "Number of frames per batch before yielding to UI. Default: 10"},
+                },
+                "required": ["output_dir", "num_frames"],
+            },
+        },
+    },
 
     # ─── ROS2 (live interaction via rosbridge / ros-mcp) ─────────────────────
     {
