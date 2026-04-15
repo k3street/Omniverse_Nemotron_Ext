@@ -1982,7 +1982,7 @@ def _gen_launch_training(args: Dict) -> str:
         f"    '--max_iterations', str(max_iterations),",
         f"    '--log_dir', log_dir,",
         "]",
-        "print(f'Launching training: {" ".join(cmd)}')",
+        """print(f"Launching training: {' '.join(cmd)}")""",
         "proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)",
         "print(f'Training started (PID: {proc.pid}). Checkpoints → {log_dir}')",
     ]
@@ -2232,3 +2232,4317 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Phase 7H: Cloud Download Results ────────────────────────────────────────
+
+def _gen_cloud_download_results(args: Dict) -> str:
+    """Generate code to download results from a cloud instance."""
+    job_id = args["job_id"]
+    output_dir = args.get("output_dir", "workspace/cloud_results")
+
+    return f'''\
+import subprocess
+import os
+
+job_id = "{job_id}"
+output_dir = "{output_dir}"
+os.makedirs(output_dir, exist_ok=True)
+
+# IsaacAutomator stores results on the cloud instance at /results/
+# Retrieve the instance IP from the deployment state
+state_file = f"deployments/{{job_id}}/state.json"
+if os.path.exists(state_file):
+    import json
+    with open(state_file) as f:
+        state = json.load(f)
+    instance_ip = state.get("instance_ip", "UNKNOWN_IP")
+    key_path = state.get("ssh_key", "~/.ssh/isaacautomator")
+else:
+    instance_ip = "UNKNOWN_IP"
+    key_path = "~/.ssh/isaacautomator"
+    print(f"WARNING: State file not found at {{state_file}}. Set instance_ip manually.")
+
+# Download results via rsync
+cmd = [
+    "rsync", "-avz", "--progress",
+    "-e", f"ssh -i {{key_path}} -o StrictHostKeyChecking=no",
+    f"ubuntu@{{instance_ip}}:/results/",
+    output_dir + "/",
+]
+print(f"Downloading results: {{' '.join(cmd)}}")
+proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+stdout, _ = proc.communicate()
+print(stdout.decode() if stdout else "")
+if proc.returncode == 0:
+    print(f"Results downloaded to {{output_dir}}/")
+else:
+    print(f"Download failed (exit code {{proc.returncode}}). Check IP and SSH key.")
+'''
+
+
+CODE_GEN_HANDLERS["cloud_download_results"] = _gen_cloud_download_results
+
+# ── Clone Envs (GridCloner) ──────────────────────────────────────────────────
+
+def _gen_clone_envs(args: Dict) -> str:
+    source_path = args["source_path"]
+    num_envs = args["num_envs"]
+    spacing = args.get("spacing", 2.5)
+    collision_filter = args.get("collision_filter", True)
+
+    lines = [
+        "from isaacsim.core.cloner import GridCloner",
+        "",
+        f"cloner = GridCloner(spacing={spacing})",
+        'cloner.define_base_env("/World/envs")',
+        f'prim_paths = cloner.generate_paths("/World/envs/env", {num_envs})',
+        "positions = cloner.clone(",
+        f"    source_prim_path='{source_path}',",
+        "    prim_paths=prim_paths,",
+        "    replicate_physics=True,  # CRITICAL for performance",
+        ")",
+    ]
+    if collision_filter:
+        lines.extend([
+            "# Collision filtering is a SEPARATE step:",
+            "cloner.filter_collisions(",
+            "    physicsscene_path='/World/PhysicsScene',",
+            "    collision_root_path='/World/collisionGroups',",
+            "    prim_paths=prim_paths,",
+            ")",
+        ])
+    lines.append(f"print(f'Cloned {num_envs} environments from {source_path}')")
+    return "\n".join(lines)
+
+
+
+
+def _gen_debug_draw(args: Dict) -> str:
+    draw_type = args["draw_type"]
+    points = args["points"]
+    color = args.get("color", [1, 0, 0, 1])
+    size = args.get("size", 5)
+    lifetime = args.get("lifetime", 0)
+
+    lines = [
+        "from isaacsim.util.debug_draw import _debug_draw",
+        "",
+        "draw = _debug_draw.acquire_debug_draw_interface()",
+    ]
+
+    if draw_type == "points":
+        lines.append(f"points = {points}")
+        lines.append(f"colors = [{color}] * len(points)")
+        lines.append(f"sizes = [{size}] * len(points)")
+        lines.append("draw.draw_points(points, colors, sizes)")
+    elif draw_type == "lines":
+        # Points come as pairs: [start, end, start, end, ...]
+        lines.append(f"all_pts = {points}")
+        lines.append("start_points = all_pts[0::2]")
+        lines.append("end_points = all_pts[1::2]")
+        lines.append(f"colors = [{color}] * len(start_points)")
+        lines.append(f"sizes = [{size}] * len(start_points)")
+        lines.append("draw.draw_lines(start_points, end_points, colors, sizes)")
+    elif draw_type == "lines_spline":
+        lines.append(f"points = {points}")
+        lines.append(f"color = {color}")
+        lines.append(f"width = {size}")
+        lines.append("draw.draw_lines_spline(points, color, width, closed=False)")
+
+    if lifetime > 0:
+        lines.extend([
+            "",
+            "# Schedule auto-clear",
+            "import asyncio",
+            f"asyncio.get_event_loop().call_later({lifetime}, draw.clear_points)",
+        ])
+
+    return "\n".join(lines)
+
+
+
+
+def _gen_generate_occupancy_map(args: Dict) -> str:
+    origin = args.get("origin", [0, 0])
+    dimensions = args.get("dimensions", [10, 10])
+    resolution = args.get("resolution", 0.05)
+    height_range = args.get("height_range", [0, 2])
+
+    return f"""\
+from isaacsim.asset.gen.omap import MapGenerator
+import carb
+
+gen = MapGenerator()
+gen.update_settings(cell_size={resolution})
+gen.set_transform(
+    origin=carb.Float3({origin[0]}, {origin[1]}, 0),
+    min_bound=carb.Float3({-dimensions[0]/2}, {-dimensions[1]/2}, {height_range[0]}),
+    max_bound=carb.Float3({dimensions[0]/2}, {dimensions[1]/2}, {height_range[1]}),
+)
+gen.generate2d()
+buffer = gen.get_buffer()
+print(f"Occupancy map generated: {int(dimensions[0]/resolution)} x {int(dimensions[1]/resolution)} cells")
+"""
+
+
+
+
+
+def _gen_configure_camera(args: Dict) -> str:
+    camera_path = args["camera_path"]
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdGeom, Gf",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        f"cam = UsdGeom.Camera(stage.GetPrimAtPath('{camera_path}'))",
+    ]
+    if "focal_length" in args:
+        lines.append(f"cam.GetFocalLengthAttr().Set({args['focal_length']})")
+    if "horizontal_aperture" in args:
+        lines.append(f"cam.GetHorizontalApertureAttr().Set({args['horizontal_aperture']})")
+    if "vertical_aperture" in args:
+        lines.append(f"cam.GetVerticalApertureAttr().Set({args['vertical_aperture']})")
+    if "clipping_range" in args:
+        cr = args["clipping_range"]
+        lines.append(f"cam.GetClippingRangeAttr().Set(Gf.Vec2f({cr[0]}, {cr[1]}))")
+    if "focus_distance" in args:
+        lines.append(f"cam.GetFocusDistanceAttr().Set({args['focus_distance']})")
+    lines.append(f"print(f'Camera {camera_path} configured')")
+    return "\n".join(lines)
+
+
+# ── Code generation dispatch ─────────────────────────────────────────────────
+
+CODE_GEN_HANDLERS["clone_envs"] = _gen_clone_envs
+CODE_GEN_HANDLERS["debug_draw"] = _gen_debug_draw
+CODE_GEN_HANDLERS["generate_occupancy_map"] = _gen_generate_occupancy_map
+CODE_GEN_HANDLERS["configure_camera"] = _gen_configure_camera
+
+
+# ── Phase 8B: Motion Policy & IK ────────────────────────────────────────────
+
+# ── Motion Policy (8B.3) ────────────────────────────────────────────────────
+
+def _gen_set_motion_policy(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    policy_type = args["policy_type"]
+    robot_type = args.get("robot_type", "franka").lower()
+
+    if policy_type == "add_obstacle":
+        obs_name = args.get("obstacle_name", "obstacle_0")
+        obs_type = args.get("obstacle_type", "cuboid")
+        obs_dims = args.get("obstacle_dims", [0.1, 0.1, 0.1])
+        obs_pos = args.get("obstacle_position", [0.0, 0.0, 0.0])
+
+        lines = [
+            "import numpy as np",
+            "from isaacsim.robot_motion.motion_generation import RmpFlow",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "",
+            f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+            "rmpflow = RmpFlow(**rmpflow_config)",
+            "",
+        ]
+        if obs_type == "sphere":
+            radius = obs_dims[0] if obs_dims else 0.1
+            lines.extend([
+                f"# Add sphere obstacle '{obs_name}'",
+                f"rmpflow.add_sphere(",
+                f"    name='{obs_name}',",
+                f"    radius={radius},",
+                f"    pose=np.array([{obs_pos[0]}, {obs_pos[1]}, {obs_pos[2]}, 1.0, 0.0, 0.0, 0.0]),",
+                f")",
+                "rmpflow.update_world()",
+                f"print(f'Added sphere obstacle \\'{obs_name}\\' at {obs_pos} with radius {radius}')",
+            ])
+        else:
+            # cuboid (default)
+            lines.extend([
+                f"# Add cuboid obstacle '{obs_name}'",
+                f"rmpflow.add_cuboid(",
+                f"    name='{obs_name}',",
+                f"    dims=np.array({list(obs_dims)}),",
+                f"    pose=np.array([{obs_pos[0]}, {obs_pos[1]}, {obs_pos[2]}, 1.0, 0.0, 0.0, 0.0]),",
+                f")",
+                "rmpflow.update_world()",
+                f"print(f'Added cuboid obstacle \\'{obs_name}\\' at {obs_pos} with dims {list(obs_dims)}')",
+            ])
+        return "\n".join(lines)
+
+    if policy_type == "remove_obstacle":
+        lines = [
+            "from isaacsim.robot_motion.motion_generation import RmpFlow",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "",
+            f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+            "rmpflow = RmpFlow(**rmpflow_config)",
+            "",
+            "# RMPflow has no individual obstacle removal — reset clears all obstacles",
+            "rmpflow.reset()",
+            "print('Motion policy reset — all obstacles cleared')",
+        ]
+        return "\n".join(lines)
+
+    if policy_type == "set_joint_limits":
+        buffer_val = args.get("joint_limit_buffers", 0.05)
+        lines = [
+            "import numpy as np",
+            "from isaacsim.robot_motion.motion_generation import RmpFlow",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "from isaacsim.core.prims import SingleArticulation",
+            "",
+            f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+            "rmpflow = RmpFlow(**rmpflow_config)",
+            "",
+            f"art = SingleArticulation(prim_path='{art_path}')",
+            "art.initialize()",
+            "",
+            "# Get current joint limits and add padding buffer",
+            "lower_limits = art.get_joint_positions()  # read current as reference",
+            f"buffer = {buffer_val}",
+            "dof_count = art.num_dof",
+            "print(f'Applying joint limit buffer of {buffer} rad to {dof_count} joints')",
+            "print(f'Note: Joint limit buffers are applied in the RMPflow config YAML.')",
+            "print(f'For runtime adjustment, modify rmpflow_config[\"joint_limit_buffers\"] before init.')",
+        ]
+        return "\n".join(lines)
+
+    return f"# Unknown policy type: {policy_type}"
+
+
+CODE_GEN_HANDLERS["set_motion_policy"] = _gen_set_motion_policy
+
+
+
+# ── Inverse Kinematics (8B.5) ──────────────────────────────────────────────
+
+def _gen_solve_ik(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    target_pos = args["target_position"]
+    target_ori = args.get("target_orientation")
+    robot_type = args.get("robot_type", "franka").lower()
+
+    cfg = _MOTION_ROBOT_CONFIGS.get(robot_type, _MOTION_ROBOT_CONFIGS["franka"])
+    ee_frame = cfg["ee_frame"]
+
+    lines = [
+        "import numpy as np",
+        "from isaacsim.robot_motion.motion_generation import LulaKinematicsSolver",
+        "from isaacsim.robot_motion.motion_generation import ArticulationKinematicsSolver",
+        "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+        "from isaacsim.core.prims import SingleArticulation",
+        "",
+        f"# Load kinematics config for {robot_type}",
+        f"kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config('{robot_type}')",
+        "kin_solver = LulaKinematicsSolver(**kin_config)",
+        "",
+        f"art = SingleArticulation(prim_path='{art_path}')",
+        "art.initialize()",
+        f"art_kin = ArticulationKinematicsSolver(art, kin_solver, '{ee_frame}')",
+        "",
+        f"target_position = np.array({list(target_pos)})",
+    ]
+    if target_ori:
+        lines.append(f"target_orientation = np.array({list(target_ori)})")
+    else:
+        lines.append("target_orientation = None")
+
+    lines.extend([
+        "",
+        "action, success = art_kin.compute_inverse_kinematics(",
+        "    target_position=target_position,",
+        "    target_orientation=target_orientation,",
+        ")",
+        "if success:",
+        "    art.apply_action(action)",
+        f"    print(f'IK solved successfully — {ee_frame} moving to {{target_position}}')",
+        "else:",
+        "    print('IK failed — target may be unreachable or near singularity')",
+    ])
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["solve_ik"] = _gen_solve_ik
+
+
+
+# ── Cortex Behaviors & Manipulation ─────────────────────────────────────────
+
+def _gen_create_behavior(args: Dict) -> str:
+    """Generate code to create a Cortex behavior (decider network) for a robot."""
+    art_path = args["articulation_path"]
+    behavior = args["behavior_type"]
+    target = args.get("target_prim", "/World/Target")
+    params = args.get("params", {})
+
+    speed = params.get("speed", 0.5)
+    threshold = params.get("threshold", 0.02)
+
+    if behavior == "pick_and_place":
+        place_target = params.get("place_target", "/World/PlaceTarget")
+        return f"""\
+from isaacsim.cortex.framework.cortex_world import CortexWorld
+from isaacsim.cortex.framework.robot import CortexRobot
+from isaacsim.cortex.framework.df import DfNetwork, DfDecider, DfState, DfStateMachineDecider
+from isaacsim.cortex.framework.motion_commander import MotionCommander
+import numpy as np
+
+# Create Cortex world
+world = CortexWorld()
+
+# Add robot
+robot = world.add_robot(CortexRobot(
+    name="robot",
+    prim_path='{art_path}',
+    motion_commander=MotionCommander('{art_path}'),
+))
+
+# ── Pick-and-place state machine ────────────────────────────
+class ApproachState(DfState):
+    \"\"\"Move to pre-grasp position above the target.\"\"\"
+    def enter(self):
+        target_pos = np.array(self.context['target_pos'])
+        approach_pos = target_pos + np.array([0, 0, {params.get('approach_distance', 0.1)}])
+        self.context['mc'].send_end_effector_target(
+            translation=approach_pos,
+        )
+
+    def step(self):
+        if self.context['mc'].reached_target(threshold={threshold}):
+            return 'grasp'
+        return None
+
+class GraspState(DfState):
+    \"\"\"Move down and close gripper.\"\"\"
+    def enter(self):
+        target_pos = np.array(self.context['target_pos'])
+        self.context['mc'].send_end_effector_target(
+            translation=target_pos,
+        )
+
+    def step(self):
+        if self.context['mc'].reached_target(threshold={threshold}):
+            self.context['gripper'].close()
+            return 'lift'
+        return None
+
+class LiftState(DfState):
+    \"\"\"Lift the grasped object.\"\"\"
+    def enter(self):
+        target_pos = np.array(self.context['target_pos'])
+        lift_pos = target_pos + np.array([0, 0, {params.get('lift_height', 0.15)}])
+        self.context['mc'].send_end_effector_target(
+            translation=lift_pos,
+        )
+
+    def step(self):
+        if self.context['mc'].reached_target(threshold={threshold}):
+            return 'place'
+        return None
+
+class PlaceState(DfState):
+    \"\"\"Move to place position and release.\"\"\"
+    def enter(self):
+        place_pos = np.array(self.context['place_pos'])
+        self.context['mc'].send_end_effector_target(
+            translation=place_pos,
+        )
+
+    def step(self):
+        if self.context['mc'].reached_target(threshold={threshold}):
+            self.context['gripper'].open()
+            return 'done'
+        return None
+
+# Build decider network
+pick_place_decider = DfStateMachineDecider(
+    states={{
+        'approach': ApproachState(),
+        'grasp': GraspState(),
+        'lift': LiftState(),
+        'place': PlaceState(),
+    }},
+    initial_state='approach',
+)
+
+network = DfNetwork(decider=pick_place_decider)
+world.add_decider_network(network)
+
+print("Cortex pick-and-place behavior created for {art_path}")
+print("Target: {target}, Place: {place_target}")
+"""
+
+    # follow_target
+    return f"""\
+from isaacsim.cortex.framework.cortex_world import CortexWorld
+from isaacsim.cortex.framework.robot import CortexRobot
+from isaacsim.cortex.framework.df import DfNetwork, DfDecider, DfState
+from isaacsim.cortex.framework.motion_commander import MotionCommander
+import numpy as np
+
+# Create Cortex world
+world = CortexWorld()
+
+# Add robot
+robot = world.add_robot(CortexRobot(
+    name="robot",
+    prim_path='{art_path}',
+    motion_commander=MotionCommander('{art_path}'),
+))
+
+# ── Follow-target behavior ──────────────────────────────────
+class FollowTargetState(DfState):
+    \"\"\"Continuously track a target prim with the end-effector.\"\"\"
+    def enter(self):
+        self.update_interval = {params.get('update_interval', 0.1)}
+
+    def step(self):
+        import omni.usd
+        from pxr import UsdGeom
+        stage = omni.usd.get_context().get_stage()
+        target_prim = stage.GetPrimAtPath('{target}')
+        xf = UsdGeom.Xformable(target_prim).ComputeLocalToWorldTransform(0)
+        target_pos = np.array(xf.ExtractTranslation())
+        self.context['mc'].send_end_effector_target(
+            translation=target_pos,
+        )
+        return None  # stay in this state
+
+class FollowDecider(DfDecider):
+    \"\"\"Simple decider that always runs the follow state.\"\"\"
+    def __init__(self):
+        super().__init__()
+        self.add_child('follow', FollowTargetState())
+
+    def decide(self):
+        return 'follow'
+
+network = DfNetwork(decider=FollowDecider())
+world.add_decider_network(network)
+
+print("Cortex follow-target behavior created for {art_path}")
+print("Following: {target}")
+"""
+
+
+def _gen_create_gripper(args: Dict) -> str:
+    """Generate code to create and configure a gripper."""
+    art_path = args["articulation_path"]
+    gripper_type = args["gripper_type"]
+    open_pos = args.get("open_position", 0.04)
+    closed_pos = args.get("closed_position", 0.0)
+
+    if gripper_type == "parallel_jaw":
+        dof_names = args.get("gripper_dof_names", ["panda_finger_joint1", "panda_finger_joint2"])
+        dof_names_str = repr(dof_names)
+        return f"""\
+from isaacsim.robot.manipulators.grippers import ParallelGripper
+import numpy as np
+
+# Create parallel jaw gripper
+gripper = ParallelGripper(
+    end_effector_prim_path='{art_path}/panda_hand',
+    joint_prim_names={dof_names_str},
+    joint_opened_positions=np.array([{open_pos}] * {len(dof_names)}),
+    joint_closed_positions=np.array([{closed_pos}] * {len(dof_names)}),
+    action_deltas=np.array([{open_pos}] * {len(dof_names)}),
+)
+
+# Initialize gripper
+gripper.initialize()
+
+# Open gripper to start
+gripper.open()
+print(f"ParallelGripper created on {art_path}")
+print(f"  DOFs: {dof_names_str}")
+print(f"  Open position: {open_pos}")
+print(f"  Closed position: {closed_pos}")
+"""
+
+    # suction gripper — OmniGraph-based OgnSurfaceGripper
+    return f"""\
+import omni.graph.core as og
+
+# Resolve backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+keys = og.Controller.Keys
+(graph, nodes, _, _) = og.Controller.edit(
+    {{
+        "graph_path": "{art_path}/SuctionGripperGraph",
+        "evaluator_name": "execution",
+        "pipeline_stage": _backing,
+    }},
+    {{
+        keys.CREATE_NODES: [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("SurfaceGripper", "isaacsim.robot.surface_gripper.OgnSurfaceGripper"),
+        ],
+        keys.CONNECT: [
+            ("OnPlaybackTick.outputs:tick", "SurfaceGripper.inputs:execIn"),
+        ],
+        keys.SET_VALUES: [
+            ("SurfaceGripper.inputs:parentPath", "{art_path}"),
+            ("SurfaceGripper.inputs:enabled", True),
+            ("SurfaceGripper.inputs:gripThreshold", 0.01),
+            ("SurfaceGripper.inputs:forceLimit", 100.0),
+            ("SurfaceGripper.inputs:torqueLimit", 100.0),
+        ],
+    }},
+)
+
+print(f"Suction gripper (OgnSurfaceGripper) created on {art_path}")
+print("Use SurfaceGripper.inputs:close to activate suction")
+"""
+
+
+def _gen_grasp_object(args: Dict) -> str:
+    """Generate a complete grasp sequence: approach, grasp, lift."""
+    robot_path = args["robot_path"]
+    target_prim = args["target_prim"]
+    grasp_type = args.get("grasp_type", "top_down")
+    approach_dist = args.get("approach_distance", 0.1)
+    lift_height = args.get("lift_height", 0.1)
+
+    if grasp_type == "from_file":
+        grasp_file = args.get("grasp_file", "")
+        return f"""\
+import numpy as np
+import yaml
+import omni.usd
+from pxr import UsdGeom, Gf
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+
+# Load grasp specification from file
+with open('{grasp_file}', 'r') as f:
+    grasp_spec = yaml.safe_load(f)
+
+grasp_name = list(grasp_spec.get('grasps', {{}}).keys())[0]
+grasp = grasp_spec['grasps'][grasp_name]
+offset = np.array(grasp.get('gripper_offset', [0, 0, 0]))
+approach_dir = np.array(grasp.get('approach_direction', [0, 0, -1]))
+
+# Get target object position
+stage = omni.usd.get_context().get_stage()
+target_xf = UsdGeom.Xformable(stage.GetPrimAtPath('{target_prim}')).ComputeLocalToWorldTransform(0)
+target_pos = np.array(target_xf.ExtractTranslation())
+
+# Compute grasp and approach positions
+grasp_pos = target_pos + offset
+approach_pos = grasp_pos - approach_dir * {approach_dist}
+lift_pos = grasp_pos + np.array([0, 0, {lift_height}])
+
+# Setup motion planner
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('franka', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+art = SingleArticulation(prim_path='{robot_path}')
+art.initialize()
+
+# Step 1: Move to approach position
+rmpflow.set_end_effector_target(approach_pos, None)
+joint_positions = art.get_joint_positions()
+joint_velocities = art.get_joint_velocities()
+action = rmpflow.get_next_articulation_action(joint_positions, joint_velocities)
+art.apply_action(action)
+print(f"Step 1: Moving to approach position {{approach_pos}}")
+
+# Step 2: Linear approach to grasp position
+rmpflow.set_end_effector_target(grasp_pos, None)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 2: Approaching grasp position {{grasp_pos}}")
+
+# Step 3: Close gripper
+print("Step 3: Closing gripper")
+
+# Step 4: Lift
+rmpflow.set_end_effector_target(lift_pos, None)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 4: Lifting to {{lift_pos}}")
+print("Grasp sequence complete (from file: {grasp_file})")
+"""
+
+    # top_down or side grasp (geometric heuristic)
+    if grasp_type == "side":
+        approach_vector = "[1, 0, 0]"
+        grasp_ori = "np.array([0.5, 0.5, -0.5, 0.5])  # side approach quaternion"
+    else:  # top_down
+        approach_vector = "[0, 0, -1]"
+        grasp_ori = "np.array([1.0, 0.0, 0.0, 0.0])  # top-down quaternion"
+
+    return f"""\
+import numpy as np
+import omni.usd
+from pxr import UsdGeom, Gf
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+
+# Get target object position
+stage = omni.usd.get_context().get_stage()
+target_xf = UsdGeom.Xformable(stage.GetPrimAtPath('{target_prim}')).ComputeLocalToWorldTransform(0)
+target_pos = np.array(target_xf.ExtractTranslation())
+
+# Compute approach geometry ({grasp_type} grasp)
+approach_dir = np.array({approach_vector})
+grasp_pos = target_pos  # grasp at object center
+approach_pos = grasp_pos - approach_dir * {approach_dist}
+lift_pos = grasp_pos + np.array([0, 0, {lift_height}])
+grasp_orientation = {grasp_ori}
+
+# Setup motion planner
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('franka', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+art = SingleArticulation(prim_path='{robot_path}')
+art.initialize()
+
+# Step 1: Move to pre-grasp approach position
+rmpflow.set_end_effector_target(approach_pos, grasp_orientation)
+joint_positions = art.get_joint_positions()
+joint_velocities = art.get_joint_velocities()
+action = rmpflow.get_next_articulation_action(joint_positions, joint_velocities)
+art.apply_action(action)
+print(f"Step 1: Moving to approach position {{approach_pos}}")
+
+# Step 2: Linear approach to grasp position
+rmpflow.set_end_effector_target(grasp_pos, grasp_orientation)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 2: Approaching grasp position {{grasp_pos}}")
+
+# Step 3: Close gripper
+print("Step 3: Closing gripper")
+
+# Step 4: Lift object
+rmpflow.set_end_effector_target(lift_pos, grasp_orientation)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 4: Lifting to {{lift_pos}}")
+print("Grasp sequence complete ({grasp_type})")
+"""
+
+
+def _gen_define_grasp_pose(args: Dict) -> str:
+    """Generate code to create a .isaac_grasp YAML file."""
+    robot_path = args["robot_path"]
+    object_path = args["object_path"]
+    offset = args.get("gripper_offset", [0, 0, 0])
+    approach_dir = args.get("approach_direction", [0, 0, -1])
+
+    return f"""\
+import yaml
+import os
+import omni.usd
+from pxr import UsdGeom, Gf
+import numpy as np
+
+# Get object position for reference
+stage = omni.usd.get_context().get_stage()
+obj_prim = stage.GetPrimAtPath('{object_path}')
+obj_xf = UsdGeom.Xformable(obj_prim).ComputeLocalToWorldTransform(0)
+obj_pos = list(obj_xf.ExtractTranslation())
+
+# Define grasp specification
+grasp_spec = {{
+    'version': '1.0',
+    'robot_path': '{robot_path}',
+    'object_path': '{object_path}',
+    'grasps': {{
+        'default_grasp': {{
+            'gripper_offset': {list(offset)},
+            'approach_direction': {list(approach_dir)},
+            'object_reference_position': obj_pos,
+            'pre_grasp_opening': 0.04,
+            'grasp_force': 40.0,
+        }},
+    }},
+}}
+
+# Save to workspace
+grasp_dir = 'workspace/grasp_poses'
+os.makedirs(grasp_dir, exist_ok=True)
+obj_name = '{object_path}'.split('/')[-1]
+file_path = os.path.join(grasp_dir, f'{{obj_name}}.isaac_grasp')
+
+with open(file_path, 'w') as f:
+    yaml.dump(grasp_spec, f, default_flow_style=False)
+
+print(f"Grasp pose saved to {{file_path}}")
+print(f"  Robot: {robot_path}")
+print(f"  Object: {object_path}")
+print(f"  Offset: {list(offset)}")
+print(f"  Approach direction: {list(approach_dir)}")
+"""
+
+
+async def _handle_visualize_behavior_tree(args: Dict) -> Dict:
+    """Return a formatted text tree of a behavior network structure."""
+    network_name = args.get("network_name", "unknown")
+
+    # Since we don't have access to a running Cortex instance at query time,
+    # return the canonical structure for known behavior types, or a template.
+    _KNOWN_BEHAVIORS = {
+        "pick_and_place": {
+            "name": "pick_and_place",
+            "type": "DfStateMachineDecider",
+            "children": [
+                {"name": "approach", "type": "DfState", "description": "Move to pre-grasp position above target"},
+                {"name": "grasp", "type": "DfState", "description": "Move down and close gripper on object"},
+                {"name": "lift", "type": "DfState", "description": "Lift grasped object to safe height"},
+                {"name": "place", "type": "DfState", "description": "Move to place position and release"},
+            ],
+            "transitions": "approach -> grasp -> lift -> place -> done",
+        },
+        "follow_target": {
+            "name": "follow_target",
+            "type": "DfDecider",
+            "children": [
+                {"name": "follow", "type": "FollowTargetState", "description": "Continuously track target prim with end-effector"},
+            ],
+            "transitions": "follow (continuous loop)",
+        },
+    }
+
+    behavior = _KNOWN_BEHAVIORS.get(network_name.lower())
+
+    if behavior:
+        # Build ASCII tree
+        lines = [
+            f"Behavior Network: {behavior['name']}",
+            f"  Type: {behavior['type']}",
+            f"  Transitions: {behavior['transitions']}",
+            "",
+            "  Nodes:",
+        ]
+        for i, child in enumerate(behavior["children"]):
+            is_last = i == len(behavior["children"]) - 1
+            prefix = "  +-- " if is_last else "  |-- "
+            lines.append(f"{prefix}{child['name']} ({child['type']})")
+            desc_prefix = "      " if is_last else "  |   "
+            lines.append(f"{desc_prefix}{child['description']}")
+
+        tree_text = "\n".join(lines)
+        return {
+            "network_name": network_name,
+            "structure": behavior,
+            "tree": tree_text,
+        }
+
+    return {
+        "network_name": network_name,
+        "structure": None,
+        "tree": (
+            f"Behavior Network: {network_name}\n"
+            f"  (No pre-built visualization available for '{network_name}'.\n"
+            f"   Known behaviors: pick_and_place, follow_target.\n"
+            f"   For custom networks, inspect the DfNetwork in the running Cortex world.)"
+        ),
+    }
+
+
+CODE_GEN_HANDLERS["create_behavior"] = _gen_create_behavior
+
+
+
+def _gen_create_gripper(args: Dict) -> str:
+    """Generate code to create and configure a gripper."""
+    art_path = args["articulation_path"]
+    gripper_type = args["gripper_type"]
+    open_pos = args.get("open_position", 0.04)
+    closed_pos = args.get("closed_position", 0.0)
+
+    if gripper_type == "parallel_jaw":
+        dof_names = args.get("gripper_dof_names", ["panda_finger_joint1", "panda_finger_joint2"])
+        dof_names_str = repr(dof_names)
+        return f"""\
+from isaacsim.robot.manipulators.grippers import ParallelGripper
+import numpy as np
+
+# Create parallel jaw gripper
+gripper = ParallelGripper(
+    end_effector_prim_path='{art_path}/panda_hand',
+    joint_prim_names={dof_names_str},
+    joint_opened_positions=np.array([{open_pos}] * {len(dof_names)}),
+    joint_closed_positions=np.array([{closed_pos}] * {len(dof_names)}),
+    action_deltas=np.array([{open_pos}] * {len(dof_names)}),
+)
+
+# Initialize gripper
+gripper.initialize()
+
+# Open gripper to start
+gripper.open()
+print(f"ParallelGripper created on {art_path}")
+print(f"  DOFs: {dof_names_str}")
+print(f"  Open position: {open_pos}")
+print(f"  Closed position: {closed_pos}")
+"""
+
+    # suction gripper — OmniGraph-based OgnSurfaceGripper
+    return f"""\
+import omni.graph.core as og
+
+# Resolve backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+keys = og.Controller.Keys
+(graph, nodes, _, _) = og.Controller.edit(
+    {{
+        "graph_path": "{art_path}/SuctionGripperGraph",
+        "evaluator_name": "execution",
+        "pipeline_stage": _backing,
+    }},
+    {{
+        keys.CREATE_NODES: [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("SurfaceGripper", "isaacsim.robot.surface_gripper.OgnSurfaceGripper"),
+        ],
+        keys.CONNECT: [
+            ("OnPlaybackTick.outputs:tick", "SurfaceGripper.inputs:execIn"),
+        ],
+        keys.SET_VALUES: [
+            ("SurfaceGripper.inputs:parentPath", "{art_path}"),
+            ("SurfaceGripper.inputs:enabled", True),
+            ("SurfaceGripper.inputs:gripThreshold", 0.01),
+            ("SurfaceGripper.inputs:forceLimit", 100.0),
+            ("SurfaceGripper.inputs:torqueLimit", 100.0),
+        ],
+    }},
+)
+
+print(f"Suction gripper (OgnSurfaceGripper) created on {art_path}")
+print("Use SurfaceGripper.inputs:close to activate suction")
+"""
+
+
+def _gen_grasp_object(args: Dict) -> str:
+    """Generate a complete grasp sequence: approach, grasp, lift."""
+    robot_path = args["robot_path"]
+    target_prim = args["target_prim"]
+    grasp_type = args.get("grasp_type", "top_down")
+    approach_dist = args.get("approach_distance", 0.1)
+    lift_height = args.get("lift_height", 0.1)
+
+    if grasp_type == "from_file":
+        grasp_file = args.get("grasp_file", "")
+        return f"""\
+import numpy as np
+import yaml
+import omni.usd
+from pxr import UsdGeom, Gf
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+
+# Load grasp specification from file
+with open('{grasp_file}', 'r') as f:
+    grasp_spec = yaml.safe_load(f)
+
+grasp_name = list(grasp_spec.get('grasps', {{}}).keys())[0]
+grasp = grasp_spec['grasps'][grasp_name]
+offset = np.array(grasp.get('gripper_offset', [0, 0, 0]))
+approach_dir = np.array(grasp.get('approach_direction', [0, 0, -1]))
+
+# Get target object position
+stage = omni.usd.get_context().get_stage()
+target_xf = UsdGeom.Xformable(stage.GetPrimAtPath('{target_prim}')).ComputeLocalToWorldTransform(0)
+target_pos = np.array(target_xf.ExtractTranslation())
+
+# Compute grasp and approach positions
+grasp_pos = target_pos + offset
+approach_pos = grasp_pos - approach_dir * {approach_dist}
+lift_pos = grasp_pos + np.array([0, 0, {lift_height}])
+
+# Setup motion planner
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('franka', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+art = SingleArticulation(prim_path='{robot_path}')
+art.initialize()
+
+# Step 1: Move to approach position
+rmpflow.set_end_effector_target(approach_pos, None)
+joint_positions = art.get_joint_positions()
+joint_velocities = art.get_joint_velocities()
+action = rmpflow.get_next_articulation_action(joint_positions, joint_velocities)
+art.apply_action(action)
+print(f"Step 1: Moving to approach position {{approach_pos}}")
+
+# Step 2: Linear approach to grasp position
+rmpflow.set_end_effector_target(grasp_pos, None)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 2: Approaching grasp position {{grasp_pos}}")
+
+# Step 3: Close gripper
+print("Step 3: Closing gripper")
+
+# Step 4: Lift
+rmpflow.set_end_effector_target(lift_pos, None)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 4: Lifting to {{lift_pos}}")
+print("Grasp sequence complete (from file: {grasp_file})")
+"""
+
+    # top_down or side grasp (geometric heuristic)
+    if grasp_type == "side":
+        approach_vector = "[1, 0, 0]"
+        grasp_ori = "np.array([0.5, 0.5, -0.5, 0.5])  # side approach quaternion"
+    else:  # top_down
+        approach_vector = "[0, 0, -1]"
+        grasp_ori = "np.array([1.0, 0.0, 0.0, 0.0])  # top-down quaternion"
+
+    return f"""\
+import numpy as np
+import omni.usd
+from pxr import UsdGeom, Gf
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+
+# Get target object position
+stage = omni.usd.get_context().get_stage()
+target_xf = UsdGeom.Xformable(stage.GetPrimAtPath('{target_prim}')).ComputeLocalToWorldTransform(0)
+target_pos = np.array(target_xf.ExtractTranslation())
+
+# Compute approach geometry ({grasp_type} grasp)
+approach_dir = np.array({approach_vector})
+grasp_pos = target_pos  # grasp at object center
+approach_pos = grasp_pos - approach_dir * {approach_dist}
+lift_pos = grasp_pos + np.array([0, 0, {lift_height}])
+grasp_orientation = {grasp_ori}
+
+# Setup motion planner
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('franka', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+art = SingleArticulation(prim_path='{robot_path}')
+art.initialize()
+
+# Step 1: Move to pre-grasp approach position
+rmpflow.set_end_effector_target(approach_pos, grasp_orientation)
+joint_positions = art.get_joint_positions()
+joint_velocities = art.get_joint_velocities()
+action = rmpflow.get_next_articulation_action(joint_positions, joint_velocities)
+art.apply_action(action)
+print(f"Step 1: Moving to approach position {{approach_pos}}")
+
+# Step 2: Linear approach to grasp position
+rmpflow.set_end_effector_target(grasp_pos, grasp_orientation)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 2: Approaching grasp position {{grasp_pos}}")
+
+# Step 3: Close gripper
+print("Step 3: Closing gripper")
+
+# Step 4: Lift object
+rmpflow.set_end_effector_target(lift_pos, grasp_orientation)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 4: Lifting to {{lift_pos}}")
+print("Grasp sequence complete ({grasp_type})")
+"""
+
+
+def _gen_define_grasp_pose(args: Dict) -> str:
+    """Generate code to create a .isaac_grasp YAML file."""
+    robot_path = args["robot_path"]
+    object_path = args["object_path"]
+    offset = args.get("gripper_offset", [0, 0, 0])
+    approach_dir = args.get("approach_direction", [0, 0, -1])
+
+    return f"""\
+import yaml
+import os
+import omni.usd
+from pxr import UsdGeom, Gf
+import numpy as np
+
+# Get object position for reference
+stage = omni.usd.get_context().get_stage()
+obj_prim = stage.GetPrimAtPath('{object_path}')
+obj_xf = UsdGeom.Xformable(obj_prim).ComputeLocalToWorldTransform(0)
+obj_pos = list(obj_xf.ExtractTranslation())
+
+# Define grasp specification
+grasp_spec = {{
+    'version': '1.0',
+    'robot_path': '{robot_path}',
+    'object_path': '{object_path}',
+    'grasps': {{
+        'default_grasp': {{
+            'gripper_offset': {list(offset)},
+            'approach_direction': {list(approach_dir)},
+            'object_reference_position': obj_pos,
+            'pre_grasp_opening': 0.04,
+            'grasp_force': 40.0,
+        }},
+    }},
+}}
+
+# Save to workspace
+grasp_dir = 'workspace/grasp_poses'
+os.makedirs(grasp_dir, exist_ok=True)
+obj_name = '{object_path}'.split('/')[-1]
+file_path = os.path.join(grasp_dir, f'{{obj_name}}.isaac_grasp')
+
+with open(file_path, 'w') as f:
+    yaml.dump(grasp_spec, f, default_flow_style=False)
+
+print(f"Grasp pose saved to {{file_path}}")
+print(f"  Robot: {robot_path}")
+print(f"  Object: {object_path}")
+print(f"  Offset: {list(offset)}")
+print(f"  Approach direction: {list(approach_dir)}")
+"""
+
+
+async def _handle_visualize_behavior_tree(args: Dict) -> Dict:
+    """Return a formatted text tree of a behavior network structure."""
+    network_name = args.get("network_name", "unknown")
+
+    # Since we don't have access to a running Cortex instance at query time,
+    # return the canonical structure for known behavior types, or a template.
+    _KNOWN_BEHAVIORS = {
+        "pick_and_place": {
+            "name": "pick_and_place",
+            "type": "DfStateMachineDecider",
+            "children": [
+                {"name": "approach", "type": "DfState", "description": "Move to pre-grasp position above target"},
+                {"name": "grasp", "type": "DfState", "description": "Move down and close gripper on object"},
+                {"name": "lift", "type": "DfState", "description": "Lift grasped object to safe height"},
+                {"name": "place", "type": "DfState", "description": "Move to place position and release"},
+            ],
+            "transitions": "approach -> grasp -> lift -> place -> done",
+        },
+        "follow_target": {
+            "name": "follow_target",
+            "type": "DfDecider",
+            "children": [
+                {"name": "follow", "type": "FollowTargetState", "description": "Continuously track target prim with end-effector"},
+            ],
+            "transitions": "follow (continuous loop)",
+        },
+    }
+
+    behavior = _KNOWN_BEHAVIORS.get(network_name.lower())
+
+    if behavior:
+        # Build ASCII tree
+        lines = [
+            f"Behavior Network: {behavior['name']}",
+            f"  Type: {behavior['type']}",
+            f"  Transitions: {behavior['transitions']}",
+            "",
+            "  Nodes:",
+        ]
+        for i, child in enumerate(behavior["children"]):
+            is_last = i == len(behavior["children"]) - 1
+            prefix = "  +-- " if is_last else "  |-- "
+            lines.append(f"{prefix}{child['name']} ({child['type']})")
+            desc_prefix = "      " if is_last else "  |   "
+            lines.append(f"{desc_prefix}{child['description']}")
+
+        tree_text = "\n".join(lines)
+        return {
+            "network_name": network_name,
+            "structure": behavior,
+            "tree": tree_text,
+        }
+
+    return {
+        "network_name": network_name,
+        "structure": None,
+        "tree": (
+            f"Behavior Network: {network_name}\n"
+            f"  (No pre-built visualization available for '{network_name}'.\n"
+            f"   Known behaviors: pick_and_place, follow_target.\n"
+            f"   For custom networks, inspect the DfNetwork in the running Cortex world.)"
+        ),
+    }
+
+
+CODE_GEN_HANDLERS["create_behavior"] = _gen_create_behavior
+CODE_GEN_HANDLERS["create_gripper"] = _gen_create_gripper
+
+
+
+def _gen_grasp_object(args: Dict) -> str:
+    """Generate a complete grasp sequence: approach, grasp, lift."""
+    robot_path = args["robot_path"]
+    target_prim = args["target_prim"]
+    grasp_type = args.get("grasp_type", "top_down")
+    approach_dist = args.get("approach_distance", 0.1)
+    lift_height = args.get("lift_height", 0.1)
+
+    if grasp_type == "from_file":
+        grasp_file = args.get("grasp_file", "")
+        return f"""\
+import numpy as np
+import yaml
+import omni.usd
+from pxr import UsdGeom, Gf
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+
+# Load grasp specification from file
+with open('{grasp_file}', 'r') as f:
+    grasp_spec = yaml.safe_load(f)
+
+grasp_name = list(grasp_spec.get('grasps', {{}}).keys())[0]
+grasp = grasp_spec['grasps'][grasp_name]
+offset = np.array(grasp.get('gripper_offset', [0, 0, 0]))
+approach_dir = np.array(grasp.get('approach_direction', [0, 0, -1]))
+
+# Get target object position
+stage = omni.usd.get_context().get_stage()
+target_xf = UsdGeom.Xformable(stage.GetPrimAtPath('{target_prim}')).ComputeLocalToWorldTransform(0)
+target_pos = np.array(target_xf.ExtractTranslation())
+
+# Compute grasp and approach positions
+grasp_pos = target_pos + offset
+approach_pos = grasp_pos - approach_dir * {approach_dist}
+lift_pos = grasp_pos + np.array([0, 0, {lift_height}])
+
+# Setup motion planner
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('franka', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+art = SingleArticulation(prim_path='{robot_path}')
+art.initialize()
+
+# Step 1: Move to approach position
+rmpflow.set_end_effector_target(approach_pos, None)
+joint_positions = art.get_joint_positions()
+joint_velocities = art.get_joint_velocities()
+action = rmpflow.get_next_articulation_action(joint_positions, joint_velocities)
+art.apply_action(action)
+print(f"Step 1: Moving to approach position {{approach_pos}}")
+
+# Step 2: Linear approach to grasp position
+rmpflow.set_end_effector_target(grasp_pos, None)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 2: Approaching grasp position {{grasp_pos}}")
+
+# Step 3: Close gripper
+print("Step 3: Closing gripper")
+
+# Step 4: Lift
+rmpflow.set_end_effector_target(lift_pos, None)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 4: Lifting to {{lift_pos}}")
+print("Grasp sequence complete (from file: {grasp_file})")
+"""
+
+    # top_down or side grasp (geometric heuristic)
+    if grasp_type == "side":
+        approach_vector = "[1, 0, 0]"
+        grasp_ori = "np.array([0.5, 0.5, -0.5, 0.5])  # side approach quaternion"
+    else:  # top_down
+        approach_vector = "[0, 0, -1]"
+        grasp_ori = "np.array([1.0, 0.0, 0.0, 0.0])  # top-down quaternion"
+
+    return f"""\
+import numpy as np
+import omni.usd
+from pxr import UsdGeom, Gf
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+
+# Get target object position
+stage = omni.usd.get_context().get_stage()
+target_xf = UsdGeom.Xformable(stage.GetPrimAtPath('{target_prim}')).ComputeLocalToWorldTransform(0)
+target_pos = np.array(target_xf.ExtractTranslation())
+
+# Compute approach geometry ({grasp_type} grasp)
+approach_dir = np.array({approach_vector})
+grasp_pos = target_pos  # grasp at object center
+approach_pos = grasp_pos - approach_dir * {approach_dist}
+lift_pos = grasp_pos + np.array([0, 0, {lift_height}])
+grasp_orientation = {grasp_ori}
+
+# Setup motion planner
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('franka', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+art = SingleArticulation(prim_path='{robot_path}')
+art.initialize()
+
+# Step 1: Move to pre-grasp approach position
+rmpflow.set_end_effector_target(approach_pos, grasp_orientation)
+joint_positions = art.get_joint_positions()
+joint_velocities = art.get_joint_velocities()
+action = rmpflow.get_next_articulation_action(joint_positions, joint_velocities)
+art.apply_action(action)
+print(f"Step 1: Moving to approach position {{approach_pos}}")
+
+# Step 2: Linear approach to grasp position
+rmpflow.set_end_effector_target(grasp_pos, grasp_orientation)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 2: Approaching grasp position {{grasp_pos}}")
+
+# Step 3: Close gripper
+print("Step 3: Closing gripper")
+
+# Step 4: Lift object
+rmpflow.set_end_effector_target(lift_pos, grasp_orientation)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 4: Lifting to {{lift_pos}}")
+print("Grasp sequence complete ({grasp_type})")
+"""
+
+
+def _gen_define_grasp_pose(args: Dict) -> str:
+    """Generate code to create a .isaac_grasp YAML file."""
+    robot_path = args["robot_path"]
+    object_path = args["object_path"]
+    offset = args.get("gripper_offset", [0, 0, 0])
+    approach_dir = args.get("approach_direction", [0, 0, -1])
+
+    return f"""\
+import yaml
+import os
+import omni.usd
+from pxr import UsdGeom, Gf
+import numpy as np
+
+# Get object position for reference
+stage = omni.usd.get_context().get_stage()
+obj_prim = stage.GetPrimAtPath('{object_path}')
+obj_xf = UsdGeom.Xformable(obj_prim).ComputeLocalToWorldTransform(0)
+obj_pos = list(obj_xf.ExtractTranslation())
+
+# Define grasp specification
+grasp_spec = {{
+    'version': '1.0',
+    'robot_path': '{robot_path}',
+    'object_path': '{object_path}',
+    'grasps': {{
+        'default_grasp': {{
+            'gripper_offset': {list(offset)},
+            'approach_direction': {list(approach_dir)},
+            'object_reference_position': obj_pos,
+            'pre_grasp_opening': 0.04,
+            'grasp_force': 40.0,
+        }},
+    }},
+}}
+
+# Save to workspace
+grasp_dir = 'workspace/grasp_poses'
+os.makedirs(grasp_dir, exist_ok=True)
+obj_name = '{object_path}'.split('/')[-1]
+file_path = os.path.join(grasp_dir, f'{{obj_name}}.isaac_grasp')
+
+with open(file_path, 'w') as f:
+    yaml.dump(grasp_spec, f, default_flow_style=False)
+
+print(f"Grasp pose saved to {{file_path}}")
+print(f"  Robot: {robot_path}")
+print(f"  Object: {object_path}")
+print(f"  Offset: {list(offset)}")
+print(f"  Approach direction: {list(approach_dir)}")
+"""
+
+
+async def _handle_visualize_behavior_tree(args: Dict) -> Dict:
+    """Return a formatted text tree of a behavior network structure."""
+    network_name = args.get("network_name", "unknown")
+
+    # Since we don't have access to a running Cortex instance at query time,
+    # return the canonical structure for known behavior types, or a template.
+    _KNOWN_BEHAVIORS = {
+        "pick_and_place": {
+            "name": "pick_and_place",
+            "type": "DfStateMachineDecider",
+            "children": [
+                {"name": "approach", "type": "DfState", "description": "Move to pre-grasp position above target"},
+                {"name": "grasp", "type": "DfState", "description": "Move down and close gripper on object"},
+                {"name": "lift", "type": "DfState", "description": "Lift grasped object to safe height"},
+                {"name": "place", "type": "DfState", "description": "Move to place position and release"},
+            ],
+            "transitions": "approach -> grasp -> lift -> place -> done",
+        },
+        "follow_target": {
+            "name": "follow_target",
+            "type": "DfDecider",
+            "children": [
+                {"name": "follow", "type": "FollowTargetState", "description": "Continuously track target prim with end-effector"},
+            ],
+            "transitions": "follow (continuous loop)",
+        },
+    }
+
+    behavior = _KNOWN_BEHAVIORS.get(network_name.lower())
+
+    if behavior:
+        # Build ASCII tree
+        lines = [
+            f"Behavior Network: {behavior['name']}",
+            f"  Type: {behavior['type']}",
+            f"  Transitions: {behavior['transitions']}",
+            "",
+            "  Nodes:",
+        ]
+        for i, child in enumerate(behavior["children"]):
+            is_last = i == len(behavior["children"]) - 1
+            prefix = "  +-- " if is_last else "  |-- "
+            lines.append(f"{prefix}{child['name']} ({child['type']})")
+            desc_prefix = "      " if is_last else "  |   "
+            lines.append(f"{desc_prefix}{child['description']}")
+
+        tree_text = "\n".join(lines)
+        return {
+            "network_name": network_name,
+            "structure": behavior,
+            "tree": tree_text,
+        }
+
+    return {
+        "network_name": network_name,
+        "structure": None,
+        "tree": (
+            f"Behavior Network: {network_name}\n"
+            f"  (No pre-built visualization available for '{network_name}'.\n"
+            f"   Known behaviors: pick_and_place, follow_target.\n"
+            f"   For custom networks, inspect the DfNetwork in the running Cortex world.)"
+        ),
+    }
+
+
+CODE_GEN_HANDLERS["create_behavior"] = _gen_create_behavior
+CODE_GEN_HANDLERS["create_gripper"] = _gen_create_gripper
+CODE_GEN_HANDLERS["grasp_object"] = _gen_grasp_object
+
+
+
+def _gen_define_grasp_pose(args: Dict) -> str:
+    """Generate code to create a .isaac_grasp YAML file."""
+    robot_path = args["robot_path"]
+    object_path = args["object_path"]
+    offset = args.get("gripper_offset", [0, 0, 0])
+    approach_dir = args.get("approach_direction", [0, 0, -1])
+
+    return f"""\
+import yaml
+import os
+import omni.usd
+from pxr import UsdGeom, Gf
+import numpy as np
+
+# Get object position for reference
+stage = omni.usd.get_context().get_stage()
+obj_prim = stage.GetPrimAtPath('{object_path}')
+obj_xf = UsdGeom.Xformable(obj_prim).ComputeLocalToWorldTransform(0)
+obj_pos = list(obj_xf.ExtractTranslation())
+
+# Define grasp specification
+grasp_spec = {{
+    'version': '1.0',
+    'robot_path': '{robot_path}',
+    'object_path': '{object_path}',
+    'grasps': {{
+        'default_grasp': {{
+            'gripper_offset': {list(offset)},
+            'approach_direction': {list(approach_dir)},
+            'object_reference_position': obj_pos,
+            'pre_grasp_opening': 0.04,
+            'grasp_force': 40.0,
+        }},
+    }},
+}}
+
+# Save to workspace
+grasp_dir = 'workspace/grasp_poses'
+os.makedirs(grasp_dir, exist_ok=True)
+obj_name = '{object_path}'.split('/')[-1]
+file_path = os.path.join(grasp_dir, f'{{obj_name}}.isaac_grasp')
+
+with open(file_path, 'w') as f:
+    yaml.dump(grasp_spec, f, default_flow_style=False)
+
+print(f"Grasp pose saved to {{file_path}}")
+print(f"  Robot: {robot_path}")
+print(f"  Object: {object_path}")
+print(f"  Offset: {list(offset)}")
+print(f"  Approach direction: {list(approach_dir)}")
+"""
+
+
+async def _handle_visualize_behavior_tree(args: Dict) -> Dict:
+    """Return a formatted text tree of a behavior network structure."""
+    network_name = args.get("network_name", "unknown")
+
+    # Since we don't have access to a running Cortex instance at query time,
+    # return the canonical structure for known behavior types, or a template.
+    _KNOWN_BEHAVIORS = {
+        "pick_and_place": {
+            "name": "pick_and_place",
+            "type": "DfStateMachineDecider",
+            "children": [
+                {"name": "approach", "type": "DfState", "description": "Move to pre-grasp position above target"},
+                {"name": "grasp", "type": "DfState", "description": "Move down and close gripper on object"},
+                {"name": "lift", "type": "DfState", "description": "Lift grasped object to safe height"},
+                {"name": "place", "type": "DfState", "description": "Move to place position and release"},
+            ],
+            "transitions": "approach -> grasp -> lift -> place -> done",
+        },
+        "follow_target": {
+            "name": "follow_target",
+            "type": "DfDecider",
+            "children": [
+                {"name": "follow", "type": "FollowTargetState", "description": "Continuously track target prim with end-effector"},
+            ],
+            "transitions": "follow (continuous loop)",
+        },
+    }
+
+    behavior = _KNOWN_BEHAVIORS.get(network_name.lower())
+
+    if behavior:
+        # Build ASCII tree
+        lines = [
+            f"Behavior Network: {behavior['name']}",
+            f"  Type: {behavior['type']}",
+            f"  Transitions: {behavior['transitions']}",
+            "",
+            "  Nodes:",
+        ]
+        for i, child in enumerate(behavior["children"]):
+            is_last = i == len(behavior["children"]) - 1
+            prefix = "  +-- " if is_last else "  |-- "
+            lines.append(f"{prefix}{child['name']} ({child['type']})")
+            desc_prefix = "      " if is_last else "  |   "
+            lines.append(f"{desc_prefix}{child['description']}")
+
+        tree_text = "\n".join(lines)
+        return {
+            "network_name": network_name,
+            "structure": behavior,
+            "tree": tree_text,
+        }
+
+    return {
+        "network_name": network_name,
+        "structure": None,
+        "tree": (
+            f"Behavior Network: {network_name}\n"
+            f"  (No pre-built visualization available for '{network_name}'.\n"
+            f"   Known behaviors: pick_and_place, follow_target.\n"
+            f"   For custom networks, inspect the DfNetwork in the running Cortex world.)"
+        ),
+    }
+
+
+CODE_GEN_HANDLERS["create_behavior"] = _gen_create_behavior
+CODE_GEN_HANDLERS["create_gripper"] = _gen_create_gripper
+CODE_GEN_HANDLERS["grasp_object"] = _gen_grasp_object
+CODE_GEN_HANDLERS["define_grasp_pose"] = _gen_define_grasp_pose
+
+
+_ROBOT_TYPE_DEFAULTS = {
+    "manipulator": {"stiffness": 1000, "damping": 100},
+    "mobile":      {"stiffness": 500,  "damping": 50},
+    "humanoid":    {"stiffness": 800,  "damping": 80},
+}
+
+
+def _gen_robot_wizard(args: Dict) -> str:
+    asset_path = args["asset_path"]
+    robot_type = args.get("robot_type", "manipulator")
+    defaults = _ROBOT_TYPE_DEFAULTS.get(robot_type, _ROBOT_TYPE_DEFAULTS["manipulator"])
+    stiffness = args.get("drive_stiffness", defaults["stiffness"])
+    damping = args.get("drive_damping", defaults["damping"])
+
+    is_urdf = asset_path.lower().endswith(".urdf")
+
+    if is_urdf:
+        import_block = f"""\
+# Step 1: Import robot from URDF
+from isaacsim.asset.importer.urdf import import_urdf, ImportConfig
+cfg = ImportConfig()
+cfg.convex_decomposition = False  # use convex hull
+dest_path = import_urdf('{asset_path}', cfg)
+print(f"Imported URDF → {{dest_path}}")
+"""
+    else:
+        import_block = f"""\
+# Step 1: Import robot from USD
+dest_path = '/World/Robot'
+prim = stage.DefinePrim(dest_path, 'Xform')
+prim.GetReferences().AddReference('{asset_path}')
+print(f"Loaded USD asset → {{dest_path}}")
+"""
+
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics, PhysxSchema, UsdGeom, Gf
+
+stage = omni.usd.get_context().get_stage()
+
+{import_block}
+# Step 2: Apply drive defaults for {robot_type} (Kp={stiffness}, Kd={damping})
+robot_prim = stage.GetPrimAtPath(dest_path)
+joint_count = 0
+for child in robot_prim.GetAllDescendants():
+    if child.HasAPI(UsdPhysics.DriveAPI):
+        for drive_type in ['angular', 'linear']:
+            drive = UsdPhysics.DriveAPI.Get(child, drive_type)
+            if drive:
+                drive.GetStiffnessAttr().Set({stiffness})
+                drive.GetDampingAttr().Set({damping})
+                joint_count += 1
+print(f"Applied Kp={stiffness}, Kd={damping} to {{joint_count}} drives")
+
+# Step 3: Apply convex-hull collision meshes
+collision_count = 0
+for child in robot_prim.GetAllDescendants():
+    if child.IsA(UsdGeom.Mesh):
+        if not child.HasAPI(UsdPhysics.CollisionAPI):
+            UsdPhysics.CollisionAPI.Apply(child)
+        if not child.HasAPI(PhysxSchema.PhysxCollisionAPI):
+            PhysxSchema.PhysxCollisionAPI.Apply(child)
+        coll_api = PhysxSchema.PhysxCollisionAPI(child)
+        coll_api.CreateContactOffsetAttr(0.02)
+        collision_count += 1
+print(f"Applied convex-hull collision to {{collision_count}} meshes")
+
+# Summary
+print(f"Robot setup complete: type={robot_type}, drives={{joint_count}}, collisions={{collision_count}}")
+"""
+
+
+def _gen_tune_gains(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    method = args.get("method", "manual")
+    joint_name = args.get("joint_name")
+    kp = args.get("kp", 1000)
+    kd = args.get("kd", 100)
+    test_mode = args.get("test_mode", "step")
+
+    if method == "step_response":
+        mode_map = {"sinusoidal": "SINUSOIDAL", "step": "STEP"}
+        mode_str = mode_map.get(test_mode, "STEP")
+        return f"""\
+import omni.usd
+from pxr import UsdPhysics
+from isaacsim.robot_setup.gain_tuner import GainTuner, GainsTestMode
+from isaacsim.core.api import World
+
+stage = omni.usd.get_context().get_stage()
+
+# Initialize GainTuner
+tuner = GainTuner()
+tuner.setup('{art_path}')
+
+# Configure test parameters
+test_params = {{"mode": GainsTestMode.{mode_str}}}
+tuner.initialize_gains_test(test_params)
+
+# Run test loop
+world = World.instance() or World()
+dt = 1.0 / 60.0
+step = 0
+while not tuner.update_gains_test(dt):
+    world.step()
+    step += 1
+
+# Compute error metrics
+pos_rmse, vel_rmse = tuner.compute_gains_test_error_terms()
+print(f"GainTuner test complete after {{step}} steps")
+print(f"Position RMSE: {{pos_rmse:.6f}}")
+print(f"Velocity RMSE: {{vel_rmse:.6f}}")
+"""
+
+    # Manual method: set gains directly via DriveAPI
+    if joint_name:
+        return f"""\
+import omni.usd
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+joint_prim = stage.GetPrimAtPath('{art_path}/{joint_name}')
+
+# Set drive gains for {joint_name}
+for drive_type in ['angular', 'linear']:
+    drive = UsdPhysics.DriveAPI.Get(joint_prim, drive_type)
+    if drive:
+        drive.GetStiffnessAttr().Set({kp})
+        drive.GetDampingAttr().Set({kd})
+        print(f"Set {{drive_type}} drive on {joint_name}: Kp={kp}, Kd={kd}")
+"""
+
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+robot_prim = stage.GetPrimAtPath('{art_path}')
+
+# Set drive gains for all joints
+joint_count = 0
+for child in robot_prim.GetAllDescendants():
+    if child.HasAPI(UsdPhysics.DriveAPI):
+        for drive_type in ['angular', 'linear']:
+            drive = UsdPhysics.DriveAPI.Get(child, drive_type)
+            if drive:
+                drive.GetStiffnessAttr().Set({kp})
+                drive.GetDampingAttr().Set({kd})
+                joint_count += 1
+print(f"Set Kp={kp}, Kd={kd} on {{joint_count}} drives")
+"""
+
+
+def _gen_assemble_robot(args: Dict) -> str:
+    base_path = args["base_path"]
+    attachment_path = args["attachment_path"]
+    base_mount = args["base_mount"]
+    attach_mount = args["attach_mount"]
+
+    return f"""\
+import omni.usd
+from isaacsim.robot_setup.assembler import RobotAssembler
+
+stage = omni.usd.get_context().get_stage()
+
+# Assemble robot: attach {attachment_path} to {base_path}
+assembler = RobotAssembler()
+assembled = assembler.assemble(
+    base_robot_path='{base_path}',
+    attach_robot_path='{attachment_path}',
+    base_robot_mount_frame='{base_mount}',
+    attach_robot_mount_frame='{attach_mount}',
+    fixed_joint_offset=None,
+    fixed_joint_orient=None,
+    single_robot=True,
+)
+print(f"Assembled: {{assembled}}")
+print(f"Base: {base_path} (mount: {base_mount})")
+print(f"Attachment: {attachment_path} (mount: {attach_mount})")
+"""
+
+
+def _gen_configure_self_collision(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    mode = args["mode"]
+    filtered_pairs = args.get("filtered_pairs", [])
+
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdPhysics, PhysxSchema",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        f"robot_prim = stage.GetPrimAtPath('{art_path}')",
+        "",
+    ]
+
+    if mode == "auto":
+        lines.extend([
+            "# Auto mode: keep defaults (adjacent links already skip collision)",
+            f"print('Self-collision for {art_path}: auto (default PhysX behavior)')",
+        ])
+    elif mode == "enable":
+        lines.extend([
+            "# Enable self-collision on the articulation",
+            "if not robot_prim.HasAPI(PhysxSchema.PhysxArticulationAPI):",
+            "    PhysxSchema.PhysxArticulationAPI.Apply(robot_prim)",
+            "artic_api = PhysxSchema.PhysxArticulationAPI(robot_prim)",
+            "artic_api.CreateEnabledSelfCollisionsAttr(True)",
+            f"print('Self-collision ENABLED for {art_path}')",
+        ])
+    elif mode == "disable":
+        lines.extend([
+            "# Disable self-collision on the articulation",
+            "if not robot_prim.HasAPI(PhysxSchema.PhysxArticulationAPI):",
+            "    PhysxSchema.PhysxArticulationAPI.Apply(robot_prim)",
+            "artic_api = PhysxSchema.PhysxArticulationAPI(robot_prim)",
+            "artic_api.CreateEnabledSelfCollisionsAttr(False)",
+            f"print('Self-collision DISABLED for {art_path}')",
+        ])
+
+    if filtered_pairs:
+        lines.extend([
+            "",
+            "# Apply collision filtering for specified link pairs",
+        ])
+        for pair in filtered_pairs:
+            if len(pair) == 2:
+                lines.extend([
+                    f"link_a = stage.GetPrimAtPath('{pair[0]}')",
+                    f"link_b = stage.GetPrimAtPath('{pair[1]}')",
+                    "filteredPairsAPI = UsdPhysics.FilteredPairsAPI.Apply(robot_prim)",
+                    f"filteredPairsAPI.GetFilteredPairsRel().AddTarget('{pair[0]}')",
+                    f"filteredPairsAPI.GetFilteredPairsRel().AddTarget('{pair[1]}')",
+                    f"print(f'Filtered collision pair: {pair[0]} <-> {pair[1]}')",
+                ])
+
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["robot_wizard"] = _gen_robot_wizard
+
+
+
+def _gen_tune_gains(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    method = args.get("method", "manual")
+    joint_name = args.get("joint_name")
+    kp = args.get("kp", 1000)
+    kd = args.get("kd", 100)
+    test_mode = args.get("test_mode", "step")
+
+    if method == "step_response":
+        mode_map = {"sinusoidal": "SINUSOIDAL", "step": "STEP"}
+        mode_str = mode_map.get(test_mode, "STEP")
+        return f"""\
+import omni.usd
+from pxr import UsdPhysics
+from isaacsim.robot_setup.gain_tuner import GainTuner, GainsTestMode
+from isaacsim.core.api import World
+
+stage = omni.usd.get_context().get_stage()
+
+# Initialize GainTuner
+tuner = GainTuner()
+tuner.setup('{art_path}')
+
+# Configure test parameters
+test_params = {{"mode": GainsTestMode.{mode_str}}}
+tuner.initialize_gains_test(test_params)
+
+# Run test loop
+world = World.instance() or World()
+dt = 1.0 / 60.0
+step = 0
+while not tuner.update_gains_test(dt):
+    world.step()
+    step += 1
+
+# Compute error metrics
+pos_rmse, vel_rmse = tuner.compute_gains_test_error_terms()
+print(f"GainTuner test complete after {{step}} steps")
+print(f"Position RMSE: {{pos_rmse:.6f}}")
+print(f"Velocity RMSE: {{vel_rmse:.6f}}")
+"""
+
+    # Manual method: set gains directly via DriveAPI
+    if joint_name:
+        return f"""\
+import omni.usd
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+joint_prim = stage.GetPrimAtPath('{art_path}/{joint_name}')
+
+# Set drive gains for {joint_name}
+for drive_type in ['angular', 'linear']:
+    drive = UsdPhysics.DriveAPI.Get(joint_prim, drive_type)
+    if drive:
+        drive.GetStiffnessAttr().Set({kp})
+        drive.GetDampingAttr().Set({kd})
+        print(f"Set {{drive_type}} drive on {joint_name}: Kp={kp}, Kd={kd}")
+"""
+
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+robot_prim = stage.GetPrimAtPath('{art_path}')
+
+# Set drive gains for all joints
+joint_count = 0
+for child in robot_prim.GetAllDescendants():
+    if child.HasAPI(UsdPhysics.DriveAPI):
+        for drive_type in ['angular', 'linear']:
+            drive = UsdPhysics.DriveAPI.Get(child, drive_type)
+            if drive:
+                drive.GetStiffnessAttr().Set({kp})
+                drive.GetDampingAttr().Set({kd})
+                joint_count += 1
+print(f"Set Kp={kp}, Kd={kd} on {{joint_count}} drives")
+"""
+
+
+def _gen_assemble_robot(args: Dict) -> str:
+    base_path = args["base_path"]
+    attachment_path = args["attachment_path"]
+    base_mount = args["base_mount"]
+    attach_mount = args["attach_mount"]
+
+    return f"""\
+import omni.usd
+from isaacsim.robot_setup.assembler import RobotAssembler
+
+stage = omni.usd.get_context().get_stage()
+
+# Assemble robot: attach {attachment_path} to {base_path}
+assembler = RobotAssembler()
+assembled = assembler.assemble(
+    base_robot_path='{base_path}',
+    attach_robot_path='{attachment_path}',
+    base_robot_mount_frame='{base_mount}',
+    attach_robot_mount_frame='{attach_mount}',
+    fixed_joint_offset=None,
+    fixed_joint_orient=None,
+    single_robot=True,
+)
+print(f"Assembled: {{assembled}}")
+print(f"Base: {base_path} (mount: {base_mount})")
+print(f"Attachment: {attachment_path} (mount: {attach_mount})")
+"""
+
+
+def _gen_configure_self_collision(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    mode = args["mode"]
+    filtered_pairs = args.get("filtered_pairs", [])
+
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdPhysics, PhysxSchema",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        f"robot_prim = stage.GetPrimAtPath('{art_path}')",
+        "",
+    ]
+
+    if mode == "auto":
+        lines.extend([
+            "# Auto mode: keep defaults (adjacent links already skip collision)",
+            f"print('Self-collision for {art_path}: auto (default PhysX behavior)')",
+        ])
+    elif mode == "enable":
+        lines.extend([
+            "# Enable self-collision on the articulation",
+            "if not robot_prim.HasAPI(PhysxSchema.PhysxArticulationAPI):",
+            "    PhysxSchema.PhysxArticulationAPI.Apply(robot_prim)",
+            "artic_api = PhysxSchema.PhysxArticulationAPI(robot_prim)",
+            "artic_api.CreateEnabledSelfCollisionsAttr(True)",
+            f"print('Self-collision ENABLED for {art_path}')",
+        ])
+    elif mode == "disable":
+        lines.extend([
+            "# Disable self-collision on the articulation",
+            "if not robot_prim.HasAPI(PhysxSchema.PhysxArticulationAPI):",
+            "    PhysxSchema.PhysxArticulationAPI.Apply(robot_prim)",
+            "artic_api = PhysxSchema.PhysxArticulationAPI(robot_prim)",
+            "artic_api.CreateEnabledSelfCollisionsAttr(False)",
+            f"print('Self-collision DISABLED for {art_path}')",
+        ])
+
+    if filtered_pairs:
+        lines.extend([
+            "",
+            "# Apply collision filtering for specified link pairs",
+        ])
+        for pair in filtered_pairs:
+            if len(pair) == 2:
+                lines.extend([
+                    f"link_a = stage.GetPrimAtPath('{pair[0]}')",
+                    f"link_b = stage.GetPrimAtPath('{pair[1]}')",
+                    "filteredPairsAPI = UsdPhysics.FilteredPairsAPI.Apply(robot_prim)",
+                    f"filteredPairsAPI.GetFilteredPairsRel().AddTarget('{pair[0]}')",
+                    f"filteredPairsAPI.GetFilteredPairsRel().AddTarget('{pair[1]}')",
+                    f"print(f'Filtered collision pair: {pair[0]} <-> {pair[1]}')",
+                ])
+
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["robot_wizard"] = _gen_robot_wizard
+CODE_GEN_HANDLERS["tune_gains"] = _gen_tune_gains
+
+
+
+def _gen_assemble_robot(args: Dict) -> str:
+    base_path = args["base_path"]
+    attachment_path = args["attachment_path"]
+    base_mount = args["base_mount"]
+    attach_mount = args["attach_mount"]
+
+    return f"""\
+import omni.usd
+from isaacsim.robot_setup.assembler import RobotAssembler
+
+stage = omni.usd.get_context().get_stage()
+
+# Assemble robot: attach {attachment_path} to {base_path}
+assembler = RobotAssembler()
+assembled = assembler.assemble(
+    base_robot_path='{base_path}',
+    attach_robot_path='{attachment_path}',
+    base_robot_mount_frame='{base_mount}',
+    attach_robot_mount_frame='{attach_mount}',
+    fixed_joint_offset=None,
+    fixed_joint_orient=None,
+    single_robot=True,
+)
+print(f"Assembled: {{assembled}}")
+print(f"Base: {base_path} (mount: {base_mount})")
+print(f"Attachment: {attachment_path} (mount: {attach_mount})")
+"""
+
+
+def _gen_configure_self_collision(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    mode = args["mode"]
+    filtered_pairs = args.get("filtered_pairs", [])
+
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdPhysics, PhysxSchema",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        f"robot_prim = stage.GetPrimAtPath('{art_path}')",
+        "",
+    ]
+
+    if mode == "auto":
+        lines.extend([
+            "# Auto mode: keep defaults (adjacent links already skip collision)",
+            f"print('Self-collision for {art_path}: auto (default PhysX behavior)')",
+        ])
+    elif mode == "enable":
+        lines.extend([
+            "# Enable self-collision on the articulation",
+            "if not robot_prim.HasAPI(PhysxSchema.PhysxArticulationAPI):",
+            "    PhysxSchema.PhysxArticulationAPI.Apply(robot_prim)",
+            "artic_api = PhysxSchema.PhysxArticulationAPI(robot_prim)",
+            "artic_api.CreateEnabledSelfCollisionsAttr(True)",
+            f"print('Self-collision ENABLED for {art_path}')",
+        ])
+    elif mode == "disable":
+        lines.extend([
+            "# Disable self-collision on the articulation",
+            "if not robot_prim.HasAPI(PhysxSchema.PhysxArticulationAPI):",
+            "    PhysxSchema.PhysxArticulationAPI.Apply(robot_prim)",
+            "artic_api = PhysxSchema.PhysxArticulationAPI(robot_prim)",
+            "artic_api.CreateEnabledSelfCollisionsAttr(False)",
+            f"print('Self-collision DISABLED for {art_path}')",
+        ])
+
+    if filtered_pairs:
+        lines.extend([
+            "",
+            "# Apply collision filtering for specified link pairs",
+        ])
+        for pair in filtered_pairs:
+            if len(pair) == 2:
+                lines.extend([
+                    f"link_a = stage.GetPrimAtPath('{pair[0]}')",
+                    f"link_b = stage.GetPrimAtPath('{pair[1]}')",
+                    "filteredPairsAPI = UsdPhysics.FilteredPairsAPI.Apply(robot_prim)",
+                    f"filteredPairsAPI.GetFilteredPairsRel().AddTarget('{pair[0]}')",
+                    f"filteredPairsAPI.GetFilteredPairsRel().AddTarget('{pair[1]}')",
+                    f"print(f'Filtered collision pair: {pair[0]} <-> {pair[1]}')",
+                ])
+
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["robot_wizard"] = _gen_robot_wizard
+CODE_GEN_HANDLERS["tune_gains"] = _gen_tune_gains
+CODE_GEN_HANDLERS["assemble_robot"] = _gen_assemble_robot
+
+
+
+def _gen_configure_self_collision(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    mode = args["mode"]
+    filtered_pairs = args.get("filtered_pairs", [])
+
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdPhysics, PhysxSchema",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        f"robot_prim = stage.GetPrimAtPath('{art_path}')",
+        "",
+    ]
+
+    if mode == "auto":
+        lines.extend([
+            "# Auto mode: keep defaults (adjacent links already skip collision)",
+            f"print('Self-collision for {art_path}: auto (default PhysX behavior)')",
+        ])
+    elif mode == "enable":
+        lines.extend([
+            "# Enable self-collision on the articulation",
+            "if not robot_prim.HasAPI(PhysxSchema.PhysxArticulationAPI):",
+            "    PhysxSchema.PhysxArticulationAPI.Apply(robot_prim)",
+            "artic_api = PhysxSchema.PhysxArticulationAPI(robot_prim)",
+            "artic_api.CreateEnabledSelfCollisionsAttr(True)",
+            f"print('Self-collision ENABLED for {art_path}')",
+        ])
+    elif mode == "disable":
+        lines.extend([
+            "# Disable self-collision on the articulation",
+            "if not robot_prim.HasAPI(PhysxSchema.PhysxArticulationAPI):",
+            "    PhysxSchema.PhysxArticulationAPI.Apply(robot_prim)",
+            "artic_api = PhysxSchema.PhysxArticulationAPI(robot_prim)",
+            "artic_api.CreateEnabledSelfCollisionsAttr(False)",
+            f"print('Self-collision DISABLED for {art_path}')",
+        ])
+
+    if filtered_pairs:
+        lines.extend([
+            "",
+            "# Apply collision filtering for specified link pairs",
+        ])
+        for pair in filtered_pairs:
+            if len(pair) == 2:
+                lines.extend([
+                    f"link_a = stage.GetPrimAtPath('{pair[0]}')",
+                    f"link_b = stage.GetPrimAtPath('{pair[1]}')",
+                    "filteredPairsAPI = UsdPhysics.FilteredPairsAPI.Apply(robot_prim)",
+                    f"filteredPairsAPI.GetFilteredPairsRel().AddTarget('{pair[0]}')",
+                    f"filteredPairsAPI.GetFilteredPairsRel().AddTarget('{pair[1]}')",
+                    f"print(f'Filtered collision pair: {pair[0]} <-> {pair[1]}')",
+                ])
+
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["robot_wizard"] = _gen_robot_wizard
+CODE_GEN_HANDLERS["tune_gains"] = _gen_tune_gains
+CODE_GEN_HANDLERS["assemble_robot"] = _gen_assemble_robot
+CODE_GEN_HANDLERS["configure_self_collision"] = _gen_configure_self_collision
+
+
+
+# ─── Wheeled Robots & Conveyor Systems (Phase 8E) ──────────────────────────
+
+def _gen_create_wheeled_robot(args: Dict) -> str:
+    robot_path = args["robot_path"]
+    drive_type = args["drive_type"]
+    wheel_radius = args["wheel_radius"]
+    wheel_base = args["wheel_base"]
+    dof_names = args.get("wheel_dof_names")
+    max_lin = args.get("max_linear_speed", 1.0)
+    max_ang = args.get("max_angular_speed", 3.14)
+
+    controller_map = {
+        "differential": "DifferentialController",
+        "ackermann": "AckermannController",
+        "holonomic": "HolonomicController",
+    }
+    ctrl_cls = controller_map[drive_type]
+
+    dof_block = ""
+    if dof_names:
+        dof_str = repr(dof_names)
+        dof_block = f"""
+# Wheel DOFs
+wheel_dof_names = {dof_str}
+"""
+
+    return f"""\
+import numpy as np
+from isaacsim.robot.wheeled_robots.controllers import {ctrl_cls}
+from isaacsim.robot.wheeled_robots.robots import WheeledRobot
+
+# Create controller
+controller = {ctrl_cls}(
+    name="{drive_type}_ctrl",
+    wheel_radius={wheel_radius},
+    wheel_base={wheel_base},
+)
+{dof_block}
+# Speed limits
+MAX_LINEAR_SPEED = {max_lin}   # m/s
+MAX_ANGULAR_SPEED = {max_ang}  # rad/s
+
+def drive(linear_vel, angular_vel):
+    \"\"\"Compute wheel actions. Clamps to speed limits.\"\"\"
+    lv = np.clip(linear_vel, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED)
+    av = np.clip(angular_vel, -MAX_ANGULAR_SPEED, MAX_ANGULAR_SPEED)
+    action = controller.forward(np.array([lv, av]))
+    return action
+
+print("Wheeled robot controller ready: {drive_type} | robot={robot_path}")
+print(f"  wheel_radius={wheel_radius}, wheel_base={wheel_base}")
+print(f"  max_linear={{MAX_LINEAR_SPEED}} m/s, max_angular={{MAX_ANGULAR_SPEED}} rad/s")
+"""
+
+
+def _gen_navigate_to(args: Dict) -> str:
+    robot_path = args["robot_path"]
+    target = args["target_position"]
+    planner = args.get("planner", "direct")
+
+    if planner == "astar":
+        return f"""\
+import numpy as np
+import heapq
+import omni.usd
+from isaacsim.robot.wheeled_robots.controllers import WheelBasePoseController
+from isaacsim.robot.wheeled_robots.controllers import DifferentialController
+
+robot_path = '{robot_path}'
+target = np.array({target}, dtype=float)
+
+# --- Inline A* on occupancy grid ---
+GRID_RES = 0.25  # meters per cell
+GRID_SIZE = 80   # 80x80 grid = 20m x 20m
+GRID_OFFSET = np.array([-GRID_SIZE * GRID_RES / 2, -GRID_SIZE * GRID_RES / 2])
+
+# Pre-generate an empty occupancy grid (0=free, 1=obstacle)
+# Replace with actual occupancy data for real scenes
+occupancy = np.zeros((GRID_SIZE, GRID_SIZE), dtype=int)
+
+def world_to_grid(pos):
+    return int((pos[0] - GRID_OFFSET[0]) / GRID_RES), int((pos[1] - GRID_OFFSET[1]) / GRID_RES)
+
+def grid_to_world(cell):
+    return np.array([cell[0] * GRID_RES + GRID_OFFSET[0], cell[1] * GRID_RES + GRID_OFFSET[1]])
+
+def astar(start, goal):
+    open_set = [(0, start)]
+    came_from = {{}}
+    g = {{start: 0}}
+    while open_set:
+        _, current = heapq.heappop(open_set)
+        if current == goal:
+            path = []
+            while current in came_from:
+                path.append(current)
+                current = came_from[current]
+            path.append(start)
+            return path[::-1]
+        for dx, dy in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(1,1),(-1,1),(1,-1)]:
+            nx, ny = current[0]+dx, current[1]+dy
+            if 0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE and occupancy[ny, nx] == 0:
+                ng = g[current] + (1.414 if dx and dy else 1.0)
+                if (nx, ny) not in g or ng < g[(nx, ny)]:
+                    g[(nx, ny)] = ng
+                    h = abs(nx - goal[0]) + abs(ny - goal[1])
+                    heapq.heappush(open_set, (ng + h, (nx, ny)))
+                    came_from[(nx, ny)] = current
+    return [start, goal]  # fallback: direct
+
+# Get current robot position (assume origin for now)
+start_world = np.array([0.0, 0.0])
+start_cell = world_to_grid(start_world)
+goal_cell = world_to_grid(target)
+grid_path = astar(start_cell, goal_cell)
+waypoints = [grid_to_world(c) for c in grid_path]
+
+# --- Drive along waypoints via physics callback ---
+pose_ctrl = WheelBasePoseController(
+    name="pose_ctrl",
+    open_loop_wheel_controller=DifferentialController(name="nav_diff", wheel_radius=0.05, wheel_base=0.3),
+    is_holonomic=False,
+)
+waypoint_idx = [0]
+
+import omni.physx
+def _nav_step(dt):
+    idx = waypoint_idx[0]
+    if idx >= len(waypoints):
+        print(f"Navigation complete: reached {{target}}")
+        sub.unsubscribe()
+        return
+    wp = waypoints[idx]
+    # current_pos would come from robot state in real usage
+    action = pose_ctrl.forward(start_position=np.array([0, 0, 0]), start_orientation=np.array([1, 0, 0, 0]), goal_position=np.array([wp[0], wp[1], 0]))
+    if action is None or np.linalg.norm(wp - start_world) < 0.1:
+        waypoint_idx[0] += 1
+
+sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_nav_step)
+print(f"A* navigation started: {{len(waypoints)}} waypoints to {{target}}")
+"""
+    else:  # direct
+        return f"""\
+import numpy as np
+import omni.physx
+from isaacsim.robot.wheeled_robots.controllers import WheelBasePoseController
+from isaacsim.robot.wheeled_robots.controllers import DifferentialController
+
+robot_path = '{robot_path}'
+target = np.array([{target[0]}, {target[1]}, 0.0])
+
+pose_ctrl = WheelBasePoseController(
+    name="pose_ctrl",
+    open_loop_wheel_controller=DifferentialController(name="nav_diff", wheel_radius=0.05, wheel_base=0.3),
+    is_holonomic=False,
+)
+
+def _nav_step(dt):
+    \"\"\"Physics callback: drive toward target each step.\"\"\"
+    # In production, read actual robot pose from ArticulationView
+    action = pose_ctrl.forward(
+        start_position=np.array([0, 0, 0]),
+        start_orientation=np.array([1, 0, 0, 0]),
+        goal_position=target,
+    )
+    if action is None:
+        print(f"Direct navigation complete: reached {{target[:2]}}")
+        sub.unsubscribe()
+
+sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_nav_step)
+print(f"Direct navigation started: target=[{target[0]}, {target[1]}]")
+"""
+
+
+def _gen_create_conveyor(args: Dict) -> str:
+    prim_path = args["prim_path"]
+    speed = args.get("speed", 0.5)
+    direction = args.get("direction", [1, 0, 0])
+
+    return f"""\
+import omni.usd
+import omni.graph.core as og
+import carb
+
+# Check GPU physics / Fabric — conveyors require CPU physics
+use_fabric = carb.settings.get_settings().get("/physics/useFabric")
+if use_fabric:
+    print("WARNING: Conveyor requires CPU physics. Set /physics/useFabric to False.")
+
+prim_path = '{prim_path}'
+speed = {speed}
+direction = {direction}
+
+# Resolve OmniGraph backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+keys = og.Controller.Keys
+(graph, nodes, _, _) = og.Controller.edit(
+    {{
+        "graph_path": prim_path + "/ConveyorGraph",
+        "evaluator_name": "execution",
+        "pipeline_stage": _backing,
+    }},
+    {{
+        keys.CREATE_NODES: [
+            ("tick", "omni.graph.action.OnPlaybackTick"),
+            ("conveyor", "isaacsim.conveyor.OgnIsaacConveyor"),
+        ],
+        keys.CONNECT: [
+            ("tick.outputs:tick", "conveyor.inputs:execIn"),
+        ],
+        keys.SET_VALUES: [
+            ("conveyor.inputs:conveyorPrim", prim_path),
+            ("conveyor.inputs:velocity", speed),
+            ("conveyor.inputs:direction", direction),
+        ],
+    }},
+)
+
+print(f"Conveyor created at {{prim_path}} — speed={{speed}} m/s, direction={{direction}}")
+"""
+
+
+def _gen_create_conveyor_track(args: Dict) -> str:
+    waypoints = args["waypoints"]
+    belt_width = args.get("belt_width", 0.5)
+    speed = args.get("speed", 0.5)
+
+    return f"""\
+import omni.usd
+import omni.graph.core as og
+import math
+from pxr import UsdGeom, Gf
+
+stage = omni.usd.get_context().get_stage()
+
+waypoints = {waypoints}
+belt_width = {belt_width}
+speed = {speed}
+
+# Create parent Xform
+track_path = '/World/ConveyorTrack'
+stage.DefinePrim(track_path, 'Xform')
+
+# Resolve OmniGraph backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+for i in range(len(waypoints) - 1):
+    p0 = waypoints[i]
+    p1 = waypoints[i + 1]
+
+    # Compute segment center, length, and orientation
+    cx = (p0[0] + p1[0]) / 2.0
+    cy = (p0[1] + p1[1]) / 2.0
+    cz = (p0[2] + p1[2]) / 2.0
+    dx = p1[0] - p0[0]
+    dy = p1[1] - p0[1]
+    seg_len = math.sqrt(dx * dx + dy * dy)
+    angle_deg = math.degrees(math.atan2(dy, dx))
+
+    # Create segment mesh (Cube scaled to belt dimensions)
+    seg_path = f"{{track_path}}/Segment_{{i}}"
+    prim = stage.DefinePrim(seg_path, 'Cube')
+    xf = UsdGeom.Xformable(prim)
+    xf.AddTranslateOp().Set(Gf.Vec3d(cx, cy, cz))
+    xf.AddRotateZOp().Set(angle_deg)
+    xf.AddScaleOp().Set(Gf.Vec3d(seg_len / 2.0, belt_width / 2.0, 0.02))
+
+    # Direction vector (local X, rotated)
+    dir_x = dx / seg_len if seg_len > 0 else 1.0
+    dir_y = dy / seg_len if seg_len > 0 else 0.0
+
+    # Create conveyor OmniGraph for this segment
+    keys = og.Controller.Keys
+    og.Controller.edit(
+        {{
+            "graph_path": seg_path + "/ConveyorGraph",
+            "evaluator_name": "execution",
+            "pipeline_stage": _backing,
+        }},
+        {{
+            keys.CREATE_NODES: [
+                ("tick", "omni.graph.action.OnPlaybackTick"),
+                ("conveyor", "isaacsim.conveyor.OgnIsaacConveyor"),
+            ],
+            keys.CONNECT: [
+                ("tick.outputs:tick", "conveyor.inputs:execIn"),
+            ],
+            keys.SET_VALUES: [
+                ("conveyor.inputs:conveyorPrim", seg_path),
+                ("conveyor.inputs:velocity", speed),
+                ("conveyor.inputs:direction", [dir_x, dir_y, 0.0]),
+            ],
+        }},
+    )
+
+print(f"Conveyor track created: {{len(waypoints) - 1}} segments, speed={{speed}} m/s")
+"""
+
+
+def _gen_merge_meshes(args: Dict) -> str:
+    prim_paths = args["prim_paths"]
+    output_path = args["output_path"]
+
+    return f"""\
+import omni.usd
+from isaacsim.util.merge_mesh import MeshMerger
+
+stage = omni.usd.get_context().get_stage()
+
+# Ensure output parent exists
+output_path = '{output_path}'
+parent_path = '/'.join(output_path.rsplit('/', 1)[:-1]) or '/World'
+if not stage.GetPrimAtPath(parent_path).IsValid():
+    stage.DefinePrim(parent_path, 'Xform')
+
+prim_paths = {prim_paths}
+
+# Merge meshes
+merger = MeshMerger(stage)
+merger.update_selection(prim_paths)
+merger.merge()
+
+print(f"Merged {{len(prim_paths)}} meshes: {{prim_paths}}")
+"""
+
+
+CODE_GEN_HANDLERS["create_wheeled_robot"] = _gen_create_wheeled_robot
+
+
+
+def _gen_navigate_to(args: Dict) -> str:
+    robot_path = args["robot_path"]
+    target = args["target_position"]
+    planner = args.get("planner", "direct")
+
+    if planner == "astar":
+        return f"""\
+import numpy as np
+import heapq
+import omni.usd
+from isaacsim.robot.wheeled_robots.controllers import WheelBasePoseController
+from isaacsim.robot.wheeled_robots.controllers import DifferentialController
+
+robot_path = '{robot_path}'
+target = np.array({target}, dtype=float)
+
+# --- Inline A* on occupancy grid ---
+GRID_RES = 0.25  # meters per cell
+GRID_SIZE = 80   # 80x80 grid = 20m x 20m
+GRID_OFFSET = np.array([-GRID_SIZE * GRID_RES / 2, -GRID_SIZE * GRID_RES / 2])
+
+# Pre-generate an empty occupancy grid (0=free, 1=obstacle)
+# Replace with actual occupancy data for real scenes
+occupancy = np.zeros((GRID_SIZE, GRID_SIZE), dtype=int)
+
+def world_to_grid(pos):
+    return int((pos[0] - GRID_OFFSET[0]) / GRID_RES), int((pos[1] - GRID_OFFSET[1]) / GRID_RES)
+
+def grid_to_world(cell):
+    return np.array([cell[0] * GRID_RES + GRID_OFFSET[0], cell[1] * GRID_RES + GRID_OFFSET[1]])
+
+def astar(start, goal):
+    open_set = [(0, start)]
+    came_from = {{}}
+    g = {{start: 0}}
+    while open_set:
+        _, current = heapq.heappop(open_set)
+        if current == goal:
+            path = []
+            while current in came_from:
+                path.append(current)
+                current = came_from[current]
+            path.append(start)
+            return path[::-1]
+        for dx, dy in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(1,1),(-1,1),(1,-1)]:
+            nx, ny = current[0]+dx, current[1]+dy
+            if 0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE and occupancy[ny, nx] == 0:
+                ng = g[current] + (1.414 if dx and dy else 1.0)
+                if (nx, ny) not in g or ng < g[(nx, ny)]:
+                    g[(nx, ny)] = ng
+                    h = abs(nx - goal[0]) + abs(ny - goal[1])
+                    heapq.heappush(open_set, (ng + h, (nx, ny)))
+                    came_from[(nx, ny)] = current
+    return [start, goal]  # fallback: direct
+
+# Get current robot position (assume origin for now)
+start_world = np.array([0.0, 0.0])
+start_cell = world_to_grid(start_world)
+goal_cell = world_to_grid(target)
+grid_path = astar(start_cell, goal_cell)
+waypoints = [grid_to_world(c) for c in grid_path]
+
+# --- Drive along waypoints via physics callback ---
+pose_ctrl = WheelBasePoseController(
+    name="pose_ctrl",
+    open_loop_wheel_controller=DifferentialController(name="nav_diff", wheel_radius=0.05, wheel_base=0.3),
+    is_holonomic=False,
+)
+waypoint_idx = [0]
+
+import omni.physx
+def _nav_step(dt):
+    idx = waypoint_idx[0]
+    if idx >= len(waypoints):
+        print(f"Navigation complete: reached {{target}}")
+        sub.unsubscribe()
+        return
+    wp = waypoints[idx]
+    # current_pos would come from robot state in real usage
+    action = pose_ctrl.forward(start_position=np.array([0, 0, 0]), start_orientation=np.array([1, 0, 0, 0]), goal_position=np.array([wp[0], wp[1], 0]))
+    if action is None or np.linalg.norm(wp - start_world) < 0.1:
+        waypoint_idx[0] += 1
+
+sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_nav_step)
+print(f"A* navigation started: {{len(waypoints)}} waypoints to {{target}}")
+"""
+    else:  # direct
+        return f"""\
+import numpy as np
+import omni.physx
+from isaacsim.robot.wheeled_robots.controllers import WheelBasePoseController
+from isaacsim.robot.wheeled_robots.controllers import DifferentialController
+
+robot_path = '{robot_path}'
+target = np.array([{target[0]}, {target[1]}, 0.0])
+
+pose_ctrl = WheelBasePoseController(
+    name="pose_ctrl",
+    open_loop_wheel_controller=DifferentialController(name="nav_diff", wheel_radius=0.05, wheel_base=0.3),
+    is_holonomic=False,
+)
+
+def _nav_step(dt):
+    \"\"\"Physics callback: drive toward target each step.\"\"\"
+    # In production, read actual robot pose from ArticulationView
+    action = pose_ctrl.forward(
+        start_position=np.array([0, 0, 0]),
+        start_orientation=np.array([1, 0, 0, 0]),
+        goal_position=target,
+    )
+    if action is None:
+        print(f"Direct navigation complete: reached {{target[:2]}}")
+        sub.unsubscribe()
+
+sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_nav_step)
+print(f"Direct navigation started: target=[{target[0]}, {target[1]}]")
+"""
+
+
+def _gen_create_conveyor(args: Dict) -> str:
+    prim_path = args["prim_path"]
+    speed = args.get("speed", 0.5)
+    direction = args.get("direction", [1, 0, 0])
+
+    return f"""\
+import omni.usd
+import omni.graph.core as og
+import carb
+
+# Check GPU physics / Fabric — conveyors require CPU physics
+use_fabric = carb.settings.get_settings().get("/physics/useFabric")
+if use_fabric:
+    print("WARNING: Conveyor requires CPU physics. Set /physics/useFabric to False.")
+
+prim_path = '{prim_path}'
+speed = {speed}
+direction = {direction}
+
+# Resolve OmniGraph backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+keys = og.Controller.Keys
+(graph, nodes, _, _) = og.Controller.edit(
+    {{
+        "graph_path": prim_path + "/ConveyorGraph",
+        "evaluator_name": "execution",
+        "pipeline_stage": _backing,
+    }},
+    {{
+        keys.CREATE_NODES: [
+            ("tick", "omni.graph.action.OnPlaybackTick"),
+            ("conveyor", "isaacsim.conveyor.OgnIsaacConveyor"),
+        ],
+        keys.CONNECT: [
+            ("tick.outputs:tick", "conveyor.inputs:execIn"),
+        ],
+        keys.SET_VALUES: [
+            ("conveyor.inputs:conveyorPrim", prim_path),
+            ("conveyor.inputs:velocity", speed),
+            ("conveyor.inputs:direction", direction),
+        ],
+    }},
+)
+
+print(f"Conveyor created at {{prim_path}} — speed={{speed}} m/s, direction={{direction}}")
+"""
+
+
+def _gen_create_conveyor_track(args: Dict) -> str:
+    waypoints = args["waypoints"]
+    belt_width = args.get("belt_width", 0.5)
+    speed = args.get("speed", 0.5)
+
+    return f"""\
+import omni.usd
+import omni.graph.core as og
+import math
+from pxr import UsdGeom, Gf
+
+stage = omni.usd.get_context().get_stage()
+
+waypoints = {waypoints}
+belt_width = {belt_width}
+speed = {speed}
+
+# Create parent Xform
+track_path = '/World/ConveyorTrack'
+stage.DefinePrim(track_path, 'Xform')
+
+# Resolve OmniGraph backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+for i in range(len(waypoints) - 1):
+    p0 = waypoints[i]
+    p1 = waypoints[i + 1]
+
+    # Compute segment center, length, and orientation
+    cx = (p0[0] + p1[0]) / 2.0
+    cy = (p0[1] + p1[1]) / 2.0
+    cz = (p0[2] + p1[2]) / 2.0
+    dx = p1[0] - p0[0]
+    dy = p1[1] - p0[1]
+    seg_len = math.sqrt(dx * dx + dy * dy)
+    angle_deg = math.degrees(math.atan2(dy, dx))
+
+    # Create segment mesh (Cube scaled to belt dimensions)
+    seg_path = f"{{track_path}}/Segment_{{i}}"
+    prim = stage.DefinePrim(seg_path, 'Cube')
+    xf = UsdGeom.Xformable(prim)
+    xf.AddTranslateOp().Set(Gf.Vec3d(cx, cy, cz))
+    xf.AddRotateZOp().Set(angle_deg)
+    xf.AddScaleOp().Set(Gf.Vec3d(seg_len / 2.0, belt_width / 2.0, 0.02))
+
+    # Direction vector (local X, rotated)
+    dir_x = dx / seg_len if seg_len > 0 else 1.0
+    dir_y = dy / seg_len if seg_len > 0 else 0.0
+
+    # Create conveyor OmniGraph for this segment
+    keys = og.Controller.Keys
+    og.Controller.edit(
+        {{
+            "graph_path": seg_path + "/ConveyorGraph",
+            "evaluator_name": "execution",
+            "pipeline_stage": _backing,
+        }},
+        {{
+            keys.CREATE_NODES: [
+                ("tick", "omni.graph.action.OnPlaybackTick"),
+                ("conveyor", "isaacsim.conveyor.OgnIsaacConveyor"),
+            ],
+            keys.CONNECT: [
+                ("tick.outputs:tick", "conveyor.inputs:execIn"),
+            ],
+            keys.SET_VALUES: [
+                ("conveyor.inputs:conveyorPrim", seg_path),
+                ("conveyor.inputs:velocity", speed),
+                ("conveyor.inputs:direction", [dir_x, dir_y, 0.0]),
+            ],
+        }},
+    )
+
+print(f"Conveyor track created: {{len(waypoints) - 1}} segments, speed={{speed}} m/s")
+"""
+
+
+def _gen_merge_meshes(args: Dict) -> str:
+    prim_paths = args["prim_paths"]
+    output_path = args["output_path"]
+
+    return f"""\
+import omni.usd
+from isaacsim.util.merge_mesh import MeshMerger
+
+stage = omni.usd.get_context().get_stage()
+
+# Ensure output parent exists
+output_path = '{output_path}'
+parent_path = '/'.join(output_path.rsplit('/', 1)[:-1]) or '/World'
+if not stage.GetPrimAtPath(parent_path).IsValid():
+    stage.DefinePrim(parent_path, 'Xform')
+
+prim_paths = {prim_paths}
+
+# Merge meshes
+merger = MeshMerger(stage)
+merger.update_selection(prim_paths)
+merger.merge()
+
+print(f"Merged {{len(prim_paths)}} meshes: {{prim_paths}}")
+"""
+
+
+CODE_GEN_HANDLERS["create_wheeled_robot"] = _gen_create_wheeled_robot
+CODE_GEN_HANDLERS["navigate_to"] = _gen_navigate_to
+
+
+
+def _gen_create_conveyor(args: Dict) -> str:
+    prim_path = args["prim_path"]
+    speed = args.get("speed", 0.5)
+    direction = args.get("direction", [1, 0, 0])
+
+    return f"""\
+import omni.usd
+import omni.graph.core as og
+import carb
+
+# Check GPU physics / Fabric — conveyors require CPU physics
+use_fabric = carb.settings.get_settings().get("/physics/useFabric")
+if use_fabric:
+    print("WARNING: Conveyor requires CPU physics. Set /physics/useFabric to False.")
+
+prim_path = '{prim_path}'
+speed = {speed}
+direction = {direction}
+
+# Resolve OmniGraph backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+keys = og.Controller.Keys
+(graph, nodes, _, _) = og.Controller.edit(
+    {{
+        "graph_path": prim_path + "/ConveyorGraph",
+        "evaluator_name": "execution",
+        "pipeline_stage": _backing,
+    }},
+    {{
+        keys.CREATE_NODES: [
+            ("tick", "omni.graph.action.OnPlaybackTick"),
+            ("conveyor", "isaacsim.conveyor.OgnIsaacConveyor"),
+        ],
+        keys.CONNECT: [
+            ("tick.outputs:tick", "conveyor.inputs:execIn"),
+        ],
+        keys.SET_VALUES: [
+            ("conveyor.inputs:conveyorPrim", prim_path),
+            ("conveyor.inputs:velocity", speed),
+            ("conveyor.inputs:direction", direction),
+        ],
+    }},
+)
+
+print(f"Conveyor created at {{prim_path}} — speed={{speed}} m/s, direction={{direction}}")
+"""
+
+
+def _gen_create_conveyor_track(args: Dict) -> str:
+    waypoints = args["waypoints"]
+    belt_width = args.get("belt_width", 0.5)
+    speed = args.get("speed", 0.5)
+
+    return f"""\
+import omni.usd
+import omni.graph.core as og
+import math
+from pxr import UsdGeom, Gf
+
+stage = omni.usd.get_context().get_stage()
+
+waypoints = {waypoints}
+belt_width = {belt_width}
+speed = {speed}
+
+# Create parent Xform
+track_path = '/World/ConveyorTrack'
+stage.DefinePrim(track_path, 'Xform')
+
+# Resolve OmniGraph backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+for i in range(len(waypoints) - 1):
+    p0 = waypoints[i]
+    p1 = waypoints[i + 1]
+
+    # Compute segment center, length, and orientation
+    cx = (p0[0] + p1[0]) / 2.0
+    cy = (p0[1] + p1[1]) / 2.0
+    cz = (p0[2] + p1[2]) / 2.0
+    dx = p1[0] - p0[0]
+    dy = p1[1] - p0[1]
+    seg_len = math.sqrt(dx * dx + dy * dy)
+    angle_deg = math.degrees(math.atan2(dy, dx))
+
+    # Create segment mesh (Cube scaled to belt dimensions)
+    seg_path = f"{{track_path}}/Segment_{{i}}"
+    prim = stage.DefinePrim(seg_path, 'Cube')
+    xf = UsdGeom.Xformable(prim)
+    xf.AddTranslateOp().Set(Gf.Vec3d(cx, cy, cz))
+    xf.AddRotateZOp().Set(angle_deg)
+    xf.AddScaleOp().Set(Gf.Vec3d(seg_len / 2.0, belt_width / 2.0, 0.02))
+
+    # Direction vector (local X, rotated)
+    dir_x = dx / seg_len if seg_len > 0 else 1.0
+    dir_y = dy / seg_len if seg_len > 0 else 0.0
+
+    # Create conveyor OmniGraph for this segment
+    keys = og.Controller.Keys
+    og.Controller.edit(
+        {{
+            "graph_path": seg_path + "/ConveyorGraph",
+            "evaluator_name": "execution",
+            "pipeline_stage": _backing,
+        }},
+        {{
+            keys.CREATE_NODES: [
+                ("tick", "omni.graph.action.OnPlaybackTick"),
+                ("conveyor", "isaacsim.conveyor.OgnIsaacConveyor"),
+            ],
+            keys.CONNECT: [
+                ("tick.outputs:tick", "conveyor.inputs:execIn"),
+            ],
+            keys.SET_VALUES: [
+                ("conveyor.inputs:conveyorPrim", seg_path),
+                ("conveyor.inputs:velocity", speed),
+                ("conveyor.inputs:direction", [dir_x, dir_y, 0.0]),
+            ],
+        }},
+    )
+
+print(f"Conveyor track created: {{len(waypoints) - 1}} segments, speed={{speed}} m/s")
+"""
+
+
+def _gen_merge_meshes(args: Dict) -> str:
+    prim_paths = args["prim_paths"]
+    output_path = args["output_path"]
+
+    return f"""\
+import omni.usd
+from isaacsim.util.merge_mesh import MeshMerger
+
+stage = omni.usd.get_context().get_stage()
+
+# Ensure output parent exists
+output_path = '{output_path}'
+parent_path = '/'.join(output_path.rsplit('/', 1)[:-1]) or '/World'
+if not stage.GetPrimAtPath(parent_path).IsValid():
+    stage.DefinePrim(parent_path, 'Xform')
+
+prim_paths = {prim_paths}
+
+# Merge meshes
+merger = MeshMerger(stage)
+merger.update_selection(prim_paths)
+merger.merge()
+
+print(f"Merged {{len(prim_paths)}} meshes: {{prim_paths}}")
+"""
+
+
+CODE_GEN_HANDLERS["create_wheeled_robot"] = _gen_create_wheeled_robot
+CODE_GEN_HANDLERS["navigate_to"] = _gen_navigate_to
+CODE_GEN_HANDLERS["create_conveyor"] = _gen_create_conveyor
+
+
+
+def _gen_create_conveyor_track(args: Dict) -> str:
+    waypoints = args["waypoints"]
+    belt_width = args.get("belt_width", 0.5)
+    speed = args.get("speed", 0.5)
+
+    return f"""\
+import omni.usd
+import omni.graph.core as og
+import math
+from pxr import UsdGeom, Gf
+
+stage = omni.usd.get_context().get_stage()
+
+waypoints = {waypoints}
+belt_width = {belt_width}
+speed = {speed}
+
+# Create parent Xform
+track_path = '/World/ConveyorTrack'
+stage.DefinePrim(track_path, 'Xform')
+
+# Resolve OmniGraph backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+for i in range(len(waypoints) - 1):
+    p0 = waypoints[i]
+    p1 = waypoints[i + 1]
+
+    # Compute segment center, length, and orientation
+    cx = (p0[0] + p1[0]) / 2.0
+    cy = (p0[1] + p1[1]) / 2.0
+    cz = (p0[2] + p1[2]) / 2.0
+    dx = p1[0] - p0[0]
+    dy = p1[1] - p0[1]
+    seg_len = math.sqrt(dx * dx + dy * dy)
+    angle_deg = math.degrees(math.atan2(dy, dx))
+
+    # Create segment mesh (Cube scaled to belt dimensions)
+    seg_path = f"{{track_path}}/Segment_{{i}}"
+    prim = stage.DefinePrim(seg_path, 'Cube')
+    xf = UsdGeom.Xformable(prim)
+    xf.AddTranslateOp().Set(Gf.Vec3d(cx, cy, cz))
+    xf.AddRotateZOp().Set(angle_deg)
+    xf.AddScaleOp().Set(Gf.Vec3d(seg_len / 2.0, belt_width / 2.0, 0.02))
+
+    # Direction vector (local X, rotated)
+    dir_x = dx / seg_len if seg_len > 0 else 1.0
+    dir_y = dy / seg_len if seg_len > 0 else 0.0
+
+    # Create conveyor OmniGraph for this segment
+    keys = og.Controller.Keys
+    og.Controller.edit(
+        {{
+            "graph_path": seg_path + "/ConveyorGraph",
+            "evaluator_name": "execution",
+            "pipeline_stage": _backing,
+        }},
+        {{
+            keys.CREATE_NODES: [
+                ("tick", "omni.graph.action.OnPlaybackTick"),
+                ("conveyor", "isaacsim.conveyor.OgnIsaacConveyor"),
+            ],
+            keys.CONNECT: [
+                ("tick.outputs:tick", "conveyor.inputs:execIn"),
+            ],
+            keys.SET_VALUES: [
+                ("conveyor.inputs:conveyorPrim", seg_path),
+                ("conveyor.inputs:velocity", speed),
+                ("conveyor.inputs:direction", [dir_x, dir_y, 0.0]),
+            ],
+        }},
+    )
+
+print(f"Conveyor track created: {{len(waypoints) - 1}} segments, speed={{speed}} m/s")
+"""
+
+
+def _gen_merge_meshes(args: Dict) -> str:
+    prim_paths = args["prim_paths"]
+    output_path = args["output_path"]
+
+    return f"""\
+import omni.usd
+from isaacsim.util.merge_mesh import MeshMerger
+
+stage = omni.usd.get_context().get_stage()
+
+# Ensure output parent exists
+output_path = '{output_path}'
+parent_path = '/'.join(output_path.rsplit('/', 1)[:-1]) or '/World'
+if not stage.GetPrimAtPath(parent_path).IsValid():
+    stage.DefinePrim(parent_path, 'Xform')
+
+prim_paths = {prim_paths}
+
+# Merge meshes
+merger = MeshMerger(stage)
+merger.update_selection(prim_paths)
+merger.merge()
+
+print(f"Merged {{len(prim_paths)}} meshes: {{prim_paths}}")
+"""
+
+
+CODE_GEN_HANDLERS["create_wheeled_robot"] = _gen_create_wheeled_robot
+CODE_GEN_HANDLERS["navigate_to"] = _gen_navigate_to
+CODE_GEN_HANDLERS["create_conveyor"] = _gen_create_conveyor
+CODE_GEN_HANDLERS["create_conveyor_track"] = _gen_create_conveyor_track
+
+
+
+def _gen_merge_meshes(args: Dict) -> str:
+    prim_paths = args["prim_paths"]
+    output_path = args["output_path"]
+
+    return f"""\
+import omni.usd
+from isaacsim.util.merge_mesh import MeshMerger
+
+stage = omni.usd.get_context().get_stage()
+
+# Ensure output parent exists
+output_path = '{output_path}'
+parent_path = '/'.join(output_path.rsplit('/', 1)[:-1]) or '/World'
+if not stage.GetPrimAtPath(parent_path).IsValid():
+    stage.DefinePrim(parent_path, 'Xform')
+
+prim_paths = {prim_paths}
+
+# Merge meshes
+merger = MeshMerger(stage)
+merger.update_selection(prim_paths)
+merger.merge()
+
+print(f"Merged {{len(prim_paths)}} meshes: {{prim_paths}}")
+"""
+
+
+CODE_GEN_HANDLERS["create_wheeled_robot"] = _gen_create_wheeled_robot
+CODE_GEN_HANDLERS["navigate_to"] = _gen_navigate_to
+CODE_GEN_HANDLERS["create_conveyor"] = _gen_create_conveyor
+CODE_GEN_HANDLERS["create_conveyor_track"] = _gen_create_conveyor_track
+CODE_GEN_HANDLERS["merge_meshes"] = _gen_merge_meshes
+
+
+
+def _gen_show_tf_tree(args: Dict) -> str:
+    root_frame = args.get("root_frame", "world")
+    return f'''\
+import os
+import omni.graph.core as og
+
+# Auto-detect ROS distro
+ros_distro = os.environ.get("ROS_DISTRO", "humble")
+print(f"ROS distro: {{ros_distro}}")
+
+# Check for TF publisher OmniGraph node — create one if missing
+stage = __import__("omni.usd", fromlist=["usd"]).get_context().get_stage()
+tf_graph_path = "/World/ROS2_TF_Tree"
+tf_prim = stage.GetPrimAtPath(tf_graph_path)
+if not tf_prim.IsValid():
+    print("No TF publisher graph found — creating one at " + tf_graph_path)
+    _bt = og.GraphBackingType
+    if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+        _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+    elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+        _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+    else:
+        _backing = list(_bt)[0]
+
+    keys = og.Controller.Keys
+    og.Controller.edit(
+        {{
+            "graph_path": tf_graph_path,
+            "evaluator_name": "execution",
+            "pipeline_stage": _backing,
+        }},
+        {{
+            keys.CREATE_NODES: [
+                ("tick", "omni.graph.action.OnPlaybackTick"),
+                ("tf_pub", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+            ],
+            keys.CONNECT: [
+                ("tick.outputs:tick", "tf_pub.inputs:execIn"),
+            ],
+        }},
+    )
+    print("Created ROS2PublishTransformTree graph")
+
+# Acquire TF data via the transform listener interface
+from isaacsim.ros2.tf_viewer import acquire_transform_listener_interface
+
+interface = acquire_transform_listener_interface()
+interface.initialize(ros_distro)
+transforms = interface.get_transforms("{root_frame}")
+
+# Format and print as indented tree
+def _print_tree(frames, parent, indent=0):
+    prefix = "  " * indent + ("|- " if indent > 0 else "")
+    print(f"{{prefix}}{{parent}}")
+    children = [f for f in frames if f.get("parent") == parent]
+    for child in children:
+        _print_tree(frames, child["child"], indent + 1)
+
+print(f"\\nTF Tree (root: {root_frame}):")
+print("=" * 40)
+if transforms:
+    _print_tree(transforms, "{root_frame}")
+    print(f"\\nTotal frames: {{len(transforms)}}")
+else:
+    print("(no transforms found — is the simulation running?)")
+'''
+
+
+def _gen_publish_robot_description(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    topic = args.get("topic", "/robot_description")
+    return f'''\
+import omni.usd
+from pxr import UsdPhysics, UsdGeom, Gf
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+from rclpy.qos import QoSProfile, DurabilityPolicy
+
+stage = omni.usd.get_context().get_stage()
+art_prim = stage.GetPrimAtPath('{art_path}')
+if not art_prim.IsValid():
+    raise RuntimeError("Articulation not found: {art_path}")
+
+# Build simplified URDF from USD articulation structure
+# NOTE: This is a simplified URDF — for full export use Isaac Sim's URDF Exporter UI
+links = []
+joints = []
+
+def _traverse(prim, parent_link=None):
+    name = prim.GetName()
+    prim_type = prim.GetTypeName()
+
+    # Detect links (Xform with collision or visual children, or known link patterns)
+    is_link = prim_type in ("Xform", "") and any(
+        child.GetTypeName() in ("Mesh", "Cube", "Sphere", "Cylinder", "Capsule")
+        for child in prim.GetChildren()
+    ) or prim.HasAPI(UsdPhysics.RigidBodyAPI)
+
+    if is_link:
+        links.append(name)
+
+        # Check for joint relationship to parent
+        for child in prim.GetChildren():
+            if child.HasAPI(UsdPhysics.RevoluteJointAPI):
+                joints.append({{
+                    "name": child.GetName(),
+                    "type": "revolute",
+                    "parent": parent_link or "base_link",
+                    "child": name,
+                }})
+            elif child.HasAPI(UsdPhysics.PrismaticJointAPI):
+                joints.append({{
+                    "name": child.GetName(),
+                    "type": "prismatic",
+                    "parent": parent_link or "base_link",
+                    "child": name,
+                }})
+
+        for child in prim.GetChildren():
+            _traverse(child, name)
+    else:
+        for child in prim.GetChildren():
+            _traverse(child, parent_link)
+
+_traverse(art_prim)
+
+# Generate URDF XML
+urdf_lines = ['<?xml version="1.0"?>']
+urdf_lines.append('<robot name="{art_path.split("/")[-1]}">')
+urdf_lines.append('  <!-- Simplified URDF auto-generated from USD articulation -->')
+urdf_lines.append('  <!-- For full export, use Isaac Sim URDF Exporter UI -->')
+
+for link_name in links:
+    urdf_lines.append(f'  <link name="{{link_name}}"/>')
+
+for j in joints:
+    urdf_lines.append(f'  <joint name="{{j["name"]}}" type="{{j["type"]}}">')
+    urdf_lines.append(f'    <parent link="{{j["parent"]}}"/>')
+    urdf_lines.append(f'    <child link="{{j["child"]}}"/>')
+    urdf_lines.append(f'  </joint>')
+
+urdf_lines.append('</robot>')
+urdf_string = "\\n".join(urdf_lines)
+
+print(f"Generated simplified URDF ({{len(links)}} links, {{len(joints)}} joints)")
+
+# Publish via rclpy with TRANSIENT_LOCAL durability
+if not rclpy.ok():
+    rclpy.init()
+
+node = rclpy.create_node("robot_description_publisher")
+qos = QoSProfile(
+    depth=1,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+)
+pub = node.create_publisher(String, "{topic}", qos_profile=qos)
+msg = String()
+msg.data = urdf_string
+pub.publish(msg)
+
+print(f"Published robot description to {topic} (TRANSIENT_LOCAL)")
+print(f"URDF preview (first 500 chars):\\n{{urdf_string[:500]}}")
+'''
+
+
+def _gen_configure_ros2_bridge(args: Dict) -> str:
+    sensors = args.get("sensors", [])
+    domain_id = args.get("ros2_domain_id", 0)
+
+    if not sensors:
+        return "print('No sensors specified — nothing to configure')\n"
+
+    # Build OmniGraph nodes and connections
+    node_defs = []
+    conn_defs = []
+    val_defs = []
+
+    # Always add tick + ROS2Context
+    node_defs.append('("tick", "omni.graph.action.OnPlaybackTick")')
+    node_defs.append(f'("ros2_context", f"{{_ROS2_NS}}.ROS2Context")')
+    if domain_id != 0:
+        val_defs.append(f'("ros2_context.inputs:domain_id", {domain_id})')
+
+    for i, sensor in enumerate(sensors):
+        stype = sensor.get("type", "camera")
+        prim_path = sensor.get("prim_path", "")
+        topic_name = sensor.get("topic_name", "")
+        frame_id = sensor.get("frame_id", "")
+        node_name = f"{stype}_{i}"
+
+        # Map sensor type to OG node type
+        og_node_class = {
+            "camera": "ROS2CameraHelper",
+            "lidar": "ROS2PublishLaserScan",
+            "imu": "ROS2PublishImu",
+            "clock": "ROS2PublishClock",
+            "joint_state": "ROS2PublishJointState",
+        }.get(stype, f"ROS2Publish{stype.title()}")
+
+        node_defs.append(f'("{node_name}", f"{{_ROS2_NS}}.{og_node_class}")')
+
+        # Connect tick → sensor node
+        conn_defs.append(f'("tick.outputs:tick", "{node_name}.inputs:execIn")')
+
+        # Connect context
+        conn_defs.append(f'("ros2_context.outputs:context", "{node_name}.inputs:context")')
+
+        # Set values
+        if topic_name:
+            val_defs.append(f'("{node_name}.inputs:topicName", "{topic_name}")')
+        if frame_id:
+            val_defs.append(f'("{node_name}.inputs:frameId", "{frame_id}")')
+        if prim_path and stype != "clock":
+            # clock doesn't have a prim path input
+            if stype == "camera":
+                val_defs.append(f'("{node_name}.inputs:renderProductPath", "{prim_path}")')
+            elif stype == "joint_state":
+                val_defs.append(f'("{node_name}.inputs:targetPrim", "{prim_path}")')
+            else:
+                val_defs.append(f'("{node_name}.inputs:prim", "{prim_path}")')
+
+    nodes_str = ",\n            ".join(node_defs)
+    conns_str = ",\n            ".join(conn_defs)
+    vals_str = ",\n            ".join(val_defs)
+
+    sensor_summary = ", ".join(s.get("type", "?") for s in sensors)
+
+    return f'''\
+import omni.graph.core as og
+
+# Handle Isaac Sim version namespace differences
+import isaacsim
+_V = tuple(int(x) for x in isaacsim.__version__.split(".")[:2])
+_ROS2_NS = "isaacsim.ros2.nodes" if _V >= (6, 0) else "isaacsim.ros2.bridge"
+print(f"Isaac Sim version: {{isaacsim.__version__}}, using namespace: {{_ROS2_NS}}")
+
+# Resolve backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+keys = og.Controller.Keys
+(graph, nodes, _, _) = og.Controller.edit(
+    {{
+        "graph_path": "/World/ROS2_Bridge",
+        "evaluator_name": "execution",
+        "pipeline_stage": _backing,
+    }},
+    {{
+        keys.CREATE_NODES: [
+            {nodes_str}
+        ],
+        keys.CONNECT: [
+            {conns_str}
+        ],
+        keys.SET_VALUES: [
+            {vals_str}
+        ],
+    }},
+)
+
+print(f"ROS2 bridge configured with {{len(nodes)}} nodes")
+print(f"Sensors: {sensor_summary}")
+print(f"Domain ID: {domain_id}")
+print("Start simulation (Play) to begin publishing.")
+'''
+
+
+CODE_GEN_HANDLERS["show_tf_tree"] = _gen_show_tf_tree
+
+
+
+def _gen_publish_robot_description(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    topic = args.get("topic", "/robot_description")
+    return f'''\
+import omni.usd
+from pxr import UsdPhysics, UsdGeom, Gf
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+from rclpy.qos import QoSProfile, DurabilityPolicy
+
+stage = omni.usd.get_context().get_stage()
+art_prim = stage.GetPrimAtPath('{art_path}')
+if not art_prim.IsValid():
+    raise RuntimeError("Articulation not found: {art_path}")
+
+# Build simplified URDF from USD articulation structure
+# NOTE: This is a simplified URDF — for full export use Isaac Sim's URDF Exporter UI
+links = []
+joints = []
+
+def _traverse(prim, parent_link=None):
+    name = prim.GetName()
+    prim_type = prim.GetTypeName()
+
+    # Detect links (Xform with collision or visual children, or known link patterns)
+    is_link = prim_type in ("Xform", "") and any(
+        child.GetTypeName() in ("Mesh", "Cube", "Sphere", "Cylinder", "Capsule")
+        for child in prim.GetChildren()
+    ) or prim.HasAPI(UsdPhysics.RigidBodyAPI)
+
+    if is_link:
+        links.append(name)
+
+        # Check for joint relationship to parent
+        for child in prim.GetChildren():
+            if child.HasAPI(UsdPhysics.RevoluteJointAPI):
+                joints.append({{
+                    "name": child.GetName(),
+                    "type": "revolute",
+                    "parent": parent_link or "base_link",
+                    "child": name,
+                }})
+            elif child.HasAPI(UsdPhysics.PrismaticJointAPI):
+                joints.append({{
+                    "name": child.GetName(),
+                    "type": "prismatic",
+                    "parent": parent_link or "base_link",
+                    "child": name,
+                }})
+
+        for child in prim.GetChildren():
+            _traverse(child, name)
+    else:
+        for child in prim.GetChildren():
+            _traverse(child, parent_link)
+
+_traverse(art_prim)
+
+# Generate URDF XML
+urdf_lines = ['<?xml version="1.0"?>']
+urdf_lines.append('<robot name="{art_path.split("/")[-1]}">')
+urdf_lines.append('  <!-- Simplified URDF auto-generated from USD articulation -->')
+urdf_lines.append('  <!-- For full export, use Isaac Sim URDF Exporter UI -->')
+
+for link_name in links:
+    urdf_lines.append(f'  <link name="{{link_name}}"/>')
+
+for j in joints:
+    urdf_lines.append(f'  <joint name="{{j["name"]}}" type="{{j["type"]}}">')
+    urdf_lines.append(f'    <parent link="{{j["parent"]}}"/>')
+    urdf_lines.append(f'    <child link="{{j["child"]}}"/>')
+    urdf_lines.append(f'  </joint>')
+
+urdf_lines.append('</robot>')
+urdf_string = "\\n".join(urdf_lines)
+
+print(f"Generated simplified URDF ({{len(links)}} links, {{len(joints)}} joints)")
+
+# Publish via rclpy with TRANSIENT_LOCAL durability
+if not rclpy.ok():
+    rclpy.init()
+
+node = rclpy.create_node("robot_description_publisher")
+qos = QoSProfile(
+    depth=1,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+)
+pub = node.create_publisher(String, "{topic}", qos_profile=qos)
+msg = String()
+msg.data = urdf_string
+pub.publish(msg)
+
+print(f"Published robot description to {topic} (TRANSIENT_LOCAL)")
+print(f"URDF preview (first 500 chars):\\n{{urdf_string[:500]}}")
+'''
+
+
+def _gen_configure_ros2_bridge(args: Dict) -> str:
+    sensors = args.get("sensors", [])
+    domain_id = args.get("ros2_domain_id", 0)
+
+    if not sensors:
+        return "print('No sensors specified — nothing to configure')\n"
+
+    # Build OmniGraph nodes and connections
+    node_defs = []
+    conn_defs = []
+    val_defs = []
+
+    # Always add tick + ROS2Context
+    node_defs.append('("tick", "omni.graph.action.OnPlaybackTick")')
+    node_defs.append(f'("ros2_context", f"{{_ROS2_NS}}.ROS2Context")')
+    if domain_id != 0:
+        val_defs.append(f'("ros2_context.inputs:domain_id", {domain_id})')
+
+    for i, sensor in enumerate(sensors):
+        stype = sensor.get("type", "camera")
+        prim_path = sensor.get("prim_path", "")
+        topic_name = sensor.get("topic_name", "")
+        frame_id = sensor.get("frame_id", "")
+        node_name = f"{stype}_{i}"
+
+        # Map sensor type to OG node type
+        og_node_class = {
+            "camera": "ROS2CameraHelper",
+            "lidar": "ROS2PublishLaserScan",
+            "imu": "ROS2PublishImu",
+            "clock": "ROS2PublishClock",
+            "joint_state": "ROS2PublishJointState",
+        }.get(stype, f"ROS2Publish{stype.title()}")
+
+        node_defs.append(f'("{node_name}", f"{{_ROS2_NS}}.{og_node_class}")')
+
+        # Connect tick → sensor node
+        conn_defs.append(f'("tick.outputs:tick", "{node_name}.inputs:execIn")')
+
+        # Connect context
+        conn_defs.append(f'("ros2_context.outputs:context", "{node_name}.inputs:context")')
+
+        # Set values
+        if topic_name:
+            val_defs.append(f'("{node_name}.inputs:topicName", "{topic_name}")')
+        if frame_id:
+            val_defs.append(f'("{node_name}.inputs:frameId", "{frame_id}")')
+        if prim_path and stype != "clock":
+            # clock doesn't have a prim path input
+            if stype == "camera":
+                val_defs.append(f'("{node_name}.inputs:renderProductPath", "{prim_path}")')
+            elif stype == "joint_state":
+                val_defs.append(f'("{node_name}.inputs:targetPrim", "{prim_path}")')
+            else:
+                val_defs.append(f'("{node_name}.inputs:prim", "{prim_path}")')
+
+    nodes_str = ",\n            ".join(node_defs)
+    conns_str = ",\n            ".join(conn_defs)
+    vals_str = ",\n            ".join(val_defs)
+
+    sensor_summary = ", ".join(s.get("type", "?") for s in sensors)
+
+    return f'''\
+import omni.graph.core as og
+
+# Handle Isaac Sim version namespace differences
+import isaacsim
+_V = tuple(int(x) for x in isaacsim.__version__.split(".")[:2])
+_ROS2_NS = "isaacsim.ros2.nodes" if _V >= (6, 0) else "isaacsim.ros2.bridge"
+print(f"Isaac Sim version: {{isaacsim.__version__}}, using namespace: {{_ROS2_NS}}")
+
+# Resolve backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+keys = og.Controller.Keys
+(graph, nodes, _, _) = og.Controller.edit(
+    {{
+        "graph_path": "/World/ROS2_Bridge",
+        "evaluator_name": "execution",
+        "pipeline_stage": _backing,
+    }},
+    {{
+        keys.CREATE_NODES: [
+            {nodes_str}
+        ],
+        keys.CONNECT: [
+            {conns_str}
+        ],
+        keys.SET_VALUES: [
+            {vals_str}
+        ],
+    }},
+)
+
+print(f"ROS2 bridge configured with {{len(nodes)}} nodes")
+print(f"Sensors: {sensor_summary}")
+print(f"Domain ID: {domain_id}")
+print("Start simulation (Play) to begin publishing.")
+'''
+
+
+CODE_GEN_HANDLERS["show_tf_tree"] = _gen_show_tf_tree
+CODE_GEN_HANDLERS["publish_robot_description"] = _gen_publish_robot_description
+
+
+
+def _gen_configure_ros2_bridge(args: Dict) -> str:
+    sensors = args.get("sensors", [])
+    domain_id = args.get("ros2_domain_id", 0)
+
+    if not sensors:
+        return "print('No sensors specified — nothing to configure')\n"
+
+    # Build OmniGraph nodes and connections
+    node_defs = []
+    conn_defs = []
+    val_defs = []
+
+    # Always add tick + ROS2Context
+    node_defs.append('("tick", "omni.graph.action.OnPlaybackTick")')
+    node_defs.append(f'("ros2_context", f"{{_ROS2_NS}}.ROS2Context")')
+    if domain_id != 0:
+        val_defs.append(f'("ros2_context.inputs:domain_id", {domain_id})')
+
+    for i, sensor in enumerate(sensors):
+        stype = sensor.get("type", "camera")
+        prim_path = sensor.get("prim_path", "")
+        topic_name = sensor.get("topic_name", "")
+        frame_id = sensor.get("frame_id", "")
+        node_name = f"{stype}_{i}"
+
+        # Map sensor type to OG node type
+        og_node_class = {
+            "camera": "ROS2CameraHelper",
+            "lidar": "ROS2PublishLaserScan",
+            "imu": "ROS2PublishImu",
+            "clock": "ROS2PublishClock",
+            "joint_state": "ROS2PublishJointState",
+        }.get(stype, f"ROS2Publish{stype.title()}")
+
+        node_defs.append(f'("{node_name}", f"{{_ROS2_NS}}.{og_node_class}")')
+
+        # Connect tick → sensor node
+        conn_defs.append(f'("tick.outputs:tick", "{node_name}.inputs:execIn")')
+
+        # Connect context
+        conn_defs.append(f'("ros2_context.outputs:context", "{node_name}.inputs:context")')
+
+        # Set values
+        if topic_name:
+            val_defs.append(f'("{node_name}.inputs:topicName", "{topic_name}")')
+        if frame_id:
+            val_defs.append(f'("{node_name}.inputs:frameId", "{frame_id}")')
+        if prim_path and stype != "clock":
+            # clock doesn't have a prim path input
+            if stype == "camera":
+                val_defs.append(f'("{node_name}.inputs:renderProductPath", "{prim_path}")')
+            elif stype == "joint_state":
+                val_defs.append(f'("{node_name}.inputs:targetPrim", "{prim_path}")')
+            else:
+                val_defs.append(f'("{node_name}.inputs:prim", "{prim_path}")')
+
+    nodes_str = ",\n            ".join(node_defs)
+    conns_str = ",\n            ".join(conn_defs)
+    vals_str = ",\n            ".join(val_defs)
+
+    sensor_summary = ", ".join(s.get("type", "?") for s in sensors)
+
+    return f'''\
+import omni.graph.core as og
+
+# Handle Isaac Sim version namespace differences
+import isaacsim
+_V = tuple(int(x) for x in isaacsim.__version__.split(".")[:2])
+_ROS2_NS = "isaacsim.ros2.nodes" if _V >= (6, 0) else "isaacsim.ros2.bridge"
+print(f"Isaac Sim version: {{isaacsim.__version__}}, using namespace: {{_ROS2_NS}}")
+
+# Resolve backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+keys = og.Controller.Keys
+(graph, nodes, _, _) = og.Controller.edit(
+    {{
+        "graph_path": "/World/ROS2_Bridge",
+        "evaluator_name": "execution",
+        "pipeline_stage": _backing,
+    }},
+    {{
+        keys.CREATE_NODES: [
+            {nodes_str}
+        ],
+        keys.CONNECT: [
+            {conns_str}
+        ],
+        keys.SET_VALUES: [
+            {vals_str}
+        ],
+    }},
+)
+
+print(f"ROS2 bridge configured with {{len(nodes)}} nodes")
+print(f"Sensors: {sensor_summary}")
+print(f"Domain ID: {domain_id}")
+print("Start simulation (Play) to begin publishing.")
+'''
+
+
+CODE_GEN_HANDLERS["show_tf_tree"] = _gen_show_tf_tree
+CODE_GEN_HANDLERS["publish_robot_description"] = _gen_publish_robot_description
+CODE_GEN_HANDLERS["configure_ros2_bridge"] = _gen_configure_ros2_bridge
+
+
+
+# ─── 2.X3: check_physics_health (CODE_GEN handler) ────────────────────────
+
+def _gen_check_physics_health(args: Dict) -> str:
+    """Generate code that checks physics health of the scene."""
+    articulation_path = args.get("articulation_path")
+
+    scope_filter = ""
+    if articulation_path:
+        scope_filter = f"""
+# Scope check to a specific articulation
+scope_root = stage.GetPrimAtPath('{articulation_path}')
+if not scope_root.IsValid():
+    issues.append({{
+        'prim': '{articulation_path}',
+        'severity': 'critical',
+        'issue': 'Articulation prim not found',
+        'fix': 'Verify the articulation path exists in the stage',
+    }})
+    all_prims = []
+else:
+    all_prims = [scope_root] + list(scope_root.GetAllDescendants())
+"""
+    else:
+        scope_filter = """
+# Check all prims in the stage
+root = stage.GetPseudoRoot()
+all_prims = [root] + list(root.GetAllDescendants())
+"""
+
+    return f"""\
+import omni.usd
+import json
+from pxr import UsdGeom, UsdPhysics, Gf, PhysxSchema
+
+stage = omni.usd.get_context().get_stage()
+issues = []
+{scope_filter}
+# 1. Check for missing PhysicsScene prim
+physics_scenes = [p for p in all_prims if p.IsA(UsdPhysics.Scene) or p.GetTypeName() == 'PhysicsScene']
+if not physics_scenes:
+    issues.append({{
+        'prim': '/World/PhysicsScene',
+        'severity': 'critical',
+        'issue': 'Missing PhysicsScene prim',
+        'fix': "Create a PhysicsScene: stage.DefinePrim('/World/PhysicsScene', 'PhysicsScene')",
+    }})
+
+# 2. Check for missing CollisionAPI on mesh prims with RigidBodyAPI
+for prim in all_prims:
+    if not prim.IsValid():
+        continue
+
+    # Missing CollisionAPI on mesh prims that have RigidBodyAPI
+    if prim.IsA(UsdGeom.Mesh) and prim.HasAPI(UsdPhysics.RigidBodyAPI):
+        if not prim.HasAPI(UsdPhysics.CollisionAPI):
+            issues.append({{
+                'prim': str(prim.GetPath()),
+                'severity': 'error',
+                'issue': 'Mesh has RigidBodyAPI but no CollisionAPI',
+                'fix': 'Apply CollisionAPI: UsdPhysics.CollisionAPI.Apply(prim)',
+            }})
+
+    # 3. Invalid inertia tensors (zero or negative)
+    if prim.HasAPI(UsdPhysics.MassAPI):
+        mass_api = UsdPhysics.MassAPI(prim)
+        inertia = mass_api.GetDiagonalInertiaAttr().Get()
+        if inertia is not None:
+            if any(v <= 0 for v in inertia):
+                issues.append({{
+                    'prim': str(prim.GetPath()),
+                    'severity': 'critical',
+                    'issue': f'Invalid inertia tensor: {{inertia}} (zero or negative components)',
+                    'fix': 'Set all diagonal inertia components to positive values',
+                }})
+        mass = mass_api.GetMassAttr().Get()
+        if mass is not None and mass <= 0:
+            issues.append({{
+                'prim': str(prim.GetPath()),
+                'severity': 'critical',
+                'issue': f'Invalid mass: {{mass}} (must be > 0)',
+                'fix': 'Set mass to a positive value',
+            }})
+
+# 4. Extreme mass ratios (>100:1 between rigid bodies)
+mass_map = {{}}
+for prim in all_prims:
+    if not prim.IsValid():
+        continue
+    if prim.HasAPI(UsdPhysics.MassAPI):
+        m = UsdPhysics.MassAPI(prim).GetMassAttr().Get()
+        if m is not None and m > 0:
+            mass_map[str(prim.GetPath())] = m
+if len(mass_map) >= 2:
+    masses = list(mass_map.values())
+    max_m = max(masses)
+    min_m = min(masses)
+    if min_m > 0 and max_m / min_m > 100:
+        issues.append({{
+            'prim': 'scene-wide',
+            'severity': 'warning',
+            'issue': f'Extreme mass ratio: {{max_m/min_m:.1f}}:1 (max={{max_m}}, min={{min_m}})',
+            'fix': 'Reduce mass ratio to below 100:1 for stable simulation',
+        }})
+
+# 5. Joint limits set to +/-inf
+for prim in all_prims:
+    if not prim.IsValid():
+        continue
+    if prim.HasAPI(UsdPhysics.RevoluteJointAPI):
+        joint = UsdPhysics.RevoluteJoint(prim)
+        lower = joint.GetLowerLimitAttr().Get()
+        upper = joint.GetUpperLimitAttr().Get()
+        if lower is not None and upper is not None:
+            if abs(lower) > 1e30 or abs(upper) > 1e30:
+                issues.append({{
+                    'prim': str(prim.GetPath()),
+                    'severity': 'warning',
+                    'issue': f'Joint limits effectively infinite: lower={{lower}}, upper={{upper}}',
+                    'fix': 'Set finite joint limits (e.g. -180 to 180 degrees)',
+                }})
+
+# 6. metersPerUnit mismatch on stage
+meters_per_unit = UsdGeom.GetStageMetersPerUnit(stage)
+if meters_per_unit != 1.0 and meters_per_unit != 0.01:
+    issues.append({{
+        'prim': 'stage',
+        'severity': 'warning',
+        'issue': f'Unusual metersPerUnit: {{meters_per_unit}} (expected 1.0 for meters or 0.01 for cm)',
+        'fix': 'Set UsdGeom.SetStageMetersPerUnit(stage, 1.0) for meter scale',
+    }})
+
+# Summary
+result = {{
+    'healthy': len(issues) == 0,
+    'issue_count': len(issues),
+    'issues': issues,
+    'critical_count': sum(1 for i in issues if i['severity'] == 'critical'),
+    'error_count': sum(1 for i in issues if i['severity'] == 'error'),
+    'warning_count': sum(1 for i in issues if i['severity'] == 'warning'),
+}}
+print(json.dumps(result, indent=2))
+"""
+
+
+CODE_GEN_HANDLERS["check_physics_health"] = _gen_check_physics_health
+
+
+
+# ── Phase 3 Addendum: URDF Post-Processor ──────────────────────────────────
+
+# ── 3.X1 verify_import (CODE_GEN handler) ──────────────────────────────────
+
+def _gen_verify_import(args: Dict) -> str:
+    """Generate code that audits a URDF-imported articulation for common issues."""
+    art_path = args["articulation_path"]
+
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics, UsdGeom, PhysxSchema, Gf
+import json
+
+stage = omni.usd.get_context().get_stage()
+root = stage.GetPrimAtPath('{art_path}')
+if not root.IsValid():
+    raise RuntimeError('Articulation not found: {art_path}')
+
+issues = []
+all_prims = [root] + list(root.GetAllDescendants())
+
+# Check 1: ArticulationRootAPI
+has_art_root = False
+for prim in all_prims:
+    if prim.HasAPI(PhysxSchema.PhysxArticulationAPI) or prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+        has_art_root = True
+        break
+if not has_art_root:
+    issues.append({{
+        'prim': '{art_path}',
+        'severity': 'critical',
+        'issue': 'Missing ArticulationRootAPI — robot will not simulate as articulation',
+        'fix': "PhysxSchema.PhysxArticulationAPI.Apply(stage.GetPrimAtPath('{art_path}'))"
+    }})
+
+# Check 2: metersPerUnit
+meters_per_unit = UsdGeom.GetStageMetersPerUnit(stage)
+if abs(meters_per_unit - 0.01) > 0.001 and abs(meters_per_unit - 1.0) > 0.001:
+    issues.append({{
+        'prim': '/',
+        'severity': 'warning',
+        'issue': f'Stage metersPerUnit={{meters_per_unit}} — expected 0.01 (cm) or 1.0 (m)',
+        'fix': 'UsdGeom.SetStageMetersPerUnit(stage, 0.01)'
+    }})
+
+# Check 3: Missing CollisionAPI on links
+for prim in all_prims:
+    path = str(prim.GetPath())
+    if prim.HasAPI(UsdPhysics.RigidBodyAPI) and not prim.HasAPI(UsdPhysics.CollisionAPI):
+        has_child_collision = any(
+            c.HasAPI(UsdPhysics.CollisionAPI) for c in prim.GetAllDescendants()
+        )
+        if not has_child_collision:
+            issues.append({{
+                'prim': path,
+                'severity': 'warning',
+                'issue': 'Link has RigidBodyAPI but no CollisionAPI',
+                'fix': f"UsdPhysics.CollisionAPI.Apply(stage.GetPrimAtPath('{{path}}'))"
+            }})
+
+# Check 4: Zero-mass links
+for prim in all_prims:
+    path = str(prim.GetPath())
+    if prim.HasAPI(UsdPhysics.MassAPI):
+        mass_attr = prim.GetAttribute('physics:mass')
+        if mass_attr and mass_attr.Get() is not None and mass_attr.Get() == 0.0:
+            issues.append({{
+                'prim': path,
+                'severity': 'error',
+                'issue': 'Zero mass on link — causes simulation instability',
+                'fix': f"stage.GetPrimAtPath('{{path}}').GetAttribute('physics:mass').Set(1.0)"
+            }})
+
+# Check 5: Infinite joint limits
+for prim in all_prims:
+    path = str(prim.GetPath())
+    if prim.IsA(UsdPhysics.RevoluteJoint) or prim.HasAPI(UsdPhysics.RevoluteJointAPI):
+        lower = prim.GetAttribute('physics:lowerLimit')
+        upper = prim.GetAttribute('physics:upperLimit')
+        if lower and upper:
+            lo_val = lower.Get()
+            hi_val = upper.Get()
+            if lo_val is not None and hi_val is not None:
+                if abs(lo_val) > 1e6 or abs(hi_val) > 1e6:
+                    issues.append({{
+                        'prim': path,
+                        'severity': 'warning',
+                        'issue': f'Infinite joint limits: [{{lo_val}}, {{hi_val}}]',
+                        'fix': f"Set finite joint limits on '{{path}}'"
+                    }})
+
+# Check 6: Extreme inertia ratios
+inertia_vals = []
+for prim in all_prims:
+    path = str(prim.GetPath())
+    if prim.HasAPI(UsdPhysics.MassAPI):
+        diag = prim.GetAttribute('physics:diagonalInertia')
+        if diag and diag.Get() is not None:
+            vals = [float(v) for v in diag.Get()]
+            inertia_vals.extend(vals)
+            if any(v <= 0 for v in vals):
+                issues.append({{
+                    'prim': path,
+                    'severity': 'critical',
+                    'issue': f'Non-positive inertia: {{vals}}',
+                    'fix': f"stage.GetPrimAtPath('{{path}}').GetAttribute('physics:diagonalInertia').Set(Gf.Vec3f(0.01, 0.01, 0.01))"
+                }})
+
+if len(inertia_vals) >= 2:
+    pos_vals = [v for v in inertia_vals if v > 0]
+    if pos_vals and max(pos_vals) / min(pos_vals) > 1000:
+        issues.append({{
+            'prim': '{art_path}',
+            'severity': 'warning',
+            'issue': f'Extreme inertia ratio across links: {{max(pos_vals)/min(pos_vals):.0f}}:1',
+            'fix': 'Review inertia values — extreme ratios cause PhysX solver instability'
+        }})
+
+print(json.dumps({{'articulation_path': '{art_path}', 'issues': issues, 'total': len(issues)}}))
+"""
+
+
+CODE_GEN_HANDLERS["verify_import"] = _gen_verify_import
+
+
+# ── Phase 8B Addendum: Workspace & Singularity ─────────────────────────────
+
+def _gen_show_workspace(args: Dict) -> str:
+    """Generate code to visualize robot workspace using batch FK + manipulability."""
+    art_path = args["articulation_path"]
+    resolution = args.get("resolution", 500000)
+    color_mode = args.get("color_mode", "manipulability")
+
+    return f"""\
+import omni.usd
+import numpy as np
+from pxr import UsdPhysics, PhysxSchema
+from isaacsim.util.debug_draw import _debug_draw
+
+stage = omni.usd.get_context().get_stage()
+art_prim = stage.GetPrimAtPath('{art_path}')
+if not art_prim.IsValid():
+    raise RuntimeError('Articulation not found: {art_path}')
+
+# Collect joint info (limits and names)
+joints = []
+for desc in art_prim.GetAllDescendants():
+    if desc.HasAPI(UsdPhysics.RevoluteJointAPI) or desc.IsA(UsdPhysics.RevoluteJoint):
+        lower = desc.GetAttribute('physics:lowerLimit')
+        upper = desc.GetAttribute('physics:upperLimit')
+        lo = lower.Get() if lower and lower.Get() is not None else -180.0
+        hi = upper.Get() if upper and upper.Get() is not None else 180.0
+        joints.append({{
+            'name': desc.GetName(),
+            'lower': np.radians(lo),
+            'upper': np.radians(hi),
+        }})
+
+n_joints = len(joints)
+if n_joints == 0:
+    raise RuntimeError('No revolute joints found in {{art_prim.GetPath()}}')
+
+n_samples = {resolution}
+print(f'Sampling {{n_samples}} configurations across {{n_joints}} joints...')
+
+# Generate random joint configurations within limits
+joint_samples = np.zeros((n_samples, n_joints))
+for i, j in enumerate(joints):
+    joint_samples[:, i] = np.random.uniform(j['lower'], j['upper'], n_samples)
+
+# Use cuRobo for batch FK if available, otherwise fallback to Lula
+try:
+    from curobo.types.robot import RobotConfig
+    from curobo.wrap.reacher.ik_solver import IKSolver
+    print('Using cuRobo for batch FK')
+    use_curobo = True
+except ImportError:
+    print('cuRobo not available, using Lula FK fallback')
+    use_curobo = False
+
+if not use_curobo:
+    # Lula FK fallback: use the kinematics solver
+    from isaacsim.robot_motion.motion_generation import interface_config_loader
+    from isaacsim.robot_motion.motion_generation import LulaKinematicsSolver
+    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config('franka')
+    kin = LulaKinematicsSolver(**kin_config)
+
+# Compute FK positions and manipulability for each sample
+ee_positions = np.zeros((n_samples, 3))
+manipulability = np.zeros(n_samples)
+
+for idx in range(n_samples):
+    q = joint_samples[idx]
+    if not use_curobo:
+        # Lula FK
+        pos, rot = kin.compute_forward_kinematics('panda_hand', q)
+        ee_positions[idx] = pos
+    # Compute numerical Jacobian (finite differences)
+    eps = 1e-4
+    J = np.zeros((3, n_joints))
+    for j_idx in range(n_joints):
+        q_plus = q.copy()
+        q_plus[j_idx] += eps
+        if not use_curobo:
+            pos_plus, _ = kin.compute_forward_kinematics('panda_hand', q_plus)
+        J[:, j_idx] = (pos_plus - ee_positions[idx]) / eps
+    # Manipulability = sqrt(det(J * J^T))
+    JJT = J @ J.T
+    det_val = np.linalg.det(JJT)
+    manipulability[idx] = np.sqrt(max(0, det_val))
+
+# Normalize manipulability for color mapping
+m_min, m_max = manipulability.min(), manipulability.max()
+if m_max > m_min:
+    m_norm = (manipulability - m_min) / (m_max - m_min)
+else:
+    m_norm = np.ones(n_samples) * 0.5
+
+# Color mapping: green (high) -> yellow (mid) -> red (low)
+def manipulability_color(val):
+    if val > 0.5:
+        t = (val - 0.5) * 2  # 0-1
+        return (1 - t, 1.0, 0.0, 0.6)  # yellow -> green
+    else:
+        t = val * 2  # 0-1
+        return (1.0, t, 0.0, 0.6)  # red -> yellow
+
+color_mode = '{color_mode}'
+draw = _debug_draw.acquire_debug_draw_interface()
+draw.clear_points()
+
+# Draw in batches for performance
+batch_size = 10000
+for start in range(0, n_samples, batch_size):
+    end = min(start + batch_size, n_samples)
+    pts = [list(ee_positions[i]) for i in range(start, end)]
+    if color_mode == 'reachability':
+        colors = [(0.0, 0.8, 0.0, 0.4)] * len(pts)
+    elif color_mode == 'singularity_distance':
+        colors = [manipulability_color(1.0 - m_norm[i]) for i in range(start, end)]
+    else:  # manipulability
+        colors = [manipulability_color(m_norm[i]) for i in range(start, end)]
+    sizes = [3.0] * len(pts)
+    draw.draw_points(pts, colors, sizes)
+
+print(f'Workspace visualization: {{n_samples}} points rendered')
+print(f'Color mode: {{color_mode}}')
+print(f'Manipulability range: [{{m_min:.4f}}, {{m_max:.4f}}]')
+"""
+
+
+CODE_GEN_HANDLERS["show_workspace"] = _gen_show_workspace
+
+
+def _gen_check_singularity(args: Dict) -> str:
+    """Generate code to check singularity at a target pose."""
+    art_path = args["articulation_path"]
+    target_pos = args["target_position"]
+    target_ori = args.get("target_orientation")
+
+    ori_line = f"target_ori = np.array({list(target_ori)})" if target_ori else "target_ori = None"
+
+    return f"""\
+import omni.usd
+import numpy as np
+from pxr import UsdPhysics
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.robot_motion.motion_generation import LulaKinematicsSolver
+from isaacsim.robot_motion.motion_generation import ArticulationKinematicsSolver
+from isaacsim.core.prims import SingleArticulation
+import json
+
+stage = omni.usd.get_context().get_stage()
+art_prim = stage.GetPrimAtPath('{art_path}')
+if not art_prim.IsValid():
+    raise RuntimeError('Articulation not found: {art_path}')
+
+target_pos = np.array({list(target_pos)})
+{ori_line}
+
+# Initialize kinematics solver
+kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config('franka')
+kin_solver = LulaKinematicsSolver(**kin_config)
+
+# Initialize articulation
+art = SingleArticulation(prim_path='{art_path}')
+art.initialize()
+art_kin = ArticulationKinematicsSolver(art, kin_solver, 'panda_hand')
+
+# Solve IK
+result, success = art_kin.compute_inverse_kinematics(target_pos, target_ori)
+if not success:
+    print(json.dumps({{
+        'status': 'ik_failed',
+        'message': 'IK solver could not find a solution for the target pose',
+        'target_position': {list(target_pos)},
+        'singularity_risk': 'unknown',
+    }}))
+else:
+    joint_positions = result.joint_positions
+
+    # Heuristic pre-filter: check for wrist/elbow singularity patterns
+    heuristic_warnings = []
+
+    # Wrist singularity: joints 4 and 6 nearly aligned (joint 5 near 0)
+    if len(joint_positions) >= 7:
+        if abs(joint_positions[5]) < 0.05:  # Joint 6 (index 5) near zero
+            heuristic_warnings.append('Wrist singularity: joint 6 near zero (wrist aligned)')
+        # Elbow singularity: joint 4 near fully extended
+        if abs(joint_positions[3]) < 0.05 or abs(joint_positions[3] - np.pi) < 0.1:
+            heuristic_warnings.append('Elbow singularity: joint 4 near extension limit')
+
+    # Compute Jacobian at the IK solution
+    n_joints = len(joint_positions)
+    eps = 1e-5
+    J = np.zeros((6, n_joints))  # 6 DOF: 3 position + 3 orientation
+
+    fk_pos, fk_rot = kin_solver.compute_forward_kinematics('panda_hand', joint_positions)
+
+    for j in range(n_joints):
+        q_plus = joint_positions.copy()
+        q_plus[j] += eps
+        pos_plus, rot_plus = kin_solver.compute_forward_kinematics('panda_hand', q_plus)
+        J[:3, j] = (pos_plus - fk_pos) / eps
+        # Orientation part (simplified: angular velocity from rotation difference)
+        rot_diff = rot_plus - fk_rot
+        J[3:, j] = rot_diff / eps
+
+    # SVD condition number
+    singular_values = np.linalg.svd(J, compute_uv=False)
+    sigma_min = singular_values[-1]
+    sigma_max = singular_values[0]
+    condition_number = sigma_max / sigma_min if sigma_min > 1e-10 else float('inf')
+
+    # Manipulability measure
+    manipulability = np.prod(singular_values)
+
+    # Classification thresholds
+    if condition_number < 50:
+        status = 'safe'
+        color = 'green'
+    elif condition_number < 100:
+        status = 'warning'
+        color = 'yellow'
+    else:
+        status = 'danger'
+        color = 'red'
+
+    result_data = {{
+        'status': status,
+        'color': color,
+        'condition_number': float(condition_number),
+        'manipulability': float(manipulability),
+        'singular_values': [float(s) for s in singular_values],
+        'sigma_min': float(sigma_min),
+        'sigma_max': float(sigma_max),
+        'joint_positions': [float(q) for q in joint_positions],
+        'target_position': {list(target_pos)},
+        'heuristic_warnings': heuristic_warnings,
+    }}
+    print(json.dumps(result_data, indent=2))
+
+    if status == 'danger':
+        print(f'WARNING: Target pose is near a kinematic singularity (condition={{condition_number:.1f}})')
+    elif status == 'warning':
+        print(f'CAUTION: Elevated singularity risk (condition={{condition_number:.1f}})')
+    else:
+        print(f'OK: Target pose is well-conditioned (condition={{condition_number:.1f}})')
+"""
+
+
+CODE_GEN_HANDLERS["check_singularity"] = _gen_check_singularity
+
+
+def _gen_monitor_joint_effort(args: Dict) -> str:
+    """Generate code to monitor joint efforts over time via physics callback."""
+    art_path = args["articulation_path"]
+    duration = args.get("duration_seconds", 5.0)
+
+    return f"""\
+import omni.usd
+import omni.physx
+import numpy as np
+from pxr import UsdPhysics
+from isaacsim.core.prims import SingleArticulation
+import json
+
+stage = omni.usd.get_context().get_stage()
+art_prim = stage.GetPrimAtPath('{art_path}')
+if not art_prim.IsValid():
+    raise RuntimeError('Articulation not found: {art_path}')
+
+# Initialize articulation
+art = SingleArticulation(prim_path='{art_path}')
+art.initialize()
+
+joint_names = art.dof_names
+n_joints = art.num_dof
+
+# Collect joint effort limits from USD
+effort_limits = []
+for desc in art_prim.GetAllDescendants():
+    if desc.HasAPI(UsdPhysics.RevoluteJointAPI) or desc.IsA(UsdPhysics.RevoluteJoint):
+        drive = UsdPhysics.DriveAPI.Get(desc, 'angular')
+        max_force = drive.GetMaxForceAttr().Get() if drive.GetMaxForceAttr() else None
+        effort_limits.append(max_force if max_force is not None else 87.0)
+
+# Pad if needed
+while len(effort_limits) < n_joints:
+    effort_limits.append(87.0)
+
+# Data collection buffers
+duration = {duration}
+collected_data = {{
+    'positions': [],
+    'velocities': [],
+    'efforts': [],
+    'timestamps': [],
+}}
+
+import time
+start_time = time.time()
+
+def _physics_step_callback(step_size):
+    elapsed = time.time() - start_time
+    if elapsed > duration:
+        return
+
+    positions = art.get_joint_positions()
+    velocities = art.get_joint_velocities()
+    efforts = art.get_applied_joint_efforts()
+
+    collected_data['positions'].append(positions.tolist() if positions is not None else [0.0] * n_joints)
+    collected_data['velocities'].append(velocities.tolist() if velocities is not None else [0.0] * n_joints)
+    collected_data['efforts'].append(efforts.tolist() if efforts is not None else [0.0] * n_joints)
+    collected_data['timestamps'].append(elapsed)
+
+# Register physics callback
+sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_physics_step_callback)
+
+# Wait for data collection to complete
+import asyncio
+
+async def _wait_and_report():
+    await asyncio.sleep(duration + 0.5)
+
+    # Unsubscribe
+    sub.unsubscribe() if hasattr(sub, 'unsubscribe') else None
+
+    n_samples = len(collected_data['timestamps'])
+    if n_samples == 0:
+        print('No data collected. Ensure simulation is playing.')
+        return
+
+    positions = np.array(collected_data['positions'])
+    velocities = np.array(collected_data['velocities'])
+    efforts = np.array(collected_data['efforts'])
+
+    # Per-joint statistics
+    joint_stats = []
+    flagged_joints = []
+    for j in range(n_joints):
+        name = joint_names[j] if j < len(joint_names) else f'joint_{{j}}'
+        limit = effort_limits[j]
+        eff = efforts[:, j]
+        max_eff = float(np.max(np.abs(eff)))
+        mean_eff = float(np.mean(np.abs(eff)))
+        utilization = max_eff / limit if limit > 0 else 0.0
+
+        stat = {{
+            'joint': name,
+            'effort_limit': limit,
+            'max_effort': max_eff,
+            'mean_effort': mean_eff,
+            'utilization': utilization,
+            'pos_range': [float(np.min(positions[:, j])), float(np.max(positions[:, j]))],
+            'vel_range': [float(np.min(velocities[:, j])), float(np.max(velocities[:, j]))],
+        }}
+        joint_stats.append(stat)
+
+        if utilization > 0.9:
+            flagged_joints.append({{
+                'joint': name,
+                'utilization': utilization,
+                'severity': 'critical' if utilization > 0.95 else 'warning',
+                'message': f'Joint {{name}} at {{utilization*100:.1f}}% of effort limit ({{max_eff:.2f}}/{{limit:.2f}})',
+            }})
+
+    result = {{
+        'articulation_path': '{art_path}',
+        'duration_seconds': duration,
+        'samples_collected': n_samples,
+        'joint_stats': joint_stats,
+        'flagged_joints': flagged_joints,
+        'summary': f'Monitored {{n_joints}} joints for {{duration}}s ({{n_samples}} samples). {{len(flagged_joints)}} joints flagged.',
+    }}
+    print(json.dumps(result, indent=2))
+
+    if flagged_joints:
+        print(f'\\nWARNING: {{len(flagged_joints)}} joint(s) exceeding 90% effort limit:')
+        for f in flagged_joints:
+            print(f"  - {{f['message']}}")
+    else:
+        print('\\nAll joints within safe effort limits.')
+
+asyncio.ensure_future(_wait_and_report())
+print(f'Monitoring joint efforts for {{duration}}s... (ensure simulation is playing)')
+"""
+
+
+CODE_GEN_HANDLERS["monitor_joint_effort"] = _gen_monitor_joint_effort

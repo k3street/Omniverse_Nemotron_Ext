@@ -942,4 +942,516 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Phase 7H: Cloud Deployment ──────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "cloud_download_results",
+            "description": "Generate code to download results from a cloud instance (scp/rsync). Use after a cloud job completes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Job ID of the completed cloud job"},
+                    "output_dir": {"type": "string", "description": "Local directory to download results to. Default: 'workspace/cloud_results'"},
+                },
+                "required": ["job_id"],
+            },
+        },
+    },
+
+    # ─── Phase 8A: Quick Wins ────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "clone_envs",
+            "description": "Clone a source environment prim into a grid of N parallel environments using isaacsim.core.cloner.GridCloner. Ideal for RL training with replicated physics and optional inter-env collision filtering.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source_path": {"type": "string", "description": "USD path to the source environment prim, e.g. '/World/envs/env_0'"},
+                    "num_envs": {"type": "integer", "description": "Number of environment clones to create"},
+                    "spacing": {"type": "number", "description": "Distance between environments in meters. Default: 2.5"},
+                    "collision_filter": {"type": "boolean", "description": "If true, filter inter-environment collisions. Default: true"},
+                },
+                "required": ["source_path", "num_envs"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "debug_draw",
+            "description": "Draw debug visualizations (points, lines, spline curves) in the viewport using isaacsim.util.debug_draw. Only supports points, lines, and lines_spline.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "draw_type": {
+                        "type": "string",
+                        "enum": ["points", "lines", "lines_spline"],
+                        "description": "Type of drawing: 'points' for individual points, 'lines' for paired start/end line segments, 'lines_spline' for a smooth spline curve",
+                    },
+                    "points": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "number"}},
+                        "description": "Coordinates: [[x,y,z], ...] for points/spline, or [[x1,y1,z1],[x2,y2,z2],...] pairs for lines",
+                    },
+                    "color": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "RGBA color [r, g, b, a] 0-1. Default: [1, 0, 0, 1] (red)",
+                    },
+                    "size": {"type": "number", "description": "Point size or line width. Default: 5"},
+                    "lifetime": {"type": "number", "description": "Seconds before auto-clear. 0 = persistent. Default: 0"},
+                },
+                "required": ["draw_type", "points"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_occupancy_map",
+            "description": "Generate a 2D occupancy map of the scene using ray casting. Useful for navigation planning, obstacle detection, and workspace analysis.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "origin": {"type": "array", "items": {"type": "number"}, "description": "XY origin of the map [x, y]. Default: [0, 0]"},
+                    "dimensions": {"type": "array", "items": {"type": "number"}, "description": "Width and height of the map in meters [w, h]. Default: [10, 10]"},
+                    "resolution": {"type": "number", "description": "Cell size in meters. Default: 0.05"},
+                    "height_range": {"type": "array", "items": {"type": "number"}, "description": "Min/max Z for ray casting [min_z, max_z]. Default: [0, 2]"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_camera",
+            "description": "Set camera properties on a USD camera prim: focal length, aperture, clipping range, focus distance.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "camera_path": {"type": "string", "description": "USD path to the camera prim"},
+                    "focal_length": {"type": "number", "description": "Focal length in mm"},
+                    "horizontal_aperture": {"type": "number", "description": "Horizontal aperture in mm"},
+                    "vertical_aperture": {"type": "number", "description": "Vertical aperture in mm"},
+                    "clipping_range": {"type": "array", "items": {"type": "number"}, "description": "Near and far clipping planes [near, far] in scene units"},
+                    "focus_distance": {"type": "number", "description": "Focus distance in scene units"},
+                },
+                "required": ["camera_path"],
+            },
+        },
+    },
+
+    # ─── Phase 8B: Motion Planning ───────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "set_motion_policy",
+            "description": "Configure motion policy for a robot articulation: add/remove obstacles for collision avoidance, or adjust joint limit padding. Uses RMPflow under the hood.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root, e.g. '/World/Franka'"},
+                    "policy_type": {"type": "string", "enum": ["add_obstacle", "remove_obstacle", "set_joint_limits"], "description": "Policy action"},
+                    "obstacle_name": {"type": "string", "description": "Name for the obstacle (used as identifier)"},
+                    "obstacle_type": {"type": "string", "enum": ["cuboid", "sphere"], "description": "Obstacle shape type"},
+                    "obstacle_dims": {"type": "array", "items": {"type": "number"}, "description": "Dimensions: [x, y, z] for cuboid or [radius] for sphere"},
+                    "obstacle_position": {"type": "array", "items": {"type": "number"}, "description": "Obstacle world position [x, y, z]"},
+                    "joint_limit_buffers": {"type": "number", "description": "Joint limit padding in radians (for set_joint_limits)"},
+                    "robot_type": {"type": "string", "description": "Robot name for config: 'franka', 'ur10', 'ur5e', 'cobotta'. Default: 'franka'"},
+                },
+                "required": ["articulation_path", "policy_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "solve_ik",
+            "description": "Solve inverse kinematics for a robot arm. Compute joint positions that place the end-effector at a target pose. Uses Lula kinematics solver.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root"},
+                    "target_position": {"type": "array", "items": {"type": "number"}, "description": "Target XYZ position [x, y, z]"},
+                    "target_orientation": {"type": "array", "items": {"type": "number"}, "description": "Target orientation as quaternion [w, x, y, z]. Optional."},
+                    "robot_type": {"type": "string", "description": "Robot name for config. Default: 'franka'"},
+                },
+                "required": ["articulation_path", "target_position"],
+            },
+        },
+    },
+
+    # ─── Phase 8B Addendum: Workspace & Singularity ──────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "show_workspace",
+            "description": "Visualize the reachable workspace of a robot arm by sampling joint configurations, running batch FK via cuRobo, computing manipulability or reachability metrics, and rendering a color-coded point cloud using debug_draw. Green=high, yellow=medium, red=low.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root, e.g. '/World/Franka'"},
+                    "resolution": {"type": "integer", "description": "Number of joint-space samples to evaluate. Default: 500000"},
+                    "color_mode": {
+                        "type": "string",
+                        "enum": ["reachability", "manipulability", "singularity_distance"],
+                        "description": "Color mapping mode: 'reachability' (binary reach), 'manipulability' (Jacobian measure), 'singularity_distance' (distance from singular configs). Default: 'manipulability'",
+                    },
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_singularity",
+            "description": "Check if a target pose is near a kinematic singularity for a robot arm. Solves IK, computes the Jacobian SVD condition number, and classifies: <50 safe (green), 50-100 warning (yellow), >=100 danger (red). Includes heuristic pre-filters for wrist and elbow singularities.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root, e.g. '/World/Franka'"},
+                    "target_position": {"type": "array", "items": {"type": "number"}, "description": "Target XYZ position [x, y, z] in world space"},
+                    "target_orientation": {"type": "array", "items": {"type": "number"}, "description": "Target orientation as quaternion [w, x, y, z]. Optional."},
+                },
+                "required": ["articulation_path", "target_position"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "monitor_joint_effort",
+            "description": "Monitor joint positions, velocities, and efforts (torques) over time using a physics step callback. Flags joints exceeding 90%% of their effort limits. Generates a summary with per-joint statistics.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root, e.g. '/World/Franka'"},
+                    "duration_seconds": {"type": "number", "description": "Monitoring duration in seconds. Default: 5.0"},
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
+
+    # ─── Phase 8C: Cortex Behaviors ──────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "create_behavior",
+            "description": "Create a Cortex behavior for a robot. Sets up a CortexWorld with a decider network for autonomous behavior like pick-and-place or target following.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "behavior_type": {"type": "string", "enum": ["pick_and_place", "follow_target"], "description": "Type of behavior to create"},
+                    "target_prim": {"type": "string", "description": "USD path to the target prim"},
+                    "params": {"type": "object", "description": "Additional behavior parameters"},
+                },
+                "required": ["articulation_path", "behavior_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_gripper",
+            "description": "Create and configure a gripper on a robot articulation. Supports parallel jaw and suction grippers.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "gripper_type": {"type": "string", "enum": ["parallel_jaw", "suction"], "description": "Type of gripper"},
+                    "gripper_dof_names": {"type": "array", "items": {"type": "string"}, "description": "Joint names for gripper DOFs"},
+                    "open_position": {"type": "number", "description": "Joint position for fully open gripper. Default: 0.04"},
+                    "closed_position": {"type": "number", "description": "Joint position for fully closed gripper. Default: 0.0"},
+                },
+                "required": ["articulation_path", "gripper_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "grasp_object",
+            "description": "Generate a complete grasp sequence: approach, grasp, and lift an object. Supports top-down, side, and file-based grasps.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "target_prim": {"type": "string", "description": "USD path to the object to grasp"},
+                    "grasp_type": {"type": "string", "enum": ["top_down", "side", "from_file"], "description": "Grasp approach strategy. Default: top_down"},
+                    "grasp_file": {"type": "string", "description": "Path to .isaac_grasp YAML file (for from_file)"},
+                    "approach_distance": {"type": "number", "description": "Pre-grasp approach distance in meters. Default: 0.1"},
+                    "lift_height": {"type": "number", "description": "Post-grasp lift height in meters. Default: 0.1"},
+                },
+                "required": ["robot_path", "target_prim"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "define_grasp_pose",
+            "description": "Define and save a grasp pose specification as a .isaac_grasp YAML file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "object_path": {"type": "string", "description": "USD path to the target object"},
+                    "gripper_offset": {"type": "array", "items": {"type": "number"}, "description": "Offset from object center to gripper [x, y, z]"},
+                    "approach_direction": {"type": "array", "items": {"type": "number"}, "description": "Approach direction vector [x, y, z]. Default: [0, 0, -1]"},
+                },
+                "required": ["robot_path", "object_path"],
+            },
+        },
+    },
+
+    # ─── Phase 8D: Robot Setup ───────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "robot_wizard",
+            "description": "Import a robot from URDF/USD, apply sensible drive defaults based on robot type, apply convex-hull collision meshes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "asset_path": {"type": "string", "description": "Path to URDF or USD robot file"},
+                    "robot_type": {"type": "string", "enum": ["manipulator", "mobile", "humanoid"], "description": "Robot category. Default: manipulator"},
+                    "drive_stiffness": {"type": "number", "description": "Override default Kp"},
+                    "drive_damping": {"type": "number", "description": "Override default Kd"},
+                },
+                "required": ["asset_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "tune_gains",
+            "description": "Tune joint drive gains for a robot articulation. Manual mode sets Kp/Kd directly, step_response runs an automated test.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root"},
+                    "method": {"type": "string", "enum": ["manual", "step_response"], "description": "Tuning method. Default: manual"},
+                    "joint_name": {"type": "string", "description": "Specific joint name (omit for all joints)"},
+                    "kp": {"type": "number", "description": "Position gain (manual)"},
+                    "kd": {"type": "number", "description": "Damping gain (manual)"},
+                    "test_mode": {"type": "string", "enum": ["sinusoidal", "step"], "description": "Test signal type for step_response. Default: step"},
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "assemble_robot",
+            "description": "Assemble a robot by attaching a tool or gripper to a base robot using a fixed joint.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "base_path": {"type": "string", "description": "USD path to the base robot"},
+                    "attachment_path": {"type": "string", "description": "USD path to the attachment"},
+                    "base_mount": {"type": "string", "description": "Mount frame on the base robot"},
+                    "attach_mount": {"type": "string", "description": "Mount frame on the attachment"},
+                },
+                "required": ["base_path", "attachment_path", "base_mount", "attach_mount"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_self_collision",
+            "description": "Configure self-collision behavior for a robot articulation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root"},
+                    "mode": {"type": "string", "enum": ["auto", "enable", "disable"], "description": "Self-collision mode"},
+                    "filtered_pairs": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}, "description": "Pairs of link paths to filter"},
+                },
+                "required": ["articulation_path", "mode"],
+            },
+        },
+    },
+
+    # ─── Phase 8E: Wheeled Robots ────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "create_wheeled_robot",
+            "description": "Create a wheeled robot controller (differential drive, Ackermann, or holonomic) for an existing robot articulation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "drive_type": {"type": "string", "enum": ["differential", "ackermann", "holonomic"], "description": "Drive kinematics type"},
+                    "wheel_radius": {"type": "number", "description": "Wheel radius in meters"},
+                    "wheel_base": {"type": "number", "description": "Distance between wheels in meters"},
+                    "wheel_dof_names": {"type": "array", "items": {"type": "string"}, "description": "Joint names for wheel DOFs"},
+                    "max_linear_speed": {"type": "number", "description": "Max linear speed in m/s. Default: 1.0"},
+                    "max_angular_speed": {"type": "number", "description": "Max angular speed in rad/s. Default: 3.14"},
+                },
+                "required": ["robot_path", "drive_type", "wheel_radius", "wheel_base"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "navigate_to",
+            "description": "Navigate a wheeled robot to a target [x, y] position using direct drive or A* path planning.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "target_position": {"type": "array", "items": {"type": "number"}, "description": "Target [x, y] position"},
+                    "planner": {"type": "string", "enum": ["astar", "direct"], "description": "Planning strategy. Default: direct"},
+                },
+                "required": ["robot_path", "target_position"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_conveyor",
+            "description": "Turn an existing mesh prim into a conveyor belt using OmniGraph with the OgnIsaacConveyor node.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the conveyor mesh prim"},
+                    "speed": {"type": "number", "description": "Belt speed in m/s. Default: 0.5"},
+                    "direction": {"type": "array", "items": {"type": "number"}, "description": "Belt direction [x, y, z]. Default: [1, 0, 0]"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_conveyor_track",
+            "description": "Create a multi-segment conveyor track along a sequence of waypoints.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "waypoints": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}, "description": "List of [x, y, z] waypoints"},
+                    "belt_width": {"type": "number", "description": "Belt width in meters. Default: 0.5"},
+                    "speed": {"type": "number", "description": "Belt speed in m/s. Default: 0.5"},
+                },
+                "required": ["waypoints"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "merge_meshes",
+            "description": "Merge multiple mesh prims into a single optimized mesh.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_paths": {"type": "array", "items": {"type": "string"}, "description": "List of USD paths to mesh prims to merge"},
+                    "output_path": {"type": "string", "description": "USD path for the merged output mesh"},
+                },
+                "required": ["prim_paths", "output_path"],
+            },
+        },
+    },
+
+    # ─── Phase 8F: ROS2 Deep Integration ─────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "show_tf_tree",
+            "description": "Visualize the ROS2 TF transform tree from a given root frame.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "root_frame": {"type": "string", "description": "Root TF frame to start from. Default: 'world'"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "publish_robot_description",
+            "description": "Publish a simplified URDF robot description to a ROS2 topic with TRANSIENT_LOCAL durability.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root"},
+                    "topic": {"type": "string", "description": "ROS2 topic to publish on. Default: '/robot_description'"},
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_ros2_bridge",
+            "description": "Configure an OmniGraph-based ROS2 bridge for multiple sensors.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sensors": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string", "enum": ["camera", "lidar", "imu", "clock", "joint_state"]},
+                                "prim_path": {"type": "string"},
+                                "topic_name": {"type": "string"},
+                                "frame_id": {"type": "string"},
+                            },
+                            "required": ["type"],
+                        },
+                    },
+                    "ros2_domain_id": {"type": "integer", "description": "ROS2 domain ID. Default: 0"},
+                },
+                "required": ["sensors"],
+            },
+        },
+    },
+
+    # ─── Phase 2 Addendum: Smart Debugging ───────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "check_physics_health",
+            "description": "Comprehensive physics health check: missing CollisionAPI, invalid inertia, extreme mass ratios, infinite joint limits, missing PhysicsScene, metersPerUnit mismatches.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "Optional: check a specific robot articulation"},
+                },
+            },
+        },
+    },
+
+    # ─── Phase 3 Addendum: URDF Post-Processor ──────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "verify_import",
+            "description": "Audit a URDF-imported articulation for common post-import issues. Returns JSON issues list with prim paths, severity, and fix commands.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the imported articulation root"},
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
 ]
