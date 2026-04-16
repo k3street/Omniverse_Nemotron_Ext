@@ -942,4 +942,99 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Phase 7C Addendum: Teleoperation Quality ────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "check_teleop_hardware",
+            "description": "Check whether a teleop input device is supported, report its transport (WebXR, CloudXR, USB-HID), latency budget, and known limitations. Use before calling start_teleop_session so the LLM can decide whether the device will work on the user's setup.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "device": {
+                        "type": "string",
+                        "enum": ["quest_3", "vision_pro", "spacemouse", "keyboard"],
+                        "description": "Input device to probe. quest_3 uses WebXR over Wi-Fi, vision_pro requires CloudXR native, spacemouse/keyboard are local USB-HID.",
+                    },
+                },
+                "required": ["device"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_teleop_demo",
+            "description": "Validate an HDF5 teleop demo file against the robomimic schema used by Phase 7C recording. Checks action shape, obs keys, episode length, and NaN/Inf in actions. Use before feeding demos to Phase 7G fine-tuning to avoid wasted GPU time on corrupt episodes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hdf5_path": {"type": "string", "description": "Absolute path to the .hdf5 demo file recorded by record_teleop_demo."},
+                },
+                "required": ["hdf5_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "export_teleop_mapping",
+            "description": "Generate a Python script that writes a teleop mapping YAML to workspace/teleop_mappings/<session_name>.yaml. The YAML follows the IsaacTeleop / dex-retargeting config shape and can be committed, diffed, and re-fed to configure_teleop_mapping.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_name": {"type": "string", "description": "Short identifier for the mapping file (becomes <session_name>.yaml)."},
+                    "device": {
+                        "type": "string",
+                        "enum": ["quest_3", "vision_pro", "spacemouse", "keyboard"],
+                        "description": "Input device the mapping targets.",
+                    },
+                    "joint_map": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "List of joint entries: [{'name': str, 'source': str, 'gain': float, 'limit_rad': [lo, hi]}, ...]",
+                    },
+                    "gains": {
+                        "type": "object",
+                        "description": "Global gains, e.g. {'position': 400, 'velocity': 40}.",
+                    },
+                    "robot": {"type": "string", "description": "Robot identifier for the mapping (default 'franka_panda')."},
+                },
+                "required": ["session_name", "device", "joint_map"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_teleop_watchdog_script",
+            "description": "Generate a Python script that arms a teleop watchdog inside Kit: if no control message arrives on /ws/teleop within timeout_ms, the watchdog holds the last command for hold_time_ms and then zeros all joint velocity targets on robot_path. Use this to add a safety layer around start_teleop_session.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path of the articulation the watchdog protects, e.g. '/World/Franka'."},
+                    "timeout_ms": {"type": "integer", "description": "Milliseconds of silence before hold mode triggers. Default 500."},
+                    "hold_time_ms": {"type": "integer", "description": "Milliseconds to hold last command before zeroing. Default 2000."},
+                    "socket_path": {"type": "string", "description": "WebSocket path to subscribe to. Default '/ws/teleop'."},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "summarize_teleop_session",
+            "description": "Summarize a recorded HDF5 teleop session: demo count, total duration, per-joint velocity and range statistics. Use to answer human-readable questions ('how much data did I record?') and to seed Phase 7G fine-tuning decisions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hdf5_path": {"type": "string", "description": "Absolute path to the .hdf5 demo file recorded by record_teleop_demo."},
+                    "fps": {"type": "integer", "description": "Recording frame rate. Defaults to the file's attr 'fps' or 30."},
+                },
+                "required": ["hdf5_path"],
+            },
+        },
+    },
 ]

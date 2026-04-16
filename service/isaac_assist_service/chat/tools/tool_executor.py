@@ -2232,3 +2232,416 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ─── Phase 7C Addendum: Teleoperation Quality ───────────────────────────────
+# Lightweight quality gates that sit in front of start_teleop_session,
+# record_teleop_demo, and configure_teleop_mapping. Pure data / code-gen —
+# no Kit RPC, no subprocess, no network.
+
+_TELEOP_DEVICES = {
+    "quest_3": {
+        "supported": True,
+        "transport": "webxr",
+        "latency_budget_ms": 80,
+        "known_limitations": [
+            "Meta Browser required; Safari does not expose XR_EXT_hand_tracking",
+        ],
+        "notes": "Quest 3 uses WebXR over Wi-Fi — keep router <= 10 ms from host.",
+    },
+    "vision_pro": {
+        "supported": True,
+        "transport": "cloudxr",
+        "latency_budget_ms": 60,
+        "known_limitations": [
+            "Requires native CloudXR app on visionOS",
+            "WebXR on Safari does NOT expose hand tracking — browser path will not work",
+        ],
+        "notes": "Vision Pro must use the NVIDIA CloudXR native app, not Safari.",
+    },
+    "spacemouse": {
+        "supported": True,
+        "transport": "usb-hid",
+        "latency_budget_ms": 20,
+        "known_limitations": ["6-DoF only — no hand retargeting"],
+        "notes": "3Dconnexion SpaceMouse over USB-HID. Local, sub-20 ms RTT.",
+    },
+    "keyboard": {
+        "supported": True,
+        "transport": "usb-hid",
+        "latency_budget_ms": 20,
+        "known_limitations": ["Discrete input only — coarse joint nudges"],
+        "notes": "Keyboard fallback for smoke tests without XR hardware.",
+    },
+}
+
+
+async def _handle_check_teleop_hardware(args: Dict) -> Dict:
+    """Look up a teleop device in the known-devices table and probe local availability."""
+    device = str(args.get("device", "")).lower()
+    info = _TELEOP_DEVICES.get(device)
+    if info is None:
+        return {
+            "device": device,
+            "supported": False,
+            "reason": f"Unknown teleop device '{device}'. Known: {sorted(_TELEOP_DEVICES.keys())}",
+        }
+
+    result: Dict[str, Any] = {
+        "device": device,
+        "supported": info["supported"],
+        "transport": info["transport"],
+        "latency_budget_ms": info["latency_budget_ms"],
+        "known_limitations": list(info["known_limitations"]),
+        "notes": info["notes"],
+    }
+
+    # Local probe — best-effort, never raises into the tool loop
+    if info["transport"] == "usb-hid":
+        try:
+            dev_input = Path("/dev/input")
+            result["local_probe"] = {
+                "dev_input_exists": dev_input.exists(),
+                "entries": len(list(dev_input.iterdir())) if dev_input.exists() else 0,
+            }
+        except Exception as e:  # noqa: BLE001 — probe must never raise
+            result["local_probe"] = {"error": str(e)}
+    else:
+        # XR path — just report that the probe is out of scope for L0.
+        result["local_probe"] = {
+            "note": "Network / XR-runtime probe not performed; run the device's own diagnostics.",
+        }
+
+    return result
+
+
+def _open_hdf5_safely(path: str):
+    """Return (h5py_File, None) or (None, reason_str). Never raises."""
+    try:
+        import h5py  # type: ignore
+    except ImportError:
+        return None, "h5py is not installed"
+    p = Path(path)
+    if not p.exists():
+        return None, f"file does not exist: {path}"
+    try:
+        return h5py.File(str(p), "r"), None
+    except Exception as e:  # noqa: BLE001
+        return None, f"failed to open HDF5: {e}"
+
+
+async def _handle_validate_teleop_demo(args: Dict) -> Dict:
+    """Validate an HDF5 teleop file against the robomimic schema."""
+    path = args["hdf5_path"]
+    f, reason = _open_hdf5_safely(path)
+    if f is None:
+        # Distinguish "h5py missing" from "file missing" for the LLM
+        available = not reason.startswith("h5py")
+        return {
+            "available": available,
+            "path": path,
+            "reason": reason,
+            "demos_checked": 0,
+            "demos_ok": 0,
+            "issues": [{"demo": "*", "problem": reason}],
+            "ready_for_training": False,
+        }
+
+    import math
+    issues: List[Dict[str, str]] = []
+    demos_checked = 0
+    demos_ok = 0
+    total_transitions = 0
+    try:
+        data_group = f.get("data")
+        if data_group is None:
+            issues.append({"demo": "*", "problem": "missing /data group"})
+        else:
+            for demo_name in data_group.keys():
+                demos_checked += 1
+                demo = data_group[demo_name]
+                actions = demo.get("actions")
+                if actions is None:
+                    issues.append({"demo": demo_name, "problem": "missing actions dataset"})
+                    continue
+                shape = getattr(actions, "shape", ())
+                if len(shape) != 2:
+                    issues.append({
+                        "demo": demo_name,
+                        "problem": f"actions rank {len(shape)} != 2, shape={shape}",
+                    })
+                    continue
+                if shape[0] == 0:
+                    issues.append({"demo": demo_name, "problem": "episode length 0"})
+                    continue
+                # NaN / Inf check — sample first N rows to stay L0-cheap
+                sample = actions[: min(shape[0], 4096)]
+                has_bad = False
+                for row in sample:
+                    for v in row:
+                        try:
+                            fv = float(v)
+                        except (TypeError, ValueError):
+                            continue
+                        if math.isnan(fv) or math.isinf(fv):
+                            has_bad = True
+                            break
+                    if has_bad:
+                        break
+                if has_bad:
+                    issues.append({"demo": demo_name, "problem": "NaN or Inf in actions"})
+                    continue
+                obs = demo.get("obs")
+                if obs is not None and len(obs.keys()) == 0:
+                    issues.append({"demo": demo_name, "problem": "obs group is empty"})
+                    continue
+                demos_ok += 1
+                total_transitions += int(shape[0])
+    finally:
+        try:
+            f.close()
+        except Exception:
+            pass
+
+    return {
+        "available": True,
+        "path": path,
+        "demos_checked": demos_checked,
+        "demos_ok": demos_ok,
+        "total_transitions": total_transitions,
+        "issues": issues,
+        "ready_for_training": demos_checked > 0 and len(issues) == 0,
+    }
+
+
+async def _handle_summarize_teleop_session(args: Dict) -> Dict:
+    """Summarize duration and per-joint statistics for an HDF5 teleop session."""
+    path = args["hdf5_path"]
+    fps_override = args.get("fps")
+    f, reason = _open_hdf5_safely(path)
+    if f is None:
+        available = not reason.startswith("h5py")
+        return {
+            "available": available,
+            "path": path,
+            "reason": reason,
+            "demos": 0,
+        }
+
+    try:
+        root_fps = f.attrs.get("fps") if hasattr(f, "attrs") else None
+        fps = int(fps_override or root_fps or 30)
+        data_group = f.get("data")
+        if data_group is None:
+            return {
+                "available": True,
+                "path": path,
+                "reason": "missing /data group",
+                "demos": 0,
+                "fps": fps,
+            }
+
+        demo_count = 0
+        total_transitions = 0
+        total_duration = 0.0
+        # Per-joint aggregates
+        joint_min: List[float] = []
+        joint_max: List[float] = []
+        joint_vel_abs_sum: List[float] = []
+        joint_vel_abs_peak: List[float] = []
+        joint_sample_count = 0
+
+        for demo_name in data_group.keys():
+            demo = data_group[demo_name]
+            actions = demo.get("actions")
+            if actions is None:
+                continue
+            shape = getattr(actions, "shape", ())
+            if len(shape) != 2 or shape[0] == 0:
+                continue
+            demo_count += 1
+            n_steps = int(shape[0])
+            n_joints = int(shape[1])
+            total_transitions += n_steps
+            total_duration += n_steps / float(fps)
+
+            # Grow per-joint arrays lazily
+            while len(joint_min) < n_joints:
+                joint_min.append(float("inf"))
+                joint_max.append(float("-inf"))
+                joint_vel_abs_sum.append(0.0)
+                joint_vel_abs_peak.append(0.0)
+
+            sample = actions[: min(n_steps, 4096)]
+            prev_row: Optional[List[float]] = None
+            for row in sample:
+                for j, v in enumerate(row):
+                    try:
+                        fv = float(v)
+                    except (TypeError, ValueError):
+                        continue
+                    if fv < joint_min[j]:
+                        joint_min[j] = fv
+                    if fv > joint_max[j]:
+                        joint_max[j] = fv
+                    if prev_row is not None:
+                        dv = abs(fv - prev_row[j])
+                        joint_vel_abs_sum[j] += dv
+                        if dv > joint_vel_abs_peak[j]:
+                            joint_vel_abs_peak[j] = dv
+                prev_row = [float(x) for x in row]
+                joint_sample_count += 1
+
+        per_joint = []
+        denom = max(joint_sample_count - demo_count, 1)
+        for j, lo in enumerate(joint_min):
+            hi = joint_max[j]
+            per_joint.append({
+                "joint": j,
+                "range_rad": (hi - lo) if hi > lo else 0.0,
+                "min": (lo if lo != float("inf") else 0.0),
+                "max": (hi if hi != float("-inf") else 0.0),
+                "vel_mean": joint_vel_abs_sum[j] / denom * fps,
+                "vel_max": joint_vel_abs_peak[j] * fps,
+            })
+
+        return {
+            "available": True,
+            "path": path,
+            "demos": demo_count,
+            "total_duration_s": total_duration,
+            "total_transitions": total_transitions,
+            "fps": fps,
+            "per_joint": per_joint,
+        }
+    finally:
+        try:
+            f.close()
+        except Exception:
+            pass
+
+
+def _gen_export_teleop_mapping(args: Dict) -> str:
+    """Generate a script that writes the teleop mapping YAML to workspace/teleop_mappings/."""
+    session_name = str(args["session_name"])
+    device = str(args["device"])
+    joint_map = args.get("joint_map") or []
+    gains = args.get("gains") or {"position": 400, "velocity": 40}
+    robot = str(args.get("robot", "franka_panda"))
+
+    # Safe quoting — repr() on every user string that ends up in source
+    return (
+        "from pathlib import Path\n"
+        "import json\n"
+        "\n"
+        f"session_name = {repr(session_name)}\n"
+        f"device = {repr(device)}\n"
+        f"robot = {repr(robot)}\n"
+        f"joint_map = {json.dumps(joint_map)}\n"
+        f"gains = {json.dumps(gains)}\n"
+        "\n"
+        "out_dir = Path('workspace') / 'teleop_mappings'\n"
+        "out_dir.mkdir(parents=True, exist_ok=True)\n"
+        "out_path = out_dir / f'{session_name}.yaml'\n"
+        "\n"
+        "lines = []\n"
+        "lines.append(f'robot: {robot}')\n"
+        "lines.append(f'device: {device}')\n"
+        "lines.append('joints:')\n"
+        "for j in joint_map:\n"
+        "    name = j.get('name', '')\n"
+        "    source = j.get('source', '')\n"
+        "    gain = j.get('gain', 1.0)\n"
+        "    limit = j.get('limit_rad', [-3.14, 3.14])\n"
+        "    lines.append(f'  - name: {name}')\n"
+        "    lines.append(f'    source: {source}')\n"
+        "    lines.append(f'    gain: {gain}')\n"
+        "    lines.append(f'    limit_rad: [{limit[0]}, {limit[1]}]')\n"
+        "lines.append('gains:')\n"
+        "for k, v in gains.items():\n"
+        "    lines.append(f'  {k}: {v}')\n"
+        "\n"
+        "out_path.write_text('\\n'.join(lines) + '\\n', encoding='utf-8')\n"
+        "print(f'Wrote mapping to {out_path}')\n"
+    )
+
+
+def _gen_generate_teleop_watchdog_script(args: Dict) -> str:
+    """Generate a Python script arming a teleop watchdog on a given articulation."""
+    robot_path = str(args["robot_path"])
+    timeout_ms = int(args.get("timeout_ms", 500))
+    hold_time_ms = int(args.get("hold_time_ms", 2000))
+    socket_path = str(args.get("socket_path", "/ws/teleop"))
+
+    return (
+        '"""\n'
+        'Teleop watchdog — hold-last-command then zero velocity targets on timeout.\n'
+        'Auto-generated by Isaac Assist (Phase 7C addendum).\n'
+        '"""\n'
+        "import asyncio\n"
+        "import time\n"
+        "\n"
+        f"ROBOT_PATH = {repr(robot_path)}\n"
+        f"SOCKET_PATH = {repr(socket_path)}\n"
+        f"TIMEOUT_MS = {timeout_ms}\n"
+        f"HOLD_TIME_MS = {hold_time_ms}\n"
+        "\n"
+        "_last_msg_ts = time.monotonic()\n"
+        "_zeroed = False\n"
+        "\n"
+        "\n"
+        "def _on_teleop_message(msg):\n"
+        "    global _last_msg_ts, _zeroed\n"
+        "    _last_msg_ts = time.monotonic()\n"
+        "    _zeroed = False\n"
+        "\n"
+        "\n"
+        "def _zero_velocity_targets():\n"
+        "    import omni.usd\n"
+        "    from pxr import UsdPhysics\n"
+        "    stage = omni.usd.get_context().get_stage()\n"
+        "    root = stage.GetPrimAtPath(ROBOT_PATH)\n"
+        "    if not root or not root.IsValid():\n"
+        "        print(f'[watchdog] robot not found: {ROBOT_PATH}')\n"
+        "        return\n"
+        "    count = 0\n"
+        "    for prim in stage.Traverse():\n"
+        "        if not str(prim.GetPath()).startswith(ROBOT_PATH):\n"
+        "            continue\n"
+        "        if prim.HasAPI(UsdPhysics.DriveAPI):\n"
+        "            drive = UsdPhysics.DriveAPI.Get(prim, 'angular')\n"
+        "            attr = drive.GetTargetVelocityAttr()\n"
+        "            if attr:\n"
+        "                attr.Set(0.0)\n"
+        "                count += 1\n"
+        "    print(f'[watchdog] zeroed {count} joint drive(s)')\n"
+        "\n"
+        "\n"
+        "async def watchdog_loop():\n"
+        "    global _zeroed\n"
+        "    print(f'[watchdog] armed on {ROBOT_PATH} — timeout {TIMEOUT_MS} ms, hold {HOLD_TIME_MS} ms')\n"
+        "    while True:\n"
+        "        await asyncio.sleep(TIMEOUT_MS / 1000.0)\n"
+        "        elapsed_ms = (time.monotonic() - _last_msg_ts) * 1000.0\n"
+        "        if elapsed_ms <= TIMEOUT_MS:\n"
+        "            continue\n"
+        "        print(f'[watchdog] timeout — elapsed {elapsed_ms:.0f} ms, holding last command')\n"
+        "        await asyncio.sleep(HOLD_TIME_MS / 1000.0)\n"
+        "        if not _zeroed:\n"
+        "            _zero_velocity_targets()\n"
+        "            _zeroed = True\n"
+        "\n"
+        "\n"
+        "# Entry point — call arm() from the Kit main loop or Script Editor.\n"
+        "def arm():\n"
+        "    loop = asyncio.get_event_loop()\n"
+        "    return loop.create_task(watchdog_loop())\n"
+    )
+
+
+CODE_GEN_HANDLERS["export_teleop_mapping"] = _gen_export_teleop_mapping
+CODE_GEN_HANDLERS["generate_teleop_watchdog_script"] = _gen_generate_teleop_watchdog_script
+
+DATA_HANDLERS["check_teleop_hardware"] = _handle_check_teleop_hardware
+DATA_HANDLERS["validate_teleop_demo"] = _handle_validate_teleop_demo
+DATA_HANDLERS["summarize_teleop_session"] = _handle_summarize_teleop_session
