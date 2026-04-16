@@ -2056,6 +2056,455 @@ DATA_HANDLERS["vision_plan_trajectory"] = _handle_vision_plan_trajectory
 DATA_HANDLERS["vision_analyze_scene"] = _handle_vision_analyze_scene
 
 
+# ── Scene Diff ───────────────────────────────────────────────────────────────
+# "What changed since last save?" → structured + human-readable diff.
+# Layer 1: Raw USD text diff via Kit RPC (Sdf.Layer + difflib).
+# Layer 2: Parse raw diff into structured SceneChange list.
+# Layer 3: LLM narration (handled by caller, we return structured data).
+
+
+def _parse_unified_diff_to_changes(raw_diff_lines: List[str]) -> List[Dict]:
+    """Parse a unified diff of USDA text into structured SceneChange dicts.
+
+    Each returned dict has:
+        prim_path: str
+        change_type: "added" | "removed" | "modified"
+        details: dict  (attribute, old, new, or raw line)
+    """
+    import re
+    changes: List[Dict] = []
+    current_prim: Optional[str] = None
+
+    # Track added/removed lines to pair modifications
+    added_lines: List[str] = []
+    removed_lines: List[str] = []
+
+    def _flush_pending():
+        nonlocal added_lines, removed_lines
+        if not current_prim:
+            added_lines.clear()
+            removed_lines.clear()
+            return
+        # Pair removed/added as modifications
+        paired = min(len(removed_lines), len(added_lines))
+        for i in range(paired):
+            changes.append({
+                "prim_path": current_prim,
+                "change_type": "modified",
+                "details": {"old_line": removed_lines[i].strip(), "new_line": added_lines[i].strip()},
+            })
+        for i in range(paired, len(removed_lines)):
+            changes.append({
+                "prim_path": current_prim,
+                "change_type": "removed",
+                "details": {"line": removed_lines[i].strip()},
+            })
+        for i in range(paired, len(added_lines)):
+            changes.append({
+                "prim_path": current_prim,
+                "change_type": "added",
+                "details": {"line": added_lines[i].strip()},
+            })
+        added_lines = []
+        removed_lines = []
+
+    prim_re = re.compile(r'^\s*def\s+(\w+)\s+"([^"]+)"')
+    for line in raw_diff_lines:
+        # Skip diff headers
+        if line.startswith("---") or line.startswith("+++") or line.startswith("@@"):
+            _flush_pending()
+            continue
+
+        # Detect prim context from context lines
+        m = prim_re.match(line.lstrip("+-"))
+        if m:
+            _flush_pending()
+            current_prim = m.group(2)
+            # A whole prim definition added/removed
+            if line.startswith("+") and not line.startswith("+++"):
+                changes.append({
+                    "prim_path": current_prim,
+                    "change_type": "added",
+                    "details": {"prim_type": m.group(1)},
+                })
+            elif line.startswith("-") and not line.startswith("---"):
+                changes.append({
+                    "prim_path": current_prim,
+                    "change_type": "removed",
+                    "details": {"prim_type": m.group(1)},
+                })
+            continue
+
+        if line.startswith("-") and not line.startswith("---"):
+            removed_lines.append(line[1:])
+        elif line.startswith("+") and not line.startswith("+++"):
+            added_lines.append(line[1:])
+        else:
+            _flush_pending()
+
+    _flush_pending()
+
+    # Deduplicate: group by prim_path + change_type
+    seen: Dict[tuple, Dict] = {}
+    deduped: List[Dict] = []
+    for c in changes:
+        key = (c["prim_path"], c["change_type"])
+        if key not in seen:
+            seen[key] = c
+            deduped.append(c)
+        else:
+            # Merge details for same prim
+            existing = seen[key]
+            if "modifications" not in existing:
+                existing["modifications"] = [existing.get("details", {})]
+            existing["modifications"].append(c.get("details", {}))
+    return deduped
+
+
+def _summarize_changes(changes: List[Dict]) -> str:
+    """Generate a concise human-readable summary from structured changes."""
+    if not changes:
+        return "No changes detected."
+
+    added = [c for c in changes if c["change_type"] == "added"]
+    removed = [c for c in changes if c["change_type"] == "removed"]
+    modified = [c for c in changes if c["change_type"] == "modified"]
+
+    parts: List[str] = []
+    total = len(added) + len(removed) + len(modified)
+    parts.append(f"{total} change(s) detected:")
+
+    for c in added:
+        ptype = c.get("details", {}).get("prim_type", "prim")
+        parts.append(f"  + Added {ptype}: {c['prim_path']}")
+    for c in removed:
+        ptype = c.get("details", {}).get("prim_type", "prim")
+        parts.append(f"  - Removed {ptype}: {c['prim_path']}")
+    for c in modified:
+        detail = c.get("details", {})
+        desc = detail.get("new_line", detail.get("line", "property changed"))
+        parts.append(f"  ~ Modified: {c['prim_path']} ({desc})")
+
+    return "\n".join(parts)
+
+
+async def _handle_scene_diff(args: Dict) -> Dict:
+    """Compute a structured scene diff via Kit RPC.
+
+    Supports three modes:
+    - since="last_save"     → diff dirty layers against on-disk version
+    - since="last_snapshot" → diff current vs. most recent snapshot
+    - snapshot_a + snapshot_b → explicit comparison
+    """
+    since = args.get("since")
+    snap_a = args.get("snapshot_a")
+    snap_b = args.get("snapshot_b")
+
+    if since == "last_save":
+        # Use Kit RPC to diff dirty layers against their on-disk copies
+        code = """\
+import omni.usd
+import difflib
+import json
+
+ctx = omni.usd.get_context()
+stage = ctx.get_stage()
+dirty = ctx.get_dirty_layers() if hasattr(ctx, 'get_dirty_layers') else []
+all_diff = []
+for layer_id in dirty:
+    from pxr import Sdf
+    layer = Sdf.Layer.Find(layer_id)
+    if layer is None:
+        continue
+    current_text = layer.ExportToString()
+    # Try to get the on-disk version
+    disk_layer = None
+    if layer.realPath:
+        try:
+            disk_layer = Sdf.Layer.OpenAsAnonymous(layer.realPath)
+        except Exception:
+            pass
+    disk_text = disk_layer.ExportToString() if disk_layer else ""
+    diff_lines = list(difflib.unified_diff(
+        disk_text.splitlines(), current_text.splitlines(), lineterm=""
+    ))
+    all_diff.extend(diff_lines)
+# Fallback: if no dirty layers found, diff root layer against empty
+if not dirty:
+    root = stage.GetRootLayer()
+    current_text = root.ExportToString()
+    all_diff = list(difflib.unified_diff(
+        [], current_text.splitlines(), lineterm=""
+    ))
+print(json.dumps({"diff_lines": all_diff, "dirty_layer_count": len(dirty)}))
+"""
+        result = await kit_tools.queue_exec_patch(code, "scene_diff(since=last_save)")
+        if result.get("error"):
+            return {"error": result["error"]}
+        # Parse Kit output
+        output = result.get("output", "")
+        diff_data: Dict = {}
+        for line in reversed(output.splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    diff_data = json.loads(line)
+                    break
+                except json.JSONDecodeError:
+                    pass
+        raw_diff = diff_data.get("diff_lines", [])
+        changes = _parse_unified_diff_to_changes(raw_diff)
+        summary = _summarize_changes(changes)
+        return {
+            "changes": changes,
+            "change_count": len(changes),
+            "summary": summary,
+            "mode": "last_save",
+            "dirty_layer_count": diff_data.get("dirty_layer_count", 0),
+        }
+
+    elif since == "last_snapshot":
+        # Compare current stage text against the most recent snapshot
+        code = """\
+import omni.usd
+import difflib
+import json
+import os
+
+stage = omni.usd.get_context().get_stage()
+current_text = stage.GetRootLayer().ExportToString()
+
+# Find most recent snapshot file
+snap_dir = os.path.join(os.getcwd(), "workspace", "snapshots")
+snapshots = []
+if os.path.isdir(snap_dir):
+    snapshots = sorted(
+        [f for f in os.listdir(snap_dir) if f.endswith(('.usda', '.usd'))],
+        key=lambda f: os.path.getmtime(os.path.join(snap_dir, f)),
+        reverse=True,
+    )
+if not snapshots:
+    print(json.dumps({"diff_lines": [], "error": "No snapshots found"}))
+else:
+    from pxr import Sdf
+    snap_path = os.path.join(snap_dir, snapshots[0])
+    snap_layer = Sdf.Layer.OpenAsAnonymous(snap_path)
+    snap_text = snap_layer.ExportToString() if snap_layer else ""
+    diff_lines = list(difflib.unified_diff(
+        snap_text.splitlines(), current_text.splitlines(), lineterm=""
+    ))
+    print(json.dumps({"diff_lines": diff_lines, "snapshot_file": snapshots[0]}))
+"""
+        result = await kit_tools.queue_exec_patch(code, "scene_diff(since=last_snapshot)")
+        if result.get("error"):
+            return {"error": result["error"]}
+        output = result.get("output", "")
+        diff_data = {}
+        for line in reversed(output.splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    diff_data = json.loads(line)
+                    break
+                except json.JSONDecodeError:
+                    pass
+        if diff_data.get("error"):
+            return {"error": diff_data["error"]}
+        raw_diff = diff_data.get("diff_lines", [])
+        changes = _parse_unified_diff_to_changes(raw_diff)
+        summary = _summarize_changes(changes)
+        return {
+            "changes": changes,
+            "change_count": len(changes),
+            "summary": summary,
+            "mode": "last_snapshot",
+            "snapshot_file": diff_data.get("snapshot_file"),
+        }
+
+    elif snap_a and snap_b:
+        # Explicit comparison between two named snapshots
+        # Sanitize snapshot names — only allow alphanumeric, underscore, hyphen, dot
+        import re as _re
+        if not _re.match(r'^[a-zA-Z0-9_.-]+$', snap_a):
+            return {"error": f"Invalid snapshot_a name: {snap_a}"}
+        if not _re.match(r'^[a-zA-Z0-9_.-]+$', snap_b):
+            return {"error": f"Invalid snapshot_b name: {snap_b}"}
+
+        code = f"""\
+import os
+import difflib
+import json
+from pxr import Sdf
+
+snap_dir = os.path.join(os.getcwd(), "workspace", "snapshots")
+path_a = os.path.join(snap_dir, "{snap_a}")
+path_b = os.path.join(snap_dir, "{snap_b}")
+
+# Try with common extensions if not found
+for ext in ("", ".usda", ".usd"):
+    if os.path.exists(path_a + ext):
+        path_a = path_a + ext
+        break
+for ext in ("", ".usda", ".usd"):
+    if os.path.exists(path_b + ext):
+        path_b = path_b + ext
+        break
+
+if not os.path.exists(path_a):
+    print(json.dumps({{"error": "Snapshot not found: {snap_a}"}}))
+elif not os.path.exists(path_b):
+    print(json.dumps({{"error": "Snapshot not found: {snap_b}"}}))
+else:
+    layer_a = Sdf.Layer.OpenAsAnonymous(path_a)
+    layer_b = Sdf.Layer.OpenAsAnonymous(path_b)
+    text_a = layer_a.ExportToString() if layer_a else ""
+    text_b = layer_b.ExportToString() if layer_b else ""
+    diff_lines = list(difflib.unified_diff(
+        text_a.splitlines(), text_b.splitlines(), lineterm=""
+    ))
+    print(json.dumps({{"diff_lines": diff_lines, "snapshot_a": "{snap_a}", "snapshot_b": "{snap_b}"}}))
+"""
+        result = await kit_tools.queue_exec_patch(code, f"scene_diff({snap_a} vs {snap_b})")
+        if result.get("error"):
+            return {"error": result["error"]}
+        output = result.get("output", "")
+        diff_data = {}
+        for line in reversed(output.splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    diff_data = json.loads(line)
+                    break
+                except json.JSONDecodeError:
+                    pass
+        if diff_data.get("error"):
+            return {"error": diff_data["error"]}
+        raw_diff = diff_data.get("diff_lines", [])
+        changes = _parse_unified_diff_to_changes(raw_diff)
+        summary = _summarize_changes(changes)
+        return {
+            "changes": changes,
+            "change_count": len(changes),
+            "summary": summary,
+            "mode": "explicit",
+            "snapshot_a": snap_a,
+            "snapshot_b": snap_b,
+        }
+
+    return {"error": "Provide either 'since' (last_save|last_snapshot) or both 'snapshot_a' and 'snapshot_b'."}
+
+
+async def _handle_watch_changes(args: Dict) -> Dict:
+    """Start/stop/query live change tracking via Tf.Notice in Kit."""
+    action = args.get("action", "query")
+
+    if action == "start":
+        code = """\
+import omni.usd
+import json
+
+# Register a global change tracker (singleton pattern)
+stage = omni.usd.get_context().get_stage()
+
+if not hasattr(omni.usd, '_isaac_assist_change_tracker'):
+    from pxr import Tf
+
+    class _ChangeTracker:
+        def __init__(self):
+            self.changes = []
+            self._listener = None
+
+        def start(self, stage):
+            self.changes = []
+            self._listener = Tf.Notice.Register(
+                Tf.Notice.ObjectsChanged, self._on_changed, stage
+            )
+
+        def stop(self):
+            if self._listener:
+                self._listener.Revoke()
+                self._listener = None
+
+        def _on_changed(self, notice, stage):
+            for path in notice.GetResyncedPaths():
+                self.changes.append({"path": str(path), "type": "structural"})
+            for path in notice.GetChangedInfoOnlyPaths():
+                self.changes.append({"path": str(path), "type": "value"})
+
+    omni.usd._isaac_assist_change_tracker = _ChangeTracker()
+
+tracker = omni.usd._isaac_assist_change_tracker
+tracker.start(stage)
+print(json.dumps({"status": "tracking_started", "message": "Live change tracking started."}))
+"""
+        result = await kit_tools.queue_exec_patch(code, "watch_changes(start)")
+        return {
+            "status": "tracking_started",
+            "message": "Live change tracking started. Use watch_changes(action='query') to see accumulated changes, or watch_changes(action='stop') to end.",
+            "queued": result.get("queued", False),
+        }
+
+    elif action == "stop":
+        code = """\
+import omni.usd
+import json
+
+if hasattr(omni.usd, '_isaac_assist_change_tracker'):
+    tracker = omni.usd._isaac_assist_change_tracker
+    tracker.stop()
+    count = len(tracker.changes)
+    changes = tracker.changes[-100:]  # return last 100
+    tracker.changes = []
+    print(json.dumps({"status": "tracking_stopped", "total_changes": count, "changes": changes}))
+else:
+    print(json.dumps({"status": "not_running", "message": "No active change tracker."}))
+"""
+        result = await kit_tools.queue_exec_patch(code, "watch_changes(stop)")
+        output = result.get("output", "")
+        for line in reversed(output.splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    return json.loads(line)
+                except json.JSONDecodeError:
+                    pass
+        return {"status": "stopped", "queued": result.get("queued", False)}
+
+    elif action == "query":
+        code = """\
+import omni.usd
+import json
+
+if hasattr(omni.usd, '_isaac_assist_change_tracker'):
+    tracker = omni.usd._isaac_assist_change_tracker
+    count = len(tracker.changes)
+    # Deduplicate by path, keep latest type
+    seen = {}
+    for c in tracker.changes:
+        seen[c["path"]] = c["type"]
+    deduped = [{"path": p, "type": t} for p, t in seen.items()]
+    print(json.dumps({"status": "tracking", "total_raw": count, "unique_paths": len(deduped), "changes": deduped[-100:]}))
+else:
+    print(json.dumps({"status": "not_running", "message": "No active change tracker. Call watch_changes(action='start') first."}))
+"""
+        result = await kit_tools.queue_exec_patch(code, "watch_changes(query)")
+        output = result.get("output", "")
+        for line in reversed(output.splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    return json.loads(line)
+                except json.JSONDecodeError:
+                    pass
+        return {"status": "query_sent", "queued": result.get("queued", False)}
+
+    return {"error": f"Unknown action: {action}. Use 'start', 'stop', or 'query'."}
+
+
+DATA_HANDLERS["scene_diff"] = _handle_scene_diff
+DATA_HANDLERS["watch_changes"] = _handle_watch_changes
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),

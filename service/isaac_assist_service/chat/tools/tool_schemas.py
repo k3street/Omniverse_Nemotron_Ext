@@ -926,6 +926,46 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Scene Diff ──────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "scene_diff",
+            "description": "Show what changed in the scene since last save, last snapshot, or between two explicit snapshots. Returns a structured list of added/removed/modified prims with attribute-level detail, plus an LLM-ready plain-language summary. Use when the user asks 'what changed', 'show diff', 'compare with last save', etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "since": {
+                        "type": "string",
+                        "enum": ["last_save", "last_snapshot"],
+                        "description": "Shortcut: compare current state against last save or last snapshot.",
+                    },
+                    "snapshot_a": {"type": "string", "description": "Snapshot ID for the 'before' state (explicit comparison)."},
+                    "snapshot_b": {"type": "string", "description": "Snapshot ID for the 'after' state (explicit comparison)."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "watch_changes",
+            "description": "Start or stop live change tracking on the USD stage. When started, accumulates structural and value changes via Tf.Notice. Query accumulated changes with scene_diff(since='last_snapshot'). Use when the user asks to 'watch changes', 'track changes', or 'monitor the scene'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["start", "stop", "query"],
+                        "description": "'start' begins tracking, 'stop' ends it, 'query' returns accumulated changes without stopping.",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",
