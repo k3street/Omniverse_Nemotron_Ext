@@ -942,4 +942,161 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Tier 2 Atomic Tools — Physics Bodies & Scene ────────────────────────
+    # 10 atomic primitives (see docs/specs/atomic_tools_catalog.md, Tier 2).
+    # Adds read symmetry for rigid body state, mass/inertia, the physics scene
+    # config, and live contact pairs — plus three CODE_GEN handlers for
+    # mutating velocity, scene config, and applying external forces. Used by
+    # the LLM to debug RL/sim runs and verify what physics actually does.
+    {
+        "type": "function",
+        "function": {
+            "name": "get_linear_velocity",
+            "description": "Return the current linear velocity (m/s) of a rigid body via UsdPhysics.RigidBodyAPI(prim).GetVelocityAttr().Get(). Use to verify a body is moving at the expected speed, e.g. after applying a force or starting a sim.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the rigid body prim"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_angular_velocity",
+            "description": "Return the current angular velocity (deg/s) of a rigid body via UsdPhysics.RigidBodyAPI(prim).GetAngularVelocityAttr().Get(). Use to inspect spin / rotation state.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the rigid body prim"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_linear_velocity",
+            "description": "Set the linear velocity (m/s) on a rigid body via UsdPhysics.RigidBodyAPI(prim).GetVelocityAttr().Set(). Generates an approvable Python patch.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the rigid body prim"},
+                    "vel": {"type": "array", "items": {"type": "number"}, "description": "Target linear velocity [vx, vy, vz] in m/s"},
+                },
+                "required": ["prim_path", "vel"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_mass",
+            "description": "Return the current mass (kg) of a rigid body via UsdPhysics.MassAPI(prim).GetMassAttr().Get(). 0.0 means PhysX will compute mass from collision geometry + density.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the rigid body prim"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_inertia",
+            "description": "Return the diagonal of the inertia tensor (kg·m²) of a rigid body via UsdPhysics.MassAPI(prim).GetDiagonalInertiaAttr().Get(). Zero vector means PhysX will compute inertia from collision geometry.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the rigid body prim"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_physics_scene_config",
+            "description": "Read the global PhysicsScene configuration: gravity, solver type (PGS/TGS), iteration counts, time step, GPU enabled flag, broadphase. Used by the LLM to verify solver settings before tuning RL or rigid body sims.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_path": {"type": "string", "description": "Optional UsdPhysics.Scene path. Default: auto-detect first scene on stage."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_physics_scene_config",
+            "description": "Update the global PhysicsScene configuration (solver type, iteration counts, time step, GPU enable, broadphase, gravity). Generates an approvable Python patch using UsdPhysics.Scene + PhysxSchema.PhysxSceneAPI.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "config": {
+                        "type": "object",
+                        "description": "Solver settings as a dict. Keys (all optional): solver_type ('PGS'|'TGS'), position_iterations (int), velocity_iterations (int), time_steps_per_second (int), enable_gpu_dynamics (bool), broadphase_type ('MBP'|'GPU'|'SAP'), gravity_direction ([x,y,z]), gravity_magnitude (number), scene_path (string).",
+                    },
+                },
+                "required": ["config"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_contacts",
+            "description": "List the current contact pairs for a rigid body. Applies PhysxContactReportAPI if missing, then subscribes to the contact report stream for one physics step and returns each contact pair {body_a, body_b, impulse}. Use to debug grasps or unexpected collisions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the rigid body prim to monitor"},
+                    "duration": {"type": "number", "description": "Seconds to listen for contacts. Default: 0.5"},
+                    "min_impulse": {"type": "number", "description": "Filter out contacts with impulse below this threshold (N·s). Default: 0.0"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_force",
+            "description": "Apply an external force and/or torque to a rigid body for one physics step using PhysX tensor API (omni.physics.tensors). Generates an approvable Python patch.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the rigid body prim"},
+                    "force": {"type": "array", "items": {"type": "number"}, "description": "World-space force vector [fx, fy, fz] in Newtons. Default [0, 0, 0]."},
+                    "torque": {"type": "array", "items": {"type": "number"}, "description": "World-space torque vector [tx, ty, tz] in N·m. Default [0, 0, 0]."},
+                    "position": {"type": "array", "items": {"type": "number"}, "description": "Optional world-space application point [x, y, z]. If omitted, force is applied at the body center of mass."},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_kinematic_state",
+            "description": "Return the full kinematic state (world transform position + rotation, linear velocity, angular velocity, and best-effort linear/angular acceleration via finite difference over a short window) for a rigid body. Used as a one-shot snapshot for debugging and behavior comparison.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the rigid body prim"},
+                    "sample_dt": {"type": "number", "description": "Seconds between velocity samples used to estimate acceleration. Default 0.05."},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
 ]

@@ -2232,3 +2232,592 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ─── Tier 2 Atomic Tools — Physics Bodies & Scene ────────────────────────────
+# 10 atomic primitives (see docs/specs/atomic_tools_catalog.md, Tier 2).
+# Seven DATA handlers ship a print-json snippet to Kit through queue_exec_patch
+# and return whatever Kit prints. Three CODE_GEN handlers (set_linear_velocity,
+# set_physics_scene_config, apply_force) emit Python patches the user approves
+# before Kit executes them. Implementation mirrors the Tier 0 / Tier 1
+# conventions established in earlier atomic-tier branches.
+
+
+# ── 1. get_linear_velocity (DATA) — T2.1 ────────────────────────────────────
+
+async def _handle_get_linear_velocity(args: Dict) -> Dict:
+    """Return rigid body linear velocity via UsdPhysics.RigidBodyAPI."""
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+elif not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+    result['error'] = 'PhysicsRigidBodyAPI not applied — apply it first'
+    result['has_rigid_body_api'] = False
+else:
+    rb = UsdPhysics.RigidBodyAPI(prim)
+    attr = rb.GetVelocityAttr()
+    if attr and attr.HasAuthoredValue():
+        v = attr.Get()
+        result['linear_velocity'] = [float(v[0]), float(v[1]), float(v[2])]
+        result['authored'] = True
+    else:
+        v = attr.Get() if attr else None
+        if v is None:
+            result['linear_velocity'] = [0.0, 0.0, 0.0]
+            result['authored'] = False
+        else:
+            result['linear_velocity'] = [float(v[0]), float(v[1]), float(v[2])]
+            result['authored'] = False
+    result['units'] = 'm/s'
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_linear_velocity {prim_path}")
+
+
+# ── 2. get_angular_velocity (DATA) — T2.2 ───────────────────────────────────
+
+async def _handle_get_angular_velocity(args: Dict) -> Dict:
+    """Return rigid body angular velocity via UsdPhysics.RigidBodyAPI."""
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+elif not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+    result['error'] = 'PhysicsRigidBodyAPI not applied — apply it first'
+    result['has_rigid_body_api'] = False
+else:
+    rb = UsdPhysics.RigidBodyAPI(prim)
+    attr = rb.GetAngularVelocityAttr()
+    if attr and attr.HasAuthoredValue():
+        v = attr.Get()
+        result['angular_velocity'] = [float(v[0]), float(v[1]), float(v[2])]
+        result['authored'] = True
+    else:
+        v = attr.Get() if attr else None
+        if v is None:
+            result['angular_velocity'] = [0.0, 0.0, 0.0]
+            result['authored'] = False
+        else:
+            result['angular_velocity'] = [float(v[0]), float(v[1]), float(v[2])]
+            result['authored'] = False
+    result['units'] = 'deg/s'
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_angular_velocity {prim_path}")
+
+
+# ── 3. set_linear_velocity (CODE_GEN) — T2.3 ────────────────────────────────
+
+def _gen_set_linear_velocity(args: Dict) -> str:
+    """Generate code to set rigid body linear velocity."""
+    prim_path = args["prim_path"]
+    vel = args.get("vel") or [0.0, 0.0, 0.0]
+    vx, vy, vz = float(vel[0]), float(vel[1]), float(vel[2])
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics, Gf
+
+stage = omni.usd.get_context().get_stage()
+prim_path = {prim_path!r}
+prim = stage.GetPrimAtPath(prim_path)
+if not prim or not prim.IsValid():
+    raise RuntimeError('prim not found: ' + repr(prim_path))
+if not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+    UsdPhysics.RigidBodyAPI.Apply(prim)
+rb = UsdPhysics.RigidBodyAPI(prim)
+attr = rb.GetVelocityAttr() or rb.CreateVelocityAttr()
+attr.Set(Gf.Vec3f({vx}, {vy}, {vz}))
+print('Set linear velocity on ' + repr(prim_path) + ' to ({vx}, {vy}, {vz}) m/s')
+"""
+
+
+# ── 4. get_mass (DATA) — T2.4 ───────────────────────────────────────────────
+
+async def _handle_get_mass(args: Dict) -> Dict:
+    """Return current rigid body mass via UsdPhysics.MassAPI."""
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}, 'units': 'kg'}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+elif not prim.HasAPI(UsdPhysics.MassAPI):
+    result['has_mass_api'] = False
+    result['mass'] = 0.0
+    result['note'] = 'PhysicsMassAPI not applied — PhysX will compute mass from collision geometry + density'
+else:
+    result['has_mass_api'] = True
+    mass_api = UsdPhysics.MassAPI(prim)
+    attr = mass_api.GetMassAttr()
+    if attr and attr.HasAuthoredValue():
+        result['mass'] = float(attr.Get())
+        result['authored'] = True
+    else:
+        v = attr.Get() if attr else None
+        result['mass'] = float(v) if v is not None else 0.0
+        result['authored'] = False
+    den_attr = mass_api.GetDensityAttr()
+    if den_attr and den_attr.HasAuthoredValue():
+        result['density_kg_m3'] = float(den_attr.Get())
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_mass {prim_path}")
+
+
+# ── 5. get_inertia (DATA) — T2.5 ────────────────────────────────────────────
+
+async def _handle_get_inertia(args: Dict) -> Dict:
+    """Return diagonal inertia tensor via UsdPhysics.MassAPI."""
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}, 'units': 'kg*m^2'}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+elif not prim.HasAPI(UsdPhysics.MassAPI):
+    result['has_mass_api'] = False
+    result['diagonal_inertia'] = [0.0, 0.0, 0.0]
+    result['note'] = 'PhysicsMassAPI not applied — PhysX will compute inertia from collision geometry'
+else:
+    result['has_mass_api'] = True
+    mass_api = UsdPhysics.MassAPI(prim)
+    attr = mass_api.GetDiagonalInertiaAttr()
+    if attr and attr.HasAuthoredValue():
+        v = attr.Get()
+        result['diagonal_inertia'] = [float(v[0]), float(v[1]), float(v[2])]
+        result['authored'] = True
+    else:
+        v = attr.Get() if attr else None
+        if v is None:
+            result['diagonal_inertia'] = [0.0, 0.0, 0.0]
+            result['authored'] = False
+        else:
+            result['diagonal_inertia'] = [float(v[0]), float(v[1]), float(v[2])]
+            result['authored'] = False
+    com_attr = mass_api.GetCenterOfMassAttr()
+    if com_attr and com_attr.HasAuthoredValue():
+        com = com_attr.Get()
+        result['center_of_mass'] = [float(com[0]), float(com[1]), float(com[2])]
+    pq_attr = mass_api.GetPrincipalAxesAttr()
+    if pq_attr and pq_attr.HasAuthoredValue():
+        q = pq_attr.Get()
+        result['principal_axes_quat'] = [float(q.GetReal()),
+                                         float(q.GetImaginary()[0]),
+                                         float(q.GetImaginary()[1]),
+                                         float(q.GetImaginary()[2])]
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_inertia {prim_path}")
+
+
+# ── 6. get_physics_scene_config (DATA) — T2.6 ───────────────────────────────
+
+async def _handle_get_physics_scene_config(args: Dict) -> Dict:
+    """Read the global PhysicsScene config: gravity, solver, iterations, dt, GPU."""
+    scene_path = args.get("scene_path", "")
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+result = {{}}
+target = {scene_path!r}
+scene_prim = None
+if target:
+    scene_prim = stage.GetPrimAtPath(target)
+    if not scene_prim or not scene_prim.IsValid():
+        scene_prim = None
+        result['warning'] = f'scene_path {{target!r}} not found, falling back to first PhysicsScene on stage'
+if scene_prim is None:
+    for p in stage.Traverse():
+        if p.IsA(UsdPhysics.Scene):
+            scene_prim = p
+            break
+if scene_prim is None:
+    result['error'] = 'no UsdPhysics.Scene found on stage'
+else:
+    result['scene_path'] = str(scene_prim.GetPath())
+    scene = UsdPhysics.Scene(scene_prim)
+    g_dir_attr = scene.GetGravityDirectionAttr()
+    g_mag_attr = scene.GetGravityMagnitudeAttr()
+    if g_dir_attr and g_dir_attr.HasAuthoredValue():
+        d = g_dir_attr.Get()
+        result['gravity_direction'] = [float(d[0]), float(d[1]), float(d[2])]
+    if g_mag_attr and g_mag_attr.HasAuthoredValue():
+        result['gravity_magnitude'] = float(g_mag_attr.Get())
+    try:
+        from pxr import PhysxSchema
+        if scene_prim.HasAPI(PhysxSchema.PhysxSceneAPI):
+            phx = PhysxSchema.PhysxSceneAPI(scene_prim)
+            if phx.GetSolverTypeAttr() and phx.GetSolverTypeAttr().HasAuthoredValue():
+                result['solver_type'] = str(phx.GetSolverTypeAttr().Get())
+            if phx.GetMinPositionIterationCountAttr() and phx.GetMinPositionIterationCountAttr().HasAuthoredValue():
+                result['min_position_iterations'] = int(phx.GetMinPositionIterationCountAttr().Get())
+            if phx.GetMaxPositionIterationCountAttr() and phx.GetMaxPositionIterationCountAttr().HasAuthoredValue():
+                result['max_position_iterations'] = int(phx.GetMaxPositionIterationCountAttr().Get())
+            if phx.GetMinVelocityIterationCountAttr() and phx.GetMinVelocityIterationCountAttr().HasAuthoredValue():
+                result['min_velocity_iterations'] = int(phx.GetMinVelocityIterationCountAttr().Get())
+            if phx.GetMaxVelocityIterationCountAttr() and phx.GetMaxVelocityIterationCountAttr().HasAuthoredValue():
+                result['max_velocity_iterations'] = int(phx.GetMaxVelocityIterationCountAttr().Get())
+            if phx.GetEnableGPUDynamicsAttr() and phx.GetEnableGPUDynamicsAttr().HasAuthoredValue():
+                result['enable_gpu_dynamics'] = bool(phx.GetEnableGPUDynamicsAttr().Get())
+            if phx.GetBroadphaseTypeAttr() and phx.GetBroadphaseTypeAttr().HasAuthoredValue():
+                result['broadphase_type'] = str(phx.GetBroadphaseTypeAttr().Get())
+            if phx.GetTimeStepsPerSecondAttr() and phx.GetTimeStepsPerSecondAttr().HasAuthoredValue():
+                result['time_steps_per_second'] = int(phx.GetTimeStepsPerSecondAttr().Get())
+                result['time_step'] = 1.0 / float(phx.GetTimeStepsPerSecondAttr().Get())
+    except Exception as exc:
+        result['physx_scene_api_error'] = str(exc)
+    try:
+        import carb.settings
+        s = carb.settings.get_settings()
+        tps = s.get('/persistent/physics/timeStepsPerSecond')
+        if tps:
+            result.setdefault('time_steps_per_second', int(tps))
+            result.setdefault('time_step', 1.0 / float(tps))
+    except Exception:
+        pass
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, "get_physics_scene_config")
+
+
+# ── 7. set_physics_scene_config (CODE_GEN) — T2.7 ───────────────────────────
+
+def _gen_set_physics_scene_config(args: Dict) -> str:
+    """Generate code to update the PhysicsScene config."""
+    cfg = args.get("config") or {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    scene_path = cfg.get("scene_path", "")
+    solver_type = cfg.get("solver_type")
+    pos_iters = cfg.get("position_iterations")
+    vel_iters = cfg.get("velocity_iterations")
+    tps = cfg.get("time_steps_per_second")
+    enable_gpu = cfg.get("enable_gpu_dynamics")
+    broadphase = cfg.get("broadphase_type")
+    grav_dir = cfg.get("gravity_direction")
+    grav_mag = cfg.get("gravity_magnitude")
+
+    lines = [
+        "import omni.usd",
+        "from pxr import Usd, UsdPhysics, PhysxSchema, Sdf, Gf",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        f"target_path = {scene_path!r}",
+        "scene_prim = None",
+        "if target_path:",
+        "    scene_prim = stage.GetPrimAtPath(target_path)",
+        "    if not scene_prim or not scene_prim.IsValid():",
+        "        scene_prim = None",
+        "if scene_prim is None:",
+        "    for p in stage.Traverse():",
+        "        if p.IsA(UsdPhysics.Scene):",
+        "            scene_prim = p",
+        "            break",
+        "if scene_prim is None:",
+        "    scene = UsdPhysics.Scene.Define(stage, Sdf.Path('/PhysicsScene'))",
+        "    scene_prim = scene.GetPrim()",
+        "scene = UsdPhysics.Scene(scene_prim)",
+        "if not scene_prim.HasAPI(PhysxSchema.PhysxSceneAPI):",
+        "    PhysxSchema.PhysxSceneAPI.Apply(scene_prim)",
+        "phx = PhysxSchema.PhysxSceneAPI(scene_prim)",
+    ]
+    if grav_dir is not None and len(grav_dir) >= 3:
+        lines.append(
+            f"(scene.GetGravityDirectionAttr() or scene.CreateGravityDirectionAttr()).Set("
+            f"Gf.Vec3f({float(grav_dir[0])}, {float(grav_dir[1])}, {float(grav_dir[2])}))"
+        )
+    if grav_mag is not None:
+        lines.append(
+            f"(scene.GetGravityMagnitudeAttr() or scene.CreateGravityMagnitudeAttr()).Set({float(grav_mag)})"
+        )
+    if solver_type is not None:
+        lines.append(
+            f"(phx.GetSolverTypeAttr() or phx.CreateSolverTypeAttr()).Set({solver_type!r})"
+        )
+    if pos_iters is not None:
+        lines.append(
+            f"(phx.GetMinPositionIterationCountAttr() or phx.CreateMinPositionIterationCountAttr()).Set({int(pos_iters)})"
+        )
+        lines.append(
+            f"(phx.GetMaxPositionIterationCountAttr() or phx.CreateMaxPositionIterationCountAttr()).Set({int(pos_iters)})"
+        )
+    if vel_iters is not None:
+        lines.append(
+            f"(phx.GetMinVelocityIterationCountAttr() or phx.CreateMinVelocityIterationCountAttr()).Set({int(vel_iters)})"
+        )
+        lines.append(
+            f"(phx.GetMaxVelocityIterationCountAttr() or phx.CreateMaxVelocityIterationCountAttr()).Set({int(vel_iters)})"
+        )
+    if enable_gpu is not None:
+        lines.append(
+            f"(phx.GetEnableGPUDynamicsAttr() or phx.CreateEnableGPUDynamicsAttr()).Set({bool(enable_gpu)})"
+        )
+    if broadphase is not None:
+        lines.append(
+            f"(phx.GetBroadphaseTypeAttr() or phx.CreateBroadphaseTypeAttr()).Set({broadphase!r})"
+        )
+    if tps is not None:
+        lines.append(
+            f"(phx.GetTimeStepsPerSecondAttr() or phx.CreateTimeStepsPerSecondAttr()).Set({int(tps)})"
+        )
+        lines.append("try:")
+        lines.append("    import carb.settings")
+        lines.append(f"    carb.settings.get_settings().set('/persistent/physics/timeStepsPerSecond', int({int(tps)}))")
+        lines.append("except Exception:")
+        lines.append("    pass")
+    lines.append("print(f'Updated PhysicsScene config on {scene_prim.GetPath()}')")
+    return "\n".join(lines)
+
+
+# ── 8. list_contacts (DATA) — T2.8 ──────────────────────────────────────────
+
+async def _handle_list_contacts(args: Dict) -> Dict:
+    """Subscribe to PhysX contact reports for a body and return the pairs."""
+    prim_path = args["prim_path"]
+    duration = float(args.get("duration", 0.5))
+    min_impulse = float(args.get("min_impulse", 0.0))
+    code = f"""\
+import omni.usd
+import json
+import time
+from pxr import UsdPhysics, PhysxSchema
+
+stage = omni.usd.get_context().get_stage()
+prim_path = {prim_path!r}
+duration = {duration}
+min_impulse = {min_impulse}
+result = {{'prim_path': prim_path, 'duration_s': duration}}
+prim = stage.GetPrimAtPath(prim_path)
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+    print(json.dumps(result, default=str))
+else:
+    # Apply contact report API if missing so PhysX emits events for this body.
+    if not prim.HasAPI(PhysxSchema.PhysxContactReportAPI):
+        PhysxSchema.PhysxContactReportAPI.Apply(prim)
+    contacts = []
+    sub = None
+    try:
+        from omni.physx import get_physx_simulation_interface
+        sim = get_physx_simulation_interface()
+
+        def _on_contact(contact_headers, contact_data):
+            for header in contact_headers:
+                pair = {{
+                    'body_a': str(getattr(header, 'actor0', '')),
+                    'body_b': str(getattr(header, 'actor1', '')),
+                    'collider_a': str(getattr(header, 'collider0', '')),
+                    'collider_b': str(getattr(header, 'collider1', '')),
+                    'contact_count': int(getattr(header, 'num_contact_data', 0)),
+                }}
+                impulse = 0.0
+                try:
+                    n = int(getattr(header, 'num_contact_data', 0))
+                    start = int(getattr(header, 'contact_data_offset', 0))
+                    for i in range(start, start + n):
+                        cd = contact_data[i]
+                        imp = cd.impulse
+                        impulse += float((imp[0]**2 + imp[1]**2 + imp[2]**2) ** 0.5)
+                except Exception:
+                    pass
+                pair['impulse'] = impulse
+                if impulse >= min_impulse:
+                    contacts.append(pair)
+
+        sub = sim.subscribe_contact_report_events(_on_contact)
+        # Step the simulation briefly to gather contacts.
+        deadline = time.time() + duration
+        while time.time() < deadline:
+            time.sleep(0.01)
+    except Exception as exc:
+        result['error'] = f'contact subscription failed: {{exc}}'
+    finally:
+        try:
+            if sub is not None:
+                sub = None
+        except Exception:
+            pass
+    result['contact_count'] = len(contacts)
+    result['contacts'] = contacts
+    print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"list_contacts {prim_path}")
+
+
+# ── 9. apply_force (CODE_GEN) — T2.9 ────────────────────────────────────────
+
+def _gen_apply_force(args: Dict) -> str:
+    """Generate code to apply external force/torque to a rigid body."""
+    prim_path = args["prim_path"]
+    force = args.get("force") or [0.0, 0.0, 0.0]
+    torque = args.get("torque") or [0.0, 0.0, 0.0]
+    position = args.get("position")
+
+    pos_block = "None"
+    if position is not None and len(position) >= 3:
+        pos_block = f"[{float(position[0])}, {float(position[1])}, {float(position[2])}]"
+
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+prim_path = {prim_path!r}
+force = [{float(force[0])}, {float(force[1])}, {float(force[2])}]
+torque = [{float(torque[0])}, {float(torque[1])}, {float(torque[2])}]
+position = {pos_block}
+
+prim = stage.GetPrimAtPath(prim_path)
+if not prim or not prim.IsValid():
+    raise RuntimeError(f'prim not found: {{prim_path!r}}')
+if not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+    UsdPhysics.RigidBodyAPI.Apply(prim)
+
+# Preferred path: omni.physx force-API for instantaneous external force.
+applied = False
+try:
+    from omni.physx.scripts import physicsUtils
+    if hasattr(physicsUtils, 'apply_force_at_pos'):
+        physicsUtils.apply_force_at_pos(prim, force, position or (0.0, 0.0, 0.0))
+        applied = True
+except Exception:
+    applied = False
+
+# Fallback: tensor API (omni.physics.tensors) — works during sim play.
+if not applied:
+    try:
+        import omni.physics.tensors as physics_tensors
+        sim_view = physics_tensors.create_simulation_view('numpy')
+        rb_view = sim_view.create_rigid_body_view([prim_path])
+        import numpy as np
+        f_arr = np.array([force], dtype='float32')
+        t_arr = np.array([torque], dtype='float32')
+        rb_view.apply_forces_and_torques_at_pos(f_arr, t_arr, None, indices=np.array([0], dtype='int32'), is_global=True)
+        applied = True
+    except Exception as exc:
+        raise RuntimeError(f'apply_force failed via both physicsUtils and tensors API: {{exc}}')
+
+print(f'Applied force={{force}} torque={{torque}} on {{prim_path!r}}')
+"""
+
+
+# ── 10. get_kinematic_state (DATA) — T2.10 ──────────────────────────────────
+
+async def _handle_get_kinematic_state(args: Dict) -> Dict:
+    """Return full kinematic state: pose + linear/angular velocity + acceleration estimate."""
+    prim_path = args["prim_path"]
+    sample_dt = float(args.get("sample_dt", 0.05))
+    code = f"""\
+import omni.usd
+import json
+import time
+from pxr import UsdGeom, UsdPhysics, Gf
+
+stage = omni.usd.get_context().get_stage()
+prim_path = {prim_path!r}
+sample_dt = {sample_dt}
+result = {{'prim_path': prim_path}}
+prim = stage.GetPrimAtPath(prim_path)
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+else:
+    # World transform via UsdGeom.Xformable.
+    try:
+        xf = UsdGeom.Xformable(prim)
+        local_to_world = xf.ComputeLocalToWorldTransform(0)
+        pos = local_to_world.ExtractTranslation()
+        rot_q = local_to_world.ExtractRotationQuat()
+        result['position'] = [float(pos[0]), float(pos[1]), float(pos[2])]
+        imag = rot_q.GetImaginary()
+        result['orientation_quat'] = [float(rot_q.GetReal()),
+                                      float(imag[0]), float(imag[1]), float(imag[2])]
+    except Exception as exc:
+        result['transform_error'] = str(exc)
+
+    has_rb = prim.HasAPI(UsdPhysics.RigidBodyAPI)
+    result['has_rigid_body_api'] = bool(has_rb)
+    if has_rb:
+        rb = UsdPhysics.RigidBodyAPI(prim)
+        v_attr = rb.GetVelocityAttr()
+        w_attr = rb.GetAngularVelocityAttr()
+        v0 = v_attr.Get() if v_attr else None
+        w0 = w_attr.Get() if w_attr else None
+        if v0 is None:
+            v0 = (0.0, 0.0, 0.0)
+        if w0 is None:
+            w0 = (0.0, 0.0, 0.0)
+        result['linear_velocity'] = [float(v0[0]), float(v0[1]), float(v0[2])]
+        result['angular_velocity'] = [float(w0[0]), float(w0[1]), float(w0[2])]
+        # Best-effort acceleration via finite diff over sample_dt seconds.
+        try:
+            time.sleep(max(0.0, sample_dt))
+            v1 = v_attr.Get() if v_attr else None
+            w1 = w_attr.Get() if w_attr else None
+            if v1 is None:
+                v1 = (0.0, 0.0, 0.0)
+            if w1 is None:
+                w1 = (0.0, 0.0, 0.0)
+            dt = max(sample_dt, 1e-6)
+            result['linear_acceleration'] = [
+                (float(v1[0]) - float(v0[0])) / dt,
+                (float(v1[1]) - float(v0[1])) / dt,
+                (float(v1[2]) - float(v0[2])) / dt,
+            ]
+            result['angular_acceleration'] = [
+                (float(w1[0]) - float(w0[0])) / dt,
+                (float(w1[1]) - float(w0[1])) / dt,
+                (float(w1[2]) - float(w0[2])) / dt,
+            ]
+            result['acceleration_dt'] = dt
+        except Exception as exc:
+            result['acceleration_error'] = str(exc)
+    else:
+        result['linear_velocity'] = [0.0, 0.0, 0.0]
+        result['angular_velocity'] = [0.0, 0.0, 0.0]
+        result['note'] = 'no PhysicsRigidBodyAPI — velocity/acceleration unavailable'
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_kinematic_state {prim_path}")
+
+
+# ── Register Tier 2 handlers ────────────────────────────────────────────────
+DATA_HANDLERS["get_linear_velocity"] = _handle_get_linear_velocity
+DATA_HANDLERS["get_angular_velocity"] = _handle_get_angular_velocity
+DATA_HANDLERS["get_mass"] = _handle_get_mass
+DATA_HANDLERS["get_inertia"] = _handle_get_inertia
+DATA_HANDLERS["get_physics_scene_config"] = _handle_get_physics_scene_config
+DATA_HANDLERS["list_contacts"] = _handle_list_contacts
+DATA_HANDLERS["get_kinematic_state"] = _handle_get_kinematic_state
+
+CODE_GEN_HANDLERS["set_linear_velocity"] = _gen_set_linear_velocity
+CODE_GEN_HANDLERS["set_physics_scene_config"] = _gen_set_physics_scene_config
+CODE_GEN_HANDLERS["apply_force"] = _gen_apply_force
