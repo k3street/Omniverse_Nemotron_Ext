@@ -2232,3 +2232,538 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ─── Tier 0 Atomic Tools — Foundation ────────────────────────────────────────
+# 12 atomic primitives (see docs/specs/atomic_tools_catalog.md).
+# DATA handlers run inline (queue a small print-json snippet through Kit and
+# return the parsed result) and CODE_GEN handlers emit Python that the user
+# approves and Kit then executes.
+
+
+# ── 1. get_attribute (DATA) ─────────────────────────────────────────────────
+
+async def _handle_get_attribute(args: Dict) -> Dict:
+    """Read a single USD attribute value."""
+    prim_path = args["prim_path"]
+    attr_name = args["attr_name"]
+    code = f"""\
+import omni.usd
+import json
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}, 'attr_name': {attr_name!r}}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+else:
+    attr = prim.GetAttribute({attr_name!r})
+    if not attr or not attr.IsDefined():
+        result['error'] = 'attribute not defined'
+        result['available'] = [a.GetName() for a in prim.GetAttributes()][:50]
+    else:
+        try:
+            value = attr.Get()
+        except Exception as exc:
+            value = None
+            result['error'] = f'attr.Get() failed: {{exc}}'
+        # Convert pxr.Vt / Gf types to plain Python for json
+        try:
+            value = list(value) if hasattr(value, '__iter__') and not isinstance(value, (str, bytes)) else value
+        except Exception:
+            value = repr(value)
+        result['value'] = value
+        result['type_name'] = attr.GetTypeName().type.typeName
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_attribute {prim_path}.{attr_name}")
+
+
+# ── 2. get_world_transform (DATA) ───────────────────────────────────────────
+
+async def _handle_get_world_transform(args: Dict) -> Dict:
+    """Compute world-space 4x4 transform of a prim."""
+    prim_path = args["prim_path"]
+    time_code = args.get("time_code")
+    tc_expr = repr(time_code) if time_code is not None else "Usd.TimeCode.Default()"
+    code = f"""\
+import omni.usd
+from pxr import Usd, UsdGeom, Gf
+import json
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+else:
+    xf = UsdGeom.Xformable(prim)
+    if not xf:
+        result['error'] = 'prim is not Xformable'
+    else:
+        m = xf.ComputeLocalToWorldTransform({tc_expr})
+        result['matrix'] = [m[i][j] for i in range(4) for j in range(4)]
+        t = m.ExtractTranslation()
+        r = m.ExtractRotationQuat()
+        # Pull scale from the upper 3x3
+        sx = Gf.Vec3d(m[0][0], m[0][1], m[0][2]).GetLength()
+        sy = Gf.Vec3d(m[1][0], m[1][1], m[1][2]).GetLength()
+        sz = Gf.Vec3d(m[2][0], m[2][1], m[2][2]).GetLength()
+        result['translation'] = [t[0], t[1], t[2]]
+        im = r.GetImaginary()
+        result['rotation_quat'] = [r.GetReal(), im[0], im[1], im[2]]
+        result['scale'] = [sx, sy, sz]
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_world_transform {prim_path}")
+
+
+# ── 3. get_bounding_box (DATA) ──────────────────────────────────────────────
+
+async def _handle_get_bounding_box(args: Dict) -> Dict:
+    """Compute world-space AABB of a prim."""
+    prim_path = args["prim_path"]
+    purpose = args.get("purpose", "default")
+    code = f"""\
+import omni.usd
+from pxr import Usd, UsdGeom, Gf
+import json
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+else:
+    purpose_token = UsdGeom.Tokens.{purpose}
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [purpose_token], useExtentsHint=True)
+    bbox = cache.ComputeWorldBound(prim)
+    rng = bbox.ComputeAlignedRange()
+    if rng.IsEmpty():
+        result['error'] = 'empty bbox'
+    else:
+        mn = rng.GetMin()
+        mx = rng.GetMax()
+        cx = (mn[0] + mx[0]) / 2.0
+        cy = (mn[1] + mx[1]) / 2.0
+        cz = (mn[2] + mx[2]) / 2.0
+        result['min'] = [mn[0], mn[1], mn[2]]
+        result['max'] = [mx[0], mx[1], mx[2]]
+        result['center'] = [cx, cy, cz]
+        result['size'] = [mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]]
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_bounding_box {prim_path}")
+
+
+# ── 4. set_semantic_label (CODE_GEN) ────────────────────────────────────────
+
+def _gen_set_semantic_label(args: Dict) -> str:
+    prim_path = args["prim_path"]
+    class_name = args["class_name"]
+    semantic_type = args.get("semantic_type", "class")
+    return (
+        "import omni.usd\n"
+        "from pxr import Usd, Semantics\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        f"prim = stage.GetPrimAtPath({prim_path!r})\n"
+        f"sem = Semantics.SemanticsAPI.Apply(prim, 'Semantics_{semantic_type}')\n"
+        "sem.CreateSemanticTypeAttr().Set("
+        f"{semantic_type!r})\n"
+        "sem.CreateSemanticDataAttr().Set("
+        f"{class_name!r})\n"
+        f"print('semantic_label', {prim_path!r}, {semantic_type!r}, {class_name!r})"
+    )
+
+
+# ── 5. get_joint_limits (DATA) ──────────────────────────────────────────────
+
+async def _handle_get_joint_limits(args: Dict) -> Dict:
+    articulation = args["articulation"]
+    joint_name = args["joint_name"]
+    code = f"""\
+import omni.usd
+from pxr import Usd, UsdPhysics
+import json
+
+stage = omni.usd.get_context().get_stage()
+art = stage.GetPrimAtPath({articulation!r})
+result = {{'articulation': {articulation!r}, 'joint_name': {joint_name!r}}}
+if not art or not art.IsValid():
+    result['error'] = 'articulation not found'
+else:
+    joint_prim = None
+    for p in Usd.PrimRange(art):
+        if p.GetName() == {joint_name!r}:
+            joint_prim = p
+            break
+    if joint_prim is None:
+        result['error'] = 'joint not found'
+    else:
+        result['joint_path'] = str(joint_prim.GetPath())
+        joint = UsdPhysics.RevoluteJoint(joint_prim) or UsdPhysics.PrismaticJoint(joint_prim)
+        if not joint:
+            result['error'] = 'joint is not Revolute or Prismatic'
+        else:
+            lower_attr = joint_prim.GetAttribute('physics:lowerLimit')
+            upper_attr = joint_prim.GetAttribute('physics:upperLimit')
+            result['lower'] = lower_attr.Get() if lower_attr and lower_attr.IsDefined() else None
+            result['upper'] = upper_attr.Get() if upper_attr and upper_attr.IsDefined() else None
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_joint_limits {articulation}.{joint_name}")
+
+
+# ── 6. set_drive_gains (CODE_GEN) ───────────────────────────────────────────
+
+def _gen_set_drive_gains(args: Dict) -> str:
+    joint_path = args["joint_path"]
+    kp = args["kp"]
+    kd = args["kd"]
+    drive_type = args.get("drive_type", "angular")
+    return (
+        "import omni.usd\n"
+        "from pxr import UsdPhysics\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        f"joint = stage.GetPrimAtPath({joint_path!r})\n"
+        f"drive = UsdPhysics.DriveAPI.Apply(joint, {drive_type!r})\n"
+        f"drive.CreateStiffnessAttr({float(kp)!r})\n"
+        f"drive.CreateDampingAttr({float(kd)!r})\n"
+        f"print('drive_gains', {joint_path!r}, 'kp=', {float(kp)!r}, 'kd=', {float(kd)!r})"
+    )
+
+
+# ── 7. get_contact_report (DATA) ────────────────────────────────────────────
+
+async def _handle_get_contact_report(args: Dict) -> Dict:
+    prim_path = args["prim_path"]
+    max_contacts = int(args.get("max_contacts", 50))
+    code = f"""\
+import omni.usd
+import json
+
+prim_path = {prim_path!r}
+max_contacts = {max_contacts}
+
+# Pull the running contact buffer from the global ContactReporter (set up by
+# set_clearance_monitor or apply_api_schema(PhysxContactReportAPI)). When no
+# buffer exists yet, return an empty report instead of crashing so callers can
+# tell apart "no contacts" from "API not applied".
+buf = globals().get('_ATOMIC_CONTACT_BUFFER')
+contacts = []
+if buf is not None:
+    for entry in list(buf)[-max_contacts:]:
+        if entry.get('actor0') == prim_path or entry.get('actor1') == prim_path:
+            contacts.append(entry)
+
+result = {{
+    'prim_path': prim_path,
+    'contact_count': len(contacts),
+    'contacts': contacts,
+    'buffer_initialized': buf is not None,
+}}
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_contact_report {prim_path}")
+
+
+# ── 8. set_render_mode (CODE_GEN) ───────────────────────────────────────────
+
+def _gen_set_render_mode(args: Dict) -> str:
+    mode = args["mode"]
+    _MODE_TO_HYDRA = {
+        "preview": "rtx",  # Hydra Storm fallback handled below
+        "rt": "rtx",
+        "path_traced": "rtx",
+    }
+    _MODE_TO_RENDERMODE = {
+        "preview": "RaytracedLighting",
+        "rt": "RaytracedLighting",
+        "path_traced": "PathTracing",
+    }
+    hydra = _MODE_TO_HYDRA.get(mode, "rtx")
+    render_mode = _MODE_TO_RENDERMODE.get(mode, "RaytracedLighting")
+    return (
+        "import carb.settings\n"
+        "settings = carb.settings.get_settings()\n"
+        f"# render mode: {mode}\n"
+        f"settings.set('/rtx/rendermode', {render_mode!r})\n"
+        "try:\n"
+        "    import omni.kit.viewport.utility as vpu\n"
+        "    vp = vpu.get_active_viewport()\n"
+        "    if vp is not None:\n"
+        f"        vp.set_hd_engine({hydra!r})\n"
+        "except Exception as exc:\n"
+        f"    print('viewport switch skipped:', exc)\n"
+        f"print('render_mode set to', {mode!r})"
+    )
+
+
+# ── 9. set_variant (CODE_GEN) ───────────────────────────────────────────────
+
+def _gen_set_variant(args: Dict) -> str:
+    prim_path = args["prim_path"]
+    variant_set = args["variant_set"]
+    variant = args["variant"]
+    return (
+        "import omni.usd\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        f"prim = stage.GetPrimAtPath({prim_path!r})\n"
+        f"vsets = prim.GetVariantSets()\n"
+        f"vset = vsets.GetVariantSet({variant_set!r}) if vsets.HasVariantSet({variant_set!r}) else vsets.AddVariantSet({variant_set!r})\n"
+        f"vset.SetVariantSelection({variant!r})\n"
+        f"print('variant', {prim_path!r}, {variant_set!r}, '=', {variant!r})"
+    )
+
+
+# ── 10. get_training_status (DATA) ──────────────────────────────────────────
+
+async def _handle_get_training_status(args: Dict) -> Dict:
+    """Read TensorBoard event files + subprocess state for an RL run."""
+    from pathlib import Path
+
+    run_id = args["run_id"]
+    log_dir = args.get("log_dir") or str(_WORKSPACE / "rl_checkpoints" / run_id)
+
+    log_path = Path(log_dir)
+    result: Dict[str, Any] = {
+        "run_id": run_id,
+        "log_dir": str(log_path),
+        "state": "unknown",
+        "step": None,
+        "total_steps": None,
+        "latest_reward": None,
+        "events_found": 0,
+    }
+
+    if not log_path.exists():
+        result["state"] = "missing"
+        result["error"] = f"log dir does not exist: {log_path}"
+        return result
+
+    # Look for TensorBoard event files (events.out.tfevents.*)
+    event_files = sorted(log_path.glob("**/events.out.tfevents.*"))
+    result["events_found"] = len(event_files)
+
+    if not event_files:
+        result["state"] = "starting"
+        return result
+
+    # Try to parse the latest event file. tensorboard isn't a hard dep, so we
+    # fall back gracefully on import failure.
+    latest = event_files[-1]
+    try:
+        from tensorboard.backend.event_processing.event_accumulator import EventAccumulator  # type: ignore
+        acc = EventAccumulator(str(latest), size_guidance={"scalars": 0})
+        acc.Reload()
+        scalars = acc.Tags().get("scalars", [])
+        # Prefer common reward / step tag names
+        for tag in ("reward", "Train/reward", "train/reward",
+                    "rollout/ep_rew_mean", "Episode_Reward/Mean"):
+            if tag in scalars:
+                events = acc.Scalars(tag)
+                if events:
+                    result["latest_reward"] = events[-1].value
+                    result["step"] = events[-1].step
+                    break
+        if result["step"] is None and scalars:
+            events = acc.Scalars(scalars[0])
+            if events:
+                result["step"] = events[-1].step
+    except ImportError:
+        result["note"] = "tensorboard not installed — install with `pip install tensorboard`"
+    except Exception as exc:
+        result["error"] = f"failed to parse event file: {exc}"
+
+    # Subprocess state via the launcher's pid file (if launch_training wrote one)
+    pid_file = log_path / "launcher.pid"
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text().strip())
+            # Cheap liveness check: send signal 0
+            try:
+                os.kill(pid, 0)
+                result["state"] = "running"
+                result["pid"] = pid
+            except ProcessLookupError:
+                result["state"] = "finished"
+                result["pid"] = pid
+            except PermissionError:
+                # Process exists but owned by another user — still treat as running
+                result["state"] = "running"
+                result["pid"] = pid
+        except Exception as exc:
+            result["state"] = "unknown"
+            result["error"] = f"could not read launcher.pid: {exc}"
+    elif result["events_found"] > 0:
+        result["state"] = "running"
+
+    return result
+
+
+# ── 11. pixel_to_world (DATA) ───────────────────────────────────────────────
+
+async def _handle_pixel_to_world(args: Dict) -> Dict:
+    """Project a viewport pixel through the camera + depth buffer to world."""
+    camera = args["camera"]
+    x = int(args["x"])
+    y = int(args["y"])
+    resolution = args.get("resolution")
+    res_expr = repr(list(resolution)) if resolution else "None"
+    code = f"""\
+import omni.usd
+from pxr import Usd, UsdGeom, Gf
+import json
+
+camera_path = {camera!r}
+px = {x}
+py = {y}
+override_res = {res_expr}
+
+stage = omni.usd.get_context().get_stage()
+cam_prim = stage.GetPrimAtPath(camera_path)
+result = {{'camera': camera_path, 'x': px, 'y': py}}
+
+if not cam_prim or not cam_prim.IsValid():
+    result['error'] = 'camera not found'
+elif not UsdGeom.Camera(cam_prim):
+    result['error'] = 'prim is not a UsdGeom.Camera'
+else:
+    cam = UsdGeom.Camera(cam_prim)
+    gf_cam = cam.GetCamera(Usd.TimeCode.Default())
+
+    # Determine viewport / depth resolution
+    if override_res:
+        width, height = override_res
+    else:
+        try:
+            import omni.kit.viewport.utility as vpu
+            vp = vpu.get_active_viewport()
+            width, height = vp.resolution
+        except Exception:
+            width, height = (1280, 720)
+
+    # NDC coords (top-left origin)
+    ndc_x = (px / float(width)) * 2.0 - 1.0
+    ndc_y = 1.0 - (py / float(height)) * 2.0
+
+    # Sample depth buffer if available
+    depth_m = None
+    try:
+        import omni.syntheticdata as sd
+        depth_arr = sd.sensors.get_distance_to_camera(camera_path)
+        if depth_arr is not None and depth_arr.size:
+            ix = max(0, min(width - 1, px))
+            iy = max(0, min(height - 1, py))
+            depth_m = float(depth_arr[iy, ix])
+    except Exception as exc:
+        result['depth_warning'] = f'no depth buffer: {{exc}}'
+
+    # Build inverse view-projection
+    proj = gf_cam.frustum.ComputeProjectionMatrix()
+    view = gf_cam.transform.GetInverse()
+    inv_vp = (view * proj).GetInverse()
+
+    near_pt = inv_vp.Transform(Gf.Vec3d(ndc_x, ndc_y, -1.0))
+    far_pt = inv_vp.Transform(Gf.Vec3d(ndc_x, ndc_y, 1.0))
+    direction = (far_pt - near_pt).GetNormalized()
+
+    if depth_m is None:
+        # Without depth, fall back to a unit ray at 1 m
+        depth_m = 1.0
+        result['depth_fallback'] = True
+
+    world = near_pt + direction * depth_m
+    result['world_position'] = [world[0], world[1], world[2]]
+    result['ray_origin'] = [near_pt[0], near_pt[1], near_pt[2]]
+    result['ray_direction'] = [direction[0], direction[1], direction[2]]
+    result['depth_m'] = depth_m
+
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"pixel_to_world {camera}@({x},{y})")
+
+
+# ── 12. record_trajectory (CODE_GEN) ────────────────────────────────────────
+
+def _gen_record_trajectory(args: Dict) -> str:
+    articulation = args["articulation"]
+    duration = float(args["duration"])
+    output_path = args.get("output_path")
+    rate_hz = float(args.get("rate_hz", 60.0))
+    if not output_path:
+        output_path = "workspace/trajectories/trajectory.npz"
+    return (
+        "import omni.usd\n"
+        "import omni.physx\n"
+        "import numpy as np\n"
+        "import os\n"
+        "import time\n"
+        "from pxr import Usd, UsdPhysics\n"
+        "\n"
+        f"art_path = {articulation!r}\n"
+        f"duration = {duration!r}\n"
+        f"output_path = {output_path!r}\n"
+        f"rate_hz = {rate_hz!r}\n"
+        "\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        "art_prim = stage.GetPrimAtPath(art_path)\n"
+        "joint_prims = []\n"
+        "for p in Usd.PrimRange(art_prim):\n"
+        "    if UsdPhysics.RevoluteJoint(p) or UsdPhysics.PrismaticJoint(p):\n"
+        "        joint_prims.append(p)\n"
+        "\n"
+        "samples = {'time': [], 'positions': [], 'velocities': [], 'efforts': []}\n"
+        "joint_names = [p.GetName() for p in joint_prims]\n"
+        "interval = 1.0 / max(rate_hz, 1.0)\n"
+        "_state = {'last_sample': 0.0, 'elapsed': 0.0, 'sub': None}\n"
+        "\n"
+        "def _step_callback(dt):\n"
+        "    _state['elapsed'] += dt\n"
+        "    if _state['elapsed'] - _state['last_sample'] < interval:\n"
+        "        return\n"
+        "    _state['last_sample'] = _state['elapsed']\n"
+        "    pos, vel, eff = [], [], []\n"
+        "    for jp in joint_prims:\n"
+        "        pos_attr = jp.GetAttribute('state:angular:physics:position') or jp.GetAttribute('state:linear:physics:position')\n"
+        "        vel_attr = jp.GetAttribute('state:angular:physics:velocity') or jp.GetAttribute('state:linear:physics:velocity')\n"
+        "        eff_attr = jp.GetAttribute('drive:angular:physics:appliedForce') or jp.GetAttribute('drive:linear:physics:appliedForce')\n"
+        "        pos.append(float(pos_attr.Get()) if pos_attr and pos_attr.IsDefined() else 0.0)\n"
+        "        vel.append(float(vel_attr.Get()) if vel_attr and vel_attr.IsDefined() else 0.0)\n"
+        "        eff.append(float(eff_attr.Get()) if eff_attr and eff_attr.IsDefined() else 0.0)\n"
+        "    samples['time'].append(_state['elapsed'])\n"
+        "    samples['positions'].append(pos)\n"
+        "    samples['velocities'].append(vel)\n"
+        "    samples['efforts'].append(eff)\n"
+        "    if _state['elapsed'] >= duration and _state['sub'] is not None:\n"
+        "        _state['sub'].unsubscribe()\n"
+        "        _state['sub'] = None\n"
+        "        os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)\n"
+        "        np.savez(output_path,\n"
+        "                 time=np.array(samples['time']),\n"
+        "                 positions=np.array(samples['positions']),\n"
+        "                 velocities=np.array(samples['velocities']),\n"
+        "                 efforts=np.array(samples['efforts']),\n"
+        "                 joint_names=np.array(joint_names))\n"
+        "        print('record_trajectory wrote', output_path, 'samples=', len(samples['time']))\n"
+        "\n"
+        "physx = omni.physx.get_physx_interface()\n"
+        "_state['sub'] = physx.subscribe_physics_step_events(_step_callback)\n"
+        "print('record_trajectory subscribed', art_path, 'duration=', duration, 'rate=', rate_hz)\n"
+    )
+
+
+# Register Tier 0 handlers
+DATA_HANDLERS["get_attribute"] = _handle_get_attribute
+DATA_HANDLERS["get_world_transform"] = _handle_get_world_transform
+DATA_HANDLERS["get_bounding_box"] = _handle_get_bounding_box
+DATA_HANDLERS["get_joint_limits"] = _handle_get_joint_limits
+DATA_HANDLERS["get_contact_report"] = _handle_get_contact_report
+DATA_HANDLERS["get_training_status"] = _handle_get_training_status
+DATA_HANDLERS["pixel_to_world"] = _handle_pixel_to_world
+
+CODE_GEN_HANDLERS["set_semantic_label"] = _gen_set_semantic_label
+CODE_GEN_HANDLERS["set_drive_gains"] = _gen_set_drive_gains
+CODE_GEN_HANDLERS["set_render_mode"] = _gen_set_render_mode
+CODE_GEN_HANDLERS["set_variant"] = _gen_set_variant
+CODE_GEN_HANDLERS["record_trajectory"] = _gen_record_trajectory
