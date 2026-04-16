@@ -942,4 +942,217 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Tier 11 — SDG Annotation (5 atomic tools) ────────────────────────────
+    # Companion to tier-0 set_semantic_label (PR #59) and PR #23 validate_annotations.
+    # tier-0   set_semantic_label       — write ONE class label on ONE prim.
+    # tier-11  list_semantic_classes    — DATA  — discover what classes exist on stage.
+    # tier-11  get_semantic_label       — DATA  — read the current class on ONE prim.
+    # tier-11  remove_semantic_label    — CODE  — clear every Semantics_* instance on ONE prim.
+    # tier-11  assign_class_to_children — CODE  — apply ONE class to every Mesh in a subtree.
+    # tier-11  validate_semantic_labels — DATA  — lint USD-side semantics annotations.
+    # PR #23   validate_annotations     — DATA  — lint SDG OUTPUT FILES on disk (different scope).
+    {
+        "type": "function",
+        "function": {
+            "name": "list_semantic_classes",
+            "description": (
+                "WHAT: Walk the entire USD stage, find every prim that has "
+                "Semantics.SemanticsAPI applied (any Semantics_* instance), read its "
+                "semanticData attribute, and return the unique set of class labels "
+                "together with the count of prims using each one. "
+                "WHEN: before kicking off SDG / Replicator capture (so the LLM knows the "
+                "label space the writer will see), answering 'what classes are labeled in "
+                "this scene' / 'show me all the semantic categories', auditing an asset "
+                "library for label coverage, or before assign_class_to_children to confirm "
+                "the new class doesn't accidentally collide with an existing label. "
+                "RETURNS: data dict {classes: [{name: str, count: int, sample_prims: "
+                "[str, ...]}], total_classes: int, total_labeled_prims: int}. "
+                "CAVEATS: read-only. Walks the full stage — slow on very large scenes "
+                "(prim_count > 50k); narrow the scope by calling get_semantic_label on a "
+                "subtree root if you only care about one asset. Only counts prims with the "
+                "*default* Semantics_class instance plus any custom Semantics_<type> "
+                "instances; pure metadata-only kind hierarchies are ignored. Returns an "
+                "error stub if no stage is open."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_semantic_label",
+            "description": (
+                "WHAT: Read every Semantics.SemanticsAPI instance applied to a single "
+                "prim and return the (semantic_type, class_name) pair for each. Calls "
+                "Semantics.SemanticsAPI.GetAll(prim) and "
+                "GetSemanticTypeAttr/GetSemanticDataAttr on each. "
+                "WHEN: verifying that a previous set_semantic_label / "
+                "assign_class_to_children call landed correctly, answering 'what class is "
+                "this prim labeled as' / 'is this object annotated for SDG', before "
+                "remove_semantic_label so the LLM can confirm the prim is actually "
+                "labeled, or auditing a single asset for missing/duplicate Semantics "
+                "instances. "
+                "RETURNS: data dict {prim_path: str, has_semantics: bool, labels: "
+                "[{instance: str, semantic_type: str, class_name: str}], count: int}. "
+                "CAVEATS: read-only. Returns has_semantics=false (NOT an error) when the "
+                "prim exists but has no SemanticsAPI applied — that is a normal state. "
+                "Returns an error stub when the prim path doesn't resolve. A prim can have "
+                "MULTIPLE Semantics_* instances at once (e.g. one for 'class', one for "
+                "'instance_id'); the labels list reports all of them. Inherited semantics "
+                "from referenced/payloaded layers ARE included — the API resolves across "
+                "the full layer stack."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim to inspect. Example: "
+                            "'/World/Tray/medicine_bottle_03'."
+                        ),
+                    },
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "remove_semantic_label",
+            "description": (
+                "WHAT: Strip every Semantics.SemanticsAPI instance from a single prim by "
+                "iterating Semantics.SemanticsAPI.GetAll(prim) and calling "
+                "prim.RemoveAPI(Semantics.SemanticsAPI, instance_name) for each. Also "
+                "deletes the underlying semanticType / semanticData attributes left "
+                "behind by RemoveAPI. The prim itself stays in the stage. "
+                "WHEN: re-labeling an asset that was previously tagged with the wrong "
+                "class, excluding a prim from SDG capture (no label = no annotation in "
+                "the writer output), cleaning up after a bad bulk-label run from "
+                "assign_class_to_children, or when the user says 'unlabel this' / 'remove "
+                "the class from /World/Tray/bottle_03'. "
+                "RETURNS: code patch for approval. "
+                "CAVEATS: only clears SemanticsAPI on the GIVEN prim — children retain "
+                "their own labels (use it on each child if you need a recursive clear). "
+                "If the prim has no SemanticsAPI applied the generated code is a safe no-op "
+                "that prints a notice rather than raising. Removing the API but leaving the "
+                "underlying attribute defs in place is a known USD foot-gun; this generator "
+                "explicitly clears the attributes so a downstream "
+                "Semantics.SemanticsAPI.HasAPI() returns False afterwards. Use "
+                "get_semantic_label() before AND after to verify the strip."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim to clear. Example: "
+                            "'/World/Tray/medicine_bottle_03'."
+                        ),
+                    },
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "assign_class_to_children",
+            "description": (
+                "WHAT: Apply Semantics.SemanticsAPI to all child meshes of a prim with "
+                "the same class label. Walks the subtree rooted at prim_path, and for "
+                "every descendant that is a Mesh / Imageable (i.e. produces pixels), "
+                "applies Semantics.SemanticsAPI.Apply(child, 'Semantics_class') and sets "
+                "semanticType / semanticData. Xform-only and pure-grouping prims are "
+                "skipped. "
+                "WHEN: bulk-labeling all parts of an asset for SDG (e.g. 'tray' → all "
+                "bottles within get class 'medicine_bottle'), avoiding manual per-prim "
+                "labeling, labeling every link of a robot at once with the robot's class, "
+                "or annotating a freshly imported referenced asset whose internal "
+                "hierarchy has no semantics yet. "
+                "RETURNS: code patch for approval. "
+                "CAVEATS: only Mesh / Imageable children get labeled — Xforms, scopes, "
+                "lights, cameras and pure-namespace prims are skipped (they don't render). "
+                "Existing labels on children ARE OVERWRITTEN by the new class — call "
+                "list_semantic_classes() before to know what you'll clobber. Walks the "
+                "FULL subtree, including referenced/payloaded children, which can be "
+                "thousands of prims for a complex scene; expect the patch to take a "
+                "few seconds to apply on large hierarchies. The root prim itself is also "
+                "labeled if it is a Mesh/Imageable. Use list_semantic_classes() AFTER to "
+                "verify the bulk write."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the subtree root. The root and every "
+                            "Mesh/Imageable descendant get the class. Example: "
+                            "'/World/Tray' to label every bottle inside as 'medicine_bottle'."
+                        ),
+                    },
+                    "class_name": {
+                        "type": "string",
+                        "description": (
+                            "The class label to apply (semanticData value). Example: "
+                            "'medicine_bottle', 'pallet', 'panda_link'."
+                        ),
+                    },
+                    "semantic_type": {
+                        "type": "string",
+                        "description": (
+                            "Optional Semantics instance type. Default: 'class' (the "
+                            "standard SDG bucket). Use 'instance_id' or a custom name "
+                            "for multi-channel labeling."
+                        ),
+                    },
+                },
+                "required": ["prim_path", "class_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_semantic_labels",
+            "description": (
+                "WHAT: Lint every prim with Semantics.SemanticsAPI applied on the current "
+                "stage and report annotation-quality issues: empty class strings, orphan "
+                "SemanticsAPI applications (API applied but the data attribute is unset), "
+                "classes used on only ONE prim (likely a typo against the bulk class — e.g. "
+                "'bottle' vs 'bottl'), invisible / inactive prims that still carry labels "
+                "(they will not render so the label is dead weight), and prims with multiple "
+                "conflicting Semantics_class instances. "
+                "WHEN: pre-flight before kicking off SDG / Replicator capture — catch label "
+                "bugs before burning hours rendering bad ground truth, after a large "
+                "assign_class_to_children call to confirm the bulk write is consistent, or "
+                "answering 'are my semantic labels correct' / 'why is my SDG class missing'. "
+                "RETURNS: data dict {ok: bool, summary: {labeled_prims: int, classes: int, "
+                "issues: int}, issues: [{severity: 'error'|'warning', kind: str, "
+                "prim_path: str, detail: str}]}. "
+                "CAVEATS: this is DIFFERENT from PR #23 `validate_annotations`. "
+                "validate_annotations reads SDG OUTPUT FILES on disk (writer JSON, bbox "
+                "captures, instance maps) and lints the rendered ground truth. "
+                "validate_semantic_labels reads the USD STAGE and lints the SOURCE "
+                "annotations BEFORE Replicator / SDG runs. Use this tool first to fix "
+                "bad source labels, then run a tiny SDG sample, then PR #23's tool to "
+                "lint the output. Read-only — never mutates the stage. Returns an error "
+                "stub when no stage is open."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
 ]

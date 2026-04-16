@@ -2232,3 +2232,396 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Tier 11 — SDG Annotation (5 atomic tools) ───────────────────────────────
+#
+# T11.1 list_semantic_classes      — DATA   (walk stage, gather Semantics.SemanticsAPI)
+# T11.2 get_semantic_label         — DATA   (Semantics.SemanticsAPI.GetAll(prim))
+# T11.3 remove_semantic_label      — CODE   (prim.RemoveAPI(SemanticsAPI, instance))
+# T11.4 assign_class_to_children   — CODE   (recurse subtree, Apply on every Mesh/Imageable)
+# T11.5 validate_semantic_labels   — DATA   (lint USD-side semantics for SDG)
+#
+# Companion to tier-0 set_semantic_label (single prim writer, PR #59) and
+# distinct from PR #23 validate_annotations (which lints SDG OUTPUT FILES on
+# disk — different scope from validate_semantic_labels which lints the USD
+# stage's Semantics.SemanticsAPI annotations themselves).
+
+
+async def _handle_list_semantic_classes(args: Dict) -> Dict:
+    """Walk the stage, collect every Semantics.SemanticsAPI label, return unique classes."""
+    code = """\
+import json
+try:
+    import omni.usd
+    from pxr import Usd, Semantics
+    stage = omni.usd.get_context().get_stage()
+    if stage is None:
+        print(json.dumps({'error': 'no stage open'}))
+    else:
+        classes = {}  # class_name -> {'count': int, 'sample_prims': [str, ...]}
+        labeled = 0
+        for prim in stage.Traverse():
+            try:
+                if not Semantics.SemanticsAPI.HasAPI(prim):
+                    # Some Kit builds expose only the multi-apply variant — fall back to
+                    # GetAll which returns an empty list when nothing is applied.
+                    instances = Semantics.SemanticsAPI.GetAll(prim) if hasattr(
+                        Semantics.SemanticsAPI, 'GetAll'
+                    ) else []
+                else:
+                    instances = Semantics.SemanticsAPI.GetAll(prim) if hasattr(
+                        Semantics.SemanticsAPI, 'GetAll'
+                    ) else [Semantics.SemanticsAPI(prim, 'Semantics_class')]
+            except Exception:
+                instances = []
+            if not instances:
+                continue
+            labeled += 1
+            for sem in instances:
+                try:
+                    data_attr = sem.GetSemanticDataAttr()
+                    cls = data_attr.Get() if data_attr and data_attr.IsValid() else None
+                except Exception:
+                    cls = None
+                if cls is None or cls == '':
+                    continue
+                cls = str(cls)
+                bucket = classes.setdefault(cls, {'count': 0, 'sample_prims': []})
+                bucket['count'] += 1
+                if len(bucket['sample_prims']) < 5:
+                    bucket['sample_prims'].append(str(prim.GetPath()))
+        out_classes = [
+            {'name': name, 'count': info['count'], 'sample_prims': info['sample_prims']}
+            for name, info in sorted(classes.items())
+        ]
+        print(json.dumps({
+            'classes': out_classes,
+            'total_classes': len(out_classes),
+            'total_labeled_prims': labeled,
+        }))
+except Exception as e:
+    print(json.dumps({'error': str(e)}))
+"""
+    result = await kit_tools.queue_exec_patch(
+        code, "List unique semantic classes used on the current stage"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "note": (
+            "Semantic-class enumeration queued. Kit will print a JSON dict with keys: "
+            "classes (list of {name, count, sample_prims}), total_classes, "
+            "total_labeled_prims. count=1 for a class often signals a typo against the "
+            "intended bulk label."
+        ),
+    }
+
+
+async def _handle_get_semantic_label(args: Dict) -> Dict:
+    """Read every Semantics.SemanticsAPI instance applied to a single prim."""
+    prim_path = args["prim_path"]
+    prim_path_repr = repr(prim_path)
+    code = (
+        "import json\n"
+        "try:\n"
+        "    import omni.usd\n"
+        "    from pxr import Usd, Semantics\n"
+        "    stage = omni.usd.get_context().get_stage()\n"
+        "    if stage is None:\n"
+        "        print(json.dumps({'error': 'no stage open'}))\n"
+        "    else:\n"
+        f"        prim_path = {prim_path_repr}\n"
+        "        prim = stage.GetPrimAtPath(prim_path)\n"
+        "        if not prim or not prim.IsValid():\n"
+        "            print(json.dumps({'error': f'prim not found: {prim_path}'}))\n"
+        "        else:\n"
+        "            try:\n"
+        "                instances = Semantics.SemanticsAPI.GetAll(prim) if hasattr(\n"
+        "                    Semantics.SemanticsAPI, 'GetAll'\n"
+        "                ) else []\n"
+        "            except Exception:\n"
+        "                instances = []\n"
+        "            labels = []\n"
+        "            for sem in instances:\n"
+        "                try:\n"
+        "                    instance_name = sem.GetName() if hasattr(sem, 'GetName') else ''\n"
+        "                except Exception:\n"
+        "                    instance_name = ''\n"
+        "                try:\n"
+        "                    type_attr = sem.GetSemanticTypeAttr()\n"
+        "                    sem_type = type_attr.Get() if type_attr and type_attr.IsValid() else ''\n"
+        "                except Exception:\n"
+        "                    sem_type = ''\n"
+        "                try:\n"
+        "                    data_attr = sem.GetSemanticDataAttr()\n"
+        "                    cls = data_attr.Get() if data_attr and data_attr.IsValid() else ''\n"
+        "                except Exception:\n"
+        "                    cls = ''\n"
+        "                labels.append({\n"
+        "                    'instance': str(instance_name),\n"
+        "                    'semantic_type': str(sem_type) if sem_type is not None else '',\n"
+        "                    'class_name': str(cls) if cls is not None else '',\n"
+        "                })\n"
+        "            print(json.dumps({\n"
+        "                'prim_path': prim_path,\n"
+        "                'has_semantics': bool(labels),\n"
+        "                'labels': labels,\n"
+        "                'count': len(labels),\n"
+        "            }))\n"
+        "except Exception as e:\n"
+        "    print(json.dumps({'error': str(e)}))\n"
+    )
+    result = await kit_tools.queue_exec_patch(
+        code, f"Read Semantics.SemanticsAPI labels on {prim_path}"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "prim_path": prim_path,
+        "note": (
+            "Semantic-label lookup queued. Kit will print a JSON dict with keys: "
+            "prim_path, has_semantics, labels (list of {instance, semantic_type, "
+            "class_name}), count. has_semantics=false means the prim is not labeled — "
+            "that is a normal state, not an error."
+        ),
+    }
+
+
+def _gen_remove_semantic_label(args: Dict) -> str:
+    prim_path = args["prim_path"]
+    prim_path_repr = repr(prim_path)
+    return (
+        "import omni.usd\n"
+        "from pxr import Usd, Semantics, Sdf\n"
+        "\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        "if stage is None:\n"
+        "    raise RuntimeError('No stage is open — cannot remove semantic label')\n"
+        "\n"
+        f"prim_path = {prim_path_repr}\n"
+        "prim = stage.GetPrimAtPath(prim_path)\n"
+        "if not prim or not prim.IsValid():\n"
+        "    raise RuntimeError(f'prim not found: {prim_path}')\n"
+        "\n"
+        "# Enumerate every Semantics_* instance, remove the API and clear leftover attrs.\n"
+        "try:\n"
+        "    instances = Semantics.SemanticsAPI.GetAll(prim) if hasattr(\n"
+        "        Semantics.SemanticsAPI, 'GetAll'\n"
+        "    ) else []\n"
+        "except Exception:\n"
+        "    instances = []\n"
+        "\n"
+        "if not instances:\n"
+        "    print(f'No Semantics.SemanticsAPI applied on {prim_path} — nothing to remove (no-op)')\n"
+        "else:\n"
+        "    removed = []\n"
+        "    for sem in instances:\n"
+        "        try:\n"
+        "            instance_name = sem.GetName() if hasattr(sem, 'GetName') else ''\n"
+        "        except Exception:\n"
+        "            instance_name = ''\n"
+        "        try:\n"
+        "            prim.RemoveAPI(Semantics.SemanticsAPI, instance_name)\n"
+        "        except Exception:\n"
+        "            # Older Kit: RemoveAppliedSchema works on the underlying spec\n"
+        "            try:\n"
+        "                full = f'SemanticsAPI:{instance_name}' if instance_name else 'SemanticsAPI'\n"
+        "                prim.RemoveAppliedSchema(full)\n"
+        "            except Exception:\n"
+        "                pass\n"
+        "        # Explicitly clear the attributes RemoveAPI leaves behind so HasAPI() is False.\n"
+        "        for attr_name in (\n"
+        "            f'semantic:{instance_name}:params:semanticType' if instance_name else 'semantic:params:semanticType',\n"
+        "            f'semantic:{instance_name}:params:semanticData' if instance_name else 'semantic:params:semanticData',\n"
+        "        ):\n"
+        "            attr = prim.GetAttribute(attr_name)\n"
+        "            if attr and attr.IsValid():\n"
+        "                try:\n"
+        "                    prim.RemoveProperty(attr_name)\n"
+        "                except Exception:\n"
+        "                    pass\n"
+        "        removed.append(instance_name or '<default>')\n"
+        "    print(f'Removed Semantics.SemanticsAPI from {prim_path}: instances={removed}')\n"
+    )
+
+
+def _gen_assign_class_to_children(args: Dict) -> str:
+    prim_path = args["prim_path"]
+    class_name = args["class_name"]
+    semantic_type = args.get("semantic_type", "class")
+    prim_path_repr = repr(prim_path)
+    class_name_repr = repr(class_name)
+    semantic_type_repr = repr(semantic_type)
+    instance_name = f"Semantics_{semantic_type}"
+    instance_name_repr = repr(instance_name)
+    return (
+        "import omni.usd\n"
+        "from pxr import Usd, UsdGeom, Semantics\n"
+        "\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        "if stage is None:\n"
+        "    raise RuntimeError('No stage is open — cannot assign class to children')\n"
+        "\n"
+        f"root_path = {prim_path_repr}\n"
+        f"class_name = {class_name_repr}\n"
+        f"semantic_type = {semantic_type_repr}\n"
+        f"instance_name = {instance_name_repr}\n"
+        "\n"
+        "root = stage.GetPrimAtPath(root_path)\n"
+        "if not root or not root.IsValid():\n"
+        "    raise RuntimeError(f'prim not found: {root_path}')\n"
+        "\n"
+        "# Walk root + every descendant. Only Mesh / Imageable prims (i.e. things that\n"
+        "# render and therefore appear in SDG output) get the label — Xforms and pure\n"
+        "# grouping prims are skipped because labels on them are dead weight.\n"
+        "labeled = []\n"
+        "skipped = []\n"
+        "for prim in Usd.PrimRange(root):\n"
+        "    if not prim or not prim.IsValid():\n"
+        "        continue\n"
+        "    is_mesh = prim.IsA(UsdGeom.Mesh)\n"
+        "    is_imageable = prim.IsA(UsdGeom.Gprim)  # Mesh, Sphere, Cube, ... — anything that draws\n"
+        "    if not (is_mesh or is_imageable):\n"
+        "        skipped.append(str(prim.GetPath()))\n"
+        "        continue\n"
+        "    sem = Semantics.SemanticsAPI.Apply(prim, instance_name)\n"
+        "    sem.CreateSemanticTypeAttr().Set(semantic_type)\n"
+        "    sem.CreateSemanticDataAttr().Set(class_name)\n"
+        "    labeled.append(str(prim.GetPath()))\n"
+        "\n"
+        "print(\n"
+        "    f'assign_class_to_children: root={root_path} class={class_name!r} '\n"
+        "    f'type={semantic_type!r} labeled={len(labeled)} skipped={len(skipped)}'\n"
+        ")\n"
+        "if labeled:\n"
+        "    print(f'  first labeled: {labeled[:5]}')\n"
+    )
+
+
+async def _handle_validate_semantic_labels(args: Dict) -> Dict:
+    """Lint every Semantics.SemanticsAPI annotation on the current stage."""
+    code = """\
+import json
+try:
+    import omni.usd
+    from pxr import Usd, UsdGeom, Semantics
+    stage = omni.usd.get_context().get_stage()
+    if stage is None:
+        print(json.dumps({'error': 'no stage open'}))
+    else:
+        issues = []
+        labeled_prims = 0
+        class_to_prims = {}  # class_name -> [prim_path, ...]
+        for prim in stage.Traverse():
+            try:
+                instances = Semantics.SemanticsAPI.GetAll(prim) if hasattr(
+                    Semantics.SemanticsAPI, 'GetAll'
+                ) else []
+            except Exception:
+                instances = []
+            if not instances:
+                continue
+            labeled_prims += 1
+            prim_path = str(prim.GetPath())
+            # Visibility / active checks — labels on hidden prims don't render
+            try:
+                is_active = bool(prim.IsActive())
+            except Exception:
+                is_active = True
+            try:
+                imageable = UsdGeom.Imageable(prim)
+                vis = imageable.ComputeVisibility() if imageable else 'inherited'
+                is_visible = vis != 'invisible'
+            except Exception:
+                is_visible = True
+            if not is_active:
+                issues.append({
+                    'severity': 'warning', 'kind': 'inactive_labeled_prim',
+                    'prim_path': prim_path,
+                    'detail': 'Prim has Semantics labels but is deactivated — will not appear in SDG output.',
+                })
+            elif not is_visible:
+                issues.append({
+                    'severity': 'warning', 'kind': 'invisible_labeled_prim',
+                    'prim_path': prim_path,
+                    'detail': 'Prim has Semantics labels but visibility=invisible — will not render.',
+                })
+            class_seen_on_prim = []
+            for sem in instances:
+                try:
+                    instance_name = sem.GetName() if hasattr(sem, 'GetName') else ''
+                except Exception:
+                    instance_name = ''
+                try:
+                    type_attr = sem.GetSemanticTypeAttr()
+                    sem_type = type_attr.Get() if type_attr and type_attr.IsValid() else ''
+                except Exception:
+                    sem_type = ''
+                try:
+                    data_attr = sem.GetSemanticDataAttr()
+                    cls = data_attr.Get() if data_attr and data_attr.IsValid() else ''
+                except Exception:
+                    cls = ''
+                cls = '' if cls is None else str(cls)
+                if cls == '':
+                    issues.append({
+                        'severity': 'error', 'kind': 'empty_class_name',
+                        'prim_path': prim_path,
+                        'detail': f'Semantics instance {instance_name!r} has empty semanticData — SDG writer will skip the label.',
+                    })
+                else:
+                    class_to_prims.setdefault(cls, []).append(prim_path)
+                if str(sem_type) == 'class' and cls != '':
+                    class_seen_on_prim.append(cls)
+            if len(class_seen_on_prim) > 1 and len(set(class_seen_on_prim)) > 1:
+                issues.append({
+                    'severity': 'error', 'kind': 'conflicting_class_labels',
+                    'prim_path': prim_path,
+                    'detail': f'Prim has multiple semantic_type=class instances with different class_names: {sorted(set(class_seen_on_prim))}',
+                })
+        # Singleton-class warnings: a class with exactly one prim is often a typo.
+        for cls, prims in class_to_prims.items():
+            if len(prims) == 1 and len(class_to_prims) > 1:
+                issues.append({
+                    'severity': 'warning', 'kind': 'singleton_class',
+                    'prim_path': prims[0],
+                    'detail': f'Class {cls!r} is used on a single prim — likely a typo against the intended bulk class.',
+                })
+        summary = {
+            'labeled_prims': labeled_prims,
+            'classes': len(class_to_prims),
+            'issues': len(issues),
+        }
+        ok = not any(i['severity'] == 'error' for i in issues)
+        print(json.dumps({
+            'ok': ok,
+            'summary': summary,
+            'issues': issues,
+        }))
+except Exception as e:
+    print(json.dumps({'error': str(e)}))
+"""
+    result = await kit_tools.queue_exec_patch(
+        code, "Validate USD-side Semantics.SemanticsAPI annotations on the stage"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "note": (
+            "Semantic-label validation queued. Kit will print a JSON dict with keys: "
+            "ok (bool, false when any error issue is present), summary "
+            "({labeled_prims, classes, issues}), issues (list of {severity, kind, "
+            "prim_path, detail}). Distinct from PR #23 validate_annotations: this tool "
+            "lints the USD STAGE annotations, validate_annotations lints the SDG "
+            "OUTPUT FILES on disk."
+        ),
+    }
+
+
+# Register Tier 11 handlers
+DATA_HANDLERS["list_semantic_classes"] = _handle_list_semantic_classes
+DATA_HANDLERS["get_semantic_label"] = _handle_get_semantic_label
+DATA_HANDLERS["validate_semantic_labels"] = _handle_validate_semantic_labels
+CODE_GEN_HANDLERS["remove_semantic_label"] = _gen_remove_semantic_label
+CODE_GEN_HANDLERS["assign_class_to_children"] = _gen_assign_class_to_children
