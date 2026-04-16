@@ -2232,3 +2232,215 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ─── Atomic Tier 5 — OmniGraph (low-level graph manipulation) ────────────────
+# Spec: docs/specs/atomic_tools_catalog.md (Tier 5).
+# These are LOWER-LEVEL atomic operations than create_omnigraph (which builds
+# whole graphs). Use them to inspect existing graphs and surgically edit nodes,
+# connections, and variables one operation at a time.
+
+
+def _gen_add_node(args: Dict) -> str:
+    """Add a single node to an existing OmniGraph via og.Controller.edit()."""
+    graph_path = args["graph_path"]
+    raw_node_type = args["node_type"]
+    node_name = args["name"]
+    # Reuse the legacy → 5.1 namespace remap so callers can pass either form.
+    node_type = _OG_NODE_TYPE_MAP.get(raw_node_type, raw_node_type)
+    return f"""\
+import omni.graph.core as og
+
+keys = og.Controller.Keys
+og.Controller.edit(
+    {{"graph_path": "{graph_path}"}},
+    {{
+        keys.CREATE_NODES: [
+            ("{node_name}", "{node_type}"),
+        ],
+    }},
+)
+print(f"Added node '{node_name}' ({node_type}) to {graph_path}")
+"""
+
+
+def _gen_connect_nodes(args: Dict) -> str:
+    """Wire src.outputs:X -> dst.inputs:Y via og.Controller.edit() with CONNECT."""
+    graph_path = args["graph_path"]
+    src = args["src"]
+    dst = args["dst"]
+    return f"""\
+import omni.graph.core as og
+
+keys = og.Controller.Keys
+og.Controller.edit(
+    {{"graph_path": "{graph_path}"}},
+    {{
+        keys.CONNECT: [
+            ("{src}", "{dst}"),
+        ],
+    }},
+)
+print(f"Connected {src} -> {dst} in {graph_path}")
+"""
+
+
+def _gen_set_graph_variable(args: Dict) -> str:
+    """Set a graph-scoped variable on an OmniGraph via og.Controller."""
+    graph_path = args["graph_path"]
+    var_name = args["name"]
+    value = args["value"]
+    return f"""\
+import omni.graph.core as og
+
+graph = og.Controller.graph("{graph_path}")
+if graph is None:
+    raise RuntimeError(f"OmniGraph not found at {graph_path}")
+
+# Try og.Controller.set_variable() first (modern API);
+# fall back to graph.get_variable(name).set(value) on older Kit builds.
+_value = {value!r}
+try:
+    og.Controller.set_variable(("{graph_path}", "{var_name}"), _value)
+    print(f"Set variable '{var_name}' on {graph_path} via og.Controller.set_variable")
+except Exception:
+    var = graph.get_variable("{var_name}")
+    if var is None:
+        raise RuntimeError(f"Variable '{var_name}' does not exist on {graph_path}")
+    var.set(_value)
+    print(f"Set variable '{var_name}' on {graph_path} via graph.get_variable().set()")
+"""
+
+
+def _gen_delete_node(args: Dict) -> str:
+    """Remove a single node via og.Controller.edit() with DELETE_NODES."""
+    graph_path = args["graph_path"]
+    node_name = args["node_name"]
+    return f"""\
+import omni.graph.core as og
+
+keys = og.Controller.Keys
+og.Controller.edit(
+    {{"graph_path": "{graph_path}"}},
+    {{
+        keys.DELETE_NODES: [
+            "{node_name}",
+        ],
+    }},
+)
+print(f"Deleted node '{node_name}' from {graph_path}")
+"""
+
+
+CODE_GEN_HANDLERS["add_node"] = _gen_add_node
+CODE_GEN_HANDLERS["connect_nodes"] = _gen_connect_nodes
+CODE_GEN_HANDLERS["set_graph_variable"] = _gen_set_graph_variable
+CODE_GEN_HANDLERS["delete_node"] = _gen_delete_node
+
+
+async def _handle_list_graphs(args: Dict) -> Dict:
+    """Enumerate all OmniGraph action graphs in the stage.
+
+    Strategy: query Kit synchronously to scan the stage for prims of type
+    'OmniGraph' (and the modern 'omni.graph.core.types.OmniGraph' fallback).
+    Falls back to empty list when Kit RPC is unavailable.
+    """
+    code = """\
+import json
+import omni.usd
+
+stage = omni.usd.get_context().get_stage()
+graphs = []
+if stage is not None:
+    for prim in stage.Traverse():
+        type_name = prim.GetTypeName()
+        if type_name in ("OmniGraph", "ComputeGraph"):
+            graphs.append({
+                "path": str(prim.GetPath()),
+                "type": str(type_name),
+                "name": prim.GetName(),
+            })
+print(json.dumps({"graphs": graphs, "count": len(graphs)}))
+"""
+    result = await kit_tools.exec_sync(code, timeout=10)
+    if not result.get("success"):
+        return {"graphs": [], "count": 0, "error": result.get("output", "Kit RPC unavailable")}
+    output = result.get("output", "").strip()
+    # exec_sync returns the captured stdout as a single string;
+    # find the last JSON line for our payload.
+    for line in reversed(output.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    return {"graphs": [], "count": 0, "raw_output": output}
+
+
+async def _handle_inspect_graph(args: Dict) -> Dict:
+    """Return nodes, connections, and attribute values for a single graph."""
+    graph_path = args["graph_path"]
+    code = f"""\
+import json
+import omni.graph.core as og
+
+graph = og.Controller.graph("{graph_path}")
+result = {{"graph_path": "{graph_path}"}}
+if graph is None:
+    result["error"] = "Graph not found"
+    print(json.dumps(result))
+else:
+    nodes_info = []
+    connections = []
+    try:
+        for node in graph.get_nodes():
+            node_path = node.get_prim_path()
+            node_type = node.get_type_name()
+            attrs = {{}}
+            for attr in node.get_attributes():
+                try:
+                    attrs[attr.get_name()] = repr(attr.get())
+                except Exception:
+                    attrs[attr.get_name()] = "<unreadable>"
+                # Track downstream connections from this attribute
+                try:
+                    for upstream in attr.get_upstream_connections():
+                        connections.append({{
+                            "src": upstream.get_path(),
+                            "dst": attr.get_path(),
+                        }})
+                except Exception:
+                    pass
+            nodes_info.append({{
+                "name": node.get_prim_path().split("/")[-1],
+                "path": node_path,
+                "type": node_type,
+                "attributes": attrs,
+            }})
+        result["nodes"] = nodes_info
+        result["connections"] = connections
+        result["node_count"] = len(nodes_info)
+    except Exception as exc:
+        result["error"] = str(exc)
+print(json.dumps(result))
+"""
+    exec_result = await kit_tools.exec_sync(code, timeout=15)
+    if not exec_result.get("success"):
+        return {
+            "graph_path": graph_path,
+            "error": exec_result.get("output", "Kit RPC unavailable"),
+        }
+    output = exec_result.get("output", "").strip()
+    for line in reversed(output.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    return {"graph_path": graph_path, "raw_output": output}
+
+
+DATA_HANDLERS["list_graphs"] = _handle_list_graphs
+DATA_HANDLERS["inspect_graph"] = _handle_inspect_graph

@@ -942,4 +942,97 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Atomic Tier 5 — OmniGraph (low-level graph manipulation) ────────────
+    # Lower-level atomic operations than create_omnigraph/explain_graph/debug_graph.
+    # Spec: docs/specs/atomic_tools_catalog.md (Tier 5).
+    {
+        "type": "function",
+        "function": {
+            "name": "list_graphs",
+            "description": "Enumerate all OmniGraph action graphs in the current USD stage. Returns a list of graph prim paths and basic metadata. Use to discover existing graphs before inspecting or modifying them.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "inspect_graph",
+            "description": "Inspect an OmniGraph: return its nodes, connections, and node attribute values. Uses og.Controller to enumerate the graph contents. Use after list_graphs to understand a graph's structure before editing.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "graph_path": {"type": "string", "description": "USD path to the OmniGraph prim, e.g. '/World/ActionGraph'"},
+                },
+                "required": ["graph_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_node",
+            "description": "Add a single node to an existing OmniGraph using og.Controller.edit() with CREATE_NODES. Atomic alternative to rebuilding the whole graph with create_omnigraph.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "graph_path": {"type": "string", "description": "USD path to the existing OmniGraph"},
+                    "node_type": {"type": "string", "description": "OmniGraph node type ID, e.g. 'omni.graph.action.OnPlaybackTick' or 'isaacsim.ros2.bridge.ROS2PublishClock'"},
+                    "name": {"type": "string", "description": "Friendly name for the new node within the graph"},
+                },
+                "required": ["graph_path", "node_type", "name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "connect_nodes",
+            "description": "Wire one node's output port to another node's input port within an OmniGraph. Uses og.Controller.edit() with CONNECT. Source/destination paths look like 'NodeName.outputs:portName' and 'NodeName.inputs:portName'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "graph_path": {"type": "string", "description": "USD path to the OmniGraph"},
+                    "src": {"type": "string", "description": "Source attribute path — e.g. 'tick.outputs:tick'"},
+                    "dst": {"type": "string", "description": "Destination attribute path — e.g. 'publishClock.inputs:execIn'"},
+                },
+                "required": ["graph_path", "src", "dst"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_graph_variable",
+            "description": "Set a graph-scoped variable on an OmniGraph via og.Controller. Variables persist across node evaluations and can be read by GetVariable nodes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "graph_path": {"type": "string", "description": "USD path to the OmniGraph"},
+                    "name": {"type": "string", "description": "Variable name (e.g. 'topicName')"},
+                    "value": {"description": "New value (string, number, bool, or array)"},
+                },
+                "required": ["graph_path", "name", "value"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_node",
+            "description": "Remove a single node from an OmniGraph using og.Controller.edit() with DELETE_NODES. Use to surgically prune nodes without rebuilding the entire graph.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "graph_path": {"type": "string", "description": "USD path to the OmniGraph"},
+                    "node_name": {"type": "string", "description": "Name of the node to remove (relative to the graph)"},
+                },
+                "required": ["graph_path", "node_name"],
+            },
+        },
+    },
 ]
