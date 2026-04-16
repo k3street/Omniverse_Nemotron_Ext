@@ -41,6 +41,18 @@ Complete natural-language control over every Isaac Sim capability — USD author
 | Import pipeline — URDF/MJCF/USD/asset_library (20+ robots) | ✅ Running |
 | Multi-viewport / camera switching | ✅ Running |
 | Session reset / new scene button | ✅ Running |
+| Multi-provider LLM (Anthropic/OpenAI/Gemini/Ollama/Grok) | ✅ Running |
+| LLM mode hot-switching (CLI `--mode` + API `/switch_mode`) | ✅ Running |
+| Nucleus browse & download tools (asset library integration) | ✅ Running |
+| Asset catalog search (5,178 indexed assets, fuzzy match + tags) | ✅ Running |
+| Golden code patterns (49 verified patterns + auto-capture pipeline) | ✅ Running |
+| Robot name normalization (alias mapping for 20+ robots) | ✅ Running |
+| Patch validator (12 regex rules for legacy API detection) | ✅ Running |
+| Context distiller (17 tool categories, smart tool pre-selection) | ✅ Running |
+| Per-tool call throttling (configurable limits per turn) | ✅ Running |
+| Secret redaction + audit trail (governance module) | ✅ Running |
+| Pipeline planner (multi-step plan generation + execution) | ✅ Running |
+| ROS-MCP integration (11 ROS2 tool schemas via rosbridge) | ⚠️ Schemas only |
 
 ---
 
@@ -55,16 +67,27 @@ Complete natural-language control over every Isaac Sim capability — USD author
 | **ROS2 bridge control** — topic pub/sub from chat | ⚠️ Schema only | Tool schemas defined but handlers are stubs (`None`); no actual ROS2 bridge code |
 | **Undo/redo narration** — LLM explains what it did, user can Ctrl+Z | ⚠️ Undo works | All mutations go through `omni.kit.commands` (Ctrl+Z); no per-action LLM narration |
 | **Fine-tune data capture** — every chat→action pair stored for training | ⚠️ Patches only | Code patches logged via `/log_execution`; tool-call chat→action pairs NOT captured |
+| **Stage Analyzer** — scene diagnosis & validation | ⚠️ 1/8 validators | Only `SchemaConsistencyRule` implemented; missing: import health, material/physics mismatch, articulation integrity, sensor completeness, ROS bridge readiness, IsaacLab sanity, performance warnings |
+| **Knowledge base feedback loop** — learn from plan outcomes | ⚠️ Schema only | `knowledge_base.py` exists but `query_by_error_pattern()` returns `[]`; no negative memory; auto-capture not wired to plan outcomes |
+| **Source Registry / document retrieval** — real NVIDIA docs | ⚠️ Mock only | Only hardcoded mock doc in `index_mock_doc()`; no real web scraping, no actual NVIDIA docs loaded into FTS index |
+| **Environment fingerprint caching** — thread-safe system info | ⚠️ Brittle | Uses mutable `global` variable, not thread-safe under concurrent requests; no durable cache |
+| **Vision tools** — object detection, bounding boxes in viewport | ⚠️ Stub only | `_handle_vision_*` handlers all return empty `{}`; detect_objects, get_bounding_boxes non-functional |
+| **Patch planner ↔ Stage Analyzer** — plan from real findings | ⚠️ Disconnected | Plan generation accepts `mock_findings` parameter; not integrated with actual Stage Analyzer output |
+| **Chat file upload** — 📎 button backend handling | ⚠️ UI only | Button defined in extension UI, no backend route processes uploaded files |
 
 ### Missing — Not Yet Implemented
 
 | Gap | Priority |
 |---|---|
 | **NL scene builder** — "build a kitchen with my robot" → full spatial layout from asset catalog | P0 |
-| **Asset catalog search** — fuzzy-match local/Nucleus assets by name, tag, type | P0 |
+| **Asset catalog search** — fuzzy-match local/Nucleus assets by name, tag, type | ✅ Done |
 | **IsaacLab RL training** — env scaffolding, training launch, live metrics from chat | P0 |
 | **Motion planning (RMPflow/Lula)** — "move arm to this pose" via `isaacsim.robot_motion` | P0 |
 | **GPU-batched cloning** — replace naive clone loop with `isaacsim.core.cloner` | P0 |
+| **Telemetry & evaluation pipeline** — metrics, events, dashboards, diagnose time, fix rate, rollback rate | P0 |
+| **Real document scraping & indexing** — scrape NVIDIA Isaac Sim docs by version, load into FTS index | P0 |
+| **7 Stage Analyzer validator packs** — import health, material/physics, articulation, sensor, ROS bridge, IsaacLab, perf | P0 |
+| **Knowledge negative memory** — store what failed and why, not just successes | P1 |
 | **Image-to-USD pipeline** — upload photo → generate 3D mesh → place in scene | P1 |
 | **Chat file upload** — 📎 button for images, OBJ, GLB, USD files | P1 |
 | **XR teleoperation** — WebRTC hand-tracking → joint control via LiveKit | P1 |
@@ -738,6 +761,184 @@ User types: "Create a 3D model from this image and place it at 0, 0, 1"
 
 ---
 
+## Phase 9 — Service Infrastructure Hardening (Weeks 39–43)
+
+**Goal:** Close the critical backend gaps that prevent the system from being a production-ready diagnostic assistant — validators for scene diagnosis, a knowledge feedback loop that learns, real document retrieval, and telemetry to measure improvement.
+
+### 9A — Stage Analyzer Validator Packs (Weeks 39–41)
+
+**Goal:** Expand the Stage Analyzer from 1 validator (SchemaConsistencyRule) to the full 8-pack needed for comprehensive scene diagnosis.
+
+#### Tasks
+
+- [ ] **9A.1** Validator: `ImportHealthValidator` — detect broken USD references, missing assets, unresolved payloads
+  - Scan `references` and `payloads` on all prims, flag missing files
+  - Check for orphan Xform prims with no geometry or children
+  - "3 broken asset references found in /World/Props"
+- [ ] **9A.2** Validator: `MaterialPhysicsMismatchValidator` — detect visual vs physics inconsistencies
+  - Prims with RigidBodyAPI but no CollisionAPI
+  - Meshes with materials but no physics (floating visual-only objects)
+  - CollisionAPI with wrong approximation (mesh vs convexHull mismatch)
+  - "15 rigid bodies have no collision shapes — they'll fall through everything"
+- [ ] **9A.3** Validator: `ArticulationIntegrityValidator` — check articulation chain health
+  - Verify joint hierarchy is connected (no orphan joints)
+  - Check drive stiffness/damping are non-zero
+  - Detect joints with no limits (infinite rotation)
+  - Flag articulations with no root body
+  - "Franka joint 5 has zero stiffness — arm will collapse under gravity"
+- [ ] **9A.4** Validator: `SensorCompletenessValidator` — verify sensor wiring
+  - Sensors without RenderProducts (cameras not rendering)
+  - LiDAR without OmniGraph tick pipeline
+  - IMU not attached to a physics-enabled body
+  - "Wrist camera has no RenderProduct — it can't produce images"
+- [ ] **9A.5** Validator: `ROSBridgeReadinessValidator` — check ROS2 integration health
+  - Verify OG action graph exists for each published topic
+  - Check frame_id consistency across sensor publishers
+  - Detect topic name collisions
+  - Verify clock publisher exists for sim-time sync
+- [ ] **9A.6** Validator: `IsaacLabSanityValidator` — check RL environment setup
+  - Verify env spacing and collision filtering between clones
+  - Check observation/action spaces match env config
+  - Detect reward terms referencing non-existent prims
+  - Validate reset behavior (prims return to initial state)
+- [ ] **9A.7** Validator: `PerformanceWarningsValidator` — flag performance issues
+  - High poly-count meshes not using convex decomposition
+  - Too many rigid bodies without GPU pipeline
+  - Excessive USD layers or sublayers
+  - Missing LOD on detailed assets
+  - "Scene has 2.3M triangles — consider enabling convex decomposition for collision shapes"
+- [ ] **9A.8** Validator registry / factory pattern
+  - Replace hardcoded validator list with plugin-style registry
+  - `@register_validator("import_health")` decorator
+  - Validators can be enabled/disabled per scene profile (RL, manipulation, warehouse)
+  - CLI: `python -m isaac_assist_service.analysis.validate --scene /path/to/scene.usd`
+
+### 9B — Knowledge Base Feedback Loop (Weeks 39–40)
+
+**Goal:** Wire the knowledge base so the system learns from every plan execution — successes stored as patterns, failures as anti-patterns — enabling continuous improvement.
+
+#### Tasks
+
+- [ ] **9B.1** Wire plan outcome capture: `plan.apply()` → `knowledge_base.capture_outcome(plan, result, success)`
+  - On success: extract code pattern + metadata, store via `save_pattern_from_success()`
+  - On failure: store error signature + failing code + root cause in negative memory
+  - Connect through `log_execution` route (already captures patches)
+- [ ] **9B.2** Implement `query_by_error_pattern()` with real queries
+  - Currently returns `[]` — replace with FTS query against error signatures
+  - Match against known failure patterns, return previous fixes
+  - "I've seen this error before — last time, the fix was adding CollisionAPI"
+- [ ] **9B.3** Negative memory store
+  - New JSONL: `workspace/knowledge/negative_patterns.jsonl`
+  - Schema: `{error_signature, failing_code, root_cause, fix_applied, timestamp}`
+  - Queried when similar errors appear — prevents repeating the same mistakes
+  - Dedup: same error signature within 24h is not stored again
+- [ ] **9B.4** Knowledge playbook authoring
+  - Multi-step repair recipes stored as reusable playbooks
+  - Schema: `{name, trigger_conditions, steps: [{tool_call, params}], success_criteria}`
+  - "When you see 'invalid prim' errors after import, run these 3 steps..."
+  - User can create playbooks via chat: "save what you just did as a playbook called 'fix_import'"
+- [ ] **9B.5** Knowledge quality metrics
+  - Track pattern hit rate (how often patterns are matched and used)
+  - Track fix success rate per pattern
+  - Auto-deprecate patterns with <20% success rate after 10+ uses
+
+### 9C — Real Document Retrieval Pipeline (Weeks 40–41)
+
+**Goal:** Replace mock documents with real NVIDIA Isaac Sim documentation, scraped, versioned, and indexed for RAG-powered retrieval.
+
+#### Tasks
+
+- [ ] **9C.1** NVIDIA doc scraper
+  - Scrape Isaac Sim 5.1 docs from `docs.omniverse.nvidia.com` (or local HTML dump)
+  - Parse: API reference, tutorials, migration guides, extension docs
+  - Store as chunked markdown in `workspace/knowledge/docs/{version}/`
+  - Respect rate limits and cache for offline use
+- [ ] **9C.2** Version-aware indexing
+  - Index docs tagged by Isaac Sim version (5.1 vs 6.0)
+  - Query filters by current environment fingerprint version
+  - "Using Isaac Sim 5.1 — showing 5.1-specific API docs"
+- [ ] **9C.3** FTS index integration
+  - Replace `index_mock_doc()` with real document loading on startup
+  - Use existing FTS infrastructure in `retrieval/indexer.py`
+  - Chunk large pages into 500-token segments with overlap
+  - Re-index on version change or manual trigger
+- [ ] **9C.4** Scheduled re-indexing
+  - Daily/weekly check for doc updates (configurable `DOC_REINDEX_INTERVAL`)
+  - Diff detection — only re-index changed pages
+  - Admin endpoint: `POST /api/v1/retrieval/reindex`
+- [ ] **9C.5** Remove `mock_findings` parameter from plan generation
+  - Replace with real call to Stage Analyzer (9A) for scene findings
+  - Plans based on actual scene problems, not hardcoded test data
+
+### 9D — Telemetry & Evaluation Pipeline (Weeks 41–43)
+
+**Goal:** Instrument the service to measure diagnostic accuracy, fix success rate, and user satisfaction — enabling data-driven improvement of the system.
+
+#### Tasks
+
+- [ ] **9D.1** Event emitter framework
+  - `TelemetryEvent` dataclass: `{event_type, timestamp, session_id, data}`
+  - Event types: `chat_turn`, `tool_call`, `plan_generated`, `plan_applied`, `plan_failed`, `rollback`, `approval_granted`, `approval_denied`, `error_diagnosed`, `pattern_matched`
+  - Async emit — doesn't block request handling
+  - Pluggable backends: SQLite (default), file, webhook
+- [ ] **9D.2** Metrics store (SQLite)
+  - `telemetry.db` in `workspace/` directory
+  - Tables: `events`, `metrics_hourly`, `metrics_daily`
+  - Rolling aggregation: avg diagnose time, fix success rate, rollback rate, tool usage distribution
+  - Auto-prune events older than 90 days
+- [ ] **9D.3** API endpoints
+  - `GET /api/v1/telemetry/summary` — overall system health metrics
+  - `GET /api/v1/telemetry/events?type=plan_failed&since=24h` — filtered event query
+  - `GET /api/v1/telemetry/tool_usage` — tool call frequency and success rate
+  - `GET /api/v1/telemetry/patterns` — pattern match rate and effectiveness
+- [ ] **9D.4** Built-in evaluation suite
+  - Run test scenarios from `workspace/knowledge/test_cases.jsonl` automatically
+  - Measure: correct tool selection, code quality, execution success
+  - Compare across LLM providers (Anthropic vs Gemini vs local)
+  - Report: accuracy, latency p50/p95/p99, token usage, cost per turn
+- [ ] **9D.5** Dashboard data export
+  - JSON export for external dashboarding (Grafana, Streamlit)
+  - Markdown report generation: "weekly summary" command
+  - Trend detection: alert if fix success rate drops below threshold
+
+### 9E — Service Hardening & Cleanup (Weeks 42–43)
+
+**Goal:** Fix brittle code, wire stubs, and remove mock data to bring the service to production quality.
+
+#### Tasks
+
+- [ ] **9E.1** Fix fingerprint cache thread safety
+  - Replace mutable `global _cached_fingerprint` with `asyncio.Lock` + TTL cache
+  - Add `Cache-Control` headers for HTTP clients
+  - Invalidate on Isaac Sim version change detection
+- [ ] **9E.2** Wire vision tool handlers
+  - Implement `_handle_vision_detect_objects()` — use `omni.replicator.core` semantic segmentation or render-based detection
+  - Implement `_handle_vision_bounding_boxes()` — return 2D/3D bounding boxes from viewport
+  - Connect to Kit RPC for renderer-based object detection
+- [ ] **9E.3** Wire file upload backend
+  - `POST /api/v1/chat/upload` — accept multipart file upload
+  - Route images to image-to-3D pipeline (Phase 6B) or viewport comparison
+  - Route USD/OBJ/GLB to import pipeline
+  - Route URDF/MJCF to robot import pipeline
+  - Store uploaded files in `workspace/uploads/` with metadata
+- [ ] **9E.4** Integrate Plan generation with real Stage Analyzer
+  - Replace `mock_findings` parameter with real `run_analysis()` call
+  - Plan steps derived from actual validator findings (9A)
+  - Each plan step references the specific finding it addresses
+- [ ] **9E.5** Wire ROS2 tool execution handlers
+  - Connect `tool_executor.py` handlers to `ros_mcp_tools.py` for:
+    - `ros2_publish_topic` / `ros2_subscribe_topic`
+    - `ros2_call_service` / `ros2_list_topics` / `ros2_list_services`
+    - `ros2_get_topic_info` / `ros2_echo_topic`
+  - Test with rosbridge WebSocket at `127.0.0.1:9090`
+- [ ] **9E.6** Add integration tests (L1–L2)
+  - L1: Service integration tests — start service, send chat, verify tool calls
+  - L2: MCP server tests — verify tool schema registration and dispatch
+  - CI-ready: can run without Isaac Sim (mock Kit RPC responses)
+  - Add to `scripts/test_full.py --level 1` and `--level 2`
+
+---
+
 ## Tool Function Registry (Summary)
 
 All tools are exposed to the LLM via structured function-calling schemas. The LLM picks which tool(s) to call based on the user's message.
@@ -837,6 +1038,23 @@ All tools are exposed to the LLM via structured function-calling schemas. The LL
 | `show_tf_tree` | 8F | ROS2 |
 | `publish_robot_description` | 8F | ROS2 |
 | `configure_ros2_bridge` | 8F | ROS2 |
+| `validate_import_health` | 9A | Stage Analyzer |
+| `validate_material_physics` | 9A | Stage Analyzer |
+| `validate_articulation` | 9A | Stage Analyzer |
+| `validate_sensors` | 9A | Stage Analyzer |
+| `validate_ros_bridge` | 9A | Stage Analyzer |
+| `validate_isaaclab` | 9A | Stage Analyzer |
+| `validate_performance` | 9A | Stage Analyzer |
+| `capture_plan_outcome` | 9B | Knowledge |
+| `query_error_pattern` | 9B | Knowledge |
+| `create_playbook` | 9B | Knowledge |
+| `search_docs` | 9C | Retrieval |
+| `reindex_docs` | 9C | Retrieval |
+| `get_telemetry_summary` | 9D | Telemetry |
+| `get_tool_usage_stats` | 9D | Telemetry |
+| `detect_objects` | 9E | Vision |
+| `get_bounding_boxes` | 9E | Vision |
+| `upload_file` | 9E | File Upload |
 
 ---
 

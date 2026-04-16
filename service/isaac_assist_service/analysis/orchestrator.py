@@ -3,12 +3,16 @@ from .models import StageAnalysisResult
 import uuid
 import time
 from .validators.schema_consistency import SchemaConsistencyRule
+from .validators.import_health import ImportHealthValidator
+from .validators.material_physics import MaterialPhysicsMismatchValidator
 
 class AnalysisOrchestrator:
     def __init__(self):
         # Register standard MVP packs
         self.rules = [
-            SchemaConsistencyRule()
+            SchemaConsistencyRule(),
+            ImportHealthValidator(),
+            MaterialPhysicsMismatchValidator(),
         ]
 
     def run_analysis(self, stage_data: Dict[str, Any]) -> StageAnalysisResult:

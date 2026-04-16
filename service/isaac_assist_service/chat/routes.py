@@ -158,6 +158,15 @@ async def log_execution(req: LogExecutionRequest):
         else:
             logger.info(f"[knowledge] Skipped duplicate error for v{version}")
 
+        # Also store as a structured negative pattern with richer metadata
+        _kb.add_negative_pattern(
+            version,
+            error_signature=req.output[:500],
+            failing_code=req.code[:2000],
+            root_cause=f"Code generated for '{(req.user_message or '')[:100]}' failed at runtime",
+            fix_applied="Auto-learned: avoid this code pattern.",
+        )
+
     elif req.success and req.user_message:
         # Successful patches become positive examples for the LLM
         instruction = req.user_message

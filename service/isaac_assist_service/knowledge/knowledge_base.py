@@ -4,6 +4,7 @@ import logging
 import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
+from datetime import datetime, timezone
 
 from service.isaac_assist_service.config import config
 
@@ -21,6 +22,11 @@ def _error_signature(output: str) -> str:
             sig = _LINE_REF_RE.sub("", stripped).strip()
             return sig[:200]
     return output.strip()[:200]
+
+
+def _keyword_set(text: str) -> Set[str]:
+    """Extract a lowercased word set from text, filtering noise."""
+    return {w for w in text.lower().split() if len(w) > 2}
 
 class KnowledgeBase:
     """
@@ -315,3 +321,178 @@ class KnowledgeBase:
         after = len(kept)
         logger.info(f"[knowledge] Compacted v{version}: {before} → {after} entries")
         return {"before": before, "after": after}
+
+    # ── Error pattern query (real implementation) ────────────────────────
+
+    def query_by_error_pattern(self, version: str, error_text: str,
+                               limit: int = 3) -> List[Dict[str, str]]:
+        """
+        Search error learnings + negative patterns for entries matching
+        the given error text.  Returns entries with the highest keyword
+        overlap, combining both the main KB and the negative-pattern store.
+        """
+        results: List[tuple] = []   # (score, entry)
+        query_words = _keyword_set(error_text)
+        if not query_words:
+            return []
+
+        # 1. Search error learnings in the main KB
+        for entry in self.get_entries(version):
+            if entry.get("source") != "auto_error_learning":
+                continue
+            inst = entry.get("instruction", "")
+            entry_words = _keyword_set(inst)
+            overlap = len(query_words & entry_words)
+            if overlap >= 2:
+                results.append((overlap, entry))
+
+        # 2. Search negative patterns store
+        for neg in self._load_negative_patterns(version):
+            sig_words = _keyword_set(neg.get("error_signature", ""))
+            cause_words = _keyword_set(neg.get("root_cause", ""))
+            combined = sig_words | cause_words
+            overlap = len(query_words & combined)
+            if overlap >= 2:
+                # Reshape to match the entry format callers expect
+                results.append((overlap + 1, {  # +1 to prefer negatives
+                    "instruction": (
+                        f"Error: {neg.get('error_signature', '')}\n"
+                        f"Root cause: {neg.get('root_cause', '')}\n"
+                        f"Failing code:\n```python\n{neg.get('failing_code', '')[:500]}\n```"
+                    ),
+                    "response": f"Fix applied: {neg.get('fix_applied', 'Unknown')}",
+                    "source": "negative_pattern",
+                }))
+
+        results.sort(key=lambda x: -x[0])
+        return [entry for _, entry in results[:limit]]
+
+    # ── Negative pattern store ───────────────────────────────────────────
+
+    def _negative_patterns_path(self, version: str) -> Path:
+        clean = "".join(c for c in version if c.isalnum() or c in "._-").strip()
+        return self.storage_dir / f"negative_patterns_{clean or 'default'}.jsonl"
+
+    def _load_negative_patterns(self, version: str) -> List[Dict[str, Any]]:
+        """Load negative patterns from the versioned JSONL file."""
+        path = self._negative_patterns_path(version)
+        if not path.exists():
+            return []
+        patterns = []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        patterns.append(json.loads(line))
+        except Exception as e:
+            logger.error(f"Failed to read negative patterns: {e}")
+        return patterns
+
+    def add_negative_pattern(
+        self,
+        version: str,
+        error_signature: str,
+        failing_code: str,
+        root_cause: str,
+        fix_applied: str,
+    ) -> bool:
+        """
+        Record a failure so the system can avoid the same mistake.
+        Deduplicates by error signature within a 24h window.
+        """
+        sig = _error_signature(error_signature)
+        existing = self._load_negative_patterns(version)
+
+        # Dedup: same signature within 24h
+        now = datetime.now(timezone.utc)
+        for p in existing:
+            if _error_signature(p.get("error_signature", "")) == sig:
+                ts = p.get("timestamp", "")
+                try:
+                    old_dt = datetime.fromisoformat(ts)
+                    if (now - old_dt).total_seconds() < 86400:
+                        logger.info(f"[knowledge] Skipping dup negative pattern: {sig[:60]}")
+                        return False
+                except (ValueError, TypeError):
+                    pass  # malformed timestamp, allow new entry
+
+        entry = {
+            "error_signature": error_signature[:500],
+            "failing_code": failing_code[:2000],
+            "root_cause": root_cause[:500],
+            "fix_applied": fix_applied[:500],
+            "timestamp": now.isoformat(),
+        }
+        path = self._negative_patterns_path(version)
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+            logger.info(f"[knowledge] Stored negative pattern: {sig[:60]}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to write negative pattern: {e}")
+            return False
+
+    def get_negative_patterns(self, version: str, user_message: str,
+                              limit: int = 3) -> List[Dict[str, Any]]:
+        """Retrieve negative patterns relevant to a user message."""
+        patterns = self._load_negative_patterns(version)
+        if not patterns:
+            return []
+        msg_words = _keyword_set(user_message)
+        scored = []
+        for p in patterns:
+            p_words = _keyword_set(
+                p.get("error_signature", "") + " " + p.get("root_cause", "")
+            )
+            overlap = len(msg_words & p_words)
+            if overlap > 0:
+                scored.append((overlap, p))
+        scored.sort(key=lambda x: -x[0])
+        return [p for _, p in scored[:limit]]
+
+    def format_negative_patterns(self, patterns: List[Dict[str, Any]]) -> str:
+        """Format negative patterns for LLM system prompt injection."""
+        if not patterns:
+            return ""
+        lines = [
+            "--- KNOWN FAILURE PATTERNS (DO NOT repeat these) ---"
+        ]
+        for i, p in enumerate(patterns, 1):
+            lines.append(f"\n[FAILURE {i}]")
+            lines.append(f"Error: {p.get('error_signature', '')[:200]}")
+            lines.append(f"Root cause: {p.get('root_cause', '')[:200]}")
+            lines.append(f"Fix: {p.get('fix_applied', '')[:200]}")
+        return "\n".join(lines)
+
+    # ── Plan outcome capture ─────────────────────────────────────────────
+
+    def capture_plan_outcome(
+        self,
+        version: str,
+        user_message: str,
+        plan_steps: List[Dict[str, Any]],
+        success: bool,
+        error_output: str = "",
+        code: str = "",
+    ) -> bool:
+        """
+        Called after a plan is applied.  On success, stores as a positive
+        example.  On failure, stores as a negative pattern with root cause.
+        """
+        if success:
+            return self.add_success(
+                version, user_message,
+                f"Plan executed successfully with {len(plan_steps)} steps:\n"
+                f"```python\n{code[:1500]}\n```",
+                code=code,
+            )
+        else:
+            return self.add_negative_pattern(
+                version,
+                error_signature=error_output[:500],
+                failing_code=code[:2000],
+                root_cause=f"Plan for '{user_message[:100]}' failed during execution",
+                fix_applied="Rolled back via snapshot. Needs alternative approach.",
+            )

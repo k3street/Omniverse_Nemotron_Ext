@@ -467,6 +467,7 @@ async def distill_context(
     patterns_text: str = "",
     error_learnings_text: str = "",
     success_learnings_text: str = "",
+    negative_patterns_text: str = "",
     small_provider=None,
 ) -> DistilledContext:
     """
@@ -525,6 +526,8 @@ async def distill_context(
         system += f"\n\n{error_learnings_text}"
     if success_learnings_text and len(success_learnings_text) < 1000:
         system += f"\n\n{success_learnings_text}"
+    if negative_patterns_text and len(negative_patterns_text) < 1200:
+        system += f"\n\n{negative_patterns_text}"
 
     # ── 4. Build message list (compressed) ───────────────────────────────
     messages = [{"role": "system", "content": system}]

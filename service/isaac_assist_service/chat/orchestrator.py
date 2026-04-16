@@ -185,6 +185,7 @@ class ChatOrchestrator:
         patterns_text = ""
         error_learnings_text = ""
         success_learnings_text = ""
+        negative_patterns_text = ""
 
         try:
             rag_results = retrieve_context(user_message, version=isaac_version, limit=3)
@@ -210,6 +211,12 @@ class ChatOrchestrator:
         except Exception as e:
             logger.warning(f"[{session_id}] Success learning retrieval failed: {e}")
 
+        try:
+            neg_patterns = _kb.get_negative_patterns(isaac_version, user_message, limit=2)
+            negative_patterns_text = _kb.format_negative_patterns(neg_patterns)
+        except Exception as e:
+            logger.warning(f"[{session_id}] Negative pattern retrieval failed: {e}")
+
         # ── 4. DISTILL: build compact context via the distillation pipeline ──
         selected_prim = context.get("selected_prim") if context else None
         selected_prim_path = context.get("selected_prim_path") if context else None
@@ -227,6 +234,7 @@ class ChatOrchestrator:
             patterns_text=patterns_text,
             error_learnings_text=error_learnings_text,
             success_learnings_text=success_learnings_text,
+            negative_patterns_text=negative_patterns_text,
             small_provider=self._distiller_provider,
         )
 
