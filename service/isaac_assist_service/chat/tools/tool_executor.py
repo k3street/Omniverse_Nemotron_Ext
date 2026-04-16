@@ -2232,3 +2232,571 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Tier 9 — USD Layers & Variants (6 atomic tools) ─────────────────────────
+#
+# T9.1 list_layers          — DATA   (walk stage.GetLayerStack + edit target)
+# T9.2 add_sublayer         — CODE   (root.subLayerPaths.insert + CreateNew)
+# T9.3 set_edit_target      — CODE   (stage.SetEditTarget(Usd.EditTarget(...)))
+# T9.4 list_variant_sets    — DATA   (prim.GetVariantSets + selections)
+# T9.5 list_variants        — DATA   (variant_set.GetVariantNames + current)
+# T9.6 flatten_layers       — CODE   (stage.Flatten().Export(out))
+
+
+async def _handle_list_layers(args: Dict) -> Dict:
+    """Walk the current stage's layer stack and return identifiers + edit target.
+
+    Generates a small introspection script and queues it via Kit RPC. Kit prints
+    JSON with one entry per layer plus the active edit target; when Kit is
+    unreachable we still return a structured stub so the LLM gets a predictable
+    shape.
+    """
+    code = """\
+import json
+try:
+    import omni.usd
+    stage = omni.usd.get_context().get_stage()
+    if stage is None:
+        print(json.dumps({'error': 'no stage open'}))
+    else:
+        edit_target = stage.GetEditTarget().GetLayer()
+        edit_target_id = edit_target.identifier if edit_target is not None else None
+        root = stage.GetRootLayer()
+        layers = []
+        seen = set()
+        # depth-first walk of the layer stack so 'depth' reflects sublayer nesting
+        def _walk(layer, depth):
+            if layer is None or layer.identifier in seen:
+                return
+            seen.add(layer.identifier)
+            layers.append({
+                'identifier': layer.identifier,
+                'display_name': getattr(layer, 'GetDisplayName', lambda: layer.identifier)(),
+                'anonymous': bool(layer.anonymous),
+                'dirty': bool(layer.dirty),
+                'depth': depth,
+                'is_edit_target': layer.identifier == edit_target_id,
+            })
+            try:
+                from pxr import Sdf
+                for sub_path in layer.subLayerPaths:
+                    sub = Sdf.Layer.FindOrOpen(sub_path)
+                    _walk(sub, depth + 1)
+            except Exception:
+                pass
+        _walk(root, 0)
+        print(json.dumps({
+            'root_layer': root.identifier if root is not None else None,
+            'edit_target': edit_target_id,
+            'layers': layers,
+            'count': len(layers),
+        }))
+except Exception as e:
+    print(json.dumps({'error': str(e)}))
+"""
+    result = await kit_tools.queue_exec_patch(code, "List USD layer stack and edit target")
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "note": (
+            "Layer stack introspection queued. Kit will print a JSON dict with keys: "
+            "root_layer, edit_target, layers (list of {identifier, display_name, "
+            "anonymous, dirty, depth, is_edit_target}), count."
+        ),
+    }
+
+
+def _gen_add_sublayer(args: Dict) -> str:
+    layer_path = args["layer_path"]
+    layer_path_repr = repr(layer_path)
+    return (
+        "import os\n"
+        "import omni.usd\n"
+        "from pxr import Sdf\n"
+        "\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        "if stage is None:\n"
+        "    raise RuntimeError('No stage is open — cannot add sublayer')\n"
+        "\n"
+        f"layer_path = {layer_path_repr}\n"
+        "\n"
+        "# Create the file if it does not already exist (anonymous and omniverse:// URLs skip)\n"
+        "if not layer_path.startswith('anon:') and '://' not in layer_path:\n"
+        "    if not os.path.exists(layer_path):\n"
+        "        new_layer = Sdf.Layer.CreateNew(layer_path)\n"
+        "        if new_layer is None:\n"
+        "            raise RuntimeError(f'Failed to create new sublayer at {layer_path}')\n"
+        "        new_layer.Save()\n"
+        "\n"
+        "root = stage.GetRootLayer()\n"
+        "if layer_path in list(root.subLayerPaths):\n"
+        "    print(f'Sublayer already attached: {layer_path}')\n"
+        "else:\n"
+        "    # Insert at position 0 → strongest sublayer below the root\n"
+        "    root.subLayerPaths.insert(0, layer_path)\n"
+        "    print(f'Attached sublayer: {layer_path}')\n"
+    )
+
+
+def _gen_set_edit_target(args: Dict) -> str:
+    layer_path = args["layer_path"]
+    layer_path_repr = repr(layer_path)
+    return (
+        "import omni.usd\n"
+        "from pxr import Sdf, Usd\n"
+        "\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        "if stage is None:\n"
+        "    raise RuntimeError('No stage is open — cannot set edit target')\n"
+        "\n"
+        f"layer_path = {layer_path_repr}\n"
+        "layer = Sdf.Layer.FindOrOpen(layer_path)\n"
+        "if layer is None:\n"
+        "    # Try to find the layer already inside the stage's layer stack\n"
+        "    for stack_layer in stage.GetLayerStack():\n"
+        "        if stack_layer.identifier == layer_path:\n"
+        "            layer = stack_layer\n"
+        "            break\n"
+        "if layer is None:\n"
+        "    raise RuntimeError(\n"
+        "        f'Layer not found: {layer_path}. Use list_layers() to see attached layers '\n"
+        "        f'or add_sublayer() to attach it first.'\n"
+        "    )\n"
+        "\n"
+        "stage.SetEditTarget(Usd.EditTarget(layer))\n"
+        "print(f'Edit target is now: {layer.identifier}')\n"
+    )
+
+
+async def _handle_list_variant_sets(args: Dict) -> Dict:
+    """Read every variant set declared on a prim and the current selection on each."""
+    prim_path = args["prim_path"]
+    prim_path_repr = repr(prim_path)
+    code = (
+        "import json\n"
+        "try:\n"
+        "    import omni.usd\n"
+        "    stage = omni.usd.get_context().get_stage()\n"
+        "    if stage is None:\n"
+        "        print(json.dumps({'error': 'no stage open'}))\n"
+        "    else:\n"
+        f"        prim_path = {prim_path_repr}\n"
+        "        prim = stage.GetPrimAtPath(prim_path)\n"
+        "        if not prim or not prim.IsValid():\n"
+        "            print(json.dumps({'error': f'prim not found: {prim_path}'}))\n"
+        "        else:\n"
+        "            vsets = prim.GetVariantSets()\n"
+        "            names = list(vsets.GetNames())\n"
+        "            entries = []\n"
+        "            for name in names:\n"
+        "                vs = vsets.GetVariantSet(name)\n"
+        "                entries.append({\n"
+        "                    'name': name,\n"
+        "                    'current': vs.GetVariantSelection(),\n"
+        "                    'count': len(vs.GetVariantNames()),\n"
+        "                })\n"
+        "            print(json.dumps({\n"
+        "                'prim_path': prim_path,\n"
+        "                'variant_sets': entries,\n"
+        "                'count': len(entries),\n"
+        "            }))\n"
+        "except Exception as e:\n"
+        "    print(json.dumps({'error': str(e)}))\n"
+    )
+    result = await kit_tools.queue_exec_patch(code, f"List variant sets on {prim_path}")
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "prim_path": prim_path,
+        "note": (
+            "Variant-set introspection queued. Kit will print a JSON dict with keys: "
+            "prim_path, variant_sets (list of {name, current, count}), count."
+        ),
+    }
+
+
+async def _handle_list_variants(args: Dict) -> Dict:
+    """List every named variant choice inside a specific variant set on a prim."""
+    prim_path = args["prim_path"]
+    variant_set = args["variant_set"]
+    prim_path_repr = repr(prim_path)
+    variant_set_repr = repr(variant_set)
+    code = (
+        "import json\n"
+        "try:\n"
+        "    import omni.usd\n"
+        "    stage = omni.usd.get_context().get_stage()\n"
+        "    if stage is None:\n"
+        "        print(json.dumps({'error': 'no stage open'}))\n"
+        "    else:\n"
+        f"        prim_path = {prim_path_repr}\n"
+        f"        variant_set_name = {variant_set_repr}\n"
+        "        prim = stage.GetPrimAtPath(prim_path)\n"
+        "        if not prim or not prim.IsValid():\n"
+        "            print(json.dumps({'error': f'prim not found: {prim_path}'}))\n"
+        "        else:\n"
+        "            vsets = prim.GetVariantSets()\n"
+        "            if not vsets.HasVariantSet(variant_set_name):\n"
+        "                print(json.dumps({\n"
+        "                    'error': f'variant set not found: {variant_set_name}',\n"
+        "                    'available': list(vsets.GetNames()),\n"
+        "                }))\n"
+        "            else:\n"
+        "                vs = vsets.GetVariantSet(variant_set_name)\n"
+        "                names = list(vs.GetVariantNames())\n"
+        "                print(json.dumps({\n"
+        "                    'prim_path': prim_path,\n"
+        "                    'variant_set': variant_set_name,\n"
+        "                    'variants': names,\n"
+        "                    'current': vs.GetVariantSelection(),\n"
+        "                    'count': len(names),\n"
+        "                }))\n"
+        "except Exception as e:\n"
+        "    print(json.dumps({'error': str(e)}))\n"
+    )
+    result = await kit_tools.queue_exec_patch(
+        code, f"List variants in {variant_set} on {prim_path}"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "prim_path": prim_path,
+        "variant_set": variant_set,
+        "note": (
+            "Variant introspection queued. Kit will print a JSON dict with keys: "
+            "prim_path, variant_set, variants (list of names), current, count."
+        ),
+    }
+
+
+def _gen_flatten_layers(args: Dict) -> str:
+    output_path = args["output_path"]
+    output_path_repr = repr(output_path)
+    return (
+        "import omni.usd\n"
+        "\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        "if stage is None:\n"
+        "    raise RuntimeError('No stage is open — cannot flatten layers')\n"
+        "\n"
+        f"output_path = {output_path_repr}\n"
+        "flat = stage.Flatten()\n"
+        "if flat is None:\n"
+        "    raise RuntimeError('stage.Flatten() returned None')\n"
+        "\n"
+        "ok = flat.Export(output_path)\n"
+        "if not ok:\n"
+        "    raise RuntimeError(f'Failed to export flattened stage to {output_path}')\n"
+        "\n"
+        "print(f'Flattened stage exported to: {output_path}')\n"
+    )
+
+
+# Register Tier 9 handlers
+DATA_HANDLERS["list_layers"] = _handle_list_layers
+DATA_HANDLERS["list_variant_sets"] = _handle_list_variant_sets
+DATA_HANDLERS["list_variants"] = _handle_list_variants
+CODE_GEN_HANDLERS["add_sublayer"] = _gen_add_sublayer
+CODE_GEN_HANDLERS["set_edit_target"] = _gen_set_edit_target
+CODE_GEN_HANDLERS["flatten_layers"] = _gen_flatten_layers
+
+
+# ── Tier 10 — Animation & Timeline (5 atomic tools) ─────────────────────────
+#
+# T10.1 get_timeline_state  — DATA   (omni.timeline + stage time-code metadata)
+# T10.2 set_timeline_range  — CODE   (Set{Start,End,TimeCodesPerSecond}TimeCode)
+# T10.3 set_keyframe        — CODE   (attr.Set(value, time_code))
+# T10.4 list_keyframes      — DATA   (attr.GetTimeSamples + attr.Get per sample)
+# T10.5 play_animation      — CODE   (omni.timeline.play() over [start, end])
+#
+# Distinct from sim_control (which drives the PhysX step loop): this tier
+# operates on the USD TimeSamples timeline. In Kit they share the same
+# omni.timeline interface by default, but conceptually the LLM should reach for
+# play_animation when the user asks to scrub keyframes / replay a recorded
+# trajectory, and for sim_control when the user asks to advance physics only.
+
+
+async def _handle_get_timeline_state(args: Dict) -> Dict:
+    """Return current timeline cursor + start/end + fps + play state."""
+    code = """\
+import json
+try:
+    import omni.timeline
+    import omni.usd
+    tl = omni.timeline.get_timeline_interface()
+    stage = omni.usd.get_context().get_stage()
+    if stage is None:
+        print(json.dumps({'error': 'no stage open'}))
+    else:
+        fps = float(stage.GetTimeCodesPerSecond() or 24.0)
+        start_code = float(stage.GetStartTimeCode())
+        end_code = float(stage.GetEndTimeCode())
+        # current_time / start / end on the timeline interface are exposed in
+        # *seconds* in modern Kit (>=105), so report both forms.
+        try:
+            cur = float(tl.get_current_time())
+        except Exception:
+            cur = float(tl.get_current_time_code()) / fps if fps else 0.0
+        is_playing = bool(tl.is_playing()) if hasattr(tl, 'is_playing') else False
+        looping = bool(tl.is_looping()) if hasattr(tl, 'is_looping') else False
+        duration_codes = max(end_code - start_code, 0.0)
+        print(json.dumps({
+            'current_time': cur,
+            'start_time': start_code,
+            'end_time': end_code,
+            'fps': fps,
+            'time_codes_per_second': fps,
+            'is_playing': is_playing,
+            'looping': looping,
+            'duration_seconds': duration_codes / fps if fps else 0.0,
+        }))
+except Exception as e:
+    print(json.dumps({'error': str(e)}))
+"""
+    result = await kit_tools.queue_exec_patch(code, "Read timeline state (current/start/end/fps/playing)")
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "note": (
+            "Timeline-state introspection queued. Kit will print a JSON dict with keys: "
+            "current_time, start_time, end_time, fps, time_codes_per_second, is_playing, "
+            "looping, duration_seconds. Time codes are USD frames; duration_seconds = "
+            "(end_time - start_time) / fps."
+        ),
+    }
+
+
+def _gen_set_timeline_range(args: Dict) -> str:
+    start = args["start"]
+    end = args["end"]
+    fps = args.get("fps")
+    lines = [
+        "import omni.usd",
+        "import omni.timeline",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        "if stage is None:",
+        "    raise RuntimeError('No stage is open — cannot set timeline range')",
+        "",
+        f"start_code = float({start!r})",
+        f"end_code = float({end!r})",
+        "if not (start_code < end_code):",
+        "    raise ValueError(f'start ({start_code}) must be < end ({end_code})')",
+        "",
+    ]
+    if fps is not None:
+        lines += [
+            f"fps = float({fps!r})",
+            "if fps <= 0:",
+            "    raise ValueError(f'fps must be > 0, got {fps}')",
+            "stage.SetTimeCodesPerSecond(fps)",
+        ]
+    else:
+        lines += [
+            "fps = float(stage.GetTimeCodesPerSecond() or 24.0)",
+        ]
+    lines += [
+        "stage.SetStartTimeCode(start_code)",
+        "stage.SetEndTimeCode(end_code)",
+        "",
+        "# Push the new range into the timeline interface so the viewport scrubber updates.",
+        "tl = omni.timeline.get_timeline_interface()",
+        "try:",
+        "    tl.set_start_time(start_code / fps)",
+        "    tl.set_end_time(end_code / fps)",
+        "except Exception:",
+        "    # Older Kit versions accept time codes directly.",
+        "    if hasattr(tl, 'set_start_time_code'):",
+        "        tl.set_start_time_code(start_code)",
+        "    if hasattr(tl, 'set_end_time_code'):",
+        "        tl.set_end_time_code(end_code)",
+        "",
+        "print(f'Timeline range set: [{start_code}, {end_code}] codes @ {fps} fps')",
+    ]
+    return "\n".join(lines)
+
+
+def _gen_set_keyframe(args: Dict) -> str:
+    prim_path = args["prim_path"]
+    attr = args["attr"]
+    time = args["time"]
+    value = args["value"]
+    return (
+        "import omni.usd\n"
+        "from pxr import Sdf, Usd\n"
+        "\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        "if stage is None:\n"
+        "    raise RuntimeError('No stage is open — cannot set keyframe')\n"
+        "\n"
+        f"prim_path = {prim_path!r}\n"
+        f"attr_name = {attr!r}\n"
+        f"time_seconds = float({time!r})\n"
+        f"value = {value!r}\n"
+        "\n"
+        "prim = stage.GetPrimAtPath(prim_path)\n"
+        "if not prim or not prim.IsValid():\n"
+        "    raise RuntimeError(f'prim not found: {prim_path}')\n"
+        "\n"
+        "fps = float(stage.GetTimeCodesPerSecond() or 24.0)\n"
+        "time_code = Usd.TimeCode(time_seconds * fps)\n"
+        "\n"
+        "attr_handle = prim.GetAttribute(attr_name)\n"
+        "if not attr_handle or not attr_handle.IsValid():\n"
+        "    raise RuntimeError(\n"
+        "        f'attribute not found on {prim_path}: {attr_name}. '\n"
+        "        f'Use list_attributes() to see available attributes.'\n"
+        "    )\n"
+        "\n"
+        "# Cast lists/tuples to Vt-friendly types when the attribute expects an array.\n"
+        "try:\n"
+        "    attr_handle.Set(value, time_code)\n"
+        "except Exception as e:\n"
+        "    # Common case: value is a Python list but attribute wants Gf.Vec3f / Vec3d.\n"
+        "    from pxr import Gf\n"
+        "    if isinstance(value, (list, tuple)) and len(value) == 3:\n"
+        "        attr_handle.Set(Gf.Vec3f(*value), time_code)\n"
+        "    elif isinstance(value, (list, tuple)) and len(value) == 4:\n"
+        "        attr_handle.Set(Gf.Vec4f(*value), time_code)\n"
+        "    else:\n"
+        "        raise\n"
+        "\n"
+        "print(f'Keyframe written: {prim_path}.{attr_name} @ frame {time_code.GetValue()} '\n"
+        "      f'(t={time_seconds}s, fps={fps}) = {value}')\n"
+    )
+
+
+async def _handle_list_keyframes(args: Dict) -> Dict:
+    """Read every authored TimeSample on a single attribute."""
+    prim_path = args["prim_path"]
+    attr = args["attr"]
+    prim_path_repr = repr(prim_path)
+    attr_repr = repr(attr)
+    code = (
+        "import json\n"
+        "try:\n"
+        "    import omni.usd\n"
+        "    stage = omni.usd.get_context().get_stage()\n"
+        "    if stage is None:\n"
+        "        print(json.dumps({'error': 'no stage open'}))\n"
+        "    else:\n"
+        f"        prim_path = {prim_path_repr}\n"
+        f"        attr_name = {attr_repr}\n"
+        "        prim = stage.GetPrimAtPath(prim_path)\n"
+        "        if not prim or not prim.IsValid():\n"
+        "            print(json.dumps({'error': f'prim not found: {prim_path}'}))\n"
+        "        else:\n"
+        "            attr_handle = prim.GetAttribute(attr_name)\n"
+        "            if not attr_handle or not attr_handle.IsValid():\n"
+        "                print(json.dumps({\n"
+        "                    'error': f'attribute not found: {attr_name}',\n"
+        "                    'prim_path': prim_path,\n"
+        "                }))\n"
+        "            else:\n"
+        "                fps = float(stage.GetTimeCodesPerSecond() or 24.0)\n"
+        "                times = list(attr_handle.GetTimeSamples())\n"
+        "                samples = []\n"
+        "                for tc in times:\n"
+        "                    try:\n"
+        "                        v = attr_handle.Get(tc)\n"
+        "                        # Coerce Vt/Gf types into JSON-safe primitives.\n"
+        "                        try:\n"
+        "                            v_json = list(v) if hasattr(v, '__iter__') and not isinstance(v, str) else v\n"
+        "                        except Exception:\n"
+        "                            v_json = repr(v)\n"
+        "                        samples.append({\n"
+        "                            'time_code': float(tc),\n"
+        "                            'time_seconds': float(tc) / fps if fps else 0.0,\n"
+        "                            'value': v_json,\n"
+        "                        })\n"
+        "                    except Exception as e:\n"
+        "                        samples.append({\n"
+        "                            'time_code': float(tc),\n"
+        "                            'time_seconds': float(tc) / fps if fps else 0.0,\n"
+        "                            'value': None,\n"
+        "                            'error': str(e),\n"
+        "                        })\n"
+        "                if times:\n"
+        "                    first, last = float(times[0]), float(times[-1])\n"
+        "                    range_codes = [first, last]\n"
+        "                    range_seconds = [first / fps if fps else 0.0, last / fps if fps else 0.0]\n"
+        "                else:\n"
+        "                    range_codes = []\n"
+        "                    range_seconds = []\n"
+        "                print(json.dumps({\n"
+        "                    'prim_path': prim_path,\n"
+        "                    'attr': attr_name,\n"
+        "                    'has_timesamples': bool(times),\n"
+        "                    'count': len(times),\n"
+        "                    'fps': fps,\n"
+        "                    'samples': samples,\n"
+        "                    'time_range_codes': range_codes,\n"
+        "                    'time_range_seconds': range_seconds,\n"
+        "                }))\n"
+        "except Exception as e:\n"
+        "    print(json.dumps({'error': str(e)}))\n"
+    )
+    result = await kit_tools.queue_exec_patch(
+        code, f"List keyframes for {prim_path}.{attr}"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "prim_path": prim_path,
+        "attr": attr,
+        "note": (
+            "Keyframe enumeration queued. Kit will print a JSON dict with keys: "
+            "prim_path, attr, has_timesamples, count, fps, samples (list of "
+            "{time_code, time_seconds, value}), time_range_codes, time_range_seconds. "
+            "has_timesamples=false means the attribute has only a default value."
+        ),
+    }
+
+
+def _gen_play_animation(args: Dict) -> str:
+    start = args["start"]
+    end = args["end"]
+    return (
+        "import omni.timeline\n"
+        "import omni.usd\n"
+        "\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        "if stage is None:\n"
+        "    raise RuntimeError('No stage is open — cannot play animation')\n"
+        "\n"
+        f"start_seconds = float({start!r})\n"
+        f"end_seconds = float({end!r})\n"
+        "if not (start_seconds < end_seconds):\n"
+        "    raise ValueError(f'start ({start_seconds}) must be < end ({end_seconds})')\n"
+        "\n"
+        "fps = float(stage.GetTimeCodesPerSecond() or 24.0)\n"
+        "start_code = start_seconds * fps\n"
+        "end_code = end_seconds * fps\n"
+        "\n"
+        "tl = omni.timeline.get_timeline_interface()\n"
+        "# Configure the playback window. Modern Kit uses seconds; older Kit uses time codes.\n"
+        "try:\n"
+        "    tl.set_start_time(start_seconds)\n"
+        "    tl.set_end_time(end_seconds)\n"
+        "    tl.set_current_time(start_seconds)\n"
+        "except Exception:\n"
+        "    if hasattr(tl, 'set_start_time_code'):\n"
+        "        tl.set_start_time_code(start_code)\n"
+        "    if hasattr(tl, 'set_end_time_code'):\n"
+        "        tl.set_end_time_code(end_code)\n"
+        "    if hasattr(tl, 'set_current_time_code'):\n"
+        "        tl.set_current_time_code(start_code)\n"
+        "\n"
+        "tl.play()\n"
+        "print(f'Playing animation [{start_seconds}s, {end_seconds}s] '\n"
+        "      f'(frames {start_code}-{end_code} @ {fps} fps)')\n"
+    )
+
+
+# Register Tier 10 handlers
+DATA_HANDLERS["get_timeline_state"] = _handle_get_timeline_state
+DATA_HANDLERS["list_keyframes"] = _handle_list_keyframes
+CODE_GEN_HANDLERS["set_timeline_range"] = _gen_set_timeline_range
+CODE_GEN_HANDLERS["set_keyframe"] = _gen_set_keyframe
+CODE_GEN_HANDLERS["play_animation"] = _gen_play_animation
