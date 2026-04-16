@@ -2232,3 +2232,386 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── ROS2 Nav2 Integration (Persona P12 — Carlos) ────────────────────────────
+# Pre-configured OmniGraph templates for common robot + ROS2 stack pairings.
+# Each profile is a list of (node_name, node_type) plus connections and values
+# fed to og.Controller.edit, identical in shape to _gen_create_omnigraph.
+_NAV2_BRIDGE_PROFILES = {
+    "ur10e_moveit2": {
+        "description": "UR10e arm wired for MoveIt2 — joint state publish, FollowJointTrajectory subscribe, TF.",
+        "topics": ["/joint_states", "/joint_command", "/tf"],
+        "nodes": [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ("PublishJointState", "isaacsim.ros2.bridge.ROS2PublishJointState"),
+            ("SubscribeJointState", "isaacsim.ros2.bridge.ROS2SubscribeJointState"),
+            ("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+            ("ArticulationController", "isaacsim.core.nodes.IsaacArticulationController"),
+        ],
+        "topic_values": {
+            "PublishJointState.inputs:topicName": "/joint_states",
+            "SubscribeJointState.inputs:topicName": "/joint_command",
+        },
+    },
+    "jetbot_nav2": {
+        "description": "Jetbot wired for Nav2 — lidar publish, cmd_vel subscribe, odom publish, TF, clock.",
+        "topics": ["/scan", "/cmd_vel", "/odom", "/tf", "/clock"],
+        "nodes": [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ("PublishLidar", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
+            ("SubscribeCmdVel", "isaacsim.ros2.bridge.ROS2SubscribeTwist"),
+            ("PublishOdom", "isaacsim.ros2.bridge.ROS2PublishOdometry"),
+            ("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+            ("DifferentialController", "isaacsim.robot.wheeled_robots.DifferentialController"),
+        ],
+        "topic_values": {
+            "PublishLidar.inputs:topicName": "/scan",
+            "SubscribeCmdVel.inputs:topicName": "/cmd_vel",
+            "PublishOdom.inputs:topicName": "/odom",
+            "PublishClock.inputs:topicName": "/clock",
+        },
+    },
+    "franka_moveit2": {
+        "description": "Franka arm wired for MoveIt2 — joint state, gripper state, TF.",
+        "topics": ["/joint_states", "/gripper", "/tf"],
+        "nodes": [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ("PublishJointState", "isaacsim.ros2.bridge.ROS2PublishJointState"),
+            ("SubscribeJointState", "isaacsim.ros2.bridge.ROS2SubscribeJointState"),
+            ("PublishGripper", "isaacsim.ros2.bridge.ROS2PublishJointState"),
+            ("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+            ("ArticulationController", "isaacsim.core.nodes.IsaacArticulationController"),
+        ],
+        "topic_values": {
+            "PublishJointState.inputs:topicName": "/joint_states",
+            "SubscribeJointState.inputs:topicName": "/joint_command",
+            "PublishGripper.inputs:topicName": "/gripper",
+        },
+    },
+    "amr_full": {
+        "description": "Full AMR — 2x lidar, 4x camera, odom, cmd_vel, TF, clock.",
+        "topics": [
+            "/scan_front", "/scan_rear", "/cmd_vel", "/odom", "/tf", "/clock",
+            "/camera_front/image_raw", "/camera_rear/image_raw",
+            "/camera_left/image_raw", "/camera_right/image_raw",
+        ],
+        "nodes": [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ("PublishLidarFront", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
+            ("PublishLidarRear", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
+            ("SubscribeCmdVel", "isaacsim.ros2.bridge.ROS2SubscribeTwist"),
+            ("PublishOdom", "isaacsim.ros2.bridge.ROS2PublishOdometry"),
+            ("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+            ("PublishCamFront", "isaacsim.ros2.bridge.ROS2PublishImage"),
+            ("PublishCamRear", "isaacsim.ros2.bridge.ROS2PublishImage"),
+            ("PublishCamLeft", "isaacsim.ros2.bridge.ROS2PublishImage"),
+            ("PublishCamRight", "isaacsim.ros2.bridge.ROS2PublishImage"),
+        ],
+        "topic_values": {
+            "PublishLidarFront.inputs:topicName": "/scan_front",
+            "PublishLidarRear.inputs:topicName": "/scan_rear",
+            "SubscribeCmdVel.inputs:topicName": "/cmd_vel",
+            "PublishOdom.inputs:topicName": "/odom",
+            "PublishCamFront.inputs:topicName": "/camera_front/image_raw",
+            "PublishCamRear.inputs:topicName": "/camera_rear/image_raw",
+            "PublishCamLeft.inputs:topicName": "/camera_left/image_raw",
+            "PublishCamRight.inputs:topicName": "/camera_right/image_raw",
+        },
+    },
+}
+
+
+def get_nav2_bridge_profile(profile: str) -> Optional[Dict[str, Any]]:
+    """Public lookup helper used by tests and Nav2 bridge code-gen."""
+    return _NAV2_BRIDGE_PROFILES.get(profile)
+
+
+def _gen_setup_ros2_bridge(args: Dict) -> str:
+    """Generate OmniGraph code for a complete ROS2 bridge profile."""
+    profile_name = args["profile"]
+    robot_path = args["robot_path"]
+    graph_path = args.get("graph_path", "/World/ROS2_Bridge")
+
+    profile = _NAV2_BRIDGE_PROFILES.get(profile_name)
+    if profile is None:
+        valid = ", ".join(sorted(_NAV2_BRIDGE_PROFILES.keys()))
+        # repr() ensures the embedded profile name is properly quoted in source
+        return (
+            "# ROS2 bridge profile not found.\n"
+            f"raise ValueError('Unknown profile ' + {profile_name!r} + '. Valid: {valid}')\n"
+        )
+
+    nodes = profile["nodes"]
+    # OnPlaybackTick → every other node's exec input (where present)
+    connections = []
+    for name, _ntype in nodes:
+        if name == "OnPlaybackTick":
+            continue
+        if name == "ROS2Context":
+            continue  # context is referenced, not ticked
+        connections.append((f"OnPlaybackTick.outputs:tick", f"{name}.inputs:execIn"))
+
+    # Bind articulation/controller to the robot path where applicable
+    values = dict(profile.get("topic_values", {}))
+    for name, _ntype in nodes:
+        if name == "ArticulationController":
+            values[f"{name}.inputs:targetPrim"] = robot_path
+        elif name == "DifferentialController":
+            values[f"{name}.inputs:targetPrim"] = robot_path
+        elif name == "PublishJointState":
+            values[f"{name}.inputs:targetPrim"] = robot_path
+        elif name == "SubscribeJointState":
+            values[f"{name}.inputs:targetPrim"] = robot_path
+        elif name == "PublishOdom":
+            values[f"{name}.inputs:chassisPrim"] = robot_path
+        elif name == "PublishTF":
+            values[f"{name}.inputs:targetPrims"] = [robot_path]
+
+    # Render node tuples (with type remap for safety)
+    node_defs = ",\n            ".join(
+        f"('{n}', '{_OG_NODE_TYPE_MAP.get(t, t)}')" for n, t in nodes
+    )
+    conn_defs = ",\n            ".join(
+        f"('{s}', '{t}')" for s, t in connections
+    )
+    val_lines = []
+    for k, v in values.items():
+        if isinstance(v, str):
+            val_lines.append(f"            ('{k}', '{v}')")
+        else:
+            val_lines.append(f"            ('{k}', {v!r})")
+    val_block = ",\n".join(val_lines)
+
+    return f"""\
+import omni.graph.core as og
+
+# ROS2 bridge profile: {profile_name}
+# {profile['description']}
+# Topics: {', '.join(profile['topics'])}
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+keys = og.Controller.Keys
+(graph, nodes, _, _) = og.Controller.edit(
+    {{
+        "graph_path": "{graph_path}",
+        "evaluator_name": "execution",
+        "pipeline_stage": _backing,
+    }},
+    {{
+        keys.CREATE_NODES: [
+            {node_defs}
+        ],
+        keys.CONNECT: [
+            {conn_defs}
+        ],
+        keys.SET_VALUES: [
+{val_block}
+        ],
+    }},
+)
+print('ROS2 bridge profile {profile_name} ready at {graph_path} for robot {robot_path}')
+"""
+
+
+def _gen_export_nav2_map(args: Dict) -> str:
+    """Generate Nav2 map_server-compatible map.pgm + map.yaml from the scene."""
+    output_path = args["output_path"]
+    resolution = args.get("resolution", 0.05)
+    origin = args.get("origin", [0.0, 0.0, 0.0])
+    dimensions = args.get("dimensions", [10.0, 10.0])
+    height_range = args.get("height_range", [0.05, 0.5])
+    occupied_thresh = args.get("occupied_thresh", 0.65)
+    free_thresh = args.get("free_thresh", 0.196)
+
+    return f"""\
+import os
+from pathlib import Path
+
+# Phase 8A.3 occupancy generator (sync, runs inside Kit)
+from isaacsim.asset.gen.omap.bindings import _omap
+
+origin = ({origin[0]}, {origin[1]}, {origin[2]})
+dims_xy = ({dimensions[0]}, {dimensions[1]})
+resolution = float({resolution})
+height_min = float({height_range[0]})
+height_max = float({height_range[1]})
+
+# 1. Generate occupancy: returns (width_px, height_px, buffer)
+generator = _omap.acquire_omap_interface()
+generator.set_cell_size(resolution)
+generator.set_transform((origin[0], origin[1], origin[2]),
+                        (-dims_xy[0] / 2.0, -dims_xy[1] / 2.0, height_min),
+                        (dims_xy[0] / 2.0, dims_xy[1] / 2.0, height_max))
+generator.generate2d()
+buffer = generator.get_buffer()  # row-major occupancy: 0=free, 100=occupied, -1=unknown
+width_px = int(dims_xy[0] / resolution)
+height_px = int(dims_xy[1] / resolution)
+
+# 2. Write PGM (P5 binary grayscale, 0..255 per Nav2 map_server)
+pgm_path = Path('{output_path}').with_suffix('.pgm')
+pgm_path.parent.mkdir(parents=True, exist_ok=True)
+with open(pgm_path, 'wb') as fp:
+    header = f'P5\\n{{width_px}} {{height_px}}\\n255\\n'
+    fp.write(header.encode('ascii'))
+    pixels = bytearray()
+    for cell in buffer:
+        # Nav2 convention: 0=occupied(black), 254=free(white), 205=unknown(grey)
+        if cell == 100:
+            pixels.append(0)
+        elif cell == -1:
+            pixels.append(205)
+        else:
+            pixels.append(254)
+    fp.write(bytes(pixels))
+
+# 3. Write YAML
+yaml_path = Path('{output_path}').with_suffix('.yaml')
+yaml_text = (
+    f'image: {{pgm_path.name}}\\n'
+    f'resolution: {{resolution}}\\n'
+    f'origin: [{{origin[0]}}, {{origin[1]}}, 0.0]\\n'
+    f'occupied_thresh: {occupied_thresh}\\n'
+    f'free_thresh: {free_thresh}\\n'
+    f'negate: 0\\n'
+)
+yaml_path.write_text(yaml_text, encoding='utf-8')
+
+print(f'Nav2 map exported: {{pgm_path}} ({{width_px}}x{{height_px}}) + {{yaml_path}}')
+"""
+
+
+def _gen_replay_rosbag(args: Dict) -> str:
+    """Generate code to replay a rosbag deterministically through sim."""
+    bag_path = args["bag_path"]
+    sync_mode = args.get("sync_mode", "sim_time")
+    topics = args.get("topics") or ["/cmd_vel"]
+    rate = args.get("rate", 1.0)
+
+    topic_list = ", ".join(repr(t) for t in topics)
+
+    return f"""\
+import subprocess
+import shlex
+import omni.timeline
+
+bag_path = {bag_path!r}
+sync_mode = {sync_mode!r}
+rate = float({rate})
+topics = [{topic_list}]
+
+# Build ros2 bag play command. --clock makes the bag drive /clock when sim_time.
+cmd_parts = ['ros2', 'bag', 'play', bag_path, '--rate', str(rate)]
+if sync_mode == 'sim_time':
+    cmd_parts.append('--clock')
+if topics:
+    cmd_parts.extend(['--topics'] + topics)
+
+# Start the timeline so OmniGraph publishers/subscribers tick during replay.
+tl = omni.timeline.get_timeline_interface()
+if not tl.is_playing():
+    tl.play()
+
+print(f'Starting rosbag replay ({{sync_mode}} @ {{rate}}x): {{shlex.join(cmd_parts)}}')
+proc = subprocess.Popen(cmd_parts)
+print(f'Replay PID: {{proc.pid}} — use proc.wait() to block, proc.terminate() to abort')
+"""
+
+
+# ── TF Health Check (data handler — runs read-only code in Kit) ─────────────
+
+async def _handle_check_tf_health(args: Dict) -> Dict:
+    """Diagnose ROS2 TF tree health by introspecting the bridge in-Kit."""
+    expected = args.get("expected_frames") or ["base_link", "odom", "map"]
+    max_age = float(args.get("max_age_seconds", 1.0))
+    root_frame = args.get("root_frame", "map")
+
+    code = f"""\
+import json
+import time
+
+expected_frames = {expected!r}
+max_age = {max_age}
+root_frame = {root_frame!r}
+
+report = {{
+    'expected_frames': expected_frames,
+    'present_frames': [],
+    'missing_frames': [],
+    'stale_frames': [],
+    'future_extrapolation_frames': [],
+    'orphan_frames': [],
+    'static_transforms_ok': True,
+    'errors': [],
+}}
+
+try:
+    import rclpy
+    from tf2_ros import Buffer, TransformListener  # noqa: F401
+except ImportError as e:
+    report['errors'].append(f'rclpy/tf2_ros not importable in Kit: {{e}}')
+    print(json.dumps(report))
+else:
+    if not rclpy.ok():
+        try:
+            rclpy.init()
+        except Exception as init_err:
+            report['errors'].append(f'rclpy.init failed: {{init_err}}')
+    node = rclpy.create_node('isaac_assist_tf_health')
+    buf = Buffer()
+    listener = TransformListener(buf, node)
+    # Spin briefly to populate the buffer
+    deadline = time.time() + 1.5
+    while time.time() < deadline:
+        rclpy.spin_once(node, timeout_sec=0.05)
+    try:
+        all_frames_yaml = buf.all_frames_as_yaml() or ''
+    except Exception as e:
+        report['errors'].append(f'all_frames_as_yaml failed: {{e}}')
+        all_frames_yaml = ''
+    # Parse the very simple YAML format (frame_name:\\n  parent: ...)
+    present = []
+    for line in all_frames_yaml.splitlines():
+        if line and not line.startswith(' ') and line.endswith(':'):
+            present.append(line[:-1].strip())
+    report['present_frames'] = present
+    report['missing_frames'] = [f for f in expected_frames if f not in present]
+    # Staleness check
+    now = node.get_clock().now()
+    for frame in present:
+        try:
+            tfs = buf.lookup_transform(root_frame, frame, rclpy.time.Time())
+            stamp = tfs.header.stamp
+            age = (now.nanoseconds - (stamp.sec * 1_000_000_000 + stamp.nanosec)) / 1e9
+            if age > max_age:
+                report['stale_frames'].append({{'frame': frame, 'age_s': age}})
+            if age < -0.05:
+                report['future_extrapolation_frames'].append({{'frame': frame, 'age_s': age}})
+        except Exception:
+            report['orphan_frames'].append(frame)
+    listener.unregister() if hasattr(listener, 'unregister') else None
+    node.destroy_node()
+    print(json.dumps(report))
+"""
+
+    return await kit_tools.queue_exec_patch(code, "Read TF tree health for Nav2 diagnostics")
+
+
+CODE_GEN_HANDLERS["setup_ros2_bridge"] = _gen_setup_ros2_bridge
+CODE_GEN_HANDLERS["export_nav2_map"] = _gen_export_nav2_map
+CODE_GEN_HANDLERS["replay_rosbag"] = _gen_replay_rosbag
+DATA_HANDLERS["check_tf_health"] = _handle_check_tf_health

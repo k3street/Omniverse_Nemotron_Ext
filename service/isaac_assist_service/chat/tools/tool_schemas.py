@@ -926,6 +926,135 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── ROS2 Nav2 Integration ────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_ros2_bridge",
+            "description": "Configure a complete ROS2 bridge for a known robot + stack profile in one call. Builds the OmniGraph with all required publishers/subscribers, QoS profiles, and a ROS2 clock node. Use when the user wants to wire Isaac Sim into Nav2, MoveIt2, or another ROS2 stack without configuring nodes individually.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "profile": {
+                        "type": "string",
+                        "enum": ["ur10e_moveit2", "jetbot_nav2", "franka_moveit2", "amr_full"],
+                        "description": "Predefined bridge profile. ur10e_moveit2 / franka_moveit2 wire joint state + trajectory + TF for arm control. jetbot_nav2 wires lidar + cmd_vel + odom + clock + TF for Nav2. amr_full adds multiple lidars and cameras for full AMR stacks.",
+                    },
+                    "robot_path": {
+                        "type": "string",
+                        "description": "USD path to the robot articulation (e.g. '/World/Jetbot'). Used to bind publisher/subscriber nodes to the right articulation.",
+                    },
+                    "graph_path": {
+                        "type": "string",
+                        "description": "USD path for the generated OmniGraph. Default: '/World/ROS2_Bridge'",
+                    },
+                },
+                "required": ["profile", "robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "export_nav2_map",
+            "description": "Generate a Nav2 map_server-compatible map.yaml + map.pgm pair from the current Isaac Sim scene. Calls Phase 8A.3 occupancy generation under the hood and writes the standard ROS map format Nav2 reads.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "output_path": {
+                        "type": "string",
+                        "description": "Output file stem (no extension). Two files are written: <stem>.pgm and <stem>.yaml. Example: 'workspace/maps/warehouse'",
+                    },
+                    "resolution": {
+                        "type": "number",
+                        "description": "Map resolution in meters per pixel. Default: 0.05 (Nav2 standard).",
+                    },
+                    "origin": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "World-space [x, y, z] origin of the map's bottom-left corner. Default: [0.0, 0.0, 0.0].",
+                    },
+                    "dimensions": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "World-space [width, height] of the map area in meters. Default: [10.0, 10.0].",
+                    },
+                    "height_range": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "[min_z, max_z] slice height for occupancy projection. Cells with geometry between these Z values are considered occupied. Default: [0.05, 0.5].",
+                    },
+                    "occupied_thresh": {
+                        "type": "number",
+                        "description": "Nav2 map.yaml occupied threshold (0-1). Default: 0.65",
+                    },
+                    "free_thresh": {
+                        "type": "number",
+                        "description": "Nav2 map.yaml free threshold (0-1). Default: 0.196",
+                    },
+                },
+                "required": ["output_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "replay_rosbag",
+            "description": "Deterministically replay a recorded rosbag through the live Isaac Sim session. Publishes the bag's cmd_vel into the sim and lets the sim produce its own odom/TF, so a downstream comparison can identify where sim and real diverge.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bag_path": {
+                        "type": "string",
+                        "description": "Filesystem path to the rosbag2 directory or .db3 file recorded on a real robot.",
+                    },
+                    "sync_mode": {
+                        "type": "string",
+                        "enum": ["sim_time", "real_time"],
+                        "description": "sim_time = step-locked replay tied to /clock (deterministic, used for sim-vs-real comparisons). real_time = wall-clock replay (used for visualization). Default: sim_time",
+                    },
+                    "topics": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional whitelist of bag topics to replay. Default: ['/cmd_vel'].",
+                    },
+                    "rate": {
+                        "type": "number",
+                        "description": "Replay rate multiplier (1.0 = original speed). Default: 1.0",
+                    },
+                },
+                "required": ["bag_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_tf_health",
+            "description": "Diagnose the ROS2 TF tree health for the current sim. Reports missing expected frames (base_link, odom, map, sensor frames), stale transforms (>1s old), 'extrapolation into the future' risk, missing static_transforms, and orphan frames not connected to the root chain. Use when Nav2 / MoveIt2 misbehave and TF is suspected.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expected_frames": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Frames that must be present. Default: ['base_link', 'odom', 'map'].",
+                    },
+                    "max_age_seconds": {
+                        "type": "number",
+                        "description": "Maximum allowed transform age before it is reported stale. Default: 1.0",
+                    },
+                    "root_frame": {
+                        "type": "string",
+                        "description": "Expected TF tree root for orphan detection. Default: 'map'",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",
