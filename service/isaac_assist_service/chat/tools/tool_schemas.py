@@ -828,6 +828,73 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── RL Training Debugging & Quality (Phase 7A Addendum) ──────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_training",
+            "description": "Diagnose an active or completed RL training run. Reads TensorBoard scalars and RSL-RL perf logs from the run directory, then runs checks for: action collapse (policy std near zero), entropy collapse (premature exploration loss), reward hacking (reward up but success flat), bimodal success (high per-env variance), NaN detection with PD stability check, and throughput. Returns per-check status + concrete suggestions. Use when training appears stuck, diverged, or behaves degenerately.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "run_dir": {"type": "string", "description": "Path to the training run directory containing TensorBoard event files and (optionally) RSL-RL perf logs"},
+                    "physics_dt": {"type": "number", "description": "Physics time step used during training (used by the PD stability check). Default: 1/120"},
+                },
+                "required": ["run_dir"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "review_reward",
+            "description": "Static analysis of an RL reward function — runs BEFORE training to catch common pitfalls. Checks for: sparse reward (reward desert), dominant term (one term swamps others), reward hacking risk (alive bonus without fall termination), scale issue (max reward too small for value learning), and success-alignment (terms don't correlate with success criterion). Returns per-check verdict with specific fix suggestions. Use when reviewing a new reward function before launching training.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reward_code": {"type": "string", "description": "Python source code of the reward function or RewTerm definitions"},
+                    "has_fall_termination": {"type": "boolean", "description": "Whether the env has a fall/early-termination condition. Default: false"},
+                    "max_possible_reward": {"type": "number", "description": "Optional max reward magnitude per step (used for scale check). If omitted, inferred from code."},
+                },
+                "required": ["reward_code"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "profile_training_throughput",
+            "description": "Analyze RSL-RL performance logs (Perf/collection_time, Perf/learning_time, Perf/total_fps) to identify whether a training run is sim-bound or train-bound. Suggests concrete fixes: TiledCamera switch for vision policies (10x faster), reducing num_envs/collision-mesh complexity for sim-bound, smaller networks/batch/PPO epochs for train-bound. Use when training throughput is lower than expected.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "run_dir": {"type": "string", "description": "Path to the training run directory containing RSL-RL perf logs (TensorBoard event files)"},
+                },
+                "required": ["run_dir"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_eval_harness",
+            "description": "Generate a reproducible Python evaluation script for a trained RL policy. Runs num_episodes deterministic rollouts on the given task, records reward/success/length per episode, saves a JSON results file, and optionally records video via gym.wrappers.RecordVideo. Use after training completes to benchmark the learned policy.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_name": {"type": "string", "description": "Gym task ID — e.g. 'Isaac-Reach-Franka-v0'"},
+                    "num_episodes": {"type": "integer", "description": "Number of evaluation episodes. Default: 100"},
+                    "output_dir": {"type": "string", "description": "Directory to write eval_results.json (and optional videos). Default: 'workspace/eval/<task>'"},
+                    "checkpoint_path": {"type": "string", "description": "Optional path to a trained policy checkpoint to load before rollout"},
+                    "record_video": {"type": "boolean", "description": "If true, wrap the env with gym.wrappers.RecordVideo. Default: false"},
+                    "max_steps_per_episode": {"type": "integer", "description": "Hard cap on steps per episode. Default: 1000"},
+                },
+                "required": ["task_name"],
+            },
+        },
+    },
+
     # ─── Vision (Gemini Robotics-ER) ──────────────────────────────────────────
     {
         "type": "function",
