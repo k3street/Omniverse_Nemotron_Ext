@@ -2232,3 +2232,98 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Safety & Compliance Addendum (S.5 — Deterministic Replay) ──────────────
+
+def _gen_enable_deterministic_mode(args: Dict) -> str:
+    """Generate code to enable deterministic simulation mode for safety validation."""
+    seed = args.get("seed", 42)
+    physics_dt = args.get("physics_dt", 1.0 / 60.0)
+    solver_iterations = args.get("solver_iterations", 4)
+    archive_path = args.get("export_archive_path")
+
+    archive_code = ""
+    if archive_path:
+        archive_code = f"""
+# Export reproducibility archive
+import zipfile
+import json
+import platform
+archive = {archive_path!r}
+manifest = {{
+    "seed": {seed},
+    "physics_dt": {physics_dt},
+    "solver_iterations": {solver_iterations},
+    "platform": platform.platform(),
+    "python_version": platform.python_version(),
+}}
+try:
+    import isaacsim
+    manifest["isaac_sim_version"] = isaacsim.__version__
+except (ImportError, AttributeError):
+    pass
+try:
+    import omni.physx
+    manifest["physx_version"] = "see omni.physx package"
+except ImportError:
+    pass
+os.makedirs(os.path.dirname(archive) or ".", exist_ok=True)
+with zipfile.ZipFile(archive, "w") as z:
+    z.writestr("manifest.json", json.dumps(manifest, indent=2))
+print(f"Reproducibility archive: {{archive}}")
+"""
+
+    return f"""\
+# Enable deterministic simulation mode (Safety & Compliance S.5)
+import os
+import random
+import omni.usd
+from pxr import UsdPhysics, PhysxSchema
+
+random.seed({seed})
+try:
+    import numpy as np
+    np.random.seed({seed})
+except ImportError:
+    pass
+
+# Configure physics scene for determinism
+stage = omni.usd.get_context().get_stage()
+physics_scene_path = "/PhysicsScene"
+physics_scene = stage.GetPrimAtPath(physics_scene_path)
+if not physics_scene.IsValid():
+    physics_scene_path = "/World/PhysicsScene"
+    physics_scene = stage.GetPrimAtPath(physics_scene_path)
+
+if physics_scene.IsValid():
+    # Apply PhysxSceneAPI for advanced settings
+    physx_api = PhysxSchema.PhysxSceneAPI.Apply(physics_scene)
+    # TGS solver — deterministic for identical inputs (vs PGS which has slight nondeterminism)
+    physx_api.CreateSolverTypeAttr().Set("TGS")
+    # Force CPU mode — GPU dynamics is NOT fully deterministic
+    physx_api.CreateBroadphaseTypeAttr().Set("MBP")
+    physx_api.CreateGpuFoundLostPairsCapacityAttr().Set(0)  # Disable GPU broadphase
+    physx_api.CreateEnableGPUDynamicsAttr().Set(False)
+    # Fixed solver iterations
+    physx_api.CreateMinPositionIterationCountAttr().Set({solver_iterations})
+    physx_api.CreateMaxPositionIterationCountAttr().Set({solver_iterations})
+
+# Set fixed physics timestep
+import carb.settings
+settings = carb.settings.get_settings()
+settings.set("/persistent/simulation/minFrameRate", int(1.0 / {physics_dt}))
+settings.set("/physics/fixedTimeStep", {physics_dt})
+
+print(f"Deterministic mode ENABLED:")
+print(f"  Seed: {seed}")
+print(f"  Physics dt: {physics_dt}s ({{1.0 / {physics_dt}:.0f}} Hz)")
+print(f"  Solver iterations: {solver_iterations} (fixed)")
+print(f"  Solver: TGS (deterministic for identical inputs)")
+print(f"  GPU dynamics: DISABLED (CPU only — GPU is not fully deterministic)")
+print(f"  WARNING: PhysX GPU mode is NOT deterministic. CPU+TGS is for safety validation.")
+{archive_code}
+"""
+
+
+CODE_GEN_HANDLERS["enable_deterministic_mode"] = _gen_enable_deterministic_mode

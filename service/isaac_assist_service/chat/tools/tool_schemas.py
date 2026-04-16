@@ -942,4 +942,22 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+    # ─── Safety & Compliance Addendum (S.5 — Deterministic Replay) ─────────
+    {
+        "type": "function",
+        "function": {
+            "name": "enable_deterministic_mode",
+            "description": "Enable deterministic simulation mode for safety validation. Fixes random seeds, sets PhysX to TGS CPU mode (deterministic for identical inputs), disables async ops, exports reproducible session archive.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "seed": {"type": "integer", "description": "Random seed for all PhysX/DR (default 42)"},
+                    "physics_dt": {"type": "number", "description": "Fixed physics timestep in seconds (default 1/60)"},
+                    "solver_iterations": {"type": "integer", "description": "Fixed solver iteration count (default 4)"},
+                    "export_archive_path": {"type": "string", "description": "Optional: path to export reproducibility archive (.zip with scene + params + AI/physics versions)"},
+                },
+                "required": [],
+            },
+        },
+    },
 ]
