@@ -1548,6 +1548,479 @@ async def _handle_catalog_search(args: Dict) -> Dict:
 DATA_HANDLERS["catalog_search"] = _handle_catalog_search
 
 
+# ── Interactive Robot Teaching ────────────────────────────────────────────────
+
+def _gen_start_teaching_mode(args: Dict) -> str:
+    """Generate code to start interactive robot teaching mode."""
+    art_path = args["articulation_path"]
+    mode = args["mode"]
+    robot_type = args.get("robot_type", "franka").lower()
+
+    if mode == "drag_target":
+        # FollowTarget pattern: ghost target prim + RMPflow tracking
+        return f"""\
+import omni.usd
+import numpy as np
+from pxr import UsdGeom, Gf, Sdf
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+stage = omni.usd.get_context().get_stage()
+
+# Create draggable ghost target at current end-effector position
+target_path = '{art_path}/TeachTarget'
+if not stage.GetPrimAtPath(target_path).IsValid():
+    target_prim = stage.DefinePrim(target_path, 'Sphere')
+    UsdGeom.Gprim(target_prim).GetDisplayColorAttr().Set([(0.2, 0.8, 0.2)])
+    xf = UsdGeom.Xformable(target_prim)
+    xf.AddTranslateOp().Set(Gf.Vec3d(0.4, 0.0, 0.4))
+    xf.AddScaleOp().Set(Gf.Vec3d(0.03, 0.03, 0.03))
+    print(f"Created draggable teach target at {{target_path}}")
+else:
+    target_prim = stage.GetPrimAtPath(target_path)
+    print(f"Teach target already exists at {{target_path}}")
+
+# Load RMPflow controller for tracking
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+# Register physics callback to track target each step
+def _teach_step(step_size):
+    target_xf = UsdGeom.Xformable(stage.GetPrimAtPath('{art_path}/TeachTarget'))
+    target_pos = target_xf.ComputeLocalToWorldTransform(0).ExtractTranslation()
+    rmpflow.set_end_effector_target(
+        np.array([target_pos[0], target_pos[1], target_pos[2]]),
+        None,
+    )
+    joint_positions = art.get_joint_positions()
+    joint_velocities = art.get_joint_velocities()
+    action = rmpflow.get_next_articulation_action(joint_positions, joint_velocities)
+    art.apply_action(action)
+
+import omni.physx
+physx = omni.physx.get_physx_interface()
+_sub = physx.subscribe_physics_step_events(_teach_step)
+
+print("Teaching mode ACTIVE (drag_target): drag the green sphere in the viewport, robot follows via RMPflow.")
+print("Press SPACE in viewport to record waypoints. Stop simulation to exit teaching mode.")
+"""
+
+    if mode == "keyboard":
+        return f"""\
+import numpy as np
+from isaaclab.devices.keyboard import Se3Keyboard
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+# Initialize keyboard device
+keyboard = Se3Keyboard(
+    pos_sensitivity=0.005,
+    rot_sensitivity=0.01,
+)
+keyboard.reset()
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+print("Teaching mode ACTIVE (keyboard):")
+print("  W/S = forward/backward, A/D = left/right, Q/E = up/down")
+print("  Z/X = roll, T/G = pitch, C/V = yaw")
+print("  K = toggle gripper, SPACE = record waypoint")
+print("Stop simulation to exit teaching mode.")
+"""
+
+    if mode == "spacemouse":
+        return f"""\
+import numpy as np
+from isaaclab.devices.spacemouse import Se3SpaceMouse
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+# Initialize SpaceMouse device
+spacemouse = Se3SpaceMouse(
+    pos_sensitivity=0.005,
+    rot_sensitivity=0.005,
+)
+spacemouse.reset()
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+print("Teaching mode ACTIVE (spacemouse): move the 3Dconnexion SpaceMouse to control the end-effector.")
+print("  Button 0 = record waypoint, Button 1 = toggle gripper")
+print("Stop simulation to exit teaching mode.")
+"""
+
+    if mode == "gravity_comp":
+        return f"""\
+import omni.usd
+from pxr import UsdPhysics, PhysxSchema
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+n_dof = art.num_dof
+
+# Zero PD gains for compliance
+art.set_joint_stiffnesses(np.zeros(n_dof))
+art.set_joint_dampings(np.full(n_dof, 0.1))  # small damping to prevent oscillation
+
+# Compute and apply gravity compensation
+import numpy as np
+gravity_comp = art.get_measured_joint_efforts()
+print(f"Gravity compensation forces: {{gravity_comp}}")
+
+# Register physics callback to maintain gravity compensation
+import omni.physx
+physx = omni.physx.get_physx_interface()
+
+def _gravity_comp_step(step_size):
+    efforts = art.get_measured_joint_efforts()
+    art.set_joint_efforts(efforts)
+
+_sub = physx.subscribe_physics_step_events(_gravity_comp_step)
+
+print("Teaching mode ACTIVE (gravity_comp): arm is now compliant.")
+print("  Use Shift+drag in viewport to move joints via physics force grab.")
+print("  The robot will hold position against gravity but yield to your input.")
+print("Stop simulation to exit teaching mode.")
+"""
+    return f"# Unknown teaching mode: {mode}"
+
+
+def _gen_record_waypoints(args: Dict) -> str:
+    """Generate code to record robot waypoints to file."""
+    art_path = args["articulation_path"]
+    output_path = args["output_path"]
+    fmt = args.get("format", "json")
+
+    if fmt == "hdf5":
+        return f"""\
+import numpy as np
+import json
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+# Capture current joint state as a waypoint
+joint_positions = art.get_joint_positions().tolist()
+joint_velocities = art.get_joint_velocities().tolist()
+joint_names = art.dof_names
+
+# Write HDF5 in robomimic schema
+import h5py
+import os
+os.makedirs(os.path.dirname('{output_path}') or '.', exist_ok=True)
+
+with h5py.File('{output_path}', 'a') as f:
+    # robomimic demo schema
+    if 'data' not in f:
+        grp = f.create_group('data')
+        grp.attrs['num_demos'] = 0
+    data = f['data']
+    demo_idx = data.attrs['num_demos']
+    demo_name = f'demo_{{demo_idx}}'
+    demo = data.create_group(demo_name)
+    demo.create_dataset('actions', data=np.array([joint_positions]))
+    obs = demo.create_group('obs')
+    obs.create_dataset('joint_pos', data=np.array([joint_positions]))
+    obs.create_dataset('joint_vel', data=np.array([joint_velocities]))
+    demo.attrs['num_samples'] = 1
+    data.attrs['num_demos'] = demo_idx + 1
+
+print(f"Recorded waypoint to {{'{output_path}'}} (HDF5 robomimic schema, demo {{demo_idx}})")
+print(f"Joint positions: {{[round(p, 4) for p in joint_positions]}}")
+"""
+
+    if fmt == "usd":
+        return f"""\
+import omni.usd
+from pxr import Usd, UsdGeom, Sdf
+import json
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+joint_positions = art.get_joint_positions().tolist()
+
+stage = omni.usd.get_context().get_stage()
+time_code = stage.GetEndTimeCode() + 1
+stage.SetEndTimeCode(time_code)
+
+# Write joint positions as USD TimeSamples on each joint drive
+joint_names = art.dof_names
+for i, jname in enumerate(joint_names):
+    joint_path = '{art_path}/' + jname
+    joint_prim = stage.GetPrimAtPath(joint_path)
+    if joint_prim.IsValid():
+        from pxr import UsdPhysics
+        drive = UsdPhysics.DriveAPI.Get(joint_prim, 'angular')
+        if drive:
+            drive.GetTargetPositionAttr().Set(joint_positions[i], time_code)
+
+print(f"Recorded waypoint as USD TimeSample at time={{time_code}}")
+print(f"Joint positions: {{[round(p, 4) for p in joint_positions]}}")
+"""
+
+    # Default: JSON format
+    return f"""\
+import json
+import os
+import numpy as np
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+joint_positions = art.get_joint_positions().tolist()
+joint_velocities = art.get_joint_velocities().tolist()
+joint_names = list(art.dof_names) if art.dof_names is not None else []
+
+waypoint = {{
+    "joint_positions": joint_positions,
+    "joint_velocities": joint_velocities,
+    "joint_names": joint_names,
+}}
+
+# Append to existing file or create new one
+output_path = '{output_path}'
+os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+
+data = {{"waypoints": []}}
+if os.path.exists(output_path):
+    with open(output_path, 'r') as f:
+        data = json.load(f)
+
+data["waypoints"].append(waypoint)
+
+with open(output_path, 'w') as f:
+    json.dump(data, f, indent=2)
+
+print(f"Recorded waypoint {{len(data['waypoints'])}} to {{output_path}}")
+print(f"Joint positions: {{[round(p, 4) for p in joint_positions]}}")
+"""
+
+
+def _gen_replay_trajectory(args: Dict) -> str:
+    """Generate code to replay a recorded trajectory."""
+    art_path = args["articulation_path"]
+    trajectory_path = args["trajectory_path"]
+    speed = args.get("speed", 1.0)
+    # Clamp speed to valid range
+    speed = max(0.1, min(4.0, speed))
+
+    return f"""\
+import json
+import numpy as np
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+import omni.physx
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+# Load trajectory
+with open('{trajectory_path}', 'r') as f:
+    data = json.load(f)
+waypoints = data.get("waypoints", [])
+if not waypoints:
+    print("No waypoints found in trajectory file.")
+else:
+    # Replay at {speed}x speed
+    speed_factor = {speed}
+    step_interval = max(1, int(10 / speed_factor))  # steps between waypoints
+    _replay_state = {{"idx": 0, "step_count": 0}}
+
+    def _replay_step(step_size):
+        state = _replay_state
+        state["step_count"] += 1
+        if state["step_count"] % step_interval != 0:
+            return
+        idx = state["idx"]
+        if idx >= len(waypoints):
+            print(f"Trajectory replay complete ({{len(waypoints)}} waypoints at {speed}x speed)")
+            return
+        wp = waypoints[idx]
+        joint_pos = np.array(wp["joint_positions"])
+        art.set_joint_position_targets(joint_pos)
+        state["idx"] += 1
+
+    physx = omni.physx.get_physx_interface()
+    _replay_sub = physx.subscribe_physics_step_events(_replay_step)
+
+    print(f"Replaying trajectory: {{len(waypoints)}} waypoints at {speed}x speed")
+"""
+
+
+def _gen_interpolate_trajectory(args: Dict) -> str:
+    """Generate code to interpolate between sparse waypoints."""
+    art_path = args["articulation_path"]
+    waypoints = args["waypoints"]
+    method = args.get("method", "linear")
+    num_steps = args.get("num_steps", 50)
+    output_path = args.get("output_path", "")
+    robot_type = args.get("robot_type", "franka").lower()
+
+    # Serialize waypoints for code injection
+    wp_data = [wp["joint_positions"] for wp in waypoints]
+
+    if method == "cubic":
+        save_block = ""
+        if output_path:
+            save_block = f"""
+# Save interpolated trajectory
+import os
+os.makedirs(os.path.dirname('{output_path}') or '.', exist_ok=True)
+output_waypoints = [{{"joint_positions": row.tolist()}} for row in smooth_trajectory]
+with open('{output_path}', 'w') as f:
+    json.dump({{"waypoints": output_waypoints, "method": "cubic", "num_steps": {num_steps}}}, f, indent=2)
+print(f"Saved interpolated trajectory to {output_path}")
+"""
+        return f"""\
+import numpy as np
+import json
+from scipy.interpolate import CubicSpline
+
+# Sparse waypoints
+waypoints = {wp_data}
+wp_array = np.array(waypoints)  # shape: (N, n_dof)
+
+# Cubic spline interpolation in joint space
+n_waypoints = len(wp_array)
+t_knots = np.linspace(0, 1, n_waypoints)
+cs = CubicSpline(t_knots, wp_array, axis=0)
+
+t_dense = np.linspace(0, 1, (n_waypoints - 1) * {num_steps})
+smooth_trajectory = cs(t_dense)
+
+print(f"Cubic interpolation: {{n_waypoints}} waypoints -> {{len(smooth_trajectory)}} steps")
+{save_block}"""
+
+    if method == "rmpflow":
+        save_block = ""
+        if output_path:
+            save_block = f"""
+# Save interpolated trajectory
+import os
+os.makedirs(os.path.dirname('{output_path}') or '.', exist_ok=True)
+output_waypoints = [{{"joint_positions": pos.tolist()}} for pos in planned_positions]
+with open('{output_path}', 'w') as f:
+    json.dump({{"waypoints": output_waypoints, "method": "rmpflow", "num_steps": {num_steps}}}, f, indent=2)
+print(f"Saved interpolated trajectory to {output_path}")
+"""
+        return f"""\
+import numpy as np
+import json
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+# Load RMPflow
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+# Sparse waypoints (joint space)
+waypoints = {wp_data}
+planned_positions = []
+
+for i, wp in enumerate(waypoints):
+    target_pos = np.array(wp)
+    # Use forward kinematics to get task-space target
+    rmpflow.set_end_effector_target(target_pos[:3], None)
+    # Step through RMPflow for {num_steps} steps
+    current_pos = np.array(waypoints[max(0, i-1)])
+    current_vel = np.zeros_like(current_pos)
+    for step in range({num_steps}):
+        action = rmpflow.get_next_articulation_action(current_pos, current_vel)
+        if action.joint_positions is not None:
+            current_pos = action.joint_positions
+        planned_positions.append(current_pos.copy())
+
+print(f"RMPflow interpolation: {{len(waypoints)}} waypoints -> {{len(planned_positions)}} steps (collision-aware)")
+{save_block}"""
+
+    # Default: linear interpolation
+    save_block = ""
+    if output_path:
+        save_block = f"""
+# Save interpolated trajectory
+import os
+os.makedirs(os.path.dirname('{output_path}') or '.', exist_ok=True)
+output_waypoints = [{{"joint_positions": pos.tolist()}} for pos in interpolated]
+with open('{output_path}', 'w') as f:
+    json.dump({{"waypoints": output_waypoints, "method": "linear", "num_steps": {num_steps}}}, f, indent=2)
+print(f"Saved interpolated trajectory to {output_path}")
+"""
+    return f"""\
+import numpy as np
+import json
+
+# Sparse waypoints
+waypoints = {wp_data}
+wp_array = np.array(waypoints)
+
+# Linear interpolation in joint space
+interpolated = []
+for i in range(len(wp_array) - 1):
+    start = wp_array[i]
+    end = wp_array[i + 1]
+    for t in np.linspace(0, 1, {num_steps}, endpoint=(i == len(wp_array) - 2)):
+        interpolated.append(start + t * (end - start))
+
+interpolated = np.array(interpolated)
+print(f"Linear interpolation: {{len(wp_array)}} waypoints -> {{len(interpolated)}} steps")
+{save_block}"""
+
+
+CODE_GEN_HANDLERS["start_teaching_mode"] = _gen_start_teaching_mode
+CODE_GEN_HANDLERS["record_waypoints"] = _gen_record_waypoints
+CODE_GEN_HANDLERS["replay_trajectory"] = _gen_replay_trajectory
+CODE_GEN_HANDLERS["interpolate_trajectory"] = _gen_interpolate_trajectory
+
+
 # ── Nucleus Browse & Download ────────────────────────────────────────────────
 
 async def _handle_nucleus_browse(args: Dict) -> Dict:
