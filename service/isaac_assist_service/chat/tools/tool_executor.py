@@ -2003,6 +2003,309 @@ DATA_HANDLERS["create_isaaclab_env"] = _handle_create_isaaclab_env
 CODE_GEN_HANDLERS["launch_training"] = _gen_launch_training
 
 
+# ─── Tier 13 — IsaacLab RL Runtime (live introspection) ────────────────────
+#
+# These DATA handlers introspect a RUNNING training subprocess.
+#
+# Distinction from neighboring tools:
+#   - create_isaaclab_env (PR #1, above) → SETUP, before training starts.
+#   - launch_training (PR #1, above) → spawns the subprocess that these tools query.
+#   - diagnose_training, review_reward (PR #37) → POST-MORTEM, after a run completes.
+#   - Tier 13 (here) → RUNTIME, while the subprocess is alive.
+#
+# The runtime registry below is a process-local dict keyed by run_id. In the
+# real system it is populated by launch_training when it spawns the IsaacLab
+# subprocess and exposes an IPC channel (typically a Unix socket or named pipe
+# at /tmp/isaaclab_run_<run_id>.sock). Tests monkeypatch _RUN_REGISTRY +
+# _query_run_ipc to avoid needing a live training process.
+
+import time
+from typing import Tuple
+
+# Active training-run registry. Keys = run_id, values = dict with metadata
+# (pid, ipc_socket, num_envs, state, last_known_step, ...).
+_RUN_REGISTRY: Dict[str, Dict[str, Any]] = {}
+
+
+def _resolve_run_id(run_id: Optional[str]) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """Resolve a run_id (or None → most-recent active run) to its registry entry.
+
+    Returns (run_id, entry) or (None, None) if no matching run exists.
+    """
+    if not _RUN_REGISTRY:
+        return None, None
+    if run_id is None:
+        # Pick the most-recently-launched RUNNING (or PAUSED) run.
+        candidates = [
+            (rid, e) for rid, e in _RUN_REGISTRY.items()
+            if e.get("state") in ("running", "paused")
+        ]
+        if not candidates:
+            return None, None
+        # Newest by launch_time
+        candidates.sort(key=lambda kv: kv[1].get("launch_time", 0.0), reverse=True)
+        return candidates[0]
+    entry = _RUN_REGISTRY.get(run_id)
+    return (run_id, entry) if entry else (None, None)
+
+
+async def _query_run_ipc(entry: Dict[str, Any], request: Dict[str, Any]) -> Dict[str, Any]:
+    """Send an IPC request to a running launch_training subprocess.
+
+    Override in tests via monkeypatch. The real implementation talks to the
+    subprocess over its Unix socket (entry['ipc_socket']).
+    """
+    handler = entry.get("ipc_handler")
+    if handler is None:
+        raise RuntimeError(
+            "No IPC handler registered for this run — was it launched via launch_training?"
+        )
+    return await handler(request)
+
+
+def _validate_env_id(env_id: Any, num_envs: int) -> Optional[str]:
+    """Return an error message if env_id is invalid, else None."""
+    if not isinstance(env_id, int) or isinstance(env_id, bool):
+        return f"env_id must be an integer, got {type(env_id).__name__}"
+    if env_id < 0 or env_id >= num_envs:
+        return f"env_id {env_id} out of range [0, {num_envs})"
+    return None
+
+
+async def _handle_get_env_observations(args: Dict) -> Dict:
+    """Read the observation tensor for one env in a running IsaacLab worker."""
+    t0 = time.perf_counter()
+    env_id = args.get("env_id")
+    run_id_arg = args.get("run_id")
+
+    run_id, entry = _resolve_run_id(run_id_arg)
+    if entry is None:
+        return {
+            "error": (
+                "No active training run found. Launch one with launch_training first, "
+                "or pass an explicit run_id."
+            ),
+            "requested_run_id": run_id_arg,
+        }
+
+    err = _validate_env_id(env_id, entry.get("num_envs", 0))
+    if err:
+        return {"error": err, "run_id": run_id, "num_envs": entry.get("num_envs")}
+
+    try:
+        ipc_result = await _query_run_ipc(entry, {"op": "get_observations", "env_id": env_id})
+    except Exception as e:
+        return {"error": f"IPC query failed: {e}", "run_id": run_id, "env_id": env_id}
+
+    return {
+        "run_id": run_id,
+        "env_id": env_id,
+        "step": ipc_result.get("step", entry.get("last_known_step", 0)),
+        "episode_step": ipc_result.get("episode_step", 0),
+        "observations": ipc_result.get("observations", {}),
+        "dtype": ipc_result.get("dtype", "float32"),
+        "shape": ipc_result.get("shape", []),
+        "wall_time_ms": (time.perf_counter() - t0) * 1000.0,
+    }
+
+
+async def _handle_get_env_rewards(args: Dict) -> Dict:
+    """Read per-term reward breakdown for one env at the current step."""
+    t0 = time.perf_counter()
+    env_id = args.get("env_id")
+    run_id_arg = args.get("run_id")
+
+    run_id, entry = _resolve_run_id(run_id_arg)
+    if entry is None:
+        return {
+            "error": (
+                "No active training run found. Launch one with launch_training first, "
+                "or pass an explicit run_id."
+            ),
+            "requested_run_id": run_id_arg,
+        }
+
+    err = _validate_env_id(env_id, entry.get("num_envs", 0))
+    if err:
+        return {"error": err, "run_id": run_id, "num_envs": entry.get("num_envs")}
+
+    try:
+        ipc_result = await _query_run_ipc(entry, {"op": "get_rewards", "env_id": env_id})
+    except Exception as e:
+        return {"error": f"IPC query failed: {e}", "run_id": run_id, "env_id": env_id}
+
+    terms = ipc_result.get("terms", [])
+    total = ipc_result.get("total_reward")
+    if total is None:
+        total = sum(t.get("weighted", 0.0) for t in terms)
+
+    return {
+        "run_id": run_id,
+        "env_id": env_id,
+        "step": ipc_result.get("step", entry.get("last_known_step", 0)),
+        "total_reward": total,
+        "terms": terms,
+        "episode_return": ipc_result.get("episode_return", 0.0),
+        "wall_time_ms": (time.perf_counter() - t0) * 1000.0,
+    }
+
+
+async def _handle_get_env_termination_state(args: Dict) -> Dict:
+    """Report termination flags (success / timeout / crashed / done) for one env."""
+    t0 = time.perf_counter()
+    env_id = args.get("env_id")
+    run_id_arg = args.get("run_id")
+
+    run_id, entry = _resolve_run_id(run_id_arg)
+    if entry is None:
+        return {
+            "error": (
+                "No active training run found. Launch one with launch_training first, "
+                "or pass an explicit run_id."
+            ),
+            "requested_run_id": run_id_arg,
+        }
+
+    err = _validate_env_id(env_id, entry.get("num_envs", 0))
+    if err:
+        return {"error": err, "run_id": run_id, "num_envs": entry.get("num_envs")}
+
+    try:
+        ipc_result = await _query_run_ipc(entry, {"op": "get_termination", "env_id": env_id})
+    except Exception as e:
+        return {"error": f"IPC query failed: {e}", "run_id": run_id, "env_id": env_id}
+
+    term_terms = ipc_result.get("termination_terms", {}) or {}
+    success = bool(ipc_result.get("success", term_terms.get("success", False)))
+    timeout = bool(ipc_result.get("timeout", term_terms.get("time_out", False)))
+    crashed = bool(ipc_result.get("crashed", any(
+        v for k, v in term_terms.items()
+        if k not in ("success", "time_out") and isinstance(v, bool) and v
+    )))
+    done = bool(ipc_result.get("done", success or timeout or crashed))
+
+    return {
+        "run_id": run_id,
+        "env_id": env_id,
+        "done": done,
+        "success": success,
+        "timeout": timeout,
+        "crashed": crashed,
+        "termination_terms": term_terms,
+        "episode_step": ipc_result.get("episode_step", 0),
+        "max_episode_steps": ipc_result.get("max_episode_steps", entry.get("max_episode_steps", 0)),
+        "last_reset_step": ipc_result.get("last_reset_step", 0),
+        "wall_time_ms": (time.perf_counter() - t0) * 1000.0,
+    }
+
+
+async def _handle_pause_training(args: Dict) -> Dict:
+    """Signal a running training subprocess to pause without stopping it."""
+    t0 = time.perf_counter()
+    run_id_arg = args.get("run_id")
+
+    run_id, entry = _resolve_run_id(run_id_arg)
+    if entry is None:
+        return {
+            "error": (
+                "No active training run found. Launch one with launch_training first, "
+                "or pass an explicit run_id."
+            ),
+            "requested_run_id": run_id_arg,
+        }
+
+    previous_state = entry.get("state", "unknown")
+    if previous_state == "paused":
+        return {
+            "run_id": run_id,
+            "paused": True,
+            "previous_state": "paused",
+            "note": "Run was already paused — no-op.",
+            "step": entry.get("last_known_step", 0),
+            "iteration": entry.get("last_known_iteration", 0),
+            "pid": entry.get("pid"),
+            "signal_sent": None,
+            "wall_time_ms": (time.perf_counter() - t0) * 1000.0,
+        }
+    if previous_state not in ("running",):
+        return {
+            "error": f"Cannot pause run in state '{previous_state}'. Only running runs can be paused.",
+            "run_id": run_id,
+            "previous_state": previous_state,
+        }
+
+    try:
+        ipc_result = await _query_run_ipc(entry, {"op": "pause"})
+    except Exception as e:
+        return {"error": f"IPC query failed: {e}", "run_id": run_id}
+
+    entry["state"] = "paused"
+    return {
+        "run_id": run_id,
+        "paused": True,
+        "previous_state": previous_state,
+        "step": ipc_result.get("step", entry.get("last_known_step", 0)),
+        "iteration": ipc_result.get("iteration", entry.get("last_known_iteration", 0)),
+        "pid": entry.get("pid"),
+        "signal_sent": ipc_result.get("signal_sent", "SIGUSR1"),
+        "wall_time_ms": (time.perf_counter() - t0) * 1000.0,
+    }
+
+
+async def _handle_checkpoint_training(args: Dict) -> Dict:
+    """Trigger an out-of-band checkpoint save on a running training subprocess."""
+    t0 = time.perf_counter()
+    run_id_arg = args.get("run_id")
+    include_replay = bool(args.get("include_replay_buffer", False))
+    tag = args.get("tag", "manual") or "manual"
+
+    run_id, entry = _resolve_run_id(run_id_arg)
+    if entry is None:
+        return {
+            "error": (
+                "No active training run found. Launch one with launch_training first, "
+                "or pass an explicit run_id."
+            ),
+            "requested_run_id": run_id_arg,
+        }
+
+    state = entry.get("state", "unknown")
+    if state not in ("running", "paused"):
+        return {
+            "error": f"Cannot checkpoint run in state '{state}'. Run must be running or paused.",
+            "run_id": run_id,
+            "state": state,
+        }
+
+    try:
+        ipc_result = await _query_run_ipc(entry, {
+            "op": "checkpoint",
+            "include_replay_buffer": include_replay,
+            "tag": tag,
+        })
+    except Exception as e:
+        return {"error": f"IPC query failed: {e}", "run_id": run_id}
+
+    return {
+        "run_id": run_id,
+        "checkpoint_path": ipc_result.get("checkpoint_path", ""),
+        "step": ipc_result.get("step", entry.get("last_known_step", 0)),
+        "iteration": ipc_result.get("iteration", entry.get("last_known_iteration", 0)),
+        "size_bytes": ipc_result.get("size_bytes", 0),
+        "includes_replay_buffer": bool(ipc_result.get("includes_replay_buffer", include_replay)),
+        "save_duration_ms": ipc_result.get("save_duration_ms", 0.0),
+        "tag": tag,
+        "wall_time_ms": (time.perf_counter() - t0) * 1000.0,
+    }
+
+
+DATA_HANDLERS["get_env_observations"] = _handle_get_env_observations
+DATA_HANDLERS["get_env_rewards"] = _handle_get_env_rewards
+DATA_HANDLERS["get_env_termination_state"] = _handle_get_env_termination_state
+DATA_HANDLERS["pause_training"] = _handle_pause_training
+DATA_HANDLERS["checkpoint_training"] = _handle_checkpoint_training
+
+
 # ─── Vision tools (Gemini Robotics-ER 1.6) ──────────────────────────────────
 
 async def _get_viewport_bytes() -> tuple:

@@ -828,6 +828,206 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Tier 13 — IsaacLab RL Runtime (live introspection) ──────────────────
+    # These tools introspect a RUNNING training process. They differ from:
+    #   - create_isaaclab_env / launch_training (PR #1) — SETUP only, before training starts
+    #   - diagnose_training / review_reward (PR #37) — POST-MORTEM, after a run completes
+    # Tier 13 is RUNTIME: peek at the live tensor state of a worker that is mid-training,
+    # signal it to pause, or trigger a checkpoint without killing the process.
+    {
+        "type": "function",
+        "function": {
+            "name": "get_env_observations",
+            "description": (
+                "WHAT: Read the current observation tensor for one parallel environment in a "
+                "running IsaacLab worker. Reaches into the live ManagerBasedRLEnv via the "
+                "training subprocess IPC channel and serializes that env's observation dict "
+                "(joint positions, velocities, target poses, sensor readings, etc.) to JSON. "
+                "WHEN: Use mid-training when the user asks 'what does env 5 see right now?', "
+                "'why is env 12 stuck?', or wants to inspect what the policy network is being "
+                "fed for a specific worker before its episode ends. This is RUNTIME inspection — "
+                "for setup, see create_isaaclab_env; for after-the-fact analysis, see "
+                "diagnose_training. "
+                "RETURNS: {observations: {term_name: [floats]}, env_id: int, step: int, "
+                "episode_step: int, dtype: str, shape: [int], wall_time_ms: float}. "
+                "CAVEATS: Requires a launch_training run that is currently RUNNING (not paused, "
+                "not finished); env_id must be in [0, num_envs); incurs ~1-5ms GPU→CPU sync per "
+                "call so do not poll in a tight loop; observation values are policy-relative and "
+                "may already be normalized depending on the env config."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "env_id": {
+                        "type": "integer",
+                        "description": "Index of the parallel environment to read, in [0, num_envs). For a 64-env training run, valid range is 0-63.",
+                    },
+                    "run_id": {
+                        "type": "string",
+                        "description": "Optional training run identifier returned by launch_training. If omitted, defaults to the most recent active run.",
+                    },
+                },
+                "required": ["env_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_env_rewards",
+            "description": (
+                "WHAT: Read the per-term reward breakdown for one parallel environment at the "
+                "current training step. Returns each named reward component (e.g. "
+                "'tracking_lin_vel', 'action_penalty', 'foot_clearance') with its raw value and "
+                "weighted contribution, plus the total. Useful for understanding WHY a particular "
+                "env is succeeding or failing in real time. "
+                "WHEN: Use during training when the user asks 'why is env 3 getting low reward?', "
+                "'which reward term dominates right now?', or wants to verify a reward shaping "
+                "change is taking effect on live workers. Distinct from review_reward (PR #37) "
+                "which post-mortems the FULL run statistics; this tool gives you the INSTANT "
+                "reward vector for ONE env at the current step. "
+                "RETURNS: {env_id: int, step: int, total_reward: float, terms: [{name: str, "
+                "raw_value: float, weight: float, weighted: float}], episode_return: float, "
+                "wall_time_ms: float}. "
+                "CAVEATS: Requires a RUNNING launch_training process; env_id must be in "
+                "[0, num_envs); reward values are for the most recent .step() — they will change "
+                "next physics tick; episode_return is cumulative since last reset, not a moving "
+                "average."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "env_id": {
+                        "type": "integer",
+                        "description": "Index of the parallel environment to read, in [0, num_envs).",
+                    },
+                    "run_id": {
+                        "type": "string",
+                        "description": "Optional training run identifier from launch_training. Defaults to the most recent active run.",
+                    },
+                },
+                "required": ["env_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_env_termination_state",
+            "description": (
+                "WHAT: Report the live termination/done flags for one parallel environment: "
+                "whether it has hit a success condition, a timeout (max episode length), a "
+                "failure/crash (e.g. robot fell, cube dropped, joint limit violated), or is still "
+                "running. Includes the raw termination-term values so you can see WHICH "
+                "condition fired. "
+                "WHEN: Use when the user asks 'did env 7 finish yet?', 'why did env 3 reset?', "
+                "or 'how many envs are timing out vs succeeding?'. This is the live RUNTIME "
+                "view — for aggregate success-rate over a whole run, use diagnose_training "
+                "(PR #37). "
+                "RETURNS: {env_id: int, done: bool, success: bool, timeout: bool, crashed: bool, "
+                "termination_terms: {name: bool}, episode_step: int, max_episode_steps: int, "
+                "last_reset_step: int, wall_time_ms: float}. "
+                "CAVEATS: Requires an active launch_training run; env_id must be in "
+                "[0, num_envs); 'success' is only meaningful if the env defines a success "
+                "termination term (most locomotion tasks do not — they only have timeout + "
+                "crash); flags are sampled from the most recent .step() and reset every episode."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "env_id": {
+                        "type": "integer",
+                        "description": "Index of the parallel environment to inspect, in [0, num_envs).",
+                    },
+                    "run_id": {
+                        "type": "string",
+                        "description": "Optional training run identifier from launch_training. Defaults to the most recent active run.",
+                    },
+                },
+                "required": ["env_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "pause_training",
+            "description": (
+                "WHAT: Send a SIGUSR1-style pause signal to a launch_training subprocess so it "
+                "stops calling .step() and .learn() but KEEPS the policy network, optimizer "
+                "state, replay buffer, and parallel envs alive in memory. The run can be resumed "
+                "later from the exact same state — no checkpoint round-trip required. "
+                "WHEN: Use when the user wants to inspect intermediate state, change a "
+                "hyperparameter, or free the GPU briefly without losing 30 minutes of training "
+                "progress. Common phrasings: 'pause training', 'hold on training', 'freeze the "
+                "RL run while I check something'. Do NOT use to fully stop a run — for that, "
+                "the user should kill the process. "
+                "RETURNS: {run_id: str, paused: bool, previous_state: str, step: int, "
+                "iteration: int, pid: int, signal_sent: str, wall_time_ms: float}. "
+                "CAVEATS: Only works for runs launched via launch_training (which manages the "
+                "subprocess + signal handler); a paused run still holds GPU memory — to release "
+                "VRAM you must checkpoint_training then kill; pause is best-effort and may take "
+                "a few hundred ms to take effect at the next step boundary; calling pause on an "
+                "already-paused run is a no-op."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "run_id": {
+                        "type": "string",
+                        "description": "Training run identifier returned by launch_training. If omitted, the most recent active run is paused.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "checkpoint_training",
+            "description": (
+                "WHAT: Trigger an out-of-band checkpoint save on a running launch_training "
+                "subprocess. Serializes the policy network weights, value network weights, "
+                "optimizer state, and (optionally) the replay buffer to "
+                "<checkpoint_dir>/manual_step_<N>.pt. Does NOT stop or pause training — the "
+                "worker keeps stepping while the save runs in a background thread. "
+                "WHEN: Use when the user wants to grab a snapshot of the current policy without "
+                "waiting for the next scheduled checkpoint, e.g. 'save the model now', 'I want "
+                "to test the current policy in eval mode', or right before a risky "
+                "hyperparameter change. Different from launch_training which sets up the "
+                "PERIODIC checkpoint cadence; this triggers ONE save on demand. "
+                "RETURNS: {run_id: str, checkpoint_path: str, step: int, iteration: int, "
+                "size_bytes: int, includes_replay_buffer: bool, save_duration_ms: float, "
+                "wall_time_ms: float}. "
+                "CAVEATS: Requires a RUNNING (not paused, not finished) launch_training "
+                "subprocess; save runs async — file may not be fully flushed when the call "
+                "returns (check checkpoint_path exists before loading); replay-buffer saves can "
+                "be 100MB+ for off-policy algos (SAC/TD3) — set include_replay_buffer=False to "
+                "save only the policy."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "run_id": {
+                        "type": "string",
+                        "description": "Training run identifier returned by launch_training. If omitted, the most recent active run is checkpointed.",
+                    },
+                    "include_replay_buffer": {
+                        "type": "boolean",
+                        "description": "If true, also serialize the off-policy replay buffer (SAC/TD3 only — ignored for on-policy PPO). Default: false.",
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "Optional human-readable tag appended to the checkpoint filename (e.g. 'pre_lr_change'). Default: 'manual'.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+
     # ─── Vision (Gemini Robotics-ER) ──────────────────────────────────────────
     {
         "type": "function",
