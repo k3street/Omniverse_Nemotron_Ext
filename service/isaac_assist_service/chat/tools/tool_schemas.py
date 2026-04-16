@@ -942,4 +942,27 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Preflight Check (Phase 2 Addendum — 23 checks) ─────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "preflight_check",
+            "description": "Run a comprehensive preflight check on the current scene before simulation. Performs 23 checks across 4 tiers: Tier 1 (crash preventers), Tier 2 (correctness warnings), Tier 3 (RL training), Tier 4 (ROS2/OmniGraph). Returns issues with severity, affected prim, auto-fix suggestions, and tier classification.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "enum": ["all", "tier1", "tier2", "tier3", "tier4"],
+                        "description": "Which tier(s) to run. Default: 'all'",
+                    },
+                    "articulation_path": {
+                        "type": "string",
+                        "description": "Optional: limit checks to a specific robot articulation path",
+                    },
+                },
+            },
+        },
+    },
 ]
