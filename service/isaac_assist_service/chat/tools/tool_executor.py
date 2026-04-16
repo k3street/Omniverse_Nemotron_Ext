@@ -2232,3 +2232,350 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Tier 7 — Camera (atomic) ─────────────────────────────────────────────────
+# Five tools per the atomic catalog:
+#   T7.1 list_cameras            (DATA)
+#   T7.2 get_camera_params       (DATA)
+#   T7.3 set_camera_params       (CODE_GEN)
+#   T7.4 capture_camera_image    (DATA)
+#   T7.5 set_camera_look_at      (CODE_GEN)
+#
+# DATA tools shell out to Kit RPC /exec_sync and parse the last JSON line
+# printed by the snippet. CODE_GEN tools emit USD-Python that is queued for
+# user approval before running in Kit.
+
+_CAM_JSON_LAST_LINE = (
+    "for line in reversed(output.splitlines()):\n"
+    "    line = line.strip()\n"
+    "    if line.startswith('{'):\n"
+    "        try:\n"
+    "            return json.loads(line)\n"
+    "        except json.JSONDecodeError:\n"
+    "            pass\n"
+)
+
+
+def _parse_last_json_line(output: str) -> Optional[Dict]:
+    """Return the last well-formed JSON object printed in `output`, or None."""
+    for line in reversed(output.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    return None
+
+
+# ── T7.1: list_cameras ───────────────────────────────────────────────────────
+
+async def _handle_list_cameras(args: Dict) -> Dict:
+    """Walk the stage and return all UsdGeom.Camera prims with type info."""
+    code = """\
+import omni.usd
+import json
+from pxr import Usd, UsdGeom
+
+stage = omni.usd.get_context().get_stage()
+cameras = []
+if stage is not None:
+    for prim in stage.Traverse():
+        if prim.GetTypeName() == 'Camera':
+            cam = UsdGeom.Camera(prim)
+            proj_attr = cam.GetProjectionAttr()
+            projection = proj_attr.Get() if proj_attr else 'perspective'
+            cameras.append({
+                'path': str(prim.GetPath()),
+                'name': prim.GetName(),
+                'projection': str(projection) if projection else 'perspective',
+                'purpose': str(UsdGeom.Imageable(prim).GetPurposeAttr().Get() or 'default'),
+                'kind': str(Usd.ModelAPI(prim).GetKind() or ''),
+            })
+print(json.dumps({'cameras': cameras, 'count': len(cameras)}))
+"""
+    result = await kit_tools.exec_sync(code, timeout=10)
+    if not result.get("success"):
+        return {
+            "error": f"Kit RPC /exec_sync failed: {result.get('output', 'unknown')}",
+            "hint": "Is Isaac Sim running with the extension's Kit RPC enabled?",
+        }
+    parsed = _parse_last_json_line(result.get("output", ""))
+    if parsed is None:
+        return {"error": "Failed to parse camera list", "raw_output": result.get("output", "")[:500]}
+    return parsed
+
+
+# ── T7.2: get_camera_params ──────────────────────────────────────────────────
+
+async def _handle_get_camera_params(args: Dict) -> Dict:
+    """Read all cinematographic attributes from a UsdGeom.Camera prim."""
+    camera_path = args.get("camera_path", "")
+    if not camera_path:
+        return {"error": "camera_path is required"}
+    # Sanitize path
+    import re as _re
+    if not _re.match(r"^/[A-Za-z0-9_/\- ]+$", camera_path):
+        return {"error": f"Invalid camera_path: {camera_path}"}
+
+    code = f"""\
+import omni.usd
+import json
+import math
+from pxr import UsdGeom
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath('{camera_path}')
+if not prim or not prim.IsValid():
+    print(json.dumps({{'error': 'Camera prim not found', 'camera_path': '{camera_path}'}}))
+elif prim.GetTypeName() != 'Camera':
+    print(json.dumps({{'error': 'Prim is not a Camera', 'camera_path': '{camera_path}', 'type': str(prim.GetTypeName())}}))
+else:
+    cam = UsdGeom.Camera(prim)
+    focal = cam.GetFocalLengthAttr().Get() or 0.0
+    h_ap = cam.GetHorizontalApertureAttr().Get() or 0.0
+    v_ap = cam.GetVerticalApertureAttr().Get() or 0.0
+    clip = cam.GetClippingRangeAttr().Get()
+    near, far = (float(clip[0]), float(clip[1])) if clip else (0.0, 0.0)
+    focus = cam.GetFocusDistanceAttr().Get() or 0.0
+    fstop = cam.GetFStopAttr().Get() or 0.0
+    proj = cam.GetProjectionAttr().Get() or 'perspective'
+
+    def _fov_deg(aperture, focal_length):
+        if focal_length <= 0 or aperture <= 0:
+            return 0.0
+        return math.degrees(2.0 * math.atan(aperture / (2.0 * focal_length)))
+
+    info = {{
+        'camera_path': '{camera_path}',
+        'projection': str(proj),
+        'focal_length_mm': float(focal),
+        'horizontal_aperture_mm': float(h_ap),
+        'vertical_aperture_mm': float(v_ap),
+        'horizontal_fov_deg': _fov_deg(float(h_ap), float(focal)),
+        'vertical_fov_deg': _fov_deg(float(v_ap), float(focal)),
+        'clipping_range_m': [near, far],
+        'focus_distance_m': float(focus),
+        'f_stop': float(fstop),
+    }}
+    print(json.dumps(info))
+"""
+    result = await kit_tools.exec_sync(code, timeout=10)
+    if not result.get("success"):
+        return {"error": f"Kit RPC /exec_sync failed: {result.get('output', 'unknown')}"}
+    parsed = _parse_last_json_line(result.get("output", ""))
+    if parsed is None:
+        return {"error": "Failed to parse camera params", "raw_output": result.get("output", "")[:500]}
+    return parsed
+
+
+# ── T7.3: set_camera_params (code-gen) ───────────────────────────────────────
+
+def _gen_set_camera_params(args: Dict) -> str:
+    """Generate Python that mutates camera attributes. Each requested field becomes one .Set()."""
+    camera_path = args["camera_path"]
+    params = args.get("params", {}) or {}
+
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdGeom, Gf, Sdf",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        f"prim = stage.GetPrimAtPath('{camera_path}')",
+        "if not prim or not prim.IsValid():",
+        f"    raise RuntimeError('Camera prim not found: {camera_path}')",
+        "if prim.GetTypeName() != 'Camera':",
+        f"    raise RuntimeError('Prim is not a Camera: {camera_path}')",
+        "cam = UsdGeom.Camera(prim)",
+        "",
+    ]
+
+    if "focal_length" in params:
+        lines.append(f"cam.GetFocalLengthAttr().Set({float(params['focal_length'])})")
+    if "horizontal_aperture" in params:
+        lines.append(f"cam.GetHorizontalApertureAttr().Set({float(params['horizontal_aperture'])})")
+    if "vertical_aperture" in params:
+        lines.append(f"cam.GetVerticalApertureAttr().Set({float(params['vertical_aperture'])})")
+    if "clipping_range" in params:
+        cr = params["clipping_range"]
+        if isinstance(cr, (list, tuple)) and len(cr) == 2:
+            near, far = float(cr[0]), float(cr[1])
+            lines.append(
+                f"cam.GetClippingRangeAttr().Set(Gf.Vec2f({near}, {far}))"
+            )
+    if "focus_distance" in params:
+        lines.append(f"cam.GetFocusDistanceAttr().Set({float(params['focus_distance'])})")
+    if "f_stop" in params:
+        lines.append(f"cam.GetFStopAttr().Set({float(params['f_stop'])})")
+    if "projection" in params:
+        proj = str(params["projection"]).lower()
+        if proj in ("perspective", "orthographic"):
+            lines.append(f"cam.GetProjectionAttr().Set('{proj}')")
+        else:
+            lines.append(f"# WARNING: unsupported projection '{proj}' — skipped")
+
+    lines.append("")
+    lines.append(f"print('set_camera_params: updated {camera_path}')")
+    return "\n".join(lines)
+
+
+# ── T7.4: capture_camera_image ───────────────────────────────────────────────
+
+async def _handle_capture_camera_image(args: Dict) -> Dict:
+    """Render a single frame from the named camera and return base64 PNG."""
+    camera_path = args.get("camera_path", "")
+    if not camera_path:
+        return {"error": "camera_path is required"}
+    import re as _re
+    if not _re.match(r"^/[A-Za-z0-9_/\- ]+$", camera_path):
+        return {"error": f"Invalid camera_path: {camera_path}"}
+
+    resolution = args.get("resolution") or [1280, 720]
+    if (
+        not isinstance(resolution, (list, tuple))
+        or len(resolution) != 2
+        or not all(isinstance(v, int) and v > 0 for v in resolution)
+    ):
+        return {"error": "resolution must be [width, height] of positive integers"}
+    width, height = int(resolution[0]), int(resolution[1])
+
+    code = f"""\
+import omni.usd
+import json
+import base64
+from pxr import UsdGeom
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath('{camera_path}')
+if not prim or not prim.IsValid():
+    print(json.dumps({{'error': 'Camera prim not found', 'camera_path': '{camera_path}'}}))
+elif prim.GetTypeName() != 'Camera':
+    print(json.dumps({{'error': 'Prim is not a Camera', 'camera_path': '{camera_path}'}}))
+else:
+    try:
+        import omni.replicator.core as rep
+        rp = rep.create.render_product('{camera_path}', ({width}, {height}))
+        annot = rep.AnnotatorRegistry.get_annotator('rgb')
+        annot.attach([rp])
+        rep.orchestrator.step()
+        data = annot.get_data()
+        # Encode the numpy RGB(A) array to PNG via PIL
+        try:
+            from PIL import Image
+            import numpy as np
+            arr = np.asarray(data)
+            if arr.ndim == 3 and arr.shape[2] == 4:
+                img = Image.fromarray(arr[:, :, :3].astype('uint8'), mode='RGB')
+            else:
+                img = Image.fromarray(arr.astype('uint8'), mode='RGB')
+            import io
+            buf = io.BytesIO()
+            img.save(buf, format='PNG')
+            b64 = base64.b64encode(buf.getvalue()).decode('ascii')
+        finally:
+            try:
+                annot.detach([rp])
+            except Exception:
+                pass
+            try:
+                rp.destroy()
+            except Exception:
+                pass
+        print(json.dumps({{
+            'camera_path': '{camera_path}',
+            'resolution': [{width}, {height}],
+            'image_base64': b64,
+            'format': 'png',
+            'message': 'Rendered 1 frame from {camera_path} at {width}x{height}',
+        }}))
+    except ImportError as e:
+        print(json.dumps({{'error': 'Replicator unavailable: ' + str(e),
+                           'hint': 'omni.replicator.core extension must be enabled'}}))
+"""
+    result = await kit_tools.exec_sync(code, timeout=30)
+    if not result.get("success"):
+        return {"error": f"Kit RPC /exec_sync failed: {result.get('output', 'unknown')}"}
+    parsed = _parse_last_json_line(result.get("output", ""))
+    if parsed is None:
+        return {"error": "Failed to parse capture result", "raw_output": result.get("output", "")[:500]}
+    return parsed
+
+
+# ── T7.5: set_camera_look_at (code-gen) ──────────────────────────────────────
+
+def _gen_set_camera_look_at(args: Dict) -> str:
+    """Generate Python that orients a camera at a world-space target.
+
+    Uses Gf.Matrix4d.SetLookAt — note that USD's Gf SetLookAt produces an
+    *inverse* view matrix, so we extract its inverse and decompose into a
+    rotation that the camera xform op can consume.
+    """
+    camera_path = args["camera_path"]
+    target = args["target"]
+    if not isinstance(target, (list, tuple)) or len(target) != 3:
+        raise ValueError("target must be [x, y, z]")
+    tx, ty, tz = float(target[0]), float(target[1]), float(target[2])
+
+    up = args.get("up") or [0.0, 1.0, 0.0]
+    if not isinstance(up, (list, tuple)) or len(up) != 3:
+        raise ValueError("up must be [x, y, z]")
+    ux, uy, uz = float(up[0]), float(up[1]), float(up[2])
+
+    eye = args.get("eye")
+    eye_block: List[str]
+    if eye is not None:
+        if not isinstance(eye, (list, tuple)) or len(eye) != 3:
+            raise ValueError("eye must be [x, y, z] when provided")
+        ex, ey, ez = float(eye[0]), float(eye[1]), float(eye[2])
+        eye_block = [
+            f"eye = Gf.Vec3d({ex}, {ey}, {ez})",
+            "# Override translation to the supplied eye position",
+            "_safe_set_translate(prim, (eye[0], eye[1], eye[2]))",
+        ]
+    else:
+        eye_block = [
+            "# Use camera's current world translation as the eye position",
+            "world_xform = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())",
+            "eye_v = world_xform.ExtractTranslation()",
+            "eye = Gf.Vec3d(eye_v[0], eye_v[1], eye_v[2])",
+        ]
+
+    lines = [
+        "import omni.usd",
+        "from pxr import Usd, UsdGeom, Gf",
+        _SAFE_XFORM_SNIPPET,
+        "stage = omni.usd.get_context().get_stage()",
+        f"prim = stage.GetPrimAtPath('{camera_path}')",
+        "if not prim or not prim.IsValid():",
+        f"    raise RuntimeError('Camera prim not found: {camera_path}')",
+        "if prim.GetTypeName() != 'Camera':",
+        f"    raise RuntimeError('Prim is not a Camera: {camera_path}')",
+        "",
+        f"target = Gf.Vec3d({tx}, {ty}, {tz})",
+        f"up = Gf.Vec3d({ux}, {uy}, {uz})",
+        *eye_block,
+        "",
+        "# Build a look-at view matrix and invert to a world-space camera transform.",
+        "# Gf.Matrix4d.SetLookAt produces a view matrix (world->camera);",
+        "# the camera's world transform is therefore its inverse.",
+        "view = Gf.Matrix4d().SetLookAt(eye, target, up)",
+        "world = view.GetInverse()",
+        "rot = world.ExtractRotation()",
+        "euler = rot.Decompose(Gf.Vec3d.ZAxis(), Gf.Vec3d.YAxis(), Gf.Vec3d.XAxis())",
+        "# Decompose returns (Z, Y, X) — feed back as (X, Y, Z) for rotateXYZ op",
+        "rx, ry, rz = float(euler[2]), float(euler[1]), float(euler[0])",
+        "_safe_set_translate(prim, (eye[0], eye[1], eye[2]))",
+        "_safe_set_rotate_xyz(prim, (rx, ry, rz))",
+        f"print('set_camera_look_at: {camera_path} now looking at ({tx}, {ty}, {tz})')",
+    ]
+    return "\n".join(lines)
+
+
+# ── Register Tier 7 handlers ─────────────────────────────────────────────────
+
+DATA_HANDLERS["list_cameras"] = _handle_list_cameras
+DATA_HANDLERS["get_camera_params"] = _handle_get_camera_params
+DATA_HANDLERS["capture_camera_image"] = _handle_capture_camera_image
+CODE_GEN_HANDLERS["set_camera_params"] = _gen_set_camera_params
+CODE_GEN_HANDLERS["set_camera_look_at"] = _gen_set_camera_look_at

@@ -926,6 +926,183 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Tier 7 — Camera (atomic) ─────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "list_cameras",
+            "description": (
+                "List all UsdGeom.Camera prims on the stage with their type "
+                "(perspective vs orthographic) and basic identification. "
+                "Returns: {cameras: [{path: str, name: str, projection: 'perspective'|'orthographic', "
+                "purpose: str, kind: str}], count: int}. Use for: discovering what cameras "
+                "exist before switching viewport, picking a camera to render from, building a "
+                "camera selector UI. NOTE: returns only Camera-typed prims; does not include "
+                "the default viewport perspective when no camera is created. Empty list is a valid result."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_camera_params",
+            "description": (
+                "Read all cinematographic attributes of a UsdGeom.Camera prim — focal length, "
+                "horizontal/vertical aperture, clipping range, focus distance, f-stop, projection — "
+                "and derive horizontal/vertical field-of-view from focal+aperture. "
+                "Returns: {camera_path: str, projection: 'perspective'|'orthographic', "
+                "focal_length_mm: float, horizontal_aperture_mm: float, vertical_aperture_mm: float, "
+                "horizontal_fov_deg: float, vertical_fov_deg: float, clipping_range_m: [near, far], "
+                "focus_distance_m: float, f_stop: float}. Use for: inspecting a camera before tweaking, "
+                "verifying lens choice matches a real-world reference, computing what is in/out of frame. "
+                "NOTE: focal/aperture are USD-native millimetres; clipping & focus distance are in scene "
+                "units (metres by default). FoV is computed as 2*atan(aperture / (2*focal_length))."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "camera_path": {
+                        "type": "string",
+                        "description": "USD path to the Camera prim, e.g. '/World/Camera' or '/World/MyRig/Cam01'",
+                    },
+                },
+                "required": ["camera_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_camera_params",
+            "description": (
+                "Modify camera attributes (focal length, horizontal/vertical aperture, clipping range, "
+                "focus distance, f-stop, projection). Returns approval-pending code patch. "
+                "Use for: matching real-world lens specs (35mm focal=standard, 14mm=wide, 200mm=telephoto), "
+                "tweaking depth of field for cinematic shots, fixing near/far plane clipping issues, "
+                "switching between perspective and orthographic projection. "
+                "NOTE: focal_length and apertures are in mm (USD convention); clipping_range and "
+                "focus_distance are in scene units (metres by default). Setting only some fields "
+                "leaves the others unchanged. clipping_range must satisfy near < far and both > 0."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "camera_path": {
+                        "type": "string",
+                        "description": "USD path to the Camera prim, e.g. '/World/Camera'",
+                    },
+                    "params": {
+                        "type": "object",
+                        "description": (
+                            "Dict of camera attributes to modify. Recognised keys: "
+                            "'focal_length' (mm, e.g. 35.0), "
+                            "'horizontal_aperture' (mm, e.g. 20.955 for 35mm full-frame), "
+                            "'vertical_aperture' (mm, e.g. 15.2908), "
+                            "'clipping_range' ([near, far] in scene units, e.g. [0.1, 1000.0]), "
+                            "'focus_distance' (scene units, e.g. 2.5), "
+                            "'f_stop' (e.g. 2.8 — used for DoF when render supports it), "
+                            "'projection' ('perspective' or 'orthographic')."
+                        ),
+                        "properties": {
+                            "focal_length": {"type": "number", "description": "Focal length in mm"},
+                            "horizontal_aperture": {"type": "number", "description": "Horizontal sensor aperture in mm"},
+                            "vertical_aperture": {"type": "number", "description": "Vertical sensor aperture in mm"},
+                            "clipping_range": {
+                                "type": "array",
+                                "items": {"type": "number"},
+                                "description": "[near, far] clip planes in scene units",
+                            },
+                            "focus_distance": {"type": "number", "description": "Focus distance in scene units"},
+                            "f_stop": {"type": "number", "description": "Aperture f-stop value (e.g. 2.8, 5.6, 11)"},
+                            "projection": {
+                                "type": "string",
+                                "enum": ["perspective", "orthographic"],
+                                "description": "Projection mode",
+                            },
+                        },
+                    },
+                },
+                "required": ["camera_path", "params"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "capture_camera_image",
+            "description": (
+                "Render a single frame from a SPECIFIC camera prim (not the active viewport) at a "
+                "user-specified resolution and return the result as a base64-encoded PNG. Internally "
+                "creates a Replicator render product bound to the camera, captures one frame, and "
+                "tears the render product down. "
+                "Returns: {camera_path: str, resolution: [width, height], image_base64: str, "
+                "format: 'png', message: str}. Use for: taking a snapshot from a security camera, "
+                "comparing what each camera sees, generating thumbnails for a multi-camera UI, "
+                "validating sensor placement. NOTE: rendering is GPU-bound and may take 100ms–2s "
+                "depending on resolution and renderer (RTX path tracing is slower than RTX real-time). "
+                "Resolution defaults to [1280, 720] if omitted; max recommended is [3840, 2160]."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "camera_path": {
+                        "type": "string",
+                        "description": "USD path to the Camera prim to render from, e.g. '/World/SecurityCam'",
+                    },
+                    "resolution": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Output [width, height] in pixels. Default: [1280, 720]",
+                    },
+                },
+                "required": ["camera_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_camera_look_at",
+            "description": (
+                "Orient a camera so it points at a given world-space target position, computing the "
+                "required rotation from the camera's current world position. The camera's translation "
+                "is preserved unless 'eye' is supplied. Returns approval-pending code patch. "
+                "Use for: framing a robot or asset for a cinematic shot, aiming a security/inspection "
+                "camera at a region of interest, snapping a debug camera to look at a clicked point in "
+                "the scene. NOTE: target is in world-space scene units (metres by default). The "
+                "computed rotation uses USD's standard look-at convention (camera's -Z axis points at "
+                "target, +Y is up). Optional 'up' vector defaults to world +Y; pass [0,0,1] for Z-up "
+                "scenes. Optional 'eye' overrides the camera's current position."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "camera_path": {
+                        "type": "string",
+                        "description": "USD path to the Camera prim to orient, e.g. '/World/Camera'",
+                    },
+                    "target": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "World-space [x, y, z] position to look at, in scene units (metres by default)",
+                    },
+                    "up": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Optional world up-vector [x, y, z]. Default: [0, 1, 0] (Y-up). Use [0, 0, 1] for Z-up scenes.",
+                    },
+                    "eye": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Optional override of camera position. If omitted, the camera's current world translation is used.",
+                    },
+                },
+                "required": ["camera_path", "target"],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",
