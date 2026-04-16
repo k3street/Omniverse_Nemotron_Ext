@@ -2232,3 +2232,569 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Onboarding & First-Time UX ──────────────────────────────────────────────
+
+# Starter prompt templates keyed by scene "archetype"
+_STARTER_PROMPTS = {
+    "empty": {
+        "welcome": "Your scene is empty — a blank canvas!",
+        "prompts": [
+            "Import a robot: 'add a Franka Panda to the scene'",
+            "Load a template: 'set up a pick and place scene'",
+            "Browse assets: 'show me available robots'",
+        ],
+    },
+    "robot_only": {
+        "welcome": "I see a robot in the scene, but no objects to interact with.",
+        "prompts": [
+            "Add objects: 'place 3 cubes on a table'",
+            "Test the robot: 'move the arm to a test position'",
+            "Check setup: 'are the collision meshes correct?'",
+        ],
+    },
+    "robot_and_objects": {
+        "welcome": "Your scene has a robot and objects — ready for action!",
+        "prompts": [
+            "Move the arm to grab the nearest object",
+            "Why is the robot not moving?",
+            "Show me the robot's workspace",
+        ],
+    },
+    "mobile_robot": {
+        "welcome": "I see a mobile robot in the scene.",
+        "prompts": [
+            "Drive the robot forward 2 meters",
+            "Set up navigation: 'create an occupancy map'",
+            "Check sensors: 'what sensors does the robot have?'",
+        ],
+    },
+    "no_physics": {
+        "welcome": "Physics is not enabled in this scene.",
+        "prompts": [
+            "Enable physics for this scene",
+            "Add rigid body physics to the objects",
+            "Set up a physics scene with gravity",
+        ],
+    },
+}
+
+# Known mobile robot keywords (path substrings)
+_MOBILE_ROBOT_KEYWORDS = {"carter", "jetbot", "nova_carter", "kaya", "husky", "turtlebot"}
+
+
+async def _handle_scene_aware_starter_prompts(args: Dict) -> Dict:
+    """Generate contextual starter prompts based on scene state."""
+    try:
+        ctx = await kit_tools.get_stage_context(full=False)
+    except Exception:
+        ctx = {}
+
+    stage = ctx.get("stage", {})
+    prim_count = stage.get("prim_count", 0)
+    prims_by_type = stage.get("prims_by_type", {})
+
+    # Detect scene archetype
+    has_robot = False
+    is_mobile = False
+    has_objects = False
+    has_physics = stage.get("has_physics_scene", False)
+    robot_paths = []
+
+    # Check for articulations (robots)
+    articulations = prims_by_type.get("Articulation", [])
+    xforms = prims_by_type.get("Xform", [])
+    meshes = prims_by_type.get("Mesh", [])
+
+    # Heuristic: any prim path containing common robot names
+    all_paths = []
+    for prim_list in prims_by_type.values():
+        if isinstance(prim_list, list):
+            all_paths.extend(prim_list)
+        elif isinstance(prim_list, int):
+            pass  # count, not paths
+
+    for p in all_paths:
+        p_lower = str(p).lower()
+        if any(kw in p_lower for kw in ("robot", "franka", "panda", "ur10", "ur5",
+                                         "anymal", "spot", "carter", "jetbot", "kaya",
+                                         "go1", "go2", "h1", "allegro")):
+            has_robot = True
+            robot_paths.append(str(p))
+            if any(kw in p_lower for kw in _MOBILE_ROBOT_KEYWORDS):
+                is_mobile = True
+
+    if isinstance(articulations, list) and len(articulations) > 0:
+        has_robot = True
+        robot_paths.extend(str(a) for a in articulations)
+    elif isinstance(articulations, int) and articulations > 0:
+        has_robot = True
+
+    has_objects = (isinstance(meshes, list) and len(meshes) > 2) or \
+                 (isinstance(meshes, int) and meshes > 2)
+
+    # Select archetype
+    if prim_count <= 2:
+        archetype = "empty"
+    elif not has_physics and prim_count > 2:
+        archetype = "no_physics"
+    elif is_mobile:
+        archetype = "mobile_robot"
+    elif has_robot and has_objects:
+        archetype = "robot_and_objects"
+    elif has_robot:
+        archetype = "robot_only"
+    else:
+        archetype = "empty"
+
+    template = _STARTER_PROMPTS[archetype]
+
+    # Build scene summary line
+    summary_parts = []
+    if prim_count > 0:
+        summary_parts.append(f"{prim_count} prims")
+    if robot_paths:
+        summary_parts.append(f"robot(s) at {', '.join(robot_paths[:3])}")
+    if has_physics:
+        summary_parts.append("physics enabled")
+
+    return {
+        "archetype": archetype,
+        "welcome": template["welcome"],
+        "scene_summary": ", ".join(summary_parts) if summary_parts else "empty scene",
+        "prompts": template["prompts"],
+        "robot_paths": robot_paths[:5],
+        "has_physics": has_physics,
+    }
+
+
+async def _handle_hardware_compatibility_check(args: Dict) -> Dict:
+    """Run hardware and software compatibility probe."""
+    checks = []
+
+    # GPU info — try Kit RPC first
+    gpu_info = {"name": "unknown", "vram_gb": 0}
+    try:
+        ctx = await kit_tools.get_stage_context(full=False)
+        device = ctx.get("device", {})
+        if device:
+            gpu_info["name"] = device.get("name", "unknown")
+            gpu_info["vram_gb"] = device.get("vram_mb", 0) / 1024
+    except Exception:
+        pass
+
+    # GPU check
+    if gpu_info["name"] != "unknown":
+        checks.append({
+            "component": "GPU",
+            "value": f"{gpu_info['name']} ({gpu_info['vram_gb']:.0f} GB VRAM)",
+            "status": "pass",
+            "icon": "check",
+        })
+    else:
+        checks.append({
+            "component": "GPU",
+            "value": "Could not detect GPU (Kit RPC unavailable)",
+            "status": "warn",
+            "icon": "warning",
+        })
+
+    # VRAM warning
+    if gpu_info["vram_gb"] > 0:
+        if gpu_info["vram_gb"] < 8:
+            checks.append({
+                "component": "VRAM",
+                "value": f"{gpu_info['vram_gb']:.0f} GB — may be insufficient for complex scenes",
+                "status": "warn",
+                "icon": "warning",
+            })
+        elif gpu_info["vram_gb"] < 16:
+            checks.append({
+                "component": "VRAM",
+                "value": f"{gpu_info['vram_gb']:.0f} GB — large RL environments (>256 envs) may need more",
+                "status": "warn",
+                "icon": "warning",
+            })
+        else:
+            checks.append({
+                "component": "VRAM",
+                "value": f"{gpu_info['vram_gb']:.0f} GB — sufficient for all workloads",
+                "status": "pass",
+                "icon": "check",
+            })
+
+    # Isaac Sim version
+    isaac_version = "unknown"
+    try:
+        ctx_stage = ctx.get("stage", {})
+        isaac_version = ctx_stage.get("isaac_sim_version", "unknown")
+    except Exception:
+        pass
+    if isaac_version != "unknown":
+        checks.append({
+            "component": "Isaac Sim",
+            "value": f"{isaac_version} — compatible",
+            "status": "pass",
+            "icon": "check",
+        })
+    else:
+        checks.append({
+            "component": "Isaac Sim",
+            "value": "Version unknown (Kit RPC unavailable)",
+            "status": "info",
+            "icon": "info",
+        })
+
+    # Python version
+    import sys
+    py_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    py_ok = sys.version_info >= (3, 10)
+    checks.append({
+        "component": "Python",
+        "value": f"{py_version} — {'compatible' if py_ok else 'requires 3.10+'}",
+        "status": "pass" if py_ok else "warn",
+        "icon": "check" if py_ok else "warning",
+    })
+
+    # LLM connectivity
+    llm_mode = os.environ.get("LLM_MODE", "local")
+    checks.append({
+        "component": "LLM",
+        "value": f"Mode: {llm_mode} — no local GPU needed" if llm_mode != "local" else f"Mode: {llm_mode}",
+        "status": "info",
+        "icon": "info",
+    })
+
+    return {
+        "checks": checks,
+        "overall_status": "warn" if any(c["status"] == "warn" for c in checks) else "pass",
+    }
+
+
+# Slash commands — static list with relevance conditions
+_SLASH_COMMANDS = [
+    {"command": "/help", "description": "What can I do?", "always": True},
+    {"command": "/scene", "description": "Summarize current scene", "always": True},
+    {"command": "/debug", "description": "Diagnose physics issues", "requires_physics": True},
+    {"command": "/performance", "description": "Why is my sim slow?", "always": True},
+    {"command": "/workspace", "description": "Show robot workspace", "requires_robot": True},
+    {"command": "/diff", "description": "What changed?", "always": True},
+    {"command": "/import", "description": "Import a robot", "always": True},
+    {"command": "/template", "description": "Load a scene template", "always": True},
+]
+
+
+async def _handle_slash_command_discovery(args: Dict) -> Dict:
+    """Return slash commands filtered by scene state."""
+    has_robot = args.get("scene_has_robot")
+    has_physics = args.get("scene_has_physics")
+
+    # Auto-detect if not provided
+    if has_robot is None or has_physics is None:
+        try:
+            ctx = await kit_tools.get_stage_context(full=False)
+            stage = ctx.get("stage", {})
+            if has_physics is None:
+                has_physics = stage.get("has_physics_scene", False)
+            if has_robot is None:
+                prim_count = stage.get("prim_count", 0)
+                has_robot = prim_count > 5  # rough heuristic
+        except Exception:
+            has_robot = has_robot if has_robot is not None else False
+            has_physics = has_physics if has_physics is not None else False
+
+    commands = []
+    for cmd in _SLASH_COMMANDS:
+        if cmd.get("always"):
+            commands.append({"command": cmd["command"], "description": cmd["description"]})
+        elif cmd.get("requires_robot") and has_robot:
+            commands.append({"command": cmd["command"], "description": cmd["description"]})
+        elif cmd.get("requires_physics") and has_physics:
+            commands.append({"command": cmd["command"], "description": cmd["description"]})
+
+    return {
+        "commands": commands,
+        "scene_has_robot": has_robot,
+        "scene_has_physics": has_physics,
+    }
+
+
+async def _handle_console_error_autodetect(args: Dict) -> Dict:
+    """Check for new console errors since a given timestamp."""
+    since = args.get("since_timestamp", 0)
+
+    try:
+        ctx = await kit_tools.get_stage_context(full=False)
+    except Exception:
+        return {"new_error_count": 0, "errors": [], "message": "Kit RPC unavailable"}
+
+    logs = ctx.get("recent_logs", [])
+
+    # Filter for errors only (not warnings) to avoid spam
+    new_errors = []
+    for entry in logs:
+        level = entry.get("level", "info")
+        if level not in ("error", "fatal"):
+            continue
+        ts = entry.get("timestamp", 0)
+        if ts > since:
+            new_errors.append({
+                "level": level,
+                "message": entry.get("message", ""),
+                "timestamp": ts,
+            })
+
+    result = {
+        "new_error_count": len(new_errors),
+        "errors": new_errors[:10],  # cap at 10 to avoid flooding
+        "since_timestamp": since,
+    }
+
+    if new_errors:
+        result["proactive_message"] = (
+            f"{len(new_errors)} new error(s) detected. "
+            "Want me to explain them?"
+        )
+
+    return result
+
+
+# Post-action suggestion map: tool_name → list of suggestion templates
+_SUGGESTION_MAP = {
+    "import_robot": [
+        "Configure the gripper",
+        "Check if the collision meshes are correct",
+        "Move the arm to a test position",
+    ],
+    "create_prim": [
+        "Add physics to this object",
+        "Change the material or color",
+        "Position it precisely in the scene",
+    ],
+    "clone_prim": [
+        "Set up physics for all copies",
+        "Create an RL training environment",
+        "Adjust spacing between copies",
+    ],
+    "move_to_pose": [
+        "Plan a pick-and-place sequence",
+        "Check for collisions along the path",
+        "Record the joint positions",
+    ],
+    "sim_control": [
+        "Capture a screenshot of the result",
+        "Check for physics errors",
+        "Measure performance (FPS, frame time)",
+    ],
+    "create_material": [
+        "Apply this material to an object",
+        "Adjust roughness or metallic properties",
+        "Create a glass or transparent variant",
+    ],
+    "configure_sdg": [
+        "Preview a sample frame",
+        "Add more randomizers (lighting, pose)",
+        "Export to COCO or KITTI format",
+    ],
+    "set_physics_params": [
+        "Test with a simulation run",
+        "Add rigid body physics to objects",
+        "Check solver iteration count for stability",
+    ],
+    "load_scene_template": [
+        "Run the simulation to see it in action",
+        "Customize the robot's behavior",
+        "Capture a screenshot of the scene",
+    ],
+}
+
+# Default suggestions when no specific tool match
+_DEFAULT_SUGGESTIONS = [
+    "Run the simulation to see the result",
+    "Capture a viewport screenshot",
+    "Check for any physics warnings",
+]
+
+
+async def _handle_post_action_suggestions(args: Dict) -> Dict:
+    """Return next-step suggestions after a tool execution."""
+    completed_tool = args.get("completed_tool", "")
+    tool_args = args.get("tool_args", {})
+    tool_result = args.get("tool_result", {})
+
+    suggestions = _SUGGESTION_MAP.get(completed_tool, _DEFAULT_SUGGESTIONS)
+
+    # Context-aware adjustments
+    if completed_tool == "import_robot":
+        robot_name = tool_args.get("file_path", "")
+        if any(kw in robot_name.lower() for kw in _MOBILE_ROBOT_KEYWORDS):
+            suggestions = [
+                "Set up navigation for the mobile robot",
+                "Add a lidar sensor",
+                "Drive the robot forward to test",
+            ]
+
+    return {
+        "completed_tool": completed_tool,
+        "suggestions": suggestions,
+    }
+
+
+# Scene template code generators
+_TEMPLATE_CONFIGS = {
+    "pick_and_place": {
+        "description": "Franka Panda + table + 3 cubes + physics",
+        "time_to_wow": "30 sec",
+    },
+    "mobile_nav": {
+        "description": "Jetbot + warehouse floor + obstacles",
+        "time_to_wow": "60 sec",
+    },
+    "sdg_basic": {
+        "description": "Camera + 5 objects + Replicator pipeline",
+        "time_to_wow": "90 sec",
+    },
+    "empty_robot": {
+        "description": "Just a Franka Panda, ready for commands",
+        "time_to_wow": "15 sec",
+    },
+}
+
+
+def _gen_load_scene_template(args: Dict) -> str:
+    """Generate code to build a quick-start scene template."""
+    template = args["template_name"]
+
+    if template == "pick_and_place":
+        return """\
+import omni.usd
+from pxr import UsdGeom, UsdPhysics, Gf, Sdf, PhysxSchema
+
+stage = omni.usd.get_context().get_stage()
+
+# Physics scene
+if not stage.GetPrimAtPath('/World/PhysicsScene').IsValid():
+    scene = UsdPhysics.Scene.Define(stage, '/World/PhysicsScene')
+    scene.GetGravityDirectionAttr().Set(Gf.Vec3f(0, 0, -1))
+    scene.GetGravityMagnitudeAttr().Set(9.81)
+
+# Ground plane
+ground = stage.DefinePrim('/World/GroundPlane', 'Xform')
+ground_mesh = UsdGeom.Mesh.Define(stage, '/World/GroundPlane/Mesh')
+UsdPhysics.CollisionAPI.Apply(ground_mesh.GetPrim())
+plane = stage.DefinePrim('/World/GroundPlane/Mesh', 'Plane')
+
+# Table
+table = stage.DefinePrim('/World/Table', 'Cube')
+xf = UsdGeom.Xformable(table)
+xf.AddTranslateOp().Set(Gf.Vec3d(0.5, 0, 0.4))
+xf.AddScaleOp().Set(Gf.Vec3d(0.6, 0.8, 0.02))
+UsdPhysics.CollisionAPI.Apply(table)
+
+# 3 cubes on the table
+colors = [(0.8, 0.1, 0.1), (0.1, 0.8, 0.1), (0.1, 0.1, 0.8)]
+for i, color in enumerate(colors):
+    cube_path = f'/World/Cube_{i}'
+    cube = stage.DefinePrim(cube_path, 'Cube')
+    xf = UsdGeom.Xformable(cube)
+    xf.AddTranslateOp().Set(Gf.Vec3d(0.4 + i * 0.1, 0, 0.45))
+    xf.AddScaleOp().Set(Gf.Vec3d(0.025, 0.025, 0.025))
+    UsdPhysics.RigidBodyAPI.Apply(cube)
+    UsdPhysics.CollisionAPI.Apply(cube)
+
+print('Template pick_and_place loaded: table + 3 cubes + physics. Add a Franka robot with: import_robot(file_path="franka", format="asset_library")')
+"""
+
+    if template == "mobile_nav":
+        return """\
+import omni.usd
+from pxr import UsdGeom, UsdPhysics, Gf
+
+stage = omni.usd.get_context().get_stage()
+
+# Physics scene
+if not stage.GetPrimAtPath('/World/PhysicsScene').IsValid():
+    scene = UsdPhysics.Scene.Define(stage, '/World/PhysicsScene')
+    scene.GetGravityDirectionAttr().Set(Gf.Vec3f(0, 0, -1))
+    scene.GetGravityMagnitudeAttr().Set(9.81)
+
+# Ground plane
+ground = stage.DefinePrim('/World/Ground', 'Plane')
+UsdPhysics.CollisionAPI.Apply(ground)
+
+# Obstacles (walls)
+for i, (pos, scale) in enumerate([
+    ((2, 0, 0.5), (0.1, 2, 0.5)),
+    ((-2, 0, 0.5), (0.1, 2, 0.5)),
+    ((0, 2, 0.5), (2, 0.1, 0.5)),
+    ((0, -2, 0.5), (2, 0.1, 0.5)),
+]):
+    wall = stage.DefinePrim(f'/World/Wall_{i}', 'Cube')
+    xf = UsdGeom.Xformable(wall)
+    xf.AddTranslateOp().Set(Gf.Vec3d(*pos))
+    xf.AddScaleOp().Set(Gf.Vec3d(*scale))
+    UsdPhysics.CollisionAPI.Apply(wall)
+
+print('Template mobile_nav loaded: ground + walls. Add a Jetbot with: import_robot(file_path="jetbot", format="asset_library")')
+"""
+
+    if template == "sdg_basic":
+        return """\
+import omni.usd
+from pxr import UsdGeom, Gf, Sdf
+
+stage = omni.usd.get_context().get_stage()
+
+# Camera
+cam = UsdGeom.Camera.Define(stage, '/World/SDG_Camera')
+xf = UsdGeom.Xformable(cam.GetPrim())
+xf.AddTranslateOp().Set(Gf.Vec3d(2, 2, 2))
+xf.AddRotateXYZOp().Set(Gf.Vec3d(-35, 0, 45))
+
+# Ground
+ground = stage.DefinePrim('/World/Ground', 'Plane')
+
+# 5 objects with semantic labels
+shapes = ['Cube', 'Sphere', 'Cylinder', 'Cone', 'Cube']
+for i, shape in enumerate(shapes):
+    prim = stage.DefinePrim(f'/World/Object_{i}', shape)
+    xf = UsdGeom.Xformable(prim)
+    xf.AddTranslateOp().Set(Gf.Vec3d(i * 0.3 - 0.6, 0, 0.15))
+    xf.AddScaleOp().Set(Gf.Vec3d(0.1, 0.1, 0.1))
+    # Add semantic label for SDG
+    prim.CreateAttribute('semantic:Semantics:params:semanticType', Sdf.ValueTypeNames.String).Set('class')
+    prim.CreateAttribute('semantic:Semantics:params:semanticData', Sdf.ValueTypeNames.String).Set(shape.lower())
+
+print('Template sdg_basic loaded: camera + 5 labeled objects. Configure SDG with: configure_sdg(num_frames=10, output_dir="/tmp/sdg_output")')
+"""
+
+    if template == "empty_robot":
+        return """\
+import omni.usd
+from pxr import UsdGeom, UsdPhysics, Gf
+
+stage = omni.usd.get_context().get_stage()
+
+# Physics scene
+if not stage.GetPrimAtPath('/World/PhysicsScene').IsValid():
+    scene = UsdPhysics.Scene.Define(stage, '/World/PhysicsScene')
+    scene.GetGravityDirectionAttr().Set(Gf.Vec3f(0, 0, -1))
+    scene.GetGravityMagnitudeAttr().Set(9.81)
+
+# Ground plane
+ground = stage.DefinePrim('/World/Ground', 'Plane')
+UsdPhysics.CollisionAPI.Apply(ground)
+
+print('Template empty_robot loaded: physics + ground. Add a Franka with: import_robot(file_path="franka", format="asset_library")')
+"""
+
+    return f"# Unknown template: {template}"
+
+
+DATA_HANDLERS["scene_aware_starter_prompts"] = _handle_scene_aware_starter_prompts
+DATA_HANDLERS["hardware_compatibility_check"] = _handle_hardware_compatibility_check
+DATA_HANDLERS["slash_command_discovery"] = _handle_slash_command_discovery
+DATA_HANDLERS["console_error_autodetect"] = _handle_console_error_autodetect
+DATA_HANDLERS["post_action_suggestions"] = _handle_post_action_suggestions
+CODE_GEN_HANDLERS["load_scene_template"] = _gen_load_scene_template
