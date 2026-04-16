@@ -883,6 +883,280 @@ with rep.new_layer():
 """
 
 
+# ── Tier 14: Bulk Operations — code generators ──────────────────────────────
+
+# Shared schema-name -> (pxr_module, class) map, re-used by bulk_apply_schema
+# Kept local so it can evolve independently of _gen_apply_api_schema's map.
+_TIER14_SCHEMA_MAP = {
+    "PhysicsRigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
+    "UsdPhysics.RigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
+    "RigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
+    "PhysicsCollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
+    "UsdPhysics.CollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
+    "CollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
+    "PhysicsMassAPI": ("pxr.UsdPhysics", "MassAPI"),
+    "UsdPhysics.MassAPI": ("pxr.UsdPhysics", "MassAPI"),
+    "MassAPI": ("pxr.UsdPhysics", "MassAPI"),
+    "PhysxRigidBodyAPI": ("pxr.PhysxSchema", "PhysxRigidBodyAPI"),
+    "PhysxCollisionAPI": ("pxr.PhysxSchema", "PhysxCollisionAPI"),
+    "PhysxDeformableBodyAPI": ("pxr.PhysxSchema", "PhysxDeformableBodyAPI"),
+    "PhysxTriggerAPI": ("pxr.PhysxSchema", "PhysxTriggerAPI"),
+    "PhysxContactReportAPI": ("pxr.PhysxSchema", "PhysxContactReportAPI"),
+}
+
+
+def _gen_bulk_set_attribute(args: Dict) -> str:
+    """T14.1 — atomically set the same attribute on many prims via Sdf.ChangeBlock."""
+    prim_paths = args["prim_paths"]
+    attr = args["attr"]
+    value = args["value"]
+    return f"""\
+import omni.usd
+from pxr import Sdf, Usd, UsdGeom, Gf
+
+stage = omni.usd.get_context().get_stage()
+_paths = {prim_paths!r}
+_attr = {attr!r}
+_value = {value!r}
+
+# Infer a USD Sdf.ValueTypeName so missing attributes can be created on the fly
+def _infer_value_type(v):
+    if isinstance(v, bool):
+        return Sdf.ValueTypeNames.Bool
+    if isinstance(v, int):
+        return Sdf.ValueTypeNames.Int
+    if isinstance(v, float):
+        return Sdf.ValueTypeNames.Float
+    if isinstance(v, str):
+        return Sdf.ValueTypeNames.String
+    if isinstance(v, (list, tuple)):
+        n = len(v)
+        if n == 2:
+            return Sdf.ValueTypeNames.Float2
+        if n == 3:
+            return Sdf.ValueTypeNames.Float3
+        if n == 4:
+            return Sdf.ValueTypeNames.Float4
+    return None
+
+_applied = 0
+_skipped_missing_prim = 0
+_skipped_create_failed = 0
+_created = 0
+
+with Sdf.ChangeBlock():
+    for _p in _paths:
+        _prim = stage.GetPrimAtPath(_p)
+        if not _prim or not _prim.IsValid():
+            _skipped_missing_prim += 1
+            continue
+        _a = _prim.GetAttribute(_attr)
+        if not _a or not _a.IsValid():
+            _tname = _infer_value_type(_value)
+            if _tname is None:
+                _skipped_create_failed += 1
+                continue
+            _a = _prim.CreateAttribute(_attr, _tname)
+            _created += 1
+        try:
+            # Wrap Vec-like lists into Gf types when the attribute expects them
+            _typename = str(_a.GetTypeName()) if _a and _a.IsValid() else ""
+            _v = _value
+            if isinstance(_value, (list, tuple)):
+                if "3" in _typename and len(_value) == 3:
+                    _v = Gf.Vec3f(*_value) if "float" in _typename.lower() else Gf.Vec3d(*_value)
+            _a.Set(_v)
+            _applied += 1
+        except Exception as _e:
+            _skipped_create_failed += 1
+
+print(f"bulk_set_attribute: applied={{_applied}} created={{_created}} "
+      f"missing_prim={{_skipped_missing_prim}} failed={{_skipped_create_failed}} "
+      f"attr={attr!r}")
+"""
+
+
+def _gen_bulk_apply_schema(args: Dict) -> str:
+    """T14.2 — apply the same API schema to many prims via Sdf.ChangeBlock."""
+    prim_paths = args["prim_paths"]
+    schema = args["schema"]
+    if schema in _TIER14_SCHEMA_MAP:
+        mod, cls = _TIER14_SCHEMA_MAP[schema]
+        return f"""\
+import omni.usd
+from pxr import Sdf
+from {mod} import {cls}
+
+stage = omni.usd.get_context().get_stage()
+_paths = {prim_paths!r}
+
+_applied = 0
+_missing = 0
+_already = 0
+
+with Sdf.ChangeBlock():
+    for _p in _paths:
+        _prim = stage.GetPrimAtPath(_p)
+        if not _prim or not _prim.IsValid():
+            _missing += 1
+            continue
+        if _prim.HasAPI({cls}):
+            _already += 1
+            continue
+        {cls}.Apply(_prim)
+        _applied += 1
+
+print(f"bulk_apply_schema: schema={schema!r} applied={{_applied}} "
+      f"already_had={{_already}} missing={{_missing}}")
+"""
+    # Fallback: ApplyAPISchemaCommand per prim, still inside a ChangeBlock
+    return f"""\
+import omni.usd
+import omni.kit.commands
+from pxr import Sdf
+
+stage = omni.usd.get_context().get_stage()
+_paths = {prim_paths!r}
+
+_applied = 0
+_missing = 0
+
+with Sdf.ChangeBlock():
+    for _p in _paths:
+        _prim = stage.GetPrimAtPath(_p)
+        if not _prim or not _prim.IsValid():
+            _missing += 1
+            continue
+        try:
+            omni.kit.commands.execute('ApplyAPISchemaCommand', api={schema!r}, prim=_prim)
+            _applied += 1
+        except Exception:
+            _missing += 1
+
+print(f"bulk_apply_schema: schema={schema!r} applied={{_applied}} missing={{_missing}}")
+"""
+
+
+def _gen_group_prims(args: Dict) -> str:
+    """T14.4 — create an Xform parent and reparent prims under it."""
+    prim_paths = args["prim_paths"]
+    group_name = args["group_name"]
+    group_parent = args.get("group_parent", "/World")
+    # Guard against slashes in group_name
+    safe_name = str(group_name).strip("/").replace("/", "_")
+    group_path = f"{group_parent.rstrip('/')}/{safe_name}"
+    return f"""\
+import omni.usd
+from pxr import Sdf, UsdGeom, Gf
+
+{_SAFE_XFORM_SNIPPET}
+
+stage = omni.usd.get_context().get_stage()
+_paths = {prim_paths!r}
+_group_path = {group_path!r}
+
+# Create the Xform group (idempotent — DefinePrim returns existing if present)
+_group_prim = stage.DefinePrim(_group_path, "Xform")
+
+_moved = 0
+_missing = 0
+_skipped_self = 0
+
+with Sdf.ChangeBlock():
+    for _src in _paths:
+        _prim = stage.GetPrimAtPath(_src)
+        if not _prim or not _prim.IsValid():
+            _missing += 1
+            continue
+        if _src == _group_path or _src.startswith(_group_path + "/"):
+            _skipped_self += 1
+            continue
+        _leaf = _src.rsplit("/", 1)[-1]
+        _dst = _group_path + "/" + _leaf
+        # Capture world transform BEFORE the move so we can restore it
+        try:
+            _world = UsdGeom.Xformable(_prim).ComputeLocalToWorldTransform(0)
+            _pos = _world.ExtractTranslation()
+        except Exception:
+            _pos = Gf.Vec3d(0, 0, 0)
+        # Reparent via CopySpec + RemovePrim (USD's canonical "move" pattern)
+        try:
+            Sdf.CopySpec(stage.GetRootLayer(), _src, stage.GetRootLayer(), _dst)
+            stage.RemovePrim(_src)
+            _new_prim = stage.GetPrimAtPath(_dst)
+            if _new_prim and _new_prim.IsValid() and UsdGeom.Xformable(_new_prim):
+                _safe_set_translate(_new_prim, (_pos[0], _pos[1], _pos[2]))
+            _moved += 1
+        except Exception as _e:
+            _missing += 1
+
+print(f"group_prims: group={{_group_path}} moved={{_moved}} "
+      f"missing={{_missing}} skipped_self={{_skipped_self}}")
+"""
+
+
+def _gen_duplicate_prims(args: Dict) -> str:
+    """T14.5 — duplicate prims via Sdf.CopySpec and apply a positional offset."""
+    prim_paths = args["prim_paths"]
+    offset = args["offset"]
+    suffix = args.get("suffix", "_copy")
+    ox, oy, oz = offset[0], offset[1], offset[2]
+    return f"""\
+import omni.usd
+from pxr import Sdf, UsdGeom, Gf
+
+{_SAFE_XFORM_SNIPPET}
+
+stage = omni.usd.get_context().get_stage()
+_paths = {prim_paths!r}
+_offset = ({ox}, {oy}, {oz})
+_suffix = {suffix!r}
+
+_pairs = []
+_missing = 0
+
+def _unique_dst(base):
+    # Append numeric suffixes on collision: _copy, _copy2, _copy3, ...
+    cand = base + _suffix
+    if not stage.GetPrimAtPath(cand):
+        return cand
+    i = 2
+    while stage.GetPrimAtPath(base + _suffix + str(i)):
+        i += 1
+    return base + _suffix + str(i)
+
+with Sdf.ChangeBlock():
+    for _src in _paths:
+        _prim = stage.GetPrimAtPath(_src)
+        if not _prim or not _prim.IsValid():
+            _missing += 1
+            continue
+        _dst = _unique_dst(_src)
+        try:
+            Sdf.CopySpec(stage.GetRootLayer(), _src, stage.GetRootLayer(), _dst)
+        except Exception:
+            _missing += 1
+            continue
+        _new = stage.GetPrimAtPath(_dst)
+        if _new and _new.IsValid() and UsdGeom.Xformable(_new):
+            # Read existing local translate (if any) and add offset
+            _cur = Gf.Vec3d(0, 0, 0)
+            _xf = UsdGeom.Xformable(_new)
+            for _op in _xf.GetOrderedXformOps():
+                if _op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+                    _cur = Gf.Vec3d(_op.Get() or (0, 0, 0))
+                    break
+            _new_t = (_cur[0] + _offset[0], _cur[1] + _offset[1], _cur[2] + _offset[2])
+            _safe_set_translate(_new, _new_t)
+        _pairs.append((_src, _dst))
+
+print(f"duplicate_prims: count={{len(_pairs)}} missing={{_missing}} "
+      f"offset={offset!r}")
+for _s, _d in _pairs:
+    print(f"  {{_s}} -> {{_d}}")
+"""
+
+
 # ── Code generation dispatch ─────────────────────────────────────────────────
 
 CODE_GEN_HANDLERS = {
@@ -904,6 +1178,11 @@ CODE_GEN_HANDLERS = {
     "anchor_robot": _gen_anchor_robot,
     "set_viewport_camera": _gen_set_viewport_camera,
     "configure_sdg": _gen_configure_sdg,
+    # Tier 14: Bulk Operations
+    "bulk_set_attribute": _gen_bulk_set_attribute,
+    "bulk_apply_schema": _gen_bulk_apply_schema,
+    "group_prims": _gen_group_prims,
+    "duplicate_prims": _gen_duplicate_prims,
 }
 
 
@@ -2242,3 +2521,106 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Tier 14.3: select_by_criteria — DATA handler ─────────────────────────────
+
+def _build_select_by_criteria_code(criteria: Dict[str, Any]) -> str:
+    """Generate the Kit-side query code for select_by_criteria.
+
+    Split out from the handler so tests can exercise the generator
+    without a live Kit RPC.
+    """
+    return f"""\
+import omni.usd
+from pxr import Usd, Sdf
+import json
+import re
+
+stage = omni.usd.get_context().get_stage()
+_criteria = {criteria!r}
+
+_type = _criteria.get("type")
+_schema = _criteria.get("has_schema")
+_name_pat = _criteria.get("name_pattern")
+_path_pat = _criteria.get("path_pattern")
+_has_attr = _criteria.get("has_attribute")
+_kind = _criteria.get("kind")
+_parent = _criteria.get("parent")
+_active = _criteria.get("active")
+
+_name_re = re.compile(_name_pat) if _name_pat else None
+_path_re = re.compile(_path_pat) if _path_pat else None
+
+# Traversal root — whole stage or a parent subtree
+if _parent:
+    _root = stage.GetPrimAtPath(_parent)
+    _iterator = iter(Usd.PrimRange(_root)) if _root and _root.IsValid() else iter([])
+else:
+    _iterator = iter(stage.Traverse())
+
+_matches = []
+for _prim in _iterator:
+    if _type and _prim.GetTypeName() != _type:
+        continue
+    if _schema:
+        _applied = [str(a) for a in _prim.GetAppliedSchemas()]
+        if _schema not in _applied and not _applied.__contains__(_schema):
+            # Also check substring match for aliases like "PhysicsRigidBodyAPI"
+            if not any(_schema in a for a in _applied):
+                continue
+    if _name_re and not _name_re.search(_prim.GetName()):
+        continue
+    if _path_re and not _path_re.search(str(_prim.GetPath())):
+        continue
+    if _has_attr:
+        _a = _prim.GetAttribute(_has_attr)
+        if not _a or not _a.IsValid():
+            continue
+    if _kind:
+        from pxr import Usd as _U
+        _k = _U.ModelAPI(_prim).GetKind()
+        if _k != _kind:
+            continue
+    if _active is not None:
+        if bool(_prim.IsActive()) != bool(_active):
+            continue
+    _matches.append(str(_prim.GetPath()))
+
+_matches.sort()
+print(json.dumps({{"matches": _matches, "count": len(_matches), "criteria": _criteria}}))
+"""
+
+
+async def _handle_select_by_criteria(args: Dict) -> Dict:
+    """T14.3 — query USD stage for prims matching a criteria dict.
+
+    Runs inside Kit via queue_exec_patch; the injected code prints a JSON
+    payload on stdout that the LLM can read from the patch result.
+    """
+    criteria = args.get("criteria", {})
+    if not isinstance(criteria, dict):
+        return {"error": "criteria must be a dict", "matches": [], "count": 0}
+
+    code = _build_select_by_criteria_code(criteria)
+    result = await kit_tools.queue_exec_patch(
+        code,
+        f"select_by_criteria({', '.join(f'{k}={v!r}' for k, v in list(criteria.items())[:3])})",
+    )
+    # queue_exec_patch returns a dict with queued/patch_id — the actual matches
+    # are produced when the patch executes. Surface both so the caller can
+    # either poll for the patch result or read matches from the Kit log.
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "criteria": criteria,
+        "query_code": code,
+        "note": (
+            "Matches are produced when the queued patch executes on Kit. "
+            "Read the resulting JSON payload from the patch output. "
+            "Schema: {matches: [str], count: int, criteria: {...}}."
+        ),
+    }
+
+
+DATA_HANDLERS["select_by_criteria"] = _handle_select_by_criteria
