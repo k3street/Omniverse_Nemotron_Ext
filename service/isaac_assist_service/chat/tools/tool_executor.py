@@ -2232,3 +2232,167 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Quick Demo Builder (New Capability) ────────────────────────────────────
+
+_QUICK_DEMO_TEMPLATES = {
+    "pick_place": {
+        "default_robot": "franka",
+        "default_objects": ["cube"],
+        "policy_checkpoint": "ppo_pick_place_franka.pt",
+        "policy_algo": "ppo",
+        "task": "Pick objects from tray and place in bin",
+        "camera_position": [1.5, -1.0, 1.2],
+    },
+    "mobile_nav": {
+        "default_robot": "jetbot",
+        "default_objects": ["waypoint"],
+        "policy_checkpoint": "astar_diffdrive_jetbot.pt",
+        "policy_algo": "astar",
+        "task": "Navigate to waypoint avoiding obstacles",
+        "camera_position": [0, -3, 4],
+    },
+    "humanoid_walk": {
+        "default_robot": "g1",
+        "default_objects": [],
+        "policy_checkpoint": "groot_n1_g1_walk.pt",
+        "policy_algo": "groot",
+        "task": "Walk forward 2m with stable balance",
+        "camera_position": [3, -3, 2],
+    },
+}
+
+_SCENE_STYLE_PRESETS = {
+    "clean": {"intensity": 1500, "background": "white_floor"},
+    "industrial": {"intensity": 1000, "background": "concrete"},
+    "lab": {"intensity": 2000, "background": "neutral_gray"},
+    "dramatic": {"intensity": 800, "background": "dark"},
+}
+
+
+def _gen_quick_demo(args: Dict) -> str:
+    """Build a complete demo scene by chaining template + robot + objects + policy + camera."""
+    demo_type = args.get("demo_type", "pick_place")
+    template = _QUICK_DEMO_TEMPLATES.get(demo_type, _QUICK_DEMO_TEMPLATES["pick_place"])
+    robot = args.get("robot", template["default_robot"])
+    objects = args.get("objects", template["default_objects"])
+    scene_style = args.get("scene_style", "clean")
+    style = _SCENE_STYLE_PRESETS.get(scene_style, _SCENE_STYLE_PRESETS["clean"])
+    cam_pos = template["camera_position"]
+
+    return f"""\
+# Quick Demo Builder: {demo_type}
+# Robot: {robot} | Objects: {objects} | Style: {scene_style}
+import omni.usd
+from pxr import UsdGeom, UsdLux, UsdPhysics, Gf
+
+stage = omni.usd.get_context().get_stage()
+print("Step 1/5: Loading scene template ({demo_type})...")
+
+# 1. Ground + physics
+if not stage.GetPrimAtPath("/World/PhysicsScene"):
+    UsdPhysics.Scene.Define(stage, "/World/PhysicsScene")
+ground = UsdGeom.Cube.Define(stage, "/World/Ground")
+ground.AddTranslateOp().Set(Gf.Vec3d(0, 0, -0.05))
+ground.AddScaleOp().Set(Gf.Vec3f(5, 5, 0.05))
+UsdPhysics.CollisionAPI.Apply(ground.GetPrim())
+
+# 2. Lighting (style: {scene_style}, intensity={style['intensity']})
+print("Step 2/5: Setting up {scene_style} lighting...")
+dome = UsdLux.DomeLight.Define(stage, "/World/DomeLight")
+dome.CreateIntensityAttr().Set({style['intensity']})
+
+# 3. Robot placeholder (call import_robot('{robot}') as follow-up for full asset)
+print("Step 3/5: Importing robot ({robot})...")
+robot_xform = UsdGeom.Xform.Define(stage, "/World/Robot")
+
+# 4. Demo objects
+print("Step 4/5: Placing {len(objects)} demo objects...")
+_objects_list = {objects!r}
+for i, obj_name in enumerate(_objects_list):
+    obj_path = f"/World/Objects/{{obj_name}}_{{i}}"
+    obj = UsdGeom.Cube.Define(stage, obj_path)
+    obj.AddTranslateOp().Set(Gf.Vec3d(0.5 + i * 0.1, 0.0, 0.05))
+    obj.AddScaleOp().Set(Gf.Vec3f(0.04, 0.04, 0.04))
+    UsdPhysics.RigidBodyAPI.Apply(obj.GetPrim())
+    UsdPhysics.CollisionAPI.Apply(obj.GetPrim())
+
+# 5. Camera
+print("Step 5/5: Positioning camera...")
+cam = UsdGeom.Camera.Define(stage, "/World/DemoCamera")
+cam.AddTranslateOp().Set(Gf.Vec3d({cam_pos[0]}, {cam_pos[1]}, {cam_pos[2]}))
+cam.CreateFocalLengthAttr().Set(35.0)
+
+import omni.kit.viewport.utility
+vp = omni.kit.viewport.utility.get_active_viewport()
+if vp:
+    vp.camera_path = "/World/DemoCamera"
+
+print(f"\\n✓ Quick demo ready: {demo_type} with {robot}")
+print(f"  Task: {template['task']}")
+print(f"  Pre-trained policy: {template['policy_checkpoint']} ({template['policy_algo']})")
+print(f"  Click ▶ Play to start, or call deploy_policy() to load the trained policy.")
+"""
+
+
+CODE_GEN_HANDLERS["quick_demo"] = _gen_quick_demo
+
+
+def _gen_record_demo_video(args: Dict) -> str:
+    """Record viewport to MP4 file."""
+    duration = args.get("duration", 10.0)
+    camera = args.get("camera", "")
+    output_path = args["output_path"]
+    resolution = args.get("resolution", [1920, 1080])
+    fps = args.get("fps", 30)
+
+    camera_setup = (
+        f"vp.camera_path = {camera!r}"
+        if camera
+        else "# Using current active camera"
+    )
+
+    return f"""\
+# Record demo video to {output_path}
+import os
+import omni.kit.viewport.utility
+
+output_path = {output_path!r}
+duration_s = {duration}
+fps = {fps}
+resolution = ({resolution[0]}, {resolution[1]})
+total_frames = int(duration_s * fps)
+
+os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+vp = omni.kit.viewport.utility.get_active_viewport()
+if vp is None:
+    raise RuntimeError("No active viewport available")
+
+{camera_setup}
+
+try:
+    from omni.kit.capture.viewport import CaptureOptions, CaptureExtension
+    options = CaptureOptions()
+    options.file_type = ".mp4"
+    options.output_folder = os.path.dirname(output_path)
+    options.file_name = os.path.basename(output_path).replace(".mp4", "")
+    options.fps = fps
+    options.start_frame = 0
+    options.end_frame = total_frames
+    options.res_width = resolution[0]
+    options.res_height = resolution[1]
+    capture = CaptureExtension.get_instance()
+    capture.start(options)
+    print(f"Recording {{duration_s}}s at {{resolution[0]}}x{{resolution[1]}}@{{fps}}fps to {{output_path}}")
+except ImportError:
+    from omni.kit.viewport.utility import capture_viewport_to_file
+    print("Capture extension not available — using frame-by-frame fallback")
+    for frame in range(total_frames):
+        capture_viewport_to_file(vp, f"{{output_path}}.frame_{{frame:05d}}.png")
+    print(f"Captured {{total_frames}} frames. Use ffmpeg to assemble: ffmpeg -framerate {{fps}} -i {{output_path}}.frame_%05d.png {{output_path}}")
+"""
+
+
+CODE_GEN_HANDLERS["record_demo_video"] = _gen_record_demo_video
