@@ -2232,3 +2232,451 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Collision Mesh Quality Addendum ──────────────────────────────────────────
+# Five tools that sit in front of apply_api_schema / import_robot to make sure
+# the user ships the right PhysX collider for each mesh.
+#   - analyze_collision_mesh           (DATA — Kit RPC analyzer)
+#   - validate_collision_setup         (DATA — Kit RPC walker)
+#   - suggest_collision_approximation  (DATA — pure-Python recommender)
+#   - apply_collision_approximation    (CODE_GEN)
+#   - generate_collision_audit_script  (CODE_GEN)
+
+_VALID_APPROXIMATIONS = {
+    "convexHull",
+    "convexDecomposition",
+    "triangleMesh",
+    "boundingCube",
+    "boundingSphere",
+    "meshSimplification",
+    "sdf",
+    "none",
+}
+
+# Per-intent default recommendation for "neutral" meshes (rules below override
+# this when convexity / triangle-count signals demand it).
+_INTENT_DEFAULTS = {
+    "static_environment": "triangleMesh",
+    "dynamic_object": "convexHull",
+    "graspable": "convexDecomposition",
+    "sensor_only": "none",
+}
+
+
+def _parse_kit_json_payload(result: Dict, key_field: str = "prim_path") -> Optional[Dict]:
+    """Extract a JSON payload printed by a Kit-side analyzer patch.
+
+    The analyzers print one JSON line; Kit may forward this through different
+    fields (`output`, `stdout`, or — when the mock is used — the raw response).
+    Returns None when no payload could be located.
+    """
+    if not isinstance(result, dict):
+        return None
+    # Direct payload (common for sync Kit responses or tests)
+    if key_field in result:
+        return result
+    # Fall back to stdout-style fields
+    for field in ("output", "stdout", "result"):
+        text = result.get(field)
+        if not isinstance(text, str):
+            continue
+        for line in text.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                payload = json.loads(line)
+                if isinstance(payload, dict):
+                    return payload
+            except json.JSONDecodeError:
+                continue
+    return None
+
+
+def _recommend_from_metrics(
+    triangle_count: int,
+    convexity_ratio: float,
+    is_convex: bool,
+    over_budget: bool,
+) -> Dict[str, str]:
+    """Pure-function recommendation kernel — used by analyze + suggest."""
+    if triangle_count <= 0:
+        return {"approximation": "none", "rationale": "Empty mesh — skip collision."}
+    if is_convex and not over_budget:
+        return {"approximation": "convexHull", "rationale": "Convex shape — single hull is exact."}
+    if over_budget and triangle_count > 50_000:
+        return {
+            "approximation": "sdf",
+            "rationale": f"High-detail mesh ({triangle_count} tri) — SDF avoids per-tri narrowphase.",
+        }
+    if not is_convex:
+        return {
+            "approximation": "convexDecomposition",
+            "rationale": f"Concave shape (ratio {convexity_ratio:.2f}) — decompose to capture cavities.",
+        }
+    return {"approximation": "convexHull", "rationale": "Default safe approximation."}
+
+
+def _suggest_decomp_params(triangle_count: int) -> Dict[str, float]:
+    """Pick PhysxConvexDecompositionCollision hull-count + voxel resolution."""
+    if triangle_count < 1_000:
+        max_hulls = 4
+        voxels = 200_000
+    elif triangle_count < 10_000:
+        max_hulls = 16
+        voxels = 500_000
+    else:
+        max_hulls = 64
+        voxels = 1_000_000
+    return {
+        "physxConvexDecompositionCollision:maxConvexHulls": max_hulls,
+        "physxConvexDecompositionCollision:voxelResolution": voxels,
+        "physxConvexDecompositionCollision:errorPercentage": 1.0,
+    }
+
+
+_ANALYZE_MESH_TEMPLATE = """\
+import json
+import omni.usd
+from pxr import UsdGeom, Gf
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+mesh = UsdGeom.Mesh(prim)
+points_attr = mesh.GetPointsAttr()
+fvi_attr = mesh.GetFaceVertexIndicesAttr()
+fvc_attr = mesh.GetFaceVertexCountsAttr()
+points = list(points_attr.Get() or [])
+counts = list(fvc_attr.Get() or [])
+indices = list(fvi_attr.Get() or [])
+triangle_count = sum(max(0, c - 2) for c in counts)
+vertex_count = len(points)
+
+# bbox
+if points:
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    zs = [p[2] for p in points]
+    bbox_volume = (max(xs) - min(xs)) * (max(ys) - min(ys)) * (max(zs) - min(zs))
+    centroid = (sum(xs)/len(xs), sum(ys)/len(ys), sum(zs)/len(zs))
+    # crude convexity proxy: mean signed distance from centroid normalised by bbox extent.
+    extent = max(1e-9, max(max(xs)-min(xs), max(ys)-min(ys), max(zs)-min(zs)))
+    sq = 0.0
+    for p in points:
+        dx = p[0] - centroid[0]
+        dy = p[1] - centroid[1]
+        dz = p[2] - centroid[2]
+        sq += (dx*dx + dy*dy + dz*dz)
+    rms = (sq / len(points)) ** 0.5
+    convexity_ratio = max(0.0, min(1.0, (rms / extent) * 1.4))
+else:
+    bbox_volume = 0.0
+    convexity_ratio = 0.0
+
+is_convex = convexity_ratio >= 0.7
+max_triangles = {max_triangles}
+over_budget = triangle_count > max_triangles
+print(json.dumps({{
+    "prim_path": {prim_path!r},
+    "triangle_count": triangle_count,
+    "vertex_count": vertex_count,
+    "bbox_volume_m3": bbox_volume,
+    "convexity_ratio": convexity_ratio,
+    "is_convex": is_convex,
+    "over_budget": over_budget,
+}}))
+"""
+
+
+async def _handle_analyze_collision_mesh(args: Dict) -> Dict:
+    """Inspect a mesh prim and recommend a collision approximation."""
+    prim_path = args["prim_path"]
+    max_triangles = int(args.get("max_triangles", 5000))
+    code = _ANALYZE_MESH_TEMPLATE.format(prim_path=prim_path, max_triangles=max_triangles)
+    result = await kit_tools.queue_exec_patch(code, f"Analyze collision mesh {prim_path}")
+    payload = _parse_kit_json_payload(result, key_field="triangle_count")
+    if not payload:
+        # Kit didn't return metrics (queued for approval, mock, or error).
+        return {
+            "prim_path": prim_path,
+            "queued": True,
+            "kit_response": result,
+            "message": "Analyzer queued — re-run after the Kit patch is approved.",
+        }
+    rec = _recommend_from_metrics(
+        triangle_count=int(payload.get("triangle_count", 0)),
+        convexity_ratio=float(payload.get("convexity_ratio", 0.0)),
+        is_convex=bool(payload.get("is_convex", False)),
+        over_budget=bool(payload.get("over_budget", False)),
+    )
+    payload["recommended_approximation"] = rec["approximation"]
+    payload["rationale"] = rec["rationale"]
+    return payload
+
+
+_VALIDATE_SETUP_TEMPLATE = """\
+import json
+import omni.usd
+from pxr import UsdGeom, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+root = stage.GetPrimAtPath({prim_path!r})
+issues = []
+colliders_checked = 0
+
+def _convexity(mesh_prim):
+    mesh = UsdGeom.Mesh(mesh_prim)
+    pts = mesh.GetPointsAttr().Get() if mesh.GetPointsAttr() else None
+    if not pts:
+        return 1.0
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    zs = [p[2] for p in pts]
+    extent = max(1e-9, max(max(xs)-min(xs), max(ys)-min(ys), max(zs)-min(zs)))
+    cx = sum(xs)/len(xs); cy = sum(ys)/len(ys); cz = sum(zs)/len(zs)
+    sq = sum((p[0]-cx)**2 + (p[1]-cy)**2 + (p[2]-cz)**2 for p in pts) / len(pts)
+    return max(0.0, min(1.0, ((sq ** 0.5) / extent) * 1.4))
+
+for prim in root.GetAllChildren() if root else []:
+    pass  # placeholder, real walk below
+
+def _walk(p):
+    yield p
+    for c in p.GetAllChildren():
+        yield from _walk(c)
+
+if root and root.IsValid():
+    for prim in _walk(root):
+        if not prim.HasAPI(UsdPhysics.CollisionAPI):
+            continue
+        colliders_checked += 1
+        ppath = str(prim.GetPath())
+        approx_attr = prim.GetAttribute("physics:approximation")
+        approx = approx_attr.Get() if approx_attr and approx_attr.HasValue() else None
+        has_rb = prim.HasAPI(UsdPhysics.RigidBodyAPI)
+        if approx is None:
+            issues.append({{"prim": ppath, "severity": "warning",
+                            "kind": "missing_approximation",
+                            "message": "No physics:approximation set — PhysX defaults to convexHull silently."}})
+        if approx == "triangleMesh" and has_rb:
+            issues.append({{"prim": ppath, "severity": "error",
+                            "kind": "triangle_mesh_on_dynamic",
+                            "message": "triangleMesh approximation on dynamic body — PhysX will reject contacts."}})
+        if approx == "convexHull" and prim.IsA(UsdGeom.Mesh):
+            ratio = _convexity(prim)
+            if ratio < 0.7:
+                issues.append({{"prim": ppath, "severity": "warning",
+                                "kind": "convex_hull_on_concave",
+                                "message": f"convexHull on concave mesh (ratio {{ratio:.2f}}) — graspable cavities will be filled."}})
+
+errors = [i for i in issues if i["severity"] == "error"]
+print(json.dumps({{
+    "prim_path": {prim_path!r},
+    "colliders_checked": colliders_checked,
+    "issues": issues,
+    "ready_for_simulation": not errors,
+}}))
+"""
+
+
+async def _handle_validate_collision_setup(args: Dict) -> Dict:
+    """Walk a prim subtree and flag the four most common collider issues."""
+    prim_path = args["prim_path"]
+    code = _VALIDATE_SETUP_TEMPLATE.format(prim_path=prim_path)
+    result = await kit_tools.queue_exec_patch(code, f"Validate collision setup under {prim_path}")
+    payload = _parse_kit_json_payload(result, key_field="colliders_checked")
+    if not payload:
+        return {
+            "prim_path": prim_path,
+            "queued": True,
+            "kit_response": result,
+            "message": "Validator queued — re-run after the Kit patch is approved.",
+        }
+    return payload
+
+
+async def _handle_suggest_collision_approximation(args: Dict) -> Dict:
+    """Recommend an approximation tailored to user intent."""
+    prim_path = args["prim_path"]
+    intent = args["intent"]
+    if intent not in _INTENT_DEFAULTS:
+        return {
+            "prim_path": prim_path,
+            "intent": intent,
+            "approximation": "convexHull",
+            "params": {},
+            "rationale": f"Unknown intent '{intent}' — falling back to convexHull.",
+        }
+
+    # Try to seed the recommendation with real metrics from the analyzer.
+    analysis = await _handle_analyze_collision_mesh({"prim_path": prim_path})
+    triangle_count = int(analysis.get("triangle_count", 0)) if isinstance(analysis, dict) else 0
+    convexity_ratio = float(analysis.get("convexity_ratio", 0.0)) if isinstance(analysis, dict) else 0.0
+    is_convex = bool(analysis.get("is_convex", False)) if isinstance(analysis, dict) else False
+    over_budget = bool(analysis.get("over_budget", False)) if isinstance(analysis, dict) else False
+
+    if intent == "sensor_only":
+        return {
+            "prim_path": prim_path,
+            "intent": intent,
+            "approximation": "none",
+            "params": {},
+            "rationale": "Sensor-only prim — collision disabled.",
+        }
+
+    if intent == "graspable":
+        approx = "convexDecomposition"
+        params = _suggest_decomp_params(max(triangle_count, 1))
+        rationale = "Graspable object — convexDecomposition captures cavities for fingers."
+    elif intent == "static_environment":
+        if triangle_count > 0 and not is_convex:
+            approx = "triangleMesh"
+            params = {}
+            rationale = "Static concave environment — triangleMesh is exact and free for kinematic bodies."
+        else:
+            approx = "convexHull" if is_convex else "triangleMesh"
+            params = {}
+            rationale = "Static prim — using exact mesh or hull as fits convexity."
+    elif intent == "dynamic_object":
+        rec = _recommend_from_metrics(triangle_count, convexity_ratio, is_convex, over_budget)
+        approx = rec["approximation"]
+        params = _suggest_decomp_params(triangle_count) if approx == "convexDecomposition" else {}
+        rationale = rec["rationale"]
+    else:  # pragma: no cover — guarded above
+        approx = _INTENT_DEFAULTS[intent]
+        params = {}
+        rationale = f"Default for {intent}."
+
+    return {
+        "prim_path": prim_path,
+        "intent": intent,
+        "approximation": approx,
+        "params": params,
+        "rationale": rationale,
+        "metrics": {
+            "triangle_count": triangle_count,
+            "convexity_ratio": convexity_ratio,
+            "is_convex": is_convex,
+        },
+    }
+
+
+def _gen_apply_collision_approximation(args: Dict) -> str:
+    prim_path = args["prim_path"]
+    approximation = args.get("approximation", "convexHull")
+    if approximation not in _VALID_APPROXIMATIONS:
+        approximation = "convexHull"
+    params = args.get("params") or {}
+    if not isinstance(params, dict):
+        params = {}
+
+    lines = [
+        "import omni.usd",
+        "from pxr import Sdf, UsdPhysics, PhysxSchema",
+        "stage = omni.usd.get_context().get_stage()",
+        f"_prim_path = {prim_path!r}",
+        "prim = stage.GetPrimAtPath(_prim_path)",
+        "if not prim or not prim.IsValid():",
+        "    raise RuntimeError('Prim not found: ' + _prim_path)",
+        "if not prim.HasAPI(UsdPhysics.CollisionAPI):",
+        "    UsdPhysics.CollisionAPI.Apply(prim)",
+        "approx_attr = prim.GetAttribute('physics:approximation')",
+        "if not approx_attr:",
+        "    approx_attr = prim.CreateAttribute('physics:approximation', Sdf.ValueTypeNames.Token)",
+        f"approx_attr.Set({approximation!r})",
+    ]
+
+    if approximation == "convexDecomposition":
+        lines.append("decomp_api = PhysxSchema.PhysxConvexDecompositionCollisionAPI.Apply(prim)")
+        for key, value in params.items():
+            if not isinstance(key, str) or not key.startswith("physxConvexDecompositionCollision:"):
+                continue
+            lines.append(
+                f"_a = prim.GetAttribute({key!r})\n"
+                f"if _a:\n"
+                f"    _a.Set({value!r})"
+            )
+    elif approximation == "sdf":
+        lines.append("sdf_api = PhysxSchema.PhysxSDFMeshCollisionAPI.Apply(prim)")
+        for key, value in params.items():
+            if not isinstance(key, str) or not key.startswith("physxSDFMeshCollision:"):
+                continue
+            lines.append(
+                f"_a = prim.GetAttribute({key!r})\n"
+                f"if _a:\n"
+                f"    _a.Set({value!r})"
+            )
+
+    lines.append(f"print('[collision] applied {approximation} on ' + _prim_path)")
+    return "\n".join(lines)
+
+
+def _gen_collision_audit_script(args: Dict) -> str:
+    scope_path = args.get("scope_path") or "/World"
+    output_path = args.get("output_path")
+    out_expr = (
+        f"{output_path!r}"
+        if output_path
+        else (
+            "str(Path('workspace/collision_audits') / "
+            "(time.strftime('%Y%m%d_%H%M%S') + '.json'))"
+        )
+    )
+    return (
+        "import json\n"
+        "import time\n"
+        "from pathlib import Path\n"
+        "import omni.usd\n"
+        "from pxr import UsdGeom, UsdPhysics\n"
+        "\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        f"root = stage.GetPrimAtPath({scope_path!r})\n"
+        "\n"
+        "def _walk(p):\n"
+        "    yield p\n"
+        "    for c in p.GetAllChildren():\n"
+        "        yield from _walk(c)\n"
+        "\n"
+        "def _convexity(prim):\n"
+        "    mesh = UsdGeom.Mesh(prim)\n"
+        "    pts = mesh.GetPointsAttr().Get() if mesh.GetPointsAttr() else None\n"
+        "    if not pts:\n"
+        "        return 1.0\n"
+        "    xs = [p[0] for p in pts]; ys = [p[1] for p in pts]; zs = [p[2] for p in pts]\n"
+        "    extent = max(1e-9, max(max(xs)-min(xs), max(ys)-min(ys), max(zs)-min(zs)))\n"
+        "    cx = sum(xs)/len(xs); cy = sum(ys)/len(ys); cz = sum(zs)/len(zs)\n"
+        "    sq = sum((p[0]-cx)**2 + (p[1]-cy)**2 + (p[2]-cz)**2 for p in pts) / len(pts)\n"
+        "    return max(0.0, min(1.0, ((sq ** 0.5) / extent) * 1.4))\n"
+        "\n"
+        "entries = []\n"
+        "if root and root.IsValid():\n"
+        "    for prim in _walk(root):\n"
+        "        if not prim.HasAPI(UsdPhysics.CollisionAPI):\n"
+        "            continue\n"
+        "        approx_attr = prim.GetAttribute('physics:approximation')\n"
+        "        approx = approx_attr.Get() if approx_attr and approx_attr.HasValue() else None\n"
+        "        tri_count = 0\n"
+        "        if prim.IsA(UsdGeom.Mesh):\n"
+        "            counts = UsdGeom.Mesh(prim).GetFaceVertexCountsAttr().Get() or []\n"
+        "            tri_count = sum(max(0, c - 2) for c in counts)\n"
+        "        entries.append({\n"
+        "            'prim': str(prim.GetPath()),\n"
+        "            'approximation': approx,\n"
+        "            'triangle_count': tri_count,\n"
+        "            'has_rigid_body': prim.HasAPI(UsdPhysics.RigidBodyAPI),\n"
+        "            'convexity_ratio': _convexity(prim) if prim.IsA(UsdGeom.Mesh) else None,\n"
+        "        })\n"
+        "\n"
+        f"out_path = Path({out_expr})\n"
+        "out_path.parent.mkdir(parents=True, exist_ok=True)\n"
+        "out_path.write_text(json.dumps(entries, indent=2))\n"
+        "print(f'[audit] wrote {len(entries)} entries to {out_path}')\n"
+    )
+
+
+DATA_HANDLERS["analyze_collision_mesh"] = _handle_analyze_collision_mesh
+DATA_HANDLERS["validate_collision_setup"] = _handle_validate_collision_setup
+DATA_HANDLERS["suggest_collision_approximation"] = _handle_suggest_collision_approximation
+CODE_GEN_HANDLERS["apply_collision_approximation"] = _gen_apply_collision_approximation
+CODE_GEN_HANDLERS["generate_collision_audit_script"] = _gen_collision_audit_script

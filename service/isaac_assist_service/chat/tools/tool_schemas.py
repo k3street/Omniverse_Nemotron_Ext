@@ -942,4 +942,92 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Collision Mesh Quality Addendum ─────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_collision_mesh",
+            "description": "Inspect a mesh prim and return triangle count, bbox volume, convexity ratio, and a recommended PhysX collision approximation. Use BEFORE applying CollisionAPI to a freshly imported mesh — the recommendation tells you whether convexHull, convexDecomposition, triangleMesh, or sdf is the right choice.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the Mesh prim, e.g. '/World/Cup'"},
+                    "max_triangles": {"type": "integer", "description": "Triangle budget — meshes above this are flagged over_budget. Default: 5000"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_collision_setup",
+            "description": "Walk a prim subtree and flag the four most common collider misconfigurations: triangleMesh on a dynamic body (PhysX rejects), convexHull on a concave mesh (cavities filled), missing physics:approximation (silent default), and unit-scale mismatches. Use after import_robot or after applying CollisionAPI to multiple meshes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "Root USD path to walk — e.g. '/World/Robot' or '/World'"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "suggest_collision_approximation",
+            "description": "Recommend a PhysX collision approximation tailored to user intent (static_environment, dynamic_object, graspable, sensor_only). Returns the approximation string AND the exact PhysxConvexDecompositionCollision params to feed into apply_collision_approximation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the Mesh prim"},
+                    "intent": {
+                        "type": "string",
+                        "enum": ["static_environment", "dynamic_object", "graspable", "sensor_only"],
+                        "description": "How the mesh will be used. graspable forces convexDecomposition even for small meshes; sensor_only returns 'none'.",
+                    },
+                },
+                "required": ["prim_path", "intent"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_collision_approximation",
+            "description": "Apply a PhysX collision approximation to a mesh prim. Sets physics:approximation and (for convexDecomposition / sdf) writes the matching PhysxSchema attribute payload. Allowed approximations: convexHull, convexDecomposition, triangleMesh, boundingCube, boundingSphere, meshSimplification, sdf, none.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the Mesh prim"},
+                    "approximation": {
+                        "type": "string",
+                        "enum": ["convexHull", "convexDecomposition", "triangleMesh", "boundingCube", "boundingSphere", "meshSimplification", "sdf", "none"],
+                        "description": "PhysX collision approximation type",
+                    },
+                    "params": {
+                        "type": "object",
+                        "description": "Optional tuning params, e.g. {'physxConvexDecompositionCollision:maxConvexHulls': 16}",
+                    },
+                },
+                "required": ["prim_path", "approximation"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_collision_audit_script",
+            "description": "Generate a runnable Python script that walks the stage, records every collider's approximation + triangle count + convexity, and writes a JSON report to disk. Use to capture a pre/post audit the user can diff between sessions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scope_path": {"type": "string", "description": "USD path to walk. Default: '/World'"},
+                    "output_path": {"type": "string", "description": "Filesystem path for the JSON report. Default: 'workspace/collision_audits/<timestamp>.json'"},
+                },
+                "required": [],
+            },
+        },
+    },
 ]
