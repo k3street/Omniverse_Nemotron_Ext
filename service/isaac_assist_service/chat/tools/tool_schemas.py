@@ -942,4 +942,62 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Quick Demo Builder ──────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "create_demo_scene",
+            "description": "Scaffold a complete demo scene (robot + table/ground + objects + physics + lighting) in one call. Eliminates the 10+ tool calls normally needed. Supports demo types: pick_and_place, navigation, conveyor, stacking, inspection.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "demo_type": {
+                        "type": "string",
+                        "enum": ["pick_and_place", "navigation", "conveyor", "stacking", "inspection"],
+                        "description": "Type of demo to create",
+                    },
+                    "robot": {"type": "string", "description": "Robot name (e.g. 'franka', 'ur10', 'nova_carter'). Default: auto per demo type."},
+                    "num_objects": {"type": "integer", "description": "Number of objects to place. Default: 3"},
+                    "ground_plane": {"type": "boolean", "description": "Add a ground plane. Default: true"},
+                    "physics": {"type": "boolean", "description": "Enable physics on all objects. Default: true"},
+                    "lighting": {
+                        "type": "string",
+                        "enum": ["default", "studio", "warehouse"],
+                        "description": "Lighting preset. Default: 'default'",
+                    },
+                },
+                "required": ["demo_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_demo_types",
+            "description": "List all available quick demo templates with descriptions and default robots. Use this to show the user what demo scenes are available before calling create_demo_scene.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_demo_objects",
+            "description": "Add more objects to an existing demo scene. Object types are chosen based on the demo type (cubes for pick_and_place, obstacles for navigation, etc.).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "demo_type": {
+                        "type": "string",
+                        "enum": ["pick_and_place", "navigation", "conveyor", "stacking", "inspection"],
+                        "description": "Demo type (determines object types)",
+                    },
+                    "prim_root": {"type": "string", "description": "USD root path for objects. Default: '/World/Objects'"},
+                    "count": {"type": "integer", "description": "Number of objects. Default: 3"},
+                    "randomize": {"type": "boolean", "description": "Randomize positions and colors. Default: true"},
+                },
+                "required": ["demo_type"],
+            },
+        },
+    },
 ]

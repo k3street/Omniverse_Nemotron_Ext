@@ -2232,3 +2232,340 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Quick Demo Builder ─────────────────────────────────────────────────────
+
+_DEMO_TEMPLATES = {
+    "pick_and_place": {
+        "description": "Robot arm on a table with graspable objects and physics",
+        "default_robot": "franka",
+        "object_types": ["Cube", "Cylinder", "Sphere"],
+        "table_height": 0.75,
+    },
+    "navigation": {
+        "description": "Mobile robot on a ground plane with obstacles and a goal marker",
+        "default_robot": "nova_carter",
+        "object_types": ["Cube", "Cylinder"],
+        "table_height": 0.0,
+    },
+    "conveyor": {
+        "description": "Conveyor belt with a robot arm picking objects into bins",
+        "default_robot": "ur10",
+        "object_types": ["Cube", "Cylinder", "Sphere"],
+        "table_height": 0.9,
+    },
+    "stacking": {
+        "description": "Robot arm with stackable blocks for tower-building tasks",
+        "default_robot": "franka",
+        "object_types": ["Cube"],
+        "table_height": 0.75,
+    },
+    "inspection": {
+        "description": "Robot arm with camera inspecting objects on a turntable",
+        "default_robot": "franka",
+        "object_types": ["Cube", "Cylinder", "Sphere"],
+        "table_height": 0.75,
+    },
+}
+
+
+def _gen_lighting_code(lighting: str) -> str:
+    """Generate lighting setup code for a demo scene."""
+    if lighting == "studio":
+        return (
+            "\n# --- Studio Lighting ---\n"
+            "dome = stage.DefinePrim('/World/DomeLight', 'DomeLight')\n"
+            "dome.GetAttribute('inputs:intensity').Set(500.0)\n"
+            "key = stage.DefinePrim('/World/KeyLight', 'DistantLight')\n"
+            "key.GetAttribute('inputs:intensity').Set(3000.0)\n"
+            "key.GetAttribute('inputs:angle').Set(2.0)\n"
+            "_safe_set_rotate_xyz(key, (-45, 30, 0))\n"
+        )
+    if lighting == "warehouse":
+        return (
+            "\n# --- Warehouse Lighting ---\n"
+            "dome = stage.DefinePrim('/World/DomeLight', 'DomeLight')\n"
+            "dome.GetAttribute('inputs:intensity').Set(200.0)\n"
+            "for i in range(3):\n"
+            "    light = stage.DefinePrim(f'/World/CeilingLight_{i}', 'RectLight')\n"
+            "    light.GetAttribute('inputs:intensity').Set(5000.0)\n"
+            "    light.GetAttribute('inputs:width').Set(2.0)\n"
+            "    light.GetAttribute('inputs:height').Set(0.5)\n"
+            "    _safe_set_translate(light, (i * 3.0 - 3.0, 0, 4.0))\n"
+        )
+    # default
+    return (
+        "\n# --- Default Lighting ---\n"
+        "dome = stage.DefinePrim('/World/DomeLight', 'DomeLight')\n"
+        "dome.GetAttribute('inputs:intensity').Set(1000.0)\n"
+        "distant = stage.DefinePrim('/World/DistantLight', 'DistantLight')\n"
+        "distant.GetAttribute('inputs:intensity').Set(3000.0)\n"
+        "_safe_set_rotate_xyz(distant, (-45, 0, 0))\n"
+    )
+
+
+def _gen_physics_block(prim_var: str) -> str:
+    """Generate physics apply block for a prim variable name."""
+    return (
+        f"UsdPhysics.RigidBodyAPI.Apply({prim_var})\n"
+        f"UsdPhysics.CollisionAPI.Apply({prim_var})\n"
+    )
+
+
+def _gen_create_demo_scene(args: Dict) -> str:
+    """Generate a complete demo scene setup script."""
+    demo_type = args["demo_type"]
+    template = _DEMO_TEMPLATES.get(demo_type, _DEMO_TEMPLATES["pick_and_place"])
+    robot = args.get("robot", template["default_robot"])
+    num_objects = args.get("num_objects", 3)
+    ground_plane = args.get("ground_plane", True)
+    physics = args.get("physics", True)
+    lighting = args.get("lighting", "default")
+    table_height = template["table_height"]
+    obj_types = template["object_types"]
+
+    # Resolve robot asset path
+    _LOCAL_ASSETS = config.assets_root_path
+    _ROBOTS_SUBDIR = config.assets_robots_subdir
+    _ROBOTS_DIR = f"{_LOCAL_ASSETS}/{_ROBOTS_SUBDIR}" if _LOCAL_ASSETS else ""
+
+    _ROBOT_FILE_MAP = {
+        "franka": "franka.usd", "ur10": "ur10.usd", "ur5e": "ur5e.usd",
+        "nova_carter": "nova_carter.usd", "jetbot": "jetbot.usd",
+        "spot": "spot.usd", "anymal_c": "anymal_c.usd",
+    }
+    robot_file = _ROBOT_FILE_MAP.get(robot.lower(), f"{robot.lower()}.usd")
+    robot_asset = f"{_ROBOTS_DIR}/{robot_file}" if _ROBOTS_DIR else robot_file
+
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdGeom, UsdPhysics, PhysxSchema, Gf, Sdf",
+        "import random",
+        _SAFE_XFORM_SNIPPET,
+        "stage = omni.usd.get_context().get_stage()",
+        "",
+        f"# === Quick Demo: {demo_type} ===",
+        "",
+    ]
+
+    # Ground plane
+    if ground_plane:
+        lines.extend([
+            "# --- Ground Plane ---",
+            "ground = stage.DefinePrim('/World/GroundPlane', 'Xform')",
+            "plane = stage.DefinePrim('/World/GroundPlane/Plane', 'Plane')",
+            "_safe_set_scale(plane, (10, 10, 1))",
+            "UsdPhysics.CollisionAPI.Apply(plane)",
+            "",
+        ])
+
+    # Physics scene
+    lines.extend([
+        "# --- Physics Scene ---",
+        "if not stage.GetPrimAtPath('/World/PhysicsScene').IsValid():",
+        "    scene_prim = UsdPhysics.Scene.Define(stage, '/World/PhysicsScene')",
+        "    scene_prim.CreateGravityDirectionAttr(Gf.Vec3f(0, 0, -1))",
+        "    scene_prim.CreateGravityMagnitudeAttr(9.81)",
+        "",
+    ])
+
+    # Robot
+    robot_name = robot.replace("_", " ").title().replace(" ", "")
+    lines.extend([
+        f"# --- Robot: {robot} ---",
+        f"robot_prim = stage.DefinePrim('/World/{robot_name}', 'Xform')",
+        f"robot_prim.GetReferences().AddReference('{robot_asset}')",
+    ])
+
+    # Robot positioning depends on demo type
+    if demo_type == "navigation":
+        lines.append(f"_safe_set_translate(robot_prim, (0, 0, 0))")
+    else:
+        lines.append(f"_safe_set_translate(robot_prim, (0, 0, 0))")
+    lines.append("")
+
+    # Table / surface (not for navigation)
+    if demo_type != "navigation":
+        if demo_type == "conveyor":
+            lines.extend([
+                "# --- Conveyor Belt ---",
+                "conveyor = stage.DefinePrim('/World/Conveyor', 'Cube')",
+                f"_safe_set_translate(conveyor, (1.0, 0, {table_height / 2}))",
+                f"_safe_set_scale(conveyor, (2.0, 0.6, {table_height}))",
+                "UsdPhysics.CollisionAPI.Apply(conveyor)",
+                "",
+                "# --- Bins ---",
+                "for i in range(2):",
+                "    bin_prim = stage.DefinePrim(f'/World/Bin_{i}', 'Cube')",
+                f"    _safe_set_translate(bin_prim, (2.5, -0.5 + i * 1.0, 0.15))",
+                "    _safe_set_scale(bin_prim, (0.3, 0.3, 0.3))",
+                "    UsdPhysics.CollisionAPI.Apply(bin_prim)",
+                "",
+            ])
+        elif demo_type == "inspection":
+            lines.extend([
+                "# --- Turntable ---",
+                "turntable = stage.DefinePrim('/World/Turntable', 'Cylinder')",
+                f"_safe_set_translate(turntable, (0.5, 0, {table_height / 2}))",
+                f"_safe_set_scale(turntable, (0.3, 0.3, {table_height}))",
+                "UsdPhysics.CollisionAPI.Apply(turntable)",
+                "",
+                "# --- Inspection Camera ---",
+                "cam = UsdGeom.Camera.Define(stage, '/World/InspectionCamera')",
+                "_safe_set_translate(stage.GetPrimAtPath('/World/InspectionCamera'), (0.5, -0.8, 1.2))",
+                "_safe_set_rotate_xyz(stage.GetPrimAtPath('/World/InspectionCamera'), (-30, 0, 0))",
+                "",
+            ])
+        else:
+            # Standard table for pick_and_place, stacking
+            lines.extend([
+                "# --- Table ---",
+                "table = stage.DefinePrim('/World/Table', 'Cube')",
+                f"_safe_set_translate(table, (0.5, 0, {table_height / 2}))",
+                f"_safe_set_scale(table, (0.8, 1.0, {table_height}))",
+                "UsdPhysics.CollisionAPI.Apply(table)",
+                "",
+            ])
+
+    # Objects
+    lines.append("# --- Objects ---")
+    if demo_type == "navigation":
+        # Obstacles + goal
+        lines.extend([
+            f"obstacle_positions = [(2, 1, 0.5), (-1, 2, 0.5), (1, -1, 0.5), (3, 0, 0.5), (-2, -1, 0.5)]",
+            f"for i in range(min({num_objects}, len(obstacle_positions))):",
+            "    obs = stage.DefinePrim(f'/World/Objects/Obstacle_{i}', 'Cube')",
+            "    pos = obstacle_positions[i]",
+            "    _safe_set_translate(obs, pos)",
+            "    _safe_set_scale(obs, (0.4, 0.4, 1.0))",
+            "    UsdPhysics.CollisionAPI.Apply(obs)",
+            "",
+            "# Goal marker",
+            "goal = stage.DefinePrim('/World/GoalMarker', 'Sphere')",
+            "_safe_set_translate(goal, (4, 3, 0.1))",
+            "_safe_set_scale(goal, (0.2, 0.2, 0.2))",
+            "",
+        ])
+    elif demo_type == "stacking":
+        lines.extend([
+            f"colors = [(0.8, 0.2, 0.2), (0.2, 0.8, 0.2), (0.2, 0.2, 0.8), (0.8, 0.8, 0.2), (0.8, 0.2, 0.8)]",
+            f"for i in range({num_objects}):",
+            "    block = stage.DefinePrim(f'/World/Objects/Block_{i}', 'Cube')",
+            f"    _safe_set_translate(block, (0.5 + (i % 3) * 0.08, -0.2 + (i // 3) * 0.08, {table_height} + 0.025))",
+            "    _safe_set_scale(block, (0.05, 0.05, 0.05))",
+        ])
+        if physics:
+            lines.append("    UsdPhysics.RigidBodyAPI.Apply(block)")
+            lines.append("    UsdPhysics.CollisionAPI.Apply(block)")
+        lines.append("")
+    else:
+        # pick_and_place, conveyor, inspection
+        obj_y_base = 0.0 if demo_type == "conveyor" else 0.0
+        obj_x_base = 0.5 if demo_type != "conveyor" else 1.0
+        lines.extend([
+            f"obj_types = {obj_types!r}",
+            f"for i in range({num_objects}):",
+            "    otype = obj_types[i % len(obj_types)]",
+            "    obj = stage.DefinePrim(f'/World/Objects/Obj_{i}', otype)",
+            f"    _safe_set_translate(obj, ({obj_x_base} + (i % 3) * 0.12, {obj_y_base} + (i // 3) * 0.12 - 0.15, {table_height} + 0.025))",
+            "    _safe_set_scale(obj, (0.04, 0.04, 0.04))",
+        ])
+        if physics:
+            lines.append("    UsdPhysics.RigidBodyAPI.Apply(obj)")
+            lines.append("    UsdPhysics.CollisionAPI.Apply(obj)")
+        lines.append("")
+
+    # Lighting
+    lines.append(_gen_lighting_code(lighting))
+
+    # Summary
+    lines.append(f"print('Quick Demo [{demo_type}]: robot={robot}, objects={num_objects}, lighting={lighting}')")
+
+    return "\n".join(lines)
+
+
+async def _handle_list_demo_types(args: Dict) -> Dict:
+    """Return all available demo templates."""
+    demos = []
+    for dtype, tmpl in _DEMO_TEMPLATES.items():
+        demos.append({
+            "type": dtype,
+            "description": tmpl["description"],
+            "default_robot": tmpl["default_robot"],
+            "object_types": tmpl["object_types"],
+        })
+    return {"demos": demos, "count": len(demos)}
+
+
+def _gen_add_demo_objects(args: Dict) -> str:
+    """Generate code to add more objects to an existing demo scene."""
+    demo_type = args["demo_type"]
+    prim_root = args.get("prim_root", "/World/Objects")
+    count = args.get("count", 3)
+    randomize = args.get("randomize", True)
+    template = _DEMO_TEMPLATES.get(demo_type, _DEMO_TEMPLATES["pick_and_place"])
+    obj_types = template["object_types"]
+    table_height = template["table_height"]
+
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdGeom, UsdPhysics, Gf",
+        "import random",
+        _SAFE_XFORM_SNIPPET,
+        "stage = omni.usd.get_context().get_stage()",
+        "",
+        f"# Add {count} objects for {demo_type} demo",
+        f"prim_root = '{prim_root}'",
+        "if not stage.GetPrimAtPath(prim_root).IsValid():",
+        "    stage.DefinePrim(prim_root, 'Xform')",
+        "",
+        f"obj_types = {obj_types!r}",
+        f"for i in range({count}):",
+        "    otype = obj_types[i % len(obj_types)]",
+        f"    obj = stage.DefinePrim(f'{{prim_root}}/Extra_{{i}}', otype)",
+    ]
+
+    if demo_type == "navigation":
+        if randomize:
+            lines.extend([
+                "    x = random.uniform(-3, 3)",
+                "    y = random.uniform(-3, 3)",
+                "    _safe_set_translate(obj, (x, y, 0.5))",
+                "    s = random.uniform(0.3, 0.8)",
+                "    _safe_set_scale(obj, (s, s, 1.0))",
+            ])
+        else:
+            lines.extend([
+                "    _safe_set_translate(obj, (1 + i * 1.5, 0, 0.5))",
+                "    _safe_set_scale(obj, (0.4, 0.4, 1.0))",
+            ])
+        lines.append("    UsdPhysics.CollisionAPI.Apply(obj)")
+    else:
+        if randomize:
+            lines.extend([
+                f"    x = 0.4 + random.uniform(-0.15, 0.15)",
+                f"    y = random.uniform(-0.2, 0.2)",
+                f"    _safe_set_translate(obj, (x, y, {table_height} + 0.025))",
+                "    s = 0.03 + random.uniform(0, 0.03)",
+                "    _safe_set_scale(obj, (s, s, s))",
+            ])
+        else:
+            lines.extend([
+                f"    _safe_set_translate(obj, (0.5 + i * 0.1, 0, {table_height} + 0.025))",
+                "    _safe_set_scale(obj, (0.04, 0.04, 0.04))",
+            ])
+        lines.extend([
+            "    UsdPhysics.RigidBodyAPI.Apply(obj)",
+            "    UsdPhysics.CollisionAPI.Apply(obj)",
+        ])
+
+    lines.append("")
+    lines.append(f"print(f'Added {count} objects under {{prim_root}}')")
+
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["create_demo_scene"] = _gen_create_demo_scene
+DATA_HANDLERS["list_demo_types"] = _handle_list_demo_types
+CODE_GEN_HANDLERS["add_demo_objects"] = _gen_add_demo_objects
