@@ -942,4 +942,115 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+    # ─── GR00T Advanced Tooling (Phase 7G Addendum) ────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "extract_attention_maps",
+            "description": "Extract cross-attention maps from GR00T's DiT for a failed action. Shows which visual patches and language tokens drove the policy. Layer 12 features per GR00T paper.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "checkpoint_path": {"type": "string", "description": "Path to GR00T checkpoint"},
+                    "observation_path": {"type": "string", "description": "Path to observation dump (image + state)"},
+                    "layer": {"type": "integer", "description": "ViT layer to tap (default 12)"},
+                },
+                "required": ["checkpoint_path", "observation_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_ood",
+            "description": "Detect out-of-distribution observations. Three tiers: action variance/autocorr (Tier 1, free), 4-sample DiT variance (Tier 2, +15ms), Mahalanobis on 12th-layer embeddings (Tier 3, requires calibration).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tier": {"type": "integer", "enum": [1, 2, 3], "description": "Detection tier (1=cheap, 3=best)"},
+                    "action_sequence": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}, "description": "Recent action history for Tier 1"},
+                    "checkpoint_path": {"type": "string", "description": "Path to GR00T checkpoint (for Tier 2/3)"},
+                    "calibration_path": {"type": "string", "description": "Path to calibration stats (for Tier 3)"},
+                },
+                "required": ["tier"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "suggest_data_mix",
+            "description": "Recommend sim/real/video data ratio for GR00T fine-tuning. Uses NVIDIA's validated 1:1 real:neural recipe (40% gain over real-only).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_type": {"type": "string", "description": "Task category (e.g. 'tabletop pick-and-place', 'mobile navigation')"},
+                    "available_data": {"type": "object", "description": "Counts: {real_demos, sim_demos, video_demos}"},
+                },
+                "required": ["task_type", "available_data"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "suggest_finetune_config",
+            "description": "Recommend layer freeze/tune strategy for GR00T fine-tuning based on task similarity, hardware, and data size. Avoids 'Don't Blind Your VLA' OOD loss.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_type": {"type": "string", "enum": ["similar_to_pretrain", "new_visual_domain", "new_embodiment"], "description": "Task similarity"},
+                    "hardware": {"type": "string", "description": "GPU model (e.g. 'A6000', 'RTX 4090', 'RTX 4080')"},
+                    "data_size": {"type": "integer", "description": "Number of training demos available"},
+                },
+                "required": ["task_type", "hardware"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "monitor_forgetting",
+            "description": "Detect catastrophic forgetting during GR00T fine-tuning. Runs 30-example VQA regression suite + computes per-layer weight drift. Alerts on >20% VQA score drop.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "checkpoint_dir": {"type": "string", "description": "Directory containing checkpoint files"},
+                    "base_model": {"type": "string", "description": "Path to base GR00T model for comparison"},
+                },
+                "required": ["checkpoint_dir", "base_model"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "export_policy",
+            "description": "Export GR00T checkpoint to deployment format (TensorRT bf16). Targets: Jetson AGX Orin (5.8 Hz), Jetson Orin NX (~3 Hz, no FP8), x86+RTX 4090 (~15 Hz).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "checkpoint": {"type": "string", "description": "Path to .pt checkpoint"},
+                    "target_device": {"type": "string", "enum": ["jetson_agx_orin", "jetson_orin_nx", "x86_rtx4090", "x86_a6000"], "description": "Deployment target"},
+                    "inference_budget_ms": {"type": "number", "description": "Max inference time per step in ms"},
+                },
+                "required": ["checkpoint", "target_device"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_checkpoint",
+            "description": "Analyze a GR00T checkpoint: detect embodiment, training steps, per-layer drift (vision/DiT/adapter/LM), action statistics, forgetting risk.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "checkpoint_path": {"type": "string", "description": "Path to .pt checkpoint file"},
+                    "base_model_path": {"type": "string", "description": "Optional base model for drift comparison"},
+                },
+                "required": ["checkpoint_path"],
+            },
+        },
+    },
 ]
