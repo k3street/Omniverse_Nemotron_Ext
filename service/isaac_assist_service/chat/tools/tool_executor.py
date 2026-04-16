@@ -2242,3 +2242,53 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Stage Analysis ───────────────────────────────────────────────────────────
+
+async def _handle_run_stage_analysis(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Run all (or selected) validator packs against the live stage."""
+    from ...analysis.orchestrator import AnalysisOrchestrator
+
+    # 1. Fetch full stage context from Kit
+    if not await kit_tools.is_kit_rpc_alive():
+        return {"error": "Kit RPC is not reachable — cannot analyse the stage."}
+
+    try:
+        stage_data = await kit_tools.get_stage_context(full=True)
+    except Exception as e:
+        return {"error": f"Failed to fetch stage context: {e}"}
+
+    # 2. Build analyser with requested packs (or all)
+    enabled_packs = args.get("packs") or None
+    analyzer = AnalysisOrchestrator(enabled_packs=enabled_packs)
+
+    # 3. Run analysis
+    result = analyzer.run_analysis(stage_data)
+
+    # 4. Serialize
+    results = []
+    for f in result.findings:
+        entry = {
+            "rule": f.rule_id,
+            "severity": f.severity,
+            "prim": f.prim_path,
+            "message": f.message,
+        }
+        if f.fix_suggestion:
+            entry["fix_hint"] = f.fix_suggestion.description
+        results.append(entry)
+
+    summary = {}
+    for r in results:
+        summary[r["severity"]] = summary.get(r["severity"], 0) + 1
+
+    return {
+        "total_findings": len(results),
+        "summary": summary,
+        "findings": results[:50],  # cap to avoid huge payloads
+        "truncated": len(results) > 50,
+    }
+
+
+DATA_HANDLERS["run_stage_analysis"] = _handle_run_stage_analysis

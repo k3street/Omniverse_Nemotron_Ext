@@ -74,6 +74,7 @@ TOOL_CATEGORIES: Dict[str, List[str]] = {
     "rl_training": ["create_isaaclab_env", "launch_training"],
     "sdg": ["configure_sdg"],
     "export": ["export_scene_package"],
+    "stage_analysis": ["run_stage_analysis"],
     "scripting": ["run_usd_script"],
 }
 
@@ -113,6 +114,8 @@ _KEYWORD_CATEGORIES: List[tuple] = [
      {"sdg"}),
     (re.compile(r"export|package|save.?scene|project.?files", re.I),
      {"export"}),
+    (re.compile(r"diagnos|validat|analyz|analyse|check.?error|what.?s.?wrong|stage.?analys|health.?check|scan.?scene", re.I),
+     {"stage_analysis", "scene_query", "console"}),
     (re.compile(r"move|teleport|position|translate|scale|rotate|transform", re.I),
      {"usd_core"}),
     (re.compile(r"cube|sphere|cylinder|cone|plane|mesh|prim|xform|light|dome", re.I),
@@ -132,7 +135,7 @@ _KEYWORD_CATEGORIES: List[tuple] = [
 # Intent → default tool categories (always included for that intent)
 _INTENT_CATEGORIES: Dict[str, Set[str]] = {
     "general_query":   {"scene_query", "knowledge"},
-    "scene_diagnose":  {"scene_query", "console", "scripting"},
+    "scene_diagnose":  {"scene_query", "console", "scripting", "stage_analysis"},
     "vision_inspect":  {"vision", "camera_viewport"},
     "prim_inspect":    {"scene_query", "usd_core"},
     "patch_request":   {"usd_core", "scripting"},

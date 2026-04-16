@@ -942,4 +942,24 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Stage Analysis ───────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "run_stage_analysis",
+            "description": "Run the Stage Analyzer to diagnose problems in the current scene. Checks for broken references, physics/material mismatches, articulation issues, sensor wiring, ROS2 bridge readiness, and performance warnings. Use when the user asks to 'diagnose the scene', 'check for errors', 'validate the stage', 'what's wrong with my scene', or 'run analysis'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "packs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of validator packs to run. Available: schema_consistency, import_health, material_physics, articulation_integrity, sensor_completeness, ros_bridge_readiness, performance_warnings, isaaclab_sanity. Default: all packs.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
