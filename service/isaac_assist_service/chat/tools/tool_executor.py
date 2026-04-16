@@ -1982,7 +1982,7 @@ def _gen_launch_training(args: Dict) -> str:
         f"    '--max_iterations', str(max_iterations),",
         f"    '--log_dir', log_dir,",
         "]",
-        "print(f'Launching training: {" ".join(cmd)}')",
+        "print('Launching training: ' + ' '.join(cmd))",
         "proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)",
         "print(f'Training started (PID: {proc.pid}). Checkpoints → {log_dir}')",
     ]
@@ -2232,3 +2232,499 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ─── Phase 5 Addendum: Pedagogy & Uncertainty ────────────────────────────────
+# Five small handlers that let the assistant explain its tool choices, hedge
+# uncertain claims, and emit teaching artifacts the user can keep on disk.
+# Pure data / code-gen — no Kit RPC, no subprocess, no network.
+
+# Canonical category for every tool the assistant routinely picks. Keep this
+# in sync with ISAAC_SIM_TOOLS in tool_schemas.py — missing tools are handled
+# via the `known=False` branch of explain_tool_choice.
+_TOOL_CATEGORIES: Dict[str, str] = {
+    "create_prim": "scene_construction",
+    "delete_prim": "scene_construction",
+    "set_attribute": "scene_construction",
+    "add_reference": "scene_construction",
+    "apply_api_schema": "scene_construction",
+    "clone_prim": "scene_construction",
+    "create_deformable_mesh": "physics",
+    "create_omnigraph": "graph",
+    "create_material": "materials",
+    "assign_material": "materials",
+    "sim_control": "simulation",
+    "set_physics_params": "physics",
+    "teleport_prim": "scene_construction",
+    "set_joint_targets": "robotics",
+    "import_robot": "robotics",
+    "anchor_robot": "robotics",
+    "set_viewport_camera": "viewport",
+    "configure_sdg": "synthetic_data",
+    "lookup_product_spec": "knowledge_lookup",
+    "scene_summary": "introspection",
+    "capture_viewport": "introspection",
+    "get_console_errors": "diagnostics",
+    "get_articulation_state": "introspection",
+    "list_all_prims": "introspection",
+    "measure_distance": "introspection",
+    "get_debug_info": "diagnostics",
+    "lookup_knowledge": "knowledge_lookup",
+    "explain_error": "diagnostics",
+    "catalog_search": "knowledge_lookup",
+    "nucleus_browse": "knowledge_lookup",
+    "download_asset": "scene_construction",
+    "generate_scene_blueprint": "scene_construction",
+    "build_scene_from_blueprint": "scene_construction",
+    "create_isaaclab_env": "training",
+    "launch_training": "training",
+    "vision_detect_objects": "vision",
+    "vision_bounding_boxes": "vision",
+    "vision_plan_trajectory": "vision",
+    "vision_analyze_scene": "vision",
+    "export_scene_package": "export",
+    "explain_tool_choice": "pedagogy",
+    "assess_answer_confidence": "pedagogy",
+    "generate_teaching_snippet": "pedagogy",
+    "generate_uncertainty_report_script": "pedagogy",
+    "generate_pedagogy_card_script": "pedagogy",
+}
+
+# Allowed signal kinds — anything else falls back to "context".
+_SIGNAL_KINDS = ("keyword", "pattern", "context", "fallback")
+
+# Heuristic table: which signal kinds are most likely to live in which signal.
+_KIND_HINTS = (
+    ("user said ", "context"),
+    ("matched pattern", "pattern"),
+    ("retrieved doc", "pattern"),
+    ("fallback", "fallback"),
+    ("default", "fallback"),
+)
+
+# Per-source weights for assess_answer_confidence. Vetted sources weight 1.0,
+# indexed sources 0.7, llm_prior 0.2, unknown kinds use the llm_prior weight.
+_SOURCE_WEIGHTS: Dict[str, float] = {
+    "sensor_spec": 1.0,
+    "user_provided": 1.0,
+    "knowledge_base": 0.7,
+    "code_pattern": 0.7,
+    "llm_prior": 0.2,
+}
+
+# Hedge tokens we accept as honest uncertainty already present in the claim.
+_HEDGE_TOKENS = (
+    "about ", "roughly ", "approximately ", "around ",
+    "i think", "i believe", "probably ", "likely ",
+    "maybe ", "could be ", "appears to ", "seems ",
+)
+
+# Curated, deterministic glossary for generate_teaching_snippet.
+_TEACHING_GLOSSARY: Dict[str, Dict[str, Any]] = {
+    "articulation_root": {
+        "see_also": ["rigid_body_api", "physics_scene"],
+        "variants": {
+            "beginner": (
+                "An articulation root marks the top of a chain of linked joints. "
+                "Without it, PhysX treats each link as a free-floating body and "
+                "the joints don't behave like a real robot."
+            ),
+            "intermediate": (
+                "ArticulationRootAPI tags the prim that owns a kinematic chain. "
+                "PhysX uses this to build a single articulation reduced-coordinate "
+                "solver for the chain — one root per chain, applied above the "
+                "first joint."
+            ),
+            "advanced": (
+                "ArticulationRootAPI applied on the chain's root prim turns the "
+                "subtree into a Featherstone reduced-coordinate articulation. "
+                "Misplacing the root (e.g. on a child link) breaks joint "
+                "Jacobians and produces silent damping artifacts."
+            ),
+        },
+    },
+    "rigid_body_api": {
+        "see_also": ["articulation_root", "physics_scene"],
+        "variants": {
+            "beginner": (
+                "RigidBodyAPI tells the physics engine that a prim is a solid "
+                "object that can move, fall, and collide with other things."
+            ),
+            "intermediate": (
+                "UsdPhysics.RigidBodyAPI marks a prim as a dynamic rigid body. "
+                "Combine with CollisionAPI for collisions and MassAPI for an "
+                "explicit mass; otherwise PhysX infers mass from the mesh "
+                "volume and a default density."
+            ),
+            "advanced": (
+                "RigidBodyAPI controls the simulation owner: kinematic vs "
+                "dynamic, sleep thresholds, linear/angular damping, and CCD. "
+                "Apply only on leaf prims with geometry — applying on Xforms "
+                "above an articulation chain conflicts with the articulation "
+                "solver."
+            ),
+        },
+    },
+    "xform_op_order": {
+        "see_also": ["articulation_root"],
+        "variants": {
+            "beginner": (
+                "USD applies transforms in a specific order — translate, then "
+                "rotate, then scale by default. Calling AddTranslateOp twice "
+                "on the same prim crashes; reuse the existing op instead."
+            ),
+            "intermediate": (
+                "Xformable.GetOrderedXformOps() returns the transform stack in "
+                "evaluation order. The xformOpOrder attribute records the "
+                "stack; mutating it without clearing existing ops is the "
+                "single most common 'AddXformOp error' source in Isaac Sim."
+            ),
+            "advanced": (
+                "xformOpOrder is a token array attribute that drives "
+                "Xformable.ComputeLocalToWorldTransform. Idempotent setters "
+                "must walk GetOrderedXformOps and Set() the existing op of "
+                "the matching TypeTranslate / TypeScale / TypeRotateXYZ rather "
+                "than re-adding."
+            ),
+        },
+    },
+    "physics_scene": {
+        "see_also": ["rigid_body_api"],
+        "variants": {
+            "beginner": (
+                "A physics scene is the global container for gravity, the "
+                "solver, and the timestep. Without one on the stage, nothing "
+                "physical actually moves when you press Play."
+            ),
+            "intermediate": (
+                "UsdPhysics.Scene defines gravity, broadphase, and solver "
+                "settings. Exactly one is expected per stage; PhysxSceneAPI on "
+                "the same prim tunes substeps, GPU settings, and CCD."
+            ),
+            "advanced": (
+                "PhysicsScene + PhysxSceneAPI together drive the PhysX solver "
+                "instance: timeStepsPerSecond, gpuMaxRigidContactCount, "
+                "enableCCD, and broadphaseType. Multiple scenes are legal but "
+                "Isaac Sim's single-stage assumption breaks down with > 1."
+            ),
+        },
+    },
+    "usd_variant_set": {
+        "see_also": [],
+        "variants": {
+            "beginner": (
+                "A variant set is a switch on a prim that swaps between named "
+                "options — like picking 'red' or 'blue' for a chair without "
+                "duplicating the whole asset."
+            ),
+            "intermediate": (
+                "VariantSets attach named alternates to a prim. Common uses: "
+                "LOD, material variants, and gripper open/close. Selecting a "
+                "variant edits the composition arc, not the underlying data."
+            ),
+            "advanced": (
+                "Sdf.PrimSpec.variantSets define authored variants; "
+                "Usd.VariantSet.SetVariantSelection() writes the selection "
+                "into the current edit target. Variant payloads compose at "
+                "stage load time — heavy variants benefit from payload guards."
+            ),
+        },
+    },
+}
+
+
+def _categorise_signal(text: str) -> str:
+    """Best-effort kind classification for a free-form signal string."""
+    lower = text.lower()
+    for hint, kind in _KIND_HINTS:
+        if hint in lower:
+            return kind
+    # Short tokens look like keyword matches; longer phrases look like context.
+    if len(text.split()) <= 3:
+        return "keyword"
+    return "context"
+
+
+def _suggest_concepts(query: str) -> List[str]:
+    """Return up to three glossary keys that share a token with the query."""
+    if not query:
+        return []
+    q = query.lower().replace(" ", "_")
+    out = []
+    for key in _TEACHING_GLOSSARY:
+        if q == key:
+            continue
+        if q in key or key in q or any(tok in key for tok in q.split("_") if tok):
+            out.append(key)
+    return out[:3]
+
+
+async def _handle_explain_tool_choice(args: Dict) -> Dict:
+    tool_name = args.get("tool_name", "")
+    user_message = args.get("user_message", "")
+    matched_signals = args.get("matched_signals") or []
+    alternatives = args.get("alternatives_considered") or []
+
+    if tool_name not in _TOOL_CATEGORIES:
+        suggestions = [t for t in _TOOL_CATEGORIES if tool_name and tool_name in t][:5]
+        return {
+            "known": False,
+            "tool": tool_name,
+            "suggestions": suggestions,
+            "user_message_echo": user_message,
+            "message": f"Unknown tool '{tool_name}'. Did you mean one of: {suggestions}?",
+        }
+
+    rationale = []
+    for sig in matched_signals:
+        if not isinstance(sig, str) or not sig.strip():
+            continue
+        kind = _categorise_signal(sig)
+        weight = {"keyword": 0.8, "pattern": 0.7, "context": 0.6, "fallback": 0.3}[kind]
+        rationale.append({"signal": sig, "kind": kind, "weight": weight})
+
+    # Confidence band: derived from rationale strength.
+    if not rationale:
+        confidence = "low"
+    else:
+        avg = sum(r["weight"] for r in rationale) / len(rationale)
+        if avg >= 0.7:
+            confidence = "high"
+        elif avg >= 0.5:
+            confidence = "medium"
+        else:
+            confidence = "low"
+
+    return {
+        "known": True,
+        "tool": tool_name,
+        "category": _TOOL_CATEGORIES[tool_name],
+        "rationale": rationale,
+        "alternatives_considered": [a for a in alternatives if isinstance(a, str)],
+        "confidence": confidence,
+        "user_message_echo": user_message,
+    }
+
+
+async def _handle_assess_answer_confidence(args: Dict) -> Dict:
+    claim = args.get("claim", "") or ""
+    sources = args.get("sources") or []
+
+    # Detect hedges already present.
+    lower = claim.lower()
+    has_hedge = any(tok in lower for tok in _HEDGE_TOKENS)
+
+    warnings: List[str] = []
+    sources_used: List[str] = []
+    weights: List[float] = []
+    seen_kinds = set()
+    suggested_prefix: Optional[str] = None
+
+    for src in sources:
+        if not isinstance(src, dict):
+            warnings.append("ignored non-dict source entry")
+            continue
+        kind = src.get("kind", "llm_prior")
+        sid = src.get("id", "?")
+        if kind not in _SOURCE_WEIGHTS:
+            warnings.append(f"unknown source kind '{kind}' — treated as llm_prior")
+            kind_weight = _SOURCE_WEIGHTS["llm_prior"]
+        else:
+            kind_weight = _SOURCE_WEIGHTS[kind]
+        weights.append(kind_weight)
+        sources_used.append(f"{kind}:{sid}")
+        seen_kinds.add(kind)
+
+    if not weights:
+        score = 0.1 if not has_hedge else 0.15
+        confidence = "guess"
+    else:
+        # Average weight across sources, capped at 1.0.
+        score = min(1.0, sum(weights) / len(weights))
+        if score >= 0.85:
+            confidence = "high"
+        elif score >= 0.6:
+            confidence = "medium"
+        elif score >= 0.3:
+            confidence = "low"
+        else:
+            confidence = "guess"
+
+    # Suggest a prefix when we have a vetted source but the claim is unhedged.
+    if not has_hedge and ("sensor_spec" in seen_kinds or "user_provided" in seen_kinds):
+        # Pick the first vetted source for the prefix.
+        for src in sources:
+            if isinstance(src, dict) and src.get("kind") in ("sensor_spec", "user_provided"):
+                suggested_prefix = f"According to {src.get('id', 'the source')},"
+                break
+
+    # Honest signal: an un-hedged claim with no sources is dangerous.
+    if not has_hedge and not weights:
+        warnings.append(
+            "Un-hedged claim with no sources — consider adding 'I think' or "
+            "calling lookup_product_spec / lookup_knowledge first."
+        )
+
+    return {
+        "claim": claim,
+        "confidence": confidence,
+        "score": round(score, 3),
+        "has_hedge": has_hedge,
+        "sources_used": sources_used,
+        "suggested_prefix": suggested_prefix,
+        "warnings": warnings,
+    }
+
+
+async def _handle_generate_teaching_snippet(args: Dict) -> Dict:
+    concept = (args.get("concept") or "").strip()
+    audience = args.get("audience") or "intermediate"
+    if audience not in ("beginner", "intermediate", "advanced"):
+        audience = "intermediate"
+    max_chars = int(args.get("max_chars") or 400)
+
+    entry = _TEACHING_GLOSSARY.get(concept)
+    if entry is None:
+        return {
+            "known": False,
+            "concept": concept,
+            "audience": audience,
+            "suggestions": _suggest_concepts(concept),
+            "message": f"No teaching snippet for '{concept}'. Closest matches: {_suggest_concepts(concept)}",
+        }
+
+    text = entry["variants"].get(audience) or entry["variants"]["intermediate"]
+    truncated = False
+    if len(text) > max_chars:
+        # Truncate on a sentence boundary if possible. Reserve one character
+        # for the ellipsis when no clean boundary fits.
+        cut = text[:max_chars]
+        last_period = cut.rfind(". ")
+        if last_period > 40:
+            text = cut[: last_period + 1]
+        else:
+            text = cut[: max(0, max_chars - 1)].rstrip() + "…"
+        truncated = True
+
+    return {
+        "known": True,
+        "concept": concept,
+        "audience": audience,
+        "snippet": text,
+        "see_also": list(entry.get("see_also", [])),
+        "truncated": truncated,
+    }
+
+
+def _gen_uncertainty_report_script(args: Dict) -> str:
+    session_id = args.get("session_id") or "default_session"
+    output_path = args.get("output_path") or f"workspace/uncertainty_reports/{session_id}.md"
+    return (
+        '"""Generated by Isaac Assist (Phase 5 addendum) — uncertainty report."""\n'
+        "import json\n"
+        "import os\n"
+        "from collections import Counter\n"
+        "from pathlib import Path\n"
+        "\n"
+        f"SESSION_ID = {repr(session_id)}\n"
+        f"OUTPUT_PATH = Path({repr(output_path)})\n"
+        "AUDIT_LOG = Path('workspace/telemetry/audit.jsonl')\n"
+        "\n"
+        "claims = []\n"
+        "if AUDIT_LOG.exists():\n"
+        "    for line in AUDIT_LOG.read_text(encoding='utf-8').splitlines():\n"
+        "        line = line.strip()\n"
+        "        if not line:\n"
+        "            continue\n"
+        "        try:\n"
+        "            entry = json.loads(line)\n"
+        "        except json.JSONDecodeError:\n"
+        "            continue\n"
+        "        meta = entry.get('metadata') or {}\n"
+        "        if entry.get('event_type') != 'assess_answer_confidence':\n"
+        "            continue\n"
+        "        if meta.get('session_id', 'default_session') != SESSION_ID:\n"
+        "            continue\n"
+        "        claims.append(meta)\n"
+        "\n"
+        "bands = Counter(c.get('confidence', 'guess') for c in claims)\n"
+        "low = [c for c in claims if c.get('confidence') in ('low', 'guess')]\n"
+        "low.sort(key=lambda c: c.get('score', 0.0))\n"
+        "low = low[:5]\n"
+        "\n"
+        "lines = ['# Uncertainty Report — session ' + SESSION_ID, '']\n"
+        "lines.append('Total claims scored: ' + str(len(claims)))\n"
+        "lines.append('')\n"
+        "lines.append('## Confidence breakdown')\n"
+        "for band in ('high', 'medium', 'low', 'guess'):\n"
+        "    lines.append('- ' + band + ': ' + str(bands.get(band, 0)))\n"
+        "lines.append('')\n"
+        "lines.append('## Top 5 lowest-confidence claims')\n"
+        "if not low:\n"
+        "    lines.append('(none)')\n"
+        "for c in low:\n"
+        "    lines.append('- score=' + str(c.get('score')) + ' — ' + str(c.get('claim', ''))[:160])\n"
+        "    srcs = c.get('sources_used') or []\n"
+        "    lines.append('  sources: ' + (', '.join(srcs) if srcs else 'none'))\n"
+        "    prefix = c.get('suggested_prefix')\n"
+        "    if prefix:\n"
+        "        lines.append('  suggested rewrite: ' + prefix + ' ' + str(c.get('claim', '')))\n"
+        "\n"
+        "OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)\n"
+        "OUTPUT_PATH.write_text('\\n'.join(lines) + '\\n', encoding='utf-8')\n"
+        "print(f'Wrote uncertainty report to {OUTPUT_PATH}')\n"
+    )
+
+
+def _gen_pedagogy_card_script(args: Dict) -> str:
+    concept = args.get("concept") or ""
+    output_path = args.get("output_path") or f"workspace/pedagogy_cards/{concept}.md"
+    include_code_example = bool(args.get("include_code_example", True))
+    return (
+        '"""Generated by Isaac Assist (Phase 5 addendum) — pedagogy card."""\n'
+        "from pathlib import Path\n"
+        "\n"
+        f"CONCEPT = {repr(concept)}\n"
+        f"OUTPUT_PATH = Path({repr(output_path)})\n"
+        f"INCLUDE_CODE_EXAMPLE = {repr(include_code_example)}\n"
+        "\n"
+        "lines = ['# ' + CONCEPT.replace('_', ' ').title(), '']\n"
+        "lines.append('## What')\n"
+        "lines.append('Concise definition of `' + CONCEPT + '`. Replace this paragraph with a curated explanation.')\n"
+        "lines.append('')\n"
+        "lines.append('## Why it matters')\n"
+        "lines.append('Explain the failure modes that show up when this concept is applied wrong.')\n"
+        "lines.append('')\n"
+        "lines.append('## Example')\n"
+        "if INCLUDE_CODE_EXAMPLE:\n"
+        "    snippet = None\n"
+        "    try:\n"
+        "        from service.isaac_assist_service.retrieval.context_retriever import find_matching_patterns\n"
+        "        matches = find_matching_patterns(CONCEPT, limit=1)\n"
+        "        if matches:\n"
+        "            snippet = matches[0].get('code')\n"
+        "    except Exception:\n"
+        "        snippet = None\n"
+        "    if snippet:\n"
+        "        lines.append('```python')\n"
+        "        lines.append(snippet)\n"
+        "        lines.append('```')\n"
+        "    else:\n"
+        "        lines.append('_no example available — add one when authoring this card_')\n"
+        "else:\n"
+        "    lines.append('_code example skipped (include_code_example=False)_')\n"
+        "lines.append('')\n"
+        "lines.append('## When it goes wrong')\n"
+        "lines.append('List the typical error messages and what they point to.')\n"
+        "\n"
+        "OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)\n"
+        "OUTPUT_PATH.write_text('\\n'.join(lines) + '\\n', encoding='utf-8')\n"
+        "print(f'Wrote pedagogy card to {OUTPUT_PATH}')\n"
+    )
+
+
+DATA_HANDLERS["explain_tool_choice"] = _handle_explain_tool_choice
+DATA_HANDLERS["assess_answer_confidence"] = _handle_assess_answer_confidence
+DATA_HANDLERS["generate_teaching_snippet"] = _handle_generate_teaching_snippet
+CODE_GEN_HANDLERS["generate_uncertainty_report_script"] = _gen_uncertainty_report_script
+CODE_GEN_HANDLERS["generate_pedagogy_card_script"] = _gen_pedagogy_card_script

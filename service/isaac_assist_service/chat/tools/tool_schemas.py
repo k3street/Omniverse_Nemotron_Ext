@@ -926,6 +926,107 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Phase 5 Addendum: Pedagogy & Uncertainty ────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "explain_tool_choice",
+            "description": "Explain why a particular tool was selected for the user's request. Returns a structured rationale (matched signals, alternatives considered, confidence band) that the chat UI can surface as a 'why this tool?' popover. Use after picking a non-obvious tool, especially when the user asks 'why did you do that?' or when chaining several tools in a row.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tool_name": {"type": "string", "description": "Name of the tool that was (or will be) invoked, e.g. 'import_robot', 'create_prim', 'lookup_knowledge'."},
+                    "user_message": {"type": "string", "description": "The user message that triggered the tool choice."},
+                    "matched_signals": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Free-form list of signals that drove the choice — keywords, retrieved patterns, prior context. Each entry is one short string.",
+                    },
+                    "alternatives_considered": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Other tools that were considered but rejected. Optional.",
+                    },
+                },
+                "required": ["tool_name", "user_message"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "assess_answer_confidence",
+            "description": "Score the confidence of a factual claim before sending it to the user. Returns a confidence band (high / medium / low / guess), a numeric score, and a suggested prefix or hedge. Use whenever the assistant is about to assert a number, dimension, parameter value, or product spec — especially when sources are weak.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "claim": {"type": "string", "description": "The assertion the model is about to make, e.g. 'The Franka Panda has a reach of 855 mm.'"},
+                    "sources": {
+                        "type": "array",
+                        "description": "List of source entries backing the claim. Each entry: {kind, id, excerpt?}. Empty list means 'no sources' and caps the score at 0.1.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {"type": "string", "enum": ["sensor_spec", "knowledge_base", "code_pattern", "user_provided", "llm_prior"]},
+                                "id": {"type": "string", "description": "Stable identifier for the source — spec name, doc section, pattern id, etc."},
+                                "excerpt": {"type": "string", "description": "Short verbatim excerpt that supports the claim. Optional."},
+                            },
+                            "required": ["kind", "id"],
+                        },
+                    },
+                },
+                "required": ["claim"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_teaching_snippet",
+            "description": "Look up a curated teaching snippet for an Isaac Sim / USD concept (e.g. 'articulation_root', 'rigid_body_api', 'xform_op_order', 'physics_scene', 'usd_variant_set'). Returns a short audience-tuned explanation suitable for inline display in the chat UI. Use when the user asks 'what is X?' or appears confused by a piece of jargon the assistant just used.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "concept": {"type": "string", "description": "Concept key — e.g. 'articulation_root', 'rigid_body_api', 'xform_op_order'."},
+                    "audience": {"type": "string", "enum": ["beginner", "intermediate", "advanced"], "description": "Target reader level. Default 'intermediate'."},
+                    "max_chars": {"type": "integer", "description": "Hard cap on snippet length, truncated on a sentence boundary. Default 400."},
+                },
+                "required": ["concept"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_uncertainty_report_script",
+            "description": "Generate a Python script that reads the session audit log, aggregates confidence scores from assess_answer_confidence calls, and writes a Markdown uncertainty report to disk. Use at the end of a session, or when the user asks 'how confident were you?' or 'show me what you weren't sure about'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Session id to filter the audit log by. Default 'default_session'."},
+                    "output_path": {"type": "string", "description": "Path where the Markdown report will be written. Default 'workspace/uncertainty_reports/<session_id>.md'."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_pedagogy_card_script",
+            "description": "Generate a Python script that writes a self-contained Markdown 'teaching card' for a concept (what / why / example / when-wrong sections). Use when the user wants to keep, share, or commit an explanation alongside their scene files.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "concept": {"type": "string", "description": "Concept key — same vocabulary as generate_teaching_snippet."},
+                    "output_path": {"type": "string", "description": "Path where the card .md file will be written. Default 'workspace/pedagogy_cards/<concept>.md'."},
+                    "include_code_example": {"type": "boolean", "description": "If true, the script attempts to embed a matching code example from the code-pattern store. Default true."},
+                },
+                "required": ["concept"],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",
