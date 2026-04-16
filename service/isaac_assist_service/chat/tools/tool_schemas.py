@@ -942,4 +942,66 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+    # ─── Sim-to-Real Gap Tooling (New Capability) ──────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "measure_sim_real_gap",
+            "description": "Compare sim and real trajectories to quantify the sim-to-real gap. Returns per-joint errors, EE Cartesian error, observation distribution gap.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sim_trajectory": {"type": "string", "description": "Path to sim trajectory file (HDF5 or CSV)"},
+                    "real_trajectory": {"type": "string", "description": "Path to real trajectory file (HDF5 or CSV)"},
+                },
+                "required": ["sim_trajectory", "real_trajectory"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "suggest_parameter_adjustment",
+            "description": "Given a gap report, suggest which physics parameters (friction, damping, stiffness) to adjust to close the gap.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "gap_report": {"type": "object", "description": "Output from measure_sim_real_gap()"},
+                },
+                "required": ["gap_report"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compare_sim_real_video",
+            "description": "Side-by-side or overlay comparison of sim and real video using vision LLM. Identifies behavioral differences (overshoot, contact timing, etc).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sim_video_path": {"type": "string", "description": "Path to simulation video (MP4)"},
+                    "real_video_path": {"type": "string", "description": "Path to real-world video (MP4)"},
+                },
+                "required": ["sim_video_path", "real_video_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_calibration_experiment",
+            "description": "Generate a grid search over a physics parameter to find the value that minimizes sim-to-real gap.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "parameter": {"type": "string", "description": "Parameter to vary (e.g. 'friction', 'damping', 'stiffness')"},
+                    "range": {"type": "array", "items": {"type": "number"}, "description": "[min, max] of parameter range"},
+                    "num_samples": {"type": "integer", "description": "Number of grid points (default 7)"},
+                    "real_data_path": {"type": "string", "description": "Real trajectory to compare against"},
+                },
+                "required": ["parameter", "range", "real_data_path"],
+            },
+        },
+    },
 ]
