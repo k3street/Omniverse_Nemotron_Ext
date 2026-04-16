@@ -942,4 +942,115 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Tier 4 — Geometry & Spatial Analysis (atomic primitives) ────────────
+    # 7 atomic tools defined in docs/specs/atomic_tools_catalog.md, Tier 4.
+    # Six DATA handlers (PhysX scene queries + mesh metric reads) and one
+    # CODE_GEN handler (compute_convex_hull) that emits an approvable patch.
+    {
+        "type": "function",
+        "function": {
+            "name": "raycast",
+            "description": "Cast a single ray through the PhysX scene and return the closest hit (prim path, world position, normal, distance). Uses get_physx_scene_query_interface().raycast_closest. T4.1.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "origin": {"type": "array", "items": {"type": "number"}, "description": "Ray origin in world space [x, y, z]"},
+                    "direction": {"type": "array", "items": {"type": "number"}, "description": "Ray direction (will be normalized) [dx, dy, dz]"},
+                    "max_distance": {"type": "number", "description": "Maximum ray distance in meters. Default: 1000.0"},
+                },
+                "required": ["origin", "direction"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "overlap_sphere",
+            "description": "Find every PhysX collider whose AABB overlaps a sphere centered at `center` with radius `radius`. Uses overlap_sphere with a report_fn callback. Returns a list of prim paths. T4.2.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "center": {"type": "array", "items": {"type": "number"}, "description": "Sphere center in world space [x, y, z]"},
+                    "radius": {"type": "number", "description": "Sphere radius in meters"},
+                },
+                "required": ["center", "radius"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "overlap_box",
+            "description": "Find every PhysX collider that overlaps an oriented box. Uses overlap_box with a report_fn callback. Returns a list of prim paths. T4.3.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "center": {"type": "array", "items": {"type": "number"}, "description": "Box center in world space [x, y, z]"},
+                    "half_extents": {"type": "array", "items": {"type": "number"}, "description": "Half-extents along local box axes [hx, hy, hz]"},
+                    "rotation": {"type": "array", "items": {"type": "number"}, "description": "Box orientation as quaternion [qx, qy, qz, qw]. Default: identity."},
+                },
+                "required": ["center", "half_extents"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "sweep_sphere",
+            "description": "Sweep a sphere from `start` to `end` and return the closest hit along the sweep (prim path, hit position, normal, distance). Uses sweep_sphere on the PhysX scene query interface. T4.4.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start": {"type": "array", "items": {"type": "number"}, "description": "Sweep start position in world space [x, y, z]"},
+                    "end": {"type": "array", "items": {"type": "number"}, "description": "Sweep end position in world space [x, y, z]"},
+                    "radius": {"type": "number", "description": "Sphere radius in meters"},
+                },
+                "required": ["start", "end", "radius"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compute_volume",
+            "description": "Compute the signed volume of a mesh prim by summing the signed volumes of tetrahedra formed by every triangle and the world origin. Uses trimesh if installed, otherwise falls back to a manual divergence-theorem implementation. Returns volume in cubic meters. T4.5.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to a Mesh prim"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compute_surface_area",
+            "description": "Compute the surface area of a mesh prim by summing the areas of every triangle (after triangulating any non-triangle faces). Returns area in square meters. T4.6.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to a Mesh prim"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compute_convex_hull",
+            "description": "Apply UsdPhysics.MeshCollisionAPI with approximation='convexHull' to the prim. Optionally export the hull mesh to a sibling Mesh prim under a chosen path so the result is visible in the viewport. T4.7.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to a Mesh prim that should receive a convex-hull collision approximation"},
+                    "export_hull_path": {"type": "string", "description": "Optional USD path for an exported convex-hull Mesh prim. If provided, the convex hull is computed via scipy.spatial.ConvexHull (with a manual gift-wrap fallback) and authored at this path so it can be inspected in the viewport."},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
 ]
