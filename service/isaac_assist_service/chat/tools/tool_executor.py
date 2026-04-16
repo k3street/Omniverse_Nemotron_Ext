@@ -2232,3 +2232,404 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ─── Safety & Compliance Addendum ────────────────────────────────────────────
+# Four lightweight guard-rail tools. All pure Python — no Kit RPC, no network.
+#
+#   validate_iso10218_limits  — DATA   (motion-envelope check against ISO bounds)
+#   declare_safety_zone       — CODE   (USD zone geometry + custom attrs)
+#   gdpr_sdg_scan             — DATA   (Art. 35 DPIA starter record)
+#   generate_compliance_report — DATA  (write Markdown report from audit log)
+
+# Scenario → limit table. Values from ISO 10218-1 §5.10 / ISO/TS 15066 §5.5.
+_ISO10218_SCENARIO_LIMITS: Dict[str, Dict[str, Any]] = {
+    "collaborative": {
+        "max_tcp_speed_m_s": 0.25,
+        "max_joint_velocity_deg_s": 90.0,
+        "clauses": {
+            "tcp": "ISO/TS 15066 §5.5.5",
+            "joint": "ISO 10218-1 §5.10.3",
+            "payload": "ISO/TS 15066 Annex A",
+        },
+        "payload_force_n": 140.0,  # quasi-static torso limit, Annex A
+    },
+    "industrial": {
+        "max_tcp_speed_m_s": 1.5,
+        "max_joint_velocity_deg_s": 180.0,
+        "clauses": {
+            "tcp": "ISO 10218-1 §5.6",
+            "joint": "ISO 10218-1 §5.10.8",
+            "payload": "ISO 10218-1 §5.3.3",
+        },
+        "payload_force_n": None,
+    },
+    "reduced": {
+        "max_tcp_speed_m_s": 0.25,
+        "max_joint_velocity_deg_s": 30.0,
+        "clauses": {
+            "tcp": "ISO 10218-1 §5.8.1",
+            "joint": "ISO 10218-1 §5.8.2",
+            "payload": "ISO 10218-1 §5.3.3",
+        },
+        "payload_force_n": None,
+    },
+}
+
+
+async def _handle_validate_iso10218_limits(args: Dict) -> Dict:
+    """Compare commanded motion envelope against scenario-specific ISO bounds."""
+    robot_type = args.get("robot_type", "generic")
+    scenario = args.get("scenario", "collaborative")
+    tcp_speed = float(args.get("max_tcp_speed_m_s", 0.0))
+    joint_vel = float(args.get("max_joint_velocity_deg_s", 0.0))
+    payload = args.get("payload_kg")
+
+    limits = _ISO10218_SCENARIO_LIMITS.get(scenario)
+    if limits is None:
+        return {
+            "robot_type": robot_type,
+            "scenario": scenario,
+            "verdict": "error",
+            "error": f"Unknown scenario '{scenario}'. Choose collaborative / industrial / reduced.",
+            "checks": [],
+        }
+
+    checks: List[Dict[str, Any]] = []
+
+    tcp_passed = tcp_speed <= limits["max_tcp_speed_m_s"]
+    checks.append({
+        "clause": limits["clauses"]["tcp"],
+        "limit": f"TCP speed ≤ {limits['max_tcp_speed_m_s']} m/s",
+        "actual": tcp_speed,
+        "passed": tcp_passed,
+    })
+
+    joint_passed = joint_vel <= limits["max_joint_velocity_deg_s"]
+    checks.append({
+        "clause": limits["clauses"]["joint"],
+        "limit": f"joint velocity ≤ {limits['max_joint_velocity_deg_s']} deg/s",
+        "actual": joint_vel,
+        "passed": joint_passed,
+    })
+
+    if payload is not None and limits.get("payload_force_n") is not None:
+        # Energy proxy: F ≈ m * v_tcp^2 / stop_distance — use 0.01 m conservative.
+        try:
+            payload_f = float(payload) * (tcp_speed ** 2) / 0.01
+        except Exception:
+            payload_f = 0.0
+        p_passed = payload_f <= limits["payload_force_n"]
+        checks.append({
+            "clause": limits["clauses"]["payload"],
+            "limit": f"quasi-static contact force ≤ {limits['payload_force_n']} N",
+            "actual": round(payload_f, 2),
+            "passed": p_passed,
+        })
+
+    failed = [c for c in checks if not c["passed"]]
+    if not failed:
+        verdict = "compliant"
+        recommendation = f"All {len(checks)} checks pass for scenario '{scenario}'."
+    elif len(failed) == len(checks):
+        verdict = "violation"
+        recommendation = (
+            f"All {len(failed)} checks fail. Reduce commanded speeds or switch "
+            f"to a less restrictive scenario (current: {scenario})."
+        )
+    else:
+        verdict = "violation"
+        recommendation = (
+            f"{len(failed)} of {len(checks)} checks fail. See 'checks' for details; "
+            "reduce the failing parameters before commanding the robot."
+        )
+
+    return {
+        "robot_type": robot_type,
+        "scenario": scenario,
+        "verdict": verdict,
+        "checks": checks,
+        "recommendation": recommendation,
+    }
+
+
+DATA_HANDLERS["validate_iso10218_limits"] = _handle_validate_iso10218_limits
+
+
+# Zone colours by classification. Values picked to display clearly on the
+# default Isaac Sim stage (HDRi + grey floor).
+_SAFETY_ZONE_COLOURS: Dict[str, tuple] = {
+    "restricted": (0.85, 0.10, 0.10),      # red
+    "monitored": (0.95, 0.65, 0.05),       # amber
+    "collaborative": (0.10, 0.70, 0.25),   # green
+}
+
+# ISO 13855 classification strings, written as USD custom attrs for audit.
+_SAFETY_ZONE_ISO13855: Dict[str, str] = {
+    "restricted": "ISO 13855 §9 — no-entry while powered",
+    "monitored": "ISO 13855 §6 — reduced-speed on breach",
+    "collaborative": "ISO/TS 15066 §5.5 — shared workspace",
+}
+
+
+def _gen_declare_safety_zone(args: Dict) -> str:
+    """Generate USD code that creates a visible + audited safety zone."""
+    zone_name = args["zone_name"]
+    zone_type = args["zone_type"]
+    geometry = args["geometry"]
+    linked = args.get("linked_robot_path")
+
+    if zone_type not in _SAFETY_ZONE_COLOURS:
+        raise ValueError(f"Unknown zone_type '{zone_type}'")
+
+    gmin = geometry["min"]
+    gmax = geometry["max"]
+    if len(gmin) != 3 or len(gmax) != 3:
+        raise ValueError("geometry.min / geometry.max must be 3-element arrays")
+
+    cx = (gmin[0] + gmax[0]) / 2.0
+    cy = (gmin[1] + gmax[1]) / 2.0
+    cz = (gmin[2] + gmax[2]) / 2.0
+    sx = max(abs(gmax[0] - gmin[0]), 1e-4)
+    sy = max(abs(gmax[1] - gmin[1]), 1e-4)
+    sz = max(abs(gmax[2] - gmin[2]), 1e-4)
+
+    colour = _SAFETY_ZONE_COLOURS[zone_type]
+    iso_label = _SAFETY_ZONE_ISO13855[zone_type]
+
+    # Use repr() for every user-supplied string so a zone name with a quote
+    # does not break the generated code.
+    safe_name = repr(zone_name)
+    safe_type = repr(zone_type)
+    safe_iso = repr(iso_label)
+    safe_linked = repr(linked) if linked else "None"
+
+    parent = "/World/SafetyZones"
+    zone_path = f"{parent}/" + "".join(c if (c.isalnum() or c == "_") else "_" for c in zone_name)
+
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdGeom, Sdf, Gf",
+        _SAFE_XFORM_SNIPPET,
+        "stage = omni.usd.get_context().get_stage()",
+        f"stage.DefinePrim('{parent}', 'Xform')",
+        f"zone_prim = stage.DefinePrim('{zone_path}', 'Xform')",
+        f"zone_prim.CreateAttribute('safety:name', Sdf.ValueTypeNames.String).Set({safe_name})",
+        f"zone_prim.CreateAttribute('safety:classification', Sdf.ValueTypeNames.String).Set({safe_type})",
+        f"zone_prim.CreateAttribute('safety:iso13855_classification', Sdf.ValueTypeNames.String).Set({safe_iso})",
+    ]
+    if linked:
+        lines.append(f"zone_prim.CreateRelationship('safety:protects').SetTargets([Sdf.Path({safe_linked})])")
+
+    box_path = f"{zone_path}/Box"
+    lines.extend([
+        f"box = stage.DefinePrim('{box_path}', 'Cube')",
+        f"_safe_set_translate(box, ({cx}, {cy}, {cz}))",
+        f"_safe_set_scale(box, ({sx / 2.0}, {sy / 2.0}, {sz / 2.0}))",
+        "geom = UsdGeom.Gprim(box)",
+        f"geom.CreateDisplayColorAttr().Set([Gf.Vec3f({colour[0]}, {colour[1]}, {colour[2]})])",
+        f"print('SafetyZone declared: {zone_path} type={zone_type}')",
+    ])
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["declare_safety_zone"] = _gen_declare_safety_zone
+
+
+async def _handle_gdpr_sdg_scan(args: Dict) -> Dict:
+    """Return a DPIA starter record for a synthetic-data scene."""
+    description = args.get("scene_description", "")
+    people = bool(args.get("generates_people", False))
+    biometrics = bool(args.get("generates_biometrics", False))
+    recipients = list(args.get("data_recipients") or [])
+
+    if not people and not biometrics:
+        return {
+            "dpia_required": False,
+            "risk_class": "none",
+            "lawful_basis_hint": None,
+            "required_elements": [],
+            "minimum_controls": [],
+            "recommendation": (
+                "No personal data generated — GDPR Art. 35 DPIA not required. "
+                "Keep a short note of this assessment in the project wiki."
+            ),
+            "scene_description": description,
+        }
+
+    if biometrics:
+        risk_class = "high"
+        lawful_basis = "Art. 9(2)(a) explicit consent"
+    else:
+        risk_class = "low"
+        lawful_basis = "Art. 6(1)(f) legitimate interest"
+
+    required_elements = [
+        "Art. 35 §7(a) — systematic description of processing operations and purposes",
+        "Art. 35 §7(b) — assessment of necessity and proportionality",
+        "Art. 35 §7(c) — risks to rights and freedoms of data subjects",
+        "Art. 35 §7(d) — measures, safeguards and security mechanisms",
+    ]
+
+    minimum_controls = [
+        "Pseudonymisation — no real-person references in filenames or metadata",
+        "Retention limit — delete raw synthetic images after model training ends",
+        f"Recipients list — {', '.join(recipients) if recipients else 'document all downstream processors before export'}",
+        "Logging — record every model trained on this data for audit",
+    ]
+    if biometrics:
+        minimum_controls.append(
+            "Explicit consent record — template for every identifiable subject, "
+            "even in synthetic form, before any distribution"
+        )
+
+    return {
+        "dpia_required": True,
+        "risk_class": risk_class,
+        "lawful_basis_hint": lawful_basis,
+        "required_elements": required_elements,
+        "minimum_controls": minimum_controls,
+        "recommendation": (
+            "Attach this record to the project wiki; review with the Data "
+            "Protection Officer (DPO) before any training run is launched."
+        ),
+        "scene_description": description,
+    }
+
+
+DATA_HANDLERS["gdpr_sdg_scan"] = _handle_gdpr_sdg_scan
+
+
+_DEFAULT_COMPLIANCE_STANDARDS = [
+    "ISO 10218-1",
+    "ISO/TS 15066",
+    "ISO 13855",
+    "GDPR Art. 35",
+]
+
+_STANDARD_TO_TOOLS: Dict[str, List[str]] = {
+    "ISO 10218-1": ["validate_iso10218_limits"],
+    "ISO/TS 15066": ["validate_iso10218_limits"],
+    "ISO 13855": ["declare_safety_zone"],
+    "GDPR Art. 35": ["gdpr_sdg_scan"],
+}
+
+
+async def _handle_generate_compliance_report(args: Dict) -> Dict:
+    """Write a Markdown compliance report from the session's audit log."""
+    from pathlib import Path as _Path
+    from datetime import datetime as _dt
+
+    scene_name = args["scene_name"]
+    session_id = args.get("session_id", "default_session")
+    standards = args.get("standards") or list(_DEFAULT_COMPLIANCE_STANDARDS)
+
+    # Sanitise filename
+    safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in scene_name)
+    out_dir = _Path("workspace/compliance_reports")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{safe_name}.md"
+
+    # Best-effort audit-log read; tolerate missing _audit (tests, standalone).
+    patch_entries: List[Dict[str, Any]] = []
+    safety_tool_calls: Dict[str, List[Dict[str, Any]]] = {}
+    try:
+        from ..routes import _audit  # type: ignore
+        for e in _audit.query_logs(limit=1000, event_type="patch_executed"):
+            meta = getattr(e, "metadata", None) or {}
+            if meta.get("session_id", "default_session") != session_id:
+                continue
+            patch_entries.append({
+                "timestamp": getattr(e, "timestamp", ""),
+                "description": meta.get("user_message", ""),
+                "success": bool(meta.get("success")),
+                "code_preview": (meta.get("code", "") or "")[:200],
+            })
+        for e in _audit.query_logs(limit=1000, event_type="tool_called"):
+            meta = getattr(e, "metadata", None) or {}
+            if meta.get("session_id", "default_session") != session_id:
+                continue
+            tname = meta.get("tool_name", "")
+            if tname in {"validate_iso10218_limits", "declare_safety_zone", "gdpr_sdg_scan"}:
+                safety_tool_calls.setdefault(tname, []).append(meta)
+    except Exception as exc:
+        logger.info(f"[ComplianceReport] Audit log unavailable ({exc}); writing empty report.")
+
+    generated_at = _dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    lines: List[str] = []
+    lines.append(f"# Compliance Report — {scene_name}")
+    lines.append("")
+    lines.append(f"Generated by **Isaac Assist** on {generated_at}.")
+    lines.append(f"Session: `{session_id}`")
+    lines.append("")
+    lines.append("## Standards covered")
+    lines.append("")
+    lines.append("| Standard | Evidence tool | Status |")
+    lines.append("|----------|----------------|--------|")
+    clause_rows: List[Dict[str, Any]] = []
+    for std in standards:
+        tool_names = _STANDARD_TO_TOOLS.get(std, [])
+        evidence = ", ".join(f"`{t}`" for t in tool_names) or "_none declared_"
+        fired = any(t in safety_tool_calls for t in tool_names)
+        status = "evidence recorded" if fired else "no evidence in session"
+        lines.append(f"| {std} | {evidence} | {status} |")
+        clause_rows.append({"standard": std, "tools": tool_names, "status": status})
+    lines.append("")
+
+    lines.append("## Patch log")
+    lines.append("")
+    if not patch_entries:
+        lines.append("_No patches recorded for this session._")
+    else:
+        for i, p in enumerate(patch_entries, 1):
+            flag = "OK" if p["success"] else "FAILED"
+            desc = p["description"] or f"Patch {i}"
+            lines.append(f"- **{i}.** [{flag}] {desc}")
+    lines.append("")
+
+    lines.append("## Safety-zone inventory")
+    lines.append("")
+    zones = safety_tool_calls.get("declare_safety_zone", [])
+    if not zones:
+        lines.append("_No `declare_safety_zone` calls recorded._")
+    else:
+        for z in zones:
+            lines.append(f"- `{z.get('zone_name', '?')}` — {z.get('zone_type', '?')}")
+    lines.append("")
+
+    lines.append("## DPIA status")
+    lines.append("")
+    dpia_calls = safety_tool_calls.get("gdpr_sdg_scan", [])
+    if not dpia_calls:
+        lines.append("_No `gdpr_sdg_scan` calls recorded for this session._")
+    else:
+        lines.append(f"- {len(dpia_calls)} DPIA scan(s) recorded; see audit log for details.")
+    lines.append("")
+
+    lines.append("## Sign-off")
+    lines.append("")
+    lines.append("| Role | Name | Date | Signature |")
+    lines.append("|------|------|------|-----------|")
+    lines.append("| Functional Safety Assessor | | | |")
+    lines.append("| Data Protection Officer | | | |")
+    lines.append("| Project Lead | | | |")
+    lines.append("")
+
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
+    return {
+        "report_path": str(out_path),
+        "scene_name": scene_name,
+        "session_id": session_id,
+        "standards": standards,
+        "patch_count": len(patch_entries),
+        "safety_tool_calls": {k: len(v) for k, v in safety_tool_calls.items()},
+        "clauses": clause_rows,
+        "message": (
+            f"Compliance report written to {out_path} — "
+            f"{len(patch_entries)} patches, {sum(len(v) for v in safety_tool_calls.values())} safety calls."
+        ),
+    }
+
+
+DATA_HANDLERS["generate_compliance_report"] = _handle_generate_compliance_report

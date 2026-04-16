@@ -942,4 +942,82 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Safety & Compliance Addendum ─────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_iso10218_limits",
+            "description": "Check commanded robot motion against ISO 10218-1 / ISO/TS 15066 safety bounds before any motion is sent to the stage. Use before move_to_pose, plan_trajectory, or launch_training on hardware. Returns a verdict (compliant / warning / violation) plus the failing clauses so the LLM can suggest a safer parameter.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_type": {"type": "string", "description": "Robot family — e.g. 'franka', 'ur10', 'ur5e', 'cobotta', 'generic'. Used only for logging; limits are scenario-based."},
+                    "max_joint_velocity_deg_s": {"type": "number", "description": "Highest joint angular velocity that will be commanded, in degrees per second."},
+                    "max_tcp_speed_m_s": {"type": "number", "description": "Highest tool-centre-point linear speed that will be commanded, in metres per second."},
+                    "payload_kg": {"type": "number", "description": "Payload carried by the robot, in kilograms. Used for ISO/TS 15066 force calculations."},
+                    "scenario": {"type": "string", "enum": ["collaborative", "industrial", "reduced"], "description": "Operating scenario: collaborative (ISO/TS 15066 shared-space), industrial (caged full-speed), or reduced (teach/jog)."},
+                },
+                "required": ["robot_type", "max_joint_velocity_deg_s", "max_tcp_speed_m_s", "scenario"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "declare_safety_zone",
+            "description": "Declare a safety-rated zone in the USD stage around a robot workcell. Creates a visible coloured box under /World/SafetyZones plus USD custom attributes (safety:iso13855_classification, safety:protects) so downstream tooling can audit the scene. Use for restricted, monitored, and collaborative zones.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "zone_name": {"type": "string", "description": "USD-safe short name for the zone — e.g. 'cell_north_monitored'."},
+                    "zone_type": {"type": "string", "enum": ["restricted", "monitored", "collaborative"], "description": "Safety classification: restricted (no human entry while powered), monitored (reduced-speed on breach), collaborative (ISO/TS 15066 shared workspace)."},
+                    "geometry": {
+                        "type": "object",
+                        "description": "Axis-aligned bounding box in world space.",
+                        "properties": {
+                            "min": {"type": "array", "items": {"type": "number"}, "description": "Lower corner [x, y, z] in metres."},
+                            "max": {"type": "array", "items": {"type": "number"}, "description": "Upper corner [x, y, z] in metres."},
+                        },
+                        "required": ["min", "max"],
+                    },
+                    "linked_robot_path": {"type": "string", "description": "USD path to the articulation the zone protects — e.g. '/World/Franka'. Written as a USD relationship 'safety:protects'."},
+                },
+                "required": ["zone_name", "zone_type", "geometry"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "gdpr_sdg_scan",
+            "description": "Assess a synthetic-data generation scene for GDPR Art. 35 DPIA obligations. Given a scene description plus flags for whether people or biometric data are produced, returns whether a DPIA is required, the suggested lawful basis, the risk class, and the Art. 35 §7 elements the user must document. No Kit calls.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_description": {"type": "string", "description": "Free-text description of what the SDG scene generates — e.g. 'Warehouse floor with 5 synthetic workers, RGB + depth'."},
+                    "generates_people": {"type": "boolean", "description": "True if the scene contains human figures (synthetic or captured)."},
+                    "generates_biometrics": {"type": "boolean", "description": "True if the scene produces identifiable biometric data (face crops, gait, iris)."},
+                    "data_recipients": {"type": "array", "items": {"type": "string"}, "description": "List of downstream processors — e.g. ['internal training', 'HF Hub']. Used for the minimum-controls checklist."},
+                },
+                "required": ["generates_people", "generates_biometrics"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_compliance_report",
+            "description": "Correlate every executed patch in the current session with the safety / compliance tools that were invoked, and write a Markdown compliance report under workspace/compliance_reports/<scene>.md. Intended for Functional Safety assessor + DPO sign-off. Use at the end of a session before shipping a scene package.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene / project (used for the report filename and heading)."},
+                    "session_id": {"type": "string", "description": "Chat session ID whose audit log should be summarised. Default: 'default_session'."},
+                    "standards": {"type": "array", "items": {"type": "string"}, "description": "Standards to include in the clause table. Default: ['ISO 10218-1', 'ISO/TS 15066', 'ISO 13855', 'GDPR Art. 35']."},
+                },
+                "required": ["scene_name"],
+            },
+        },
+    },
 ]
