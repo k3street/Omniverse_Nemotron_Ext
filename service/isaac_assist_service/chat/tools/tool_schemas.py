@@ -942,4 +942,156 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Phase 10: Autonomous Multi-Step Workflows ─────────────────────────────
+    # High-level orchestration tools. Each workflow runs through a series of
+    # phases with optional checkpoints (user approval) and an autonomous
+    # error-fix loop on failing code (max 3 retries).
+    {
+        "type": "function",
+        "function": {
+            "name": "start_workflow",
+            "description": "Start a multi-step autonomous workflow with an editable plan artifact. Generates a plan first, then waits for user approval before executing. Supported workflow types: 'rl_training' (W1: env -> reward -> train -> evaluate -> deploy), 'robot_import' (W2: import -> verify -> motion plan -> report), 'sim_debugging' (W4: diagnose -> hypothesis -> fix -> verify with autonomous error-fix loop). Use when the user asks for a high-level goal like 'set up RL training for X', 'import this URDF and configure it', or 'debug why my sim is broken'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "workflow_type": {
+                        "type": "string",
+                        "enum": ["rl_training", "robot_import", "sim_debugging"],
+                        "description": "Which workflow template to instantiate.",
+                    },
+                    "goal": {"type": "string", "description": "High-level user goal in natural language — e.g. 'train the Franka to pick up the cup'."},
+                    "scope_prim": {"type": "string", "description": "Root prim under which the workflow operates (safety boundary). Default: '/World'."},
+                    "params": {"type": "object", "description": "Workflow-specific parameters (robot path, target object, num_envs, urdf_path, etc.). Schema depends on workflow_type."},
+                    "max_retries": {"type": "integer", "description": "Max autonomous error-fix retries per code-execution phase. Default: 3."},
+                    "auto_approve_checkpoints": {"type": "boolean", "description": "If true, skip user-approval checkpoints (DANGEROUS — only for trusted batch runs). Default: false."},
+                },
+                "required": ["workflow_type", "goal"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_workflow_plan",
+            "description": "Edit a workflow's plan artifact before execution. Use during the planning checkpoint when the user wants to adjust parameters (e.g. 'change to 128 envs', 'add orientation reward', 'use a different reward shaping'). The workflow stays paused until approve_workflow_checkpoint is called.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "workflow_id": {"type": "string", "description": "ID returned by start_workflow."},
+                    "plan_edits": {"type": "object", "description": "Dict of phase_name -> {field: new_value} edits, e.g. {'env_creation': {'num_envs': 128}, 'reward': {'add_terms': ['orientation']}}."},
+                },
+                "required": ["workflow_id", "plan_edits"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "approve_workflow_checkpoint",
+            "description": "Approve, reject, or revise at a workflow checkpoint. Workflows pause at checkpoints (after plan generation, after reward generation, after results, before deploy) and wait for the user. 'approve' resumes execution, 'reject' cancels and rolls back, 'revise' returns to the previous phase for re-generation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "workflow_id": {"type": "string", "description": "ID returned by start_workflow."},
+                    "phase": {"type": "string", "description": "Phase name being approved — e.g. 'plan', 'reward', 'results', 'deploy'."},
+                    "action": {"type": "string", "enum": ["approve", "reject", "revise"], "description": "Decision at the checkpoint."},
+                    "feedback": {"type": "string", "description": "Optional user feedback (passed back to the LLM if action='revise')."},
+                },
+                "required": ["workflow_id", "phase", "action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_workflow",
+            "description": "Cancel a running workflow and roll back to the pre-workflow snapshot. Use when the user says 'stop', 'cancel', 'abort', or when the workflow can no longer proceed safely.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "workflow_id": {"type": "string", "description": "ID returned by start_workflow."},
+                    "reason": {"type": "string", "description": "Why the workflow is being cancelled (logged for audit)."},
+                },
+                "required": ["workflow_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_workflow_status",
+            "description": "Query a workflow's current state — current phase, completed phases, pending checkpoints, error-fix attempts, and the plan artifact. Use when the user asks 'how is the workflow going?', 'what step are we on?', or to surface progress.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "workflow_id": {"type": "string", "description": "ID returned by start_workflow."},
+                },
+                "required": ["workflow_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_with_retry",
+            "description": "Execute a code patch through the autonomous error-fix loop (max 3 retries by default). On failure, the system reads the error, asks the LLM for a fix, and retries. Stops and reports if all retries exhausted. Use for code-generation steps where occasional API mismatches or PhysX errors are expected (URDF imports, IsaacLab env creation, OmniGraph wiring).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "Python code to execute via Kit RPC."},
+                    "description": {"type": "string", "description": "Human-readable description of what the code does."},
+                    "max_retries": {"type": "integer", "description": "Max autonomous fix attempts. Default: 3. Hard cap: 5."},
+                    "context_hints": {"type": "array", "items": {"type": "string"}, "description": "Optional hints fed to the LLM during error-fix (e.g. ['use mdp.joint_pos not joint_positions', 'IsaacLab 2.x API'])."},
+                },
+                "required": ["code", "description"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "proactive_check",
+            "description": "Run the proactive agent for a given trigger. The agent observes scene state and reports issues without auto-modifying (unless AUTO_PROACTIVE_FIX env var is set). Triggers: 'scene_opened' (preflight check), 'robot_imported' (verify import + collision mesh check), 'console_error' (explain error with prim context), 'training_started' / 'training_active' (monitor entropy/reward/NaN), 'training_finished' (diagnose + eval harness), 'sim_idle' (suggest next steps), 'sim_play' (preflight before unpause), 'fps_drop' (performance diagnosis), 'target_placed' (workspace + singularity check).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "trigger": {
+                        "type": "string",
+                        "enum": [
+                            "scene_opened",
+                            "robot_imported",
+                            "console_error",
+                            "training_started",
+                            "training_active",
+                            "training_finished",
+                            "sim_idle",
+                            "sim_play",
+                            "fps_drop",
+                            "target_placed",
+                        ],
+                        "description": "Which proactive trigger fired.",
+                    },
+                    "context": {"type": "object", "description": "Trigger-specific context (scene_path, robot_path, error_text, run_dir, fps, target_path, etc.)."},
+                    "auto_fix": {"type": "boolean", "description": "If true AND AUTO_PROACTIVE_FIX env var is enabled, apply Tier 1 crash-preventer fixes automatically. Default: false."},
+                },
+                "required": ["trigger"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_workflows",
+            "description": "List active and recently completed workflows for the current session. Returns workflow_id, type, status, current_phase, and start_time for each. Use to recover after a connection drop or when the user asks 'what workflows are running?'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "include_completed": {"type": "boolean", "description": "Include workflows that have finished or been cancelled. Default: false."},
+                    "limit": {"type": "integer", "description": "Max workflows to return. Default: 20."},
+                },
+                "required": [],
+            },
+        },
+    },
 ]
