@@ -942,4 +942,103 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Community & Remote Addendum ──────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "share_scene_to_community",
+            "description": "Publish an already-exported scene package (from export_scene_package) to the local community registry so a colleague can discover and replay it. Writes a community_manifest.json with author, license, tags and SHA-256 checksums next to the export, and appends a row to workspace/community/registry.jsonl. Use after the user has exported a scene and wants to 'share', 'publish', 'submit to community'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the exported scene directory under workspace/scene_exports/."},
+                    "author": {"type": "string", "description": "Human-readable author name or handle — used in the manifest and registry."},
+                    "description": {"type": "string", "description": "Short summary shown to other users browsing the registry."},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for discovery (e.g. ['franka', 'pick-and-place', 'tutorial']). Default: []."},
+                    "license": {"type": "string", "enum": ["MIT", "Apache-2.0", "CC-BY-4.0", "proprietary"], "description": "License for the shared package. Default: 'MIT'."},
+                },
+                "required": ["scene_name", "author", "description"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_community_scenes",
+            "description": "Search the local community scene registry for shared workcells, demos and tutorials. Use when the user asks to 'find a scene', 'browse community', 'is there a starter for X'. Reads workspace/community/registry.jsonl and ranks rows by tag, name and description matches. Returns ordered list of pointers — the user picks one to import.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Free-text query — matched against scene name and description."},
+                    "tag": {"type": "string", "description": "Filter to only rows that include this tag."},
+                    "license": {"type": "string", "enum": ["MIT", "Apache-2.0", "CC-BY-4.0", "proprietary"], "description": "Filter to only rows with this license."},
+                    "limit": {"type": "integer", "description": "Maximum rows to return. Default: 10"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "remote_session_invite",
+            "description": "Generate a shareable invite for a remote co-editing session. Issues a hex token, computes an isaac-assist:// deep link and an HTTPS fallback URL the chat UI can render as clickable, and persists the invite to workspace/community/invites.jsonl. Use when the user asks to 'invite a colleague', 'share my session', 'get a join link'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_name": {"type": "string", "description": "Name shown to the joiner — e.g. 'pick-and-place pair-debug'."},
+                    "expires_in_minutes": {"type": "integer", "description": "Invite lifetime in minutes. Default: 60. Clamped to [1, 1440]."},
+                    "allow_write": {"type": "boolean", "description": "If true, the invite grants edit rights on approved patches; otherwise read-only. Default: false."},
+                },
+                "required": ["session_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "connect_remote_kit",
+            "description": "Persist a connection profile for a remote Kit RPC instance (lab GPU, cloud workstation, peer machine) under workspace/community/remote_kits.json. Use when the user wants to register a remote Kit ('add my lab GPU', 'save the cloud Kit URL'). Stores the auth token redacted (preview only); the user activates the connection from the UI's connection picker.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "Hostname or IPv4 of the remote Kit machine — no scheme, no path."},
+                    "port": {"type": "integer", "description": "TCP port the remote Kit RPC listens on (1–65535)."},
+                    "auth_token": {"type": "string", "description": "Pre-shared auth token issued by the remote Kit. Minimum 8 characters. Stored redacted on disk."},
+                    "name": {"type": "string", "description": "Friendly profile name. Default: 'remote-kit'."},
+                },
+                "required": ["host", "port", "auth_token"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "publish_skill_recipe",
+            "description": "Package a sequence of approved patches as a reusable skill recipe under workspace/community/skills/<name>.py + <name>.yaml. Each step is {description, code}. Generates a Python module exposing run(inputs) so the recipe can be replayed in a single tool call. Use when the user says 'save these steps as a skill', 'make this into a recipe'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "recipe_name": {"type": "string", "description": "USD-safe short name — alphanumerics, dashes, underscores. Used as the file stem."},
+                    "description": {"type": "string", "description": "One-line description of what the recipe does."},
+                    "steps": {
+                        "type": "array",
+                        "description": "Ordered list of steps. Each item is {description, code}.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "description": {"type": "string"},
+                                "code": {"type": "string"},
+                            },
+                            "required": ["description", "code"],
+                        },
+                    },
+                    "inputs": {"type": "array", "items": {"type": "string"}, "description": "Names of inputs the recipe expects (passed as a dict to run()). Default: []."},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Discovery tags for the YAML manifest. Default: []."},
+                },
+                "required": ["recipe_name", "description", "steps"],
+            },
+        },
+    },
 ]

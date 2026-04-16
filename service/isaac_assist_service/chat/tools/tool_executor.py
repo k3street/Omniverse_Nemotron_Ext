@@ -2232,3 +2232,419 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Community & Remote Addendum ──────────────────────────────────────────────
+# Five tools that move scene packages and sessions between users / machines:
+#   share_scene_to_community, search_community_scenes, remote_session_invite,
+#   connect_remote_kit, publish_skill_recipe.
+# All five are pure data / code-gen — no Kit RPC, no network call.
+
+_COMMUNITY_DIR = Path("workspace/community")
+_COMMUNITY_REGISTRY = _COMMUNITY_DIR / "registry.jsonl"
+_COMMUNITY_INVITES = _COMMUNITY_DIR / "invites.jsonl"
+_COMMUNITY_REMOTE_KITS = _COMMUNITY_DIR / "remote_kits.json"
+_COMMUNITY_SKILLS_DIR = _COMMUNITY_DIR / "skills"
+
+_VALID_LICENSES = ("MIT", "Apache-2.0", "CC-BY-4.0", "proprietary")
+
+
+async def _handle_share_scene_to_community(args: Dict) -> Dict:
+    """Publish a previously exported scene package to the local community registry."""
+    import hashlib
+    from datetime import datetime as _dt
+
+    scene_name = args["scene_name"]
+    author = args["author"]
+    description = args["description"]
+    tags = list(args.get("tags") or [])
+    license_id = args.get("license", "MIT")
+
+    if license_id not in _VALID_LICENSES:
+        return {
+            "error": f"Unknown license '{license_id}'. Allowed: {list(_VALID_LICENSES)}",
+            "shared": False,
+        }
+
+    safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in scene_name)
+    export_dir = Path("workspace/scene_exports") / safe_name
+    if not export_dir.exists() or not export_dir.is_dir():
+        return {
+            "error": (
+                f"Scene export directory not found: {export_dir}. "
+                "Run export_scene_package first."
+            ),
+            "shared": False,
+        }
+
+    # Compute SHA-256 of every regular file in the export directory.
+    checksums: Dict[str, str] = {}
+    files_listed: List[str] = []
+    for p in sorted(export_dir.rglob("*")):
+        if not p.is_file():
+            continue
+        rel = str(p.relative_to(export_dir))
+        if rel == "community_manifest.json":
+            # Skip the manifest itself if we are re-publishing.
+            continue
+        h = hashlib.sha256()
+        with p.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(65536), b""):
+                h.update(chunk)
+        checksums[rel] = h.hexdigest()
+        files_listed.append(rel)
+
+    created_utc = _dt.utcnow().isoformat() + "Z"
+    manifest = {
+        "name": scene_name,
+        "author": author,
+        "description": description,
+        "tags": tags,
+        "license": license_id,
+        "created_utc": created_utc,
+        "files": files_listed,
+        "checksums": checksums,
+    }
+    manifest_path = export_dir / "community_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    # Append a registry row.
+    _COMMUNITY_DIR.mkdir(parents=True, exist_ok=True)
+    registry_row = {
+        "name": scene_name,
+        "author": author,
+        "description": description,
+        "tags": tags,
+        "license": license_id,
+        "manifest_path": str(manifest_path),
+        "created_utc": created_utc,
+    }
+    with _COMMUNITY_REGISTRY.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(registry_row) + "\n")
+
+    return {
+        "shared": True,
+        "manifest_path": str(manifest_path),
+        "registry_path": str(_COMMUNITY_REGISTRY),
+        "checksums": checksums,
+        "file_count": len(files_listed),
+        "message": (
+            f"Shared '{scene_name}' to community registry "
+            f"({len(files_listed)} files, license={license_id})."
+        ),
+    }
+
+
+DATA_HANDLERS["share_scene_to_community"] = _handle_share_scene_to_community
+
+
+async def _handle_search_community_scenes(args: Dict) -> Dict:
+    """Search the local community registry for matching scenes."""
+    query = (args.get("query") or "").strip().lower()
+    tag_filter = (args.get("tag") or "").strip().lower()
+    license_filter = args.get("license")
+    limit = int(args.get("limit", 10))
+    if limit < 1:
+        limit = 1
+
+    if license_filter is not None and license_filter not in _VALID_LICENSES:
+        return {
+            "error": f"Unknown license '{license_filter}'. Allowed: {list(_VALID_LICENSES)}",
+            "results": [],
+            "count": 0,
+            "total_indexed": 0,
+        }
+
+    rows: List[Dict[str, Any]] = []
+    if _COMMUNITY_REGISTRY.exists():
+        for line in _COMMUNITY_REGISTRY.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+
+    total_indexed = len(rows)
+    scored: List[Dict[str, Any]] = []
+    for row in rows:
+        if license_filter is not None and row.get("license") != license_filter:
+            continue
+        row_tags = [t.lower() for t in (row.get("tags") or [])]
+        if tag_filter and tag_filter not in row_tags:
+            continue
+        score = 0
+        if tag_filter and tag_filter in row_tags:
+            score += 3
+        if query:
+            name_l = str(row.get("name", "")).lower()
+            desc_l = str(row.get("description", "")).lower()
+            if query in name_l:
+                score += 2
+            if query in desc_l:
+                score += 1
+        # No query and no tag → list everything with score 0 (still filterable).
+        scored.append({"score": score, "row": row})
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    results = [s["row"] | {"score": s["score"]} for s in scored[:limit]]
+
+    return {
+        "results": results,
+        "count": len(results),
+        "total_indexed": total_indexed,
+        "registry_path": str(_COMMUNITY_REGISTRY),
+    }
+
+
+DATA_HANDLERS["search_community_scenes"] = _handle_search_community_scenes
+
+
+_INVITE_MAX_MINUTES = 1440
+_INVITE_DEFAULT_MINUTES = 60
+
+
+async def _handle_remote_session_invite(args: Dict) -> Dict:
+    """Generate a shareable invite for a remote co-editing session."""
+    import secrets
+    from datetime import datetime as _dt, timedelta as _td
+
+    session_name = args["session_name"]
+    raw_minutes = int(args.get("expires_in_minutes", _INVITE_DEFAULT_MINUTES))
+    minutes = max(1, min(raw_minutes, _INVITE_MAX_MINUTES))
+    allow_write = bool(args.get("allow_write", False))
+
+    token = secrets.token_hex(16)
+    write_flag = "1" if allow_write else "0"
+    deep_link = f"isaac-assist://join/{token}?write={write_flag}"
+    https_url = f"https://isaac-assist.local/invite/{token}"
+
+    now = _dt.utcnow()
+    expires_utc = (now + _td(minutes=minutes)).isoformat() + "Z"
+    created_utc = now.isoformat() + "Z"
+
+    _COMMUNITY_DIR.mkdir(parents=True, exist_ok=True)
+    invite_row = {
+        "token": token,
+        "session_name": session_name,
+        "allow_write": allow_write,
+        "expires_utc": expires_utc,
+        "created_utc": created_utc,
+    }
+    with _COMMUNITY_INVITES.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(invite_row) + "\n")
+
+    return {
+        "session_name": session_name,
+        "token": token,
+        "deep_link": deep_link,
+        "https_url": https_url,
+        "expires_utc": expires_utc,
+        "expires_in_minutes": minutes,
+        "allow_write": allow_write,
+        "invites_path": str(_COMMUNITY_INVITES),
+        "message": (
+            f"Invite for '{session_name}' valid for {minutes} min "
+            f"({'write' if allow_write else 'read-only'}). "
+            f"Share: {https_url}"
+        ),
+    }
+
+
+DATA_HANDLERS["remote_session_invite"] = _handle_remote_session_invite
+
+
+def _is_valid_host(host: str) -> bool:
+    """Check that host is a hostname or IPv4 — no scheme, no whitespace."""
+    if not host or any(c.isspace() for c in host):
+        return False
+    if "://" in host or "/" in host:
+        return False
+    # Hostnames: alnum, dots, hyphens. IPv4: digits + dots.
+    for c in host:
+        if not (c.isalnum() or c in ".-_"):
+            return False
+    return True
+
+
+async def _handle_connect_remote_kit(args: Dict) -> Dict:
+    """Persist a remote Kit RPC connection profile to disk."""
+    from datetime import datetime as _dt
+
+    host = str(args.get("host", "")).strip()
+    port_raw = args.get("port")
+    auth_token = str(args.get("auth_token", ""))
+    name = str(args.get("name", "remote-kit")).strip() or "remote-kit"
+
+    if not _is_valid_host(host):
+        return {
+            "error": f"Invalid host '{host}'. Must be a hostname or IPv4, no scheme, no path.",
+            "saved": False,
+        }
+    try:
+        port = int(port_raw)
+    except (TypeError, ValueError):
+        return {
+            "error": f"Invalid port '{port_raw}'. Must be an integer in 1..65535.",
+            "saved": False,
+        }
+    if port < 1 or port > 65535:
+        return {
+            "error": f"Port {port} out of range (1..65535).",
+            "saved": False,
+        }
+    if len(auth_token) < 8:
+        return {
+            "error": "auth_token must be at least 8 characters.",
+            "saved": False,
+        }
+
+    token_preview = auth_token[:4] + "…" + auth_token[-4:]
+    profile = {
+        "name": name,
+        "host": host,
+        "port": port,
+        "url": f"http://{host}:{port}",
+        "ws_url": f"ws://{host}:{port}/ws",
+        "auth_token_preview": token_preview,
+        "added_utc": _dt.utcnow().isoformat() + "Z",
+    }
+
+    _COMMUNITY_DIR.mkdir(parents=True, exist_ok=True)
+    if _COMMUNITY_REMOTE_KITS.exists():
+        try:
+            existing = json.loads(_COMMUNITY_REMOTE_KITS.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            existing = {"profiles": []}
+    else:
+        existing = {"profiles": []}
+    profiles = [p for p in existing.get("profiles", []) if p.get("name") != name]
+    profiles.append(profile)
+    existing["profiles"] = profiles
+    _COMMUNITY_REMOTE_KITS.write_text(
+        json.dumps(existing, indent=2),
+        encoding="utf-8",
+    )
+
+    return {
+        "saved": True,
+        "profile": profile,
+        "profile_count": len(profiles),
+        "remote_kits_path": str(_COMMUNITY_REMOTE_KITS),
+        "message": (
+            f"Saved remote Kit profile '{name}' → {profile['url']} "
+            f"(token {token_preview}). Activate from the connection picker."
+        ),
+    }
+
+
+DATA_HANDLERS["connect_remote_kit"] = _handle_connect_remote_kit
+
+
+def _gen_publish_skill_recipe(args: Dict) -> str:
+    """Generate the Python source for a reusable skill recipe.
+
+    Side-effect: also writes the YAML manifest. The returned string is the
+    Python source for the recipe module so the caller can compile() and
+    persist it via the usual code-gen flow.
+    """
+    from datetime import datetime as _dt
+
+    recipe_name = args["recipe_name"]
+    description = args["description"]
+    steps = args["steps"]
+    inputs = list(args.get("inputs") or [])
+    tags = list(args.get("tags") or [])
+
+    if not isinstance(steps, list) or not steps:
+        raise ValueError("steps must be a non-empty list of {description, code}")
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            raise ValueError(f"steps[{i}] must be an object")
+        if "description" not in step or "code" not in step:
+            raise ValueError(f"steps[{i}] requires 'description' and 'code'")
+
+    safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in recipe_name)
+    if not safe_name:
+        raise ValueError("recipe_name must contain at least one alphanumeric character")
+
+    _COMMUNITY_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+    py_path = _COMMUNITY_SKILLS_DIR / f"{safe_name}.py"
+    yaml_path = _COMMUNITY_SKILLS_DIR / f"{safe_name}.yaml"
+
+    created_utc = _dt.utcnow().isoformat() + "Z"
+
+    # Build the Python source. Use repr() for every user-supplied string
+    # so a recipe name / description containing a quote does not break it.
+    safe_desc = repr(description)
+    safe_recipe = repr(recipe_name)
+    safe_inputs = repr(inputs)
+    safe_tags = repr(tags)
+
+    lines: List[str] = [
+        '"""',
+        f"Skill recipe: {safe_name}",
+        f"Auto-generated by Isaac Assist on {created_utc}",
+        '"""',
+        "from __future__ import annotations",
+        "from typing import Any, Dict",
+        "",
+        f"MANIFEST: Dict[str, Any] = {{",
+        f"    'name': {safe_recipe},",
+        f"    'description': {safe_desc},",
+        f"    'tags': {safe_tags},",
+        f"    'inputs': {safe_inputs},",
+        f"    'created_utc': {created_utc!r},",
+        f"    'step_count': {len(steps)},",
+        "}",
+        "",
+        "",
+        "def run(inputs: Dict[str, Any]) -> Dict[str, Any]:",
+        f'    """Replay the {len(steps)}-step recipe."""',
+        "    completed = 0",
+    ]
+    for i, step in enumerate(steps, 1):
+        step_desc = step["description"]
+        step_code = step["code"]
+        lines.append("")
+        lines.append(f"    # ── Step {i}: {step_desc.replace(chr(10), ' ')[:120]}")
+        # Indent every line of the user-supplied code by 4 spaces.
+        for code_line in step_code.splitlines() or [""]:
+            lines.append("    " + code_line)
+        lines.append(f"    completed += 1")
+    lines.extend([
+        "",
+        f"    return {{'completed_steps': completed, 'recipe': {safe_recipe}}}",
+        "",
+    ])
+    source = "\n".join(lines)
+
+    # Validate by compiling before writing.
+    compile(source, str(py_path), "exec")
+
+    py_path.write_text(source, encoding="utf-8")
+
+    # Build the YAML manifest by hand — no PyYAML dependency.
+    yaml_lines: List[str] = [
+        f"name: {json.dumps(recipe_name)}",
+        f"description: {json.dumps(description)}",
+        f"created_utc: {json.dumps(created_utc)}",
+        f"py_path: {json.dumps(str(py_path))}",
+        "tags:",
+    ]
+    for t in tags:
+        yaml_lines.append(f"  - {json.dumps(t)}")
+    yaml_lines.append("inputs:")
+    for inp in inputs:
+        yaml_lines.append(f"  - {json.dumps(inp)}")
+    yaml_lines.append("steps:")
+    for i, step in enumerate(steps, 1):
+        yaml_lines.append(f"  - index: {i}")
+        yaml_lines.append(f"    description: {json.dumps(step['description'])}")
+    yaml_path.write_text("\n".join(yaml_lines) + "\n", encoding="utf-8")
+
+    return source
+
+
+CODE_GEN_HANDLERS["publish_skill_recipe"] = _gen_publish_skill_recipe
