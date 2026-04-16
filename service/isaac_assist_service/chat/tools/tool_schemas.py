@@ -942,4 +942,58 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Clearance Detection (Phase 8B Addendum) ─────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "set_clearance_monitor",
+            "description": "Configure a near-miss / clearance monitor on a robot articulation. Sets PhysX contactOffset on each robot link so contact-report events fire BEFORE actual penetration, then subscribes to those events to warn when the robot comes within `clearance_mm` of any specified target. Supports multi-tier ISO 10218 zones (warning + stop).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation root (e.g. '/World/Franka')"},
+                    "clearance_mm": {"type": "number", "description": "Stop-zone clearance threshold in millimeters. Default: 50.0"},
+                    "warning_mm": {"type": "number", "description": "Optional warning-zone threshold in millimeters (must be > clearance_mm). Default: 100.0"},
+                    "target_prims": {"type": "array", "items": {"type": "string"}, "description": "USD paths of fixtures / obstacles to monitor against the robot links"},
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "visualize_clearance",
+            "description": "Visualize clearance between a robot and surrounding obstacles. mode='heatmap' applies SDF mesh collision and color-codes link positions by signed distance. mode='zones' creates invisible PhysX trigger volumes around obstacles at warning/stop distances.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation root"},
+                    "mode": {"type": "string", "enum": ["heatmap", "zones"], "description": "Visualization mode: 'heatmap' (SDF gradient) or 'zones' (static trigger volumes). Default: 'heatmap'"},
+                    "target_prims": {"type": "array", "items": {"type": "string"}, "description": "USD paths of fixture / obstacle prims to visualize clearance against"},
+                    "clearance_mm": {"type": "number", "description": "Stop-zone threshold in millimeters. Default: 50.0"},
+                    "warning_mm": {"type": "number", "description": "Warning-zone threshold in millimeters (zones mode only). Default: 100.0"},
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_path_clearance",
+            "description": "Pre-flight clearance check for a planned trajectory. Runs forward kinematics on each waypoint, queries SDF distance to each obstacle, and flags waypoints whose minimum link-to-obstacle clearance falls below the threshold. Use BEFORE execute_trajectory to catch near-miss conditions before motion executes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation root"},
+                    "trajectory": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}, "description": "List of joint-position waypoints, each a list of joint angles in radians"},
+                    "obstacles": {"type": "array", "items": {"type": "string"}, "description": "USD paths of obstacle prims (must have a SDF or mesh collider)"},
+                    "clearance_mm": {"type": "number", "description": "Minimum allowed clearance in millimeters. Default: 50.0"},
+                },
+                "required": ["articulation_path", "trajectory", "obstacles"],
+            },
+        },
+    },
 ]

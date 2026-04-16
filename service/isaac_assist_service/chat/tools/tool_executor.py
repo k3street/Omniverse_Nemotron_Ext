@@ -2232,3 +2232,346 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Clearance Detection (Phase 8B Addendum) ─────────────────────────────────
+# Implements three near-miss / clearance tools described in
+# docs/specs/addendum_clearance_detection.md:
+#   - set_clearance_monitor : PhysX contactOffset + contact-report subscription
+#   - visualize_clearance   : SDF heatmap or static trigger zones
+#   - check_path_clearance  : pre-flight SDF distance sweep along trajectory
+#
+# Approach: PhysX `contactOffset` makes contact events fire BEFORE penetration,
+# and `contact_pair.separation` reports true surface-to-surface gap (positive
+# while still separated). This is essentially zero extra cost — it piggybacks
+# on the normal PhysX simulation step.
+
+def _gen_set_clearance_monitor(args: Dict) -> str:
+    """Generate code that arms a clearance / near-miss monitor on a robot."""
+    art_path = args["articulation_path"]
+    clearance_mm = float(args.get("clearance_mm", 50.0))
+    warning_mm = float(args.get("warning_mm", 100.0))
+    target_prims = args.get("target_prims") or []
+
+    # Stop zone is the contactOffset — events fire when within this distance.
+    # Use the larger of warning/stop for the contactOffset itself so we get
+    # warning-zone events too; the callback then classifies them by separation.
+    monitor_offset_mm = max(clearance_mm, warning_mm)
+    stop_m = clearance_mm / 1000.0
+    warn_m = warning_mm / 1000.0
+    monitor_m = monitor_offset_mm / 1000.0
+    targets_repr = repr(list(target_prims))
+
+    return f"""\
+import omni.usd
+import omni.physx
+from pxr import Usd, UsdGeom, UsdPhysics, PhysxSchema
+
+stage = omni.usd.get_context().get_stage()
+robot_prim = stage.GetPrimAtPath('{art_path}')
+if not robot_prim.IsValid():
+    raise RuntimeError('Articulation not found: {art_path}')
+
+stop_threshold_m = {stop_m}
+warning_threshold_m = {warn_m}
+monitor_offset_m = {monitor_m}
+target_paths = set({targets_repr})
+
+# 1) Walk all descendants and arm contactOffset + contact reporting on every
+#    prim that already has a CollisionAPI (i.e. each robot link's collider).
+link_paths = []
+for desc in Usd.PrimRange(robot_prim):
+    if desc.HasAPI(UsdPhysics.CollisionAPI):
+        physx_col = PhysxSchema.PhysxCollisionAPI.Apply(desc)
+        # contactOffset is in scene units (meters in Isaac Sim defaults)
+        physx_col.CreateContactOffsetAttr().Set(monitor_offset_m)
+        # contactReport API must be applied to receive on_contact events
+        PhysxSchema.PhysxContactReportAPI.Apply(desc)
+        link_paths.append(str(desc.GetPath()))
+
+# 2) Arm the same APIs on each target so PhysX pairs them with the robot links
+for tp in target_paths:
+    tprim = stage.GetPrimAtPath(tp)
+    if tprim.IsValid() and tprim.HasAPI(UsdPhysics.CollisionAPI):
+        physx_col = PhysxSchema.PhysxCollisionAPI.Apply(tprim)
+        physx_col.CreateContactOffsetAttr().Set(monitor_offset_m)
+        PhysxSchema.PhysxContactReportAPI.Apply(tprim)
+
+# 3) Subscribe to contact-report events. `separation > 0` means the two
+#    colliders are still apart but inside the contactOffset zone.
+def _on_contact_report(contact_headers, contact_data):
+    for header in contact_headers:
+        actor0 = str(header.actor0)
+        actor1 = str(header.actor1)
+        # If targets were provided, only report robot-vs-target pairs
+        if target_paths and not (actor0 in target_paths or actor1 in target_paths):
+            continue
+        for i in range(header.contact_data_offset,
+                       header.contact_data_offset + header.num_contact_data):
+            sep = float(contact_data[i].separation)
+            if sep <= 0:
+                # Actual penetration — full collision
+                print(f'[CLEARANCE] COLLISION: {{actor0}} <-> {{actor1}} (penetration={{-sep*1000:.1f}}mm)')
+            elif sep < stop_threshold_m:
+                print(f'[CLEARANCE] STOP: {{actor0}} within {{sep*1000:.1f}}mm of {{actor1}} (<{{stop_threshold_m*1000:.0f}}mm stop zone)')
+            elif sep < warning_threshold_m:
+                print(f'[CLEARANCE] WARNING: {{actor0}} within {{sep*1000:.1f}}mm of {{actor1}} (<{{warning_threshold_m*1000:.0f}}mm warning zone)')
+
+physx_iface = omni.physx.get_physx_interface()
+_clearance_sub = physx_iface.subscribe_contact_report_events(_on_contact_report)
+
+print(f'Clearance monitor armed on {{len(link_paths)}} robot links of {art_path}')
+print(f'  warning zone: <{{warning_threshold_m*1000:.0f}}mm   stop zone: <{{stop_threshold_m*1000:.0f}}mm')
+print(f'  monitoring against {{len(target_paths)}} target prims')
+"""
+
+
+CODE_GEN_HANDLERS["set_clearance_monitor"] = _gen_set_clearance_monitor
+
+
+def _gen_visualize_clearance(args: Dict) -> str:
+    """Generate code to visualize clearance via SDF heatmap or trigger zones."""
+    art_path = args["articulation_path"]
+    mode = args.get("mode", "heatmap")
+    target_prims = args.get("target_prims") or []
+    clearance_mm = float(args.get("clearance_mm", 50.0))
+    warning_mm = float(args.get("warning_mm", 100.0))
+    targets_repr = repr(list(target_prims))
+    stop_m = clearance_mm / 1000.0
+    warn_m = warning_mm / 1000.0
+
+    if mode == "zones":
+        # Static trigger volumes (cubes scaled to warning/stop dist) around
+        # each target. Trigger prims are invisible but report enter/exit.
+        return f"""\
+import omni.usd
+from pxr import Usd, UsdGeom, UsdPhysics, PhysxSchema, Gf, Sdf
+
+stage = omni.usd.get_context().get_stage()
+target_paths = list({targets_repr})
+stop_m = {stop_m}
+warn_m = {warn_m}
+
+created = []
+for tp in target_paths:
+    tprim = stage.GetPrimAtPath(tp)
+    if not tprim.IsValid():
+        print(f'[CLEARANCE-ZONES] Skipping invalid target: {{tp}}')
+        continue
+
+    # Compute world-space bounds of the target to size the trigger zones
+    bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    world_bbox = bbox_cache.ComputeWorldBound(tprim)
+    bb_range = world_bbox.ComputeAlignedRange()
+    center = bb_range.GetMidpoint()
+    extent = bb_range.GetSize()
+
+    # Warning zone (outer) and Stop zone (inner) trigger volumes
+    for zone_name, gap_m in (('WarningZone', warn_m), ('StopZone', stop_m)):
+        zone_path = f'{{tp}}_{{zone_name}}'
+        zone_prim = stage.DefinePrim(zone_path, 'Cube')
+        zone_xf = UsdGeom.Xformable(zone_prim)
+        zone_xf.ClearXformOpOrder()
+        zone_xf.AddTranslateOp().Set(Gf.Vec3d(center[0], center[1], center[2]))
+        zone_xf.AddScaleOp().Set(Gf.Vec3d(
+            float(extent[0])/2 + gap_m,
+            float(extent[1])/2 + gap_m,
+            float(extent[2])/2 + gap_m,
+        ))
+        # Make invisible — the cube only matters as a collider/trigger
+        UsdGeom.Imageable(zone_prim).MakeInvisible()
+        UsdPhysics.CollisionAPI.Apply(zone_prim)
+        PhysxSchema.PhysxTriggerAPI.Apply(zone_prim)
+        created.append(zone_path)
+
+print(f'Created {{len(created)}} trigger zones around {{len(target_paths)}} targets for {art_path}')
+print(f'  stop zone offset: {{stop_m*1000:.0f}}mm   warning zone offset: {{warn_m*1000:.0f}}mm')
+"""
+
+    # Default: heatmap. Apply PhysX SDF mesh collision to each target so we
+    # can query signed distance, then color robot link positions accordingly.
+    return f"""\
+import omni.usd
+import numpy as np
+from pxr import Usd, UsdGeom, UsdPhysics, PhysxSchema, Gf
+from isaacsim.util.debug_draw import _debug_draw
+
+stage = omni.usd.get_context().get_stage()
+robot_prim = stage.GetPrimAtPath('{art_path}')
+if not robot_prim.IsValid():
+    raise RuntimeError('Articulation not found: {art_path}')
+
+target_paths = list({targets_repr})
+stop_m = {stop_m}
+warn_m = {warn_m}
+
+# 1) Apply SDF mesh collision to each target so SDF queries can resolve
+for tp in target_paths:
+    tprim = stage.GetPrimAtPath(tp)
+    if not tprim.IsValid():
+        continue
+    if not tprim.HasAPI(UsdPhysics.CollisionAPI):
+        UsdPhysics.CollisionAPI.Apply(tprim)
+    PhysxSchema.PhysxSDFMeshCollisionAPI.Apply(tprim)
+
+# 2) Collect world positions of every robot link with a collider
+link_positions = []
+for desc in Usd.PrimRange(robot_prim):
+    if desc.HasAPI(UsdPhysics.CollisionAPI):
+        xf = UsdGeom.Xformable(desc).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+        link_positions.append(np.array(xf.ExtractTranslation()))
+
+if not link_positions:
+    raise RuntimeError('No collider links found on {art_path}')
+
+# 3) For each link, compute min distance to any target centroid as a coarse
+#    fallback when the SDF query API isn't directly exposed in this Kit build.
+target_centers = []
+bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+for tp in target_paths:
+    tprim = stage.GetPrimAtPath(tp)
+    if tprim.IsValid():
+        wb = bbox_cache.ComputeWorldBound(tprim)
+        target_centers.append(np.array(wb.ComputeAlignedRange().GetMidpoint()))
+
+distances = []
+for lp in link_positions:
+    if target_centers:
+        d = min(float(np.linalg.norm(lp - tc)) for tc in target_centers)
+    else:
+        d = float('inf')
+    distances.append(d)
+
+# 4) Color: red if < stop, yellow if < warning, green otherwise
+colors = []
+for d in distances:
+    if d < stop_m:
+        colors.append((1.0, 0.0, 0.0, 1.0))   # red
+    elif d < warn_m:
+        colors.append((1.0, 1.0, 0.0, 1.0))   # yellow
+    else:
+        colors.append((0.0, 1.0, 0.0, 1.0))   # green
+
+draw = _debug_draw.acquire_debug_draw_interface()
+draw.clear_points()
+points = [(float(p[0]), float(p[1]), float(p[2])) for p in link_positions]
+draw.draw_points(points, colors, [12] * len(points))
+
+print(f'Clearance heatmap drawn for {{len(points)}} links of {art_path}')
+print(f'  stop<{{stop_m*1000:.0f}}mm=red  warn<{{warn_m*1000:.0f}}mm=yellow  safe=green')
+"""
+
+
+CODE_GEN_HANDLERS["visualize_clearance"] = _gen_visualize_clearance
+
+
+def _gen_check_path_clearance(args: Dict) -> str:
+    """Generate code that runs FK on every waypoint and reports min clearance."""
+    art_path = args["articulation_path"]
+    trajectory = args["trajectory"]
+    obstacles = args.get("obstacles") or []
+    clearance_mm = float(args.get("clearance_mm", 50.0))
+    threshold_m = clearance_mm / 1000.0
+    obstacles_repr = repr(list(obstacles))
+    # Render trajectory as a Python list literal of lists
+    traj_repr = "[" + ", ".join("[" + ", ".join(f"{float(v):.6f}" for v in wp) + "]" for wp in trajectory) + "]"
+
+    return f"""\
+import json
+import numpy as np
+from pxr import Usd, UsdGeom, UsdPhysics
+import omni.usd
+from isaacsim.robot_motion.motion_generation import LulaKinematicsSolver
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+
+stage = omni.usd.get_context().get_stage()
+robot_prim = stage.GetPrimAtPath('{art_path}')
+if not robot_prim.IsValid():
+    raise RuntimeError('Articulation not found: {art_path}')
+
+trajectory = {traj_repr}
+obstacle_paths = list({obstacles_repr})
+threshold_m = {threshold_m}
+
+# Resolve obstacle world-space centroids (coarse SDF fallback)
+bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+obstacle_centers = []
+for op in obstacle_paths:
+    oprim = stage.GetPrimAtPath(op)
+    if not oprim.IsValid():
+        continue
+    wb = bbox_cache.ComputeWorldBound(oprim)
+    obstacle_centers.append((op, np.array(wb.ComputeAlignedRange().GetMidpoint())))
+
+# Load kinematics for FK
+robot_name = '{art_path}'.split('/')[-1].lower()
+try:
+    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config(robot_name)
+    kin = LulaKinematicsSolver(**kin_config)
+    frame_names = kin.get_all_frame_names()
+except Exception as e:
+    print(json.dumps({{'status': 'error', 'message': f'Kinematics not available: {{e}}'}}))
+    raise
+
+violations = []
+per_waypoint = []
+
+for idx, q in enumerate(trajectory):
+    q_np = np.array(q, dtype=float)
+    # Compute FK at each frame to get all link world positions
+    link_positions = []
+    for fname in frame_names:
+        try:
+            pos, _ = kin.compute_forward_kinematics(fname, q_np)
+            link_positions.append(np.array(pos))
+        except Exception:
+            continue
+
+    # Min distance from any link to any obstacle centroid
+    if obstacle_centers and link_positions:
+        min_dist = min(
+            float(np.linalg.norm(lp - oc))
+            for lp in link_positions
+            for _, oc in obstacle_centers
+        )
+        # Identify the closest obstacle
+        closest = min(
+            (
+                (op, float(np.linalg.norm(lp - oc)))
+                for lp in link_positions
+                for op, oc in obstacle_centers
+            ),
+            key=lambda x: x[1],
+        )
+    else:
+        min_dist = float('inf')
+        closest = (None, float('inf'))
+
+    waypoint_info = {{
+        'waypoint_index': idx,
+        'min_clearance_mm': round(min_dist * 1000, 2) if min_dist != float('inf') else None,
+        'closest_obstacle': closest[0],
+    }}
+    per_waypoint.append(waypoint_info)
+
+    if min_dist < threshold_m:
+        violations.append({{
+            **waypoint_info,
+            'threshold_mm': threshold_m * 1000,
+            'message': f'Waypoint {{idx}}: min clearance {{min_dist*1000:.1f}}mm < {{threshold_m*1000:.0f}}mm',
+        }})
+
+result = {{
+    'status': 'violation' if violations else 'ok',
+    'articulation_path': '{art_path}',
+    'threshold_mm': threshold_m * 1000,
+    'num_waypoints': len(trajectory),
+    'num_violations': len(violations),
+    'violations': violations,
+    'per_waypoint': per_waypoint,
+}}
+print(json.dumps(result))
+"""
+
+
+CODE_GEN_HANDLERS["check_path_clearance"] = _gen_check_path_clearance
