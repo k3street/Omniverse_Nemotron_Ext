@@ -24,10 +24,12 @@ logger = logging.getLogger(__name__)
 _WORKSPACE = Path(__file__).resolve().parents[4] / "workspace"
 _SENSOR_SPECS_PATH = _WORKSPACE / "knowledge" / "sensor_specs.jsonl"
 _DEFORMABLE_PRESETS_PATH = _WORKSPACE / "knowledge" / "deformable_presets.json"
+_PHYSICS_MATERIALS_PATH = _WORKSPACE / "knowledge" / "physics_materials.json"
 
 # Cache loaded once
 _sensor_specs: Optional[List[Dict]] = None
 _deformable_presets: Optional[Dict] = None
+_physics_materials: Optional[Dict] = None
 
 
 def _load_sensor_specs() -> List[Dict]:
@@ -53,6 +55,35 @@ def _load_deformable_presets() -> Dict:
     else:
         _deformable_presets = {"presets": {}}
     return _deformable_presets
+
+
+def _load_physics_materials() -> Dict:
+    global _physics_materials
+    if _physics_materials is not None:
+        return _physics_materials
+    if _PHYSICS_MATERIALS_PATH.exists():
+        _physics_materials = json.loads(_PHYSICS_MATERIALS_PATH.read_text())
+    else:
+        _physics_materials = {"materials": {}, "pairs": {}, "aliases": {}}
+    return _physics_materials
+
+
+def _normalize_material_name(name: str) -> str:
+    """Normalize a user-supplied material name to a database key."""
+    db = _load_physics_materials()
+    key = name.strip().lower().replace(" ", "_").replace("-", "_")
+    # Check aliases first
+    aliases = db.get("aliases", {})
+    if key in aliases:
+        return aliases[key]
+    # Check direct match in materials
+    if key in db["materials"]:
+        return key
+    # Partial match: e.g. "mild steel" -> "steel_mild"
+    for mat_key in db["materials"]:
+        if key in mat_key or mat_key in key:
+            return mat_key
+    return key
 
 
 # ── Safe xform helper (inlined into generated code) ─────────────────────────
@@ -570,6 +601,58 @@ def _gen_assign_material(args: Dict) -> str:
     )
 
 
+def _gen_apply_physics_material(args: Dict) -> str:
+    """Generate code to create a PhysicsMaterialAPI with values from the material database."""
+    prim_path = args["prim_path"]
+    material_name = args["material_name"]
+
+    db = _load_physics_materials()
+    mat_key = _normalize_material_name(material_name)
+    mat = db["materials"].get(mat_key)
+
+    if mat is None:
+        available = sorted(db["materials"].keys())
+        return (
+            f"raise ValueError("
+            f"\"Unknown material '{material_name}' (normalized: '{mat_key}'). "
+            f"Available: {', '.join(available)}\")"
+        )
+
+    sf = mat["static_friction"]
+    df = mat["dynamic_friction"]
+    rest = mat["restitution"]
+    density = mat["density_kg_m3"]
+    safe_name = mat_key.replace(" ", "_")
+
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics, Sdf
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath('{prim_path}')
+
+# Ensure CollisionAPI is applied
+if not prim.HasAPI(UsdPhysics.CollisionAPI):
+    UsdPhysics.CollisionAPI.Apply(prim)
+
+# Create physics material
+mat_path = '/World/PhysicsMaterials/{safe_name}'
+mat_prim = stage.DefinePrim(mat_path)
+mat_api = UsdPhysics.MaterialAPI.Apply(mat_prim)
+mat_api.CreateStaticFrictionAttr().Set({sf})
+mat_api.CreateDynamicFrictionAttr().Set({df})
+mat_api.CreateRestitutionAttr().Set({rest})
+mat_api.CreateDensityAttr().Set({density})
+
+# Bind physics material to prim
+binding_api = UsdPhysics.MaterialAPI(prim)
+rel = prim.CreateRelationship('physics:materialBinding', custom=False)
+rel.SetTargets([Sdf.Path(mat_path)])
+
+print(f"Applied {{mat_path}} to {prim_path}: static_friction={sf}, dynamic_friction={df}, restitution={rest}, density={density}")
+"""
+
+
 def _gen_sim_control(args: Dict) -> str:
     action = args["action"]
     if action == "play":
@@ -891,6 +974,7 @@ CODE_GEN_HANDLERS = {
     "create_omnigraph": _gen_create_omnigraph,
     "create_material": _gen_create_material,
     "assign_material": _gen_assign_material,
+    "apply_physics_material": _gen_apply_physics_material,
     "sim_control": _gen_sim_control,
     "set_physics_params": _gen_set_physics_params,
     "teleport_prim": _gen_teleport_prim,
@@ -1003,6 +1087,90 @@ async def _handle_get_debug_info(args: Dict) -> Dict:
     }
 
 
+async def _handle_lookup_material(args: Dict) -> Dict:
+    """Look up physics material properties for a material pair."""
+    mat_a_raw = args.get("material_a", "")
+    mat_b_raw = args.get("material_b", "")
+    if not mat_a_raw or not mat_b_raw:
+        return {"error": "Both material_a and material_b are required."}
+
+    db = _load_physics_materials()
+    mat_a = _normalize_material_name(mat_a_raw)
+    mat_b = _normalize_material_name(mat_b_raw)
+
+    # Check if materials exist in database
+    materials = db.get("materials", {})
+    available = sorted(materials.keys())
+    if mat_a not in materials and mat_b not in materials:
+        return {
+            "found": False,
+            "error": f"Unknown materials: '{mat_a_raw}' and '{mat_b_raw}'",
+            "available_materials": available,
+        }
+    if mat_a not in materials:
+        return {
+            "found": False,
+            "error": f"Unknown material: '{mat_a_raw}' (normalized: '{mat_a}')",
+            "available_materials": available,
+        }
+    if mat_b not in materials:
+        return {
+            "found": False,
+            "error": f"Unknown material: '{mat_b_raw}' (normalized: '{mat_b}')",
+            "available_materials": available,
+        }
+
+    # Check pair overrides (both orderings)
+    pairs = db.get("pairs", {})
+    pair_key_ab = f"{mat_a}:{mat_b}"
+    pair_key_ba = f"{mat_b}:{mat_a}"
+    if pair_key_ab in pairs:
+        result = dict(pairs[pair_key_ab])
+        result["found"] = True
+        result["pair"] = pair_key_ab
+        result["lookup_type"] = "pair_specific"
+        result["material_a"] = mat_a
+        result["material_b"] = mat_b
+        result["density_a_kg_m3"] = materials[mat_a]["density_kg_m3"]
+        result["density_b_kg_m3"] = materials[mat_b]["density_kg_m3"]
+        return result
+    if pair_key_ba in pairs:
+        result = dict(pairs[pair_key_ba])
+        result["found"] = True
+        result["pair"] = pair_key_ba
+        result["lookup_type"] = "pair_specific"
+        result["material_a"] = mat_a
+        result["material_b"] = mat_b
+        result["density_a_kg_m3"] = materials[mat_a]["density_kg_m3"]
+        result["density_b_kg_m3"] = materials[mat_b]["density_kg_m3"]
+        return result
+
+    # Combine individual materials (PhysX average combine mode)
+    a = materials[mat_a]
+    b = materials[mat_b]
+    sf_a = a["static_friction"] if isinstance(a["static_friction"], (int, float)) else a["static_friction"][0]
+    sf_b = b["static_friction"] if isinstance(b["static_friction"], (int, float)) else b["static_friction"][0]
+    df_a = a["dynamic_friction"] if isinstance(a["dynamic_friction"], (int, float)) else a["dynamic_friction"][0]
+    df_b = b["dynamic_friction"] if isinstance(b["dynamic_friction"], (int, float)) else b["dynamic_friction"][0]
+    rest_a = a["restitution"]
+    rest_b = b["restitution"]
+
+    return {
+        "found": True,
+        "pair": f"{mat_a}:{mat_b}",
+        "lookup_type": "average_combine",
+        "static_friction": round((sf_a + sf_b) / 2, 4),
+        "dynamic_friction": round((df_a + df_b) / 2, 4),
+        "restitution": round((rest_a + rest_b) / 2, 4),
+        "combine_mode": "average",
+        "material_a": mat_a,
+        "material_b": mat_b,
+        "density_a_kg_m3": a["density_kg_m3"],
+        "density_b_kg_m3": b["density_kg_m3"],
+        "note": "Computed via PhysX average combine — pair-specific data not available",
+    }
+
+
 async def _handle_lookup_knowledge(args: Dict) -> Dict:
     """Search the version-specific knowledge base for code patterns and docs."""
     from ...retrieval.context_retriever import (
@@ -1045,6 +1213,7 @@ async def _handle_lookup_knowledge(args: Dict) -> Dict:
 # Data-only handlers (no code gen → return data directly to LLM)
 DATA_HANDLERS = {
     "lookup_product_spec": _handle_lookup_product_spec,
+    "lookup_material": _handle_lookup_material,
     "scene_summary": _handle_scene_summary,
     "capture_viewport": _handle_capture_viewport,
     "get_console_errors": _handle_get_console_errors,

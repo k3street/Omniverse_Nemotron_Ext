@@ -283,6 +283,38 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Physics Material Database ───────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_material",
+            "description": "Look up physics material properties (friction, restitution, density) for a material pair. Returns pair-specific measured values when available, otherwise computes average-combine values. Covers 16 common robotics materials with 20 pre-measured pairs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "material_a": {"type": "string", "description": "First material name (e.g. 'steel', 'rubber', 'aluminum', 'plastic_abs', 'concrete', 'glass', 'wood', 'cardboard')"},
+                    "material_b": {"type": "string", "description": "Second material name for the contact pair"},
+                },
+                "required": ["material_a", "material_b"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_physics_material",
+            "description": "Create a PhysicsMaterialAPI on a USD prim with correct friction and restitution values from the material database. Also applies CollisionAPI if not already present.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path of the prim to apply the material to"},
+                    "material_name": {"type": "string", "description": "Material name from the database (e.g. 'steel', 'rubber', 'aluminum')"},
+                },
+                "required": ["prim_path", "material_name"],
+            },
+        },
+    },
+
     # ─── Simulation Control ───────────────────────────────────────────────────
     {
         "type": "function",
