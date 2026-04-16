@@ -926,6 +926,95 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Domain Randomization Advanced (Addendum) ─────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_correlated_dr",
+            "description": "Configure correlated domain randomization where physically related parameters (e.g. mass and friction, joint damping and temperature) are sampled jointly via a Gaussian copula instead of independently. Generates a Replicator/IsaacLab-compatible randomizer that respects the provided correlation matrix per parameter group.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "parameter_groups": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "List of correlation groups. Each group: {'params': ['mass', 'static_friction'], 'ranges': {'mass': [0.5, 2.0], 'static_friction': [0.3, 0.8]}, 'correlation': 0.6, 'method': 'copula'}. method in {'copula', 'linear'} (default: 'copula').",
+                    },
+                    "target_path": {"type": "string", "description": "USD prim path the randomizer applies to. Default: '/World'"},
+                    "seed": {"type": "integer", "description": "RNG seed for reproducibility. Default: 0"},
+                },
+                "required": ["parameter_groups"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "suggest_dr_ranges",
+            "description": "Recommend reasonable domain-randomization ranges for a task. Given task type, robot, and (optionally) a path to real sensor data, returns suggested ranges for object mass, friction, joint damping, gravity, action latency, and lighting. Uses material/sensor heuristics plus, when real_data_path is provided, empirical variance from logged sensor data.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_type": {"type": "string", "description": "Task category — e.g. 'pick_and_place', 'locomotion', 'navigation', 'assembly'. Free-form."},
+                    "robot": {"type": "string", "description": "Robot name — e.g. 'Franka Panda', 'UR10', 'Anymal-C'. Free-form; used to look up gripper/material defaults."},
+                    "real_data_path": {"type": "string", "description": "Optional path to a CSV/JSON of real sensor measurements. When provided, ranges are estimated from observed variance instead of defaults."},
+                },
+                "required": ["task_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_dr_preset",
+            "description": "Look up a pre-configured domain-randomization preset for a common scenario (indoor_industrial, outdoor_daylight, warehouse, cleanroom, aggressive_sim2real). Returns the full parameter dict that can be fed into configure_correlated_dr or any IsaacLab event manager.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "preset": {
+                        "type": "string",
+                        "enum": ["indoor_industrial", "outdoor_daylight", "warehouse", "cleanroom", "aggressive_sim2real"],
+                        "description": "Preset name. See the addendum spec for what each preset randomizes.",
+                    },
+                },
+                "required": ["preset"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_latency_randomization",
+            "description": "Inject per-step action delay into an IsaacLab environment to match the jitter of real control loops. Generates an EventManager-compatible ActionLatencyEvent that delays the policy actions by uniform(min_ms, max_ms) each episode. Without this, policies trained in sim fail on real hardware when actions arrive late.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "min_ms": {"type": "number", "description": "Minimum injected latency in milliseconds. Default: 10"},
+                    "max_ms": {"type": "number", "description": "Maximum injected latency in milliseconds. Default: 50"},
+                    "physics_dt": {"type": "number", "description": "Physics step size in seconds (used to convert ms to step count). Default: 0.005"},
+                    "buffer_size": {"type": "integer", "description": "Action buffer size; must be at least ceil(max_ms / (physics_dt * 1000)). Default: auto."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "preview_dr",
+            "description": "Generate a small grid of preview frames using the currently configured domain randomization, so the user can visually verify the ranges before committing to a full SDG / training run. Captures num_samples viewport frames with the DR randomizer triggered between each.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "num_samples": {"type": "integer", "description": "Number of preview frames to generate. Default: 9 (3x3 grid)."},
+                    "output_dir": {"type": "string", "description": "Directory for preview images. Default: 'workspace/dr_previews'"},
+                    "resolution": {"type": "array", "items": {"type": "integer"}, "description": "[width, height] of each preview. Default: [512, 512]"},
+                },
+                "required": [],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",

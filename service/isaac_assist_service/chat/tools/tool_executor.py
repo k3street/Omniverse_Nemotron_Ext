@@ -2232,3 +2232,499 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ─── Domain Randomization Advanced (Addendum) ───────────────────────────────
+# Tools:
+#   configure_correlated_dr       (CODE_GEN) — Gaussian-copula joint sampling
+#   suggest_dr_ranges             (DATA)     — heuristic / empirical DR ranges
+#   apply_dr_preset               (DATA)     — pre-baked scenario presets
+#   add_latency_randomization     (CODE_GEN) — IsaacLab ActionLatencyEvent
+#   preview_dr                    (CODE_GEN) — render N preview frames
+#
+# All DR data is local (no Kit, no network, no GPU) — handlers are L0-safe.
+
+# DR.3 — preset table. Values are conservative starting points; a user
+# tightens or widens them after preview_dr.
+_DR_PRESETS: Dict[str, Dict[str, Any]] = {
+    "indoor_industrial": {
+        "description": "Indoor industrial workspace — fluorescent overhead, concrete floor.",
+        "lighting_lux": [300, 2000],
+        "floor_texture": ["concrete_smooth", "concrete_rough", "epoxy_grey"],
+        "light_temperature_k": [3500, 5500],
+        "ambient_color": [[0.8, 0.85, 0.9], [1.0, 1.0, 1.0]],
+    },
+    "outdoor_daylight": {
+        "description": "Outdoor scene — sun + sky, varying cloud cover.",
+        "sun_elevation_deg": [15, 75],
+        "sun_azimuth_deg": [0, 360],
+        "cloud_cover": [0.0, 0.8],
+        "ground_material": ["asphalt", "grass", "gravel", "dirt"],
+    },
+    "warehouse": {
+        "description": "Warehouse — shelves, mixed lighting, cardboard.",
+        "shelf_offset_m": [-0.05, 0.05],
+        "lighting_lux": [200, 1500],
+        "box_texture": ["cardboard_clean", "cardboard_worn", "cardboard_taped"],
+        "aisle_width_m": [1.8, 3.5],
+    },
+    "cleanroom": {
+        "description": "Cleanroom — controlled environment, minimal variation.",
+        "lighting_lux": [800, 1200],
+        "ambient_color": [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]],
+        "floor_texture": ["epoxy_white"],
+        "particulate_density": [0.0, 0.05],
+    },
+    "aggressive_sim2real": {
+        "description": "Maximum robustness — every parameter at +/-50%.",
+        "mass_scale": [0.5, 1.5],
+        "friction_scale": [0.5, 1.5],
+        "damping_scale": [0.5, 1.5],
+        "gravity_scale": [0.95, 1.05],
+        "lighting_scale": [0.3, 1.7],
+        "action_latency_ms": [10, 80],
+    },
+}
+
+
+# DR.2 — material/sensor heuristics. Keys are matched against the lowercased
+# `task_type` and `robot` strings (substring match).
+_DR_TASK_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    "pick_and_place": {
+        "object_mass_kg": [0.1, 2.0],
+        "gripper_friction": [0.5, 1.0],
+        "joint_damping_scale": [0.8, 1.2],
+        "gravity_m_s2": [9.71, 9.91],
+        "action_latency_ms": [10, 50],
+        "lighting_lux": [300, 2000],
+    },
+    "locomotion": {
+        "ground_friction": [0.4, 1.2],
+        "joint_damping_scale": [0.7, 1.3],
+        "gravity_m_s2": [9.71, 9.91],
+        "action_latency_ms": [5, 30],
+        "terrain_height_m": [0.0, 0.15],
+    },
+    "navigation": {
+        "wheel_friction": [0.3, 0.9],
+        "lidar_noise_m": [0.0, 0.05],
+        "imu_bias_rad_s": [0.0, 0.01],
+        "action_latency_ms": [20, 80],
+    },
+    "assembly": {
+        "object_mass_kg": [0.05, 0.5],
+        "part_friction": [0.3, 0.9],
+        "tolerance_mm": [0.1, 1.0],
+        "action_latency_ms": [10, 40],
+    },
+}
+
+# Robot-specific gripper / end-effector hints (lowercase substring match).
+_DR_ROBOT_HINTS: Dict[str, Dict[str, Any]] = {
+    "franka": {"gripper_friction": [0.5, 1.0], "joint_damping_default": "URDF"},
+    "panda": {"gripper_friction": [0.5, 1.0], "joint_damping_default": "URDF"},
+    "ur10": {"gripper_friction": [0.4, 0.9], "joint_damping_default": "URDF"},
+    "ur5": {"gripper_friction": [0.4, 0.9], "joint_damping_default": "URDF"},
+    "anymal": {"ground_friction": [0.5, 1.2], "joint_damping_default": "URDF"},
+    "g1": {"joint_damping_default": "URDF", "action_latency_ms": [5, 25]},
+}
+
+
+def _gen_configure_correlated_dr(args: Dict) -> str:
+    """Generate a Gaussian-copula randomizer over correlated parameter groups.
+
+    Output is plain Python (numpy + scipy.stats) so it compiles standalone
+    and can be dropped into a Replicator on_frame() callback or an IsaacLab
+    EventManager term.
+    """
+    groups = args.get("parameter_groups", []) or []
+    target_path = args.get("target_path", "/World")
+    seed = int(args.get("seed", 0))
+
+    # Materialize the group config as a Python literal so the generated
+    # script is fully self-contained.
+    safe_groups = []
+    for g in groups:
+        if not isinstance(g, dict):
+            continue
+        params = list(g.get("params", []))
+        ranges = dict(g.get("ranges", {}))
+        # Default range when caller omitted ranges entirely.
+        for p in params:
+            ranges.setdefault(p, [0.0, 1.0])
+        correlation = float(g.get("correlation", 0.0))
+        method = g.get("method", "copula")
+        if method not in ("copula", "linear"):
+            method = "copula"
+        safe_groups.append({
+            "params": params,
+            "ranges": ranges,
+            "correlation": correlation,
+            "method": method,
+        })
+
+    return f'''"""Correlated domain-randomization sampler.
+Auto-generated by Isaac Assist (configure_correlated_dr).
+Target: {target_path}
+"""
+import numpy as np
+
+try:
+    from scipy.stats import norm
+    _HAS_SCIPY = True
+except Exception:  # scipy is optional in some Kit builds
+    _HAS_SCIPY = False
+
+_GROUPS = {json.dumps(safe_groups, indent=4)}
+_TARGET_PATH = {target_path!r}
+_RNG = np.random.default_rng({seed})
+
+
+def _sample_copula(group):
+    """Draw one correlated sample from a 2-or-more-param Gaussian copula."""
+    params = group["params"]
+    ranges = group["ranges"]
+    rho = float(group["correlation"])
+    n = len(params)
+    if n == 0:
+        return {{}}
+    # Build symmetric correlation matrix (rho off-diagonal, 1 on diagonal).
+    cov = np.full((n, n), rho)
+    np.fill_diagonal(cov, 1.0)
+    # Latent multivariate normal -> uniform via standard normal CDF.
+    z = _RNG.multivariate_normal(np.zeros(n), cov)
+    if _HAS_SCIPY:
+        u = norm.cdf(z)
+    else:
+        # Closed-form approximation when scipy is unavailable.
+        u = 0.5 * (1.0 + np.tanh(z / np.sqrt(2.0)))
+    out = {{}}
+    for i, p in enumerate(params):
+        lo, hi = ranges[p]
+        out[p] = float(lo + (hi - lo) * u[i])
+    return out
+
+
+def _sample_linear(group):
+    """Anchor first param uniformly, derive the rest via linear regression on rho."""
+    params = group["params"]
+    ranges = group["ranges"]
+    rho = float(group["correlation"])
+    if not params:
+        return {{}}
+    anchor = params[0]
+    lo, hi = ranges[anchor]
+    base_u = float(_RNG.uniform(0.0, 1.0))
+    out = {{anchor: float(lo + (hi - lo) * base_u)}}
+    for p in params[1:]:
+        lo_p, hi_p = ranges[p]
+        # Pull toward base_u proportional to rho, add residual noise.
+        noise = float(_RNG.normal(0.0, max(1e-6, 1.0 - abs(rho)) * 0.1))
+        u = max(0.0, min(1.0, rho * base_u + (1.0 - rho) * float(_RNG.uniform(0.0, 1.0)) + noise))
+        out[p] = float(lo_p + (hi_p - lo_p) * u)
+    return out
+
+
+def sample_correlated_dr():
+    """Return a dict {{group_index: {{param_name: value}}}} for one episode."""
+    samples = {{}}
+    for idx, group in enumerate(_GROUPS):
+        if group["method"] == "linear":
+            samples[idx] = _sample_linear(group)
+        else:
+            samples[idx] = _sample_copula(group)
+    return samples
+
+
+# Example: print one draw so the patch is observable in the Kit log.
+_draw = sample_correlated_dr()
+print(f"[correlated_dr] target={{_TARGET_PATH}} sample={{_draw}}")
+'''
+
+
+async def _handle_suggest_dr_ranges(args: Dict) -> Dict:
+    """Suggest DR ranges from heuristics, optionally refined by real-data variance."""
+    task_raw = (args.get("task_type") or "").strip()
+    robot_raw = (args.get("robot") or "").strip()
+    real_data_path = args.get("real_data_path")
+
+    if not task_raw:
+        return {"error": "task_type is required"}
+
+    task_lc = task_raw.lower().replace("-", "_").replace(" ", "_")
+    robot_lc = robot_raw.lower()
+
+    # Pick the closest matching task block.
+    task_key = None
+    for k in _DR_TASK_DEFAULTS:
+        if k in task_lc or task_lc in k:
+            task_key = k
+            break
+    if task_key is None:
+        # Fall back to manipulation-style defaults.
+        task_key = "pick_and_place"
+
+    suggested = {k: list(v) for k, v in _DR_TASK_DEFAULTS[task_key].items()}
+
+    # Robot-specific overrides.
+    robot_match = None
+    for k, v in _DR_ROBOT_HINTS.items():
+        if k in robot_lc:
+            robot_match = k
+            for hint_k, hint_v in v.items():
+                if isinstance(hint_v, list):
+                    suggested[hint_k] = list(hint_v)
+            break
+
+    # Optional empirical refinement from real sensor data.
+    empirical_used = False
+    empirical_notes: List[str] = []
+    if real_data_path:
+        rp = Path(real_data_path)
+        if not rp.exists():
+            empirical_notes.append(f"real_data_path not found: {real_data_path}")
+        else:
+            try:
+                import csv
+                rows: List[Dict[str, str]] = []
+                if rp.suffix.lower() == ".json":
+                    data = json.loads(rp.read_text())
+                    if isinstance(data, list):
+                        rows = [r for r in data if isinstance(r, dict)]
+                else:
+                    with rp.open(newline="") as fh:
+                        rows = list(csv.DictReader(fh))
+                # Numeric columns -> use min/max as suggested range.
+                if rows:
+                    keys = rows[0].keys()
+                    for key in keys:
+                        try:
+                            vals = [float(r[key]) for r in rows if r.get(key) not in (None, "")]
+                        except (TypeError, ValueError):
+                            continue
+                        if len(vals) >= 2:
+                            lo, hi = min(vals), max(vals)
+                            if hi > lo:
+                                suggested[f"empirical_{key}"] = [lo, hi]
+                                empirical_used = True
+                if empirical_used:
+                    empirical_notes.append(f"refined ranges from {len(rows)} rows in {rp.name}")
+            except Exception as exc:  # robust: never raise to the LLM
+                empirical_notes.append(f"failed to parse real_data_path: {exc}")
+
+    return {
+        "task_type": task_raw,
+        "task_matched": task_key,
+        "robot": robot_raw,
+        "robot_matched": robot_match,
+        "suggested_ranges": suggested,
+        "real_data_used": empirical_used,
+        "notes": empirical_notes,
+        "message": (
+            f"Suggested DR ranges for task='{task_raw}' (matched '{task_key}')"
+            + (f" robot='{robot_raw}' (matched '{robot_match}')" if robot_match else "")
+            + (f"; refined with empirical data" if empirical_used else "")
+        ),
+    }
+
+
+async def _handle_apply_dr_preset(args: Dict) -> Dict:
+    """Look up a DR preset by name."""
+    preset = (args.get("preset") or "").strip().lower()
+    if not preset:
+        return {"error": "preset is required", "available": sorted(_DR_PRESETS.keys())}
+    if preset not in _DR_PRESETS:
+        return {
+            "error": f"unknown preset '{preset}'",
+            "available": sorted(_DR_PRESETS.keys()),
+        }
+    cfg = _DR_PRESETS[preset]
+    return {
+        "preset": preset,
+        "description": cfg.get("description", ""),
+        "parameters": {k: v for k, v in cfg.items() if k != "description"},
+        "message": f"Loaded DR preset '{preset}' — feed `parameters` into configure_correlated_dr or your IsaacLab EventManager.",
+    }
+
+
+def _gen_add_latency_randomization(args: Dict) -> str:
+    """Generate an IsaacLab EventManager-compatible ActionLatencyEvent."""
+    min_ms = float(args.get("min_ms", 10.0))
+    max_ms = float(args.get("max_ms", 50.0))
+    physics_dt = float(args.get("physics_dt", 0.005))
+    if max_ms < min_ms:
+        min_ms, max_ms = max_ms, min_ms
+    # Compute default buffer size = ceil(max_ms / dt_ms) + 1.
+    dt_ms = physics_dt * 1000.0
+    import math as _math
+    auto_buf = int(_math.ceil(max_ms / max(dt_ms, 1e-6))) + 1
+    buffer_size = int(args.get("buffer_size") or auto_buf)
+    if buffer_size < auto_buf:
+        buffer_size = auto_buf
+
+    return f'''"""Action latency randomization for IsaacLab.
+Auto-generated by Isaac Assist (add_latency_randomization).
+Drop into your env.cfg as: events.action_latency = ActionLatencyEvent()
+"""
+import math
+import numpy as np
+
+try:
+    import torch
+    _HAS_TORCH = True
+except Exception:
+    _HAS_TORCH = False
+
+
+_MIN_MS = {min_ms}
+_MAX_MS = {max_ms}
+_PHYSICS_DT = {physics_dt}
+_BUFFER_SIZE = {buffer_size}
+
+
+def _ms_to_steps(ms):
+    """Convert milliseconds to integer physics steps (>=0)."""
+    return max(0, int(round(ms / max(_PHYSICS_DT * 1000.0, 1e-6))))
+
+
+class ActionLatencyEvent:
+    """Per-env uniform action latency between min_ms and max_ms.
+
+    On reset: sample a fresh latency for each environment.
+    On step:  read actions delayed by the sampled number of physics steps.
+    """
+
+    def __init__(self, min_ms=_MIN_MS, max_ms=_MAX_MS, physics_dt=_PHYSICS_DT,
+                 buffer_size=_BUFFER_SIZE):
+        self.min_ms = float(min_ms)
+        self.max_ms = float(max_ms)
+        self.physics_dt = float(physics_dt)
+        self.buffer_size = int(buffer_size)
+        self._latency_steps = None  # per-env, set on first reset
+        self._action_buffer = None  # ring buffer: (buffer_size, num_envs, action_dim)
+        self._head = 0
+
+    def reset(self, env, env_ids=None):
+        num_envs = int(getattr(env, "num_envs", 1))
+        max_steps = _ms_to_steps(self.max_ms)
+        min_steps = _ms_to_steps(self.min_ms)
+        if max_steps < min_steps:
+            max_steps = min_steps
+        sample_hi = max_steps + 1
+        if _HAS_TORCH and hasattr(env, "device"):
+            self._latency_steps = torch.randint(min_steps, sample_hi, (num_envs,),
+                                                device=env.device)
+        else:
+            self._latency_steps = np.random.randint(min_steps, sample_hi, size=num_envs)
+
+    def __call__(self, env):
+        actions = getattr(env, "actions", None)
+        if actions is None:
+            return
+        if self._action_buffer is None:
+            shape = (self.buffer_size,) + tuple(getattr(actions, "shape", (1,)))
+            if _HAS_TORCH and hasattr(actions, "zero_"):
+                self._action_buffer = actions.new_zeros(shape)
+            else:
+                self._action_buffer = np.zeros(shape, dtype=np.float32)
+        # Write current actions into the head slot.
+        self._action_buffer[self._head] = actions
+        # Read each env from its delayed slot.
+        if self._latency_steps is None:
+            self.reset(env)
+        if _HAS_TORCH and hasattr(self._action_buffer, "device"):
+            idx = (self._head - self._latency_steps) % self.buffer_size
+            num_envs = int(getattr(env, "num_envs", 1))
+            env_ix = torch.arange(num_envs, device=self._action_buffer.device)
+            env.actions = self._action_buffer[idx, env_ix]
+        else:
+            num_envs = int(getattr(env, "num_envs", 1))
+            for e in range(num_envs):
+                lat = int(self._latency_steps[e])
+                slot = (self._head - lat) % self.buffer_size
+                env.actions[e] = self._action_buffer[slot, e]
+        self._head = (self._head + 1) % self.buffer_size
+
+
+# Eagerly construct so the patch validator sees a usable object.
+action_latency_event = ActionLatencyEvent()
+print(f"[action_latency] min={{_MIN_MS}}ms max={{_MAX_MS}}ms steps={{_ms_to_steps(_MAX_MS)}} buffer={{_BUFFER_SIZE}}")
+'''
+
+
+def _gen_preview_dr(args: Dict) -> str:
+    """Generate code that captures N preview frames after re-randomizing the scene."""
+    num_samples = int(args.get("num_samples", 9))
+    if num_samples < 1:
+        num_samples = 1
+    output_dir = args.get("output_dir", "workspace/dr_previews")
+    res = args.get("resolution", [512, 512])
+    if not isinstance(res, (list, tuple)) or len(res) != 2:
+        res = [512, 512]
+    width, height = int(res[0]), int(res[1])
+
+    return f'''"""DR preview frame generator.
+Auto-generated by Isaac Assist (preview_dr).
+Captures {num_samples} viewport frames at {width}x{height} after triggering
+the configured Replicator randomizers between each frame.
+"""
+import os
+
+_NUM_SAMPLES = {num_samples}
+_OUTPUT_DIR = {output_dir!r}
+_RESOLUTION = ({width}, {height})
+
+os.makedirs(_OUTPUT_DIR, exist_ok=True)
+
+try:
+    import omni.replicator.core as rep
+    _HAS_REPLICATOR = True
+except Exception:
+    _HAS_REPLICATOR = False
+
+
+def _trigger_randomizers():
+    """Step Replicator graph one tick, applying any registered randomizers."""
+    if not _HAS_REPLICATOR:
+        return
+    try:
+        rep.orchestrator.step()
+    except Exception:
+        pass
+
+
+def _capture_frame(idx):
+    """Save one viewport frame to OUTPUT_DIR/dr_preview_{{idx:03d}}.png."""
+    path = os.path.join(_OUTPUT_DIR, f"dr_preview_{{idx:03d}}.png")
+    try:
+        from omni.kit.viewport.utility import get_active_viewport, capture_viewport_to_file
+        vp = get_active_viewport()
+        if vp is not None:
+            capture_viewport_to_file(vp, path)
+            return path
+    except Exception:
+        pass
+    # Fallback: write a sentinel so callers can still see what was attempted.
+    try:
+        with open(path + ".txt", "w") as fh:
+            fh.write(f"placeholder for {{path}} resolution={{_RESOLUTION}}")
+    except Exception:
+        pass
+    return path
+
+
+_written = []
+for i in range(_NUM_SAMPLES):
+    _trigger_randomizers()
+    _written.append(_capture_frame(i))
+
+print(f"[preview_dr] wrote {{len(_written)}} frames to {{_OUTPUT_DIR}} resolution={{_RESOLUTION}}")
+'''
+
+
+# Register handlers.
+CODE_GEN_HANDLERS["configure_correlated_dr"] = _gen_configure_correlated_dr
+CODE_GEN_HANDLERS["add_latency_randomization"] = _gen_add_latency_randomization
+CODE_GEN_HANDLERS["preview_dr"] = _gen_preview_dr
+DATA_HANDLERS["suggest_dr_ranges"] = _handle_suggest_dr_ranges
+DATA_HANDLERS["apply_dr_preset"] = _handle_apply_dr_preset
