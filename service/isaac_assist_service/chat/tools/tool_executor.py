@@ -1982,7 +1982,7 @@ def _gen_launch_training(args: Dict) -> str:
         f"    '--max_iterations', str(max_iterations),",
         f"    '--log_dir', log_dir,",
         "]",
-        "print(f'Launching training: {" ".join(cmd)}')",
+        "print(f'Launching training: {\" \".join(cmd)}')",
         "proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)",
         "print(f'Training started (PID: {proc.pid}). Checkpoints → {log_dir}')",
     ]
@@ -2232,3 +2232,453 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ─── Phase 7G Addendum: GR00T N1 Tooling ────────────────────────────────────
+#
+# Four lightweight utilities that let the LLM decide whether it can realistically
+# chain into load_groot_policy / finetune_groot (Phase 7G) and, if yes, emit the
+# user-owned deployment + data-conversion scripts.  No Kit RPC, no subprocess
+# at handler time — everything runs in the service process.
+
+# Inference baseline from the Phase 7G spec (GR00T N1.6-3B).
+_GROOT_INFERENCE_MIN_GB = 24.0
+# LoRA fine-tune fits in ~24 GB per GPU (multi-GPU sum required).
+_GROOT_LORA_FINETUNE_MIN_GB = 24.0
+# Full fine-tune needs A6000/H100 class.
+_GROOT_FULL_FINETUNE_MIN_GB = 48.0
+
+# Pre-registered embodiment configs shipped with Isaac-GR00T.
+# Keys are lowercase aliases the user might type; values hold the metadata
+# needed when calling load_groot_policy / evaluate_groot.
+_GROOT_EMBODIMENTS: Dict[str, Dict[str, Any]] = {
+    "franka": {
+        "embodiment_config": "LIBERO_PANDA",
+        "observation_type": "rgb+proprio+language",
+        "action_dim": 7,
+        "note": "LIBERO benchmark config, Franka Panda 7-DoF arm.",
+    },
+    "panda": {
+        "embodiment_config": "LIBERO_PANDA",
+        "observation_type": "rgb+proprio+language",
+        "action_dim": 7,
+        "note": "LIBERO benchmark config, Franka Panda 7-DoF arm.",
+    },
+    "widowx": {
+        "embodiment_config": "OXE_WIDOWX",
+        "observation_type": "rgb+proprio+language",
+        "action_dim": 6,
+        "note": "Open X-Embodiment WidowX 250 config, 6-DoF arm.",
+    },
+    "unitree g1": {
+        "embodiment_config": "UNITREE_G1",
+        "observation_type": "rgb+proprio+language",
+        "action_dim": 23,
+        "note": "Unitree G1 humanoid config, 23-DoF whole-body.",
+    },
+    "g1": {
+        "embodiment_config": "UNITREE_G1",
+        "observation_type": "rgb+proprio+language",
+        "action_dim": 23,
+        "note": "Unitree G1 humanoid config, 23-DoF whole-body.",
+    },
+    "so-100": {
+        "embodiment_config": "OXE_SO100",
+        "observation_type": "rgb+proprio+language",
+        "action_dim": 6,
+        "note": "Open X-Embodiment SO-100 tabletop arm, 6-DoF.",
+    },
+    "so100": {
+        "embodiment_config": "OXE_SO100",
+        "observation_type": "rgb+proprio+language",
+        "action_dim": 6,
+        "note": "Open X-Embodiment SO-100 tabletop arm, 6-DoF.",
+    },
+}
+
+
+def _probe_vram_via_torch() -> Optional[List[Dict[str, Any]]]:
+    """Return per-GPU VRAM info via torch.cuda, or None if torch unavailable."""
+    try:
+        import torch  # type: ignore
+    except ImportError:
+        return None
+    if not torch.cuda.is_available():
+        return []
+    gpus: List[Dict[str, Any]] = []
+    for i in range(torch.cuda.device_count()):
+        props = torch.cuda.get_device_properties(i)
+        gpus.append({
+            "name": props.name,
+            "vram_gb": round(props.total_memory / (1024 ** 3), 2),
+        })
+    return gpus
+
+
+def _probe_vram_via_nvidia_smi() -> Optional[List[Dict[str, Any]]]:
+    """Return per-GPU VRAM via `nvidia-smi`.  Returns None on any failure."""
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.total",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=2.0,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    if out.returncode != 0:
+        return None
+    gpus: List[Dict[str, Any]] = []
+    for line in out.stdout.splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 2:
+            continue
+        try:
+            vram_mib = float(parts[1])
+        except ValueError:
+            continue
+        gpus.append({"name": parts[0], "vram_gb": round(vram_mib / 1024.0, 2)})
+    return gpus
+
+
+async def _handle_check_groot_hardware(args: Dict) -> Dict:
+    """Check whether the local machine meets GR00T VRAM gates."""
+    required_inference_gb = float(args.get("required_vram_gb", _GROOT_INFERENCE_MIN_GB))
+
+    gpus = _probe_vram_via_torch()
+    probe_source = "torch.cuda"
+    if gpus is None:
+        gpus = _probe_vram_via_nvidia_smi()
+        probe_source = "nvidia-smi"
+    if gpus is None:
+        return {
+            "available": False,
+            "error": "Could not detect any GPU — torch.cuda not importable and nvidia-smi not found.",
+            "inference_ok": False,
+            "lora_finetune_ok": False,
+            "full_finetune_ok": False,
+            "recommendation": "cloud_required_for_inference",
+            "cloud_hint": "Phase 7H cloud_launch or remote A6000/H100.",
+            "probe_source": probe_source,
+        }
+    if not gpus:
+        return {
+            "available": False,
+            "gpus": [],
+            "max_vram_gb": 0.0,
+            "inference_ok": False,
+            "lora_finetune_ok": False,
+            "full_finetune_ok": False,
+            "recommendation": "cloud_required_for_inference",
+            "cloud_hint": "Phase 7H cloud_launch or remote A6000/H100.",
+            "probe_source": probe_source,
+        }
+
+    max_vram = max(g["vram_gb"] for g in gpus)
+    total_vram = sum(g["vram_gb"] for g in gpus)
+    inference_ok = max_vram >= required_inference_gb
+    lora_ok = total_vram >= _GROOT_LORA_FINETUNE_MIN_GB * 2  # LoRA typically 2×24 GB
+    full_ok = max_vram >= _GROOT_FULL_FINETUNE_MIN_GB
+
+    if not inference_ok:
+        recommendation = "cloud_required_for_inference"
+        hint = (
+            f"Largest local GPU has {max_vram} GB; GR00T inference needs "
+            f"{required_inference_gb} GB.  Use Phase 7H cloud_launch or a remote "
+            "A6000/H100."
+        )
+    elif not full_ok:
+        recommendation = "cloud_required_for_finetune"
+        hint = (
+            f"Inference fits locally ({max_vram} GB), but full fine-tune needs "
+            f"{_GROOT_FULL_FINETUNE_MIN_GB} GB.  LoRA fine-tune may fit on "
+            "multi-GPU; otherwise use Phase 7H cloud_launch."
+        )
+    else:
+        recommendation = "local_ok"
+        hint = "Local hardware meets all GR00T gates (inference + full fine-tune)."
+
+    return {
+        "available": True,
+        "gpus": gpus,
+        "max_vram_gb": max_vram,
+        "total_vram_gb": round(total_vram, 2),
+        "required_inference_gb": required_inference_gb,
+        "inference_ok": inference_ok,
+        "lora_finetune_ok": lora_ok,
+        "full_finetune_ok": full_ok,
+        "recommendation": recommendation,
+        "cloud_hint": hint,
+        "probe_source": probe_source,
+    }
+
+
+async def _handle_lookup_groot_embodiment(args: Dict) -> Dict:
+    """Resolve a robot name to a GR00T N1.6 pre-registered embodiment config."""
+    raw = str(args.get("robot_name", "")).strip().lower()
+    if not raw:
+        return {"found": False, "error": "robot_name is empty"}
+
+    # Exact match
+    if raw in _GROOT_EMBODIMENTS:
+        entry = _GROOT_EMBODIMENTS[raw]
+        return {
+            "found": True,
+            "robot_name": raw,
+            "embodiment_config": entry["embodiment_config"],
+            "observation_type": entry["observation_type"],
+            "action_dim": entry["action_dim"],
+            "note": entry["note"],
+            "alternatives": [],
+        }
+
+    # Substring match (either direction)
+    matches = []
+    for key, entry in _GROOT_EMBODIMENTS.items():
+        if raw in key or key in raw:
+            matches.append((key, entry))
+    if matches:
+        key, entry = matches[0]
+        return {
+            "found": True,
+            "robot_name": key,
+            "embodiment_config": entry["embodiment_config"],
+            "observation_type": entry["observation_type"],
+            "action_dim": entry["action_dim"],
+            "note": entry["note"],
+            "alternatives": [k for k, _ in matches[1:4]],
+        }
+
+    # Unknown robot — return CUSTOM tag with a warning.
+    return {
+        "found": False,
+        "robot_name": raw,
+        "embodiment_config": "CUSTOM",
+        "observation_type": "rgb+proprio+language",
+        "action_dim": None,
+        "note": (
+            f"No pre-registered GR00T embodiment matches '{raw}'.  Use "
+            "embodiment_config='CUSTOM' and define an EmbodimentTag yourself; "
+            "see Isaac-GR00T docs."
+        ),
+        "alternatives": sorted(_GROOT_EMBODIMENTS.keys()),
+    }
+
+
+def _gen_groot_deploy_script(args: Dict) -> str:
+    """Generate a reproducible GR00T deploy script."""
+    model_id = str(args.get("model_id", "nvidia/GR00T-N1.6-3B"))
+    embodiment_config = str(args.get("embodiment_config", "LIBERO_PANDA"))
+    host = str(args.get("host", "0.0.0.0"))
+    port = int(args.get("port", 5555))
+    output_path = str(args.get("output_path", "workspace/groot/deploy_groot.py"))
+
+    return f'''"""Deploy the NVIDIA GR00T N1.6 policy server.
+
+Auto-generated by Isaac Assist (Phase 7G Addendum).
+Output path on disk: {output_path!r}
+
+Usage:
+    python {output_path}
+
+The script downloads the checkpoint via huggingface_hub, then launches the
+GR00T policy_server.py subprocess.  Press Ctrl+C to terminate both.
+"""
+import os
+import signal
+import subprocess
+import sys
+from pathlib import Path
+
+MODEL_ID = {model_id!r}
+EMBODIMENT_CONFIG = {embodiment_config!r}
+HOST = {host!r}
+PORT = {port}
+
+
+def download_checkpoint() -> str:
+    """Snapshot the checkpoint and return the local path."""
+    from huggingface_hub import snapshot_download
+    print(f"[groot] Downloading {{MODEL_ID}} …")
+    local_dir = snapshot_download(repo_id=MODEL_ID)
+    print(f"[groot] Checkpoint at {{local_dir}}")
+    return local_dir
+
+
+def launch_server(checkpoint_dir: str) -> subprocess.Popen:
+    """Spawn the GR00T policy server subprocess."""
+    script = Path("scripts") / "deployment" / "policy_server.py"
+    if not script.exists():
+        print(
+            f"[groot] Expected Isaac-GR00T/scripts/deployment/policy_server.py "
+            f"in CWD={{Path.cwd()}} — clone NVIDIA/Isaac-GR00T first.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    cmd = [
+        sys.executable, str(script),
+        "--checkpoint", checkpoint_dir,
+        "--embodiment", EMBODIMENT_CONFIG,
+        "--host", HOST,
+        "--port", str(PORT),
+    ]
+    print(f"[groot] Launching: {{' '.join(cmd)}}")
+    return subprocess.Popen(cmd)
+
+
+def main() -> None:
+    checkpoint_dir = download_checkpoint()
+    proc = launch_server(checkpoint_dir)
+    print(f"[groot] Server PID {{proc.pid}} — bound to {{HOST}}:{{PORT}}")
+
+    def _forward(signum, _frame):
+        print(f"[groot] Forwarding signal {{signum}} to server …")
+        proc.send_signal(signum)
+
+    signal.signal(signal.SIGINT, _forward)
+    signal.signal(signal.SIGTERM, _forward)
+    rc = proc.wait()
+    print(f"[groot] Server exited with rc={{rc}}")
+    sys.exit(rc)
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+def _gen_convert_demos_to_lerobot(args: Dict) -> str:
+    """Generate an HDF5 → LeRobot v2 conversion script."""
+    hdf5_dir = str(args["hdf5_dir"])
+    output_dir = str(args["output_dir"])
+    task_name = str(args["task_name"])
+    fps = int(args.get("fps", 30))
+
+    return f'''"""Convert Phase 7C teleop HDF5 demos → LeRobot v2 dataset.
+
+Auto-generated by Isaac Assist (Phase 7G Addendum).
+
+Input:  every *.hdf5 under {hdf5_dir!r} (expected groups: observations/rgb,
+        observations/state, actions).
+Output: LeRobot v2 dataset at {output_dir!r}:
+          data/chunk-000/episode_XXXXXX.parquet
+          meta/info.json
+          meta/episodes.jsonl
+          meta/tasks.jsonl
+"""
+import glob
+import json
+import os
+from pathlib import Path
+
+HDF5_DIR = Path({hdf5_dir!r})
+OUTPUT_DIR = Path({output_dir!r})
+TASK_NAME = {task_name!r}
+FPS = {fps}
+
+
+def _load_episode(path: str):
+    """Return (num_frames, state, actions, images) from one HDF5 episode."""
+    import h5py  # type: ignore
+    import numpy as np  # type: ignore
+    with h5py.File(path, "r") as f:
+        state = f["observations/state"][:]
+        actions = f["actions"][:]
+        images = f["observations/rgb"][:] if "observations/rgb" in f else None
+    return int(state.shape[0]), state, actions, images
+
+
+def main() -> None:
+    import numpy as np  # type: ignore
+    import pandas as pd  # type: ignore
+
+    data_dir = OUTPUT_DIR / "data" / "chunk-000"
+    meta_dir = OUTPUT_DIR / "meta"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    meta_dir.mkdir(parents=True, exist_ok=True)
+
+    hdf5_files = sorted(glob.glob(str(HDF5_DIR / "*.hdf5")))
+    if not hdf5_files:
+        raise SystemExit(f"No *.hdf5 files found under {{HDF5_DIR}}")
+
+    episodes_meta = []
+    total_frames = 0
+    action_dim = None
+    state_dim = None
+    has_rgb = False
+
+    for ep_idx, src in enumerate(hdf5_files):
+        num_frames, state, actions, images = _load_episode(src)
+        state_dim = state.shape[1] if state.ndim > 1 else 1
+        action_dim = actions.shape[1] if actions.ndim > 1 else 1
+        has_rgb = has_rgb or images is not None
+
+        frame_rows = []
+        for t in range(num_frames):
+            row = {{
+                "episode_index": ep_idx,
+                "frame_index": t,
+                "timestamp": t / FPS,
+                "task_index": 0,
+                "observation.state": state[t].tolist(),
+                "action": actions[t].tolist(),
+            }}
+            if images is not None:
+                row["observation.image"] = images[t].tobytes()
+            frame_rows.append(row)
+
+        out_parquet = data_dir / f"episode_{{ep_idx:06d}}.parquet"
+        pd.DataFrame(frame_rows).to_parquet(out_parquet)
+        episodes_meta.append({{
+            "episode_index": ep_idx,
+            "tasks": [TASK_NAME],
+            "length": num_frames,
+        }})
+        total_frames += num_frames
+
+    # meta/episodes.jsonl
+    with open(meta_dir / "episodes.jsonl", "w") as f:
+        for row in episodes_meta:
+            f.write(json.dumps(row) + "\\n")
+
+    # meta/tasks.jsonl
+    with open(meta_dir / "tasks.jsonl", "w") as f:
+        f.write(json.dumps({{"task_index": 0, "task": TASK_NAME}}) + "\\n")
+
+    # meta/info.json
+    info = {{
+        "codebase_version": "v2.0",
+        "robot_type": "unknown",
+        "total_episodes": len(episodes_meta),
+        "total_frames": total_frames,
+        "total_tasks": 1,
+        "total_videos": 0,
+        "fps": FPS,
+        "splits": {{"train": f"0:{{len(episodes_meta)}}"}},
+        "data_path": "data/chunk-{{episode_chunk:03d}}/episode_{{episode_index:06d}}.parquet",
+        "features": {{
+            "observation.state": {{"dtype": "float32", "shape": [state_dim]}},
+            "action": {{"dtype": "float32", "shape": [action_dim]}},
+            "episode_index": {{"dtype": "int64", "shape": [1]}},
+            "frame_index": {{"dtype": "int64", "shape": [1]}},
+            "timestamp": {{"dtype": "float32", "shape": [1]}},
+            "task_index": {{"dtype": "int64", "shape": [1]}},
+        }},
+    }}
+    if has_rgb:
+        info["features"]["observation.image"] = {{"dtype": "video", "shape": [0, 0, 3]}}
+    with open(meta_dir / "info.json", "w") as f:
+        json.dump(info, f, indent=2)
+
+    print(f"Converted {{len(episodes_meta)}} episodes ({{total_frames}} frames) → {{OUTPUT_DIR}}")
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+DATA_HANDLERS["check_groot_hardware"] = _handle_check_groot_hardware
+DATA_HANDLERS["lookup_groot_embodiment"] = _handle_lookup_groot_embodiment
+CODE_GEN_HANDLERS["generate_groot_deploy_script"] = _gen_groot_deploy_script
+CODE_GEN_HANDLERS["convert_demos_to_lerobot"] = _gen_convert_demos_to_lerobot

@@ -926,6 +926,71 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Phase 7G Addendum: GR00T N1 Tooling ─────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "check_groot_hardware",
+            "description": "Check whether the local machine's GPU meets NVIDIA GR00T N1.6 VRAM requirements for inference (24 GB), LoRA fine-tuning (24 GB per GPU), and full fine-tuning (48 GB). Probes torch.cuda first, falls back to nvidia-smi. Returns per-gate verdict and a recommendation (local_ok / cloud_required_for_inference / cloud_required_for_finetune). Use BEFORE calling load_groot_policy or finetune_groot to avoid wasting download bandwidth and GPU minutes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "required_vram_gb": {"type": "number", "description": "Minimum VRAM (GB) for inference. Default: 24.0 (GR00T N1.6-3B inference baseline)."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_groot_embodiment",
+            "description": "Resolve a robot name ('franka', 'panda', 'widowx', 'unitree g1', 'so-100', etc.) to the GR00T N1.6 pre-registered embodiment config key (LIBERO_PANDA, OXE_WIDOWX, UNITREE_G1, OXE_SO100, CUSTOM). Returns action dimension and observation type. Use before load_groot_policy so the embodiment_config arg is correct.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_name": {"type": "string", "description": "Human-readable robot name — e.g. 'franka', 'panda', 'widowx 250', 'g1', 'unitree h1'."},
+                },
+                "required": ["robot_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_groot_deploy_script",
+            "description": "Generate a reproducible Python script that downloads the GR00T checkpoint from HuggingFace (huggingface_hub.snapshot_download) and launches the GR00T policy server subprocess from the Isaac-GR00T repo. The script is user-owned and survives Kit restarts. Use AFTER check_groot_hardware confirms the machine can host inference.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "HuggingFace model id. Default: 'nvidia/GR00T-N1.6-3B'."},
+                    "embodiment_config": {"type": "string", "description": "Pre-registered embodiment config — LIBERO_PANDA, OXE_WIDOWX, UNITREE_G1, OXE_SO100, CUSTOM. Default: LIBERO_PANDA."},
+                    "host": {"type": "string", "description": "Policy server bind host. Default: '0.0.0.0'."},
+                    "port": {"type": "integer", "description": "Policy server port. Default: 5555."},
+                    "output_path": {"type": "string", "description": "Where to save the generated script. Default: 'workspace/groot/deploy_groot.py'."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "convert_demos_to_lerobot",
+            "description": "Generate a Python script that converts a directory of teleop HDF5 demos (Phase 7C.3 output) into a LeRobot v2 dataset directory suitable for GR00T fine-tuning. The generated script writes data/chunk-000/*.parquet, meta/info.json, meta/episodes.jsonl, meta/tasks.jsonl. Use BEFORE finetune_groot so schema mismatches surface at conversion time, not on a GPU instance.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hdf5_dir": {"type": "string", "description": "Directory containing *.hdf5 teleop demo files."},
+                    "output_dir": {"type": "string", "description": "Target LeRobot v2 dataset directory."},
+                    "task_name": {"type": "string", "description": "Short task description — e.g. 'pick_and_place_red_block'. Stored in meta/tasks.jsonl."},
+                    "fps": {"type": "integer", "description": "Recording FPS used during teleop. Default: 30."},
+                },
+                "required": ["hdf5_dir", "output_dir", "task_name"],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",
