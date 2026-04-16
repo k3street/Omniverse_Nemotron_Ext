@@ -2232,3 +2232,388 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ─── Humanoid Advanced (Addendum H) ──────────────────────────────────────────
+# H.1 GPU ContactSensors at scale, H.2 whole-body control + diagnose,
+# H.3 loco-manipulation training advisor + RSI, H.4 multi-rate wrapper.
+
+# Pre-configured whole-body profiles (spec H.2 table)
+_WHOLE_BODY_PROFILES = {
+    "g1": {
+        "locomotion": "hover_g1_flat.pt",
+        "command_type": "velocity",
+        "ee_frame": "left_hand",
+        "status": "Working (IsaacLab 2.3)",
+    },
+    "h1": {
+        "locomotion": "hover_h1_rough.pt",
+        "command_type": "velocity",
+        "ee_frame": "left_hand",
+        "status": "Working",
+    },
+    "figure02": {
+        "locomotion": "custom",
+        "command_type": "velocity",
+        "ee_frame": "left_hand",
+        "status": "Manual config required",
+    },
+    "generic": {
+        "locomotion": "custom",
+        "command_type": "velocity",
+        "ee_frame": "left_hand",
+        "status": "Generic skeleton — review before use",
+    },
+}
+
+
+def _gen_setup_contact_sensors(args: Dict) -> str:
+    """Generate per-fingertip ContactSensorCfg + PhysxCfg buffer bumps for `num_envs`."""
+    articulation_path = args["articulation_path"]
+    body_names = args["body_names"]
+    if not isinstance(body_names, list) or not body_names:
+        body_names = ["fingertip"]
+    num_envs = int(args.get("num_envs", 4096))
+    update_period = float(args.get("update_period", 0.0))
+    history_length = int(args.get("history_length", 1))
+    track_air_time = bool(args.get("track_air_time", False))
+
+    # Heuristic: bump GPU buffers when num_envs * sensors_per_env exceeds
+    # the implicit 8M default (PhysX default = 2**23 contacts, 2**22 patches).
+    contacts_needed = num_envs * len(body_names) * 8  # est. 8 contacts per fingertip
+    contact_pow = max(24, contacts_needed.bit_length())  # at least 2**24 = 16M
+    patch_pow = max(23, (contacts_needed // 2).bit_length())  # at least 2**23 = 8M
+
+    lines = [
+        '"""Auto-generated ContactSensorCfg block.',
+        f"Articulation: {articulation_path}",
+        f"Bodies: {body_names}",
+        f"num_envs={num_envs}",
+        '"""',
+        "from isaaclab.sensors import ContactSensorCfg",
+        "from isaaclab.sim import PhysxCfg",
+        "",
+        "# One ContactSensorCfg per body (mandatory one-to-many constraint —",
+        "# wildcards in prim_path do not aggregate, they would silently overwrite).",
+        "contact_sensors = {",
+    ]
+    for body in body_names:
+        # Sanitize the body name for use as a Python identifier in the dict key
+        safe_key = "".join(c if c.isalnum() or c == "_" else "_" for c in body)
+        lines.extend([
+            f"    {safe_key!r}: ContactSensorCfg(",
+            f"        prim_path=f'{{ENV_REGEX_NS}}/Robot/{body}',",
+            f"        update_period={update_period},  # 0.0 = every physics step",
+            f"        history_length={history_length},",
+            f"        track_air_time={track_air_time},",
+            "    ),",
+        ])
+    lines.extend([
+        "}",
+        "",
+        f"# Critical: bump GPU buffers for {num_envs} envs x {len(body_names)} sensors.",
+        "# Default 2**23 contacts / 2**22 patches will silently overflow at this scale,",
+        "# producing zero forces on all sensors with no error message.",
+        "physx_cfg = PhysxCfg(",
+        f"    gpu_max_rigid_contact_count=2**{contact_pow},",
+        f"    gpu_max_rigid_patch_count=2**{patch_pow},",
+        ")",
+        "",
+        "# Cheap alternative when you just need 'is there contact?':",
+        "#   joint_forces = articulation.root_physx_view.get_link_incoming_joint_force()",
+        "#   fingertip_forces = joint_forces[:, fingertip_body_ids]",
+        "# (Includes gravity / inertia contributions — not pure contact, but zero overhead.)",
+    ])
+    return "\n".join(lines)
+
+
+def _gen_setup_whole_body_control(args: Dict) -> str:
+    """Generate ActionGroupCfg combining a locomotion RL policy + arm planner."""
+    articulation_path = args["articulation_path"]
+    locomotion_policy = args["locomotion_policy"]
+    arm_planner = args.get("arm_planner", "pink_ik")
+    profile_key = args.get("robot_profile", "generic")
+    profile = _WHOLE_BODY_PROFILES.get(profile_key, _WHOLE_BODY_PROFILES["generic"])
+    ee_frame = args.get("ee_frame", profile["ee_frame"])
+    command_type = profile["command_type"]
+
+    lines = [
+        '"""Auto-generated whole-body control config.',
+        f"Articulation: {articulation_path}",
+        f"Profile: {profile_key} ({profile['status']})",
+        f"Locomotion: {locomotion_policy}",
+        f"Arm planner: {arm_planner}",
+        '"""',
+        "from isaaclab.envs import ActionGroupCfg",
+        "",
+        "# Lower body: locomotion RL policy (HOVER family typical)",
+        "locomotion_cfg = LocomotionPolicyCfg(",
+        f"    checkpoint={locomotion_policy!r},",
+        "    action_space='lower_body_joints',",
+        f"    command_type={command_type!r},",
+        ")",
+        "",
+    ]
+    if arm_planner == "pink_ik":
+        lines.extend([
+            "# Upper body: Pink-IK QP controller (Pinocchio)",
+            "arm_cfg = PinkIKControllerCfg(",
+            f"    robot_model={articulation_path!r},",
+            f"    ee_frame={ee_frame!r},",
+            "    tasks=[",
+            f"        FrameTask(frame={ee_frame!r}, position_cost=1.0, orientation_cost=0.5),",
+            "        PostureTask(cost=0.01),  # null-space regularization",
+            "        DampingTask(cost=0.001),",
+            "    ],",
+            ")",
+        ])
+    elif arm_planner == "lula":
+        lines.extend([
+            "# Upper body: Lula RRT/RMP planner",
+            "arm_cfg = LulaControllerCfg(",
+            f"    robot_model={articulation_path!r},",
+            f"    ee_frame={ee_frame!r},",
+            ")",
+        ])
+    else:  # rmpflow
+        lines.extend([
+            "# Upper body: RmpFlow controller",
+            "arm_cfg = RmpFlowControllerCfg(",
+            f"    robot_model={articulation_path!r},",
+            f"    ee_frame={ee_frame!r},",
+            ")",
+        ])
+    lines.extend([
+        "",
+        "# Combine in ActionGroupCfg",
+        "action_cfg = ActionGroupCfg(",
+        "    lower_body=locomotion_cfg,",
+        "    upper_body=arm_cfg,",
+        ")",
+    ])
+    return "\n".join(lines)
+
+
+def _gen_setup_loco_manipulation_training(args: Dict) -> str:
+    """Generate training scaffolding + reward-mixing advisor for loco-manipulation."""
+    task = args["task_description"]
+    robot = args["robot"]
+    approach = args.get("approach", "decoupled")
+    reward_terms = args.get("reward_terms", []) or []
+
+    # Categorize and sum weights to detect imbalance
+    loco_weight = 0.0
+    manip_weight = 0.0
+    for term in reward_terms:
+        cat = (term.get("category") or "").lower()
+        w = float(term.get("weight", 0.0))
+        if cat == "locomotion":
+            loco_weight += w
+        elif cat == "manipulation":
+            manip_weight += w
+
+    advisor_lines = []
+    if reward_terms:
+        advisor_lines.append("# Reward mixing advisor:")
+        for term in reward_terms:
+            advisor_lines.append(
+                f"#   - {term.get('name', '?')}: weight {term.get('weight', '?')}"
+                f" ({term.get('category', 'unknown')})"
+            )
+        if manip_weight > loco_weight and loco_weight > 0:
+            advisor_lines.extend([
+                "#",
+                f"# WARNING: manipulation weight ({manip_weight}) exceeds locomotion ({loco_weight}).",
+                "# Early training will optimize grasping at the expense of balance.",
+                "#",
+                "# Recommended 3-phase schedule:",
+                "#   Phase 1 (0-2000 iters):    locomotion_weight=5.0, manipulation_weight=0.5",
+                "#   Phase 2 (2000-5000 iters): locomotion_weight=2.0, manipulation_weight=1.0",
+                "#   Phase 3 (5000+ iters):     locomotion_weight=1.0, manipulation_weight=2.0",
+            ])
+        else:
+            advisor_lines.append("# Reward weights look balanced for early training.")
+
+    if approach == "decoupled":
+        approach_blurb = (
+            "# Approach: DECOUPLED (HOVER locomotion + Pink-IK arm).\n"
+            "# Best for slow deliberate tasks. Lowest complexity — already in IsaacLab."
+        )
+    elif approach == "hierarchical":
+        approach_blurb = (
+            "# Approach: HIERARCHICAL dual-agent (SoFTA / FALCON pattern).\n"
+            "# Best for dynamic tasks. Medium complexity."
+        )
+    else:  # joint
+        approach_blurb = (
+            "# Approach: JOINT end-to-end RL.\n"
+            "# Maximum performance, highest complexity — needs reward curriculum."
+        )
+
+    lines = [
+        '"""Loco-manipulation training scaffold.',
+        f"Task: {task}",
+        f"Robot: {robot}",
+        f"Approach: {approach}",
+        '"""',
+        approach_blurb,
+        "",
+        f"task_description = {task!r}",
+        f"robot = {robot!r}",
+        f"approach = {approach!r}",
+        "",
+    ]
+    if advisor_lines:
+        lines.extend(advisor_lines)
+        lines.append("")
+    lines.extend([
+        "# Configure the env builder according to the chosen approach.",
+        "# (See create_isaaclab_env / launch_training tools to wire the pieces.)",
+    ])
+    return "\n".join(lines)
+
+
+def _gen_setup_rsi_from_demos(args: Dict) -> str:
+    """Generate Reference State Initialization config from demo trajectories."""
+    demo_path = args["demo_path"]
+    env_cfg = args["env_cfg"]
+    noise_std = float(args.get("noise_std", 0.05))
+
+    return (
+        '"""Reference State Initialization from demonstrations.\n'
+        f'Demo file: {demo_path}\n'
+        f'Env cfg:   {env_cfg}\n'
+        '"""\n'
+        "from isaaclab.envs import InitialStateCfg\n"
+        "\n"
+        "# RSI: sample initial state from demo trajectories instead of default pose.\n"
+        "# Highest-impact technique for loco-manipulation RL.\n"
+        "rsi_cfg = InitialStateCfg(\n"
+        "    mode='demo_sampling',\n"
+        f"    demo_path={demo_path!r},\n"
+        f"    noise_std={noise_std},  # small Gaussian perturbation around demo states\n"
+        ")\n"
+        "\n"
+        f"# Attach to env config (e.g. {env_cfg}.initial_state = rsi_cfg)\n"
+        f"# or pass through the env constructor.\n"
+    )
+
+
+def _gen_setup_multi_rate(args: Dict) -> str:
+    """Generate DualRateVecEnvWrapper for upper/lower body running at different Hz."""
+    lower_hz = float(args.get("lower_rate_hz", 50))
+    upper_hz = float(args.get("upper_rate_hz", 100))
+    upper_dof = int(args.get("upper_dof", 14))
+
+    if lower_hz <= 0:
+        lower_hz = 50.0
+    if upper_hz <= 0:
+        upper_hz = 100.0
+    # Decimation = ratio of upper:lower (must be >= 1)
+    decimation = max(1, int(round(upper_hz / lower_hz)))
+
+    return (
+        '"""Dual-rate VecEnv wrapper for whole-body humanoid control.\n'
+        f'Upper body: {upper_hz} Hz (manipulation IK)\n'
+        f'Lower body: {lower_hz} Hz (locomotion RL)\n'
+        f'Decimation: every {decimation} upper steps -> 1 lower step\n'
+        '"""\n'
+        "import gymnasium as gym\n"
+        "import torch\n"
+        "\n"
+        "\n"
+        "class DualRateWrapper(gym.Wrapper):\n"
+        f"    UPPER_DOF = {upper_dof}\n"
+        f"    DECIMATION = {decimation}\n"
+        "\n"
+        "    def __init__(self, env):\n"
+        "        super().__init__(env)\n"
+        "        self.step_count = 0\n"
+        "        self._cached_lower = None\n"
+        "\n"
+        "    def step(self, action):\n"
+        "        # Upper body acts every step\n"
+        "        upper_action = action[:, :self.UPPER_DOF]\n"
+        "\n"
+        "        # Lower body acts every DECIMATION-th step, otherwise reuse cached action\n"
+        "        if self.step_count % self.DECIMATION == 0 or self._cached_lower is None:\n"
+        "            lower_action = action[:, self.UPPER_DOF:]\n"
+        "            self._cached_lower = lower_action\n"
+        "        else:\n"
+        "            lower_action = self._cached_lower\n"
+        "\n"
+        "        full_action = torch.cat([upper_action, lower_action], dim=-1)\n"
+        "        self.step_count += 1\n"
+        "        return self.env.step(full_action)\n"
+        "\n"
+        "    def reset(self, **kwargs):\n"
+        "        self.step_count = 0\n"
+        "        self._cached_lower = None\n"
+        "        return self.env.reset(**kwargs)\n"
+    )
+
+
+async def _handle_diagnose_whole_body(args: Dict) -> Dict:
+    """Diagnostic checklist for humanoid balance/coordination during arm motion."""
+    articulation_path = args["articulation_path"]
+    margin = float(args.get("support_polygon_margin_m", 0.05))
+    accel_thresh = float(args.get("ee_accel_threshold_m_s2", 5.0))
+
+    checks = [
+        {
+            "id": "balance_margin",
+            "name": "Balance margin during arm motion",
+            "description": (
+                "Compare CoM ground projection to support polygon (foot contacts). "
+                f"Min margin: {margin} m. If CoM exits the polygon during reach, "
+                "the locomotion policy will compensate or the robot will tip."
+            ),
+        },
+        {
+            "id": "com_projection",
+            "name": "CoM projection vs support polygon",
+            "description": (
+                "Compute polygon from active foot contact patches, project CoM onto ground "
+                "plane, measure signed distance to nearest edge. Negative = CoM outside polygon."
+            ),
+        },
+        {
+            "id": "arm_payload_effect",
+            "name": "Arm payload effect on locomotion policy",
+            "description": (
+                "If the locomotion policy was trained with a free arm, attaching a "
+                "heavy end-effector (or carrying an object) shifts the CoM and can "
+                "destabilize gait. Retrain with payload domain randomization or use "
+                "a payload-conditioned policy."
+            ),
+        },
+        {
+            "id": "ee_acceleration",
+            "name": "EE acceleration during gait",
+            "description": (
+                f"High EE acceleration (> {accel_thresh} m/s^2) injects reaction "
+                "forces into the torso that the locomotion policy did not see during "
+                "training. Smooth the IK trajectory or add an EE-acceleration penalty."
+            ),
+        },
+    ]
+
+    return {
+        "articulation_path": articulation_path,
+        "support_polygon_margin_m": margin,
+        "ee_accel_threshold_m_s2": accel_thresh,
+        "checks": checks,
+        "message": (
+            f"Diagnose whole-body checklist for {articulation_path} "
+            f"({len(checks)} items). Run each check against the live articulation "
+            "to identify why the robot is falling during arm motion."
+        ),
+    }
+
+
+CODE_GEN_HANDLERS["setup_contact_sensors"] = _gen_setup_contact_sensors
+CODE_GEN_HANDLERS["setup_whole_body_control"] = _gen_setup_whole_body_control
+CODE_GEN_HANDLERS["setup_loco_manipulation_training"] = _gen_setup_loco_manipulation_training
+CODE_GEN_HANDLERS["setup_rsi_from_demos"] = _gen_setup_rsi_from_demos
+CODE_GEN_HANDLERS["setup_multi_rate"] = _gen_setup_multi_rate
+DATA_HANDLERS["diagnose_whole_body"] = _handle_diagnose_whole_body

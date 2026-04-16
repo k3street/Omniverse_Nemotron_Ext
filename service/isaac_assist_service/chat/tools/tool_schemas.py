@@ -926,6 +926,125 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Humanoid Advanced (Addendum H) ──────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_contact_sensors",
+            "description": "Add GPU ContactSensorCfg for one or more bodies (e.g. fingertips) on an articulation, sized for `num_envs` parallel environments. Generates per-body ContactSensorCfg entries plus a PhysxCfg block that bumps gpu_max_rigid_contact_count / gpu_max_rigid_patch_count to avoid silent buffer overflow. Use when the user asks to 'add fingertip contact sensors', 'enable touch sensing on the hand', or similar.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation, e.g. '/World/Robot' (used to scope {ENV_REGEX_NS}/Robot/<body>)"},
+                    "body_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of body / link names to attach ContactSensorCfg to (one cfg per body — mandatory one-to-many constraint). E.g. ['thumb_tip', 'index_tip', 'middle_tip', 'ring_tip']",
+                    },
+                    "num_envs": {"type": "integer", "description": "Number of parallel environments. Used to size GPU buffers. Default: 4096"},
+                    "update_period": {"type": "number", "description": "Sensor update period in seconds. 0.0 = every physics step. Default: 0.0"},
+                    "history_length": {"type": "integer", "description": "Number of past frames to retain per sensor. Default: 1"},
+                    "track_air_time": {"type": "boolean", "description": "Track time-since-last-contact per body. Default: false"},
+                },
+                "required": ["articulation_path", "body_names"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_whole_body_control",
+            "description": "Generate one-shot whole-body control config combining a locomotion RL policy (lower body) with a Pink-IK QP arm planner (upper body), wired into an ActionGroupCfg. Pre-configured profiles available for Unitree G1 (HOVER flat), Unitree H1 (HOVER rough); other robots get a generic skeleton. Use when the user asks to 'set up whole-body control', 'combine HOVER with Pink-IK', or similar.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the humanoid articulation"},
+                    "locomotion_policy": {"type": "string", "description": "Locomotion policy checkpoint name or identifier, e.g. 'hover_g1_flat.pt', 'hover_h1_rough.pt'"},
+                    "arm_planner": {"type": "string", "enum": ["pink_ik", "lula", "rmpflow"], "description": "Upper-body arm planner. Default: 'pink_ik'"},
+                    "ee_frame": {"type": "string", "description": "End-effector frame name for the arm task. Default: 'left_hand'"},
+                    "robot_profile": {"type": "string", "enum": ["g1", "h1", "figure02", "generic"], "description": "Pre-configured robot profile. Default: 'generic'"},
+                },
+                "required": ["articulation_path", "locomotion_policy"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_whole_body",
+            "description": "Diagnostic check for whole-body humanoid behavior. Inspects balance margin during arm motion, CoM projection vs support polygon, arm-payload effect on locomotion policy, and EE acceleration during gait. Use when the user asks 'why does the robot fall when reaching?' or similar balance/coordination questions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the humanoid articulation"},
+                    "support_polygon_margin_m": {"type": "number", "description": "Minimum acceptable distance from CoM projection to support polygon edge, in meters. Default: 0.05"},
+                    "ee_accel_threshold_m_s2": {"type": "number", "description": "Maximum acceptable EE acceleration during gait, m/s^2. Default: 5.0"},
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_loco_manipulation_training",
+            "description": "Set up a joint locomotion + manipulation RL training run. Picks an approach (decoupled HOVER+IK / hierarchical dual-agent / joint end-to-end) and emits a reward-mixing advisor with a 3-phase weight schedule that prevents manipulation rewards from drowning out locomotion early in training. Use when the user asks to 'train the robot to walk and pick up X' or similar loco-manipulation tasks.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_description": {"type": "string", "description": "Natural-language task, e.g. 'walk to a table and pick up a cup'"},
+                    "robot": {"type": "string", "description": "Robot identifier, e.g. 'g1', 'h1', 'figure02'"},
+                    "approach": {"type": "string", "enum": ["decoupled", "hierarchical", "joint"], "description": "Training approach. 'decoupled' = HOVER+IK (low complexity, slow tasks), 'hierarchical' = dual-agent (medium, dynamic), 'joint' = end-to-end (high, max performance). Default: 'decoupled'"},
+                    "reward_terms": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "weight": {"type": "number"},
+                                "category": {"type": "string", "enum": ["locomotion", "manipulation", "regularization"]},
+                            },
+                        },
+                        "description": "Reward terms with names, weights, and categories. Used to advise on weight imbalances (e.g. manipulation outweighing locomotion).",
+                    },
+                },
+                "required": ["task_description", "robot"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_rsi_from_demos",
+            "description": "Configure Reference State Initialization (RSI) for an RL env by sampling each episode's initial state from a demonstration trajectory file instead of the default pose. Highest-impact technique for loco-manipulation. Generates an InitialStateCfg with mode='demo_sampling'. Use when the user asks to 'initialize from demos', 'use RSI', or 'sample starting states from demonstrations'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "demo_path": {"type": "string", "description": "Filesystem path to the demonstration file (.npz, .hdf5, .pkl, etc.) containing recorded trajectories"},
+                    "env_cfg": {"type": "string", "description": "Python class path or identifier of the env config to attach the InitialStateCfg to, e.g. 'G1WalkPickEnvCfg'"},
+                    "noise_std": {"type": "number", "description": "Standard deviation of Gaussian perturbation applied around each sampled demo state. Default: 0.05"},
+                },
+                "required": ["demo_path", "env_cfg"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_multi_rate",
+            "description": "Generate a DualRateVecEnvWrapper that runs the upper body (manipulation IK) at a higher rate than the lower body (locomotion RL). Required when manipulation needs ~100 Hz updates while the locomotion policy was trained at ~50 Hz. The wrapper caches lower-body actions between its update ticks. Use when the user asks for 'multi-rate control', 'dual-rate wrapper', or different rates for arms vs legs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "lower_rate_hz": {"type": "number", "description": "Lower-body (locomotion) update rate in Hz. Default: 50"},
+                    "upper_rate_hz": {"type": "number", "description": "Upper-body (manipulation) update rate in Hz. Default: 100"},
+                    "upper_dof": {"type": "integer", "description": "Number of upper-body DOFs at the front of the action vector. Default: 14 (typical humanoid two-arm count)"},
+                },
+                "required": [],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",
