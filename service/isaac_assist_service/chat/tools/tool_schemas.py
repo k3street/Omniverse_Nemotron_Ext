@@ -210,6 +210,80 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── OmniGraph Assistant ─────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "explain_graph",
+            "description": "Explain an existing OmniGraph action graph in plain language. Reads all nodes, connections, and attribute values, then returns a structured description of what the graph does (e.g., 'ticks every physics frame, reads joint states, publishes to ROS2'). Use when the user asks 'what does this graph do?' or 'explain the action graph'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "graph_path": {"type": "string", "description": "USD path to the OmniGraph prim, e.g. '/World/ActionGraph'"},
+                },
+                "required": ["graph_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_graph",
+            "description": (
+                "Create an OmniGraph from a natural language description using known ROS2/sensor templates. "
+                "Covers 8 canonical patterns: ros2_clock, ros2_joint_state, ros2_camera, ros2_lidar, "
+                "ros2_cmd_vel, ros2_tf, ros2_imu, ros2_odom. Automatically includes the required ROS2Context node. "
+                "Use when the user says 'publish joint states to ROS2', 'set up a camera topic', "
+                "'create a lidar publisher', 'subscribe to cmd_vel', etc."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string", "description": "Natural language description of the desired graph — e.g. 'publish Franka joint states to ROS2', 'subscribe to /cmd_vel for the Carter robot'"},
+                    "template": {
+                        "type": "string",
+                        "enum": [
+                            "ros2_clock", "ros2_joint_state", "ros2_camera",
+                            "ros2_lidar", "ros2_cmd_vel", "ros2_tf",
+                            "ros2_imu", "ros2_odom",
+                        ],
+                        "description": "Explicit template name. If omitted, auto-detected from description.",
+                    },
+                    "graph_path": {"type": "string", "description": "USD path for the new graph prim. Default: '/World/ActionGraph'"},
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation, e.g. '/World/Franka'. Required for joint_state, cmd_vel."},
+                    "topic": {"type": "string", "description": "ROS2 topic name override, e.g. '/joint_states', '/camera/image_raw'"},
+                    "camera_path": {"type": "string", "description": "USD path to the camera prim (for ros2_camera template)"},
+                    "lidar_path": {"type": "string", "description": "USD path to the lidar prim (for ros2_lidar template)"},
+                    "imu_path": {"type": "string", "description": "USD path to the IMU prim (for ros2_imu template)"},
+                    "chassis_path": {"type": "string", "description": "USD path to the chassis prim (for ros2_odom template)"},
+                    "root_prim": {"type": "string", "description": "USD path to the root prim for TF broadcasting (for ros2_tf template)"},
+                    "fps": {"type": "number", "description": "Publishing rate in Hz. Default varies by template."},
+                },
+                "required": ["description"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "debug_graph",
+            "description": (
+                "Debug an OmniGraph that isn't working correctly. Checks for common issues: "
+                "missing ROS2Context node, disconnected inputs, type mismatches, missing OnTick trigger, "
+                "duplicate node names. Returns a list of issues found with suggested fixes. "
+                "Use when the user says 'my graph isn't working', 'ROS2 topics not appearing', "
+                "'OmniGraph not evaluating'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "graph_path": {"type": "string", "description": "USD path to the OmniGraph prim, e.g. '/World/ActionGraph'"},
+                },
+                "required": ["graph_path"],
+            },
+        },
+    },
+
     # ─── Sensors ──────────────────────────────────────────────────────────────
     {
         "type": "function",

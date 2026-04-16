@@ -518,6 +518,453 @@ keys = og.Controller.Keys
 """
 
 
+# ── OmniGraph Assistant ──────────────────────────────────────────────────────
+
+# Canonical OmniGraph templates (verified, cover ~90% of ROS2 use cases).
+# Each template is a dict with: nodes, connections, values (parameterized).
+# The ROS2Context node is ALWAYS included automatically.
+
+_OG_TEMPLATES = {
+    "ros2_clock": {
+        "description": "Publish simulation clock to ROS2 /clock topic",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("publish_clock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "publish_clock.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_clock.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_clock.inputs:timeStamp"),
+        ],
+        "values": {},
+        "param_keys": [],
+    },
+    "ros2_joint_state": {
+        "description": "Publish robot joint states to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("articulation_controller", "isaacsim.core.nodes.IsaacArticulationController"),
+            ("publish_joint_state", "isaacsim.ros2.bridge.ROS2PublishJointState"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "publish_joint_state.inputs:execIn"),
+            ("on_playback_tick.outputs:tick", "articulation_controller.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_joint_state.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_joint_state.inputs:timeStamp"),
+        ],
+        "values": {
+            "articulation_controller.inputs:robotPath": "{robot_path}",
+            "publish_joint_state.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["robot_path", "topic"],
+        "defaults": {"topic": "/joint_states"},
+    },
+    "ros2_camera": {
+        "description": "Publish camera images to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("camera_helper", "isaacsim.ros2.bridge.ROS2CameraHelper"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "camera_helper.inputs:execIn"),
+            ("ros2_context.outputs:context", "camera_helper.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "camera_helper.inputs:timeStamp"),
+        ],
+        "values": {
+            "camera_helper.inputs:cameraPrimPath": "{camera_path}",
+            "camera_helper.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["camera_path", "topic"],
+        "defaults": {"topic": "/camera/image_raw"},
+    },
+    "ros2_lidar": {
+        "description": "Publish lidar scans to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("read_lidar", "isaacsim.sensor.nodes.IsaacReadLidar"),
+            ("publish_laser_scan", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "read_lidar.inputs:execIn"),
+            ("read_lidar.outputs:execOut", "publish_laser_scan.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_laser_scan.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_laser_scan.inputs:timeStamp"),
+            ("read_lidar.outputs:azimuthRange", "publish_laser_scan.inputs:azimuthRange"),
+            ("read_lidar.outputs:depthRange", "publish_laser_scan.inputs:depthRange"),
+            ("read_lidar.outputs:horizontalResolution", "publish_laser_scan.inputs:horizontalResolution"),
+            ("read_lidar.outputs:intensitiesData", "publish_laser_scan.inputs:intensitiesData"),
+            ("read_lidar.outputs:linearDepthData", "publish_laser_scan.inputs:linearDepthData"),
+            ("read_lidar.outputs:numCols", "publish_laser_scan.inputs:numCols"),
+            ("read_lidar.outputs:numRows", "publish_laser_scan.inputs:numRows"),
+        ],
+        "values": {
+            "read_lidar.inputs:lidarPrimPath": "{lidar_path}",
+            "publish_laser_scan.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["lidar_path", "topic"],
+        "defaults": {"topic": "/scan"},
+    },
+    "ros2_cmd_vel": {
+        "description": "Subscribe to /cmd_vel and drive a differential robot",
+        "nodes": [
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("subscribe_twist", "isaacsim.ros2.bridge.ROS2SubscribeTwist"),
+            ("differential_controller", "isaacsim.robot.wheeled_robots.DifferentialController"),
+            ("articulation_controller", "isaacsim.core.nodes.IsaacArticulationController"),
+        ],
+        "connections": [
+            ("ros2_context.outputs:context", "subscribe_twist.inputs:context"),
+            ("subscribe_twist.outputs:linearVelocity", "differential_controller.inputs:linearVelocity"),
+            ("subscribe_twist.outputs:angularVelocity", "differential_controller.inputs:angularVelocity"),
+            ("differential_controller.outputs:velocityCommand", "articulation_controller.inputs:velocityCommand"),
+        ],
+        "values": {
+            "subscribe_twist.inputs:topicName": "{topic}",
+            "articulation_controller.inputs:robotPath": "{robot_path}",
+        },
+        "param_keys": ["robot_path", "topic"],
+        "defaults": {"topic": "/cmd_vel"},
+    },
+    "ros2_tf": {
+        "description": "Publish TF transform tree to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("publish_tf", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "publish_tf.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_tf.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_tf.inputs:timeStamp"),
+        ],
+        "values": {
+            "publish_tf.inputs:parentPrim": "{root_prim}",
+        },
+        "param_keys": ["root_prim"],
+        "defaults": {"root_prim": "/World"},
+    },
+    "ros2_imu": {
+        "description": "Publish IMU data to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_imu", "isaacsim.sensor.nodes.IsaacReadIMU"),
+            ("publish_imu", "isaacsim.ros2.bridge.ROS2PublishImu"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "read_imu.inputs:execIn"),
+            ("read_imu.outputs:execOut", "publish_imu.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_imu.inputs:context"),
+            ("read_imu.outputs:angVel", "publish_imu.inputs:angularVelocity"),
+            ("read_imu.outputs:linAcc", "publish_imu.inputs:linearAcceleration"),
+            ("read_imu.outputs:orientation", "publish_imu.inputs:orientation"),
+        ],
+        "values": {
+            "read_imu.inputs:imuPrimPath": "{imu_path}",
+            "publish_imu.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["imu_path", "topic"],
+        "defaults": {"topic": "/imu/data"},
+    },
+    "ros2_odom": {
+        "description": "Publish odometry data to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("compute_odom", "isaacsim.core.nodes.IsaacComputeOdometry"),
+            ("publish_odom", "isaacsim.ros2.bridge.ROS2PublishOdometry"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "compute_odom.inputs:execIn"),
+            ("compute_odom.outputs:execOut", "publish_odom.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_odom.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_odom.inputs:timeStamp"),
+            ("compute_odom.outputs:angularVelocity", "publish_odom.inputs:angularVelocity"),
+            ("compute_odom.outputs:linearVelocity", "publish_odom.inputs:linearVelocity"),
+            ("compute_odom.outputs:orientation", "publish_odom.inputs:orientation"),
+            ("compute_odom.outputs:position", "publish_odom.inputs:position"),
+        ],
+        "values": {
+            "compute_odom.inputs:chassisPrimPath": "{chassis_path}",
+            "publish_odom.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["chassis_path", "topic"],
+        "defaults": {"topic": "/odom"},
+    },
+}
+
+# Keyword → template mapping for auto-detection from description
+_TEMPLATE_KEYWORDS = {
+    "ros2_clock": ["clock", "sim_time", "simulation time", "simtime"],
+    "ros2_joint_state": ["joint state", "joint_state", "joint states", "joint positions"],
+    "ros2_camera": ["camera", "image", "rgb", "depth image"],
+    "ros2_lidar": ["lidar", "laser scan", "laserscan", "point cloud lidar"],
+    "ros2_cmd_vel": ["cmd_vel", "twist", "teleop", "drive", "velocity command"],
+    "ros2_tf": ["tf", "transform tree", "transforms", "tf2"],
+    "ros2_imu": ["imu", "inertial", "accelerometer", "gyroscope"],
+    "ros2_odom": ["odom", "odometry"],
+}
+
+
+def _detect_template(description: str) -> Optional[str]:
+    """Auto-detect the best template from a natural language description."""
+    desc_lower = description.lower()
+    best_match = None
+    best_score = 0
+    for template_name, keywords in _TEMPLATE_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in desc_lower)
+        if score > best_score:
+            best_score = score
+            best_match = template_name
+    return best_match if best_score > 0 else None
+
+
+def _gen_create_graph(args: Dict) -> str:
+    """Generate OmniGraph code from a template-based description."""
+    description = args.get("description", "")
+    template_name = args.get("template")
+    graph_path = args.get("graph_path", "/World/ActionGraph")
+
+    # Auto-detect template if not explicitly specified
+    if not template_name:
+        template_name = _detect_template(description)
+    if not template_name or template_name not in _OG_TEMPLATES:
+        return (
+            f"# Could not match description to a known template: '{description}'\n"
+            f"# Available templates: {', '.join(sorted(_OG_TEMPLATES.keys()))}\n"
+            f"# Specify 'template' parameter explicitly, or use create_omnigraph for free-form graphs.\n"
+            f"raise ValueError('No matching OmniGraph template for: {description}')"
+        )
+
+    tmpl = _OG_TEMPLATES[template_name]
+    defaults = tmpl.get("defaults", {})
+
+    # Resolve parameter values from args, falling back to defaults
+    params = {}
+    for key in tmpl.get("param_keys", []):
+        val = args.get(key) or defaults.get(key, "")
+        params[key] = val
+
+    # Build node definitions
+    node_defs = ",\n            ".join(
+        f"('{name}', '{ntype}')" for name, ntype in tmpl["nodes"]
+    )
+
+    # Build connection definitions
+    conn_defs = ",\n            ".join(
+        f"('{src}', '{tgt}')" for src, tgt in tmpl["connections"]
+    )
+
+    # Build SET_VALUES with parameter substitution
+    val_items = []
+    for attr_path, val_template in tmpl.get("values", {}).items():
+        resolved = val_template.format(**params) if isinstance(val_template, str) else val_template
+        if isinstance(resolved, str):
+            val_items.append(f"            ('{attr_path}', '{resolved}')")
+        else:
+            val_items.append(f"            ('{attr_path}', {resolved})")
+
+    set_values_block = ""
+    if val_items:
+        val_defs = ",\n".join(val_items)
+        set_values_block = f"""        keys.SET_VALUES: [
+{val_defs}
+        ],"""
+
+    return f"""\
+import omni.graph.core as og
+
+# Template: {template_name} — {tmpl['description']}
+# {description}
+
+# Resolve backing type: FABRIC_SHARED (Isaac Sim 5.x+) replaces deprecated FLATCACHING
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]  # fallback to first available
+
+keys = og.Controller.Keys
+(graph, nodes, _, _) = og.Controller.edit(
+    {{
+        "graph_path": "{graph_path}",
+        "evaluator_name": "execution",
+        "pipeline_stage": _backing,
+    }},
+    {{
+        keys.CREATE_NODES: [
+            {node_defs}
+        ],
+        keys.CONNECT: [
+            {conn_defs}
+        ],
+{set_values_block}
+    }},
+)
+print(f"Created {{template}} graph at {graph_path} with {{len(nodes)}} nodes")
+"""
+
+
+def _gen_explain_graph(args: Dict) -> str:
+    """Generate code that reads an OmniGraph and prints a structured JSON description."""
+    graph_path = args["graph_path"]
+    return f"""\
+import omni.graph.core as og
+import json
+
+graph = og.get_graph_by_path('{graph_path}')
+if graph is None:
+    raise ValueError("No OmniGraph found at '{graph_path}'")
+
+nodes = graph.get_nodes()
+result = {{
+    "graph_path": "{graph_path}",
+    "node_count": len(nodes),
+    "nodes": [],
+    "connections": [],
+}}
+
+for node in nodes:
+    node_info = {{
+        "name": node.get_prim_path().split("/")[-1],
+        "type": node.get_node_type().get_node_type(),
+        "path": str(node.get_prim_path()),
+    }}
+    # Read input attribute values
+    attrs = {{}}
+    for attr in node.get_attributes():
+        name = attr.get_name()
+        if name.startswith("inputs:"):
+            try:
+                val = attr.get()
+                if val is not None and not isinstance(val, (bytes, memoryview)):
+                    attrs[name] = val
+            except Exception:
+                pass
+    if attrs:
+        node_info["inputs"] = attrs
+    result["nodes"].append(node_info)
+
+    # Read connections (outputs)
+    for attr in node.get_attributes():
+        if attr.get_name().startswith("outputs:"):
+            for conn in attr.get_upstream_connections():
+                result["connections"].append({{
+                    "source": f"{{conn.get_node().get_prim_path().split('/')[-1]}}.{{conn.get_name()}}",
+                    "target": f"{{node.get_prim_path().split('/')[-1]}}.{{attr.get_name()}}",
+                }})
+
+print(json.dumps(result, indent=2, default=str))
+"""
+
+
+def _gen_debug_graph(args: Dict) -> str:
+    """Generate code that checks an OmniGraph for common issues."""
+    graph_path = args["graph_path"]
+    return f"""\
+import omni.graph.core as og
+import json
+
+graph = og.get_graph_by_path('{graph_path}')
+if graph is None:
+    raise ValueError("No OmniGraph found at '{graph_path}'")
+
+nodes = graph.get_nodes()
+issues = []
+
+# Collect node info
+node_types = {{}}
+node_names = []
+has_ros2_context = False
+has_on_tick = False
+
+for node in nodes:
+    ntype = node.get_node_type().get_node_type()
+    nname = node.get_prim_path().split("/")[-1]
+    node_types[nname] = ntype
+    node_names.append(nname)
+
+    if "ROS2Context" in ntype:
+        has_ros2_context = True
+    if "OnPlaybackTick" in ntype or "OnTick" in ntype:
+        has_on_tick = True
+
+# Check 1: Missing ROS2Context (most common omission)
+has_ros2_nodes = any("ros2" in t.lower() or "ROS2" in t for t in node_types.values())
+if has_ros2_nodes and not has_ros2_context:
+    issues.append({{
+        "severity": "error",
+        "check": "missing_ros2_context",
+        "message": "Graph has ROS2 nodes but no ROS2Context node. Topics will not appear.",
+        "fix": "Add a ROS2Context node and connect its context output to all ROS2 nodes.",
+    }})
+
+# Check 2: Missing OnTick trigger
+if len(nodes) > 0 and not has_on_tick:
+    issues.append({{
+        "severity": "warning",
+        "check": "missing_on_tick",
+        "message": "No OnPlaybackTick/OnTick node found. The graph may never evaluate.",
+        "fix": "Add an OnPlaybackTick node and connect its tick output to the execution chain.",
+    }})
+
+# Check 3: Disconnected inputs (nodes with no incoming connections on execIn)
+for node in nodes:
+    ntype = node.get_node_type().get_node_type()
+    nname = node.get_prim_path().split("/")[-1]
+    # Skip source nodes (OnTick, Context)
+    if "OnPlaybackTick" in ntype or "OnTick" in ntype or "ROS2Context" in ntype:
+        continue
+    has_exec_in = False
+    exec_connected = False
+    for attr in node.get_attributes():
+        if attr.get_name() == "inputs:execIn":
+            has_exec_in = True
+            if len(attr.get_upstream_connections()) > 0:
+                exec_connected = True
+    if has_exec_in and not exec_connected:
+        issues.append({{
+            "severity": "warning",
+            "check": "disconnected_exec_input",
+            "message": f"Node '{{nname}}' ({{ntype}}) has an unconnected execIn — it will never execute.",
+            "fix": f"Connect an execution output to {{nname}}.inputs:execIn",
+        }})
+
+# Check 4: Duplicate node names
+from collections import Counter
+dupes = [name for name, count in Counter(node_names).items() if count > 1]
+if dupes:
+    issues.append({{
+        "severity": "error",
+        "check": "duplicate_node_names",
+        "message": f"Duplicate node names found: {{dupes}}. This can cause connection confusion.",
+        "fix": "Rename duplicate nodes to unique names.",
+    }})
+
+result = {{
+    "graph_path": "{graph_path}",
+    "node_count": len(nodes),
+    "issues_found": len(issues),
+    "issues": issues,
+    "node_types": node_types,
+    "status": "ok" if len(issues) == 0 else "issues_found",
+}}
+print(json.dumps(result, indent=2, default=str))
+"""
+
+
 def _gen_create_material(args: Dict) -> str:
     mat_path = args["material_path"]
     shader = args.get("shader_type", "OmniPBR")
@@ -889,6 +1336,9 @@ CODE_GEN_HANDLERS = {
     "clone_prim": _gen_clone_prim,
     "create_deformable_mesh": _gen_deformable,
     "create_omnigraph": _gen_create_omnigraph,
+    "explain_graph": _gen_explain_graph,
+    "create_graph": _gen_create_graph,
+    "debug_graph": _gen_debug_graph,
     "create_material": _gen_create_material,
     "assign_material": _gen_assign_material,
     "sim_control": _gen_sim_control,
