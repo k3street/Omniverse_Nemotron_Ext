@@ -2232,3 +2232,431 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Collision Mesh Quality Addendum ─────────────────────────────────────────
+# Bad collision meshes are the #1 cause of "the robot does something weird."
+# These tools detect and fix common mesh issues (non-manifold edges, inverted
+# normals, oversized triangles, hulls beyond PhysX/GPU limits) before the mesh
+# reaches PhysX. Two-tier severity: fatal (blocks simulation) vs silent
+# degradation (causes weird behavior).
+
+# Triangle count guidelines (from research / PhysX docs):
+_COLLISION_TRIANGLE_TARGETS = {
+    "dynamic": 500,    # Robot links, manipulated objects → convexDecomposition
+    "static": 2000,    # Walls, tables, fixed environment → convexHull or meshSimplification
+    "background": 0,   # Decorative non-interacted props → boundingCube or no collision
+}
+
+# PhysX limits — never exceed these per convex hull:
+_PHYSX_HULL_MAX_POLYS = 255    # Cooked hull polygon limit
+_PHYSX_HULL_MAX_VERTS = 64     # GPU PhysX vertex limit per hull
+
+
+def _gen_check_collision_mesh_code(prim_path: str) -> str:
+    """Build the read-only Kit/USD/trimesh analysis script for check_collision_mesh."""
+    safe_path = prim_path.replace("'", "").replace('"', "")
+    return f"""
+import json
+import omni.usd
+from pxr import Usd, UsdGeom, UsdPhysics
+
+result = {{
+    "prim": "{safe_path}",
+    "triangle_count": 0,
+    "is_watertight": None,
+    "is_manifold": None,
+    "degenerate_faces": 0,
+    "collision_approximation": "unknown",
+    "issues": [],
+    "recommendation": "",
+}}
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath("{safe_path}")
+
+if not prim or not prim.IsValid():
+    result["issues"].append({{"type": "prim_not_found", "severity": "error"}})
+    result["recommendation"] = "Prim not found — check the path."
+    print(json.dumps(result))
+else:
+    # ── Fatal check: missing CollisionAPI ────────────────────────────────
+    has_collision = prim.HasAPI(UsdPhysics.CollisionAPI)
+    if not has_collision:
+        result["issues"].append({{"type": "missing_collision_api", "severity": "error"}})
+
+    # ── Read approximation type ──────────────────────────────────────────
+    if prim.HasAPI(UsdPhysics.MeshCollisionAPI):
+        try:
+            approx_attr = UsdPhysics.MeshCollisionAPI(prim).GetApproximationAttr().Get()
+            result["collision_approximation"] = approx_attr or "none"
+        except Exception:
+            result["collision_approximation"] = "none"
+    else:
+        result["collision_approximation"] = "none (no MeshCollisionAPI)"
+
+    mesh = UsdGeom.Mesh(prim)
+    if not mesh:
+        result["issues"].append({{"type": "not_a_mesh", "severity": "error"}})
+        result["recommendation"] = "Prim is not a UsdGeom.Mesh — collision analysis only supports meshes."
+        print(json.dumps(result))
+    else:
+        points = mesh.GetPointsAttr().Get() or []
+        face_counts = mesh.GetFaceVertexCountsAttr().Get() or []
+        face_indices = mesh.GetFaceVertexIndicesAttr().Get() or []
+        n_points = len(points)
+
+        # ── Fatal: out-of-range vertex indices ───────────────────────────
+        oor = [i for i in face_indices if i < 0 or i >= n_points]
+        if oor:
+            result["issues"].append({{
+                "type": "out_of_range_indices", "severity": "error", "count": len(oor),
+            }})
+
+        # ── Triangulate face_counts/face_indices into triangles ──────────
+        triangles = []
+        cursor = 0
+        for fc in face_counts:
+            if fc < 3:
+                cursor += fc
+                continue
+            base = face_indices[cursor]
+            for k in range(1, fc - 1):
+                triangles.append((base, face_indices[cursor + k], face_indices[cursor + k + 1]))
+            cursor += fc
+        result["triangle_count"] = len(triangles)
+
+        # Count degenerate triangles (any two indices equal → zero area)
+        degenerate = 0
+        for a, b, c in triangles:
+            if a == b or b == c or a == c:
+                degenerate += 1
+        result["degenerate_faces"] = degenerate
+        if degenerate > 0:
+            result["issues"].append({{
+                "type": "degenerate_faces", "severity": "error", "count": degenerate,
+            }})
+
+        # ── trimesh-based silent-degradation checks (optional dep) ───────
+        try:
+            import trimesh
+            import numpy as np
+            verts = np.array([(p[0], p[1], p[2]) for p in points], dtype=float)
+            faces = np.array(triangles, dtype=int) if triangles else np.zeros((0, 3), dtype=int)
+            if len(faces) > 0 and len(verts) > 0:
+                tm = trimesh.Trimesh(vertices=verts, faces=faces, process=False)
+                result["is_watertight"] = bool(tm.is_watertight)
+                result["is_manifold"] = bool(getattr(tm, "is_winding_consistent", True))
+
+                # Zero-area triangles (geometric degeneracy)
+                area_faces = tm.area_faces
+                near_zero = int((area_faces < 1e-10).sum())
+                if near_zero > 0 and near_zero != degenerate:
+                    result["issues"].append({{
+                        "type": "zero_area_faces", "severity": "error", "count": near_zero,
+                    }})
+
+                if not tm.is_watertight:
+                    result["issues"].append({{"type": "non_watertight", "severity": "warning"}})
+                if not getattr(tm, "is_winding_consistent", True):
+                    result["issues"].append({{"type": "non_manifold_edges", "severity": "warning"}})
+                if not getattr(tm, "is_volume", True):
+                    result["issues"].append({{"type": "not_volume", "severity": "warning"}})
+
+                # Oversized-triangle heuristic: any tri area > 10% of bbox area
+                try:
+                    bbox_diag = float(np.linalg.norm(tm.bounds[1] - tm.bounds[0]))
+                    if bbox_diag > 0 and len(area_faces) > 0:
+                        max_tri = float(area_faces.max())
+                        if max_tri > 0.1 * (bbox_diag ** 2):
+                            result["issues"].append({{
+                                "type": "oversized_triangles", "severity": "warning",
+                                "max_area": max_tri, "bbox_diag": bbox_diag,
+                            }})
+                except Exception:
+                    pass
+
+                # ── Convex hull GPU-limit check (only when relevant) ─────
+                if result["collision_approximation"] in ("convexHull", "convexDecomposition"):
+                    try:
+                        hull = tm.convex_hull
+                        n_hv = len(hull.vertices)
+                        n_hf = len(hull.faces)
+                        if n_hv > {_PHYSX_HULL_MAX_VERTS}:
+                            result["issues"].append({{
+                                "type": "hull_exceeds_gpu_limit", "severity": "error",
+                                "vertices": n_hv, "limit": {_PHYSX_HULL_MAX_VERTS},
+                            }})
+                        if n_hf > {_PHYSX_HULL_MAX_POLYS}:
+                            result["issues"].append({{
+                                "type": "hull_exceeds_polygon_limit", "severity": "error",
+                                "polygons": n_hf, "limit": {_PHYSX_HULL_MAX_POLYS},
+                            }})
+                    except Exception as e:
+                        result["issues"].append({{"type": "hull_compute_failed", "severity": "warning", "error": str(e)}})
+        except ImportError:
+            result["issues"].append({{
+                "type": "trimesh_unavailable", "severity": "info",
+                "message": "trimesh not installed — silent-degradation checks skipped (pip install trimesh)",
+            }})
+
+        # ── Recommendation ───────────────────────────────────────────────
+        rec_parts = []
+        n_tri = result["triangle_count"]
+        approx = result["collision_approximation"]
+        if n_tri > 5000 and approx in ("none", "none (no MeshCollisionAPI)", ""):
+            rec_parts.append(
+                f"Switch to convexDecomposition ({{n_tri}} triangles is too heavy for raw triangle-mesh collision)."
+            )
+        if any(i["severity"] == "error" for i in result["issues"]):
+            rec_parts.append("Run fix_collision_mesh first to repair errors.")
+        elif any(i["type"] in ("non_watertight", "non_manifold_edges", "not_volume") for i in result["issues"]):
+            rec_parts.append("Run fix_collision_mesh to clean up the mesh.")
+        if not rec_parts:
+            rec_parts.append("Mesh looks healthy — no action needed.")
+        result["recommendation"] = " ".join(rec_parts)
+
+        print(json.dumps(result))
+"""
+
+
+async def _handle_check_collision_mesh(args: Dict) -> Dict:
+    """Analyze a USD mesh prim's collision quality (DATA handler)."""
+    prim_path = args.get("prim_path", "")
+    if not prim_path or not prim_path.startswith("/"):
+        return {"error": "prim_path must be a non-empty USD path starting with /"}
+    code = _gen_check_collision_mesh_code(prim_path)
+    result = await kit_tools.exec_sync(code, timeout=20)
+    if not result.get("success"):
+        return {
+            "error": f"Kit RPC failed: {result.get('output', 'unknown')}",
+            "hint": "Is Isaac Sim running with the Kit RPC bridge on port 8001?",
+        }
+    output = (result.get("output") or "").strip()
+    for line in reversed(output.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    return {"error": "Failed to parse collision-mesh response", "raw_output": output[:500]}
+
+
+DATA_HANDLERS["check_collision_mesh"] = _handle_check_collision_mesh
+
+
+def _gen_fix_collision_mesh(args: Dict) -> str:
+    """Generate auto-repair code: normals → degenerate → holes → simplify → CoACD → write back."""
+    prim_path = args["prim_path"]
+    target = args.get("target_triangles")
+    target_val = "None" if target is None else str(int(target))
+    safe_path = prim_path.replace("'", "").replace('"', "")
+    return f"""
+import omni.usd
+import numpy as np
+from pxr import Usd, UsdGeom, UsdPhysics, Vt, Sdf
+
+PRIM_PATH = "{safe_path}"
+TARGET_TRIANGLES = {target_val}
+PHYSX_HULL_MAX_VERTS = {_PHYSX_HULL_MAX_VERTS}
+PHYSX_HULL_MAX_POLYS = {_PHYSX_HULL_MAX_POLYS}
+COACD_THRESHOLD = 0.05
+COACD_MAX_CONVEX_HULL = 16
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath(PRIM_PATH)
+if not prim or not prim.IsValid():
+    raise RuntimeError(f"Prim not found: {{PRIM_PATH}}")
+
+mesh = UsdGeom.Mesh(prim)
+if not mesh:
+    raise RuntimeError(f"Prim {{PRIM_PATH}} is not a UsdGeom.Mesh")
+
+# ── Step 0: Read current mesh data ──────────────────────────────────────
+points = mesh.GetPointsAttr().Get() or []
+face_counts = mesh.GetFaceVertexCountsAttr().Get() or []
+face_indices = mesh.GetFaceVertexIndicesAttr().Get() or []
+
+# Triangulate
+triangles = []
+cursor = 0
+for fc in face_counts:
+    if fc < 3:
+        cursor += fc
+        continue
+    base = face_indices[cursor]
+    for k in range(1, fc - 1):
+        triangles.append((base, face_indices[cursor + k], face_indices[cursor + k + 1]))
+    cursor += fc
+
+import trimesh
+verts_np = np.array([(p[0], p[1], p[2]) for p in points], dtype=float)
+faces_np = np.array(triangles, dtype=int) if triangles else np.zeros((0, 3), dtype=int)
+tm = trimesh.Trimesh(vertices=verts_np, faces=faces_np, process=False)
+
+# ── Step 1: Fix normals ─────────────────────────────────────────────────
+try:
+    tm.fix_normals()
+except Exception as exc:
+    print(f"fix_normals failed: {{exc}}")
+
+# ── Step 2: Remove degenerate triangles (zero / near-zero area) ─────────
+try:
+    nondegen_mask = tm.area_faces > 1e-12
+    if not nondegen_mask.all():
+        tm.update_faces(nondegen_mask)
+        tm.remove_unreferenced_vertices()
+except Exception as exc:
+    print(f"degenerate removal failed: {{exc}}")
+
+# ── Step 3: Fill holes (trimesh first, pymeshfix for complex cases) ─────
+try:
+    tm.fill_holes()
+except Exception as exc:
+    print(f"fill_holes failed: {{exc}}")
+
+if not tm.is_watertight:
+    try:
+        import pymeshfix
+        meshfix = pymeshfix.MeshFix(tm.vertices, tm.faces)
+        meshfix.repair()
+        tm = trimesh.Trimesh(vertices=meshfix.v, faces=meshfix.f, process=False)
+    except ImportError:
+        print("pymeshfix not installed — skipping advanced hole-fill (pip install pymeshfix)")
+    except Exception as exc:
+        print(f"pymeshfix repair failed: {{exc}}")
+
+# ── Step 4: Simplify to target face count via quadric decimation ────────
+target = TARGET_TRIANGLES
+if target is None:
+    # Heuristic: classify based on RigidBodyAPI presence
+    target = 500 if prim.HasAPI(UsdPhysics.RigidBodyAPI) else 2000
+
+if target > 0 and len(tm.faces) > target:
+    try:
+        tm = tm.simplify_quadric_decimation(target)
+    except Exception as exc:
+        print(f"quadric decimation failed: {{exc}}")
+
+# ── Step 5: Convex decompose if mesh too complex for a single hull ──────
+hulls = []
+needs_decompose = False
+try:
+    hull = tm.convex_hull
+    if len(hull.vertices) > PHYSX_HULL_MAX_VERTS or len(hull.faces) > PHYSX_HULL_MAX_POLYS:
+        needs_decompose = True
+except Exception:
+    needs_decompose = True
+
+if needs_decompose:
+    try:
+        import coacd
+        coacd_mesh = coacd.Mesh(tm.vertices, tm.faces)
+        parts = coacd.run_coacd(
+            coacd_mesh,
+            threshold=COACD_THRESHOLD,
+            max_convex_hull=COACD_MAX_CONVEX_HULL,
+        )
+        for v, f in parts:
+            hulls.append(trimesh.Trimesh(vertices=v, faces=f, process=False))
+    except ImportError:
+        print("coacd not installed — falling back to single convex hull (pip install coacd)")
+        hulls = [tm.convex_hull]
+    except Exception as exc:
+        print(f"CoACD decomposition failed: {{exc}} — falling back to single hull")
+        hulls = [tm.convex_hull]
+else:
+    hulls = [tm.convex_hull]
+
+# ── Step 6: Verify all hulls ≤ GPU limits ───────────────────────────────
+for idx, h in enumerate(hulls):
+    if len(h.vertices) > PHYSX_HULL_MAX_VERTS:
+        print(f"WARN: hull {{idx}} has {{len(h.vertices)}} vertices > {{PHYSX_HULL_MAX_VERTS}}")
+    if len(h.faces) > PHYSX_HULL_MAX_POLYS:
+        print(f"WARN: hull {{idx}} has {{len(h.faces)}} faces > {{PHYSX_HULL_MAX_POLYS}}")
+
+# ── Step 7: Write repaired triangle mesh back to USD ────────────────────
+new_points = Vt.Vec3fArray([tuple(v) for v in tm.vertices.tolist()])
+mesh.GetPointsAttr().Set(new_points)
+new_face_counts = Vt.IntArray([3] * len(tm.faces))
+mesh.GetFaceVertexCountsAttr().Set(new_face_counts)
+flat_indices = [int(i) for tri in tm.faces.tolist() for i in tri]
+mesh.GetFaceVertexIndicesAttr().Set(Vt.IntArray(flat_indices))
+
+# Apply MeshCollisionAPI with appropriate approximation
+if not prim.HasAPI(UsdPhysics.CollisionAPI):
+    UsdPhysics.CollisionAPI.Apply(prim)
+if not prim.HasAPI(UsdPhysics.MeshCollisionAPI):
+    UsdPhysics.MeshCollisionAPI.Apply(prim)
+
+mca = UsdPhysics.MeshCollisionAPI(prim)
+approx = "convexDecomposition" if len(hulls) > 1 else "convexHull"
+mca.CreateApproximationAttr().Set(approx)
+
+print(f"OK: repaired {{PRIM_PATH}} — {{len(tm.faces)}} triangles, {{len(hulls)}} hull(s), approx={{approx}}")
+"""
+
+
+CODE_GEN_HANDLERS["fix_collision_mesh"] = _gen_fix_collision_mesh
+
+
+def _gen_visualize_collision_mesh(args: Dict) -> str:
+    """Toggle PhysX collision-shape debug visualization for a prim (CODE_GEN handler)."""
+    prim_path = args["prim_path"]
+    safe_path = prim_path.replace("'", "").replace('"', "")
+    return f"""
+import omni.usd
+from pxr import Usd, UsdGeom, UsdPhysics
+
+PRIM_PATH = "{safe_path}"
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath(PRIM_PATH)
+if not prim or not prim.IsValid():
+    raise RuntimeError(f"Prim not found: {{PRIM_PATH}}")
+
+# ── Enable per-prim collision visualization via CollisionAPI displayColor ─
+# UsdPhysics offers a CollisionGroup and the omni.physx.ui debug
+# visualization mode "Collision Shapes". Enable both so the user can
+# clearly see what PhysX is using for collision.
+if not prim.HasAPI(UsdPhysics.CollisionAPI):
+    UsdPhysics.CollisionAPI.Apply(prim)
+
+# ── Enable the global Physics Debug "Collision Shapes" visualization ────
+try:
+    import carb.settings
+    settings = carb.settings.get_settings()
+    # omni.physx.ui debug visualization toggles (these are the documented paths)
+    settings.set("/persistent/physics/visualizationCollisionMesh", True)
+    settings.set("/physics/visualizationDisplayJoints", False)
+    settings.set("/physics/visualizationSimulationOutput", True)
+    print(f"Collision-shape visualization ENABLED for {{PRIM_PATH}}")
+except Exception as exc:
+    print(f"Failed to set carb settings: {{exc}}")
+
+# ── Try the omni.physx.ui PhysicsDebugView API as a secondary path ──────
+try:
+    import omni.physx.ui as physx_ui
+    # Newer Kit versions expose a debug-view manager; fall back gracefully.
+    try:
+        physx_ui.get_physx_debug_view().enable_debug_visualization(True)
+    except Exception:
+        pass
+    print("omni.physx.ui debug visualization enabled")
+except ImportError:
+    print("omni.physx.ui not available — relying on carb.settings toggles")
+
+# ── Highlight the prim with a wireframe display style ──────────────────
+imageable = UsdGeom.Imageable(prim)
+if imageable:
+    try:
+        imageable.CreatePurposeAttr().Set(UsdGeom.Tokens.guide)
+    except Exception:
+        pass
+
+print(f"OK: visualizing collision mesh for {{PRIM_PATH}}")
+"""
+
+
+CODE_GEN_HANDLERS["visualize_collision_mesh"] = _gen_visualize_collision_mesh
