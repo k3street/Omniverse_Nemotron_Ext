@@ -2056,6 +2056,547 @@ DATA_HANDLERS["vision_plan_trajectory"] = _handle_vision_plan_trajectory
 DATA_HANDLERS["vision_analyze_scene"] = _handle_vision_analyze_scene
 
 
+# ── Sim-to-Real Gap Analysis ────────────────────────────────────────────────
+
+# Reference specs for known robots (physics-relevant parameters)
+_REAL_ROBOT_SPECS = {
+    "franka": {
+        "max_torque": [87, 87, 87, 87, 12, 12, 12],
+        "max_velocity": [2.175, 2.175, 2.175, 2.175, 2.61, 2.61, 2.61],
+        "joint_friction": 0.1,
+        "recommended_solver_iterations": 16,
+        "recommended_dt": 1.0 / 240.0,
+        "has_motor_dynamics": True,
+    },
+    "ur10": {
+        "max_torque": [330, 330, 150, 54, 54, 54],
+        "max_velocity": [2.094, 2.094, 3.142, 3.142, 3.142, 3.142],
+        "joint_friction": 0.2,
+        "recommended_solver_iterations": 16,
+        "recommended_dt": 1.0 / 240.0,
+        "has_motor_dynamics": True,
+    },
+    "ur5e": {
+        "max_torque": [150, 150, 150, 28, 28, 28],
+        "max_velocity": [3.142, 3.142, 3.142, 6.283, 6.283, 6.283],
+        "joint_friction": 0.15,
+        "recommended_solver_iterations": 16,
+        "recommended_dt": 1.0 / 240.0,
+        "has_motor_dynamics": True,
+    },
+}
+
+# Known gap categories with default severity and recommendations
+_GAP_TEMPLATES = {
+    "domain_randomization": {
+        "severity": "high",
+        "detail": "No domain randomization detected — friction, mass, and damping should be randomized for robust transfer",
+        "recommendation": "Add domain randomization for friction (0.5-1.5x), mass (0.8-1.2x), joint damping (0.5-2.0x)",
+    },
+    "sensor_noise": {
+        "severity": "medium",
+        "detail": "No sensor noise model detected — real sensors have measurement noise",
+        "recommendation": "Enable camera noise model: Gaussian sigma=0.01, depth noise sigma=0.005",
+    },
+    "actuator_model": {
+        "severity": "medium",
+        "detail": "Using ideal torque control — real motors have dynamics, friction, and torque limits",
+        "recommendation": "Switch to DC motor or PID actuator model with realistic torque/velocity limits",
+    },
+    "physics_fidelity": {
+        "severity": "medium",
+        "detail": "Physics solver iterations may be too low for manipulation fidelity",
+        "recommendation": "Increase solver iterations to 16+ for manipulation tasks, use dt=1/240",
+    },
+    "environment_fidelity": {
+        "severity": "low",
+        "detail": "Scene may lack realistic surface materials, lighting, and object geometry",
+        "recommendation": "Add PBR materials with realistic friction, use domain randomization for visual appearance",
+    },
+}
+
+
+async def _handle_analyze_sim_to_real_gap(args: Dict) -> Dict:
+    """Analyze sim-to-real gap for a robot in the current scene."""
+    robot_path = args["robot_path"]
+    real_robot_type = args.get("real_robot_type", "").lower()
+
+    # Auto-detect robot type from path if not specified
+    if not real_robot_type:
+        path_lower = robot_path.lower()
+        for rtype in _REAL_ROBOT_SPECS:
+            if rtype in path_lower:
+                real_robot_type = rtype
+                break
+
+    real_spec = _REAL_ROBOT_SPECS.get(real_robot_type)
+
+    gaps = []
+    recommendations = []
+    score = 100  # Start at 100 and deduct for each gap
+
+    # Always flag domain randomization (we can't detect it without Kit)
+    dr_gap = _GAP_TEMPLATES["domain_randomization"]
+    gaps.append({
+        "category": "domain_randomization",
+        "severity": dr_gap["severity"],
+        "detail": dr_gap["detail"],
+    })
+    recommendations.append(dr_gap["recommendation"])
+    score -= 25
+
+    # Sensor noise gap
+    sn_gap = _GAP_TEMPLATES["sensor_noise"]
+    gaps.append({
+        "category": "sensor_noise",
+        "severity": sn_gap["severity"],
+        "detail": sn_gap["detail"],
+    })
+    recommendations.append(sn_gap["recommendation"])
+    score -= 15
+
+    # Actuator model gap
+    am_gap = _GAP_TEMPLATES["actuator_model"]
+    gaps.append({
+        "category": "actuator_model",
+        "severity": am_gap["severity"],
+        "detail": am_gap["detail"],
+    })
+    recommendations.append(am_gap["recommendation"])
+    score -= 15
+
+    # Physics fidelity gap
+    pf_gap = _GAP_TEMPLATES["physics_fidelity"]
+    if real_spec:
+        detail = (
+            f"Recommended solver iterations: {real_spec['recommended_solver_iterations']}, "
+            f"dt: {real_spec['recommended_dt']:.4f}s for {real_robot_type}"
+        )
+    else:
+        detail = pf_gap["detail"]
+    gaps.append({
+        "category": "physics_fidelity",
+        "severity": pf_gap["severity"],
+        "detail": detail,
+    })
+    recommendations.append(pf_gap["recommendation"])
+    score -= 10
+
+    # Environment fidelity gap
+    ef_gap = _GAP_TEMPLATES["environment_fidelity"]
+    gaps.append({
+        "category": "environment_fidelity",
+        "severity": ef_gap["severity"],
+        "detail": ef_gap["detail"],
+    })
+    recommendations.append(ef_gap["recommendation"])
+    score -= 5
+
+    score = max(0, score)
+
+    return {
+        "robot_path": robot_path,
+        "real_robot_type": real_robot_type or "unknown",
+        "real_spec_available": real_spec is not None,
+        "overall_score": score,
+        "gaps": gaps,
+        "recommendations": recommendations,
+        "note": (
+            "This analysis is based on common sim-to-real gaps. "
+            "For a more accurate assessment, run with Isaac Sim active to inspect live physics settings."
+        ),
+    }
+
+
+def _gen_apply_domain_randomization(args: Dict) -> str:
+    """Generate Replicator domain randomization code."""
+    prim_path = args["prim_path"]
+    rand_type = args["randomization_type"]
+    params = args.get("params", {})
+
+    if rand_type == "physics":
+        friction_range = params.get("friction_range", [0.5, 1.5])
+        mass_range = params.get("mass_scale_range", [0.8, 1.2])
+        damping_range = params.get("joint_damping_range", [0.5, 2.0])
+        stiffness_range = params.get("joint_stiffness_range", [0.8, 1.2])
+
+        return f"""\
+import omni.usd
+from pxr import UsdPhysics, PhysxSchema
+import random
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath('{prim_path}')
+
+# Randomize friction
+friction = random.uniform({friction_range[0]}, {friction_range[1]})
+for child in prim.GetAllDescendants():
+    if child.HasAPI(PhysxSchema.PhysxMaterialAPI):
+        mat_api = PhysxSchema.PhysxMaterialAPI(child)
+        mat_api.GetDynamicFrictionAttr().Set(friction)
+        mat_api.GetStaticFrictionAttr().Set(friction * 1.2)
+
+# Randomize mass scale
+mass_scale = random.uniform({mass_range[0]}, {mass_range[1]})
+for child in prim.GetAllDescendants():
+    if child.HasAPI(UsdPhysics.MassAPI):
+        mass_api = UsdPhysics.MassAPI(child)
+        current = mass_api.GetMassAttr().Get()
+        if current and current > 0:
+            mass_api.GetMassAttr().Set(current * mass_scale)
+
+# Randomize joint damping and stiffness
+damping_scale = random.uniform({damping_range[0]}, {damping_range[1]})
+stiffness_scale = random.uniform({stiffness_range[0]}, {stiffness_range[1]})
+for child in prim.GetAllDescendants():
+    drive = UsdPhysics.DriveAPI.Get(child, 'angular')
+    if drive:
+        current_d = drive.GetDampingAttr().Get()
+        current_s = drive.GetStiffnessAttr().Get()
+        if current_d is not None:
+            drive.GetDampingAttr().Set(current_d * damping_scale)
+        if current_s is not None:
+            drive.GetStiffnessAttr().Set(current_s * stiffness_scale)
+
+print(f"Physics randomization applied to '{prim_path}': friction={{friction:.3f}}, mass_scale={{mass_scale:.3f}}, damping_scale={{damping_scale:.3f}}, stiffness_scale={{stiffness_scale:.3f}}")
+"""
+
+    if rand_type == "visual":
+        color_min = params.get("color_range", [[0.1, 0.1, 0.1], [0.9, 0.9, 0.9]])[0]
+        color_max = params.get("color_range", [[0.1, 0.1, 0.1], [0.9, 0.9, 0.9]])[1]
+        roughness_range = params.get("roughness_range", [0.2, 0.8])
+
+        return f"""\
+import omni.usd
+from pxr import UsdShade, Sdf, Gf
+import random
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath('{prim_path}')
+
+# Randomize diffuse color
+r = random.uniform({color_min[0]}, {color_max[0]})
+g = random.uniform({color_min[1]}, {color_max[1]})
+b = random.uniform({color_min[2]}, {color_max[2]})
+
+# Randomize roughness
+roughness = random.uniform({roughness_range[0]}, {roughness_range[1]})
+
+# Find and modify bound material
+binding_api = UsdShade.MaterialBindingAPI(prim)
+mat, _ = binding_api.ComputeBoundMaterial()
+if mat:
+    for shader_prim in mat.GetPrim().GetAllDescendants():
+        shader = UsdShade.Shader(shader_prim)
+        if shader:
+            color_input = shader.GetInput('diffuse_color_constant')
+            if color_input:
+                color_input.Set(Gf.Vec3f(r, g, b))
+            rough_input = shader.GetInput('reflection_roughness_constant')
+            if rough_input:
+                rough_input.Set(roughness)
+
+print(f"Visual randomization applied to '{prim_path}': color=({{r:.2f}}, {{g:.2f}}, {{b:.2f}}), roughness={{roughness:.2f}}")
+"""
+
+    if rand_type == "lighting":
+        intensity_range = params.get("intensity_range", [500, 2000])
+        color_temp_range = params.get("color_temp_range", [4000, 7000])
+
+        return f"""\
+import omni.usd
+from pxr import UsdLux, Gf
+import random
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath('{prim_path}')
+
+# Randomize light intensity
+intensity = random.uniform({intensity_range[0]}, {intensity_range[1]})
+color_temp = random.uniform({color_temp_range[0]}, {color_temp_range[1]})
+
+light = UsdLux.Light(prim)
+if light:
+    light.GetIntensityAttr().Set(intensity)
+    light.GetColorTemperatureAttr().Set(color_temp)
+    light.GetEnableColorTemperatureAttr().Set(True)
+
+print(f"Lighting randomization applied to '{prim_path}': intensity={{intensity:.0f}}, color_temp={{color_temp:.0f}}K")
+"""
+
+    if rand_type == "sensor_noise":
+        noise_type = params.get("noise_type", "gaussian")
+        noise_sigma = params.get("noise_sigma", 0.01)
+        depth_noise_sigma = params.get("depth_noise_sigma", 0.005)
+
+        return f"""\
+import omni.usd
+from pxr import UsdGeom
+import omni.replicator.core as rep
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath('{prim_path}')
+
+# Configure sensor noise augmentation via Replicator
+noise_type = '{noise_type}'
+noise_sigma = {noise_sigma}
+depth_noise_sigma = {depth_noise_sigma}
+
+# Apply noise to camera render product
+cam = UsdGeom.Camera(prim) if prim.IsA(UsdGeom.Camera) else None
+if cam:
+    rp = rep.create.render_product(str(prim.GetPath()), (1280, 720))
+    # Augment with noise
+    with rep.trigger.on_frame():
+        if noise_type == 'gaussian':
+            rep.randomizer.color_jitter(
+                brightness=noise_sigma,
+                contrast=noise_sigma,
+                saturation=noise_sigma,
+            )
+    print(f"Sensor noise applied to '{{str(prim.GetPath())}}': type={{noise_type}}, sigma={{noise_sigma}}, depth_sigma={{depth_noise_sigma}}")
+else:
+    print(f"Prim '{prim_path}' is not a Camera — sensor noise requires a camera prim")
+"""
+
+    return f"# Unknown randomization type: {rand_type}"
+
+
+def _gen_configure_actuator_model(args: Dict) -> str:
+    """Generate actuator configuration code for a robot."""
+    robot_path = args["robot_path"]
+    actuator_type = args["actuator_type"]
+    params = args.get("params", {})
+
+    stiffness = params.get("stiffness", 1000)
+    damping = params.get("damping", 100)
+    max_torque = params.get("max_torque", 87)
+    max_velocity = params.get("max_velocity", 2.175)
+    friction = params.get("friction", 0.1)
+
+    if actuator_type == "ideal":
+        return f"""\
+import omni.usd
+from pxr import UsdPhysics, PhysxSchema
+
+stage = omni.usd.get_context().get_stage()
+robot_prim = stage.GetPrimAtPath('{robot_path}')
+
+# Ideal actuator: high stiffness, high damping, no limits
+for child in robot_prim.GetAllDescendants():
+    drive = UsdPhysics.DriveAPI.Get(child, 'angular')
+    if drive:
+        drive.GetStiffnessAttr().Set(10000.0)
+        drive.GetDampingAttr().Set(1000.0)
+        drive.GetMaxForceAttr().Set(float('inf'))
+
+print(f"Ideal actuator model applied to '{robot_path}' — infinite torque, no dynamics")
+"""
+
+    if actuator_type == "dc_motor":
+        return f"""\
+import omni.usd
+from pxr import UsdPhysics, PhysxSchema
+
+stage = omni.usd.get_context().get_stage()
+robot_prim = stage.GetPrimAtPath('{robot_path}')
+
+# DC motor model: realistic stiffness, damping, torque limits, friction
+stiffness = {stiffness}
+damping = {damping}
+max_torque = {max_torque}
+max_velocity = {max_velocity}
+joint_friction = {friction}
+
+for child in robot_prim.GetAllDescendants():
+    drive = UsdPhysics.DriveAPI.Get(child, 'angular')
+    if drive:
+        drive.GetStiffnessAttr().Set(float(stiffness))
+        drive.GetDampingAttr().Set(float(damping))
+        drive.GetMaxForceAttr().Set(float(max_torque))
+
+    # Apply joint friction via PhysxJointAPI
+    if child.HasAPI(UsdPhysics.RevoluteJointAPI) or child.HasAPI(UsdPhysics.PrismaticJointAPI):
+        if not child.HasAPI(PhysxSchema.PhysxJointAPI):
+            PhysxSchema.PhysxJointAPI.Apply(child)
+        joint_api = PhysxSchema.PhysxJointAPI(child)
+        joint_api.CreateJointFrictionAttr(joint_friction)
+        # Set max velocity on the joint
+        if child.HasAPI(UsdPhysics.RevoluteJointAPI):
+            rev_api = UsdPhysics.RevoluteJointAPI(child)
+            upper = rev_api.GetUpperLimitAttr().Get()
+            if upper is not None:
+                pass  # Limits already set in URDF/USD
+
+print(f"DC motor actuator model applied to '{robot_path}': stiffness={{stiffness}}, damping={{damping}}, max_torque={{max_torque}}, friction={{joint_friction}}")
+"""
+
+    if actuator_type == "position_pid":
+        return f"""\
+import omni.usd
+from pxr import UsdPhysics, PhysxSchema
+
+stage = omni.usd.get_context().get_stage()
+robot_prim = stage.GetPrimAtPath('{robot_path}')
+
+# Position PID controller: stiffness = P-gain, damping = D-gain
+kp = {stiffness}
+kd = {damping}
+max_torque = {max_torque}
+
+for child in robot_prim.GetAllDescendants():
+    drive = UsdPhysics.DriveAPI.Get(child, 'angular')
+    if drive:
+        drive.GetTypeAttr().Set('force')
+        drive.GetStiffnessAttr().Set(float(kp))
+        drive.GetDampingAttr().Set(float(kd))
+        drive.GetMaxForceAttr().Set(float(max_torque))
+
+print(f"Position PID actuator model applied to '{robot_path}': Kp={{kp}}, Kd={{kd}}, max_torque={{max_torque}}")
+"""
+
+    if actuator_type == "velocity_pid":
+        return f"""\
+import omni.usd
+from pxr import UsdPhysics, PhysxSchema
+
+stage = omni.usd.get_context().get_stage()
+robot_prim = stage.GetPrimAtPath('{robot_path}')
+
+# Velocity PID controller: low stiffness (no position control), damping = P-gain for velocity
+kp_vel = {damping}
+max_torque = {max_torque}
+max_velocity = {max_velocity}
+
+for child in robot_prim.GetAllDescendants():
+    drive = UsdPhysics.DriveAPI.Get(child, 'angular')
+    if drive:
+        drive.GetTypeAttr().Set('force')
+        drive.GetStiffnessAttr().Set(0.0)  # No position control
+        drive.GetDampingAttr().Set(float(kp_vel))
+        drive.GetMaxForceAttr().Set(float(max_torque))
+
+print(f"Velocity PID actuator model applied to '{robot_path}': Kp_vel={{kp_vel}}, max_torque={{max_torque}}, max_velocity={{max_velocity}}")
+"""
+
+    if actuator_type == "implicit_spring_damper":
+        return f"""\
+import omni.usd
+from pxr import UsdPhysics, PhysxSchema
+
+stage = omni.usd.get_context().get_stage()
+robot_prim = stage.GetPrimAtPath('{robot_path}')
+
+# Implicit spring-damper: uses PhysX implicit integration for stability
+stiffness = {stiffness}
+damping = {damping}
+max_torque = {max_torque}
+
+for child in robot_prim.GetAllDescendants():
+    drive = UsdPhysics.DriveAPI.Get(child, 'angular')
+    if drive:
+        drive.GetTypeAttr().Set('force')
+        drive.GetStiffnessAttr().Set(float(stiffness))
+        drive.GetDampingAttr().Set(float(damping))
+        drive.GetMaxForceAttr().Set(float(max_torque))
+    # Enable implicit spring-damper via PhysxJointAPI
+    if child.HasAPI(UsdPhysics.RevoluteJointAPI) or child.HasAPI(UsdPhysics.PrismaticJointAPI):
+        if not child.HasAPI(PhysxSchema.PhysxJointAPI):
+            PhysxSchema.PhysxJointAPI.Apply(child)
+        joint_api = PhysxSchema.PhysxJointAPI(child)
+        joint_api.CreateJointFrictionAttr({friction})
+
+print(f"Implicit spring-damper actuator model applied to '{robot_path}': stiffness={{stiffness}}, damping={{damping}}")
+"""
+
+    return f"# Unknown actuator type: {actuator_type}"
+
+
+async def _handle_generate_transfer_report(args: Dict) -> Dict:
+    """Generate a comprehensive sim-to-real transfer readiness report."""
+    robot_path = args["robot_path"]
+    output_format = args.get("output_format", "summary")
+
+    # Run the gap analysis
+    gap_result = await _handle_analyze_sim_to_real_gap({
+        "robot_path": robot_path,
+        "real_robot_type": args.get("real_robot_type", ""),
+    })
+
+    score = gap_result["overall_score"]
+    gaps = gap_result["gaps"]
+    recommendations = gap_result["recommendations"]
+
+    # Determine readiness level
+    if score >= 80:
+        readiness = "HIGH"
+        readiness_detail = "Scene is well-configured for sim-to-real transfer"
+    elif score >= 50:
+        readiness = "MEDIUM"
+        readiness_detail = "Some gaps identified — address high-severity items before transfer"
+    else:
+        readiness = "LOW"
+        readiness_detail = "Significant gaps — substantial configuration needed before transfer"
+
+    # Build prioritized action items (high severity first)
+    severity_order = {"high": 0, "medium": 1, "low": 2}
+    sorted_gaps = sorted(gaps, key=lambda g: severity_order.get(g["severity"], 3))
+    action_items = []
+    for i, gap in enumerate(sorted_gaps, 1):
+        action_items.append({
+            "priority": i,
+            "category": gap["category"],
+            "severity": gap["severity"],
+            "detail": gap["detail"],
+            "recommendation": recommendations[gaps.index(gap)] if gaps.index(gap) < len(recommendations) else "",
+        })
+
+    report = {
+        "robot_path": robot_path,
+        "real_robot_type": gap_result["real_robot_type"],
+        "transfer_readiness": readiness,
+        "readiness_detail": readiness_detail,
+        "overall_score": score,
+        "gap_count": len(gaps),
+        "high_severity_count": sum(1 for g in gaps if g["severity"] == "high"),
+        "medium_severity_count": sum(1 for g in gaps if g["severity"] == "medium"),
+        "low_severity_count": sum(1 for g in gaps if g["severity"] == "low"),
+        "action_items": action_items,
+    }
+
+    if output_format == "detailed":
+        report["gaps_detail"] = gaps
+        report["all_recommendations"] = recommendations
+
+    if output_format == "summary":
+        # Generate a human-readable summary
+        summary_lines = [
+            f"Sim-to-Real Transfer Report for {robot_path}",
+            f"Robot Type: {gap_result['real_robot_type']}",
+            f"Transfer Readiness: {readiness} ({score}/100)",
+            f"",
+            f"Gaps Found: {len(gaps)} ({sum(1 for g in gaps if g['severity'] == 'high')} high, "
+            f"{sum(1 for g in gaps if g['severity'] == 'medium')} medium, "
+            f"{sum(1 for g in gaps if g['severity'] == 'low')} low)",
+            f"",
+            "Top Action Items:",
+        ]
+        for item in action_items[:3]:
+            summary_lines.append(
+                f"  [{item['severity'].upper()}] {item['category']}: {item['recommendation']}"
+            )
+        report["summary_text"] = "\n".join(summary_lines)
+
+    return report
+
+
+# Register sim-to-real gap handlers
+DATA_HANDLERS["analyze_sim_to_real_gap"] = _handle_analyze_sim_to_real_gap
+DATA_HANDLERS["generate_transfer_report"] = _handle_generate_transfer_report
+CODE_GEN_HANDLERS["apply_domain_randomization"] = _gen_apply_domain_randomization
+CODE_GEN_HANDLERS["configure_actuator_model"] = _gen_configure_actuator_model
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),

@@ -926,6 +926,88 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Sim-to-Real Gap ─────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_sim_to_real_gap",
+            "description": "Analyze the simulation setup for a robot and identify gaps that may affect sim-to-real transfer. Evaluates physics parameters, sensor noise, actuator modeling, domain randomization coverage, and environment fidelity. Returns a structured gap report with severity ratings and actionable recommendations.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation, e.g. '/World/Franka'"},
+                    "real_robot_type": {"type": "string", "description": "Real robot model for reference specs (e.g. 'franka', 'ur10'). Auto-detected from USD if omitted."},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_domain_randomization",
+            "description": "Apply domain randomization to scene objects using Omniverse Replicator randomizers. Supports physics properties (friction, mass, damping), visual appearance (color, roughness), lighting, and sensor noise. Essential for robust sim-to-real transfer.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim to randomize"},
+                    "randomization_type": {
+                        "type": "string",
+                        "enum": ["physics", "visual", "lighting", "sensor_noise"],
+                        "description": "Type of randomization to apply",
+                    },
+                    "params": {
+                        "type": "object",
+                        "description": "Randomization parameters. Physics: friction_range, mass_scale_range, joint_damping_range, joint_stiffness_range. Visual: color_range, roughness_range. Lighting: intensity_range, color_temp_range. Sensor noise: noise_type, noise_sigma, depth_noise_sigma.",
+                    },
+                },
+                "required": ["prim_path", "randomization_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_actuator_model",
+            "description": "Configure the actuator model for a robot to better match real-world motor behavior. Real robots have motor dynamics, torque limits, velocity limits, and friction that ideal simulation controllers lack. Choose from ideal, DC motor, position PID, velocity PID, or implicit spring-damper models.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "actuator_type": {
+                        "type": "string",
+                        "enum": ["ideal", "dc_motor", "position_pid", "velocity_pid", "implicit_spring_damper"],
+                        "description": "Actuator model type",
+                    },
+                    "params": {
+                        "type": "object",
+                        "description": "Actuator parameters: stiffness, damping, max_torque, max_velocity, friction",
+                    },
+                },
+                "required": ["robot_path", "actuator_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_transfer_report",
+            "description": "Generate a comprehensive sim-to-real transfer readiness report. Combines gap analysis, current randomization settings, physics config, and actuator models into a single report with a transfer readiness score and prioritized action items.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "output_format": {
+                        "type": "string",
+                        "enum": ["summary", "detailed", "json"],
+                        "description": "Report format. Default: 'summary'",
+                    },
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",
