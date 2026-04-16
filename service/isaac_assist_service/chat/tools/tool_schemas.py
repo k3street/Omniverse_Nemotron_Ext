@@ -942,4 +942,216 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Tier 6 — Lighting (5 tools) ──────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "list_lights",
+            "description": (
+                "Enumerate every USD light prim in the current stage (DistantLight, DomeLight, SphereLight, "
+                "RectLight, DiskLight, CylinderLight). "
+                "Returns JSON with shape {'lights': [{'path': str, 'type': str, 'intensity': float, "
+                "'color': [r,g,b], 'enabled': bool}, ...], 'count': int, 'has_dome': bool}. "
+                "'type' is one of 'DistantLight'|'DomeLight'|'SphereLight'|'RectLight'|'DiskLight'|'CylinderLight'. "
+                "'intensity' is the raw USD inputs:intensity attribute (nits-equivalent, not lux). "
+                "'color' is the linear RGB triple from inputs:color (each channel 0.0–1.0). "
+                "'has_dome' is true if at least one DomeLight exists (useful to decide whether to create_hdri_skydome). "
+                "Use for: auditing lighting before a render ('how many lights does the scene have?'), "
+                "finding the dome-light path to swap an HDRI, checking whether a scene is dark because "
+                "all lights are disabled. "
+                "Limitations: does not report light visibility flags other than inputs:enabled; does not "
+                "distinguish UsdLux vs PxrLight (both appear by their USD type name); empty stages return count=0."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_light_properties",
+            "description": (
+                "Read the full attribute set of a single light prim: type, intensity, color, exposure, "
+                "and type-specific parameters (angle for DistantLight, radius for SphereLight, "
+                "width/height for RectLight, texture for DomeLight). "
+                "Returns JSON with shape {'path': str, 'type': str, 'intensity': float, 'exposure': float, "
+                "'color': [r,g,b], 'enabled': bool, 'angle': float|null, 'radius': float|null, "
+                "'width': float|null, 'height': float|null, 'texture_file': str|null, 'color_temperature': float|null}. "
+                "'angle' is the DistantLight cone angle in degrees (sun ~0.53). "
+                "'texture_file' is the HDRI path for a DomeLight (empty string if unset). "
+                "Use for: inspecting a light before editing it ('what is the current sun intensity?'), "
+                "copying settings from one light to another, debugging a too-dark/too-bright scene. "
+                "Limitations: unknown attributes return null; the prim MUST exist and MUST have UsdLux.LightAPI "
+                "applied — otherwise an error dict is returned. Intensity is in USD's raw 'nits-like' units; "
+                "there is no automatic lux/lumens conversion."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "light_path": {
+                        "type": "string",
+                        "description": (
+                            "Absolute USD path to the light prim, e.g. '/World/SunLight' or '/Environment/DomeLight'. "
+                            "Must be a prim with UsdLux LightAPI applied (DistantLight, DomeLight, SphereLight, "
+                            "RectLight, DiskLight, or CylinderLight)."
+                        ),
+                    },
+                },
+                "required": ["light_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_light_intensity",
+            "description": (
+                "Set the intensity of an existing light prim by writing the USD inputs:intensity attribute. "
+                "Returns an approval-pending code patch (no direct scene mutation). "
+                "UNITS: Omniverse/UsdLux intensity is NOT lux. It is a dimensionless scalar the path-tracer "
+                "multiplies by the light's emissive term — think of it as 'nits × area' for area lights, and "
+                "a perpendicular-irradiance-equivalent for DistantLight. Typical values: "
+                "  • DistantLight (sun) — 3000–10000 for bright daylight "
+                "  • DomeLight (sky HDRI) — 1000–2500 for balanced ambient "
+                "  • SphereLight / RectLight (indoor) — 500–3000 "
+                "  • Practical 'indoor lamp' ≈ 1500; 'overcast outdoor' ≈ 8000. "
+                "Use for: brightening a scene that renders too dark, dimming a studio key light, "
+                "matching real-world lux targets approximately (no exact conversion), flickering via "
+                "repeated calls with different values. "
+                "Limitations: does NOT convert lux/lumens/candela automatically; does not change exposure "
+                "(use set_attribute on inputs:exposure for stops-based control); light must already exist "
+                "(use create_prim of type DistantLight/DomeLight/SphereLight first)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "light_path": {
+                        "type": "string",
+                        "description": (
+                            "Absolute USD path to an existing light prim, e.g. '/World/KeyLight'. "
+                            "Must already exist — this tool only mutates, it does not create."
+                        ),
+                    },
+                    "intensity": {
+                        "type": "number",
+                        "description": (
+                            "New intensity scalar (>= 0). Typical range 0–20000. "
+                            "Examples: 0 = off, 500 = dim indoor lamp, 1500 = normal indoor, "
+                            "3000–5000 = bright indoor / overcast sun, 10000 = strong direct sun. "
+                            "Values above ~50000 tend to burn out the tonemapper without adjusting exposure."
+                        ),
+                    },
+                },
+                "required": ["light_path", "intensity"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_light_color",
+            "description": (
+                "Set the RGB color of an existing light prim by writing the USD inputs:color attribute "
+                "(linear color space, per-channel 0.0–1.0). Returns an approval-pending code patch. "
+                "COLOR SPACE: values are LINEAR RGB, not sRGB — [1,1,1] is pure white, [1,0.5,0.2] is a "
+                "warm tungsten hue, [0.4,0.6,1.0] is a cool sky hue. Intensity is multiplied on top of color, "
+                "so to change ONLY the hue, keep the brightest channel at 1.0 and use set_light_intensity "
+                "for level. For physically based color temperature, prefer setting inputs:colorTemperature "
+                "via set_attribute (Kelvin) and setting color to [1,1,1]. "
+                "Typical presets: "
+                "  • tungsten 2700K ≈ [1.0, 0.56, 0.20] "
+                "  • halogen 3200K ≈ [1.0, 0.70, 0.40] "
+                "  • daylight 5500K ≈ [1.0, 0.94, 0.88] "
+                "  • overcast 7500K ≈ [0.80, 0.87, 1.00] "
+                "  • pure white        [1.0, 1.0, 1.0]. "
+                "Use for: simulating sunrise/sunset (warm red sun), matching showroom lighting "
+                "(5000K neutral), mood lighting (tinted key light), signalling state (red alarm light). "
+                "Limitations: channels are CLAMPED to >= 0 but values > 1 are allowed and act as an "
+                "additional brightness multiplier (non-physical). Light must already exist."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "light_path": {
+                        "type": "string",
+                        "description": (
+                            "Absolute USD path to an existing light prim, e.g. '/World/RedAlarmLight'. "
+                            "Must already exist."
+                        ),
+                    },
+                    "rgb": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": (
+                            "Linear RGB triple [r, g, b], each channel in 0.0–1.0 (values >1 act as a "
+                            "brightness boost, not recommended — use intensity instead). "
+                            "Examples: [1,1,1] white, [1,0.56,0.2] warm tungsten, [0.4,0.6,1] cool sky."
+                        ),
+                    },
+                },
+                "required": ["light_path", "rgb"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_hdri_skydome",
+            "description": (
+                "Create (or replace) a DomeLight prim with an HDRI environment texture — the standard way "
+                "to add photorealistic image-based lighting + background to a scene. Returns an "
+                "approval-pending code patch. Internally: defines a UsdLux.DomeLight, sets inputs:texture:file "
+                "to the HDRI path, configures latlong format, and sets a sensible default intensity (1000). "
+                "The HDRI lights the scene AND acts as the visible background (unless hidden via "
+                "primvars:arnold:camera = 0 or similar). "
+                "Supported formats: .hdr, .exr, .ktx, .dds (Omniverse prefers .exr for HDR range, "
+                ".hdr for legacy HDRIs). "
+                "Use for: one-shot realistic outdoor lighting ('make it look like a sunny day'), "
+                "studio turntable renders (gray studio HDRI), quickly replacing the default dim ambient "
+                "with any HDRI from Poly Haven / HDRI-Haven. "
+                "Limitations: overwrites any existing prim at /Environment/DomeLight (idempotent). "
+                "HDRI intensity must often be tuned afterwards via set_light_intensity (typical range "
+                "500–3000). The HDRI file must be accessible to Kit — local paths work; Nucleus paths "
+                "(omniverse://) work if the asset has been uploaded. Relative paths resolve against the "
+                "current stage. Does NOT change the scene's linear workflow / tonemapper — pair with "
+                "set_render_config if you see washed-out colors."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hdri_path": {
+                        "type": "string",
+                        "description": (
+                            "Absolute or Nucleus URL to the HDRI file. Examples: "
+                            "'/home/user/hdris/kloofendal_48d_partly_cloudy_4k.exr', "
+                            "'omniverse://localhost/NVIDIA/Assets/Skies/Dynamic/cumulus_sky.hdr', "
+                            "'./textures/studio.exr' (relative to stage). "
+                            "Accepts .hdr, .exr, .ktx, .dds. Non-HDR formats (.png/.jpg) are allowed but "
+                            "will not produce true HDR lighting."
+                        ),
+                    },
+                    "dome_path": {
+                        "type": "string",
+                        "description": (
+                            "Optional USD path for the DomeLight prim. Default: '/Environment/DomeLight'. "
+                            "Override only if you already have a convention like '/World/Lighting/Sky'."
+                        ),
+                    },
+                    "intensity": {
+                        "type": "number",
+                        "description": (
+                            "Optional initial intensity (default 1000). Typical 500–3000 for HDRIs. "
+                            "Overexposed HDRIs (sun-in-frame EXRs) may need 200–500; dim interior "
+                            "HDRIs may need 3000–8000."
+                        ),
+                    },
+                },
+                "required": ["hdri_path"],
+            },
+        },
+    },
 ]

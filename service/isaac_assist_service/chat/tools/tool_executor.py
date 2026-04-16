@@ -2232,3 +2232,201 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Tier 6: Lighting ─────────────────────────────────────────────────────────
+
+# UsdLux light types we recognise. Used by both list_lights and
+# get_light_properties for type filtering.
+_LIGHT_TYPE_NAMES = (
+    "DistantLight",
+    "DomeLight",
+    "SphereLight",
+    "RectLight",
+    "DiskLight",
+    "CylinderLight",
+)
+
+
+async def _handle_list_lights(args: Dict) -> Dict:
+    """Enumerate all UsdLux light prims in the current stage via Kit RPC."""
+    type_tuple = repr(_LIGHT_TYPE_NAMES)
+    code = f"""\
+import omni.usd
+import json
+
+stage = omni.usd.get_context().get_stage()
+LIGHT_TYPES = set({type_tuple})
+
+lights = []
+has_dome = False
+if stage is not None:
+    for prim in stage.Traverse():
+        type_name = prim.GetTypeName()
+        if type_name not in LIGHT_TYPES:
+            continue
+        intensity_attr = prim.GetAttribute('inputs:intensity')
+        color_attr = prim.GetAttribute('inputs:color')
+        enabled_attr = prim.GetAttribute('inputs:enabled')
+        intensity = float(intensity_attr.Get()) if intensity_attr and intensity_attr.HasAuthoredValue() else None
+        color_val = color_attr.Get() if color_attr and color_attr.HasAuthoredValue() else None
+        if color_val is not None:
+            color = [float(color_val[0]), float(color_val[1]), float(color_val[2])]
+        else:
+            color = None
+        enabled = bool(enabled_attr.Get()) if enabled_attr and enabled_attr.HasAuthoredValue() else True
+        if type_name == 'DomeLight':
+            has_dome = True
+        lights.append({{
+            'path': str(prim.GetPath()),
+            'type': type_name,
+            'intensity': intensity,
+            'color': color,
+            'enabled': enabled,
+        }})
+
+print(json.dumps({{
+    'lights': lights,
+    'count': len(lights),
+    'has_dome': has_dome,
+}}))
+"""
+    return await kit_tools.queue_exec_patch(code, "List all UsdLux light prims in the stage")
+
+
+async def _handle_get_light_properties(args: Dict) -> Dict:
+    """Read the full attribute set of a single light prim."""
+    light_path = args["light_path"]
+    code = f"""\
+import omni.usd
+import json
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath('{light_path}')
+
+if not prim or not prim.IsValid():
+    print(json.dumps({{'error': 'prim not found', 'path': '{light_path}'}}))
+else:
+    type_name = prim.GetTypeName()
+
+    def _get(attr_name):
+        a = prim.GetAttribute(attr_name)
+        if a and a.HasAuthoredValue():
+            return a.Get()
+        if a:
+            return a.Get()
+        return None
+
+    intensity = _get('inputs:intensity')
+    exposure = _get('inputs:exposure')
+    color = _get('inputs:color')
+    enabled = _get('inputs:enabled')
+    color_temp = _get('inputs:colorTemperature')
+    angle = _get('inputs:angle') if type_name == 'DistantLight' else None
+    radius = _get('inputs:radius') if type_name in ('SphereLight', 'DiskLight') else None
+    width = _get('inputs:width') if type_name == 'RectLight' else None
+    height = _get('inputs:height') if type_name == 'RectLight' else None
+    texture_file = None
+    if type_name == 'DomeLight':
+        tex = _get('inputs:texture:file')
+        if tex is not None:
+            texture_file = str(tex)
+
+    out = {{
+        'path': '{light_path}',
+        'type': type_name,
+        'intensity': float(intensity) if intensity is not None else None,
+        'exposure': float(exposure) if exposure is not None else None,
+        'color': [float(color[0]), float(color[1]), float(color[2])] if color is not None else None,
+        'enabled': bool(enabled) if enabled is not None else True,
+        'color_temperature': float(color_temp) if color_temp is not None else None,
+        'angle': float(angle) if angle is not None else None,
+        'radius': float(radius) if radius is not None else None,
+        'width': float(width) if width is not None else None,
+        'height': float(height) if height is not None else None,
+        'texture_file': texture_file,
+    }}
+    print(json.dumps(out))
+"""
+    return await kit_tools.queue_exec_patch(code, f"Read light properties for {light_path}")
+
+
+def _gen_set_light_intensity(args: Dict) -> str:
+    light_path = args["light_path"]
+    intensity = float(args["intensity"])
+    if intensity < 0:
+        intensity = 0.0
+    return (
+        "import omni.usd\n"
+        "from pxr import Sdf\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        f"prim = stage.GetPrimAtPath('{light_path}')\n"
+        "if not prim or not prim.IsValid():\n"
+        f"    raise RuntimeError(\"Light prim not found: {light_path}\")\n"
+        "attr = prim.GetAttribute('inputs:intensity')\n"
+        "if not attr:\n"
+        "    attr = prim.CreateAttribute('inputs:intensity', Sdf.ValueTypeNames.Float)\n"
+        f"attr.Set({intensity})\n"
+        f"print('Set intensity={intensity} on {light_path}')"
+    )
+
+
+def _gen_set_light_color(args: Dict) -> str:
+    light_path = args["light_path"]
+    rgb = args["rgb"]
+    if not isinstance(rgb, (list, tuple)) or len(rgb) != 3:
+        raise ValueError("rgb must be a 3-element list [r, g, b]")
+    r, g, b = (max(0.0, float(rgb[0])), max(0.0, float(rgb[1])), max(0.0, float(rgb[2])))
+    return (
+        "import omni.usd\n"
+        "from pxr import Sdf, Gf\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        f"prim = stage.GetPrimAtPath('{light_path}')\n"
+        "if not prim or not prim.IsValid():\n"
+        f"    raise RuntimeError(\"Light prim not found: {light_path}\")\n"
+        "attr = prim.GetAttribute('inputs:color')\n"
+        "if not attr:\n"
+        "    attr = prim.CreateAttribute('inputs:color', Sdf.ValueTypeNames.Color3f)\n"
+        f"attr.Set(Gf.Vec3f({r}, {g}, {b}))\n"
+        f"print('Set color=({r}, {g}, {b}) on {light_path}')"
+    )
+
+
+def _gen_create_hdri_skydome(args: Dict) -> str:
+    hdri_path = args["hdri_path"]
+    dome_path = args.get("dome_path", "/Environment/DomeLight")
+    intensity = float(args.get("intensity", 1000.0))
+    if intensity < 0:
+        intensity = 0.0
+    # Escape single quotes in the HDRI path so the literal stays valid
+    safe_hdri = hdri_path.replace("'", "\\'")
+    return (
+        "import omni.usd\n"
+        "from pxr import UsdLux, Sdf\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        f"dome_path = '{dome_path}'\n"
+        "# Idempotent: re-define replaces existing prim of the same type, leaves\n"
+        "# parent Xforms untouched.\n"
+        "dome = UsdLux.DomeLight.Define(stage, dome_path)\n"
+        "prim = dome.GetPrim()\n"
+        "tex_attr = prim.GetAttribute('inputs:texture:file')\n"
+        "if not tex_attr:\n"
+        "    tex_attr = prim.CreateAttribute('inputs:texture:file', Sdf.ValueTypeNames.Asset)\n"
+        f"tex_attr.Set('{safe_hdri}')\n"
+        "fmt_attr = prim.GetAttribute('inputs:texture:format')\n"
+        "if not fmt_attr:\n"
+        "    fmt_attr = prim.CreateAttribute('inputs:texture:format', Sdf.ValueTypeNames.Token)\n"
+        "fmt_attr.Set('latlong')\n"
+        "intensity_attr = prim.GetAttribute('inputs:intensity')\n"
+        "if not intensity_attr:\n"
+        "    intensity_attr = prim.CreateAttribute('inputs:intensity', Sdf.ValueTypeNames.Float)\n"
+        f"intensity_attr.Set({intensity})\n"
+        f"print('Created HDRI skydome at ' + dome_path + ' with texture {safe_hdri}')"
+    )
+
+
+CODE_GEN_HANDLERS["set_light_intensity"] = _gen_set_light_intensity
+CODE_GEN_HANDLERS["set_light_color"] = _gen_set_light_color
+CODE_GEN_HANDLERS["create_hdri_skydome"] = _gen_create_hdri_skydome
+DATA_HANDLERS["list_lights"] = _handle_list_lights
+DATA_HANDLERS["get_light_properties"] = _handle_get_light_properties
