@@ -180,22 +180,31 @@ def save_pattern_from_success(
 ) -> bool:
     """
     Save a successfully executed code patch as a reusable code pattern.
-    Deduplicates by checking if a pattern with >=70% keyword overlap exists.
+    Deduplicates by checking keyword overlap and title similarity.
     Invalidates the in-memory cache so the new pattern is used immediately.
     """
     keywords = _extract_keywords(user_message, code)
     if len(keywords) < 2:
         return False  # too generic to be useful
 
-    # Check for near-duplicate
+    # Check for near-duplicate (keyword overlap OR similar title)
     existing = _load_patterns(version)
     new_kw_set = set(keywords)
+    title_words = set(user_message.lower().split())
     for p in existing:
         existing_kw_set = set(k.lower() for k in p.get("keywords", []))
+        # Keyword overlap check
         if existing_kw_set and new_kw_set:
             overlap = len(new_kw_set & existing_kw_set)
-            if overlap / max(len(new_kw_set), len(existing_kw_set)) > 0.7:
-                logger.info(f"[patterns] Skipping near-duplicate: {user_message[:60]}")
+            if overlap / max(len(new_kw_set), len(existing_kw_set)) > 0.5:
+                logger.info(f"[patterns] Skipping near-duplicate (keywords): {user_message[:60]}")
+                return False
+        # Title similarity check — catch repeated prompts with minor typo variations
+        existing_title_words = set(p.get("title", "").lower().split())
+        if title_words and existing_title_words:
+            title_overlap = len(title_words & existing_title_words)
+            if title_overlap / max(len(title_words), len(existing_title_words)) > 0.6:
+                logger.info(f"[patterns] Skipping near-duplicate (title): {user_message[:60]}")
                 return False
 
     title = user_message[:80].strip()

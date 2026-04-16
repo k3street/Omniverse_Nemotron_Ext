@@ -687,10 +687,15 @@ def _gen_import_robot(args: Dict) -> str:
         "a1": "a1.usd",
         "go1": "go1.usd",
         "go2": "go2.usd",
-        "h1": "h1.usd",
+        "g1": "g1.usd",
+        "unitree_g1": "g1.usd",
+        "g1_23dof": "g1_23dof_robot.usd",
+        "h1": "h1_hand_left.usd",
+        "unitree_h1": "h1_hand_left.usd",
         "allegro": "allegro_hand.usd",
         "ridgeback_franka": "ridgeback_franka.usd",
         "humanoid": "humanoid.usd",
+        "humanoid_28": "humanoid_28.usd",
     }
 
     if fmt == "urdf":
@@ -1409,10 +1414,15 @@ _CATALOG_ROBOTS = {
     "a1": "a1.usd",
     "go1": "go1.usd",
     "go2": "go2.usd",
-    "h1": "h1.usd",
+    "g1": "g1.usd",
+    "unitree_g1": "g1.usd",
+    "g1_23dof": "g1_23dof_robot.usd",
+    "h1": "h1_hand_left.usd",
+    "unitree_h1": "h1_hand_left.usd",
     "allegro_hand": "allegro_hand.usd",
     "ridgeback_franka": "ridgeback_franka.usd",
     "humanoid": "humanoid.usd",
+    "humanoid_28": "humanoid_28.usd",
 }
 
 
