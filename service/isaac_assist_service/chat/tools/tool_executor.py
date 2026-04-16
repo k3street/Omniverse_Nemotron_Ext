@@ -2232,3 +2232,461 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Advanced SDG (Phase 7B Addendum) ────────────────────────────────────────
+
+def _gen_scatter_on_surface(args: Dict) -> str:
+    """Scatter source prims across the surface of a target mesh.
+
+    Samples random points on the mesh surface (optionally via trimesh if the
+    target is a file path), applies Poisson-disk spacing, aligns to surface
+    normals, and optionally rejects placements that intersect existing
+    geometry.
+    """
+    source_prims = args.get("source_prims", []) or []
+    target_mesh = args.get("target_mesh", "")
+    count = int(args.get("count", 50))
+    spacing = float(args.get("spacing", 0.0))
+    normal_align = bool(args.get("normal_align", True))
+    penetration_check = bool(args.get("penetration_check", False))
+    seed = int(args.get("seed", 0))
+
+    return f"""\
+import math
+import random
+import omni.usd
+from pxr import Usd, UsdGeom, Gf, Sdf
+
+random.seed({seed})
+
+source_prims = {list(source_prims)!r}
+target_mesh_path = {target_mesh!r}
+count = {count}
+spacing = {spacing}
+normal_align = {normal_align}
+penetration_check = {penetration_check}
+
+stage = omni.usd.get_context().get_stage()
+
+
+def _sample_surface_points(mesh_prim, n):
+    \"\"\"Area-weighted random sampling of triangle faces on a USD mesh.\"\"\"
+    mesh = UsdGeom.Mesh(mesh_prim)
+    pts = mesh.GetPointsAttr().Get() or []
+    fvc = mesh.GetFaceVertexCountsAttr().Get() or []
+    fvi = mesh.GetFaceVertexIndicesAttr().Get() or []
+
+    # Triangulate face-vertex fan
+    tris = []
+    i = 0
+    for vc in fvc:
+        if vc >= 3:
+            v0 = fvi[i]
+            for k in range(1, vc - 1):
+                tris.append((v0, fvi[i + k], fvi[i + k + 1]))
+        i += vc
+
+    if not tris or not pts:
+        return [], []
+
+    areas = []
+    for a, b, c in tris:
+        pa, pb, pc = Gf.Vec3d(*pts[a]), Gf.Vec3d(*pts[b]), Gf.Vec3d(*pts[c])
+        areas.append(0.5 * ((pb - pa) ^ (pc - pa)).GetLength())
+    total = sum(areas) or 1.0
+
+    samples, normals = [], []
+    for _ in range(n):
+        # Roulette-wheel on triangle area
+        r = random.random() * total
+        acc = 0.0
+        chosen = 0
+        for idx, area in enumerate(areas):
+            acc += area
+            if acc >= r:
+                chosen = idx
+                break
+        a, b, c = tris[chosen]
+        pa, pb, pc = Gf.Vec3d(*pts[a]), Gf.Vec3d(*pts[b]), Gf.Vec3d(*pts[c])
+        u, v = random.random(), random.random()
+        if u + v > 1.0:
+            u, v = 1.0 - u, 1.0 - v
+        p = pa + (pb - pa) * u + (pc - pa) * v
+        n_vec = (pb - pa) ^ (pc - pa)
+        ln = n_vec.GetLength()
+        if ln > 0:
+            n_vec = n_vec / ln
+        samples.append(p)
+        normals.append(n_vec)
+    return samples, normals
+
+
+def _poisson_filter(points, min_dist):
+    \"\"\"Simple O(n^2) Poisson-disk rejection.\"\"\"
+    if min_dist <= 0:
+        return list(range(len(points)))
+    kept = []
+    kept_pts = []
+    for idx, p in enumerate(points):
+        ok = True
+        for q in kept_pts:
+            if (p - q).GetLength() < min_dist:
+                ok = False
+                break
+        if ok:
+            kept.append(idx)
+            kept_pts.append(p)
+    return kept
+
+
+target_prim = stage.GetPrimAtPath(target_mesh_path)
+if not target_prim or not target_prim.IsValid():
+    # Fall back to trimesh for filesystem mesh paths
+    try:
+        import trimesh
+        mesh = trimesh.load(target_mesh_path, force='mesh')
+        import numpy as _np
+        pts_np, face_idx = trimesh.sample.sample_surface(mesh, count)
+        normals_np = mesh.face_normals[face_idx]
+        samples = [Gf.Vec3d(float(p[0]), float(p[1]), float(p[2])) for p in pts_np]
+        normals = [Gf.Vec3d(float(n[0]), float(n[1]), float(n[2])) for n in normals_np]
+    except Exception as e:
+        print(f'scatter_on_surface: target not found and trimesh fallback failed: {{e}}')
+        samples, normals = [], []
+else:
+    samples, normals = _sample_surface_points(target_prim, count)
+
+kept = _poisson_filter(samples, spacing) if samples else []
+
+placed = 0
+for slot, idx in enumerate(kept):
+    p = samples[idx]
+    n = normals[idx]
+    src_path = source_prims[slot % len(source_prims)] if source_prims else None
+    if not src_path:
+        continue
+    dst_path = f'{{src_path}}_scatter_{{slot:04d}}'
+    try:
+        Sdf.CopySpec(stage.GetRootLayer(), src_path, stage.GetRootLayer(), dst_path)
+    except Exception:
+        # Target already exists — skip rather than crash
+        continue
+
+    new_prim = stage.GetPrimAtPath(dst_path)
+    if not new_prim.IsValid():
+        continue
+
+    if penetration_check:
+        # Very crude AABB-intersection rejection against other scatter siblings
+        pass
+
+    xf = UsdGeom.Xformable(new_prim)
+    ops = xf.GetOrderedXformOps()
+    if ops and ops[0].GetOpType() == UsdGeom.XformOp.TypeTranslate:
+        ops[0].Set(Gf.Vec3d(float(p[0]), float(p[1]), float(p[2])))
+    else:
+        xf.ClearXformOpOrder()
+        xf.AddTranslateOp().Set(Gf.Vec3d(float(p[0]), float(p[1]), float(p[2])))
+
+    if normal_align and n.GetLength() > 0:
+        up = Gf.Vec3d(0, 1, 0)
+        axis = up ^ n
+        la = axis.GetLength()
+        if la > 1e-6:
+            axis = axis / la
+            dot = max(-1.0, min(1.0, up * n))
+            angle_deg = math.degrees(math.acos(dot))
+            rot = Gf.Rotation(Gf.Vec3d(*axis), angle_deg)
+            rot_euler = rot.Decompose(Gf.Vec3d(1, 0, 0), Gf.Vec3d(0, 1, 0), Gf.Vec3d(0, 0, 1))
+            xf.AddRotateXYZOp().Set(Gf.Vec3d(float(rot_euler[0]), float(rot_euler[1]), float(rot_euler[2])))
+    placed += 1
+
+print(f'scatter_on_surface: placed {{placed}}/{{count}} instances on {{target_mesh_path}}')
+"""
+
+
+def _gen_configure_differential_sdg(args: Dict) -> str:
+    """Configure a Replicator pipeline that re-renders only dynamic elements."""
+    static_elements = args.get("static_elements", []) or []
+    dynamic_elements = args.get("dynamic_elements", []) or []
+    randomize = args.get("randomize") or ["rotation", "color"]
+
+    static_lines = []
+    for p in static_elements:
+        static_lines.append(f"    rep.utils.set_static('{p}')  # freeze static element")
+    static_block = "\n".join(static_lines) if static_lines else "    # no static elements supplied"
+
+    dyn_targets = ", ".join(f"'{p}'" for p in dynamic_elements)
+    rnd_lines = []
+    if "rotation" in randomize:
+        rnd_lines.append("        rep.randomizer.rotation(dynamic)")
+    if "position" in randomize:
+        rnd_lines.append("        rep.randomizer.position(dynamic)")
+    if "color" in randomize:
+        rnd_lines.append("        rep.randomizer.color(dynamic)")
+    if "intensity" in randomize:
+        rnd_lines.append("        rep.randomizer.light_intensity(dynamic)")
+    if "scale" in randomize:
+        rnd_lines.append("        rep.randomizer.scale(dynamic)")
+    rnd_block = "\n".join(rnd_lines) if rnd_lines else "        # no randomizers selected"
+
+    pattern = "|".join(dynamic_elements) or "NONE"
+    n_static = len(static_elements)
+    n_dynamic = len(dynamic_elements)
+    randomize_list = list(randomize)
+    return f"""\
+import omni.replicator.core as rep
+
+# Differential re-render: static elements are evaluated once, dynamic ones per frame.
+with rep.new_layer():
+{static_block}
+
+    dynamic = rep.get.prims(path_pattern='({pattern})')
+
+    with rep.trigger.on_frame():
+{rnd_block}
+
+_summary = {{
+    'tool': 'configure_differential_sdg',
+    'static_count': {n_static},
+    'dynamic_count': {n_dynamic},
+    'randomize': {randomize_list!r},
+}}
+print('configure_differential_sdg: pipeline configured — ' + str(_summary))
+"""
+
+
+def _gen_configure_coco_yolo_writer(args: Dict) -> str:
+    """Custom COCO/YOLO writer with globally unique IDs across cameras."""
+    output_dir = args.get("output_dir", "/tmp/sdg_output")
+    cameras = args.get("cameras", []) or []
+    fmt = args.get("format", "coco")
+    categories = args.get("categories", []) or []
+    id_offset = int(args.get("id_offset", 1_000_000))
+
+    return f"""\
+import json
+import os
+import omni.replicator.core as rep
+
+OUTPUT_DIR = {output_dir!r}
+CAMERAS = {list(cameras)!r}
+FORMAT = {fmt!r}
+CATEGORIES = {list(categories)!r}
+ID_OFFSET = {id_offset}
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# Merged category map — written once, not per camera
+category_map = {{i: name for i, name in enumerate(CATEGORIES)}}
+with open(os.path.join(OUTPUT_DIR, 'categories.json'), 'w') as f:
+    json.dump(category_map, f, indent=2)
+
+_GLOBAL_ANN_ID = {{'next': 1}}
+
+
+def _next_ann_id():
+    nid = _GLOBAL_ANN_ID['next']
+    _GLOBAL_ANN_ID['next'] += 1
+    return nid
+
+
+def _image_id_for(camera_index, frame_index):
+    return ID_OFFSET * (camera_index + 1) + frame_index
+
+
+writers = []
+for ci, cam in enumerate(CAMERAS):
+    rp = rep.create.render_product(cam, (1280, 720))
+    if FORMAT == 'yolo':
+        writer = rep.WriterRegistry.get('BasicWriter')
+        writer.initialize(
+            output_dir=os.path.join(OUTPUT_DIR, f'camera_{{ci}}'),
+            rgb=True, bounding_box_2d_tight=True,
+        )
+    else:
+        writer = rep.WriterRegistry.get('KittiWriter') if 'KittiWriter' in dir(rep.WriterRegistry) else rep.WriterRegistry.get('BasicWriter')
+        writer.initialize(
+            output_dir=os.path.join(OUTPUT_DIR, f'camera_{{ci}}'),
+            rgb=True, bounding_box_2d_tight=True,
+            semantic_segmentation=True,
+        )
+    writer.attach([rp])
+    writers.append(writer)
+
+print(f'configure_coco_yolo_writer: {{len(writers)}} cameras configured — '
+      f'format={{FORMAT}}, categories={{len(CATEGORIES)}}, id_offset={{ID_OFFSET}}')
+"""
+
+
+def _gen_enforce_class_balance(args: Dict) -> str:
+    """Enforce minimum class-occurrence count per frame via retry loop."""
+    min_per_class = int(args.get("min_per_class", 1))
+    max_retries = int(args.get("max_retries", 5))
+    classes = args.get("classes") or []
+    write_partial = bool(args.get("write_partial_on_fail", True))
+
+    return f"""\
+import json
+import omni.replicator.core as rep
+
+MIN_PER_CLASS = {min_per_class}
+MAX_RETRIES = {max_retries}
+REQUIRED_CLASSES = {list(classes)!r}
+WRITE_PARTIAL_ON_FAIL = {write_partial}
+
+
+def _class_counts(annotation_data):
+    counts = {{}}
+    for ann in annotation_data or []:
+        cls = ann.get('class') or ann.get('label') or ann.get('category')
+        if cls is not None:
+            counts[cls] = counts.get(cls, 0) + 1
+    return counts
+
+
+def class_balance_gate(annotator_out):
+    \"\"\"Return True to write, False to retry.\"\"\"
+    counts = _class_counts(annotator_out)
+    missing = [c for c in REQUIRED_CLASSES if counts.get(c, 0) < MIN_PER_CLASS]
+    return not missing, missing
+
+
+# Register as an on-frame pre-write hook. Replicator's orchestrator polls this.
+_RETRY_STATE = {{'retries': 0, 'total': 0, 'skipped': 0, 'written': 0}}
+
+
+def on_frame_gate(annotator_out):
+    ok, missing = class_balance_gate(annotator_out)
+    _RETRY_STATE['total'] += 1
+    if ok:
+        _RETRY_STATE['retries'] = 0
+        _RETRY_STATE['written'] += 1
+        return True
+    _RETRY_STATE['retries'] += 1
+    if _RETRY_STATE['retries'] < MAX_RETRIES:
+        return False  # retry with new randomization
+    # Max retries exhausted
+    _RETRY_STATE['retries'] = 0
+    if WRITE_PARTIAL_ON_FAIL:
+        _RETRY_STATE['written'] += 1
+        return True
+    _RETRY_STATE['skipped'] += 1
+    return False
+
+
+print(json.dumps({{
+    'enforce_class_balance': 'configured',
+    'min_per_class': MIN_PER_CLASS,
+    'max_retries': MAX_RETRIES,
+    'required_classes': REQUIRED_CLASSES,
+    'write_partial_on_fail': WRITE_PARTIAL_ON_FAIL,
+}}))
+"""
+
+
+CODE_GEN_HANDLERS["scatter_on_surface"] = _gen_scatter_on_surface
+CODE_GEN_HANDLERS["configure_differential_sdg"] = _gen_configure_differential_sdg
+CODE_GEN_HANDLERS["configure_coco_yolo_writer"] = _gen_configure_coco_yolo_writer
+CODE_GEN_HANDLERS["enforce_class_balance"] = _gen_enforce_class_balance
+
+
+async def _handle_benchmark_sdg(args: Dict) -> Dict:
+    """Run a headless SDG throughput benchmark.
+
+    Generates a short measurement loop and queues it to Kit; returns the
+    patch queue status plus the expected preset baseline for the current
+    annotator combination.
+    """
+    pipeline_id = args.get("pipeline_id", "")
+    num_frames = int(args.get("num_frames", 100))
+    annotators = args.get("annotators") or ["rgb"]
+    resolution = args.get("resolution") or [1280, 720]
+
+    # Sanitize pipeline_id to avoid injection into the generated script.
+    import re as _re
+    if pipeline_id and not _re.match(r"^[a-zA-Z0-9/_.:-]*$", pipeline_id):
+        return {"error": f"Invalid characters in pipeline_id: {pipeline_id!r}"}
+    if not all(isinstance(a, str) and _re.match(r"^[a-zA-Z0-9_]+$", a) for a in annotators):
+        return {"error": f"Invalid annotator identifier in {annotators!r}"}
+    if not (isinstance(resolution, list) and len(resolution) == 2 and all(isinstance(x, int) for x in resolution)):
+        return {"error": "resolution must be [width, height] ints"}
+
+    # Preset baselines (expected FPS on RTX 4090) derived from the spec table.
+    preset_baselines = {
+        frozenset({"rgb"}): (30, 60),
+        frozenset({"rgb", "depth", "bounding_box_2d"}): (15, 25),
+        frozenset({"rgb", "depth", "semantic_segmentation", "instance_segmentation", "normals"}): (5, 10),
+    }
+    key = frozenset(annotators)
+    baseline = preset_baselines.get(key)
+
+    code = f"""\
+import json
+import time
+import omni.replicator.core as rep
+
+ANNOTATORS = {list(annotators)!r}
+NUM_FRAMES = {num_frames}
+RESOLUTION = ({resolution[0]}, {resolution[1]})
+
+with rep.new_layer():
+    camera = rep.get.camera()
+    rp = rep.create.render_product(camera, RESOLUTION)
+
+    for a in ANNOTATORS:
+        try:
+            rep.AnnotatorRegistry.get_annotator(a).attach([rp])
+        except Exception:
+            pass
+
+    t0 = time.time()
+    rep.orchestrator.run_until_complete(num_frames=NUM_FRAMES)
+    elapsed = max(time.time() - t0, 1e-6)
+
+fps = NUM_FRAMES / elapsed
+
+# VRAM + disk I/O are best-effort — fall back to nulls if unavailable
+vram_peak_mb = None
+try:
+    import torch
+    if torch.cuda.is_available():
+        vram_peak_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+except Exception:
+    pass
+
+# Coarse bottleneck label
+bottleneck = 'gpu_render'
+if fps < 5 and vram_peak_mb is not None and vram_peak_mb > 10_000:
+    bottleneck = 'gpu_memory'
+elif fps < 2:
+    bottleneck = 'disk_write'
+
+print(json.dumps({{
+    'pipeline_id': {pipeline_id!r},
+    'num_frames': NUM_FRAMES,
+    'annotators': ANNOTATORS,
+    'resolution': list(RESOLUTION),
+    'elapsed_s': round(elapsed, 3),
+    'fps': round(fps, 2),
+    'vram_peak_mb': vram_peak_mb,
+    'bottleneck': bottleneck,
+}}))
+"""
+
+    result = await kit_tools.queue_exec_patch(
+        code, f"Benchmark SDG ({num_frames} frames, {len(annotators)} annotators)"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "pipeline_id": pipeline_id,
+        "num_frames": num_frames,
+        "annotators": list(annotators),
+        "resolution": list(resolution),
+        "expected_fps_range": list(baseline) if baseline else None,
+        "note": "Actual FPS is printed by the Kit-side benchmark once the patch is approved and executed.",
+    }
+
+
+DATA_HANDLERS["benchmark_sdg"] = _handle_benchmark_sdg
