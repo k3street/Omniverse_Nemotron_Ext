@@ -942,4 +942,24 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+    # ─── Phase 5 Addendum — Pedagogy & Uncertainty ─────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "create_broken_scene",
+            "description": "Create a scene with a specific, diagnosable fault for students to find and fix. Educational tool for professors and self-study.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fault_type": {
+                        "type": "string",
+                        "enum": ["missing_collision", "zero_mass", "wrong_scale", "inverted_joint", "no_physics_scene", "inf_joint_limits"],
+                        "description": "Type of intentional fault to introduce"
+                    },
+                    "scene_name": {"type": "string", "description": "Name for the broken scene (default 'BrokenScene')"},
+                },
+                "required": ["fault_type"],
+            },
+        },
+    },
 ]
