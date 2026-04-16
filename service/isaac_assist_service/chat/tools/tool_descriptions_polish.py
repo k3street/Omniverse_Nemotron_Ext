@@ -487,4 +487,37 @@ def apply_polish(tools_list):
         if name in POLISH:
             tool["function"]["description"] = POLISH[name]
             count += 1
+
+    # Apply batched polish files (B1-B5) — covers remaining 235 tools
+    for batch_module in [
+        "tool_descriptions_polish_b1",
+        "tool_descriptions_polish_b2",
+        "tool_descriptions_polish_b3",
+        "tool_descriptions_polish_b4",
+        "tool_descriptions_polish_b5",
+    ]:
+        try:
+            mod = __import__(
+                f"service.isaac_assist_service.chat.tools.{batch_module}",
+                fromlist=[batch_module],
+            )
+            batch_dict = getattr(mod, batch_module.upper().replace("TOOL_DESCRIPTIONS_", "").replace("POLISH_", "POLISH_").upper())
+        except (ImportError, AttributeError):
+            # Try simpler name
+            try:
+                mod = __import__(
+                    f"service.isaac_assist_service.chat.tools.{batch_module}",
+                    fromlist=[f"POLISH_{batch_module[-2:].upper()}"],
+                )
+                batch_dict = getattr(mod, f"POLISH_{batch_module[-2:].upper()}")
+            except (ImportError, AttributeError):
+                continue
+        for tool in tools_list:
+            try:
+                name = tool["function"]["name"]
+            except (KeyError, TypeError):
+                continue
+            if name in batch_dict:
+                tool["function"]["description"] = batch_dict[name]
+                count += 1
     return count
