@@ -29,6 +29,1448 @@ _DEFORMABLE_PRESETS_PATH = _WORKSPACE / "knowledge" / "deformable_presets.json"
 _sensor_specs: Optional[List[Dict]] = None
 _deformable_presets: Optional[Dict] = None
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Recovered state for bundled PR handlers (local QA branch only)
+# Module-level dicts, regexes, classes, and imports that the extraction
+# script missed. Restores 182 broken name references so handlers can run.
+# ═══════════════════════════════════════════════════════════════════════════
+import re
+import re as _re
+import time
+import time as _time
+import threading as _threading
+import uuid as _uuid
+import uuid as _wf_uuid
+from datetime import datetime as _wf_dt
+from typing import Tuple
+import asyncio as _asyncio
+from dataclasses import dataclass, field
+
+# Lazy import — TurnRecorder has its own deps, only pull it in if available
+try:
+    from ...finetune.turn_recorder import TurnRecorder
+except Exception:
+    class TurnRecorder:
+        def __init__(self, *a, **k): pass
+        def __getattr__(self, name): return lambda *a, **k: None
+
+# cleanly, but the Python-side wrapper keeps ordering deterministic for tests.
+
+import asyncio as _asyncio
+from dataclasses import dataclass, field
+from typing import Tuple
+
+
+@dataclass(order=True)
+class _LockedPatch:
+    sort_key: Tuple[int, int] = field(compare=True)
+    code: str = field(compare=False, default="")
+    description: str = field(compare=False, default="")
+    priority: int = field(compare=False, default=0)
+
+
+class _StageWriteLockQueue:
+    """Minimal serialized queue — mirrors the spec's StageWriteLock pattern."""
+
+    def __init__(self) -> None:
+        self._lock = _asyncio.Lock()
+        self._pending: List[_LockedPatch] = []
+        self._counter = 0
+
+    async def submit(self, code: str, description: str, priority: int) -> Dict[str, Any]:
+        self._counter += 1
+        # Higher priority first; stable by insertion order for ties.
+        patch = _LockedPatch(
+            sort_key=(-int(priority), self._counter),
+            code=code,
+            description=description,
+            priority=int(priority),
+        )
+        async with self._lock:
+            self._pending.append(patch)
+            self._pending.sort()
+            queue_depth = len(self._pending)
+        result = await kit_tools.queue_exec_patch(code, description)
+        async with self._lock:
+            # Pop the matching entry so the queue drains in order.
+            for idx, p in enumerate(self._pending):
+                if p is patch:
+                    self._pending.pop(idx)
+                    break
+        return {
+            "queued": bool(result.get("queued", False)) if isinstance(result, dict) else False,
+            "priority": int(priority),
+            "queue_depth": queue_depth,
+        }
+
+    def pending(self) -> int:
+        return len(self._pending)
+
+# ── Recovered module-level state from PR branches ───────────────────────
+
+# from: feat/7D-arena
+_ARENA_SCENE_MAP = {
+    "tabletop_pick_and_place": "isaaclab_tasks.envs.arena.scenes.tabletop",
+    "kitchen": "isaaclab_tasks.envs.arena.scenes.kitchen",
+    "galileo": "isaaclab_tasks.envs.arena.scenes.galileo",
+    "custom": None,
+}
+
+# from: feat/addendum-community-remote-v2
+_ASYNC_TASKS: Dict[str, Dict[str, Any]] = {}
+
+# from: feat/addendum-community-remote-v2
+_ASYNC_TASKS_LOCK = _threading.Lock()
+
+# from: feat/addendum-phase5-pedagogy-uncertainty-v2
+_BROKEN_SCENE_FAULTS = {
+    "missing_collision": {
+        "what_breaks": "Ground plane has no CollisionAPI — robot falls through floor",
+        "learning_goal": "Physics basics — CollisionAPI must be applied for objects to interact",
+    },
+    "zero_mass": {
+        "what_breaks": "Robot link has mass=0 — articulation behaves erratically",
+        "learning_goal": "Inertia understanding — every dynamic body needs positive mass",
+    },
+    "wrong_scale": {
+        "what_breaks": "Object imported at 100x scale (cm vs m mismatch)",
+        "learning_goal": "USD units — metersPerUnit must match between asset and stage",
+    },
+    "inverted_joint": {
+        "what_breaks": "One joint axis flipped — robot moves opposite direction",
+        "learning_goal": "URDF import debugging — axis conventions can flip",
+    },
+    "no_physics_scene": {
+        "what_breaks": "Missing PhysicsScene prim — no physics simulation runs",
+        "learning_goal": "Scene setup — every physics-enabled stage needs a PhysicsScene",
+    },
+    "inf_joint_limits": {
+        "what_breaks": "Joint limits set to ±inf — arm can move through itself or environment",
+        "learning_goal": "URDF best practices — always set finite joint limits",
+    },
+}
+
+# from: feat/7H-cloud-deployment
+_cloud_jobs: Dict[str, Dict] = {}
+
+# from: feat/7H-cloud-deployment
+_CLOUD_PRICING = {
+    ("aws", "g5.2xlarge"): {"price_per_hour": 1.21, "gpu": "A10G"},
+    ("aws", "g6e.2xlarge"): {"price_per_hour": 2.50, "gpu": "L40S"},
+    ("gcp", "g2-standard-8"): {"price_per_hour": 1.35, "gpu": "L4"},
+    ("azure", "NCasT4_v3"): {"price_per_hour": 1.10, "gpu": "T4"},
+}
+
+# from: feat/7H-cloud-deployment
+_CLOUD_SCRIPT_ALLOWLIST = {"training", "sdg", "evaluation", "headless_sim"}
+
+# from: feat/new-physics-calibration
+_DEFAULT_CALIBRATE_PARAMS = ["friction", "damping", "masses"]
+
+# from: feat/new-onboarding
+_DEFAULT_SUGGESTIONS = [
+    "Run the simulation to see the result",
+    "Capture a viewport screenshot",
+    "Check for any physics warnings",
+]
+
+# from: feat/addendum-enterprise-scale
+_DELTA_ROOT = _WORKSPACE / "snapshots" / "deltas"
+
+# from: feat/7C-xr-teleoperation
+_DEVICE_AXIS_DEFAULTS = {
+    "quest_3": ["left_x", "left_y", "right_x", "right_y", "trigger_left", "trigger_right", "grip_left", "grip_right"],
+    "vision_pro": ["left_x", "left_y", "right_x", "right_y", "pinch_left", "pinch_right"],
+    "spacemouse": ["tx", "ty", "tz", "rx", "ry", "rz"],
+    "keyboard": ["w", "a", "s", "d", "q", "e"],
+}
+
+# from: feat/addendum-phase7A-rl-debugging
+_DOMINANT_TERM_THRESHOLD = 100.0  # one term's |weight| > 100x another → dominant
+
+# from: feat/addendum-dr-advanced
+_DR_PRESETS: Dict[str, Dict[str, Any]] = {
+    "indoor_industrial": {
+        "description": "Indoor industrial workspace — fluorescent overhead, concrete floor.",
+        "lighting_lux": [300, 2000],
+        "floor_texture": ["concrete_smooth", "concrete_rough", "epoxy_grey"],
+        "light_temperature_k": [3500, 5500],
+        "ambient_color": [[0.8, 0.85, 0.9], [1.0, 1.0, 1.0]],
+    },
+    "outdoor_daylight": {
+        "description": "Outdoor scene — sun + sky, varying cloud cover.",
+        "sun_elevation_deg": [15, 75],
+        "sun_azimuth_deg": [0, 360],
+        "cloud_cover": [0.0, 0.8],
+        "ground_material": ["asphalt", "grass", "gravel", "dirt"],
+    },
+    "warehouse": {
+        "description": "Warehouse — shelves, mixed lighting, cardboard.",
+        "shelf_offset_m": [-0.05, 0.05],
+        "lighting_lux": [200, 1500],
+        "box_texture": ["cardboard_clean", "cardboard_worn", "cardboard_taped"],
+        "aisle_width_m": [1.8, 3.5],
+    },
+    "cleanroom": {
+        "description": "Cleanroom — controlled environment, minimal variation.",
+        "lighting_lux": [800, 1200],
+        "ambient_color": [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]],
+        "floor_texture": ["epoxy_white"],
+        "particulate_density": [0.0, 0.05],
+    },
+    "aggressive_sim2real": {
+        "description": "Maximum robustness — every parameter at +/-50%.",
+        "mass_scale": [0.5, 1.5],
+        "friction_scale": [0.5, 1.5],
+        "damping_scale": [0.5, 1.5],
+        "gravity_scale": [0.95, 1.05],
+        "lighting_scale": [0.3, 1.7],
+        "action_latency_ms": [10, 80],
+    },
+}
+
+# from: feat/new-physics-calibration
+_DR_RANGE_HINTS = {
+    "friction": "+-30% of calibrated values",
+    "damping": "+-20%",
+    "armature": "+-10%",
+    "masses": "+-5-10%",
+    "viscous_friction": "+-20%",
+}
+
+# from: feat/addendum-dr-advanced
+_DR_ROBOT_HINTS: Dict[str, Dict[str, Any]] = {
+    "franka": {"gripper_friction": [0.5, 1.0], "joint_damping_default": "URDF"},
+    "panda": {"gripper_friction": [0.5, 1.0], "joint_damping_default": "URDF"},
+    "ur10": {"gripper_friction": [0.4, 0.9], "joint_damping_default": "URDF"},
+    "ur5": {"gripper_friction": [0.4, 0.9], "joint_damping_default": "URDF"},
+    "anymal": {"ground_friction": [0.5, 1.2], "joint_damping_default": "URDF"},
+    "g1": {"joint_damping_default": "URDF", "action_latency_ms": [5, 25]},
+}
+
+# from: feat/addendum-dr-advanced
+_DR_TASK_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    "pick_and_place": {
+        "object_mass_kg": [0.1, 2.0],
+        "gripper_friction": [0.5, 1.0],
+        "joint_damping_scale": [0.8, 1.2],
+        "gravity_m_s2": [9.71, 9.91],
+        "action_latency_ms": [10, 50],
+        "lighting_lux": [300, 2000],
+    },
+    "locomotion": {
+        "ground_friction": [0.4, 1.2],
+        "joint_damping_scale": [0.7, 1.3],
+        "gravity_m_s2": [9.71, 9.91],
+        "action_latency_ms": [5, 30],
+        "terrain_height_m": [0.0, 0.15],
+    },
+    "navigation": {
+        "wheel_friction": [0.3, 0.9],
+        "lidar_noise_m": [0.0, 0.05],
+        "imu_bias_rad_s": [0.0, 0.01],
+        "action_latency_ms": [20, 80],
+    },
+    "assembly": {
+        "object_mass_kg": [0.05, 0.5],
+        "part_friction": [0.3, 0.9],
+        "tolerance_mm": [0.1, 1.0],
+        "action_latency_ms": [10, 40],
+    },
+}
+
+# from: feat/7E-eureka-rewards
+_eureka_runs: Dict[str, Dict] = {}
+
+# from: feat/addendum-phase7G-groot-tooling-v2
+_EXPORT_TARGETS = {
+    "jetson_agx_orin": {"format": "TensorRT bf16", "expected_hz": 5.8, "fp8_supported": False, "note": "Official pipeline"},
+    "jetson_orin_nx": {"format": "TensorRT bf16", "expected_hz": 3.0, "fp8_supported": False, "note": "FP8/NVFP4 unsupported (SM87)"},
+    "x86_rtx4090": {"format": "TensorRT bf16", "expected_hz": 15.0, "fp8_supported": True, "note": "Best desktop performance"},
+    "x86_a6000": {"format": "TensorRT bf16", "expected_hz": 12.0, "fp8_supported": True, "note": "High VRAM headroom"},
+}
+
+# from: feat/addendum-phase7G-groot-tooling-v2
+_FINETUNE_FREEZE_PROFILES = {
+    "similar_to_pretrain": {
+        "freeze": ["vision_encoder", "language_model"],
+        "tune": ["dit_layers", "connectors"],
+        "rationale": "NVIDIA's own recipe — preserves visual+language priors, adapts action head",
+        "lora_rank": 0,
+    },
+    "new_visual_domain": {
+        "freeze": ["language_model"],
+        "tune": ["vision_encoder", "dit_layers", "connectors"],
+        "rationale": "New visual domain requires vision adaptation. Cuts batch from 200 to 16 on A6000.",
+        "lora_rank": 0,
+        "warning": "Don't Blind Your VLA: unfreezing vision can cause OOD generalization loss",
+    },
+    "new_embodiment": {
+        "freeze": [],
+        "tune": ["all (LoRA)"],
+        "rationale": "New robot morphology requires full re-tuning. LoRA rank 16 fits on RTX 4080 <8GB",
+        "lora_rank": 16,
+    },
+}
+
+# from: feat/addendum-phase3-urdf-postprocessor
+_FIX_PROFILE_PATTERNS = {
+    "franka": ["franka", "panda"],
+    "ur5": ["ur5"],
+    "ur10": ["ur10"],
+    "g1": ["g1", "unitree_g1"],
+    "allegro": ["allegro"],
+}
+
+# from: feat/7G-groot-n1
+_GROOT_EMBODIMENTS = {
+    "LIBERO_PANDA": {
+        "obs_type": "rgb+proprio",
+        "action_dim": 7,
+        "description": "Franka Panda in LIBERO benchmark",
+        "vram_gb": 24,
+    },
+    "OXE_WIDOWX": {
+        "obs_type": "rgb+proprio",
+        "action_dim": 7,
+        "description": "WidowX from Open X-Embodiment",
+        "vram_gb": 24,
+    },
+    "UNITREE_G1": {
+        "obs_type": "rgb+proprio",
+        "action_dim": 29,
+        "description": "Unitree G1 humanoid",
+        "vram_gb": 24,
+    },
+    "custom": {
+        "obs_type": "rgb+proprio",
+        "action_dim": None,
+        "description": "Custom embodiment — configure manually",
+        "vram_gb": 24,
+    },
+}
+
+# from: feat/addendum-community-remote-v2
+_ISAA_MANIFEST_VERSION = 1
+
+# from: feat/atomic-tier6-lighting
+_LIGHT_TYPE_NAMES = (
+    "DistantLight",
+    "DomeLight",
+    "SphereLight",
+    "RectLight",
+    "DiskLight",
+    "CylinderLight",
+)
+
+# from: feat/new-onboarding
+_MOBILE_ROBOT_KEYWORDS = {"carter", "jetbot", "nova_carter", "kaya", "husky", "turtlebot"}
+
+# from: feat/addendum-ros2-nav2
+_NAV2_BRIDGE_PROFILES = {
+    "ur10e_moveit2": {
+        "description": "UR10e arm wired for MoveIt2 — joint state publish, FollowJointTrajectory subscribe, TF.",
+        "topics": ["/joint_states", "/joint_command", "/tf"],
+        "nodes": [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ("PublishJointState", "isaacsim.ros2.bridge.ROS2PublishJointState"),
+            ("SubscribeJointState", "isaacsim.ros2.bridge.ROS2SubscribeJointState"),
+            ("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+            ("ArticulationController", "isaacsim.core.nodes.IsaacArticulationController"),
+        ],
+        "topic_values": {
+            "PublishJointState.inputs:topicName": "/joint_states",
+            "SubscribeJointState.inputs:topicName": "/joint_command",
+        },
+    },
+    "jetbot_nav2": {
+        "description": "Jetbot wired for Nav2 — lidar publish, cmd_vel subscribe, odom publish, TF, clock.",
+        "topics": ["/scan", "/cmd_vel", "/odom", "/tf", "/clock"],
+        "nodes": [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ("PublishLidar", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
+            ("SubscribeCmdVel", "isaacsim.ros2.bridge.ROS2SubscribeTwist"),
+            ("PublishOdom", "isaacsim.ros2.bridge.ROS2PublishOdometry"),
+            ("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+            ("DifferentialController", "isaacsim.robot.wheeled_robots.DifferentialController"),
+        ],
+        "topic_values": {
+            "PublishLidar.inputs:topicName": "/scan",
+            "SubscribeCmdVel.inputs:topicName": "/cmd_vel",
+            "PublishOdom.inputs:topicName": "/odom",
+            "PublishClock.inputs:topicName": "/clock",
+        },
+    },
+    "franka_moveit2": {
+        "description": "Franka arm wired for MoveIt2 — joint state, gripper state, TF.",
+        "topics": ["/joint_states", "/gripper", "/tf"],
+        "nodes": [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ("PublishJointState", "isaacsim.ros2.bridge.ROS2PublishJointState"),
+            ("SubscribeJointState", "isaacsim.ros2.bridge.ROS2SubscribeJointState"),
+            ("PublishGripper", "isaacsim.ros2.bridge.ROS2PublishJointState"),
+            ("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+            ("ArticulationController", "isaacsim.core.nodes.IsaacArticulationController"),
+        ],
+        "topic_values": {
+            "PublishJointState.inputs:topicName": "/joint_states",
+            "SubscribeJointState.inputs:topicName": "/joint_command",
+            "PublishGripper.inputs:topicName": "/gripper",
+        },
+    },
+    "amr_full": {
+        "description": "Full AMR — 2x lidar, 4x camera, odom, cmd_vel, TF, clock.",
+        "topics": [
+            "/scan_front", "/scan_rear", "/cmd_vel", "/odom", "/tf", "/clock",
+            "/camera_front/image_raw", "/camera_rear/image_raw",
+            "/camera_left/image_raw", "/camera_right/image_raw",
+        ],
+        "nodes": [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ("PublishLidarFront", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
+            ("PublishLidarRear", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
+            ("SubscribeCmdVel", "isaacsim.ros2.bridge.ROS2SubscribeTwist"),
+            ("PublishOdom", "isaacsim.ros2.bridge.ROS2PublishOdometry"),
+            ("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+            ("PublishCamFront", "isaacsim.ros2.bridge.ROS2PublishImage"),
+            ("PublishCamRear", "isaacsim.ros2.bridge.ROS2PublishImage"),
+            ("PublishCamLeft", "isaacsim.ros2.bridge.ROS2PublishImage"),
+            ("PublishCamRight", "isaacsim.ros2.bridge.ROS2PublishImage"),
+        ],
+        "topic_values": {
+            "PublishLidarFront.inputs:topicName": "/scan_front",
+            "PublishLidarRear.inputs:topicName": "/scan_rear",
+            "SubscribeCmdVel.inputs:topicName": "/cmd_vel",
+            "PublishOdom.inputs:topicName": "/odom",
+            "PublishCamFront.inputs:topicName": "/camera_front/image_raw",
+            "PublishCamRear.inputs:topicName": "/camera_rear/image_raw",
+            "PublishCamLeft.inputs:topicName": "/camera_left/image_raw",
+            "PublishCamRight.inputs:topicName": "/camera_right/image_raw",
+        },
+    },
+}
+
+# from: feat/new-omnigraph-assistant
+_OG_TEMPLATES = {
+    "ros2_clock": {
+        "description": "Publish simulation clock to ROS2 /clock topic",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("publish_clock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "publish_clock.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_clock.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_clock.inputs:timeStamp"),
+        ],
+        "values": {},
+        "param_keys": [],
+    },
+    "ros2_joint_state": {
+        "description": "Publish robot joint states to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("articulation_controller", "isaacsim.core.nodes.IsaacArticulationController"),
+            ("publish_joint_state", "isaacsim.ros2.bridge.ROS2PublishJointState"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "publish_joint_state.inputs:execIn"),
+            ("on_playback_tick.outputs:tick", "articulation_controller.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_joint_state.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_joint_state.inputs:timeStamp"),
+        ],
+        "values": {
+            "articulation_controller.inputs:robotPath": "{robot_path}",
+            "publish_joint_state.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["robot_path", "topic"],
+        "defaults": {"topic": "/joint_states"},
+    },
+    "ros2_camera": {
+        "description": "Publish camera images to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("camera_helper", "isaacsim.ros2.bridge.ROS2CameraHelper"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "camera_helper.inputs:execIn"),
+            ("ros2_context.outputs:context", "camera_helper.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "camera_helper.inputs:timeStamp"),
+        ],
+        "values": {
+            "camera_helper.inputs:cameraPrimPath": "{camera_path}",
+            "camera_helper.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["camera_path", "topic"],
+        "defaults": {"topic": "/camera/image_raw"},
+    },
+    "ros2_lidar": {
+        "description": "Publish lidar scans to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("read_lidar", "isaacsim.sensor.nodes.IsaacReadLidar"),
+            ("publish_laser_scan", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "read_lidar.inputs:execIn"),
+            ("read_lidar.outputs:execOut", "publish_laser_scan.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_laser_scan.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_laser_scan.inputs:timeStamp"),
+            ("read_lidar.outputs:azimuthRange", "publish_laser_scan.inputs:azimuthRange"),
+            ("read_lidar.outputs:depthRange", "publish_laser_scan.inputs:depthRange"),
+            ("read_lidar.outputs:horizontalResolution", "publish_laser_scan.inputs:horizontalResolution"),
+            ("read_lidar.outputs:intensitiesData", "publish_laser_scan.inputs:intensitiesData"),
+            ("read_lidar.outputs:linearDepthData", "publish_laser_scan.inputs:linearDepthData"),
+            ("read_lidar.outputs:numCols", "publish_laser_scan.inputs:numCols"),
+            ("read_lidar.outputs:numRows", "publish_laser_scan.inputs:numRows"),
+        ],
+        "values": {
+            "read_lidar.inputs:lidarPrimPath": "{lidar_path}",
+            "publish_laser_scan.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["lidar_path", "topic"],
+        "defaults": {"topic": "/scan"},
+    },
+    "ros2_cmd_vel": {
+        "description": "Subscribe to /cmd_vel and drive a differential robot",
+        "nodes": [
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("subscribe_twist", "isaacsim.ros2.bridge.ROS2SubscribeTwist"),
+            ("differential_controller", "isaacsim.robot.wheeled_robots.DifferentialController"),
+            ("articulation_controller", "isaacsim.core.nodes.IsaacArticulationController"),
+        ],
+        "connections": [
+            ("ros2_context.outputs:context", "subscribe_twist.inputs:context"),
+            ("subscribe_twist.outputs:linearVelocity", "differential_controller.inputs:linearVelocity"),
+            ("subscribe_twist.outputs:angularVelocity", "differential_controller.inputs:angularVelocity"),
+            ("differential_controller.outputs:velocityCommand", "articulation_controller.inputs:velocityCommand"),
+        ],
+        "values": {
+            "subscribe_twist.inputs:topicName": "{topic}",
+            "articulation_controller.inputs:robotPath": "{robot_path}",
+        },
+        "param_keys": ["robot_path", "topic"],
+        "defaults": {"topic": "/cmd_vel"},
+    },
+    "ros2_tf": {
+        "description": "Publish TF transform tree to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("publish_tf", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "publish_tf.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_tf.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_tf.inputs:timeStamp"),
+        ],
+        "values": {
+            "publish_tf.inputs:parentPrim": "{root_prim}",
+        },
+        "param_keys": ["root_prim"],
+        "defaults": {"root_prim": "/World"},
+    },
+    "ros2_imu": {
+        "description": "Publish IMU data to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_imu", "isaacsim.sensor.nodes.IsaacReadIMU"),
+            ("publish_imu", "isaacsim.ros2.bridge.ROS2PublishImu"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "read_imu.inputs:execIn"),
+            ("read_imu.outputs:execOut", "publish_imu.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_imu.inputs:context"),
+            ("read_imu.outputs:angVel", "publish_imu.inputs:angularVelocity"),
+            ("read_imu.outputs:linAcc", "publish_imu.inputs:linearAcceleration"),
+            ("read_imu.outputs:orientation", "publish_imu.inputs:orientation"),
+        ],
+        "values": {
+            "read_imu.inputs:imuPrimPath": "{imu_path}",
+            "publish_imu.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["imu_path", "topic"],
+        "defaults": {"topic": "/imu/data"},
+    },
+    "ros2_odom": {
+        "description": "Publish odometry data to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("compute_odom", "isaacsim.core.nodes.IsaacComputeOdometry"),
+            ("publish_odom", "isaacsim.ros2.bridge.ROS2PublishOdometry"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "compute_odom.inputs:execIn"),
+            ("compute_odom.outputs:execOut", "publish_odom.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_odom.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_odom.inputs:timeStamp"),
+            ("compute_odom.outputs:angularVelocity", "publish_odom.inputs:angularVelocity"),
+            ("compute_odom.outputs:linearVelocity", "publish_odom.inputs:linearVelocity"),
+            ("compute_odom.outputs:orientation", "publish_odom.inputs:orientation"),
+            ("compute_odom.outputs:position", "publish_odom.inputs:position"),
+        ],
+        "values": {
+            "compute_odom.inputs:chassisPrimPath": "{chassis_path}",
+            "publish_odom.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["chassis_path", "topic"],
+        "defaults": {"topic": "/odom"},
+    },
+}
+
+# from: feat/new-material-database
+_PHYSICS_MATERIALS_PATH = _WORKSPACE / "knowledge" / "physics_materials.json"
+
+# from: feat/new-auto-simplification
+_PHYSICS_SETTINGS_PRESETS = {
+    "rl_training": {
+        "scene_type": "rl_training",
+        "description": "RL training with 1024 environments — maximum throughput",
+        "solver": "TGS",
+        "solver_position_iterations": 4,
+        "solver_velocity_iterations": 1,
+        "gpu_dynamics": True,
+        "broadphase": "GPU",
+        "ccd": False,
+        "time_step": 1.0 / 120,
+        "time_steps_per_second": 120,
+        "notes": "Use TGS solver with minimal iterations for speed. GPU dynamics required for large env counts. Disable CCD to save compute.",
+    },
+    "manipulation": {
+        "scene_type": "manipulation",
+        "description": "Precision manipulation (pick-and-place, assembly)",
+        "solver": "TGS",
+        "solver_position_iterations": 16,
+        "solver_velocity_iterations": 1,
+        "gpu_dynamics": False,
+        "broadphase": "MBP",
+        "ccd": True,
+        "ccd_note": "Enable CCD on gripper fingers only — not all objects",
+        "time_step": 1.0 / 240,
+        "time_steps_per_second": 240,
+        "notes": "Higher iterations for stable contacts. CCD on gripper prevents finger pass-through. 240 Hz for smooth grasping.",
+    },
+    "mobile_robot": {
+        "scene_type": "mobile_robot",
+        "description": "Mobile robot navigation (wheeled/legged)",
+        "solver": "TGS",
+        "solver_position_iterations": 4,
+        "solver_velocity_iterations": 1,
+        "gpu_dynamics": True,
+        "broadphase": "GPU",
+        "ccd": False,
+        "time_step": 1.0 / 60,
+        "time_steps_per_second": 60,
+        "notes": "Low iterations sufficient for wheel/ground contact. GPU dynamics helps with large environments. 60 Hz matches typical sensor rates.",
+    },
+    "digital_twin": {
+        "scene_type": "digital_twin",
+        "description": "Digital twin visualization (minimal physics)",
+        "solver": "PGS",
+        "solver_position_iterations": 4,
+        "solver_velocity_iterations": 1,
+        "gpu_dynamics": False,
+        "broadphase": "MBP",
+        "ccd": False,
+        "time_step": 1.0 / 60,
+        "time_steps_per_second": 60,
+        "notes": "PGS solver is sufficient for visualization-only scenes. Disable GPU dynamics and CCD to minimize resource usage.",
+    },
+}
+
+# from: feat/addendum-phase2-smart-debugging
+_PHYSX_ERROR_PATTERNS = [
+    {
+        "pattern": r"negative mass",
+        "category": "mass_configuration",
+        "fix": "Set the mass to a positive value via UsdPhysics.MassAPI. Check that density and volume are both positive.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"joint limit exceeded",
+        "category": "joint_limits",
+        "fix": "Increase the joint limit range or add damping to prevent overshoot. Check RevoluteJoint.LowerLimitAttr/UpperLimitAttr.",
+        "severity": "warning",
+        "prim_regex": r"joint[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"collision mesh invalid|degenerate triangle|invalid mesh",
+        "category": "collision_mesh",
+        "fix": "Regenerate the collision mesh with convex decomposition. Remove degenerate (zero-area) triangles from the source mesh.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"solver diverge|solver divergence|simulation diverge",
+        "category": "solver_divergence",
+        "fix": "Lower the physics timestep (e.g. 1/120 instead of 1/60), increase solver iterations (positionIterations=16, velocityIterations=4), or reduce extreme mass ratios.",
+        "severity": "critical",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"invalid inertia|zero inertia|non-positive inertia",
+        "category": "inertia_tensor",
+        "fix": "Set a valid diagonal inertia tensor via MassAPI.DiagonalInertiaAttr. All components must be > 0.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"missing collision|no collision api|CollisionAPI not applied",
+        "category": "missing_collision",
+        "fix": "Apply UsdPhysics.CollisionAPI to the mesh prim: UsdPhysics.CollisionAPI.Apply(prim).",
+        "severity": "error",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"PhysicsScene.*not found|no physics scene",
+        "category": "missing_physics_scene",
+        "fix": "Create a PhysicsScene prim: stage.DefinePrim('/World/PhysicsScene', 'PhysicsScene'). Apply UsdPhysics.Scene API.",
+        "severity": "critical",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"mass ratio|extreme mass ratio",
+        "category": "mass_ratio",
+        "fix": "Reduce the mass ratio between contacting bodies to below 100:1. Consider using articulations instead of free bodies for robot links.",
+        "severity": "warning",
+        "prim_regex": r"(?:between|bodies)[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"articulation.*loop|closed loop|kinematic loop",
+        "category": "articulation_loop",
+        "fix": "PhysX does not support closed-loop articulations. Break the loop by removing one joint or using a D6 joint with a spring constraint instead.",
+        "severity": "critical",
+        "prim_regex": r"articulation[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"self.intersection|self.penetration|initial overlap|interpenetration",
+        "category": "initial_overlap",
+        "fix": "Move the overlapping bodies apart before starting simulation. Use debug draw to visualize collision shapes.",
+        "severity": "warning",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"too many contacts|contact buffer overflow",
+        "category": "contact_overflow",
+        "fix": "Increase PhysxScene.maxNbContactDataBlocks or simplify collision geometry. Consider using collision filtering.",
+        "severity": "error",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"gpu.*memory|cuda.*out of memory|gpu.*buffer",
+        "category": "gpu_memory",
+        "fix": "Reduce the number of collision pairs, lower particle counts, or use simpler collision shapes (convex hull instead of triangle mesh).",
+        "severity": "critical",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"fixed base.*missing|no fixed base|floating base",
+        "category": "fixed_base",
+        "fix": "Set PhysxArticulationAPI.fixedBase=True on the articulation root prim for stationary robots.",
+        "severity": "warning",
+        "prim_regex": r"articulation[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"nan|NaN detected|not a number",
+        "category": "nan_values",
+        "fix": "NaN typically indicates numerical instability. Check for zero-mass bodies, extreme forces, or missing gravity direction. Lower timestep and increase solver iterations.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"joint drive.*target|drive target out of range",
+        "category": "drive_target",
+        "fix": "Ensure joint drive targets are within the joint limit range. Clamp target values to [lowerLimit, upperLimit].",
+        "severity": "warning",
+        "prim_regex": r"joint[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"invalid transform|singular matrix|non-finite transform",
+        "category": "invalid_transform",
+        "fix": "Reset the prim transform to identity. Check for zero-scale axes or non-orthogonal rotation matrices.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"broadphase.*overflow|pair buffer.*full",
+        "category": "broadphase_overflow",
+        "fix": "Increase PhysxScene.maxBiasCoefficient or reduce the number of dynamic objects. Use collision groups to limit pair generation.",
+        "severity": "error",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"unstable simulation|jitter|oscillat",
+        "category": "simulation_instability",
+        "fix": "Increase solver iterations, add damping to joints, or lower the physics timestep. Check for stiff springs without adequate damping.",
+        "severity": "warning",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"metersPerUnit.*mismatch|scale mismatch|unit mismatch",
+        "category": "unit_mismatch",
+        "fix": "Ensure all referenced assets use the same metersPerUnit. Set UsdGeom.SetStageMetersPerUnit(stage, 1.0) or scale the referenced asset.",
+        "severity": "error",
+        "prim_regex": r"asset[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"exceeded velocity|velocity clamp|max velocity",
+        "category": "velocity_exceeded",
+        "fix": "Increase PhysxRigidBodyAPI.maxLinearVelocity or reduce applied forces. Default max is 100 m/s.",
+        "severity": "warning",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+]
+
+# from: feat/6A-physx-validation
+_PHYSX_ERROR_RE = re.compile(
+    r"physx.*?error|px.*?error|physics.*?simulation.*?error|"
+    r"articulation.*?error|joint.*?error",
+    re.IGNORECASE,
+)
+
+# from: feat/addendum-collision-mesh-quality-v2
+_PHYSX_HULL_MAX_POLYS = 255    # Cooked hull polygon limit
+
+# from: feat/addendum-collision-mesh-quality-v2
+_PHYSX_HULL_MAX_VERTS = 64     # GPU PhysX vertex limit per hull
+
+# from: feat/atomic-tier8-render
+_POST_PROCESS_PATHS = {
+    "bloom": "/Render/PostProcess/Bloom",
+    "tonemap": "/Render/PostProcess/Tonemap",
+    "dof": "/Render/PostProcess/DoF",
+    "motion_blur": "/Render/PostProcess/MotionBlur",
+}
+
+# from: feat/phase10-autonomous-workflows
+_PROACTIVE_TRIGGER_PLAYBOOKS: Dict[str, List[str]] = {
+    "scene_opened":      ["scene_summary", "get_console_errors"],
+    "robot_imported":    ["scene_summary", "get_articulation_state"],
+    "console_error":     ["get_console_errors", "explain_error"],
+    "training_started":  ["get_console_errors"],
+    "training_active":   ["get_console_errors"],
+    "training_finished": ["get_console_errors"],
+    "sim_idle":          ["scene_summary"],
+    "sim_play":          ["get_console_errors", "scene_summary"],
+    "fps_drop":          ["get_debug_info", "scene_summary"],
+    "target_placed":     ["scene_summary", "measure_distance"],
+}
+
+# from: feat/new-physics-calibration
+_QUICK_CALIBRATE_PARAMS = ["armature", "friction", "masses"]
+
+# from: feat/new-quick-demo-builder-v2
+_QUICK_DEMO_TEMPLATES = {
+    "pick_place": {
+        "default_robot": "franka",
+        "default_objects": ["cube"],
+        "policy_checkpoint": "ppo_pick_place_franka.pt",
+        "policy_algo": "ppo",
+        "task": "Pick objects from tray and place in bin",
+        "camera_position": [1.5, -1.0, 1.2],
+    },
+    "mobile_nav": {
+        "default_robot": "jetbot",
+        "default_objects": ["waypoint"],
+        "policy_checkpoint": "astar_diffdrive_jetbot.pt",
+        "policy_algo": "astar",
+        "task": "Navigate to waypoint avoiding obstacles",
+        "camera_position": [0, -3, 4],
+    },
+    "humanoid_walk": {
+        "default_robot": "g1",
+        "default_objects": [],
+        "policy_checkpoint": "groot_n1_g1_walk.pt",
+        "policy_algo": "groot",
+        "task": "Walk forward 2m with stable balance",
+        "camera_position": [3, -3, 2],
+    },
+}
+
+# from: feat/addendum-community-remote-v2
+_RENDER_QUALITY_PRESETS = {
+    "preview": {
+        "renderer": "RayTracing",
+        "resolution": (1280, 720),
+        "spp": 1,
+    },
+    "presentation": {
+        "renderer": "PathTracing",
+        "resolution": (1920, 1080),
+        "spp": 64,
+    },
+    "production": {
+        "renderer": "PathTracing",
+        "resolution": (3840, 2160),
+        "spp": 256,
+    },
+}
+
+# from: feat/addendum-phase7A-rl-debugging
+_REWARD_HACK_PATTERNS = [
+    ("alive_bonus", "alive bonus reward without an explicit fall/early-termination is exploitable — robot learns to just stand still"),
+    ("survival_bonus", "survival bonus without termination — same hacking risk as alive_bonus"),
+    ("time_bonus", "time-based reward — robot may stall to milk the bonus"),
+]
+
+# from: feat/addendum-phase3-urdf-postprocessor
+_ROBOT_FIX_PROFILES = {
+    "franka": {
+        "robot_name": "franka",
+        "display_name": "Franka Emika Panda",
+        "known_issues": [
+            "rootJoint creates unwanted floating base — delete it",
+            "Default drive stiffness too low for position control",
+            "panda_hand and finger links often missing CollisionAPI",
+        ],
+        "fixes": [
+            {
+                "description": "Delete rootJoint to allow fixedBase anchoring",
+                "code": "stage.RemovePrim('{art_path}/rootJoint')",
+            },
+            {
+                "description": "Set fixedBase for stationary arm",
+                "code": "PhysxSchema.PhysxArticulationAPI.Apply(stage.GetPrimAtPath('{art_path}')).CreateEnabledSelfCollisionsAttr(False)",
+            },
+            {
+                "description": "Set drive stiffness Kp=1000, Kd=100 on all joints",
+                "code": "# Apply Kp=1000, Kd=100 to all revolute joints",
+            },
+            {
+                "description": "Add CollisionAPI to hand and finger links",
+                "code": "# Apply CollisionAPI to panda_hand, panda_leftfinger, panda_rightfinger",
+            },
+        ],
+        "drive_gains": {"kp": 1000, "kd": 100},
+    },
+    "ur5": {
+        "robot_name": "ur5",
+        "display_name": "Universal Robots UR5",
+        "known_issues": [
+            "Joint limits often imported as ±infinity",
+            "Missing collision meshes on wrist links",
+        ],
+        "fixes": [
+            {
+                "description": "Set finite joint limits (±2π for revolute joints)",
+                "code": "# Set lowerLimit=-6.283, upperLimit=6.283 on all revolute joints",
+            },
+            {
+                "description": "Add CollisionAPI to wrist links",
+                "code": "# Apply CollisionAPI to wrist_1_link, wrist_2_link, wrist_3_link",
+            },
+        ],
+        "drive_gains": {"kp": 800, "kd": 80},
+    },
+    "ur10": {
+        "robot_name": "ur10",
+        "display_name": "Universal Robots UR10",
+        "known_issues": [
+            "Joint limits often imported as ±infinity",
+            "Missing collision meshes on wrist links",
+            "Default mass values may be incorrect for UR10 (heavier than UR5)",
+        ],
+        "fixes": [
+            {
+                "description": "Set finite joint limits (±2π for revolute joints)",
+                "code": "# Set lowerLimit=-6.283, upperLimit=6.283 on all revolute joints",
+            },
+            {
+                "description": "Add CollisionAPI to wrist links",
+                "code": "# Apply CollisionAPI to wrist_1_link, wrist_2_link, wrist_3_link",
+            },
+        ],
+        "drive_gains": {"kp": 1000, "kd": 100},
+    },
+    "g1": {
+        "robot_name": "g1",
+        "display_name": "Unitree G1 Humanoid",
+        "known_issues": [
+            "Many links imported with zero mass",
+            "Extreme inertia ratios between torso and finger links",
+            "Self-collision filtering needed for dense link structure",
+        ],
+        "fixes": [
+            {
+                "description": "Set minimum mass (0.1 kg) on zero-mass links",
+                "code": "# Set mass=0.1 on all links where mass==0",
+            },
+            {
+                "description": "Enable self-collision filtering",
+                "code": "PhysxSchema.PhysxArticulationAPI.Apply(root).CreateEnabledSelfCollisionsAttr(True)",
+            },
+        ],
+        "drive_gains": {"kp": 500, "kd": 50},
+    },
+    "allegro": {
+        "robot_name": "allegro",
+        "display_name": "Allegro Hand",
+        "known_issues": [
+            "Very small link masses cause solver instability",
+            "Finger joint limits must be carefully bounded",
+            "CollisionAPI often missing on fingertip links",
+        ],
+        "fixes": [
+            {
+                "description": "Set minimum mass (0.01 kg) on finger links",
+                "code": "# Set mass=0.01 on all finger links",
+            },
+            {
+                "description": "Add CollisionAPI to all fingertip links",
+                "code": "# Apply CollisionAPI to all *_tip links",
+            },
+        ],
+        "drive_gains": {"kp": 100, "kd": 10},
+    },
+}
+
+# from: feat/addendum-phase3-urdf-postprocessor
+_ROBOT_NAME_PATTERNS = {
+    "franka": ["franka", "panda"],
+    "ur10": ["ur10"],
+    "ur5": ["ur5"],
+    "ur5e": ["ur5e"],
+    "cobotta": ["cobotta"],
+}
+
+# from: feat/8D-robot-setup
+_ROBOT_TYPE_DEFAULTS = {
+    "manipulator": {"stiffness": 1000, "damping": 100},
+    "mobile":      {"stiffness": 500,  "damping": 50},
+    "humanoid":    {"stiffness": 800,  "damping": 80},
+}
+
+# from: feat/addendum-phase8F-ros2-quality
+_ROS2_QOS_PRESETS = {
+    "scan": ("BEST_EFFORT", "VOLATILE", "Laser scan data — high-frequency, drop-tolerant"),
+    "robot_description": ("RELIABLE", "TRANSIENT_LOCAL", "Robot URDF — latched, must arrive"),
+    "tf": ("RELIABLE", "VOLATILE", "Transform tree — must be reliable"),
+    "tf_static": ("RELIABLE", "TRANSIENT_LOCAL", "Static transforms — latched"),
+    "cmd_vel": ("RELIABLE", "VOLATILE", "Velocity commands — must not be dropped"),
+    "camera": ("BEST_EFFORT", "VOLATILE", "Camera images — high-bandwidth, drop-tolerant"),
+    "image": ("BEST_EFFORT", "VOLATILE", "Image data — high-bandwidth, drop-tolerant"),
+    "joint_states": ("RELIABLE", "VOLATILE", "Joint state feedback — must be reliable"),
+    "clock": ("BEST_EFFORT", "VOLATILE", "Simulation clock — high-frequency"),
+}
+
+# from: feat/atomic-tier13-rl-runtime
+_RUN_REGISTRY: Dict[str, Dict[str, Any]] = {}
+
+# from: feat/new-quick-demo-builder-v2
+_SCENE_STYLE_PRESETS = {
+    "clean": {"intensity": 1500, "background": "white_floor"},
+    "industrial": {"intensity": 1000, "background": "concrete"},
+    "lab": {"intensity": 2000, "background": "neutral_gray"},
+    "dramatic": {"intensity": 800, "background": "dark"},
+}
+
+# from: feat/6A-physx-validation
+_SCENE_TEMPLATES = {
+    "tabletop_manipulation": {
+        "description": "Table-top manipulation scene with a Franka robot arm, objects to grasp, and an overhead camera. Ideal for pick-and-place tasks.",
+        "category": "manipulation",
+        "room_dims": [4, 4, 3],
+        "objects": [
+            {"name": "GroundPlane", "prim_type": "Plane", "position": [0, 0, 0], "scale": [5, 5, 1]},
+            {"name": "Table", "prim_type": "Cube", "position": [0, 0, 0.4], "scale": [0.8, 0.6, 0.4]},
+            {"name": "Franka", "prim_path": "/World/Franka", "asset_name": "franka", "position": [0, -0.3, 0.8], "scale": [1, 1, 1]},
+            {"name": "Cube_Red", "prim_type": "Cube", "position": [0.15, 0.1, 0.85], "scale": [0.03, 0.03, 0.03]},
+            {"name": "Cube_Green", "prim_type": "Cube", "position": [-0.1, 0.15, 0.85], "scale": [0.03, 0.03, 0.03]},
+            {"name": "Cylinder_Blue", "prim_type": "Cylinder", "position": [0.05, -0.1, 0.85], "scale": [0.02, 0.02, 0.04]},
+            {"name": "OverheadCamera", "prim_type": "Camera", "position": [0, 0, 1.8], "rotation": [-90, 0, 0]},
+        ],
+        "suggested_sensors": ["camera (overhead, 1280x720)", "contact_sensor (gripper fingers)"],
+        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 120.0, "solver_iterations": 32},
+    },
+    "warehouse_picking": {
+        "description": "Warehouse bin-picking scene with shelving units, a mobile robot, bins with objects, and an overhead camera. Good for logistics and order-fulfillment tasks.",
+        "category": "warehouse",
+        "room_dims": [10, 8, 4],
+        "objects": [
+            {"name": "GroundPlane", "prim_type": "Plane", "position": [0, 0, 0], "scale": [12, 10, 1]},
+            {"name": "Shelf_A", "prim_type": "Cube", "position": [-2, 2, 1.0], "scale": [1.2, 0.4, 2.0]},
+            {"name": "Shelf_B", "prim_type": "Cube", "position": [2, 2, 1.0], "scale": [1.2, 0.4, 2.0]},
+            {"name": "Bin_1", "prim_type": "Cube", "position": [-2, 2, 0.3], "scale": [0.4, 0.3, 0.25]},
+            {"name": "Bin_2", "prim_type": "Cube", "position": [-2, 2, 0.8], "scale": [0.4, 0.3, 0.25]},
+            {"name": "Bin_3", "prim_type": "Cube", "position": [2, 2, 0.3], "scale": [0.4, 0.3, 0.25]},
+            {"name": "MobileRobot", "prim_path": "/World/Carter", "asset_name": "carter", "position": [0, -1, 0], "scale": [1, 1, 1]},
+            {"name": "OverheadCamera", "prim_type": "Camera", "position": [0, 0, 3.5], "rotation": [-90, 0, 0]},
+        ],
+        "suggested_sensors": ["camera (overhead, 1920x1080)", "rtx_lidar (mobile robot)"],
+        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 60.0, "solver_iterations": 16},
+    },
+    "mobile_navigation": {
+        "description": "Indoor navigation scene with a ground plane, walls, obstacles, and a wheeled robot with lidar. Good for SLAM and path-planning tasks.",
+        "category": "mobile",
+        "room_dims": [8, 8, 3],
+        "objects": [
+            {"name": "GroundPlane", "prim_type": "Plane", "position": [0, 0, 0], "scale": [10, 10, 1]},
+            {"name": "Wall_North", "prim_type": "Cube", "position": [0, 4, 1.0], "scale": [8, 0.1, 2.0]},
+            {"name": "Wall_South", "prim_type": "Cube", "position": [0, -4, 1.0], "scale": [8, 0.1, 2.0]},
+            {"name": "Wall_East", "prim_type": "Cube", "position": [4, 0, 1.0], "scale": [0.1, 8, 2.0]},
+            {"name": "Wall_West", "prim_type": "Cube", "position": [-4, 0, 1.0], "scale": [0.1, 8, 2.0]},
+            {"name": "Obstacle_1", "prim_type": "Cylinder", "position": [1.5, 1.0, 0.5], "scale": [0.3, 0.3, 1.0]},
+            {"name": "Obstacle_2", "prim_type": "Cube", "position": [-1.0, -1.5, 0.4], "scale": [0.6, 0.6, 0.8]},
+            {"name": "Obstacle_3", "prim_type": "Cylinder", "position": [-2.0, 2.0, 0.5], "scale": [0.25, 0.25, 1.0]},
+            {"name": "Jetbot", "prim_path": "/World/Jetbot", "asset_name": "jetbot", "position": [0, 0, 0.05], "scale": [1, 1, 1]},
+        ],
+        "suggested_sensors": ["rtx_lidar (robot-mounted, 360 deg)", "camera (front-facing)"],
+        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 60.0, "solver_iterations": 16},
+    },
+    "inspection_cell": {
+        "description": "Automated inspection cell with a conveyor belt, inspection cameras, structured lighting, and sample objects. Good for quality-inspection and defect-detection tasks.",
+        "category": "inspection",
+        "room_dims": [6, 4, 3],
+        "objects": [
+            {"name": "GroundPlane", "prim_type": "Plane", "position": [0, 0, 0], "scale": [8, 6, 1]},
+            {"name": "Conveyor", "prim_type": "Cube", "position": [0, 0, 0.45], "scale": [3.0, 0.5, 0.05]},
+            {"name": "ConveyorLegs_L", "prim_type": "Cube", "position": [-1.2, 0, 0.2], "scale": [0.05, 0.4, 0.4]},
+            {"name": "ConveyorLegs_R", "prim_type": "Cube", "position": [1.2, 0, 0.2], "scale": [0.05, 0.4, 0.4]},
+            {"name": "InspectionCamera_Top", "prim_type": "Camera", "position": [0, 0, 1.5], "rotation": [-90, 0, 0]},
+            {"name": "InspectionCamera_Side", "prim_type": "Camera", "position": [0, -1.2, 0.8], "rotation": [0, 0, 0]},
+            {"name": "Light_Bar_1", "prim_type": "RectLight", "position": [-0.5, 0, 1.2], "scale": [0.8, 0.1, 0.05]},
+            {"name": "Light_Bar_2", "prim_type": "RectLight", "position": [0.5, 0, 1.2], "scale": [0.8, 0.1, 0.05]},
+            {"name": "SampleObject_1", "prim_type": "Cube", "position": [-0.3, 0, 0.5], "scale": [0.08, 0.08, 0.08]},
+            {"name": "SampleObject_2", "prim_type": "Cylinder", "position": [0.1, 0, 0.5], "scale": [0.04, 0.04, 0.06]},
+            {"name": "SampleObject_3", "prim_type": "Sphere", "position": [0.4, 0, 0.52], "scale": [0.03, 0.03, 0.03]},
+        ],
+        "suggested_sensors": ["camera (top-down, high-res 4K)", "camera (side-view, 1280x720)"],
+        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 120.0, "solver_iterations": 32},
+    },
+}
+
+# from: feat/new-onboarding
+_SLASH_COMMANDS = [
+    {"command": "/help", "description": "What can I do?", "always": True},
+    {"command": "/scene", "description": "Summarize current scene", "always": True},
+    {"command": "/debug", "description": "Diagnose physics issues", "requires_physics": True},
+    {"command": "/performance", "description": "Why is my sim slow?", "always": True},
+    {"command": "/workspace", "description": "Show robot workspace", "requires_robot": True},
+    {"command": "/diff", "description": "What changed?", "always": True},
+    {"command": "/import", "description": "Import a robot", "always": True},
+    {"command": "/template", "description": "Load a scene template", "always": True},
+]
+
+# from: feat/addendum-enterprise-scale
+_STAGE_INDEX: Dict[str, Dict[str, Any]] = {}
+
+# from: feat/addendum-enterprise-scale
+_STAGE_INDEX_META: Dict[str, Any] = {"prim_scope": None, "prim_count": 0}
+
+# from: feat/new-onboarding
+_STARTER_PROMPTS = {
+    "empty": {
+        "welcome": "Your scene is empty — a blank canvas!",
+        "prompts": [
+            "Import a robot: 'add a Franka Panda to the scene'",
+            "Load a template: 'set up a pick and place scene'",
+            "Browse assets: 'show me available robots'",
+        ],
+    },
+    "robot_only": {
+        "welcome": "I see a robot in the scene, but no objects to interact with.",
+        "prompts": [
+            "Add objects: 'place 3 cubes on a table'",
+            "Test the robot: 'move the arm to a test position'",
+            "Check setup: 'are the collision meshes correct?'",
+        ],
+    },
+    "robot_and_objects": {
+        "welcome": "Your scene has a robot and objects — ready for action!",
+        "prompts": [
+            "Move the arm to grab the nearest object",
+            "Why is the robot not moving?",
+            "Show me the robot's workspace",
+        ],
+    },
+    "mobile_robot": {
+        "welcome": "I see a mobile robot in the scene.",
+        "prompts": [
+            "Drive the robot forward 2 meters",
+            "Set up navigation: 'create an occupancy map'",
+            "Check sensors: 'what sensors does the robot have?'",
+        ],
+    },
+    "no_physics": {
+        "welcome": "Physics is not enabled in this scene.",
+        "prompts": [
+            "Enable physics for this scene",
+            "Add rigid body physics to the objects",
+            "Set up a physics scene with gravity",
+        ],
+    },
+}
+
+# from: feat/7C-xr-teleoperation
+_STREAM_QUALITY_PRESETS = {
+    "low": {"width": 640, "height": 480, "bitrate_mbps": 2, "fps": 30},
+    "medium": {"width": 1280, "height": 720, "bitrate_mbps": 8, "fps": 60},
+    "high": {"width": 1920, "height": 1080, "bitrate_mbps": 20, "fps": 90},
+}
+
+# from: feat/new-onboarding
+_SUGGESTION_MAP = {
+    "import_robot": [
+        "Configure the gripper",
+        "Check if the collision meshes are correct",
+        "Move the arm to a test position",
+    ],
+    "create_prim": [
+        "Add physics to this object",
+        "Change the material or color",
+        "Position it precisely in the scene",
+    ],
+    "clone_prim": [
+        "Set up physics for all copies",
+        "Create an RL training environment",
+        "Adjust spacing between copies",
+    ],
+    "move_to_pose": [
+        "Plan a pick-and-place sequence",
+        "Check for collisions along the path",
+        "Record the joint positions",
+    ],
+    "sim_control": [
+        "Capture a screenshot of the result",
+        "Check for physics errors",
+        "Measure performance (FPS, frame time)",
+    ],
+    "create_material": [
+        "Apply this material to an object",
+        "Adjust roughness or metallic properties",
+        "Create a glass or transparent variant",
+    ],
+    "configure_sdg": [
+        "Preview a sample frame",
+        "Add more randomizers (lighting, pose)",
+        "Export to COCO or KITTI format",
+    ],
+    "set_physics_params": [
+        "Test with a simulation run",
+        "Add rigid body physics to objects",
+        "Check solver iteration count for stability",
+    ],
+    "load_scene_template": [
+        "Run the simulation to see it in action",
+        "Customize the robot's behavior",
+        "Capture a screenshot of the scene",
+    ],
+}
+
+# from: feat/8B-motion-planning-complete
+_SUPPORTED_MOTION_ROBOTS = {
+    "franka", "ur10", "ur5e", "ur3e", "cobotta", "rs007n",
+    "dofbot", "kawasaki", "flexiv_rizon",
+}
+
+# from: feat/addendum-phase7C-teleop-quality
+_TELEOP_DEVICES = {
+    "quest_3": {
+        "supported": True,
+        "transport": "webxr",
+        "latency_budget_ms": 80,
+        "known_limitations": [
+            "Meta Browser required; Safari does not expose XR_EXT_hand_tracking",
+        ],
+        "notes": "Quest 3 uses WebXR over Wi-Fi — keep router <= 10 ms from host.",
+    },
+    "vision_pro": {
+        "supported": True,
+        "transport": "cloudxr",
+        "latency_budget_ms": 60,
+        "known_limitations": [
+            "Requires native CloudXR app on visionOS",
+            "WebXR on Safari does NOT expose hand tracking — browser path will not work",
+        ],
+        "notes": "Vision Pro must use the NVIDIA CloudXR native app, not Safari.",
+    },
+    "spacemouse": {
+        "supported": True,
+        "transport": "usb-hid",
+        "latency_budget_ms": 20,
+        "known_limitations": ["6-DoF only — no hand retargeting"],
+        "notes": "3Dconnexion SpaceMouse over USB-HID. Local, sub-20 ms RTT.",
+    },
+    "keyboard": {
+        "supported": True,
+        "transport": "usb-hid",
+        "latency_budget_ms": 20,
+        "known_limitations": ["Discrete input only — coarse joint nudges"],
+        "notes": "Keyboard fallback for smoke tests without XR hardware.",
+    },
+}
+
+# from: feat/addendum-community-remote-v2
+_TEMPLATE_EXPORT_DIR = _WORKSPACE / "templates" / "exports"
+
+# from: feat/new-omnigraph-assistant
+_TEMPLATE_KEYWORDS = {
+    "ros2_clock": ["clock", "sim_time", "simulation time", "simtime"],
+    "ros2_joint_state": ["joint state", "joint_state", "joint states", "joint positions"],
+    "ros2_camera": ["camera", "image", "rgb", "depth image"],
+    "ros2_lidar": ["lidar", "laser scan", "laserscan", "point cloud lidar"],
+    "ros2_cmd_vel": ["cmd_vel", "twist", "teleop", "drive", "velocity command"],
+    "ros2_tf": ["tf", "transform tree", "transforms", "tf2"],
+    "ros2_imu": ["imu", "inertial", "accelerometer", "gyroscope"],
+    "ros2_odom": ["odom", "odometry"],
+}
+
+# from: feat/addendum-community-remote-v2
+_TEMPLATE_LIBRARY_DIR = _WORKSPACE / "templates" / "library"
+
+# from: feat/atomic-tier12-asset-mgmt
+_TIER12_HELPERS = (
+    "            def _layer_offset_dict(lo):\n"
+    "                if lo is None:\n"
+    "                    return {'offset': 0.0, 'scale': 1.0}\n"
+    "                try:\n"
+    "                    return {'offset': float(lo.offset), 'scale': float(lo.scale)}\n"
+    "                except Exception:\n"
+    "                    return {'offset': 0.0, 'scale': 1.0}\n"
+)
+
+# from: feat/atomic-tier14-bulk
+_TIER14_SCHEMA_MAP = {
+    "PhysicsRigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
+    "UsdPhysics.RigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
+    "RigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
+    "PhysicsCollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
+    "UsdPhysics.CollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
+    "CollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
+    "PhysicsMassAPI": ("pxr.UsdPhysics", "MassAPI"),
+    "UsdPhysics.MassAPI": ("pxr.UsdPhysics", "MassAPI"),
+    "MassAPI": ("pxr.UsdPhysics", "MassAPI"),
+    "PhysxRigidBodyAPI": ("pxr.PhysxSchema", "PhysxRigidBodyAPI"),
+    "PhysxCollisionAPI": ("pxr.PhysxSchema", "PhysxCollisionAPI"),
+    "PhysxDeformableBodyAPI": ("pxr.PhysxSchema", "PhysxDeformableBodyAPI"),
+    "PhysxTriggerAPI": ("pxr.PhysxSchema", "PhysxTriggerAPI"),
+    "PhysxContactReportAPI": ("pxr.PhysxSchema", "PhysxContactReportAPI"),
+}
+
+# from: feat/new-physics-calibration
+_VALID_CALIBRATE_PARAMS = {"friction", "damping", "armature", "masses", "viscous_friction"}
+
+# from: feat/addendum-community-remote-v2
+_VRAM_PER_ENV_MB = {
+    "clone": {"low": 8, "medium": 16, "high": 32},
+    "train": {"low": 12, "medium": 24, "high": 48},
+    "sdg": {"low": 32, "medium": 64, "high": 128},
+    "render": {"low": 256, "medium": 512, "high": 1024},
+    "custom": {"low": 16, "medium": 32, "high": 64},
+}
+
+# from: feat/addendum-humanoid-advanced
+_WHOLE_BODY_PROFILES = {
+    "g1": {
+        "locomotion": "hover_g1_flat.pt",
+        "command_type": "velocity",
+        "ee_frame": "left_hand",
+        "status": "Working (IsaacLab 2.3)",
+    },
+    "h1": {
+        "locomotion": "hover_h1_rough.pt",
+        "command_type": "velocity",
+        "ee_frame": "left_hand",
+        "status": "Working",
+    },
+    "figure02": {
+        "locomotion": "custom",
+        "command_type": "velocity",
+        "ee_frame": "left_hand",
+        "status": "Manual config required",
+    },
+    "generic": {
+        "locomotion": "custom",
+        "command_type": "velocity",
+        "ee_frame": "left_hand",
+        "status": "Generic skeleton — review before use",
+    },
+}
+
+# from: feat/phase10-autonomous-workflows
+_WORKFLOW_RETRY_HARD_CAP = 5
+
+# from: feat/phase10-autonomous-workflows
+_WORKFLOWS: Dict[str, Dict[str, Any]] = {}
+
+# from: feat/phase10-autonomous-workflows
+_WORKFLOW_TEMPLATES: Dict[str, Dict[str, Any]] = {
+    "rl_training": {
+        "description": "Full RL training pipeline (W1 from spec)",
+        "phases": [
+            {"name": "plan",        "checkpoint": True,  "error_fix": False},
+            {"name": "env_creation","checkpoint": False, "error_fix": True},
+            {"name": "reward",      "checkpoint": True,  "error_fix": False},
+            {"name": "training",    "checkpoint": False, "error_fix": False},
+            {"name": "results",     "checkpoint": True,  "error_fix": False},
+            {"name": "deploy",      "checkpoint": True,  "error_fix": False},
+        ],
+        "default_params": {
+            "num_envs": 64,
+            "env_spacing": 2.5,
+            "algo": "ppo",
+            "num_iterations": 5000,
+        },
+    },
+    "robot_import": {
+        "description": "Robot import & configuration (W2 from spec)",
+        "phases": [
+            {"name": "plan",            "checkpoint": True,  "error_fix": False},
+            {"name": "import",          "checkpoint": False, "error_fix": True},
+            {"name": "verify",          "checkpoint": False, "error_fix": False},
+            {"name": "auto_fix",        "checkpoint": True,  "error_fix": False},
+            {"name": "motion_planning", "checkpoint": False, "error_fix": True},
+            {"name": "report",          "checkpoint": False, "error_fix": False},
+        ],
+        "default_params": {
+            "fix_profile": "auto",
+        },
+    },
+    "sim_debugging": {
+        "description": "Simulation debugging with autonomous error-fix loop (W4 from spec)",
+        "phases": [
+            {"name": "diagnose",   "checkpoint": False, "error_fix": False},
+            {"name": "hypothesis", "checkpoint": False, "error_fix": False},
+            {"name": "fix",        "checkpoint": True,  "error_fix": True},
+            {"name": "verify",     "checkpoint": False, "error_fix": False},
+            {"name": "report",     "checkpoint": False, "error_fix": False},
+        ],
+        "default_params": {
+            "max_hypothesis_iterations": 3,
+        },
+    },
+}
+
+# from: feat/addendum-enterprise-scale
+_WRITE_LOCK_QUEUE = _StageWriteLockQueue()
+
+# from: feat/9-finetune-flywheel
+_turn_recorder = TurnRecorder()
+
+# End recovered state
+# ═══════════════════════════════════════════════════════════════════════════
+
 
 def _load_sensor_specs() -> List[Dict]:
     global _sensor_specs
@@ -1143,7 +2585,15 @@ async def execute_tool_call(
                 logger.warning(f"[ToolExecutor] Patch blocked for {tool_name}: {msg}")
                 return {"type": "error", "error": msg, "code": code, "validation_blocked": True}
             result = await kit_tools.queue_exec_patch(code, desc)
-            return {"type": "code_patch", "code": code, "description": desc, "queued": result.get("queued", False)}
+            return {
+                "type": "code_patch",
+                "code": code,
+                "description": desc,
+                "queued": result.get("queued", False),
+                "executed": result.get("executed", False),
+                "success": result.get("success"),
+                "output": result.get("output", ""),
+            }
 
         # 3. Code generation tools — generate code, send to Kit for approval
         if tool_name in CODE_GEN_HANDLERS:
@@ -1175,6 +2625,9 @@ async def execute_tool_call(
                 "code": code,
                 "description": desc,
                 "queued": result.get("queued", False),
+                "executed": result.get("executed", False),
+                "success": result.get("success"),
+                "output": result.get("output", ""),
             }
 
         return {"type": "error", "error": f"Unknown tool: {tool_name}"}

@@ -184,10 +184,16 @@ class MCPServer:
         # Format code patches and data results into MCP content blocks
         content = []
         if result.get("type") == "code_patch":
-            content.append({
-                "type": "text",
-                "text": f"Generated code for `{tool_name}`:\n```python\n{result.get('code', '')}\n```\n\n{result.get('description', '')}",
-            })
+            parts = [
+                f"Generated code for `{tool_name}`:\n```python\n{result.get('code', '')}\n```\n\n{result.get('description', '')}"
+            ]
+            # Surface execution output when AUTO_APPROVE bypassed the queue.
+            if result.get("executed"):
+                success = result.get("success")
+                output = result.get("output", "") or "(no output)"
+                status = "succeeded" if success else ("failed" if success is False else "ran")
+                parts.append(f"\n\nExecution {status}:\n```\n{output}\n```")
+            content.append({"type": "text", "text": "".join(parts)})
         elif result.get("type") == "data":
             content.append({
                 "type": "text",

@@ -61,7 +61,19 @@ async def queue_exec_patch(code: str, description: str = "") -> Dict[str, Any]:
     """
     Send Python patch code to Kit's approval queue.
     The extension UI will show a confirmation dialog before executing.
+
+    When AUTO_APPROVE=true in env, bypass the queue and execute immediately
+    via /exec_sync — required for MCP flows where no approval UI drains the queue.
     """
+    import os
+    if os.environ.get("AUTO_APPROVE", "false").lower() == "true":
+        result = await exec_sync(code)
+        return {
+            "queued": False,
+            "executed": True,
+            "success": result.get("success", False),
+            "output": result.get("output", ""),
+        }
     return await _post("/exec_patch", {"code": code, "description": description})
 
 
