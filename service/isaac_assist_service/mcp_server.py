@@ -49,6 +49,16 @@ class MCPServer:
         self._openai_tools = ISAAC_SIM_TOOLS
         self._executor = execute_tool_call
         self._settings = SettingsManager()
+
+        # Apply rich descriptions for LLM tool selection accuracy (Phase 12 prep)
+        try:
+            from .chat.tools.tool_descriptions_polish import apply_polish
+            count = apply_polish(self._openai_tools)
+            import logging
+            logging.getLogger(__name__).info(f"Applied polished descriptions to {count} tools")
+        except ImportError:
+            pass  # polish file optional
+
         self._mcp_tools = self._convert_tools()
 
     # ── Tool conversion ─────────────────────────────────────────────────
