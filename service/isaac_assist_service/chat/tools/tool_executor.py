@@ -2232,3 +2232,480 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ─── Tier 3 Atomic Tools — Articulation & Joints ─────────────────────────────
+# 9 atomic primitives (see docs/specs/atomic_tools_catalog.md, Tier 3).
+# Seven DATA handlers ship a print-json snippet to Kit through queue_exec_patch
+# and return whatever Kit prints. Two CODE_GEN handlers (set_joint_limits,
+# set_joint_velocity_limit) emit Python patches the user approves before Kit
+# executes them. Implementation mirrors the Tier 0 / Tier 1 / Tier 2
+# conventions established in earlier atomic-tier branches.
+
+
+# ── 1. get_joint_positions (DATA) — T3.1 ────────────────────────────────────
+
+async def _handle_get_joint_positions(args: Dict) -> Dict:
+    """Return current position of every joint in an articulation."""
+    articulation = args["articulation"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+art = stage.GetPrimAtPath({articulation!r})
+result = {{'articulation': {articulation!r}, 'units': {{'revolute': 'deg', 'prismatic': 'm'}}}}
+if not art or not art.IsValid():
+    result['error'] = 'articulation not found'
+else:
+    joints = []
+    for p in Usd.PrimRange(art):
+        rj = UsdPhysics.RevoluteJoint(p)
+        pj = UsdPhysics.PrismaticJoint(p)
+        if not (rj or pj):
+            continue
+        joint_type = 'revolute' if rj else 'prismatic'
+        # Prefer PhysxJointStateAPI live state, fall back to authored target
+        state_attr = p.GetAttribute('state:angular:physics:position') if rj else p.GetAttribute('state:linear:physics:position')
+        if not (state_attr and state_attr.IsDefined()):
+            state_attr = p.GetAttribute('physics:position')
+        target_attr = p.GetAttribute('drive:angular:physics:targetPosition') if rj else p.GetAttribute('drive:linear:physics:targetPosition')
+        pos = None
+        source = None
+        if state_attr and state_attr.HasAuthoredValue():
+            pos = float(state_attr.Get())
+            source = 'state'
+        elif target_attr and target_attr.HasAuthoredValue():
+            pos = float(target_attr.Get())
+            source = 'drive_target'
+        joints.append({{
+            'name': p.GetName(),
+            'path': str(p.GetPath()),
+            'type': joint_type,
+            'position': pos,
+            'source': source,
+        }})
+    result['joint_count'] = len(joints)
+    result['joints'] = joints
+    result['positions'] = [j['position'] for j in joints]
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_joint_positions {articulation}")
+
+
+# ── 2. get_joint_velocities (DATA) — T3.2 ───────────────────────────────────
+
+async def _handle_get_joint_velocities(args: Dict) -> Dict:
+    """Return current velocity of every joint in an articulation."""
+    articulation = args["articulation"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+art = stage.GetPrimAtPath({articulation!r})
+result = {{'articulation': {articulation!r}, 'units': {{'revolute': 'deg/s', 'prismatic': 'm/s'}}}}
+if not art or not art.IsValid():
+    result['error'] = 'articulation not found'
+else:
+    joints = []
+    for p in Usd.PrimRange(art):
+        rj = UsdPhysics.RevoluteJoint(p)
+        pj = UsdPhysics.PrismaticJoint(p)
+        if not (rj or pj):
+            continue
+        joint_type = 'revolute' if rj else 'prismatic'
+        # PhysxJointStateAPI velocity attribute
+        vel_attr = p.GetAttribute('state:angular:physics:velocity') if rj else p.GetAttribute('state:linear:physics:velocity')
+        if not (vel_attr and vel_attr.IsDefined()):
+            vel_attr = p.GetAttribute('physics:velocity')
+        vel = float(vel_attr.Get()) if (vel_attr and vel_attr.HasAuthoredValue()) else 0.0
+        joints.append({{
+            'name': p.GetName(),
+            'path': str(p.GetPath()),
+            'type': joint_type,
+            'velocity': vel,
+        }})
+    result['joint_count'] = len(joints)
+    result['joints'] = joints
+    result['velocities'] = [j['velocity'] for j in joints]
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_joint_velocities {articulation}")
+
+
+# ── 3. get_joint_torques (DATA) — T3.3 ──────────────────────────────────────
+
+async def _handle_get_joint_torques(args: Dict) -> Dict:
+    """Return most recently applied torque/force on every joint."""
+    articulation = args["articulation"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+art = stage.GetPrimAtPath({articulation!r})
+result = {{'articulation': {articulation!r}, 'units': {{'revolute': 'N*m', 'prismatic': 'N'}}}}
+if not art or not art.IsValid():
+    result['error'] = 'articulation not found'
+else:
+    joints = []
+    for p in Usd.PrimRange(art):
+        rj = UsdPhysics.RevoluteJoint(p)
+        pj = UsdPhysics.PrismaticJoint(p)
+        if not (rj or pj):
+            continue
+        joint_type = 'revolute' if rj else 'prismatic'
+        # PhysxJointStateAPI: appliedJointTorque (revolute) / appliedJointForce (prismatic)
+        torque_attr = (
+            p.GetAttribute('state:angular:physics:appliedJointTorque') if rj
+            else p.GetAttribute('state:linear:physics:appliedJointForce')
+        )
+        if not (torque_attr and torque_attr.IsDefined()):
+            torque_attr = p.GetAttribute('physics:appliedTorque')
+        torque = float(torque_attr.Get()) if (torque_attr and torque_attr.HasAuthoredValue()) else 0.0
+        joints.append({{
+            'name': p.GetName(),
+            'path': str(p.GetPath()),
+            'type': joint_type,
+            'torque': torque,
+        }})
+    result['joint_count'] = len(joints)
+    result['joints'] = joints
+    result['torques'] = [j['torque'] for j in joints]
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_joint_torques {articulation}")
+
+
+# ── 4. get_drive_gains (DATA) — T3.4 ────────────────────────────────────────
+
+async def _handle_get_drive_gains(args: Dict) -> Dict:
+    """Read current kp/kd from UsdPhysics.DriveAPI on a joint."""
+    joint_path = args["joint_path"]
+    drive_type = args.get("drive_type", "auto")
+    code = f"""\
+import omni.usd
+import json
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+joint = stage.GetPrimAtPath({joint_path!r})
+requested = {drive_type!r}
+result = {{'joint_path': {joint_path!r}, 'requested_drive_type': requested}}
+if not joint or not joint.IsValid():
+    result['error'] = 'joint not found'
+else:
+    candidates = ['angular', 'linear'] if requested == 'auto' else [requested]
+    drives = {{}}
+    for token in candidates:
+        drive = UsdPhysics.DriveAPI(joint, token)
+        if not drive or not drive.GetPrim().HasAPI(UsdPhysics.DriveAPI):
+            continue
+        kp_attr = drive.GetStiffnessAttr()
+        kd_attr = drive.GetDampingAttr()
+        max_force_attr = drive.GetMaxForceAttr()
+        target_pos_attr = drive.GetTargetPositionAttr()
+        target_vel_attr = drive.GetTargetVelocityAttr()
+        drives[token] = {{
+            'kp': float(kp_attr.Get()) if (kp_attr and kp_attr.HasAuthoredValue()) else None,
+            'kd': float(kd_attr.Get()) if (kd_attr and kd_attr.HasAuthoredValue()) else None,
+            'max_force': float(max_force_attr.Get()) if (max_force_attr and max_force_attr.HasAuthoredValue()) else None,
+            'target_position': float(target_pos_attr.Get()) if (target_pos_attr and target_pos_attr.HasAuthoredValue()) else None,
+            'target_velocity': float(target_vel_attr.Get()) if (target_vel_attr and target_vel_attr.HasAuthoredValue()) else None,
+        }}
+    if not drives:
+        result['error'] = 'no DriveAPI applied on this joint'
+        result['has_drive_api'] = False
+    else:
+        result['drives'] = drives
+        result['has_drive_api'] = True
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_drive_gains {joint_path}")
+
+
+# ── 5. set_joint_limits (CODE_GEN) — T3.5 ───────────────────────────────────
+
+def _gen_set_joint_limits(args: Dict) -> str:
+    """Generate code to set physics:lowerLimit and physics:upperLimit."""
+    joint_path = args["joint_path"]
+    lower = float(args["lower"])
+    upper = float(args["upper"])
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+joint_path = {joint_path!r}
+joint = stage.GetPrimAtPath(joint_path)
+if not joint or not joint.IsValid():
+    raise RuntimeError('joint not found: ' + repr(joint_path))
+rj = UsdPhysics.RevoluteJoint(joint)
+pj = UsdPhysics.PrismaticJoint(joint)
+if not (rj or pj):
+    raise RuntimeError('joint is not Revolute or Prismatic: ' + repr(joint_path))
+lower_attr = joint.GetAttribute('physics:lowerLimit')
+if not (lower_attr and lower_attr.IsDefined()):
+    lower_attr = (rj or pj).CreateLowerLimitAttr()
+upper_attr = joint.GetAttribute('physics:upperLimit')
+if not (upper_attr and upper_attr.IsDefined()):
+    upper_attr = (rj or pj).CreateUpperLimitAttr()
+lower_attr.Set({lower})
+upper_attr.Set({upper})
+print('joint_limits ' + repr(joint_path) + ' lower=' + repr({lower}) + ' upper=' + repr({upper}))
+"""
+
+
+# ── 6. set_joint_velocity_limit (CODE_GEN) — T3.6 ───────────────────────────
+
+def _gen_set_joint_velocity_limit(args: Dict) -> str:
+    """Generate code to cap the joint's max velocity via PhysxJointAPI."""
+    joint_path = args["joint_path"]
+    vel_limit = float(args["vel_limit"])
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+joint_path = {joint_path!r}
+joint = stage.GetPrimAtPath(joint_path)
+if not joint or not joint.IsValid():
+    raise RuntimeError('joint not found: ' + repr(joint_path))
+rj = UsdPhysics.RevoluteJoint(joint)
+pj = UsdPhysics.PrismaticJoint(joint)
+if not (rj or pj):
+    raise RuntimeError('joint is not Revolute or Prismatic: ' + repr(joint_path))
+# Prefer PhysxSchema.PhysxJointAPI when available (Isaac Sim 5.x ships PhysxSchema).
+try:
+    from pxr import PhysxSchema
+    if not joint.HasAPI(PhysxSchema.PhysxJointAPI):
+        PhysxSchema.PhysxJointAPI.Apply(joint)
+    pjapi = PhysxSchema.PhysxJointAPI(joint)
+    attr = pjapi.GetMaxJointVelocityAttr() or pjapi.CreateMaxJointVelocityAttr()
+except Exception:
+    # Fallback: write the raw USD attribute used by PhysX 5.x.
+    attr = joint.GetAttribute('physxJoint:maxJointVelocity')
+    if not (attr and attr.IsDefined()):
+        attr = joint.CreateAttribute('physxJoint:maxJointVelocity', None)
+attr.Set({vel_limit})
+print('joint_velocity_limit ' + repr(joint_path) + ' vel_limit=' + repr({vel_limit}))
+"""
+
+
+# ── 7. get_articulation_mass (DATA) — T3.7 ──────────────────────────────────
+
+async def _handle_get_articulation_mass(args: Dict) -> Dict:
+    """Sum mass of every link in the articulation."""
+    articulation = args["articulation"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+art = stage.GetPrimAtPath({articulation!r})
+result = {{'articulation': {articulation!r}, 'units': 'kg'}}
+if not art or not art.IsValid():
+    result['error'] = 'articulation not found'
+else:
+    links = []
+    total = 0.0
+    for p in Usd.PrimRange(art):
+        if not p.HasAPI(UsdPhysics.RigidBodyAPI):
+            continue
+        m = 0.0
+        authored = False
+        if p.HasAPI(UsdPhysics.MassAPI):
+            mass_attr = UsdPhysics.MassAPI(p).GetMassAttr()
+            if mass_attr and mass_attr.HasAuthoredValue():
+                m = float(mass_attr.Get())
+                authored = True
+        links.append({{
+            'name': p.GetName(),
+            'path': str(p.GetPath()),
+            'mass': m,
+            'authored': authored,
+        }})
+        total += m
+    result['link_count'] = len(links)
+    result['total_mass'] = total
+    result['links'] = links
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_articulation_mass {articulation}")
+
+
+# ── 8. get_center_of_mass (DATA) — T3.8 ─────────────────────────────────────
+
+async def _handle_get_center_of_mass(args: Dict) -> Dict:
+    """Compute world-space mass-weighted center of mass of an articulation."""
+    articulation = args["articulation"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdGeom, UsdPhysics, Gf
+
+stage = omni.usd.get_context().get_stage()
+art = stage.GetPrimAtPath({articulation!r})
+result = {{'articulation': {articulation!r}, 'units': 'm'}}
+if not art or not art.IsValid():
+    result['error'] = 'articulation not found'
+else:
+    sum_x = sum_y = sum_z = 0.0
+    total_mass = 0.0
+    link_breakdown = []
+    for p in Usd.PrimRange(art):
+        if not p.HasAPI(UsdPhysics.RigidBodyAPI):
+            continue
+        m = 0.0
+        local_com = Gf.Vec3f(0.0, 0.0, 0.0)
+        if p.HasAPI(UsdPhysics.MassAPI):
+            mass_api = UsdPhysics.MassAPI(p)
+            mass_attr = mass_api.GetMassAttr()
+            if mass_attr and mass_attr.HasAuthoredValue():
+                m = float(mass_attr.Get())
+            com_attr = mass_api.GetCenterOfMassAttr()
+            if com_attr and com_attr.HasAuthoredValue():
+                v = com_attr.Get()
+                local_com = Gf.Vec3f(float(v[0]), float(v[1]), float(v[2]))
+        # Skip zero-mass links (PhysX auto-mass not yet computed)
+        if m <= 0.0:
+            continue
+        xf = UsdGeom.Xformable(p)
+        if not xf:
+            continue
+        mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+        world_com = mat.Transform(Gf.Vec3d(local_com[0], local_com[1], local_com[2]))
+        sum_x += m * world_com[0]
+        sum_y += m * world_com[1]
+        sum_z += m * world_com[2]
+        total_mass += m
+        link_breakdown.append({{
+            'name': p.GetName(),
+            'path': str(p.GetPath()),
+            'mass': m,
+            'world_com': [world_com[0], world_com[1], world_com[2]],
+        }})
+    if total_mass <= 0.0:
+        result['error'] = 'no mass-bearing links found (apply MassAPI to set mass)'
+        result['total_mass'] = 0.0
+        result['center_of_mass'] = None
+    else:
+        result['total_mass'] = total_mass
+        result['center_of_mass'] = [sum_x / total_mass, sum_y / total_mass, sum_z / total_mass]
+        result['link_breakdown'] = link_breakdown
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_center_of_mass {articulation}")
+
+
+# ── 9. get_gripper_state (DATA) — T3.9 ──────────────────────────────────────
+
+async def _handle_get_gripper_state(args: Dict) -> Dict:
+    """Report whether a gripper is open/closed plus current grip force."""
+    articulation = args["articulation"]
+    gripper_joints = list(args.get("gripper_joints") or [])
+    open_threshold = float(args.get("open_threshold", 0.6))
+    closed_threshold = float(args.get("closed_threshold", 0.1))
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+art = stage.GetPrimAtPath({articulation!r})
+gripper_names = list({gripper_joints!r})
+open_threshold = {open_threshold}
+closed_threshold = {closed_threshold}
+result = {{
+    'articulation': {articulation!r},
+    'gripper_joints': gripper_names,
+    'open_threshold': open_threshold,
+    'closed_threshold': closed_threshold,
+}}
+if not art or not art.IsValid():
+    result['error'] = 'articulation not found'
+elif not gripper_names:
+    result['error'] = 'gripper_joints must not be empty'
+else:
+    found = []
+    for p in Usd.PrimRange(art):
+        if p.GetName() in gripper_names:
+            found.append(p)
+    if not found:
+        result['error'] = 'none of the named gripper joints were found under the articulation'
+        result['joints'] = []
+    else:
+        joints = []
+        positions = []
+        torques = []
+        normalized = []
+        for p in found:
+            rj = UsdPhysics.RevoluteJoint(p)
+            pj = UsdPhysics.PrismaticJoint(p)
+            if not (rj or pj):
+                continue
+            jt = 'revolute' if rj else 'prismatic'
+            pos_attr = p.GetAttribute('state:angular:physics:position') if rj else p.GetAttribute('state:linear:physics:position')
+            if not (pos_attr and pos_attr.IsDefined()):
+                pos_attr = p.GetAttribute('physics:position')
+            pos = float(pos_attr.Get()) if (pos_attr and pos_attr.HasAuthoredValue()) else 0.0
+            lower_attr = p.GetAttribute('physics:lowerLimit')
+            upper_attr = p.GetAttribute('physics:upperLimit')
+            lower = float(lower_attr.Get()) if (lower_attr and lower_attr.HasAuthoredValue()) else 0.0
+            upper = float(upper_attr.Get()) if (upper_attr and upper_attr.HasAuthoredValue()) else 0.0
+            torque_attr = (
+                p.GetAttribute('state:angular:physics:appliedJointTorque') if rj
+                else p.GetAttribute('state:linear:physics:appliedJointForce')
+            )
+            torque = float(torque_attr.Get()) if (torque_attr and torque_attr.HasAuthoredValue()) else 0.0
+            span = upper - lower if upper > lower else 0.0
+            norm = (pos - lower) / span if span > 0.0 else 0.0
+            joints.append({{
+                'name': p.GetName(),
+                'path': str(p.GetPath()),
+                'type': jt,
+                'position': pos,
+                'lower_limit': lower,
+                'upper_limit': upper,
+                'normalized': norm,
+                'torque': torque,
+            }})
+            positions.append(pos)
+            torques.append(torque)
+            normalized.append(norm)
+        if not joints:
+            result['error'] = 'matched prims are not Revolute/Prismatic joints'
+        else:
+            avg_norm = sum(normalized) / len(normalized)
+            if avg_norm >= open_threshold:
+                state = 'open'
+            elif avg_norm <= closed_threshold:
+                state = 'closed'
+            else:
+                state = 'midway'
+            result['joints'] = joints
+            result['state'] = state
+            result['avg_normalized'] = avg_norm
+            result['force_estimate'] = sum(abs(t) for t in torques) / len(torques)
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_gripper_state {articulation}")
+
+
+# ── Register Tier 3 handlers ────────────────────────────────────────────────
+
+DATA_HANDLERS["get_joint_positions"] = _handle_get_joint_positions
+DATA_HANDLERS["get_joint_velocities"] = _handle_get_joint_velocities
+DATA_HANDLERS["get_joint_torques"] = _handle_get_joint_torques
+DATA_HANDLERS["get_drive_gains"] = _handle_get_drive_gains
+DATA_HANDLERS["get_articulation_mass"] = _handle_get_articulation_mass
+DATA_HANDLERS["get_center_of_mass"] = _handle_get_center_of_mass
+DATA_HANDLERS["get_gripper_state"] = _handle_get_gripper_state
+
+CODE_GEN_HANDLERS["set_joint_limits"] = _gen_set_joint_limits
+CODE_GEN_HANDLERS["set_joint_velocity_limit"] = _gen_set_joint_velocity_limit

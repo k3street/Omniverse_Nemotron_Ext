@@ -942,4 +942,144 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Tier 3 Atomic Tools — Articulation & Joints ─────────────────────────
+    # 9 atomic primitives (see docs/specs/atomic_tools_catalog.md, Tier 3).
+    # Six DATA handlers read live joint state (positions, velocities, torques,
+    # drive gains, total mass, CoM, gripper open/closed). Three CODE_GEN
+    # handlers mutate joint configuration (limits, max velocity). All built on
+    # UsdPhysics + PhysxSchema joint / drive / mass APIs.
+    {
+        "type": "function",
+        "function": {
+            "name": "get_joint_positions",
+            "description": "Return the current position of every joint in an articulation as a vector. Walks UsdPhysics.RevoluteJoint / PrismaticJoint children and reads physics:position from PhysxJointStateAPI when present, otherwise the joint's authored target. Use to verify the robot reached a commanded pose or to log demos.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation": {"type": "string", "description": "USD path to the articulation root, e.g. '/World/Franka'"},
+                },
+                "required": ["articulation"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_joint_velocities",
+            "description": "Return the current angular/linear velocity of every joint in an articulation. Reads physics:velocity from PhysxJointStateAPI on each joint. Units: rad/s for revolute, m/s for prismatic.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation": {"type": "string", "description": "USD path to the articulation root"},
+                },
+                "required": ["articulation"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_joint_torques",
+            "description": "Return the most recently applied actuator torque/force on every joint in an articulation. Reads PhysxJointStateAPI's appliedJointTorque (revolute) or appliedJointForce (prismatic). Use to detect saturation or unexpected torque spikes during RL rollouts.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation": {"type": "string", "description": "USD path to the articulation root"},
+                },
+                "required": ["articulation"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_drive_gains",
+            "description": "Read the current drive stiffness (kp) and damping (kd) on a joint via UsdPhysics.DriveAPI. Returns gains for both 'angular' and 'linear' drives if applied. Use BEFORE set_drive_gains to know what you are overwriting.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "joint_path": {"type": "string", "description": "USD path to the joint prim, e.g. '/World/Franka/panda_link0/panda_joint1'"},
+                    "drive_type": {"type": "string", "enum": ["angular", "linear", "auto"], "description": "Which drive token to inspect. 'auto' (default) tries both."},
+                },
+                "required": ["joint_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_joint_limits",
+            "description": "Modify a joint's position range by setting physics:lowerLimit and physics:upperLimit on UsdPhysics.RevoluteJoint or PrismaticJoint. Generates an approvable Python patch. Units: degrees for revolute, meters for prismatic.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "joint_path": {"type": "string", "description": "USD path to the joint prim"},
+                    "lower": {"type": "number", "description": "Lower limit (deg for revolute, m for prismatic)"},
+                    "upper": {"type": "number", "description": "Upper limit (deg for revolute, m for prismatic)"},
+                },
+                "required": ["joint_path", "lower", "upper"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_joint_velocity_limit",
+            "description": "Cap a joint's maximum velocity by setting physxJoint:maxJointVelocity (PhysxSchema.PhysxJointAPI). Generates an approvable Python patch. Units: deg/s for revolute, m/s for prismatic.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "joint_path": {"type": "string", "description": "USD path to the joint prim"},
+                    "vel_limit": {"type": "number", "description": "Max joint velocity (deg/s for revolute, m/s for prismatic)"},
+                },
+                "required": ["joint_path", "vel_limit"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_articulation_mass",
+            "description": "Sum the mass of every link in an articulation. Walks Usd.PrimRange under the articulation root and adds UsdPhysics.MassAPI(prim).GetMassAttr().Get() for each rigid body. Returns total kg plus a per-link breakdown.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation": {"type": "string", "description": "USD path to the articulation root"},
+                },
+                "required": ["articulation"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_center_of_mass",
+            "description": "Compute the world-space center-of-mass of an articulation. Mass-weighted average of each link's CoM (UsdPhysics.MassAPI center_of_mass transformed to world via ComputeLocalToWorldTransform). Returns [cx, cy, cz] plus total mass.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation": {"type": "string", "description": "USD path to the articulation root"},
+                },
+                "required": ["articulation"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_gripper_state",
+            "description": "Report whether a gripper is open or closed and the current grip force. Reads joint position + applied torque on the listed gripper joints, classifies vs joint limits (open/closed/midway), and returns the average commanded torque as 'force_estimate'. Use after issuing a grasp.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation": {"type": "string", "description": "USD path to the articulation root, e.g. '/World/Franka'"},
+                    "gripper_joints": {"type": "array", "items": {"type": "string"}, "description": "Names of the joints controlling the gripper, e.g. ['panda_finger_joint1', 'panda_finger_joint2']"},
+                    "open_threshold": {"type": "number", "description": "Fraction (0..1) of joint range above which the gripper is 'open'. Default: 0.6"},
+                    "closed_threshold": {"type": "number", "description": "Fraction (0..1) of joint range below which the gripper is 'closed'. Default: 0.1"},
+                },
+                "required": ["articulation", "gripper_joints"],
+            },
+        },
+    },
 ]
