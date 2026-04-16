@@ -942,4 +942,376 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Tier 15 — Viewport & UI ─────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "get_viewport_camera",
+            "description": (
+                "WHAT: Returns the USD prim path of the camera currently driving the active viewport "
+                "(via omni.kit.viewport.utility.get_active_viewport().camera_path). "
+                "WHEN: Use before set_viewport_camera to remember the previous camera, when the user asks "
+                "'which camera am I looking through?', or when an LLM tool needs to inspect the current "
+                "framing context (e.g. capture_viewport, vision_*) to reason about what the user sees. "
+                "RETURNS: {camera_path: str, viewport_id: str, resolution: [w, h]}. "
+                "CAVEATS: Read-only; does not switch cameras (use set_viewport_camera). Returns null camera_path "
+                "when the viewport is using its default freefly perspective camera that has no underlying USD prim."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_selected_prims",
+            "description": (
+                "WHAT: Returns the list of USD prim paths the user has currently selected in the viewport / "
+                "Stage panel (via omni.usd.get_context().get_selection().get_selected_prim_paths()). "
+                "WHEN: Use whenever the user refers to 'this prim', 'the selected object', 'these', or asks to "
+                "operate on their selection. Pair with apply_api_schema, set_attribute, teleport_prim, "
+                "highlight_prim, etc. to act on the user's intent without forcing them to type prim paths. "
+                "RETURNS: {selected_paths: [str], count: int, primary: str|null}. primary is the most recently "
+                "clicked prim (last in the list). "
+                "CAVEATS: Empty list when nothing is selected — handle this gracefully. Selection lives in the "
+                "viewport, not the stage, so it resets on stage open/reload."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "highlight_prim",
+            "description": (
+                "WHAT: Briefly flashes a prim in the viewport by drawing a colored bounding box / wire overlay "
+                "around it via omni.isaac.debug_draw (DebugDrawHelper.draw_lines + scheduled clear). "
+                "WHEN: Use to draw the user's attention to a specific prim — after creating something new, "
+                "when explaining what an OmniGraph node refers to, when surfacing collision/clearance violations, "
+                "or any time the LLM wants to say 'this one' visually. "
+                "ARGS: prim_path (USD path of prim to highlight); color (RGB list 0-1, default [1,1,0] yellow); "
+                "duration (seconds the highlight remains, default 2.0 — a future async task clears the lines). "
+                "RETURNS: code patch that draws the overlay, sent through approval queue. "
+                "CAVEATS: Requires omni.isaac.debug_draw extension loaded (always present in Isaac Sim). "
+                "If duration is very large the lines stay until the next stage reload."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path of the prim to highlight"},
+                    "color": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "RGB color [r, g, b] in 0-1 range. Default: [1.0, 1.0, 0.0] (yellow)",
+                    },
+                    "duration": {
+                        "type": "number",
+                        "description": "Seconds to keep the highlight visible. Default: 2.0",
+                    },
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "focus_viewport_on",
+            "description": (
+                "WHAT: Frames a prim in the active viewport — selects it and triggers the 'frame selection' "
+                "command (omni.kit.viewport.utility.frame_viewport_selection) so the camera dollies/zooms to "
+                "fit the prim's bounding box on screen. "
+                "WHEN: Use when the user says 'show me X', 'zoom to the robot', 'focus on /World/Cube', or when "
+                "a tool result references a prim the user can't currently see. Great companion to highlight_prim. "
+                "ARGS: prim_path (USD path of prim to frame). "
+                "RETURNS: code patch that performs selection + frame, sent through approval queue. "
+                "CAVEATS: Operates on the active viewport only. Has no effect if the prim has no computable "
+                "bounding box (e.g. an empty Xform with no children); user will see the camera not move."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path of the prim to frame in view"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+
+    # ─── Tier 16 — Scene Persistence ─────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "save_stage",
+            "description": (
+                "WHAT: Saves the current root USD stage to disk via omni.usd.get_context().save_as_stage(path) "
+                "(or save_stage() if the path matches the existing root layer). Writes .usd / .usda / .usdc "
+                "based on file extension. "
+                "WHEN: Use when the user says 'save', 'save as', 'write the scene out', or before any operation "
+                "the user wants persisted across Kit restarts. Always confirm path with the user first if "
+                "overwriting an existing file. "
+                "ARGS: path (absolute filesystem path including extension; .usd/.usda/.usdc or omniverse:// URL). "
+                "RETURNS: code patch that performs the save, sent through approval queue. "
+                "CAVEATS: Save is synchronous — large stages can block Kit briefly. Writing into omniverse:// "
+                "requires Nucleus auth. Does NOT flatten references — sublayers remain external."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Filesystem path (.usd/.usda/.usdc) or omniverse:// URL where the stage will be written.",
+                    },
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_stage",
+            "description": (
+                "WHAT: Loads a USD file from disk into Kit as the new root stage via "
+                "omni.usd.get_context().open_stage(path). Replaces the current stage. "
+                "WHEN: Use when the user says 'open', 'load the scene', 'switch to file X.usd', or wants to "
+                "resume from a saved snapshot. Warn the user that unsaved work in the current stage will be "
+                "discarded. "
+                "ARGS: path (absolute filesystem path or omniverse:// URL to .usd/.usda/.usdc/.usdz file). "
+                "RETURNS: code patch that performs the open, sent through approval queue. "
+                "CAVEATS: This DESTROYS the in-memory current stage. Pair with save_stage first if the user "
+                "has unsaved changes. Loading is asynchronous in Kit — subsequent tool calls may run against a "
+                "still-loading stage; allow a tick before querying."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Filesystem path or omniverse:// URL to a .usd / .usda / .usdc / .usdz file.",
+                    },
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "export_stage",
+            "description": (
+                "WHAT: Exports the current stage to a non-USD format (FBX / OBJ / GLB / GLTF) via the "
+                "omni.kit.tool.asset_exporter extension (ExportContext + export_asset). Useful for handing "
+                "geometry off to DCC tools (Blender, Maya, Unity, Unreal) or web viewers. "
+                "WHEN: Use when the user says 'export as fbx/obj/glb', 'send to Blender', 'I need a glTF for my "
+                "web app', or any cross-tool handoff. Use save_stage instead if the target is just another USD. "
+                "ARGS: path (absolute output filesystem path including extension); format (fbx/obj/glb/gltf — "
+                "must match extension). "
+                "RETURNS: code patch that performs the export, sent through approval queue. "
+                "CAVEATS: Requires omni.kit.tool.asset_exporter extension loaded (use enable_extension if not). "
+                "FBX/OBJ lose USD-specific data (variants, layers, references). GLB/GLTF preserve PBR materials "
+                "but skin/skeleton support depends on the exporter version."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Output filesystem path including extension."},
+                    "format": {
+                        "type": "string",
+                        "enum": ["fbx", "obj", "glb", "gltf"],
+                        "description": "Output format. Must match the file extension in path.",
+                    },
+                },
+                "required": ["path", "format"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_opened_stages",
+            "description": (
+                "WHAT: Lists every USD stage Kit currently has open across all UsdContext instances "
+                "(via omni.usd.get_context_names() + each context's get_stage_url()). Kit can hold "
+                "multiple parallel stages — main scene, preview, library — this returns all of them. "
+                "WHEN: Use when the user asks 'what scenes are loaded?', 'switch to the other stage', or before "
+                "calling save_stage / open_stage to confirm which context will be affected. "
+                "RETURNS: {stages: [{context_name: str, stage_url: str|null, prim_count: int, is_dirty: bool}], "
+                "active_context: str}. "
+                "CAVEATS: Most workflows only use the default '' context (single stage). Stage URL is null for "
+                "in-memory stages that have never been saved. is_dirty indicates unsaved changes."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+
+    # ─── Tier 17 — Extension Management ──────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "list_extensions",
+            "description": (
+                "WHAT: Returns every Kit extension currently registered with the extension manager "
+                "(omni.kit.app.get_app().get_extension_manager().get_extensions()), including ID, version, "
+                "and enabled state. "
+                "WHEN: Use when the user asks 'is X loaded?', 'what version of replicator do I have?', when "
+                "diagnosing 'module not found' errors, or before recommending tools that depend on optional "
+                "extensions (asset_exporter, isaac_lab, ros2_bridge, etc.). "
+                "ARGS: enabled_only (bool, default false — when true, only return currently enabled extensions); "
+                "name_filter (optional substring to match against extension IDs, e.g. 'isaac', 'ros2'). "
+                "RETURNS: {extensions: [{id: str, version: str, enabled: bool, title: str}], total: int}. "
+                "CAVEATS: 'Registered' != 'Loaded' — the manager knows about hundreds of extensions but only "
+                "actually loads those marked enabled. Use enable_extension to activate a registered-but-disabled one."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "enabled_only": {
+                        "type": "boolean",
+                        "description": "If true, return only currently enabled extensions. Default: false",
+                    },
+                    "name_filter": {
+                        "type": "string",
+                        "description": "Optional case-insensitive substring filter on extension IDs.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "enable_extension",
+            "description": (
+                "WHAT: Enables a Kit extension at runtime via "
+                "omni.kit.app.get_app().get_extension_manager().set_extension_enabled_immediate(ext_id, True). "
+                "Loads the extension's Python modules and runs its on_startup hook. "
+                "WHEN: Use when a tool fails because an optional subsystem isn't loaded (e.g. enable "
+                "'omni.kit.tool.asset_exporter' before export_stage; 'omni.replicator.core' before configure_sdg; "
+                "'omni.isaac.ros2_bridge' before ROS2 OmniGraph nodes). Discover IDs with list_extensions. "
+                "ARGS: ext_id (full extension identifier as shown in list_extensions, e.g. "
+                "'omni.kit.tool.asset_exporter'). "
+                "RETURNS: code patch that performs the enable, sent through approval queue. "
+                "CAVEATS: Some extensions take seconds to load. If the extension is already enabled this is a "
+                "no-op. Enabling a broken/missing extension surfaces an error in the next get_console_errors call."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ext_id": {
+                        "type": "string",
+                        "description": "Full extension ID, e.g. 'omni.kit.tool.asset_exporter', 'omni.replicator.core'.",
+                    },
+                },
+                "required": ["ext_id"],
+            },
+        },
+    },
+
+    # ─── Tier 18 — Audio ─────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "create_audio_prim",
+            "description": (
+                "WHAT: Creates a UsdMedia.SpatialAudio prim at a world-space position pointing at a sound file. "
+                "Spatial audio attenuates with distance from the listener (active camera) and supports HRTF / "
+                "stereo panning, enabling positional sound effects (machine hums, voice cues, etc.). "
+                "WHEN: Use when the user says 'add a sound at...', 'put a beep on the robot', 'play this wav "
+                "from the conveyor', or whenever the scene needs immersive 3D audio. "
+                "ARGS: position (world XYZ [x, y, z] for the audio source); audio_file (filesystem path or "
+                "omniverse:// URL to .wav / .mp3 / .ogg); prim_path (optional USD path, default "
+                "'/World/Audio_<n>'); start_time (optional seconds offset, default 0); auto_play (optional bool, "
+                "default true). "
+                "RETURNS: code patch that defines the SpatialAudio prim and sets its asset path / translate ops, "
+                "sent through approval queue. "
+                "CAVEATS: Requires Kit's audio extension (omni.audioplayer or omni.usd.audio) loaded. Some Kit "
+                "builds disable spatial audio by default — use enable_extension('omni.audioplayer') first."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "position": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "World-space XYZ position of the audio source [x, y, z].",
+                    },
+                    "audio_file": {
+                        "type": "string",
+                        "description": "Filesystem path or omniverse:// URL to .wav / .mp3 / .ogg sound file.",
+                    },
+                    "prim_path": {
+                        "type": "string",
+                        "description": "USD path for the new audio prim. Default: '/World/Audio_<index>'.",
+                    },
+                    "start_time": {
+                        "type": "number",
+                        "description": "Seconds offset into the audio file at which to begin playback. Default: 0.0",
+                    },
+                    "auto_play": {
+                        "type": "boolean",
+                        "description": "If true, start playing as soon as the timeline plays. Default: true",
+                    },
+                },
+                "required": ["position", "audio_file"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_audio_property",
+            "description": (
+                "WHAT: Sets one playback property on an existing SpatialAudio prim — gain (volume in dB), "
+                "pitch (playback rate multiplier), or attenuation parameters (start/end distance for the "
+                "distance roll-off curve). Maps friendly names to the underlying UsdMedia.SpatialAudio attrs. "
+                "WHEN: Use when the user says 'turn the sound down', 'make it quieter', 'pitch it up an octave', "
+                "'this should fade out beyond 5m', or any other tweak to an existing audio prim from "
+                "create_audio_prim. "
+                "ARGS: prim_path (USD path to a SpatialAudio prim); prop (one of 'volume' / 'gain' / 'pitch' / "
+                "'attenuation_start' / 'attenuation_end' / 'auto_play' / 'start_time'); value (number for "
+                "numeric props, bool for auto_play). "
+                "RETURNS: code patch that sets the corresponding USD attribute, sent through approval queue. "
+                "CAVEATS: 'volume' and 'gain' both map to the gain attribute (decibels — 0 = unchanged, "
+                "negative = quieter, positive = louder). Pitch is a multiplier (1.0 = unchanged, 2.0 = +octave). "
+                "Attenuation distances are in stage units (typically meters). Unknown prop names are rejected."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to an existing SpatialAudio prim."},
+                    "prop": {
+                        "type": "string",
+                        "enum": [
+                            "volume",
+                            "gain",
+                            "pitch",
+                            "attenuation_start",
+                            "attenuation_end",
+                            "auto_play",
+                            "start_time",
+                        ],
+                        "description": "Property name to set.",
+                    },
+                    "value": {
+                        "description": "New value — number for volume/gain/pitch/attenuation/start_time, bool for auto_play.",
+                    },
+                },
+                "required": ["prim_path", "prop", "value"],
+            },
+        },
+    },
 ]

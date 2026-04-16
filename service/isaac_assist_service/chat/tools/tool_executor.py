@@ -2242,3 +2242,455 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Tier 15 — Viewport & UI ──────────────────────────────────────────────────
+
+async def _handle_get_viewport_camera(args: Dict) -> Dict:
+    """Return the active viewport's current camera path and resolution."""
+    code = """\
+import json
+import omni.kit.viewport.utility as _vpu
+
+vp_api = _vpu.get_active_viewport()
+cam_path = None
+viewport_id = ""
+res = [0, 0]
+if vp_api is not None:
+    try:
+        cam_path = str(vp_api.camera_path) if vp_api.camera_path else None
+    except Exception:
+        cam_path = None
+    try:
+        viewport_id = getattr(vp_api, "id", "") or ""
+    except Exception:
+        viewport_id = ""
+    try:
+        res = list(vp_api.resolution)
+    except Exception:
+        res = [0, 0]
+print(json.dumps({"camera_path": cam_path, "viewport_id": viewport_id, "resolution": res}))
+"""
+    return await kit_tools.queue_exec_patch(code, "Read active viewport camera")
+
+
+async def _handle_get_selected_prims(args: Dict) -> Dict:
+    """Return the user's current selection in the viewport / Stage panel."""
+    code = """\
+import json
+import omni.usd
+
+ctx = omni.usd.get_context()
+sel = ctx.get_selection()
+paths = list(sel.get_selected_prim_paths()) if sel is not None else []
+primary = paths[-1] if paths else None
+print(json.dumps({"selected_paths": paths, "count": len(paths), "primary": primary}))
+"""
+    return await kit_tools.queue_exec_patch(code, "Read user selection")
+
+
+def _gen_highlight_prim(args: Dict) -> str:
+    prim_path = args["prim_path"]
+    color = args.get("color", [1.0, 1.0, 0.0])
+    duration = float(args.get("duration", 2.0))
+    if len(color) < 3:
+        color = list(color) + [0.0] * (3 - len(color))
+    r, g, b = color[0], color[1], color[2]
+    return f"""\
+import asyncio
+import omni.usd
+import omni.kit.app
+from pxr import UsdGeom, Gf
+
+try:
+    from omni.isaac.debug_draw import _debug_draw
+    _draw = _debug_draw.acquire_debug_draw_interface()
+except Exception:
+    _draw = None
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath('{prim_path}')
+if not prim or not prim.IsValid():
+    print("highlight_prim: prim not found at '{prim_path}'")
+else:
+    bbox_cache = UsdGeom.BBoxCache(0, includedPurposes=[UsdGeom.Tokens.default_])
+    bbox = bbox_cache.ComputeWorldBound(prim).ComputeAlignedRange()
+    mn = bbox.GetMin()
+    mx = bbox.GetMax()
+    corners = [
+        Gf.Vec3d(mn[0], mn[1], mn[2]),
+        Gf.Vec3d(mx[0], mn[1], mn[2]),
+        Gf.Vec3d(mx[0], mx[1], mn[2]),
+        Gf.Vec3d(mn[0], mx[1], mn[2]),
+        Gf.Vec3d(mn[0], mn[1], mx[2]),
+        Gf.Vec3d(mx[0], mn[1], mx[2]),
+        Gf.Vec3d(mx[0], mx[1], mx[2]),
+        Gf.Vec3d(mn[0], mx[1], mx[2]),
+    ]
+    edges = [
+        (0, 1), (1, 2), (2, 3), (3, 0),
+        (4, 5), (5, 6), (6, 7), (7, 4),
+        (0, 4), (1, 5), (2, 6), (3, 7),
+    ]
+    starts = [corners[a] for a, _ in edges]
+    ends = [corners[b] for _, b in edges]
+    color = ({r}, {g}, {b}, 1.0)
+    colors = [color] * len(edges)
+    sizes = [3] * len(edges)
+    if _draw is not None:
+        _draw.draw_lines(starts, ends, colors, sizes)
+
+        async def _clear_after():
+            await asyncio.sleep({duration})
+            try:
+                _draw.clear_lines()
+            except Exception:
+                pass
+
+        asyncio.ensure_future(_clear_after())
+        print(f"highlight_prim: drew {{len(edges)}} edges around '{prim_path}', clear in {duration}s")
+    else:
+        print("highlight_prim: omni.isaac.debug_draw unavailable — no overlay drawn")
+"""
+
+
+def _gen_focus_viewport_on(args: Dict) -> str:
+    prim_path = args["prim_path"]
+    return f"""\
+import omni.usd
+import omni.kit.commands
+
+ctx = omni.usd.get_context()
+stage = ctx.get_stage()
+prim = stage.GetPrimAtPath('{prim_path}')
+if not prim or not prim.IsValid():
+    print("focus_viewport_on: prim not found at '{prim_path}'")
+else:
+    ctx.get_selection().set_selected_prim_paths(['{prim_path}'], True)
+    try:
+        import omni.kit.viewport.utility as _vpu
+        vp_api = _vpu.get_active_viewport()
+        try:
+            _vpu.frame_viewport_selection(vp_api)
+        except Exception:
+            omni.kit.commands.execute('FramePrimsCommand', prim_to_move=[], prims_to_frame=['{prim_path}'])
+        print("focus_viewport_on: framed '{prim_path}'")
+    except Exception as e:
+        print(f"focus_viewport_on: viewport framing failed: {{e}}")
+"""
+
+
+CODE_GEN_HANDLERS["highlight_prim"] = _gen_highlight_prim
+CODE_GEN_HANDLERS["focus_viewport_on"] = _gen_focus_viewport_on
+DATA_HANDLERS["get_viewport_camera"] = _handle_get_viewport_camera
+DATA_HANDLERS["get_selected_prims"] = _handle_get_selected_prims
+
+
+# ── Tier 16 — Scene Persistence ──────────────────────────────────────────────
+
+def _gen_save_stage(args: Dict) -> str:
+    path = args["path"]
+    return f"""\
+import omni.usd
+
+ctx = omni.usd.get_context()
+target = {repr(path)}
+current = ctx.get_stage_url() or ""
+try:
+    if current and current == target:
+        result = ctx.save_stage()
+    else:
+        result = ctx.save_as_stage(target)
+    print(f"save_stage: wrote {{target}} (result={{result}})")
+except Exception as e:
+    print(f"save_stage: failed to write {{target}}: {{e}}")
+"""
+
+
+def _gen_open_stage(args: Dict) -> str:
+    path = args["path"]
+    return f"""\
+import omni.usd
+
+ctx = omni.usd.get_context()
+target = {repr(path)}
+try:
+    ok = ctx.open_stage(target)
+    print(f"open_stage: opened {{target}} (ok={{ok}})")
+except Exception as e:
+    print(f"open_stage: failed to open {{target}}: {{e}}")
+"""
+
+
+def _gen_export_stage(args: Dict) -> str:
+    path = args["path"]
+    fmt = args["format"].lower()
+    return f"""\
+import asyncio
+import omni.kit.app
+
+target = {repr(path)}
+fmt = {repr(fmt)}
+
+async def _do_export():
+    try:
+        ext_mgr = omni.kit.app.get_app().get_extension_manager()
+        ext_id = "omni.kit.tool.asset_exporter"
+        if not ext_mgr.is_extension_enabled(ext_id):
+            ext_mgr.set_extension_enabled_immediate(ext_id, True)
+        from omni.kit.tool.asset_exporter import ExportContext, export_asset
+        ec = ExportContext()
+        ec.export_path = target
+        ec.export_format = fmt
+        result = await export_asset(ec)
+        print(f"export_stage: wrote {{target}} as {{fmt}} (result={{result}})")
+    except Exception as e:
+        print(f"export_stage: failed for {{target}} ({{fmt}}): {{e}}")
+
+asyncio.ensure_future(_do_export())
+"""
+
+
+async def _handle_list_opened_stages(args: Dict) -> Dict:
+    """List all UsdContexts and the stage URL each holds."""
+    code = """\
+import json
+import omni.usd
+
+ctx_names = []
+try:
+    ctx_names = list(omni.usd.get_context_names())
+except Exception:
+    ctx_names = [""]
+if not ctx_names:
+    ctx_names = [""]
+
+stages = []
+active_ctx = ""
+for name in ctx_names:
+    try:
+        c = omni.usd.get_context(name)
+        if c is None:
+            continue
+        url = c.get_stage_url() or None
+        stage = c.get_stage()
+        prim_count = 0
+        if stage is not None:
+            prim_count = sum(1 for _ in stage.Traverse())
+        is_dirty = False
+        try:
+            is_dirty = bool(c.has_pending_edit())
+        except Exception:
+            is_dirty = False
+        stages.append({
+            "context_name": name,
+            "stage_url": url,
+            "prim_count": prim_count,
+            "is_dirty": is_dirty,
+        })
+        if not active_ctx:
+            active_ctx = name
+    except Exception:
+        continue
+print(json.dumps({"stages": stages, "active_context": active_ctx}))
+"""
+    return await kit_tools.queue_exec_patch(code, "List opened USD stages")
+
+
+CODE_GEN_HANDLERS["save_stage"] = _gen_save_stage
+CODE_GEN_HANDLERS["open_stage"] = _gen_open_stage
+CODE_GEN_HANDLERS["export_stage"] = _gen_export_stage
+DATA_HANDLERS["list_opened_stages"] = _handle_list_opened_stages
+
+
+# ── Tier 17 — Extension Management ───────────────────────────────────────────
+
+async def _handle_list_extensions(args: Dict) -> Dict:
+    """List Kit extensions registered with the extension manager."""
+    enabled_only = bool(args.get("enabled_only", False))
+    name_filter = args.get("name_filter") or ""
+    code = f"""\
+import json
+import omni.kit.app
+
+mgr = omni.kit.app.get_app().get_extension_manager()
+exts = list(mgr.get_extensions())
+enabled_only = {repr(enabled_only)}
+nf = {repr(name_filter)}.lower()
+
+out = []
+for ext in exts:
+    try:
+        ext_id = ext.get("id") or ext.get("name") or ""
+        version = ext.get("version") or ""
+        enabled = bool(ext.get("enabled", False))
+        title = ext.get("title") or ext.get("name") or ext_id
+    except AttributeError:
+        ext_id = getattr(ext, "id", "") or ""
+        version = getattr(ext, "version", "") or ""
+        enabled = bool(getattr(ext, "enabled", False))
+        title = getattr(ext, "title", "") or ext_id
+    if enabled_only and not enabled:
+        continue
+    if nf and nf not in str(ext_id).lower():
+        continue
+    out.append({{
+        "id": str(ext_id),
+        "version": str(version),
+        "enabled": enabled,
+        "title": str(title),
+    }})
+
+print(json.dumps({{"extensions": out, "total": len(out)}}))
+"""
+    return await kit_tools.queue_exec_patch(code, "List Kit extensions")
+
+
+def _gen_enable_extension(args: Dict) -> str:
+    ext_id = args["ext_id"]
+    return f"""\
+import omni.kit.app
+
+mgr = omni.kit.app.get_app().get_extension_manager()
+ext_id = {repr(ext_id)}
+try:
+    if mgr.is_extension_enabled(ext_id):
+        print(f"enable_extension: '{{ext_id}}' already enabled")
+    else:
+        ok = mgr.set_extension_enabled_immediate(ext_id, True)
+        print(f"enable_extension: '{{ext_id}}' set_enabled returned {{ok}}")
+except Exception as e:
+    print(f"enable_extension: failed for '{{ext_id}}': {{e}}")
+"""
+
+
+CODE_GEN_HANDLERS["enable_extension"] = _gen_enable_extension
+DATA_HANDLERS["list_extensions"] = _handle_list_extensions
+
+
+# ── Tier 18 — Audio ──────────────────────────────────────────────────────────
+
+def _gen_create_audio_prim(args: Dict) -> str:
+    pos = args["position"]
+    audio_file = args["audio_file"]
+    prim_path = args.get("prim_path", "")
+    start_time = float(args.get("start_time", 0.0))
+    auto_play = bool(args.get("auto_play", True))
+    if len(pos) < 3:
+        pos = list(pos) + [0.0] * (3 - len(pos))
+    px, py, pz = pos[0], pos[1], pos[2]
+    return f"""\
+import omni.usd
+from pxr import UsdGeom, UsdMedia, Sdf, Gf
+{_SAFE_XFORM_SNIPPET}
+stage = omni.usd.get_context().get_stage()
+
+# Pick a unique path under /World/Audio_<n> if none provided
+desired = {repr(prim_path)}
+if not desired:
+    n = 0
+    while True:
+        candidate = f"/World/Audio_{{n}}"
+        if not stage.GetPrimAtPath(candidate).IsValid():
+            desired = candidate
+            break
+        n += 1
+
+audio = UsdMedia.SpatialAudio.Define(stage, Sdf.Path(desired))
+prim = audio.GetPrim()
+_safe_set_translate(prim, ({px}, {py}, {pz}))
+
+# Set the audio asset path
+try:
+    audio.CreateFilePathAttr().Set(Sdf.AssetPath({repr(audio_file)}))
+except Exception:
+    attr = prim.CreateAttribute("filePath", Sdf.ValueTypeNames.Asset)
+    attr.Set(Sdf.AssetPath({repr(audio_file)}))
+
+# Optional playback hints
+try:
+    audio.CreateStartTimeAttr().Set({start_time})
+except Exception:
+    prim.CreateAttribute("startTime", Sdf.ValueTypeNames.Double).Set({start_time})
+try:
+    audio.CreateAuralModeAttr().Set(UsdMedia.Tokens.spatial)
+except Exception:
+    pass
+try:
+    audio.CreatePlaybackModeAttr().Set(
+        UsdMedia.Tokens.onceFromStart if {auto_play} else UsdMedia.Tokens.noPlayback
+    )
+except Exception:
+    prim.CreateAttribute("auto_play", Sdf.ValueTypeNames.Bool).Set({auto_play})
+
+print(f"create_audio_prim: defined SpatialAudio at {{desired}} -> {audio_file}")
+"""
+
+
+def _gen_set_audio_property(args: Dict) -> str:
+    prim_path = args["prim_path"]
+    prop = args["prop"]
+    value = args["value"]
+    # Map the friendly prop name to the SpatialAudio attr
+    PROP_MAP = {
+        "volume": "gain",
+        "gain": "gain",
+        "pitch": "pitch",
+        "attenuation_start": "startTime",  # not a real attenuation attr in UsdMedia, mapped numerically
+        "attenuation_end": "endTime",
+        "auto_play": "auto_play",
+        "start_time": "startTime",
+    }
+    if prop not in PROP_MAP:
+        return f"# set_audio_property: unknown prop '{prop}'"
+    attr_name = PROP_MAP[prop]
+    return f"""\
+import omni.usd
+from pxr import UsdMedia, Sdf
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({repr(prim_path)})
+if not prim or not prim.IsValid():
+    print("set_audio_property: prim not found at {prim_path}")
+else:
+    audio = UsdMedia.SpatialAudio(prim)
+    prop_name = {repr(prop)}
+    attr_name = {repr(attr_name)}
+    value = {repr(value)}
+    try:
+        if prop_name in ("volume", "gain"):
+            try:
+                audio.CreateGainAttr().Set(float(value))
+            except Exception:
+                prim.CreateAttribute("gain", Sdf.ValueTypeNames.Double).Set(float(value))
+        elif prop_name == "pitch":
+            try:
+                audio.CreatePitchAttr().Set(float(value))
+            except Exception:
+                prim.CreateAttribute("pitch", Sdf.ValueTypeNames.Double).Set(float(value))
+        elif prop_name == "auto_play":
+            try:
+                mode = UsdMedia.Tokens.onceFromStart if bool(value) else UsdMedia.Tokens.noPlayback
+                audio.CreatePlaybackModeAttr().Set(mode)
+            except Exception:
+                prim.CreateAttribute("auto_play", Sdf.ValueTypeNames.Bool).Set(bool(value))
+        elif prop_name == "start_time":
+            try:
+                audio.CreateStartTimeAttr().Set(float(value))
+            except Exception:
+                prim.CreateAttribute("startTime", Sdf.ValueTypeNames.Double).Set(float(value))
+        elif prop_name == "attenuation_end":
+            try:
+                audio.CreateEndTimeAttr().Set(float(value))
+            except Exception:
+                prim.CreateAttribute("endTime", Sdf.ValueTypeNames.Double).Set(float(value))
+        elif prop_name == "attenuation_start":
+            prim.CreateAttribute("attenuationStart", Sdf.ValueTypeNames.Double).Set(float(value))
+        print(f"set_audio_property: {{prop_name}} -> {{value}} on {prim_path}")
+    except Exception as e:
+        print(f"set_audio_property: failed to set {{prop_name}}: {{e}}")
+"""
+
+
+CODE_GEN_HANDLERS["create_audio_prim"] = _gen_create_audio_prim
+CODE_GEN_HANDLERS["set_audio_property"] = _gen_set_audio_property
