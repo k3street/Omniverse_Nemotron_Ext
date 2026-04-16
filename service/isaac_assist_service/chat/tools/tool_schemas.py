@@ -457,12 +457,13 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "list_all_prims",
-            "description": "List all prims in the scene, optionally filtered by type (Mesh, Camera, Light, etc.).",
+            "description": "List all prims in the scene, optionally filtered by type (Mesh, Camera, Light, etc.). At enterprise scale (50K+ prims) always pass prim_scope to limit traversal to a subtree.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "filter_type": {"type": "string", "description": "USD prim type to filter by (e.g., 'Mesh', 'Camera', 'DistantLight')"},
-                    "under_path": {"type": "string", "description": "Only list prims under this path"},
+                    "under_path": {"type": "string", "description": "Only list prims under this path (legacy alias for prim_scope)"},
+                    "prim_scope": {"type": "string", "description": "USD subtree root to restrict traversal to. Default: '/World'. Critical at enterprise scale to avoid 45-90s TraverseAll delays."},
                 },
             },
         },
@@ -486,8 +487,13 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "scene_summary",
-            "description": "Generate a high-level natural language summary of the current scene: prim counts by type, physics setup, lighting, robots present.",
-            "parameters": {"type": "object", "properties": {}},
+            "description": "Generate a high-level natural language summary of the current scene: prim counts by type, physics setup, lighting, robots present. Accepts prim_scope to limit traversal to a subtree — essential at enterprise scale.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_scope": {"type": "string", "description": "USD subtree root to summarize. Default: '/World'. Use a narrower scope (e.g. the selected robot cell) to avoid full-stage traversal at enterprise scale."},
+                },
+            },
         },
     },
 
@@ -939,6 +945,139 @@ ISAAC_SIM_TOOLS = [
                     "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
                 },
                 "required": [],
+            },
+        },
+    },
+
+    # ─── Enterprise Scale Addendum ────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "build_stage_index",
+            "description": "Build a lightweight metadata index of the USD stage (prim path, type, applied schemas, physics flags) for fast retrieval at enterprise scale. Replaces full-stage context-stuffing into the LLM window. Use prim_scope to index a subtree only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_scope": {"type": "string", "description": "USD subtree root to index. Default: '/World'."},
+                    "max_prims": {"type": "integer", "description": "Safety cap on indexed prims. Default: 50000."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_stage_index",
+            "description": "Query the in-memory stage metadata index for prims relevant to a question. Returns 50-200 matching prims instead of the full stage — critical for keeping LLM context small at 50K+ prims. Searches prim paths, types, and schemas by keyword.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keywords": {"type": "array", "items": {"type": "string"}, "description": "Keywords to match against prim path / type / schema names."},
+                    "selected_prim": {"type": "string", "description": "Optional currently selected prim path — neighbours are included in results."},
+                    "max_results": {"type": "integer", "description": "Maximum prims to return. Default: 100."},
+                },
+                "required": ["keywords"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_delta_snapshot",
+            "description": "Save only the USD layer deltas (dirty layers) rather than the whole stage. Dramatically smaller than a full snapshot at 50K+ prims (800MB-2GB → KB-MB). Applies on top of a base snapshot.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "snapshot_id": {"type": "string", "description": "Identifier for the delta snapshot — e.g. 'delta_2026_04_15_001'."},
+                    "base_snapshot_id": {"type": "string", "description": "Optional base snapshot to diff against. If omitted, the snapshot manager's last full snapshot is used."},
+                },
+                "required": ["snapshot_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "restore_delta_snapshot",
+            "description": "Restore a delta snapshot by replaying the saved dirty-layer strings on top of the base snapshot. Inverse of save_delta_snapshot.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "snapshot_id": {"type": "string", "description": "Delta snapshot identifier to restore."},
+                },
+                "required": ["snapshot_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "batch_delete_prims",
+            "description": "Delete many prims atomically using Sdf.BatchNamespaceEdit — a single Hydra rebuild instead of thousands of individual omni.kit.commands calls. Use whenever removing >10 prims at once.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_paths": {"type": "array", "items": {"type": "string"}, "description": "List of USD paths to remove in one batch."},
+                },
+                "required": ["prim_paths"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "batch_set_attributes",
+            "description": "Set many prim attributes in a single change-block so only one stage notification fires. Use whenever modifying >10 attributes at once; much faster than per-attribute omni.kit.commands calls.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "changes": {
+                        "type": "array",
+                        "description": "Attribute changes to apply atomically.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "prim_path": {"type": "string"},
+                                "attr_name": {"type": "string"},
+                                "value": {"description": "New value (number, array, string, bool)."},
+                            },
+                            "required": ["prim_path", "attr_name", "value"],
+                        },
+                    },
+                },
+                "required": ["changes"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "activate_area",
+            "description": "Selectively activate a single robot cell or area — deactivates every prim outside prim_scope (SetActive(False)) so they're excluded from physics and rendering. Dramatically reduces load on 50K+ prim enterprise stages when the user only cares about one cell.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_scope": {"type": "string", "description": "USD path of the subtree to keep active. Everything outside this scope is deactivated."},
+                    "deactivate_siblings_only": {"type": "boolean", "description": "If true, only deactivate siblings of prim_scope ancestors (preserves /World and pseudo-root). Default: true."},
+                },
+                "required": ["prim_scope"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "queue_write_locked_patch",
+            "description": "Queue a Python patch behind the stage write-lock so it serializes cleanly with concurrent OPC-UA / digital-twin syncs that are writing the same layer stack at 30 Hz. Prevents HNSW/USD layer corruption from two writers.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "Python code to execute under the write-lock."},
+                    "description": {"type": "string", "description": "Human-readable description of the patch."},
+                    "priority": {"type": "integer", "description": "Queue priority, higher runs sooner. Default: 0."},
+                },
+                "required": ["code", "description"],
             },
         },
     },

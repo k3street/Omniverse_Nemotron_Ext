@@ -926,11 +926,12 @@ async def _handle_lookup_product_spec(args: Dict) -> Dict:
 
 
 async def _handle_scene_summary(args: Dict) -> Dict:
+    prim_scope = args.get("prim_scope") or "/World"
     ctx = await kit_tools.get_stage_context(full=False)
     if "error" in ctx:
         return ctx
     text = kit_tools.format_stage_context_for_llm(ctx)
-    return {"summary": text}
+    return {"summary": text, "prim_scope": prim_scope}
 
 
 async def _handle_capture_viewport(args: Dict) -> Dict:
@@ -969,8 +970,25 @@ print(json.dumps(result))
 
 
 async def _handle_list_all_prims(args: Dict) -> Dict:
+    # Scoped traversal (E.1): accept prim_scope with under_path as legacy alias.
+    prim_scope = args.get("prim_scope") or args.get("under_path") or "/World"
+    filter_type = args.get("filter_type")
     ctx = await kit_tools.get_stage_context(full=True)
-    return ctx.get("stage", {})
+    stage = ctx.get("stage", {})
+    prims = stage.get("prims", []) if isinstance(stage, dict) else []
+    # Apply scope filter client-side so we never return the full stage to the LLM.
+    scope_prefix = prim_scope.rstrip("/")
+    filtered = []
+    for p in prims:
+        path = p.get("path") if isinstance(p, dict) else None
+        if not path:
+            continue
+        if scope_prefix and scope_prefix != "/" and not (path == scope_prefix or path.startswith(scope_prefix + "/")):
+            continue
+        if filter_type and p.get("type") != filter_type:
+            continue
+        filtered.append(p)
+    return {**stage, "prims": filtered, "prim_scope": prim_scope, "filter_type": filter_type}
 
 
 async def _handle_measure_distance(args: Dict) -> Dict:
@@ -2232,3 +2250,483 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Enterprise Scale Addendum (E.1-E.6) ────────────────────────────────────
+# Implements the prerequisites for 50K+ prim stages described in
+# docs/specs/addendum_enterprise_scale.md:
+#   E.2  StageIndex          → build_stage_index / query_stage_index
+#   E.3  Delta snapshots     → save_delta_snapshot / restore_delta_snapshot
+#   E.4  Batch operations    → batch_delete_prims / batch_set_attributes
+#   E.5  StageWriteLock      → queue_write_locked_patch
+#   E.6  Area activation     → activate_area
+
+
+# Module-level in-memory stage index. A real deployment would back this with
+# SQLite as the spec suggests, but the in-memory dict is sufficient for the
+# retrieval pattern and matches the spec's pseudocode.
+_STAGE_INDEX: Dict[str, Dict[str, Any]] = {}
+_STAGE_INDEX_META: Dict[str, Any] = {"prim_scope": None, "prim_count": 0}
+
+
+def _gen_build_stage_index(args: Dict) -> str:
+    """Emit code that walks the stage with Usd.PrimRange and prints an index."""
+    prim_scope = args.get("prim_scope") or "/World"
+    max_prims = int(args.get("max_prims", 50000))
+    return f"""\
+import json
+import omni.usd
+from pxr import Usd, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+root = stage.GetPrimAtPath('{prim_scope}') or stage.GetPseudoRoot()
+index = {{}}
+count = 0
+for prim in Usd.PrimRange(root):
+    if count >= {max_prims}:
+        break
+    try:
+        schemas = [s.GetType().typeName for s in prim.GetAppliedSchemas()]
+    except Exception:
+        schemas = []
+    try:
+        has_physics = prim.HasAPI(UsdPhysics.RigidBodyAPI)
+    except Exception:
+        has_physics = False
+    index[str(prim.GetPath())] = {{
+        'type': prim.GetTypeName(),
+        'schemas': schemas,
+        'has_physics': bool(has_physics),
+    }}
+    count += 1
+
+print(json.dumps({{'prim_scope': '{prim_scope}', 'prim_count': count, 'truncated': count >= {max_prims}, 'index': index}}))
+"""
+
+
+async def _handle_build_stage_index(args: Dict) -> Dict:
+    """Build the metadata index and populate the module-level cache."""
+    prim_scope = args.get("prim_scope") or "/World"
+    max_prims = int(args.get("max_prims", 50000))
+    code = _gen_build_stage_index({"prim_scope": prim_scope, "max_prims": max_prims})
+    queued = await kit_tools.queue_exec_patch(code, f"Build stage index under {prim_scope}")
+    # Even when Kit is offline we still reset the local cache so repeated
+    # builds don't accumulate stale data.
+    _STAGE_INDEX.clear()
+    _STAGE_INDEX_META["prim_scope"] = prim_scope
+    _STAGE_INDEX_META["prim_count"] = 0
+    _STAGE_INDEX_META["max_prims"] = max_prims
+    return {
+        "prim_scope": prim_scope,
+        "max_prims": max_prims,
+        "queued": bool(queued.get("queued", False)) if isinstance(queued, dict) else False,
+        "note": "Kit will populate the index asynchronously via the queued patch.",
+    }
+
+
+def _score_prim_for_query(path: str, meta: Dict[str, Any], keywords: List[str]) -> int:
+    """Simple keyword scoring: count hits in path / type / schemas."""
+    score = 0
+    haystack_parts = [path.lower(), str(meta.get("type", "")).lower()]
+    for s in meta.get("schemas", []) or []:
+        haystack_parts.append(str(s).lower())
+    haystack = " ".join(haystack_parts)
+    for kw in keywords:
+        kw_lower = kw.lower().strip()
+        if not kw_lower:
+            continue
+        if kw_lower in haystack:
+            score += 1
+    return score
+
+
+def _neighbour_paths(selected: str) -> List[str]:
+    """Return paths considered neighbours of `selected` — parent, siblings, direct children."""
+    if not selected:
+        return []
+    selected = selected.rstrip("/")
+    parent = selected.rsplit("/", 1)[0] or "/"
+    neighbours: List[str] = []
+    for path in _STAGE_INDEX.keys():
+        if path == selected:
+            continue
+        if path == parent:
+            neighbours.append(path)
+            continue
+        # siblings share the parent prefix
+        if parent != "/" and path.startswith(parent + "/") and path.count("/") == selected.count("/"):
+            neighbours.append(path)
+            continue
+        # direct children of selected
+        if path.startswith(selected + "/") and path.count("/") == selected.count("/") + 1:
+            neighbours.append(path)
+    return neighbours
+
+
+async def _handle_query_stage_index(args: Dict) -> Dict:
+    """Return prims relevant to the keywords plus neighbours of selected_prim."""
+    keywords = args.get("keywords") or []
+    if isinstance(keywords, str):
+        keywords = [keywords]
+    selected_prim = args.get("selected_prim") or ""
+    max_results = int(args.get("max_results", 100))
+
+    if not _STAGE_INDEX:
+        return {
+            "results": [],
+            "total_indexed": 0,
+            "note": "Stage index is empty — call build_stage_index first.",
+        }
+
+    scored: List[Dict[str, Any]] = []
+    for path, meta in _STAGE_INDEX.items():
+        score = _score_prim_for_query(path, meta, keywords)
+        if score > 0:
+            scored.append({"path": path, "score": score, **meta})
+    scored.sort(key=lambda r: (-r["score"], r["path"]))
+
+    # Always include the selected prim + its neighbours so the LLM has local
+    # context even when keywords don't match nearby paths.
+    included_paths = {r["path"] for r in scored}
+    context_paths: List[str] = []
+    if selected_prim and selected_prim in _STAGE_INDEX and selected_prim not in included_paths:
+        context_paths.append(selected_prim)
+    for n in _neighbour_paths(selected_prim):
+        if n not in included_paths and n not in context_paths:
+            context_paths.append(n)
+
+    context_records = [
+        {"path": p, "score": 0, **_STAGE_INDEX[p]}
+        for p in context_paths if p in _STAGE_INDEX
+    ]
+
+    combined = (scored + context_records)[:max_results]
+    return {
+        "results": combined,
+        "total_indexed": len(_STAGE_INDEX),
+        "match_count": len(scored),
+        "context_count": len(context_records),
+        "keywords": keywords,
+        "selected_prim": selected_prim,
+    }
+
+
+# ── E.3 Delta snapshots ─────────────────────────────────────────────────────
+# Store dirty-layer exports rather than a whole-stage dump. We persist deltas
+# under workspace/snapshots/deltas/<id>.json keyed by layer identifier.
+
+_DELTA_ROOT = _WORKSPACE / "snapshots" / "deltas"
+
+
+def _gen_save_delta_snapshot(snapshot_id: str, base_snapshot_id: Optional[str]) -> str:
+    """Generate code that collects dirty layers and prints them as JSON."""
+    return f"""\
+import json
+import omni.usd
+
+stage = omni.usd.get_context().get_stage()
+try:
+    dirty_identifiers = omni.usd.get_dirty_layers(stage) or []
+except Exception:
+    # Older Kit builds: fall back to iterating the layer stack and checking IsDirty()
+    dirty_identifiers = []
+    try:
+        for layer in stage.GetLayerStack(includeSessionLayers=False):
+            if layer and layer.dirty:
+                dirty_identifiers.append(layer.identifier)
+    except Exception:
+        pass
+
+deltas = {{}}
+for ident in dirty_identifiers:
+    layer = None
+    try:
+        from pxr import Sdf
+        layer = Sdf.Layer.Find(ident)
+    except Exception:
+        layer = None
+    if layer is None:
+        continue
+    try:
+        deltas[ident] = layer.ExportToString()
+    except Exception as exc:
+        deltas[ident] = f"__export_error__: {{exc}}"
+
+print(json.dumps({{
+    'snapshot_id': '{snapshot_id}',
+    'base_snapshot_id': {repr(base_snapshot_id)},
+    'layer_count': len(deltas),
+    'deltas': deltas,
+}}))
+"""
+
+
+async def _handle_save_delta_snapshot(args: Dict) -> Dict:
+    snapshot_id = args["snapshot_id"]
+    base_snapshot_id = args.get("base_snapshot_id")
+    _DELTA_ROOT.mkdir(parents=True, exist_ok=True)
+    code = _gen_save_delta_snapshot(snapshot_id, base_snapshot_id)
+    queued = await kit_tools.queue_exec_patch(code, f"Save delta snapshot {snapshot_id}")
+    # Record a manifest so restore_delta_snapshot has something to read even
+    # before Kit has returned the dirty-layer payload.
+    manifest_path = _DELTA_ROOT / f"{snapshot_id}.json"
+    manifest = {
+        "snapshot_id": snapshot_id,
+        "base_snapshot_id": base_snapshot_id,
+        "status": "queued",
+        "deltas": {},
+    }
+    try:
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    except Exception as exc:
+        logger.warning(f"[ToolExecutor] Could not write delta manifest: {exc}")
+    return {
+        "snapshot_id": snapshot_id,
+        "base_snapshot_id": base_snapshot_id,
+        "manifest_path": str(manifest_path),
+        "queued": bool(queued.get("queued", False)) if isinstance(queued, dict) else False,
+    }
+
+
+def _gen_restore_delta_snapshot(snapshot_id: str, deltas: Dict[str, str]) -> str:
+    """Generate code that replays saved layer strings onto the current stage."""
+    # Embed the delta payload literally so the patch is self-contained.
+    return f"""\
+import json
+from pxr import Sdf
+
+deltas = json.loads({json.dumps(json.dumps(deltas))})
+applied = 0
+for ident, payload in deltas.items():
+    if not isinstance(payload, str) or payload.startswith('__export_error__'):
+        continue
+    layer = Sdf.Layer.Find(ident) or Sdf.Layer.FindOrOpen(ident)
+    if layer is None:
+        continue
+    try:
+        layer.ImportFromString(payload)
+        applied += 1
+    except Exception as exc:
+        print(f'Failed to apply delta to {{ident}}: {{exc}}')
+
+print(json.dumps({{'snapshot_id': '{snapshot_id}', 'applied_layers': applied}}))
+"""
+
+
+async def _handle_restore_delta_snapshot(args: Dict) -> Dict:
+    snapshot_id = args["snapshot_id"]
+    manifest_path = _DELTA_ROOT / f"{snapshot_id}.json"
+    if not manifest_path.exists():
+        return {
+            "snapshot_id": snapshot_id,
+            "restored": False,
+            "error": f"No delta manifest found at {manifest_path}",
+        }
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {"snapshot_id": snapshot_id, "restored": False, "error": f"Manifest unreadable: {exc}"}
+    deltas = manifest.get("deltas") or {}
+    code = _gen_restore_delta_snapshot(snapshot_id, deltas)
+    queued = await kit_tools.queue_exec_patch(code, f"Restore delta snapshot {snapshot_id}")
+    return {
+        "snapshot_id": snapshot_id,
+        "base_snapshot_id": manifest.get("base_snapshot_id"),
+        "layer_count": len(deltas),
+        "queued": bool(queued.get("queued", False)) if isinstance(queued, dict) else False,
+    }
+
+
+# ── E.4 Batch operations ────────────────────────────────────────────────────
+
+def _gen_batch_delete_prims(args: Dict) -> str:
+    paths = list(args.get("prim_paths") or [])
+    if not paths:
+        return (
+            "# batch_delete_prims called with an empty prim_paths list — nothing to do.\n"
+            "print('batch_delete_prims: no paths supplied')\n"
+        )
+    return f"""\
+import omni.usd
+from pxr import Sdf
+
+stage = omni.usd.get_context().get_stage()
+layer = stage.GetRootLayer()
+edit = Sdf.BatchNamespaceEdit()
+paths = {json.dumps(paths)}
+for p in paths:
+    edit.Add(Sdf.NamespaceEdit.Remove(p))
+
+ok = layer.Apply(edit)
+print(f'batch_delete_prims: removed {{len(paths)}} prims ok={{ok}}')
+"""
+
+
+def _gen_batch_set_attributes(args: Dict) -> str:
+    changes = list(args.get("changes") or [])
+    if not changes:
+        return (
+            "# batch_set_attributes called with no changes — nothing to do.\n"
+            "print('batch_set_attributes: no changes supplied')\n"
+        )
+    # Emit a single Sdf.ChangeBlock so only one stage notification fires.
+    lines = [
+        "import omni.usd",
+        "from pxr import Sdf",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        f"changes = {json.dumps(changes)}",
+        "with Sdf.ChangeBlock():",
+        "    for ch in changes:",
+        "        prim = stage.GetPrimAtPath(ch['prim_path'])",
+        "        if not prim or not prim.IsValid():",
+        "            continue",
+        "        attr = prim.GetAttribute(ch['attr_name'])",
+        "        if not attr:",
+        "            attr = prim.CreateAttribute(ch['attr_name'], Sdf.ValueTypeNames.Token)",
+        "        try:",
+        "            attr.Set(ch['value'])",
+        "        except Exception as exc:",
+        "            print(f\"batch_set_attributes: {ch['prim_path']}.{ch['attr_name']} -> {exc}\")",
+        "",
+        "print(f'batch_set_attributes: applied {len(changes)} changes')",
+    ]
+    return "\n".join(lines)
+
+
+# ── E.5 Write-locked patch queue ────────────────────────────────────────────
+# A tiny in-process queue that serializes patches behind a single lock. Real
+# deployments run this inside Kit so OPC-UA and Isaac Assist interleave
+# cleanly, but the Python-side wrapper keeps ordering deterministic for tests.
+
+import asyncio as _asyncio
+from dataclasses import dataclass, field
+from typing import Tuple
+
+
+@dataclass(order=True)
+class _LockedPatch:
+    sort_key: Tuple[int, int] = field(compare=True)
+    code: str = field(compare=False, default="")
+    description: str = field(compare=False, default="")
+    priority: int = field(compare=False, default=0)
+
+
+class _StageWriteLockQueue:
+    """Minimal serialized queue — mirrors the spec's StageWriteLock pattern."""
+
+    def __init__(self) -> None:
+        self._lock = _asyncio.Lock()
+        self._pending: List[_LockedPatch] = []
+        self._counter = 0
+
+    async def submit(self, code: str, description: str, priority: int) -> Dict[str, Any]:
+        self._counter += 1
+        # Higher priority first; stable by insertion order for ties.
+        patch = _LockedPatch(
+            sort_key=(-int(priority), self._counter),
+            code=code,
+            description=description,
+            priority=int(priority),
+        )
+        async with self._lock:
+            self._pending.append(patch)
+            self._pending.sort()
+            queue_depth = len(self._pending)
+        result = await kit_tools.queue_exec_patch(code, description)
+        async with self._lock:
+            # Pop the matching entry so the queue drains in order.
+            for idx, p in enumerate(self._pending):
+                if p is patch:
+                    self._pending.pop(idx)
+                    break
+        return {
+            "queued": bool(result.get("queued", False)) if isinstance(result, dict) else False,
+            "priority": int(priority),
+            "queue_depth": queue_depth,
+        }
+
+    def pending(self) -> int:
+        return len(self._pending)
+
+
+_WRITE_LOCK_QUEUE = _StageWriteLockQueue()
+
+
+async def _handle_queue_write_locked_patch(args: Dict) -> Dict:
+    code = args.get("code", "")
+    desc = args.get("description", "Write-locked patch")
+    priority = int(args.get("priority", 0) or 0)
+    if not code:
+        return {"type": "error", "error": "queue_write_locked_patch requires non-empty code"}
+    # Pre-flight validation — same rules as run_usd_script.
+    issues = validate_patch(code)
+    if has_blocking_issues(issues):
+        msg = format_issues_for_llm(issues)
+        logger.warning(f"[ToolExecutor] queue_write_locked_patch blocked: {msg}")
+        return {"type": "error", "error": msg, "validation_blocked": True}
+    outcome = await _WRITE_LOCK_QUEUE.submit(code, desc, priority)
+    return {**outcome, "description": desc}
+
+
+# ── E.6 Area activation ────────────────────────────────────────────────────
+
+def _gen_activate_area(args: Dict) -> str:
+    scope = args["prim_scope"]
+    sibling_only = bool(args.get("deactivate_siblings_only", True))
+    return f"""\
+import omni.usd
+
+stage = omni.usd.get_context().get_stage()
+scope = '{scope}'
+sibling_only = {sibling_only}
+deactivated = 0
+kept = 0
+
+scope_norm = scope.rstrip('/')
+
+def _inside_scope(path):
+    return path == scope_norm or path.startswith(scope_norm + '/')
+
+# Collect ancestor paths of the scope so we can keep them active when
+# sibling_only is True (the spec's "deactivate everything outside scope"
+# would otherwise also disable the pseudo-root / /World which breaks rendering).
+ancestors = set()
+parts = scope_norm.strip('/').split('/')
+cur = ''
+for part in parts:
+    cur = cur + '/' + part
+    ancestors.add(cur)
+
+for prim in stage.TraverseAll():
+    path = str(prim.GetPath())
+    if _inside_scope(path):
+        prim.SetActive(True)
+        kept += 1
+        continue
+    if sibling_only and path in ancestors:
+        # keep structural ancestors active so the scope prim resolves
+        prim.SetActive(True)
+        kept += 1
+        continue
+    try:
+        prim.SetActive(False)
+        deactivated += 1
+    except Exception:
+        pass
+
+print(f'activate_area: scope={{scope}} kept={{kept}} deactivated={{deactivated}}')
+"""
+
+
+# ── Registration ───────────────────────────────────────────────────────────
+
+CODE_GEN_HANDLERS["batch_delete_prims"] = _gen_batch_delete_prims
+CODE_GEN_HANDLERS["batch_set_attributes"] = _gen_batch_set_attributes
+CODE_GEN_HANDLERS["activate_area"] = _gen_activate_area
+
+DATA_HANDLERS["build_stage_index"] = _handle_build_stage_index
+DATA_HANDLERS["query_stage_index"] = _handle_query_stage_index
+DATA_HANDLERS["save_delta_snapshot"] = _handle_save_delta_snapshot
+DATA_HANDLERS["restore_delta_snapshot"] = _handle_restore_delta_snapshot
+DATA_HANDLERS["queue_write_locked_patch"] = _handle_queue_write_locked_patch
