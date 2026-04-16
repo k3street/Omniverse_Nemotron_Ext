@@ -2056,6 +2056,250 @@ DATA_HANDLERS["vision_plan_trajectory"] = _handle_vision_plan_trajectory
 DATA_HANDLERS["vision_analyze_scene"] = _handle_vision_analyze_scene
 
 
+# ── Performance Diagnostics ─────────────────────────────────────────────────
+# Reads PhysX profiling data, GPU/VRAM stats, and identifies bottlenecks.
+
+
+def _analyze_performance(stats: Dict, timing: Dict, mem: Dict) -> List[Dict]:
+    """Analyze profiling data and return a list of performance issues."""
+    issues = []
+
+    # Physics narrow-phase bottleneck
+    narrow_ms = timing.get("narrow_phase_ms", 0)
+    if narrow_ms > 10:
+        issues.append({
+            "category": "physics_narrow_phase",
+            "severity": "high",
+            "message": (
+                f"Narrow phase takes {narrow_ms:.0f}ms. "
+                f"Heavy trimesh colliders are likely the cause."
+            ),
+            "fix": "Switch to convexHull or convexDecomposition approximation",
+        })
+
+    # VRAM pressure
+    used_mb = mem.get("used_mb", 0)
+    total_mb = mem.get("total_mb", 1)
+    if total_mb > 0 and used_mb / total_mb > 0.9:
+        issues.append({
+            "category": "memory",
+            "severity": "high",
+            "message": f"GPU memory {used_mb:.0f}/{total_mb:.0f} MB (>90%)",
+            "breakdown": mem.get("per_category", {}),
+            "fix": "Reduce texture resolution or number of render products",
+        })
+
+    # Solver convergence
+    solver_ms = timing.get("solver_ms", 0)
+    solver_iters = stats.get("solver_iterations", 0)
+    if solver_ms > 5 and solver_iters > 16:
+        issues.append({
+            "category": "solver",
+            "severity": "medium",
+            "message": (
+                f"Solver takes {solver_ms:.0f}ms at "
+                f"{solver_iters} iterations"
+            ),
+            "fix": "Reduce solver iterations to 4-8 for non-contact-critical bodies",
+        })
+
+    # Broad-phase bottleneck
+    broad_ms = timing.get("broad_phase_ms", 0)
+    if broad_ms > 8:
+        issues.append({
+            "category": "physics_broad_phase",
+            "severity": "medium",
+            "message": f"Broad phase takes {broad_ms:.0f}ms",
+            "fix": "Reduce number of active rigid bodies or increase physics scene bounds",
+        })
+
+    # High dynamic rigid body count
+    nb_dynamic = stats.get("nb_dynamic_rigids", 0)
+    if nb_dynamic > 500:
+        issues.append({
+            "category": "scene_complexity",
+            "severity": "medium",
+            "message": f"{nb_dynamic} dynamic rigid bodies in scene",
+            "fix": "Consider using GPU pipeline or reducing active body count",
+        })
+
+    return issues
+
+
+async def _handle_diagnose_performance(args: Dict) -> Dict:
+    """Collect PhysX stats, timing, and GPU memory, then analyze for bottlenecks."""
+    code = """\
+import json
+
+results = {"stats": {}, "timing": {}, "mem": {}}
+
+# 1. PhysX scene statistics
+try:
+    from omni.physx import get_physx_statistics_interface
+    pstats = get_physx_statistics_interface()
+    scene_stats = pstats.get_physx_scene_statistics()
+    results["stats"] = {
+        "nb_dynamic_rigids": scene_stats.get("nbDynamicRigids", 0),
+        "nb_static_rigids": scene_stats.get("nbStaticRigids", 0),
+        "nb_articulations": scene_stats.get("nbArticulations", 0),
+        "nb_trimesh_shapes": scene_stats.get("nbTriMeshShapes", 0),
+        "active_contact_pairs": scene_stats.get("nbActiveContactPairs", 0),
+        "solver_iterations": scene_stats.get("solverIterations", 4),
+    }
+except Exception as e:
+    results["stats"]["error"] = str(e)
+
+# 2. PhysX per-zone timing
+try:
+    from omni.physx import get_physx_benchmarks_interface
+    benchmarks = get_physx_benchmarks_interface()
+    benchmarks.enable_profile()
+    results["timing"] = {
+        "simulation_ms": benchmarks.get_value("Simulation") or 0,
+        "collision_detection_ms": benchmarks.get_value("Collision Detection") or 0,
+        "broad_phase_ms": benchmarks.get_value("Broad Phase") or 0,
+        "narrow_phase_ms": benchmarks.get_value("Narrow Phase") or 0,
+        "solver_ms": benchmarks.get_value("Solver") or 0,
+        "integration_ms": benchmarks.get_value("Integration") or 0,
+    }
+except Exception as e:
+    results["timing"]["error"] = str(e)
+
+# 3. Render timing + VRAM
+try:
+    from omni.hydra.engine.stats import HydraEngineStats
+    hydra = HydraEngineStats()
+    mem = hydra.get_mem_stats(detailed=True)
+    device = hydra.get_device_info()
+    results["mem"] = {
+        "used_mb": mem.get("usedMB", 0),
+        "total_mb": device.get("totalVRAM_MB", 0),
+        "per_category": mem.get("perCategory", {}),
+    }
+except Exception as e:
+    results["mem"]["error"] = str(e)
+
+# 4. FPS
+try:
+    import omni.kit.app
+    fps = omni.kit.app.get_app().get_fps()
+    results["fps"] = fps
+except Exception:
+    results["fps"] = None
+
+print(json.dumps(results))
+"""
+    kit_result = await kit_tools.queue_exec_patch(
+        code, "Collect performance diagnostics (PhysX stats + GPU memory)"
+    )
+
+    # If Kit returned data, analyze it; otherwise return the raw queue result
+    if isinstance(kit_result, dict) and "stats" in kit_result:
+        stats = kit_result.get("stats", {})
+        timing = kit_result.get("timing", {})
+        mem = kit_result.get("mem", {})
+        fps = kit_result.get("fps")
+
+        issues = _analyze_performance(stats, timing, mem)
+
+        # Determine bottleneck
+        bottleneck = "unknown"
+        if issues:
+            bottleneck = issues[0]["category"]
+
+        # Build summary
+        parts = []
+        if fps is not None:
+            parts.append(f"Your sim runs at {fps:.0f} FPS.")
+        if issues:
+            parts.append(f"{len(issues)} issue(s) found.")
+            parts.append(issues[0]["message"])
+            parts.append(issues[0]["fix"])
+        else:
+            parts.append("No obvious performance issues detected.")
+
+        return {
+            "fps": fps,
+            "bottleneck": bottleneck,
+            "issues": issues,
+            "stats": stats,
+            "timing": timing,
+            "mem": mem,
+            "summary": " ".join(parts),
+        }
+
+    # Kit RPC just queued the patch — return what we have
+    return {"type": "data", "queued": True, **kit_result}
+
+
+async def _handle_find_heavy_prims(args: Dict) -> Dict:
+    """Traverse the stage and find meshes above a triangle-count threshold."""
+    threshold = args.get("threshold_triangles", 10000)
+    code = f"""\
+import json
+import omni.usd
+from pxr import UsdGeom, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+heavy = []
+for prim in stage.TraverseAll():
+    if prim.IsA(UsdGeom.Mesh):
+        mesh = UsdGeom.Mesh(prim)
+        face_counts = mesh.GetFaceVertexCountsAttr().Get()
+        if face_counts is None:
+            continue
+        tri_count = sum(fc - 2 for fc in face_counts)
+        if tri_count >= {threshold}:
+            approx = "none"
+            if prim.HasAPI(UsdPhysics.MeshCollisionAPI):
+                approx_attr = UsdPhysics.MeshCollisionAPI(prim).GetApproximationAttr()
+                if approx_attr:
+                    approx = approx_attr.Get() or "none"
+            heavy.append({{
+                "prim_path": str(prim.GetPath()),
+                "triangle_count": tri_count,
+                "collision_approximation": approx,
+            }})
+
+heavy.sort(key=lambda x: x["triangle_count"], reverse=True)
+print(json.dumps({{"prims": heavy, "count": len(heavy), "threshold": {threshold}}}))
+"""
+    return await kit_tools.queue_exec_patch(
+        code, f"Find mesh prims with >{threshold} triangles"
+    )
+
+
+def _gen_optimize_collision(args: Dict) -> str:
+    """Generate code to switch a collision mesh to a simpler approximation."""
+    prim_path = args["prim_path"]
+    approximation = args["approximation"]
+    return (
+        "import omni.usd\n"
+        "from pxr import UsdPhysics\n"
+        "\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        f"prim = stage.GetPrimAtPath('{prim_path}')\n"
+        "if not prim.IsValid():\n"
+        f"    raise RuntimeError('Prim not found: {prim_path}')\n"
+        "\n"
+        "# Ensure CollisionAPI is applied\n"
+        "if not prim.HasAPI(UsdPhysics.CollisionAPI):\n"
+        "    UsdPhysics.CollisionAPI.Apply(prim)\n"
+        "\n"
+        "# Ensure MeshCollisionAPI is applied\n"
+        "if not prim.HasAPI(UsdPhysics.MeshCollisionAPI):\n"
+        "    UsdPhysics.MeshCollisionAPI.Apply(prim)\n"
+        "\n"
+        f"UsdPhysics.MeshCollisionAPI(prim).GetApproximationAttr().Set('{approximation}')\n"
+        f"print(f'Set collision approximation on {prim_path} to {approximation}')"
+    )
+
+
+DATA_HANDLERS["diagnose_performance"] = _handle_diagnose_performance
+DATA_HANDLERS["find_heavy_prims"] = _handle_find_heavy_prims
+CODE_GEN_HANDLERS["optimize_collision"] = _gen_optimize_collision
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),

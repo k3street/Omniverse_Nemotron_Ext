@@ -926,6 +926,53 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Performance Diagnostics ────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_performance",
+            "description": "Diagnose why the simulation is slow. Reads PhysX scene statistics, per-zone timing, and GPU/VRAM usage, then returns actionable issues ranked by severity. Use when user asks 'why is my sim slow?', 'low FPS', 'performance problems', or 'profiling'.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "find_heavy_prims",
+            "description": "Find all mesh prims with triangle count above a threshold. Returns sorted list with prim path, triangle count, and collision approximation type. Use to identify geometry that may be causing performance issues.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "threshold_triangles": {"type": "integer", "description": "Minimum triangle count to report. Default: 10000"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "optimize_collision",
+            "description": "Switch a collision mesh to a simpler approximation to improve physics performance. Options: convexHull (single convex wrap, fastest), convexDecomposition (multiple convex pieces, good balance), boundingSphere/boundingCube (simplest, for non-contact objects), meshSimplification (reduced triangle mesh, keeps shape).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the mesh prim with collision"},
+                    "approximation": {
+                        "type": "string",
+                        "enum": ["convexHull", "convexDecomposition", "boundingSphere", "boundingCube", "meshSimplification"],
+                        "description": "Collision approximation type",
+                    },
+                },
+                "required": ["prim_path", "approximation"],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",
