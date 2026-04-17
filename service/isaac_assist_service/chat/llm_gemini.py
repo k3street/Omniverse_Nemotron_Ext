@@ -35,7 +35,12 @@ class GeminiProvider:
         )
 
     async def complete(self, messages: List[Dict], context: Dict) -> LLMResponse:
-        system = getattr(self, "_system_override", None) or SYSTEM_PROMPT
+        # Per-call override via context avoids racing a shared instance attr.
+        system = (
+            context.get("system_override")
+            or getattr(self, "_system_override", None)
+            or SYSTEM_PROMPT
+        )
         gemini_messages = self._format_messages(messages)
 
         payload = {

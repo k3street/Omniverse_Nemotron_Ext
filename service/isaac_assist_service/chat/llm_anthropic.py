@@ -36,7 +36,12 @@ class AnthropicProvider:
         self.model = model
 
     async def complete(self, messages: List[Dict], context: Dict) -> LLMResponse:
-        system = getattr(self, "_system_override", None) or SYSTEM_PROMPT
+        # Per-call override via context avoids racing a shared instance attr.
+        system = (
+            context.get("system_override")
+            or getattr(self, "_system_override", None)
+            or SYSTEM_PROMPT
+        )
 
         # Filter out system messages (Anthropic uses separate 'system' field)
         filtered_msgs = [m for m in messages if m.get("role") != "system"]
