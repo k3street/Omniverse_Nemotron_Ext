@@ -63,7 +63,17 @@ _NOVA_CARTER_PHASES = [
             "4. IsaacArticulationController targeting the Nova Carter robot\n"
             "5. ROS2PublishOdometry publishing to /odom\n\n"
             "IMPORTANT: ROS2SubscribeTwist outputs double3 but DifferentialController "
-            "expects scalar inputs. Use Break3Vector nodes to extract X (linear) and Z (angular) components."
+            "expects scalar inputs. Use Break3Vector nodes to extract X (linear) and Z (angular) components.\n\n"
+            "USE THESE EXACT VERIFIED PARAMETERS:\n"
+            "- DifferentialController.inputs:wheelRadius = 0.14\n"
+            "- DifferentialController.inputs:wheelDistance = 0.4132\n"
+            "- DifferentialController.inputs:maxLinearSpeed = 1.5\n"
+            "- DifferentialController.inputs:maxAngularSpeed = 3.14\n"
+            "- IsaacArticulationController.inputs:robotPath = <robot prim path>\n"
+            "- IsaacArticulationController.inputs:jointNames = ['joint_wheel_left', 'joint_wheel_right']\n\n"
+            "CRITICAL: Connect BOTH DiffController.inputs:execIn AND ArtController.inputs:execIn "
+            "to OnPlaybackTick.outputs:tick. If ArtController.inputs:execIn is not connected, "
+            "the robot will NOT move even if velocityCommand is correct."
         ),
         "verification": "Verify the OmniGraph exists at /World/CarterROS2Graph with ROS2 nodes.",
         "retry_hint": "If OmniGraph creation failed, check that isaacsim.ros2.bridge extension is enabled. Use isaacsim.* node type namespace, NOT omni.isaac.*.",

@@ -309,6 +309,32 @@ def _check_create_attribute_signature(code: str) -> List[PatchIssue]:
     return issues
 
 
+# Detect ArticulationController without execIn connected to tick source
+_RE_ART_CTRL = re.compile(r"ArticulationController", re.I)
+_RE_ART_CTRL_EXEC_IN = re.compile(
+    r"""['"][^'"]*(?:OnPlaybackTick|OnTick)[^'"]*\.outputs?:tick['"]"""
+    r"""[^'"]*['"][^'"]*Art(?:iculation)?Ctrl(?:oller)?[^'"]*\.inputs?:execIn['"]""",
+    re.I | re.DOTALL,
+)
+
+
+def _check_art_ctrl_exec_in(code: str) -> List[PatchIssue]:
+    """ArticulationController.inputs:execIn must be connected to the tick source."""
+    issues = []
+    if _RE_ART_CTRL.search(code) and "og.Controller.edit" in code:
+        if not _RE_ART_CTRL_EXEC_IN.search(code):
+            issues.append(PatchIssue(
+                severity="warning",
+                rule="og_art_ctrl_no_exec_in",
+                message="ArticulationController.inputs:execIn does not appear to be "
+                        "connected to OnPlaybackTick.outputs:tick. Without this "
+                        "connection the robot will NOT move.",
+                fix_hint="Add connection: ('OnPlaybackTick.outputs:tick', "
+                         "'ArtController.inputs:execIn') to the CONNECT list.",
+            ))
+    return issues
+
+
 # ---------------------------------------------------------------------------
 # Aggregate validator
 # ---------------------------------------------------------------------------
@@ -326,6 +352,7 @@ _ALL_VALIDATORS = [
     _check_raw_list_for_vec,
     _check_unsafe_add_xform_op,
     _check_create_attribute_signature,
+    _check_art_ctrl_exec_in,
 ]
 
 

@@ -363,3 +363,39 @@ The long-term goal is a community-trained model that understands Isaac Sim's ful
 ---
 
 > **Spec Reference:** See `Docs/00_INDEX.md` for the full ecosystem specification, data models, and phase roadmap.
+
+---
+
+## License
+
+Copyright 2025 Kimate Richards / 10Things, Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+> <http://www.apache.org/licenses/LICENSE-2.0>
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the [LICENSE](LICENSE) file for details.
+
+---
+
+## Attribution
+
+**Isaac Assist** is created and maintained by **Kimate Richards** and **[10Things, Inc.](https://10things.com)**
+
+If you use this project in your research or work, please cite:
+
+```
+Kimate Richards / 10Things, Inc. (2025). Isaac Assist — Omniverse Extension & Background Service.
+https://github.com/10ThingsInc/Omniverse_Nemotron_Ext
+```
+
+This project builds on and integrates with the following technologies:
+
+- [NVIDIA Isaac Sim](https://developer.nvidia.com/isaac-sim) — Robotics simulation platform
+- [NVIDIA Omniverse](https://www.nvidia.com/en-us/omniverse/) — 3D development platform
+- [OpenUSD](https://openusd.org/) — Universal Scene Description
