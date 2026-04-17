@@ -3470,7 +3470,7 @@ def _gen_launch_training(args: Dict) -> str:
         f"    '--max_iterations', str(max_iterations),",
         f"    '--log_dir', log_dir,",
         "]",
-        "print(f'Launching training: {" ".join(cmd)}')",
+        "print('Launching training: ' + ' '.join(cmd))",
         "proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)",
         "print(f'Training started (PID: {proc.pid}). Checkpoints → {log_dir}')",
     ]
@@ -23228,3 +23228,23 @@ CODE_GEN_HANDLERS["enable_extension"] = _gen_enable_extension
 DATA_HANDLERS["list_extensions"] = _handle_list_extensions
 CODE_GEN_HANDLERS["create_audio_prim"] = _gen_create_audio_prim
 CODE_GEN_HANDLERS["set_audio_property"] = _gen_set_audio_property
+
+# ── Recovered handler registrations (missing from original bundle extraction) ─
+CODE_GEN_HANDLERS["add_domain_randomizer"] = _gen_add_domain_randomizer
+CODE_GEN_HANDLERS["apply_physics_material"] = _gen_apply_physics_material
+DATA_HANDLERS["lookup_material"] = _handle_lookup_material
+DATA_HANDLERS["preview_sdg"] = _handle_preview_sdg
+CODE_GEN_HANDLERS["create_sdg_pipeline"] = _gen_create_sdg_pipeline
+CODE_GEN_HANDLERS["bulk_set_attribute"] = _gen_bulk_set_attribute
+CODE_GEN_HANDLERS["group_prims"] = _gen_group_prims
+CODE_GEN_HANDLERS["duplicate_prims"] = _gen_duplicate_prims
+CODE_GEN_HANDLERS["bulk_apply_schema"] = _gen_bulk_apply_schema
+CODE_GEN_HANDLERS["clone_envs"] = _gen_clone_envs
+CODE_GEN_HANDLERS["configure_camera"] = _gen_configure_camera
+CODE_GEN_HANDLERS["configure_zmq_stream"] = _gen_configure_zmq_stream
+CODE_GEN_HANDLERS["create_graph"] = _gen_create_graph
+CODE_GEN_HANDLERS["debug_draw"] = _gen_debug_draw
+CODE_GEN_HANDLERS["debug_graph"] = _gen_debug_graph
+CODE_GEN_HANDLERS["explain_graph"] = _gen_explain_graph
+CODE_GEN_HANDLERS["export_dataset"] = _gen_export_dataset
+CODE_GEN_HANDLERS["generate_occupancy_map"] = _gen_generate_occupancy_map

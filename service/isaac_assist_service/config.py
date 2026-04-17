@@ -17,7 +17,8 @@ class Config:
                         line = line.strip()
                         if line and not line.startswith("#") and "=" in line:
                             key, val = line.split("=", 1)
-                            os.environ[key] = val  # later files override earlier ones
+                            # Do NOT clobber env vars set by the caller (tests rely on this).
+                            os.environ.setdefault(key, val)
 
         # ── LLM routing ─────────────────────────────────────────────────────
         self.llm_mode = os.environ.get("LLM_MODE", "local")

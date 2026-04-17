@@ -21,10 +21,44 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
+import time
+import traceback
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
+
+
+# ── QA session logging ────────────────────────────────────────────────────
+# Every MCP tool call (name, args, result, duration, errors) is written to
+# a per-session log file for Phase 12 QA analysis. Location is overridable
+# via QA_LOG_DIR env; otherwise defaults to workspace/qa_logs/.
+_QA_LOG_DIR = Path(os.environ.get(
+    "QA_LOG_DIR",
+    str(Path(__file__).resolve().parents[2] / "workspace" / "qa_logs"),
+))
+_QA_LOG_DIR.mkdir(parents=True, exist_ok=True)
+_QA_SESSION_ID = datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{os.getpid()}"
+_QA_LOG_FILE = _QA_LOG_DIR / f"mcp_{_QA_SESSION_ID}.log"
+
+_qa_file_handler = logging.FileHandler(_QA_LOG_FILE)
+_qa_file_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+))
+# Attach to root so every module's logger writes to the session file.
+logging.getLogger().addHandler(_qa_file_handler)
+logging.getLogger().setLevel(logging.DEBUG)
+logger.info("QA session log: %s", _QA_LOG_FILE)
+
+
+def _truncate(s: str, n: int = 4000) -> str:
+    """Keep log entries readable for huge args/results."""
+    if not isinstance(s, str):
+        s = json.dumps(s, default=str)
+    return s if len(s) <= n else s[:n] + f" ...[+{len(s)-n} chars]"
 
 # ---------------------------------------------------------------------------
 # MCP protocol primitives (no external dependency required)
