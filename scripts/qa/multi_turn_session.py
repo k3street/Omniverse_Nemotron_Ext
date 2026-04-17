@@ -37,6 +37,118 @@ MAX_TURNS = 20
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 
 
+_SNAPSHOT_CODE = """
+import omni.usd, json as _json
+from pxr import Usd, UsdGeom, UsdPhysics
+
+ctx = omni.usd.get_context()
+stage = ctx.get_stage()
+if stage is None:
+    print(_json.dumps({"error": "no_stage"}))
+else:
+    prims_info = []
+    joints_info = {}
+    transforms_info = {}
+    for p in stage.Traverse():
+        path = str(p.GetPath())
+        if path.startswith(("/Render", "/OmniverseKit", "/OmniKit_Environment")):
+            continue
+        ptype = str(p.GetTypeName())
+        entry = {"path": path, "type": ptype}
+        # API schemas applied (Collision, RigidBody, Articulation, Mass, etc.)
+        try:
+            schemas = [s for s in (p.GetAppliedSchemas() or []) if s]
+            if schemas:
+                entry["apis"] = schemas
+        except Exception:
+            pass
+        prims_info.append(entry)
+
+        # World transform for all Xformables (position ground-truth)
+        try:
+            xf = UsdGeom.Xformable(p)
+            if xf:
+                wt = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+                tr = wt.ExtractTranslation()
+                transforms_info[path] = [round(float(tr[0]),4), round(float(tr[1]),4), round(float(tr[2]),4)]
+        except Exception:
+            pass
+
+        # Joint positions (Physics*Joint with physics:jointPosition attr)
+        if p.IsA(UsdPhysics.RevoluteJoint) or p.IsA(UsdPhysics.PrismaticJoint) or p.IsA(UsdPhysics.Joint):
+            try:
+                attr = p.GetAttribute("physics:jointPosition")
+                if attr and attr.IsAuthored():
+                    joints_info[path] = round(float(attr.Get()), 4)
+            except Exception:
+                pass
+
+    # Timeline state (playing? current frame?)
+    timeline = {}
+    try:
+        import omni.timeline
+        t = omni.timeline.get_timeline_interface()
+        timeline = {
+            "playing": t.is_playing(),
+            "stopped": t.is_stopped(),
+            "current_time": round(float(t.get_current_time()), 3),
+            "start_time": round(float(t.get_start_time()), 3),
+            "end_time": round(float(t.get_end_time()), 3),
+        }
+    except Exception as e:
+        timeline = {"error": str(e)}
+
+    # Active viewport + its camera
+    cam = None
+    try:
+        import omni.kit.viewport.utility as _vp
+        vp = _vp.get_active_viewport()
+        cam = str(vp.camera_path) if vp else None
+    except Exception:
+        pass
+
+    # Recent console errors (from Kit's message bus)
+    errors = []
+    try:
+        import omni.log as _ol
+        # Not all Kit builds expose log history; best-effort
+        errors = []
+    except Exception:
+        pass
+
+    print(_json.dumps({
+        "prim_count": len(prims_info),
+        "prims": prims_info[:80],
+        "joint_positions": joints_info,
+        "world_translations": transforms_info,
+        "timeline": timeline,
+        "active_camera": cam,
+        "errors": errors,
+    }, default=str))
+"""
+
+
+def _snapshot_stage() -> Dict[str, Any]:
+    """Query Kit RPC for the current stage state (prim tree + active camera)."""
+    try:
+        with httpx.Client(timeout=15) as client:
+            r = client.post(KIT_RPC_EXEC, json={"code": _SNAPSHOT_CODE})
+            r.raise_for_status()
+            data = r.json()
+            out = (data.get("output") or "").strip().splitlines()
+            # last non-empty line is the JSON payload
+            for line in reversed(out):
+                line = line.strip()
+                if line.startswith("{"):
+                    try:
+                        return json.loads(line)
+                    except Exception:
+                        pass
+            return {"error": "no_snapshot_line", "raw": (data.get("output") or "")[:200]}
+    except Exception as e:
+        return {"error": f"snapshot_failed: {e}"}
+
+
 def _reset_stage() -> Dict[str, Any]:
     """Open a fresh, empty stage in Isaac Sim before starting a session."""
     code = (
@@ -131,6 +243,7 @@ def run_session(persona: str, task: str, runs_dir: Path, seed: Optional[int] = N
 
     reset_result = _reset_stage()
     log({"event": "stage_reset", "result": reset_result})
+    log({"event": "stage_snapshot", "when": "initial", "snapshot": _snapshot_stage()})
     log({"event": "session_start", "persona": persona, "task": task, "modifiers": mods.as_dict()})
 
     session_id = f"qa_{run_id}"
@@ -173,6 +286,11 @@ def run_session(persona: str, task: str, runs_dir: Path, seed: Optional[int] = N
              "tool_calls": aa_reply.get("tool_calls", []),
              "actions_to_approve": aa_reply.get("actions_to_approve"),
              "sources_consulted": aa_reply.get("sources_consulted", [])})
+
+        # Ground-truth snapshot AFTER each Assist reply — what actually changed
+        # in the stage. Separates "Python ran" from "scene actually changed".
+        log({"event": "stage_snapshot", "when": f"after_turn_{turn}",
+             "snapshot": _snapshot_stage()})
 
         conversation.append({"role": "assistant", "content": assistant_msg})
 
