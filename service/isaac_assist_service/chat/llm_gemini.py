@@ -30,7 +30,23 @@ SYSTEM_PROMPT = (
     "'how does…') or when there is a genuine ambiguity that would change the action. "
     "Ambiguous? Ask ONE concise clarifying question, do not write a tutorial.\n"
     "- If the user says 'less prose' or similar, drop all prose for the rest of the "
-    "session and emit only code / tool calls / one-line confirmations."
+    "session and emit only code / tool calls / one-line confirmations.\n\n"
+    "Grounding discipline (CRITICAL):\n"
+    "- NEVER describe scene contents, tool output, API return values, file paths, "
+    "asset names, standard-document quotations, or product specifications unless "
+    "a tool actually returned that information in this session.\n"
+    "- If a tool returned an error, empty output, or didn't run: say 'I don't have "
+    "verified output from <tool_name>, so I can't confirm that' and either retry, "
+    "call a different tool, or ask the user.\n"
+    "- NEVER pattern-match API names based on what they 'should look like'. When "
+    "unsure of a module path, class name, or function signature, say 'I'm not "
+    "sure of the exact API — let me look it up' and call lookup_knowledge or "
+    "ask the user to confirm.\n"
+    "- NEVER quote specific numbers from ISO/IEC/ANSI standards, product datasheets, "
+    "or manufacturer specs as authoritative. If asked for such numbers, say 'I'd "
+    "need to check the standard directly; my cited value could be wrong'.\n"
+    "- Confident-wrong is worse than 'I don't know'. Users prefer admitted "
+    "uncertainty over fabrication."
 )
 
 class GeminiProvider:
@@ -165,7 +181,10 @@ class GeminiProvider:
                 })
                 continue
 
-            # Assistant with tool_calls → model message with functionCall
+            # Assistant with tool_calls → model message with functionCall.
+            # Gemini 3.x requires thought_signature in functionCall parts when
+            # continuing a tool-calling conversation. We preserve the signature
+            # from the original response via tc["thought_signature"] if present.
             if role == "assistant" and msg.get("tool_calls"):
                 parts = []
                 if msg.get("content"):
@@ -173,12 +192,17 @@ class GeminiProvider:
                 for tc in msg["tool_calls"]:
                     fn = tc.get("function", {})
                     args = fn.get("arguments", "{}")
-                    parts.append({
+                    part = {
                         "functionCall": {
                             "name": fn["name"],
                             "args": json.loads(args) if isinstance(args, str) else args,
                         }
-                    })
+                    }
+                    # Gemini 3.x: thoughtSignature is a sibling of functionCall on the part
+                    ts = tc.get("thought_signature")
+                    if ts:
+                        part["thoughtSignature"] = ts
+                    parts.append(part)
                 gemini_msgs.append({"role": "model", "parts": parts})
                 continue
 
@@ -206,14 +230,19 @@ class GeminiProvider:
                 text_parts.append(part["text"])
             elif "functionCall" in part:
                 fc = part["functionCall"]
-                tool_calls.append({
+                entry = {
                     "id": f"gemini_{fc['name']}",
                     "type": "function",
                     "function": {
                         "name": fc["name"],
                         "arguments": json.dumps(fc.get("args", {})),
                     },
-                })
+                }
+                # Gemini 3.x: thoughtSignature is a sibling of functionCall on the part
+                ts = part.get("thoughtSignature")
+                if ts:
+                    entry["thought_signature"] = ts
+                tool_calls.append(entry)
 
         text = "\n".join(text_parts)
         return LLMResponse(

@@ -340,6 +340,24 @@ def validate_patch(code: str) -> List[PatchIssue]:
             issues.extend(validator(code))
         except Exception as e:
             logger.warning(f"Validator {validator.__name__} crashed: {e}")
+
+    # API allowlist validation — catches hallucinated imports like
+    # `from omni.isaac.urdf import _urdf` (4.x deprecated) or
+    # `from isaacsim.app import SimulationApp` (fabricated module name).
+    try:
+        from .api_validator import validate_code as _api_validate
+        _ok, _api_issues = _api_validate(code)
+        for i in _api_issues:
+            severity = "error" if i["severity"] in ("deprecated", "syntax") else "warning"
+            issues.append(PatchIssue(
+                severity=severity,
+                rule=f"api_{i['severity']}",
+                message=i["message"],
+                fix_hint=i["fix_hint"],
+            ))
+    except Exception as e:
+        logger.warning(f"api_validator crashed: {e}")
+
     return issues
 
 

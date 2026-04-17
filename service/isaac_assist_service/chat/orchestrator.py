@@ -343,11 +343,16 @@ class ChatOrchestrator:
                 except Exception:
                     pass  # audit must never block chat
 
-                assistant_tool_calls.append({
+                entry = {
                     "id": tc_id,
                     "type": "function",
                     "function": {"name": fn_name, "arguments": json.dumps(fn_args)},
-                })
+                }
+                # Preserve thought_signature (Gemini 3.x requires it on continuation)
+                ts = tc.get("thought_signature")
+                if ts:
+                    entry["thought_signature"] = ts
+                assistant_tool_calls.append(entry)
                 tool_results.append({
                     "role": "tool",
                     "tool_call_id": tc_id,
