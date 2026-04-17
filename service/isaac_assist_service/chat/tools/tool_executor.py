@@ -16657,7 +16657,7 @@ import omni.usd
 from pxr import Usd, UsdGeom, UsdPhysics, Gf
 
 try:
-    from omni.isaac.debug_draw import _debug_draw  # Isaac 4.x
+    from isaacsim.util.debug_draw import _debug_draw  # Isaac 4.x
 except ImportError:  # Isaac Sim 5.x renamed module
     from isaacsim.util.debug_draw import _debug_draw
 
@@ -22859,7 +22859,7 @@ import omni.kit.app
 from pxr import UsdGeom, Gf
 
 try:
-    from omni.isaac.debug_draw import _debug_draw
+    from isaacsim.util.debug_draw import _debug_draw
     _draw = _debug_draw.acquire_debug_draw_interface()
 except Exception:
     _draw = None
