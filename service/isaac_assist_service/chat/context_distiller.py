@@ -562,7 +562,18 @@ async def distill_context(
             if len(content) > 800:
                 content = content[:800] + "..."
             recent_raw.append({"role": m["role"], "content": content})
-    messages.extend(recent_raw)
+
+    # Ensure valid alternation (Anthropic requires user/assistant/user/...).
+    # After filtering poisoned assistant messages we may have consecutive
+    # user messages.  Merge them so the API doesn't reject the request.
+    merged_raw: List[Dict] = []
+    for m in recent_raw:
+        if merged_raw and merged_raw[-1]["role"] == m["role"]:
+            merged_raw[-1]["content"] += "\n" + m["content"]
+        else:
+            merged_raw.append(m)
+
+    messages.extend(merged_raw)
     messages.append({"role": "user", "content": user_message})
 
     # ── 5. Estimate token count ──────────────────────────────────────────
