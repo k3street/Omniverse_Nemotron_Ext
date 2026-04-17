@@ -138,7 +138,7 @@ class ChatViewWindow(ui.Window):
                 with ui.HStack(height=20):
                     ui.Label("LLM Model:", width=150)
                     self.model_field = ui.StringField()
-                    self.model_field.model.set_value(os.environ.get("CLOUD_MODEL_NAME", "claude-opus-4-6"))
+                    self.model_field.model.set_value(os.environ.get("CLOUD_MODEL_NAME", "claude-opus-4-7"))
                 
                 with ui.HStack(height=20):
                     self.contribute_cb = ui.CheckBox()

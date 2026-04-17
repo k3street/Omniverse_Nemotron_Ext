@@ -22,7 +22,7 @@ class Config:
         # ── LLM routing ─────────────────────────────────────────────────────
         self.llm_mode = os.environ.get("LLM_MODE", "local")
         self.local_model_name = os.environ.get("LOCAL_MODEL_NAME", "qwen3.5:35b")
-        self.cloud_model_name = os.environ.get("CLOUD_MODEL_NAME", "claude-opus-4-6")
+        self.cloud_model_name = os.environ.get("CLOUD_MODEL_NAME", "claude-opus-4-7")
         self.distiller_model_name = os.environ.get("DISTILLER_MODEL_NAME", "")  # small LLM for context compression; blank = use local_model_name
         self.vision_model_name = os.environ.get("VISION_MODEL_NAME", "gemini-robotics-er-1.6-preview")
 

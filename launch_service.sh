@@ -60,7 +60,7 @@ esac
 if [ "$MODE" = "local" ]; then
     MODEL="${LOCAL_MODEL_NAME:-qwen3.5:35b}"
 else
-    MODEL="${CLOUD_MODEL_NAME:-claude-opus-4-6}"
+    MODEL="${CLOUD_MODEL_NAME:-claude-opus-4-7}"
 fi
 
 export LLM_MODE="$MODE"

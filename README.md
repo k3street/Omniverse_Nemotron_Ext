@@ -88,7 +88,7 @@ cp service/isaac_assist_service/.env.example service/isaac_assist_service/.env
 |---|---|---|
 | `LLM_MODE` | `local` | `local` (Ollama), `anthropic` (Claude), `cloud` (Gemini), `openai`, or `grok` (xAI) |
 | `LOCAL_MODEL_NAME` | `qwen3.5:35b` | Model name as shown in `ollama list` |
-| `CLOUD_MODEL_NAME` | `claude-opus-4-6` | Cloud model identifier (used by all non-local modes) |
+| `CLOUD_MODEL_NAME` | `claude-opus-4-7` | Cloud model identifier (used by all non-local modes) |
 | `ANTHROPIC_API_KEY` | *(empty)* | Required when `LLM_MODE=anthropic` |
 | `API_KEY_GEMINI` | *(empty)* | Required when `LLM_MODE=cloud` |
 | `OPENAI_API_KEY` | *(empty)* | Required when `LLM_MODE=openai` |
@@ -200,7 +200,7 @@ If you prefer to load the extension manually inside Isaac Sim:
 
 ```bash
 curl http://localhost:8000/health
-# Expected: {"status":"ok","service":"isaac-assist-backend","llm_mode":"anthropic","model":"claude-opus-4-6"}
+# Expected: {"status":"ok","service":"isaac-assist-backend","llm_mode":"anthropic","model":"claude-opus-4-7"}
 ```
 
 ### Check the Extension UI
@@ -237,7 +237,7 @@ See [`.env.local.example`](.env.local.example) for the full annotated template.
 | Variable | Example | Description |
 |---|---|---|
 | `LLM_MODE` | `anthropic` | `anthropic`, `openai`, `ollama`, or `gemini` |
-| `CLOUD_MODEL_NAME` | `claude-opus-4-6` | Model name for cloud providers |
+| `CLOUD_MODEL_NAME` | `claude-opus-4-7` | Model name for cloud providers |
 | `ANTHROPIC_API_KEY` | `sk-ant-xxx` | API key for your chosen provider |
 | `ASSETS_ROOT_PATH` | `/home/user/assets` | Path to Isaac Sim USD assets (local or Nucleus) |
 | `ASSETS_ROBOTS_SUBDIR` | `Collected_Robots` | Subdirectory containing robot USD files |

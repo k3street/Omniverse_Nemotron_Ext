@@ -343,7 +343,7 @@ Messages starting with `patch` or `fix` route to the multi-agent swarm.
 **Verify:**
 - OpenAI API Base field (shows current value)
 - API Key field (password masked)
-- LLM Model field (should show `claude-opus-4-6` or your configured model)
+- LLM Model field (should show `claude-opus-4-7` or your configured model)
 - "Contribute Fine-Tuning Data" checkbox
 - **"Auto-Approve Code Patches"** checkbox (default: unchecked)
 - **Save Settings** and **Export Training Data** buttons
@@ -997,7 +997,7 @@ Type: `Hello, what model are you?`
 curl -s -X PUT http://localhost:8000/api/v1/settings/llm_mode \
   -H "Content-Type: application/json" -d '{"mode": "anthropic"}' | python3 -m json.tool
 ```
-**Expected:** `{"status": "success", "llm_mode": "anthropic", "model": "claude-opus-4-6"}`
+**Expected:** `{"status": "success", "llm_mode": "anthropic", "model": "claude-opus-4-7"}`
 
 **Step 5 — Verify in chat again:**
 Type: `Hello, what model are you?`
