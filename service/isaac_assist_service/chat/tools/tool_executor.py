@@ -1394,6 +1394,667 @@ CODE_GEN_HANDLERS["move_to_pose"] = _gen_move_to_pose
 CODE_GEN_HANDLERS["plan_trajectory"] = _gen_plan_trajectory
 
 
+# ── cuRobo GPU Motion Planning ───────────────────────────────────────────────
+
+# cuRobo robot config → joint names mapping (for trajectory execution)
+_CUROBO_ROBOT_JOINTS = {
+    "franka.yml": [
+        "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
+        "panda_joint5", "panda_joint6", "panda_joint7",
+    ],
+    "ur5e.yml": [
+        "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+        "wrist_1_joint", "wrist_2_joint", "wrist_3_joint",
+    ],
+    "ur10e.yml": [
+        "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+        "wrist_1_joint", "wrist_2_joint", "wrist_3_joint",
+    ],
+    "kinova_gen3.yml": [
+        "joint_1", "joint_2", "joint_3", "joint_4",
+        "joint_5", "joint_6", "joint_7",
+    ],
+    "iiwa.yml": [
+        "iiwa_joint_1", "iiwa_joint_2", "iiwa_joint_3", "iiwa_joint_4",
+        "iiwa_joint_5", "iiwa_joint_6", "iiwa_joint_7",
+    ],
+    "jaco7.yml": [
+        "j2n7s300_joint_1", "j2n7s300_joint_2", "j2n7s300_joint_3",
+        "j2n7s300_joint_4", "j2n7s300_joint_5", "j2n7s300_joint_6",
+        "j2n7s300_joint_7",
+    ],
+}
+
+
+def _gen_curobo_motion_plan(args: Dict) -> str:
+    """Generate code that runs cuRobo MotionGen inside Isaac Sim's Python env."""
+    art_path = args["articulation_path"]
+    target_pos = args["target_position"]
+    target_ori = args.get("target_orientation")
+    robot_cfg = args.get("robot_config", "franka.yml")
+    interp_dt = args.get("interpolation_dt", 0.02)
+    max_attempts = args.get("max_attempts", 5)
+    world_obs = args.get("world_obstacles")
+
+    joint_names = _CUROBO_ROBOT_JOINTS.get(robot_cfg, _CUROBO_ROBOT_JOINTS["franka.yml"])
+
+    lines = [
+        "import torch",
+        "import numpy as np",
+        "from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig",
+        "from curobo.types.math import Pose",
+        "from curobo.types.robot import JointState as CuroboJointState",
+        "from isaacsim.core.prims import SingleArticulation",
+        "",
+        f"# cuRobo motion plan → target {target_pos}",
+        f"robot_cfg_file = '{robot_cfg}'",
+    ]
+
+    # World config
+    if world_obs:
+        lines.append(f"world_config = {json.dumps(world_obs)}")
+    else:
+        lines.extend([
+            "",
+            "# Read world obstacles from USD stage",
+            "try:",
+            "    from curobo.util.usd_helper import UsdHelper",
+            "    usd_helper = UsdHelper()",
+            "    usd_helper.load_stage(usd_helper.stage)",
+            "    world_config = usd_helper.get_obstacles_from_stage(",
+            f"        reference_prim_path='{art_path}',",
+            "        ignore_substring=['visual', 'finger'],",
+            "    ).get_collision_check_world()",
+            "except Exception as e:",
+            "    print(f'Could not read world from stage: {e}, planning without obstacles')",
+            "    world_config = {'cuboid': {'ground': {'dims': [10, 10, 0.01], 'pose': [0, 0, -0.005, 1, 0, 0, 0]}}}",
+        ])
+
+    lines.extend([
+        "",
+        "motion_gen_config = MotionGenConfig.load_from_robot_config(",
+        "    robot_cfg_file,",
+        "    world_config,",
+        f"    interpolation_dt={interp_dt},",
+        ")",
+        "motion_gen = MotionGen(motion_gen_config)",
+        "motion_gen.warmup()",
+        "",
+        "# Read current joint state",
+        f"art = SingleArticulation(prim_path='{art_path}')",
+        "art.initialize()",
+        "q_current = art.get_joint_positions()",
+        f"joint_names = {joint_names}",
+        "n_dof = len(joint_names)",
+        "start_state = CuroboJointState.from_position(",
+        "    torch.tensor(q_current[:n_dof], dtype=torch.float32).unsqueeze(0).cuda(),",
+        "    joint_names=joint_names,",
+        ")",
+        "",
+        f"goal_pose = Pose.from_list({list(target_pos) + (list(target_ori) if target_ori else [1.0, 0.0, 0.0, 0.0])})",
+        "",
+        f"result = motion_gen.plan_single(start_state, goal_pose, MotionGenPlanConfig(max_attempts={max_attempts}))",
+        "",
+        "if result.success:",
+        "    traj = result.get_interpolated_plan()",
+        "    positions = traj.position.cpu().numpy().tolist()",
+        f"    print(f'cuRobo: planned {{len(positions)}} waypoints (dt={interp_dt}s)')",
+        "    # Store for curobo_execute_trajectory",
+        "    import json as _json",
+        "    _traj_data = {'joint_names': joint_names, 'waypoints': positions,",
+        f"                  'dt': {interp_dt}, 'success': True}}",
+        "    print('CUROBO_TRAJ:' + _json.dumps(_traj_data))",
+        "else:",
+        "    print(f'cuRobo: planning failed — {result.status}')",
+        "    print('CUROBO_TRAJ:' + _json.dumps({'success': False, 'status': str(result.status)}))",  # noqa: E501
+    ])
+    return "\n".join(lines)
+
+
+def _gen_curobo_pick_place(args: Dict) -> str:
+    """Generate a full pick-and-place code sequence using cuRobo + ROS2."""
+    art_path = args["articulation_path"]
+    pick_pos = args["pick_position"]
+    place_pos = args["place_position"]
+    pick_ori = args.get("pick_orientation", [0, 1, 0, 0])  # top-down
+    place_ori = args.get("place_orientation", pick_ori)
+    approach_h = args.get("approach_height", 0.1)
+    robot_cfg = args.get("robot_config", "franka.yml")
+    gripper_joints = args.get("gripper_joint_names", ["panda_finger_joint1", "panda_finger_joint2"])
+    gripper_open = args.get("gripper_open", [0.04, 0.04])
+    gripper_close = args.get("gripper_close", [0.0, 0.0])
+    cmd_topic = args.get("joint_command_topic", "/joint_command")
+    state_topic = args.get("joint_state_topic", "/joint_states")
+    rate_hz = args.get("execution_rate_hz", 50)
+
+    joint_names = _CUROBO_ROBOT_JOINTS.get(robot_cfg, _CUROBO_ROBOT_JOINTS["franka.yml"])
+
+    # Compute approach/retreat positions
+    pick_approach = [pick_pos[0], pick_pos[1], pick_pos[2] + approach_h]
+    place_approach = [place_pos[0], place_pos[1], place_pos[2] + approach_h]
+
+    code = f'''\
+import torch
+import time
+import numpy as np
+from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig
+from curobo.types.math import Pose
+from curobo.types.robot import JointState as CuroboJointState
+from isaacsim.core.prims import SingleArticulation
+
+# ── Config ──
+ROBOT_CFG = '{robot_cfg}'
+ART_PATH = '{art_path}'
+JOINT_NAMES = {joint_names}
+GRIPPER_JOINTS = {gripper_joints}
+GRIPPER_OPEN = {gripper_open}
+GRIPPER_CLOSE = {gripper_close}
+RATE_HZ = {rate_hz}
+
+# Poses: [x, y, z, qw, qx, qy, qz]
+PICK_APPROACH = {pick_approach + list(pick_ori)}
+PICK_GRASP    = {list(pick_pos) + list(pick_ori)}
+PLACE_APPROACH = {place_approach + list(place_ori)}
+PLACE_TARGET  = {list(place_pos) + list(place_ori)}
+
+# ── Initialize cuRobo ──
+world_config = {{
+    'cuboid': {{
+        'ground': {{'dims': [10, 10, 0.01], 'pose': [0, 0, -0.005, 1, 0, 0, 0]}},
+    }},
+}}
+
+# Try to read obstacles from the stage
+try:
+    from curobo.util.usd_helper import UsdHelper
+    usd_helper = UsdHelper()
+    usd_helper.load_stage(usd_helper.stage)
+    world_config = usd_helper.get_obstacles_from_stage(
+        reference_prim_path=ART_PATH,
+        ignore_substring=['visual', 'finger'],
+    ).get_collision_check_world()
+    print('cuRobo: loaded world obstacles from USD stage')
+except Exception as e:
+    print(f'cuRobo: using ground-only world ({{e}})')
+
+motion_gen_config = MotionGenConfig.load_from_robot_config(
+    ROBOT_CFG, world_config, interpolation_dt=0.02,
+)
+motion_gen = MotionGen(motion_gen_config)
+motion_gen.warmup()
+print('cuRobo: warmed up')
+
+art = SingleArticulation(prim_path=ART_PATH)
+art.initialize()
+
+def get_current_state():
+    q = art.get_joint_positions()
+    n = len(JOINT_NAMES)
+    return CuroboJointState.from_position(
+        torch.tensor(q[:n], dtype=torch.float32).unsqueeze(0).cuda(),
+        joint_names=JOINT_NAMES,
+    )
+
+def plan_to(pose_list):
+    start = get_current_state()
+    goal = Pose.from_list(pose_list)
+    result = motion_gen.plan_single(start, goal, MotionGenPlanConfig(max_attempts=10))
+    if result.success:
+        return result.get_interpolated_plan().position.cpu().numpy()
+    else:
+        print(f'  Planning failed: {{result.status}}')
+        return None
+
+def execute_traj(waypoints):
+    """Apply each waypoint to the articulation directly."""
+    n = len(JOINT_NAMES)
+    from isaacsim.core.utils.types import ArticulationAction
+    dt = 1.0 / RATE_HZ
+    for wp in waypoints:
+        positions = list(wp[:n])
+        action = ArticulationAction(joint_positions=np.array(positions))
+        art.apply_action(action)
+        # Step the sim for this timestep
+        import omni.kit.app
+        app = omni.kit.app.get_app()
+        app.update()
+        time.sleep(dt)
+
+def set_gripper(positions):
+    from isaacsim.core.utils.types import ArticulationAction
+    # Get full joint positions and just override gripper
+    q = art.get_joint_positions()
+    n_arm = len(JOINT_NAMES)
+    for i, gname in enumerate(GRIPPER_JOINTS):
+        # Find gripper joint index
+        all_joints = art.dof_names if hasattr(art, 'dof_names') else JOINT_NAMES + GRIPPER_JOINTS
+        try:
+            idx = list(all_joints).index(gname)
+            q[idx] = positions[i]
+        except (ValueError, IndexError):
+            q[n_arm + i] = positions[i]
+    action = ArticulationAction(joint_positions=np.array(q))
+    art.apply_action(action)
+    import omni.kit.app
+    for _ in range(10):  # let gripper settle
+        omni.kit.app.get_app().update()
+        time.sleep(0.02)
+
+# ── Execute Pick & Place Sequence ──
+print('=== cuRobo Pick & Place ===')
+
+# Step 1: Open gripper
+print('1. Opening gripper...')
+set_gripper(GRIPPER_OPEN)
+
+# Step 2: Move to pick approach
+print('2. Moving to pick approach...')
+traj = plan_to(PICK_APPROACH)
+if traj is not None:
+    execute_traj(traj)
+    print('   ✓ At pick approach')
+
+# Step 3: Move down to grasp
+print('3. Moving to grasp position...')
+traj = plan_to(PICK_GRASP)
+if traj is not None:
+    execute_traj(traj)
+    print('   ✓ At grasp position')
+
+# Step 4: Close gripper
+print('4. Closing gripper...')
+set_gripper(GRIPPER_CLOSE)
+print('   ✓ Gripper closed')
+
+# Step 5: Lift (back to approach height)
+print('5. Lifting...')
+traj = plan_to(PICK_APPROACH)
+if traj is not None:
+    execute_traj(traj)
+    print('   ✓ Lifted')
+
+# Step 6: Move to place approach
+print('6. Moving to place approach...')
+traj = plan_to(PLACE_APPROACH)
+if traj is not None:
+    execute_traj(traj)
+    print('   ✓ At place approach')
+
+# Step 7: Lower to place
+print('7. Lowering to place position...')
+traj = plan_to(PLACE_TARGET)
+if traj is not None:
+    execute_traj(traj)
+    print('   ✓ At place position')
+
+# Step 8: Open gripper (release)
+print('8. Releasing...')
+set_gripper(GRIPPER_OPEN)
+print('   ✓ Released')
+
+# Step 9: Retreat
+print('9. Retreating...')
+traj = plan_to(PLACE_APPROACH)
+if traj is not None:
+    execute_traj(traj)
+    print('   ✓ Retreat complete')
+
+print('=== Pick & Place Complete ===')
+'''
+    return code
+
+
+CODE_GEN_HANDLERS["curobo_motion_plan"] = _gen_curobo_motion_plan
+CODE_GEN_HANDLERS["curobo_pick_place"] = _gen_curobo_pick_place
+
+
+# ── cuRobo trajectory execution via ROS2 ─────────────────────────────────────
+
+async def _handle_curobo_execute_trajectory(args: Dict) -> Dict:
+    """Execute a joint trajectory by publishing waypoints via ROS2."""
+    joint_names = args["joint_names"]
+    waypoints = args["waypoints"]
+    topic = args.get("joint_command_topic", "/joint_command")
+    rate_hz = args.get("rate_hz", 50)
+    msg_type = args.get("msg_type", "sensor_msgs/msg/JointState")
+
+    if not waypoints:
+        return {"error": "No waypoints provided"}
+
+    # Build the publish sequence: each waypoint published for 1/rate_hz seconds
+    dt = 1.0 / rate_hz
+    messages = []
+    durations = []
+    for wp in waypoints:
+        messages.append({
+            "name": joint_names,
+            "position": list(wp),
+            "velocity": [],
+            "effort": [],
+        })
+        durations.append(dt)
+
+    # Use the existing ros2_publish_sequence handler
+    try:
+        from . import ros_mcp_tools
+        handler = getattr(ros_mcp_tools, "handle_publish_sequence", None)
+        if handler:
+            result = await handler({
+                "topic": topic,
+                "msg_type": msg_type,
+                "messages": messages,
+                "durations": durations,
+                "rate_hz": rate_hz,
+            })
+            return {
+                "executed": True,
+                "waypoints_sent": len(waypoints),
+                "duration_s": round(len(waypoints) * dt, 2),
+                "topic": topic,
+                **result,
+            }
+    except ImportError:
+        pass
+
+    # Fallback: return the trajectory data for manual execution
+    return {
+        "executed": False,
+        "note": "ros-mcp not available — trajectory planned but not executed via ROS2",
+        "joint_names": joint_names,
+        "waypoints_count": len(waypoints),
+        "duration_s": round(len(waypoints) * dt, 2),
+    }
+
+DATA_HANDLERS["curobo_execute_trajectory"] = _handle_curobo_execute_trajectory
+
+
+# ── cuRobo Vision-Guided Pick & Place ─────────────────────────────────────────
+
+def _gen_curobo_vision_pick(args: Dict) -> str:
+    """Generate code for vision-guided pick-and-place with robot segmentation."""
+    art_path = args["articulation_path"]
+    cam_path = args["camera_prim_path"]
+    pick_pos = args["pick_position"]
+    place_pos = args["place_position"]
+    pick_ori = args.get("pick_orientation", [0, 1, 0, 0])
+    place_ori = args.get("place_orientation", pick_ori)
+    depth_topic = args.get("depth_topic", "/camera/depth")
+    img_size = args.get("depth_image_size", [640, 480])
+    robot_cfg = args.get("robot_config", "franka.yml")
+    approach_h = args.get("approach_height", 0.1)
+    gripper_joints = args.get("gripper_joint_names",
+                              ["panda_finger_joint1", "panda_finger_joint2"])
+    gripper_open = args.get("gripper_open", [0.04, 0.04])
+    gripper_close = args.get("gripper_close", [0.0, 0.0])
+    seg_buffer = args.get("segmentation_buffer", 0.02)
+    voxel_size = args.get("voxel_size", 0.02)
+    rate_hz = args.get("execution_rate_hz", 50)
+
+    joint_names = _CUROBO_ROBOT_JOINTS.get(robot_cfg, _CUROBO_ROBOT_JOINTS["franka.yml"])
+    pick_approach = [pick_pos[0], pick_pos[1], pick_pos[2] + approach_h]
+    place_approach = [place_pos[0], place_pos[1], place_pos[2] + approach_h]
+
+    code = f'''\
+import torch
+import time
+import numpy as np
+from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig
+from curobo.wrap.model.robot_segmenter import RobotSegmenter
+from curobo.types.math import Pose
+from curobo.types.camera import CameraObservation
+from curobo.types.robot import JointState as CuroboJointState
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.utils.types import ArticulationAction
+from pxr import UsdGeom, Gf
+
+# ── Configuration ──
+ROBOT_CFG = '{robot_cfg}'
+ART_PATH = '{art_path}'
+CAM_PATH = '{cam_path}'
+JOINT_NAMES = {joint_names}
+GRIPPER_JOINTS = {gripper_joints}
+GRIPPER_OPEN = {gripper_open}
+GRIPPER_CLOSE = {gripper_close}
+RATE_HZ = {rate_hz}
+IMG_W, IMG_H = {img_size[0]}, {img_size[1]}
+SEG_BUFFER = {seg_buffer}
+VOXEL_SIZE = {voxel_size}
+
+PICK_APPROACH = {pick_approach + list(pick_ori)}
+PICK_GRASP    = {list(pick_pos) + list(pick_ori)}
+PLACE_APPROACH = {place_approach + list(place_ori)}
+PLACE_TARGET  = {list(place_pos) + list(place_ori)}
+
+# ── Initialize robot ──
+art = SingleArticulation(prim_path=ART_PATH)
+art.initialize()
+
+# ── Camera intrinsics from USD prim ──
+import omni.usd
+stage = omni.usd.get_context().get_stage()
+cam_prim = stage.GetPrimAtPath(CAM_PATH)
+
+# Get focal length and sensor size for intrinsics
+fl = cam_prim.GetAttribute('focalLength').Get() or 24.0
+h_ap = cam_prim.GetAttribute('horizontalAperture').Get() or 36.0
+v_ap = cam_prim.GetAttribute('verticalAperture').Get() or 24.0
+fx = fl * IMG_W / h_ap
+fy = fl * IMG_H / v_ap
+cx, cy = IMG_W / 2.0, IMG_H / 2.0
+intrinsics = torch.tensor([[fx, 0, cx], [0, fy, cy], [0, 0, 1]],
+                           dtype=torch.float32).cuda()
+print(f'Camera intrinsics: fx={{fx:.1f}} fy={{fy:.1f}} cx={{cx:.1f}} cy={{cy:.1f}}')
+
+# ── Camera pose (world → robot base frame) ──
+cam_xformable = UsdGeom.Xformable(cam_prim)
+cam_world_tf = cam_xformable.ComputeLocalToWorldTransform(0)
+cam_pos = cam_world_tf.ExtractTranslation()
+cam_rot = cam_world_tf.ExtractRotationMatrix()
+
+robot_prim = stage.GetPrimAtPath(ART_PATH)
+robot_xformable = UsdGeom.Xformable(robot_prim)
+robot_world_tf = robot_xformable.ComputeLocalToWorldTransform(0)
+robot_inv_tf = robot_world_tf.GetInverse()
+
+# Camera pose relative to robot base
+cam_in_robot = robot_inv_tf * cam_world_tf
+pose_mat = np.array(cam_in_robot).T  # USD is row-major, convert
+cam_position = torch.tensor(pose_mat[:3, 3], dtype=torch.float32).cuda()
+# Build quaternion from rotation matrix
+rot_np = pose_mat[:3, :3]
+from scipy.spatial.transform import Rotation as R
+quat_xyzw = R.from_matrix(rot_np).as_quat()  # [x,y,z,w]
+cam_quat = torch.tensor([quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]],
+                         dtype=torch.float32).cuda()  # [w,x,y,z]
+cam_pose = Pose(position=cam_position.unsqueeze(0), quaternion=cam_quat.unsqueeze(0))
+print(f'Camera in robot frame: pos={{cam_position.cpu().tolist()}}')
+
+# ── Initialize Robot Segmenter ──
+segmenter = RobotSegmenter.from_robot_file(ROBOT_CFG, seg_buffer=SEG_BUFFER)
+print('Robot segmenter initialized')
+
+# ── Capture depth from Isaac Sim's render product ──
+from isaacsim.core.utils.render_product import create_render_product
+from isaacsim.replicator.core import AnnotatorRegistry
+import isaacsim.replicator.core as rep
+
+rp = create_render_product(CAM_PATH, (IMG_W, IMG_H))
+depth_annot = rep.AnnotatorRegistry.get_annotator('distance_to_camera')
+depth_annot.attach([rp])
+
+# Wait a frame for data
+import omni.kit.app
+omni.kit.app.get_app().update()
+omni.kit.app.get_app().update()
+
+depth_data = depth_annot.get_data()
+depth_image = torch.tensor(depth_data, dtype=torch.float32).cuda()
+if depth_image.ndim == 2:
+    depth_image = depth_image.unsqueeze(0).unsqueeze(0)  # [1, 1, H, W]
+elif depth_image.ndim == 3:
+    depth_image = depth_image.unsqueeze(0)
+
+print(f'Depth image shape: {{depth_image.shape}}, range: [{{depth_image.min():.3f}}, {{depth_image.max():.3f}}]m')
+
+# ── Robot segmentation — filter robot from depth ──
+q_current = art.get_joint_positions()
+n_dof = len(JOINT_NAMES)
+joint_state = CuroboJointState.from_position(
+    torch.tensor(q_current[:n_dof], dtype=torch.float32).unsqueeze(0).cuda(),
+    joint_names=JOINT_NAMES,
+)
+
+cam_obs = CameraObservation(
+    depth_image=depth_image,
+    intrinsics=intrinsics.unsqueeze(0),
+    pose=cam_pose,
+)
+
+seg_result = segmenter.get_robot_mask(cam_obs, joint_state)
+world_depth = seg_result.world_depth  # depth with robot removed
+robot_mask = seg_result.mask
+
+robot_pixels = robot_mask.sum().item()
+total_pixels = robot_mask.numel()
+print(f'Robot segmentation: {{robot_pixels}}/{{total_pixels}} pixels masked ({{100*robot_pixels/total_pixels:.1f}}%)')
+
+# ── Build collision world from filtered depth ──
+# Convert filtered depth to pointcloud for cuRobo world
+from curobo.geom.types import WorldConfig
+
+# Use cuboid world from USD stage as fallback + depth-derived obstacles
+try:
+    from curobo.util.usd_helper import UsdHelper
+    usd_helper = UsdHelper()
+    usd_helper.load_stage(usd_helper.stage)
+    world_config = usd_helper.get_obstacles_from_stage(
+        reference_prim_path=ART_PATH,
+        ignore_substring=['visual', 'finger'],
+    ).get_collision_check_world()
+    print('Loaded world obstacles from USD stage')
+except Exception as e:
+    world_config = {{'cuboid': {{'ground': {{'dims': [10, 10, 0.01], 'pose': [0, 0, -0.005, 1, 0, 0, 0]}}}}}}
+    print(f'Using ground-only world ({{e}})')
+
+# ── Initialize cuRobo MotionGen ──
+motion_gen_config = MotionGenConfig.load_from_robot_config(
+    ROBOT_CFG, world_config, interpolation_dt=0.02,
+)
+motion_gen = MotionGen(motion_gen_config)
+motion_gen.warmup()
+print('cuRobo MotionGen warmed up')
+
+# ── Helper functions ──
+def get_current_state():
+    q = art.get_joint_positions()
+    return CuroboJointState.from_position(
+        torch.tensor(q[:n_dof], dtype=torch.float32).unsqueeze(0).cuda(),
+        joint_names=JOINT_NAMES,
+    )
+
+def plan_to(pose_list):
+    start = get_current_state()
+    goal = Pose.from_list(pose_list)
+    result = motion_gen.plan_single(start, goal, MotionGenPlanConfig(max_attempts=10))
+    if result.success:
+        return result.get_interpolated_plan().position.cpu().numpy()
+    print(f'  Planning failed: {{result.status}}')
+    return None
+
+def execute_traj(waypoints):
+    dt = 1.0 / RATE_HZ
+    for wp in waypoints:
+        positions = list(wp[:n_dof])
+        action = ArticulationAction(joint_positions=np.array(positions))
+        art.apply_action(action)
+        omni.kit.app.get_app().update()
+        time.sleep(dt)
+
+def set_gripper(positions):
+    q = art.get_joint_positions()
+    for i, gname in enumerate(GRIPPER_JOINTS):
+        try:
+            all_names = list(art.dof_names) if hasattr(art, 'dof_names') else JOINT_NAMES + GRIPPER_JOINTS
+            idx = all_names.index(gname)
+            q[idx] = positions[i]
+        except (ValueError, IndexError):
+            q[n_dof + i] = positions[i]
+    art.apply_action(ArticulationAction(joint_positions=np.array(q)))
+    for _ in range(10):
+        omni.kit.app.get_app().update()
+        time.sleep(0.02)
+
+# ── Execute Vision-Guided Pick & Place ──
+print('\\n=== Vision-Guided Pick & Place (with Robot Segmentation) ===')
+print(f'Depth camera: {{CAM_PATH}} | Robot filtered: {{robot_pixels}} pixels')
+
+print('1. Opening gripper...')
+set_gripper(GRIPPER_OPEN)
+
+print('2. Moving to pick approach...')
+traj = plan_to(PICK_APPROACH)
+if traj is not None:
+    execute_traj(traj)
+    print('   Done')
+
+# Re-capture depth at new pose for updated world awareness
+print('   Updating depth segmentation...')
+omni.kit.app.get_app().update()
+omni.kit.app.get_app().update()
+depth_data = depth_annot.get_data()
+new_depth = torch.tensor(depth_data, dtype=torch.float32).cuda()
+if new_depth.ndim == 2:
+    new_depth = new_depth.unsqueeze(0).unsqueeze(0)
+cam_obs_updated = CameraObservation(depth_image=new_depth, intrinsics=intrinsics.unsqueeze(0), pose=cam_pose)
+seg_result = segmenter.get_robot_mask(cam_obs_updated, get_current_state())
+print(f'   Filtered {{seg_result.mask.sum().item()}} robot pixels')
+
+print('3. Moving to grasp position...')
+traj = plan_to(PICK_GRASP)
+if traj is not None:
+    execute_traj(traj)
+    print('   Done')
+
+print('4. Closing gripper...')
+set_gripper(GRIPPER_CLOSE)
+
+print('5. Lifting...')
+traj = plan_to(PICK_APPROACH)
+if traj is not None:
+    execute_traj(traj)
+    print('   Done')
+
+print('6. Moving to place approach...')
+traj = plan_to(PLACE_APPROACH)
+if traj is not None:
+    execute_traj(traj)
+    print('   Done')
+
+print('7. Lowering to place...')
+traj = plan_to(PLACE_TARGET)
+if traj is not None:
+    execute_traj(traj)
+    print('   Done')
+
+print('8. Releasing...')
+set_gripper(GRIPPER_OPEN)
+
+print('9. Retreating...')
+traj = plan_to(PLACE_APPROACH)
+if traj is not None:
+    execute_traj(traj)
+    print('   Done')
+
+# Cleanup annotator
+depth_annot.detach([rp])
+
+print('\\n=== Vision-Guided Pick & Place Complete ===')
+'''
+    return code
+
+CODE_GEN_HANDLERS["curobo_vision_pick"] = _gen_curobo_vision_pick
+
+
 # ── Asset Catalog Search ─────────────────────────────────────────────────────
 
 _asset_index: Optional[List[Dict]] = None

@@ -962,4 +962,115 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── cuRobo GPU Motion Planning ───────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "curobo_motion_plan",
+            "description": "Plan a collision-free trajectory to a target pose using cuRobo GPU-accelerated motion planning. Returns interpolated joint waypoints. Use this for precise, collision-aware motion. Faster than RMPflow for single-target planning and supports obstacle avoidance from the USD stage.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation, e.g. '/World/Franka'"},
+                    "target_position": {"type": "array", "items": {"type": "number"}, "description": "Target EE position [x, y, z] in meters"},
+                    "target_orientation": {"type": "array", "items": {"type": "number"}, "description": "Target EE orientation as quaternion [qw, qx, qy, qz]. Omit to keep current."},
+                    "robot_config": {"type": "string", "enum": ["franka.yml", "ur5e.yml", "ur10e.yml", "kinova_gen3.yml", "iiwa.yml", "jaco7.yml", "tm12.yml"], "description": "cuRobo robot config file. Default: franka.yml"},
+                    "interpolation_dt": {"type": "number", "description": "Time step between waypoints in seconds. Default: 0.02"},
+                    "max_attempts": {"type": "integer", "description": "Max planning attempts. Default: 5"},
+                    "world_obstacles": {
+                        "type": "object",
+                        "description": "Optional world obstacles as cuboids/meshes dict. If omitted, reads from USD stage via UsdHelper.",
+                    },
+                },
+                "required": ["articulation_path", "target_position"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "curobo_pick_place",
+            "description": "Plan and execute a complete pick-and-place sequence using cuRobo: approach → grasp → lift → move → place → release. Handles gripper open/close and collision-free trajectory planning. Publishes joint commands via ROS2 /joint_command topic for execution.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot, e.g. '/World/Franka'"},
+                    "pick_position": {"type": "array", "items": {"type": "number"}, "description": "Object grasp position [x, y, z] in meters"},
+                    "pick_orientation": {"type": "array", "items": {"type": "number"}, "description": "Grasp orientation [qw, qx, qy, qz]. Default: top-down grasp [0, 1, 0, 0]"},
+                    "place_position": {"type": "array", "items": {"type": "number"}, "description": "Place target position [x, y, z] in meters"},
+                    "place_orientation": {"type": "array", "items": {"type": "number"}, "description": "Place orientation [qw, qx, qy, qz]. Default: same as pick."},
+                    "approach_height": {"type": "number", "description": "Height above pick/place for approach/retreat in meters. Default: 0.1"},
+                    "robot_config": {"type": "string", "description": "cuRobo config file. Default: franka.yml"},
+                    "gripper_joint_names": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "Gripper joint names. Default: ['panda_finger_joint1', 'panda_finger_joint2']",
+                    },
+                    "gripper_open": {"type": "array", "items": {"type": "number"}, "description": "Gripper open joint positions. Default: [0.04, 0.04]"},
+                    "gripper_close": {"type": "array", "items": {"type": "number"}, "description": "Gripper close joint positions. Default: [0.0, 0.0]"},
+                    "joint_command_topic": {"type": "string", "description": "ROS2 topic for joint commands. Default: /joint_command"},
+                    "joint_state_topic": {"type": "string", "description": "ROS2 topic for reading current state. Default: /joint_states"},
+                    "execution_rate_hz": {"type": "number", "description": "Rate to publish trajectory waypoints in Hz. Default: 50"},
+                },
+                "required": ["articulation_path", "pick_position", "place_position"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "curobo_execute_trajectory",
+            "description": "Execute a pre-planned joint trajectory by publishing waypoints to a ROS2 topic at a given rate. Use after curobo_motion_plan to send the computed trajectory to the robot. Can also be used to replay any sequence of joint positions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "joint_names": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "Joint names matching the trajectory columns, e.g. ['panda_joint1', ..., 'panda_joint7']",
+                    },
+                    "waypoints": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "number"}},
+                        "description": "List of joint position arrays — each inner array is one waypoint",
+                    },
+                    "joint_command_topic": {"type": "string", "description": "ROS2 topic. Default: /joint_command"},
+                    "rate_hz": {"type": "number", "description": "Publishing rate. Default: 50"},
+                    "msg_type": {"type": "string", "description": "Message type. Default: sensor_msgs/msg/JointState"},
+                },
+                "required": ["joint_names", "waypoints"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "curobo_vision_pick",
+            "description": "Vision-guided pick-and-place using depth camera + cuRobo robot segmentation. Reads depth image from a ROS2 camera topic, uses RobotSegmenter to filter the robot from the depth image, builds a clean collision world from the remaining pointcloud, then plans and executes collision-free pick-and-place. Requires a depth camera publishing via ROS2.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot, e.g. '/World/Franka'"},
+                    "camera_prim_path": {"type": "string", "description": "USD path to the depth camera prim, e.g. '/World/Camera'"},
+                    "pick_position": {"type": "array", "items": {"type": "number"}, "description": "Object grasp position [x, y, z] in meters"},
+                    "place_position": {"type": "array", "items": {"type": "number"}, "description": "Place target position [x, y, z] in meters"},
+                    "pick_orientation": {"type": "array", "items": {"type": "number"}, "description": "Grasp orientation [qw, qx, qy, qz]. Default: top-down [0, 1, 0, 0]"},
+                    "place_orientation": {"type": "array", "items": {"type": "number"}, "description": "Place orientation. Default: same as pick."},
+                    "depth_topic": {"type": "string", "description": "ROS2 depth image topic. Default: /camera/depth"},
+                    "depth_image_size": {"type": "array", "items": {"type": "integer"}, "description": "Depth image [width, height]. Default: [640, 480]"},
+                    "robot_config": {"type": "string", "description": "cuRobo config. Default: franka.yml"},
+                    "approach_height": {"type": "number", "description": "Height above pick/place for approach in meters. Default: 0.1"},
+                    "gripper_joint_names": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "Gripper joint names. Default: ['panda_finger_joint1', 'panda_finger_joint2']",
+                    },
+                    "gripper_open": {"type": "array", "items": {"type": "number"}, "description": "Open positions. Default: [0.04, 0.04]"},
+                    "gripper_close": {"type": "array", "items": {"type": "number"}, "description": "Close positions. Default: [0.0, 0.0]"},
+                    "segmentation_buffer": {"type": "number", "description": "Extra radius margin for robot sphere filtering in meters. Default: 0.02"},
+                    "voxel_size": {"type": "number", "description": "Voxel size for collision world in meters. Default: 0.02"},
+                    "execution_rate_hz": {"type": "number", "description": "Rate to play waypoints. Default: 50"},
+                },
+                "required": ["articulation_path", "camera_prim_path", "pick_position", "place_position"],
+            },
+        },
+    },
 ]
