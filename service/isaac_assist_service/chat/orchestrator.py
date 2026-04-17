@@ -385,6 +385,40 @@ class ChatOrchestrator:
             logger.warning(f"[{session_id}] Hit max tool rounds ({max_rounds})")
 
         reply = response.text or ""
+
+        # Anti-ghosting: if the LLM finished calling tools but never produced
+        # visible text, the user sees a blank reply and assumes we died. Force
+        # one more call with tools disabled, asking for a concise summary.
+        if not reply.strip() and executed_tools:
+            logger.warning(f"[{session_id}] Empty reply with {len(executed_tools)} tools — forcing summary")
+            messages.append({
+                "role": "user",
+                "content": (
+                    "You just ran tools but didn't write a reply to the user. "
+                    "Now write ONE concise paragraph summarising (a) what you did, "
+                    "(b) what the user should see in the viewport or stage right now, "
+                    "(c) any caveats or next step you'd suggest. "
+                    "Do NOT call more tools. If the viewport might not show the result "
+                    "(e.g., camera not framed on the new prim), say so explicitly and "
+                    "tell them to frame-focus on the prim path."
+                ),
+            })
+            try:
+                summary_ctx = dict(context) if isinstance(context, dict) else {}
+                summary_ctx["tools"] = []  # disable tool-calling for summary
+                summary_response = await self.llm_provider.complete(messages, summary_ctx)
+                reply = (summary_response.text or "").strip()
+            except Exception as e:
+                logger.warning(f"[{session_id}] Anti-ghosting summary failed: {e}")
+            if not reply:
+                # Fallback — synthesize from tool names so the user sees something
+                tools_run = ", ".join({t.get("tool") for t in executed_tools if t.get("tool")})
+                reply = (
+                    f"I ran these tools: {tools_run}. "
+                    "Check the stage tree / viewport for the result; frame-focus on the new "
+                    "prim if the camera isn't on it yet."
+                )
+
         logger.info(f"[{session_id}] ASSISTANT: {reply[:200]}")
 
         # ── 6. Persist to session history ────────────────────────────────────
