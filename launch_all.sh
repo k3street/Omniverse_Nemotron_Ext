@@ -28,6 +28,11 @@ cleanup() {
     for pid in "${PIDS[@]}"; do
         kill "$pid" 2>/dev/null && echo "   Stopped PID $pid"
     done
+    if [ -n "${ISAAC_PID:-}" ]; then
+        kill "$ISAAC_PID" 2>/dev/null && echo "   Stopped Isaac Sim wrapper PID $ISAAC_PID"
+    fi
+    # Also kill any orphaned isaac-sim processes we spawned
+    pkill -f "isaac-sim.sh" 2>/dev/null || true
     wait 2>/dev/null
     echo "   Done."
 }
@@ -152,14 +157,18 @@ done
 echo ""
 echo "🚀 Starting Isaac Sim..."
 
-# launch_isaac.sh uses exec (replaces the process), so we call it differently
+# launch_isaac.sh uses exec, so the bash wrapper exits once Isaac Sim
+# forks/daemonises. We don't track its PID — Isaac Sim manages its own
+# lifecycle.  Instead we track it separately for the cleanup trap.
+ISAAC_PID=""
+
 if [ -n "$USD_FILE" ]; then
     bash "$SCRIPT_DIR/launch_isaac.sh" "$USD_FILE" &
 else
     bash "$SCRIPT_DIR/launch_isaac.sh" &
 fi
-PIDS+=($!)
-echo "   PID: ${PIDS[-1]}"
+ISAAC_PID=$!
+echo "   PID: $ISAAC_PID"
 
 echo ""
 echo "════════════════════════════════════════════════════════════"
@@ -171,7 +180,11 @@ echo "   API:        tail -f /tmp/isaac_assist_service.log"
 echo "════════════════════════════════════════════════════════════"
 echo ""
 
-# Wait for any child to exit
-wait -n 2>/dev/null || true
-# If one exits, shut everything down
-echo "⚠️  A process exited. Shutting down..."
+# Keep alive — wait on the API service (the long-running process).
+# Isaac Sim may exit its bash wrapper quickly (exec), so don't use wait -n.
+# If the API dies, we shut down.
+SERVICE_PID="${PIDS[1]:-}"
+if [ -n "$SERVICE_PID" ]; then
+    wait "$SERVICE_PID" 2>/dev/null || true
+fi
+echo "⚠️  API service exited. Shutting down..."
