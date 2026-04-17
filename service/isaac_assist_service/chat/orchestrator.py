@@ -229,6 +229,21 @@ class ChatOrchestrator:
         except Exception as e:
             logger.warning(f"[{session_id}] Negative pattern retrieval failed: {e}")
 
+        # Retrieve workflow templates (pre-generated offline from task specs).
+        # Injected as few-shot patterns to stop the LLM from inventing a fresh
+        # tool chain each turn. Adds to patterns_text (part of system prompt).
+        try:
+            from .tools.template_retriever import retrieve_templates, format_for_prompt
+            templates = retrieve_templates(user_message, top_k=3)
+            if templates:
+                tpl_text = format_for_prompt(templates)
+                if patterns_text:
+                    patterns_text = patterns_text + "\n\n" + tpl_text
+                else:
+                    patterns_text = tpl_text
+        except Exception as e:
+            logger.warning(f"[{session_id}] Template retrieval failed: {e}")
+
         # ── 4. DISTILL: build compact context via the distillation pipeline ──
         selected_prim = context.get("selected_prim") if context else None
         selected_prim_path = context.get("selected_prim_path") if context else None

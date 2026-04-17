@@ -26,7 +26,7 @@ import json
 
 logger = logging.getLogger(__name__)
 
-_PERSIST_DIR = Path(__file__).resolve().parents[3] / "workspace" / "tool_index"
+_PERSIST_DIR = Path(__file__).resolve().parents[4] / "workspace" / "tool_index"
 _COLLECTION_NAME = "isaac_assist_tools"
 _client = None
 _collection = None

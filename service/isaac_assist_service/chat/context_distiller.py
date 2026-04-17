@@ -363,22 +363,19 @@ def select_tools(
     if knowledge.ros2_topics:
         categories.add("omnigraph_ros2")
 
-    # 4. Collect tool names from selected categories
+    # 4. Semantic retrieval first (research-preferred narrowing): get the
+    # top-20 tools whose descriptions best match the user message. This is
+    # REPLACE mode — retrieval is the primary filter, not an addition.
     tool_names: Set[str] = set(_ALWAYS_TOOLS)
-    for cat in categories:
-        tool_names.update(TOOL_CATEGORIES.get(cat, []))
-
-    # 4b. Semantic retrieval: augment with top-K tools whose descriptions
-    # best match the user message. Catches specialized tools the coarse
-    # category filter missed (e.g. user asks about "LIDAR" → `inspect_camera`
-    # was in camera category but `capture_camera_image`, `configure_camera`
-    # are surfaced semantically too).
     try:
         from .tools.tool_retriever import retrieve_tools
-        semantic = retrieve_tools(message, top_k=15)
+        semantic = retrieve_tools(message, top_k=20)
         tool_names.update(semantic)
     except Exception as e:
-        logger.warning(f"[Distiller] Semantic tool retrieval skipped: {e}")
+        logger.warning(f"[Distiller] Semantic tool retrieval failed, falling back to categories: {e}")
+        # Only use categories when retrieval is unavailable
+        for cat in categories:
+            tool_names.update(TOOL_CATEGORIES.get(cat, []))
 
     # 5. Resolve to actual schemas
     tools = [_TOOL_BY_NAME[name] for name in tool_names if name in _TOOL_BY_NAME]
