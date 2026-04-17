@@ -132,6 +132,20 @@ _KEYWORD_CATEGORIES: List[tuple] = [
      {"scene_builder"}),
 ]
 
+# Pattern to detect poisoned assistant messages that are just intent JSON
+_INTENT_JSON_RE = re.compile(
+    r'^\s*\{[^{}]*"intent"\s*:\s*"[a-z_]+"[^{}]*\}\s*$', re.S
+)
+
+
+def _is_bare_intent_json(text: str) -> bool:
+    """Return True if text is just an intent classification echo (bug artifact)."""
+    text = text.strip()
+    if len(text) > 200:
+        return False
+    return bool(_INTENT_JSON_RE.match(text))
+
+
 # Intent → default tool categories (always included for that intent)
 _INTENT_CATEGORIES: Dict[str, Set[str]] = {
     "general_query":   {"scene_query", "knowledge"},
@@ -540,6 +554,11 @@ async def distill_context(
     for m in history[-4:]:
         if m.get("role") in ("user", "assistant") and m.get("content"):
             content = m["content"]
+            # Skip poisoned assistant messages that are just intent JSON
+            # (caused by a previous bug where the LLM echoed the classifier)
+            if m["role"] == "assistant" and _is_bare_intent_json(content):
+                logger.debug("[Distiller] Skipping poisoned intent-echo from history")
+                continue
             if len(content) > 800:
                 content = content[:800] + "..."
             recent_raw.append({"role": m["role"], "content": content})
