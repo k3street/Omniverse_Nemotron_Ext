@@ -187,23 +187,26 @@ def save_pattern_from_success(
     if len(keywords) < 2:
         return False  # too generic to be useful
 
-    # Check for near-duplicate (keyword overlap OR similar title)
+    # Check for near-duplicate — only against OTHER auto-captured patterns.
+    # Curated patterns share broad keywords (robot, physics, etc.) and would
+    # block almost every auto-capture if included in the dedup check.
     existing = _load_patterns(version)
+    auto_existing = [p for p in existing if p.get("source") == "auto_captured"]
     new_kw_set = set(keywords)
     title_words = set(user_message.lower().split())
-    for p in existing:
+    for p in auto_existing:
         existing_kw_set = set(k.lower() for k in p.get("keywords", []))
-        # Keyword overlap check
+        # Keyword overlap: require 80% overlap to consider duplicate
         if existing_kw_set and new_kw_set:
             overlap = len(new_kw_set & existing_kw_set)
-            if overlap / max(len(new_kw_set), len(existing_kw_set)) > 0.5:
+            if overlap / max(len(new_kw_set), len(existing_kw_set)) > 0.8:
                 logger.info(f"[patterns] Skipping near-duplicate (keywords): {user_message[:60]}")
                 return False
-        # Title similarity check — catch repeated prompts with minor typo variations
+        # Title similarity: require 80% word overlap (catches exact re-runs / typos)
         existing_title_words = set(p.get("title", "").lower().split())
         if title_words and existing_title_words:
             title_overlap = len(title_words & existing_title_words)
-            if title_overlap / max(len(title_words), len(existing_title_words)) > 0.6:
+            if title_overlap / max(len(title_words), len(existing_title_words)) > 0.8:
                 logger.info(f"[patterns] Skipping near-duplicate (title): {user_message[:60]}")
                 return False
 
