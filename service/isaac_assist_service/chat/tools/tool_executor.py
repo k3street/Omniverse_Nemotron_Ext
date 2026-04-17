@@ -46,13 +46,7 @@ from typing import Tuple
 import asyncio as _asyncio
 from dataclasses import dataclass, field
 
-# Lazy import — TurnRecorder has its own deps, only pull it in if available
-try:
-    from ...finetune.turn_recorder import TurnRecorder
-except Exception:
-    class TurnRecorder:
-        def __init__(self, *a, **k): pass
-        def __getattr__(self, name): return lambda *a, **k: None
+from ...finetune.turn_recorder import TurnRecorder
 
 # cleanly, but the Python-side wrapper keeps ordering deterministic for tests.
 

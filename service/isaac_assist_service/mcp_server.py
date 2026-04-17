@@ -195,9 +195,13 @@ class MCPServer:
                 parts.append(f"\n\nExecution {status}:\n```\n{output}\n```")
             content.append({"type": "text", "text": "".join(parts)})
         elif result.get("type") == "data":
+            # Handlers spread their fields directly into result — strip "type"
+            # and return everything else as JSON (older code looked at result["data"]
+            # which handlers never populate).
+            payload = {k: v for k, v in result.items() if k != "type"}
             content.append({
                 "type": "text",
-                "text": json.dumps(result.get("data", {}), indent=2),
+                "text": json.dumps(payload, indent=2, default=str),
             })
         else:
             content.append({"type": "text", "text": json.dumps(result, indent=2)})
