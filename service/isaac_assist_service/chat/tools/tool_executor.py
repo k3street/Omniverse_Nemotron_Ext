@@ -2136,7 +2136,7 @@ def _gen_import_robot(args: Dict) -> str:
 
     if fmt == "urdf":
         return f"""\
-from omni.isaac.urdf import _urdf
+from isaacsim.asset.importer.urdf import _urdf
 import omni.kit.commands
 result, prim_path = omni.kit.commands.execute(
     "URDFParseAndImportFile",
@@ -2661,17 +2661,17 @@ lidar_prim = stage.DefinePrim(lidar_path, 'Camera')
 _safe_set_translate(lidar_prim, (0, 0, 0.1))
 
 # Configure RTX Lidar via Isaac Sim extension
-from omni.isaac.sensor import LidarRtx
+from isaacsim.sensors.rtx import LidarRtx
 lidar = LidarRtx(prim_path=lidar_path)
 """
     if sensor_type == "imu":
         return f"""\
-from omni.isaac.sensor import IMUSensor
+from isaacsim.sensors.physics import IMUSensor
 imu = IMUSensor(prim_path='{prim_path}/IMU')
 """
     if sensor_type == "contact_sensor":
         return f"""\
-from omni.isaac.sensor import ContactSensor
+from isaacsim.sensors.physics import ContactSensor
 contact = ContactSensor(prim_path='{prim_path}/ContactSensor')
 """
     return f"# Sensor type '{sensor_type}' not yet implemented"
