@@ -35,7 +35,14 @@ class GeminiProvider:
         )
 
     async def complete(self, messages: List[Dict], context: Dict) -> LLMResponse:
-        system = getattr(self, "_system_override", None) or SYSTEM_PROMPT
+        # Use override, or extract from the distilled messages, or fallback.
+        system = getattr(self, "_system_override", None)
+        if not system:
+            sys_msgs = [m for m in messages if m.get("role") == "system"]
+            if sys_msgs:
+                system = sys_msgs[0].get("content", "") or SYSTEM_PROMPT
+            else:
+                system = SYSTEM_PROMPT
         gemini_messages = self._format_messages(messages)
 
         payload = {

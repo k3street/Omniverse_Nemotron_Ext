@@ -36,7 +36,15 @@ class AnthropicProvider:
         self.model = model
 
     async def complete(self, messages: List[Dict], context: Dict) -> LLMResponse:
-        system = getattr(self, "_system_override", None) or SYSTEM_PROMPT
+        # Use override (set during history compression), or extract from
+        # the distilled messages, or fall back to the generic prompt.
+        system = getattr(self, "_system_override", None)
+        if not system:
+            sys_msgs = [m for m in messages if m.get("role") == "system"]
+            if sys_msgs:
+                system = sys_msgs[0].get("content", "") or SYSTEM_PROMPT
+            else:
+                system = SYSTEM_PROMPT
 
         # Filter out system messages (Anthropic uses separate 'system' field)
         filtered_msgs = [m for m in messages if m.get("role") != "system"]
