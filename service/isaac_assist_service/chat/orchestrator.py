@@ -353,19 +353,6 @@ class ChatOrchestrator:
             logger.warning(f"[{session_id}] Hit max tool rounds ({max_rounds})")
 
         reply = response.text or ""
-        # Defensive: strip internal intent-classifier JSON that sometimes leaks
-        # into the chat response when the LLM mirrors its prompt format.
-        _stripped = reply.strip()
-        if _stripped.startswith("```json") and _stripped.endswith("```"):
-            _inner = _stripped[len("```json"):-3].strip()
-            try:
-                _parsed = json.loads(_inner)
-                if isinstance(_parsed, dict) and set(_parsed.keys()) <= {"intent", "confidence"}:
-                    logger.warning(f"[{session_id}] Dropped intent-JSON leak from reply")
-                    # Provide a graceful fallback so the user sees something useful.
-                    reply = "I'm here — could you tell me a bit more about what you want to do?"
-            except Exception:
-                pass
         logger.info(f"[{session_id}] ASSISTANT: {reply[:200]}")
 
         # ── 6. Persist to session history ────────────────────────────────────
