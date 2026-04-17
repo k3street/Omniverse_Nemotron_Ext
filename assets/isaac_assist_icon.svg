@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <!-- NVIDIA green to 10Things teal gradient -->
+    <linearGradient id="mainGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#76B900"/>
+      <stop offset="50%" style="stop-color:#4CAF50"/>
+      <stop offset="100%" style="stop-color:#00BFA5"/>
+    </linearGradient>
+    <!-- Glow gradient for the eye -->
+    <radialGradient id="eyeGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#76B900;stop-opacity:0.9"/>
+      <stop offset="60%" style="stop-color:#4CAF50;stop-opacity:0.5"/>
+      <stop offset="100%" style="stop-color:#00BFA5;stop-opacity:0"/>
+    </radialGradient>
+    <!-- Dark background gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#0d0d1a"/>
+    </linearGradient>
+    <!-- Circuit trace glow -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background: rounded square -->
+  <rect x="8" y="8" width="240" height="240" rx="40" ry="40" fill="url(#bgGrad)" stroke="url(#mainGrad)" stroke-width="2.5"/>
+
+  <!-- Subtle grid pattern (circuit board feel) -->
+  <g opacity="0.08" stroke="#76B900" stroke-width="0.5" fill="none">
+    <line x1="48" y1="8" x2="48" y2="248"/>
+    <line x1="88" y1="8" x2="88" y2="248"/>
+    <line x1="128" y1="8" x2="128" y2="248"/>
+    <line x1="168" y1="8" x2="168" y2="248"/>
+    <line x1="208" y1="8" x2="208" y2="248"/>
+    <line x1="8" y1="48" x2="248" y2="48"/>
+    <line x1="8" y1="88" x2="248" y2="88"/>
+    <line x1="8" y1="128" x2="248" y2="128"/>
+    <line x1="8" y1="168" x2="248" y2="168"/>
+    <line x1="8" y1="208" x2="248" y2="208"/>
+  </g>
+
+  <!-- NVIDIA-inspired eye shape — outer -->
+  <g filter="url(#softGlow)">
+    <path d="M 48 128 Q 128 52 208 128 Q 128 204 48 128 Z"
+          fill="none" stroke="url(#mainGrad)" stroke-width="3" opacity="0.6"/>
+  </g>
+
+  <!-- Eye shape — inner filled -->
+  <path d="M 64 128 Q 128 72 192 128 Q 128 184 64 128 Z"
+        fill="url(#eyeGlow)" opacity="0.15"/>
+
+  <!-- Stylized "AI" pupil — hexagonal iris -->
+  <g filter="url(#glow)">
+    <polygon points="128,100 148,114 148,142 128,156 108,142 108,114"
+             fill="none" stroke="#76B900" stroke-width="2.5" opacity="0.9"/>
+    <polygon points="128,108 142,118 142,138 128,148 114,138 114,118"
+             fill="#76B900" opacity="0.25"/>
+  </g>
+
+  <!-- Center dot (pupil core) -->
+  <circle cx="128" cy="128" r="8" fill="#76B900" opacity="0.9" filter="url(#glow)"/>
+  <circle cx="128" cy="128" r="4" fill="#ffffff" opacity="0.8"/>
+
+  <!-- Circuit traces emanating from eye -->
+  <g stroke="#00BFA5" stroke-width="1.5" fill="none" opacity="0.5" filter="url(#glow)">
+    <!-- Left traces -->
+    <path d="M 64 128 L 40 128 L 40 88 L 28 88"/>
+    <circle cx="28" cy="88" r="3" fill="#00BFA5"/>
+    <path d="M 72 108 L 48 84 L 48 58"/>
+    <circle cx="48" cy="58" r="3" fill="#00BFA5"/>
+    <path d="M 72 148 L 48 172 L 48 198"/>
+    <circle cx="48" cy="198" r="3" fill="#00BFA5"/>
+
+    <!-- Right traces -->
+    <path d="M 192 128 L 216 128 L 216 168 L 228 168"/>
+    <circle cx="228" cy="168" r="3" fill="#00BFA5"/>
+    <path d="M 184 108 L 208 84 L 208 58"/>
+    <circle cx="208" cy="58" r="3" fill="#00BFA5"/>
+    <path d="M 184 148 L 208 172 L 208 198"/>
+    <circle cx="208" cy="198" r="3" fill="#00BFA5"/>
+  </g>
+
+  <!-- Robotic arm silhouette (subtle, bottom-left) -->
+  <g stroke="#76B900" stroke-width="2" fill="none" opacity="0.3" stroke-linecap="round">
+    <path d="M 36 210 L 52 185 L 72 190 L 82 172"/>
+    <circle cx="82" cy="172" r="3" fill="#76B900" opacity="0.5"/>
+  </g>
+
+  <!-- Text: "ISAAC" small at bottom -->
+  <text x="128" y="230" text-anchor="middle" font-family="'Segoe UI','Helvetica Neue',sans-serif"
+        font-size="16" font-weight="700" letter-spacing="6" fill="url(#mainGrad)" opacity="0.8">
+    ISAAC
+  </text>
+
+  <!-- Text: "AI" inside the eye -->
+  <text x="128" y="134" text-anchor="middle" font-family="'Segoe UI','Helvetica Neue',sans-serif"
+        font-size="14" font-weight="800" fill="#ffffff" opacity="0.85" filter="url(#glow)">
+    AI
+  </text>
+
+  <!-- Small "10T" branding mark (top-right corner) -->
+  <text x="210" y="42" text-anchor="middle" font-family="'Courier New',monospace"
+        font-size="11" font-weight="700" fill="#00BFA5" opacity="0.6">
+    10T
+  </text>
+</svg>

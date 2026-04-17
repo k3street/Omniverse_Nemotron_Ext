@@ -42,7 +42,32 @@ LLM_ARG="$1"
 USD_FILE="$2"
 
 # ── Determine LLM mode ──────────────────────────────────────────────────────
-MODE="${LLM_ARG:-${LLM_MODE:-anthropic}}"
+MODE="${LLM_ARG:-}"
+
+# If no argument given, show a GUI picker (zenity) or fall to env default
+if [ -z "$MODE" ]; then
+    if command -v zenity &>/dev/null && [ -n "$DISPLAY" ]; then
+        MODE=$(zenity --list \
+            --title="Isaac Assist — Select LLM Mode" \
+            --text="Choose the AI provider for this session:" \
+            --column="Mode" --column="Provider" --column="Model" \
+            --width=500 --height=320 \
+            --window-icon="/home/kimate/Omniverse_Nemotron_Ext/assets/isaac_assist_icon.png" \
+            "anthropic" "Claude (Anthropic)" "${CLOUD_MODEL_NAME:-claude-opus-4-7}" \
+            "cloud"     "Gemini (Google)"    "${CLOUD_MODEL_NAME:-gemini-robotics-er-1.6-preview}" \
+            "openai"    "OpenAI"             "${CLOUD_MODEL_NAME:-gpt-4o}" \
+            "grok"      "Grok (xAI)"         "${CLOUD_MODEL_NAME:-grok-3}" \
+            "local"     "Ollama (Local GPU)"  "${LOCAL_MODEL_NAME:-qwen3.5:35b}" \
+            2>/dev/null) || true
+        # User cancelled
+        if [ -z "$MODE" ]; then
+            echo "No mode selected — cancelled."
+            exit 0
+        fi
+    else
+        MODE="${LLM_MODE:-anthropic}"
+    fi
+fi
 
 case "$MODE" in
     1|local)      MODE="local" ;;
