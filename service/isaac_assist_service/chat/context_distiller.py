@@ -368,6 +368,18 @@ def select_tools(
     for cat in categories:
         tool_names.update(TOOL_CATEGORIES.get(cat, []))
 
+    # 4b. Semantic retrieval: augment with top-K tools whose descriptions
+    # best match the user message. Catches specialized tools the coarse
+    # category filter missed (e.g. user asks about "LIDAR" → `inspect_camera`
+    # was in camera category but `capture_camera_image`, `configure_camera`
+    # are surfaced semantically too).
+    try:
+        from .tools.tool_retriever import retrieve_tools
+        semantic = retrieve_tools(message, top_k=15)
+        tool_names.update(semantic)
+    except Exception as e:
+        logger.warning(f"[Distiller] Semantic tool retrieval skipped: {e}")
+
     # 5. Resolve to actual schemas
     tools = [_TOOL_BY_NAME[name] for name in tool_names if name in _TOOL_BY_NAME]
 
