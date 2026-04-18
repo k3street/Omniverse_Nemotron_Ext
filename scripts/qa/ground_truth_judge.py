@@ -153,14 +153,20 @@ async def judge_with_gemini(tx: Dict, task_sections: Dict) -> Dict[str, Any]:
     lines.append("\n=== SESSION ===")
 
     snap_idx = 1  # after_turn_N snapshots follow initial
+    # Per-message truncation tuned for longer-reply tasks (T-13 cite-able
+    # statements can run 3k+ chars). 500 was too tight: judge missed the
+    # "cite-able" section and flagged truncation-shaped failures that were
+    # actually present in the reply. 2500 matches observed turn-length
+    # distribution; the outer `convo[:8000]` still bounds the prompt.
+    _MSG_MAX = 2500
     for i, e in enumerate(tx["events"]):
         et = e.get("event")
         if et == "persona_message":
             lines.append(f"\n--- Persona T{e.get('turn','?')} ---")
-            lines.append(e.get("text", "")[:500])
+            lines.append(e.get("text", "")[:_MSG_MAX])
         elif et == "isaac_assist_reply":
             lines.append(f"\n--- Assist T{e.get('turn','?')} [{_tool_summary(e)}] ---")
-            lines.append(e.get("text", "")[:500] or "(EMPTY REPLY — Assist produced no text)")
+            lines.append(e.get("text", "")[:_MSG_MAX] or "(EMPTY REPLY — Assist produced no text)")
             # Inject snapshot AFTER this turn
             if snap_idx < len(tx["snapshots"]):
                 s = tx["snapshots"][snap_idx]["snapshot"]
@@ -168,7 +174,10 @@ async def judge_with_gemini(tx: Dict, task_sections: Dict) -> Dict[str, Any]:
                 lines.append(_snapshot_summary(s))
                 snap_idx += 1
 
-    convo = "\n".join(lines)[:8000]
+    # Prompt-level cap widened proportionally: the previous 8000 was sized
+    # for 500-char messages. 20000 fits a few 2500-char turns plus snapshots
+    # and still leaves room for the rubric + task spec.
+    convo = "\n".join(lines)[:20000]
 
     prompt = f"""You are a QA judge. Score the session based on the TASK GOAL primarily, using the SUCCESS CRITERIA only as informational support.
 
