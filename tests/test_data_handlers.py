@@ -921,3 +921,72 @@ class TestTraceConfig:
     async def test_trace_no_param_name(self):
         result = await _handle_trace_config({"param_name": ""})
         assert "error" in result
+
+
+# ── Phase 3 Addendum: URDF Post-Processor ───────────────────────────────────
+
+class TestApplyRobotFixProfile:
+    """apply_robot_fix_profile DATA handler — lookup table of known robot import issues."""
+
+    @pytest.mark.asyncio
+    async def test_known_robot_franka(self):
+        handler = DATA_HANDLERS["apply_robot_fix_profile"]
+        result = await handler({
+            "articulation_path": "/World/Franka",
+            "robot_name": "franka",
+        })
+        assert result["found"] is True
+        assert result["robot_name"] == "franka"
+        assert result["display_name"] == "Franka Emika Panda"
+        assert len(result["fixes"]) > 0
+        assert result["drive_gains"]["kp"] == 1000
+        assert result["drive_gains"]["kd"] == 100
+        assert "/World/Franka" in result["articulation_path"]
+        # Fix code should have art_path substituted
+        assert any("/World/Franka" in f["code"] for f in result["fixes"])
+
+    @pytest.mark.asyncio
+    async def test_unknown_robot(self):
+        handler = DATA_HANDLERS["apply_robot_fix_profile"]
+        result = await handler({
+            "articulation_path": "/World/CustomArm",
+            "robot_name": "my_custom_robot",
+        })
+        assert result["found"] is False
+        assert "verify_import" in result["message"]
+        assert "my_custom_robot" in result["robot_name"]
+
+    @pytest.mark.asyncio
+    async def test_auto_detect_from_path(self):
+        """Should detect robot name from articulation path when not provided."""
+        handler = DATA_HANDLERS["apply_robot_fix_profile"]
+        result = await handler({
+            "articulation_path": "/World/ur10_robot",
+        })
+        assert result["found"] is True
+        assert result["robot_name"] == "ur10"
+        assert result["display_name"] == "Universal Robots UR10"
+
+    @pytest.mark.asyncio
+    async def test_g1_profile(self):
+        handler = DATA_HANDLERS["apply_robot_fix_profile"]
+        result = await handler({
+            "articulation_path": "/World/G1",
+            "robot_name": "g1",
+        })
+        assert result["found"] is True
+        assert result["robot_name"] == "g1"
+        assert any("zero mass" in issue.lower() or "zero-mass" in issue.lower() or "zero mass" in issue
+                    for issue in result["known_issues"])
+        assert result["drive_gains"]["kp"] == 500
+
+    @pytest.mark.asyncio
+    async def test_allegro_profile(self):
+        handler = DATA_HANDLERS["apply_robot_fix_profile"]
+        result = await handler({
+            "articulation_path": "/World/AllegroHand",
+            "robot_name": "allegro",
+        })
+        assert result["found"] is True
+        assert result["robot_name"] == "allegro"
+        assert result["drive_gains"]["kp"] == 100

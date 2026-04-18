@@ -838,6 +838,17 @@ _TEST_VECTORS = [
         {"articulation_path": "/World/Franka"},
         ["/World/Franka", "GetAllDescendants", "CollisionAPI", "MassAPI"],
     ),
+    # ── Phase 3 Addendum: URDF Post-Processor ──────────────────────────────
+    (
+        "verify_import",
+        {"articulation_path": "/World/Robot"},
+        ["UsdPhysics", "CollisionAPI", "MassAPI", "ArticulationRootAPI", "metersPerUnit", "json.dumps"],
+    ),
+    (
+        "verify_import",
+        {"articulation_path": "/World/Franka"},
+        ["/World/Franka", "GetAllDescendants", "CollisionAPI", "RevoluteJoint"],
+    ),
     # ── Phase 8F: ROS2 Deep Integration ──────────────────────────────────────
     (
         "show_tf_tree",
