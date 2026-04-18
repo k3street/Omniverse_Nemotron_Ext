@@ -593,6 +593,52 @@ class ChatOrchestrator:
                     except Exception as e:
                         logger.debug(f"[{session_id}] verify count({path}) failed: {e}")
 
+                # (c) Transform / pose claims — "X is at (a, b, c)" or
+                # "positioned at (a, b, c)" or "moved to (a, b, c)" paired
+                # with a /World/... path. Cross-check against
+                # get_world_transform and flag divergence. Cap at 2 checks.
+                pose_pat = _re.compile(
+                    r"(?P<path>/World[/A-Za-z0-9_]+)[^\n]{0,180}?"
+                    r"(?:at|to|positioned at|located at|moved to|placed at|transform)\s*"
+                    r"\(?\s*(?P<x>-?\d+(?:\.\d+)?)\s*,\s*"
+                    r"(?P<y>-?\d+(?:\.\d+)?)\s*,\s*"
+                    r"(?P<z>-?\d+(?:\.\d+)?)\s*\)?",
+                    _re.I,
+                )
+                matched_poses = set()
+                for m in pose_pat.finditer(reply):
+                    path = m.group("path")
+                    claim = (round(float(m.group("x")), 3),
+                             round(float(m.group("y")), 3),
+                             round(float(m.group("z")), 3))
+                    key = (path, claim)
+                    if key in matched_poses:
+                        continue
+                    matched_poses.add(key)
+                    if len(matched_poses) > 2:
+                        break
+                    try:
+                        ver = await _exec("get_world_transform", {"prim_path": path})
+                        out = ver.get("output") if isinstance(ver, dict) else None
+                        parsed = {}
+                        if isinstance(out, str) and out.strip().startswith("{"):
+                            try: parsed = json.loads(out)
+                            except: pass
+                        tr = parsed.get("translation") or parsed.get("world_translation") or parsed.get("position")
+                        if isinstance(tr, (list, tuple)) and len(tr) >= 3:
+                            actual = (round(float(tr[0]), 3),
+                                      round(float(tr[1]), 3),
+                                      round(float(tr[2]), 3))
+                            # 5cm tolerance on each axis — matches the tolerances
+                            # used in most G-task success criteria.
+                            if any(abs(a - c) > 0.05 for a, c in zip(actual, claim)):
+                                verify_warnings.append(
+                                    f"reply claims `{path}` at {claim}, "
+                                    f"but get_world_transform returned {actual}"
+                                )
+                    except Exception as e:
+                        logger.debug(f"[{session_id}] verify pose({path}) failed: {e}")
+
                 if verify_warnings:
                     logger.warning(
                         f"[{session_id}] verify-contract mismatches: {verify_warnings[:3]}"
