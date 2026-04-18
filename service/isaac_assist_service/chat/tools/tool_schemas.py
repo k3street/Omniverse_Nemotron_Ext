@@ -1470,4 +1470,106 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── GR00T N1 Foundation Policy ──────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "load_groot_policy",
+            "description": "Load the NVIDIA GR00T N1 foundation model for a robot articulation. Downloads the model from HuggingFace and configures the policy server. Returns download commands, launch config, and VRAM requirements. Requires >= 24 GB VRAM.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "HuggingFace model ID. Default: 'nvidia/GR00T-N1.6-3B'", "default": "nvidia/GR00T-N1.6-3B"},
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation, e.g. '/World/Robot'"},
+                    "embodiment": {
+                        "type": "string",
+                        "enum": ["LIBERO_PANDA", "OXE_WIDOWX", "UNITREE_G1", "custom"],
+                        "description": "Embodiment preset for the robot. Determines observation/action space mapping.",
+                    },
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "evaluate_groot",
+            "description": "Run closed-loop evaluation of a GR00T N1 policy on an IsaacLab task. Launches the evaluation subprocess, connects to the policy server, and collects success_rate and task_metrics over N episodes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "HuggingFace model ID. Default: 'nvidia/GR00T-N1.6-3B'", "default": "nvidia/GR00T-N1.6-3B"},
+                    "task": {"type": "string", "description": "Evaluation task name, e.g. 'Isaac-GR00T-Reach-v0'"},
+                    "num_episodes": {"type": "integer", "description": "Number of evaluation episodes. Default: 50", "default": 50},
+                    "checkpoint": {"type": "string", "description": "Optional path to a custom fine-tuned checkpoint"},
+                },
+                "required": ["task"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "finetune_groot",
+            "description": "Fine-tune a GR00T N1 model on demonstration data in LeRobot v2 format. Supports LoRA (lower VRAM) and full fine-tuning. Launches training as a subprocess from Isaac-GR00T scripts.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "HuggingFace model ID. Default: 'nvidia/GR00T-N1.6-3B'", "default": "nvidia/GR00T-N1.6-3B"},
+                    "demo_data": {"type": "string", "description": "Path to demonstration data in LeRobot v2 format"},
+                    "num_steps": {"type": "integer", "description": "Number of training steps. Default: 10000", "default": 10000},
+                    "lora": {"type": "boolean", "description": "Use LoRA for lower VRAM requirements. Default: true", "default": True},
+                    "output_dir": {"type": "string", "description": "Directory for saving checkpoints. Default: 'workspace/groot_checkpoints'", "default": "workspace/groot_checkpoints"},
+                },
+                "required": ["demo_data"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compare_policies",
+            "description": "Compare evaluation results from multiple GR00T policies side by side. Returns a formatted comparison table showing zero-shot generalization, single-task performance, training data needed, and observation type.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "policy_name": {"type": "string"},
+                                "model_id": {"type": "string"},
+                                "success_rate": {"type": "number"},
+                                "task_metrics": {"type": "object"},
+                                "training_data_size": {"type": "string"},
+                                "observation_type": {"type": "string"},
+                            },
+                        },
+                        "description": "List of evaluation results from different policies",
+                    },
+                },
+                "required": ["results"],
+            },
+        },
+    },
+
+    # ─── Scene Export ─────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
+                },
+                "required": [],
+            },
+        },
+    },
 ]

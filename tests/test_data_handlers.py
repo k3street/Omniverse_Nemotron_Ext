@@ -342,3 +342,117 @@ class TestArenaLeaderboard:
         assert result["count"] == 1
         assert result["entries"][0]["rank"] == 1
         assert result["entries"][0]["robot"] == "Spot"
+
+
+class TestLoadGrootPolicy:
+    """load_groot_policy data handler."""
+
+    @pytest.mark.asyncio
+    async def test_vram_check_ok(self):
+        handler = DATA_HANDLERS["load_groot_policy"]
+        result = await handler({
+            "robot_path": "/World/Franka",
+            "embodiment": "LIBERO_PANDA",
+        })
+        assert result["vram_check"] == "ok"
+        assert result["error"] is None
+        assert result["robot_path"] == "/World/Franka"
+        assert result["embodiment"] == "LIBERO_PANDA"
+        assert "snapshot_download" in result["download_command"]
+        assert "policy_server" in result["launch_command"]
+        assert result["vram_required_gb"] == 24
+
+    @pytest.mark.asyncio
+    async def test_embodiment_lookup(self):
+        handler = DATA_HANDLERS["load_groot_policy"]
+        # Test each embodiment preset
+        for emb in ["LIBERO_PANDA", "OXE_WIDOWX", "UNITREE_G1", "custom"]:
+            result = await handler({
+                "robot_path": "/World/Robot",
+                "embodiment": emb,
+            })
+            assert result["embodiment"] == emb
+            assert result["embodiment_config"]["obs_type"] == "rgb+proprio"
+            assert "description" in result["embodiment_config"]
+
+    @pytest.mark.asyncio
+    async def test_default_model_id(self):
+        handler = DATA_HANDLERS["load_groot_policy"]
+        result = await handler({"robot_path": "/World/Robot"})
+        assert result["model_id"] == "nvidia/GR00T-N1.6-3B"
+        assert result["embodiment"] == "custom"
+
+    @pytest.mark.asyncio
+    async def test_custom_model_id(self):
+        handler = DATA_HANDLERS["load_groot_policy"]
+        result = await handler({
+            "robot_path": "/World/Robot",
+            "model_id": "nvidia/GR00T-N1.6-7B",
+        })
+        assert result["model_id"] == "nvidia/GR00T-N1.6-7B"
+        assert "GR00T-N1.6-7B" in result["download_command"]
+        assert "GR00T-N1.6-7B" in result["launch_command"]
+
+
+class TestComparePolicies:
+    """compare_policies data handler."""
+
+    @pytest.mark.asyncio
+    async def test_formatting_with_results(self):
+        handler = DATA_HANDLERS["compare_policies"]
+        result = await handler({
+            "results": [
+                {
+                    "policy_name": "GR00T-zero-shot",
+                    "model_id": "nvidia/GR00T-N1.6-3B",
+                    "success_rate": 0.45,
+                    "training_data_size": "0 demos",
+                    "observation_type": "rgb+proprio",
+                    "task_metrics": {"avg_steps": 120.5},
+                },
+                {
+                    "policy_name": "GR00T-finetuned",
+                    "model_id": "nvidia/GR00T-N1.6-3B",
+                    "success_rate": 0.85,
+                    "training_data_size": "100 demos",
+                    "observation_type": "rgb+proprio",
+                    "task_metrics": {"avg_steps": 80.2},
+                },
+            ]
+        })
+        assert result["count"] == 2
+        assert len(result["entries"]) == 2
+        # Sorted by success_rate descending
+        assert result["entries"][0]["policy_name"] == "GR00T-finetuned"
+        assert result["entries"][1]["policy_name"] == "GR00T-zero-shot"
+        # Table contains policy names
+        table = result["comparison_table"]
+        assert "GR00T-zero-shot" in table
+        assert "GR00T-finetuned" in table
+        assert "85.0%" in table
+        assert "45.0%" in table
+        # Dimensions included
+        assert len(result["dimensions"]) == 4
+        assert "avg_steps" in result["metric_columns"]
+
+    @pytest.mark.asyncio
+    async def test_formatting_empty_results(self):
+        handler = DATA_HANDLERS["compare_policies"]
+        result = await handler({"results": []})
+        assert result["comparison_table"] == "No results to compare."
+        assert result["entries"] == []
+        assert result["count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_formatting_single_result(self):
+        handler = DATA_HANDLERS["compare_policies"]
+        result = await handler({
+            "results": [
+                {
+                    "policy_name": "baseline",
+                    "success_rate": 0.5,
+                },
+            ]
+        })
+        assert result["count"] == 1
+        assert "baseline" in result["comparison_table"]

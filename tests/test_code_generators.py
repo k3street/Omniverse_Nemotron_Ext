@@ -477,6 +477,45 @@ _TEST_VECTORS = [
         },
         ["subprocess.Popen", "arena.benchmark", "--checkpoint", "policy_best.pt"],
     ),
+    # ── Phase 7G: GR00T N1 Foundation Policy ───────────────────────────────
+    (
+        "evaluate_groot",
+        {
+            "task": "Isaac-GR00T-Reach-v0",
+            "num_episodes": 50,
+        },
+        ["subprocess.Popen", "gr00t.eval.isaac_lab", "gr00t.deploy.policy_server", "Isaac-GR00T-Reach-v0", "50"],
+    ),
+    (
+        "evaluate_groot",
+        {
+            "model_id": "nvidia/GR00T-N1.6-3B",
+            "task": "Isaac-GR00T-PickCube-v0",
+            "num_episodes": 100,
+            "checkpoint": "/checkpoints/groot_finetuned/best.pt",
+        },
+        ["subprocess.Popen", "gr00t.eval.isaac_lab", "Isaac-GR00T-PickCube-v0", "100", "/checkpoints/groot_finetuned/best.pt"],
+    ),
+    (
+        "finetune_groot",
+        {
+            "demo_data": "/data/lerobot_demos/panda_pick",
+            "num_steps": 10000,
+            "lora": True,
+        },
+        ["subprocess.Popen", "gr00t.finetune.train", "--use-lora", "--lora-rank", "lerobot_demos/panda_pick", "10000"],
+    ),
+    (
+        "finetune_groot",
+        {
+            "model_id": "nvidia/GR00T-N1.6-3B",
+            "demo_data": "/data/demos/full_train",
+            "num_steps": 50000,
+            "lora": False,
+            "output_dir": "/output/groot_full",
+        },
+        ["subprocess.Popen", "gr00t.finetune.train", "demos/full_train", "50000", "Full fine-tuning", "/output/groot_full"],
+    ),
 ]
 
 
