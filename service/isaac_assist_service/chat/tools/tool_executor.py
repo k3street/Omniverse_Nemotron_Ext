@@ -3214,6 +3214,7 @@ import json
 
 result, entries = omni.client.list("{full_path}")
 items = []
+payload = {{"status": str(result), "path": "{full_path}"}}
 if result == omni.client.Result.OK:
     for entry in entries[:{limit}]:
         items.append({{
@@ -3222,7 +3223,19 @@ if result == omni.client.Result.OK:
             "is_folder": entry.flags & omni.client.ItemFlags.CAN_HAVE_CHILDREN != 0,
             "modified_time": str(entry.modified_time) if hasattr(entry, 'modified_time') else "",
         }})
-print(json.dumps({{"status": str(result), "path": "{full_path}", "items": items, "count": len(items)}}))
+    payload["items"] = items
+    payload["count"] = len(items)
+else:
+    # Non-OK: surface as an explicit `error` key so the agent can't interpret
+    # count=0 as an empty directory. The status string contains the
+    # Result.ERROR_* variant (e.g. Result.ERROR_NOT_FOUND, Result.ERROR_ACCESS_DENIED).
+    payload["error"] = (
+        "omni.client.list(" + repr("{full_path}") + ") failed with " + str(result)
+        + " — Nucleus server unreachable, path missing, or permission denied."
+    )
+    payload["items"] = []
+    payload["count"] = 0
+print(json.dumps(payload))
 """
     result = await kit_tools.exec_sync(code, timeout=15)
     if not result.get("success"):
@@ -21531,6 +21544,19 @@ def _gen_add_sublayer(args: Dict) -> str:
         "        if new_layer is None:\n"
         "            raise RuntimeError(f'Failed to create new sublayer at {layer_path}')\n"
         "        new_layer.Save()\n"
+        "elif '://' in layer_path:\n"
+        "    # Remote URL (omniverse://, http(s)://, file://, anon:): the local\n"
+        "    # file-create path is skipped, so verify the layer actually resolves\n"
+        "    # via the asset resolver before we append it to subLayerPaths —\n"
+        "    # otherwise an unreachable URL produces a 'success' with a dead\n"
+        "    # reference in the layer stack.\n"
+        "    _probe = Sdf.Layer.FindOrOpen(layer_path)\n"
+        "    if _probe is None:\n"
+        "        raise RuntimeError(\n"
+        "            'add_sublayer: Sdf.Layer.FindOrOpen(' + repr(layer_path) + ') returned None — '\n"
+        "            'the URL could not be resolved by the asset resolver. Refusing to attach '\n"
+        "            'a dead sublayer reference.'\n"
+        "        )\n"
         "\n"
         "root = stage.GetRootLayer()\n"
         "if layer_path in list(root.subLayerPaths):\n"
