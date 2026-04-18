@@ -31426,3 +31426,472 @@ DATA_HANDLERS["get_semantic_label"] = _handle_get_semantic_label
 DATA_HANDLERS["validate_semantic_labels"] = _handle_validate_semantic_labels
 CODE_GEN_HANDLERS["remove_semantic_label"] = _gen_remove_semantic_label
 CODE_GEN_HANDLERS["assign_class_to_children"] = _gen_assign_class_to_children
+
+
+# ── Tier 12 — Asset Management (5 atomic tools) ──────────────────────────────
+#
+# T12.1 list_references    — DATA  (prim.GetReferences() + Usd.PrimCompositionQuery)
+# T12.2 add_usd_reference  — CODE  (full AddReference surface w/ kwargs)
+# T12.3 list_payloads      — DATA  (prim.GetPayloads() + load-set membership)
+# T12.4 load_payload       — CODE  (stage.LoadAndUnload({prim_path}, set()))
+# T12.5 get_asset_info     — DATA  (prim.GetAssetInfo() + introducing layer + sha256)
+#
+# `add_usd_reference` is intentionally NOT named `add_reference` — PR #1's
+# `add_reference` is the simple default-prim drop and stays untouched. Tier 12
+# adds the FULL surface (ref_prim_path, layer_offset_seconds, instanceable);
+# both tools coexist and the LLM picks based on whether kwargs are needed.
+
+
+# Inline helper lines used by both list_references and list_payloads.
+# These are emitted INTO the introspection script at "            " indent
+# (12 spaces) — i.e. inside the "else:" branch of the prim-found check.
+_TIER12_HELPERS = (
+    "            def _layer_offset_dict(lo):\n"
+    "                if lo is None:\n"
+    "                    return {'offset': 0.0, 'scale': 1.0}\n"
+    "                try:\n"
+    "                    return {'offset': float(lo.offset), 'scale': float(lo.scale)}\n"
+    "                except Exception:\n"
+    "                    return {'offset': 0.0, 'scale': 1.0}\n"
+)
+
+
+async def _handle_list_references(args: Dict) -> Dict:
+    """Enumerate USD reference arcs composed onto a prim."""
+    prim_path = args["prim_path"]
+    prim_path_repr = repr(prim_path)
+    code = (
+        "import json\n"
+        "try:\n"
+        "    import omni.usd\n"
+        "    from pxr import Usd, Sdf, Pcp\n"
+        "    stage = omni.usd.get_context().get_stage()\n"
+        "    if stage is None:\n"
+        "        print(json.dumps({'error': 'no stage open'}))\n"
+        "    else:\n"
+        f"        prim_path = {prim_path_repr}\n"
+        "        prim = stage.GetPrimAtPath(prim_path)\n"
+        "        if not prim or not prim.IsValid():\n"
+        "            print(json.dumps({'error': f'prim not found: {prim_path}'}))\n"
+        "        else:\n"
+        + _TIER12_HELPERS
+        + "            references = []\n"
+        "            # Local opinions via prim.GetReferences().GetAllReferences() —\n"
+        "            # available on most Kit builds. Fall back to PrimCompositionQuery\n"
+        "            # when the simple API is missing.\n"
+        "            try:\n"
+        "                refs_api = prim.GetReferences()\n"
+        "                local_refs = refs_api.GetAllReferences() if hasattr(\n"
+        "                    refs_api, 'GetAllReferences'\n"
+        "                ) else []\n"
+        "            except Exception:\n"
+        "                local_refs = []\n"
+        "            for r in local_refs:\n"
+        "                try:\n"
+        "                    references.append({\n"
+        "                        'asset_path': str(r.assetPath) if hasattr(r, 'assetPath') else '',\n"
+        "                        'prim_path': str(r.primPath) if hasattr(r, 'primPath') else '',\n"
+        "                        'layer_offset': _layer_offset_dict(getattr(r, 'layerOffset', None)),\n"
+        "                        'introducing_layer': '<local>',\n"
+        "                        'list_position': 'explicit',\n"
+        "                    })\n"
+        "                except Exception:\n"
+        "                    continue\n"
+        "            # Composed arcs (sublayered / inherited reference arcs) via PrimCompositionQuery.\n"
+        "            try:\n"
+        "                query = Usd.PrimCompositionQuery.GetDirectReferences(prim)\n"
+        "                for arc in query.GetCompositionArcs():\n"
+        "                    try:\n"
+        "                        intro_layer = arc.GetIntroducingLayer()\n"
+        "                        intro = intro_layer.identifier if intro_layer else ''\n"
+        "                        if intro == '<local>' or any(\n"
+        "                            ref.get('introducing_layer') == intro for ref in references\n"
+        "                        ):\n"
+        "                            continue\n"
+        "                        target = arc.GetTargetNode()\n"
+        "                        asset = ''\n"
+        "                        target_path = ''\n"
+        "                        if target is not None:\n"
+        "                            try:\n"
+        "                                site = target.path\n"
+        "                                target_path = str(site)\n"
+        "                            except Exception:\n"
+        "                                target_path = ''\n"
+        "                            try:\n"
+        "                                asset_layer = target.layerStack.identifier.rootLayer\n"
+        "                                asset = asset_layer.identifier\n"
+        "                            except Exception:\n"
+        "                                asset = ''\n"
+        "                        references.append({\n"
+        "                            'asset_path': asset,\n"
+        "                            'prim_path': target_path,\n"
+        "                            'layer_offset': {'offset': 0.0, 'scale': 1.0},\n"
+        "                            'introducing_layer': intro,\n"
+        "                            'list_position': 'explicit',\n"
+        "                        })\n"
+        "                    except Exception:\n"
+        "                        continue\n"
+        "            except Exception:\n"
+        "                pass\n"
+        "            print(json.dumps({\n"
+        "                'prim_path': prim_path,\n"
+        "                'has_references': bool(references),\n"
+        "                'references': references,\n"
+        "                'count': len(references),\n"
+        "            }))\n"
+        "except Exception as e:\n"
+        "    print(json.dumps({'error': str(e)}))\n"
+    )
+    result = await kit_tools.queue_exec_patch(
+        code, f"List USD references composed onto {prim_path}"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "prim_path": prim_path,
+        "note": (
+            "Reference enumeration queued. Kit will print a JSON dict with keys: "
+            "prim_path, has_references, references (list of {asset_path, prim_path, "
+            "layer_offset, introducing_layer, list_position}), count. "
+            "has_references=false means the prim has no references — that is a normal "
+            "state, not an error. References are ALWAYS loaded — use list_payloads "
+            "for the deferred-load equivalent."
+        ),
+    }
+
+
+def _gen_add_usd_reference(args: Dict) -> str:
+    prim_path = args["prim_path"]
+    usd_url = args["usd_url"]
+    ref_prim_path = args.get("ref_prim_path")
+    layer_offset_seconds = args.get("layer_offset_seconds")
+    instanceable = bool(args.get("instanceable", False))
+
+    prim_path_repr = repr(prim_path)
+    usd_url_repr = repr(usd_url)
+    ref_prim_path_repr = repr(ref_prim_path) if ref_prim_path else "None"
+    layer_offset_repr = (
+        repr(float(layer_offset_seconds)) if layer_offset_seconds is not None else "None"
+    )
+    instanceable_repr = "True" if instanceable else "False"
+
+    return (
+        "import omni.usd\n"
+        "from pxr import Usd, Sdf, UsdGeom\n"
+        "\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        "if stage is None:\n"
+        "    raise RuntimeError('No stage is open — cannot add USD reference')\n"
+        "\n"
+        f"prim_path = {prim_path_repr}\n"
+        f"usd_url = {usd_url_repr}\n"
+        f"ref_prim_path = {ref_prim_path_repr}\n"
+        f"layer_offset_seconds = {layer_offset_repr}\n"
+        f"instanceable = {instanceable_repr}\n"
+        "\n"
+        "# Auto-create the holding prim as an Xform if it does not exist.\n"
+        "prim = stage.GetPrimAtPath(prim_path)\n"
+        "if not prim or not prim.IsValid():\n"
+        "    prim = UsdGeom.Xform.Define(stage, prim_path).GetPrim()\n"
+        "    print(f'Created Xform at {prim_path} to hold the reference')\n"
+        "\n"
+        "# Build the LayerOffset in USD time codes (caller passes SECONDS).\n"
+        "layer_offset = None\n"
+        "if layer_offset_seconds is not None:\n"
+        "    try:\n"
+        "        tcps = stage.GetTimeCodesPerSecond() or 24.0\n"
+        "    except Exception:\n"
+        "        tcps = 24.0\n"
+        "    layer_offset = Sdf.LayerOffset(layer_offset_seconds * tcps, 1.0)\n"
+        "\n"
+        "refs_api = prim.GetReferences()\n"
+        "if ref_prim_path and layer_offset is not None:\n"
+        "    refs_api.AddReference(usd_url, ref_prim_path, layer_offset)\n"
+        "elif ref_prim_path:\n"
+        "    refs_api.AddReference(usd_url, ref_prim_path)\n"
+        "elif layer_offset is not None:\n"
+        "    refs_api.AddReference(usd_url, '', layer_offset)\n"
+        "else:\n"
+        "    refs_api.AddReference(usd_url)\n"
+        "\n"
+        "if instanceable:\n"
+        "    # USD point-instancing: per-instance edits below this prim are dropped.\n"
+        "    prim.SetInstanceable(True)\n"
+        "    print(f'  prim marked instanceable=True (per-instance edits below {prim_path} will be dropped)')\n"
+        "\n"
+        "print(\n"
+        "    f'add_usd_reference: prim={prim_path} asset={usd_url!r} '\n"
+        "    f'ref_prim={ref_prim_path!r} offset_s={layer_offset_seconds} '\n"
+        "    f'instanceable={instanceable}'\n"
+        ")\n"
+    )
+
+
+async def _handle_list_payloads(args: Dict) -> Dict:
+    """Enumerate USD payload arcs (deferred-load) on a prim."""
+    prim_path = args["prim_path"]
+    prim_path_repr = repr(prim_path)
+    code = (
+        "import json\n"
+        "try:\n"
+        "    import omni.usd\n"
+        "    from pxr import Usd, Sdf, Pcp\n"
+        "    stage = omni.usd.get_context().get_stage()\n"
+        "    if stage is None:\n"
+        "        print(json.dumps({'error': 'no stage open'}))\n"
+        "    else:\n"
+        f"        prim_path = {prim_path_repr}\n"
+        "        prim = stage.GetPrimAtPath(prim_path)\n"
+        "        if not prim or not prim.IsValid():\n"
+        "            print(json.dumps({'error': f'prim not found: {prim_path}'}))\n"
+        "        else:\n"
+        + _TIER12_HELPERS
+        + "            payloads = []\n"
+        "            try:\n"
+        "                pl_api = prim.GetPayloads()\n"
+        "                local_pls = pl_api.GetAllPayloads() if hasattr(\n"
+        "                    pl_api, 'GetAllPayloads'\n"
+        "                ) else []\n"
+        "            except Exception:\n"
+        "                local_pls = []\n"
+        "            # Current load-set membership tells us which prims have their\n"
+        "            # payloads activated right now.\n"
+        "            try:\n"
+        "                load_set = stage.GetLoadSet()\n"
+        "                prim_is_loaded = bool(prim.GetPath() in load_set)\n"
+        "            except Exception:\n"
+        "                prim_is_loaded = True  # default: loaded\n"
+        "            for p in local_pls:\n"
+        "                try:\n"
+        "                    payloads.append({\n"
+        "                        'asset_path': str(p.assetPath) if hasattr(p, 'assetPath') else '',\n"
+        "                        'prim_path': str(p.primPath) if hasattr(p, 'primPath') else '',\n"
+        "                        'layer_offset': _layer_offset_dict(getattr(p, 'layerOffset', None)),\n"
+        "                        'introducing_layer': '<local>',\n"
+        "                        'is_loaded': prim_is_loaded,\n"
+        "                        'list_position': 'explicit',\n"
+        "                    })\n"
+        "                except Exception:\n"
+        "                    continue\n"
+        "            # Composed arcs via PrimCompositionQuery.\n"
+        "            try:\n"
+        "                query = Usd.PrimCompositionQuery.GetDirectInherits(prim)  # placeholder; real call below\n"
+        "                query = Usd.PrimCompositionQuery(prim)\n"
+        "                filt = Usd.CompositionArcFilter() if hasattr(Usd, 'CompositionArcFilter') else None\n"
+        "                for arc in query.GetCompositionArcs():\n"
+        "                    try:\n"
+        "                        if str(arc.GetArcType()).lower().find('payload') < 0:\n"
+        "                            continue\n"
+        "                        intro_layer = arc.GetIntroducingLayer()\n"
+        "                        intro = intro_layer.identifier if intro_layer else ''\n"
+        "                        if intro == '<local>':\n"
+        "                            continue\n"
+        "                        target = arc.GetTargetNode()\n"
+        "                        asset = ''\n"
+        "                        target_path = ''\n"
+        "                        if target is not None:\n"
+        "                            try:\n"
+        "                                target_path = str(target.path)\n"
+        "                            except Exception:\n"
+        "                                target_path = ''\n"
+        "                            try:\n"
+        "                                asset = target.layerStack.identifier.rootLayer.identifier\n"
+        "                            except Exception:\n"
+        "                                asset = ''\n"
+        "                        payloads.append({\n"
+        "                            'asset_path': asset,\n"
+        "                            'prim_path': target_path,\n"
+        "                            'layer_offset': {'offset': 0.0, 'scale': 1.0},\n"
+        "                            'introducing_layer': intro,\n"
+        "                            'is_loaded': prim_is_loaded,\n"
+        "                            'list_position': 'explicit',\n"
+        "                        })\n"
+        "                    except Exception:\n"
+        "                        continue\n"
+        "            except Exception:\n"
+        "                pass\n"
+        "            print(json.dumps({\n"
+        "                'prim_path': prim_path,\n"
+        "                'has_payloads': bool(payloads),\n"
+        "                'payloads': payloads,\n"
+        "                'count': len(payloads),\n"
+        "                'prim_is_loaded': prim_is_loaded,\n"
+        "            }))\n"
+        "except Exception as e:\n"
+        "    print(json.dumps({'error': str(e)}))\n"
+    )
+    result = await kit_tools.queue_exec_patch(
+        code, f"List USD payloads (deferred-load) on {prim_path}"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "prim_path": prim_path,
+        "note": (
+            "Payload enumeration queued. Kit will print a JSON dict with keys: "
+            "prim_path, has_payloads, payloads (list of {asset_path, prim_path, "
+            "layer_offset, introducing_layer, is_loaded, list_position}), count, "
+            "prim_is_loaded. has_payloads=false (no payload arcs on this prim) is a "
+            "normal state, not an error. is_loaded reflects the CURRENT load-set "
+            "membership and can be flipped via load_payload."
+        ),
+    }
+
+
+def _gen_load_payload(args: Dict) -> str:
+    prim_path = args["prim_path"]
+    prim_path_repr = repr(prim_path)
+    return (
+        "import omni.usd\n"
+        "from pxr import Usd, Sdf\n"
+        "\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        "if stage is None:\n"
+        "    raise RuntimeError('No stage is open — cannot load payload')\n"
+        "\n"
+        f"prim_path = {prim_path_repr}\n"
+        "prim = stage.GetPrimAtPath(prim_path)\n"
+        "if not prim or not prim.IsValid():\n"
+        "    raise RuntimeError(f'prim not found: {prim_path}')\n"
+        "\n"
+        "# Soft no-op if the prim's payload(s) are already in the load set.\n"
+        "try:\n"
+        "    load_set = stage.GetLoadSet()\n"
+        "    already_loaded = prim.GetPath() in load_set\n"
+        "except Exception:\n"
+        "    already_loaded = False\n"
+        "\n"
+        "if already_loaded:\n"
+        "    print(f'Payload already loaded for {prim_path} — nothing to do (no-op)')\n"
+        "else:\n"
+        "    # LoadAndUnload({prim_path}, set()) loads the payload + descendants.\n"
+        "    try:\n"
+        "        stage.LoadAndUnload(\n"
+        "            {Sdf.Path(prim_path)},\n"
+        "            set(),\n"
+        "            Usd.LoadWithDescendants,\n"
+        "        )\n"
+        "    except Exception:\n"
+        "        # Older Kit signature without policy arg:\n"
+        "        stage.LoadAndUnload({Sdf.Path(prim_path)}, set())\n"
+        "    print(\n"
+        "        f'load_payload: activated payload(s) on {prim_path} (LoadWithDescendants)'\n"
+        "    )\n"
+    )
+
+
+async def _handle_get_asset_info(args: Dict) -> Dict:
+    """Read assetInfo metadata + introducing layer + sha256 for a prim."""
+    prim_path = args["prim_path"]
+    prim_path_repr = repr(prim_path)
+    code = (
+        "import json\n"
+        "import os\n"
+        "import hashlib\n"
+        "try:\n"
+        "    import omni.usd\n"
+        "    from pxr import Usd, Sdf\n"
+        "    stage = omni.usd.get_context().get_stage()\n"
+        "    if stage is None:\n"
+        "        print(json.dumps({'error': 'no stage open'}))\n"
+        "    else:\n"
+        f"        prim_path = {prim_path_repr}\n"
+        "        prim = stage.GetPrimAtPath(prim_path)\n"
+        "        if not prim or not prim.IsValid():\n"
+        "            print(json.dumps({'error': f'prim not found: {prim_path}'}))\n"
+        "        else:\n"
+        "            ai = {}\n"
+        "            try:\n"
+        "                raw = prim.GetAssetInfo() or {}\n"
+        "                # GetAssetInfo returns a VtDictionary — coerce to plain dict.\n"
+        "                ai = {k: raw[k] for k in raw.keys()} if hasattr(raw, 'keys') else dict(raw)\n"
+        "            except Exception:\n"
+        "                ai = {}\n"
+        "            asset_info = {\n"
+        "                'identifier': str(ai.get('identifier', '') or ''),\n"
+        "                'name': str(ai.get('name', '') or ''),\n"
+        "                'version': str(ai.get('version', '') or ''),\n"
+        "                'payload_asset_dependencies': [\n"
+        "                    str(x) for x in (ai.get('payloadAssetDependencies') or [])\n"
+        "                ],\n"
+        "            }\n"
+        "            has_asset_info = bool(\n"
+        "                asset_info['identifier'] or asset_info['name']\n"
+        "                or asset_info['version'] or asset_info['payload_asset_dependencies']\n"
+        "            )\n"
+        "            # Introducing layer — the layer that brought this prim into the\n"
+        "            # composed stage. Use prim.GetPrimStack()[0] (strongest spec).\n"
+        "            intro_layer = {'identifier': '', 'real_path': '', 'version': None, 'sha256': None}\n"
+        "            try:\n"
+        "                stack = prim.GetPrimStack()\n"
+        "                if stack:\n"
+        "                    spec = stack[0]\n"
+        "                    layer = spec.layer if hasattr(spec, 'layer') else None\n"
+        "                    if layer is not None:\n"
+        "                        intro_layer['identifier'] = str(layer.identifier)\n"
+        "                        intro_layer['real_path'] = str(layer.realPath or '')\n"
+        "                        intro_layer['version'] = str(layer.GetCustomLayerData().get('version', '')) or None\n"
+        "                        rp = intro_layer['real_path']\n"
+        "                        if rp and os.path.isfile(rp):\n"
+        "                            try:\n"
+        "                                size = os.path.getsize(rp)\n"
+        "                            except OSError:\n"
+        "                                size = 0\n"
+        "                            if 0 < size < 256 * 1024 * 1024:\n"
+        "                                h = hashlib.sha256()\n"
+        "                                with open(rp, 'rb') as f:\n"
+        "                                    for chunk in iter(lambda: f.read(65536), b''):\n"
+        "                                        h.update(chunk)\n"
+        "                                intro_layer['sha256'] = h.hexdigest()\n"
+        "            except Exception:\n"
+        "                pass\n"
+        "            try:\n"
+        "                from pxr import Kind\n"
+        "                model = Usd.ModelAPI(prim)\n"
+        "                kind_val = model.GetKind() if model else ''\n"
+        "                prim_kind = str(kind_val) if kind_val else None\n"
+        "            except Exception:\n"
+        "                prim_kind = None\n"
+        "            try:\n"
+        "                spec_str = str(prim.GetSpecifier()).split('.')[-1].lower()\n"
+        "                if spec_str.startswith('specifier'):\n"
+        "                    spec_str = spec_str[len('specifier'):]\n"
+        "            except Exception:\n"
+        "                spec_str = 'def'\n"
+        "            print(json.dumps({\n"
+        "                'prim_path': prim_path,\n"
+        "                'has_asset_info': has_asset_info,\n"
+        "                'asset_info': asset_info,\n"
+        "                'introducing_layer': intro_layer,\n"
+        "                'prim_kind': prim_kind,\n"
+        "                'prim_specifier': spec_str,\n"
+        "            }))\n"
+        "except Exception as e:\n"
+        "    print(json.dumps({'error': str(e)}))\n"
+    )
+    result = await kit_tools.queue_exec_patch(
+        code, f"Read asset info / origin / hash for {prim_path}"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "prim_path": prim_path,
+        "note": (
+            "Asset-info lookup queued. Kit will print a JSON dict with keys: "
+            "prim_path, has_asset_info, asset_info ({identifier, name, version, "
+            "payload_asset_dependencies}), introducing_layer ({identifier, "
+            "real_path, version, sha256}), prim_kind, prim_specifier. "
+            "has_asset_info=false is normal — most prims do not author the "
+            "assetInfo metadata. sha256=null when the layer is bigger than 256 MB "
+            "(synchronous hashing would block Kit) or the layer is not a real "
+            "on-disk file (e.g. anonymous in-memory layer)."
+        ),
+    }
+
+
+# Register Tier 12 handlers
+DATA_HANDLERS["list_references"] = _handle_list_references
+DATA_HANDLERS["list_payloads"] = _handle_list_payloads
+DATA_HANDLERS["get_asset_info"] = _handle_get_asset_info
+CODE_GEN_HANDLERS["add_usd_reference"] = _gen_add_usd_reference
+CODE_GEN_HANDLERS["load_payload"] = _gen_load_payload

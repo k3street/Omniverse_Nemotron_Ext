@@ -10902,4 +10902,290 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+# ─── Tier 12 — Asset Management (5 atomic tools) ──────────────────────────
+    # USD references / payloads / asset-resolver provenance.
+    #
+    # Coexists with PR #1 add_reference (the simple "drop a USD onto a prim"
+    # call). PR #1's tool stays unchanged; tier 12 adds the full surface:
+    #
+    #   tier-12 list_references   — DATA — enumerate composed reference arcs
+    #   tier-12 add_usd_reference — CODE — full Add{Reference} with ref_prim_path,
+    #                                       layer_offset_seconds, instanceable
+    #   tier-12 list_payloads     — DATA — enumerate deferred-load payload arcs
+    #   tier-12 load_payload      — CODE — stage.LoadAndUnload to activate payload
+    #   tier-12 get_asset_info    — DATA — origin file, version, hash, intro layer
+    #
+    # The tier-12 add tool is named `add_usd_reference` (NOT `add_reference`) so
+    # PR #1's existing simple-call tool is not redefined — both surfaces remain
+    # available and the LLM picks the right one based on whether kwargs are needed.
+    {
+        "type": "function",
+        "function": {
+            "name": "list_references",
+            "description": (
+                "WHAT: Enumerate every USD reference arc composed onto a prim. Calls "
+                "prim.GetReferences().GetAllReferences() for the local opinion and walks "
+                "Usd.PrimCompositionQuery to surface inherited / sublayered reference arcs "
+                "with their introducing layer. Reports each reference's asset_path, "
+                "prim_path (the targeted prim inside the referenced file), layer_offset, "
+                "and the layer that introduced it. "
+                "WHEN: answering 'where did this prim come from?' / 'what assets are "
+                "loaded onto /World/Robot?', verifying that a previous add_reference / "
+                "add_usd_reference call landed correctly, before remove_reference (when "
+                "that tool is added) so the LLM can confirm the asset is actually "
+                "referenced, debugging composition issues ('why does this prim have two "
+                "meshes?'), and auditing a scene for which external files it depends on. "
+                "RETURNS: data dict {prim_path: str, has_references: bool, references: "
+                "[{asset_path: str, prim_path: str, layer_offset: {offset: float, scale: "
+                "float}, introducing_layer: str, list_position: 'prepended' | 'appended' "
+                "| 'explicit'}], count: int}. "
+                "CAVEATS: read-only — never mutates the stage. References are ALWAYS "
+                "loaded (vs payloads which are deferred) — so `has_references=true` means "
+                "the asset's prims are already in memory. The list is the COMPOSED order "
+                "after stronger opinions win; use Usd.PrimCompositionQuery in custom "
+                "scripts if you need the raw arc list. Returns has_references=false (NOT "
+                "an error) when the prim has no references — that is a normal state. "
+                "Returns an error stub when the prim path doesn't resolve. Does NOT list "
+                "payloads — use list_payloads for that."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim to inspect. Example: '/World/Robot' or "
+                            "'/World/Tray/medicine_bottle_03'."
+                        ),
+                    },
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_usd_reference",
+            "description": (
+                "WHAT: Add a USD reference to a prim with the FULL Usd.References surface "
+                "— optional ref_prim_path (target a specific prim inside the file, not the "
+                "defaultPrim), optional layer_offset_seconds for animation retiming "
+                "(Sdf.LayerOffset), and optional instanceable flag for USD point-"
+                "instancing of repeated assets. Calls "
+                "prim.GetReferences().AddReference(asset_path, ref_prim_path?, "
+                "layer_offset?) and optionally prim.SetInstanceable(True). "
+                "WHEN: dropping an asset onto an Xform when you need MORE than the "
+                "simple `add_reference` (PR #1) — e.g. 'reference only the /Manipulator "
+                "subtree from franka.usd' (use ref_prim_path), 'load this anim USD with "
+                "a 2-second offset' (use layer_offset_seconds), or 'add 100 of the same "
+                "tree as instanceable point-instances' (use instanceable=true). For the "
+                "common no-kwargs case prefer the simpler `add_reference` so the user "
+                "approval prompt is cleaner. "
+                "RETURNS: code patch for approval. "
+                "CAVEATS: distinct from PR #1's `add_reference` — both backed by "
+                "AddReference but `add_reference` is the simple default-prim drop with no "
+                "kwargs. Adding a reference that targets a non-existent ref_prim_path "
+                "makes the prim invalid in the composed stage (USD will not raise — the "
+                "prim just renders empty); call list_references afterwards to verify. "
+                "instanceable=True changes the prim into a USD instance master and any "
+                "subsequent edits to its descendants are silently lost (USD instancing "
+                "rule); only set instanceable when you know you will not author "
+                "per-instance edits below this prim. layer_offset_seconds applies to USD "
+                "time codes, not seconds — internally converted via the stage's "
+                "timeCodesPerSecond at apply time. add_usd_reference APPENDS to the "
+                "reference list; existing references on the prim are kept (use a future "
+                "remove_reference / clear_references tool to strip them first if needed)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim that will hold the reference. Example: "
+                            "'/World/Robot'. The prim is auto-created as an Xform if it "
+                            "does not exist yet."
+                        ),
+                    },
+                    "usd_url": {
+                        "type": "string",
+                        "description": (
+                            "Asset path / URL to the .usd / .usda / .usdz file. Examples: "
+                            "'omniverse://localhost/NVIDIA/Assets/Isaac/5.1/Robots/Franka/"
+                            "franka.usd', './assets/medicine_bottle.usda', "
+                            "'https://example.com/tray.usdz'."
+                        ),
+                    },
+                    "ref_prim_path": {
+                        "type": "string",
+                        "description": (
+                            "Optional. USD path INSIDE the referenced file to target — "
+                            "default is the file's defaultPrim. Example: "
+                            "'/Manipulator/panda_link0' to reference only the link subtree "
+                            "instead of the whole robot."
+                        ),
+                    },
+                    "layer_offset_seconds": {
+                        "type": "number",
+                        "description": (
+                            "Optional. Time offset in seconds applied to the referenced "
+                            "layer (Sdf.LayerOffset). Useful for retiming animation USDs. "
+                            "Default 0. Internally converted to USD time codes via the "
+                            "stage's timeCodesPerSecond."
+                        ),
+                    },
+                    "instanceable": {
+                        "type": "boolean",
+                        "description": (
+                            "Optional. Mark the prim as a USD instance after the "
+                            "reference is added (point-instancing for repeated assets). "
+                            "Default false. WARNING: per-instance edits below an "
+                            "instanceable prim are silently dropped by USD."
+                        ),
+                    },
+                },
+                "required": ["prim_path", "usd_url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_payloads",
+            "description": (
+                "WHAT: Enumerate every USD payload arc on a prim. Payloads are like "
+                "references but DEFERRED — the asset is not loaded into memory until "
+                "stage.Load() / load_payload is called. Calls "
+                "prim.GetPayloads().GetAllPayloads() for the local opinion and walks "
+                "Usd.PrimCompositionQuery to surface inherited / sublayered payload arcs. "
+                "Reports each payload's asset_path, prim_path inside the payloaded file, "
+                "layer_offset, introducing_layer, AND whether it is currently loaded "
+                "(stage.GetLoadSet() membership). "
+                "WHEN: answering 'what heavy assets is /World/Robot lazily loading?', "
+                "before load_payload to see what would be activated, debugging 'why is "
+                "this prim empty?' (often: payload not loaded yet), auditing a scene's "
+                "memory footprint (unloaded payloads = 0 RAM), or before scene save / "
+                "export (so you know which payloads are activated and which are not). "
+                "RETURNS: data dict {prim_path: str, has_payloads: bool, payloads: "
+                "[{asset_path: str, prim_path: str, layer_offset: {offset: float, scale: "
+                "float}, introducing_layer: str, is_loaded: bool, list_position: "
+                "'prepended' | 'appended' | 'explicit'}], count: int, prim_is_loaded: "
+                "bool}. "
+                "CAVEATS: read-only. has_payloads=false (NOT an error) is normal for "
+                "most prims — payloads are an opt-in performance feature. The is_loaded "
+                "flag reflects the CURRENT load set (stage.GetLoadSet()) not the static "
+                "USD definition; payloads can be loaded / unloaded at runtime via "
+                "load_payload (or the inverse, when added). Does NOT list references — "
+                "use list_references for that. The is_loaded flag is per-prim, not per-"
+                "payload-arc — USD loads the prim's full payload set together."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim to inspect. Example: '/World/Robot' or "
+                            "'/World/Environment/Warehouse'."
+                        ),
+                    },
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "load_payload",
+            "description": (
+                "WHAT: Activate a deferred-loaded payload on a prim by adding it to the "
+                "stage's load set. Calls stage.LoadAndUnload({prim_path}, set(), "
+                "Usd.LoadWithDescendants) which loads the prim's payload AND every "
+                "payload below it in the hierarchy. The prim and its descendants become "
+                "inspectable / renderable after this call. "
+                "WHEN: the user says 'load the warehouse environment' / 'activate the "
+                "robot payload' / 'why is this empty? load it', after list_payloads "
+                "showed `is_loaded=false` for a prim that should be visible, before "
+                "running SDG / Replicator on a payloaded asset (the writer cannot capture "
+                "an unloaded subtree), or before computing bounding boxes / running "
+                "physics on a payloaded subtree. "
+                "RETURNS: code patch for approval. "
+                "CAVEATS: loading a heavy payload (a full warehouse, a 500-MB robot) can "
+                "take several seconds and adds significant RAM usage — verify with "
+                "list_payloads first that the asset_path is the one you expect. "
+                "LoadWithDescendants is used by default; descendants-only loads are not "
+                "exposed from this tool (write a custom script via run_usd_script if you "
+                "need LoadWithoutDescendants). The matching unload-payload tool is NOT "
+                "part of tier 12 — call run_usd_script with stage.Unload({prim_path}) for "
+                "the inverse. Soft no-op + printed notice if the prim is already loaded "
+                "(prim_path in stage.GetLoadSet()) — does not raise. Raises only on a "
+                "bad prim_path."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim whose payload(s) to load. Loads the "
+                            "prim's payload AND every payload below it. Example: "
+                            "'/World/Environment' to activate a deferred warehouse asset."
+                        ),
+                    },
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_asset_info",
+            "description": (
+                "WHAT: Read the asset-provenance metadata for a prim — origin file, "
+                "asset name, asset version, payload asset (if any), and the identifier "
+                "of the layer that introduced the prim. Combines prim.GetAssetInfo() "
+                "(the assetInfo metadata dict — `identifier`, `name`, `version`, "
+                "`payloadAssetDependencies`) with the prim's primary spec / introducing "
+                "layer (Sdf.PrimSpec) and a sha256 hash of the resolved layer file when "
+                "the layer is a real on-disk file. "
+                "WHEN: provenance / debugging — 'where did /World/Robot come from?', "
+                "'what version of the franka asset is loaded?', 'is this the Isaac Sim "
+                "5.1 panda or the 5.0 one?', auditing a scene to ensure all referenced "
+                "assets come from approved sources, computing a fingerprint of the scene "
+                "for caching / contribute_data, and as a follow-up to list_references "
+                "when the LLM needs the version / hash of a specific reference. "
+                "RETURNS: data dict {prim_path: str, has_asset_info: bool, asset_info: "
+                "{identifier: str, name: str, version: str, payload_asset_dependencies: "
+                "[str, ...]}, introducing_layer: {identifier: str, real_path: str, "
+                "version: str|null, sha256: str|null}, prim_kind: str|null, "
+                "prim_specifier: 'def' | 'over' | 'class'}. "
+                "CAVEATS: read-only. has_asset_info=false (NOT an error) is normal — "
+                "most prims do not author the assetInfo metadata. The sha256 field is "
+                "populated only when the introducing layer resolves to an on-disk file "
+                "smaller than 256 MB; otherwise sha256=null (hashing a multi-GB layer "
+                "synchronously would block Kit). version comes from "
+                "assetInfo['version'] — many assets do not author this and version "
+                "will be the empty string. introducing_layer.identifier is what you "
+                "would pass to Sdf.Layer.FindOrOpen() to reopen the layer. Returns an "
+                "error stub when the prim path doesn't resolve."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim to inspect. Example: '/World/Robot' "
+                            "or '/World/Tray/medicine_bottle_03'."
+                        ),
+                    },
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
 ]

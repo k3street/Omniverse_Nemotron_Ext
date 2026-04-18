@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 Minimal scaffolding focused on the tier-11 SDG-annotation tools — only
 fixtures needed by the test files in this branch.
+Minimal scaffolding for the tier-12 asset-management tools — only fixtures
+needed by the test files in this branch.
 """
 from __future__ import annotations
 
@@ -159,6 +161,7 @@ def mock_kit_rpc(monkeypatch):
     Default behavior: queue_exec_patch returns a stub patch_id; tests that
     need to inspect the generated script override queue_exec_patch with their
     own monkeypatch (see test_data_handlers.py).
+    own monkeypatch (see test_tier12_data_handlers.py).
     """
     defaults = {
         "/health": {"ok": True},
