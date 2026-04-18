@@ -19,7 +19,7 @@ from service.isaac_assist_service.chat.tools.tool_executor import (
     _load_sensor_specs,
 )
 
-# Optional imports — these handlers may not exist on all branches
+# These handlers may not exist on all branches — import conditionally
 try:
     from service.isaac_assist_service.chat.tools.tool_executor import _handle_diagnose_physics_error
 except ImportError:
@@ -858,6 +858,108 @@ class TestValidateSceneBlueprintPhysX:
 @pytest.mark.skipif(_handle_diagnose_physics_error is None,
                     reason="diagnose_physics_error not available on this branch")
 @pytest.mark.skipif(_handle_diagnose_physics_error is None, reason="Phase 2 addendum not merged")
+# ── Physics Material Database ─────────────────────────────────────────────
+
+class TestLookupMaterial:
+    """lookup_material DATA handler — physics material property lookup."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_cache(self):
+        """Reset the cached physics materials between tests."""
+        import service.isaac_assist_service.chat.tools.tool_executor as te
+        old = te._physics_materials
+        te._physics_materials = None
+        yield
+        te._physics_materials = old
+
+    @pytest.mark.asyncio
+    async def test_known_pair_returns_pair_specific(self):
+        """A known pair (steel+rubber) returns pair-specific measured values."""
+        result = await _handle_lookup_material({
+            "material_a": "steel",
+            "material_b": "rubber",
+        })
+        assert result["found"] is True
+        assert result["lookup_type"] == "pair_specific"
+        assert result["static_friction"] == 0.80
+        assert result["dynamic_friction"] == 0.65
+        assert result["restitution"] == 0.30
+
+    @pytest.mark.asyncio
+    async def test_no_pair_returns_average_combine(self):
+        """Unknown pair computes average combine values."""
+        result = await _handle_lookup_material({
+            "material_a": "glass",
+            "material_b": "cardboard",
+        })
+        assert result["found"] is True
+        assert result["lookup_type"] == "average_combine"
+        assert result["combine_mode"] == "average"
+        # glass sf=0.95, cardboard sf=0.50 → avg = 0.725
+        assert abs(result["static_friction"] - 0.725) < 0.001
+
+    @pytest.mark.asyncio
+    async def test_unknown_material_returns_error(self):
+        """Unknown material returns helpful error with suggestions."""
+        result = await _handle_lookup_material({
+            "material_a": "unobtanium",
+            "material_b": "steel",
+        })
+        assert result["found"] is False
+        assert "available_materials" in result
+        assert "steel_mild" in result["available_materials"]
+
+    @pytest.mark.asyncio
+    async def test_alias_resolution(self):
+        """Aliases like 'steel' → 'steel_mild' and 'rubber' → 'rubber_natural' work."""
+        result = await _handle_lookup_material({
+            "material_a": "metal",
+            "material_b": "rubber",
+        })
+        assert result["found"] is True
+        assert result["material_a"] == "steel_mild"
+        assert result["material_b"] == "rubber_natural"
+
+    @pytest.mark.asyncio
+    async def test_missing_args_returns_error(self):
+        """Empty material names return an error."""
+        result = await _handle_lookup_material({
+            "material_a": "",
+            "material_b": "steel",
+        })
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_pair_reverse_order_found(self):
+        """Pair lookup works regardless of argument order."""
+        result = await _handle_lookup_material({
+            "material_a": "rubber",
+            "material_b": "steel",
+        })
+        assert result["found"] is True
+        assert result["lookup_type"] == "pair_specific"
+        assert result["static_friction"] == 0.80
+
+    @pytest.mark.asyncio
+    async def test_density_included(self):
+        """Density for both materials is returned."""
+        result = await _handle_lookup_material({
+            "material_a": "steel",
+            "material_b": "aluminum",
+        })
+        assert result["found"] is True
+        assert result["density_a_kg_m3"] == 7850
+        assert result["density_b_kg_m3"] == 2700
+
+    @pytest.mark.asyncio
+    async def test_handler_registered_in_data_handlers(self):
+        """lookup_material is registered in DATA_HANDLERS."""
+        assert "lookup_material" in DATA_HANDLERS
+        assert DATA_HANDLERS["lookup_material"] is not None
+
+
+# ── Phase 2 Addendum: Smart Debugging ─────────────────────────────────────
+
 @pytest.mark.skipif(_handle_diagnose_physics_error is None, reason="diagnose_physics_error not available on this branch")
 class TestDiagnosePhysicsError:
     """diagnose_physics_error DATA handler — pattern matching against known PhysX errors."""

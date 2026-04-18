@@ -530,6 +530,22 @@ _TEST_VECTORS = [
         {"job_id": "cloud-gcp-def67890", "output_dir": "/tmp/my_results"},
         ["rsync", "subprocess", "cloud-gcp-def67890", "/tmp/my_results"],
     ),
+    # ── Physics Material Database ────────────────────────────────────────
+    (
+        "apply_physics_material",
+        {"prim_path": "/World/Cube", "material_name": "steel"},
+        ["UsdPhysics.MaterialAPI", "StaticFrictionAttr", "DynamicFrictionAttr", "RestitutionAttr", "CollisionAPI"],
+    ),
+    (
+        "apply_physics_material",
+        {"prim_path": "/World/Gripper", "material_name": "rubber"},
+        ["UsdPhysics.MaterialAPI", "PhysicsMaterials/rubber_natural", "CollisionAPI"],
+    ),
+    (
+        "apply_physics_material",
+        {"prim_path": "/World/Part", "material_name": "aluminum"},
+        ["UsdPhysics.MaterialAPI", "PhysicsMaterials/aluminum", "DensityAttr"],
+    ),
     # ── Phase 8A: Cloner, Debug Draw, Occupancy Map, Camera ──────────────
     (
         "clone_envs",
