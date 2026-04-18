@@ -11,6 +11,8 @@ pytestmark = pytest.mark.l0
 from service.isaac_assist_service.chat.tools.tool_executor import (
     DATA_HANDLERS,
     _handle_lookup_product_spec,
+    _handle_diagnose_physics_error,
+    _handle_trace_config,
     _load_sensor_specs,
 )
 
@@ -806,3 +808,116 @@ class TestValidateSceneBlueprintPhysX:
             # Should still work — just without PhysX validation
             assert "object_count" in result
             assert result["object_count"] == 1
+
+
+# ── Phase 2 Addendum: Smart Debugging ─────────────────────────────────────
+
+class TestDiagnosePhysicsError:
+    """diagnose_physics_error DATA handler — pattern matching against known PhysX errors."""
+
+    @pytest.mark.asyncio
+    async def test_negative_mass_detected(self):
+        result = await _handle_diagnose_physics_error({
+            "error_text": "PhysX error: negative mass detected on prim: /World/Robot/link3"
+        })
+        assert len(result["matches"]) >= 1
+        match = result["matches"][0]
+        assert match["category"] == "mass_configuration"
+        assert match["severity"] == "critical"
+        assert match["prim_path"] == "/World/Robot/link3"
+        assert "positive" in match["fix"].lower()
+
+    @pytest.mark.asyncio
+    async def test_solver_divergence_no_prim(self):
+        result = await _handle_diagnose_physics_error({
+            "error_text": "Warning: solver divergence detected in physics step"
+        })
+        assert len(result["matches"]) >= 1
+        match = result["matches"][0]
+        assert match["category"] == "solver_divergence"
+        assert match["prim_path"] is None
+        assert "timestep" in match["fix"].lower()
+
+    @pytest.mark.asyncio
+    async def test_multiple_errors_deduplicated(self):
+        error_text = (
+            "collision mesh invalid on prim: /World/Table\n"
+            "collision mesh invalid on prim: /World/Table\n"
+            "collision mesh invalid on prim: /World/Table\n"
+            "solver divergence detected\n"
+        )
+        result = await _handle_diagnose_physics_error({"error_text": error_text})
+        assert len(result["matches"]) == 2  # deduplicated to 2 categories
+        mesh_match = [m for m in result["matches"] if m["category"] == "collision_mesh"][0]
+        assert mesh_match["occurrences"] == 3
+        assert mesh_match["dedup_hint"] is not None
+        assert "3 time" in mesh_match["dedup_hint"]
+
+    @pytest.mark.asyncio
+    async def test_no_match_returns_empty(self):
+        result = await _handle_diagnose_physics_error({
+            "error_text": "This is a generic Python error: list index out of range"
+        })
+        assert len(result["matches"]) == 0
+        assert "No known PhysX error" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_empty_error_text(self):
+        result = await _handle_diagnose_physics_error({"error_text": ""})
+        assert result["matches"] == []
+        assert "No error text" in result["message"]
+
+
+class TestTraceConfig:
+    """trace_config DATA handler — AST-based parameter tracing."""
+
+    @pytest.mark.asyncio
+    async def test_trace_annotated_assignment(self, tmp_path):
+        source = tmp_path / "env_cfg.py"
+        source.write_text(
+            "from dataclasses import dataclass\n"
+            "\n"
+            "@dataclass\n"
+            "class SimCfg:\n"
+            "    dt: float = 0.005\n"
+            "    gravity: float = -9.81\n",
+            encoding="utf-8",
+        )
+        result = await _handle_trace_config({
+            "param_name": "sim.dt",
+            "env_source_path": str(source),
+        })
+        assert result["final_value"] == 0.005
+        assert len(result["resolution_chain"]) == 1
+        assert result["resolution_chain"][0]["status"] == "active"
+        assert result["resolution_chain"][0]["line"] == 5
+
+    @pytest.mark.asyncio
+    async def test_trace_param_not_found(self, tmp_path):
+        source = tmp_path / "env_cfg.py"
+        source.write_text(
+            "class Cfg:\n"
+            "    something_else: int = 42\n",
+            encoding="utf-8",
+        )
+        result = await _handle_trace_config({
+            "param_name": "nonexistent_param",
+            "env_source_path": str(source),
+        })
+        assert result["final_value"] is None
+        assert len(result["resolution_chain"]) == 0
+        assert "not found" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_trace_missing_file(self):
+        result = await _handle_trace_config({
+            "param_name": "sim.dt",
+            "env_source_path": "/nonexistent/path/env.py",
+        })
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_trace_no_param_name(self):
+        result = await _handle_trace_config({"param_name": ""})
+        assert "error" in result

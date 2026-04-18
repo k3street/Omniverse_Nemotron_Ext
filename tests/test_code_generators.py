@@ -827,6 +827,17 @@ _TEST_VECTORS = [
         },
         ["LulaKinematicsSolver", "compute_inverse_kinematics", "[1.0, 0.0, 0.0, 0.0]"],
     ),
+    # ── Phase 2 Addendum: Smart Debugging ─────────────────────────────────────
+    (
+        "check_physics_health",
+        {},
+        ["UsdPhysics", "CollisionAPI", "MassAPI", "DiagonalInertiaAttr", "RevoluteJoint", "metersPerUnit", "json.dumps"],
+    ),
+    (
+        "check_physics_health",
+        {"articulation_path": "/World/Franka"},
+        ["/World/Franka", "GetAllDescendants", "CollisionAPI", "MassAPI"],
+    ),
     # ── Phase 8F: ROS2 Deep Integration ──────────────────────────────────────
     (
         "show_tf_tree",
