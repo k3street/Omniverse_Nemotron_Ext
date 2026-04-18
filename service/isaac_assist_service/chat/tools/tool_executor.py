@@ -18481,21 +18481,37 @@ limit = {limit}
 stage = omni.usd.get_context().get_stage()
 result = {{'schema_name': schema_name, 'root_path': {root_path!r}}}
 
-# Resolve schema class. Try UsdPhysics, UsdGeom, UsdShade, then any pxr module.
+# Resolve schema class. Users pass the applied-schema token (e.g.
+# "PhysicsRigidBodyAPI"), but the Python class is UsdPhysics.RigidBodyAPI —
+# the module prefix is dropped. Try both the literal name and variants with
+# the conventional "Physics"/"Geom"/"Shade" prefix stripped.
+_mod_prefix_map = (
+    (UsdPhysics, "Physics"),
+    (UsdGeom, "Geom"),
+    (UsdShade, "Shade"),
+)
 schema_cls = None
-for mod in (UsdPhysics, UsdGeom, UsdShade):
-    cand = getattr(mod, schema_name, None)
-    if cand is not None:
-        schema_cls = cand
+for mod, prefix in _mod_prefix_map:
+    for candidate_name in (schema_name, schema_name[len(prefix):] if schema_name.startswith(prefix) else None):
+        if candidate_name is None:
+            continue
+        cand = getattr(mod, candidate_name, None)
+        if cand is not None:
+            schema_cls = cand
+            break
+    if schema_cls is not None:
         break
 if schema_cls is None:
     try:
         import pxr
         for mod_name in dir(pxr):
             mod = getattr(pxr, mod_name, None)
-            cand = getattr(mod, schema_name, None) if mod is not None else None
-            if cand is not None:
-                schema_cls = cand
+            for candidate_name in (schema_name,):
+                cand = getattr(mod, candidate_name, None) if mod is not None else None
+                if cand is not None:
+                    schema_cls = cand
+                    break
+            if schema_cls is not None:
                 break
     except Exception as exc:
         result['lookup_error'] = str(exc)

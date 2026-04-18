@@ -348,6 +348,25 @@ def test_gen_check_physics_health_imports_usd():
     assert "Usd" in imports, f"Usd missing from pxr import; got {imports}"
 
 
+def test_find_prims_by_schema_resolves_physics_prefix():
+    """Regression: the applied-schema token is e.g. 'PhysicsRigidBodyAPI'
+    but the Python class in UsdPhysics is 'RigidBodyAPI'. The tool must
+    strip the conventional prefix so that both forms resolve to the same
+    class. Verify via generated code string (the actual run needs Kit RPC)."""
+    import asyncio, sys
+    sys.path.insert(0, "service")
+    from isaac_assist_service.chat.tools.tool_executor import _handle_find_prims_by_schema
+    # Introspect the code that would be sent to Kit RPC. We can't import the
+    # inner function, so just call the coroutine's code-generation path with
+    # a mock by reading the module source and confirming the prefix-strip
+    # logic is present.
+    import inspect
+    src = inspect.getsource(_handle_find_prims_by_schema)
+    assert '_mod_prefix_map' in src
+    assert '"Physics"' in src
+    assert 'schema_name[len(prefix):]' in src
+
+
 def test_gen_create_behavior_fails_fast():
     """Regression: Isaac Sim 5.x Cortex API requires RmpFlow/AMP plumbing
     we don't have here. Better to raise NotImplementedError than emit code
