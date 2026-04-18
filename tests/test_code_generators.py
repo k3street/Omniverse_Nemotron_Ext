@@ -1186,6 +1186,26 @@ _TEST_VECTORS = [
         {"graph_path": "/World/ActionGraph"},
         ["og.get_graph_by_path", "/World/ActionGraph", "ROS2Context", "OnPlaybackTick", "issues", "json.dumps"],
     ),
+    # ── Phase 2 Addendum: Preflight Check (23 checks) ────────────────────────
+    (
+        "preflight_check",
+        {},
+        ["UsdPhysics", "CollisionAPI", "MassAPI", "DiagonalInertiaAttr", "RevoluteJoint",
+         "metersPerUnit", "json.dumps", "M01", "M04", "M07", "M09", "M16", "M18",
+         "tier1_errors", "tier2_warnings", "tier3_rl", "tier4_ros2", "auto_fixable"],
+    ),
+    (
+        "preflight_check",
+        {"scope": "tier1"},
+        ["UsdPhysics", "CollisionAPI", "MassAPI", "DiagonalInertiaAttr",
+         "M01", "M04", "M05", "M06", "M08", "M11", "tier1_errors"],
+    ),
+    (
+        "preflight_check",
+        {"scope": "all", "articulation_path": "/World/Franka"},
+        ["/World/Franka", "GetAllDescendants", "CollisionAPI", "MassAPI",
+         "tier1_errors", "auto_fixable"],
+    ),
 ]
 
 
