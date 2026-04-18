@@ -92,6 +92,8 @@ AUDITED_CLEAN = frozenset({
     "_gen_start_teleop_session",    # `assert robot_prim.IsValid()` at top
     "_gen_visualize_collision_mesh", # `raise RuntimeError("Prim not found")`
     "_gen_restore_delta_snapshot",   # query/informational; print-on-apply-fail ok
+    "_gen_set_drive_gains",          # UsdPhysics.DriveAPI.Apply on invalid prim raises internally
+    "_gen_set_semantic_label",       # Semantics.SemanticsAPI.Apply on invalid prim raises internally
     # Query-only handlers (return data or print a structured result).
     # `print(json.dumps({'error': ...}))` is acceptable because the caller
     # parses the JSON output and can see the error field — not a
