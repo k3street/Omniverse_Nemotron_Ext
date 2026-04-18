@@ -996,6 +996,88 @@ _TEST_VECTORS = [
         {"prim_path": "/World/Deformable", "approximation": "sdf"},
         ["MeshCollisionAPI", "sdf"],
     ),
+    # ── OmniGraph Assistant ──────────────────────────────────────────────────
+    (
+        "explain_graph",
+        {"graph_path": "/World/ActionGraph"},
+        ["og.get_graph_by_path", "/World/ActionGraph", "get_nodes", "get_node_type", "json.dumps"],
+    ),
+    (
+        "create_graph",
+        {"description": "publish joint states to ROS2", "robot_path": "/World/Franka"},
+        ["og.Controller.edit", "ROS2Context", "ROS2PublishJointState", "CREATE_NODES", "CONNECT", "/World/Franka"],
+    ),
+    (
+        "create_graph",
+        {
+            "description": "publish simulation clock",
+            "template": "ros2_clock",
+            "graph_path": "/World/ClockGraph",
+        },
+        ["og.Controller.edit", "ROS2Context", "ROS2PublishClock", "IsaacReadSimulationTime", "/World/ClockGraph"],
+    ),
+    (
+        "create_graph",
+        {
+            "description": "subscribe to cmd_vel for teleop",
+            "template": "ros2_cmd_vel",
+            "robot_path": "/World/Carter",
+            "topic": "/cmd_vel",
+        },
+        ["og.Controller.edit", "ROS2Context", "SubscribeTwist", "DifferentialController", "/World/Carter", "/cmd_vel"],
+    ),
+    (
+        "create_graph",
+        {
+            "description": "publish camera images",
+            "template": "ros2_camera",
+            "camera_path": "/World/Camera",
+            "topic": "/camera/rgb",
+        },
+        ["og.Controller.edit", "ROS2CameraHelper", "/World/Camera", "/camera/rgb"],
+    ),
+    (
+        "create_graph",
+        {
+            "description": "publish lidar scans",
+            "template": "ros2_lidar",
+            "lidar_path": "/World/Lidar",
+        },
+        ["og.Controller.edit", "IsaacReadLidar", "ROS2PublishLaserScan", "/World/Lidar"],
+    ),
+    (
+        "create_graph",
+        {
+            "description": "broadcast TF tree",
+            "template": "ros2_tf",
+            "root_prim": "/World/Robot",
+        },
+        ["og.Controller.edit", "ROS2PublishTransformTree", "/World/Robot"],
+    ),
+    (
+        "create_graph",
+        {
+            "description": "publish IMU data",
+            "template": "ros2_imu",
+            "imu_path": "/World/Robot/IMU",
+            "topic": "/imu/data",
+        },
+        ["og.Controller.edit", "IsaacReadIMU", "ROS2PublishImu", "/World/Robot/IMU", "/imu/data"],
+    ),
+    (
+        "create_graph",
+        {
+            "description": "publish odometry",
+            "template": "ros2_odom",
+            "chassis_path": "/World/Carter/chassis",
+        },
+        ["og.Controller.edit", "IsaacComputeOdometry", "ROS2PublishOdometry", "/World/Carter/chassis"],
+    ),
+    (
+        "debug_graph",
+        {"graph_path": "/World/ActionGraph"},
+        ["og.get_graph_by_path", "/World/ActionGraph", "ROS2Context", "OnPlaybackTick", "issues", "json.dumps"],
+    ),
 ]
 
 
@@ -1250,6 +1332,155 @@ class TestCodeGenEdgeCases:
         assert "FilteredPairsAPI" in code
         assert "link1" in code
         assert "link2" in code
+
+    # ── OmniGraph Assistant edge cases ────────────────────────────────────
+
+    def test_create_graph_auto_detects_template(self):
+        """Description containing 'joint state' should auto-select ros2_joint_state."""
+        code = CODE_GEN_HANDLERS["create_graph"]({
+            "description": "publish the joint states to ROS2",
+            "robot_path": "/World/UR10",
+        })
+        _assert_valid_python(code, "create_graph")
+        assert "ROS2PublishJointState" in code
+        assert "/World/UR10" in code
+
+    def test_create_graph_auto_detects_imu(self):
+        """Description containing 'imu' should auto-select ros2_imu."""
+        code = CODE_GEN_HANDLERS["create_graph"]({
+            "description": "publish IMU sensor data",
+            "imu_path": "/World/Robot/IMU",
+        })
+        _assert_valid_python(code, "create_graph")
+        assert "IsaacReadIMU" in code
+
+    def test_create_graph_auto_detects_odom(self):
+        """Description containing 'odometry' should auto-select ros2_odom."""
+        code = CODE_GEN_HANDLERS["create_graph"]({
+            "description": "publish the odometry of the robot",
+            "chassis_path": "/World/Robot/chassis",
+        })
+        _assert_valid_python(code, "create_graph")
+        assert "IsaacComputeOdometry" in code
+
+    def test_create_graph_unknown_description_raises(self):
+        """Unrecognizable description should produce a ValueError code."""
+        code = CODE_GEN_HANDLERS["create_graph"]({
+            "description": "do something completely unrelated to ROS2",
+        })
+        assert "ValueError" in code or "Could not match" in code
+
+    def test_create_graph_default_topic_used(self):
+        """When no topic provided, template default should be used."""
+        code = CODE_GEN_HANDLERS["create_graph"]({
+            "description": "publish joint states",
+            "template": "ros2_joint_state",
+            "robot_path": "/World/Robot",
+        })
+        _assert_valid_python(code, "create_graph")
+        assert "/joint_states" in code
+
+    def test_create_graph_custom_topic_override(self):
+        """Explicit topic should override template default."""
+        code = CODE_GEN_HANDLERS["create_graph"]({
+            "description": "publish joint states",
+            "template": "ros2_joint_state",
+            "robot_path": "/World/Robot",
+            "topic": "/my_robot/joint_states",
+        })
+        _assert_valid_python(code, "create_graph")
+        assert "/my_robot/joint_states" in code
+
+    def test_create_graph_custom_graph_path(self):
+        """Custom graph_path should be used in generated code."""
+        code = CODE_GEN_HANDLERS["create_graph"]({
+            "description": "publish clock",
+            "template": "ros2_clock",
+            "graph_path": "/World/MyClockGraph",
+        })
+        _assert_valid_python(code, "create_graph")
+        assert "/World/MyClockGraph" in code
+
+    def test_create_graph_all_templates_compile(self):
+        """Every template should produce valid Python."""
+        from service.isaac_assist_service.chat.tools.tool_executor import _OG_TEMPLATES
+        for tmpl_name in _OG_TEMPLATES:
+            code = CODE_GEN_HANDLERS["create_graph"]({
+                "description": f"test {tmpl_name}",
+                "template": tmpl_name,
+                "robot_path": "/World/Robot",
+                "camera_path": "/World/Camera",
+                "lidar_path": "/World/Lidar",
+                "imu_path": "/World/IMU",
+                "chassis_path": "/World/Chassis",
+                "root_prim": "/World",
+            })
+            _assert_valid_python(code, f"create_graph:{tmpl_name}")
+
+    def test_explain_graph_contains_node_introspection(self):
+        """explain_graph should introspect node types and connections."""
+        code = CODE_GEN_HANDLERS["explain_graph"]({
+            "graph_path": "/World/SensorGraph",
+        })
+        _assert_valid_python(code, "explain_graph")
+        assert "/World/SensorGraph" in code
+        assert "get_attributes" in code
+        assert "get_upstream_connections" in code
+
+    def test_debug_graph_checks_all_issues(self):
+        """debug_graph should check for the 4 main issue categories."""
+        code = CODE_GEN_HANDLERS["debug_graph"]({
+            "graph_path": "/World/BrokenGraph",
+        })
+        _assert_valid_python(code, "debug_graph")
+        assert "missing_ros2_context" in code
+        assert "missing_on_tick" in code
+        assert "disconnected_exec_input" in code
+        assert "duplicate_node_names" in code
+
+
+class TestTemplateDetection:
+    """Test the template auto-detection from natural language descriptions."""
+
+    def test_detect_clock(self):
+        from service.isaac_assist_service.chat.tools.tool_executor import _detect_template
+        assert _detect_template("publish the simulation clock to ROS2") == "ros2_clock"
+
+    def test_detect_joint_state(self):
+        from service.isaac_assist_service.chat.tools.tool_executor import _detect_template
+        assert _detect_template("publish joint states") == "ros2_joint_state"
+
+    def test_detect_camera(self):
+        from service.isaac_assist_service.chat.tools.tool_executor import _detect_template
+        assert _detect_template("stream camera images to ROS2") == "ros2_camera"
+
+    def test_detect_lidar(self):
+        from service.isaac_assist_service.chat.tools.tool_executor import _detect_template
+        assert _detect_template("publish lidar laser scan") == "ros2_lidar"
+
+    def test_detect_cmd_vel(self):
+        from service.isaac_assist_service.chat.tools.tool_executor import _detect_template
+        assert _detect_template("subscribe to cmd_vel for teleop") == "ros2_cmd_vel"
+
+    def test_detect_tf(self):
+        from service.isaac_assist_service.chat.tools.tool_executor import _detect_template
+        assert _detect_template("broadcast transform tree") == "ros2_tf"
+
+    def test_detect_imu(self):
+        from service.isaac_assist_service.chat.tools.tool_executor import _detect_template
+        assert _detect_template("publish IMU data") == "ros2_imu"
+
+    def test_detect_odom(self):
+        from service.isaac_assist_service.chat.tools.tool_executor import _detect_template
+        assert _detect_template("publish odometry") == "ros2_odom"
+
+    def test_detect_none_for_unrelated(self):
+        from service.isaac_assist_service.chat.tools.tool_executor import _detect_template
+        assert _detect_template("make a cube") is None
+
+    def test_detect_none_for_empty(self):
+        from service.isaac_assist_service.chat.tools.tool_executor import _detect_template
+        assert _detect_template("") is None
 
 
 class TestAllCodeGenHandlersCovered:
