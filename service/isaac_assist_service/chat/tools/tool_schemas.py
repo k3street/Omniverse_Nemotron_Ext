@@ -4084,4 +4084,100 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+# ─── Onboarding & First-Time UX ─────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "scene_aware_starter_prompts",
+            "description": "Generate contextual starter prompts based on the current scene state. Call this when the chat panel opens to give users scene-aware suggestions. Returns 3 example prompts tailored to what's in the scene (empty scene, robot + objects, mobile robot, no physics, etc.).",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "hardware_compatibility_check",
+            "description": "Run a hardware and software compatibility check for Isaac Sim. Probes GPU info, VRAM, Isaac Sim version, Python version, and LLM connectivity. Returns a structured report with status icons (pass/warn/info).",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "slash_command_discovery",
+            "description": "Return available slash commands filtered by current scene state. Shows only commands relevant to what's in the scene (e.g., hides /workspace if no robot is present). Call when user types '/' in chat.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_has_robot": {"type": "boolean", "description": "Whether the scene contains a robot articulation. If omitted, auto-detected via scene_summary."},
+                    "scene_has_physics": {"type": "boolean", "description": "Whether the scene has physics enabled. If omitted, auto-detected."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "console_error_autodetect",
+            "description": "Check for new console errors since the last chat message. Returns a count and summary of new errors (not warnings) to proactively offer diagnosis. Only fires for errors to avoid spam.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "since_timestamp": {"type": "number", "description": "Unix timestamp of the last chat message. Errors after this time are considered 'new'. Default: 0 (return all errors)."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "post_action_suggestions",
+            "description": "Get context-aware next-step suggestions after a tool execution. Returns 2-3 follow-up prompts the user might want based on what tool just ran and its result.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "completed_tool": {"type": "string", "description": "Name of the tool that just executed (e.g., 'import_robot', 'create_prim')"},
+                    "tool_args": {"type": "object", "description": "Arguments that were passed to the completed tool"},
+                    "tool_result": {"type": "object", "description": "Result returned by the completed tool"},
+                },
+                "required": ["completed_tool"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "load_scene_template",
+            "description": "Load a pre-built quick-start scene template that gets users to 'something working' fast. Templates include robot + environment + physics setup. Available: 'pick_and_place' (Franka + table + cubes), 'mobile_nav' (Jetbot + warehouse), 'sdg_basic' (camera + objects + Replicator), 'empty_robot' (just a Franka, ready for commands).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "template_name": {
+                        "type": "string",
+                        "enum": ["pick_and_place", "mobile_nav", "sdg_basic", "empty_robot"],
+                        "description": "Template to load",
+                    },
+                },
+                "required": ["template_name"],
+            },
+        },
+    },
+
+    # ─── Scene Export ─────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
+                },
+                "required": [],
+            },
+        },
+    },
 ]

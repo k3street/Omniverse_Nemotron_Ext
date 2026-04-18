@@ -37,6 +37,7 @@ except ImportError:
     _handle_diagnose_ros2 = None
 
 
+
 class TestLookupProductSpec:
     """Test the sensor spec lookup handler."""
 
