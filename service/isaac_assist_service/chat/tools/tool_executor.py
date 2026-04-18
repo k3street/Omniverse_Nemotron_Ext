@@ -4982,7 +4982,8 @@ VELOCITY_GAIN = {vel_gain}
 
 stage = omni.usd.get_context().get_stage()
 robot_prim = stage.GetPrimAtPath(ROBOT_PATH)
-assert robot_prim.IsValid(), f"Robot not found at {{ROBOT_PATH}}"
+if not robot_prim or not robot_prim.IsValid():
+    raise RuntimeError(f'configure_teleop_mapping: robot not found at {{ROBOT_PATH!r}}')
 
 # Discover joints if not explicitly provided
 if JOINT_NAMES is None:
@@ -5010,6 +5011,18 @@ else:
             'position_gain': POSITION_GAIN,
             'velocity_gain': VELOCITY_GAIN,
         }}
+
+if not mapping:
+    # No axes mapped — either the robot has no revolute/prismatic joints
+    # under it, or DEVICE_AXES was given but JOINT_NAMES auto-discovery
+    # returned nothing. Printing "configured" with 0 axes mapped is a
+    # silent-success — the teleop session would do nothing on input.
+    raise RuntimeError(
+        f'configure_teleop_mapping: 0 axes ended up mapped on {{ROBOT_PATH!r}} — '
+        f'either the robot has no Revolute/Prismatic joints under it, or '
+        f'the provided DEVICE_AXES/JOINT_NAMES combination produced no '
+        f'entries. Joints discovered: {{JOINT_NAMES!r}}'
+    )
 
 # Store mapping in global teleop state (if session is active)
 try:
