@@ -2401,10 +2401,26 @@ print(f"ArticulationRootAPI remains on {{robot_path}} — tensor API patterns wi
 
 
 def _gen_set_viewport_camera(args: Dict) -> str:
+    # Viewport API silently ignores camera_path assignment when the target
+    # doesn't exist or isn't a Camera prim. Tool used to report success
+    # while the viewport stayed on /OmniverseKit_Persp. Pre-check + verify.
     return (
+        "import omni.usd\n"
         "import omni.kit.viewport.utility\n"
+        "from pxr import UsdGeom\n"
+        f"cam_path = {args['camera_path']!r}\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        "cam_prim = stage.GetPrimAtPath(cam_path)\n"
+        "if not cam_prim or not cam_prim.IsValid():\n"
+        "    raise RuntimeError(f'set_viewport_camera: prim not found: {cam_path!r}')\n"
+        "if not cam_prim.IsA(UsdGeom.Camera):\n"
+        "    raise RuntimeError(f'set_viewport_camera: prim {cam_path!r} is a {cam_prim.GetTypeName()!r}, not a Camera')\n"
         "vp_api = omni.kit.viewport.utility.get_active_viewport()\n"
-        f"vp_api.camera_path = '{args['camera_path']}'"
+        "vp_api.camera_path = cam_path\n"
+        "# Viewport assignment can be silently rejected; verify.\n"
+        "if str(vp_api.camera_path) != cam_path:\n"
+        "    raise RuntimeError(f'set_viewport_camera: assignment ignored; viewport still on {vp_api.camera_path!r}')\n"
+        "print(f'viewport camera set to {cam_path}')"
     )
 
 

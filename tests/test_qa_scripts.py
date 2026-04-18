@@ -447,6 +447,22 @@ def test_gen_batch_set_attributes_reports_accurate_counts():
     assert "raise RuntimeError" in code
 
 
+def test_gen_set_viewport_camera_validates_target():
+    """Regression: vp_api.camera_path = '/path' is silently ignored when
+    the target prim doesn't exist or isn't a UsdGeom.Camera. Tool used to
+    report success while the viewport stayed on /OmniverseKit_Persp.
+    Generated code now pre-checks IsValid() + IsA(Camera) and post-verifies
+    the viewport actually accepted the assignment."""
+    import sys
+    sys.path.insert(0, "service")
+    from isaac_assist_service.chat.tools.tool_executor import _gen_set_viewport_camera
+    code = _gen_set_viewport_camera({"camera_path": "/World/Cam"})
+    assert "cam_prim.IsValid()" in code
+    assert "IsA(UsdGeom.Camera)" in code
+    # Post-verify the assignment took effect
+    assert "str(vp_api.camera_path) != cam_path" in code
+
+
 def test_gen_robot_wizard_validates_asset_path():
     """Regression: robot_wizard for USD path did `prim.GetReferences().AddReference(asset_path)`
     without any existence check; for URDF it trusted import_urdf's return.
