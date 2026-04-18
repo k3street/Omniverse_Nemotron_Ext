@@ -14,15 +14,24 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "create_prim",
-            "description": "Create a new USD prim (Cube, Sphere, Cylinder, Cone, Mesh, Xform, Camera, etc.) at a given path with optional position and scale.",
+            "description": (
+                "Create a new USD prim (Cube, Sphere, Cylinder, Cone, Mesh, Xform, Camera, etc.) at a given path. "
+                "IMPORTANT — USD primitive defaults: Cube.size=2m (edge length), Sphere.radius=1m, "
+                "Cylinder/Cone/Capsule radius=1m height=2m. If the user wants a 1m cube, EITHER pass "
+                "size=1.0 (preferred, authors the USD attribute directly) OR scale=[0.5,0.5,0.5] (scales the 2m default). "
+                "Passing scale=[1,1,1] on a Cube leaves it at 2m, not 1m. Same caveat for sphere/cylinder radius/height."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "prim_path": {"type": "string", "description": "USD path for the new prim, e.g. '/World/MyCube'"},
-                    "prim_type": {"type": "string", "description": "Type: Cube, Sphere, Cylinder, Cone, Mesh, Xform, Camera, DistantLight, DomeLight"},
+                    "prim_type": {"type": "string", "description": "Type: Cube, Sphere, Cylinder, Cone, Capsule, Mesh, Xform, Camera, DistantLight, DomeLight"},
                     "position": {"type": "array", "items": {"type": "number"}, "description": "XYZ position in world space [x, y, z]"},
-                    "scale": {"type": "array", "items": {"type": "number"}, "description": "XYZ scale [sx, sy, sz]"},
+                    "scale": {"type": "array", "items": {"type": "number"}, "description": "XYZ scale [sx, sy, sz]. Multiplies the primitive's geometric defaults (see description)."},
                     "rotation_euler": {"type": "array", "items": {"type": "number"}, "description": "Euler rotation in degrees [rx, ry, rz]"},
+                    "size": {"type": "number", "description": "Cube: edge length in meters. Overrides the USD default (2m). Ignored for non-Cube types."},
+                    "radius": {"type": "number", "description": "Sphere/Cylinder/Cone/Capsule: radius in meters. Overrides the USD default (1m). Ignored for non-round types."},
+                    "height": {"type": "number", "description": "Cylinder/Cone/Capsule: height in meters. Overrides the USD default (2m). Ignored for types without height."},
                 },
                 "required": ["prim_path", "prim_type"],
             },

@@ -385,6 +385,30 @@ def test_find_prims_by_schema_resolves_physics_prefix():
     assert 'schema_name[len(prefix):]' in src
 
 
+def test_gen_create_prim_authors_size_radius_height():
+    """Regression: agent kept claiming '1m cube' while actually creating a
+    2m cube (USD default) because only scale was supported. Tool now accepts
+    size/radius/height params that set the geometric USD attribute directly."""
+    import sys
+    sys.path.insert(0, "service")
+    from isaac_assist_service.chat.tools.tool_executor import _gen_create_prim
+
+    code_cube = _gen_create_prim({"prim_path": "/World/C", "prim_type": "Cube", "size": 1.0})
+    assert "UsdGeom.Cube(prim).GetSizeAttr().Set(1.0)" in code_cube
+
+    code_cyl = _gen_create_prim({"prim_path": "/World/Cy", "prim_type": "Cylinder",
+                                  "radius": 0.1, "height": 1.0})
+    assert "UsdGeom.Cylinder(prim).GetRadiusAttr().Set(0.1)" in code_cyl
+    assert "UsdGeom.Cylinder(prim).GetHeightAttr().Set(1.0)" in code_cyl
+
+    code_sph = _gen_create_prim({"prim_path": "/World/S", "prim_type": "Sphere", "radius": 0.5})
+    assert "UsdGeom.Sphere(prim).GetRadiusAttr().Set(0.5)" in code_sph
+
+    # Non-applicable params are ignored (e.g. size on a Sphere)
+    code_sph2 = _gen_create_prim({"prim_path": "/World/S2", "prim_type": "Sphere", "size": 99.0})
+    assert "GetSizeAttr" not in code_sph2
+
+
 def test_gen_create_behavior_fails_fast():
     """Regression: Isaac Sim 5.x Cortex API requires RmpFlow/AMP plumbing
     we don't have here. Better to raise NotImplementedError than emit code

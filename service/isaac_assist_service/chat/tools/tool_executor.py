@@ -1535,6 +1535,9 @@ def _gen_create_prim(args: Dict) -> str:
     pos = args.get("position")
     scale = args.get("scale")
     rot = args.get("rotation_euler")
+    size = args.get("size")
+    radius = args.get("radius")
+    height = args.get("height")
     lines = [
         "import omni.usd",
         "from pxr import UsdGeom, Gf",
@@ -1548,6 +1551,27 @@ def _gen_create_prim(args: Dict) -> str:
         lines.append(f"_safe_set_scale(prim, ({scale[0]}, {scale[1]}, {scale[2]}))")
     if rot:
         lines.append(f"_safe_set_rotate_xyz(prim, ({rot[0]}, {rot[1]}, {rot[2]}))")
+    # Geometric attributes authored directly. Cleaner than relying on scale
+    # because set_attribute on 'size'/'radius'/'height' matches what success
+    # criteria typically verify (the USD attribute, not the scale op).
+    if size is not None and prim_type == "Cube":
+        lines.append(f"UsdGeom.Cube(prim).GetSizeAttr().Set({float(size)})")
+    if radius is not None:
+        if prim_type == "Sphere":
+            lines.append(f"UsdGeom.Sphere(prim).GetRadiusAttr().Set({float(radius)})")
+        elif prim_type == "Cylinder":
+            lines.append(f"UsdGeom.Cylinder(prim).GetRadiusAttr().Set({float(radius)})")
+        elif prim_type == "Cone":
+            lines.append(f"UsdGeom.Cone(prim).GetRadiusAttr().Set({float(radius)})")
+        elif prim_type == "Capsule":
+            lines.append(f"UsdGeom.Capsule(prim).GetRadiusAttr().Set({float(radius)})")
+    if height is not None:
+        if prim_type == "Cylinder":
+            lines.append(f"UsdGeom.Cylinder(prim).GetHeightAttr().Set({float(height)})")
+        elif prim_type == "Cone":
+            lines.append(f"UsdGeom.Cone(prim).GetHeightAttr().Set({float(height)})")
+        elif prim_type == "Capsule":
+            lines.append(f"UsdGeom.Capsule(prim).GetHeightAttr().Set({float(height)})")
     return "\n".join(lines)
 
 
