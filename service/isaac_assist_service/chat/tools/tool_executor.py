@@ -2388,12 +2388,18 @@ if not _fb_attr or not _fb_attr.IsDefined():
 _fb_attr.Set(True)
 print("Set physxArticulation:fixedBase=True on root")
 
-# Step 2: Delete the rootJoint (6-DOF free joint that lets the robot float)
+# Step 2: Delete the rootJoint if present (6-DOF free joint that lets the
+# robot float). NOT all assets have one — Isaac's stock robot USDs do, but
+# a bare ArticulationRootAPI-only fixture does not. Emit an explicit
+# "no rootJoint" line when absent so the agent doesn't fabricate
+# "rootJoint has been removed" in its reply.
 root_joint_path = robot_path + '/rootJoint'
 rj = stage.GetPrimAtPath(root_joint_path)
 if rj.IsValid():
     stage.RemovePrim(root_joint_path)
     print(f"Deleted {{root_joint_path}} (6-DOF free joint)")
+else:
+    print(f"No rootJoint at {{root_joint_path}} — nothing to delete (fixedBase attribute is the sole anchor mechanism here)")
 {fixed_joint_block}
 print(f"Robot at {{robot_path}} is now anchored (fixedBase=True)")
 print(f"ArticulationRootAPI remains on {{robot_path}} — tensor API patterns will work")
