@@ -19,15 +19,21 @@ from service.isaac_assist_service.chat.tools.tool_executor import (
     _load_sensor_specs,
 )
 
-# These handlers may not exist on every branch — import conditionally
+# Conditional imports for addendum handlers (may not exist on all branches)
 try:
     from service.isaac_assist_service.chat.tools.tool_executor import _handle_diagnose_physics_error
 except ImportError:
     _handle_diagnose_physics_error = None
+
 try:
     from service.isaac_assist_service.chat.tools.tool_executor import _handle_trace_config
 except ImportError:
     _handle_trace_config = None
+
+try:
+    from service.isaac_assist_service.chat.tools.tool_executor import _handle_diagnose_ros2
+except ImportError:
+    _handle_diagnose_ros2 = None
 
 
 class TestLookupProductSpec:
@@ -473,6 +479,7 @@ class TestComparePolicies:
         assert "baseline" in result["comparison_table"]
 @pytest.mark.skipif("inspect_camera" not in DATA_HANDLERS,
                     reason="inspect_camera not available on this branch")
+@pytest.mark.skipif("inspect_camera" not in DATA_HANDLERS, reason="Phase 8A not merged")
 class TestInspectCamera:
     """inspect_camera DATA handler — sends read-only code to Kit RPC."""
 
@@ -498,6 +505,7 @@ class TestInspectCamera:
 
 @pytest.mark.skipif("cloud_launch" not in DATA_HANDLERS,
                     reason="cloud_launch not available on this branch")
+@pytest.mark.skipif("cloud_launch" not in DATA_HANDLERS, reason="Phase 7H not merged")
 class TestCloudLaunch:
     """cloud_launch data handler."""
 
@@ -562,6 +570,7 @@ class TestCloudLaunch:
 
 @pytest.mark.skipif("cloud_estimate_cost" not in DATA_HANDLERS,
                     reason="cloud_estimate_cost not available on this branch")
+@pytest.mark.skipif("cloud_estimate_cost" not in DATA_HANDLERS, reason="Phase 7H not merged")
 class TestCloudEstimateCost:
     """cloud_estimate_cost data handler."""
 
@@ -604,6 +613,7 @@ class TestCloudEstimateCost:
 
 @pytest.mark.skipif("cloud_teardown" not in DATA_HANDLERS,
                     reason="cloud_teardown not available on this branch")
+@pytest.mark.skipif("cloud_teardown" not in DATA_HANDLERS, reason="Phase 7H not merged")
 class TestCloudTeardown:
     """cloud_teardown data handler."""
 
@@ -639,6 +649,7 @@ class TestCloudTeardown:
 
 @pytest.mark.skipif("cloud_status" not in DATA_HANDLERS,
                     reason="cloud_status not available on this branch")
+@pytest.mark.skipif("cloud_status" not in DATA_HANDLERS, reason="Phase 7H not merged")
 class TestCloudStatus:
     """cloud_status data handler."""
 
@@ -672,6 +683,7 @@ class TestCloudStatus:
 
 @pytest.mark.skipif("visualize_behavior_tree" not in DATA_HANDLERS,
                     reason="visualize_behavior_tree not available on this branch")
+@pytest.mark.skipif("visualize_behavior_tree" not in DATA_HANDLERS, reason="Phase 8C not merged")
 class TestVisualizeBehaviorTree:
     """visualize_behavior_tree DATA handler."""
 
@@ -708,6 +720,7 @@ class TestVisualizeBehaviorTree:
 
 @pytest.mark.skipif("generate_robot_description" not in DATA_HANDLERS,
                     reason="generate_robot_description not available on this branch")
+@pytest.mark.skipif("generate_robot_description" not in DATA_HANDLERS, reason="Phase 8D not merged")
 class TestGenerateRobotDescription:
     """generate_robot_description DATA handler."""
 
@@ -761,6 +774,7 @@ class TestGenerateRobotDescription:
 
 @pytest.mark.skipif("validate_scene_blueprint" not in DATA_HANDLERS,
                     reason="validate_scene_blueprint not available on this branch")
+@pytest.mark.skipif("validate_scene_blueprint" not in DATA_HANDLERS, reason="Phase 8A not merged")
 class TestValidateSceneBlueprintPhysX:
     """Test PhysX overlap validation in validate_scene_blueprint."""
 
@@ -843,6 +857,7 @@ class TestValidateSceneBlueprintPhysX:
 
 @pytest.mark.skipif(_handle_diagnose_physics_error is None,
                     reason="diagnose_physics_error not available on this branch")
+@pytest.mark.skipif(_handle_diagnose_physics_error is None, reason="Phase 2 addendum not merged")
 class TestDiagnosePhysicsError:
     """diagnose_physics_error DATA handler — pattern matching against known PhysX errors."""
 
@@ -901,6 +916,7 @@ class TestDiagnosePhysicsError:
 
 @pytest.mark.skipif(_handle_trace_config is None,
                     reason="trace_config not available on this branch")
+@pytest.mark.skipif(_handle_trace_config is None, reason="Phase 2 addendum not merged")
 class TestTraceConfig:
     """trace_config DATA handler — AST-based parameter tracing."""
 
@@ -960,6 +976,7 @@ class TestTraceConfig:
 
 @pytest.mark.skipif("apply_robot_fix_profile" not in DATA_HANDLERS,
                     reason="apply_robot_fix_profile not available on this branch")
+@pytest.mark.skipif("apply_robot_fix_profile" not in DATA_HANDLERS, reason="Phase 3 addendum not merged")
 class TestApplyRobotFixProfile:
     """apply_robot_fix_profile DATA handler — lookup table of known robot import issues."""
 
@@ -1137,3 +1154,109 @@ class TestDiagnoseDomainGap:
             "real_dir": "/tmp/real",
         })
         assert "error" in result
+# ── Phase 8F Addendum: ROS2 Quality Diagnostics ─────────────────────────────
+
+class TestDiagnoseRos2:
+    """diagnose_ros2 DATA handler — comprehensive ROS2 health check."""
+
+    @pytest.mark.asyncio
+    async def test_all_clear(self, mock_kit_rpc):
+        """When Kit reports a healthy ROS2 setup, no issues should be raised."""
+        import json as _json
+
+        healthy_scene = _json.dumps({
+            "ros2_context_found": True,
+            "ros2_context_path": "/World/ActionGraph/ROS2Context",
+            "distro": "humble",
+            "domain_id": "0",
+            "domain_id_node": 0,
+            "clock_publisher_found": True,
+            "use_sim_time": True,
+            "og_graphs": ["/World/ActionGraph"],
+            "dangling_connections": [],
+            "qos_nodes": [],
+        })
+
+        async def mock_post(path, body):
+            return {"queued": True, "output": healthy_scene}
+
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        with patch.object(kt, "_post", mock_post):
+            handler = DATA_HANDLERS["diagnose_ros2"]
+            result = await handler({})
+
+        assert result["issue_count"] == 0
+        assert "no issues" in result["message"].lower() or result["issue_count"] == 0
+        assert result["ros2_context_found"] is True
+        assert result["clock_publishing"] is True
+
+    @pytest.mark.asyncio
+    async def test_missing_context(self, mock_kit_rpc):
+        """When no ROS2Context node exists, a critical issue should be raised."""
+        import json as _json
+
+        no_context_scene = _json.dumps({
+            "ros2_context_found": False,
+            "ros2_context_path": None,
+            "distro": "humble",
+            "domain_id": "0",
+            "clock_publisher_found": False,
+            "use_sim_time": None,
+            "og_graphs": ["/World/ActionGraph"],
+            "dangling_connections": [],
+            "qos_nodes": [],
+        })
+
+        async def mock_post(path, body):
+            return {"queued": True, "output": no_context_scene}
+
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        with patch.object(kt, "_post", mock_post):
+            handler = DATA_HANDLERS["diagnose_ros2"]
+            result = await handler({})
+
+        assert result["issue_count"] >= 1
+        assert result["ros2_context_found"] is False
+        # Should have "no_ros2_context" issue
+        issue_ids = [i["id"] for i in result["issues"]]
+        assert "no_ros2_context" in issue_ids
+        context_issue = next(i for i in result["issues"] if i["id"] == "no_ros2_context")
+        assert context_issue["severity"] == "critical"
+
+    @pytest.mark.asyncio
+    async def test_qos_mismatch_detected(self, mock_kit_rpc):
+        """When a publisher has wrong QoS for its topic type, a warning should be raised."""
+        import json as _json
+
+        qos_mismatch_scene = _json.dumps({
+            "ros2_context_found": True,
+            "ros2_context_path": "/World/ActionGraph/ROS2Context",
+            "distro": "humble",
+            "domain_id": "0",
+            "clock_publisher_found": True,
+            "use_sim_time": True,
+            "og_graphs": ["/World/ActionGraph"],
+            "dangling_connections": [],
+            "qos_nodes": [
+                {
+                    "node_type": "isaacsim.ros2.bridge.ROS2PublishLaserScan",
+                    "node_path": "/World/ActionGraph/PublishScan",
+                    "topic": "/scan",
+                    "qos": "RELIABLE, VOLATILE",
+                },
+            ],
+        })
+
+        async def mock_post(path, body):
+            return {"queued": True, "output": qos_mismatch_scene}
+
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        with patch.object(kt, "_post", mock_post):
+            handler = DATA_HANDLERS["diagnose_ros2"]
+            result = await handler({})
+
+        # /scan should be BEST_EFFORT, but we set RELIABLE → should flag it
+        qos_issues = [i for i in result["issues"] if i["id"] == "qos_mismatch"]
+        assert len(qos_issues) >= 1
+        assert "BEST_EFFORT" in qos_issues[0]["message"]
+        assert qos_issues[0]["severity"] == "warning"

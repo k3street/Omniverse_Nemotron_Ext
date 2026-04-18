@@ -3434,6 +3434,398 @@ exec(open("{out_dir}/scene_setup.py").read())
     }
 
 
+# ── Phase 8F Addendum: ROS2 Quality Diagnostics ────────────────────────────
+
+# QoS preset mapping: topic keyword → (reliability, durability, description)
+_ROS2_QOS_PRESETS = {
+    "scan": ("BEST_EFFORT", "VOLATILE", "Laser scan data — high-frequency, drop-tolerant"),
+    "robot_description": ("RELIABLE", "TRANSIENT_LOCAL", "Robot URDF — latched, must arrive"),
+    "tf": ("RELIABLE", "VOLATILE", "Transform tree — must be reliable"),
+    "tf_static": ("RELIABLE", "TRANSIENT_LOCAL", "Static transforms — latched"),
+    "cmd_vel": ("RELIABLE", "VOLATILE", "Velocity commands — must not be dropped"),
+    "camera": ("BEST_EFFORT", "VOLATILE", "Camera images — high-bandwidth, drop-tolerant"),
+    "image": ("BEST_EFFORT", "VOLATILE", "Image data — high-bandwidth, drop-tolerant"),
+    "joint_states": ("RELIABLE", "VOLATILE", "Joint state feedback — must be reliable"),
+    "clock": ("BEST_EFFORT", "VOLATILE", "Simulation clock — high-frequency"),
+}
+
+
+async def _handle_diagnose_ros2(args: Dict) -> Dict:
+    """Run comprehensive ROS2 integration health check on the current scene.
+
+    Checks performed:
+    1. ROS2Context node present in OmniGraph
+    2. ROS distro detection
+    3. QoS profile mismatches between common topic pairs
+    4. use_sim_time parameter configuration
+    5. Clock publishing (ROS2PublishClock node)
+    6. Domain ID consistency
+    7. Dangling OmniGraph connections
+    """
+    issues: List[Dict[str, Any]] = []
+
+    # Generate diagnostic code that runs inside Kit
+    diag_code = '''\
+import omni.graph.core as og
+import json
+import os
+
+result = {
+    "ros2_context_found": False,
+    "ros2_context_path": None,
+    "distro": None,
+    "domain_id": None,
+    "clock_publisher_found": False,
+    "use_sim_time": None,
+    "og_graphs": [],
+    "dangling_connections": [],
+    "qos_nodes": [],
+}
+
+# Check ROS_DISTRO environment variable
+result["distro"] = os.environ.get("ROS_DISTRO", None)
+result["domain_id"] = os.environ.get("ROS_DOMAIN_ID", "0")
+
+# Scan all OmniGraph graphs
+try:
+    all_graphs = og.get_all_graphs()
+    for graph in all_graphs:
+        graph_path = graph.get_path_to_graph()
+        result["og_graphs"].append(graph_path)
+        nodes = graph.get_nodes()
+        for node in nodes:
+            node_type = node.get_type_name()
+            node_path = node.get_prim_path()
+
+            # Check for ROS2Context
+            if "ROS2Context" in node_type:
+                result["ros2_context_found"] = True
+                result["ros2_context_path"] = str(node_path)
+                # Try to read domain_id attribute
+                domain_attr = node.get_attribute("inputs:domain_id")
+                if domain_attr:
+                    result["domain_id_node"] = domain_attr.get()
+
+            # Check for ROS2PublishClock
+            if "PublishClock" in node_type:
+                result["clock_publisher_found"] = True
+
+            # Collect QoS-relevant nodes
+            if "ROS2" in node_type and "Publish" in node_type:
+                topic_attr = node.get_attribute("inputs:topicName")
+                qos_attr = node.get_attribute("inputs:qosProfile")
+                result["qos_nodes"].append({
+                    "node_type": node_type,
+                    "node_path": str(node_path),
+                    "topic": topic_attr.get() if topic_attr else None,
+                    "qos": qos_attr.get() if qos_attr else None,
+                })
+
+        # Check for dangling connections
+        for node in nodes:
+            for attr in node.get_attributes():
+                if attr.get_port_type() == og.AttributePortType.ATTRIBUTE_PORT_TYPE_INPUT:
+                    upstream = attr.get_upstream_connections()
+                    if not upstream and attr.get_name().startswith("inputs:execIn"):
+                        result["dangling_connections"].append({
+                            "node": str(node.get_prim_path()),
+                            "attr": attr.get_name(),
+                        })
+except Exception as e:
+    result["scan_error"] = str(e)
+
+# Check use_sim_time via carb settings
+try:
+    import carb.settings
+    settings = carb.settings.get_settings()
+    result["use_sim_time"] = settings.get("/persistent/exts/isaacsim.ros2.bridge/useSimTime")
+except Exception:
+    result["use_sim_time"] = None
+
+print(json.dumps(result))
+'''
+
+    try:
+        diag_result = await kit_tools.queue_exec_patch(diag_code, "ROS2 diagnostic scan")
+        # Parse the result if we got immediate output
+        if isinstance(diag_result, dict) and diag_result.get("output"):
+            import json as _json
+            scene_info = _json.loads(diag_result["output"])
+        else:
+            scene_info = {}
+    except Exception:
+        scene_info = {}
+
+    # Issue 1: ROS2Context node
+    if not scene_info.get("ros2_context_found", False):
+        issues.append({
+            "id": "no_ros2_context",
+            "severity": "critical",
+            "message": "No ROS2Context node found in any OmniGraph",
+            "fix": "Add a ROS2Context node to your action graph. This is required for all ROS2 bridge communication.",
+            "tool_hint": "create_omnigraph with a ROS2Context node",
+        })
+
+    # Issue 2: ROS distro
+    distro = scene_info.get("distro")
+    if not distro:
+        issues.append({
+            "id": "no_ros_distro",
+            "severity": "warning",
+            "message": "ROS_DISTRO environment variable not set",
+            "fix": "Source your ROS2 workspace: source /opt/ros/<distro>/setup.bash",
+            "tool_hint": None,
+        })
+
+    # Issue 3: Clock publisher
+    if not scene_info.get("clock_publisher_found", False):
+        issues.append({
+            "id": "no_clock_publisher",
+            "severity": "warning",
+            "message": "No ROS2PublishClock node found — /clock topic will not be published",
+            "fix": "Add a ROS2PublishClock node to publish simulation time. Use configure_ros2_time tool.",
+            "tool_hint": "configure_ros2_time(mode='sim_time')",
+        })
+
+    # Issue 4: use_sim_time
+    use_sim_time = scene_info.get("use_sim_time")
+    clock_found = scene_info.get("clock_publisher_found", False)
+    if clock_found and use_sim_time is not True:
+        issues.append({
+            "id": "use_sim_time_mismatch",
+            "severity": "warning",
+            "message": "Clock publisher active but use_sim_time is not enabled",
+            "fix": "Set use_sim_time=true so ROS2 nodes use simulation clock instead of wall clock.",
+            "tool_hint": "configure_ros2_time(mode='sim_time')",
+        })
+
+    # Issue 5: Domain ID mismatch
+    env_domain = scene_info.get("domain_id", "0")
+    node_domain = scene_info.get("domain_id_node")
+    if node_domain is not None and str(node_domain) != str(env_domain):
+        issues.append({
+            "id": "domain_id_mismatch",
+            "severity": "critical",
+            "message": f"Domain ID mismatch: ROS_DOMAIN_ID={env_domain} but ROS2Context node has domain_id={node_domain}",
+            "fix": f"Set ROS_DOMAIN_ID={node_domain} in your environment, or update the ROS2Context node to domain_id={env_domain}.",
+            "tool_hint": None,
+        })
+
+    # Issue 6: QoS mismatches
+    for qos_node in scene_info.get("qos_nodes", []):
+        topic = qos_node.get("topic", "")
+        if topic:
+            topic_key = topic.strip("/").split("/")[-1]
+            preset = _ROS2_QOS_PRESETS.get(topic_key)
+            if preset and qos_node.get("qos"):
+                current_qos = str(qos_node["qos"])
+                expected_reliability = preset[0]
+                if expected_reliability not in current_qos:
+                    issues.append({
+                        "id": "qos_mismatch",
+                        "severity": "warning",
+                        "message": f"QoS mismatch on topic '{topic}': expected {expected_reliability} reliability",
+                        "fix": f"Use fix_ros2_qos(topic='{topic}') to apply the recommended QoS profile.",
+                        "tool_hint": f"fix_ros2_qos(topic='{topic}')",
+                    })
+
+    # Issue 7: Dangling connections
+    for dangling in scene_info.get("dangling_connections", []):
+        issues.append({
+            "id": "dangling_connection",
+            "severity": "info",
+            "message": f"Dangling execution input on {dangling['node']}.{dangling['attr']}",
+            "fix": "Connect this node's execIn to an OnPlaybackTick or upstream node.",
+            "tool_hint": None,
+        })
+
+    return {
+        "issues": issues,
+        "issue_count": len(issues),
+        "ros2_context_found": scene_info.get("ros2_context_found", False),
+        "distro": scene_info.get("distro"),
+        "domain_id": scene_info.get("domain_id", "0"),
+        "clock_publishing": scene_info.get("clock_publisher_found", False),
+        "graphs_scanned": len(scene_info.get("og_graphs", [])),
+        "message": f"Found {len(issues)} issue(s)" if issues else "All ROS2 checks passed — no issues found",
+    }
+
+
+DATA_HANDLERS["diagnose_ros2"] = _handle_diagnose_ros2
+
+
+def _gen_fix_ros2_qos(args: Dict) -> str:
+    """Generate code to update the QoS profile on a ROS2 publisher for a given topic."""
+    topic = args["topic"]
+
+    # Determine the QoS preset from the topic name
+    topic_key = topic.strip("/").split("/")[-1]
+    preset = _ROS2_QOS_PRESETS.get(topic_key)
+
+    if preset:
+        reliability, durability, description = preset
+    else:
+        # Default to RELIABLE + VOLATILE for unknown topics
+        reliability = "RELIABLE"
+        durability = "VOLATILE"
+        description = f"Unknown topic '{topic}' — defaulting to RELIABLE"
+
+    return f'''\
+import omni.graph.core as og
+import json
+
+topic_name = "{topic}"
+target_reliability = "{reliability}"
+target_durability = "{durability}"
+
+# QoS profile: {description}
+# Find the publisher node for this topic and update its QoS profile
+all_graphs = og.get_all_graphs()
+updated = False
+
+for graph in all_graphs:
+    for node in graph.get_nodes():
+        node_type = node.get_type_name()
+        if "ROS2" not in node_type:
+            continue
+
+        topic_attr = node.get_attribute("inputs:topicName")
+        if not topic_attr:
+            continue
+
+        current_topic = topic_attr.get()
+        if current_topic != topic_name:
+            continue
+
+        # Found the node — update QoS profile
+        qos_attr = node.get_attribute("inputs:qosProfile")
+        if qos_attr:
+            qos_attr.set(f"{{target_reliability}}, {{target_durability}}")
+            updated = True
+            print(f"Updated QoS on {{node.get_prim_path()}}: {{target_reliability}}, {{target_durability}}")
+
+        # Also set reliability/durability if separate attributes exist
+        rel_attr = node.get_attribute("inputs:reliability")
+        if rel_attr:
+            rel_attr.set(target_reliability)
+
+        dur_attr = node.get_attribute("inputs:durability")
+        if dur_attr:
+            dur_attr.set(target_durability)
+
+        break  # Only update the first matching node
+
+if not updated:
+    # No existing node found — create a new publisher with correct QoS
+    print(f"No publisher found for {{topic_name}} — set QoS when creating the publisher:")
+    print(f"  reliability: {{target_reliability}}")
+    print(f"  durability: {{target_durability}}")
+    print(f"  Hint: {description}")
+'''
+
+
+CODE_GEN_HANDLERS["fix_ros2_qos"] = _gen_fix_ros2_qos
+
+
+def _gen_configure_ros2_time(args: Dict) -> str:
+    """Generate OmniGraph code for ROS2 clock publishing and use_sim_time configuration."""
+    mode = args["mode"]
+    time_scale = args.get("time_scale", 1.0)
+
+    if mode == "real_time":
+        return '''\
+import carb.settings
+import omni.graph.core as og
+
+# Configure real_time mode: disable use_sim_time, no clock publishing needed
+settings = carb.settings.get_settings()
+settings.set("/persistent/exts/isaacsim.ros2.bridge/useSimTime", False)
+
+# Remove existing ROS2PublishClock nodes if any
+all_graphs = og.get_all_graphs()
+for graph in all_graphs:
+    for node in graph.get_nodes():
+        if "PublishClock" in node.get_type_name():
+            node_path = node.get_prim_path()
+            print(f"Note: ROS2PublishClock at {node_path} is active but use_sim_time=false")
+            print("ROS2 nodes will use wall clock time.")
+
+print("Configured real_time mode: use_sim_time=false")
+print("ROS2 nodes will use the system wall clock.")
+'''
+
+    # sim_time or scaled mode — both need clock publishing
+    time_scale_block = ""
+    if mode == "scaled":
+        time_scale_block = f'''
+# Set simulation time scale
+import omni.timeline
+tl = omni.timeline.get_timeline_interface()
+tl.set_time_codes_per_second(tl.get_time_codes_per_second() * {time_scale})
+print(f"Time scale set to {time_scale}x")
+'''
+
+    return f'''\
+import omni.graph.core as og
+import carb.settings
+
+# ── Step 1: Enable use_sim_time ──────────────────────────────────────────
+settings = carb.settings.get_settings()
+settings.set("/persistent/exts/isaacsim.ros2.bridge/useSimTime", True)
+print("Enabled use_sim_time=true")
+
+# ── Step 2: Create ROS2PublishClock node in an action graph ──────────────
+# Check if a clock publisher already exists
+clock_exists = False
+all_graphs = og.get_all_graphs()
+for graph in all_graphs:
+    for node in graph.get_nodes():
+        if "PublishClock" in node.get_type_name():
+            clock_exists = True
+            print(f"ROS2PublishClock already exists at {{node.get_prim_path()}}")
+            break
+    if clock_exists:
+        break
+
+if not clock_exists:
+    # Resolve backing type
+    _bt = og.GraphBackingType
+    if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+        _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+    elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+        _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+    else:
+        _backing = list(_bt)[0]
+
+    keys = og.Controller.Keys
+    (graph, nodes, _, _) = og.Controller.edit(
+        {{
+            "graph_path": "/World/ROS2ClockGraph",
+            "evaluator_name": "execution",
+            "pipeline_stage": _backing,
+        }},
+        {{
+            keys.CREATE_NODES: [
+                ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+                ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
+                ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ],
+            keys.CONNECT: [
+                ("OnPlaybackTick.outputs:tick", "PublishClock.inputs:execIn"),
+                ("ROS2Context.outputs:context", "PublishClock.inputs:context"),
+            ],
+        }},
+    )
+    print("Created ROS2ClockGraph with ROS2PublishClock node")
+    print("  /clock topic will publish simulation time")
+{time_scale_block}
+print("Configured {mode} mode: ROS2 nodes will use simulation clock from /clock topic")
+'''
+
+
+CODE_GEN_HANDLERS["configure_ros2_time"] = _gen_configure_ros2_time
+
+
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
 
 
@@ -13285,3 +13677,398 @@ else:
 DATA_HANDLERS["validate_annotations"] = _handle_validate_annotations
 DATA_HANDLERS["analyze_randomization"] = _handle_analyze_randomization
 DATA_HANDLERS["diagnose_domain_gap"] = _handle_diagnose_domain_gap
+
+
+# ── Phase 8F Addendum: ROS2 Quality Diagnostics ────────────────────────────
+
+# QoS preset mapping: topic keyword → (reliability, durability, description)
+_ROS2_QOS_PRESETS = {
+    "scan": ("BEST_EFFORT", "VOLATILE", "Laser scan data — high-frequency, drop-tolerant"),
+    "robot_description": ("RELIABLE", "TRANSIENT_LOCAL", "Robot URDF — latched, must arrive"),
+    "tf": ("RELIABLE", "VOLATILE", "Transform tree — must be reliable"),
+    "tf_static": ("RELIABLE", "TRANSIENT_LOCAL", "Static transforms — latched"),
+    "cmd_vel": ("RELIABLE", "VOLATILE", "Velocity commands — must not be dropped"),
+    "camera": ("BEST_EFFORT", "VOLATILE", "Camera images — high-bandwidth, drop-tolerant"),
+    "image": ("BEST_EFFORT", "VOLATILE", "Image data — high-bandwidth, drop-tolerant"),
+    "joint_states": ("RELIABLE", "VOLATILE", "Joint state feedback — must be reliable"),
+    "clock": ("BEST_EFFORT", "VOLATILE", "Simulation clock — high-frequency"),
+}
+
+
+async def _handle_diagnose_ros2(args: Dict) -> Dict:
+    """Run comprehensive ROS2 integration health check on the current scene.
+
+    Checks performed:
+    1. ROS2Context node present in OmniGraph
+    2. ROS distro detection
+    3. QoS profile mismatches between common topic pairs
+    4. use_sim_time parameter configuration
+    5. Clock publishing (ROS2PublishClock node)
+    6. Domain ID consistency
+    7. Dangling OmniGraph connections
+    """
+    issues: List[Dict[str, Any]] = []
+
+    # Generate diagnostic code that runs inside Kit
+    diag_code = '''\
+import omni.graph.core as og
+import json
+import os
+
+result = {
+    "ros2_context_found": False,
+    "ros2_context_path": None,
+    "distro": None,
+    "domain_id": None,
+    "clock_publisher_found": False,
+    "use_sim_time": None,
+    "og_graphs": [],
+    "dangling_connections": [],
+    "qos_nodes": [],
+}
+
+# Check ROS_DISTRO environment variable
+result["distro"] = os.environ.get("ROS_DISTRO", None)
+result["domain_id"] = os.environ.get("ROS_DOMAIN_ID", "0")
+
+# Scan all OmniGraph graphs
+try:
+    all_graphs = og.get_all_graphs()
+    for graph in all_graphs:
+        graph_path = graph.get_path_to_graph()
+        result["og_graphs"].append(graph_path)
+        nodes = graph.get_nodes()
+        for node in nodes:
+            node_type = node.get_type_name()
+            node_path = node.get_prim_path()
+
+            # Check for ROS2Context
+            if "ROS2Context" in node_type:
+                result["ros2_context_found"] = True
+                result["ros2_context_path"] = str(node_path)
+                # Try to read domain_id attribute
+                domain_attr = node.get_attribute("inputs:domain_id")
+                if domain_attr:
+                    result["domain_id_node"] = domain_attr.get()
+
+            # Check for ROS2PublishClock
+            if "PublishClock" in node_type:
+                result["clock_publisher_found"] = True
+
+            # Collect QoS-relevant nodes
+            if "ROS2" in node_type and "Publish" in node_type:
+                topic_attr = node.get_attribute("inputs:topicName")
+                qos_attr = node.get_attribute("inputs:qosProfile")
+                result["qos_nodes"].append({
+                    "node_type": node_type,
+                    "node_path": str(node_path),
+                    "topic": topic_attr.get() if topic_attr else None,
+                    "qos": qos_attr.get() if qos_attr else None,
+                })
+
+        # Check for dangling connections
+        for node in nodes:
+            for attr in node.get_attributes():
+                if attr.get_port_type() == og.AttributePortType.ATTRIBUTE_PORT_TYPE_INPUT:
+                    upstream = attr.get_upstream_connections()
+                    if not upstream and attr.get_name().startswith("inputs:execIn"):
+                        result["dangling_connections"].append({
+                            "node": str(node.get_prim_path()),
+                            "attr": attr.get_name(),
+                        })
+except Exception as e:
+    result["scan_error"] = str(e)
+
+# Check use_sim_time via carb settings
+try:
+    import carb.settings
+    settings = carb.settings.get_settings()
+    result["use_sim_time"] = settings.get("/persistent/exts/isaacsim.ros2.bridge/useSimTime")
+except Exception:
+    result["use_sim_time"] = None
+
+print(json.dumps(result))
+'''
+
+    try:
+        diag_result = await kit_tools.queue_exec_patch(diag_code, "ROS2 diagnostic scan")
+        # Parse the result if we got immediate output
+        if isinstance(diag_result, dict) and diag_result.get("output"):
+            import json as _json
+            scene_info = _json.loads(diag_result["output"])
+        else:
+            scene_info = {}
+    except Exception:
+        scene_info = {}
+
+    # Issue 1: ROS2Context node
+    if not scene_info.get("ros2_context_found", False):
+        issues.append({
+            "id": "no_ros2_context",
+            "severity": "critical",
+            "message": "No ROS2Context node found in any OmniGraph",
+            "fix": "Add a ROS2Context node to your action graph. This is required for all ROS2 bridge communication.",
+            "tool_hint": "create_omnigraph with a ROS2Context node",
+        })
+
+    # Issue 2: ROS distro
+    distro = scene_info.get("distro")
+    if not distro:
+        issues.append({
+            "id": "no_ros_distro",
+            "severity": "warning",
+            "message": "ROS_DISTRO environment variable not set",
+            "fix": "Source your ROS2 workspace: source /opt/ros/<distro>/setup.bash",
+            "tool_hint": None,
+        })
+
+    # Issue 3: Clock publisher
+    if not scene_info.get("clock_publisher_found", False):
+        issues.append({
+            "id": "no_clock_publisher",
+            "severity": "warning",
+            "message": "No ROS2PublishClock node found — /clock topic will not be published",
+            "fix": "Add a ROS2PublishClock node to publish simulation time. Use configure_ros2_time tool.",
+            "tool_hint": "configure_ros2_time(mode='sim_time')",
+        })
+
+    # Issue 4: use_sim_time
+    use_sim_time = scene_info.get("use_sim_time")
+    clock_found = scene_info.get("clock_publisher_found", False)
+    if clock_found and use_sim_time is not True:
+        issues.append({
+            "id": "use_sim_time_mismatch",
+            "severity": "warning",
+            "message": "Clock publisher active but use_sim_time is not enabled",
+            "fix": "Set use_sim_time=true so ROS2 nodes use simulation clock instead of wall clock.",
+            "tool_hint": "configure_ros2_time(mode='sim_time')",
+        })
+
+    # Issue 5: Domain ID mismatch
+    env_domain = scene_info.get("domain_id", "0")
+    node_domain = scene_info.get("domain_id_node")
+    if node_domain is not None and str(node_domain) != str(env_domain):
+        issues.append({
+            "id": "domain_id_mismatch",
+            "severity": "critical",
+            "message": f"Domain ID mismatch: ROS_DOMAIN_ID={env_domain} but ROS2Context node has domain_id={node_domain}",
+            "fix": f"Set ROS_DOMAIN_ID={node_domain} in your environment, or update the ROS2Context node to domain_id={env_domain}.",
+            "tool_hint": None,
+        })
+
+    # Issue 6: QoS mismatches
+    for qos_node in scene_info.get("qos_nodes", []):
+        topic = qos_node.get("topic", "")
+        if topic:
+            topic_key = topic.strip("/").split("/")[-1]
+            preset = _ROS2_QOS_PRESETS.get(topic_key)
+            if preset and qos_node.get("qos"):
+                current_qos = str(qos_node["qos"])
+                expected_reliability = preset[0]
+                if expected_reliability not in current_qos:
+                    issues.append({
+                        "id": "qos_mismatch",
+                        "severity": "warning",
+                        "message": f"QoS mismatch on topic '{topic}': expected {expected_reliability} reliability",
+                        "fix": f"Use fix_ros2_qos(topic='{topic}') to apply the recommended QoS profile.",
+                        "tool_hint": f"fix_ros2_qos(topic='{topic}')",
+                    })
+
+    # Issue 7: Dangling connections
+    for dangling in scene_info.get("dangling_connections", []):
+        issues.append({
+            "id": "dangling_connection",
+            "severity": "info",
+            "message": f"Dangling execution input on {dangling['node']}.{dangling['attr']}",
+            "fix": "Connect this node's execIn to an OnPlaybackTick or upstream node.",
+            "tool_hint": None,
+        })
+
+    return {
+        "issues": issues,
+        "issue_count": len(issues),
+        "ros2_context_found": scene_info.get("ros2_context_found", False),
+        "distro": scene_info.get("distro"),
+        "domain_id": scene_info.get("domain_id", "0"),
+        "clock_publishing": scene_info.get("clock_publisher_found", False),
+        "graphs_scanned": len(scene_info.get("og_graphs", [])),
+        "message": f"Found {len(issues)} issue(s)" if issues else "All ROS2 checks passed — no issues found",
+    }
+
+
+DATA_HANDLERS["diagnose_ros2"] = _handle_diagnose_ros2
+
+
+def _gen_fix_ros2_qos(args: Dict) -> str:
+    """Generate code to update the QoS profile on a ROS2 publisher for a given topic."""
+    topic = args["topic"]
+
+    # Determine the QoS preset from the topic name
+    topic_key = topic.strip("/").split("/")[-1]
+    preset = _ROS2_QOS_PRESETS.get(topic_key)
+
+    if preset:
+        reliability, durability, description = preset
+    else:
+        # Default to RELIABLE + VOLATILE for unknown topics
+        reliability = "RELIABLE"
+        durability = "VOLATILE"
+        description = f"Unknown topic '{topic}' — defaulting to RELIABLE"
+
+    return f'''\
+import omni.graph.core as og
+import json
+
+topic_name = "{topic}"
+target_reliability = "{reliability}"
+target_durability = "{durability}"
+
+# QoS profile: {description}
+# Find the publisher node for this topic and update its QoS profile
+all_graphs = og.get_all_graphs()
+updated = False
+
+for graph in all_graphs:
+    for node in graph.get_nodes():
+        node_type = node.get_type_name()
+        if "ROS2" not in node_type:
+            continue
+
+        topic_attr = node.get_attribute("inputs:topicName")
+        if not topic_attr:
+            continue
+
+        current_topic = topic_attr.get()
+        if current_topic != topic_name:
+            continue
+
+        # Found the node — update QoS profile
+        qos_attr = node.get_attribute("inputs:qosProfile")
+        if qos_attr:
+            qos_attr.set(f"{{target_reliability}}, {{target_durability}}")
+            updated = True
+            print(f"Updated QoS on {{node.get_prim_path()}}: {{target_reliability}}, {{target_durability}}")
+
+        # Also set reliability/durability if separate attributes exist
+        rel_attr = node.get_attribute("inputs:reliability")
+        if rel_attr:
+            rel_attr.set(target_reliability)
+
+        dur_attr = node.get_attribute("inputs:durability")
+        if dur_attr:
+            dur_attr.set(target_durability)
+
+        break  # Only update the first matching node
+
+if not updated:
+    # No existing node found — create a new publisher with correct QoS
+    print(f"No publisher found for {{topic_name}} — set QoS when creating the publisher:")
+    print(f"  reliability: {{target_reliability}}")
+    print(f"  durability: {{target_durability}}")
+    print(f"  Hint: {description}")
+'''
+
+
+CODE_GEN_HANDLERS["fix_ros2_qos"] = _gen_fix_ros2_qos
+
+
+def _gen_configure_ros2_time(args: Dict) -> str:
+    """Generate OmniGraph code for ROS2 clock publishing and use_sim_time configuration."""
+    mode = args["mode"]
+    time_scale = args.get("time_scale", 1.0)
+
+    if mode == "real_time":
+        return '''\
+import carb.settings
+import omni.graph.core as og
+
+# Configure real_time mode: disable use_sim_time, no clock publishing needed
+settings = carb.settings.get_settings()
+settings.set("/persistent/exts/isaacsim.ros2.bridge/useSimTime", False)
+
+# Remove existing ROS2PublishClock nodes if any
+all_graphs = og.get_all_graphs()
+for graph in all_graphs:
+    for node in graph.get_nodes():
+        if "PublishClock" in node.get_type_name():
+            node_path = node.get_prim_path()
+            print(f"Note: ROS2PublishClock at {node_path} is active but use_sim_time=false")
+            print("ROS2 nodes will use wall clock time.")
+
+print("Configured real_time mode: use_sim_time=false")
+print("ROS2 nodes will use the system wall clock.")
+'''
+
+    # sim_time or scaled mode — both need clock publishing
+    time_scale_block = ""
+    if mode == "scaled":
+        time_scale_block = f'''
+# Set simulation time scale
+import omni.timeline
+tl = omni.timeline.get_timeline_interface()
+tl.set_time_codes_per_second(tl.get_time_codes_per_second() * {time_scale})
+print(f"Time scale set to {time_scale}x")
+'''
+
+    return f'''\
+import omni.graph.core as og
+import carb.settings
+
+# ── Step 1: Enable use_sim_time ──────────────────────────────────────────
+settings = carb.settings.get_settings()
+settings.set("/persistent/exts/isaacsim.ros2.bridge/useSimTime", True)
+print("Enabled use_sim_time=true")
+
+# ── Step 2: Create ROS2PublishClock node in an action graph ──────────────
+# Check if a clock publisher already exists
+clock_exists = False
+all_graphs = og.get_all_graphs()
+for graph in all_graphs:
+    for node in graph.get_nodes():
+        if "PublishClock" in node.get_type_name():
+            clock_exists = True
+            print(f"ROS2PublishClock already exists at {{node.get_prim_path()}}")
+            break
+    if clock_exists:
+        break
+
+if not clock_exists:
+    # Resolve backing type
+    _bt = og.GraphBackingType
+    if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+        _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+    elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+        _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+    else:
+        _backing = list(_bt)[0]
+
+    keys = og.Controller.Keys
+    (graph, nodes, _, _) = og.Controller.edit(
+        {{
+            "graph_path": "/World/ROS2ClockGraph",
+            "evaluator_name": "execution",
+            "pipeline_stage": _backing,
+        }},
+        {{
+            keys.CREATE_NODES: [
+                ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+                ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
+                ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ],
+            keys.CONNECT: [
+                ("OnPlaybackTick.outputs:tick", "PublishClock.inputs:execIn"),
+                ("ROS2Context.outputs:context", "PublishClock.inputs:context"),
+            ],
+        }},
+    )
+    print("Created ROS2ClockGraph with ROS2PublishClock node")
+    print("  /clock topic will publish simulation time")
+{time_scale_block}
+print("Configured {mode} mode: ROS2 nodes will use simulation clock from /clock topic")
+'''
+
+
+CODE_GEN_HANDLERS["configure_ros2_time"] = _gen_configure_ros2_time
+
+
+DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package

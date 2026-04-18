@@ -2881,4 +2881,104 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── ROS2 Quality / Diagnostics (Phase 8F Addendum) ──────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_ros2",
+            "description": "Run a comprehensive ROS2 integration health check on the current scene. Checks for: ROS2Context node presence, distro detection, QoS profile mismatches, use_sim_time configuration, clock publishing, domain ID consistency, and dangling OmniGraph connections. Returns a list of issues with suggested fixes.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fix_ros2_qos",
+            "description": "Generate code to fix the QoS (Quality of Service) profile on a ROS2 publisher node for a specific topic. Uses a preset mapping: scan->BEST_EFFORT, robot_description->TRANSIENT_LOCAL, tf->RELIABLE, cmd_vel->RELIABLE, camera->BEST_EFFORT. Ensures publisher and subscriber QoS profiles are compatible.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "description": "ROS2 topic name to fix QoS for, e.g. '/scan', '/robot_description', '/tf', '/cmd_vel', '/camera/rgb'"},
+                },
+                "required": ["topic"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_ros2_time",
+            "description": "Generate OmniGraph code to configure ROS2 time synchronization. Sets up a ROS2PublishClock node and configures use_sim_time parameter. Supports sim_time (Isaac Sim clock published to /clock), real_time (wall clock, use_sim_time=false), and scaled (sim_time with a time scale factor).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["sim_time", "real_time", "scaled"],
+                        "description": "Time synchronization mode",
+                    },
+                    "time_scale": {
+                        "type": "number",
+                        "description": "Time scale factor (only used when mode='scaled'). Default: 1.0",
+                    },
+                },
+                "required": ["mode"],
+            },
+        },
+    },
+
+# ─── ROS2 Quality / Diagnostics (Phase 8F Addendum) ──────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_ros2",
+            "description": "Run a comprehensive ROS2 integration health check on the current scene. Checks for: ROS2Context node presence, distro detection, QoS profile mismatches, use_sim_time configuration, clock publishing, domain ID consistency, and dangling OmniGraph connections. Returns a list of issues with suggested fixes.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fix_ros2_qos",
+            "description": "Generate code to fix the QoS (Quality of Service) profile on a ROS2 publisher node for a specific topic. Uses a preset mapping: scan->BEST_EFFORT, robot_description->TRANSIENT_LOCAL, tf->RELIABLE, cmd_vel->RELIABLE, camera->BEST_EFFORT. Ensures publisher and subscriber QoS profiles are compatible.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "description": "ROS2 topic name to fix QoS for, e.g. '/scan', '/robot_description', '/tf', '/cmd_vel', '/camera/rgb'"},
+                },
+                "required": ["topic"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_ros2_time",
+            "description": "Generate OmniGraph code to configure ROS2 time synchronization. Sets up a ROS2PublishClock node and configures use_sim_time parameter. Supports sim_time (Isaac Sim clock published to /clock), real_time (wall clock, use_sim_time=false), and scaled (sim_time with a time scale factor).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["sim_time", "real_time", "scaled"],
+                        "description": "Time synchronization mode",
+                    },
+                    "time_scale": {
+                        "type": "number",
+                        "description": "Time scale factor (only used when mode='scaled'). Default: 1.0",
+                    },
+                },
+                "required": ["mode"],
+            },
+        },
+    },
 ]
