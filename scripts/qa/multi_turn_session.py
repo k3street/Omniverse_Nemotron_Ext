@@ -74,6 +74,53 @@ else:
                 entry['visibility'] = str(vis_attr.Get())
         except Exception:
             pass
+        # Named physics / drive attributes — the prim-type + api list surfaces
+        # "this has PhysxSceneAPI" but the attribute VALUES (solverType,
+        # timeStepsPerSecond, etc.) only land in the snapshot if we read them
+        # explicitly. Without this, tasks like "configure deterministic mode"
+        # produce a stage-identical snapshot from the judge's perspective
+        # even when the tool authored the right attributes (verified on
+        # /World/PhysicsScene after enable_deterministic_mode).
+        try:
+            _named = []
+            if ptype == 'PhysicsScene':
+                _named = [
+                    'physxScene:solverType',
+                    'physxScene:enableGPUDynamics',
+                    'physxScene:enableCCD',
+                    'physxScene:timeStepsPerSecond',
+                    'physics:gravityMagnitude',
+                    'physics:gravityDirection',
+                ]
+            elif ptype in ('PhysicsRevoluteJoint', 'PhysicsPrismaticJoint'):
+                _named = [
+                    'physics:lowerLimit',
+                    'physics:upperLimit',
+                    'drive:angular:physics:stiffness',
+                    'drive:angular:physics:damping',
+                    'drive:angular:physics:targetPosition',
+                    'drive:linear:physics:stiffness',
+                    'drive:linear:physics:damping',
+                ]
+            if _named:
+                extras = {}
+                for name in _named:
+                    try:
+                        a = p.GetAttribute(name)
+                        if a and a.IsValid() and a.IsAuthored():
+                            v = a.Get()
+                            # Serialize Gf types (Vec3f, etc.) to list for JSON
+                            if hasattr(v, '__len__') and not isinstance(v, str):
+                                v = [round(float(x), 4) for x in v]
+                            elif isinstance(v, float):
+                                v = round(v, 4)
+                            extras[name] = v
+                    except Exception:
+                        continue
+                if extras:
+                    entry['attrs'] = extras
+        except Exception:
+            pass
         prims_info.append(entry)
 
         # World transform for all Xformables (position + rotation + scale ground-truth)

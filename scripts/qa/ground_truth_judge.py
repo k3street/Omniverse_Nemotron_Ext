@@ -104,6 +104,13 @@ def _snapshot_summary(snap: Dict) -> str:
             g = geometry[path]
             g_compact = ", ".join(f"{k}={v}" for k, v in g.items() if not k.startswith("_"))
             extras.append(f"geom={{{g_compact}}}")
+        # Named physics/drive attribute values (PhysicsScene config, joint
+        # limits, drive gains). Surfaces values that prior runs saw as blank
+        # snapshot diffs even when the tool correctly authored them.
+        p_attrs = p.get("attrs") or {}
+        if p_attrs:
+            a_compact = ", ".join(f"{k}={v}" for k, v in p_attrs.items())
+            extras.append(f"attrs={{{a_compact}}}")
         if extras:
             line += "  " + " ".join(extras)
         lines.append(line)
