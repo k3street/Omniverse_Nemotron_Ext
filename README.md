@@ -368,7 +368,7 @@ The long-term goal is a community-trained model that understands Isaac Sim's ful
 
 ## License
 
-Copyright 2025 Kimate Richards / 10Things, Inc.
+Copyright 2026 Kimate Richards / 10Things, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -390,7 +390,7 @@ See the [LICENSE](LICENSE) file for details.
 If you use this project in your research or work, please cite:
 
 ```
-Kimate Richards / 10Things, Inc. (2025). Isaac Assist — Omniverse Extension & Background Service.
+Kimate Richards / 10Things, Inc. (2026). Isaac Assist — Omniverse Extension & Background Service.
 https://github.com/10ThingsInc/Omniverse_Nemotron_Ext
 ```
 
