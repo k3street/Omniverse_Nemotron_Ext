@@ -353,6 +353,47 @@ _TEST_VECTORS = [
         {"output_dir": "/tmp/sdg_export", "num_frames": 500, "step_batch": 20},
         ["step", "Progress"],
     ),
+    # ── Phase 7C: XR Teleoperation ──────────────────────────────────────────
+    (
+        "start_teleop_session",
+        {"robot_path": "/World/Robot", "input_device": "keyboard", "stream_quality": "medium"},
+        ["subscribe_physics_step_events", "watchdog"],
+    ),
+    (
+        "start_teleop_session",
+        {"robot_path": "/World/Franka", "input_device": "quest_3", "stream_quality": "high"},
+        ["subscribe_physics_step_events", "quest_3"],
+    ),
+    (
+        "configure_teleop_mapping",
+        {"robot_path": "/World/Robot", "joint_names": ["joint_1", "joint_2"], "gains": {"position": 1.0, "velocity": 0.5}},
+        ["joint", "gain"],
+    ),
+    (
+        "record_teleop_demo",
+        {"output_path": "/tmp/demo.hdf5", "robot_path": "/World/Robot", "frequency_hz": 30},
+        ["h5py", "joint_pos"],
+    ),
+    (
+        "record_teleop_demo",
+        {"output_path": "/tmp/demo2.hdf5", "robot_path": "/World/Franka", "frequency_hz": 60},
+        ["h5py", "60"],
+    ),
+    (
+        "stop_teleop_session",
+        {},
+        ["remove", "velocit"],
+    ),
+    (
+        "teleop_safety_config",
+        {"robot_path": "/World/Robot", "watchdog_timeout_ms": 500, "max_joint_velocity": 2.0},
+        ["watchdog", "velocit"],
+    ),
+    (
+        "teleop_safety_config",
+        {"robot_path": "/World/Robot", "workspace_limits": {"min": [-1, -1, 0], "max": [1, 1, 2]}},
+        ["workspace", "limit"],
+    ),
 ]
 
 

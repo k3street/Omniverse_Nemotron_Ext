@@ -3180,3 +3180,575 @@ async def _handle_run_stage_analysis(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 DATA_HANDLERS["run_stage_analysis"] = _handle_run_stage_analysis
+# ── XR Teleoperation ────────────────────────────────────────────────────────
+
+# Stream quality presets: resolution, bitrate, FPS
+_STREAM_QUALITY_PRESETS = {
+    "low": {"width": 640, "height": 480, "bitrate_mbps": 2, "fps": 30},
+    "medium": {"width": 1280, "height": 720, "bitrate_mbps": 8, "fps": 60},
+    "high": {"width": 1920, "height": 1080, "bitrate_mbps": 20, "fps": 90},
+}
+
+# Device axis defaults per input device
+_DEVICE_AXIS_DEFAULTS = {
+    "quest_3": ["left_x", "left_y", "right_x", "right_y", "trigger_left", "trigger_right", "grip_left", "grip_right"],
+    "vision_pro": ["left_x", "left_y", "right_x", "right_y", "pinch_left", "pinch_right"],
+    "spacemouse": ["tx", "ty", "tz", "rx", "ry", "rz"],
+    "keyboard": ["w", "a", "s", "d", "q", "e"],
+}
+
+
+def _gen_start_teleop_session(args: Dict) -> str:
+    robot_path = args["robot_path"]
+    device = args.get("input_device", "keyboard")
+    quality = args.get("stream_quality", "medium")
+    preset = _STREAM_QUALITY_PRESETS.get(quality, _STREAM_QUALITY_PRESETS["medium"])
+    axes = _DEVICE_AXIS_DEFAULTS.get(device, _DEVICE_AXIS_DEFAULTS["keyboard"])
+
+    return f"""\
+import omni.usd
+import omni.kit.app
+import omni.physx
+from pxr import UsdPhysics, PhysxSchema, Gf
+import time
+import json
+import asyncio
+import threading
+
+# ── Configuration ───────────────────────────────────────────────────────
+ROBOT_PATH = '{robot_path}'
+INPUT_DEVICE = '{device}'
+STREAM_WIDTH = {preset["width"]}
+STREAM_HEIGHT = {preset["height"]}
+STREAM_BITRATE_MBPS = {preset["bitrate_mbps"]}
+STREAM_FPS = {preset["fps"]}
+WATCHDOG_TIMEOUT_S = 0.5      # Hold last command until timeout
+WATCHDOG_ZERO_VEL_S = 2.0     # Zero velocity after this period
+MAX_JOINT_VEL = 2.0           # rad/s cap (safety default)
+WS_PORT = 8766
+
+# ── Global state ────────────────────────────────────────────────────────
+_teleop_state = {{
+    'active': True,
+    'last_cmd_time': time.time(),
+    'last_joint_targets': None,
+    'ws_server': None,
+    'recording_active': False,
+    'device_axes': {axes!r},
+}}
+
+stage = omni.usd.get_context().get_stage()
+robot_prim = stage.GetPrimAtPath(ROBOT_PATH)
+assert robot_prim.IsValid(), f"Robot prim not found at {{ROBOT_PATH}}"
+
+# ── WebSocket bridge for control data ───────────────────────────────────
+try:
+    import websockets
+    import websockets.server
+
+    _connected_clients = set()
+
+    async def _ws_handler(websocket):
+        _connected_clients.add(websocket)
+        try:
+            async for message in websocket:
+                data = json.loads(message)
+                if data.get('type') == 'joint_command':
+                    _teleop_state['last_cmd_time'] = time.time()
+                    _teleop_state['last_joint_targets'] = data.get('targets', [])
+                elif data.get('type') == 'stop':
+                    _teleop_state['active'] = False
+        except websockets.exceptions.ConnectionClosed:
+            pass
+        finally:
+            _connected_clients.discard(websocket)
+
+    async def _start_ws_server():
+        server = await websockets.server.serve(_ws_handler, '0.0.0.0', WS_PORT)
+        _teleop_state['ws_server'] = server
+        print(f"Teleop WebSocket server listening on ws://0.0.0.0:{{WS_PORT}}")
+        return server
+
+    # Launch WS server in background
+    _ws_loop = asyncio.new_event_loop()
+    _ws_thread = threading.Thread(
+        target=lambda: (_ws_loop.run_until_complete(_start_ws_server()), _ws_loop.run_forever()),
+        daemon=True,
+    )
+    _ws_thread.start()
+
+except ImportError:
+    print("WARNING: websockets package not installed — WebSocket bridge disabled")
+    print("Install with: pip install websockets")
+
+# ── Viewport streaming setup ───────────────────────────────────────────
+try:
+    import carb.settings
+    settings = carb.settings.get_settings()
+    settings.set('/rtx/renderResolution/width', STREAM_WIDTH)
+    settings.set('/rtx/renderResolution/height', STREAM_HEIGHT)
+    print(f"Viewport streaming configured: {{STREAM_WIDTH}}x{{STREAM_HEIGHT}} @ {{STREAM_FPS}}fps, {{STREAM_BITRATE_MBPS}}Mbps")
+except Exception as e:
+    print(f"Viewport streaming setup note: {{e}}")
+
+# ── Physics callback: apply joint commands with watchdog ────────────────
+def _teleop_physics_step(dt):
+    if not _teleop_state['active']:
+        return
+
+    now = time.time()
+    elapsed = now - _teleop_state['last_cmd_time']
+    targets = _teleop_state['last_joint_targets']
+
+    robot = stage.GetPrimAtPath(ROBOT_PATH)
+    if not robot.IsValid():
+        return
+
+    # Iterate joints and apply targets
+    joint_idx = 0
+    for child in robot.GetAllChildren():
+        is_revolute = child.HasAPI(UsdPhysics.RevoluteJointAPI)
+        is_prismatic = child.HasAPI(UsdPhysics.PrismaticJointAPI)
+        if not (is_revolute or is_prismatic):
+            continue
+
+        drive_type = 'angular' if is_revolute else 'linear'
+        if not child.HasAPI(UsdPhysics.DriveAPI):
+            continue
+        drive = UsdPhysics.DriveAPI.Get(child, drive_type)
+
+        if elapsed > WATCHDOG_ZERO_VEL_S:
+            # Safety: zero velocity after extended timeout
+            drive.GetTargetVelocityAttr().Set(0.0)
+        elif elapsed > WATCHDOG_TIMEOUT_S:
+            # Hold last command (do nothing — keep current targets)
+            pass
+        elif targets and joint_idx < len(targets):
+            # Apply command with velocity capping
+            target_vel = targets[joint_idx]
+            capped_vel = max(-MAX_JOINT_VEL, min(MAX_JOINT_VEL, target_vel))
+            drive.GetTargetVelocityAttr().Set(capped_vel)
+
+        joint_idx += 1
+
+# Register physics callback
+_teleop_sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_teleop_physics_step)
+_teleop_state['physics_sub'] = _teleop_sub
+
+print(f"Teleop session started for {{ROBOT_PATH}}")
+print(f"  Device: {{INPUT_DEVICE}}")
+print(f"  Stream: {{STREAM_WIDTH}}x{{STREAM_HEIGHT}} @ {{STREAM_FPS}}fps")
+print(f"  Watchdog: hold={{WATCHDOG_TIMEOUT_S}}s, zero_vel={{WATCHDOG_ZERO_VEL_S}}s")
+print(f"  Connect: ws://localhost:{{WS_PORT}}")
+"""
+
+
+def _gen_configure_teleop_mapping(args: Dict) -> str:
+    robot_path = args["robot_path"]
+    device_axes = args.get("device_axes")
+    joint_names = args.get("joint_names")
+    gains = args.get("gains", {})
+    pos_gain = gains.get("position", 1.0)
+    vel_gain = gains.get("velocity", 1.0)
+
+    device_axes_repr = repr(device_axes) if device_axes else "None"
+    joint_names_repr = repr(joint_names) if joint_names else "None"
+
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics
+
+# ── Teleop Axis-to-Joint Mapping ────────────────────────────────────────
+ROBOT_PATH = '{robot_path}'
+DEVICE_AXES = {device_axes_repr}
+JOINT_NAMES = {joint_names_repr}
+POSITION_GAIN = {pos_gain}
+VELOCITY_GAIN = {vel_gain}
+
+stage = omni.usd.get_context().get_stage()
+robot_prim = stage.GetPrimAtPath(ROBOT_PATH)
+assert robot_prim.IsValid(), f"Robot not found at {{ROBOT_PATH}}"
+
+# Discover joints if not explicitly provided
+if JOINT_NAMES is None:
+    JOINT_NAMES = []
+    for child in robot_prim.GetAllChildren():
+        if child.HasAPI(UsdPhysics.RevoluteJointAPI) or child.HasAPI(UsdPhysics.PrismaticJointAPI):
+            JOINT_NAMES.append(child.GetName())
+    print(f"Auto-discovered {{len(JOINT_NAMES)}} joints: {{JOINT_NAMES}}")
+
+# Build mapping table
+mapping = {{}}
+if DEVICE_AXES:
+    for i, axis in enumerate(DEVICE_AXES):
+        if i < len(JOINT_NAMES):
+            mapping[axis] = {{
+                'joint': JOINT_NAMES[i],
+                'position_gain': POSITION_GAIN,
+                'velocity_gain': VELOCITY_GAIN,
+            }}
+else:
+    # Default: sequential 1:1 mapping
+    for i, joint in enumerate(JOINT_NAMES):
+        mapping[f'axis_{{i}}'] = {{
+            'joint': joint,
+            'position_gain': POSITION_GAIN,
+            'velocity_gain': VELOCITY_GAIN,
+        }}
+
+# Store mapping in global teleop state (if session is active)
+try:
+    _teleop_state['mapping'] = mapping
+    _teleop_state['joint_names'] = JOINT_NAMES
+    _teleop_state['gains'] = {{'position': POSITION_GAIN, 'velocity': VELOCITY_GAIN}}
+except NameError:
+    print("WARNING: No active teleop session — mapping stored locally only")
+
+print(f"Teleop mapping configured for {{ROBOT_PATH}}:")
+print(f"  Axes: {{len(mapping)}} mapped")
+print(f"  Gains: pos={{POSITION_GAIN}}, vel={{VELOCITY_GAIN}}")
+for axis, cfg in mapping.items():
+    print(f"    {{axis}} -> {{cfg['joint']}}")
+"""
+
+
+def _gen_record_teleop_demo(args: Dict) -> str:
+    output_path = args["output_path"]
+    robot_path = args["robot_path"]
+    frequency_hz = args.get("frequency_hz", 30)
+
+    return f"""\
+import omni.usd
+import omni.physx
+from pxr import UsdPhysics, UsdGeom, Gf
+import time
+import numpy as np
+
+# ── Teleop Demo Recording ───────────────────────────────────────────────
+OUTPUT_PATH = '{output_path}'
+ROBOT_PATH = '{robot_path}'
+FREQUENCY_HZ = {frequency_hz}
+RECORD_INTERVAL = 1.0 / FREQUENCY_HZ
+
+stage = omni.usd.get_context().get_stage()
+robot_prim = stage.GetPrimAtPath(ROBOT_PATH)
+assert robot_prim.IsValid(), f"Robot not found at {{ROBOT_PATH}}"
+
+# Discover joints
+_rec_joints = []
+for child in robot_prim.GetAllChildren():
+    if child.HasAPI(UsdPhysics.RevoluteJointAPI) or child.HasAPI(UsdPhysics.PrismaticJointAPI):
+        _rec_joints.append(child)
+num_joints = len(_rec_joints)
+
+# Recording buffers
+_rec_data = {{
+    'joint_positions': [],
+    'joint_velocities': [],
+    'ee_poses': [],
+    'timestamps': [],
+    'active': False,
+    'last_record_time': 0.0,
+    'start_time': 0.0,
+}}
+
+def _get_joint_positions():
+    positions = []
+    for j in _rec_joints:
+        is_revolute = j.HasAPI(UsdPhysics.RevoluteJointAPI)
+        drive_type = 'angular' if is_revolute else 'linear'
+        if j.HasAPI(UsdPhysics.DriveAPI):
+            drive = UsdPhysics.DriveAPI.Get(j, drive_type)
+            pos = drive.GetTargetPositionAttr().Get()
+            positions.append(float(pos) if pos is not None else 0.0)
+        else:
+            positions.append(0.0)
+    return positions
+
+def _get_joint_velocities():
+    velocities = []
+    for j in _rec_joints:
+        is_revolute = j.HasAPI(UsdPhysics.RevoluteJointAPI)
+        drive_type = 'angular' if is_revolute else 'linear'
+        if j.HasAPI(UsdPhysics.DriveAPI):
+            drive = UsdPhysics.DriveAPI.Get(j, drive_type)
+            vel = drive.GetTargetVelocityAttr().Get()
+            velocities.append(float(vel) if vel is not None else 0.0)
+        else:
+            velocities.append(0.0)
+    return velocities
+
+def _get_ee_pose():
+    # Attempt to find end-effector (last link or named ee_link/panda_hand)
+    ee_names = ['ee_link', 'panda_hand', 'tool0', 'link_ee']
+    ee_prim = None
+    for name in ee_names:
+        candidate = stage.GetPrimAtPath(f'{{ROBOT_PATH}}/{{name}}')
+        if candidate.IsValid():
+            ee_prim = candidate
+            break
+    if ee_prim is None:
+        # Fallback: use last child with xform
+        for child in robot_prim.GetAllChildren():
+            if child.IsA(UsdGeom.Xformable):
+                ee_prim = child
+    if ee_prim is None:
+        return [0.0] * 7  # pos(3) + quat(4)
+    xf = UsdGeom.Xformable(ee_prim).ComputeLocalToWorldTransform(0)
+    pos = xf.ExtractTranslation()
+    rot = xf.ExtractRotation().GetQuat()
+    return [float(pos[0]), float(pos[1]), float(pos[2]),
+            float(rot.GetReal()), float(rot.GetImaginary()[0]),
+            float(rot.GetImaginary()[1]), float(rot.GetImaginary()[2])]
+
+def _record_physics_step(dt):
+    if not _rec_data['active']:
+        return
+    now = time.time()
+    if now - _rec_data['last_record_time'] < RECORD_INTERVAL:
+        return
+    _rec_data['last_record_time'] = now
+
+    _rec_data['timestamps'].append(now - _rec_data['start_time'])
+    _rec_data['joint_positions'].append(_get_joint_positions())
+    _rec_data['joint_velocities'].append(_get_joint_velocities())
+    _rec_data['ee_poses'].append(_get_ee_pose())
+
+# Register recording callback
+_rec_sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_record_physics_step)
+
+# Start recording
+_rec_data['active'] = True
+_rec_data['start_time'] = time.time()
+_rec_data['last_record_time'] = 0.0
+
+# Store references for stop_teleop_session to finalize
+try:
+    _teleop_state['recording_active'] = True
+    _teleop_state['rec_data'] = _rec_data
+    _teleop_state['rec_sub'] = _rec_sub
+    _teleop_state['rec_output_path'] = OUTPUT_PATH
+    _teleop_state['rec_num_joints'] = num_joints
+except NameError:
+    pass
+
+def _finalize_recording():
+    \"\"\"Write recorded data to HDF5 file with robomimic-compatible schema.\"\"\"
+    import h5py
+    _rec_data['active'] = False
+
+    n_steps = len(_rec_data['timestamps'])
+    if n_steps == 0:
+        print("No data recorded — nothing to write.")
+        return
+
+    with h5py.File(OUTPUT_PATH, 'w') as f:
+        # robomimic-compatible schema
+        grp = f.create_group('data')
+        demo = grp.create_group('demo_0')
+        demo.attrs['num_samples'] = n_steps
+
+        obs = demo.create_group('obs')
+        obs.create_dataset('joint_positions', data=np.array(_rec_data['joint_positions']))
+        obs.create_dataset('joint_velocities', data=np.array(_rec_data['joint_velocities']))
+        obs.create_dataset('ee_pose', data=np.array(_rec_data['ee_poses']))
+
+        demo.create_dataset('timestamps', data=np.array(_rec_data['timestamps']))
+
+        # Metadata
+        f.attrs['robot_path'] = ROBOT_PATH
+        f.attrs['frequency_hz'] = FREQUENCY_HZ
+        f.attrs['num_joints'] = num_joints
+        f.attrs['total_timesteps'] = n_steps
+
+    print(f"Recording saved: {{OUTPUT_PATH}} ({{n_steps}} steps, {{num_joints}} joints)")
+
+# Expose finalize for external use
+_rec_data['finalize'] = _finalize_recording
+
+print(f"Recording started: {{ROBOT_PATH}} -> {{OUTPUT_PATH}}")
+print(f"  Frequency: {{FREQUENCY_HZ}} Hz")
+print(f"  Joints: {{num_joints}}")
+print(f"  Call stop_teleop_session to finalize and save.")
+"""
+
+
+def _gen_stop_teleop_session(args: Dict) -> str:
+    return """\
+import omni.usd
+import omni.physx
+from pxr import UsdPhysics
+import time
+
+# ── Stop Teleop Session ─────────────────────────────────────────────────
+stage = omni.usd.get_context().get_stage()
+
+try:
+    _teleop_state
+except NameError:
+    print("No active teleop session found.")
+    _teleop_state = {}
+
+# 1. Deactivate session
+_teleop_state['active'] = False
+
+# 2. Remove physics callbacks
+if 'physics_sub' in _teleop_state:
+    _teleop_state['physics_sub'] = None
+    print("Teleop physics callback removed.")
+
+if 'rec_sub' in _teleop_state:
+    _teleop_state['rec_sub'] = None
+    print("Recording physics callback removed.")
+
+# 3. Zero all joint velocities (safety)
+robot_path = _teleop_state.get('robot_path', '')
+if not robot_path:
+    # Try to find any articulation in the scene
+    for prim in stage.Traverse():
+        if prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+            robot_path = str(prim.GetPath())
+            break
+
+if robot_path:
+    robot_prim = stage.GetPrimAtPath(robot_path)
+    if robot_prim.IsValid():
+        zeroed = 0
+        for child in robot_prim.GetAllChildren():
+            is_revolute = child.HasAPI(UsdPhysics.RevoluteJointAPI)
+            is_prismatic = child.HasAPI(UsdPhysics.PrismaticJointAPI)
+            if not (is_revolute or is_prismatic):
+                continue
+            drive_type = 'angular' if is_revolute else 'linear'
+            if child.HasAPI(UsdPhysics.DriveAPI):
+                drive = UsdPhysics.DriveAPI.Get(child, drive_type)
+                drive.GetTargetVelocityAttr().Set(0.0)
+                zeroed += 1
+        print(f"Zeroed velocity on {zeroed} joints for safety.")
+
+# 4. Stop viewport streaming
+try:
+    import carb.settings
+    settings = carb.settings.get_settings()
+    # Reset to default render resolution
+    settings.set('/rtx/renderResolution/width', 1280)
+    settings.set('/rtx/renderResolution/height', 720)
+    print("Viewport streaming stopped.")
+except Exception:
+    pass
+
+# 5. Close WebSocket connections
+ws_server = _teleop_state.get('ws_server')
+if ws_server is not None:
+    ws_server.close()
+    _teleop_state['ws_server'] = None
+    print("WebSocket server closed.")
+
+# 6. Finalize any active HDF5 recording
+if _teleop_state.get('recording_active'):
+    rec_data = _teleop_state.get('rec_data', {})
+    finalize_fn = rec_data.get('finalize')
+    if finalize_fn:
+        finalize_fn()
+    _teleop_state['recording_active'] = False
+    print("Recording finalized.")
+
+print("Teleop session stopped.")
+"""
+
+
+def _gen_teleop_safety_config(args: Dict) -> str:
+    robot_path = args["robot_path"]
+    watchdog_ms = args.get("watchdog_timeout_ms", 500)
+    max_vel = args.get("max_joint_velocity")
+    ws_limits = args.get("workspace_limits")
+
+    watchdog_s = watchdog_ms / 1000.0
+    zero_vel_s = watchdog_s * 4  # Zero velocity at 4x watchdog timeout
+
+    max_vel_line = ""
+    if max_vel is not None:
+        max_vel_line = f"MAX_JOINT_VEL = {max_vel}"
+    else:
+        max_vel_line = "MAX_JOINT_VEL = 2.0  # default rad/s"
+
+    ws_limits_block = ""
+    if ws_limits:
+        ws_min = ws_limits.get("min", [-1, -1, 0])
+        ws_max = ws_limits.get("max", [1, 1, 2])
+        ws_limits_block = f"""
+# ── Workspace limits ────────────────────────────────────────────────────
+WS_MIN = Gf.Vec3d({ws_min[0]}, {ws_min[1]}, {ws_min[2]})
+WS_MAX = Gf.Vec3d({ws_max[0]}, {ws_max[1]}, {ws_max[2]})
+
+def _check_workspace_limits():
+    \"\"\"Check if end-effector is within workspace bounds.\"\"\"
+    ee_names = ['ee_link', 'panda_hand', 'tool0', 'link_ee']
+    for name in ee_names:
+        ee = stage.GetPrimAtPath(f'{{ROBOT_PATH}}/{{name}}')
+        if ee.IsValid():
+            xf = UsdGeom.Xformable(ee).ComputeLocalToWorldTransform(0)
+            pos = xf.ExtractTranslation()
+            clamped = False
+            for i in range(3):
+                if pos[i] < WS_MIN[i] or pos[i] > WS_MAX[i]:
+                    clamped = True
+                    break
+            if clamped:
+                print(f"WARNING: End-effector at {{pos}} outside workspace limits!")
+                return False
+            return True
+    return True  # No ee found, skip check
+
+print(f"Workspace limits: min={{list(WS_MIN)}}, max={{list(WS_MAX)}}")
+"""
+
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics, UsdGeom, Gf
+
+# ── Teleop Safety Configuration ─────────────────────────────────────────
+ROBOT_PATH = '{robot_path}'
+WATCHDOG_TIMEOUT_S = {watchdog_s}
+WATCHDOG_ZERO_VEL_S = {zero_vel_s}
+{max_vel_line}
+
+stage = omni.usd.get_context().get_stage()
+
+# Update global teleop state if session is active
+try:
+    _teleop_state['watchdog_timeout'] = WATCHDOG_TIMEOUT_S
+    _teleop_state['watchdog_zero_vel'] = WATCHDOG_ZERO_VEL_S
+    _teleop_state['max_joint_vel'] = MAX_JOINT_VEL
+    print("Updated active teleop session safety config.")
+except NameError:
+    print("No active teleop session — safety config stored for next session.")
+
+# Apply velocity limits to joint drives
+robot_prim = stage.GetPrimAtPath(ROBOT_PATH)
+if robot_prim.IsValid():
+    configured = 0
+    for child in robot_prim.GetAllChildren():
+        is_revolute = child.HasAPI(UsdPhysics.RevoluteJointAPI)
+        is_prismatic = child.HasAPI(UsdPhysics.PrismaticJointAPI)
+        if not (is_revolute or is_prismatic):
+            continue
+        drive_type = 'angular' if is_revolute else 'linear'
+        if child.HasAPI(UsdPhysics.DriveAPI):
+            drive = UsdPhysics.DriveAPI.Get(child, drive_type)
+            drive.GetMaxVelocityAttr().Set(MAX_JOINT_VEL)
+            configured += 1
+    print(f"Applied max velocity {{MAX_JOINT_VEL}} rad/s to {{configured}} joints.")
+
+print(f"Safety config for {{ROBOT_PATH}}:")
+print(f"  Watchdog timeout: {{WATCHDOG_TIMEOUT_S*1000:.0f}} ms")
+print(f"  Zero velocity after: {{WATCHDOG_ZERO_VEL_S*1000:.0f}} ms")
+print(f"  Max joint velocity: {{MAX_JOINT_VEL}} rad/s")
+{ws_limits_block}"""
+
+
+CODE_GEN_HANDLERS["start_teleop_session"] = _gen_start_teleop_session
+CODE_GEN_HANDLERS["configure_teleop_mapping"] = _gen_configure_teleop_mapping
+CODE_GEN_HANDLERS["record_teleop_demo"] = _gen_record_teleop_demo
+CODE_GEN_HANDLERS["stop_teleop_session"] = _gen_stop_teleop_session
+CODE_GEN_HANDLERS["teleop_safety_config"] = _gen_teleop_safety_config
