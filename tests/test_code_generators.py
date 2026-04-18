@@ -1733,6 +1733,36 @@ _RAW_TEST_VECTORS = [
         },
         ["'/tmp/ur10.npz'", "rate_hz = 120.0", "duration = 2.5"],
     ),
+    # ── Tier 2 Atomic Tools — Physics Bodies & Scene ───────────────────────
+    (
+        "set_linear_velocity",
+        {"prim_path": "/World/Cube", "vel": [1.0, 0.0, 0.0]},
+        ["UsdPhysics.RigidBodyAPI", "GetVelocityAttr", "Gf.Vec3f"],
+    ),
+    (
+        "set_physics_scene_config",
+        {"config": {
+            "solver_type": "TGS",
+            "position_iterations": 8,
+            "velocity_iterations": 1,
+            "time_steps_per_second": 120,
+            "enable_gpu_dynamics": True,
+            "broadphase_type": "GPU",
+            "gravity_direction": [0, 0, -1],
+            "gravity_magnitude": 9.81,
+        }},
+        ["PhysxSceneAPI", "TGS", "GPU", "GravityMagnitudeAttr"],
+    ),
+    (
+        "apply_force",
+        {
+            "prim_path": "/World/Cube",
+            "force": [10.0, 0.0, 0.0],
+            "torque": [0.0, 0.0, 1.0],
+            "position": [0.0, 0.0, 0.0],
+        },
+        ["UsdPhysics.RigidBodyAPI", "force", "torque"],
+    ),
 ]
 
 
@@ -2476,6 +2506,9 @@ class TestTemplateDetection:
     # NOTE: Clearance Detection Addendum edge cases live on the
     # feat/addendum-clearance-detection branch and are intentionally absent
     # here so this branch ships only Tier 1 USD Core changes.
+    # NOTE: Clearance Detection Addendum edge cases live on the
+    # feat/addendum-clearance-detection branch and are intentionally absent
+    # here so this branch ships only Tier 2 Physics Bodies & Scene changes.
 
 
 class TestAllCodeGenHandlersCovered:
