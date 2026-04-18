@@ -401,9 +401,16 @@ class ChatOrchestrator:
             ack_words = ("fail", "error", "didn't", "did not", "couldn't",
                          "could not", "not applied", "not authored", "not registered",
                          "did not succeed", "was not", "wasn't")
+            # Success-claim keywords — expanded with common scene-mutation verbs
+            # beyond the original "callback/play" family. Each word is a strong
+            # signal of "effect landed" that the agent shouldn't be using when
+            # a tool call in the same round came back success=False.
             claims_success = any(w in reply_l for w in
                 ("ready", "registered", "loaded", "is set", "configured",
-                 "applied", "hit play", "press play", "done"))
+                 "applied", "hit play", "press play", "done",
+                 "created", "placed", "anchored", "added", "removed",
+                 "deleted", "imported", "attached", "enabled", "disabled",
+                 "successfully", "completed"))
             acks_failure = any(w in reply_l for w in ack_words)
             if last_round_fails and claims_success and not acks_failure:
                 logger.warning(
