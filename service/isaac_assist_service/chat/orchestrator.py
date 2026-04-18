@@ -585,11 +585,37 @@ class ChatOrchestrator:
                             try: parsed = json.loads(out)
                             except: pass
                         actual = parsed.get("count")
+                        # Shallow mismatch — if the recursive count matches,
+                        # the nesting is off rather than the total wrong; tell
+                        # the user so they can re-parent or re-query.
                         if isinstance(actual, int) and actual != n:
-                            verify_warnings.append(
-                                f"reply claims {n} {m.group('noun')} under `{path}`, "
-                                f"but count_prims_under_path found {actual}"
-                            )
+                            rec_actual = None
+                            try:
+                                rec_ver = await _exec("count_prims_under_path", {
+                                    "parent_path": path, "recursive": True,
+                                })
+                                rec_out = rec_ver.get("output") if isinstance(rec_ver, dict) else None
+                                rec_parsed = {}
+                                if isinstance(rec_out, str) and rec_out.strip().startswith("{"):
+                                    try: rec_parsed = json.loads(rec_out)
+                                    except: pass
+                                rec_actual = rec_parsed.get("count")
+                            except Exception:
+                                pass
+                            if isinstance(rec_actual, int) and rec_actual == n:
+                                verify_warnings.append(
+                                    f"reply claims {n} {m.group('noun')} under `{path}`, "
+                                    f"but only {actual} are direct children; "
+                                    f"the {n} match appears in the recursive count — "
+                                    f"prims are nested deeper than the claim implies"
+                                )
+                            else:
+                                rec_str = f", recursive={rec_actual}" if rec_actual is not None else ""
+                                verify_warnings.append(
+                                    f"reply claims {n} {m.group('noun')} under `{path}`, "
+                                    f"but count_prims_under_path found {actual}"
+                                    + rec_str
+                                )
                     except Exception as e:
                         logger.debug(f"[{session_id}] verify count({path}) failed: {e}")
 
