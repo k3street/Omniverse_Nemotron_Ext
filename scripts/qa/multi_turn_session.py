@@ -65,6 +65,15 @@ else:
                 entry["apis"] = schemas
         except Exception:
             pass
+        # Visibility — token 'invisible' / 'inherited'. Only record when it's
+        # been authored (default is 'inherited'); visibility is a common
+        # success-criterion attribute (e.g. FX-03 bulk-hide).
+        try:
+            vis_attr = p.GetAttribute('visibility')
+            if vis_attr and vis_attr.IsValid() and vis_attr.IsAuthored():
+                entry['visibility'] = str(vis_attr.Get())
+        except Exception:
+            pass
         prims_info.append(entry)
 
         # World transform for all Xformables (position + rotation + scale ground-truth)
