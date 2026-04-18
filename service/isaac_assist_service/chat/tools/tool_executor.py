@@ -23376,20 +23376,46 @@ else:
 
 def _gen_save_stage(args: Dict) -> str:
     path = args["path"]
+    # Live-reproduced bug: save_stage('/nonexistent/dir/scene.usd') returned
+    # result=True and the tool reported 'wrote ...' — but the file wasn't
+    # there. Kit's save is async + doesn't propagate filesystem errors
+    # synchronously, AND the try/except swallowed any that did leak.
+    # Fix: pre-check parent dir exists and is writable (for local paths),
+    # post-check the file landed, and stop calling the output "wrote"
+    # until we've confirmed it.
     return f"""\
+import os
 import omni.usd
 
 ctx = omni.usd.get_context()
 target = {repr(path)}
+
+# Pre-check local filesystem destinations. Remote URLs (omniverse://,
+# http(s)://, file://, anon:) go through the asset resolver.
+if not any(target.startswith(p) for p in ('omniverse://','http://','https://','file://','anon:')):
+    _parent = os.path.dirname(os.path.abspath(target)) or '.'
+    if not os.path.isdir(_parent):
+        raise FileNotFoundError(f'save_stage: parent directory does not exist: {{_parent!r}}')
+    if not os.access(_parent, os.W_OK):
+        raise PermissionError(f'save_stage: parent directory not writable: {{_parent!r}}')
+
 current = ctx.get_stage_url() or ""
-try:
-    if current and current == target:
-        result = ctx.save_stage()
-    else:
-        result = ctx.save_as_stage(target)
-    print(f"save_stage: wrote {{target}} (result={{result}})")
-except Exception as e:
-    print(f"save_stage: failed to write {{target}}: {{e}}")
+if current and current == target:
+    result = ctx.save_stage()
+else:
+    result = ctx.save_as_stage(target)
+
+# USD's save_stage returns True even when the actual write failed (async
+# pipeline). For local paths, verify the file materialized.
+if not result:
+    raise RuntimeError(f'save_stage: ctx returned result={{result!r}} for {{target!r}}')
+if not any(target.startswith(p) for p in ('omniverse://','http://','https://','file://','anon:')):
+    if not os.path.exists(target):
+        raise RuntimeError(
+            f'save_stage: ctx reported success but no file at {{target!r}} — '
+            f'check filesystem permissions / disk space / USD async pipeline.'
+        )
+print(f'save_stage: confirmed write of {{target}}')
 """
 
 def _gen_open_stage(args: Dict) -> str:
