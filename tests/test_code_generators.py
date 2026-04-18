@@ -927,6 +927,22 @@ _TEST_VECTORS = [
         {"articulation_path": "/World/Franka", "duration_seconds": 3.0},
         ["subscribe_physics_step_events", "get_applied_joint_efforts", "utilization"],
     ),
+    # ── Performance Diagnostics ──────────────────────────────────────────────
+    (
+        "optimize_collision",
+        {"prim_path": "/World/HeavyMesh", "approximation": "convexHull"},
+        ["MeshCollisionAPI", "GetApproximationAttr", "convexHull", "/World/HeavyMesh"],
+    ),
+    (
+        "optimize_collision",
+        {"prim_path": "/World/Table/Legs", "approximation": "convexDecomposition"},
+        ["MeshCollisionAPI", "convexDecomposition", "CollisionAPI"],
+    ),
+    (
+        "optimize_collision",
+        {"prim_path": "/World/Backdrop", "approximation": "boundingSphere"},
+        ["MeshCollisionAPI", "boundingSphere", "/World/Backdrop"],
+    ),
 ]
 
 

@@ -19,7 +19,7 @@ from service.isaac_assist_service.chat.tools.tool_executor import (
     _load_sensor_specs,
 )
 
-# Conditional imports for addendum handlers (may not exist on all branches)
+# Optional imports — these handlers may not exist on all branches
 try:
     from service.isaac_assist_service.chat.tools.tool_executor import _handle_diagnose_physics_error
 except ImportError:
@@ -858,6 +858,7 @@ class TestValidateSceneBlueprintPhysX:
 @pytest.mark.skipif(_handle_diagnose_physics_error is None,
                     reason="diagnose_physics_error not available on this branch")
 @pytest.mark.skipif(_handle_diagnose_physics_error is None, reason="Phase 2 addendum not merged")
+@pytest.mark.skipif(_handle_diagnose_physics_error is None, reason="diagnose_physics_error not available on this branch")
 class TestDiagnosePhysicsError:
     """diagnose_physics_error DATA handler — pattern matching against known PhysX errors."""
 
@@ -917,6 +918,7 @@ class TestDiagnosePhysicsError:
 @pytest.mark.skipif(_handle_trace_config is None,
                     reason="trace_config not available on this branch")
 @pytest.mark.skipif(_handle_trace_config is None, reason="Phase 2 addendum not merged")
+@pytest.mark.skipif(_handle_trace_config is None, reason="trace_config not available on this branch")
 class TestTraceConfig:
     """trace_config DATA handler — AST-based parameter tracing."""
 
@@ -1260,3 +1262,117 @@ class TestDiagnoseRos2:
         assert len(qos_issues) >= 1
         assert "BEST_EFFORT" in qos_issues[0]["message"]
         assert qos_issues[0]["severity"] == "warning"
+# ── Performance Diagnostics ─────────────────────────────────────────────────
+
+class TestAnalyzePerformance:
+    """Unit tests for the _analyze_performance analysis function (no Kit needed)."""
+
+    def test_narrow_phase_bottleneck(self):
+        stats = {"nb_dynamic_rigids": 10, "solver_iterations": 4}
+        timing = {"narrow_phase_ms": 25, "solver_ms": 1, "broad_phase_ms": 1}
+        mem = {"used_mb": 2000, "total_mb": 8000}
+        issues = _analyze_performance(stats, timing, mem)
+        assert len(issues) >= 1
+        cats = [i["category"] for i in issues]
+        assert "physics_narrow_phase" in cats
+        narrow = [i for i in issues if i["category"] == "physics_narrow_phase"][0]
+        assert narrow["severity"] == "high"
+        assert "25" in narrow["message"]
+        assert "convex" in narrow["fix"].lower()
+
+    def test_vram_pressure(self):
+        stats = {}
+        timing = {"narrow_phase_ms": 1, "solver_ms": 1, "broad_phase_ms": 1}
+        mem = {"used_mb": 7500, "total_mb": 8000}
+        issues = _analyze_performance(stats, timing, mem)
+        cats = [i["category"] for i in issues]
+        assert "memory" in cats
+        mem_issue = [i for i in issues if i["category"] == "memory"][0]
+        assert mem_issue["severity"] == "high"
+        assert "7500" in mem_issue["message"]
+
+    def test_solver_convergence(self):
+        stats = {"solver_iterations": 32}
+        timing = {"narrow_phase_ms": 1, "solver_ms": 12, "broad_phase_ms": 1}
+        mem = {"used_mb": 2000, "total_mb": 8000}
+        issues = _analyze_performance(stats, timing, mem)
+        cats = [i["category"] for i in issues]
+        assert "solver" in cats
+        solver = [i for i in issues if i["category"] == "solver"][0]
+        assert solver["severity"] == "medium"
+        assert "32" in solver["message"]
+
+    def test_no_issues_when_healthy(self):
+        stats = {"nb_dynamic_rigids": 10, "solver_iterations": 4}
+        timing = {"narrow_phase_ms": 2, "solver_ms": 1, "broad_phase_ms": 1}
+        mem = {"used_mb": 2000, "total_mb": 8000}
+        issues = _analyze_performance(stats, timing, mem)
+        assert len(issues) == 0
+
+    def test_broad_phase_bottleneck(self):
+        stats = {"nb_dynamic_rigids": 10}
+        timing = {"narrow_phase_ms": 1, "solver_ms": 1, "broad_phase_ms": 15}
+        mem = {"used_mb": 1000, "total_mb": 8000}
+        issues = _analyze_performance(stats, timing, mem)
+        cats = [i["category"] for i in issues]
+        assert "physics_broad_phase" in cats
+
+    def test_high_dynamic_body_count(self):
+        stats = {"nb_dynamic_rigids": 1000}
+        timing = {"narrow_phase_ms": 1, "solver_ms": 1, "broad_phase_ms": 1}
+        mem = {"used_mb": 1000, "total_mb": 8000}
+        issues = _analyze_performance(stats, timing, mem)
+        cats = [i["category"] for i in issues]
+        assert "scene_complexity" in cats
+
+    def test_multiple_issues_combined(self):
+        stats = {"nb_dynamic_rigids": 800, "solver_iterations": 20}
+        timing = {"narrow_phase_ms": 20, "solver_ms": 8, "broad_phase_ms": 12}
+        mem = {"used_mb": 7800, "total_mb": 8000}
+        issues = _analyze_performance(stats, timing, mem)
+        # Should detect all 5 issue types
+        cats = [i["category"] for i in issues]
+        assert "physics_narrow_phase" in cats
+        assert "memory" in cats
+        assert "solver" in cats
+        assert "physics_broad_phase" in cats
+        assert "scene_complexity" in cats
+
+
+class TestDiagnosePerformance:
+    """diagnose_performance DATA handler — sends profiling code to Kit RPC."""
+
+    @pytest.mark.asyncio
+    async def test_diagnose_performance_queues_code(self, mock_kit_rpc):
+        mock_kit_rpc["/exec_patch"] = {"queued": True, "patch_id": "test_perf"}
+        handler = DATA_HANDLERS["diagnose_performance"]
+        result = await handler({})
+        assert isinstance(result, dict)
+
+    @pytest.mark.asyncio
+    async def test_diagnose_performance_registered(self):
+        assert "diagnose_performance" in DATA_HANDLERS
+        assert DATA_HANDLERS["diagnose_performance"] is not None
+
+
+class TestFindHeavyPrims:
+    """find_heavy_prims DATA handler — sends traversal code to Kit RPC."""
+
+    @pytest.mark.asyncio
+    async def test_find_heavy_prims_queues_code(self, mock_kit_rpc):
+        mock_kit_rpc["/exec_patch"] = {"queued": True, "patch_id": "test_heavy"}
+        handler = DATA_HANDLERS["find_heavy_prims"]
+        result = await handler({"threshold_triangles": 5000})
+        assert isinstance(result, dict)
+
+    @pytest.mark.asyncio
+    async def test_find_heavy_prims_default_threshold(self, mock_kit_rpc):
+        mock_kit_rpc["/exec_patch"] = {"queued": True, "patch_id": "test_heavy_default"}
+        handler = DATA_HANDLERS["find_heavy_prims"]
+        result = await handler({})
+        assert isinstance(result, dict)
+
+    @pytest.mark.asyncio
+    async def test_find_heavy_prims_registered(self):
+        assert "find_heavy_prims" in DATA_HANDLERS
+        assert DATA_HANDLERS["find_heavy_prims"] is not None

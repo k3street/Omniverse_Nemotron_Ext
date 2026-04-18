@@ -14334,3 +14334,425 @@ else:
 """
 
 CODE_GEN_HANDLERS["monitor_joint_effort"] = _gen_monitor_joint_effort
+
+
+# ── Performance Diagnostics ─────────────────────────────────────────────────
+# Reads PhysX profiling data, GPU/VRAM stats, and identifies bottlenecks.
+
+
+def _analyze_performance(stats: Dict, timing: Dict, mem: Dict) -> List[Dict]:
+    """Analyze profiling data and return a list of performance issues."""
+    issues = []
+
+    # Physics narrow-phase bottleneck
+    narrow_ms = timing.get("narrow_phase_ms", 0)
+    if narrow_ms > 10:
+        issues.append({
+            "category": "physics_narrow_phase",
+            "severity": "high",
+            "message": (
+                f"Narrow phase takes {narrow_ms:.0f}ms. "
+                f"Heavy trimesh colliders are likely the cause."
+            ),
+            "fix": "Switch to convexHull or convexDecomposition approximation",
+        })
+
+    # VRAM pressure
+    used_mb = mem.get("used_mb", 0)
+    total_mb = mem.get("total_mb", 1)
+    if total_mb > 0 and used_mb / total_mb > 0.9:
+        issues.append({
+            "category": "memory",
+            "severity": "high",
+            "message": f"GPU memory {used_mb:.0f}/{total_mb:.0f} MB (>90%)",
+            "breakdown": mem.get("per_category", {}),
+            "fix": "Reduce texture resolution or number of render products",
+        })
+
+    # Solver convergence
+    solver_ms = timing.get("solver_ms", 0)
+    solver_iters = stats.get("solver_iterations", 0)
+    if solver_ms > 5 and solver_iters > 16:
+        issues.append({
+            "category": "solver",
+            "severity": "medium",
+            "message": (
+                f"Solver takes {solver_ms:.0f}ms at "
+                f"{solver_iters} iterations"
+            ),
+            "fix": "Reduce solver iterations to 4-8 for non-contact-critical bodies",
+        })
+
+    # Broad-phase bottleneck
+    broad_ms = timing.get("broad_phase_ms", 0)
+    if broad_ms > 8:
+        issues.append({
+            "category": "physics_broad_phase",
+            "severity": "medium",
+            "message": f"Broad phase takes {broad_ms:.0f}ms",
+            "fix": "Reduce number of active rigid bodies or increase physics scene bounds",
+        })
+
+    # High dynamic rigid body count
+    nb_dynamic = stats.get("nb_dynamic_rigids", 0)
+    if nb_dynamic > 500:
+        issues.append({
+            "category": "scene_complexity",
+            "severity": "medium",
+            "message": f"{nb_dynamic} dynamic rigid bodies in scene",
+            "fix": "Consider using GPU pipeline or reducing active body count",
+        })
+
+    return issues
+
+
+async def _handle_diagnose_performance(args: Dict) -> Dict:
+    """Collect PhysX stats, timing, and GPU memory, then analyze for bottlenecks."""
+    code = """\
+import json
+
+results = {"stats": {}, "timing": {}, "mem": {}}
+
+# 1. PhysX scene statistics
+try:
+    from omni.physx import get_physx_statistics_interface
+    pstats = get_physx_statistics_interface()
+    scene_stats = pstats.get_physx_scene_statistics()
+    results["stats"] = {
+        "nb_dynamic_rigids": scene_stats.get("nbDynamicRigids", 0),
+        "nb_static_rigids": scene_stats.get("nbStaticRigids", 0),
+        "nb_articulations": scene_stats.get("nbArticulations", 0),
+        "nb_trimesh_shapes": scene_stats.get("nbTriMeshShapes", 0),
+        "active_contact_pairs": scene_stats.get("nbActiveContactPairs", 0),
+        "solver_iterations": scene_stats.get("solverIterations", 4),
+    }
+except Exception as e:
+    results["stats"]["error"] = str(e)
+
+# 2. PhysX per-zone timing
+try:
+    from omni.physx import get_physx_benchmarks_interface
+    benchmarks = get_physx_benchmarks_interface()
+    benchmarks.enable_profile()
+    results["timing"] = {
+        "simulation_ms": benchmarks.get_value("Simulation") or 0,
+        "collision_detection_ms": benchmarks.get_value("Collision Detection") or 0,
+        "broad_phase_ms": benchmarks.get_value("Broad Phase") or 0,
+        "narrow_phase_ms": benchmarks.get_value("Narrow Phase") or 0,
+        "solver_ms": benchmarks.get_value("Solver") or 0,
+        "integration_ms": benchmarks.get_value("Integration") or 0,
+    }
+except Exception as e:
+    results["timing"]["error"] = str(e)
+
+# 3. Render timing + VRAM
+try:
+    from omni.hydra.engine.stats import HydraEngineStats
+    hydra = HydraEngineStats()
+    mem = hydra.get_mem_stats(detailed=True)
+    device = hydra.get_device_info()
+    results["mem"] = {
+        "used_mb": mem.get("usedMB", 0),
+        "total_mb": device.get("totalVRAM_MB", 0),
+        "per_category": mem.get("perCategory", {}),
+    }
+except Exception as e:
+    results["mem"]["error"] = str(e)
+
+# 4. FPS
+try:
+    import omni.kit.app
+    fps = omni.kit.app.get_app().get_fps()
+    results["fps"] = fps
+except Exception:
+    results["fps"] = None
+
+print(json.dumps(results))
+"""
+    kit_result = await kit_tools.queue_exec_patch(
+        code, "Collect performance diagnostics (PhysX stats + GPU memory)"
+    )
+
+    # If Kit returned data, analyze it; otherwise return the raw queue result
+    if isinstance(kit_result, dict) and "stats" in kit_result:
+        stats = kit_result.get("stats", {})
+        timing = kit_result.get("timing", {})
+        mem = kit_result.get("mem", {})
+        fps = kit_result.get("fps")
+
+        issues = _analyze_performance(stats, timing, mem)
+
+        # Determine bottleneck
+        bottleneck = "unknown"
+        if issues:
+            bottleneck = issues[0]["category"]
+
+        # Build summary
+        parts = []
+        if fps is not None:
+            parts.append(f"Your sim runs at {fps:.0f} FPS.")
+        if issues:
+            parts.append(f"{len(issues)} issue(s) found.")
+            parts.append(issues[0]["message"])
+            parts.append(issues[0]["fix"])
+        else:
+            parts.append("No obvious performance issues detected.")
+
+        return {
+            "fps": fps,
+            "bottleneck": bottleneck,
+            "issues": issues,
+            "stats": stats,
+            "timing": timing,
+            "mem": mem,
+            "summary": " ".join(parts),
+        }
+
+    # Kit RPC just queued the patch — return what we have
+    return {"type": "data", "queued": True, **kit_result}
+
+
+async def _handle_find_heavy_prims(args: Dict) -> Dict:
+    """Traverse the stage and find meshes above a triangle-count threshold."""
+    threshold = args.get("threshold_triangles", 10000)
+    code = f"""\
+import json
+import omni.usd
+from pxr import UsdGeom, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+heavy = []
+for prim in stage.TraverseAll():
+    if prim.IsA(UsdGeom.Mesh):
+        mesh = UsdGeom.Mesh(prim)
+        face_counts = mesh.GetFaceVertexCountsAttr().Get()
+        if face_counts is None:
+            continue
+        tri_count = sum(fc - 2 for fc in face_counts)
+        if tri_count >= {threshold}:
+            approx = "none"
+            if prim.HasAPI(UsdPhysics.MeshCollisionAPI):
+                approx_attr = UsdPhysics.MeshCollisionAPI(prim).GetApproximationAttr()
+                if approx_attr:
+                    approx = approx_attr.Get() or "none"
+            heavy.append({{
+                "prim_path": str(prim.GetPath()),
+                "triangle_count": tri_count,
+                "collision_approximation": approx,
+            }})
+
+heavy.sort(key=lambda x: x["triangle_count"], reverse=True)
+print(json.dumps({{"prims": heavy, "count": len(heavy), "threshold": {threshold}}}))
+"""
+    return await kit_tools.queue_exec_patch(
+        code, f"Find mesh prims with >{threshold} triangles"
+    )
+
+
+def _gen_optimize_collision(args: Dict) -> str:
+    """Generate code to switch a collision mesh to a simpler approximation."""
+    prim_path = args["prim_path"]
+    approximation = args["approximation"]
+    return (
+        "import omni.usd\n"
+        "from pxr import UsdPhysics\n"
+        "\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        f"prim = stage.GetPrimAtPath('{prim_path}')\n"
+        "if not prim.IsValid():\n"
+        f"    raise RuntimeError('Prim not found: {prim_path}')\n"
+        "\n"
+        "# Ensure CollisionAPI is applied\n"
+        "if not prim.HasAPI(UsdPhysics.CollisionAPI):\n"
+        "    UsdPhysics.CollisionAPI.Apply(prim)\n"
+        "\n"
+        "# Ensure MeshCollisionAPI is applied\n"
+        "if not prim.HasAPI(UsdPhysics.MeshCollisionAPI):\n"
+        "    UsdPhysics.MeshCollisionAPI.Apply(prim)\n"
+        "\n"
+        f"UsdPhysics.MeshCollisionAPI(prim).GetApproximationAttr().Set('{approximation}')\n"
+        f"print(f'Set collision approximation on {prim_path} to {approximation}')"
+    )
+
+
+DATA_HANDLERS["diagnose_performance"] = _handle_diagnose_performance
+DATA_HANDLERS["find_heavy_prims"] = _handle_find_heavy_prims
+CODE_GEN_HANDLERS["optimize_collision"] = _gen_optimize_collision
+
+
+# ── Scene Package Export ─────────────────────────────────────────────────────
+# Collects all approved code patches from the audit log for a session,
+# then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
+# README.md, and a ros2_topics.yaml listing detected topics.
+
+async def _handle_export_scene_package(args: Dict) -> Dict:
+    """Export the current session's scene setup as a reusable file package."""
+    from pathlib import Path
+    from datetime import datetime as _dt
+    from ..routes import _audit
+
+    session_id = args.get("session_id", "default_session")
+    scene_name = args.get("scene_name", "exported_scene")
+    # Sanitize scene_name for filesystem
+    safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in scene_name)
+
+    out_dir = Path("workspace/scene_exports") / safe_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Collect approved patches from audit log ──────────────────────────
+    entries = _audit.query_logs(limit=500, event_type="patch_executed")
+    patches = []
+    for e in entries:
+        meta = e.metadata or {}
+        if meta.get("success") and meta.get("session_id", "default_session") == session_id:
+            code = meta.get("code", "")
+            if code:
+                patches.append({
+                    "description": meta.get("user_message", ""),
+                    "code": code,
+                })
+
+    if not patches:
+        # Fallback: grab all successful patches regardless of session
+        for e in entries:
+            meta = e.metadata or {}
+            if meta.get("success") and meta.get("code"):
+                patches.append({
+                    "description": meta.get("user_message", ""),
+                    "code": meta["code"],
+                })
+
+    # ── scene_setup.py ───────────────────────────────────────────────────
+    setup_lines = [
+        '"""',
+        f'Scene Setup: {scene_name}',
+        f'Auto-exported by Isaac Assist on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}',
+        f'Patches: {len(patches)}',
+        '"""',
+        'import omni.usd',
+        'from pxr import Usd, UsdGeom, UsdPhysics, PhysxSchema, Gf, Sdf, UsdShade',
+        '',
+        'stage = omni.usd.get_context().get_stage()',
+        '',
+    ]
+    for i, p in enumerate(patches):
+        desc = p["description"] or f"Step {i+1}"
+        setup_lines.append(f'# ── Step {i+1}: {desc}')
+        setup_lines.append(p["code"].rstrip())
+        setup_lines.append('')
+    setup_lines.append('print("Scene setup complete.")')
+    scene_py = "\n".join(setup_lines)
+    (out_dir / "scene_setup.py").write_text(scene_py, encoding="utf-8")
+
+    # ── Detect ROS2 topics from OmniGraph patterns in code ───────────────
+    import re as _re
+    ros2_topics = set()
+    og_node_types = set()
+    robot_paths = set()
+    for p in patches:
+        code = p["code"]
+        # topics: /joint_states, /joint_command, /clock, /tf, etc.
+        ros2_topics.update(_re.findall(r"""['\"](/[a-zA-Z_][a-zA-Z0-9_/]*)['\"]\s*""", code))
+        # OmniGraph node types
+        og_node_types.update(_re.findall(r"""['\"](?:isaacsim|omni\.isaac)\.[a-zA-Z0-9_.]+['\"]""", code))
+        # Robot paths
+        robot_paths.update(_re.findall(r"""['\"](/World/[A-Z][a-zA-Z0-9_]*)['\"]\s*""", code))
+    # Filter to ROS2-style topics only (not USD paths, not physics scene attrs)
+    _NON_TOPIC_PREFIXES = ("/World", "/Physics", "/Collision", "/persistent", "/Render", "/OmniKit")
+    ros2_topics = sorted(
+        t for t in ros2_topics
+        if not any(t.startswith(p) for p in _NON_TOPIC_PREFIXES)
+        and len(t) > 2  # skip bare "/"
+        and not t.endswith(".usd")
+    )
+
+    # ── ros2_topics.yaml ─────────────────────────────────────────────────
+    if ros2_topics or og_node_types:
+        topic_lines = [f"# ROS2 Topics detected in scene: {scene_name}", "topics:"]
+        for t in sorted(ros2_topics):
+            topic_lines.append(f"  - name: \"{t}\"")
+        topic_lines.append("")
+        topic_lines.append("omnigraph_node_types:")
+        for nt in sorted(og_node_types):
+            topic_lines.append(f"  - {nt}")
+        (out_dir / "ros2_topics.yaml").write_text("\n".join(topic_lines) + "\n", encoding="utf-8")
+
+    # ── ros2_launch.py (if ROS2 topics detected) ────────────────────────
+    has_ros2 = bool(ros2_topics)
+    if has_ros2:
+        launch_lines = [
+            '"""',
+            f'ROS2 Launch File for scene: {scene_name}',
+            f'Auto-generated by Isaac Assist on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}',
+            '"""',
+            'from launch import LaunchDescription',
+            'from launch_ros.actions import Node',
+            '',
+            '',
+            'def generate_launch_description():',
+            '    return LaunchDescription([',
+        ]
+        # Add placeholder nodes for each topic
+        for t in sorted(ros2_topics):
+            node_name = t.strip("/").replace("/", "_")
+            launch_lines.append(f'        # Topic: {t}')
+            launch_lines.append(f'        # Node("{node_name}") — configure publisher/subscriber as needed')
+        launch_lines.append('    ])')
+        (out_dir / "ros2_launch.py").write_text("\n".join(launch_lines) + "\n", encoding="utf-8")
+
+    # ── README.md ────────────────────────────────────────────────────────
+    robot_list = ", ".join(f"`{r}`" for r in sorted(robot_paths)) or "None detected"
+    topic_list = "\n".join(f"- `{t}`" for t in sorted(ros2_topics)) or "- None detected"
+    readme = f"""# {scene_name}
+
+Auto-exported by **Isaac Assist** on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}.
+
+## Scene Summary
+
+- **Patches applied:** {len(patches)}
+- **Robots:** {robot_list}
+- **ROS2 Topics:**
+{topic_list}
+
+## Files
+
+| File | Description |
+|------|-------------|
+| `scene_setup.py` | All approved code patches as a single runnable script |
+| `ros2_topics.yaml` | Detected ROS2 topics and OmniGraph node types |
+{"| `ros2_launch.py` | ROS2 launch file template |" if has_ros2 else ""}
+| `README.md` | This file |
+
+## Usage
+
+### Replay Scene in Isaac Sim
+```python
+# In Isaac Sim Script Editor or via Kit RPC:
+exec(open("{out_dir}/scene_setup.py").read())
+```
+
+### ROS2 Topics
+{"Launch the ROS2 nodes alongside Isaac Sim:" if has_ros2 else "No ROS2 topics detected in this scene."}
+{"```bash" if has_ros2 else ""}
+{"ros2 launch " + str(out_dir / "ros2_launch.py") if has_ros2 else ""}
+{"```" if has_ros2 else ""}
+"""
+    (out_dir / "README.md").write_text(readme, encoding="utf-8")
+
+    files_written = ["scene_setup.py", "README.md"]
+    if ros2_topics or og_node_types:
+        files_written.append("ros2_topics.yaml")
+    if has_ros2:
+        files_written.append("ros2_launch.py")
+
+    return {
+        "export_dir": str(out_dir),
+        "files": files_written,
+        "patch_count": len(patches),
+        "ros2_topics": ros2_topics,
+        "robots_detected": sorted(robot_paths),
+        "message": f"Exported {len(patches)} patches to {out_dir}/ — files: {', '.join(files_written)}",
+    }
+
+
+DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
