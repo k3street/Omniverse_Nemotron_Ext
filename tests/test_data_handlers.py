@@ -16,6 +16,7 @@ from service.isaac_assist_service.chat.tools.tool_executor import (
     _handle_validate_annotations,
     _handle_analyze_randomization,
     _handle_diagnose_domain_gap,
+    _handle_suggest_physics_settings,
     _load_sensor_specs,
 )
 
@@ -962,6 +963,7 @@ class TestLookupMaterial:
 
 @pytest.mark.skipif(_handle_diagnose_physics_error is None, reason="diagnose_physics_error not available on this branch")
 @pytest.mark.skipif(_handle_diagnose_physics_error is None, reason="diagnose_physics_error not on this branch")
+@pytest.mark.skipif(_handle_diagnose_physics_error is None, reason="Handler not available on this branch")
 class TestDiagnosePhysicsError:
     """diagnose_physics_error DATA handler — pattern matching against known PhysX errors."""
 
@@ -1023,6 +1025,7 @@ class TestDiagnosePhysicsError:
 @pytest.mark.skipif(_handle_trace_config is None, reason="Phase 2 addendum not merged")
 @pytest.mark.skipif(_handle_trace_config is None, reason="trace_config not available on this branch")
 @pytest.mark.skipif(_handle_trace_config is None, reason="trace_config not on this branch")
+@pytest.mark.skipif(_handle_trace_config is None, reason="Handler not available on this branch")
 class TestTraceConfig:
     """trace_config DATA handler — AST-based parameter tracing."""
 
@@ -1656,3 +1659,57 @@ class TestWatchChanges:
         result = await handler({"action": "invalid_action"})
         assert "error" in result
         assert "Unknown action" in result["error"]
+class TestSuggestPhysicsSettings:
+    """suggest_physics_settings DATA handler — scene type to settings lookup."""
+
+    @pytest.mark.asyncio
+    async def test_rl_training_settings(self):
+        result = await _handle_suggest_physics_settings({"scene_type": "rl_training"})
+        settings = result["settings"]
+        assert settings["solver"] == "TGS"
+        assert settings["gpu_dynamics"] is True
+        assert settings["ccd"] is False
+        assert settings["solver_position_iterations"] == 4
+        assert settings["time_steps_per_second"] == 120
+
+    @pytest.mark.asyncio
+    async def test_manipulation_settings(self):
+        result = await _handle_suggest_physics_settings({"scene_type": "manipulation"})
+        settings = result["settings"]
+        assert settings["solver"] == "TGS"
+        assert settings["ccd"] is True
+        assert settings["solver_position_iterations"] == 16
+        assert settings["time_steps_per_second"] == 240
+
+    @pytest.mark.asyncio
+    async def test_mobile_robot_settings(self):
+        result = await _handle_suggest_physics_settings({"scene_type": "mobile_robot"})
+        settings = result["settings"]
+        assert settings["gpu_dynamics"] is True
+        assert settings["time_steps_per_second"] == 60
+
+    @pytest.mark.asyncio
+    async def test_digital_twin_settings(self):
+        result = await _handle_suggest_physics_settings({"scene_type": "digital_twin"})
+        settings = result["settings"]
+        assert settings["solver"] == "PGS"
+        assert settings["gpu_dynamics"] is False
+        assert settings["ccd"] is False
+
+    @pytest.mark.asyncio
+    async def test_unknown_scene_type_returns_error(self):
+        result = await _handle_suggest_physics_settings({"scene_type": "unknown_type"})
+        assert "error" in result
+        assert "valid_types" in result
+        assert "rl_training" in result["valid_types"]
+
+    @pytest.mark.asyncio
+    async def test_default_scene_type(self):
+        result = await _handle_suggest_physics_settings({})
+        settings = result["settings"]
+        assert settings["scene_type"] == "manipulation"
+
+    @pytest.mark.asyncio
+    async def test_handler_registered_in_data_handlers(self):
+        assert "suggest_physics_settings" in DATA_HANDLERS
+        assert DATA_HANDLERS["suggest_physics_settings"] is not None

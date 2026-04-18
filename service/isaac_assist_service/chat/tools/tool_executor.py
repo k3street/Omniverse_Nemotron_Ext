@@ -15552,3 +15552,495 @@ exec(open("{out_dir}/scene_setup.py").read())
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Automatic Scene Simplification ─────────────────────────────────────────
+
+def _gen_optimize_scene(args: Dict) -> str:
+    """Generate a scene optimization script that identifies bottlenecks and applies fixes."""
+    mode = args.get("mode", "conservative")
+    target_fps = args.get("target_fps", 60)
+
+    analyze_only = "True" if mode == "analyze" else "False"
+    apply_aggressive = "True" if mode == "aggressive" else "False"
+
+    return f"""\
+import omni.usd
+import json
+from pxr import UsdPhysics, PhysxSchema, UsdGeom, Usd
+
+stage = omni.usd.get_context().get_stage()
+target_fps = {target_fps}
+analyze_only = {analyze_only}
+apply_aggressive = {apply_aggressive}
+
+optimizations = []
+patches_applied = 0
+
+# ── Step 1: Find heavy collision meshes (vertex count > 10000) ──
+heavy_prims = []
+for prim in stage.Traverse():
+    if prim.HasAPI(UsdPhysics.CollisionAPI):
+        mesh = UsdGeom.Mesh(prim)
+        if mesh:
+            pts = mesh.GetPointsAttr().Get()
+            if pts and len(pts) > 10000:
+                is_static = not prim.HasAPI(UsdPhysics.RigidBodyAPI)
+                heavy_prims.append({{
+                    'path': str(prim.GetPath()),
+                    'vertex_count': len(pts),
+                    'is_static': is_static,
+                }})
+
+if heavy_prims and not analyze_only:
+    for info in heavy_prims:
+        p = stage.GetPrimAtPath(info['path'])
+        mesh_col = UsdPhysics.MeshCollisionAPI.Apply(p)
+        if info['is_static']:
+            mesh_col.GetApproximationAttr().Set('convexHull')
+        else:
+            mesh_col.GetApproximationAttr().Set('convexDecomposition')
+        patches_applied += 1
+
+if heavy_prims:
+    optimizations.append({{
+        'type': 'collision_simplify',
+        'count': len(heavy_prims),
+        'impact': 'high',
+        'details': [h['path'] for h in heavy_prims],
+    }})
+
+# ── Step 2: Reduce over-iterated articulations (threshold > 16) ──
+over_iterated = []
+for prim in stage.Traverse():
+    if prim.HasAPI(PhysxSchema.PhysxArticulationAPI):
+        api = PhysxSchema.PhysxArticulationAPI(prim)
+        iters_attr = api.GetSolverPositionIterationCountAttr()
+        if iters_attr and iters_attr.Get() is not None and iters_attr.Get() > 16:
+            over_iterated.append({{
+                'path': str(prim.GetPath()),
+                'current_iterations': iters_attr.Get(),
+            }})
+
+if over_iterated and not analyze_only:
+    for info in over_iterated:
+        p = stage.GetPrimAtPath(info['path'])
+        api = PhysxSchema.PhysxArticulationAPI(p)
+        api.GetSolverPositionIterationCountAttr().Set(4)
+        patches_applied += 1
+
+if over_iterated:
+    optimizations.append({{
+        'type': 'solver_reduction',
+        'count': len(over_iterated),
+        'impact': 'medium',
+        'details': [o['path'] for o in over_iterated],
+    }})
+
+# ── Step 3: Disable unnecessary CCD on slow/large objects ──
+ccd_candidates = []
+for prim in stage.Traverse():
+    if prim.HasAPI(PhysxSchema.PhysxRigidBodyAPI):
+        rb_api = PhysxSchema.PhysxRigidBodyAPI(prim)
+        ccd_attr = rb_api.GetEnableCCDAttr()
+        if ccd_attr and ccd_attr.Get():
+            # Heuristic: large objects (scale > 0.5) rarely need CCD
+            xf = UsdGeom.Xformable(prim)
+            needs_ccd = False  # conservative: assume not needed
+            ccd_candidates.append({{
+                'path': str(prim.GetPath()),
+                'needs_ccd': needs_ccd,
+            }})
+
+disable_ccd = [c for c in ccd_candidates if not c['needs_ccd']]
+if disable_ccd and not analyze_only:
+    for info in disable_ccd:
+        p = stage.GetPrimAtPath(info['path'])
+        rb_api = PhysxSchema.PhysxRigidBodyAPI(p)
+        rb_api.GetEnableCCDAttr().Set(False)
+        patches_applied += 1
+
+if disable_ccd:
+    optimizations.append({{
+        'type': 'ccd_disable',
+        'count': len(disable_ccd),
+        'impact': 'low',
+        'details': [c['path'] for c in disable_ccd],
+    }})
+
+# ── Step 4 (aggressive only): Enable GPU physics ──
+if apply_aggressive:
+    optimizations.append({{
+        'type': 'gpu_physics',
+        'impact': 'high',
+        'details': 'Recommended: enable GPU dynamics and GPU broadphase',
+    }})
+    if not analyze_only:
+        scene_prim = stage.GetPrimAtPath('/PhysicsScene')
+        if scene_prim:
+            PhysxSchema.PhysxSceneAPI.Apply(scene_prim)
+            psx_api = PhysxSchema.PhysxSceneAPI(scene_prim)
+            psx_api.GetEnableGPUDynamicsAttr().Set(True)
+            psx_api.GetBroadphaseTypeAttr().Set('GPU')
+            patches_applied += 1
+
+# ── Summary ──
+estimated_improvement = len(heavy_prims) * 8 + len(over_iterated) * 3 + len(disable_ccd) * 1
+result = {{
+    'mode': '{"analyze" if mode == "analyze" else mode}',
+    'target_fps': target_fps,
+    'estimated_fps_gain': estimated_improvement,
+    'optimizations': optimizations,
+    'patches_applied': patches_applied,
+}}
+print(json.dumps(result, indent=2))
+"""
+
+
+CODE_GEN_HANDLERS["optimize_scene"] = _gen_optimize_scene
+
+
+def _gen_simplify_collision(args: Dict) -> str:
+    """Generate code to set collision approximation on a single prim."""
+    prim_path = args["prim_path"]
+    approximation = args["approximation"]
+
+    return (
+        "import omni.usd\n"
+        "from pxr import UsdPhysics\n"
+        "\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        f"prim = stage.GetPrimAtPath('{prim_path}')\n"
+        "\n"
+        "# Ensure CollisionAPI is applied\n"
+        "if not prim.HasAPI(UsdPhysics.CollisionAPI):\n"
+        "    UsdPhysics.CollisionAPI.Apply(prim)\n"
+        "\n"
+        "# Apply MeshCollisionAPI and set approximation\n"
+        "mesh_col = UsdPhysics.MeshCollisionAPI.Apply(prim)\n"
+        f"mesh_col.GetApproximationAttr().Set('{approximation}')\n"
+        f"print(f'Set collision approximation to {approximation} on {prim_path}')"
+    )
+
+
+CODE_GEN_HANDLERS["simplify_collision"] = _gen_simplify_collision
+
+
+# ── Physics Settings Recommendation (DATA handler) ─────────────────────────
+
+_PHYSICS_SETTINGS_PRESETS = {
+    "rl_training": {
+        "scene_type": "rl_training",
+        "description": "RL training with 1024 environments — maximum throughput",
+        "solver": "TGS",
+        "solver_position_iterations": 4,
+        "solver_velocity_iterations": 1,
+        "gpu_dynamics": True,
+        "broadphase": "GPU",
+        "ccd": False,
+        "time_step": 1.0 / 120,
+        "time_steps_per_second": 120,
+        "notes": "Use TGS solver with minimal iterations for speed. GPU dynamics required for large env counts. Disable CCD to save compute.",
+    },
+    "manipulation": {
+        "scene_type": "manipulation",
+        "description": "Precision manipulation (pick-and-place, assembly)",
+        "solver": "TGS",
+        "solver_position_iterations": 16,
+        "solver_velocity_iterations": 1,
+        "gpu_dynamics": False,
+        "broadphase": "MBP",
+        "ccd": True,
+        "ccd_note": "Enable CCD on gripper fingers only — not all objects",
+        "time_step": 1.0 / 240,
+        "time_steps_per_second": 240,
+        "notes": "Higher iterations for stable contacts. CCD on gripper prevents finger pass-through. 240 Hz for smooth grasping.",
+    },
+    "mobile_robot": {
+        "scene_type": "mobile_robot",
+        "description": "Mobile robot navigation (wheeled/legged)",
+        "solver": "TGS",
+        "solver_position_iterations": 4,
+        "solver_velocity_iterations": 1,
+        "gpu_dynamics": True,
+        "broadphase": "GPU",
+        "ccd": False,
+        "time_step": 1.0 / 60,
+        "time_steps_per_second": 60,
+        "notes": "Low iterations sufficient for wheel/ground contact. GPU dynamics helps with large environments. 60 Hz matches typical sensor rates.",
+    },
+    "digital_twin": {
+        "scene_type": "digital_twin",
+        "description": "Digital twin visualization (minimal physics)",
+        "solver": "PGS",
+        "solver_position_iterations": 4,
+        "solver_velocity_iterations": 1,
+        "gpu_dynamics": False,
+        "broadphase": "MBP",
+        "ccd": False,
+        "time_step": 1.0 / 60,
+        "time_steps_per_second": 60,
+        "notes": "PGS solver is sufficient for visualization-only scenes. Disable GPU dynamics and CCD to minimize resource usage.",
+    },
+}
+
+
+async def _handle_suggest_physics_settings(args: Dict) -> Dict:
+    """Return recommended physics settings for the given scene type."""
+    scene_type = args.get("scene_type", "manipulation")
+    preset = _PHYSICS_SETTINGS_PRESETS.get(scene_type)
+    if preset is None:
+        return {
+            "error": f"Unknown scene type '{scene_type}'. Valid types: {', '.join(_PHYSICS_SETTINGS_PRESETS.keys())}",
+            "valid_types": list(_PHYSICS_SETTINGS_PRESETS.keys()),
+        }
+    return {"type": "data", "settings": preset}
+
+
+DATA_HANDLERS["suggest_physics_settings"] = _handle_suggest_physics_settings
+
+
+# ── Automatic Scene Simplification ─────────────────────────────────────────
+
+def _gen_optimize_scene(args: Dict) -> str:
+    """Generate a scene optimization script that identifies bottlenecks and applies fixes."""
+    mode = args.get("mode", "conservative")
+    target_fps = args.get("target_fps", 60)
+
+    analyze_only = "True" if mode == "analyze" else "False"
+    apply_aggressive = "True" if mode == "aggressive" else "False"
+
+    return f"""\
+import omni.usd
+import json
+from pxr import UsdPhysics, PhysxSchema, UsdGeom, Usd
+
+stage = omni.usd.get_context().get_stage()
+target_fps = {target_fps}
+analyze_only = {analyze_only}
+apply_aggressive = {apply_aggressive}
+
+optimizations = []
+patches_applied = 0
+
+# ── Step 1: Find heavy collision meshes (vertex count > 10000) ──
+heavy_prims = []
+for prim in stage.Traverse():
+    if prim.HasAPI(UsdPhysics.CollisionAPI):
+        mesh = UsdGeom.Mesh(prim)
+        if mesh:
+            pts = mesh.GetPointsAttr().Get()
+            if pts and len(pts) > 10000:
+                is_static = not prim.HasAPI(UsdPhysics.RigidBodyAPI)
+                heavy_prims.append({{
+                    'path': str(prim.GetPath()),
+                    'vertex_count': len(pts),
+                    'is_static': is_static,
+                }})
+
+if heavy_prims and not analyze_only:
+    for info in heavy_prims:
+        p = stage.GetPrimAtPath(info['path'])
+        mesh_col = UsdPhysics.MeshCollisionAPI.Apply(p)
+        if info['is_static']:
+            mesh_col.GetApproximationAttr().Set('convexHull')
+        else:
+            mesh_col.GetApproximationAttr().Set('convexDecomposition')
+        patches_applied += 1
+
+if heavy_prims:
+    optimizations.append({{
+        'type': 'collision_simplify',
+        'count': len(heavy_prims),
+        'impact': 'high',
+        'details': [h['path'] for h in heavy_prims],
+    }})
+
+# ── Step 2: Reduce over-iterated articulations (threshold > 16) ──
+over_iterated = []
+for prim in stage.Traverse():
+    if prim.HasAPI(PhysxSchema.PhysxArticulationAPI):
+        api = PhysxSchema.PhysxArticulationAPI(prim)
+        iters_attr = api.GetSolverPositionIterationCountAttr()
+        if iters_attr and iters_attr.Get() is not None and iters_attr.Get() > 16:
+            over_iterated.append({{
+                'path': str(prim.GetPath()),
+                'current_iterations': iters_attr.Get(),
+            }})
+
+if over_iterated and not analyze_only:
+    for info in over_iterated:
+        p = stage.GetPrimAtPath(info['path'])
+        api = PhysxSchema.PhysxArticulationAPI(p)
+        api.GetSolverPositionIterationCountAttr().Set(4)
+        patches_applied += 1
+
+if over_iterated:
+    optimizations.append({{
+        'type': 'solver_reduction',
+        'count': len(over_iterated),
+        'impact': 'medium',
+        'details': [o['path'] for o in over_iterated],
+    }})
+
+# ── Step 3: Disable unnecessary CCD on slow/large objects ──
+ccd_candidates = []
+for prim in stage.Traverse():
+    if prim.HasAPI(PhysxSchema.PhysxRigidBodyAPI):
+        rb_api = PhysxSchema.PhysxRigidBodyAPI(prim)
+        ccd_attr = rb_api.GetEnableCCDAttr()
+        if ccd_attr and ccd_attr.Get():
+            # Heuristic: large objects (scale > 0.5) rarely need CCD
+            xf = UsdGeom.Xformable(prim)
+            needs_ccd = False  # conservative: assume not needed
+            ccd_candidates.append({{
+                'path': str(prim.GetPath()),
+                'needs_ccd': needs_ccd,
+            }})
+
+disable_ccd = [c for c in ccd_candidates if not c['needs_ccd']]
+if disable_ccd and not analyze_only:
+    for info in disable_ccd:
+        p = stage.GetPrimAtPath(info['path'])
+        rb_api = PhysxSchema.PhysxRigidBodyAPI(p)
+        rb_api.GetEnableCCDAttr().Set(False)
+        patches_applied += 1
+
+if disable_ccd:
+    optimizations.append({{
+        'type': 'ccd_disable',
+        'count': len(disable_ccd),
+        'impact': 'low',
+        'details': [c['path'] for c in disable_ccd],
+    }})
+
+# ── Step 4 (aggressive only): Enable GPU physics ──
+if apply_aggressive:
+    optimizations.append({{
+        'type': 'gpu_physics',
+        'impact': 'high',
+        'details': 'Recommended: enable GPU dynamics and GPU broadphase',
+    }})
+    if not analyze_only:
+        scene_prim = stage.GetPrimAtPath('/PhysicsScene')
+        if scene_prim:
+            PhysxSchema.PhysxSceneAPI.Apply(scene_prim)
+            psx_api = PhysxSchema.PhysxSceneAPI(scene_prim)
+            psx_api.GetEnableGPUDynamicsAttr().Set(True)
+            psx_api.GetBroadphaseTypeAttr().Set('GPU')
+            patches_applied += 1
+
+# ── Summary ──
+estimated_improvement = len(heavy_prims) * 8 + len(over_iterated) * 3 + len(disable_ccd) * 1
+result = {{
+    'mode': '{"analyze" if mode == "analyze" else mode}',
+    'target_fps': target_fps,
+    'estimated_fps_gain': estimated_improvement,
+    'optimizations': optimizations,
+    'patches_applied': patches_applied,
+}}
+print(json.dumps(result, indent=2))
+"""
+
+
+CODE_GEN_HANDLERS["optimize_scene"] = _gen_optimize_scene
+
+
+def _gen_simplify_collision(args: Dict) -> str:
+    """Generate code to set collision approximation on a single prim."""
+    prim_path = args["prim_path"]
+    approximation = args["approximation"]
+
+    return (
+        "import omni.usd\n"
+        "from pxr import UsdPhysics\n"
+        "\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        f"prim = stage.GetPrimAtPath('{prim_path}')\n"
+        "\n"
+        "# Ensure CollisionAPI is applied\n"
+        "if not prim.HasAPI(UsdPhysics.CollisionAPI):\n"
+        "    UsdPhysics.CollisionAPI.Apply(prim)\n"
+        "\n"
+        "# Apply MeshCollisionAPI and set approximation\n"
+        "mesh_col = UsdPhysics.MeshCollisionAPI.Apply(prim)\n"
+        f"mesh_col.GetApproximationAttr().Set('{approximation}')\n"
+        f"print(f'Set collision approximation to {approximation} on {prim_path}')"
+    )
+
+
+CODE_GEN_HANDLERS["simplify_collision"] = _gen_simplify_collision
+
+
+# ── Physics Settings Recommendation (DATA handler) ─────────────────────────
+
+_PHYSICS_SETTINGS_PRESETS = {
+    "rl_training": {
+        "scene_type": "rl_training",
+        "description": "RL training with 1024 environments — maximum throughput",
+        "solver": "TGS",
+        "solver_position_iterations": 4,
+        "solver_velocity_iterations": 1,
+        "gpu_dynamics": True,
+        "broadphase": "GPU",
+        "ccd": False,
+        "time_step": 1.0 / 120,
+        "time_steps_per_second": 120,
+        "notes": "Use TGS solver with minimal iterations for speed. GPU dynamics required for large env counts. Disable CCD to save compute.",
+    },
+    "manipulation": {
+        "scene_type": "manipulation",
+        "description": "Precision manipulation (pick-and-place, assembly)",
+        "solver": "TGS",
+        "solver_position_iterations": 16,
+        "solver_velocity_iterations": 1,
+        "gpu_dynamics": False,
+        "broadphase": "MBP",
+        "ccd": True,
+        "ccd_note": "Enable CCD on gripper fingers only — not all objects",
+        "time_step": 1.0 / 240,
+        "time_steps_per_second": 240,
+        "notes": "Higher iterations for stable contacts. CCD on gripper prevents finger pass-through. 240 Hz for smooth grasping.",
+    },
+    "mobile_robot": {
+        "scene_type": "mobile_robot",
+        "description": "Mobile robot navigation (wheeled/legged)",
+        "solver": "TGS",
+        "solver_position_iterations": 4,
+        "solver_velocity_iterations": 1,
+        "gpu_dynamics": True,
+        "broadphase": "GPU",
+        "ccd": False,
+        "time_step": 1.0 / 60,
+        "time_steps_per_second": 60,
+        "notes": "Low iterations sufficient for wheel/ground contact. GPU dynamics helps with large environments. 60 Hz matches typical sensor rates.",
+    },
+    "digital_twin": {
+        "scene_type": "digital_twin",
+        "description": "Digital twin visualization (minimal physics)",
+        "solver": "PGS",
+        "solver_position_iterations": 4,
+        "solver_velocity_iterations": 1,
+        "gpu_dynamics": False,
+        "broadphase": "MBP",
+        "ccd": False,
+        "time_step": 1.0 / 60,
+        "time_steps_per_second": 60,
+        "notes": "PGS solver is sufficient for visualization-only scenes. Disable GPU dynamics and CCD to minimize resource usage.",
+    },
+}
+
+
+async def _handle_suggest_physics_settings(args: Dict) -> Dict:
+    """Return recommended physics settings for the given scene type."""
+    scene_type = args.get("scene_type", "manipulation")
+    preset = _PHYSICS_SETTINGS_PRESETS.get(scene_type)
+    if preset is None:
+        return {
+            "error": f"Unknown scene type '{scene_type}'. Valid types: {', '.join(_PHYSICS_SETTINGS_PRESETS.keys())}",
+            "valid_types": list(_PHYSICS_SETTINGS_PRESETS.keys()),
+        }
+    return {"type": "data", "settings": preset}
+
+
+DATA_HANDLERS["suggest_physics_settings"] = _handle_suggest_physics_settings

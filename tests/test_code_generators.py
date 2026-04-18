@@ -959,6 +959,43 @@ _TEST_VECTORS = [
         {"prim_path": "/World/Backdrop", "approximation": "boundingSphere"},
         ["MeshCollisionAPI", "boundingSphere", "/World/Backdrop"],
     ),
+    # ── Scene Simplification: optimize_scene ─────────────────────────────────
+    (
+        "optimize_scene",
+        {"mode": "analyze"},
+        ["stage.Traverse", "analyze_only = True", "CollisionAPI", "optimizations"],
+    ),
+    (
+        "optimize_scene",
+        {"mode": "conservative", "target_fps": 60},
+        ["stage.Traverse", "analyze_only = False", "convexHull", "convexDecomposition", "target_fps = 60"],
+    ),
+    (
+        "optimize_scene",
+        {"mode": "aggressive", "target_fps": 45},
+        ["analyze_only = False", "apply_aggressive = True", "EnableGPUDynamicsAttr", "BroadphaseTypeAttr"],
+    ),
+    # ── Scene Simplification: simplify_collision ─────────────────────────────
+    (
+        "simplify_collision",
+        {"prim_path": "/World/Table", "approximation": "convexHull"},
+        ["MeshCollisionAPI", "CollisionAPI", "convexHull", "/World/Table"],
+    ),
+    (
+        "simplify_collision",
+        {"prim_path": "/World/Ball", "approximation": "convexDecomposition"},
+        ["MeshCollisionAPI", "convexDecomposition", "/World/Ball"],
+    ),
+    (
+        "simplify_collision",
+        {"prim_path": "/World/Trigger", "approximation": "boundingSphere"},
+        ["MeshCollisionAPI", "boundingSphere"],
+    ),
+    (
+        "simplify_collision",
+        {"prim_path": "/World/Deformable", "approximation": "sdf"},
+        ["MeshCollisionAPI", "sdf"],
+    ),
 ]
 
 

@@ -3962,4 +3962,126 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Automatic Scene Simplification ──────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "optimize_scene",
+            "description": "Analyze the scene for performance bottlenecks and generate optimization patches. Identifies heavy collision meshes, over-iterated articulations, CPU-bound physics, unnecessary CCD, and never-moving joints. Use when the user says 'optimize my scene', 'it runs too slow', 'improve FPS', or 'simplify physics'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["analyze", "conservative", "aggressive"],
+                        "description": "Optimization mode: 'analyze' reports issues only (no changes), 'conservative' applies safe optimizations (collision approximation, solver tuning), 'aggressive' applies all optimizations including mesh simplification. Default: 'conservative'",
+                    },
+                    "target_fps": {
+                        "type": "number",
+                        "description": "Desired target FPS. Used to estimate whether optimizations are sufficient. Default: 60",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "simplify_collision",
+            "description": "Simplify the collision mesh of a single prim by setting the MeshCollisionAPI approximation type. Use for targeted collision optimization on specific objects.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim to simplify"},
+                    "approximation": {
+                        "type": "string",
+                        "enum": ["convexHull", "convexDecomposition", "meshSimplification", "boundingSphere", "sdf"],
+                        "description": "Collision approximation type: 'convexHull' (fastest, static bg objects), 'convexDecomposition' (dynamic objects needing rough shape), 'meshSimplification' (shape matters), 'boundingSphere' (far-away/triggers), 'sdf' (deformable interaction)",
+                    },
+                },
+                "required": ["prim_path", "approximation"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "suggest_physics_settings",
+            "description": "Suggest optimal physics settings (solver, iterations, GPU, CCD, timestep) for a given scene type. Returns recommended configuration without modifying the scene.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_type": {
+                        "type": "string",
+                        "enum": ["rl_training", "manipulation", "mobile_robot", "digital_twin"],
+                        "description": "Scene type: 'rl_training' (1024 envs, fast), 'manipulation' (precision grasping), 'mobile_robot' (navigation), 'digital_twin' (visualization)",
+                    },
+                },
+                "required": ["scene_type"],
+            },
+        },
+    },
+
+# ─── Automatic Scene Simplification ──────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "optimize_scene",
+            "description": "Analyze the scene for performance bottlenecks and generate optimization patches. Identifies heavy collision meshes, over-iterated articulations, CPU-bound physics, unnecessary CCD, and never-moving joints. Use when the user says 'optimize my scene', 'it runs too slow', 'improve FPS', or 'simplify physics'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["analyze", "conservative", "aggressive"],
+                        "description": "Optimization mode: 'analyze' reports issues only (no changes), 'conservative' applies safe optimizations (collision approximation, solver tuning), 'aggressive' applies all optimizations including mesh simplification. Default: 'conservative'",
+                    },
+                    "target_fps": {
+                        "type": "number",
+                        "description": "Desired target FPS. Used to estimate whether optimizations are sufficient. Default: 60",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "simplify_collision",
+            "description": "Simplify the collision mesh of a single prim by setting the MeshCollisionAPI approximation type. Use for targeted collision optimization on specific objects.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim to simplify"},
+                    "approximation": {
+                        "type": "string",
+                        "enum": ["convexHull", "convexDecomposition", "meshSimplification", "boundingSphere", "sdf"],
+                        "description": "Collision approximation type: 'convexHull' (fastest, static bg objects), 'convexDecomposition' (dynamic objects needing rough shape), 'meshSimplification' (shape matters), 'boundingSphere' (far-away/triggers), 'sdf' (deformable interaction)",
+                    },
+                },
+                "required": ["prim_path", "approximation"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "suggest_physics_settings",
+            "description": "Suggest optimal physics settings (solver, iterations, GPU, CCD, timestep) for a given scene type. Returns recommended configuration without modifying the scene.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_type": {
+                        "type": "string",
+                        "enum": ["rl_training", "manipulation", "mobile_robot", "digital_twin"],
+                        "description": "Scene type: 'rl_training' (1024 envs, fast), 'manipulation' (precision grasping), 'mobile_robot' (navigation), 'digital_twin' (visualization)",
+                    },
+                },
+                "required": ["scene_type"],
+            },
+        },
+    },
 ]
