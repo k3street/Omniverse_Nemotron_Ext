@@ -121,6 +121,164 @@ Response discipline:
 """
 
 
+import re as _re_mod
+
+
+# NOTE: path was previously `(?P<path>...)?` which, combined with the
+# preceding non-greedy `{0,200}?`, meant the engine always picked 0 chars
+# and no path — the extractor then dropped the match for lack of a path.
+# Net effect: count-claim verification was silently disabled. Making path
+# non-optional forces the engine to consume enough to reach a /World/...
+# reference; matches without a path no longer produce a count claim.
+_COUNT_PAT = _re_mod.compile(
+    r"\b(?P<n>\d{1,4})\s+(?P<noun>arms?|robots?|clones?|copies|instances?|envs?|environments?|cubes?|spheres?|cameras?)\b[^\n]{0,200}?(?P<path>/World[/A-Za-z0-9_]+)",
+    _re_mod.I,
+)
+_POSE_PAT = _re_mod.compile(
+    r"(?P<path>/World[/A-Za-z0-9_]+)[^\n]{0,180}?"
+    r"(?:at|to|positioned at|located at|moved to|placed at|transform)\s*"
+    r"\(?\s*(?P<x>-?\d+(?:\.\d+)?)\s*,\s*"
+    r"(?P<y>-?\d+(?:\.\d+)?)\s*,\s*"
+    r"(?P<z>-?\d+(?:\.\d+)?)\s*\)?",
+    _re_mod.I,
+)
+_SCHEMA_PAT = _re_mod.compile(
+    r"(?P<schema>(?:Physics|Physx|UsdPhysics\.|PhysxSchema\.)?\w+API)"
+    r"[^\n]{0,120}?"
+    r"(?P<path>/World[/A-Za-z0-9_]+)"
+    r"|"
+    r"(?P<path2>/World[/A-Za-z0-9_]+)"
+    r"[^\n]{0,120}?"
+    r"(?P<schema2>(?:Physics|Physx|UsdPhysics\.|PhysxSchema\.)?\w+API)",
+    _re_mod.I,
+)
+_ATTR_SEP = r"(?:\s*[=:]\s*|\s+(?:is|of|set to|=)\s+)"
+_ATTR_WORDS = r"mass|friction|restitution|damping|stiffness|radius|height|density|size"
+_ATTR_PAT_PATH_FIRST = _re_mod.compile(
+    r"(?P<path>/World[/A-Za-z0-9_]+)"
+    r"[^\n]{0,120}?"
+    r"(?P<attr>" + _ATTR_WORDS + r")"
+    + _ATTR_SEP +
+    r"(?P<val>-?\d+(?:\.\d+)?)",
+    _re_mod.I,
+)
+_ATTR_PAT_ATTR_FIRST = _re_mod.compile(
+    r"\b(?P<attr>" + _ATTR_WORDS + r")\b"
+    r"[^\n]{0,20}?"
+    r"(?:on\s+|of\s+|for\s+)?"
+    r"(?P<path>/World[/A-Za-z0-9_]+)"
+    r"[^\n]{0,40}?"
+    r"(?:is|of|set to|=|:)\s*"
+    r"(?P<val>-?\d+(?:\.\d+)?)",
+    _re_mod.I,
+)
+_ATTR_NAME_MAP = {
+    "mass": "physics:mass",
+    "friction": "physics:dynamicFriction",
+    "restitution": "physics:restitution",
+    "damping": "drive:angular:physics:damping",
+    "stiffness": "drive:angular:physics:stiffness",
+    "radius": "radius",
+    "height": "height",
+    "density": "physics:density",
+    "size": "size",
+}
+
+
+def _extract_count_claims(reply: str) -> List[tuple]:
+    """Extract (n, noun, path) count claims from a reply.
+
+    Matches patterns like "16 arms under /World/envs" or "cloned 16 Franka".
+    Claims without a /World/... path are discarded — counts without a place
+    can't be verified. Deduped on (n, path) keeping first-seen noun.
+    """
+    seen = set()
+    out: List[tuple] = []
+    for m in _COUNT_PAT.finditer(reply or ""):
+        path = m.group("path")
+        if not path:
+            continue
+        n = int(m.group("n"))
+        key = (n, path)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((n, m.group("noun"), path))
+    return out
+
+
+def _extract_pose_claims(reply: str) -> List[tuple]:
+    """Extract (path, (x, y, z)) pose claims. Coordinates rounded to 3 dp.
+
+    Matches "/World/X at (1, 2, 3)", "... moved to (a, b, c)", etc. Deduped
+    on the full (path, claim) tuple.
+    """
+    seen = set()
+    out: List[tuple] = []
+    for m in _POSE_PAT.finditer(reply or ""):
+        path = m.group("path")
+        claim = (
+            round(float(m.group("x")), 3),
+            round(float(m.group("y")), 3),
+            round(float(m.group("z")), 3),
+        )
+        key = (path, claim)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((path, claim))
+    return out
+
+
+def _extract_schema_claims(reply: str) -> List[tuple]:
+    """Extract (schema, path) API-application claims.
+
+    Handles both directions: "RigidBodyAPI applied to /World/X" and
+    "/World/X has CollisionAPI". Schema name is normalized — the
+    UsdPhysics./PhysxSchema. prefixes and trailing punctuation are stripped.
+    Deduped on (schema, path).
+    """
+    seen = set()
+    out: List[tuple] = []
+    for m in _SCHEMA_PAT.finditer(reply or ""):
+        schema = (m.group("schema") or m.group("schema2") or "")
+        schema = schema.lstrip("UsdPhysics.").lstrip("PhysxSchema.").rstrip(".,;:")
+        path = m.group("path") or m.group("path2")
+        if not schema or not path:
+            continue
+        key = (schema, path)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((schema, path))
+    return out
+
+
+def _extract_attr_claims(reply: str) -> List[tuple]:
+    """Extract (path, attr_short, value) attribute-value claims.
+
+    Handles both phrasings: path-first ("/World/X has mass=1.0") and
+    attr-first ("mass on /World/X is 1.0"). Returns the short attr word
+    (lowercase, e.g. "mass") — callers map to the full USD attribute name
+    via _ATTR_NAME_MAP before calling get_attribute. Deduped on
+    (path, attr, value).
+    """
+    seen = set()
+    out: List[tuple] = []
+    for m in list(_ATTR_PAT_PATH_FIRST.finditer(reply or "")) + list(
+        _ATTR_PAT_ATTR_FIRST.finditer(reply or "")
+    ):
+        path = m.group("path")
+        attr = m.group("attr").lower()
+        claim = round(float(m.group("val")), 3)
+        key = (path, attr, claim)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((path, attr, claim))
+    return out
+
+
 def _partition_path_existence(
     executed_tools: List[Dict[str, Any]],
 ) -> tuple[set, set]:
@@ -615,21 +773,11 @@ class ChatOrchestrator:
                     except Exception as e:
                         logger.debug(f"[{session_id}] verify prim_exists({p}) failed: {e}")
 
-                # (b) Count claims: "N arms", "N robots", "N clones", etc. paired with a path
-                # Matches patterns like "16 arms ... at /World/envs" or "cloned 16 Franka"
-                count_pat = _re.compile(
-                    r"\b(?P<n>\d{1,4})\s+(?P<noun>arms?|robots?|clones?|copies|instances?|envs?|environments?|cubes?|spheres?|cameras?)\b[^\n]{0,200}?(?P<path>/World[/A-Za-z0-9_]+)?",
-                    _re.I,
-                )
-                matched_counts = set()
-                for m in count_pat.finditer(reply):
-                    n = int(m.group("n"))
-                    path = m.group("path")
-                    key = (n, path)
-                    if key in matched_counts or not path:
-                        continue
-                    matched_counts.add(key)
-                    if len(matched_counts) > 2:
+                # (b) Count claims: "N arms", "N robots", "N clones", etc.
+                # Extraction is deduped + path-filtered in _extract_count_claims;
+                # we cap verifications at 2 per turn for bounded cost.
+                for _ci, (n, _noun, path) in enumerate(_extract_count_claims(reply)):
+                    if _ci >= 2:
                         break
                     try:
                         ver = await _exec("count_prims_under_path", {
@@ -660,7 +808,7 @@ class ChatOrchestrator:
                                 pass
                             if isinstance(rec_actual, int) and rec_actual == n:
                                 verify_warnings.append(
-                                    f"reply claims {n} {m.group('noun')} under `{path}`, "
+                                    f"reply claims {n} {_noun} under `{path}`, "
                                     f"but only {actual} are direct children; "
                                     f"the {n} match appears in the recursive count — "
                                     f"prims are nested deeper than the claim implies"
@@ -668,36 +816,18 @@ class ChatOrchestrator:
                             else:
                                 rec_str = f", recursive={rec_actual}" if rec_actual is not None else ""
                                 verify_warnings.append(
-                                    f"reply claims {n} {m.group('noun')} under `{path}`, "
+                                    f"reply claims {n} {_noun} under `{path}`, "
                                     f"but count_prims_under_path found {actual}"
                                     + rec_str
                                 )
                     except Exception as e:
                         logger.debug(f"[{session_id}] verify count({path}) failed: {e}")
 
-                # (c) Transform / pose claims — "X is at (a, b, c)" or
-                # "positioned at (a, b, c)" or "moved to (a, b, c)" paired
-                # with a /World/... path. Cross-check against
-                # get_world_transform and flag divergence. Cap at 2 checks.
-                pose_pat = _re.compile(
-                    r"(?P<path>/World[/A-Za-z0-9_]+)[^\n]{0,180}?"
-                    r"(?:at|to|positioned at|located at|moved to|placed at|transform)\s*"
-                    r"\(?\s*(?P<x>-?\d+(?:\.\d+)?)\s*,\s*"
-                    r"(?P<y>-?\d+(?:\.\d+)?)\s*,\s*"
-                    r"(?P<z>-?\d+(?:\.\d+)?)\s*\)?",
-                    _re.I,
-                )
-                matched_poses = set()
-                for m in pose_pat.finditer(reply):
-                    path = m.group("path")
-                    claim = (round(float(m.group("x")), 3),
-                             round(float(m.group("y")), 3),
-                             round(float(m.group("z")), 3))
-                    key = (path, claim)
-                    if key in matched_poses:
-                        continue
-                    matched_poses.add(key)
-                    if len(matched_poses) > 2:
+                # (c) Transform / pose claims — extraction deduped in
+                # _extract_pose_claims; cap at 2 verifications per turn.
+                # 5cm tolerance on each axis matches most G-task criteria.
+                for _pi, (path, claim) in enumerate(_extract_pose_claims(reply)):
+                    if _pi >= 2:
                         break
                     try:
                         ver = await _exec("get_world_transform", {"prim_path": path})
@@ -721,32 +851,11 @@ class ChatOrchestrator:
                     except Exception as e:
                         logger.debug(f"[{session_id}] verify pose({path}) failed: {e}")
 
-                # (d) Schema / API application claims — "RigidBodyAPI applied
-                # to /World/X" or "with CollisionAPI" paired with a path.
-                # Cross-check via list_applied_schemas. Cap at 3 claims.
-                schema_pat = _re.compile(
-                    r"(?P<schema>(?:Physics|Physx|UsdPhysics\.|PhysxSchema\.)?\w+API)"
-                    r"[^\n]{0,120}?"
-                    r"(?P<path>/World[/A-Za-z0-9_]+)"
-                    r"|"
-                    r"(?P<path2>/World[/A-Za-z0-9_]+)"
-                    r"[^\n]{0,120}?"
-                    r"(?P<schema2>(?:Physics|Physx|UsdPhysics\.|PhysxSchema\.)?\w+API)",
-                    _re.I,
-                )
-                matched_schemas = set()
-                for m in schema_pat.finditer(reply):
-                    schema = (m.group("schema") or m.group("schema2") or "").lstrip("UsdPhysics.").lstrip("PhysxSchema.")
-                    path = m.group("path") or m.group("path2")
-                    if not schema or not path:
-                        continue
-                    # Normalize: strip trailing punctuation/whitespace
-                    schema = schema.rstrip(".,;:")
-                    key = (schema, path)
-                    if key in matched_schemas:
-                        continue
-                    matched_schemas.add(key)
-                    if len(matched_schemas) > 3:
+                # (d) Schema / API application claims — extraction normalizes
+                # the schema prefix and dedups in _extract_schema_claims; cap
+                # at 3 verifications per turn.
+                for _si, (schema, path) in enumerate(_extract_schema_claims(reply)):
+                    if _si >= 3:
                         break
                     try:
                         ver = await _exec("list_applied_schemas", {"prim_path": path})
@@ -764,60 +873,12 @@ class ChatOrchestrator:
                     except Exception as e:
                         logger.debug(f"[{session_id}] verify schema({path}/{schema}) failed: {e}")
 
-                # (e) Attribute-value claims — "/World/X has mass=1.0" or
-                # "friction=0.8 on /World/Material". Verify via get_attribute.
-                # Cap at 3 checks. Only common physics/appearance attrs to
-                # avoid over-matching plain numbers in prose.
-                # Accept: `attr=val`, `attr: val`, `attr of val`, `attr is val`,
-                # `attr set to val`. Two regex variants: (a) path → attr → val
-                # ("/World/X has mass=1.0") and (b) attr → path → val ("mass on
-                # /World/X is 1.0"). Second variant was a known gap noted in
-                # ARCHITECTURE_REVIEW.md — now closed.
-                _ATTR_SEP = r"(?:\s*[=:]\s*|\s+(?:is|of|set to|=)\s+)"
-                _ATTR_WORDS = r"mass|friction|restitution|damping|stiffness|radius|height|density|size"
-                attr_pat_path_first = _re.compile(
-                    r"(?P<path>/World[/A-Za-z0-9_]+)"
-                    r"[^\n]{0,120}?"
-                    r"(?P<attr>" + _ATTR_WORDS + r")"
-                    + _ATTR_SEP +
-                    r"(?P<val>-?\d+(?:\.\d+)?)",
-                    _re.I,
-                )
-                # attr → path (optional "on") → ... → value
-                attr_pat_attr_first = _re.compile(
-                    r"\b(?P<attr>" + _ATTR_WORDS + r")\b"
-                    r"[^\n]{0,20}?"
-                    r"(?:on\s+|of\s+|for\s+)?"
-                    r"(?P<path>/World[/A-Za-z0-9_]+)"
-                    r"[^\n]{0,40}?"
-                    r"(?:is|of|set to|=|:)\s*"
-                    r"(?P<val>-?\d+(?:\.\d+)?)",
-                    _re.I,
-                )
-                _attr_iter = list(attr_pat_path_first.finditer(reply)) + list(
-                    attr_pat_attr_first.finditer(reply)
-                )
-                _ATTR_NAME_MAP = {
-                    "mass": "physics:mass",
-                    "friction": "physics:dynamicFriction",
-                    "restitution": "physics:restitution",
-                    "damping": "drive:angular:physics:damping",
-                    "stiffness": "drive:angular:physics:stiffness",
-                    "radius": "radius",
-                    "height": "height",
-                    "density": "physics:density",
-                    "size": "size",
-                }
-                matched_attrs = set()
-                for m in _attr_iter:
-                    path = m.group("path")
-                    attr = m.group("attr").lower()
-                    claim = round(float(m.group("val")), 3)
-                    key = (path, attr, claim)
-                    if key in matched_attrs:
-                        continue
-                    matched_attrs.add(key)
-                    if len(matched_attrs) > 3:
+                # (e) Attribute-value claims — extraction handles both
+                # path-first and attr-first phrasings, dedups, and returns
+                # short attr names. _ATTR_NAME_MAP is module-level; cap at
+                # 3 verifications per turn.
+                for _ai, (path, attr, claim) in enumerate(_extract_attr_claims(reply)):
+                    if _ai >= 3:
                         break
                     try:
                         attr_name = _ATTR_NAME_MAP.get(attr, attr)
