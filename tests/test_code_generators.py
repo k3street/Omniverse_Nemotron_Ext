@@ -1543,6 +1543,32 @@ _RAW_TEST_VECTORS = [
             "/World/Robot/link3",
         ],
     ),
+    # ── Quick Demo Builder ──────────────────────────────────────────────────
+    (
+        "quick_demo",
+        {"demo_type": "pick_place"},
+        ["pick_place", "DemoCamera", "DomeLight", "import omni.usd"],
+    ),
+    (
+        "quick_demo",
+        {"demo_type": "mobile_nav", "robot": "jetbot", "scene_style": "industrial"},
+        ["mobile_nav", "jetbot", "industrial"],
+    ),
+    (
+        "quick_demo",
+        {"demo_type": "humanoid_walk", "objects": [], "scene_style": "dramatic"},
+        ["humanoid_walk", "DemoCamera"],
+    ),
+    (
+        "record_demo_video",
+        {"output_path": "/tmp/demo.mp4"},
+        ["CaptureExtension", "/tmp/demo.mp4", "fps"],
+    ),
+    (
+        "record_demo_video",
+        {"output_path": "/tmp/demo2.mp4", "duration": 30, "fps": 60, "camera": "/World/Cam"},
+        ["/tmp/demo2.mp4", "60", "/World/Cam"],
+    ),
 ]
 
 

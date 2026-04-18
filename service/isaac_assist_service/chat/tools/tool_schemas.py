@@ -7440,4 +7440,77 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+    # ─── Quick Demo Builder (New Capability) ──────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "quick_demo",
+            "description": "Build a complete demo scene in under 2 minutes. Chains template loading, robot import, object placement, and pre-trained policy deployment.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "demo_type": {"type": "string", "enum": ["pick_place", "mobile_nav", "humanoid_walk"], "description": "Demo template type"},
+                    "robot": {"type": "string", "description": "Robot model name (e.g. 'franka', 'ur5e', 'jetbot', 'g1')"},
+                    "objects": {"type": "array", "items": {"type": "string"}, "description": "Objects to interact with (e.g. ['cube', 'bottle'])"},
+                    "scene_style": {"type": "string", "enum": ["clean", "industrial", "lab", "dramatic"], "description": "Lighting and background preset (default 'clean')"},
+                },
+                "required": ["demo_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "record_demo_video",
+            "description": "Record viewport to MP4 video file. Output ready for investor decks or YouTube.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "duration": {"type": "number", "description": "Recording duration in seconds (default 10)"},
+                    "camera": {"type": "string", "description": "Camera prim path to record from (default active viewport camera)"},
+                    "output_path": {"type": "string", "description": "Output MP4 file path"},
+                    "resolution": {"type": "array", "items": {"type": "integer"}, "description": "Resolution [width, height] (default [1920, 1080])"},
+                    "fps": {"type": "integer", "description": "Frames per second (default 30)"},
+                },
+                "required": ["output_path"],
+            },
+        },
+    },
+
+# ─── Quick Demo Builder (New Capability) ──────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "quick_demo",
+            "description": "Build a complete demo scene in under 2 minutes. Chains template loading, robot import, object placement, and pre-trained policy deployment.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "demo_type": {"type": "string", "enum": ["pick_place", "mobile_nav", "humanoid_walk"], "description": "Demo template type"},
+                    "robot": {"type": "string", "description": "Robot model name (e.g. 'franka', 'ur5e', 'jetbot', 'g1')"},
+                    "objects": {"type": "array", "items": {"type": "string"}, "description": "Objects to interact with (e.g. ['cube', 'bottle'])"},
+                    "scene_style": {"type": "string", "enum": ["clean", "industrial", "lab", "dramatic"], "description": "Lighting and background preset (default 'clean')"},
+                },
+                "required": ["demo_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "record_demo_video",
+            "description": "Record viewport to MP4 video file. Output ready for investor decks or YouTube.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "duration": {"type": "number", "description": "Recording duration in seconds (default 10)"},
+                    "camera": {"type": "string", "description": "Camera prim path to record from (default active viewport camera)"},
+                    "output_path": {"type": "string", "description": "Output MP4 file path"},
+                    "resolution": {"type": "array", "items": {"type": "integer"}, "description": "Resolution [width, height] (default [1920, 1080])"},
+                    "fps": {"type": "integer", "description": "Frames per second (default 30)"},
+                },
+                "required": ["output_path"],
+            },
+        },
+    },
 ]
