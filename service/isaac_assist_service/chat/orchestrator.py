@@ -121,6 +121,48 @@ Response discipline:
 """
 
 
+def _partition_path_existence(
+    executed_tools: List[Dict[str, Any]],
+) -> tuple[set, set]:
+    """Parse a turn's tool results into (confirmed_present, confirmed_absent)
+    prim-path sets.
+
+    Used by the Fas 2 verify-contract item (a) path check to decide which
+    claimed paths can be skipped (already grounded in tool observation as
+    present), flagged immediately (observed absent), or need a fresh
+    prim_exists probe (unverified).
+
+    A tool result counts toward existence evidence when its payload carries
+    both a ``prim_path`` (starting with ``/World``) and a boolean ``exists``
+    field. Data handlers wrap their payload in ``{"output": "<json>"}``,
+    so we try parsing that first and also inspect the top-level dict.
+    """
+    confirmed_absent: set = set()
+    confirmed_present: set = set()
+    for t in executed_tools or []:
+        result = t.get("result") or {}
+        payloads: List[Any] = []
+        out_str = result.get("output") if isinstance(result, dict) else None
+        if isinstance(out_str, str) and out_str.strip().startswith("{"):
+            try:
+                payloads.append(json.loads(out_str))
+            except Exception:
+                pass
+        if isinstance(result, dict):
+            payloads.append(result)
+        for pl in payloads:
+            if not isinstance(pl, dict):
+                continue
+            pp = pl.get("prim_path")
+            ex = pl.get("exists")
+            if isinstance(pp, str) and pp.startswith("/World"):
+                if ex is False:
+                    confirmed_absent.add(pp)
+                elif ex is True:
+                    confirmed_present.add(pp)
+    return confirmed_present, confirmed_absent
+
+
 class ChatOrchestrator:
     """
     Manages multi-turn chat sessions, injects stage context, and calls the
@@ -540,39 +582,14 @@ class ChatOrchestrator:
 
                 # (a) All USD-like paths mentioned in the reply
                 claimed_paths = set(_re.findall(r"(?<![A-Za-z0-9_])/World[/A-Za-z0-9_]+", reply))
-                # Parse tool outputs semantically: a path that appeared alongside
-                # `"exists": false` counts as CONFIRMED ABSENT — the agent should
-                # never claim it exists. Paths that appeared as success payloads
-                # (exists:true, prim_type in a valid response, tool ran without
-                # error) count as CONFIRMED PRESENT and don't need re-verification.
-                # Earlier versions did a dumb substring skip, which missed the
-                # inversion-of-meaning case where the tool returned exists=false
-                # and the agent nonetheless claimed the prim exists.
-                confirmed_absent = set()
-                confirmed_present = set()
-                for t in executed_tools:
-                    result = t.get("result") or {}
-                    # tool results come through as {"output": "<json>"} for
-                    # data handlers, or as dicts with direct fields.
-                    payloads = []
-                    out_str = result.get("output") if isinstance(result, dict) else None
-                    if isinstance(out_str, str) and out_str.strip().startswith("{"):
-                        try:
-                            payloads.append(json.loads(out_str))
-                        except Exception:
-                            pass
-                    if isinstance(result, dict):
-                        payloads.append(result)
-                    for pl in payloads:
-                        if not isinstance(pl, dict):
-                            continue
-                        pp = pl.get("prim_path")
-                        ex = pl.get("exists")
-                        if isinstance(pp, str) and pp.startswith("/World"):
-                            if ex is False:
-                                confirmed_absent.add(pp)
-                            elif ex is True:
-                                confirmed_present.add(pp)
+                # See _partition_path_existence for the semantics: a path
+                # observed with exists=false in any tool output counts as
+                # CONFIRMED ABSENT and is flagged immediately; a path
+                # observed with exists=true is CONFIRMED PRESENT and skipped;
+                # everything else falls through to a fresh prim_exists probe.
+                # This closes the inversion-of-meaning gap the prior dumb
+                # substring skip missed.
+                confirmed_present, confirmed_absent = _partition_path_existence(executed_tools)
                 for p in claimed_paths & confirmed_absent:
                     verify_warnings.append(f"`{p}` does not exist in the stage")
                 unverified_paths = [
