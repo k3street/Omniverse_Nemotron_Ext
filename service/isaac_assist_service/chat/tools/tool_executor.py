@@ -23224,16 +23224,26 @@ except Exception as e:
 
 def _gen_open_stage(args: Dict) -> str:
     path = args["path"]
+    # Two holes the old version had: (1) ctx.open_stage returns False on
+    # missing file but the print said "opened {target} (ok=False)" — the word
+    # "opened" is a lie; (2) the try/except swallowed exceptions, so the tool
+    # reported success=True and the agent would parrot "opened" to the user.
     return f"""\
+import os
 import omni.usd
 
 ctx = omni.usd.get_context()
 target = {repr(path)}
-try:
-    ok = ctx.open_stage(target)
-    print(f"open_stage: opened {{target}} (ok={{ok}})")
-except Exception as e:
-    print(f"open_stage: failed to open {{target}}: {{e}}")
+# Local filesystem paths must exist. Remote/session URLs (omniverse://,
+# http(s)://, file://, anon:) resolve through USD's asset resolver and can't
+# be checked with os.path.exists.
+if not any(target.startswith(p) for p in ('omniverse://','http://','https://','file://','anon:')):
+    if not os.path.exists(target):
+        raise FileNotFoundError(f'open_stage: no such file: {{target!r}}')
+ok = ctx.open_stage(target)
+if not ok:
+    raise RuntimeError(f'open_stage: ctx.open_stage({{target!r}}) returned False — USD could not load the stage')
+print(f"open_stage: successfully opened {{target}}")
 """
 
 def _gen_export_stage(args: Dict) -> str:

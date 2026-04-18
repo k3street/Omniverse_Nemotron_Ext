@@ -425,6 +425,25 @@ def test_gen_import_robot_urdf_verifies_result():
     assert "raise RuntimeError" in code
 
 
+def test_gen_open_stage_fails_on_missing_file():
+    """Regression: old _gen_open_stage wrapped ctx.open_stage in try/except
+    and printed 'opened {target} (ok=False)' when the file didn't exist —
+    that printed "opened" at all was misleading, and the exception-swallow
+    made the tool-level success=True. Now raises FileNotFoundError for
+    missing local paths and RuntimeError when ctx.open_stage returns False."""
+    import sys
+    sys.path.insert(0, "service")
+    from isaac_assist_service.chat.tools.tool_executor import _gen_open_stage
+    code = _gen_open_stage({"path": "/nonexistent/scene.usd"})
+    assert "FileNotFoundError" in code
+    assert "os.path.exists" in code
+    # Must not swallow the open_stage return value
+    assert "if not ok:" in code
+    assert "raise RuntimeError" in code
+    # Remote/URL prefixes skip the filesystem check
+    assert "omniverse://" in code
+
+
 def test_gen_add_reference_validates_local_path():
     """Regression: USD AddReference accepts any asset URL and returns True
     even if the file doesn't exist (composition is lazy). Tool now pre-checks
