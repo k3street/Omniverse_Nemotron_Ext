@@ -425,6 +425,46 @@ def test_gen_import_robot_urdf_verifies_result():
     assert "raise RuntimeError" in code
 
 
+def test_gen_batch_set_attributes_reports_accurate_counts():
+    """Regression: old _gen_batch_set_attributes printed
+    'applied {len(changes)}' regardless of outcome, silently skipped
+    missing prims/attrs, and auto-created unknown attrs as Tokens
+    (so set_attribute 'physics:mass' -> 1.0 stored a string). Fixed to
+    partition applied/missing_prims/missing_attrs/errors, report real
+    counts, and raise when 0 of N succeeded."""
+    import sys
+    sys.path.insert(0, "service")
+    from isaac_assist_service.chat.tools.tool_executor import _gen_batch_set_attributes
+    code = _gen_batch_set_attributes({"changes": [{"prim_path": "/p", "attr_name": "a", "value": 1}]})
+    assert "_applied = 0" in code
+    assert "_missing_prims" in code
+    assert "_missing_attrs" in code
+    # Old misleading message removed
+    assert "applied {len(changes)}" not in code
+    # Auto-create-as-Token path is gone
+    assert "ValueTypeNames.Token" not in code
+    assert "if _applied == 0 and" in code
+    assert "raise RuntimeError" in code
+
+
+def test_gen_batch_delete_prims_reports_real_removal_count():
+    """Regression: old batch_delete_prims printed 'removed {len(paths)}'
+    regardless of whether layer.Apply succeeded, and ignored the atomic
+    semantics — if any path was missing the whole batch was rejected but
+    the tool still claimed success. Now partitions present vs missing,
+    applies only the present set, verifies each is actually gone, and
+    raises if 0 of N were removable."""
+    import sys
+    sys.path.insert(0, "service")
+    from isaac_assist_service.chat.tools.tool_executor import _gen_batch_delete_prims
+    code = _gen_batch_delete_prims({"prim_paths": ["/a", "/b"]})
+    assert "_missing = [p for p in requested" in code
+    assert "_present = [p for p in requested" in code
+    assert "_still_present" in code  # post-apply verification
+    assert "removed={_removed}/{len(requested)}" in code
+    assert "raise RuntimeError" in code
+
+
 def test_gen_export_stage_validates_inputs_before_fire_and_forget():
     """Regression: export_stage scheduled a coroutine via asyncio.ensure_future
     and returned immediately. Any exception inside _do_export was printed,

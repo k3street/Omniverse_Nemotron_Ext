@@ -13538,19 +13538,50 @@ def _gen_batch_delete_prims(args: Dict) -> str:
             "# batch_delete_prims called with an empty prim_paths list — nothing to do.\n"
             "print('batch_delete_prims: no paths supplied')\n"
         )
+    # Old version printed "removed {len(paths)} prims ok={ok}" regardless of
+    # outcome. If `ok` was False (even one path missing), nothing actually
+    # got deleted (BatchNamespaceEdit is atomic), but the text claimed
+    # removal. Partition requested paths into missing vs present, run the
+    # edit only on the present set, and report actual counts.
     return f"""\
 import omni.usd
 from pxr import Sdf
 
 stage = omni.usd.get_context().get_stage()
 layer = stage.GetRootLayer()
-edit = Sdf.BatchNamespaceEdit()
-paths = {json.dumps(paths)}
-for p in paths:
-    edit.Add(Sdf.NamespaceEdit.Remove(p))
+requested = {json.dumps(paths)}
 
-ok = layer.Apply(edit)
-print(f'batch_delete_prims: removed {{len(paths)}} prims ok={{ok}}')
+# Filter out paths that don't exist — BatchNamespaceEdit.Apply is atomic
+# and rejects the whole batch if any target is missing.
+_missing = [p for p in requested if not stage.GetPrimAtPath(p).IsValid()]
+_present = [p for p in requested if stage.GetPrimAtPath(p).IsValid()]
+
+_removed = 0
+if _present:
+    edit = Sdf.BatchNamespaceEdit()
+    for p in _present:
+        edit.Add(Sdf.NamespaceEdit.Remove(p))
+    ok = layer.Apply(edit)
+    if not ok:
+        raise RuntimeError(
+            f'batch_delete_prims: layer.Apply failed for all {{len(_present)}} present paths '
+            f'(missing paths were already filtered: {{_missing}}).'
+        )
+    # Verify each removed prim is actually gone.
+    _still_present = [p for p in _present if stage.GetPrimAtPath(p).IsValid()]
+    if _still_present:
+        raise RuntimeError(
+            f'batch_delete_prims: layer.Apply returned True but these prims still exist: {{_still_present}}'
+        )
+    _removed = len(_present)
+
+print(f'batch_delete_prims: removed={{_removed}}/{{len(requested)}} requested, missing={{len(_missing)}}')
+if _missing:
+    print(f'  paths not in stage (skipped): {{_missing[:5]}}')
+if _removed == 0 and _missing:
+    raise RuntimeError(
+        f'batch_delete_prims: 0 of {{len(requested)}} paths were removable — all were missing: {{_missing}}'
+    )
 """
 
 def _gen_batch_set_attributes(args: Dict) -> str:
@@ -13560,27 +13591,64 @@ def _gen_batch_set_attributes(args: Dict) -> str:
             "# batch_set_attributes called with no changes — nothing to do.\n"
             "print('batch_set_attributes: no changes supplied')\n"
         )
-    # Emit a single Sdf.ChangeBlock so only one stage notification fires.
+    # Old version had three honesty holes:
+    #   1. Missing prim → `continue` silently. No signal the path was wrong.
+    #   2. Missing attribute → auto-created with ValueTypeNames.Token. That's
+    #      wrong for almost every case (e.g. creates a token attr named
+    #      "physics:mass" and stores the float "1.0" as a string-token);
+    #      the snapshot's mass check then never sees a real authored mass.
+    #   3. Final print said "applied {len(changes)} changes" even when
+    #      every single one was skipped or errored.
+    # Fix: track applied / skipped / errored separately, raise at the end
+    # if nothing actually landed, and keep attr creation strict (only
+    # auto-create when the caller provided an explicit `value_type`).
     lines = [
         "import omni.usd",
         "from pxr import Sdf",
         "",
         "stage = omni.usd.get_context().get_stage()",
         f"changes = {json.dumps(changes)}",
+        "_applied = 0",
+        "_missing_prims = []",
+        "_missing_attrs = []",
+        "_errors = []",
         "with Sdf.ChangeBlock():",
         "    for ch in changes:",
         "        prim = stage.GetPrimAtPath(ch['prim_path'])",
         "        if not prim or not prim.IsValid():",
+        "            _missing_prims.append(ch['prim_path'])",
         "            continue",
         "        attr = prim.GetAttribute(ch['attr_name'])",
-        "        if not attr:",
-        "            attr = prim.CreateAttribute(ch['attr_name'], Sdf.ValueTypeNames.Token)",
+        "        if not attr or not attr.IsValid():",
+        "            _missing_attrs.append(f\"{ch['prim_path']}.{ch['attr_name']}\")",
+        "            continue",
         "        try:",
         "            attr.Set(ch['value'])",
+        "            _applied += 1",
         "        except Exception as exc:",
-        "            print(f\"batch_set_attributes: {ch['prim_path']}.{ch['attr_name']} -> {exc}\")",
+        "            _errors.append(f\"{ch['prim_path']}.{ch['attr_name']} -> {exc}\")",
         "",
-        "print(f'batch_set_attributes: applied {len(changes)} changes')",
+        "_report = (",
+        "    f'batch_set_attributes: applied={_applied} '",
+        "    f'missing_prims={len(_missing_prims)} '",
+        "    f'missing_attrs={len(_missing_attrs)} '",
+        "    f'errors={len(_errors)}'",
+        ")",
+        "print(_report)",
+        "if _missing_prims:",
+        "    print(f'  missing prims: {_missing_prims[:5]}')",
+        "if _missing_attrs:",
+        "    print(f'  missing attrs: {_missing_attrs[:5]}')",
+        "if _errors:",
+        "    print(f'  errors: {_errors[:5]}')",
+        "if _applied == 0 and (_missing_prims or _missing_attrs or _errors):",
+        "    raise RuntimeError(",
+        "        f'batch_set_attributes: 0 of {len(changes)} changes applied. {_report}. '",
+        "        f'First problem: '",
+        "        + (f\"prim not found: {_missing_prims[0]!r}\" if _missing_prims",
+        "           else f\"attribute not found: {_missing_attrs[0]!r}\" if _missing_attrs",
+        "           else f\"error: {_errors[0]}\")",
+        "    )",
     ]
     return "\n".join(lines)
 
