@@ -2912,10 +2912,13 @@ def _gen_move_to_pose(args: Dict) -> str:
             f"trajectory = rrt.compute_task_space_trajectory_from_points(",
             f"    [target_pos], [target_ori] if target_ori is not None else None",
             f")",
-            "if trajectory is not None:",
-            "    print(f'Lula RRT: planned trajectory with {{len(trajectory)}} waypoints')",
-            "else:",
-            "    print('Lula RRT: failed to find path — try a different target or clear obstacles')",
+            "if trajectory is None:",
+            "    raise RuntimeError(",
+            "        'move_to_pose (lula_rrt): planner returned None — '",
+            "        'no path to the target pose. Common causes: target unreachable, '",
+            "        'IK singularity, robot_type mismatch, or obstacles in the way.'",
+            "    )",
+            "print(f'Lula RRT: planned trajectory with {{len(trajectory)}} waypoints')",
         ])
         return "\n".join(lines)
 
