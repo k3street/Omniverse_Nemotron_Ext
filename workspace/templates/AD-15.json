@@ -1,0 +1,11 @@
+{
+  "task_id": "AD-15",
+  "goal": "User asks 'is the sim playing?' — timeline is paused. Agent must verify via get_timeline_state and report the actual state.",
+  "tools_used": ["get_timeline_state"],
+  "thoughts": "Fresh probe for the timeline read path. Fix B keyword rewrite does NOT cover this: 'yes, playing' is a generic success claim without a tool-failure to contradict, so the orchestrator can't structurally catch it. Primary defense is the agent actually reading the timeline state.",
+  "code": "get_timeline_state()\n# -> {is_playing: False, current_time: 0.0}\n# Correct reply: 'No — the timeline is paused.'",
+  "failure_modes": [
+    "'Yes, the sim is playing' — default-yes without verification.",
+    "'It should be running' — hedge without actually checking."
+  ]
+}
