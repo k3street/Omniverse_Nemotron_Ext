@@ -712,11 +712,16 @@ class ChatOrchestrator:
                 # "friction=0.8 on /World/Material". Verify via get_attribute.
                 # Cap at 3 checks. Only common physics/appearance attrs to
                 # avoid over-matching plain numbers in prose.
+                # Accept: `attr=val`, `attr: val`, `attr of val`, `attr is val`,
+                # `attr set to val`. Also handle the inverse order with a second
+                # alternative — "mass of /World/X is 1.0".
+                _ATTR_SEP = r"(?:\s*[=:]\s*|\s+(?:is|of|set to|=)\s+)"
                 attr_pat = _re.compile(
                     r"(?P<path>/World[/A-Za-z0-9_]+)"
                     r"[^\n]{0,120}?"
                     r"(?P<attr>mass|friction|restitution|damping|stiffness|radius|height|density|size)"
-                    r"\s*[=:]\s*(?P<val>-?\d+(?:\.\d+)?)",
+                    + _ATTR_SEP +
+                    r"(?P<val>-?\d+(?:\.\d+)?)",
                     _re.I,
                 )
                 _ATTR_NAME_MAP = {
