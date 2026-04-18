@@ -50,7 +50,24 @@ def _task_goal_query(task_id: str) -> Optional[str]:
     return goal[:MAX_QUERY_CHARS]
 
 
-def run_direct(task_id: str, runs_dir: Path, timeout_s: int = 600) -> Dict:
+_CONTINUATION_PROMPT = (
+    "Please continue and make sure every part of my original request is covered — "
+    "if you left any sub-task unfinished (code example, specific tool name, exact "
+    "constraint values, cite-able statement), complete it now. If you are truly "
+    "done and every sub-task is addressed, reply with 'All sub-tasks covered.'"
+)
+
+
+def run_direct(task_id: str, runs_dir: Path, timeout_s: int = 600,
+               followup: bool = False) -> Dict:
+    """Run a direct-mode eval on `task_id`.
+
+    When `followup=True`, send one additional "are you really done?" turn
+    after the first reply. This probes whether LLM truncation is what's
+    costing us the ~2 failures on the 20-task suite (T-13, C-03) — if the
+    agent CAN produce the full answer given a second shot, the failure was
+    output-length-bound rather than capability-bound.
+    """
     run_id = datetime.now().strftime("run_direct_%Y%m%dT%H%M%S") + f"_{uuid.uuid4().hex[:6]}"
     out_dir = runs_dir / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -66,7 +83,8 @@ def run_direct(task_id: str, runs_dir: Path, timeout_s: int = 600) -> Dict:
         log({"event": "error", "message": f"no goal found for {task_id}"})
         return {"task": task_id, "transcript": str(transcript), "error": "no goal"}
 
-    log({"event": "direct_eval_start", "task": task_id, "query": query})
+    log({"event": "direct_eval_start", "task": task_id, "query": query,
+         "followup_enabled": followup})
     reset_result = _reset_stage()
     log({"event": "stage_reset", "result": reset_result})
     pre = _apply_pre_session_setup(task_id)
@@ -75,6 +93,8 @@ def run_direct(task_id: str, runs_dir: Path, timeout_s: int = 600) -> Dict:
     log({"event": "stage_snapshot", "when": "initial", "snapshot": _snapshot_stage()})
 
     session_id = f"direct_{run_id}"
+    total_tool_calls = 0
+    total_chars = 0
     try:
         with httpx.Client(timeout=timeout_s) as client:
             r = client.post(ISAAC_ASSIST_URL, json={"session_id": session_id, "message": query})
@@ -88,11 +108,37 @@ def run_direct(task_id: str, runs_dir: Path, timeout_s: int = 600) -> Dict:
     log({"event": "isaac_assist_reply", "turn": 1, "text": assistant_msg,
          "intent": reply.get("intent"),
          "tool_calls": reply.get("tool_calls", [])})
+    total_tool_calls += len(reply.get("tool_calls", []))
+    total_chars += len(assistant_msg)
+
+    if followup:
+        log({"event": "stage_snapshot", "when": "after_turn_1", "snapshot": _snapshot_stage()})
+        log({"event": "persona_message", "turn": 2, "text": _CONTINUATION_PROMPT})
+        try:
+            with httpx.Client(timeout=timeout_s) as client:
+                r2 = client.post(ISAAC_ASSIST_URL, json={
+                    "session_id": session_id, "message": _CONTINUATION_PROMPT
+                })
+                r2.raise_for_status()
+                reply2 = r2.json()
+        except Exception as e:
+            log({"event": "isaac_assist_error", "error": str(e), "turn": 2})
+            reply2 = None
+        if reply2 is not None:
+            assistant_msg_2 = "\n".join(
+                m.get("content", "") for m in reply2.get("response_messages", [])
+            ).strip()
+            log({"event": "isaac_assist_reply", "turn": 2, "text": assistant_msg_2,
+                 "intent": reply2.get("intent"),
+                 "tool_calls": reply2.get("tool_calls", [])})
+            total_tool_calls += len(reply2.get("tool_calls", []))
+            total_chars += len(assistant_msg_2)
+
     log({"event": "stage_snapshot", "when": "after_direct", "snapshot": _snapshot_stage()})
     log({"event": "direct_eval_end"})
     return {"task": task_id, "transcript": str(transcript),
-            "tool_calls": len(reply.get("tool_calls", [])),
-            "reply_chars": len(assistant_msg)}
+            "tool_calls": total_tool_calls,
+            "reply_chars": total_chars}
 
 
 def main():
@@ -101,6 +147,10 @@ def main():
     p.add_argument("--tasks", help="comma-separated")
     p.add_argument("--all", action="store_true")
     p.add_argument("--runs-dir", default=str(REPO_ROOT / "workspace" / "qa_runs"))
+    p.add_argument("--followup", action="store_true",
+                   help="Add one 'are you done?' continuation turn — probes whether "
+                        "the agent's truncation-shaped failures are fixable with a "
+                        "second shot, or are a true capability ceiling.")
     args = p.parse_args()
     runs_dir = Path(args.runs_dir)
 
@@ -115,12 +165,13 @@ def main():
         p.print_help()
         return
 
-    summary = runs_dir / f"campaign_direct_{time.strftime('%Y%m%dT%H%M%S')}.jsonl"
+    tag = "direct2" if args.followup else "direct"
+    summary = runs_dir / f"campaign_{tag}_{time.strftime('%Y%m%dT%H%M%S')}.jsonl"
     print(f"Campaign: {summary.name}", flush=True)
     for i, tid in enumerate(task_ids, 1):
         t0 = time.time()
         print(f"[{i}/{len(task_ids)}] {tid}", flush=True)
-        res = run_direct(tid, runs_dir)
+        res = run_direct(tid, runs_dir, followup=args.followup)
         elapsed = time.time() - t0
         print(f"  done tool_calls={res.get('tool_calls',0)} chars={res.get('reply_chars',0)} time={elapsed:.0f}s err={res.get('error','')}", flush=True)
         with summary.open('a') as f:
