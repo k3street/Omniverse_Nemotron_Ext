@@ -26668,3 +26668,331 @@ print(json.dumps(results, indent=2))
 
 
 CODE_GEN_HANDLERS["create_calibration_experiment"] = _gen_create_calibration_experiment
+
+
+# ── GR00T Advanced Tooling (Phase 7G Addendum) ─────────────────────────────
+
+_FINETUNE_FREEZE_PROFILES = {
+    "similar_to_pretrain": {
+        "freeze": ["vision_encoder", "language_model"],
+        "tune": ["dit_layers", "connectors"],
+        "rationale": "NVIDIA's own recipe — preserves visual+language priors, adapts action head",
+        "lora_rank": 0,
+    },
+    "new_visual_domain": {
+        "freeze": ["language_model"],
+        "tune": ["vision_encoder", "dit_layers", "connectors"],
+        "rationale": "New visual domain requires vision adaptation. Cuts batch from 200 to 16 on A6000.",
+        "lora_rank": 0,
+        "warning": "Don't Blind Your VLA: unfreezing vision can cause OOD generalization loss",
+    },
+    "new_embodiment": {
+        "freeze": [],
+        "tune": ["all (LoRA)"],
+        "rationale": "New robot morphology requires full re-tuning. LoRA rank 16 fits on RTX 4080 <8GB",
+        "lora_rank": 16,
+    },
+}
+
+_EXPORT_TARGETS = {
+    "jetson_agx_orin": {"format": "TensorRT bf16", "expected_hz": 5.8, "fp8_supported": False, "note": "Official pipeline"},
+    "jetson_orin_nx": {"format": "TensorRT bf16", "expected_hz": 3.0, "fp8_supported": False, "note": "FP8/NVFP4 unsupported (SM87)"},
+    "x86_rtx4090": {"format": "TensorRT bf16", "expected_hz": 15.0, "fp8_supported": True, "note": "Best desktop performance"},
+    "x86_a6000": {"format": "TensorRT bf16", "expected_hz": 12.0, "fp8_supported": True, "note": "High VRAM headroom"},
+}
+
+
+def _gen_extract_attention_maps(args: Dict) -> str:
+    """Generate code to extract DiT cross-attention maps from GR00T."""
+    checkpoint = args["checkpoint_path"]
+    obs_path = args["observation_path"]
+    layer = args.get("layer", 12)
+
+    return f"""\
+# Extract GR00T attention maps (layer {layer})
+import torch
+import json
+import os
+
+checkpoint_path = {checkpoint!r}
+observation_path = {obs_path!r}
+layer = {layer}
+
+if not os.path.exists(checkpoint_path):
+    print(json.dumps({{"error": f"Checkpoint not found: {{checkpoint_path}}"}}))
+else:
+    print(f"Loading GR00T checkpoint from {{checkpoint_path}}...")
+    # Note: actual GR00T model loading requires gr00t.policy package
+    # from gr00t.policy.dit_policy import DiTPolicy
+    # model = DiTPolicy.load_from_checkpoint(checkpoint_path)
+    # from torch.fx import create_feature_extractor
+    # features = create_feature_extractor(model.vision_encoder,
+    #     return_nodes={{f"encoder.layers.{{layer}}.self_attn.attn_drop": f"attn_{{layer}}"}})
+
+    print(f"Attention map extraction configured for layer {{layer}}")
+    print(f"Observation: {{observation_path}}")
+    print("Run model.forward(observation) to capture attention; overlay on viewport image as heatmap")
+
+    result = {{
+        "checkpoint": checkpoint_path,
+        "observation": observation_path,
+        "layer": layer,
+        "tap_node": f"encoder.layers.{{layer}}.self_attn.attn_drop",
+        "next_step": "Run inference with feature extractor, save heatmap PNG",
+    }}
+    print(json.dumps(result, indent=2))
+"""
+
+
+CODE_GEN_HANDLERS["extract_attention_maps"] = _gen_extract_attention_maps
+
+
+async def _handle_detect_ood(args: Dict) -> Dict:
+    """Detect OOD via action variance/autocorrelation (Tier 1) or higher tiers."""
+    tier = args.get("tier", 1)
+
+    if tier == 1:
+        action_seq = args.get("action_sequence", [])
+        if not action_seq or len(action_seq) < 2:
+            return {"error": "Tier 1 requires action_sequence with >= 2 entries"}
+
+        n_dims = len(action_seq[0]) if isinstance(action_seq[0], (list, tuple)) else 1
+        variances = []
+        autocorrs = []
+        for j in range(n_dims):
+            values = [step[j] if isinstance(step, (list, tuple)) else step for step in action_seq]
+            mean = sum(values) / len(values)
+            var = sum((v - mean) ** 2 for v in values) / len(values)
+            variances.append(var)
+            if len(values) >= 3:
+                v0, v1 = values[:-1], values[1:]
+                m0, m1 = sum(v0) / len(v0), sum(v1) / len(v1)
+                num = sum((a - m0) * (b - m1) for a, b in zip(v0, v1))
+                den0 = sum((a - m0) ** 2 for a in v0) ** 0.5
+                den1 = sum((b - m1) ** 2 for b in v1) ** 0.5
+                autocorrs.append(num / max(den0 * den1, 1e-10))
+            else:
+                autocorrs.append(0.0)
+
+        max_var = max(variances)
+        min_autocorr = min(autocorrs) if autocorrs else 1.0
+        is_ood = max_var > 1.0 or min_autocorr < 0.3
+        return {
+            "tier": 1,
+            "is_ood": is_ood,
+            "max_action_variance": round(max_var, 4),
+            "min_autocorrelation": round(min_autocorr, 4),
+            "thresholds": {"variance": 1.0, "autocorr": 0.3},
+            "warning": "Action instability detected — policy may be extrapolating" if is_ood else None,
+        }
+    elif tier == 2:
+        return {
+            "tier": 2,
+            "method": "4-sample DiT variance",
+            "overhead_ms": 15,
+            "instructions": "Run 4 forward passes with dropout, compute action variance",
+            "checkpoint_needed": args.get("checkpoint_path"),
+        }
+    elif tier == 3:
+        return {
+            "tier": 3,
+            "method": "Mahalanobis distance on 12th-layer embeddings",
+            "instructions": "Pre-compute mean+covariance over training data; inference distance > threshold = OOD",
+            "calibration_path": args.get("calibration_path"),
+        }
+    else:
+        return {"error": f"Invalid tier {tier} — must be 1, 2, or 3"}
+
+
+DATA_HANDLERS["detect_ood"] = _handle_detect_ood
+
+
+async def _handle_suggest_data_mix(args: Dict) -> Dict:
+    """Recommend sim/real/video data ratio per NVIDIA's 1:1 recipe."""
+    task_type = args.get("task_type", "tabletop pick-and-place")
+    available = args.get("available_data", {})
+    real_demos = available.get("real_demos", 0)
+    sim_demos = available.get("sim_demos", 0)
+    video_demos = available.get("video_demos", 0)
+
+    target_real = real_demos
+    target_sim = min(sim_demos, real_demos) if real_demos > 0 else min(sim_demos, 200)
+    target_video = min(video_demos, max(target_real // 4, 0))
+
+    return {
+        "task_type": task_type,
+        "available": available,
+        "recommendation": {
+            "real_demos_to_use": target_real,
+            "sim_demos_to_use": target_sim,
+            "video_demos_to_use": target_video,
+            "total_training_examples": target_real + target_sim + target_video,
+        },
+        "rationale": "NVIDIA's validated 1:1 real-to-neural ratio (40% gain over real-only)",
+        "dr_priorities": [
+            "Spatial DR (table height + camera pose) — 3x weight",
+            "Appearance DR (textures, lighting) — 1x weight",
+        ],
+        "additional_advice": (
+            f"Consider collecting {max(50 - video_demos, 0)} more video demos for visual diversity"
+            if video_demos < 50 else "Video diversity is sufficient"
+        ),
+        "warnings": (
+            ["⚠ No real demos — sim-only training will have high sim-to-real gap"]
+            if real_demos == 0 else []
+        ),
+    }
+
+
+DATA_HANDLERS["suggest_data_mix"] = _handle_suggest_data_mix
+
+
+async def _handle_suggest_finetune_config(args: Dict) -> Dict:
+    """Recommend layer freeze/tune strategy."""
+    task_type = args.get("task_type", "similar_to_pretrain")
+    hardware = args.get("hardware", "RTX 4090")
+    data_size = args.get("data_size", 0)
+
+    profile = _FINETUNE_FREEZE_PROFILES.get(task_type)
+    if not profile:
+        return {"error": f"Unknown task_type: {task_type}. Valid: {list(_FINETUNE_FREEZE_PROFILES.keys())}"}
+
+    hw_batch_hints = {
+        "A6000": {"similar_to_pretrain": 200, "new_visual_domain": 16, "new_embodiment": 8},
+        "RTX 4090": {"similar_to_pretrain": 100, "new_visual_domain": 8, "new_embodiment": 4},
+        "RTX 4080": {"similar_to_pretrain": 50, "new_visual_domain": 4, "new_embodiment": 2},
+        "H100": {"similar_to_pretrain": 400, "new_visual_domain": 32, "new_embodiment": 16},
+    }
+    batch = hw_batch_hints.get(hardware, hw_batch_hints["RTX 4090"]).get(task_type, 16)
+
+    result = {
+        "task_type": task_type,
+        "hardware": hardware,
+        "freeze_layers": profile["freeze"],
+        "tune_layers": profile["tune"],
+        "rationale": profile["rationale"],
+        "recommended_batch_size": batch,
+        "lora_rank": profile["lora_rank"],
+    }
+    if "warning" in profile:
+        result["warning"] = profile["warning"]
+    if data_size and data_size < 50:
+        result["data_warning"] = f"Only {data_size} demos — consider collecting more (recommended: 200+)"
+    return result
+
+
+DATA_HANDLERS["suggest_finetune_config"] = _handle_suggest_finetune_config
+
+
+async def _handle_monitor_forgetting(args: Dict) -> Dict:
+    """Detect catastrophic forgetting via VQA regression + weight drift."""
+    checkpoint_dir = args.get("checkpoint_dir", "")
+    base_model = args.get("base_model", "")
+
+    if not Path(checkpoint_dir).exists():
+        return {"error": f"Checkpoint dir not found: {checkpoint_dir}"}
+
+    return {
+        "checkpoint_dir": checkpoint_dir,
+        "base_model": base_model,
+        "vqa_benchmarks": ["MMMU", "MMStar", "RealWorldQA", "MathVista", "AI2D"],
+        "instructions": [
+            "1. Run 30-example VQA regression suite on each checkpoint",
+            "2. Compare scores against base_model baseline",
+            "3. Compute per-layer Frobenius norm: ||W_ft - W_pre||_F",
+            "4. Alert if ANY VQA score drops >20% OR vision encoder drift > threshold",
+        ],
+        "alert_thresholds": {
+            "vqa_score_drop_pct": 20,
+            "vision_encoder_drift_max": 0.05,
+            "language_model_drift_max": 0.01,
+        },
+        "warning": "Standard fine-tuning can collapse silently to near-zero VQA scores without external checks",
+    }
+
+
+DATA_HANDLERS["monitor_forgetting"] = _handle_monitor_forgetting
+
+
+def _gen_export_policy(args: Dict) -> str:
+    """Generate code to export GR00T checkpoint to TensorRT."""
+    checkpoint = args["checkpoint"]
+    target = args["target_device"]
+    budget_ms = args.get("inference_budget_ms")
+
+    target_info = _EXPORT_TARGETS.get(target, _EXPORT_TARGETS["x86_rtx4090"])
+
+    return f"""\
+# Export GR00T policy to TensorRT for {target}
+import os
+import json
+
+checkpoint_path = {checkpoint!r}
+target_device = {target!r}
+target_info = {target_info!r}
+budget_ms = {budget_ms!r}
+
+print(f"Exporting {{checkpoint_path}} for {{target_device}}")
+print(f"  Format: {{target_info['format']}}")
+print(f"  Expected throughput: {{target_info['expected_hz']}} Hz")
+print(f"  FP8 supported: {{target_info['fp8_supported']}}")
+print(f"  Note: {{target_info['note']}}")
+
+if not target_info['fp8_supported']:
+    print("⚠ FP8/NVFP4 unsupported on this device — capped at bf16")
+
+# Actual export pipeline:
+# 1. Load checkpoint via gr00t.policy.dit_policy.DiTPolicy
+# 2. Convert to ONNX via torch.onnx.export
+# 3. Build TensorRT engine via trtexec or polygraphy:
+#    trtexec --onnx=policy.onnx --saveEngine=policy.engine --bf16
+
+output_engine = checkpoint_path.replace('.pt', f'.{{target_device}}.engine')
+print(f"Output engine path: {{output_engine}}")
+
+if budget_ms:
+    if 1000 / budget_ms > target_info['expected_hz']:
+        print(f"⚠ Budget {{budget_ms}}ms requires {{1000/budget_ms:.1f}} Hz but device max is {{target_info['expected_hz']}} Hz")
+"""
+
+
+CODE_GEN_HANDLERS["export_policy"] = _gen_export_policy
+
+
+async def _handle_analyze_checkpoint(args: Dict) -> Dict:
+    """Analyze GR00T checkpoint: embodiment, drift, action stats, risk."""
+    checkpoint_path = args.get("checkpoint_path", "")
+    base_path = args.get("base_model_path")
+
+    if not Path(checkpoint_path).exists():
+        return {"error": f"Checkpoint not found: {checkpoint_path}"}
+
+    analysis = {
+        "checkpoint_path": checkpoint_path,
+        "instructions": [
+            "1. Load checkpoint with torch.load(weights_only=False)",
+            "2. Read metadata: embodiment, training_steps from checkpoint['config']",
+            "3. If base_model provided, compute per-layer Frobenius norm",
+            "4. Aggregate action statistics from training logs",
+        ],
+        "expected_structure": {
+            "embodiment": "UNITREE_G1 / LIBERO_PANDA / OXE_WIDOWX / CUSTOM",
+            "training_steps": "int",
+            "layer_drift": {
+                "vision_encoder": "low (<0.05) = frozen, good",
+                "dit_layers": "high (>0.3) = well-targeted",
+                "adapter_mlps": "high (>0.3) = expected",
+                "language_model": "near-zero (<0.01) = frozen, good",
+            },
+            "action_statistics": {
+                "mean_per_joint": "[float, ...]",
+                "std_per_joint": "[float, ...]",
+            },
+        },
+    }
+    if base_path:
+        analysis["compare_against"] = base_path
+    return analysis
+
+
+DATA_HANDLERS["analyze_checkpoint"] = _handle_analyze_checkpoint

@@ -1580,6 +1580,27 @@ _RAW_TEST_VECTORS = [
         {"parameter": "damping", "range": [0.1, 1.0], "real_data_path": "/data/real.csv"},
         ["damping", "DriveAPI", "DampingAttr"],
     ),
+    # ── GR00T Tooling: extract_attention_maps + export_policy ─────────────
+    (
+        "extract_attention_maps",
+        {"checkpoint_path": "/models/groot.pt", "observation_path": "/data/obs.h5"},
+        ["/models/groot.pt", "/data/obs.h5", "12", "attn_drop"],
+    ),
+    (
+        "extract_attention_maps",
+        {"checkpoint_path": "/models/g.pt", "observation_path": "/o.h5", "layer": 6},
+        ["layer = 6", "attn_drop"],
+    ),
+    (
+        "export_policy",
+        {"checkpoint": "/models/groot.pt", "target_device": "jetson_agx_orin"},
+        ["jetson_agx_orin", "TensorRT", "5.8"],
+    ),
+    (
+        "export_policy",
+        {"checkpoint": "/models/groot.pt", "target_device": "x86_rtx4090", "inference_budget_ms": 50},
+        ["x86_rtx4090", "budget_ms", "50"],
+    ),
 ]
 
 

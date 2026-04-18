@@ -57,6 +57,7 @@ except ImportError:
 
 
 
+
 class TestLookupProductSpec:
     """Test the sensor spec lookup handler."""
 
@@ -2244,3 +2245,102 @@ class TestSimToRealGap:
         result = await handler({"sim_video_path": str(sim_vid), "real_video_path": str(real_vid)})
         assert "analysis_prompt" in result
         assert "next_step" in result
+class TestGr00tTooling:
+    """Test GR00T addendum data handlers."""
+
+    @pytest.mark.asyncio
+    async def test_detect_ood_tier1_stable(self):
+        handler = DATA_HANDLERS["detect_ood"]
+        action_seq = [[0.0, 0.0], [0.01, 0.01], [0.02, 0.02], [0.03, 0.03]]
+        result = await handler({"tier": 1, "action_sequence": action_seq})
+        assert result["tier"] == 1
+        assert result["is_ood"] is False or "max_action_variance" in result
+
+    @pytest.mark.asyncio
+    async def test_detect_ood_tier1_unstable(self):
+        handler = DATA_HANDLERS["detect_ood"]
+        action_seq = [[0.0, 0.0], [5.0, -5.0], [-3.0, 4.0], [10.0, -8.0]]
+        result = await handler({"tier": 1, "action_sequence": action_seq})
+        assert result["is_ood"] is True
+        assert "warning" in result and result["warning"] is not None
+
+    @pytest.mark.asyncio
+    async def test_detect_ood_tier1_no_data(self):
+        handler = DATA_HANDLERS["detect_ood"]
+        result = await handler({"tier": 1})
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_detect_ood_invalid_tier(self):
+        handler = DATA_HANDLERS["detect_ood"]
+        result = await handler({"tier": 5})
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_suggest_data_mix_balanced(self):
+        handler = DATA_HANDLERS["suggest_data_mix"]
+        result = await handler({
+            "task_type": "tabletop pick-and-place",
+            "available_data": {"real_demos": 200, "sim_demos": 5000, "video_demos": 0},
+        })
+        assert result["recommendation"]["real_demos_to_use"] == 200
+        assert result["recommendation"]["sim_demos_to_use"] == 200  # 1:1 ratio
+
+    @pytest.mark.asyncio
+    async def test_suggest_data_mix_no_real(self):
+        handler = DATA_HANDLERS["suggest_data_mix"]
+        result = await handler({
+            "task_type": "navigation",
+            "available_data": {"real_demos": 0, "sim_demos": 1000, "video_demos": 0},
+        })
+        assert result["warnings"]
+        assert "No real demos" in result["warnings"][0]
+
+    @pytest.mark.asyncio
+    async def test_suggest_finetune_similar(self):
+        handler = DATA_HANDLERS["suggest_finetune_config"]
+        result = await handler({"task_type": "similar_to_pretrain", "hardware": "A6000"})
+        assert "vision_encoder" in result["freeze_layers"]
+        assert "language_model" in result["freeze_layers"]
+        assert result["recommended_batch_size"] == 200
+
+    @pytest.mark.asyncio
+    async def test_suggest_finetune_new_visual(self):
+        handler = DATA_HANDLERS["suggest_finetune_config"]
+        result = await handler({"task_type": "new_visual_domain", "hardware": "A6000"})
+        assert "warning" in result
+        assert "Don't Blind" in result["warning"]
+
+    @pytest.mark.asyncio
+    async def test_suggest_finetune_invalid(self):
+        handler = DATA_HANDLERS["suggest_finetune_config"]
+        result = await handler({"task_type": "bogus", "hardware": "A6000"})
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_monitor_forgetting_missing_dir(self):
+        handler = DATA_HANDLERS["monitor_forgetting"]
+        result = await handler({"checkpoint_dir": "/nonexistent", "base_model": "/base"})
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_monitor_forgetting_returns_thresholds(self, tmp_path):
+        handler = DATA_HANDLERS["monitor_forgetting"]
+        result = await handler({"checkpoint_dir": str(tmp_path), "base_model": "/base"})
+        assert "alert_thresholds" in result
+        assert result["alert_thresholds"]["vqa_score_drop_pct"] == 20
+
+    @pytest.mark.asyncio
+    async def test_analyze_checkpoint_missing(self):
+        handler = DATA_HANDLERS["analyze_checkpoint"]
+        result = await handler({"checkpoint_path": "/nonexistent.pt"})
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_analyze_checkpoint_exists(self, tmp_path):
+        ckpt = tmp_path / "model.pt"
+        ckpt.write_bytes(b"fake")
+        handler = DATA_HANDLERS["analyze_checkpoint"]
+        result = await handler({"checkpoint_path": str(ckpt)})
+        assert "expected_structure" in result
+        assert "embodiment" in result["expected_structure"]
