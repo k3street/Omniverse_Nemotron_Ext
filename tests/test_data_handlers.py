@@ -70,6 +70,7 @@ except ImportError:
 
 
 
+
 class TestLookupProductSpec:
     """Test the sensor spec lookup handler."""
 
@@ -2804,3 +2805,100 @@ class TestListVariants:
         handler = DATA_HANDLERS["list_variants"]
         result = await handler({"prim_path": "/World/X", "variant_set": "lod"})
         assert result["queued"] is True
+
+
+# ---------------------------------------------------------------------------
+# Tier 10 — Animation & Timeline data handlers
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(
+    "get_timeline_state" not in DATA_HANDLERS,
+    reason="Tier 10 (Animation & Timeline) not merged on this branch",
+)
+class TestGetTimelineState:
+    """get_timeline_state introspects omni.timeline + stage time-code metadata."""
+
+    @pytest.mark.asyncio
+    async def test_get_timeline_state_queues_introspection(self, mock_kit_rpc, monkeypatch):
+        captured = {}
+        async def fake_queue(code, desc):
+            captured["code"] = code
+            captured["desc"] = desc
+            return {"queued": True, "patch_id": "tier10_timeline_001"}
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+
+        handler = DATA_HANDLERS["get_timeline_state"]
+        result = await handler({})
+        assert result["queued"] is True
+        assert result["patch_id"] == "tier10_timeline_001"
+        # Script must touch both timeline interface AND stage time-code metadata.
+        assert "omni.timeline" in captured["code"]
+        assert "GetTimeCodesPerSecond" in captured["code"]
+        assert "GetStartTimeCode" in captured["code"]
+        assert "GetEndTimeCode" in captured["code"]
+        assert "json.dumps" in captured["code"]
+        # Note must describe the response shape so the LLM knows what keys to expect.
+        assert "current_time" in result["note"]
+        assert "fps" in result["note"]
+        assert "is_playing" in result["note"]
+
+    @pytest.mark.asyncio
+    async def test_get_timeline_state_script_compiles(self, mock_kit_rpc, monkeypatch):
+        async def fake_queue(code, desc):
+            compile(code, "<get_timeline_state>", "exec")
+            return {"queued": True, "patch_id": "ok"}
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+
+        handler = DATA_HANDLERS["get_timeline_state"]
+        result = await handler({})
+        assert result["queued"] is True
+
+
+@pytest.mark.skipif(
+    "list_keyframes" not in DATA_HANDLERS,
+    reason="Tier 10 (Animation & Timeline) not merged on this branch",
+)
+class TestListKeyframes:
+    """list_keyframes enumerates TimeSamples on a single attribute."""
+
+    @pytest.mark.asyncio
+    async def test_list_keyframes_embeds_both_args(self, mock_kit_rpc, monkeypatch):
+        captured = {}
+        async def fake_queue(code, desc):
+            captured["code"] = code
+            captured["desc"] = desc
+            return {"queued": True, "patch_id": "tier10_kf_001"}
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+
+        handler = DATA_HANDLERS["list_keyframes"]
+        result = await handler({"prim_path": "/World/Cube", "attr": "xformOp:translate"})
+        assert result["queued"] is True
+        assert result["prim_path"] == "/World/Cube"
+        assert result["attr"] == "xformOp:translate"
+        # Both arguments must reach the introspection script.
+        assert "/World/Cube" in captured["code"]
+        assert "xformOp:translate" in captured["code"]
+        assert "GetTimeSamples" in captured["code"]
+        # Must report has_timesamples + time_range so empty results are not "errors".
+        assert "has_timesamples" in captured["code"]
+        assert "time_range_codes" in captured["code"]
+
+    @pytest.mark.asyncio
+    async def test_list_keyframes_path_with_special_chars(self, mock_kit_rpc, monkeypatch):
+        """Special chars in prim path / attr must round-trip through repr() without breaking syntax."""
+        async def fake_queue(code, desc):
+            compile(code, "<list_keyframes>", "exec")
+            return {"queued": True, "patch_id": "ok"}
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+
+        handler = DATA_HANDLERS["list_keyframes"]
+        result = await handler({
+            "prim_path": "/World/Robot's (v2)",
+            "attr": "drive:angular:physics:targetPosition",
+        })
+        assert result["queued"] is True
+        assert result["attr"] == "drive:angular:physics:targetPosition"

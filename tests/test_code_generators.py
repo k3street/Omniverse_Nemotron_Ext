@@ -2059,6 +2059,47 @@ _RAW_TEST_VECTORS = [
         {"output_path": "/tmp/baked.usdc"},
         ["stage.Flatten", "Export", "/tmp/baked.usdc"],
     ),
+    # ── Tier 10 — Animation & Timeline ────────────────────────────────────
+    (
+        "set_timeline_range",
+        {"start": 0, "end": 240},
+        ["SetStartTimeCode", "SetEndTimeCode", "omni.timeline", "240"],
+    ),
+    (
+        "set_timeline_range",
+        {"start": 0, "end": 720, "fps": 60},
+        ["SetTimeCodesPerSecond", "60", "720"],
+    ),
+    (
+        "set_keyframe",
+        {
+            "prim_path": "/World/Cube",
+            "attr": "xformOp:translate",
+            "time": 1.0,
+            "value": [0, 0, 1],
+        },
+        ["GetAttribute", "TimeCode", "xformOp:translate", "/World/Cube"],
+    ),
+    (
+        "set_keyframe",
+        {
+            "prim_path": "/World/Light",
+            "attr": "inputs:intensity",
+            "time": 2.5,
+            "value": 5000.0,
+        },
+        ["inputs:intensity", "5000.0", "TimeCode"],
+    ),
+    (
+        "play_animation",
+        {"start": 0, "end": 5.0},
+        ["omni.timeline", "tl.play()", "5.0"],
+    ),
+    (
+        "play_animation",
+        {"start": 1.0, "end": 3.5},
+        ["omni.timeline", "tl.play()", "1.0", "3.5"],
+    ),
 ]
 
 
@@ -3212,6 +3253,91 @@ class TestTemplateDetection:
         code = CODE_GEN_HANDLERS["flatten_layers"]({"output_path": "/tmp/scene.usdc"})
         _assert_valid_python(code, "flatten_layers")
         assert "/tmp/scene.usdc" in code
+
+    # ── Tier 10 — Animation & Timeline edge cases ──────────────────────────
+
+    @pytest.mark.skipif(
+        "set_timeline_range" not in CODE_GEN_HANDLERS,
+        reason="Tier 10 (Animation & Timeline) not merged on this branch",
+    )
+    def test_set_timeline_range_defaults_keep_existing_fps(self):
+        """When fps is omitted, generated code reads stage.GetTimeCodesPerSecond()."""
+        code = CODE_GEN_HANDLERS["set_timeline_range"]({"start": 0, "end": 100})
+        _assert_valid_python(code, "set_timeline_range")
+        # No SetTimeCodesPerSecond when fps not provided
+        assert "SetTimeCodesPerSecond" not in code
+        # Should still read fps for the timeline-interface conversion
+        assert "GetTimeCodesPerSecond" in code
+
+    @pytest.mark.skipif(
+        "set_timeline_range" not in CODE_GEN_HANDLERS,
+        reason="Tier 10 (Animation & Timeline) not merged on this branch",
+    )
+    def test_set_timeline_range_validates_start_lt_end(self):
+        """Generated code must guard against start >= end."""
+        code = CODE_GEN_HANDLERS["set_timeline_range"]({"start": 10, "end": 100, "fps": 30})
+        _assert_valid_python(code, "set_timeline_range")
+        assert "ValueError" in code
+        assert "must be < end" in code
+
+    @pytest.mark.skipif(
+        "set_keyframe" not in CODE_GEN_HANDLERS,
+        reason="Tier 10 (Animation & Timeline) not merged on this branch",
+    )
+    def test_set_keyframe_path_with_special_chars(self):
+        """Special chars in prim path / attr must round-trip via repr() without breaking syntax."""
+        code = CODE_GEN_HANDLERS["set_keyframe"]({
+            "prim_path": "/World/My Robot (v2)/joint",
+            "attr": "drive:angular:physics:targetPosition",
+            "time": 0.5,
+            "value": 1.57,
+        })
+        _assert_valid_python(code, "set_keyframe")
+        assert "My Robot" in code
+        assert "drive:angular" in code
+        # Must convert seconds -> USD time code via fps
+        assert "TimeCode" in code
+        assert "fps" in code
+
+    @pytest.mark.skipif(
+        "set_keyframe" not in CODE_GEN_HANDLERS,
+        reason="Tier 10 (Animation & Timeline) not merged on this branch",
+    )
+    def test_set_keyframe_array_value_falls_back_to_gf_vec(self):
+        """Vec3 / Vec4 fallback when raw .Set() rejects a Python list."""
+        code = CODE_GEN_HANDLERS["set_keyframe"]({
+            "prim_path": "/World/Cube",
+            "attr": "xformOp:translate",
+            "time": 0.0,
+            "value": [1.0, 2.0, 3.0],
+        })
+        _assert_valid_python(code, "set_keyframe")
+        # Fallback path must construct a Gf.Vec3f from the list
+        assert "Gf.Vec3f" in code
+        assert "Gf.Vec4f" in code
+
+    @pytest.mark.skipif(
+        "play_animation" not in CODE_GEN_HANDLERS,
+        reason="Tier 10 (Animation & Timeline) not merged on this branch",
+    )
+    def test_play_animation_validates_range(self):
+        """Generated code must reject start >= end before calling play()."""
+        code = CODE_GEN_HANDLERS["play_animation"]({"start": 0, "end": 2.0})
+        _assert_valid_python(code, "play_animation")
+        assert "ValueError" in code
+        assert "tl.play()" in code
+
+    @pytest.mark.skipif(
+        "play_animation" not in CODE_GEN_HANDLERS,
+        reason="Tier 10 (Animation & Timeline) not merged on this branch",
+    )
+    def test_play_animation_uses_seconds_not_codes(self):
+        """play_animation takes seconds and converts to time codes via stage fps."""
+        code = CODE_GEN_HANDLERS["play_animation"]({"start": 0.0, "end": 1.0})
+        _assert_valid_python(code, "play_animation")
+        assert "GetTimeCodesPerSecond" in code
+        assert "start_seconds" in code
+        assert "end_seconds" in code
 
 
 class TestAllCodeGenHandlersCovered:

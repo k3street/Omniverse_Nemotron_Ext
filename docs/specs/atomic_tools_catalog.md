@@ -153,6 +153,26 @@ USD stage inspection — making scene structure queryable.
 | T10.3 | `set_keyframe(prim_path, attr, time, value)` | USD TimeSamples |
 | T10.4 | `list_keyframes(prim_path, attr)` | Existing keyframes |
 | T10.5 | `play_animation(start, end)` | Playback control |
+## Tier 10 — Animation & Timeline (5 tools) [IMPLEMENTED]
+
+5 tools wiring the LLM to the USD timeline + TimeSamples. **Distinct from
+`sim_control`** (which steps PhysX): tier-10 controls the USD playback cursor
+and authors keyframes that PhysX-decoupled clients (Replicator, SDG, replay)
+consume.
+
+| # | Tool | Type | Implementation |
+|---|------|------|----------------|
+| T10.1 | `get_timeline_state()` | DATA | omni.timeline + stage time-code metadata |
+| T10.2 | `set_timeline_range(start, end, fps)` | CODE_GEN | Set{Start,End,TimeCodesPerSecond}TimeCode |
+| T10.3 | `set_keyframe(prim_path, attr, time, value)` | CODE_GEN | attr.Set(value, TimeCode(t * fps)) |
+| T10.4 | `list_keyframes(prim_path, attr)` | DATA | attr.GetTimeSamples() + attr.Get per sample |
+| T10.5 | `play_animation(start, end)` | CODE_GEN | timeline.set_{start,end}_time + timeline.play() |
+
+All schemas use the WHAT/WHEN/RETURNS/UNITS/CAVEATS template so the LLM can
+disambiguate between `set_keyframe` (TimeSamples), `set_attribute` (default
+value), and `sim_control` (physics step). Time arguments to T10.3 / T10.5 are
+in **seconds** and converted to USD time codes internally via the stage's
+`timeCodesPerSecond`.
 
 ## Tier 11 — SDG Annotation (5 tools)
 

@@ -6267,6 +6267,495 @@ ISAAC_SIM_TOOLS = [
     },
 
     # ─── Scene Export ─────────────────────────────────────────────────────────
+    # ─── Tier 9 — USD Layers & Variants (6 atomic tools) ──────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "list_layers",
+            "description": (
+                "WHAT: List every layer participating in the current USD stage's layer stack — "
+                "the root layer, every sublayer attached to it, and every session/anonymous "
+                "layer — together with which one is the current edit target. Walks "
+                "stage.GetLayerStack() and stage.GetEditTarget() and returns identifier, "
+                "display name, anonymous/dirty flags, and stack depth for each. "
+                "WHEN: before adding a sublayer (so the LLM knows what's already wired in), "
+                "before set_edit_target (to confirm the layer exists and is mutable), when "
+                "the user asks 'what layers are loaded' / 'where do my edits go' / 'show me "
+                "the layer stack', or before flatten_layers to preview what will be baked. "
+                "RETURNS: data dict {root_layer: str, edit_target: str, layers: [{identifier, "
+                "display_name, anonymous: bool, dirty: bool, depth: int, is_edit_target: bool}], "
+                "count: int}. "
+                "UNITS: identifier is an .usd/.usda/.usdc filesystem path or anon:0xADDR for "
+                "anonymous (session) layers; depth=0 is the root, deeper means weaker opinion. "
+                "CAVEATS: read-only — no stage mutation. Anonymous layers (depth>0) are session-"
+                "only and lost on stage close. The strongest opinion wins, so layers earlier in "
+                "the list override later ones at the same prim path. Returns an error stub if "
+                "no stage is open."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_sublayer",
+            "description": (
+                "WHAT: Attach a new sublayer to the root layer of the current stage. Generates "
+                "a code patch that calls stage.GetRootLayer().subLayerPaths.insert(0, layer_path) "
+                "and (if the file does not yet exist) creates an empty .usda layer at the given "
+                "path via Sdf.Layer.CreateNew. The new sublayer becomes the strongest sublayer "
+                "below the root. "
+                "WHEN: separating user overrides from a base scene (e.g. attach 'overrides.usda' "
+                "above a referenced robot.usd), composing modular shot files, layering a "
+                "lighting/look pass on top of geometry, or wiring in a Replicator output layer "
+                "before SDG. Pair with set_edit_target if subsequent edits should land in the "
+                "new sublayer. "
+                "RETURNS: code patch for approval (queued via Kit RPC /exec). "
+                "UNITS: layer_path is a filesystem path or omniverse:// URL. "
+                "CAVEATS: insertion position 0 = strongest sublayer (overrides everything below). "
+                "If the file already exists it is referenced as-is — its contents will start "
+                "overriding the stage immediately. Sublayer composition is destructive at "
+                "compose time: a delete in a stronger sublayer can't be 'undone' by a weaker "
+                "one. Anonymous (in-memory) sublayers must be saved with .Export() before stage "
+                "close or they are lost."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "layer_path": {
+                        "type": "string",
+                        "description": (
+                            "Filesystem path or Nucleus URL of the sublayer to attach. Created "
+                            "as an empty .usda if it does not exist. Example: "
+                            "'/tmp/overrides.usda' or 'omniverse://localhost/projects/shot01/lighting.usda'."
+                        ),
+                    },
+                },
+                "required": ["layer_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_edit_target",
+            "description": (
+                "WHAT: Change which USD layer receives subsequent edits by calling "
+                "stage.SetEditTarget(Usd.EditTarget(Sdf.Layer.FindOrOpen(layer_path))). All "
+                "later prim creates / attribute writes / deletes go into this layer instead of "
+                "the root. "
+                "WHEN: separating user-overrides from a base scene, working in a session-only "
+                "layer that won't be saved to disk, applying edits to a specific sublayer "
+                "(e.g. a lighting pass), or recording Replicator randomisations into a dedicated "
+                "output layer. "
+                "RETURNS: code patch for approval. "
+                "UNITS: layer_path is a filesystem path / Nucleus URL / anonymous-layer "
+                "identifier (anon:0x...). "
+                "CAVEATS: edits to anonymous (session) layers are LOST on stage close — call "
+                "Sdf.Layer.Export to persist them. The target layer must already be in the "
+                "layer stack (use list_layers() first to see what's available; use add_sublayer() "
+                "to attach new ones). Switching edit targets does NOT change which opinions are "
+                "active — only where new opinions are written. Edits to a weaker layer can be "
+                "shadowed by stronger layers and may appear to do nothing in the viewport."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "layer_path": {
+                        "type": "string",
+                        "description": (
+                            "Identifier of the layer to make the edit target. Must already be "
+                            "in the layer stack — call list_layers() to see options. Example: "
+                            "'/tmp/overrides.usda' or 'anon:0x7f8a1c0' for a session layer."
+                        ),
+                    },
+                },
+                "required": ["layer_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_variant_sets",
+            "description": (
+                "WHAT: Read every variant set declared on a prim (and on its ancestors via "
+                "inherited composition) by calling prim.GetVariantSets().GetNames() and "
+                "GetVariantSelection() for each. A variant set is a named switch (e.g. 'modelingVariant', "
+                "'shadingVariant', 'lod') with a list of named choices. "
+                "WHEN: discovering what configuration knobs an asset exposes before set_variant, "
+                "answering 'what variants does this prim have', auditing an asset library for "
+                "consistent variant naming, or before list_variants() to enumerate the choices "
+                "in a specific set. "
+                "RETURNS: data dict {prim_path: str, variant_sets: [{name: str, current: str, "
+                "count: int}], count: int}. "
+                "UNITS: counts are integers (number of variants in the set). 'current' is the "
+                "active selection ('' means no selection — falls back to the variant set's "
+                "default or the first one). "
+                "CAVEATS: read-only. Variant sets are inherited along the namespace, so a prim "
+                "may show variant sets defined on its model root. Returns an empty list when "
+                "the prim has no variant sets — that is NOT an error. Returns an error stub if "
+                "the prim path doesn't resolve."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim to inspect. Example: '/World/Asset' or "
+                            "'/World/Robot/geom'."
+                        ),
+                    },
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_variants",
+            "description": (
+                "WHAT: List every named variant choice inside a specific variant set on a prim "
+                "by calling prim.GetVariantSet(variant_set).GetVariantNames(). Also returns "
+                "the currently selected variant. "
+                "WHEN: enumerating asset configurations (e.g. 'red'/'blue'/'green' for a "
+                "shadingVariant; 'low'/'mid'/'high' for a lod set), confirming a variant exists "
+                "before set_variant, or surfacing the choices to the user for selection. "
+                "RETURNS: data dict {prim_path: str, variant_set: str, variants: [str], "
+                "current: str, count: int}. "
+                "UNITS: variants are arbitrary string names defined by the asset author. "
+                "CAVEATS: read-only. Returns an empty variants list (not an error) when the "
+                "variant set exists but has no choices defined yet. Returns an error stub when "
+                "the prim path doesn't resolve OR the variant set isn't declared on the prim "
+                "(use list_variant_sets() first to see what's available)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim to inspect. Example: '/World/Asset'."
+                        ),
+                    },
+                    "variant_set": {
+                        "type": "string",
+                        "description": (
+                            "Name of the variant set to enumerate. Example: 'shadingVariant', "
+                            "'modelingVariant', 'lod'."
+                        ),
+                    },
+                },
+                "required": ["prim_path", "variant_set"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "flatten_layers",
+            "description": (
+                "WHAT: Bake every layer in the current stage's layer stack — root + all "
+                "sublayers + all references — into a single .usda file at output_path by calling "
+                "stage.Flatten().Export(output_path). The result is a self-contained USD file "
+                "with one layer that has zero composition arcs. "
+                "WHEN: shipping a final scene to a renderer or external tool that doesn't "
+                "support composition, freezing a working scene before refactoring layers, "
+                "creating a deterministic snapshot for SDG/training reproducibility, or "
+                "preparing a scene for a USDZ archive. "
+                "RETURNS: code patch for approval. "
+                "UNITS: output_path is a filesystem path; .usda (ASCII) is human-readable, "
+                ".usdc (crate) is binary and ~10x smaller for large scenes. "
+                "CAVEATS: flattening is LOSSY for composition — variant sets, payloads, "
+                "references, and inherits collapse into resolved opinions; you cannot recover "
+                "the layer structure afterwards. Asset metadata, layer customLayerData, and "
+                "layer-level offsets are dropped. Output file size can be very large for scenes "
+                "with many references (each is fully expanded). Run after set_edit_target / "
+                "add_sublayer changes are saved — unsaved anonymous layers are still flattened "
+                "but the source is then lost. Existing files at output_path are overwritten."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "output_path": {
+                        "type": "string",
+                        "description": (
+                            "Filesystem path for the flattened output. Use .usda for ASCII "
+                            "(diff-friendly) or .usdc for binary crate (smaller). Example: "
+                            "'/tmp/flattened_scene.usda'."
+                        ),
+                    },
+                },
+                "required": ["output_path"],
+            },
+        },
+    },
+
+    # ─── Tier 10 — Animation & Timeline (5 atomic tools) ──────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "get_timeline_state",
+            "description": (
+                "WHAT: Read the current state of the USD timeline interface — "
+                "current time, start/end time, FPS (timeCodesPerSecond), playback "
+                "direction, and whether the timeline is currently playing or paused. "
+                "Calls omni.timeline.get_timeline_interface() plus stage.GetStartTimeCode/"
+                "GetEndTimeCode/GetTimeCodesPerSecond and reports a snapshot. "
+                "WHEN: before set_timeline_range (so the LLM doesn't truncate animation "
+                "the user already authored), before set_keyframe (to confirm the keyframe "
+                "time falls inside the active range), before play_animation (to know what "
+                "'reset to start' means), when the user asks 'where in the timeline am I' "
+                "/ 'what FPS is the scene' / 'is anything playing', or to verify a previous "
+                "timeline mutation took effect. "
+                "RETURNS: data dict {current_time: float, start_time: float, end_time: float, "
+                "fps: float, is_playing: bool, looping: bool, time_codes_per_second: float, "
+                "duration_seconds: float}. "
+                "UNITS: time fields are USD time codes (a.k.a. frames). duration_seconds = "
+                "(end_time - start_time) / fps. fps is timeCodesPerSecond from the stage's "
+                "metadata, NOT the renderer's framerate. "
+                "CAVEATS: read-only — no mutation. Returns an error stub if no stage is open "
+                "or omni.timeline isn't available (running outside Kit). The timeline reflects "
+                "USD TimeSamples playback, NOT the physics simulation clock; sim_control "
+                "play/pause is a SEPARATE concern (physics steps), although in Kit they are "
+                "wired together by default. is_playing can be true even when no keyframes "
+                "exist — the timeline cursor still advances."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_timeline_range",
+            "description": (
+                "WHAT: Configure the USD timeline by setting the stage's startTimeCode, "
+                "endTimeCode, and timeCodesPerSecond (FPS) metadata via "
+                "stage.SetStartTimeCode/SetEndTimeCode/SetTimeCodesPerSecond. Also pushes "
+                "the new range into omni.timeline so the viewport scrubber updates. "
+                "WHEN: setting up an animation/recording window before set_keyframe, "
+                "matching the timeline to a recorded teleop demonstration's duration, "
+                "preparing for SDG capture (one frame per timecode), aligning timeline "
+                "to a target render framerate (24/30/60), or shrinking the range to "
+                "loop-test a sub-clip. "
+                "RETURNS: code patch for approval. "
+                "UNITS: start/end are USD time codes (frames). fps is frames per second "
+                "(timeCodesPerSecond). Real-world duration in seconds = (end - start) / fps. "
+                "CAVEATS: changing fps does NOT rescale existing TimeSamples — keyframes "
+                "stay at the same numeric time codes, so a key at frame 24 plays at t=1.0s "
+                "with fps=24 but at t=0.5s with fps=48. start_time MUST be < end_time. "
+                "Existing TimeSamples outside the new range are NOT deleted — they're just "
+                "no longer played back. After set_timeline_range, call get_timeline_state() "
+                "to verify the write."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start": {
+                        "type": "number",
+                        "description": (
+                            "Start time code (frame). Typically 0 or 1. Example: 0."
+                        ),
+                    },
+                    "end": {
+                        "type": "number",
+                        "description": (
+                            "End time code (frame). Must be > start. Example: 240 for "
+                            "10 seconds at 24 fps."
+                        ),
+                    },
+                    "fps": {
+                        "type": "number",
+                        "description": (
+                            "Frames per second (timeCodesPerSecond). Common: 24 (film), "
+                            "30 (NTSC video), 60 (interactive). Default: keep existing fps."
+                        ),
+                    },
+                },
+                "required": ["start", "end"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_keyframe",
+            "description": (
+                "WHAT: Write a USD TimeSample (keyframe) for an attribute at a specific "
+                "time by calling prim.GetAttribute(attr).Set(value, time_code). The value "
+                "is recorded into the current edit target layer at the given time code; "
+                "USD interpolates linearly between adjacent samples on playback. "
+                "WHEN: animating object positions/rotations/scales over time, recording "
+                "teleop demonstrations as USD TimeSamples (one frame per joint state), "
+                "creating procedural animations (e.g. door open/close), authoring camera "
+                "moves for cinematics, or baking a controller's output into a static "
+                "animation clip for later replay without physics. "
+                "RETURNS: code patch for approval. "
+                "UNITS: time is in SECONDS — internally multiplied by the stage's "
+                "timeCodesPerSecond to get the USD time code (so set_keyframe(..., time=2.5) "
+                "with fps=24 writes at frame 60). value units depend on the attribute "
+                "(meters for translate, degrees for rotateXYZ, normalized RGB for "
+                "displayColor, etc.). "
+                "CAVEATS: only works on attributes that support TimeSamples — positions, "
+                "rotations, scales, displayColor, light intensity, joint drive targets: YES. "
+                "Topology (mesh point counts, prim hierarchy), API schemas, and metadata: "
+                "NO. The attribute is created if it doesn't exist (provided the prim "
+                "supports it). Writes go into the current edit target layer — call "
+                "set_edit_target() first if you want the keyframe in a specific sublayer. "
+                "Use list_keyframes() afterwards to verify the sample landed at the "
+                "expected time code. Mixing TimeSamples with a default value can cause "
+                "surprising playback behaviour at the range boundaries — TimeSamples "
+                "always win when present."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim that owns the attribute. Example: "
+                            "'/World/Cube' or '/World/Robot/joints/panda_joint1'."
+                        ),
+                    },
+                    "attr": {
+                        "type": "string",
+                        "description": (
+                            "Attribute name to keyframe. Examples: 'xformOp:translate', "
+                            "'xformOp:rotateXYZ', 'xformOp:scale', "
+                            "'primvars:displayColor', 'inputs:intensity', "
+                            "'drive:angular:physics:targetPosition'."
+                        ),
+                    },
+                    "time": {
+                        "type": "number",
+                        "description": (
+                            "Keyframe time in SECONDS. Multiplied by the stage's "
+                            "timeCodesPerSecond internally. Example: 1.5 (= frame 36 "
+                            "at 24 fps)."
+                        ),
+                    },
+                    "value": {
+                        "description": (
+                            "New value at this time. Number, array (e.g. [x,y,z] for "
+                            "translate), or RGB triplet. Type must match the attribute."
+                        ),
+                    },
+                },
+                "required": ["prim_path", "attr", "time", "value"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_keyframes",
+            "description": (
+                "WHAT: Enumerate every TimeSample currently authored on a single attribute "
+                "of a prim by calling attr.GetTimeSamples() and attr.Get(time_code) for each. "
+                "Returns the list of time codes (in seconds and frames), the value at each, "
+                "and the bracketing range. "
+                "WHEN: verifying a previous set_keyframe write landed at the expected time, "
+                "auditing a recorded teleop trajectory for missing/duplicate samples, "
+                "deciding where to insert an in-between key, answering 'what's animated on "
+                "this prim', or before deleting/rewriting a keyframe to confirm the current "
+                "value first. "
+                "RETURNS: data dict {prim_path: str, attr: str, has_timesamples: bool, "
+                "count: int, fps: float, samples: [{time_code: float, time_seconds: float, "
+                "value: any}], time_range_codes: [first, last], time_range_seconds: "
+                "[first, last]}. "
+                "UNITS: time_code is a USD frame number; time_seconds = time_code / fps. "
+                "value units match the attribute (meters / degrees / RGB / etc.). "
+                "CAVEATS: read-only. Returns has_timesamples=false (NOT an error) when the "
+                "attribute has only a default value, or when the attribute exists but has "
+                "no samples yet. Returns an error stub if the prim or attribute doesn't "
+                "exist. attr.GetTimeSamples() reports the resolved list across all layers — "
+                "you may see samples authored in a sublayer that you didn't write yourself. "
+                "Very dense sample lists (e.g. recorded at 60 Hz for several minutes) can "
+                "be large; consider narrowing by querying a specific time range outside this "
+                "tool if the result truncates."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim to inspect. Example: '/World/Cube'."
+                        ),
+                    },
+                    "attr": {
+                        "type": "string",
+                        "description": (
+                            "Attribute name to read keyframes from. Example: "
+                            "'xformOp:translate'."
+                        ),
+                    },
+                },
+                "required": ["prim_path", "attr"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "play_animation",
+            "description": (
+                "WHAT: Start USD TimeSamples playback over the [start, end] window by "
+                "configuring omni.timeline.get_timeline_interface() — sets start/end time, "
+                "rewinds to start, and calls play(). Distinct from sim_control: sim_control "
+                "drives the PHYSICS simulation step loop (PhysX), while play_animation "
+                "drives the USD TIMELINE cursor that interpolates TimeSamples. In Kit they "
+                "share the same timeline by default, so playback also advances physics "
+                "unless physics is decoupled. "
+                "WHEN: previewing a keyframed animation after authoring it with "
+                "set_keyframe, replaying a recorded teleop demonstration from USD "
+                "TimeSamples, looping a sub-range to debug timing, or kicking off a "
+                "Replicator/SDG capture that's tied to timeline frames. "
+                "RETURNS: code patch for approval. "
+                "UNITS: start, end are in SECONDS — multiplied by the stage's "
+                "timeCodesPerSecond internally to get USD time codes. "
+                "CAVEATS: this is ANIMATION playback (USD TimeSamples interpolation), "
+                "NOT a physics-only step loop — use sim_control(action='play') if you only "
+                "want PhysX advancing without scrubbing the timeline. start MUST be < end. "
+                "If start/end fall outside the stage's startTimeCode/endTimeCode the "
+                "viewport may clamp; pair with set_timeline_range() first to widen the "
+                "range. Does NOT auto-loop unless the timeline's looping flag is already "
+                "true. play_animation triggers a code patch — the actual play() call only "
+                "happens after user approval through Kit RPC."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start": {
+                        "type": "number",
+                        "description": (
+                            "Playback start time in SECONDS. Example: 0 to play from the "
+                            "beginning."
+                        ),
+                    },
+                    "end": {
+                        "type": "number",
+                        "description": (
+                            "Playback end time in SECONDS. Must be > start. Example: 5.0 "
+                            "to play five seconds of animation."
+                        ),
+                    },
+                },
+                "required": ["start", "end"],
+            },
+        },
+    },
+
     {
         "type": "function",
         "function": {
@@ -9906,6 +10395,281 @@ ISAAC_SIM_TOOLS = [
                     },
                 },
                 "required": ["output_path"],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+# ─── Tier 10 — Animation & Timeline (5 atomic tools) ──────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "get_timeline_state",
+            "description": (
+                "WHAT: Read the current state of the USD timeline interface — "
+                "current time, start/end time, FPS (timeCodesPerSecond), playback "
+                "direction, and whether the timeline is currently playing or paused. "
+                "Calls omni.timeline.get_timeline_interface() plus stage.GetStartTimeCode/"
+                "GetEndTimeCode/GetTimeCodesPerSecond and reports a snapshot. "
+                "WHEN: before set_timeline_range (so the LLM doesn't truncate animation "
+                "the user already authored), before set_keyframe (to confirm the keyframe "
+                "time falls inside the active range), before play_animation (to know what "
+                "'reset to start' means), when the user asks 'where in the timeline am I' "
+                "/ 'what FPS is the scene' / 'is anything playing', or to verify a previous "
+                "timeline mutation took effect. "
+                "RETURNS: data dict {current_time: float, start_time: float, end_time: float, "
+                "fps: float, is_playing: bool, looping: bool, time_codes_per_second: float, "
+                "duration_seconds: float}. "
+                "UNITS: time fields are USD time codes (a.k.a. frames). duration_seconds = "
+                "(end_time - start_time) / fps. fps is timeCodesPerSecond from the stage's "
+                "metadata, NOT the renderer's framerate. "
+                "CAVEATS: read-only — no mutation. Returns an error stub if no stage is open "
+                "or omni.timeline isn't available (running outside Kit). The timeline reflects "
+                "USD TimeSamples playback, NOT the physics simulation clock; sim_control "
+                "play/pause is a SEPARATE concern (physics steps), although in Kit they are "
+                "wired together by default. is_playing can be true even when no keyframes "
+                "exist — the timeline cursor still advances."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_timeline_range",
+            "description": (
+                "WHAT: Configure the USD timeline by setting the stage's startTimeCode, "
+                "endTimeCode, and timeCodesPerSecond (FPS) metadata via "
+                "stage.SetStartTimeCode/SetEndTimeCode/SetTimeCodesPerSecond. Also pushes "
+                "the new range into omni.timeline so the viewport scrubber updates. "
+                "WHEN: setting up an animation/recording window before set_keyframe, "
+                "matching the timeline to a recorded teleop demonstration's duration, "
+                "preparing for SDG capture (one frame per timecode), aligning timeline "
+                "to a target render framerate (24/30/60), or shrinking the range to "
+                "loop-test a sub-clip. "
+                "RETURNS: code patch for approval. "
+                "UNITS: start/end are USD time codes (frames). fps is frames per second "
+                "(timeCodesPerSecond). Real-world duration in seconds = (end - start) / fps. "
+                "CAVEATS: changing fps does NOT rescale existing TimeSamples — keyframes "
+                "stay at the same numeric time codes, so a key at frame 24 plays at t=1.0s "
+                "with fps=24 but at t=0.5s with fps=48. start_time MUST be < end_time. "
+                "Existing TimeSamples outside the new range are NOT deleted — they're just "
+                "no longer played back. After set_timeline_range, call get_timeline_state() "
+                "to verify the write."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start": {
+                        "type": "number",
+                        "description": (
+                            "Start time code (frame). Typically 0 or 1. Example: 0."
+                        ),
+                    },
+                    "end": {
+                        "type": "number",
+                        "description": (
+                            "End time code (frame). Must be > start. Example: 240 for "
+                            "10 seconds at 24 fps."
+                        ),
+                    },
+                    "fps": {
+                        "type": "number",
+                        "description": (
+                            "Frames per second (timeCodesPerSecond). Common: 24 (film), "
+                            "30 (NTSC video), 60 (interactive). Default: keep existing fps."
+                        ),
+                    },
+                },
+                "required": ["start", "end"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_keyframe",
+            "description": (
+                "WHAT: Write a USD TimeSample (keyframe) for an attribute at a specific "
+                "time by calling prim.GetAttribute(attr).Set(value, time_code). The value "
+                "is recorded into the current edit target layer at the given time code; "
+                "USD interpolates linearly between adjacent samples on playback. "
+                "WHEN: animating object positions/rotations/scales over time, recording "
+                "teleop demonstrations as USD TimeSamples (one frame per joint state), "
+                "creating procedural animations (e.g. door open/close), authoring camera "
+                "moves for cinematics, or baking a controller's output into a static "
+                "animation clip for later replay without physics. "
+                "RETURNS: code patch for approval. "
+                "UNITS: time is in SECONDS — internally multiplied by the stage's "
+                "timeCodesPerSecond to get the USD time code (so set_keyframe(..., time=2.5) "
+                "with fps=24 writes at frame 60). value units depend on the attribute "
+                "(meters for translate, degrees for rotateXYZ, normalized RGB for "
+                "displayColor, etc.). "
+                "CAVEATS: only works on attributes that support TimeSamples — positions, "
+                "rotations, scales, displayColor, light intensity, joint drive targets: YES. "
+                "Topology (mesh point counts, prim hierarchy), API schemas, and metadata: "
+                "NO. The attribute is created if it doesn't exist (provided the prim "
+                "supports it). Writes go into the current edit target layer — call "
+                "set_edit_target() first if you want the keyframe in a specific sublayer. "
+                "Use list_keyframes() afterwards to verify the sample landed at the "
+                "expected time code. Mixing TimeSamples with a default value can cause "
+                "surprising playback behaviour at the range boundaries — TimeSamples "
+                "always win when present."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim that owns the attribute. Example: "
+                            "'/World/Cube' or '/World/Robot/joints/panda_joint1'."
+                        ),
+                    },
+                    "attr": {
+                        "type": "string",
+                        "description": (
+                            "Attribute name to keyframe. Examples: 'xformOp:translate', "
+                            "'xformOp:rotateXYZ', 'xformOp:scale', "
+                            "'primvars:displayColor', 'inputs:intensity', "
+                            "'drive:angular:physics:targetPosition'."
+                        ),
+                    },
+                    "time": {
+                        "type": "number",
+                        "description": (
+                            "Keyframe time in SECONDS. Multiplied by the stage's "
+                            "timeCodesPerSecond internally. Example: 1.5 (= frame 36 "
+                            "at 24 fps)."
+                        ),
+                    },
+                    "value": {
+                        "description": (
+                            "New value at this time. Number, array (e.g. [x,y,z] for "
+                            "translate), or RGB triplet. Type must match the attribute."
+                        ),
+                    },
+                },
+                "required": ["prim_path", "attr", "time", "value"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_keyframes",
+            "description": (
+                "WHAT: Enumerate every TimeSample currently authored on a single attribute "
+                "of a prim by calling attr.GetTimeSamples() and attr.Get(time_code) for each. "
+                "Returns the list of time codes (in seconds and frames), the value at each, "
+                "and the bracketing range. "
+                "WHEN: verifying a previous set_keyframe write landed at the expected time, "
+                "auditing a recorded teleop trajectory for missing/duplicate samples, "
+                "deciding where to insert an in-between key, answering 'what's animated on "
+                "this prim', or before deleting/rewriting a keyframe to confirm the current "
+                "value first. "
+                "RETURNS: data dict {prim_path: str, attr: str, has_timesamples: bool, "
+                "count: int, fps: float, samples: [{time_code: float, time_seconds: float, "
+                "value: any}], time_range_codes: [first, last], time_range_seconds: "
+                "[first, last]}. "
+                "UNITS: time_code is a USD frame number; time_seconds = time_code / fps. "
+                "value units match the attribute (meters / degrees / RGB / etc.). "
+                "CAVEATS: read-only. Returns has_timesamples=false (NOT an error) when the "
+                "attribute has only a default value, or when the attribute exists but has "
+                "no samples yet. Returns an error stub if the prim or attribute doesn't "
+                "exist. attr.GetTimeSamples() reports the resolved list across all layers — "
+                "you may see samples authored in a sublayer that you didn't write yourself. "
+                "Very dense sample lists (e.g. recorded at 60 Hz for several minutes) can "
+                "be large; consider narrowing by querying a specific time range outside this "
+                "tool if the result truncates."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim to inspect. Example: '/World/Cube'."
+                        ),
+                    },
+                    "attr": {
+                        "type": "string",
+                        "description": (
+                            "Attribute name to read keyframes from. Example: "
+                            "'xformOp:translate'."
+                        ),
+                    },
+                },
+                "required": ["prim_path", "attr"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "play_animation",
+            "description": (
+                "WHAT: Start USD TimeSamples playback over the [start, end] window by "
+                "configuring omni.timeline.get_timeline_interface() — sets start/end time, "
+                "rewinds to start, and calls play(). Distinct from sim_control: sim_control "
+                "drives the PHYSICS simulation step loop (PhysX), while play_animation "
+                "drives the USD TIMELINE cursor that interpolates TimeSamples. In Kit they "
+                "share the same timeline by default, so playback also advances physics "
+                "unless physics is decoupled. "
+                "WHEN: previewing a keyframed animation after authoring it with "
+                "set_keyframe, replaying a recorded teleop demonstration from USD "
+                "TimeSamples, looping a sub-range to debug timing, or kicking off a "
+                "Replicator/SDG capture that's tied to timeline frames. "
+                "RETURNS: code patch for approval. "
+                "UNITS: start, end are in SECONDS — multiplied by the stage's "
+                "timeCodesPerSecond internally to get USD time codes. "
+                "CAVEATS: this is ANIMATION playback (USD TimeSamples interpolation), "
+                "NOT a physics-only step loop — use sim_control(action='play') if you only "
+                "want PhysX advancing without scrubbing the timeline. start MUST be < end. "
+                "If start/end fall outside the stage's startTimeCode/endTimeCode the "
+                "viewport may clamp; pair with set_timeline_range() first to widen the "
+                "range. Does NOT auto-loop unless the timeline's looping flag is already "
+                "true. play_animation triggers a code patch — the actual play() call only "
+                "happens after user approval through Kit RPC."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start": {
+                        "type": "number",
+                        "description": (
+                            "Playback start time in SECONDS. Example: 0 to play from the "
+                            "beginning."
+                        ),
+                    },
+                    "end": {
+                        "type": "number",
+                        "description": (
+                            "Playback end time in SECONDS. Must be > start. Example: 5.0 "
+                            "to play five seconds of animation."
+                        ),
+                    },
+                },
+                "required": ["start", "end"],
             },
         },
     },
