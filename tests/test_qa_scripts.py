@@ -425,6 +425,22 @@ def test_gen_import_robot_urdf_verifies_result():
     assert "raise RuntimeError" in code
 
 
+def test_gen_enable_extension_fails_on_unknown_id():
+    """Regression: set_extension_enabled_immediate returns False for unknown
+    extension ids, and old _gen_enable_extension only printed the result
+    inside a try/except. Agent saw success=True and could claim 'enabled'.
+    Now post-checks is_extension_enabled and raises if still disabled."""
+    import sys
+    sys.path.insert(0, "service")
+    from isaac_assist_service.chat.tools.tool_executor import _gen_enable_extension
+    code = _gen_enable_extension({"ext_id": "omni.fake.ext"})
+    assert "is_extension_enabled" in code
+    # Post-state check after the enable attempt
+    assert code.count("mgr.is_extension_enabled") >= 2
+    assert "raise RuntimeError" in code
+    assert "still disabled after set_enabled" in code
+
+
 def test_gen_open_stage_fails_on_missing_file():
     """Regression: old _gen_open_stage wrapped ctx.open_stage in try/except
     and printed 'opened {target} (ok=False)' when the file didn't exist —

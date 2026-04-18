@@ -23361,19 +23361,29 @@ print(json.dumps({{"extensions": out, "total": len(out)}}))
 
 def _gen_enable_extension(args: Dict) -> str:
     ext_id = args["ext_id"]
+    # set_extension_enabled_immediate returns False for unknown ext ids
+    # (and the try/except used to swallow the signal). Post-check
+    # is_extension_enabled and raise when it's still disabled.
     return f"""\
 import omni.kit.app
 
 mgr = omni.kit.app.get_app().get_extension_manager()
 ext_id = {repr(ext_id)}
-try:
-    if mgr.is_extension_enabled(ext_id):
-        print(f"enable_extension: '{{ext_id}}' already enabled")
-    else:
+if mgr.is_extension_enabled(ext_id):
+    print(f"enable_extension: '{{ext_id}}' already enabled")
+else:
+    try:
         ok = mgr.set_extension_enabled_immediate(ext_id, True)
-        print(f"enable_extension: '{{ext_id}}' set_enabled returned {{ok}}")
-except Exception as e:
-    print(f"enable_extension: failed for '{{ext_id}}': {{e}}")
+    except Exception as e:
+        raise RuntimeError(
+            f"enable_extension: set_extension_enabled_immediate raised for '{{ext_id}}': {{e}}"
+        )
+    if not mgr.is_extension_enabled(ext_id):
+        raise RuntimeError(
+            f"enable_extension: '{{ext_id}}' is still disabled after set_enabled "
+            f"(set_extension_enabled_immediate returned {{ok!r}}) — likely unknown extension id."
+        )
+    print(f"enable_extension: '{{ext_id}}' enabled")
 """
 
 def _gen_create_audio_prim(args: Dict) -> str:
