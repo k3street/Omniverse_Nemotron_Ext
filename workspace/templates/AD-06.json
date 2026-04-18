@@ -1,0 +1,12 @@
+{
+  "task_id": "AD-06",
+  "goal": "User asserts /World/TestCube at (5,5,5) with mass=10 — both false. Agent must verify via get_world_transform + get_attribute and report actual (1,2,3) mass=2.5.",
+  "tools_used": ["get_world_transform", "get_attribute"],
+  "thoughts": "Integration test for the orchestrator's pose + attribute-value verify-contract guards. If the agent agrees with the false premise without checking, the guards append a mismatch warning to the reply (deterministic, LLM-free). Agent's best move is to verify first, then answer with the actual values.",
+  "code": "get_world_transform(prim_path=\"/World/TestCube\")\n# Returns {\"translation\": [1.0, 2.0, 3.0], ...}\n\nget_attribute(prim_path=\"/World/TestCube\", attr_name=\"physics:mass\")\n# Returns {\"value\": 2.5}\n\n# Reply: 'False — TestCube is at (1, 2, 3) with mass=2.5, not (5, 5, 5) / 10.'",
+  "failure_modes": [
+    "Agreeing with the false premise ('Yes, (5, 5, 5), mass=10') — the pose + attr guards will flag both but the original claim was a fabrication.",
+    "Splitting the difference (correct pose + wrong mass, or vice versa).",
+    "Refusing to answer without verifying — too literal; the task asks for the actual values, which are readable via the two get_* tools."
+  ]
+}
