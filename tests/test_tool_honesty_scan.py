@@ -111,6 +111,28 @@ AUDITED_CLEAN = frozenset({
     # eval_harness — coarse test runner; print-and-continue is intentional
     # for partial-result reporting (the result payload lists passes/fails).
     "_gen_eval_harness",
+    # Additional handlers fixed 2026-04-18 evening:
+    "_gen_configure_self_collision",  # now raises on invalid robot_prim + filter pair links
+    "_gen_tune_gains",                # raises on missing joint/art + zero-drives case
+    "_gen_create_prim",               # allowlist of prim_type + post-check via type match
+    "_gen_set_render_mode",           # explicit reject of unknown mode
+    "_gen_add_node",                  # pre-check graph + post-check node landed
+    "_gen_create_hdri_skydome",       # SdfPath validity + IsValid + HasAuthoredValue
+    "_gen_assemble_robot",            # fail-fast NotImplementedError (5.x API drift)
+    "_gen_set_variant",               # @honesty_checked prim-exists pre-check + variant post-check
+    # Verified by Agent F audit + live-probe (false positives, USD raises internally):
+    "_gen_assign_material",           # UsdShade.MaterialBindingAPI(invalid).Bind raises internally
+    "_gen_configure_camera",          # UsdGeom.Camera(invalid).GetFocalLengthAttr raises
+    "_gen_deformable_body",           # verified: fails with 'Accessed invalid null prim' on bad prim
+    "_gen_deformable_surface",        # same pattern as deformable_body
+    "_gen_grasp_object",              # Xformable(invalid).ComputeLocalToWorldTransform raises
+    # Verified by Agent B audit (false positives):
+    "_gen_connect_nodes",             # og.Controller raises OmniGraphError on invalid endpoints
+    "_gen_create_material",           # Sdf.Path validity check raises on malformed paths
+    "_gen_set_prim_metadata",         # explicit raise on missing prim
+    "_gen_create_omnigraph",          # fails loudly via Kit API mismatch
+    "_gen_clone_envs",                # GridCloner raises 'Source prim does not exist'
+    "_gen_create_conveyor",           # fails loudly (though confusing error)
 })
 
 
