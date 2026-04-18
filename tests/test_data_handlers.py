@@ -136,3 +136,60 @@ class TestCatalogSearch:
         handler = DATA_HANDLERS["catalog_search"]
         result = await handler({"query": "zzzznonexistent"})
         assert result["total_matches"] == 0
+
+
+class TestArenaLeaderboard:
+    """arena_leaderboard data handler."""
+
+    @pytest.mark.asyncio
+    async def test_leaderboard_with_results(self):
+        handler = DATA_HANDLERS["arena_leaderboard"]
+        results_input = {
+            "results": [
+                {
+                    "env_id": "Arena-Tabletop-Franka-v0",
+                    "robot": "Franka",
+                    "metrics": {"success_rate": 0.85, "episode_length": 120.5},
+                },
+                {
+                    "env_id": "Arena-Tabletop-UR10-v0",
+                    "robot": "UR10",
+                    "metrics": {"success_rate": 0.72, "episode_length": 145.0},
+                },
+            ]
+        }
+        result = await handler(results_input)
+        assert "leaderboard" in result
+        assert result["count"] == 2
+        assert len(result["entries"]) == 2
+        assert "success_rate" in result["metric_columns"]
+        assert "episode_length" in result["metric_columns"]
+        # Franka has higher success_rate → should be rank 1
+        assert result["entries"][0]["robot"] == "Franka"
+        assert result["entries"][0]["rank"] == 1
+        # Table should contain robot names
+        assert "Franka" in result["leaderboard"]
+        assert "UR10" in result["leaderboard"]
+
+    @pytest.mark.asyncio
+    async def test_leaderboard_empty_results(self):
+        handler = DATA_HANDLERS["arena_leaderboard"]
+        result = await handler({"results": []})
+        assert result["leaderboard"] == "No results to display."
+        assert result["entries"] == []
+
+    @pytest.mark.asyncio
+    async def test_leaderboard_single_result(self):
+        handler = DATA_HANDLERS["arena_leaderboard"]
+        result = await handler({
+            "results": [
+                {
+                    "env_id": "Arena-Kitchen-Spot-v0",
+                    "robot": "Spot",
+                    "metrics": {"success_rate": 0.95},
+                },
+            ]
+        })
+        assert result["count"] == 1
+        assert result["entries"][0]["rank"] == 1
+        assert result["entries"][0]["robot"] == "Spot"

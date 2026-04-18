@@ -992,6 +992,29 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+    # ─── IsaacLab-Arena Composable Environments ──────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "create_arena",
+            "description": "Create a composable IsaacLab-Arena environment by combining a scene, robot embodiment, and task config. Registers the env with gymnasium and returns the env_id. Arena uses compile-time composition — environments are fixed after env.reset().",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_type": {
+                        "type": "string",
+                        "enum": ["tabletop_pick_and_place", "kitchen", "galileo", "custom"],
+                        "description": "Pre-defined scene type or 'custom' for user-defined scenes",
+                    },
+                    "robot_asset": {"type": "string", "description": "Robot name or USD path (e.g. 'Franka', '/path/to/robot.usd')"},
+                    "task": {"type": "string", "description": "Task description — e.g. 'pick_and_place', 'locomotion', 'navigation'"},
+                    "num_envs": {"type": "integer", "description": "Number of parallel environments. Default: 64"},
+                    "env_spacing": {"type": "number", "description": "Spacing between environments in meters. Default: 2.5"},
+                },
+                "required": ["scene_type", "robot_asset", "task"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -1005,6 +1028,67 @@ ISAAC_SIM_TOOLS = [
                     "category": {"type": "string", "enum": ["robot", "prop", "scene", "sensor", "material"], "description": "Asset category for catalog registration. Auto-detected from path if omitted."},
                 },
                 "required": ["nucleus_url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_arena_variant",
+            "description": "Create a variant of an existing Arena environment with a different robot embodiment. Each variant is a separate simulation registered under a new env_id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "base_env_id": {"type": "string", "description": "The original env ID from create_arena (e.g. 'Arena-TabletopPickAndPlace-Franka-v0')"},
+                    "robot_asset": {"type": "string", "description": "Different robot for comparison (e.g. 'UR10', '/path/to/other_robot.usd')"},
+                },
+                "required": ["base_env_id", "robot_asset"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_arena_benchmark",
+            "description": "Run a benchmark on an Arena environment. Launches as a subprocess (separate IsaacLab process), collects results including success rate, episode length, and custom metrics.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "env_id": {"type": "string", "description": "Gymnasium env ID (from create_arena or create_arena_variant)"},
+                    "num_episodes": {"type": "integer", "description": "Number of evaluation episodes. Default: 100"},
+                    "metrics": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Metrics to collect — e.g. ['success_rate', 'episode_length', 'object_moved']",
+                    },
+                    "checkpoint": {"type": "string", "description": "Path to a trained policy checkpoint. If omitted, uses random actions."},
+                },
+                "required": ["env_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "arena_leaderboard",
+            "description": "Format a leaderboard table comparing Arena benchmark results across different robots and policies. Input is an array of result objects from run_arena_benchmark.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "env_id": {"type": "string"},
+                                "robot": {"type": "string"},
+                                "metrics": {"type": "object"},
+                            },
+                        },
+                        "description": "List of benchmark result objects with env_id, robot, and metrics fields",
+                    },
+                },
+                "required": ["results"],
             },
         },
     },

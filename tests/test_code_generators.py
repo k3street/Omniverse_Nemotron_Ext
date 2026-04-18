@@ -394,6 +394,55 @@ _TEST_VECTORS = [
         {"robot_path": "/World/Robot", "workspace_limits": {"min": [-1, -1, 0], "max": [1, 1, 2]}},
         ["workspace", "limit"],
     ),
+    # ── Phase 7D: IsaacLab-Arena Composable Environments ───────────────────
+    (
+        "create_arena",
+        {
+            "scene_type": "tabletop_pick_and_place",
+            "robot_asset": "Franka",
+            "task": "pick_and_place",
+            "num_envs": 64,
+            "env_spacing": 2.5,
+        },
+        ["ArenaEnvBuilder.combine", "gymnasium.register", "EmbodimentCfg", "TaskCfg", "SceneCfg"],
+    ),
+    (
+        "create_arena",
+        {
+            "scene_type": "custom",
+            "robot_asset": "/path/to/my_robot.usd",
+            "task": "locomotion",
+            "num_envs": 128,
+        },
+        ["ArenaEnvBuilder.combine", "gymnasium.register", "EmbodimentCfg", "'custom'"],
+    ),
+    (
+        "create_arena_variant",
+        {
+            "base_env_id": "Arena-TabletopPickAndPlacePickAndPlace-Franka-v0",
+            "robot_asset": "UR10",
+        },
+        ["ArenaEnvBuilder.combine", "gymnasium.register", "gymnasium.spec", "EmbodimentCfg", "UR10"],
+    ),
+    (
+        "run_arena_benchmark",
+        {
+            "env_id": "Arena-TabletopPickAndPlacePickAndPlace-Franka-v0",
+            "num_episodes": 50,
+            "metrics": ["success_rate", "episode_length"],
+        },
+        ["subprocess.Popen", "arena.benchmark", "num_episodes", "results_file"],
+    ),
+    (
+        "run_arena_benchmark",
+        {
+            "env_id": "Arena-KitchenNavigation-NovaCarter-v0",
+            "num_episodes": 200,
+            "metrics": ["success_rate", "object_moved"],
+            "checkpoint": "/checkpoints/policy_best.pt",
+        },
+        ["subprocess.Popen", "arena.benchmark", "--checkpoint", "policy_best.pt"],
+    ),
 ]
 
 
