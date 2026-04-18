@@ -2263,7 +2263,9 @@ print(f'imported URDF to {{prim_path}}')
             resolved = f"{_ROBOTS_DIR}/{file_path}.usd"
 
         if is_nucleus:
-            # Nucleus URL — no local file check, USD resolves directly
+            # Nucleus URL — no local file check, USD resolves directly.
+            # Still post-verify HasAuthoredReferences so a composition error
+            # (bad Nucleus path / permissions) doesn't report success=True.
             return (
                 "import omni.usd\n"
                 "from pxr import UsdGeom, Gf\n"
@@ -2271,10 +2273,14 @@ print(f'imported URDF to {{prim_path}}')
                 "\nstage = omni.usd.get_context().get_stage()\n"
                 f"prim = stage.DefinePrim('{dest}', 'Xform')\n"
                 f"prim.GetReferences().AddReference('{resolved}')\n"
-                f"_safe_set_translate(prim, (0, 0, 0))"
+                f"if not prim.HasAuthoredReferences():\n"
+                f"    raise RuntimeError(f'import_robot: AddReference({resolved!r}) completed but HasAuthoredReferences=False on {dest}')\n"
+                f"_safe_set_translate(prim, (0, 0, 0))\n"
+                f"print(f'imported Nucleus asset {resolved} → {dest}')"
             )
         else:
-            # Local filesystem — validate the file exists
+            # Local filesystem — validate the file exists, then verify the
+            # reference landed on the prim.
             return (
                 "import omni.usd\n"
                 "from pxr import UsdGeom, Gf\n"
@@ -2286,18 +2292,30 @@ print(f'imported URDF to {{prim_path}}')
                 f"    raise FileNotFoundError(f'Robot asset not found: {{asset_path}}')\n"
                 f"prim = stage.DefinePrim('{dest}', 'Xform')\n"
                 "prim.GetReferences().AddReference(asset_path)\n"
-                f"_safe_set_translate(prim, (0, 0, 0))"
+                f"if not prim.HasAuthoredReferences():\n"
+                f"    raise RuntimeError(f'import_robot: AddReference({{asset_path!r}}) completed but HasAuthoredReferences=False on {dest}')\n"
+                f"_safe_set_translate(prim, (0, 0, 0))\n"
+                f"print(f'imported local asset {{asset_path}} → {dest}')"
             )
 
-    # Default: USD reference (absolute path or URL)
+    # Default: USD reference (absolute path or URL). Accept both local
+    # filesystem paths and URL schemes; validate local paths; post-verify.
     return (
+        "import os\n"
         "import omni.usd\n"
         "from pxr import UsdGeom, Gf\n"
         + _SAFE_XFORM_SNIPPET +
         "\nstage = omni.usd.get_context().get_stage()\n"
+        f"_ref = '{file_path}'\n"
+        "if not any(_ref.startswith(p) for p in ('omniverse://','http://','https://','file://','anon:')):\n"
+        f"    if not os.path.exists(_ref):\n"
+        f"        raise FileNotFoundError(f'import_robot: asset not found: {{_ref!r}}')\n"
         f"prim = stage.DefinePrim('{dest}', 'Xform')\n"
-        f"prim.GetReferences().AddReference('{file_path}')\n"
-        f"_safe_set_translate(prim, (0, 0, 0))"
+        "prim.GetReferences().AddReference(_ref)\n"
+        f"if not prim.HasAuthoredReferences():\n"
+        f"    raise RuntimeError(f'import_robot: AddReference({{_ref!r}}) completed but HasAuthoredReferences=False on {dest}')\n"
+        f"_safe_set_translate(prim, (0, 0, 0))\n"
+        f"print(f'imported {{_ref}} → {dest}')"
     )
 
 
