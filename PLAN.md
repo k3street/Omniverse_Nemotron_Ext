@@ -3,7 +3,8 @@
 **Author:** 10Things, Inc. — [www.10things.tech](http://www.10things.tech)  
 **Extension:** `omni.isaac.assist`  
 **Target:** Isaac Sim 5.1 / 6.0 on NVIDIA Omniverse  
-**Date:** April 2026
+**Date:** April 2026  
+**Last Updated:** April 18, 2026
 
 ---
 
@@ -48,11 +49,14 @@ Complete natural-language control over every Isaac Sim capability — USD author
 | Golden code patterns (49 verified patterns + auto-capture pipeline) | ✅ Running |
 | Robot name normalization (alias mapping for 20+ robots) | ✅ Running |
 | Patch validator (12 regex rules for legacy API detection) | ✅ Running |
-| Context distiller (17 tool categories, smart tool pre-selection) | ✅ Running |
+| Context distiller (20 tool categories, smart tool pre-selection) | ✅ Running |
 | Per-tool call throttling (configurable limits per turn) | ✅ Running |
 | Secret redaction + audit trail (governance module) | ✅ Running |
 | Pipeline planner (multi-step plan generation + execution) | ✅ Running |
-| ROS-MCP integration (11 ROS2 tool schemas via rosbridge) | ⚠️ Schemas only |
+| ROS2 bridge tools (13 tools: topic pub/sub, service calls, node info via rosbridge) | ✅ Running |
+| ROS2 camera topics (4 cameras × 3 topics = 12 live via OmniGraph) | ✅ Running |
+| RViz2 auto-launch (topic discovery → config gen → process management) | ✅ Running |
+| MCP server (auto-converts all tools to JSON-RPC 2.0 over SSE/stdio) | ✅ Running |
 
 ---
 
@@ -64,7 +68,7 @@ Complete natural-language control over every Isaac Sim capability — USD author
 |---|---|---|
 | **Viewport visual feedback** — show LLM what the user sees per turn | ⚠️ Tool-call only | LLM must call `capture_viewport` explicitly; not auto-injected per chat turn |
 | **Replicator / SDG** — synthetic data generation from chat | ⚠️ Basic only | Annotators + BasicWriter work; no domain randomization, no custom annotators |
-| **ROS2 bridge control** — topic pub/sub from chat | ⚠️ Schema only | Tool schemas defined but handlers are stubs (`None`); no actual ROS2 bridge code |
+| **ROS2 bridge control** — topic pub/sub from chat | ✅ Working | 13 ROS2 tools fully connected via rosbridge WebSocket (port 9090); topic list/pub/sub/echo, service list/call, node list/details all functional |
 | **Undo/redo narration** — LLM explains what it did, user can Ctrl+Z | ⚠️ Undo works | All mutations go through `omni.kit.commands` (Ctrl+Z); no per-action LLM narration |
 | **Fine-tune data capture** — every chat→action pair stored for training | ⚠️ Patches only | Code patches logged via `/log_execution`; tool-call chat→action pairs NOT captured |
 | **Stage Analyzer** — scene diagnosis & validation | ⚠️ 1/8 validators | Only `SchemaConsistencyRule` implemented; missing: import health, material/physics mismatch, articulation integrity, sensor completeness, ROS bridge readiness, IsaacLab sanity, performance warnings |
@@ -81,6 +85,7 @@ Complete natural-language control over every Isaac Sim capability — USD author
 |---|---|
 | **NL scene builder** — "build a kitchen with my robot" → full spatial layout from asset catalog | P0 |
 | **Asset catalog search** — fuzzy-match local/Nucleus assets by name, tag, type | ✅ Done |
+| **RViz2 integration** — auto-configured launch with topic discovery + scene-named configs | ✅ Done |
 | **IsaacLab RL training** — env scaffolding, training launch, live metrics from chat | P0 |
 | **Motion planning (RMPflow/Lula)** — "move arm to this pose" via `isaacsim.robot_motion` | P0 |
 | **GPU-batched cloning** — replace naive clone loop with `isaacsim.core.cloner` | P0 |
@@ -335,9 +340,11 @@ Audit of all `isaacsim.*` extensions available vs. currently used.
 
 ### 4B — ROS2 Bridge
 
-- [ ] **4B.1** Tool: `ros2_publish(topic, msg_type, data)` — publish to a ROS2 topic
-- [ ] **4B.2** Tool: `ros2_subscribe(topic, msg_type)` — subscribe and show data in chat
-- [ ] **4B.3** Tool: `ros2_list_topics()` — show active topics
+- [x] **4B.1** Tool: `ros2_publish(topic, msg_type, data)` — publish to a ROS2 topic
+- [x] **4B.2** Tool: `ros2_subscribe(topic, msg_type)` — subscribe and show data in chat
+- [x] **4B.3** Tool: `ros2_list_topics()` — show active topics
+- [x] **4B.4** Tool: `launch_rviz2(extra_topics, fixed_frame)` — auto-discover topics, generate config (named after USD scene), launch RViz2 process
+- [x] **4B.5** Tool: `stop_rviz2()` — stop managed RViz2 instance (SIGTERM → SIGKILL)
 
 ### 4C — Camera & Viewport Control
 
@@ -925,12 +932,14 @@ User types: "Create a 3D model from this image and place it at 0, 0, 1"
   - Replace `mock_findings` parameter with real `run_analysis()` call
   - Plan steps derived from actual validator findings (9A)
   - Each plan step references the specific finding it addresses
-- [ ] **9E.5** Wire ROS2 tool execution handlers
-  - Connect `tool_executor.py` handlers to `ros_mcp_tools.py` for:
-    - `ros2_publish_topic` / `ros2_subscribe_topic`
-    - `ros2_call_service` / `ros2_list_topics` / `ros2_list_services`
-    - `ros2_get_topic_info` / `ros2_echo_topic`
-  - Test with rosbridge WebSocket at `127.0.0.1:9090`
+- [x] **9E.5** Wire ROS2 tool execution handlers
+  - Connected `tool_executor.py` handlers to `ros_mcp_tools.py` for:
+    - `ros2_list_topics` / `ros2_get_topic_type` / `ros2_get_message_type`
+    - `ros2_subscribe_once` / `ros2_publish` / `ros2_publish_sequence`
+    - `ros2_list_services` / `ros2_call_service`
+    - `ros2_list_nodes` / `ros2_get_node_details`
+    - `launch_rviz2` / `stop_rviz2` (via `rviz_launcher.py`)
+  - Tested with rosbridge WebSocket at `127.0.0.1:9090`
 - [ ] **9E.6** Add integration tests (L1–L2)
   - L1: Service integration tests — start service, send chat, verify tool calls
   - L2: MCP server tests — verify tool schema registration and dispatch
@@ -972,6 +981,8 @@ All tools are exposed to the LLM via structured function-calling schemas. The LL
 | `run_sdg` | 4A | Replicator |
 | `ros2_publish` | 4B | ROS2 |
 | `ros2_subscribe` | 4B | ROS2 |
+| `launch_rviz2` | 4B | ROS2 |
+| `stop_rviz2` | 4B | ROS2 |
 | `set_viewport_camera` | 4C | Viewport |
 | `create_render_product` | 4C | Viewport |
 | `list_all_prims` | 4D | Query |
@@ -1168,7 +1179,21 @@ User types: "attach the Robotiq 2F-85 gripper to the UR10 tool flange"
 → LLM: "Gripper attached. 8 DOF total (6 arm + 2 finger)."
 ```
 
-### Flow 10: "Show me what the overhead camera sees"
+### Flow 10: "Launch RViz to see the robot's sensors"
+```
+User types: "launch rviz"
+→ LLM calls: launch_rviz2(fixed_frame="odom")
+→ Internally: discovers 22 active ROS2 topics via rosbridge
+→ Maps topics to RViz2 display types (8 camera Image displays, TF, Odometry, etc.)
+→ Queries Kit RPC for scene file name → "nova_carter_omnigraph_kitchen"
+→ Saves config: workspace/rviz_configs/nova_carter_omnigraph_kitchen_20260418_082211.rviz
+→ Launches rviz2 subprocess with the config
+→ LLM: "RViz2 launched with 9 displays (8 cameras, TF). PID 48231.
+         Config saved as nova_carter_omnigraph_kitchen_20260418_082211.rviz"
+→ User: "stop rviz" → LLM calls stop_rviz2() → process terminated
+```
+
+### Flow 11: "Show me what the overhead camera sees"
 ```
 User types: "switch viewport to the overhead camera"
 → LLM calls: set_viewport_camera("/World/Cameras/overhead_cam")
@@ -1176,7 +1201,7 @@ User types: "switch viewport to the overhead camera"
 → LLM auto-captures and says: "Here's the overhead view. I can see 3 objects on the table."
 ```
 
-### Flow 11: "Build a house and put my robot in the kitchen"
+### Flow 12: "Build a house and put my robot in the kitchen"
 ```
 User types: "Build a house with a kitchen and put my Unitree G1 robot inside
             with a table, chairs, sink, and some kitchen items"
@@ -1214,7 +1239,7 @@ User types: "Build a house with a kitchen and put my Unitree G1 robot inside
 → LLM updates blueprint delta, re-validates, applies change
 ```
 
-### Flow 12: "Turn this photo into a 3D model"
+### Flow 13: "Turn this photo into a 3D model"
 ```
 User clicks 📎 → selects photo of a coffee mug from desktop
 User types: "Create a 3D model from this image and put it on the table"

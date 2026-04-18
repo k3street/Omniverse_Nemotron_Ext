@@ -1073,4 +1073,43 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+    # ── ROS2 Launch Tools ────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_rviz2",
+            "description": (
+                "Launch RViz2 with an auto-generated display configuration based on currently "
+                "active ROS2 topics. Discovers camera, LiDAR, odometry, TF, map, and other "
+                "topics and creates matching RViz2 display panels. Returns the PID and config path."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "extra_topics": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Additional topic names to include beyond auto-discovered ones",
+                    },
+                    "fixed_frame": {
+                        "type": "string",
+                        "description": "TF fixed frame for RViz2. Default: 'odom' (falls back to 'base_link')",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stop_rviz2",
+            "description": "Stop a previously launched RViz2 instance.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
 ]

@@ -57,13 +57,19 @@ _NOVA_CARTER_PHASES = [
         "prompt": (
             "Create a ROS2 OmniGraph at /World/CarterROS2Graph for the Nova Carter robot:\n"
             "1. OnPlaybackTick as the tick source\n"
-            "2. ROS2SubscribeTwist node subscribing to /cmd_vel\n"
-            "3. DifferentialController for the two front drive wheels "
+            "2. ROS2Context node (provides the ROS2 context handle for all ROS2 nodes)\n"
+            "3. ROS2SubscribeTwist node subscribing to /cmd_vel\n"
+            "4. Break3Vector nodes to extract scalar X (linear) and Z (angular) from the double3 outputs\n"
+            "5. DifferentialController for the two front drive wheels "
             "(rear casters are passive — do NOT drive them)\n"
-            "4. IsaacArticulationController targeting the Nova Carter robot\n"
-            "5. ROS2PublishOdometry publishing to /odom\n\n"
+            "6. IsaacArticulationController targeting the Nova Carter robot\n"
+            "7. IsaacComputeOdometry with chassisPrim set to the robot prim\n"
+            "8. ROS2PublishOdometry publishing to /odom (wire ComputeOdometry outputs into it)\n"
+            "9. ROS2PublishClock publishing to /clock\n\n"
             "IMPORTANT: ROS2SubscribeTwist outputs double3 but DifferentialController "
             "expects scalar inputs. Use Break3Vector nodes to extract X (linear) and Z (angular) components.\n\n"
+            "PUBLISHER NODES ARE MANDATORY — without them, outbound topics like /odom and /clock "
+            "will never appear on the ROS2 network. Always include publisher nodes alongside subscribers.\n\n"
             "USE THESE EXACT VERIFIED PARAMETERS:\n"
             "- DifferentialController.inputs:wheelRadius = 0.14\n"
             "- DifferentialController.inputs:wheelDistance = 0.4132\n"
@@ -73,10 +79,12 @@ _NOVA_CARTER_PHASES = [
             "- IsaacArticulationController.inputs:jointNames = ['joint_wheel_left', 'joint_wheel_right']\n\n"
             "CRITICAL: Connect BOTH DiffController.inputs:execIn AND ArtController.inputs:execIn "
             "to OnPlaybackTick.outputs:tick. If ArtController.inputs:execIn is not connected, "
-            "the robot will NOT move even if velocityCommand is correct."
+            "the robot will NOT move even if velocityCommand is correct.\n\n"
+            "CRITICAL: Wire ROS2Context.outputs:context to ALL ROS2 nodes' inputs:context "
+            "(SubscribeTwist, PubOdom, PubClock)."
         ),
-        "verification": "Verify the OmniGraph exists at /World/CarterROS2Graph with ROS2 nodes.",
-        "retry_hint": "If OmniGraph creation failed, check that isaacsim.ros2.bridge extension is enabled. Use isaacsim.* node type namespace, NOT omni.isaac.*.",
+        "verification": "Verify the OmniGraph exists at /World/CarterROS2Graph with ROS2 subscriber AND publisher nodes. Run ros2 topic list to confirm /cmd_vel, /odom, and /clock appear.",
+        "retry_hint": "If OmniGraph creation failed, check that isaacsim.ros2.bridge extension is enabled. Use isaacsim.* node type namespace, NOT omni.isaac.*. If topics are missing, ensure publisher nodes (ROS2PublishOdometry, ROS2PublishClock) were created.",
     },
     {
         "id": 4,
@@ -139,14 +147,21 @@ _JETBOT_PHASES = [
         "prompt": (
             "Create a ROS2 OmniGraph at /World/JetbotROS2Graph for the Jetbot:\n"
             "1. OnPlaybackTick as the tick source\n"
-            "2. ROS2SubscribeTwist subscribing to /cmd_vel\n"
-            "3. DifferentialController for the left and right drive wheels\n"
-            "4. IsaacArticulationController targeting the Jetbot\n"
-            "5. ROS2PublishOdometry publishing to /odom\n\n"
-            "Use Break3Vector to extract scalar components from the Twist message."
+            "2. ROS2Context node\n"
+            "3. ROS2SubscribeTwist subscribing to /cmd_vel\n"
+            "4. Break3Vector nodes to extract scalar components from the Twist double3 outputs\n"
+            "5. DifferentialController for the left and right drive wheels\n"
+            "6. IsaacArticulationController targeting the Jetbot\n"
+            "7. IsaacComputeOdometry with chassisPrim set to the Jetbot prim\n"
+            "8. ROS2PublishOdometry publishing to /odom\n"
+            "9. ROS2PublishClock publishing to /clock\n\n"
+            "PUBLISHER NODES ARE MANDATORY — without them, outbound topics like /odom and /clock "
+            "will never appear on the ROS2 network.\n\n"
+            "Wire ROS2Context.outputs:context to ALL ROS2 nodes' inputs:context.\n"
+            "Connect OnPlaybackTick.outputs:tick to ALL nodes that have inputs:execIn."
         ),
-        "verification": "Verify the OmniGraph exists with ROS2 nodes.",
-        "retry_hint": "Check node type namespaces: use isaacsim.* not omni.isaac.*.",
+        "verification": "Verify the OmniGraph exists with ROS2 subscriber AND publisher nodes. Confirm /cmd_vel, /odom, /clock topics appear.",
+        "retry_hint": "Check node type namespaces: use isaacsim.* not omni.isaac.*. If topics are missing, ensure publisher nodes were created.",
     },
     {
         "id": 4,
@@ -206,13 +221,18 @@ _FRANKA_PHASES = [
         "prompt": (
             "Create a ROS2 OmniGraph at /World/FrankaROS2Graph:\n"
             "1. OnPlaybackTick tick source\n"
-            "2. ROS2SubscribeJointState subscribing to /joint_command\n"
-            "3. IsaacArticulationController targeting the Franka robot\n"
-            "4. ROS2PublishJointState publishing to /joint_states\n"
-            "Wire them all together."
+            "2. ROS2Context node\n"
+            "3. ROS2SubscribeJointState subscribing to /joint_command\n"
+            "4. IsaacArticulationController targeting the Franka robot\n"
+            "5. ROS2PublishJointState publishing to /joint_states\n"
+            "6. ROS2PublishClock publishing to /clock\n\n"
+            "PUBLISHER NODES ARE MANDATORY — without them, outbound topics like /joint_states "
+            "and /clock will never appear on the ROS2 network.\n\n"
+            "Wire ROS2Context.outputs:context to ALL ROS2 nodes' inputs:context.\n"
+            "Connect OnPlaybackTick.outputs:tick to ALL nodes that have inputs:execIn."
         ),
-        "verification": "Verify the OmniGraph exists with JointState nodes.",
-        "retry_hint": "Use isaacsim.* namespace for node types.",
+        "verification": "Verify the OmniGraph exists with JointState subscriber AND publisher nodes. Confirm /joint_states, /joint_command, /clock topics appear.",
+        "retry_hint": "Use isaacsim.* namespace for node types. If topics are missing, ensure publisher nodes were created.",
     },
     {
         "id": 4,
@@ -261,14 +281,19 @@ _UNITREE_G1_PHASES = [
         "prompt": (
             "Create a ROS2 OmniGraph at /World/G1ROS2Graph:\n"
             "1. OnPlaybackTick tick source\n"
-            "2. ROS2SubscribeJointState subscribing to /joint_command\n"
-            "3. IsaacArticulationController targeting the G1 robot\n"
-            "4. ROS2PublishJointState publishing to /joint_states\n"
-            "Wire them all together. The G1 has many joints — the articulation "
-            "controller should handle all of them."
+            "2. ROS2Context node\n"
+            "3. ROS2SubscribeJointState subscribing to /joint_command\n"
+            "4. IsaacArticulationController targeting the G1 robot\n"
+            "5. ROS2PublishJointState publishing to /joint_states\n"
+            "6. ROS2PublishClock publishing to /clock\n\n"
+            "PUBLISHER NODES ARE MANDATORY — without them, outbound topics like /joint_states "
+            "and /clock will never appear on the ROS2 network.\n\n"
+            "Wire ROS2Context.outputs:context to ALL ROS2 nodes' inputs:context.\n"
+            "Connect OnPlaybackTick.outputs:tick to ALL nodes that have inputs:execIn.\n"
+            "The G1 has many joints — the articulation controller should handle all of them."
         ),
-        "verification": "Verify the OmniGraph exists with JointState nodes.",
-        "retry_hint": "Use isaacsim.* namespace for node types.",
+        "verification": "Verify the OmniGraph exists with JointState subscriber AND publisher nodes. Confirm /joint_states, /joint_command, /clock topics appear.",
+        "retry_hint": "Use isaacsim.* namespace for node types. If topics are missing, ensure publisher nodes were created.",
     },
     {
         "id": 4,
@@ -315,13 +340,18 @@ _UNITREE_GO2_PHASES = [
         "prompt": (
             "Create a ROS2 OmniGraph at /World/Go2ROS2Graph:\n"
             "1. OnPlaybackTick tick source\n"
-            "2. ROS2SubscribeJointState subscribing to /joint_command\n"
-            "3. IsaacArticulationController targeting the Go2 robot\n"
-            "4. ROS2PublishJointState publishing to /joint_states\n"
-            "Wire them all together."
+            "2. ROS2Context node\n"
+            "3. ROS2SubscribeJointState subscribing to /joint_command\n"
+            "4. IsaacArticulationController targeting the Go2 robot\n"
+            "5. ROS2PublishJointState publishing to /joint_states\n"
+            "6. ROS2PublishClock publishing to /clock\n\n"
+            "PUBLISHER NODES ARE MANDATORY — without them, outbound topics like /joint_states "
+            "and /clock will never appear on the ROS2 network.\n\n"
+            "Wire ROS2Context.outputs:context to ALL ROS2 nodes' inputs:context.\n"
+            "Connect OnPlaybackTick.outputs:tick to ALL nodes that have inputs:execIn."
         ),
-        "verification": "Verify the OmniGraph exists with JointState nodes.",
-        "retry_hint": "Use isaacsim.* namespace for node types.",
+        "verification": "Verify the OmniGraph exists with JointState subscriber AND publisher nodes. Confirm /joint_states, /joint_command, /clock topics appear.",
+        "retry_hint": "Use isaacsim.* namespace for node types. If topics are missing, ensure publisher nodes were created.",
     },
     {
         "id": 4,
@@ -410,6 +440,16 @@ RULES:
 - For WHEELED robots (Nova Carter, Jetbot): NEVER set fixedBase=True
 - For STATIONARY robots (Franka, UR10): use anchor_robot with fixedBase=True
 - Include Isaac Sim-specific API hints (isaacsim.* namespace, Break3Vector for Twist, etc.)
+
+CRITICAL OmniGraph rules for ALL ROS2 graph phases:
+- NEVER create subscriber-only graphs. If a graph has ROS2Subscribe* nodes,
+  it MUST also have publisher nodes (ROS2PublishOdometry, ROS2PublishClock, etc.)
+  so the robot reports its state back.
+- ALWAYS include ROS2Context and wire its outputs:context to ALL ROS2 nodes.
+- For camera graphs: NEVER set renderProductPath to a raw camera prim path.
+  ALWAYS create an IsaacCreateRenderProduct node, set its inputs:cameraPrim
+  to [Sdf.Path(cam_path)], and CONNECT its outputs:renderProductPath to
+  the camera helper nodes' inputs:renderProductPath.
 
 Respond with a JSON object:
 {{

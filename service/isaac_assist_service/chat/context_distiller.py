@@ -49,6 +49,7 @@ TOOL_CATEGORIES: Dict[str, List[str]] = {
         "ros2_subscribe_once", "ros2_publish", "ros2_publish_sequence",
         "ros2_list_services", "ros2_call_service",
         "ros2_list_nodes", "ros2_get_node_details",
+        "launch_rviz2", "stop_rviz2",
     ],
     "camera_viewport": [
         "create_prim", "set_viewport_camera", "capture_viewport",
@@ -82,7 +83,7 @@ TOOL_CATEGORIES: Dict[str, List[str]] = {
 _KEYWORD_CATEGORIES: List[tuple] = [
     (re.compile(r"robot|franka|ur10|ur5|panda|carter|jetbot|nova|spot|anymal|cobotta", re.I),
      {"robot", "usd_core"}),
-    (re.compile(r"ros2?|omnigraph|graph|publish|subscribe|topic|/cmd_vel|/joint|twist|odom", re.I),
+    (re.compile(r"ros2?|omnigraph|graph|publish|subscribe|topic|/cmd_vel|/joint|twist|odom|rviz", re.I),
      {"omnigraph_ros2", "scripting"}),
     (re.compile(r"physics|rigid.?body|collision|collider|gravity|deform|cloth|soft|mass", re.I),
      {"physics", "usd_core"}),

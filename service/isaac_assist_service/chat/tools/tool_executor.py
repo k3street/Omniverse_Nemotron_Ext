@@ -1105,6 +1105,12 @@ except ImportError:
         "ros2_get_node_details": None,
     })
 
+# ── RViz2 launch tools ──────────────────────────────────────────────────────
+from .rviz_launcher import handle_launch_rviz2, handle_stop_rviz2
+
+DATA_HANDLERS["launch_rviz2"] = handle_launch_rviz2
+DATA_HANDLERS["stop_rviz2"] = handle_stop_rviz2
+
 
 # ── Main dispatch ────────────────────────────────────────────────────────────
 

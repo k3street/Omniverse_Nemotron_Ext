@@ -336,6 +336,77 @@ def _check_art_ctrl_exec_in(code: str) -> List[PatchIssue]:
 
 
 # ---------------------------------------------------------------------------
+# ROS2 publisher completeness
+# ---------------------------------------------------------------------------
+
+_RE_ROS2_SUBSCRIBE = re.compile(r"ROS2Subscribe\w+", re.I)
+_RE_ROS2_PUBLISH = re.compile(r"ROS2Publish\w+", re.I)
+
+
+def _check_missing_ros2_publishers(code: str) -> List[PatchIssue]:
+    """Graphs with ROS2 subscribers but no publishers are almost always incomplete."""
+    issues = []
+    if "og.Controller.edit" not in code:
+        return issues
+    has_sub = _RE_ROS2_SUBSCRIBE.search(code)
+    has_pub = _RE_ROS2_PUBLISH.search(code)
+    if has_sub and not has_pub:
+        issues.append(PatchIssue(
+            severity="warning",
+            rule="og_subscriber_only_graph",
+            message="Graph creates ROS2 subscriber nodes but no publisher nodes. "
+                    "Typically you also need ROS2PublishOdometry, ROS2PublishClock, "
+                    "or other publishers so the robot reports its state.",
+            fix_hint="Add ROS2PublishOdometry + IsaacComputeOdometry + "
+                     "ROS2PublishClock + IsaacReadSimulationTime nodes and "
+                     "wire them to OnPlaybackTick and ROS2Context.",
+        ))
+    return issues
+
+
+# ---------------------------------------------------------------------------
+# Camera render-product validator
+# ---------------------------------------------------------------------------
+
+_RE_RENDER_PRODUCT_SET = re.compile(
+    r"""renderProductPath['"],\s*['"]([^'"]+)['"]""",
+)
+_RE_CREATE_RENDER_PRODUCT = re.compile(
+    r"IsaacCreateRenderProduct", re.I,
+)
+
+
+def _check_camera_raw_prim_as_render_product(code: str) -> List[PatchIssue]:
+    """ROS2CameraHelper.inputs:renderProductPath must come from IsaacCreateRenderProduct,
+    not a raw camera prim path."""
+    issues = []
+    if "og.Controller.edit" not in code:
+        return issues
+    matches = _RE_RENDER_PRODUCT_SET.findall(code)
+    if not matches:
+        return issues
+    # If any renderProductPath is set to a literal prim path (starts with /)
+    # AND there's no IsaacCreateRenderProduct node, that's an error.
+    has_create_rp = _RE_CREATE_RENDER_PRODUCT.search(code)
+    for path_val in matches:
+        if path_val.startswith("/"):
+            if not has_create_rp:
+                issues.append(PatchIssue(
+                    severity="error",
+                    rule="og_camera_raw_prim_as_render_product",
+                    message=f"renderProductPath is set to a raw prim path '{path_val}' "
+                            "instead of being wired from IsaacCreateRenderProduct. "
+                            "This will fail with 'Invalid renderProduct'.",
+                    fix_hint="Create an IsaacCreateRenderProduct node, set its "
+                             "inputs:cameraPrim to the camera prim (as [Sdf.Path(...)]), "
+                             "and CONNECT its outputs:renderProductPath to the camera "
+                             "helper's inputs:renderProductPath instead of SET_VALUES.",
+                ))
+                break  # One error is enough
+    return issues
+
+
+# ---------------------------------------------------------------------------
 # Aggregate validator
 # ---------------------------------------------------------------------------
 
@@ -353,6 +424,8 @@ _ALL_VALIDATORS = [
     _check_unsafe_add_xform_op,
     _check_create_attribute_signature,
     _check_art_ctrl_exec_in,
+    _check_missing_ros2_publishers,
+    _check_camera_raw_prim_as_render_product,
 ]
 
 

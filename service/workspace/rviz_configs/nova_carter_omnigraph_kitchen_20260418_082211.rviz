@@ -1,0 +1,144 @@
+Panels:
+- Class: rviz_common/Displays
+  Name: Displays
+  Help Height: 78
+Visualization Manager:
+  Class: ''
+  Displays:
+  - Class: rviz_default_plugins/Grid
+    Name: Grid
+    Enabled: true
+    Value: true
+    Cell Count: 20
+    Cell Size: 1
+    Line Style:
+      Line Width: 0.03
+      Value: Lines
+    Plane: XY
+    Plane Cell Count: 10
+    Color: 160; 160; 164
+  - Class: rviz_default_plugins/Image
+    Name: Front_Hawk_Left / Depth (Depth)
+    Enabled: true
+    Value: true
+    Topic:
+      Value: /front_hawk_left/depth
+      Depth: 5
+      History Policy: Keep Last
+      Reliability Policy: Best Effort
+      Durability Policy: Volatile
+    Max Value: 10.0
+    Min Value: 0.0
+    Median window: 5
+    Normalize Range: true
+  - Class: rviz_default_plugins/Image
+    Name: Front_Hawk_Left / Rgb
+    Enabled: true
+    Value: true
+    Topic:
+      Value: /front_hawk_left/rgb
+      Depth: 5
+      History Policy: Keep Last
+      Reliability Policy: Best Effort
+      Durability Policy: Volatile
+    Max Value: 1.0
+    Min Value: 0.0
+    Median window: 5
+    Normalize Range: true
+  - Class: rviz_default_plugins/Image
+    Name: Front_Hawk_Right / Depth (Depth)
+    Enabled: true
+    Value: true
+    Topic:
+      Value: /front_hawk_right/depth
+      Depth: 5
+      History Policy: Keep Last
+      Reliability Policy: Best Effort
+      Durability Policy: Volatile
+    Max Value: 10.0
+    Min Value: 0.0
+    Median window: 5
+    Normalize Range: true
+  - Class: rviz_default_plugins/Image
+    Name: Front_Hawk_Right / Rgb
+    Enabled: true
+    Value: true
+    Topic:
+      Value: /front_hawk_right/rgb
+      Depth: 5
+      History Policy: Keep Last
+      Reliability Policy: Best Effort
+      Durability Policy: Volatile
+    Max Value: 1.0
+    Min Value: 0.0
+    Median window: 5
+    Normalize Range: true
+  - Class: rviz_default_plugins/Image
+    Name: Left_Owl / Depth (Depth)
+    Enabled: true
+    Value: true
+    Topic:
+      Value: /left_owl/depth
+      Depth: 5
+      History Policy: Keep Last
+      Reliability Policy: Best Effort
+      Durability Policy: Volatile
+    Max Value: 10.0
+    Min Value: 0.0
+    Median window: 5
+    Normalize Range: true
+  - Class: rviz_default_plugins/Image
+    Name: Left_Owl / Rgb
+    Enabled: true
+    Value: true
+    Topic:
+      Value: /left_owl/rgb
+      Depth: 5
+      History Policy: Keep Last
+      Reliability Policy: Best Effort
+      Durability Policy: Volatile
+    Max Value: 1.0
+    Min Value: 0.0
+    Median window: 5
+    Normalize Range: true
+  - Class: rviz_default_plugins/Image
+    Name: Right_Owl / Depth (Depth)
+    Enabled: true
+    Value: true
+    Topic:
+      Value: /right_owl/depth
+      Depth: 5
+      History Policy: Keep Last
+      Reliability Policy: Best Effort
+      Durability Policy: Volatile
+    Max Value: 10.0
+    Min Value: 0.0
+    Median window: 5
+    Normalize Range: true
+  - Class: rviz_default_plugins/Image
+    Name: Right_Owl / Rgb
+    Enabled: true
+    Value: true
+    Topic:
+      Value: /right_owl/rgb
+      Depth: 5
+      History Policy: Keep Last
+      Reliability Policy: Best Effort
+      Durability Policy: Volatile
+    Max Value: 1.0
+    Min Value: 0.0
+    Median window: 5
+    Normalize Range: true
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: odom
+    Frame Rate: 30
+  Name: root
+  Tools:
+  - Class: rviz_default_plugins/MoveCamera
+  - Class: rviz_default_plugins/FocusCamera
+  Value: true
+Window Geometry:
+  Width: 1920
+  Height: 1080

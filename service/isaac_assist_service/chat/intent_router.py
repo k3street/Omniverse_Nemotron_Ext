@@ -45,6 +45,8 @@ INTENT_EXAMPLES = [
     ("what are the properties of /World/Robot", "prim_inspect"),
     ("fix the joint damping", "patch_request"),
     ("apply a gravity correction", "patch_request"),
+    ("launch rviz", "patch_request"),
+    ("start rviz2 with camera topics", "patch_request"),
     ("what are the joint velocities?", "physics_query"),
     ("any errors in the console?", "console_review"),
     ("select the robot arm", "navigation"),
