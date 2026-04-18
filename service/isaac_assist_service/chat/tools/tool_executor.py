@@ -23351,27 +23351,36 @@ else:
 
 def _gen_focus_viewport_on(args: Dict) -> str:
     prim_path = args["prim_path"]
+    # Old version printed "prim not found" and returned success=True — the
+    # viewport wasn't framed but the agent could claim it was. Also the
+    # outer try/except swallowed framing failures so partial failures
+    # (extension not loaded, etc.) flowed up as success.
+    # Note: bind prim_path to a Python variable in the generated code so
+    # the f-string interpolation in messages uses that variable — avoids
+    # quote-char collisions when prim_path repr gets embedded twice.
     return f"""\
 import omni.usd
 import omni.kit.commands
 
+_prim_path = {prim_path!r}
 ctx = omni.usd.get_context()
 stage = ctx.get_stage()
-prim = stage.GetPrimAtPath('{prim_path}')
+prim = stage.GetPrimAtPath(_prim_path)
 if not prim or not prim.IsValid():
-    print("focus_viewport_on: prim not found at '{prim_path}'")
-else:
-    ctx.get_selection().set_selected_prim_paths(['{prim_path}'], True)
-    try:
-        import omni.kit.viewport.utility as _vpu
-        vp_api = _vpu.get_active_viewport()
-        try:
-            _vpu.frame_viewport_selection(vp_api)
-        except Exception:
-            omni.kit.commands.execute('FramePrimsCommand', prim_to_move=[], prims_to_frame=['{prim_path}'])
-        print("focus_viewport_on: framed '{prim_path}'")
-    except Exception as e:
-        print(f"focus_viewport_on: viewport framing failed: {{e}}")
+    raise RuntimeError(f'focus_viewport_on: prim not found: {{_prim_path!r}}')
+
+ctx.get_selection().set_selected_prim_paths([_prim_path], True)
+import omni.kit.viewport.utility as _vpu
+vp_api = _vpu.get_active_viewport()
+if vp_api is None:
+    raise RuntimeError('focus_viewport_on: no active viewport')
+try:
+    _vpu.frame_viewport_selection(vp_api)
+except Exception:
+    # Fallback: older Kit versions use the FramePrimsCommand. If it also
+    # fails, we surface the underlying error — no silent swallow.
+    omni.kit.commands.execute('FramePrimsCommand', prim_to_move=[], prims_to_frame=[_prim_path])
+print(f"focus_viewport_on: framed {{_prim_path!r}}")
 """
 
 def _gen_save_stage(args: Dict) -> str:
@@ -23688,8 +23697,12 @@ from pxr import UsdMedia, Sdf
 stage = omni.usd.get_context().get_stage()
 prim = stage.GetPrimAtPath({repr(prim_path)})
 if not prim or not prim.IsValid():
-    print("set_audio_property: prim not found at {prim_path}")
-else:
+    raise RuntimeError(f"set_audio_property: prim not found: {prim_path!r}")
+if not prim.IsA(UsdMedia.SpatialAudio):
+    raise RuntimeError(
+        f"set_audio_property: prim {prim_path!r} is a {{prim.GetTypeName()!r}}, not UsdMedia.SpatialAudio"
+    )
+if True:
     audio = UsdMedia.SpatialAudio(prim)
     prop_name = {repr(prop)}
     attr_name = {repr(attr_name)}
