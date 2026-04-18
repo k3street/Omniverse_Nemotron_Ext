@@ -22193,6 +22193,7 @@ def _gen_add_usd_reference(args: Dict) -> str:
     instanceable_repr = "True" if instanceable else "False"
 
     return (
+        "import os\n"
         "import omni.usd\n"
         "from pxr import Usd, Sdf, UsdGeom\n"
         "\n"
@@ -22205,6 +22206,13 @@ def _gen_add_usd_reference(args: Dict) -> str:
         f"ref_prim_path = {ref_prim_path_repr}\n"
         f"layer_offset_seconds = {layer_offset_repr}\n"
         f"instanceable = {instanceable_repr}\n"
+        "\n"
+        # Validate local filesystem paths before calling AddReference — USD
+        # accepts any URL and the composition failure surfaces later (or
+        # never). Remote URLs go through USD's asset resolver as before.
+        "if not any(usd_url.startswith(p) for p in ('omniverse://','http://','https://','file://','anon:')):\n"
+        "    if not os.path.isabs(usd_url) or not os.path.exists(usd_url):\n"
+        "        raise FileNotFoundError(f'add_usd_reference: asset not found: {usd_url!r}')\n"
         "\n"
         "# Auto-create the holding prim as an Xform if it does not exist.\n"
         "prim = stage.GetPrimAtPath(prim_path)\n"
@@ -22222,6 +22230,7 @@ def _gen_add_usd_reference(args: Dict) -> str:
         "    layer_offset = Sdf.LayerOffset(layer_offset_seconds * tcps, 1.0)\n"
         "\n"
         "refs_api = prim.GetReferences()\n"
+        "_had_refs_before = prim.HasAuthoredReferences()\n"
         "if ref_prim_path and layer_offset is not None:\n"
         "    refs_api.AddReference(usd_url, ref_prim_path, layer_offset)\n"
         "elif ref_prim_path:\n"
@@ -22230,6 +22239,9 @@ def _gen_add_usd_reference(args: Dict) -> str:
         "    refs_api.AddReference(usd_url, '', layer_offset)\n"
         "else:\n"
         "    refs_api.AddReference(usd_url)\n"
+        "\n"
+        "if not prim.HasAuthoredReferences():\n"
+        "    raise RuntimeError(f'add_usd_reference: AddReference completed but HasAuthoredReferences is still False on {prim_path}')\n"
         "\n"
         "if instanceable:\n"
         "    # USD point-instancing: per-instance edits below this prim are dropped.\n"
