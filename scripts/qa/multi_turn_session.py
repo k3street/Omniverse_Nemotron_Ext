@@ -206,13 +206,43 @@ def _snapshot_stage() -> Dict[str, Any]:
 
 
 def _reset_stage() -> Dict[str, Any]:
-    """Open a fresh, empty stage in Isaac Sim before starting a session."""
+    """Open a fresh, empty stage in Isaac Sim before starting a session.
+
+    `ctx.new_stage()` alone is not reliable in practice — the stage swap is
+    event-driven in Kit, so a tool call on the same RPC channel can still
+    observe the previous stage for a handful of ticks. Observed failure
+    mode: `stage_reset_prims=11` prints the OLD stage's prim count even
+    though the new stage appears empty to the immediate snapshot, and the
+    agent's next tool call lands back on the stale stage. Symptom:
+    'ghost prims' from a prior run appear in the final snapshot.
+
+    Fix: keep the `new_stage()` call (it's cheap and clears metadata), then
+    ALSO iterate and `RemovePrim` on every non-system prim to make the
+    reset take effect synchronously in the current tick.
+    """
     code = (
         "import omni.usd\n"
         "ctx = omni.usd.get_context()\n"
         "ctx.new_stage()\n"
         "stage = ctx.get_stage()\n"
-        "print('stage_reset prims=', len(list(stage.Traverse())))\n"
+        "# Belt + suspenders: force-clear everything authored.\n"
+        "_removed = 0\n"
+        "if stage is not None:\n"
+        "    for p in list(stage.Traverse()):\n"
+        "        path = str(p.GetPath())\n"
+        "        if path in ('/', '/World'):\n"
+        "            continue\n"
+        "        if path.startswith(('/Render', '/OmniverseKit', '/OmniKit_Environment')):\n"
+        "            continue\n"
+        "        try:\n"
+        "            if stage.RemovePrim(p.GetPath()):\n"
+        "                _removed += 1\n"
+        "        except Exception:\n"
+        "            pass\n"
+        "    # Re-assert /World as a plain Xform (some reset flows drop it).\n"
+        "    from pxr import UsdGeom\n"
+        "    UsdGeom.Xform.Define(stage, '/World')\n"
+        "print(f'stage_reset removed={_removed} remaining_prims={len(list(stage.Traverse()))}')\n"
     )
     try:
         with httpx.Client(timeout=30) as client:

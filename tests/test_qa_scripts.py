@@ -348,6 +348,24 @@ def test_gen_check_physics_health_imports_usd():
     assert "Usd" in imports, f"Usd missing from pxr import; got {imports}"
 
 
+def test_reset_stage_code_forces_explicit_prim_removal():
+    """Regression: ctx.new_stage() alone doesn't reliably produce an empty
+    scene from the perspective of the next tool call — earlier user prims
+    can reappear ("ghost prims"). The reset must ALSO iterate and RemovePrim
+    explicitly, and re-assert /World so downstream tools don't fail on a
+    missing parent."""
+    import inspect
+    from scripts.qa.multi_turn_session import _reset_stage
+    src = inspect.getsource(_reset_stage)
+    # Must include the explicit-removal loop
+    assert "stage.RemovePrim(p.GetPath())" in src
+    assert "stage.Traverse()" in src
+    # Must re-assert /World after clearing
+    assert "UsdGeom.Xform.Define(stage, '/World')" in src
+    # System prims must be skipped (not removed)
+    assert "/Render" in src and "/OmniverseKit" in src
+
+
 def test_find_prims_by_schema_resolves_physics_prefix():
     """Regression: the applied-schema token is e.g. 'PhysicsRigidBodyAPI'
     but the Python class in UsdPhysics is 'RigidBodyAPI'. The tool must
