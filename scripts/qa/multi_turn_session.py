@@ -166,6 +166,46 @@ def _reset_stage() -> Dict[str, Any]:
     except Exception as e:
         return {"success": False, "output": f"stage_reset_failed: {e}"}
 
+
+_PRE_SESSION_SETUP_HEADER = "## Pre-session setup"
+
+
+def _extract_pre_session_code(task_id: str) -> Optional[str]:
+    """Read the '## Pre-session setup' fenced python block from the task spec.
+
+    Tasks that need stage seeding (e.g. broken-scene diagnosis, pre-loaded
+    robots for graph wiring) declare their setup directly in their .md spec.
+    Keeping the fixture next to the spec means no harness change is needed
+    when a new task is added — the harness just reads whatever is authored.
+    """
+    spec_path = REPO_ROOT / "docs" / "qa" / "tasks" / f"{task_id}.md"
+    if not spec_path.exists():
+        return None
+    text = spec_path.read_text()
+    if _PRE_SESSION_SETUP_HEADER not in text:
+        return None
+    tail = text.split(_PRE_SESSION_SETUP_HEADER, 1)[1]
+    import re as _pre_re
+    m = _pre_re.search(r"```(?:python|py)?\s*\n(.*?)```", tail, _pre_re.S)
+    return m.group(1).strip() if m else None
+
+
+def _apply_pre_session_setup(task_id: str) -> Dict[str, Any]:
+    """Run task-declared stage-seeding code via Kit RPC before the session starts."""
+    code = _extract_pre_session_code(task_id)
+    if not code:
+        return {"applied": False, "task_id": task_id}
+    try:
+        with httpx.Client(timeout=60) as client:
+            r = client.post(KIT_RPC_EXEC, json={"code": code})
+            r.raise_for_status()
+            data = r.json()
+            data["applied"] = True
+            data["task_id"] = task_id
+            return data
+    except Exception as e:
+        return {"applied": False, "task_id": task_id, "error": str(e)}
+
 # Give-up phrases / stage directions indicating the persona has disengaged.
 import re as _qa_re
 GIVE_UP_PATTERNS = [
@@ -188,7 +228,11 @@ def _is_give_up(text: str) -> bool:
     t = text.lower().strip()
     if _STAGE_DIRECTION_RE.match(t):
         return True
-    return any(p in t for p in GIVE_UP_PATTERNS)
+    # Give-up phrases must appear at the END of the message (the persona is
+    # closing out), not mid-sentence. "later." inside "...work later..." is
+    # a false positive; "bye." at end of the final message is real.
+    tail = t[-80:]  # last ~80 chars only
+    return any(p in tail for p in GIVE_UP_PATTERNS)
 
 
 def _persona_next_message(prompt: str, timeout_s: int = 120) -> Dict[str, Any]:
@@ -243,6 +287,9 @@ def run_session(persona: str, task: str, runs_dir: Path, seed: Optional[int] = N
 
     reset_result = _reset_stage()
     log({"event": "stage_reset", "result": reset_result})
+    pre_setup = _apply_pre_session_setup(task)
+    if pre_setup.get("applied"):
+        log({"event": "pre_session_setup", "task": task, "result": pre_setup})
     log({"event": "stage_snapshot", "when": "initial", "snapshot": _snapshot_stage()})
     log({"event": "session_start", "persona": persona, "task": task, "modifiers": mods.as_dict()})
 

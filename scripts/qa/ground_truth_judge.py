@@ -28,6 +28,7 @@ def _parse_transcript(path: Path) -> Dict[str, Any]:
     ev = []
     persona = task = end_reason = None
     snapshots = []
+    direct_query = None
     for l in lines:
         try:
             d = json.loads(l)
@@ -35,14 +36,25 @@ def _parse_transcript(path: Path) -> Dict[str, Any]:
         e = d.get("event")
         if e == "session_start":
             persona = d.get("persona"); task = d.get("task")
+        elif e == "direct_eval_start":
+            # direct-eval transcripts: single-shot, no persona
+            task = d.get("task")
+            direct_query = d.get("query")
+            persona = "<direct>"
         elif e == "stage_snapshot":
             snapshots.append({"when": d.get("when"), "snapshot": d.get("snapshot", {})})
         elif e == "session_end":
             end_reason = d.get("reason")
         elif e == "session_summary" and not end_reason:
             end_reason = "complete"
+        elif e == "direct_eval_end" and not end_reason:
+            end_reason = "direct_complete"
         if e in ("persona_message", "isaac_assist_reply"):
             ev.append(d)
+    # Direct-eval: synthesize a persona_message from the stored query so the
+    # downstream prompt builder has something to show as 'user input'.
+    if direct_query and not any(x.get("event") == "persona_message" for x in ev):
+        ev.insert(0, {"event": "persona_message", "turn": 1, "text": direct_query})
     return {
         "persona": persona, "task": task, "end_reason": end_reason,
         "events": ev, "snapshots": snapshots, "turns": sum(1 for x in ev if x.get("event") == "persona_message"),
@@ -135,9 +147,14 @@ async def judge_with_gemini(tx: Dict, task_sections: Dict) -> Dict[str, Any]:
 
     convo = "\n".join(lines)[:8000]
 
-    prompt = f"""You are a STRICT QA judge. Score the session based ONLY on:
-1. Did the task's success criterion actually get met — verified in the GROUND TRUTH snapshots?
-2. Did Assist's text claims match what the snapshot shows, or did it fabricate?
+    prompt = f"""You are a QA judge. Score the session based on the TASK GOAL primarily, using the SUCCESS CRITERIA only as informational support.
+
+Evaluation rules:
+1. The primary question is: did the USER'S STATED GOAL get accomplished, verified against GROUND TRUTH snapshots?
+2. Use success-criterion items as helpful signals but do NOT require verbatim literal matching. Criteria items that are quality-of-response requirements (e.g. "says literally X", "under 8 lines", "does NOT lecture on Y") are SECONDARY and should not by themselves cause real_success=False if the goal was met.
+3. Scene-state claims by Assist must be backed by GROUND TRUTH snapshot data. Flag as fabricated if not.
+4. Tool-execution failures are real failures only if they prevented goal achievement.
+5. A session is a REAL SUCCESS if the goal is demonstrably accomplished (scene state matches intent OR information-advice was coherently delivered for advice-only tasks), even if minor criteria were missed.
 
 NEVER trust Assist's or the persona's words about scene state. Only trust the GROUND TRUTH snapshot lines.
 
@@ -148,10 +165,12 @@ END REASON: {tx.get('end_reason')}
 Respond with ONLY this JSON (no markdown fences):
 {{
   "real_success": true|false,
+  "goal_achieved": true|false,
   "scene_matched_criterion": true|false,
-  "evidence_for_success": "short quote from GROUND TRUTH showing the match (or empty)",
-  "fabricated_claims": ["quote of an assist claim that's NOT backed by snapshot", ...],
-  "unmatched_criteria": ["criterion text that snapshot doesn't confirm", ...],
+  "evidence_for_success": "short quote from GROUND TRUTH showing goal met (or empty)",
+  "fabricated_claims": ["quote of an assist claim that's NOT backed by snapshot"],
+  "criteria_misses": ["criterion item not met — informational only"],
+  "partial_credit": "brief note on what worked vs what didn't",
   "notes": "one-sentence summary"
 }}"""
     resp = await provider.complete(
@@ -165,7 +184,19 @@ Respond with ONLY this JSON (no markdown fences):
     try:
         return json.loads(raw)
     except json.JSONDecodeError as e:
-        return {"parse_error": str(e), "raw": raw[:600]}
+        # Robust fallback — regex-extract the critical boolean fields from the
+        # partially-formed JSON. Gemini sometimes truncates mid-string and the
+        # strict parser fails; the answer we need is usually intact.
+        import re as _re
+        fallback = {"parse_error": str(e), "raw": raw[:1200]}
+        for field in ("real_success", "goal_achieved", "scene_matched_criterion"):
+            m = _re.search(rf'"{field}"\s*:\s*(true|false)', raw)
+            if m:
+                fallback[field] = (m.group(1) == "true")
+        note_m = _re.search(r'"notes"\s*:\s*"([^"]{0,400})', raw)
+        if note_m:
+            fallback["notes"] = note_m.group(1)
+        return fallback
 
 
 def _judge_one(path: Path) -> Dict[str, Any]:
