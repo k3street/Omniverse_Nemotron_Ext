@@ -883,6 +883,223 @@ with rep.new_layer():
 """
 
 
+def _gen_create_sdg_pipeline(args: Dict) -> str:
+    """Generate a full Replicator SDG pipeline with camera, render product, writer."""
+    annotators = args.get("annotators", ["bounding_box_2d"])
+    output_format = args.get("output_format", "basic")
+    num_frames = args.get("num_frames", 100)
+    output_dir = args.get("output_dir", "/tmp/sdg_output")
+    cam_pos = args.get("camera_position", [0, 0, 5])
+    cam_look = args.get("camera_look_at", [0, 0, 0])
+    resolution = args.get("resolution", [1280, 720])
+
+    # Map output_format to writer class name
+    writer_map = {
+        "coco": "CocoWriter",
+        "kitti": "KittiWriter",
+        "basic": "BasicWriter",
+        "numpy": "BasicWriter",
+    }
+    writer_class = writer_map.get(output_format, "BasicWriter")
+
+    # Build writer.initialize() kwargs based on format
+    if output_format == "coco":
+        writer_init = f'writer.initialize(output_dir="{output_dir}")'
+    elif output_format == "kitti":
+        writer_init = f'writer.initialize(output_dir="{output_dir}")'
+    elif output_format == "numpy":
+        # BasicWriter with raw annotator flags
+        init_kwargs = [f'output_dir="{output_dir}"', "rgb=True"]
+        if "normals" in annotators:
+            init_kwargs.append("normals=True")
+        if "depth" in annotators:
+            init_kwargs.append("distance_to_camera=True")
+        if "semantic_segmentation" in annotators:
+            init_kwargs.append("semantic_segmentation=True")
+        if "instance_segmentation" in annotators:
+            init_kwargs.append("instance_segmentation=True")
+        if "bounding_box_2d" in annotators:
+            init_kwargs.append("bounding_box_2d=True")
+        if "bounding_box_3d" in annotators:
+            init_kwargs.append("bounding_box_3d=True")
+        if "occlusion" in annotators:
+            init_kwargs.append("occlusion=True")
+        writer_init = "writer.initialize(" + ", ".join(init_kwargs) + ")"
+    else:
+        # basic
+        init_kwargs = [f'output_dir="{output_dir}"', "rgb=True"]
+        for ann in annotators:
+            # Map annotator names to BasicWriter kwargs
+            kwarg = ann.replace("-", "_")
+            if kwarg == "depth":
+                kwarg = "distance_to_camera"
+            init_kwargs.append(f"{kwarg}=True")
+        writer_init = "writer.initialize(" + ", ".join(init_kwargs) + ")"
+
+    return f"""\
+import omni.replicator.core as rep
+
+with rep.new_layer():
+    camera = rep.create.camera(
+        position=({cam_pos[0]}, {cam_pos[1]}, {cam_pos[2]}),
+        look_at=({cam_look[0]}, {cam_look[1]}, {cam_look[2]}),
+    )
+    rp = rep.create.render_product(camera, ({resolution[0]}, {resolution[1]}))
+
+    writer = rep.WriterRegistry.get("{writer_class}")
+    {writer_init}
+    writer.attach([rp])
+
+    with rep.trigger.on_frame(num_frames={num_frames}):
+        pass
+
+    rep.orchestrator.run()
+
+print("SDG pipeline started: {num_frames} frames -> {output_dir}")
+"""
+
+
+def _gen_add_domain_randomizer(args: Dict) -> str:
+    """Generate Replicator domain randomization code."""
+    target = args["target"]
+    rand_type = args["randomizer_type"]
+    params = args.get("params", {})
+
+    lines = ["import omni.replicator.core as rep", ""]
+
+    if rand_type == "pose":
+        surface = params.get("surface_prim", "/World/Ground")
+        min_angle = params.get("min_angle", -180)
+        max_angle = params.get("max_angle", 180)
+        lines.extend([
+            "with rep.trigger.on_frame():",
+            f"    with rep.get.prims(path_pattern=\"{target}\"):",
+            f"        rep.randomizer.scatter_2d(",
+            f"            surface_prims=rep.get.prims(path_pattern=\"{surface}\")",
+            f"        )",
+            f"        rep.randomizer.rotation(",
+            f"            min_angle={min_angle}, max_angle={max_angle}",
+            f"        )",
+        ])
+
+    elif rand_type == "texture":
+        lines.extend([
+            "with rep.trigger.on_frame():",
+            f"    with rep.get.prims(path_pattern=\"{target}\"):",
+            "        rep.randomizer.texture(",
+            "            textures=rep.distribution.choice([",
+            "                'omniverse://localhost/NVIDIA/Materials/Base/Stone/Fieldstone.mdl',",
+            "                'omniverse://localhost/NVIDIA/Materials/Base/Wood/Oak.mdl',",
+            "                'omniverse://localhost/NVIDIA/Materials/Base/Metal/Steel_Brushed.mdl',",
+            "            ])",
+            "        )",
+        ])
+
+    elif rand_type == "color":
+        c_min = params.get("color_min", [0, 0, 0])
+        c_max = params.get("color_max", [1, 1, 1])
+        lines.extend([
+            "with rep.trigger.on_frame():",
+            f"    with rep.get.prims(path_pattern=\"{target}\"):",
+            f"        rep.randomizer.color(",
+            f"            colors=rep.distribution.uniform(",
+            f"                ({c_min[0]}, {c_min[1]}, {c_min[2]}),",
+            f"                ({c_max[0]}, {c_max[1]}, {c_max[2]}),",
+            f"            )",
+            f"        )",
+        ])
+
+    elif rand_type == "lighting":
+        i_min = params.get("intensity_min", 500)
+        i_max = params.get("intensity_max", 2000)
+        lines.extend([
+            "# Note: 'intensity' is in nits (candelas/m^2), not lux.",
+            "# Lux is not directly settable on USD lights.",
+            "with rep.trigger.on_frame():",
+            f"    with rep.get.prims(path_pattern=\"{target}\"):",
+            f"        rep.modify.attribute(",
+            f"            \"intensity\",",
+            f"            rep.distribution.uniform({i_min}, {i_max}),",
+            f"        )",
+        ])
+
+    elif rand_type == "material_properties":
+        r_min = params.get("roughness_min", 0.0)
+        r_max = params.get("roughness_max", 1.0)
+        m_min = params.get("metallic_min", 0.0)
+        m_max = params.get("metallic_max", 1.0)
+        lines.extend([
+            "with rep.trigger.on_frame():",
+            f"    with rep.get.prims(path_pattern=\"{target}\"):",
+            f"        rep.modify.attribute(",
+            f"            \"inputs:reflection_roughness_constant\",",
+            f"            rep.distribution.uniform({r_min}, {r_max}),",
+            f"        )",
+            f"        rep.modify.attribute(",
+            f"            \"inputs:metallic_constant\",",
+            f"            rep.distribution.uniform({m_min}, {m_max}),",
+            f"        )",
+        ])
+
+    elif rand_type == "visibility":
+        prob = params.get("probability", 0.5)
+        lines.extend([
+            "with rep.trigger.on_frame():",
+            f"    with rep.get.prims(path_pattern=\"{target}\"):",
+            f"        rep.modify.visibility(",
+            f"            rep.distribution.choice([True, False],",
+            f"                weights=[{prob}, {1.0 - prob}])",
+            f"        )",
+        ])
+
+    else:
+        lines.append(f"# Unknown randomizer type: {rand_type}")
+
+    return "\n".join(lines)
+
+
+async def _handle_preview_sdg(args: Dict) -> Dict:
+    """Step the Replicator orchestrator a few times for preview frames."""
+    num_samples = args.get("num_samples", 3)
+
+    code = f"""\
+import omni.replicator.core as rep
+import json
+
+num_samples = {num_samples}
+for i in range(num_samples):
+    rep.orchestrator.step()
+    print(f"Preview frame {{i + 1}}/{num_samples} generated")
+
+print(json.dumps({{"preview_frames": num_samples, "status": "done"}}))
+"""
+    return await kit_tools.queue_exec_patch(code, f"Preview SDG: generate {num_samples} sample frames")
+
+
+def _gen_export_dataset(args: Dict) -> str:
+    """Generate async step-loop code for large dataset generation."""
+    output_dir = args["output_dir"]
+    num_frames = args["num_frames"]
+    step_batch = args.get("step_batch", 10)
+
+    return f"""\
+import omni.replicator.core as rep
+import asyncio
+
+async def _export_dataset():
+    num_frames = {num_frames}
+    step_batch = {step_batch}
+    for i in range(0, num_frames, step_batch):
+        batch = min(step_batch, num_frames - i)
+        for _ in range(batch):
+            await rep.orchestrator.step_async()
+        print(f"Progress: {{i + batch}}/{{num_frames}} frames")
+    print(f"Dataset export complete: {{num_frames}} frames -> '{output_dir}'")
+
+asyncio.ensure_future(_export_dataset())
+"""
+
+
 # ── Code generation dispatch ─────────────────────────────────────────────────
 
 CODE_GEN_HANDLERS = {
@@ -904,6 +1121,9 @@ CODE_GEN_HANDLERS = {
     "anchor_robot": _gen_anchor_robot,
     "set_viewport_camera": _gen_set_viewport_camera,
     "configure_sdg": _gen_configure_sdg,
+    "create_sdg_pipeline": _gen_create_sdg_pipeline,
+    "add_domain_randomizer": _gen_add_domain_randomizer,
+    "export_dataset": _gen_export_dataset,
 }
 
 
@@ -1059,6 +1279,7 @@ DATA_HANDLERS = {
     "get_debug_info": _handle_get_debug_info,
     "lookup_knowledge": _handle_lookup_knowledge,
     "explain_error": None,  # handled inline by LLM (no tool execution)
+    "preview_sdg": _handle_preview_sdg,
 }
 
 # ── ROS2 live handlers (via rosbridge / ros-mcp) ────────────────────────────

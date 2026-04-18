@@ -302,6 +302,57 @@ _TEST_VECTORS = [
         {"task": "Isaac-Reach-Franka-v0", "algo": "ppo", "num_steps": 100000},
         ["IsaacLab", "train"],
     ),
+    # ── Phase 7B: Replicator / SDG ──────────────────────────────────────────
+    (
+        "create_sdg_pipeline",
+        {"annotators": ["bounding_box_2d", "semantic_segmentation"], "output_format": "coco", "num_frames": 50},
+        ["omni.replicator.core", "rep.create.camera", "CocoWriter", "rep.orchestrator"],
+    ),
+    (
+        "create_sdg_pipeline",
+        {"annotators": ["depth", "normals"], "output_format": "kitti", "num_frames": 10, "camera_position": [0, 5, 5]},
+        ["omni.replicator.core", "KittiWriter", "render_product"],
+    ),
+    (
+        "create_sdg_pipeline",
+        {"annotators": ["bounding_box_2d"], "output_format": "basic", "num_frames": 5},
+        ["BasicWriter", "rep.orchestrator"],
+    ),
+    (
+        "create_sdg_pipeline",
+        {"annotators": ["depth"], "output_format": "numpy", "num_frames": 20, "resolution": [640, 480]},
+        ["BasicWriter", "640", "480"],
+    ),
+    (
+        "add_domain_randomizer",
+        {"target": "/World/Objects/.*", "randomizer_type": "pose"},
+        ["omni.replicator.core", "rep.get.prims", "rotation"],
+    ),
+    (
+        "add_domain_randomizer",
+        {"target": "/World/Lights/.*", "randomizer_type": "lighting", "params": {"intensity_min": 500, "intensity_max": 2000}},
+        ["omni.replicator.core", "intensity"],
+    ),
+    (
+        "add_domain_randomizer",
+        {"target": "/World/Objects/.*", "randomizer_type": "color"},
+        ["omni.replicator.core", "color"],
+    ),
+    (
+        "add_domain_randomizer",
+        {"target": "/World/Objects/.*", "randomizer_type": "visibility"},
+        ["omni.replicator.core", "visibility"],
+    ),
+    (
+        "export_dataset",
+        {"output_dir": "/tmp/sdg_export", "num_frames": 100},
+        ["rep.orchestrator", "step"],
+    ),
+    (
+        "export_dataset",
+        {"output_dir": "/tmp/sdg_export", "num_frames": 500, "step_batch": 20},
+        ["step", "Progress"],
+    ),
 ]
 
 
