@@ -540,13 +540,45 @@ class ChatOrchestrator:
 
                 # (a) All USD-like paths mentioned in the reply
                 claimed_paths = set(_re.findall(r"(?<![A-Za-z0-9_])/World[/A-Za-z0-9_]+", reply))
-                # Skip paths that already appeared in any tool output this turn
-                # (those were grounded in real tool observations).
-                tool_output_blob = " ".join(
-                    json.dumps(t.get("result", {}), default=str)
-                    for t in executed_tools
-                )
-                unverified_paths = [p for p in claimed_paths if p not in tool_output_blob]
+                # Parse tool outputs semantically: a path that appeared alongside
+                # `"exists": false` counts as CONFIRMED ABSENT — the agent should
+                # never claim it exists. Paths that appeared as success payloads
+                # (exists:true, prim_type in a valid response, tool ran without
+                # error) count as CONFIRMED PRESENT and don't need re-verification.
+                # Earlier versions did a dumb substring skip, which missed the
+                # inversion-of-meaning case where the tool returned exists=false
+                # and the agent nonetheless claimed the prim exists.
+                confirmed_absent = set()
+                confirmed_present = set()
+                for t in executed_tools:
+                    result = t.get("result") or {}
+                    # tool results come through as {"output": "<json>"} for
+                    # data handlers, or as dicts with direct fields.
+                    payloads = []
+                    out_str = result.get("output") if isinstance(result, dict) else None
+                    if isinstance(out_str, str) and out_str.strip().startswith("{"):
+                        try:
+                            payloads.append(json.loads(out_str))
+                        except Exception:
+                            pass
+                    if isinstance(result, dict):
+                        payloads.append(result)
+                    for pl in payloads:
+                        if not isinstance(pl, dict):
+                            continue
+                        pp = pl.get("prim_path")
+                        ex = pl.get("exists")
+                        if isinstance(pp, str) and pp.startswith("/World"):
+                            if ex is False:
+                                confirmed_absent.add(pp)
+                            elif ex is True:
+                                confirmed_present.add(pp)
+                for p in claimed_paths & confirmed_absent:
+                    verify_warnings.append(f"`{p}` does not exist in the stage")
+                unverified_paths = [
+                    p for p in claimed_paths
+                    if p not in confirmed_present and p not in confirmed_absent
+                ]
                 # Cap at 4 verifications to keep cost bounded
                 for p in sorted(unverified_paths)[:4]:
                     try:
