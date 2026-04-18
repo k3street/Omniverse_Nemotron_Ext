@@ -720,16 +720,33 @@ class ChatOrchestrator:
                 # Cap at 3 checks. Only common physics/appearance attrs to
                 # avoid over-matching plain numbers in prose.
                 # Accept: `attr=val`, `attr: val`, `attr of val`, `attr is val`,
-                # `attr set to val`. Also handle the inverse order with a second
-                # alternative — "mass of /World/X is 1.0".
+                # `attr set to val`. Two regex variants: (a) path → attr → val
+                # ("/World/X has mass=1.0") and (b) attr → path → val ("mass on
+                # /World/X is 1.0"). Second variant was a known gap noted in
+                # ARCHITECTURE_REVIEW.md — now closed.
                 _ATTR_SEP = r"(?:\s*[=:]\s*|\s+(?:is|of|set to|=)\s+)"
-                attr_pat = _re.compile(
+                _ATTR_WORDS = r"mass|friction|restitution|damping|stiffness|radius|height|density|size"
+                attr_pat_path_first = _re.compile(
                     r"(?P<path>/World[/A-Za-z0-9_]+)"
                     r"[^\n]{0,120}?"
-                    r"(?P<attr>mass|friction|restitution|damping|stiffness|radius|height|density|size)"
+                    r"(?P<attr>" + _ATTR_WORDS + r")"
                     + _ATTR_SEP +
                     r"(?P<val>-?\d+(?:\.\d+)?)",
                     _re.I,
+                )
+                # attr → path (optional "on") → ... → value
+                attr_pat_attr_first = _re.compile(
+                    r"\b(?P<attr>" + _ATTR_WORDS + r")\b"
+                    r"[^\n]{0,20}?"
+                    r"(?:on\s+|of\s+|for\s+)?"
+                    r"(?P<path>/World[/A-Za-z0-9_]+)"
+                    r"[^\n]{0,40}?"
+                    r"(?:is|of|set to|=|:)\s*"
+                    r"(?P<val>-?\d+(?:\.\d+)?)",
+                    _re.I,
+                )
+                _attr_iter = list(attr_pat_path_first.finditer(reply)) + list(
+                    attr_pat_attr_first.finditer(reply)
                 )
                 _ATTR_NAME_MAP = {
                     "mass": "physics:mass",
@@ -743,7 +760,7 @@ class ChatOrchestrator:
                     "size": "size",
                 }
                 matched_attrs = set()
-                for m in attr_pat.finditer(reply):
+                for m in _attr_iter:
                     path = m.group("path")
                     attr = m.group("attr").lower()
                     claim = round(float(m.group("val")), 3)
