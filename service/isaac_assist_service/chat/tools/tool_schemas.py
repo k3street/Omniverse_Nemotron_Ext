@@ -2510,4 +2510,88 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+# ─── Fine-Tune Flywheel (DATA) ──────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "record_feedback",
+            "description": "Record user feedback (approve / reject / correct) for a previous chat turn. Links feedback to a recorded turn for fine-tuning quality filtering.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Chat session ID"},
+                    "turn_id": {"type": "integer", "description": "Turn number within the session"},
+                    "approved": {"type": "boolean", "description": "True if the user approved the assistant's response"},
+                    "edited": {"type": "boolean", "description": "True if the user edited the response before approving. Default: false"},
+                    "correction": {"type": "string", "description": "User's correction text when rejecting or editing"},
+                },
+                "required": ["session_id", "turn_id", "approved"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "export_finetune_data",
+            "description": "Export recorded chat turns to a provider-specific fine-tuning format. Filters by quality and converts to OpenAI, Anthropic, Ollama (Unsloth/ShareGPT), or Alpaca JSONL.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "format": {
+                        "type": "string",
+                        "enum": ["openai", "anthropic", "ollama", "alpaca"],
+                        "description": "Target fine-tuning format",
+                    },
+                    "min_quality": {
+                        "type": "string",
+                        "enum": ["all", "approved", "approved_successful"],
+                        "description": "Minimum quality filter. Default: approved_successful",
+                    },
+                    "output_path": {"type": "string", "description": "Optional explicit output file path"},
+                },
+                "required": ["format"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "finetune_stats",
+            "description": "Return aggregate statistics about recorded fine-tuning data: total turns, approval rate, tool distribution, error rate, date range, and rejection-correction pair count.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "redact_finetune_data",
+            "description": "Run the redaction pipeline on an existing JSONL data file. Strips API keys (sk-*, AIza*, Bearer *, ghp_*, etc.), external file paths, and user-identifiable information.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "input_path": {"type": "string", "description": "Path to the input JSONL file to redact"},
+                    "output_path": {"type": "string", "description": "Optional output path. Defaults to <input>_redacted.jsonl"},
+                },
+                "required": ["input_path"],
+            },
+        },
+    },
+
+    # ─── Scene Export ─────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
+                },
+                "required": [],
+            },
+        },
+    },
 ]
