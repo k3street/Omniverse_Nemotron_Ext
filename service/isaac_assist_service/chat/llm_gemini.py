@@ -72,20 +72,60 @@ class GeminiProvider:
                 })
             payload["tools"] = [{"function_declarations": function_declarations}]
 
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.post(self.base_url, json=payload) as response:
-                    if response.status != 200:
+        # Retry on transient errors (503 overload, 429 rate-limit, connection drops).
+        # Google recommends exponential backoff for these; keep total wait bounded
+        # so we don't blow the caller's timeout.
+        import asyncio as _asyncio_rt
+        retry_statuses = {429, 500, 502, 503, 504}
+        max_attempts = 4
+        backoff = 2.0  # seconds; doubles each retry
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            async with aiohttp.ClientSession() as session:
+                try:
+                    async with session.post(self.base_url, json=payload) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            return self._parse_response(data)
                         error_text = await response.text()
-                        logger.error(f"Gemini API Error: {error_text}")
-                        return LLMResponse(text=f"Error from Gemini Cloud: {error_text}")
-
-                    data = await response.json()
-                    return self._parse_response(data)
-
-            except aiohttp.ClientError as e:
-                logger.error(f"Failed to connect to Gemini cloud: {e}")
-                return LLMResponse(text="Failed to connect to cloud AI service.")
+                        if response.status in retry_statuses and attempt < max_attempts:
+                            logger.warning(
+                                f"Gemini {response.status} (attempt {attempt}/{max_attempts}), "
+                                f"retrying in {backoff:.1f}s"
+                            )
+                            await _asyncio_rt.sleep(backoff)
+                            backoff *= 2
+                            last_error = error_text
+                            continue
+                        logger.error(f"Gemini API Error ({response.status}): {error_text[:200]}")
+                        # Graceful user-facing message — no raw API JSON in chat.
+                        if response.status in retry_statuses:
+                            return LLMResponse(text=(
+                                "I'm having trouble reaching my reasoning backend right now "
+                                "(upstream service overloaded). Please try again in a moment."
+                            ))
+                        return LLMResponse(text=(
+                            f"I couldn't complete that request (backend returned {response.status}). "
+                            "Please try rephrasing or try again shortly."
+                        ))
+                except aiohttp.ClientError as e:
+                    last_error = str(e)
+                    if attempt < max_attempts:
+                        logger.warning(
+                            f"Gemini connection error (attempt {attempt}/{max_attempts}): {e}, "
+                            f"retrying in {backoff:.1f}s"
+                        )
+                        await _asyncio_rt.sleep(backoff)
+                        backoff *= 2
+                        continue
+                    logger.error(f"Failed to connect to Gemini cloud: {e}")
+                    return LLMResponse(text=(
+                        "I couldn't reach my reasoning backend. Check your network or try again."
+                    ))
+        logger.error(f"Gemini retries exhausted; last error: {last_error}")
+        return LLMResponse(text=(
+            "Backend is overloaded after several retries. Please try again in a minute."
+        ))
 
     def _format_messages(self, messages: List[Dict]) -> List[Dict]:
         """Converts OpenAI style messages to Gemini format, including tool results."""
