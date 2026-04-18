@@ -2688,6 +2688,8 @@ class TestTemplateDetection:
         "set_clearance_monitor" not in CODE_GEN_HANDLERS,
         reason="Clearance Detection addendum not merged on this branch",
     )
+    # ── Clearance Detection Addendum edge cases ────────────────────────────
+
     def test_set_clearance_monitor_default_thresholds(self):
         """No clearance_mm given should fall back to 50mm stop / 100mm warning."""
         code = CODE_GEN_HANDLERS["set_clearance_monitor"]({
