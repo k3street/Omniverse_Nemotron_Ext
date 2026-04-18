@@ -6583,6 +6583,296 @@ exec(open("{out_dir}/scene_setup.py").read())
     }
 
 
+# ── ROS2 Deep Integration (Phase 8F) ────────────────────────────────────────
+
+# Sensor type → OmniGraph node type mapping for configure_ros2_bridge
+_ROS2_SENSOR_NODE_MAP = {
+    "camera": "ROS2CameraHelper",
+    "lidar": "ROS2PublishLaserScan",
+    "imu": "ROS2PublishImu",
+    "clock": "ROS2PublishClock",
+    "joint_state": "ROS2PublishJointState",
+}
+
+
+def _gen_show_tf_tree(args: Dict) -> str:
+    root_frame = args.get("root_frame", "world")
+    return f'''\
+import os
+import omni.graph.core as og
+
+# Auto-detect ROS distro
+ros_distro = os.environ.get("ROS_DISTRO", "humble")
+print(f"ROS distro: {{ros_distro}}")
+
+# Check for TF publisher OmniGraph node — create one if missing
+stage = __import__("omni.usd", fromlist=["usd"]).get_context().get_stage()
+tf_graph_path = "/World/ROS2_TF_Tree"
+tf_prim = stage.GetPrimAtPath(tf_graph_path)
+if not tf_prim.IsValid():
+    print("No TF publisher graph found — creating one at " + tf_graph_path)
+    _bt = og.GraphBackingType
+    if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+        _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+    elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+        _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+    else:
+        _backing = list(_bt)[0]
+
+    keys = og.Controller.Keys
+    og.Controller.edit(
+        {{
+            "graph_path": tf_graph_path,
+            "evaluator_name": "execution",
+            "pipeline_stage": _backing,
+        }},
+        {{
+            keys.CREATE_NODES: [
+                ("tick", "omni.graph.action.OnPlaybackTick"),
+                ("tf_pub", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+            ],
+            keys.CONNECT: [
+                ("tick.outputs:tick", "tf_pub.inputs:execIn"),
+            ],
+        }},
+    )
+    print("Created ROS2PublishTransformTree graph")
+
+# Acquire TF data via the transform listener interface
+from isaacsim.ros2.tf_viewer import acquire_transform_listener_interface
+
+interface = acquire_transform_listener_interface()
+interface.initialize(ros_distro)
+transforms = interface.get_transforms("{root_frame}")
+
+# Format and print as indented tree
+def _print_tree(frames, parent, indent=0):
+    prefix = "  " * indent + ("|- " if indent > 0 else "")
+    print(f"{{prefix}}{{parent}}")
+    children = [f for f in frames if f.get("parent") == parent]
+    for child in children:
+        _print_tree(frames, child["child"], indent + 1)
+
+print(f"\\nTF Tree (root: {root_frame}):")
+print("=" * 40)
+if transforms:
+    _print_tree(transforms, "{root_frame}")
+    print(f"\\nTotal frames: {{len(transforms)}}")
+else:
+    print("(no transforms found — is the simulation running?)")
+'''
+
+
+def _gen_publish_robot_description(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    topic = args.get("topic", "/robot_description")
+    return f'''\
+import omni.usd
+from pxr import UsdPhysics, UsdGeom, Gf
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+from rclpy.qos import QoSProfile, DurabilityPolicy
+
+stage = omni.usd.get_context().get_stage()
+art_prim = stage.GetPrimAtPath('{art_path}')
+if not art_prim.IsValid():
+    raise RuntimeError("Articulation not found: {art_path}")
+
+# Build simplified URDF from USD articulation structure
+# NOTE: This is a simplified URDF — for full export use Isaac Sim's URDF Exporter UI
+links = []
+joints = []
+
+def _traverse(prim, parent_link=None):
+    name = prim.GetName()
+    prim_type = prim.GetTypeName()
+
+    # Detect links (Xform with collision or visual children, or known link patterns)
+    is_link = prim_type in ("Xform", "") and any(
+        child.GetTypeName() in ("Mesh", "Cube", "Sphere", "Cylinder", "Capsule")
+        for child in prim.GetChildren()
+    ) or prim.HasAPI(UsdPhysics.RigidBodyAPI)
+
+    if is_link:
+        links.append(name)
+
+        # Check for joint relationship to parent
+        for child in prim.GetChildren():
+            if child.HasAPI(UsdPhysics.RevoluteJointAPI):
+                joints.append({{
+                    "name": child.GetName(),
+                    "type": "revolute",
+                    "parent": parent_link or "base_link",
+                    "child": name,
+                }})
+            elif child.HasAPI(UsdPhysics.PrismaticJointAPI):
+                joints.append({{
+                    "name": child.GetName(),
+                    "type": "prismatic",
+                    "parent": parent_link or "base_link",
+                    "child": name,
+                }})
+
+        for child in prim.GetChildren():
+            _traverse(child, name)
+    else:
+        for child in prim.GetChildren():
+            _traverse(child, parent_link)
+
+_traverse(art_prim)
+
+# Generate URDF XML
+urdf_lines = ['<?xml version="1.0"?>']
+urdf_lines.append('<robot name="{art_path.split("/")[-1]}">')
+urdf_lines.append('  <!-- Simplified URDF auto-generated from USD articulation -->')
+urdf_lines.append('  <!-- For full export, use Isaac Sim URDF Exporter UI -->')
+
+for link_name in links:
+    urdf_lines.append(f'  <link name="{{link_name}}"/>')
+
+for j in joints:
+    urdf_lines.append(f'  <joint name="{{j["name"]}}" type="{{j["type"]}}">')
+    urdf_lines.append(f'    <parent link="{{j["parent"]}}"/>')
+    urdf_lines.append(f'    <child link="{{j["child"]}}"/>')
+    urdf_lines.append(f'  </joint>')
+
+urdf_lines.append('</robot>')
+urdf_string = "\\n".join(urdf_lines)
+
+print(f"Generated simplified URDF ({{len(links)}} links, {{len(joints)}} joints)")
+
+# Publish via rclpy with TRANSIENT_LOCAL durability
+if not rclpy.ok():
+    rclpy.init()
+
+node = rclpy.create_node("robot_description_publisher")
+qos = QoSProfile(
+    depth=1,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+)
+pub = node.create_publisher(String, "{topic}", qos_profile=qos)
+msg = String()
+msg.data = urdf_string
+pub.publish(msg)
+
+print(f"Published robot description to {topic} (TRANSIENT_LOCAL)")
+print(f"URDF preview (first 500 chars):\\n{{urdf_string[:500]}}")
+'''
+
+
+def _gen_configure_ros2_bridge(args: Dict) -> str:
+    sensors = args.get("sensors", [])
+    domain_id = args.get("ros2_domain_id", 0)
+
+    if not sensors:
+        return "print('No sensors specified — nothing to configure')\n"
+
+    # Build OmniGraph nodes and connections
+    node_defs = []
+    conn_defs = []
+    val_defs = []
+
+    # Always add tick + ROS2Context
+    node_defs.append('("tick", "omni.graph.action.OnPlaybackTick")')
+    node_defs.append(f'("ros2_context", f"{{_ROS2_NS}}.ROS2Context")')
+    if domain_id != 0:
+        val_defs.append(f'("ros2_context.inputs:domain_id", {domain_id})')
+
+    for i, sensor in enumerate(sensors):
+        stype = sensor.get("type", "camera")
+        prim_path = sensor.get("prim_path", "")
+        topic_name = sensor.get("topic_name", "")
+        frame_id = sensor.get("frame_id", "")
+        node_name = f"{stype}_{i}"
+
+        # Map sensor type to OG node type
+        og_node_class = {
+            "camera": "ROS2CameraHelper",
+            "lidar": "ROS2PublishLaserScan",
+            "imu": "ROS2PublishImu",
+            "clock": "ROS2PublishClock",
+            "joint_state": "ROS2PublishJointState",
+        }.get(stype, f"ROS2Publish{stype.title()}")
+
+        node_defs.append(f'("{node_name}", f"{{_ROS2_NS}}.{og_node_class}")')
+
+        # Connect tick → sensor node
+        conn_defs.append(f'("tick.outputs:tick", "{node_name}.inputs:execIn")')
+
+        # Connect context
+        conn_defs.append(f'("ros2_context.outputs:context", "{node_name}.inputs:context")')
+
+        # Set values
+        if topic_name:
+            val_defs.append(f'("{node_name}.inputs:topicName", "{topic_name}")')
+        if frame_id:
+            val_defs.append(f'("{node_name}.inputs:frameId", "{frame_id}")')
+        if prim_path and stype != "clock":
+            # clock doesn't have a prim path input
+            if stype == "camera":
+                val_defs.append(f'("{node_name}.inputs:renderProductPath", "{prim_path}")')
+            elif stype == "joint_state":
+                val_defs.append(f'("{node_name}.inputs:targetPrim", "{prim_path}")')
+            else:
+                val_defs.append(f'("{node_name}.inputs:prim", "{prim_path}")')
+
+    nodes_str = ",\n            ".join(node_defs)
+    conns_str = ",\n            ".join(conn_defs)
+    vals_str = ",\n            ".join(val_defs)
+
+    sensor_summary = ", ".join(s.get("type", "?") for s in sensors)
+
+    return f'''\
+import omni.graph.core as og
+
+# Handle Isaac Sim version namespace differences
+import isaacsim
+_V = tuple(int(x) for x in isaacsim.__version__.split(".")[:2])
+_ROS2_NS = "isaacsim.ros2.nodes" if _V >= (6, 0) else "isaacsim.ros2.bridge"
+print(f"Isaac Sim version: {{isaacsim.__version__}}, using namespace: {{_ROS2_NS}}")
+
+# Resolve backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+keys = og.Controller.Keys
+(graph, nodes, _, _) = og.Controller.edit(
+    {{
+        "graph_path": "/World/ROS2_Bridge",
+        "evaluator_name": "execution",
+        "pipeline_stage": _backing,
+    }},
+    {{
+        keys.CREATE_NODES: [
+            {nodes_str}
+        ],
+        keys.CONNECT: [
+            {conns_str}
+        ],
+        keys.SET_VALUES: [
+            {vals_str}
+        ],
+    }},
+)
+
+print(f"ROS2 bridge configured with {{len(nodes)}} nodes")
+print(f"Sensors: {sensor_summary}")
+print(f"Domain ID: {domain_id}")
+print("Start simulation (Play) to begin publishing.")
+'''
+
+
+CODE_GEN_HANDLERS["show_tf_tree"] = _gen_show_tf_tree
+CODE_GEN_HANDLERS["publish_robot_description"] = _gen_publish_robot_description
+CODE_GEN_HANDLERS["configure_ros2_bridge"] = _gen_configure_ros2_bridge
+
+
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
 
 
@@ -11228,6 +11518,299 @@ CODE_GEN_HANDLERS["navigate_to"] = _gen_navigate_to
 CODE_GEN_HANDLERS["create_conveyor"] = _gen_create_conveyor
 CODE_GEN_HANDLERS["create_conveyor_track"] = _gen_create_conveyor_track
 CODE_GEN_HANDLERS["merge_meshes"] = _gen_merge_meshes
+
+
+DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── ROS2 Deep Integration (Phase 8F) ────────────────────────────────────────
+
+# Sensor type → OmniGraph node type mapping for configure_ros2_bridge
+_ROS2_SENSOR_NODE_MAP = {
+    "camera": "ROS2CameraHelper",
+    "lidar": "ROS2PublishLaserScan",
+    "imu": "ROS2PublishImu",
+    "clock": "ROS2PublishClock",
+    "joint_state": "ROS2PublishJointState",
+}
+
+
+def _gen_show_tf_tree(args: Dict) -> str:
+    root_frame = args.get("root_frame", "world")
+    return f'''\
+import os
+import omni.graph.core as og
+
+# Auto-detect ROS distro
+ros_distro = os.environ.get("ROS_DISTRO", "humble")
+print(f"ROS distro: {{ros_distro}}")
+
+# Check for TF publisher OmniGraph node — create one if missing
+stage = __import__("omni.usd", fromlist=["usd"]).get_context().get_stage()
+tf_graph_path = "/World/ROS2_TF_Tree"
+tf_prim = stage.GetPrimAtPath(tf_graph_path)
+if not tf_prim.IsValid():
+    print("No TF publisher graph found — creating one at " + tf_graph_path)
+    _bt = og.GraphBackingType
+    if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+        _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+    elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+        _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+    else:
+        _backing = list(_bt)[0]
+
+    keys = og.Controller.Keys
+    og.Controller.edit(
+        {{
+            "graph_path": tf_graph_path,
+            "evaluator_name": "execution",
+            "pipeline_stage": _backing,
+        }},
+        {{
+            keys.CREATE_NODES: [
+                ("tick", "omni.graph.action.OnPlaybackTick"),
+                ("tf_pub", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+            ],
+            keys.CONNECT: [
+                ("tick.outputs:tick", "tf_pub.inputs:execIn"),
+            ],
+        }},
+    )
+    print("Created ROS2PublishTransformTree graph")
+
+# Acquire TF data via the transform listener interface
+from isaacsim.ros2.tf_viewer import acquire_transform_listener_interface
+
+interface = acquire_transform_listener_interface()
+interface.initialize(ros_distro)
+transforms = interface.get_transforms("{root_frame}")
+
+# Format and print as indented tree
+def _print_tree(frames, parent, indent=0):
+    prefix = "  " * indent + ("|- " if indent > 0 else "")
+    print(f"{{prefix}}{{parent}}")
+    children = [f for f in frames if f.get("parent") == parent]
+    for child in children:
+        _print_tree(frames, child["child"], indent + 1)
+
+print(f"\\nTF Tree (root: {root_frame}):")
+print("=" * 40)
+if transforms:
+    _print_tree(transforms, "{root_frame}")
+    print(f"\\nTotal frames: {{len(transforms)}}")
+else:
+    print("(no transforms found — is the simulation running?)")
+'''
+
+
+def _gen_publish_robot_description(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    topic = args.get("topic", "/robot_description")
+    return f'''\
+import omni.usd
+from pxr import UsdPhysics, UsdGeom, Gf
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+from rclpy.qos import QoSProfile, DurabilityPolicy
+
+stage = omni.usd.get_context().get_stage()
+art_prim = stage.GetPrimAtPath('{art_path}')
+if not art_prim.IsValid():
+    raise RuntimeError("Articulation not found: {art_path}")
+
+# Build simplified URDF from USD articulation structure
+# NOTE: This is a simplified URDF — for full export use Isaac Sim's URDF Exporter UI
+links = []
+joints = []
+
+def _traverse(prim, parent_link=None):
+    name = prim.GetName()
+    prim_type = prim.GetTypeName()
+
+    # Detect links (Xform with collision or visual children, or known link patterns)
+    is_link = prim_type in ("Xform", "") and any(
+        child.GetTypeName() in ("Mesh", "Cube", "Sphere", "Cylinder", "Capsule")
+        for child in prim.GetChildren()
+    ) or prim.HasAPI(UsdPhysics.RigidBodyAPI)
+
+    if is_link:
+        links.append(name)
+
+        # Check for joint relationship to parent
+        for child in prim.GetChildren():
+            if child.HasAPI(UsdPhysics.RevoluteJointAPI):
+                joints.append({{
+                    "name": child.GetName(),
+                    "type": "revolute",
+                    "parent": parent_link or "base_link",
+                    "child": name,
+                }})
+            elif child.HasAPI(UsdPhysics.PrismaticJointAPI):
+                joints.append({{
+                    "name": child.GetName(),
+                    "type": "prismatic",
+                    "parent": parent_link or "base_link",
+                    "child": name,
+                }})
+
+        for child in prim.GetChildren():
+            _traverse(child, name)
+    else:
+        for child in prim.GetChildren():
+            _traverse(child, parent_link)
+
+_traverse(art_prim)
+
+# Generate URDF XML
+urdf_lines = ['<?xml version="1.0"?>']
+urdf_lines.append('<robot name="{art_path.split("/")[-1]}">')
+urdf_lines.append('  <!-- Simplified URDF auto-generated from USD articulation -->')
+urdf_lines.append('  <!-- For full export, use Isaac Sim URDF Exporter UI -->')
+
+for link_name in links:
+    urdf_lines.append(f'  <link name="{{link_name}}"/>')
+
+for j in joints:
+    urdf_lines.append(f'  <joint name="{{j["name"]}}" type="{{j["type"]}}">')
+    urdf_lines.append(f'    <parent link="{{j["parent"]}}"/>')
+    urdf_lines.append(f'    <child link="{{j["child"]}}"/>')
+    urdf_lines.append(f'  </joint>')
+
+urdf_lines.append('</robot>')
+urdf_string = "\\n".join(urdf_lines)
+
+print(f"Generated simplified URDF ({{len(links)}} links, {{len(joints)}} joints)")
+
+# Publish via rclpy with TRANSIENT_LOCAL durability
+if not rclpy.ok():
+    rclpy.init()
+
+node = rclpy.create_node("robot_description_publisher")
+qos = QoSProfile(
+    depth=1,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+)
+pub = node.create_publisher(String, "{topic}", qos_profile=qos)
+msg = String()
+msg.data = urdf_string
+pub.publish(msg)
+
+print(f"Published robot description to {topic} (TRANSIENT_LOCAL)")
+print(f"URDF preview (first 500 chars):\\n{{urdf_string[:500]}}")
+'''
+
+
+def _gen_configure_ros2_bridge(args: Dict) -> str:
+    sensors = args.get("sensors", [])
+    domain_id = args.get("ros2_domain_id", 0)
+
+    if not sensors:
+        return "print('No sensors specified — nothing to configure')\n"
+
+    # Build OmniGraph nodes and connections
+    node_defs = []
+    conn_defs = []
+    val_defs = []
+
+    # Always add tick + ROS2Context
+    node_defs.append('("tick", "omni.graph.action.OnPlaybackTick")')
+    node_defs.append(f'("ros2_context", f"{{_ROS2_NS}}.ROS2Context")')
+    if domain_id != 0:
+        val_defs.append(f'("ros2_context.inputs:domain_id", {domain_id})')
+
+    for i, sensor in enumerate(sensors):
+        stype = sensor.get("type", "camera")
+        prim_path = sensor.get("prim_path", "")
+        topic_name = sensor.get("topic_name", "")
+        frame_id = sensor.get("frame_id", "")
+        node_name = f"{stype}_{i}"
+
+        # Map sensor type to OG node type
+        og_node_class = {
+            "camera": "ROS2CameraHelper",
+            "lidar": "ROS2PublishLaserScan",
+            "imu": "ROS2PublishImu",
+            "clock": "ROS2PublishClock",
+            "joint_state": "ROS2PublishJointState",
+        }.get(stype, f"ROS2Publish{stype.title()}")
+
+        node_defs.append(f'("{node_name}", f"{{_ROS2_NS}}.{og_node_class}")')
+
+        # Connect tick → sensor node
+        conn_defs.append(f'("tick.outputs:tick", "{node_name}.inputs:execIn")')
+
+        # Connect context
+        conn_defs.append(f'("ros2_context.outputs:context", "{node_name}.inputs:context")')
+
+        # Set values
+        if topic_name:
+            val_defs.append(f'("{node_name}.inputs:topicName", "{topic_name}")')
+        if frame_id:
+            val_defs.append(f'("{node_name}.inputs:frameId", "{frame_id}")')
+        if prim_path and stype != "clock":
+            # clock doesn't have a prim path input
+            if stype == "camera":
+                val_defs.append(f'("{node_name}.inputs:renderProductPath", "{prim_path}")')
+            elif stype == "joint_state":
+                val_defs.append(f'("{node_name}.inputs:targetPrim", "{prim_path}")')
+            else:
+                val_defs.append(f'("{node_name}.inputs:prim", "{prim_path}")')
+
+    nodes_str = ",\n            ".join(node_defs)
+    conns_str = ",\n            ".join(conn_defs)
+    vals_str = ",\n            ".join(val_defs)
+
+    sensor_summary = ", ".join(s.get("type", "?") for s in sensors)
+
+    return f'''\
+import omni.graph.core as og
+
+# Handle Isaac Sim version namespace differences
+import isaacsim
+_V = tuple(int(x) for x in isaacsim.__version__.split(".")[:2])
+_ROS2_NS = "isaacsim.ros2.nodes" if _V >= (6, 0) else "isaacsim.ros2.bridge"
+print(f"Isaac Sim version: {{isaacsim.__version__}}, using namespace: {{_ROS2_NS}}")
+
+# Resolve backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+keys = og.Controller.Keys
+(graph, nodes, _, _) = og.Controller.edit(
+    {{
+        "graph_path": "/World/ROS2_Bridge",
+        "evaluator_name": "execution",
+        "pipeline_stage": _backing,
+    }},
+    {{
+        keys.CREATE_NODES: [
+            {nodes_str}
+        ],
+        keys.CONNECT: [
+            {conns_str}
+        ],
+        keys.SET_VALUES: [
+            {vals_str}
+        ],
+    }},
+)
+
+print(f"ROS2 bridge configured with {{len(nodes)}} nodes")
+print(f"Sensors: {sensor_summary}")
+print(f"Domain ID: {domain_id}")
+print("Start simulation (Play) to begin publishing.")
+'''
+
+
+CODE_GEN_HANDLERS["show_tf_tree"] = _gen_show_tf_tree
+CODE_GEN_HANDLERS["publish_robot_description"] = _gen_publish_robot_description
+CODE_GEN_HANDLERS["configure_ros2_bridge"] = _gen_configure_ros2_bridge
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package

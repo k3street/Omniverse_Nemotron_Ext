@@ -827,6 +827,37 @@ _TEST_VECTORS = [
         },
         ["LulaKinematicsSolver", "compute_inverse_kinematics", "[1.0, 0.0, 0.0, 0.0]"],
     ),
+    # ── Phase 8F: ROS2 Deep Integration ──────────────────────────────────────
+    (
+        "show_tf_tree",
+        {"root_frame": "base_link"},
+        ["tf_viewer", "acquire_transform_listener_interface", "get_transforms", "base_link", "ROS2PublishTransformTree"],
+    ),
+    (
+        "publish_robot_description",
+        {"articulation_path": "/World/Franka", "topic": "/robot_description"},
+        ["rclpy", "TRANSIENT_LOCAL", "DurabilityPolicy", "urdf_string", "/robot_description", "create_publisher"],
+    ),
+    (
+        "configure_ros2_bridge",
+        {
+            "sensors": [
+                {"type": "camera", "prim_path": "/World/Camera", "topic_name": "/rgb", "frame_id": "camera_link"},
+            ],
+            "ros2_domain_id": 0,
+        },
+        ["ROS2Context", "ROS2CameraHelper", "_ROS2_NS", "isaacsim.__version__", "og.Controller.edit", "/rgb"],
+    ),
+    (
+        "configure_ros2_bridge",
+        {
+            "sensors": [
+                {"type": "lidar", "prim_path": "/World/Lidar", "topic_name": "/scan", "frame_id": "lidar_link"},
+                {"type": "imu", "prim_path": "/World/IMU", "topic_name": "/imu/data", "frame_id": "imu_link"},
+            ],
+        },
+        ["ROS2Context", "ROS2PublishLaserScan", "ROS2PublishImu", "/scan", "/imu/data", "lidar_link", "imu_link"],
+    ),
 ]
 
 
