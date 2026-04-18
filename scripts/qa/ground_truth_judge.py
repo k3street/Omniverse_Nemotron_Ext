@@ -80,12 +80,35 @@ def _snapshot_summary(snap: Dict) -> str:
     prims = snap.get("prims", [])
     user_prims = [p for p in prims if not p["path"].startswith(("/Render", "/OmniverseKit", "/Environment"))]
     lines = [f"prim_count={snap.get('prim_count')} (user_prims={len(user_prims)})"]
-    for p in user_prims[:15]:
+    translations = snap.get("world_translations", {}) or {}
+    rotations = snap.get("world_rotations_quat_wxyz", {}) or {}
+    scales = snap.get("world_scales", {}) or {}
+    geometry = snap.get("geometry", {}) or {}
+    for p in user_prims[:20]:
+        path = p["path"]
         apis = p.get("apis", [])
         apis_short = (" [" + ",".join(apis[:3]) + "]") if apis else ""
-        lines.append(f"  {p['path']} ({p['type']}){apis_short}")
-    if len(user_prims) > 15:
-        lines.append(f"  ... and {len(user_prims)-15} more")
+        line = f"  {path} ({p['type']}){apis_short}"
+        vis = p.get("visibility")
+        if vis:
+            line += f" visibility={vis}"
+        extras = []
+        if path in translations:
+            extras.append(f"pos={translations[path]}")
+        if path in rotations:
+            extras.append(f"rot_wxyz={rotations[path]}")
+        if path in scales:
+            extras.append(f"scale={scales[path]}")
+        if path in geometry:
+            # keep geometry compact — join key:value
+            g = geometry[path]
+            g_compact = ", ".join(f"{k}={v}" for k, v in g.items() if not k.startswith("_"))
+            extras.append(f"geom={{{g_compact}}}")
+        if extras:
+            line += "  " + " ".join(extras)
+        lines.append(line)
+    if len(user_prims) > 20:
+        lines.append(f"  ... and {len(user_prims)-20} more")
     jp = snap.get("joint_positions", {})
     if jp:
         lines.append(f"joint_positions: {dict(list(jp.items())[:5])}")
