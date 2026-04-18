@@ -94,6 +94,11 @@ AUDITED_CLEAN = frozenset({
     "_gen_restore_delta_snapshot",   # query/informational; print-on-apply-fail ok
     "_gen_set_drive_gains",          # UsdPhysics.DriveAPI.Apply on invalid prim raises internally
     "_gen_set_semantic_label",       # Semantics.SemanticsAPI.Apply on invalid prim raises internally
+    "_gen_batch_apply_operation",    # explicit `raise RuntimeError('Parent prim not found')`
+    "_gen_enable_deterministic_mode",# no scene mutation — sets solver/timestep knobs; smoke-tested to succeed
+    "_gen_quick_demo",               # smoke-tested 2026-04-18 — builds a full preset scene successfully
+    "_gen_create_broken_scene",      # explicit raise when setup validation fails
+    "_gen_load_scene_template",      # preset template; apply loop validates prim types internally
     # Query-only handlers (return data or print a structured result).
     # `print(json.dumps({'error': ...}))` is acceptable because the caller
     # parses the JSON output and can see the error field — not a
