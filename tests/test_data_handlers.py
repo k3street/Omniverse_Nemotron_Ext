@@ -40,29 +40,16 @@ try:
 except ImportError:
     _handle_diagnose_ros2 = None
 
-
-
-
-# Optional imports — present only on branches that ship those handlers.
 try:
     from service.isaac_assist_service.chat.tools.tool_executor import (
-        _handle_diagnose_physics_error,
+        _handle_diagnose_training,
+        _handle_review_reward,
+        _handle_profile_training_throughput,
     )
 except ImportError:
-    _handle_diagnose_physics_error = None
-try:
-    from service.isaac_assist_service.chat.tools.tool_executor import (
-        _handle_trace_config,
-    )
-except ImportError:
-    _handle_trace_config = None
-# Phase 7A Addendum handlers (added on this branch).
-from service.isaac_assist_service.chat.tools.tool_executor import (
-    _handle_diagnose_training,
-    _handle_review_reward,
-    _handle_profile_training_throughput,
-)
-
+    _handle_diagnose_training = None
+    _handle_review_reward = None
+    _handle_profile_training_throughput = None
 
 
 class TestLookupProductSpec:
@@ -992,6 +979,10 @@ class TestLookupMaterial:
 @pytest.mark.skipif(_handle_diagnose_physics_error is None, reason="diagnose_physics_error not available on this branch")
 @pytest.mark.skipif(_handle_diagnose_physics_error is None, reason="diagnose_physics_error not on this branch")
 @pytest.mark.skipif(_handle_diagnose_physics_error is None, reason="Handler not available on this branch")
+@pytest.mark.skipif(
+    _handle_diagnose_physics_error is None,
+    reason="diagnose_physics_error handler not present on this branch",
+)
 class TestDiagnosePhysicsError:
     """diagnose_physics_error DATA handler — pattern matching against known PhysX errors."""
 
@@ -1054,6 +1045,10 @@ class TestDiagnosePhysicsError:
 @pytest.mark.skipif(_handle_trace_config is None, reason="trace_config not available on this branch")
 @pytest.mark.skipif(_handle_trace_config is None, reason="trace_config not on this branch")
 @pytest.mark.skipif(_handle_trace_config is None, reason="Handler not available on this branch")
+@pytest.mark.skipif(
+    _handle_trace_config is None,
+    reason="trace_config handler not present on this branch",
+)
 class TestTraceConfig:
     """trace_config DATA handler — AST-based parameter tracing."""
 
@@ -1994,3 +1989,49 @@ class TestProfileTrainingThroughput:
         monkeypatch.setattr(te, "_read_tb_scalars", fake_tb)
         result = await _handle_profile_training_throughput({"run_dir": str(tmp_path)})
         assert result["bottleneck"] == "balanced"
+# ── Addendum H: Humanoid Advanced — diagnose_whole_body ─────────────────────
+
+class TestDiagnoseWholeBody:
+    """The diagnose_whole_body data handler returns a structured checklist."""
+
+    @pytest.mark.asyncio
+    async def test_default_thresholds_present(self):
+        from service.isaac_assist_service.chat.tools.tool_executor import (
+            _handle_diagnose_whole_body,
+        )
+        result = await _handle_diagnose_whole_body(
+            {"articulation_path": "/World/G1"}
+        )
+        assert result["articulation_path"] == "/World/G1"
+        assert result["support_polygon_margin_m"] == 0.05
+        assert result["ee_accel_threshold_m_s2"] == 5.0
+        assert isinstance(result["checks"], list)
+        check_ids = {c["id"] for c in result["checks"]}
+        assert {
+            "balance_margin",
+            "com_projection",
+            "arm_payload_effect",
+            "ee_acceleration",
+        }.issubset(check_ids)
+        # Every check must have a name and description for the LLM to surface
+        for c in result["checks"]:
+            assert c["name"]
+            assert c["description"]
+
+    @pytest.mark.asyncio
+    async def test_custom_thresholds_propagated(self):
+        from service.isaac_assist_service.chat.tools.tool_executor import (
+            _handle_diagnose_whole_body,
+        )
+        result = await _handle_diagnose_whole_body({
+            "articulation_path": "/World/H1",
+            "support_polygon_margin_m": 0.1,
+            "ee_accel_threshold_m_s2": 2.5,
+        })
+        assert result["support_polygon_margin_m"] == 0.1
+        assert result["ee_accel_threshold_m_s2"] == 2.5
+        # The thresholds should appear in the descriptions
+        balance = next(c for c in result["checks"] if c["id"] == "balance_margin")
+        assert "0.1" in balance["description"]
+        ee = next(c for c in result["checks"] if c["id"] == "ee_acceleration")
+        assert "2.5" in ee["description"]

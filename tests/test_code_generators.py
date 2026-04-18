@@ -1371,11 +1371,141 @@ _RAW_TEST_VECTORS = [
             "/World/Fixture",
         ],
     ),
+    # ── Addendum H: Humanoid Advanced ──────────────────────────────────────
+    (
+        "setup_contact_sensors",
+        {
+            "articulation_path": "/World/Allegro",
+            "body_names": ["thumb_tip", "index_tip", "middle_tip", "ring_tip"],
+            "num_envs": 4096,
+        },
+        [
+            "ContactSensorCfg",
+            "PhysxCfg",
+            "thumb_tip",
+            "index_tip",
+            "{ENV_REGEX_NS}/Robot/thumb_tip",
+            "gpu_max_rigid_contact_count",
+            "gpu_max_rigid_patch_count",
+        ],
+    ),
+    (
+        "setup_contact_sensors",
+        {
+            "articulation_path": "/World/Hand",
+            "body_names": ["fingertip"],
+            "num_envs": 64,
+            "track_air_time": True,
+        },
+        ["ContactSensorCfg", "fingertip", "track_air_time=True"],
+    ),
+    (
+        "setup_whole_body_control",
+        {
+            "articulation_path": "/World/G1",
+            "locomotion_policy": "hover_g1_flat.pt",
+            "arm_planner": "pink_ik",
+            "robot_profile": "g1",
+        },
+        [
+            "ActionGroupCfg",
+            "LocomotionPolicyCfg",
+            "PinkIKControllerCfg",
+            "FrameTask",
+            "PostureTask",
+            "DampingTask",
+            "lower_body=locomotion_cfg",
+            "upper_body=arm_cfg",
+            "hover_g1_flat.pt",
+        ],
+    ),
+    (
+        "setup_whole_body_control",
+        {
+            "articulation_path": "/World/H1",
+            "locomotion_policy": "hover_h1_rough.pt",
+            "arm_planner": "rmpflow",
+            "robot_profile": "h1",
+        },
+        ["ActionGroupCfg", "RmpFlowControllerCfg", "hover_h1_rough.pt"],
+    ),
+    (
+        "setup_loco_manipulation_training",
+        {
+            "task_description": "walk to a table and pick up a cup",
+            "robot": "g1",
+            "approach": "decoupled",
+            "reward_terms": [
+                {"name": "forward_velocity", "weight": 1.0, "category": "locomotion"},
+                {"name": "reach_target", "weight": 1.0, "category": "manipulation"},
+                {"name": "grasp_success", "weight": 5.0, "category": "manipulation"},
+            ],
+        },
+        [
+            "DECOUPLED",
+            "Reward mixing advisor",
+            "WARNING",
+            "Phase 1",
+            "Phase 2",
+            "Phase 3",
+            "locomotion_weight=5.0",
+            "manipulation_weight=2.0",
+        ],
+    ),
+    (
+        "setup_loco_manipulation_training",
+        {
+            "task_description": "dynamic running pickup",
+            "robot": "h1",
+            "approach": "hierarchical",
+        },
+        ["HIERARCHICAL", "SoFTA", "FALCON"],
+    ),
+    (
+        "setup_loco_manipulation_training",
+        {
+            "task_description": "max performance whole-body",
+            "robot": "g1",
+            "approach": "joint",
+        },
+        ["JOINT", "end-to-end", "reward curriculum"],
+    ),
+    (
+        "setup_rsi_from_demos",
+        {
+            "demo_path": "workspace/demos/g1_walk_pick.npz",
+            "env_cfg": "G1WalkPickEnvCfg",
+            "noise_std": 0.05,
+        },
+        [
+            "InitialStateCfg",
+            "demo_sampling",
+            "g1_walk_pick.npz",
+            "noise_std=0.05",
+            "G1WalkPickEnvCfg",
+        ],
+    ),
+    (
+        "setup_multi_rate",
+        {"lower_rate_hz": 50, "upper_rate_hz": 100, "upper_dof": 14},
+        [
+            "DualRateWrapper",
+            "gym.Wrapper",
+            "UPPER_DOF = 14",
+            "DECIMATION = 2",
+            "torch.cat",
+            "_cached_lower",
+        ],
+    ),
+    (
+        "setup_multi_rate",
+        {"lower_rate_hz": 30, "upper_rate_hz": 120},
+        ["DualRateWrapper", "DECIMATION = 4"],
+    ),
 ]
 
 
 # Filter out vectors whose handlers do not exist on this branch.
-# Keeps the file runnable as new addenda are merged into master in any order.
 _TEST_VECTORS = [v for v in _RAW_TEST_VECTORS if v[0] in CODE_GEN_HANDLERS]
 
 
