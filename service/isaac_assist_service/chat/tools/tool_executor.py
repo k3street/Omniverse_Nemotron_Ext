@@ -11413,6 +11413,12 @@ joint_positions = art.get_joint_positions().tolist()
 joint_velocities = art.get_joint_velocities().tolist()
 joint_names = list(art.dof_names) if art.dof_names is not None else []
 
+if not joint_positions:
+    raise RuntimeError(
+        "record_waypoints: articulation at " + repr({art_path!r}) + " has no joints — "
+        "nothing to record. Check the prim path points at an actual articulation root."
+    )
+
 waypoint = {{
     "joint_positions": joint_positions,
     "joint_velocities": joint_velocities,
