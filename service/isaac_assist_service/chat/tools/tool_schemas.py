@@ -2981,4 +2981,53 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+# ─── Workspace & Singularity (Phase 8B Addendum) ─────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "show_workspace",
+            "description": "Visualize robot workspace as a color-coded point cloud. Green = high manipulability, red = near singularity.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "resolution": {"type": "integer", "description": "Number of joint configuration samples (default 500000)"},
+                    "color_mode": {"type": "string", "enum": ["reachability", "manipulability", "singularity_distance"], "description": "Color mode: reachability (binary), manipulability (gradient), singularity_distance (red near singularities)"},
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_singularity",
+            "description": "Check if a target pose is near a robot singularity. Returns condition number: <50 safe, 50-100 warning, >=100 danger.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "target_position": {"type": "array", "items": {"type": "number"}, "description": "Target XYZ position [x, y, z]"},
+                    "target_orientation": {"type": "array", "items": {"type": "number"}, "description": "Target quaternion [w, x, y, z] (optional)"},
+                },
+                "required": ["articulation_path", "target_position"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "monitor_joint_effort",
+            "description": "Monitor joint positions, velocities, and efforts over time. Flags joints exceeding 90% of effort limits.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "duration_seconds": {"type": "number", "description": "Monitoring duration in seconds (default 5.0)"},
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
 ]

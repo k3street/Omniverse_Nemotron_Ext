@@ -901,6 +901,32 @@ _TEST_VECTORS = [
         {"mode": "scaled", "time_scale": 2.0},
         ["useSimTime", "True", "ROS2PublishClock", "Time scale", "2.0"],
     ),
+    # ── Phase 8B Addendum: Workspace & Singularity ──────────────────────────
+    (
+        "show_workspace",
+        {"articulation_path": "/World/Franka", "resolution": 10000, "color_mode": "manipulability"},
+        ["debug_draw", "acquire_debug_draw_interface", "draw_points", "LulaKinematicsSolver"],
+    ),
+    (
+        "show_workspace",
+        {"articulation_path": "/World/UR10", "color_mode": "reachability"},
+        ["debug_draw", "draw_points"],
+    ),
+    (
+        "check_singularity",
+        {"articulation_path": "/World/Franka", "target_position": [0.5, 0, 0.3]},
+        ["LulaKinematicsSolver", "svd", "condition"],
+    ),
+    (
+        "check_singularity",
+        {"articulation_path": "/World/Franka", "target_position": [0.5, 0, 0.3], "target_orientation": [1, 0, 0, 0]},
+        ["compute_inverse_kinematics", "svd", "condition"],
+    ),
+    (
+        "monitor_joint_effort",
+        {"articulation_path": "/World/Franka", "duration_seconds": 3.0},
+        ["subscribe_physics_step_events", "get_applied_joint_efforts", "utilization"],
+    ),
 ]
 
 
