@@ -1892,4 +1892,132 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+# ─── Cortex Behaviors & Manipulation ─────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "create_behavior",
+            "description": "Create a Cortex behavior (decision framework) for a robot. Sets up a CortexWorld with a decider network for autonomous behavior like pick-and-place or target following. Generates a complete runnable script.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation, e.g. '/World/Franka'"},
+                    "behavior_type": {
+                        "type": "string",
+                        "enum": ["pick_and_place", "follow_target"],
+                        "description": "Type of behavior to create",
+                    },
+                    "target_prim": {"type": "string", "description": "USD path to the target prim (object to pick or follow)"},
+                    "params": {"type": "object", "description": "Additional behavior parameters (speed, thresholds, etc.)"},
+                },
+                "required": ["articulation_path", "behavior_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_gripper",
+            "description": "Create and configure a gripper on a robot articulation. Supports parallel jaw (finger) grippers and suction grippers. Generates code to initialize the gripper with open/close positions and DOF names.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "gripper_type": {
+                        "type": "string",
+                        "enum": ["parallel_jaw", "suction"],
+                        "description": "Type of gripper",
+                    },
+                    "gripper_dof_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Joint names for gripper DOFs (required for parallel_jaw), e.g. ['panda_finger_joint1', 'panda_finger_joint2']",
+                    },
+                    "open_position": {"type": "number", "description": "Joint position for fully open gripper. Default: 0.04"},
+                    "closed_position": {"type": "number", "description": "Joint position for fully closed gripper. Default: 0.0"},
+                },
+                "required": ["articulation_path", "gripper_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "grasp_object",
+            "description": "Generate a complete grasp sequence for a robot: approach, grasp, and lift an object. Supports top-down grasps, side grasps, and loading grasps from .isaac_grasp files.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "target_prim": {"type": "string", "description": "USD path to the object to grasp"},
+                    "grasp_type": {
+                        "type": "string",
+                        "enum": ["top_down", "side", "from_file"],
+                        "description": "Grasp approach strategy. Default: top_down",
+                    },
+                    "grasp_file": {"type": "string", "description": "Path to .isaac_grasp YAML file (required when grasp_type='from_file')"},
+                    "approach_distance": {"type": "number", "description": "Pre-grasp approach distance in meters. Default: 0.1"},
+                    "lift_height": {"type": "number", "description": "Post-grasp lift height in meters. Default: 0.1"},
+                },
+                "required": ["robot_path", "target_prim"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "define_grasp_pose",
+            "description": "Define and save a grasp pose specification for a robot-object pair. Creates a .isaac_grasp YAML file with the grasp transform, approach direction, and gripper parameters. Use with grasp_object(grasp_type='from_file').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "object_path": {"type": "string", "description": "USD path to the target object"},
+                    "gripper_offset": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Offset from object center to gripper [x, y, z]. Default: [0, 0, 0]",
+                    },
+                    "approach_direction": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Approach direction vector [x, y, z]. Default: [0, 0, -1] (top-down)",
+                    },
+                },
+                "required": ["robot_path", "object_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "visualize_behavior_tree",
+            "description": "Visualize the structure of a Cortex behavior (decider) network as a formatted text tree. Shows the hierarchy of decision nodes, their types, and connections.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "network_name": {"type": "string", "description": "Name of the behavior/decider network to visualize"},
+                },
+                "required": ["network_name"],
+            },
+        },
+    },
+
+    # ─── Scene Export ─────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
+                },
+                "required": [],
+            },
+        },
+    },
 ]

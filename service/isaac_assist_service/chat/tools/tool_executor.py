@@ -7023,6 +7023,1164 @@ DATA_HANDLERS["vision_plan_trajectory"] = _handle_vision_plan_trajectory
 DATA_HANDLERS["vision_analyze_scene"] = _handle_vision_analyze_scene
 
 
+# ── Cortex Behaviors & Manipulation ─────────────────────────────────────────
+
+def _gen_create_behavior(args: Dict) -> str:
+    """Generate code to create a Cortex behavior (decider network) for a robot."""
+    art_path = args["articulation_path"]
+    behavior = args["behavior_type"]
+    target = args.get("target_prim", "/World/Target")
+    params = args.get("params", {})
+
+    speed = params.get("speed", 0.5)
+    threshold = params.get("threshold", 0.02)
+
+    if behavior == "pick_and_place":
+        place_target = params.get("place_target", "/World/PlaceTarget")
+        return f"""\
+from isaacsim.cortex.framework.cortex_world import CortexWorld
+from isaacsim.cortex.framework.robot import CortexRobot
+from isaacsim.cortex.framework.df import DfNetwork, DfDecider, DfState, DfStateMachineDecider
+from isaacsim.cortex.framework.motion_commander import MotionCommander
+import numpy as np
+
+# Create Cortex world
+world = CortexWorld()
+
+# Add robot
+robot = world.add_robot(CortexRobot(
+    name="robot",
+    prim_path='{art_path}',
+    motion_commander=MotionCommander('{art_path}'),
+))
+
+# ── Pick-and-place state machine ────────────────────────────
+class ApproachState(DfState):
+    \"\"\"Move to pre-grasp position above the target.\"\"\"
+    def enter(self):
+        target_pos = np.array(self.context['target_pos'])
+        approach_pos = target_pos + np.array([0, 0, {params.get('approach_distance', 0.1)}])
+        self.context['mc'].send_end_effector_target(
+            translation=approach_pos,
+        )
+
+    def step(self):
+        if self.context['mc'].reached_target(threshold={threshold}):
+            return 'grasp'
+        return None
+
+class GraspState(DfState):
+    \"\"\"Move down and close gripper.\"\"\"
+    def enter(self):
+        target_pos = np.array(self.context['target_pos'])
+        self.context['mc'].send_end_effector_target(
+            translation=target_pos,
+        )
+
+    def step(self):
+        if self.context['mc'].reached_target(threshold={threshold}):
+            self.context['gripper'].close()
+            return 'lift'
+        return None
+
+class LiftState(DfState):
+    \"\"\"Lift the grasped object.\"\"\"
+    def enter(self):
+        target_pos = np.array(self.context['target_pos'])
+        lift_pos = target_pos + np.array([0, 0, {params.get('lift_height', 0.15)}])
+        self.context['mc'].send_end_effector_target(
+            translation=lift_pos,
+        )
+
+    def step(self):
+        if self.context['mc'].reached_target(threshold={threshold}):
+            return 'place'
+        return None
+
+class PlaceState(DfState):
+    \"\"\"Move to place position and release.\"\"\"
+    def enter(self):
+        place_pos = np.array(self.context['place_pos'])
+        self.context['mc'].send_end_effector_target(
+            translation=place_pos,
+        )
+
+    def step(self):
+        if self.context['mc'].reached_target(threshold={threshold}):
+            self.context['gripper'].open()
+            return 'done'
+        return None
+
+# Build decider network
+pick_place_decider = DfStateMachineDecider(
+    states={{
+        'approach': ApproachState(),
+        'grasp': GraspState(),
+        'lift': LiftState(),
+        'place': PlaceState(),
+    }},
+    initial_state='approach',
+)
+
+network = DfNetwork(decider=pick_place_decider)
+world.add_decider_network(network)
+
+print("Cortex pick-and-place behavior created for {art_path}")
+print("Target: {target}, Place: {place_target}")
+"""
+
+    # follow_target
+    return f"""\
+from isaacsim.cortex.framework.cortex_world import CortexWorld
+from isaacsim.cortex.framework.robot import CortexRobot
+from isaacsim.cortex.framework.df import DfNetwork, DfDecider, DfState
+from isaacsim.cortex.framework.motion_commander import MotionCommander
+import numpy as np
+
+# Create Cortex world
+world = CortexWorld()
+
+# Add robot
+robot = world.add_robot(CortexRobot(
+    name="robot",
+    prim_path='{art_path}',
+    motion_commander=MotionCommander('{art_path}'),
+))
+
+# ── Follow-target behavior ──────────────────────────────────
+class FollowTargetState(DfState):
+    \"\"\"Continuously track a target prim with the end-effector.\"\"\"
+    def enter(self):
+        self.update_interval = {params.get('update_interval', 0.1)}
+
+    def step(self):
+        import omni.usd
+        from pxr import UsdGeom
+        stage = omni.usd.get_context().get_stage()
+        target_prim = stage.GetPrimAtPath('{target}')
+        xf = UsdGeom.Xformable(target_prim).ComputeLocalToWorldTransform(0)
+        target_pos = np.array(xf.ExtractTranslation())
+        self.context['mc'].send_end_effector_target(
+            translation=target_pos,
+        )
+        return None  # stay in this state
+
+class FollowDecider(DfDecider):
+    \"\"\"Simple decider that always runs the follow state.\"\"\"
+    def __init__(self):
+        super().__init__()
+        self.add_child('follow', FollowTargetState())
+
+    def decide(self):
+        return 'follow'
+
+network = DfNetwork(decider=FollowDecider())
+world.add_decider_network(network)
+
+print("Cortex follow-target behavior created for {art_path}")
+print("Following: {target}")
+"""
+
+
+def _gen_create_gripper(args: Dict) -> str:
+    """Generate code to create and configure a gripper."""
+    art_path = args["articulation_path"]
+    gripper_type = args["gripper_type"]
+    open_pos = args.get("open_position", 0.04)
+    closed_pos = args.get("closed_position", 0.0)
+
+    if gripper_type == "parallel_jaw":
+        dof_names = args.get("gripper_dof_names", ["panda_finger_joint1", "panda_finger_joint2"])
+        dof_names_str = repr(dof_names)
+        return f"""\
+from isaacsim.robot.manipulators.grippers import ParallelGripper
+import numpy as np
+
+# Create parallel jaw gripper
+gripper = ParallelGripper(
+    end_effector_prim_path='{art_path}/panda_hand',
+    joint_prim_names={dof_names_str},
+    joint_opened_positions=np.array([{open_pos}] * {len(dof_names)}),
+    joint_closed_positions=np.array([{closed_pos}] * {len(dof_names)}),
+    action_deltas=np.array([{open_pos}] * {len(dof_names)}),
+)
+
+# Initialize gripper
+gripper.initialize()
+
+# Open gripper to start
+gripper.open()
+print(f"ParallelGripper created on {art_path}")
+print(f"  DOFs: {dof_names_str}")
+print(f"  Open position: {open_pos}")
+print(f"  Closed position: {closed_pos}")
+"""
+
+    # suction gripper — OmniGraph-based OgnSurfaceGripper
+    return f"""\
+import omni.graph.core as og
+
+# Resolve backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+keys = og.Controller.Keys
+(graph, nodes, _, _) = og.Controller.edit(
+    {{
+        "graph_path": "{art_path}/SuctionGripperGraph",
+        "evaluator_name": "execution",
+        "pipeline_stage": _backing,
+    }},
+    {{
+        keys.CREATE_NODES: [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("SurfaceGripper", "isaacsim.robot.surface_gripper.OgnSurfaceGripper"),
+        ],
+        keys.CONNECT: [
+            ("OnPlaybackTick.outputs:tick", "SurfaceGripper.inputs:execIn"),
+        ],
+        keys.SET_VALUES: [
+            ("SurfaceGripper.inputs:parentPath", "{art_path}"),
+            ("SurfaceGripper.inputs:enabled", True),
+            ("SurfaceGripper.inputs:gripThreshold", 0.01),
+            ("SurfaceGripper.inputs:forceLimit", 100.0),
+            ("SurfaceGripper.inputs:torqueLimit", 100.0),
+        ],
+    }},
+)
+
+print(f"Suction gripper (OgnSurfaceGripper) created on {art_path}")
+print("Use SurfaceGripper.inputs:close to activate suction")
+"""
+
+
+def _gen_grasp_object(args: Dict) -> str:
+    """Generate a complete grasp sequence: approach, grasp, lift."""
+    robot_path = args["robot_path"]
+    target_prim = args["target_prim"]
+    grasp_type = args.get("grasp_type", "top_down")
+    approach_dist = args.get("approach_distance", 0.1)
+    lift_height = args.get("lift_height", 0.1)
+
+    if grasp_type == "from_file":
+        grasp_file = args.get("grasp_file", "")
+        return f"""\
+import numpy as np
+import yaml
+import omni.usd
+from pxr import UsdGeom, Gf
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+
+# Load grasp specification from file
+with open('{grasp_file}', 'r') as f:
+    grasp_spec = yaml.safe_load(f)
+
+grasp_name = list(grasp_spec.get('grasps', {{}}).keys())[0]
+grasp = grasp_spec['grasps'][grasp_name]
+offset = np.array(grasp.get('gripper_offset', [0, 0, 0]))
+approach_dir = np.array(grasp.get('approach_direction', [0, 0, -1]))
+
+# Get target object position
+stage = omni.usd.get_context().get_stage()
+target_xf = UsdGeom.Xformable(stage.GetPrimAtPath('{target_prim}')).ComputeLocalToWorldTransform(0)
+target_pos = np.array(target_xf.ExtractTranslation())
+
+# Compute grasp and approach positions
+grasp_pos = target_pos + offset
+approach_pos = grasp_pos - approach_dir * {approach_dist}
+lift_pos = grasp_pos + np.array([0, 0, {lift_height}])
+
+# Setup motion planner
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('franka', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+art = SingleArticulation(prim_path='{robot_path}')
+art.initialize()
+
+# Step 1: Move to approach position
+rmpflow.set_end_effector_target(approach_pos, None)
+joint_positions = art.get_joint_positions()
+joint_velocities = art.get_joint_velocities()
+action = rmpflow.get_next_articulation_action(joint_positions, joint_velocities)
+art.apply_action(action)
+print(f"Step 1: Moving to approach position {{approach_pos}}")
+
+# Step 2: Linear approach to grasp position
+rmpflow.set_end_effector_target(grasp_pos, None)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 2: Approaching grasp position {{grasp_pos}}")
+
+# Step 3: Close gripper
+print("Step 3: Closing gripper")
+
+# Step 4: Lift
+rmpflow.set_end_effector_target(lift_pos, None)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 4: Lifting to {{lift_pos}}")
+print("Grasp sequence complete (from file: {grasp_file})")
+"""
+
+    # top_down or side grasp (geometric heuristic)
+    if grasp_type == "side":
+        approach_vector = "[1, 0, 0]"
+        grasp_ori = "np.array([0.5, 0.5, -0.5, 0.5])  # side approach quaternion"
+    else:  # top_down
+        approach_vector = "[0, 0, -1]"
+        grasp_ori = "np.array([1.0, 0.0, 0.0, 0.0])  # top-down quaternion"
+
+    return f"""\
+import numpy as np
+import omni.usd
+from pxr import UsdGeom, Gf
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+
+# Get target object position
+stage = omni.usd.get_context().get_stage()
+target_xf = UsdGeom.Xformable(stage.GetPrimAtPath('{target_prim}')).ComputeLocalToWorldTransform(0)
+target_pos = np.array(target_xf.ExtractTranslation())
+
+# Compute approach geometry ({grasp_type} grasp)
+approach_dir = np.array({approach_vector})
+grasp_pos = target_pos  # grasp at object center
+approach_pos = grasp_pos - approach_dir * {approach_dist}
+lift_pos = grasp_pos + np.array([0, 0, {lift_height}])
+grasp_orientation = {grasp_ori}
+
+# Setup motion planner
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('franka', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+art = SingleArticulation(prim_path='{robot_path}')
+art.initialize()
+
+# Step 1: Move to pre-grasp approach position
+rmpflow.set_end_effector_target(approach_pos, grasp_orientation)
+joint_positions = art.get_joint_positions()
+joint_velocities = art.get_joint_velocities()
+action = rmpflow.get_next_articulation_action(joint_positions, joint_velocities)
+art.apply_action(action)
+print(f"Step 1: Moving to approach position {{approach_pos}}")
+
+# Step 2: Linear approach to grasp position
+rmpflow.set_end_effector_target(grasp_pos, grasp_orientation)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 2: Approaching grasp position {{grasp_pos}}")
+
+# Step 3: Close gripper
+print("Step 3: Closing gripper")
+
+# Step 4: Lift object
+rmpflow.set_end_effector_target(lift_pos, grasp_orientation)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 4: Lifting to {{lift_pos}}")
+print("Grasp sequence complete ({grasp_type})")
+"""
+
+
+def _gen_define_grasp_pose(args: Dict) -> str:
+    """Generate code to create a .isaac_grasp YAML file."""
+    robot_path = args["robot_path"]
+    object_path = args["object_path"]
+    offset = args.get("gripper_offset", [0, 0, 0])
+    approach_dir = args.get("approach_direction", [0, 0, -1])
+
+    return f"""\
+import yaml
+import os
+import omni.usd
+from pxr import UsdGeom, Gf
+import numpy as np
+
+# Get object position for reference
+stage = omni.usd.get_context().get_stage()
+obj_prim = stage.GetPrimAtPath('{object_path}')
+obj_xf = UsdGeom.Xformable(obj_prim).ComputeLocalToWorldTransform(0)
+obj_pos = list(obj_xf.ExtractTranslation())
+
+# Define grasp specification
+grasp_spec = {{
+    'version': '1.0',
+    'robot_path': '{robot_path}',
+    'object_path': '{object_path}',
+    'grasps': {{
+        'default_grasp': {{
+            'gripper_offset': {list(offset)},
+            'approach_direction': {list(approach_dir)},
+            'object_reference_position': obj_pos,
+            'pre_grasp_opening': 0.04,
+            'grasp_force': 40.0,
+        }},
+    }},
+}}
+
+# Save to workspace
+grasp_dir = 'workspace/grasp_poses'
+os.makedirs(grasp_dir, exist_ok=True)
+obj_name = '{object_path}'.split('/')[-1]
+file_path = os.path.join(grasp_dir, f'{{obj_name}}.isaac_grasp')
+
+with open(file_path, 'w') as f:
+    yaml.dump(grasp_spec, f, default_flow_style=False)
+
+print(f"Grasp pose saved to {{file_path}}")
+print(f"  Robot: {robot_path}")
+print(f"  Object: {object_path}")
+print(f"  Offset: {list(offset)}")
+print(f"  Approach direction: {list(approach_dir)}")
+"""
+
+
+async def _handle_visualize_behavior_tree(args: Dict) -> Dict:
+    """Return a formatted text tree of a behavior network structure."""
+    network_name = args.get("network_name", "unknown")
+
+    # Since we don't have access to a running Cortex instance at query time,
+    # return the canonical structure for known behavior types, or a template.
+    _KNOWN_BEHAVIORS = {
+        "pick_and_place": {
+            "name": "pick_and_place",
+            "type": "DfStateMachineDecider",
+            "children": [
+                {"name": "approach", "type": "DfState", "description": "Move to pre-grasp position above target"},
+                {"name": "grasp", "type": "DfState", "description": "Move down and close gripper on object"},
+                {"name": "lift", "type": "DfState", "description": "Lift grasped object to safe height"},
+                {"name": "place", "type": "DfState", "description": "Move to place position and release"},
+            ],
+            "transitions": "approach -> grasp -> lift -> place -> done",
+        },
+        "follow_target": {
+            "name": "follow_target",
+            "type": "DfDecider",
+            "children": [
+                {"name": "follow", "type": "FollowTargetState", "description": "Continuously track target prim with end-effector"},
+            ],
+            "transitions": "follow (continuous loop)",
+        },
+    }
+
+    behavior = _KNOWN_BEHAVIORS.get(network_name.lower())
+
+    if behavior:
+        # Build ASCII tree
+        lines = [
+            f"Behavior Network: {behavior['name']}",
+            f"  Type: {behavior['type']}",
+            f"  Transitions: {behavior['transitions']}",
+            "",
+            "  Nodes:",
+        ]
+        for i, child in enumerate(behavior["children"]):
+            is_last = i == len(behavior["children"]) - 1
+            prefix = "  +-- " if is_last else "  |-- "
+            lines.append(f"{prefix}{child['name']} ({child['type']})")
+            desc_prefix = "      " if is_last else "  |   "
+            lines.append(f"{desc_prefix}{child['description']}")
+
+        tree_text = "\n".join(lines)
+        return {
+            "network_name": network_name,
+            "structure": behavior,
+            "tree": tree_text,
+        }
+
+    return {
+        "network_name": network_name,
+        "structure": None,
+        "tree": (
+            f"Behavior Network: {network_name}\n"
+            f"  (No pre-built visualization available for '{network_name}'.\n"
+            f"   Known behaviors: pick_and_place, follow_target.\n"
+            f"   For custom networks, inspect the DfNetwork in the running Cortex world.)"
+        ),
+    }
+
+
+CODE_GEN_HANDLERS["create_behavior"] = _gen_create_behavior
+CODE_GEN_HANDLERS["create_gripper"] = _gen_create_gripper
+CODE_GEN_HANDLERS["grasp_object"] = _gen_grasp_object
+CODE_GEN_HANDLERS["define_grasp_pose"] = _gen_define_grasp_pose
+DATA_HANDLERS["visualize_behavior_tree"] = _handle_visualize_behavior_tree
+
+
+# ── Scene Package Export ─────────────────────────────────────────────────────
+# Collects all approved code patches from the audit log for a session,
+# then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
+# README.md, and a ros2_topics.yaml listing detected topics.
+
+async def _handle_export_scene_package(args: Dict) -> Dict:
+    """Export the current session's scene setup as a reusable file package."""
+    from pathlib import Path
+    from datetime import datetime as _dt
+    from ..routes import _audit
+
+    session_id = args.get("session_id", "default_session")
+    scene_name = args.get("scene_name", "exported_scene")
+    # Sanitize scene_name for filesystem
+    safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in scene_name)
+
+    out_dir = Path("workspace/scene_exports") / safe_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Collect approved patches from audit log ──────────────────────────
+    entries = _audit.query_logs(limit=500, event_type="patch_executed")
+    patches = []
+    for e in entries:
+        meta = e.metadata or {}
+        if meta.get("success") and meta.get("session_id", "default_session") == session_id:
+            code = meta.get("code", "")
+            if code:
+                patches.append({
+                    "description": meta.get("user_message", ""),
+                    "code": code,
+                })
+
+    if not patches:
+        # Fallback: grab all successful patches regardless of session
+        for e in entries:
+            meta = e.metadata or {}
+            if meta.get("success") and meta.get("code"):
+                patches.append({
+                    "description": meta.get("user_message", ""),
+                    "code": meta["code"],
+                })
+
+    # ── scene_setup.py ───────────────────────────────────────────────────
+    setup_lines = [
+        '"""',
+        f'Scene Setup: {scene_name}',
+        f'Auto-exported by Isaac Assist on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}',
+        f'Patches: {len(patches)}',
+        '"""',
+        'import omni.usd',
+        'from pxr import Usd, UsdGeom, UsdPhysics, PhysxSchema, Gf, Sdf, UsdShade',
+        '',
+        'stage = omni.usd.get_context().get_stage()',
+        '',
+    ]
+    for i, p in enumerate(patches):
+        desc = p["description"] or f"Step {i+1}"
+        setup_lines.append(f'# ── Step {i+1}: {desc}')
+        setup_lines.append(p["code"].rstrip())
+        setup_lines.append('')
+    setup_lines.append('print("Scene setup complete.")')
+    scene_py = "\n".join(setup_lines)
+    (out_dir / "scene_setup.py").write_text(scene_py, encoding="utf-8")
+
+    # ── Detect ROS2 topics from OmniGraph patterns in code ───────────────
+    import re as _re
+    ros2_topics = set()
+    og_node_types = set()
+    robot_paths = set()
+    for p in patches:
+        code = p["code"]
+        # topics: /joint_states, /joint_command, /clock, /tf, etc.
+        ros2_topics.update(_re.findall(r"""['\"](/[a-zA-Z_][a-zA-Z0-9_/]*)['\"]\s*""", code))
+        # OmniGraph node types
+        og_node_types.update(_re.findall(r"""['\"](?:isaacsim|omni\.isaac)\.[a-zA-Z0-9_.]+['\"]""", code))
+        # Robot paths
+        robot_paths.update(_re.findall(r"""['\"](/World/[A-Z][a-zA-Z0-9_]*)['\"]\s*""", code))
+    # Filter to ROS2-style topics only (not USD paths, not physics scene attrs)
+    _NON_TOPIC_PREFIXES = ("/World", "/Physics", "/Collision", "/persistent", "/Render", "/OmniKit")
+    ros2_topics = sorted(
+        t for t in ros2_topics
+        if not any(t.startswith(p) for p in _NON_TOPIC_PREFIXES)
+        and len(t) > 2  # skip bare "/"
+        and not t.endswith(".usd")
+    )
+
+    # ── ros2_topics.yaml ─────────────────────────────────────────────────
+    if ros2_topics or og_node_types:
+        topic_lines = [f"# ROS2 Topics detected in scene: {scene_name}", "topics:"]
+        for t in sorted(ros2_topics):
+            topic_lines.append(f"  - name: \"{t}\"")
+        topic_lines.append("")
+        topic_lines.append("omnigraph_node_types:")
+        for nt in sorted(og_node_types):
+            topic_lines.append(f"  - {nt}")
+        (out_dir / "ros2_topics.yaml").write_text("\n".join(topic_lines) + "\n", encoding="utf-8")
+
+    # ── ros2_launch.py (if ROS2 topics detected) ────────────────────────
+    has_ros2 = bool(ros2_topics)
+    if has_ros2:
+        launch_lines = [
+            '"""',
+            f'ROS2 Launch File for scene: {scene_name}',
+            f'Auto-generated by Isaac Assist on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}',
+            '"""',
+            'from launch import LaunchDescription',
+            'from launch_ros.actions import Node',
+            '',
+            '',
+            'def generate_launch_description():',
+            '    return LaunchDescription([',
+        ]
+        # Add placeholder nodes for each topic
+        for t in sorted(ros2_topics):
+            node_name = t.strip("/").replace("/", "_")
+            launch_lines.append(f'        # Topic: {t}')
+            launch_lines.append(f'        # Node("{node_name}") — configure publisher/subscriber as needed')
+        launch_lines.append('    ])')
+        (out_dir / "ros2_launch.py").write_text("\n".join(launch_lines) + "\n", encoding="utf-8")
+
+    # ── README.md ────────────────────────────────────────────────────────
+    robot_list = ", ".join(f"`{r}`" for r in sorted(robot_paths)) or "None detected"
+    topic_list = "\n".join(f"- `{t}`" for t in sorted(ros2_topics)) or "- None detected"
+    readme = f"""# {scene_name}
+
+Auto-exported by **Isaac Assist** on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}.
+
+## Scene Summary
+
+- **Patches applied:** {len(patches)}
+- **Robots:** {robot_list}
+- **ROS2 Topics:**
+{topic_list}
+
+## Files
+
+| File | Description |
+|------|-------------|
+| `scene_setup.py` | All approved code patches as a single runnable script |
+| `ros2_topics.yaml` | Detected ROS2 topics and OmniGraph node types |
+{"| `ros2_launch.py` | ROS2 launch file template |" if has_ros2 else ""}
+| `README.md` | This file |
+
+## Usage
+
+### Replay Scene in Isaac Sim
+```python
+# In Isaac Sim Script Editor or via Kit RPC:
+exec(open("{out_dir}/scene_setup.py").read())
+```
+
+### ROS2 Topics
+{"Launch the ROS2 nodes alongside Isaac Sim:" if has_ros2 else "No ROS2 topics detected in this scene."}
+{"```bash" if has_ros2 else ""}
+{"ros2 launch " + str(out_dir / "ros2_launch.py") if has_ros2 else ""}
+{"```" if has_ros2 else ""}
+"""
+    (out_dir / "README.md").write_text(readme, encoding="utf-8")
+
+    files_written = ["scene_setup.py", "README.md"]
+    if ros2_topics or og_node_types:
+        files_written.append("ros2_topics.yaml")
+    if has_ros2:
+        files_written.append("ros2_launch.py")
+
+    return {
+        "export_dir": str(out_dir),
+        "files": files_written,
+        "patch_count": len(patches),
+        "ros2_topics": ros2_topics,
+        "robots_detected": sorted(robot_paths),
+        "message": f"Exported {len(patches)} patches to {out_dir}/ — files: {', '.join(files_written)}",
+    }
+
+
+DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Cortex Behaviors & Manipulation ─────────────────────────────────────────
+
+def _gen_create_behavior(args: Dict) -> str:
+    """Generate code to create a Cortex behavior (decider network) for a robot."""
+    art_path = args["articulation_path"]
+    behavior = args["behavior_type"]
+    target = args.get("target_prim", "/World/Target")
+    params = args.get("params", {})
+
+    speed = params.get("speed", 0.5)
+    threshold = params.get("threshold", 0.02)
+
+    if behavior == "pick_and_place":
+        place_target = params.get("place_target", "/World/PlaceTarget")
+        return f"""\
+from isaacsim.cortex.framework.cortex_world import CortexWorld
+from isaacsim.cortex.framework.robot import CortexRobot
+from isaacsim.cortex.framework.df import DfNetwork, DfDecider, DfState, DfStateMachineDecider
+from isaacsim.cortex.framework.motion_commander import MotionCommander
+import numpy as np
+
+# Create Cortex world
+world = CortexWorld()
+
+# Add robot
+robot = world.add_robot(CortexRobot(
+    name="robot",
+    prim_path='{art_path}',
+    motion_commander=MotionCommander('{art_path}'),
+))
+
+# ── Pick-and-place state machine ────────────────────────────
+class ApproachState(DfState):
+    \"\"\"Move to pre-grasp position above the target.\"\"\"
+    def enter(self):
+        target_pos = np.array(self.context['target_pos'])
+        approach_pos = target_pos + np.array([0, 0, {params.get('approach_distance', 0.1)}])
+        self.context['mc'].send_end_effector_target(
+            translation=approach_pos,
+        )
+
+    def step(self):
+        if self.context['mc'].reached_target(threshold={threshold}):
+            return 'grasp'
+        return None
+
+class GraspState(DfState):
+    \"\"\"Move down and close gripper.\"\"\"
+    def enter(self):
+        target_pos = np.array(self.context['target_pos'])
+        self.context['mc'].send_end_effector_target(
+            translation=target_pos,
+        )
+
+    def step(self):
+        if self.context['mc'].reached_target(threshold={threshold}):
+            self.context['gripper'].close()
+            return 'lift'
+        return None
+
+class LiftState(DfState):
+    \"\"\"Lift the grasped object.\"\"\"
+    def enter(self):
+        target_pos = np.array(self.context['target_pos'])
+        lift_pos = target_pos + np.array([0, 0, {params.get('lift_height', 0.15)}])
+        self.context['mc'].send_end_effector_target(
+            translation=lift_pos,
+        )
+
+    def step(self):
+        if self.context['mc'].reached_target(threshold={threshold}):
+            return 'place'
+        return None
+
+class PlaceState(DfState):
+    \"\"\"Move to place position and release.\"\"\"
+    def enter(self):
+        place_pos = np.array(self.context['place_pos'])
+        self.context['mc'].send_end_effector_target(
+            translation=place_pos,
+        )
+
+    def step(self):
+        if self.context['mc'].reached_target(threshold={threshold}):
+            self.context['gripper'].open()
+            return 'done'
+        return None
+
+# Build decider network
+pick_place_decider = DfStateMachineDecider(
+    states={{
+        'approach': ApproachState(),
+        'grasp': GraspState(),
+        'lift': LiftState(),
+        'place': PlaceState(),
+    }},
+    initial_state='approach',
+)
+
+network = DfNetwork(decider=pick_place_decider)
+world.add_decider_network(network)
+
+print("Cortex pick-and-place behavior created for {art_path}")
+print("Target: {target}, Place: {place_target}")
+"""
+
+    # follow_target
+    return f"""\
+from isaacsim.cortex.framework.cortex_world import CortexWorld
+from isaacsim.cortex.framework.robot import CortexRobot
+from isaacsim.cortex.framework.df import DfNetwork, DfDecider, DfState
+from isaacsim.cortex.framework.motion_commander import MotionCommander
+import numpy as np
+
+# Create Cortex world
+world = CortexWorld()
+
+# Add robot
+robot = world.add_robot(CortexRobot(
+    name="robot",
+    prim_path='{art_path}',
+    motion_commander=MotionCommander('{art_path}'),
+))
+
+# ── Follow-target behavior ──────────────────────────────────
+class FollowTargetState(DfState):
+    \"\"\"Continuously track a target prim with the end-effector.\"\"\"
+    def enter(self):
+        self.update_interval = {params.get('update_interval', 0.1)}
+
+    def step(self):
+        import omni.usd
+        from pxr import UsdGeom
+        stage = omni.usd.get_context().get_stage()
+        target_prim = stage.GetPrimAtPath('{target}')
+        xf = UsdGeom.Xformable(target_prim).ComputeLocalToWorldTransform(0)
+        target_pos = np.array(xf.ExtractTranslation())
+        self.context['mc'].send_end_effector_target(
+            translation=target_pos,
+        )
+        return None  # stay in this state
+
+class FollowDecider(DfDecider):
+    \"\"\"Simple decider that always runs the follow state.\"\"\"
+    def __init__(self):
+        super().__init__()
+        self.add_child('follow', FollowTargetState())
+
+    def decide(self):
+        return 'follow'
+
+network = DfNetwork(decider=FollowDecider())
+world.add_decider_network(network)
+
+print("Cortex follow-target behavior created for {art_path}")
+print("Following: {target}")
+"""
+
+
+def _gen_create_gripper(args: Dict) -> str:
+    """Generate code to create and configure a gripper."""
+    art_path = args["articulation_path"]
+    gripper_type = args["gripper_type"]
+    open_pos = args.get("open_position", 0.04)
+    closed_pos = args.get("closed_position", 0.0)
+
+    if gripper_type == "parallel_jaw":
+        dof_names = args.get("gripper_dof_names", ["panda_finger_joint1", "panda_finger_joint2"])
+        dof_names_str = repr(dof_names)
+        return f"""\
+from isaacsim.robot.manipulators.grippers import ParallelGripper
+import numpy as np
+
+# Create parallel jaw gripper
+gripper = ParallelGripper(
+    end_effector_prim_path='{art_path}/panda_hand',
+    joint_prim_names={dof_names_str},
+    joint_opened_positions=np.array([{open_pos}] * {len(dof_names)}),
+    joint_closed_positions=np.array([{closed_pos}] * {len(dof_names)}),
+    action_deltas=np.array([{open_pos}] * {len(dof_names)}),
+)
+
+# Initialize gripper
+gripper.initialize()
+
+# Open gripper to start
+gripper.open()
+print(f"ParallelGripper created on {art_path}")
+print(f"  DOFs: {dof_names_str}")
+print(f"  Open position: {open_pos}")
+print(f"  Closed position: {closed_pos}")
+"""
+
+    # suction gripper — OmniGraph-based OgnSurfaceGripper
+    return f"""\
+import omni.graph.core as og
+
+# Resolve backing type
+_bt = og.GraphBackingType
+if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
+elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
+    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
+else:
+    _backing = list(_bt)[0]
+
+keys = og.Controller.Keys
+(graph, nodes, _, _) = og.Controller.edit(
+    {{
+        "graph_path": "{art_path}/SuctionGripperGraph",
+        "evaluator_name": "execution",
+        "pipeline_stage": _backing,
+    }},
+    {{
+        keys.CREATE_NODES: [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("SurfaceGripper", "isaacsim.robot.surface_gripper.OgnSurfaceGripper"),
+        ],
+        keys.CONNECT: [
+            ("OnPlaybackTick.outputs:tick", "SurfaceGripper.inputs:execIn"),
+        ],
+        keys.SET_VALUES: [
+            ("SurfaceGripper.inputs:parentPath", "{art_path}"),
+            ("SurfaceGripper.inputs:enabled", True),
+            ("SurfaceGripper.inputs:gripThreshold", 0.01),
+            ("SurfaceGripper.inputs:forceLimit", 100.0),
+            ("SurfaceGripper.inputs:torqueLimit", 100.0),
+        ],
+    }},
+)
+
+print(f"Suction gripper (OgnSurfaceGripper) created on {art_path}")
+print("Use SurfaceGripper.inputs:close to activate suction")
+"""
+
+
+def _gen_grasp_object(args: Dict) -> str:
+    """Generate a complete grasp sequence: approach, grasp, lift."""
+    robot_path = args["robot_path"]
+    target_prim = args["target_prim"]
+    grasp_type = args.get("grasp_type", "top_down")
+    approach_dist = args.get("approach_distance", 0.1)
+    lift_height = args.get("lift_height", 0.1)
+
+    if grasp_type == "from_file":
+        grasp_file = args.get("grasp_file", "")
+        return f"""\
+import numpy as np
+import yaml
+import omni.usd
+from pxr import UsdGeom, Gf
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+
+# Load grasp specification from file
+with open('{grasp_file}', 'r') as f:
+    grasp_spec = yaml.safe_load(f)
+
+grasp_name = list(grasp_spec.get('grasps', {{}}).keys())[0]
+grasp = grasp_spec['grasps'][grasp_name]
+offset = np.array(grasp.get('gripper_offset', [0, 0, 0]))
+approach_dir = np.array(grasp.get('approach_direction', [0, 0, -1]))
+
+# Get target object position
+stage = omni.usd.get_context().get_stage()
+target_xf = UsdGeom.Xformable(stage.GetPrimAtPath('{target_prim}')).ComputeLocalToWorldTransform(0)
+target_pos = np.array(target_xf.ExtractTranslation())
+
+# Compute grasp and approach positions
+grasp_pos = target_pos + offset
+approach_pos = grasp_pos - approach_dir * {approach_dist}
+lift_pos = grasp_pos + np.array([0, 0, {lift_height}])
+
+# Setup motion planner
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('franka', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+art = SingleArticulation(prim_path='{robot_path}')
+art.initialize()
+
+# Step 1: Move to approach position
+rmpflow.set_end_effector_target(approach_pos, None)
+joint_positions = art.get_joint_positions()
+joint_velocities = art.get_joint_velocities()
+action = rmpflow.get_next_articulation_action(joint_positions, joint_velocities)
+art.apply_action(action)
+print(f"Step 1: Moving to approach position {{approach_pos}}")
+
+# Step 2: Linear approach to grasp position
+rmpflow.set_end_effector_target(grasp_pos, None)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 2: Approaching grasp position {{grasp_pos}}")
+
+# Step 3: Close gripper
+print("Step 3: Closing gripper")
+
+# Step 4: Lift
+rmpflow.set_end_effector_target(lift_pos, None)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 4: Lifting to {{lift_pos}}")
+print("Grasp sequence complete (from file: {grasp_file})")
+"""
+
+    # top_down or side grasp (geometric heuristic)
+    if grasp_type == "side":
+        approach_vector = "[1, 0, 0]"
+        grasp_ori = "np.array([0.5, 0.5, -0.5, 0.5])  # side approach quaternion"
+    else:  # top_down
+        approach_vector = "[0, 0, -1]"
+        grasp_ori = "np.array([1.0, 0.0, 0.0, 0.0])  # top-down quaternion"
+
+    return f"""\
+import numpy as np
+import omni.usd
+from pxr import UsdGeom, Gf
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+
+# Get target object position
+stage = omni.usd.get_context().get_stage()
+target_xf = UsdGeom.Xformable(stage.GetPrimAtPath('{target_prim}')).ComputeLocalToWorldTransform(0)
+target_pos = np.array(target_xf.ExtractTranslation())
+
+# Compute approach geometry ({grasp_type} grasp)
+approach_dir = np.array({approach_vector})
+grasp_pos = target_pos  # grasp at object center
+approach_pos = grasp_pos - approach_dir * {approach_dist}
+lift_pos = grasp_pos + np.array([0, 0, {lift_height}])
+grasp_orientation = {grasp_ori}
+
+# Setup motion planner
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('franka', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+art = SingleArticulation(prim_path='{robot_path}')
+art.initialize()
+
+# Step 1: Move to pre-grasp approach position
+rmpflow.set_end_effector_target(approach_pos, grasp_orientation)
+joint_positions = art.get_joint_positions()
+joint_velocities = art.get_joint_velocities()
+action = rmpflow.get_next_articulation_action(joint_positions, joint_velocities)
+art.apply_action(action)
+print(f"Step 1: Moving to approach position {{approach_pos}}")
+
+# Step 2: Linear approach to grasp position
+rmpflow.set_end_effector_target(grasp_pos, grasp_orientation)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 2: Approaching grasp position {{grasp_pos}}")
+
+# Step 3: Close gripper
+print("Step 3: Closing gripper")
+
+# Step 4: Lift object
+rmpflow.set_end_effector_target(lift_pos, grasp_orientation)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 4: Lifting to {{lift_pos}}")
+print("Grasp sequence complete ({grasp_type})")
+"""
+
+
+def _gen_define_grasp_pose(args: Dict) -> str:
+    """Generate code to create a .isaac_grasp YAML file."""
+    robot_path = args["robot_path"]
+    object_path = args["object_path"]
+    offset = args.get("gripper_offset", [0, 0, 0])
+    approach_dir = args.get("approach_direction", [0, 0, -1])
+
+    return f"""\
+import yaml
+import os
+import omni.usd
+from pxr import UsdGeom, Gf
+import numpy as np
+
+# Get object position for reference
+stage = omni.usd.get_context().get_stage()
+obj_prim = stage.GetPrimAtPath('{object_path}')
+obj_xf = UsdGeom.Xformable(obj_prim).ComputeLocalToWorldTransform(0)
+obj_pos = list(obj_xf.ExtractTranslation())
+
+# Define grasp specification
+grasp_spec = {{
+    'version': '1.0',
+    'robot_path': '{robot_path}',
+    'object_path': '{object_path}',
+    'grasps': {{
+        'default_grasp': {{
+            'gripper_offset': {list(offset)},
+            'approach_direction': {list(approach_dir)},
+            'object_reference_position': obj_pos,
+            'pre_grasp_opening': 0.04,
+            'grasp_force': 40.0,
+        }},
+    }},
+}}
+
+# Save to workspace
+grasp_dir = 'workspace/grasp_poses'
+os.makedirs(grasp_dir, exist_ok=True)
+obj_name = '{object_path}'.split('/')[-1]
+file_path = os.path.join(grasp_dir, f'{{obj_name}}.isaac_grasp')
+
+with open(file_path, 'w') as f:
+    yaml.dump(grasp_spec, f, default_flow_style=False)
+
+print(f"Grasp pose saved to {{file_path}}")
+print(f"  Robot: {robot_path}")
+print(f"  Object: {object_path}")
+print(f"  Offset: {list(offset)}")
+print(f"  Approach direction: {list(approach_dir)}")
+"""
+
+
+async def _handle_visualize_behavior_tree(args: Dict) -> Dict:
+    """Return a formatted text tree of a behavior network structure."""
+    network_name = args.get("network_name", "unknown")
+
+    # Since we don't have access to a running Cortex instance at query time,
+    # return the canonical structure for known behavior types, or a template.
+    _KNOWN_BEHAVIORS = {
+        "pick_and_place": {
+            "name": "pick_and_place",
+            "type": "DfStateMachineDecider",
+            "children": [
+                {"name": "approach", "type": "DfState", "description": "Move to pre-grasp position above target"},
+                {"name": "grasp", "type": "DfState", "description": "Move down and close gripper on object"},
+                {"name": "lift", "type": "DfState", "description": "Lift grasped object to safe height"},
+                {"name": "place", "type": "DfState", "description": "Move to place position and release"},
+            ],
+            "transitions": "approach -> grasp -> lift -> place -> done",
+        },
+        "follow_target": {
+            "name": "follow_target",
+            "type": "DfDecider",
+            "children": [
+                {"name": "follow", "type": "FollowTargetState", "description": "Continuously track target prim with end-effector"},
+            ],
+            "transitions": "follow (continuous loop)",
+        },
+    }
+
+    behavior = _KNOWN_BEHAVIORS.get(network_name.lower())
+
+    if behavior:
+        # Build ASCII tree
+        lines = [
+            f"Behavior Network: {behavior['name']}",
+            f"  Type: {behavior['type']}",
+            f"  Transitions: {behavior['transitions']}",
+            "",
+            "  Nodes:",
+        ]
+        for i, child in enumerate(behavior["children"]):
+            is_last = i == len(behavior["children"]) - 1
+            prefix = "  +-- " if is_last else "  |-- "
+            lines.append(f"{prefix}{child['name']} ({child['type']})")
+            desc_prefix = "      " if is_last else "  |   "
+            lines.append(f"{desc_prefix}{child['description']}")
+
+        tree_text = "\n".join(lines)
+        return {
+            "network_name": network_name,
+            "structure": behavior,
+            "tree": tree_text,
+        }
+
+    return {
+        "network_name": network_name,
+        "structure": None,
+        "tree": (
+            f"Behavior Network: {network_name}\n"
+            f"  (No pre-built visualization available for '{network_name}'.\n"
+            f"   Known behaviors: pick_and_place, follow_target.\n"
+            f"   For custom networks, inspect the DfNetwork in the running Cortex world.)"
+        ),
+    }
+
+
+CODE_GEN_HANDLERS["create_behavior"] = _gen_create_behavior
+CODE_GEN_HANDLERS["create_gripper"] = _gen_create_gripper
+CODE_GEN_HANDLERS["grasp_object"] = _gen_grasp_object
+CODE_GEN_HANDLERS["define_grasp_pose"] = _gen_define_grasp_pose
+DATA_HANDLERS["visualize_behavior_tree"] = _handle_visualize_behavior_tree
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),

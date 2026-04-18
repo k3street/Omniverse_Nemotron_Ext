@@ -645,6 +645,40 @@ class TestCloudStatus:
             del te._cloud_jobs["test-cloud-status-001"]
 
 
+class TestVisualizeBehaviorTree:
+    """visualize_behavior_tree DATA handler."""
+
+    @pytest.mark.asyncio
+    async def test_known_behavior_pick_and_place(self):
+        handler = DATA_HANDLERS["visualize_behavior_tree"]
+        result = await handler({"network_name": "pick_and_place"})
+        assert result["network_name"] == "pick_and_place"
+        assert result["structure"] is not None
+        assert result["structure"]["type"] == "DfStateMachineDecider"
+        assert "approach" in result["tree"]
+        assert "grasp" in result["tree"]
+        assert "lift" in result["tree"]
+        assert "place" in result["tree"]
+
+    @pytest.mark.asyncio
+    async def test_known_behavior_follow_target(self):
+        handler = DATA_HANDLERS["visualize_behavior_tree"]
+        result = await handler({"network_name": "follow_target"})
+        assert result["network_name"] == "follow_target"
+        assert result["structure"] is not None
+        assert result["structure"]["type"] == "DfDecider"
+        assert "follow" in result["tree"]
+
+    @pytest.mark.asyncio
+    async def test_unknown_behavior(self):
+        handler = DATA_HANDLERS["visualize_behavior_tree"]
+        result = await handler({"network_name": "custom_something"})
+        assert result["network_name"] == "custom_something"
+        assert result["structure"] is None
+        assert "No pre-built visualization" in result["tree"]
+        assert "pick_and_place" in result["tree"]
+
+
 class TestGenerateRobotDescription:
     """generate_robot_description DATA handler."""
 

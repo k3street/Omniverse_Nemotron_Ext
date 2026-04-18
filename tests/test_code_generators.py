@@ -579,6 +579,75 @@ _TEST_VECTORS = [
         {"camera_path": "/World/Camera", "clipping_range": [0.01, 10000.0]},
         ["UsdGeom.Camera", "ClippingRangeAttr", "Gf.Vec2f(0.01, 10000.0)"],
     ),
+    # ── Phase 8C: Cortex Behaviors & Manipulation ─────────────────────────
+    (
+        "create_behavior",
+        {
+            "articulation_path": "/World/Franka",
+            "behavior_type": "pick_and_place",
+            "target_prim": "/World/Cube",
+        },
+        ["CortexWorld", "DfStateMachineDecider", "MotionCommander", "ApproachState", "GraspState", "LiftState", "PlaceState"],
+    ),
+    (
+        "create_behavior",
+        {
+            "articulation_path": "/World/Franka",
+            "behavior_type": "follow_target",
+            "target_prim": "/World/Target",
+        },
+        ["CortexWorld", "FollowTargetState", "send_end_effector_target", "MotionCommander"],
+    ),
+    (
+        "create_gripper",
+        {
+            "articulation_path": "/World/Franka",
+            "gripper_type": "parallel_jaw",
+            "gripper_dof_names": ["panda_finger_joint1", "panda_finger_joint2"],
+            "open_position": 0.04,
+            "closed_position": 0.0,
+        },
+        ["ParallelGripper", "panda_finger_joint1", "joint_opened_positions", "gripper.open()"],
+    ),
+    (
+        "create_gripper",
+        {
+            "articulation_path": "/World/Franka",
+            "gripper_type": "suction",
+        },
+        ["og.Controller.edit", "OgnSurfaceGripper", "SuctionGripperGraph", "gripThreshold"],
+    ),
+    (
+        "grasp_object",
+        {
+            "robot_path": "/World/Franka",
+            "target_prim": "/World/Cube",
+            "grasp_type": "top_down",
+            "approach_distance": 0.15,
+            "lift_height": 0.2,
+        },
+        ["RmpFlow", "set_end_effector_target", "approach_pos", "Step 1", "Step 4", "top_down"],
+    ),
+    (
+        "grasp_object",
+        {
+            "robot_path": "/World/Franka",
+            "target_prim": "/World/Mug",
+            "grasp_type": "from_file",
+            "grasp_file": "workspace/grasp_poses/Mug.isaac_grasp",
+        },
+        ["yaml.safe_load", "grasp_spec", "RmpFlow", "from file", "Mug.isaac_grasp"],
+    ),
+    (
+        "define_grasp_pose",
+        {
+            "robot_path": "/World/Franka",
+            "object_path": "/World/Cup",
+            "gripper_offset": [0, 0, 0.02],
+            "approach_direction": [0, 0, -1],
+        },
+        ["yaml.dump", "isaac_grasp", "gripper_offset", "approach_direction", "grasp_force"],
+    ),
     # ── Phase 8B: Motion Policy, IK ──────────────────────────────────────────
     (
         "set_motion_policy",
