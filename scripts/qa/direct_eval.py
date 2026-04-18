@@ -29,7 +29,14 @@ from scripts.qa.multi_turn_session import (
 
 
 def _task_goal_query(task_id: str) -> Optional[str]:
-    """Extract the Goal section from the task .md and format as a direct user query."""
+    """Extract the Goal section from the task .md and format as a direct user query.
+
+    Uses the full goal text (trimmed of whitespace, capped at MAX_QUERY_CHARS).
+    Earlier versions took only the first sentence, but many task goals open
+    with a context sentence (e.g. 'A cube already exists at /World/Anchor')
+    and put the actual ask in sentence 2+. First-sentence truncation dropped
+    the ask entirely and reduced the query to scene-state acknowledgement.
+    """
     p = REPO_ROOT / "docs" / "qa" / "tasks" / f"{task_id}.md"
     if not p.exists():
         return None
@@ -38,11 +45,9 @@ def _task_goal_query(task_id: str) -> Optional[str]:
     m = re.search(r"\*\*Goal:\*\*\s*(.*?)(?=\n\*\*|\n##|\n\Z)", text, re.S)
     if not m:
         return None
-    goal = m.group(1).strip()
-    # A real user wouldn't type a novel-length paragraph; trim to first sentence
-    # + keep it under 300 chars. The intent survives, the verbosity doesn't.
-    first_sentence = re.split(r"(?<=[.!?])\s", goal)[0]
-    return (first_sentence if len(first_sentence) < 300 else goal[:300]).strip()
+    goal = " ".join(m.group(1).split()).strip()  # collapse whitespace
+    MAX_QUERY_CHARS = 600
+    return goal[:MAX_QUERY_CHARS]
 
 
 def run_direct(task_id: str, runs_dir: Path, timeout_s: int = 600) -> Dict:
