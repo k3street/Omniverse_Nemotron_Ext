@@ -49,6 +49,9 @@ else:
     prims_info = []
     joints_info = {}
     transforms_info = {}
+    rotations_info = {}
+    scales_info = {}
+    geom_info = {}
     for p in stage.Traverse():
         path = str(p.GetPath())
         if path.startswith(("/Render", "/OmniverseKit", "/OmniKit_Environment")):
@@ -64,13 +67,63 @@ else:
             pass
         prims_info.append(entry)
 
-        # World transform for all Xformables (position ground-truth)
+        # World transform for all Xformables (position + rotation + scale ground-truth)
         try:
             xf = UsdGeom.Xformable(p)
             if xf:
                 wt = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
                 tr = wt.ExtractTranslation()
                 transforms_info[path] = [round(float(tr[0]),4), round(float(tr[1]),4), round(float(tr[2]),4)]
+                # Rotation as quaternion (w, x, y, z) — enables orientation checks
+                try:
+                    q = wt.ExtractRotationQuat()
+                    rotations_info[path] = [round(float(q.GetReal()), 4),
+                                            round(float(q.GetImaginary()[0]), 4),
+                                            round(float(q.GetImaginary()[1]), 4),
+                                            round(float(q.GetImaginary()[2]), 4)]
+                except Exception:
+                    pass
+                # Scale — enables size checks
+                try:
+                    sx = wt.GetRow(0).GetLength()
+                    sy = wt.GetRow(1).GetLength()
+                    sz = wt.GetRow(2).GetLength()
+                    if abs(sx-1.0) > 1e-4 or abs(sy-1.0) > 1e-4 or abs(sz-1.0) > 1e-4:
+                        scales_info[path] = [round(float(sx),4), round(float(sy),4), round(float(sz),4)]
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Type-specific geometric attributes for primitive shapes
+        try:
+            if p.IsA(UsdGeom.Cube):
+                v = UsdGeom.Cube(p).GetSizeAttr().Get()
+                if v is not None:
+                    geom_info[path] = {"size": round(float(v), 4)}
+            elif p.IsA(UsdGeom.Sphere):
+                v = UsdGeom.Sphere(p).GetRadiusAttr().Get()
+                if v is not None:
+                    geom_info[path] = {"radius": round(float(v), 4)}
+            elif p.IsA(UsdGeom.Cylinder):
+                c = UsdGeom.Cylinder(p)
+                geom_info[path] = {
+                    "radius": round(float(c.GetRadiusAttr().Get() or 0.0), 4),
+                    "height": round(float(c.GetHeightAttr().Get() or 0.0), 4),
+                    "axis": str(c.GetAxisAttr().Get() or "Z"),
+                }
+            elif p.IsA(UsdGeom.Cone):
+                c = UsdGeom.Cone(p)
+                geom_info[path] = {
+                    "radius": round(float(c.GetRadiusAttr().Get() or 0.0), 4),
+                    "height": round(float(c.GetHeightAttr().Get() or 0.0), 4),
+                }
+            elif p.IsA(UsdGeom.Capsule):
+                c = UsdGeom.Capsule(p)
+                geom_info[path] = {
+                    "radius": round(float(c.GetRadiusAttr().Get() or 0.0), 4),
+                    "height": round(float(c.GetHeightAttr().Get() or 0.0), 4),
+                }
         except Exception:
             pass
 
@@ -121,6 +174,9 @@ else:
         "prims": prims_info[:80],
         "joint_positions": joints_info,
         "world_translations": transforms_info,
+        "world_rotations_quat_wxyz": rotations_info,
+        "world_scales": scales_info,
+        "geometry": geom_info,
         "timeline": timeline,
         "active_camera": cam,
         "errors": errors,

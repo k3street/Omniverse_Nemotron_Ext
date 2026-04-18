@@ -5163,6 +5163,16 @@ def _gen_create_arena(args: Dict) -> str:
         scene_cfg = "SceneCfg()"
 
     lines = [
+        "# NOTE: isaaclab_tasks.envs.arena.* was never shipped in Isaac Lab.",
+        "# Detect at import time and guide the caller to the actual API path.",
+        "try:",
+        "    from isaaclab_tasks.envs.arena.builder import ArenaEnvBuilder  # noqa: F401",
+        "except ModuleNotFoundError as _e:",
+        "    raise ModuleNotFoundError(",
+        "        'isaaclab_tasks.envs.arena is not available in this Isaac Lab install. '",
+        "        'Use isaaclab_tasks.manager_based.<domain>.<task> directly, or pick a preset '",
+        "        \"from isaaclab_tasks.direct (e.g. 'cartpole', 'franka_cabinet').\"",
+        "    )",
         "import gymnasium",
         "from isaaclab_tasks.envs.arena.builder import ArenaEnvBuilder",
         "from isaaclab_tasks.envs.arena.configs.embodiment import EmbodimentCfg",
@@ -8016,7 +8026,7 @@ all_prims = [root] + list(Usd.PrimRange(root))[1:]
     return f"""\
 import omni.usd
 import json
-from pxr import UsdGeom, UsdPhysics, Gf, PhysxSchema
+from pxr import Usd, UsdGeom, UsdPhysics, Gf, PhysxSchema
 
 stage = omni.usd.get_context().get_stage()
 issues = []
@@ -10712,21 +10722,21 @@ import omni.graph.core as og
 # Template: {template_name} — {tmpl['description']}
 # {description}
 
-# Resolve backing type: FABRIC_SHARED (Isaac Sim 5.x+) replaces deprecated FLATCACHING
-_bt = og.GraphBackingType
-if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
-    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
-elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
-    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
-else:
-    _backing = list(_bt)[0]  # fallback to first available
+# ROS2 templates need the ROS2 bridge extension loaded first
+if "{template_name}".startswith("ros2"):
+    try:
+        import omni.kit.app as _app
+        _mgr = _app.get_app().get_extension_manager()
+        if not _mgr.is_extension_enabled("isaacsim.ros2.bridge"):
+            _mgr.set_extension_enabled_immediate("isaacsim.ros2.bridge", True)
+    except Exception as _ex:
+        print(f"[warn] could not enable isaacsim.ros2.bridge: {{_ex}}")
 
 keys = og.Controller.Keys
 (graph, nodes, _, _) = og.Controller.edit(
     {{
         "graph_path": "{graph_path}",
         "evaluator_name": "execution",
-        "pipeline_stage": _backing,
     }},
     {{
         keys.CREATE_NODES: [
@@ -10738,7 +10748,7 @@ keys = og.Controller.Keys
 {set_values_block}
     }},
 )
-print(f"Created {{template}} graph at {graph_path} with {{len(nodes)}} nodes")
+print(f"Created {template_name} graph at {graph_path} with {{len(nodes)}} nodes")
 """
 
 def _gen_explain_graph(args: Dict) -> str:

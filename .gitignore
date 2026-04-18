@@ -22,6 +22,10 @@ workspace/*
 !workspace/knowledge/
 !workspace/templates/
 
+# Runtime state (not source)
+service/workspace/
+logs/
+
 # IDEs
 .idea/
 .vscode/
