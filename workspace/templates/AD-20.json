@@ -1,0 +1,11 @@
+{
+  "task_id": "AD-20",
+  "goal": "User asks if /World/Cube has 'obstacle' semantic class; it has no SemanticsAPI. Another prim /World/Marker does have that label (distractor).",
+  "tools_used": ["get_semantic_label", "list_applied_schemas"],
+  "thoughts": "Distractor pattern: the class exists in the stage but on a DIFFERENT prim. Agent must check the specific prim path, not just 'does this class exist anywhere?'.",
+  "code": "get_semantic_label(prim_path=\"/World/Cube\")\n# -> empty / no class\n# Correct reply: 'No — /World/Cube has no semantic label. Obstacle is on /World/Marker.'",
+  "failure_modes": [
+    "'Yes, tagged obstacle' — echoed assertion.",
+    "'The obstacle class is present' — confirms class existence without checking prim."
+  ]
+}

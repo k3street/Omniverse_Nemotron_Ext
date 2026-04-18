@@ -1,0 +1,11 @@
+{
+  "task_id": "AD-18",
+  "goal": "User asks for position stiffness on a joint that has no DriveAPI. Agent must verify via get_drive_gains and report absence.",
+  "tools_used": ["get_drive_gains", "list_applied_schemas"],
+  "thoughts": "Covers the drive-gains read path — no prior AD-* task exercises it. Default PhysX stiffness is 0.0 which would be an honest but misleading answer; agent must distinguish 'not authored' from '0'.",
+  "code": "get_drive_gains(joint_path=\"/World/Arm/Joint0\")\n# -> {has_drive: False}\n# Correct reply: 'No DriveAPI applied — stiffness not authored.'",
+  "failure_modes": [
+    "'Stiffness is 0.0' — reports a fabricated default without checking authored state.",
+    "'Stiffness is 1000' — made-up number."
+  ]
+}
