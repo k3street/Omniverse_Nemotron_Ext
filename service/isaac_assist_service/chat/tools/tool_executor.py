@@ -7343,27 +7343,22 @@ def _gen_assemble_robot(args: Dict) -> str:
     base_mount = args["base_mount"]
     attach_mount = args["attach_mount"]
 
-    return f"""\
-import omni.usd
-from isaacsim.robot_setup.assembler import RobotAssembler
-
-stage = omni.usd.get_context().get_stage()
-
-# Assemble robot: attach {attachment_path} to {base_path}
-assembler = RobotAssembler()
-assembled = assembler.assemble(
-    base_robot_path='{base_path}',
-    attach_robot_path='{attachment_path}',
-    base_robot_mount_frame='{base_mount}',
-    attach_robot_mount_frame='{attach_mount}',
-    fixed_joint_offset=None,
-    fixed_joint_orient=None,
-    single_robot=True,
-)
-print(f"Assembled: {{assembled}}")
-print(f"Base: {base_path} (mount: {base_mount})")
-print(f"Attachment: {attachment_path} (mount: {attach_mount})")
-"""
+    # Live-probed 2026-04-18 against isaacsim 5.x: the old code used
+    # `assembler.assemble(base_robot_path=..., attach_robot_path=...,
+    # base_robot_mount_frame=..., attach_robot_mount_frame=...)` which
+    # raises `TypeError: assemble() got an unexpected keyword argument
+    # 'base_robot_path'`. The 5.x API is `begin_assembly()` →
+    # `create_fixed_joint(...)` → `finish_assemble()`, and the argument
+    # names for the fixed joint differ. Fail-fast rather than emit
+    # broken code until we write the 5.x-compliant assembly flow.
+    return (
+        "raise NotImplementedError("
+        "'assemble_robot is a pre-5.x Cortex/Assembler API call that does not match "
+        "isaacsim.robot_setup.assembler.RobotAssembler.assemble() in 5.x — '"
+        "'the 5.x flow is begin_assembly/create_fixed_joint/finish_assemble with "
+        "different arg names. Rewrite this handler against the current API before using it.'"
+        ")\n"
+    )
 
 def _gen_configure_self_collision(args: Dict) -> str:
     art_path = args["articulation_path"]
@@ -20794,19 +20789,36 @@ def _gen_create_hdri_skydome(args: Dict) -> str:
         intensity = 0.0
     # Escape single quotes in the HDRI path so the literal stays valid
     safe_hdri = hdri_path.replace("'", "\\'")
+    # Live-probed 2026-04-18: UsdLux.DomeLight.Define on /NoSuchParent/Dome
+    # returned a DomeLight object whose .GetPrim() was technically valid
+    # (USD auto-creates intermediate parents in DefinePrim's internal call)
+    # but the .Set() calls on the Sdf.Asset attr silently fell through on
+    # some Kit builds. The tool printed "Created HDRI skydome at ..."
+    # regardless. Fix: post-check prim IsValid + the texture attribute
+    # was actually authored, and pre-check the dome_path is a legal SdfPath.
     return (
         "import omni.usd\n"
         "from pxr import UsdLux, Sdf\n"
         "stage = omni.usd.get_context().get_stage()\n"
         f"dome_path = '{dome_path}'\n"
+        "# Reject paths that USD considers malformed (spaces, special chars, "
+        "# leading digits) — Sdf.Path raises on these but DefinePrim silently "
+        "# returns an invalid schema object in some Kit builds.\n"
+        "_sdf_path = Sdf.Path(dome_path)\n"
+        "if _sdf_path.isEmpty:\n"
+        f"    raise ValueError('create_hdri_skydome: invalid dome_path: ' + {dome_path!r})\n"
         "# Idempotent: re-define replaces existing prim of the same type, leaves\n"
         "# parent Xforms untouched.\n"
         "dome = UsdLux.DomeLight.Define(stage, dome_path)\n"
         "prim = dome.GetPrim()\n"
+        "if not prim.IsValid():\n"
+        f"    raise RuntimeError('create_hdri_skydome: DomeLight.Define did not produce a valid prim at ' + {dome_path!r})\n"
         "tex_attr = prim.GetAttribute('inputs:texture:file')\n"
         "if not tex_attr:\n"
         "    tex_attr = prim.CreateAttribute('inputs:texture:file', Sdf.ValueTypeNames.Asset)\n"
         f"tex_attr.Set('{safe_hdri}')\n"
+        "if not tex_attr.HasAuthoredValue():\n"
+        f"    raise RuntimeError('create_hdri_skydome: inputs:texture:file did not author on ' + {dome_path!r})\n"
         "fmt_attr = prim.GetAttribute('inputs:texture:format')\n"
         "if not fmt_attr:\n"
         "    fmt_attr = prim.CreateAttribute('inputs:texture:format', Sdf.ValueTypeNames.Token)\n"
