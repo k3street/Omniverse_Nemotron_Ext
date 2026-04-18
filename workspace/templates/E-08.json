@@ -1,0 +1,13 @@
+{
+  "task_id": "E-08",
+  "goal": "Bundle the Friday demo scene into an offline-capable package (flattened references, pinned Isaac Sim version, git tag) so Erik can roll back in 10 seconds on the demo laptop.",
+  "tools_used": ["export_scene_package", "scene_summary", "nucleus_browse", "lookup_knowledge"],
+  "thoughts": "zip of the project folder is lossy — Nucleus-referenced prims fail to resolve offline. export_scene_package with embed-references is the real fix. Pin Isaac Sim 5.0.x in a README that ships with the bundle (cross-version USD loads silently mutate schemas). USDZ survives MDL materials partially — test before betting on it. git tag the demo-day commit, not just a local snapshot. Offline acceptance test: unplug wifi, reopen the package, play the scene.",
+  "code": "# 1. Flatten all references into a single offline-capable package\nexport_scene_package(\n    source_stage=\"<DEMO_STAGE>\",\n    output_path=\"<BUNDLE_DIR>/demo_frozen_<DATE>.usdz\",\n    embed_references=True,\n    include_textures=True,\n    include_mdl=True\n)\n\n# 2. Sanity check the packed bundle — nothing should still point at live Nucleus\nscene_summary(stage_path=\"<BUNDLE_DIR>/demo_frozen_<DATE>.usdz\")\nnucleus_browse(path=\"<BUNDLE_DIR>/demo_frozen_<DATE>.usdz\", list_broken_references=True)\n\n# 3. Confirm USDZ/MDL survival caveats before trusting it on stage\nlookup_knowledge(query=\"USDZ MDL material packing Isaac Sim 5.0 offline texture resolution\")\n\n# Ship-list for the demo laptop:\n#  - demo_frozen_<DATE>.usdz\n#  - README.txt pinning Isaac Sim == 5.0.x (exact patch)\n#  - git tag demo-<DATE> on the repo (NOT just a local snapshot)\n#  - one-page runbook: open .usdz, press Play, expected pick-and-place timing\n# Acceptance: unplug wifi on the demo laptop, reopen .usdz, play for 30s.",
+  "failure_modes": [
+    "zip of project folder — Nucleus paths fail offline, demo laptop shows grey blocks",
+    "No pinned Isaac Sim version — next minor release silently mutates MDL shader nodes",
+    "No offline test — discovers the broken reference on the customer's wifi-less projector",
+    "USDZ packed without MDL — materials drop to default grey at customer site"
+  ]
+}

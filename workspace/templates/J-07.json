@@ -1,0 +1,13 @@
+{
+  "task_id": "J-07",
+  "goal": "4-hour unattended open-house demo, visually flashy, loops forever, RTX A5000.",
+  "tools_used": ["quick_demo", "list_scene_templates", "set_viewport_camera", "play_animation"],
+  "thoughts": "Pedagogy/showcase angle: zero interaction required. Pick a demo with in-scene motion (humanoid walk loop, AMR route, manipulation sequence) \u2014 not an RL env that idles. Lock camera to cinematic angle. Disable auto-dim/screensaver. 4-hour stress: a demo that leaks memory crashes at hour 2 \u2014 warn.",
+  "code": "list_scene_templates()\n\n# Pick a LOOPING demo (humanoid walk, warehouse AMR patrol)\nquick_demo(demo_name=\"<LOOPING_HUMANOID_OR_AMR>\")\n\n# Lock a cinematic camera \u2014 no manual click needed\nset_viewport_camera(\n    camera_prim=\"/World/OpenHouseCam\",\n    position=[<X>, <Y>, <Z>],\n    look_at=[<TX>, <TY>, <TZ>]\n)\n\n# Ensure animation/policy auto-plays and loops\nplay_animation(loop=True)\n\n# Disable OS screensaver on projector workstation separately (not an Isaac tool)\n# Fallback demo (if first requires input): <STATIC_CINEMATIC_FLYTHROUGH>",
+  "failure_modes": [
+    "Picking an RL env that idles without a trained policy loaded",
+    "Memory leak in long-running demo \u2014 crashes at hour 2",
+    "Default viewport camera gets bumped by accidental mouse touch",
+    "OS screensaver kicks in \u2014 not an Isaac Sim fault but spoils the booth"
+  ]
+}

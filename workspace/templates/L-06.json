@@ -1,0 +1,12 @@
+{
+  "task_id": "L-06",
+  "goal": "Compute min swept clearance along a waypoint trajectory vs fixture walls, flag spec-fail if under 2mm.",
+  "tools_used": ["check_path_clearance", "sweep_sphere", "measure_distance", "capture_viewport"],
+  "thoughts": "Be explicit: interpolation between waypoints is linear joint space by default -- Cartesian linear gives a different mid-segment pose, and the closest-approach happens between waypoints, not at them. check_path_clearance returns min + the segment index. Cross-check with sweep_sphere at the tightest section.",
+  "code": "waypoints = [\"<WP1>\", \"<WP2>\", \"<WP3>\", \"<WP4>\", \"<WP5>\"]\nclearance = check_path_clearance(\n    prim_path=\"/World/UR10e/Flange/EOAT\",\n    waypoints=waypoints,\n    others=[\"/World/Fixture\"],\n    interpolation=\"joint_linear\",  # or \"cartesian_linear\"\n    samples_per_segment=50,\n    units=\"mm\"\n)\nmin_mm = clearance.min_distance_mm\nworst_wp = clearance.min_segment_index\nspec_margin_mm = 2.0\nverdict = \"PASS\" if min_mm >= spec_margin_mm else \"FAIL\"\nsweep = sweep_sphere(\n    start=waypoints[worst_wp], end=waypoints[worst_wp+1],\n    radius=\"<R_MM>\", ignore_prims=[\"/World/UR10e\"]\n)\nexact = measure_distance(\n    prim_a=\"/World/UR10e/Flange/EOAT\",\n    prim_b=\"/World/Fixture/wall_nearest\",\n    units=\"mm\"\n)\ncapture_viewport(path=\"<TIGHT_POINT_PNG>\", width=1920, height=1080)",
+  "failure_modes": [
+    "Treating waypoints as discrete and missing mid-segment worst case",
+    "Not declaring interpolation mode (joint vs cartesian) when corners give different answers",
+    "Returning a pass on 1.8mm without flagging spec fail"
+  ]
+}

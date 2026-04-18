@@ -1,0 +1,13 @@
+{
+  "task_id": "A-05",
+  "goal": "Give Alex the top 3 fps-killers to turn off on a 3-prim scene running at 3 fps on an RTX 3060, short numbered list, no rendering-pipeline lecture.",
+  "tools_used": ["scene_summary", "find_heavy_prims", "lookup_knowledge"],
+  "thoughts": "3 fps on a 3-prim scene is wrong — a giant imported mesh hiding in the URDF is the usual culprit. scene_summary + find_heavy_prims catches that before recommending RTX preset changes. lookup_knowledge retrieves the current preset names. 3060 is fine for this scene, so don't blame the GPU.",
+  "code": "# 3 fps on 3 prims = something weird. Check first, then tune.\n\n# 1. Is something huge hiding in the URDF import?\nscene_summary(stage_path=\"<CURRENT_STAGE>\")\nfind_heavy_prims(stage_path=\"<CURRENT_STAGE>\", top_n=5)\n\n# 2. Current RTX preset names (don't cite from memory)\nlookup_knowledge(query=\"Isaac Sim 5 RTX render preset Real-Time Interactive Path Tracing\")\n\n# Top 3 fps fixes for a 3060 on a tiny scene:\n#   1. Render preset: switch to RTX Interactive (NOT Real-Time, NOT Path Tracing).\n#   2. Viewport resolution: drop to 1080p.\n#   3. Reflections + translucency: off if you don't need them.\n#\n# Your 3060 is fine. If FPS is still bad after those three, you probably have a\n# multi-million-poly mesh imported from a CAD file in the URDF — find_heavy_prims\n# will show it. Decimate or remove.",
+  "failure_modes": [
+    "Explaining the RTX rendering pipeline — lecture = fail",
+    "Telling Alex the 3060 is the bottleneck (it isn't, for this scene)",
+    "Skipping the 'hidden giant mesh' check and going straight to render settings",
+    "Giving more than 3 numbered fixes — Alex stops reading at 4"
+  ]
+}

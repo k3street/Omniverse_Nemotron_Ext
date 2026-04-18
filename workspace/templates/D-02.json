@@ -1,0 +1,13 @@
+{
+  "task_id": "D-02",
+  "goal": "Mount an Ouster OS1-32 on AMR base_link at h=0.42 m with datasheet-matching beams/FOV/rate.",
+  "tools_used": ["lookup_product_spec", "add_sensor_to_prim", "inspect_camera"],
+  "thoughts": "Never generic-LIDAR this \u2014 cite the OS1-32 datasheet: 32 channels, V-FOV -16.6\u00b0 to +16.6\u00b0 (33.2\u00b0 total), 10 or 20 Hz, ~655k pts/s at 20 Hz (200k at 10). Attach on a child xform 'lidar_mount' under base_link, not at world origin. TF chain: base_link \u2192 lidar_mount \u2192 laser (optical). Leave 2\u00b0 tilt as set_attribute after mount if asked.",
+  "code": "# 1. Datasheet values \u2014 no guessing\nspec = lookup_product_spec(product=\"Ouster OS1-32\")\n# Expect: channels=32, v_fov=(-16.6, 16.6), rate_hz=[10,20], points_per_sec=~655000\n\n# 2. Mount xform under base_link\ncreate_prim(\n    prim_path=\"/World/amr/base_link/lidar_mount\",\n    prim_type=\"Xform\",\n    position=[0.0, 0.0, 0.42],                    # datasheet h=0.42 m\n    rotation_euler=[0.0, 0.0, 0.0]                # tilt added separately if needed\n)\n\n# 3. Attach RTX LIDAR with OS1-32 preset / explicit datasheet params\nadd_sensor_to_prim(\n    parent_prim_path=\"/World/amr/base_link/lidar_mount\",\n    sensor_type=\"rtx_lidar\",\n    config_preset=\"Ouster_OS1_32\",                # prefer preset if available\n    channels=32,\n    v_fov_deg=[-16.6, 16.6],\n    rate_hz=10,\n    frame_id=\"laser\"\n)\n\ninspect_camera(prim_path=\"/World/amr/base_link/lidar_mount/lidar\")\n\n# TF chain to publish later: base_link \u2192 lidar_mount \u2192 laser",
+  "failure_modes": [
+    "Using generic RTX LIDAR defaults instead of OS1-32 datasheet",
+    "Mounting at world origin \u2014 AMR moves, sensor stays",
+    "Forgetting to name the TF frame_id \u2014 Nav2 drops the scan",
+    "Swapping to OS1-64 without rebuilding OmniGraph publisher"
+  ]
+}

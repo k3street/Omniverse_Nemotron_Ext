@@ -1,0 +1,12 @@
+{
+  "task_id": "Y-06",
+  "goal": "Capture a 30-second 1080p viewport clip of the pick demo for a trade-show loop.",
+  "tools_used": ["set_render_mode", "set_render_resolution", "sim_control", "record_demo_video"],
+  "thoughts": "RTX Real-Time, not path-traced -- 30s of path-traced takes hours and trade-show screens don't resolve the difference. record_demo_video captures the viewport camera cleanly, not the desktop, so no OBS rabbit-hole. Start sim before recording so the pick is actually running in frame.",
+  "code": "set_render_mode(mode=\"RTXInteractiveRealTime\")\nset_render_resolution(width=1920, height=1080)\nsim_control(action=\"play\")\nrecord_demo_video(\n    output_path=\"<OUT_MP4>\",\n    duration_seconds=30,\n    camera_path=\"/World/Cameras/Hero_Beauty\",\n    fps=30,\n    include_ui=False\n)",
+  "failure_modes": [
+    "Recommending path-traced mode for a 30-second real-time capture",
+    "Sending her to OBS/ffmpeg for built-in functionality",
+    "Starting capture before sim_control play so the robot is frozen in the clip"
+  ]
+}

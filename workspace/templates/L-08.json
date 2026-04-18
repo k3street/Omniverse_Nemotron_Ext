@@ -1,0 +1,12 @@
+{
+  "task_id": "L-08",
+  "goal": "Swap heavy EOAT collision mesh for a conservative convex hull, verify enclosure, re-run clearance.",
+  "tools_used": ["compute_convex_hull", "get_bounding_box", "check_collisions", "check_path_clearance", "capture_viewport"],
+  "thoughts": "Convex hull is conservative for OUTWARD clearance (hull sticks out further than the part so clearance numbers are pessimistic = safe) but LOSES concavities (vacuum cups). For EOATs with significant concave features, use convex decomposition instead. Verify hull encloses real mesh before trusting any downstream clearance.",
+  "code": "hull = compute_convex_hull(\n    prim_path=\"/World/EOAT/body\",\n    output_path=\"/World/EOAT/body_hull\",\n    assign_as_collision=True\n)\nbbox_real = get_bounding_box(prim_path=\"/World/EOAT/body\", units=\"mm\")\nbbox_hull = get_bounding_box(prim_path=hull.output_path, units=\"mm\")\nassert all(\n    bbox_hull.min[i] <= bbox_real.min[i] and bbox_hull.max[i] >= bbox_real.max[i]\n    for i in range(3)\n), \"hull fails to enclose real mesh\"\n# For concave features (vacuum cups), recommend decomposition:\n# compute_convex_hull(..., mode=\"decomposition\", max_pieces=16)\nclear_before = check_path_clearance(prim_path=\"/World/EOAT/body\", waypoints=\"<WPS>\", others=[\"/World/Fixture\"])\nclear_after = check_collisions(subjects=[hull.output_path], targets=[\"/World/Fixture\"])\ncapture_viewport(path=\"<HULL_OVERLAY_PNG>\", width=1920, height=1080)",
+  "failure_modes": [
+    "Claiming convex hull preserves vacuum-cup cavities when it demonstrably does not",
+    "Silently switching to a non-conservative approximation (e.g. bounding box)",
+    "Skipping the enclosure verification and trusting the hull blindly"
+  ]
+}

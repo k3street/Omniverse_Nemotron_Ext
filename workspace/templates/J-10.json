@@ -1,0 +1,13 @@
+{
+  "task_id": "J-10",
+  "goal": "4-week capstone scaffold: template \u2192 extend \u2192 reproducible package, runnable by graders identically each semester.",
+  "tools_used": ["list_scene_templates", "load_scene_template", "run_stage_analysis", "add_reference", "run_usd_script", "export_scene_package"],
+  "thoughts": "Pedagogy: weekly deliverable with explicit grader check. Past failures = unreproducible scenes. Pin scaffold: week 1 load, week 2 inspect, week 3 extend, week 4 export + sanity script. Final deliverable = zip + reproducibility_check.py that prints deterministic state hash. ROS2 pairs: allowed but must run bridge in container so grader's machine is unaffected.",
+  "code": "# WEEK 1: Scene selection\nlist_scene_templates()\nload_scene_template(template_name=\"<PAIR_ASSIGNED_TEMPLATE>\")\n# Deliverable: stage saved, pair documents why this template fits their goal.\n\n# WEEK 2: Stage understanding\nrun_stage_analysis()\n# Deliverable: annotated prim hierarchy (Environment/Robots/Sensors/Lights).\n\n# WEEK 3: Extension\nadd_reference(prim_path=\"<NEW_PRIM_PATH>\", reference_path=\"<EXTENSION_ASSET>\")\nrun_usd_script(\n    description=\"Pair's custom logic (motion, sensor wiring, etc.)\",\n    code=\"<PAIR_CUSTOM_CODE>\"\n)\n# Deliverable: commit + run_stage_analysis diff vs week 2.\n\n# WEEK 4: Reproducible package\nexport_scene_package(\n    stage_path=\"<PAIR_FINAL_USD>\",\n    output_path=\"<PAIR_DELIVERABLE_ZIP>\",\n    format=\"zip\",\n    rewrite_refs_relative=True,\n    isaac_sim_version=\"<5.1.0>\"\n)\n# Ship with: reproducibility_check.py that loads zip, steps 10x, prints SHA.\n# Grader runs ONE command; matching SHA = pass reproducibility criterion.\n\n# ROS2 pairs: bridge must run in Docker so grader's host is untouched.",
+  "failure_modes": [
+    "Absolute paths in week-3 scripts \u2014 grader cannot load",
+    "Pair uses Nucleus asset not in grader's mount \u2014 unresolved ref",
+    "No pinned Isaac Sim version \u2014 5.2 changes schema, semester-old scene breaks",
+    "ROS2 bridge wired directly to host \u2014 pollutes grader's ROS2 graph"
+  ]
+}

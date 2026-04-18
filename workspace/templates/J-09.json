@@ -1,0 +1,13 @@
+{
+  "task_id": "J-09",
+  "goal": "10-minute live lecture teaching students to read a USD stage via run_stage_analysis on a chosen scene.",
+  "tools_used": ["list_scene_templates", "load_scene_template", "run_stage_analysis", "add_reference"],
+  "thoughts": "Pedagogic sweet spot: 20-80 prims. Too small = nothing to show, too big = unreadable. A tabletop manipulation scene (robot + sensors + lights + table + objects) hits ~30-50. Three teachable moments: (1) Xform parenting \u2014 move parent, children follow; (2) API schemas \u2014 same prim type, different physics; (3) references \u2014 same asset, multiple instances. Exercise: add cube, re-run, diff.",
+  "code": "# Pick the right-sized scene\nlist_scene_templates()\nload_scene_template(template_name=\"<TABLETOP_MANIPULATION_STARTER>\")\n\n# Live-demo the tool students will use\nrun_stage_analysis()\n\n# Teachable moment 1: all Franka parts under /World/Franka Xform\n#   \u2192 move parent, children follow. Demo: set_attribute on /World/Franka\u2019s translate.\n# Teachable moment 2: /World/Franka has PhysicsArticulationRootAPI,\n#   /World/Table has PhysicsCollisionAPI \u2014 same prim type, different behaviors.\n# Teachable moment 3: /World/Cup is a Reference to cup.usd; add another reference\n#   and both update if the source changes.\n\n# Student exercise:\nadd_reference(prim_path=\"/World/ExerciseCube\", reference_path=\"<CUBE_USD>\")\nrun_stage_analysis()  # students diff output \u2014 what changed?\n\n# Depth for \"what is Xform?\": \"A coordinate-frame container. Children inherit\n# its transform.\" Stop there unless asked.",
+  "failure_modes": [
+    "Picking a 500-prim warehouse \u2014 analysis output scrolls off screen",
+    "Picking an empty scene \u2014 no hierarchy to teach",
+    "Jargon-dumping (prim, schema, xformOp) without one-line definitions",
+    "Skipping the diff exercise \u2014 students do not feel the tool's usefulness"
+  ]
+}

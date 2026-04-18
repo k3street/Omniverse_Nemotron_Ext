@@ -1,0 +1,13 @@
+{
+  "task_id": "S-08",
+  "goal": "Diagnose Nova Carter 4 m teleport at Play, fix via articulation-root / initial-pose without URDF rewrite.",
+  "tools_used": ["run_stage_analysis", "diagnose_physics_error", "check_physics_health", "apply_robot_fix_profile", "get_world_transform", "set_attribute"],
+  "thoughts": "The classic Carter-pop: ArticulationRootAPI is on a prim whose transform differs from where the chassis actually sits, OR wheels are 1-2 cm below ground at t=0 and PhysX resolves penetration over the first substeps as a large impulse. apply_robot_fix_profile('nova_carter') encodes the canonical layout. 'Sleep(2)' is a band-aid — the right answer is make t=0 non-penetrating. Stale /cmd_vel is a red herring unless controller subscriber is latched (it isn't by default).",
+  "code": "# 1. Dump articulation + initial pose state\nanalysis = run_stage_analysis(focus=\"articulation\", prim_path=\"/World/Carter_01\")\nerr = diagnose_physics_error(prim_path=\"/World/Carter_01\", at_play=True)\n# Expect: articulation_root_transform != chassis_transform OR wheel ground penetration\n\n# 2. Apply canonical Carter fix profile\napply_robot_fix_profile(profile=\"nova_carter\", prim_path=\"/World/Carter_01\")\n\n# 3. If wheels still penetrate, lift by contact-offset\nhealth = check_physics_health(focus=\"contacts\")\nif health.initial_penetration_m > 0:\n    set_attribute(\n        prim_path=\"/World/Carter_01\",\n        attribute=\"xformOp:translate\",\n        value=[<START_X>, <START_Y>, <START_Z> + <CONTACT_OFFSET>],\n    )\n\n# 4. Validate — press Play and read back pose delta\nsim_control(action=\"play\")\npose_after = get_world_transform(prim_path=\"/World/Carter_01\")\n# Expect delta < 0.05 m at t=0.1s",
+  "failure_modes": [
+    "assistant suggests sleep(2) as primary fix",
+    "assistant blames stale /cmd_vel without evidence",
+    "assistant rewrites URDF instead of applying fix profile",
+    "assistant misses the articulation-root-vs-chassis-transform mismatch"
+  ]
+}

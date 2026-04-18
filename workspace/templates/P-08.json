@@ -1,0 +1,13 @@
+{
+  "task_id": "P-08",
+  "goal": "Randomize camera intrinsics across iPhone 13/14/15 envelope so the model generalizes across devices.",
+  "tools_used": ["configure_sdg", "create_sdg_pipeline", "set_camera_params", "preview_sdg", "lookup_knowledge"],
+  "thoughts": "USD cameras have no fx/fy — use focalLength + horizontalAperture + verticalAperture. Aspect ratio must be categorical; independent h/v aperture randomization produces nonsense frames. Resolution changes reinit the render product (expensive) — alternative: fix render res, randomize only focalLength/aperture, crop in the data loader. Log emulated device per frame so Priya can stratify eval. Autofocus = narrow uniform on focalLength within each device.",
+  "code": "# 1. Device envelopes (Priya's teardown specs — user to fill in real numbers)\nDEVICES = {\n    \"iphone_13_main\": {\"focal_mm\": <F13>, \"aperture_mm\": <A13>, \"res\": [<W13>, <H13>]},\n    \"iphone_14_main\": {\"focal_mm\": <F14>, \"aperture_mm\": <A14>, \"res\": [<W14>, <H14>]},\n    \"iphone_15_main\": {\"focal_mm\": <F15>, \"aperture_mm\": <A15>, \"res\": [<W15>, <H15>]},\n}\n\n# 2. Sample device categorically, then narrow-range AF jitter within device\nconfigure_sdg(\n    stage=\"camera_intrinsics\",\n    sampler=\"categorical\",\n    categories=list(DEVICES.keys()),\n    per_category_params={\n        name: {\n            \"focalLength\": {\"type\": \"uniform\", \"min\": p[\"focal_mm\"]*0.97, \"max\": p[\"focal_mm\"]*1.03},\n            \"horizontalAperture\": p[\"aperture_mm\"],\n            \"verticalAperture\": p[\"aperture_mm\"] * p[\"res\"][1] / p[\"res\"][0],\n            \"resolution\": p[\"res\"],\n        } for name, p in DEVICES.items()\n    },\n    write_metadata_tag=\"emulated_device\",\n)\n\n# 3. If resolution changes choke downstream YOLO: fix render res, log emulated K\n# intrinsics matrix in per-image sidecar JSON\nlookup_knowledge(query=\"replicator writer per-image camera_info sidecar\")\n\n# 4. Preview all 3 devices\npreview_sdg(pipeline=\"<PIPE_ID>\", frame_count=3, force_categories=list(DEVICES.keys()))",
+  "failure_modes": [
+    "assistant uses fx/fy as if they were USD attributes",
+    "assistant randomizes h_aperture and v_aperture independently",
+    "assistant models 'camera brand' as a semantic class",
+    "assistant ignores resolution-change render-product cost"
+  ]
+}

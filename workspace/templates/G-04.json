@@ -1,0 +1,13 @@
+{
+  "task_id": "G-04",
+  "goal": "Create a 0.1m-radius, 1m-height cylinder at world origin rotated so its default Z-axis long dimension points along world +Y (a 90° rotation about X). Verify via get_world_transform.rotation_quat ≈ ±(√0.5, √0.5, 0, 0).",
+  "tools_used": ["create_prim", "get_world_transform"],
+  "thoughts": "UsdGeom.Cylinder default long axis is Z. To lay it along +Y we need a 90° rotation about the X axis. In xformOps: add_rotateX(90). Make sure the xformOpOrder includes the rotate op. After creation, get_world_transform should show rotation_quat ≈ (0.7071, 0.7071, 0, 0) — or -(√0.5, √0.5, 0, 0) depending on sign convention. Both are acceptable.",
+  "code": "create_prim(\n    prim_path=\"/World/Cylinder\",\n    prim_type=\"Cylinder\",\n    translate=[0.0, 0.0, 0.0],\n    rotate=[90.0, 0.0, 0.0],   # Euler XYZ, degrees; 90° about X\n    attributes={\"radius\": 0.1, \"height\": 1.0, \"axis\": \"Z\"}\n)\nget_world_transform(prim_path=\"/World/Cylinder\")",
+  "failure_modes": [
+    "Setting attributes.axis='Y' instead of rotating — UsdGeom.Cylinder accepts an axis token, but the task specifies rotating the default-Z cylinder, not choosing a Y-axis variant. Both produce the same geometry but the snapshot rotation_quat differs.",
+    "Rotating about Z instead of X — cylinder stays vertical; wrong result.",
+    "AddRotateXYZOp on an existing cylinder with xformOps already — breaks stack order. Fresh create_prim avoids this.",
+    "Forgetting to include 'rotate' op in xformOpOrder — the attribute is authored but the transform doesn't apply."
+  ]
+}

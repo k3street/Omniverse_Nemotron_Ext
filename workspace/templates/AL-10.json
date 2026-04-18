@@ -1,0 +1,13 @@
+{
+  "task_id": "AL-10",
+  "goal": "Propose a defensible sim-to-real SLA protocol for a 6-DOF arm pick-place digital twin.",
+  "tools_used": ["lookup_knowledge", "check_physics_health", "run_stage_analysis", "diagnose_physics_error", "launch_training", "measure_sim_real_gap", "compare_sim_real_video"],
+  "thoughts": "NVIDIA does NOT publish a blanket 'sim-to-real accuracy' number. Accuracy is per-metric and per-use-case. Honest answer: measure-first protocol co-running sim + real on a defined trajectory matrix, computing per-metric residuals. Stratify SLA by metric class: cycle time is usually tight (<5%), joint torque moderate (10-20%), contact force at impact often poor (30%+). Do NOT let Alessandro commit to a single-digit number for contact force. PhysX solver bounds (TGS iters, contact offset, CCD) are documented uncertainty contributors.",
+  "code": "# Advisory + measurement protocol. No single-number contract allowed.\n# 1. Ground what PhysX can actually do\nlookup_knowledge(query=\"physx tgs solver iterations contact offset ccd accuracy bounds\")\nlookup_knowledge(query=\"isaac sim sim-to-real industrial arm documented accuracy\")\n\n# 2. Baseline physics sanity on the target scene\nrun_stage_analysis(scene_path=\"<ARM_SCENE>\", emit=\"physics_settings\")\ncheck_physics_health(focus=\"solver_stability\", play_duration_s=10.0)\n\n# 3. Measurement matrix: T1..T10 covering payload 0/1/2 kg x slow/nominal/fast\n# Per trajectory log joint_pos, joint_torque, tool_pose, peak_contact_force, cycle_ms\n\n# 4. Run sim side programmatically\nlaunch_training(\n    env=\"<DIGITAL_TWIN_ENV>\",\n    num_envs=1,\n    steps=\"<N_PER_TRAJ>\",\n    trajectories=[f\"T{i}\" for i in range(1, 11)],\n    log_metrics=[\"joint_torque\", \"cycle_time\", \"peak_contact_force\"],\n)\n\n# 5. Compute per-metric residuals\nmeasure_sim_real_gap(\n    sim_log=\"<SIM_LOG>\", real_log=\"<REAL_LOG>\",\n    metrics=[\"joint_torque_rmse\", \"cycle_time_pct_delta\", \"peak_contact_ratio\"],\n)\ncompare_sim_real_video(sim=\"<SIM_VIDEO>\", real=\"<REAL_VIDEO>\")\n\n# 6. SLA by metric class: cycle_time tight, joint_torque medium, contact_force loose\n# Cure path on failure: re-calibrate physics against the failing trajectory\ndiagnose_physics_error(prim_path=\"<ARM_PRIM>\")  # template for failure attribution",
+  "failure_modes": [
+    "assistant gives legal one number for all metrics",
+    "assistant promises contact-force fidelity better than measurement supports",
+    "assistant claims NVIDIA publishes a blanket accuracy figure",
+    "assistant skips the measurement matrix and proposes a vibes-based SLA"
+  ]
+}

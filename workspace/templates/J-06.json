@@ -1,0 +1,13 @@
+{
+  "task_id": "J-06",
+  "goal": "Triage 10 student launch-crashes in 50 minutes with a single diagnostic command each.",
+  "tools_used": ["explain_error", "hardware_compatibility_check", "get_console_errors", "get_debug_info"],
+  "thoughts": "Pedagogy: give ONE command students paste, they return output, Jordan reads it. Three buckets: driver too old (updatable), GPU too weak (fallback to cloud/pair-up), Vulkan missing (install or unsupported OS). ARM Mac is a no-go \u2014 say it directly. Do not recommend bleeding-edge drivers in a managed lab.",
+  "code": "# One command every student runs and pastes back:\nget_debug_info()                       # GPU, driver, Vulkan, Kit version\nhardware_compatibility_check()         # green/yellow/red verdict\n\n# Then bucket their output by error signature:\nexplain_error(error_text=\"<DRIVER_TOO_OLD_STRING>\")\nexplain_error(error_text=\"<VULKAN_NOT_FOUND_STRING>\")\nexplain_error(error_text=\"<SHADER_COMPILE_CRASH>\")\n\n# Optional if Kit launched but console spam:\nget_console_errors(last_n=50)\n\n# Verdicts per bucket:\n# - Driver too old + lab IT blocks update \u2192 pair student with working lab workstation\n# - Integrated GPU \u2192 cloud session (no local fix)\n# - ARM Mac \u2192 unsupported; cloud or borrow x86 laptop\n# - Vulkan missing on Linux \u2192 install mesa-vulkan-drivers / nvidia-vulkan",
+  "failure_modes": [
+    "Telling integrated-GPU student to 'update driver' (will not help)",
+    "Recommending bleeding-edge driver that breaks lab's other software",
+    "Claiming ARM Mac can run Isaac Sim (it cannot, natively)",
+    "No single command \u2014 Jordan has to debug each student separately"
+  ]
+}

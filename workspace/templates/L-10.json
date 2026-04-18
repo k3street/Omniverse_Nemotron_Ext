@@ -1,0 +1,12 @@
+{
+  "task_id": "L-10",
+  "goal": "Orchestrate full fixture-validation package: reach table, clearance verdicts, workspace envelope, mass, vendor USD export.",
+  "tools_used": ["solve_ik", "check_path_clearance", "show_workspace", "get_bounding_box", "compute_volume", "export_scene_package", "capture_viewport"],
+  "thoughts": "Multi-step design-review package. Keep confidence honest at each step. Lisa won't sign off on 'looks fine'. Per-position screenshot + number + pass/fail is the deliverable format. Density varies by material -- take her numbers, do not guess. Headless overnight is realistic for the 6-position clearance sweeps.",
+  "code": "targets = [\"<T1>\", \"<T2>\", \"<T3>\", \"<T4>\", \"<T5>\", \"<T6>\"]\nSPEC_MM = 2.0\nrows = []\nfor idx, tgt in enumerate(targets):\n    ik = solve_ik(articulation_path=\"/World/UR10e\", target_pose=tgt)\n    clr = check_path_clearance(\n        prim_path=\"/World/UR10e/Flange/EOAT\",\n        waypoints=[\"<APPROACH>\", tgt, \"<RETRACT>\"],\n        others=[\"/World/Fixture\"], units=\"mm\"\n    )\n    verdict = \"PASS\" if clr.min_distance_mm >= SPEC_MM else \"FAIL\"\n    capture_viewport(path=f\"<DIR>/pos_{idx}.png\", width=2048, height=2048)\n    rows.append({\"pos\": idx, \"reach\": ik.success,\n                 \"min_clearance_mm\": clr.min_distance_mm, \"verdict\": verdict})\nenv = show_workspace(articulation_path=\"/World/UR10e\", include_end_effector=True, mode=\"swept_volume\")\nenv_bbox = get_bounding_box(prim_path=env.prim_path, units=\"mm\")\nvol = compute_volume(prim_path=\"/World/Fixture\", units=\"m^3\")\nmass_kg = vol.value * \"<DENSITY_KG_PER_M3>\"\nexport_scene_package(\n    output_path=\"<OUT>/fixture_for_vendor.usdz\",\n    scope_paths=[\"/World/Fixture\"],\n    flatten_references=True, vendor_nucleus_assets=True,\n    preserve_metersPerUnit=True\n)",
+  "failure_modes": [
+    "Guessing material density instead of taking her numbers",
+    "Declaring 'PASS' on a position without the per-position screenshot + number",
+    "Running interactively when headless overnight is cleaner for 6 sweeps"
+  ]
+}

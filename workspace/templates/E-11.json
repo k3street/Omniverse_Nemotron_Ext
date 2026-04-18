@@ -1,0 +1,13 @@
+{
+  "task_id": "E-11",
+  "goal": "Measure peak fingertip normal force during a G1 grasp of a cardboard box, log CSV, produce a plot vs the 200 N crush threshold, and flag what sim forces do NOT certify.",
+  "tools_used": ["list_all_prims", "lookup_knowledge", "setup_contact_sensors", "check_collisions", "run_usd_script"],
+  "thoughts": "Use ContactSensorCfg (real API) on fingertips, not hand-rolled PhysX callback. Default PhysX contact stiffness can be far stiffer than reality -> sim peaks overshoot real. Sanity check via comparison to 200 N crush literature, NOT certification — legal needs to hear this explicitly. A 3000 N single-step spike is almost always a penetration or dt artifact, check check_collisions before trusting the number. Units depend on metersPerUnit * kilogramsPerUnit so confirm scene units before quoting Newtons.",
+  "code": "# 1. Find fingertip prim paths\nlist_all_prims(root=\"<G1_HAND_PRIM_PATH>\", name_contains=\"finger\")\n\n# 2. Anchor in real ContactSensorCfg API and force-unit semantics\nlookup_knowledge(query=\"IsaacLab ContactSensorCfg net_forces_w units metersPerUnit kilogramsPerUnit Newton\")\n\n# 3. Attach contact sensors to each fingertip\nsetup_contact_sensors(\n    prim_path_expr=\"<G1_HAND_PRIM_PATH>/.*_finger_tip\",\n    history_length=<H>,\n    track_air_time=False,\n    update_period=<DT>\n)\n\n# 4. Pre-check contact geometry — no penetration before trusting forces\ncheck_collisions(scope=\"<G1_HAND_PRIM_PATH>\", other=\"<BOX_PRIM_PATH>\")\n\n# 5. Run one scripted grasp cycle, log force magnitude per fingertip per step\nrun_usd_script(script=\"\"\"\nimport csv, torch\nsensor = env.scene.sensors['<SENSOR_NAME>']\nwith open('<CSV_OUT>', 'w', newline='') as f:\n    w = csv.writer(f); w.writerow(['step','ft_idx','force_N'])\n    for step in range(<N_STEPS>):\n        env.sim.step()\n        mags = torch.norm(sensor.data.net_forces_w[0], dim=-1).cpu().tolist()  # (n_fingertips,)\n        for i, m in enumerate(mags):\n            w.writerow([step, i, m])\nprint('peak, mean, p95 per fingertip -> plot vs 200 N')\n\"\"\")\n\n# Output summary for legal:\n#  - peak / mean / p95 per fingertip (Newtons, confirmed via scene units)\n#  - matplotlib plot with 200 N reference line\n#  - EXPLICIT caveat: sim forces = model prediction, NOT a certification.\n#    Real safety validation requires hardware instrumentation.",
+  "failure_modes": [
+    "Hand-rolled PhysX callback instead of ContactSensorCfg — misses GPU readback pipeline",
+    "Trusting a 3000 N spike — almost always penetration/dt artifact, not real",
+    "Quoting Newtons without checking metersPerUnit * kilogramsPerUnit",
+    "Promising legal that sim matches real — it does not, stiffness calibration is required"
+  ]
+}

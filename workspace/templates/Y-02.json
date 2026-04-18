@@ -1,0 +1,12 @@
+{
+  "task_id": "Y-02",
+  "goal": "Build a product-photography key/fill/rim 3-light rig plus HDRI around the hero robot for a trade-show reel.",
+  "tools_used": ["create_hdri_skydome", "create_prim", "set_light_color", "set_light_intensity", "enable_post_process", "capture_viewport"],
+  "thoughts": "HDRI first for grounding reflections, then three-point rig layered on top. Warm key, cooler fill at lower intensity, cooler-still rim behind. Do not touch PhysX or articulation -- look-dev is pure rendering. Post-process tonemap/bloom is a separate pass so she can A/B without baking decisions in.",
+  "code": "create_hdri_skydome(\n    path=\"/World/Lighting/SkyDome\",\n    texture_path=\"<HDRI_EXR>\",\n    intensity=\"<FLOAT>\",\n    rotation=\"<DEGREES>\"\n)\nfor role, pos, color_k, inten in [\n    (\"Key\",  \"<POS>\", 5500, \"<HIGH>\"),\n    (\"Fill\", \"<POS>\", 7000, \"<MED>\"),\n    (\"Rim\",  \"<POS>\", 8000, \"<MED>\")\n]:\n    p = f\"/World/Lighting/{role}\"\n    create_prim(path=p, type_name=\"RectLight\", translate=pos)\n    set_light_color(prim_path=p, temperature_k=color_k)\n    set_light_intensity(prim_path=p, intensity=inten)\nenable_post_process(\n    tonemap=\"ACES\",\n    exposure=\"<EV>\",\n    bloom_enabled=True,\n    bloom_intensity=\"<FLOAT>\"\n)\ncapture_viewport(path=\"<OUT_PNG>\", width=1920, height=1080)",
+  "failure_modes": [
+    "Recommending Arnold-only workflow when RTX Interactive can hold up for stills",
+    "Confusing HDRI intensity with dome rotation when highlights clip",
+    "Touching articulation or PhysX for a pure look-dev task"
+  ]
+}

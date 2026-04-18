@@ -1,0 +1,13 @@
+{
+  "task_id": "R-10",
+  "goal": "Produce a 30-second 1080p MP4 of the trained policy running, for the Friday client update.",
+  "tools_used": ["record_demo_video", "set_viewport_camera", "capture_viewport"],
+  "thoughts": "record_demo_video wraps the Movie Capture extension (omni.kit.capture.viewport) \u2014 the real, supported path. 1080p30 for 30s is ~1GB raw, MP4 compresses to <30MB. If running over SSH, kit must launch with --/app/renderer/enabled=true (headless-with-rendering). Black frames usually mean renderer not warmed \u2014 wait 2s before record start.",
+  "code": "# Frame the shot first\nset_viewport_camera(\n    camera_prim=\"<CINEMATIC_CAMERA_PATH>\",\n    position=[<X>, <Y>, <Z>],\n    look_at=[<TX>, <TY>, <TZ>]\n)\n\nrecord_demo_video(\n    output_path=\"<MP4_PATH>\",                  # /home/raj/deliveries/policy_demo.mp4\n    duration_sec=<30>,\n    fps=<30>,\n    resolution=[1920, 1080],\n    camera_prim=\"<CINEMATIC_CAMERA_PATH>\",\n    warmup_sec=<2>\n)\n\n# Fallback if Movie Capture extension missing:\ncapture_viewport(output_path=\"<PNG_DIR>/frame_%04d.png\", fps=<30>, duration_sec=<30>)\n# then ffmpeg locally to MP4.",
+  "failure_modes": [
+    "Black video \u2014 renderer not warmed, add warmup_sec",
+    "SSH session without --/app/renderer/enabled=true \u2014 nothing rendered",
+    "Hallucinating extension name 'omni.kit.video.capture' (real: omni.kit.capture.viewport)",
+    "1080p60 at full RT \u2014 frame drops, video stutters"
+  ]
+}

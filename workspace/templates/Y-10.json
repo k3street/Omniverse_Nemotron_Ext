@@ -1,0 +1,12 @@
+{
+  "task_id": "Y-10",
+  "goal": "Produce a multichannel EXR with beauty/diffuse/specular/normals/depth/cryptomatte (or object-id fallback) for Nuke compositor.",
+  "tools_used": ["lookup_knowledge", "set_render_mode", "set_render_config", "set_semantic_label", "capture_viewport"],
+  "thoughts": "Be honest about what RTX emits natively vs what needs a fallback. Cryptomatte in particular has been a pain point -- if not native, use object-ID pass derived from semantic labels and let the compositor remap. Denoiser on beauty, off on utility passes or Nuke's reprojection breaks. Do not invent AOV names.",
+  "code": "aov_inventory = lookup_knowledge(query=\"Isaac Sim 5.x RTX renderer AOV list cryptomatte motion vector\")\nset_render_mode(mode=\"RTXInteractivePathTraced\")\n# Tag prims so object_id AOV is meaningful if cryptomatte is absent\nfor prim, label in [(\"/World/Hero/Body\", \"hero_body\"), (\"/World/Floor\", \"floor\")]:\n    set_semantic_label(prim_path=prim, label_class=\"segmentation\", label=label)\nset_render_config(\n    aovs=[\"beauty\", \"diffuse\", \"specular\", \"normal\", \"depth\", \"object_id\"],\n    denoiser=\"optix\",\n    denoise_aovs=False,\n    samples_per_pixel=\"<SPP>\",\n    output_format=\"exr_multilayer\"\n)\ncapture_viewport(\n    path=\"<OUT_EXR>\",\n    camera_path=\"/World/Cameras/Hero_Beauty\",\n    width=3840, height=2160,\n    file_format=\"exr_multilayer\"\n)",
+  "failure_modes": [
+    "Fabricating a cryptomatte AOV name that RTX does not emit",
+    "Denoising utility passes so Nuke reprojection falls apart",
+    "Promising motion-vector AOV without checking the real inventory"
+  ]
+}

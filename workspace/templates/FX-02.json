@@ -1,0 +1,13 @@
+{
+  "task_id": "FX-02",
+  "goal": "Add a Replicator domain randomizer on /World/Camera's pose with uniform offset box ±(0.2, 0.2, 0.1)m around its current position for sim-to-real training data. Verify via count_prims_under_path that Replicator authored nodes.",
+  "tools_used": ["prim_exists", "add_domain_randomizer", "count_prims_under_path"],
+  "thoughts": "Replicator domain randomization runs per-sample in the render loop, unlike a one-shot random at import. add_domain_randomizer is the dedicated tool — do NOT generate raw Replicator Python ('with rep.trigger.on_frame(...)') when the tool exists. Verify that Replicator authored something under /Replicator or similar after the call.",
+  "code": "# 1. Confirm target camera present\nprim_exists(prim_path=\"/World/Camera\")\n\n# 2. Wire the randomizer (uniform offset on pose, per-sample)\nadd_domain_randomizer(\n    target_path=\"/World/Camera\",\n    attribute=\"pose\",\n    distribution=\"uniform\",\n    low=[-0.2, -0.2, -0.1],\n    high=[0.2, 0.2, 0.1]\n)\n\n# 3. Verify the randomizer was authored\ncount_prims_under_path(parent_path=\"/Replicator\", recursive=True)",
+  "failure_modes": [
+    "Using Python random.uniform at import time instead of Replicator — only randomizes once, not per frame.",
+    "Specifying absolute coordinates instead of offsets — uniform([0.2, 0.2, 0.1], [0.2, 0.2, 0.1]) is a single point.",
+    "Inventing an 'inputs:randomize' attribute on the camera directly — that's not how Replicator works.",
+    "Using a range too large (±1m) that places the camera outside the valid frustum of the scene."
+  ]
+}

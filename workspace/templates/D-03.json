@@ -1,0 +1,13 @@
+{
+  "task_id": "D-03",
+  "goal": "Flat inventory of every camera prim with path, type, resolution, fps; flag suspicious ones.",
+  "tools_used": ["list_cameras", "inspect_camera"],
+  "thoughts": "list_cameras is the one tool here. Follow up with inspect_camera only on prims with obviously wrong settings (0x0 resolution, missing parent xform). Do NOT list lidars/IMUs \u2014 cameras only. Group output by parent prim so duplicates jump out.",
+  "code": "cams = list_cameras()\n\n# Table: prim_path | type (RGB/depth/stereo) | resolution | fps | parent | flags\nfor c in cams:\n    if c.resolution == (0, 0) or c.fps == 0 or not c.parent_xform:\n        inspect_camera(prim_path=c.prim_path)     # drill into suspicious ones\n\n# Group by parent prim to expose duplicates on the same robot.\n# Do NOT include lidar/IMU \u2014 those are not cameras.",
+  "failure_modes": [
+    "Listing RTX LIDAR / IMU as cameras \u2014 wrong schema",
+    "Skipping the 0x0 resolution flag \u2014 Dimitri deploys a broken cam",
+    "'RealSense D435?' question answered by name-guessing instead of inspect",
+    "No grouping by parent \u2014 duplicates on same robot missed"
+  ]
+}

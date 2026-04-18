@@ -1,0 +1,13 @@
+{
+  "task_id": "M-05",
+  "goal": "Find why Allegro training hits only 18k steps/sec on 4096 envs when IsaacLab benchmarks suggest >=40k — identify the real bottleneck, not a cargo-cult workaround.",
+  "tools_used": ["check_physics_health", "profile_training_throughput", "run_stage_analysis", "find_heavy_prims", "lookup_knowledge", "run_usd_script"],
+  "thoughts": "GPU util 62% strongly suggests CPU-side env wrapping or PhysX contact explosion, not kernel-starved GPU. Real suspects: SDF collider on cube (expensive at 4096x, convex hull is free), rendering leaking through a non-truly-headless path, solver_position_iteration too high, fabric/USDRT disabled. Profile before suggesting --num_envs=1024 — that treats the symptom.",
+  "code": "# 1. Physics health + PhysX stats before guessing\ncheck_physics_health()\nprofile_training_throughput(task=\"<TASK_NAME>\", duration_s=30)\n\n# 2. Count contact-generating prims per env template\nrun_stage_analysis(scope=\"/World/envs/env_0\")\nfind_heavy_prims(metric=\"collision_cost\", top_k=20)\n\n# 3. Check the cube collider approximation — SDF at 4096x is the classic trap\nrun_usd_script(script=\"\"\"\nfrom pxr import UsdPhysics\nstage = omni.usd.get_context().get_stage()\nfor p in stage.Traverse():\n    if 'Cube' in str(p.GetPath()) and p.HasAPI(UsdPhysics.MeshCollisionAPI):\n        print(p.GetPath(), UsdPhysics.MeshCollisionAPI(p).GetApproximationAttr().Get())\n\"\"\")\n\n# 4. Cross-check solver iterations + fabric enablement\nrun_usd_script(script=\"\"\"\nimport carb.settings\ns = carb.settings.get_settings()\nprint('fabric', s.get('/app/useFabric'))\nprint('renderer/enabled', s.get('/rtx/rendermode'))\n# solver iterations:\nfrom pxr import UsdPhysics\nstage = omni.usd.get_context().get_stage()\nfor p in stage.Traverse():\n    if p.HasAPI(UsdPhysics.RigidBodyAPI):\n        print(p.GetPath(), 'pos_iter', p.GetAttribute('physxRigidBody:solverPositionIterationCount').Get())\n        break\n\"\"\")\n\n# 5. Ground recommendation in docs\nlookup_knowledge(query=\"IsaacLab performance tuning PhysX GPU fabric headless SDF collider\")",
+  "failure_modes": [
+    "Dropping num_envs to 1024 hides bottleneck instead of fixing it",
+    "--headless does not guarantee no rendering if an app template leaks RTX",
+    "SDF collider on a cube at 4096x tanks contact gen; convex hull is effectively free",
+    "High solverPositionIterationCount inherited from URDF default multiplies per-step cost"
+  ]
+}

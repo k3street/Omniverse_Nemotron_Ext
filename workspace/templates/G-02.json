@@ -1,0 +1,13 @@
+{
+  "task_id": "G-02",
+  "goal": "Stack three 0.2m cubes along the Z axis with 0.1m air gap between them, bottom cube sitting on the ground. Center Z positions: 0.1, 0.4, 0.7. Verify with get_world_transform.",
+  "tools_used": ["create_prim", "get_world_transform"],
+  "thoughts": "The arithmetic that trips people up: 'stacked with 0.1m gap' means air gap between faces, not between centers. Cube 0 sits on ground → its center is at z = size/2 = 0.1. Cube 1 sits 0.1m above the top face of Cube 0 → Cube 1 bottom = 0.2 + 0.1 = 0.3, Cube 1 center = 0.4. Cube 2 center = 0.7 by same logic. Use create_prim 3x with explicit translate, then verify each with get_world_transform.",
+  "code": "# Stack three 0.2m cubes along Z, 0.1m gap between faces.\n# Bottom cube center = 0.1 (sitting on ground).\n# Each subsequent center = previous + size (0.2) + gap (0.1) = previous + 0.3.\nsize = 0.2\ngap = 0.1\nfor i in range(3):\n    z = size/2 + i * (size + gap)   # 0.1, 0.4, 0.7\n    create_prim(\n        prim_path=f\"/World/Cube_{i}\",\n        prim_type=\"Cube\",\n        translate=[0.0, 0.0, z],\n        attributes={\"size\": size}\n    )\n\nfor i in range(3):\n    get_world_transform(prim_path=f\"/World/Cube_{i}\")",
+  "failure_modes": [
+    "Placing centers at 0.0, 0.2, 0.4 — the 'gap' is then zero because cubes touch face-to-face.",
+    "Placing centers at 0.0, 0.3, 0.6 — half of Cube_0 is below the ground (z<0).",
+    "Forgetting to verify — create_prim may silently reject translate if there's a schema conflict.",
+    "Using 'size' attribute for Sphere (radius) or vice versa — but here all three are cubes so less risk."
+  ]
+}

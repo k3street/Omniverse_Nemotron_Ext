@@ -1,0 +1,13 @@
+{
+  "task_id": "G-05",
+  "goal": "Place a 0.2m-radius sphere exactly 1.5m from the center of a pre-existing anchor cube at /World/Anchor along world +X, so the sphere center lands at (2.5, 2, 0.5). Read the anchor's actual position first (do not assume) and verify the final sphere placement.",
+  "tools_used": ["prim_exists", "get_world_transform", "create_prim"],
+  "thoughts": "Read-before-act: the anchor MAY be where the user said but must be verified. Use prim_exists to confirm, get_world_transform to read the exact translation. Then add (1.5, 0, 0) to that and create the sphere there. Finally verify the sphere with another get_world_transform. The template is the canonical shape of a 'measure-from-scene' request.",
+  "code": "# 1. Confirm the anchor is present\nprim_exists(prim_path=\"/World/Anchor\")\n\n# 2. Read the anchor's actual world position (don't trust the user)\nget_world_transform(prim_path=\"/World/Anchor\")\n# ... inspect the 'translation' field in the return; suppose it is [1.0, 2.0, 0.5]\n\n# 3. Place the sphere 1.5m along +X from that point\ncreate_prim(\n    prim_path=\"/World/Sphere\",\n    prim_type=\"Sphere\",\n    translate=[2.5, 2.0, 0.5],   # anchor.x + 1.5, anchor.y, anchor.z\n    attributes={\"radius\": 0.2}\n)\n\n# 4. Verify placement\nget_world_transform(prim_path=\"/World/Sphere\")",
+  "failure_modes": [
+    "Placing sphere at (1.5, 0, 0) — measures from origin, not from the anchor.",
+    "Assuming the anchor position without reading it — works only if the user's spec matches reality, and fails silently when it doesn't.",
+    "Deleting or moving the anchor cube in the process — task requires it stays unchanged.",
+    "Using radius=0.1 (diameter confusion) or forgetting the radius attribute entirely, defaulting to 1.0."
+  ]
+}

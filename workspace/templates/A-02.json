@@ -1,0 +1,13 @@
+{
+  "task_id": "A-02",
+  "goal": "Stop Alex's robot from falling through the floor with a one-line fix, no essay.",
+  "tools_used": ["scene_summary", "diagnose_physics_error"],
+  "thoughts": "Two likely causes: no ground plane, or no collider on base link. scene_summary confirms which. If scene lacks a GroundPlane prim, that's the one-line fix. If GroundPlane exists, the URDF base is missing a collider — re-import with fix_base. Never lecture. Never paste Python USD APIs.",
+  "code": "# One question: is there a ground plane in the scene?\n\n# 1. Confirm scene contents\nscene_summary(stage_path=\"<CURRENT_STAGE>\")\n\n# 2. If diagnose is needed for the falling symptom\ndiagnose_physics_error(symptom=\"rigid_body_falls_through_floor\")\n\n# Two possible one-line answers (pick ONE based on scene_summary result):\n#\n# If there's no GroundPlane prim:\n#   \"Create > Physics > Ground Plane. Hit Play again.\"\n#\n# If GroundPlane exists but robot still falls:\n#   \"Your URDF base has no collider — re-import with 'Fix Base Link' checked.\"\n#\n# If Alex says \"lol still falling\" — the OTHER fix. Do not repeat the same one.",
+  "failure_modes": [
+    "Response over 10 lines — Alex is gone",
+    "Explaining UsdPhysics APIs or collision schemas — wall of text = fail",
+    "Asking 3 clarifying questions when 1 will do",
+    "Mentioning 'prim' without a 1-line definition if Alex asks"
+  ]
+}

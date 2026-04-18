@@ -1,0 +1,12 @@
+{
+  "task_id": "L-05",
+  "goal": "Return volume cm^3 and surface area cm^2 of a named fixture-insert prim, with watertight-mesh caveat.",
+  "tools_used": ["list_all_prims", "compute_volume", "compute_surface_area"],
+  "thoughts": "compute_volume needs a watertight mesh -- if non-closed, volume is garbage; flag this explicitly. Isaac Sim's native units are meters; convert outputs to cm^3 and cm^2 for SolidWorks parity. Do not hallucinate density or mass -- she asked for geometry.",
+  "code": "prims = list_all_prims(path_prefix=\"/World/Fixture/Insert_v2\")\nvol = compute_volume(prim_path=\"/World/Fixture/Insert_v2\", units=\"m^3\")\nsa = compute_surface_area(prim_path=\"/World/Fixture/Insert_v2\", units=\"m^2\")\n# Convert m -> cm\nvol_cm3 = vol.value * 1_000_000\nsa_cm2 = sa.value * 10_000\nif not vol.is_watertight:\n    note = \"mesh not watertight -- volume unreliable\"\nelse:\n    note = \"watertight mesh\"",
+  "failure_modes": [
+    "Returning volume for a non-watertight mesh without flagging the hole",
+    "Guessing density and handing her a mass number she did not request",
+    "Returning in m^3 without converting to cm^3 for SolidWorks parity"
+  ]
+}

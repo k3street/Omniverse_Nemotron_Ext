@@ -1,0 +1,12 @@
+{
+  "task_id": "AM-01",
+  "goal": "Get a first-time founder one visible thing on screen in under 10 minutes without USD/robotics lectures.",
+  "tools_used": ["scene_aware_starter_prompts", "list_scene_templates", "load_scene_template", "quick_demo"],
+  "thoughts": "Fastest credible path is a prebuilt template. Offer a pick list (warehouse / manipulation / AMR) phrased without robotics vocabulary, load the one he points at, then one sentence: press the Play triangle top-left. Zero USD/articulation concepts until something is on screen.",
+  "code": "starters = scene_aware_starter_prompts(\n    user_goal=\"first pixel on screen, Tuesday customer demo\",\n    user_level=\"beginner\"\n)\ntemplates = list_scene_templates(category=\"demo\", difficulty=\"beginner\")\n# Present 3 options: warehouse / manipulation / AMR\npick = \"<USER_CHOICE>\"\nload_scene_template(\n    template_name=pick,\n    target_path=\"/World\"\n)\n# Fallback if he cannot decide:\n# quick_demo(name=\"franka_pick_place\")",
+  "failure_modes": [
+    "Starting with USD / articulation / physics concepts before anything is on screen",
+    "Opening a blank stage and walking him through create_prim",
+    "Asking him to pick between 8 templates when 3 max is all he can process"
+  ]
+}

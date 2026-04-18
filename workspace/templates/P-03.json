@@ -1,0 +1,12 @@
+{
+  "task_id": "P-03",
+  "goal": "Build a categorical lighting randomizer over 4 named orchard conditions (overcast, direct sun, golden hour, dappled).",
+  "tools_used": ["configure_sdg", "create_sdg_pipeline", "create_hdri_skydome", "set_light_intensity", "preview_sdg", "apply_dr_preset"],
+  "thoughts": "Categorical sampling over 4 physically meaningful conditions is much better than uniform noise — uniform produces nonsensical midnight-with-direct-sun frames. Each condition = (HDRI swap, sun azimuth/elevation range, intensity range). Use rep.distribution.choice over 4 named conditions, then nested uniforms inside. Real API only — no rep.presets.outdoor_lighting(). 12 real HDRIs can be bucketed into the 4 categories.",
+  "code": "# 1. Define the 4 categorical conditions with concrete ranges\nCONDITIONS = {\n    \"overcast_midday\":  {\"hdri\": \"<HDRI_OVERCAST>\", \"sun_el\": [80,90],  \"sun_az\": [0,360], \"sun_i\": [1000, 2000]},\n    \"direct_sun\":       {\"hdri\": \"<HDRI_CLEAR>\",    \"sun_el\": [55,75],  \"sun_az\": [90,270],\"sun_i\": [5000,8000]},\n    \"golden_hour\":      {\"hdri\": \"<HDRI_GOLDEN>\",   \"sun_el\": [5,15],   \"sun_az\": [80,100],\"sun_i\": [2000,4000]},\n    \"dappled_through_leaves\": {\"hdri\": \"<HDRI_FOREST>\",\"sun_el\": [40,60],\"sun_az\": [0,360],\"sun_i\": [3000,6000]},\n}\n\n# 2. Author the categorical sampler stage\nconfigure_sdg(\n    stage=\"lighting\",\n    sampler=\"categorical\",\n    categories=list(CONDITIONS.keys()),\n    weights=[0.25, 0.35, 0.2, 0.2],   # realistic orchard day mix\n    per_category_params=CONDITIONS,\n)\n\n# 3. Register with the main pipeline\ncreate_sdg_pipeline(\n    name=\"apples_lighting_dr\",\n    randomizers=[\"lighting_categorical\", \"camera_pose\"],\n    num_frames=<N_FRAMES>,\n)\n\n# 4. Preview one frame per category to sanity check\npreview_sdg(pipeline=\"apples_lighting_dr\", frame_count=4, force_categories=list(CONDITIONS.keys()))",
+  "failure_modes": [
+    "assistant uses single rep.randomizer.light() with uniform noise",
+    "assistant invents rep.presets.outdoor_lighting()",
+    "assistant doesn't preview one-per-category"
+  ]
+}

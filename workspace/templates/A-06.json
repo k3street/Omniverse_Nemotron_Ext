@@ -1,0 +1,13 @@
+{
+  "task_id": "A-06",
+  "goal": "Give Alex one self-contained Python snippet (paste into Script Editor, hit Play) that slides a cube back and forth along X forever.",
+  "tools_used": ["create_prim", "run_usd_script"],
+  "thoughts": "Single code block, <=15 lines, no OmniGraph, no Behavior Scripts, no extension install. Use omni.kit.app update-event stream or a timeline subscription. Set xformOp:translate on each tick using pxr.UsdGeom + Gf. Comments: one per logical block, not every line.",
+  "code": "# 1. Create the cube (or Alex can drag one from Create > Shapes > Cube)\ncreate_prim(\n    prim_path=\"/World/Slider\",\n    prim_type=\"Cube\",\n    translation=(0.0, 0.0, 0.5)\n)\n\n# 2. Wire up a per-frame updater. Paste into Script Editor, hit Play.\nrun_usd_script(script=\"\"\"\nimport omni.kit.app\nfrom pxr import Usd, UsdGeom, Gf\nimport math\n\nstage = omni.usd.get_context().get_stage()\ncube = UsdGeom.Xformable(stage.GetPrimAtPath(\"/World/Slider\"))\n\nt0 = [0.0]\ndef on_update(e):\n    t0[0] += 1.0/60.0\n    x = 0.5 + 0.5 * math.sin(t0[0] * 2.0)   # 0..1 back and forth\n    cube.ClearXformOpOrder()\n    cube.AddTranslateOp().Set(Gf.Vec3d(x, 0.0, 0.5))\n\n_sub = omni.kit.app.get_app().get_update_event_stream().create_subscription_to_pop(on_update)\n\"\"\")\n\n# Hit Play. If nothing moves, check the timeline is actually advancing.",
+  "failure_modes": [
+    "Requiring an extension install — Alex bails",
+    "Introducing OmniGraph / Action Graph / Behavior Scripts",
+    "Forgetting ClearXformOpOrder() — stacking translate ops each tick accumulates drift",
+    "Missing 'hit Play' reminder — Alex thinks the code is broken when timeline is paused"
+  ]
+}

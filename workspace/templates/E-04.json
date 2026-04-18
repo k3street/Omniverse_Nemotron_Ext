@@ -1,0 +1,13 @@
+{
+  "task_id": "E-04",
+  "goal": "Swap Franka for Unitree G1 in the existing pick demo: import G1 under a new prim path, remap joint names, pin the bipedal base for a static pick demo.",
+  "tools_used": ["nucleus_browse", "import_robot", "verify_import", "list_all_prims", "lookup_knowledge"],
+  "thoughts": "Do NOT find-replace the Franka prim — import G1 under a fresh path and retire the old one. Joint names differ entirely (panda_joint1..7 vs left_shoulder_pitch_joint etc.) so the demo script's joint-target dict must be remapped, not copy-pasted. G1 is bipedal — for a static pick demo either set fix_base=True at import or kinematically pin the pelvis, otherwise the robot falls and the demo dies on stage.",
+  "code": "# 1. Confirm shipped G1 asset path\nnucleus_browse(path=\"omniverse://localhost/NVIDIA/Assets/Isaac/5.0/Isaac/Robots/Unitree/G1/\")\n\n# 2. Import G1 under a NEW prim path (not a find-replace on /World/Robot)\nimport_robot(\n    urdf_path=\"omniverse://localhost/NVIDIA/Assets/Isaac/5.0/Isaac/Robots/Unitree/G1/g1.usd\",\n    dest_path=\"/World/G1\",\n    fix_base=True,\n    merge_fixed_joints=False\n)\n\n# 3. Sanity check the articulation\nverify_import(prim_path=\"/World/G1\")\n\n# 4. Diff joint names so the demo script's target dict gets rewritten correctly\nlist_all_prims(root=\"/World/G1\", schema_filter=\"PhysicsJoint\")\n# Old: {'panda_joint1': <q1>, ...}\n# New: {'left_shoulder_pitch_joint': <q1>, 'left_elbow_joint': <q2>, ...}\n\n# 5. Patterns for pinning a humanoid base statically\nlookup_knowledge(query=\"Isaac Sim humanoid base pin fixedBase kinematic pelvis static demo G1\")\n\n# 6. Retire old Franka prim or park it under /World/_attic so nothing else grabs it.",
+  "failure_modes": [
+    "Find-replace across /World/Robot breaks parented child prims (cameras, TCP frames)",
+    "Re-using the Franka joint-target dict verbatim — KeyError at first step",
+    "Forgetting fix_base=True on a bipedal — G1 flops over during demo",
+    "Importing G1 without verify_import — articulation looks right, zero-mass link crashes on Play"
+  ]
+}

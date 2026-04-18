@@ -1,0 +1,13 @@
+{
+  "task_id": "D-01",
+  "goal": "Make RTX LIDAR /scan bit-reproducible across CI replays so AMCL jitter stays under 5 cm.",
+  "tools_used": ["inspect_camera", "enable_deterministic_mode", "set_physics_scene_config", "lookup_knowledge", "run_usd_script"],
+  "thoughts": "Honest answer: RTX LIDAR is NOT bit-exact deterministic across drivers \u2014 denoiser + RT sampling introduce variance. Levers: (1) fix physics dt + substeps, (2) disable denoiser, (3) pin sample count per beam, (4) lock omni.replicator seed. If CI needs absolute determinism, switch to analytic lidar (isaacsim.sensors.rtx analytic model). Cite that driver-version parity is required.",
+  "code": "# 1. Inspect current LIDAR config \u2014 denoiser on?\ninspect_camera(prim_path=\"<LIDAR_PRIM_PATH>\")\n\n# 2. Pin physics and sim clocks\nset_physics_scene_config(\n    scene_path=\"/physicsScene\",\n    time_steps_per_second=<60>,\n    substeps=<1>,\n    solver_type=\"TGS\"\n)\nenable_deterministic_mode(seed=<CI_SEED>)\n\n# 3. Disable RTX denoiser + pin samples per beam on the sensor\nrun_usd_script(\n    description=\"Pin RTX LIDAR sample count and disable denoiser\",\n    code=\"\"\"\nfrom pxr import Usd\nstage = omni.usd.get_context().get_stage()\np = stage.GetPrimAtPath('<LIDAR_PRIM_PATH>')\np.GetAttribute('omni:sensor:Core:denoiser:enabled').Set(False)\np.GetAttribute('omni:sensor:Core:samplesPerBeam').Set(<N_SAMPLES>)\np.GetAttribute('omni:sensor:Core:seed').Set(<CI_SEED>)\n\"\"\"\n)\n\n# 4. If tolerance still missed: switch profile to analytic LIDAR\nlookup_knowledge(query=\"isaacsim analytic lidar model deterministic replacement for RTX\")\n\n# Caveat: cross-driver bit-exact is NOT promised by NVIDIA.",
+  "failure_modes": [
+    "Claiming RTX LIDAR can be bit-exact across GPU/driver versions (it cannot)",
+    "Pinning only physics seed \u2014 RT path still jitters",
+    "Dropping denoiser without warning \u2014 point variance goes UP",
+    "Analytic-lidar swap ignored \u2014 Dimitri loses another week of CI flakes"
+  ]
+}

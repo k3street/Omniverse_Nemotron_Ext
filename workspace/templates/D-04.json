@@ -1,0 +1,13 @@
+{
+  "task_id": "D-04",
+  "goal": "Configure /World/amr/front_cam to match RealSense D435 depth stream for sim-to-real obstacle-layer parity.",
+  "tools_used": ["lookup_product_spec", "configure_camera", "inspect_camera"],
+  "thoughts": "D435 depth datasheet: 848x480 @ 30 Hz, HFOV ~87\u00b0, VFOV ~58\u00b0, stereo IR baseline 50 mm. Isaac Sim models clean depth \u2014 it does NOT replicate the D435's stereo-IR block-matching noise pattern; be explicit about this gap. Color stream is a SEPARATE camera prim (different optical frame, 1280x720 default). REP-103 optical frame: Z forward, X right, Y down.",
+  "code": "spec = lookup_product_spec(product=\"Intel RealSense D435\")\n# Use: depth 848x480 @ 30 Hz, HFOV 87\u00b0, VFOV 58\u00b0, baseline 50 mm, REP-103 optical.\n\nconfigure_camera(\n    prim_path=\"/World/amr/front_cam\",\n    resolution=[848, 480],\n    hfov_deg=87.0,\n    vfov_deg=58.0,\n    fps=30,\n    output_type=\"depth\",\n    frame_id=\"camera_depth_optical_frame\",\n    optical_convention=\"ros_rep103\"               # Z fwd, X right, Y down\n)\n\ninspect_camera(prim_path=\"/World/amr/front_cam\")\n\n# Color stream is a DIFFERENT prim \u2014 do not overload this one:\n# configure_camera(prim_path=\"/World/amr/front_cam_color\", resolution=[1280,720], ...)\n\n# Honest gap: Isaac Sim depth is clean. No stereo-IR block-match noise, no post-3m rolloff.\n# For realism add omni.replicator depth-noise pass OR accept the sim-to-real delta.",
+  "failure_modes": [
+    "Conflating depth optical frame with color optical frame \u2014 TF tree wrong",
+    "Claiming Isaac Sim replicates D435 stereo-IR noise pattern (it does not)",
+    "Putting color + depth on same prim \u2014 only one output_type wins",
+    "Intrinsics hand-computed from HFOV alone \u2014 drops the VFOV / aspect check"
+  ]
+}

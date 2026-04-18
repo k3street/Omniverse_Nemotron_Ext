@@ -1,0 +1,13 @@
+{
+  "task_id": "D-07",
+  "goal": "One-shot PNG capture from /World/amr/rear_fisheye at configured 1920x1080, headless-compatible.",
+  "tools_used": ["inspect_camera", "capture_camera_image"],
+  "thoughts": "capture_camera_image targets the named prim \u2014 does NOT fall back to viewport camera. Headless-safe (no UI render). If image is white: either auto-exposure maxed or camera inside a mesh \u2014 check inspect_camera first. Depth from same prim at same instant needs a second capture call with output_type=depth.",
+  "code": "inspect_camera(prim_path=\"/World/amr/rear_fisheye\")\n# Sanity: HFOV 180, resolution 1920x1080, not occluded by parent mesh.\n\ncapture_camera_image(\n    camera_prim=\"/World/amr/rear_fisheye\",\n    output_path=\"/tmp/rear_fisheye_check.png\",\n    resolution=[1920, 1080],\n    output_type=\"rgb\",\n    wait_for_render=True                          # avoid black frame\n)\n\n# Report: sim time of capture (frame tick), path written.\n# If paired depth wanted, second call with output_type=\"depth\".",
+  "failure_modes": [
+    "Capturing from viewport instead of the named prim",
+    "Black PNG \u2014 wait_for_render not set, renderer not warmed",
+    "White PNG \u2014 auto-exposure or camera inside parent mesh",
+    "Resolution arg ignored because camera was configured at different size"
+  ]
+}

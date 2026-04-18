@@ -1,0 +1,13 @@
+{
+  "task_id": "R-01",
+  "goal": "Identify the Isaac Sim 4.2.0 API change that broke ArticulationAction(joint_indices=...) and give Raj a drop-in migration before his flight.",
+  "tools_used": ["lookup_knowledge", "run_usd_script", "explain_error"],
+  "thoughts": "No speculation — Raj will grep the source if I hallucinate. Pull the current signature from lookup_knowledge, then confirm via run_usd_script that inspects the installed ArticulationAction class in the live Kit process. If unsure, say so and give the exact grep command, not a guess.",
+  "code": "# 1. Pull current signature from docs index\nlookup_knowledge(query=\"ArticulationAction signature Isaac Sim 4.2 migration joint_indices\")\n\n# 2. Verify against installed module (source of truth, no guessing)\nrun_usd_script(\n    description=\"Introspect installed ArticulationAction to confirm kw names\",\n    code=\"\"\"\nimport inspect\nfrom isaacsim.core.utils.types import ArticulationAction\nprint(inspect.signature(ArticulationAction.__init__))\nprint(inspect.getsourcefile(ArticulationAction))\n\"\"\"\n)\n\n# 3. If Raj's error text is ambiguous, decode it\nexplain_error(error_text=\"<PASTED_TRACEBACK>\")\n\n# 4. Deliver old-\u2192new diff. Do NOT monkey-patch for 40 sites; write a\n#    one-line adapter: def make_action(**kw): kw['<NEW_KW>']=kw.pop('joint_indices'); return ArticulationAction(**kw)",
+  "failure_modes": [
+    "Hallucinating a renamed kwarg that does not exist in 4.2.0",
+    "Suggesting a monkey-patch that breaks again in 4.3.0",
+    "Pointing Raj at release notes instead of answering directly",
+    "Confusing ArticulationAction with the deprecated omni.isaac.core variant"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "task_id": "Y-01",
+  "goal": "Diagnose why an MDL clearcoat+anisotropic material lost fidelity on Maya->USD round-trip into Isaac Sim, then rebuild to preserve MDL.",
+  "tools_used": ["list_all_prims", "get_prim_metadata", "create_material", "assign_material", "set_render_mode", "capture_viewport"],
+  "thoughts": "Confirm binding resolves before blaming the exporter. Maya USD often drops MDL clearcoat layer and anisotropy tangents flip under Y-up to Z-up. Rebuild MDL in-place rather than falling back to UsdPreviewSurface (art direction requires MDL fidelity). RTX Interactive path-traced for honest look-dev A/B.",
+  "code": "prims = list_all_prims(type_filter=\"Material\", path_prefix=\"/World/Hero\")\nmeta = get_prim_metadata(path=\"<MATERIAL_PATH>\")\n# inspect shader id + source asset to see if clearcoat network survived\nmat = create_material(\n    path=\"/World/Looks/Hero_Brushed_Aluminum\",\n    shader=\"MDL\",\n    mdl_source=\"<MDL_MODULE>\",\n    params={\n        \"base_color\": \"<RGB>\",\n        \"roughness\": \"<FLOAT>\",\n        \"anisotropy\": \"<FLOAT>\",\n        \"anisotropy_rotation\": \"<RADIANS>\",\n        \"clearcoat_weight\": \"<FLOAT>\",\n        \"clearcoat_roughness\": \"<FLOAT>\"\n    }\n)\nassign_material(prim_path=\"/World/Hero/Body\", material_path=mat.path)\nset_render_mode(mode=\"RTXInteractivePathTraced\")\ncapture_viewport(path=\"<OUT_PNG>\", width=1920, height=1080)",
+  "failure_modes": [
+    "Silently substituting UsdPreviewSurface and calling it 'close enough'",
+    "Missing the Y-up to Z-up tangent rotation that rotated anisotropy 90 degrees",
+    "Claiming MDL clearcoat survived Maya USD export without inspecting the shader network"
+  ]
+}

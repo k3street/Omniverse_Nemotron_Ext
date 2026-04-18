@@ -1,0 +1,12 @@
+{
+  "task_id": "L-07",
+  "goal": "Export just the fixture subtree as a self-contained mm-unit USD for the vendor.",
+  "tools_used": ["list_all_prims", "export_stage", "export_scene_package", "flatten_layers", "open_stage"],
+  "thoughts": "Scope export to /World/Fixture subtree only -- robot must not leak in. Flatten/vendor external references so it opens without Nucleus. Preserve metersPerUnit=0.001 so vendor sees mm. Round-trip verify by opening the exported file.",
+  "code": "prims = list_all_prims(path_prefix=\"/World/Fixture\")\nexport_scene_package(\n    output_path=\"<OUT_DIR>/fixture_for_vendor.usdz\",\n    scope_paths=[\"/World/Fixture\"],\n    flatten_references=True,\n    vendor_nucleus_assets=True,\n    preserve_metersPerUnit=True,\n    include_subtree=True\n)\n# Alternative flat usd:\nexport_stage(\n    output_path=\"<OUT_DIR>/fixture_for_vendor.usd\",\n    root_prim=\"/World/Fixture\",\n    flatten=True\n)\n# Verify:\nverify = open_stage(path=\"<OUT_DIR>/fixture_for_vendor.usd\", read_only=True)\n# Confirm metersPerUnit=0.001 and robot prims absent",
+  "failure_modes": [
+    "Exporting whole stage including robot when only fixture requested",
+    "Leaving Nucleus references intact so vendor can't open the file",
+    "Losing mm units through export with no metersPerUnit preserved"
+  ]
+}

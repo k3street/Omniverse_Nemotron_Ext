@@ -1,0 +1,13 @@
+{
+  "task_id": "J-02",
+  "goal": "Enumerate real scene templates so 10 student pairs each pick a unique term project.",
+  "tools_used": ["list_scene_templates", "load_scene_template", "filter_templates_by_hardware"],
+  "thoughts": "Never invent names. list_scene_templates is the single source of truth. Group output by domain (manipulation / navigation / perception) and tag difficulty. Spot-load two or three to confirm they open. If fewer than 10 unique templates exist, say so and suggest parameterized variants (same template, different robot).",
+  "code": "# 1. Authoritative enumeration \u2014 no hallucination\ntemplates = list_scene_templates()\n\n# 2. Filter by hardware class the students have\nfilter_templates_by_hardware(gpu_tier=\"<UNDERGRAD_LAPTOP_TIER>\")\n\n# 3. Spot-check two templates actually load\nload_scene_template(template_name=\"<SAMPLE_A>\")\nload_scene_template(template_name=\"<SAMPLE_B>\")\n\n# 4. Present as handout:\n# | Template            | Domain        | Difficulty | Out-of-box motion |\n# |---------------------|---------------|------------|-------------------|\n# | <TEMPLATE_NAME>     | manipulation  | beginner   | yes (demo policy) |\n# ...\n\n# If <10 distinct: suggest robot-swap variants (Franka vs UR10) within same scene",
+  "failure_modes": [
+    "Inventing template names not in the live registry",
+    "Dumping raw JSON instead of grouped table",
+    "Two pairs pick same template because no uniqueness check",
+    "Recommending a template that needs cameras to students with iGPU laptops"
+  ]
+}

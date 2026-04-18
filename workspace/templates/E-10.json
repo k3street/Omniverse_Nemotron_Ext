@@ -1,0 +1,13 @@
+{
+  "task_id": "E-10",
+  "goal": "Build a 30-minute loop-safe scripted demo wrapper that resets per cycle, catches exceptions, throttles to real-time, and tolerates slow memory leaks via periodic process restart.",
+  "tools_used": ["set_joint_targets", "set_attribute", "check_physics_health", "lookup_knowledge", "save_delta_snapshot"],
+  "thoughts": "Scripted demo, not RL. Core reliability pattern: (1) per-cycle reset to a known snapshot (saved once at scene-author time), (2) try/except around each cycle with auto-restart (never let the exception surface), (3) kit update-event-stream stepping so motion syncs to the renderer clock (while True: time.sleep(0.1) desyncs). Memory growth from Replicator/texture cache over 30 min is real — schedule a belt-and-braces process restart every N cycles. Disable laptop sleep or the demo dies at minute 15.",
+  "code": "# 1. Save a clean delta snapshot of the scene at authoring time\nsave_delta_snapshot(name=\"demo_t0\", scope=\"/World\")\n\n# 2. Patterns for kit's update event stream (sync to renderer clock)\nlookup_knowledge(query=\"omni.kit.app update event stream time-synced stepping scripted demo loop\")\n\n# 3. Cycle skeleton (sketched; authored in demo_loop.py)\n# def run_cycle():\n#     for wp in WAYPOINTS:\n#         set_joint_targets('<ROBOT_PRIM_PATH>', targets=wp, blocking=True, timeout=<WP_TIMEOUT>)\n#         wait_for_step()      # sync to update-event-stream, NOT time.sleep\n#\n# def main():\n#     i = 0\n#     while True:\n#         try:\n#             restore_delta_snapshot('demo_t0')           # reset each cycle\n#             run_cycle()\n#             set_attribute('/World/Lights/Status', 'inputs:color', (0,1,0))\n#         except Exception as e:\n#             print('cycle', i, 'FAILED:', e)             # log, do NOT crash\n#             continue\n#         i += 1\n#         if i % <RESTART_EVERY> == 0:                    # belt-and-braces\n#             exit(42)                                     # systemd respawn\n\n# 4. Dry-run 5 min and check for leaks / drift\ncheck_physics_health()\n\n# 5. On the demo laptop:\n#    - systemd-inhibit --why='demo' ... OR caffeinate\n#    - disable screen blanking + sleep + network power management\n#    - systemd unit with Restart=always so exit(42) respawns instantly",
+  "failure_modes": [
+    "while True: time.sleep(0.1) — drifts from renderer, motion goes jittery",
+    "No per-cycle reset — boxes end up scattered after 10 cycles, demo looks broken",
+    "Unhandled exception on one cycle kills the whole 30-min loop",
+    "Laptop sleeps at minute 15 — no caffeine/inhibit, customer sees a lock screen"
+  ]
+}

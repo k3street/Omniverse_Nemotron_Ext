@@ -1,0 +1,13 @@
+{
+  "task_id": "S-01",
+  "goal": "Diagnose disconnected TF trees between Isaac Sim and Nav2, fix root-frame mismatch and sim-clock propagation.",
+  "tools_used": ["diagnose_ros2", "show_tf_tree", "configure_ros2_time", "fix_ros2_qos", "lookup_knowledge"],
+  "thoughts": "Two disconnected TF forests is almost always a root-frame naming issue (sim root='world', Nav2 root='map') plus sim-time drift across lifecycle nodes. Diagnose first (show_tf_tree), then decide: rename sim root vs publish static world->map TF. use_sim_time must be set on every lifecycle node individually — inheritance through launch args is unreliable. Never disable /tf_static.",
+  "code": "# 1. Inspect current TF state\ntree = show_tf_tree(include_static=True)\nif tree.roots == [\"<SIM_ROOT>\", \"<NAV2_ROOT>\"]:\n    # Two-root case confirmed\n    diag = diagnose_ros2(focus=\"tf\", namespace=\"<NAMESPACE>\")\n\n# 2. Either rename sim root OR publish static transform\n# Preferred: static world->map bridge\nros2_publish_sequence(\n    topic=\"/tf_static\",\n    msg_type=\"tf2_msgs/msg/TFMessage\",\n    messages=[{\"transforms\": [{\"header\": {\"frame_id\": \"<SIM_ROOT>\"},\n                                 \"child_frame_id\": \"map\",\n                                 \"transform\": {\"translation\": [0,0,0], \"rotation\": [0,0,0,1]}}]}],\n)\n\n# 3. Fix sim-time propagation — must be per-lifecycle-node\nconfigure_ros2_time(use_sim_time=True, nodes=[\"<NAV2_NODE_1>\", \"<NAV2_NODE_2>\"])\n\n# 4. Verify\nfix_ros2_qos(topic=\"/tf\", reliability=\"reliable\", durability=\"volatile\")\nshow_tf_tree(include_static=True)  # expect single connected tree",
+  "failure_modes": [
+    "assistant disables /tf_static to 'simplify' tree",
+    "assistant sets use_sim_time only on top-level launch arg",
+    "assistant fabricates a non-existent Nav2 lifecycle node name",
+    "assistant confuses ROS clock with sim clock"
+  ]
+}

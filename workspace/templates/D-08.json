@@ -1,0 +1,13 @@
+{
+  "task_id": "D-08",
+  "goal": "Compare camera sun-glare vs LIDAR returns at 07:00 outdoor loading yard; honest trade-off with sim-gap caveat.",
+  "tools_used": ["inspect_camera", "capture_camera_image", "lookup_product_spec", "run_stage_analysis"],
+  "thoughts": "Sim sun-glare in Isaac Sim is a LENS-FLARE artifact, not a real CMOS saturation model \u2014 state this. LIDAR (905 nm and 1550 nm) unaffected by visible sunlight except for retro-reflectors; Isaac Sim does NOT differentiate wavelengths in the RTX lidar model. Compute: camera 1080p@30 ~ 60 MB/s uncompressed; 32-beam lidar ~ 655k pts/s. Answer 'not unconditionally better.'",
+  "code": "# 1. Snapshot the glare case\ninspect_camera(prim_path=\"/World/amr/front_cam\")\ncapture_camera_image(\n    camera_prim=\"/World/amr/front_cam\",\n    output_path=\"<GLARE_PNG>\",\n    output_type=\"rgb\"\n)\n\n# 2. LIDAR point density in the same field\nrun_stage_analysis()\n# Inspect /World/amr/.../lidar return count in the front sector.\n\n# 3. Sensor-choice tradeoff inputs\nlookup_product_spec(product=\"<905nm_vs_1550nm_LIDAR>\")\n\n# Honest reporting:\n# - Sim glare is lens-flare overlay, not CMOS saturation. sim-to-real gap.\n# - Isaac Sim RTX LIDAR does not model 905 vs 1550 nm differently.\n# - Camera 1080p@30: ~60 MB/s raw; LIDAR 32-beam: ~655k pts/s, much lighter.\n# - LIDAR sees through glare; camera degrades \u2014 but LIDAR is sparse and misses texture/color classes.\n# - Verdict: retain fusion; do not drop camera solely on a sim artifact.",
+  "failure_modes": [
+    "Claiming sim perfectly models CMOS saturation / bloom",
+    "Claiming sim differentiates 905 vs 1550 nm LIDAR behavior",
+    "Declaring LIDAR unconditionally superior \u2014 ignores color/texture loss",
+    "Quoting sim FPS as proof \u2014 real driver has different compute budget"
+  ]
+}

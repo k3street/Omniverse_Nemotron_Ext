@@ -1,0 +1,13 @@
+{
+  "task_id": "M-02",
+  "goal": "Diagnose an overnight PhysX segfault at step ~3000 and pinpoint the custom 12k-face gripper as the likely cause, with a dual UI+Python fix path.",
+  "tools_used": ["get_console_errors", "diagnose_physics_error", "find_prims_by_schema", "run_usd_script", "lookup_knowledge"],
+  "thoughts": "Stack trace lacks a prim path, so correlate the error with recent scene changes: the gripper mesh (12k faces, convex hull) violates PhysX's ~255-vertex hull limit. Fix requires BOTH the per-Mesh UsdPhysics approximation attr AND the CollisionAPI approximation — a common trap where one gets set and the other stays stale. Never invent physx_validate_asset.",
+  "code": "# 1. Pull the raw error + stage context\nget_console_errors(limit=50)\ndiagnose_physics_error(error_text=\"<PASTE_PHYSX_SEGFAULT_LOG>\")\n\n# 2. Enumerate collision-bearing prims; the custom gripper is the recent delta\nfind_prims_by_schema(schema=\"UsdPhysics.MeshCollisionAPI\")\n\n# 3. Dump approximation + face count so 12k-face convex-hull stands out\nrun_usd_script(script=\"\"\"\nfrom pxr import Usd, UsdGeom, UsdPhysics\nstage = omni.usd.get_context().get_stage()\nfor p in stage.Traverse():\n    if p.HasAPI(UsdPhysics.MeshCollisionAPI):\n        approx = UsdPhysics.MeshCollisionAPI(p).GetApproximationAttr().Get()\n        faces = len((UsdGeom.Mesh(p).GetFaceVertexCountsAttr().Get() or []))\n        if approx == 'convexHull' and faces > 255:\n            print('SUSPECT', p.GetPath(), faces)\n\"\"\")\n\n# 4. Apply convex decomposition on BOTH the mesh approx and CollisionAPI\nrun_usd_script(script=\"\"\"\nfrom pxr import Usd, UsdPhysics\nstage = omni.usd.get_context().get_stage()\nprim = stage.GetPrimAtPath('<GRIPPER_MESH_PATH>')\n# per-Mesh approximation\nUsdPhysics.MeshCollisionAPI.Apply(prim).GetApproximationAttr().Set('convexDecomposition')\n# CollisionAPI enabled flag (the secondary setting)\nUsdPhysics.CollisionAPI.Apply(prim).GetCollisionEnabledAttr().Set(True)\n\"\"\")\n\n# 5. Confirm fix path aligns with docs, not a guess\nlookup_knowledge(query=\"PhysX convex hull 255 vertex limit convex decomposition Isaac Sim\")",
+  "failure_modes": [
+    "Setting MeshCollisionAPI.approximation alone without CollisionAPI flag leaves stale collider",
+    "Asking LLM to call physx_validate_asset — that function does not exist, do not hallucinate",
+    "convexHull compiles but segfaults at runtime when faces >> 255 — no import-time warning",
+    "Log without prim path forces correlation by recent-change timestamp, not string match"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "task_id": "R-05",
+  "goal": "Package scene + assets as a self-contained deliverable the client can open without unresolved-reference hell.",
+  "tools_used": ["run_stage_analysis", "export_scene_package"],
+  "thoughts": "Last handoff broke on absolute paths. export_scene_package flattens refs to relative. Pre-audit with run_stage_analysis so Raj knows what is bundled vs what the client must install (Nucleus assets, custom extensions). Produce .usdz or .zip. Version-stamp: 5.1.0 scene opens in 5.0.0 only if no 5.1-specific schemas were used.",
+  "code": "# 1. See what external refs exist\nrun_stage_analysis()\n\n# 2. Pack everything into a single deliverable\nexport_scene_package(\n    stage_path=\"<STAGE_USD>\",            # /home/raj/client_project/stage.usd\n    output_path=\"<DELIVERABLE_ZIP>\",     # /home/raj/deliveries/client_v3.zip\n    format=\"<zip|usdz>\",\n    rewrite_refs_relative=True,\n    include_textures=<True|False>,        # False to shrink; client must re-link\n    isaac_sim_version=\"<5.1.0>\"\n)\n\n# Verify: unzip to /tmp, grep for absolute paths before emailing\n# run_usd_script to assert no path starts with '/home/raj'",
+  "failure_modes": [
+    "Absolute paths leak through custom python modules, not USD refs",
+    "Nucleus omniverse:// URIs not resolvable on client's workstation",
+    "5.1-only schema (e.g. new PhysX feature) silently fails in 5.0.0",
+    "Stripped textures \u2014 client sees pink material and thinks it is broken"
+  ]
+}

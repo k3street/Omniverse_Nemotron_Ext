@@ -1,0 +1,13 @@
+{
+  "task_id": "M-01",
+  "goal": "Import a Franka Panda URDF into Isaac Sim 5.x and audit its collision meshes for oversized hulls, missing links, or wrong-axis joints.",
+  "tools_used": ["import_robot", "verify_import", "run_usd_script", "lookup_knowledge"],
+  "thoughts": "Maya is programmatic: prefer Python over GUI. import_robot wraps isaacsim.asset.importer.urdf (not the deprecated omni.isaac.urdf). Follow with verify_import because URDF imports routinely drop joint limits and produce single convex hulls on high-face meshes. A run_usd_script pass enumerates UsdPhysics.MeshCollisionAPI approximation per link so the 12,000-face gripper is visibly flagged.",
+  "code": "# 1. Import URDF via Isaac Sim 5.x importer\nimport_robot(\n    urdf_path=\"<ABSOLUTE_URDF_PATH>\",        # must be absolute, e.g. /home/maya/robots/franka_panda/panda.urdf\n    dest_path=\"<STAGE_PRIM_PATH>\",             # e.g. /World/Franka\n    fix_base=True,\n    merge_fixed_joints=False,\n    convex_decomposition=False                 # keep default hulls, we audit next\n)\n\n# 2. Verify joints, mass, collision approximations\nverify_import(prim_path=\"<STAGE_PRIM_PATH>\")\n\n# 3. Per-link collision audit\nrun_usd_script(script=\"\"\"\nfrom pxr import Usd, UsdGeom, UsdPhysics\nstage = omni.usd.get_context().get_stage()\nfor prim in stage.Traverse():\n    if prim.HasAPI(UsdPhysics.MeshCollisionAPI):\n        api = UsdPhysics.MeshCollisionAPI(prim)\n        approx = api.GetApproximationAttr().Get()\n        mesh = UsdGeom.Mesh(prim)\n        face_count = len(mesh.GetFaceVertexCountsAttr().Get() or [])\n        bbox = UsdGeom.Imageable(prim).ComputeWorldBound(0, 'default').GetRange()\n        print(prim.GetPath(), approx, 'faces=', face_count, 'size=', bbox.GetSize())\n\"\"\")\n\n# 4. If a link reports >255-face convex hull, flag it (PhysX limit) and consult docs\nlookup_knowledge(query=\"convex decomposition vs convex hull PhysX Isaac Sim 5 URDF\")",
+  "failure_modes": [
+    "URDF path must be absolute, not ~-relative — home expansion fails inside kit",
+    "Deprecated 4.x omni.isaac.urdf calls break silently; always use isaacsim.asset.importer.urdf",
+    "Single convex hull on >255-face mesh compiles but crashes at PhysX simulate",
+    "Joint limits in URDF often omitted — verify_import must run before any training"
+  ]
+}

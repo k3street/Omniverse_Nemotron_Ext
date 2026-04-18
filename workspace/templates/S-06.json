@@ -1,0 +1,12 @@
+{
+  "task_id": "S-06",
+  "goal": "Smoke-test navigate_to on Nova Carter and confirm arrival pose without involving Nav2.",
+  "tools_used": ["scene_summary", "navigate_to", "get_world_transform", "run_usd_script"],
+  "thoughts": "Use the sim-side go-to-pose primitive — not Nav2, not a full planner. The primitive is straight-line-ish with the built-in diff-drive controller; it does NOT path-plan around columns. Be upfront: if Sarah's goal is behind an obstacle she needs her own planner publishing /cmd_vel (which is fully supported — just don't call navigate_to and external /cmd_vel at the same time). Verify arrival by reading world transform.",
+  "code": "# 1. Confirm scene + robot present\nsummary = scene_summary()\n\n# 2. Dispatch a reachable goal pose\nresult = navigate_to(\n    robot_prim=\"/World/Carter_01\",\n    target_xy=[<GOAL_X>, <GOAL_Y>],\n    target_yaw=<GOAL_YAW_RAD>,\n    max_linear_speed=<MAX_LIN>,\n    max_angular_speed=<MAX_ANG>,\n    timeout_s=<TIMEOUT_S>,\n)\n\n# 3. Verify arrival (not just trust the return code)\npose = get_world_transform(prim_path=\"/World/Carter_01/chassis_link\")\n# Log delta so Sarah can eyeball it\nrun_usd_script(code=\"print('delta_xy', <GOAL_X>-pose.translation[0], <GOAL_Y>-pose.translation[1])\")\n\n# If Sarah wants her own planner: do NOT call navigate_to, just let the\n# ROS2 /cmd_vel subscriber drive the diff-drive controller directly.",
+  "failure_modes": [
+    "assistant claims navigate_to does full planning around obstacles",
+    "assistant forgets to verify arrival pose",
+    "assistant uses navigate_to and external /cmd_vel simultaneously (conflict)"
+  ]
+}

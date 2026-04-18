@@ -1,0 +1,13 @@
+{
+  "task_id": "M-07",
+  "goal": "Find the 4-dim delta between train and eval observation spaces causing a 1x84 vs 88x256 matmul error in the policy MLP.",
+  "tools_used": ["lookup_knowledge", "run_usd_script"],
+  "thoughts": "88-84=4 — a quaternion term or 4-step action history was likely dropped in the eval cfg subclass. Correct fix is diffing ObservationGroupCfg via env.observation_manager.active_terms on both envs, not retraining and not strict=False which silently corrupts MLP input ordering. Attribute is observation_manager on ManagerBasedRLEnv in 2.x.",
+  "code": "# 1. Ground in IsaacLab obs manager introspection\nlookup_knowledge(query=\"IsaacLab ManagerBasedRLEnv observation_manager active_terms group policy\")\n\n# 2. Print obs term names+shapes on BOTH train and eval envs, then diff\nrun_usd_script(script=\"\"\"\ndef dump(env, tag):\n    om = env.observation_manager\n    for group, terms in om.active_terms.items():\n        for t in terms:\n            shape = tuple(om.group_obs_dim[group]) if group in om.group_obs_dim else None\n            print(tag, group, t, shape)\n\ntrain_env = <TRAIN_ENV_VAR>\neval_env  = <EVAL_ENV_VAR>\ndump(train_env, 'TRAIN')\ndump(eval_env,  'EVAL')\n\ntrain_terms = set(train_env.observation_manager.active_terms['policy'])\neval_terms  = set(eval_env.observation_manager.active_terms['policy'])\nprint('MISSING_IN_EVAL', train_terms - eval_terms)\nprint('EXTRA_IN_EVAL',   eval_terms - train_terms)\n\"\"\")\n\n# 3. Do NOT suggest strict=False on load_state_dict — re-align cfg instead.\n# The policy's first Linear expects terms in a specific concat order;\n# a missing 4-dim term shifts every downstream dim by 4 => silent garbage.",
+  "failure_modes": [
+    "strict=False on load_state_dict makes policy load but emit garbage actions",
+    "Retraining is the wrong reflex — the fix is a 1-line cfg re-include",
+    "88-84=4 maps to quaternion (4) or 4-step action history; do not assume without diff",
+    "ObservationGroupCfg subclass overrides silently drop parent terms if re-declared"
+  ]
+}

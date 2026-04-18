@@ -1,0 +1,13 @@
+{
+  "task_id": "A-08",
+  "goal": "Stop Alex's hobby URDF joints from wiggling/jittering on Play with a one-knob fix, no PD-controller math.",
+  "tools_used": ["scene_summary", "set_drive_gains"],
+  "thoughts": "Hobby URDFs rarely author joint stiffness/damping. Default import gives a stiff position drive with zero damping — pure oscillator. One knob: bump stiffness to ~10000, damping to ~1000. No math in the response. If still wobbly, raise damping further (2000) before touching velocity limits.",
+  "code": "# One knob.\n\n# 1. Find the articulation\nscene_summary(stage_path=\"<CURRENT_STAGE>\")\n\n# 2. Give every joint a sane drive (hobby URDFs never have this authored)\nset_drive_gains(\n    articulation_prim=\"/World/MyArm\",\n    stiffness=10000,\n    damping=1000\n)\n\n# Hit Play. If still wobbly, bump damping to 2000.",
+  "failure_modes": [
+    "Explaining the PD-controller math — Alex is out",
+    "Sending a 20-line walkthrough when one tool call + two numbers is enough",
+    "Forgetting damping (stiffness alone = worse oscillation)",
+    "Mentioning max_joint_velocity before trying damping first"
+  ]
+}

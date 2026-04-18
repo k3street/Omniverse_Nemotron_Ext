@@ -1,0 +1,13 @@
+{
+  "task_id": "J-03",
+  "goal": "Explain ~80-prim warehouse scene to a second-year undergrad in grouped, narrated form.",
+  "tools_used": ["run_stage_analysis", "scene_summary", "find_prims_by_schema"],
+  "thoughts": "Raw prim list overwhelms. Group into Environment / Robots / Sensors / Lights. One pedagogic sentence per group with one concrete example. Use find_prims_by_schema to identify the driveable robot (UsdPhysics.ArticulationRootAPI). Highlight one 'teachable moment' (e.g. shelves are instanced \u2014 why USD composition matters).",
+  "code": "# 1. Stage-wide summary\nscene_summary()\nrun_stage_analysis()\n\n# 2. Identify the driveable robot for the \"point to it\" question\nfind_prims_by_schema(schema_name=\"PhysicsArticulationRootAPI\")\n\n# 3. Group output for handout:\n# Environment: /World/Warehouse/Floor, /World/Warehouse/Shelves (instanced x12)\n#   \u2192 \"The floor is a single plane. Shelves are instanced \u2014 one asset, many copies.\"\n# Robots: /World/amr_01 (ArticulationRoot) \u2192 this is what moves\n# Sensors: /World/amr_01/front_cam, /World/amr_01/lidar\n# Lights: /World/DomeLight (ambient), /World/DistantLight (sun)\n\n# Teachable moment: point out composition \u2014 shelves are refs, not copies.",
+  "failure_modes": [
+    "Dumping 80 prim paths with no grouping",
+    "Skipping the articulation identification \u2014 student still asks which robot moves",
+    "Using Isaac Sim jargon (Xform, API schema) without one-line definitions",
+    "Missing that sensors are under the robot, not at world root"
+  ]
+}

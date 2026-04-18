@@ -1,0 +1,13 @@
+{
+  "task_id": "E-09",
+  "goal": "Give Erik a grounded investor-ready answer on '1000 robots in one scene' — draw the line between 4096 parallel single-agent envs and true multi-agent interaction in one scene.",
+  "tools_used": ["lookup_knowledge", "check_physics_health", "lookup_product_spec"],
+  "thoughts": "The honest distinction: IsaacLab 4096 envs = 4096 independent single-robot sims (routine per A100), NOT 4096 agents interacting in one scene. True multi-agent in one scene hits contact-pair explosion, articulation-count solver limits, and requires synchronized comms simulation. Realistic today: tens of interacting humanoids per scene. Fleet coordination pitch: hierarchical — local policy per robot (parallel train), global coordinator (warehouse planner, maybe not RL at all). Reject the 'thousands of humanoids per scene' marketing.",
+  "code": "# 1. Cite the real IsaacLab parallel-env vs multi-agent distinction\nlookup_knowledge(query=\"IsaacLab parallel envs replicate_physics multi-agent interaction single scene\")\n\n# 2. Pull PhysX articulation scaling caps to ground the throughput claim\nlookup_product_spec(query=\"PhysX 5 GPU articulation count limit contact pair scaling RTX A100\")\n\n# 3. Benchmark scaling on the current single-robot scene before quoting numbers\ncheck_physics_health()\n\n# Investor-ready framing (paste into deck):\n#  - Parallel TRAINING: 4096 independent single-G1 envs per A100, routine today\n#  - Multi-agent in ONE scene (robots see/interact): tens today, research-bet for hundreds\n#  - Fleet coordination path: hierarchical -- local RL policy (parallel train) +\n#    warehouse-level planner (maybe classical OR-tools, maybe not RL)\n#  - Honest blockers: contact-pair explosion, articulation solver partitioning, network comms sim\n# Language Erik can use: 'thousands of parallel single-agent training envs today; tens of\n# interacting agents per scene production-grade; hundreds is our research target.'\n# Do NOT say 'up to thousands of humanoids in one scene' -- that is the competitor-claim trap.",
+  "failure_modes": [
+    "Conflating 4096 parallel envs with 4096 interacting agents — technically false",
+    "Quoting a competitor's '10000 humanoids' number uncritically — they mean kinematic-only",
+    "Promising 1000 in-scene robots on next-quarter roadmap — over-promising the investor",
+    "No mention of the hierarchical pattern — leaves Erik without a credible architecture story"
+  ]
+}
