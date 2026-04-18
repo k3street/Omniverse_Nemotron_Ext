@@ -1601,6 +1601,37 @@ _RAW_TEST_VECTORS = [
         {"checkpoint": "/models/groot.pt", "target_device": "x86_rtx4090", "inference_budget_ms": 50},
         ["x86_rtx4090", "budget_ms", "50"],
     ),
+    # ── Phase 5 Addendum: create_broken_scene (6 fault types) ─────────────
+    (
+        "create_broken_scene",
+        {"fault_type": "missing_collision"},
+        ["FAULT", "CollisionAPI", "FallingCube"],
+    ),
+    (
+        "create_broken_scene",
+        {"fault_type": "zero_mass"},
+        ["MassAPI", "0.0", "ZeroMassBody"],
+    ),
+    (
+        "create_broken_scene",
+        {"fault_type": "wrong_scale"},
+        ["100", "HugeBox"],
+    ),
+    (
+        "create_broken_scene",
+        {"fault_type": "inverted_joint"},
+        ["RevoluteJoint", "Z"],
+    ),
+    (
+        "create_broken_scene",
+        {"fault_type": "no_physics_scene"},
+        ["RigidBodyAPI", "no_physics_scene"],
+    ),
+    (
+        "create_broken_scene",
+        {"fault_type": "inf_joint_limits"},
+        ["inf", "LowerLimitAttr"],
+    ),
 ]
 
 

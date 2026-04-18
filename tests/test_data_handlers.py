@@ -58,6 +58,7 @@ except ImportError:
 
 
 
+
 class TestLookupProductSpec:
     """Test the sensor spec lookup handler."""
 

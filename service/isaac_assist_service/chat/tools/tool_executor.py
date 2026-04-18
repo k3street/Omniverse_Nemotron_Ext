@@ -26996,3 +26996,139 @@ async def _handle_analyze_checkpoint(args: Dict) -> Dict:
 
 
 DATA_HANDLERS["analyze_checkpoint"] = _handle_analyze_checkpoint
+
+
+# ── Phase 5 Addendum — Pedagogy & Uncertainty ──────────────────────────────
+
+_BROKEN_SCENE_FAULTS = {
+    "missing_collision": {
+        "what_breaks": "Ground plane has no CollisionAPI — robot falls through floor",
+        "learning_goal": "Physics basics — CollisionAPI must be applied for objects to interact",
+    },
+    "zero_mass": {
+        "what_breaks": "Robot link has mass=0 — articulation behaves erratically",
+        "learning_goal": "Inertia understanding — every dynamic body needs positive mass",
+    },
+    "wrong_scale": {
+        "what_breaks": "Object imported at 100x scale (cm vs m mismatch)",
+        "learning_goal": "USD units — metersPerUnit must match between asset and stage",
+    },
+    "inverted_joint": {
+        "what_breaks": "One joint axis flipped — robot moves opposite direction",
+        "learning_goal": "URDF import debugging — axis conventions can flip",
+    },
+    "no_physics_scene": {
+        "what_breaks": "Missing PhysicsScene prim — no physics simulation runs",
+        "learning_goal": "Scene setup — every physics-enabled stage needs a PhysicsScene",
+    },
+    "inf_joint_limits": {
+        "what_breaks": "Joint limits set to ±inf — arm can move through itself or environment",
+        "learning_goal": "URDF best practices — always set finite joint limits",
+    },
+}
+
+
+def _gen_create_broken_scene(args: Dict) -> str:
+    """Generate code that creates a scene with a specific, diagnosable fault for teaching."""
+    fault_type = args.get("fault_type", "missing_collision")
+    scene_name = args.get("scene_name", "BrokenScene")
+
+    if fault_type not in _BROKEN_SCENE_FAULTS:
+        raise ValueError(f"Unknown fault_type: {fault_type}. Valid: {list(_BROKEN_SCENE_FAULTS.keys())}")
+
+    fault = _BROKEN_SCENE_FAULTS[fault_type]
+    scene_path = f"/World/{scene_name}"
+
+    physics_scene_code = (
+        ""
+        if fault_type == "no_physics_scene"
+        else "if not stage.GetPrimAtPath('/World/PhysicsScene'):\n    UsdPhysics.Scene.Define(stage, '/World/PhysicsScene')"
+    )
+
+    if fault_type == "missing_collision":
+        fault_code = f"""\
+ground = UsdGeom.Cube.Define(stage, '{scene_path}/Ground')
+ground.AddTranslateOp().Set(Gf.Vec3d(0, 0, -0.05))
+ground.AddScaleOp().Set(Gf.Vec3f(5, 5, 0.05))
+# FAULT: NO CollisionAPI applied — the ground will not collide with anything
+# UsdPhysics.CollisionAPI.Apply(ground.GetPrim())  # THIS LINE DELIBERATELY MISSING
+
+falling = UsdGeom.Cube.Define(stage, '{scene_path}/FallingCube')
+falling.AddTranslateOp().Set(Gf.Vec3d(0, 0, 2.0))
+falling.AddScaleOp().Set(Gf.Vec3f(0.1, 0.1, 0.1))
+UsdPhysics.RigidBodyAPI.Apply(falling.GetPrim())
+UsdPhysics.CollisionAPI.Apply(falling.GetPrim())
+"""
+    elif fault_type == "zero_mass":
+        fault_code = f"""\
+body = UsdGeom.Cube.Define(stage, '{scene_path}/ZeroMassBody')
+body.AddTranslateOp().Set(Gf.Vec3d(0, 0, 1))
+UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+UsdPhysics.CollisionAPI.Apply(body.GetPrim())
+mass_api = UsdPhysics.MassAPI.Apply(body.GetPrim())
+mass_api.CreateMassAttr().Set(0.0)  # FAULT: zero mass causes PhysX NaN explosion
+"""
+    elif fault_type == "wrong_scale":
+        fault_code = f"""\
+# FAULT: object scaled 100x (cm interpreted as m)
+big = UsdGeom.Cube.Define(stage, '{scene_path}/HugeBox')
+big.AddTranslateOp().Set(Gf.Vec3d(0, 0, 50))
+big.AddScaleOp().Set(Gf.Vec3f(100, 100, 100))
+UsdPhysics.RigidBodyAPI.Apply(big.GetPrim())
+UsdPhysics.CollisionAPI.Apply(big.GetPrim())
+"""
+    elif fault_type == "inverted_joint":
+        fault_code = f"""\
+base = UsdGeom.Cube.Define(stage, '{scene_path}/Base')
+base.AddTranslateOp().Set(Gf.Vec3d(0, 0, 0.5))
+arm = UsdGeom.Cube.Define(stage, '{scene_path}/Arm')
+arm.AddTranslateOp().Set(Gf.Vec3d(0.6, 0, 0.5))
+joint = UsdPhysics.RevoluteJoint.Define(stage, '{scene_path}/Joint')
+joint.CreateBody0Rel().SetTargets(['{scene_path}/Base'])
+joint.CreateBody1Rel().SetTargets(['{scene_path}/Arm'])
+joint.CreateAxisAttr().Set('Z')  # FAULT: should be Y for typical hinge
+"""
+    elif fault_type == "no_physics_scene":
+        fault_code = f"""\
+# FAULT: PhysicsScene prim deliberately not created — no physics will run
+body = UsdGeom.Cube.Define(stage, '{scene_path}/Cube')
+body.AddTranslateOp().Set(Gf.Vec3d(0, 0, 2))
+UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+UsdPhysics.CollisionAPI.Apply(body.GetPrim())
+"""
+    else:  # inf_joint_limits
+        fault_code = f"""\
+base = UsdGeom.Cube.Define(stage, '{scene_path}/Base')
+arm = UsdGeom.Cube.Define(stage, '{scene_path}/Arm')
+arm.AddTranslateOp().Set(Gf.Vec3d(0.5, 0, 0))
+joint = UsdPhysics.RevoluteJoint.Define(stage, '{scene_path}/Joint')
+joint.CreateBody0Rel().SetTargets(['{scene_path}/Base'])
+joint.CreateBody1Rel().SetTargets(['{scene_path}/Arm'])
+joint.CreateAxisAttr().Set('Y')
+joint.CreateLowerLimitAttr().Set(float('-inf'))  # FAULT: ±inf limits
+joint.CreateUpperLimitAttr().Set(float('inf'))
+"""
+
+    return f"""\
+# Broken scene: {fault_type}
+# What breaks: {fault['what_breaks']}
+# Learning goal: {fault['learning_goal']}
+import omni.usd
+from pxr import UsdGeom, UsdPhysics, Gf
+
+stage = omni.usd.get_context().get_stage()
+scope = UsdGeom.Xform.Define(stage, '{scene_path}')
+
+{physics_scene_code}
+
+{fault_code}
+
+print(f"Created broken scene: {scene_path}")
+print(f"Fault type: {fault_type}")
+print(f"What's wrong: {fault['what_breaks']}")
+print(f"Learning goal: {fault['learning_goal']}")
+print(f"Hint: students should diagnose this without being told the answer.")
+"""
+
+
+CODE_GEN_HANDLERS["create_broken_scene"] = _gen_create_broken_scene
