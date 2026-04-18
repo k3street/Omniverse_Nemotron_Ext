@@ -1258,6 +1258,25 @@ _TEST_VECTORS = [
         {"min_per_class": 2, "max_retries": 5, "classes": ["apple", "orange"]},
         ["MIN_PER_CLASS = 2", "_class_counts", "class_balance_gate"],
     ),
+    # ─── Enterprise Scale Addendum (E.4 / E.6) ───────────────────────────────
+    (
+        "batch_delete_prims",
+        {"prim_paths": ["/World/A", "/World/B", "/World/C"]},
+        ["Sdf.BatchNamespaceEdit", "/World/A", "/World/C"],
+    ),
+    (
+        "batch_set_attributes",
+        {"changes": [
+            {"prim_path": "/World/A", "attr_name": "visibility", "value": "invisible"},
+            {"prim_path": "/World/B", "attr_name": "radius", "value": 0.25},
+        ]},
+        ["Sdf.ChangeBlock", "visibility", "radius"],
+    ),
+    (
+        "activate_area",
+        {"prim_scope": "/World/Cell_A"},
+        ["SetActive(True)", "SetActive(False)", "/World/Cell_A"],
+    ),
 ]
 
 
