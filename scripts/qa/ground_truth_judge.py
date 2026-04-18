@@ -220,7 +220,19 @@ Respond with ONLY this JSON (no markdown fences):
         # partially-formed JSON. Gemini sometimes truncates mid-string and the
         # strict parser fails; the answer we need is usually intact.
         import re as _re
-        fallback = {"parse_error": str(e), "raw": raw[:1200]}
+        # Default to False explicitly so truncation-induced missing fields
+        # fail closed instead of defaulting to falsy-but-silent. A truncated
+        # Gemini response that lost the `"real_success": true|false` line
+        # should not look identical to an unambiguous False — both now set
+        # the key, but the parse_error signals that the absence may be a
+        # truncation artifact.
+        fallback = {
+            "parse_error": str(e),
+            "raw": raw[:1200],
+            "real_success": False,
+            "goal_achieved": False,
+            "scene_matched_criterion": False,
+        }
         for field in ("real_success", "goal_achieved", "scene_matched_criterion"):
             m = _re.search(rf'"{field}"\s*:\s*(true|false)', raw)
             if m:
