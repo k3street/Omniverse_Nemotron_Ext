@@ -648,6 +648,71 @@ _TEST_VECTORS = [
         },
         ["yaml.dump", "isaac_grasp", "gripper_offset", "approach_direction", "grasp_force"],
     ),
+    # ── Phase 8D: Robot Setup Suite ─────────────────────────────────────────
+    (
+        "robot_wizard",
+        {
+            "asset_path": "/home/user/robots/franka.urdf",
+            "robot_type": "manipulator",
+        },
+        ["import_urdf", "ImportConfig", "Kp=1000", "Kd=100", "CollisionAPI", "convex"],
+    ),
+    (
+        "robot_wizard",
+        {
+            "asset_path": "/assets/carter.usd",
+            "robot_type": "mobile",
+            "drive_stiffness": 300,
+            "drive_damping": 30,
+        },
+        ["AddReference", "carter.usd", "Kp=300", "Kd=30", "CollisionAPI"],
+    ),
+    (
+        "tune_gains",
+        {
+            "articulation_path": "/World/Franka",
+            "method": "manual",
+            "joint_name": "panda_joint1",
+            "kp": 500,
+            "kd": 50,
+        },
+        ["DriveAPI", "StiffnessAttr", "DampingAttr", "panda_joint1", "500", "50"],
+    ),
+    (
+        "tune_gains",
+        {
+            "articulation_path": "/World/Franka",
+            "method": "step_response",
+            "test_mode": "step",
+        },
+        ["GainTuner", "GainsTestMode.STEP", "initialize_gains_test", "compute_gains_test_error_terms", "pos_rmse", "vel_rmse"],
+    ),
+    (
+        "assemble_robot",
+        {
+            "base_path": "/World/Franka",
+            "attachment_path": "/World/Gripper",
+            "base_mount": "panda_hand",
+            "attach_mount": "tool_base",
+        },
+        ["RobotAssembler", "assemble(", "panda_hand", "tool_base", "single_robot"],
+    ),
+    (
+        "configure_self_collision",
+        {
+            "articulation_path": "/World/Franka",
+            "mode": "enable",
+        },
+        ["PhysxArticulationAPI", "EnabledSelfCollisionsAttr", "True"],
+    ),
+    (
+        "configure_self_collision",
+        {
+            "articulation_path": "/World/Franka",
+            "mode": "auto",
+        },
+        ["auto", "default"],
+    ),
     # ── Phase 8B: Motion Policy, IK ──────────────────────────────────────────
     (
         "set_motion_policy",
@@ -861,6 +926,77 @@ class TestCodeGenEdgeCases:
         )
         _assert_valid_python(code, "configure_camera")
         assert "UsdGeom.Camera" in code
+
+
+    # ── Phase 8D edge cases ────────────────────────────────────────────────
+
+    def test_robot_wizard_humanoid_defaults(self):
+        """Humanoid type should use stiffness=800, damping=80."""
+        code = CODE_GEN_HANDLERS["robot_wizard"]({
+            "asset_path": "/robots/h1.usd",
+            "robot_type": "humanoid",
+        })
+        _assert_valid_python(code, "robot_wizard")
+        assert "Kp=800" in code
+        assert "Kd=80" in code
+
+    def test_robot_wizard_custom_overrides(self):
+        """Custom stiffness/damping should override type defaults."""
+        code = CODE_GEN_HANDLERS["robot_wizard"]({
+            "asset_path": "/robots/franka.urdf",
+            "robot_type": "manipulator",
+            "drive_stiffness": 2000,
+            "drive_damping": 200,
+        })
+        _assert_valid_python(code, "robot_wizard")
+        assert "Kp=2000" in code
+        assert "Kd=200" in code
+        assert "import_urdf" in code
+
+    def test_tune_gains_manual_all_joints(self):
+        """When no joint_name given, should iterate all descendants."""
+        code = CODE_GEN_HANDLERS["tune_gains"]({
+            "articulation_path": "/World/Robot",
+            "method": "manual",
+            "kp": 750,
+            "kd": 75,
+        })
+        _assert_valid_python(code, "tune_gains")
+        assert "GetAllDescendants" in code
+        assert "750" in code
+        assert "75" in code
+
+    def test_tune_gains_sinusoidal_mode(self):
+        """Step response with sinusoidal test mode."""
+        code = CODE_GEN_HANDLERS["tune_gains"]({
+            "articulation_path": "/World/Robot",
+            "method": "step_response",
+            "test_mode": "sinusoidal",
+        })
+        _assert_valid_python(code, "tune_gains")
+        assert "GainsTestMode.SINUSOIDAL" in code
+
+    def test_configure_self_collision_disable(self):
+        """Disable mode should set enabledSelfCollisions=False."""
+        code = CODE_GEN_HANDLERS["configure_self_collision"]({
+            "articulation_path": "/World/Robot",
+            "mode": "disable",
+        })
+        _assert_valid_python(code, "configure_self_collision")
+        assert "EnabledSelfCollisionsAttr" in code
+        assert "False" in code
+
+    def test_configure_self_collision_with_filtered_pairs(self):
+        """Filtered pairs should generate FilteredPairsAPI code."""
+        code = CODE_GEN_HANDLERS["configure_self_collision"]({
+            "articulation_path": "/World/Robot",
+            "mode": "enable",
+            "filtered_pairs": [["/World/Robot/link1", "/World/Robot/link2"]],
+        })
+        _assert_valid_python(code, "configure_self_collision")
+        assert "FilteredPairsAPI" in code
+        assert "link1" in code
+        assert "link2" in code
 
 
 class TestAllCodeGenHandlersCovered:
