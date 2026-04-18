@@ -140,6 +140,18 @@ _TRY_PRINT = re.compile(r"except\s+Exception[^\n]*:\s*\n\s*print\(")
 _KIT_COMMAND = re.compile(r"omni\.kit\.commands\.execute\(['\"][A-Za-z]+Command")
 _ADD_REFERENCE = re.compile(r"\.AddReference\(")
 _HAS_AUTHORED = re.compile(r"HasAuthoredReferences")
+# Plain `print('Failed to …')` / `print('No … found')` / `print('Nothing to …')`
+# outside a try/except is a silent-swallow on a negative-sentinel path: the
+# operation didn't happen but the tool still returns success=True. This class
+# of bug was common enough in 2026-04-18's trajectory-handler audit to warrant
+# its own scan pattern (record_trajectory / replay_trajectory / record_waypoints
+# / plan_trajectory / move_to_pose / configure_ros2_bridge were all six fixed
+# in a single sitting). Matches both 'print(...)' and 'print(f"...")' forms.
+_PRINT_FAIL = re.compile(
+    r"print\(f?['\"](?:Failed (?:to|at|-)|No\s+\w+\s+(?:found|specified)|"
+    r"Nothing (?:to|was)|Could not|Unable to)",
+    re.I,
+)
 
 
 def test_no_new_try_except_print_without_raise():
@@ -187,6 +199,40 @@ def test_no_new_kit_command_without_before_after_diff():
         "\n\nKit commands silently no-op on invalid args (unknown api names, "
         "unknown command names). Without a before/after check the tool "
         "reports success on operations that did nothing."
+    )
+
+
+def test_no_new_print_fail_without_raise():
+    """Plain `print('Failed to …')` or `print('No sensors specified …')` on a
+    negative-sentinel path, without a following `raise`, is a silent-swallow:
+    the operation didn't happen but the tool returns success=True anyway.
+
+    Six handlers had this pattern before 2026-04-18 (record_trajectory,
+    replay_trajectory, record_waypoints, plan_trajectory, move_to_pose
+    lula_rrt, configure_ros2_bridge) — now all fixed. This scan keeps
+    future additions honest.
+    """
+    offenders = []
+    for name, body in _iter_handlers():
+        if name in AUDITED_CLEAN:
+            continue
+        match = _PRINT_FAIL.search(body)
+        if not match:
+            continue
+        # Allow if there's any raise in the 300 chars after the failing print
+        # OR if the print is a diagnostic followed by a raise within the same
+        # if-block (heuristic: just check 'raise' appears after the match).
+        tail = body[match.start():match.start() + 400]
+        if "raise" in tail:
+            continue
+        offenders.append(name)
+    assert not offenders, (
+        "These handlers print a failure-sentinel but don't raise — the tool "
+        f"reports success=True to the agent even though nothing happened:\n  "
+        + "\n  ".join(offenders) +
+        "\n\nFix: replace the print with a `raise RuntimeError(...)` carrying "
+        "the specific failure reason, OR add the handler to AUDITED_CLEAN if "
+        "the print is informational (e.g. a legitimate idempotent no-op)."
     )
 
 

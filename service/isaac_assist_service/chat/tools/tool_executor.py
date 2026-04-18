@@ -9125,11 +9125,16 @@ for graph in all_graphs:
         break  # Only update the first matching node
 
 if not updated:
-    # No existing node found — create a new publisher with correct QoS
-    print(f"No publisher found for {{topic_name}} — set QoS when creating the publisher:")
-    print(f"  reliability: {{target_reliability}}")
-    print(f"  durability: {{target_durability}}")
-    print(f"  Hint: {description}")
+    # No existing publisher node to patch. The tool's name is fix_ros2_qos
+    # — claiming success when nothing was fixed misleads the agent. Raise
+    # with the hint so the user/agent knows to create the publisher first.
+    raise RuntimeError(
+        f"fix_ros2_qos: no ROS2 publisher node found for topic {{topic_name!r}} — "
+        f"nothing to patch. Create the publisher first (e.g. via "
+        f"configure_ros2_bridge) then re-run. Recommended QoS: "
+        f"reliability={{target_reliability}}, durability={{target_durability}} "
+        f"({description})."
+    )
 '''
 
 def _gen_configure_ros2_time(args: Dict) -> str:
