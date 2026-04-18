@@ -1112,6 +1112,52 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── SDG Quality (Phase 7B Addendum) ────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_annotations",
+            "description": "Cross-check SDG annotations for common issues: bounding boxes outside image bounds, duplicate instance IDs, zero-area boxes, and missing declared classes. Returns a health report with per-issue details.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "num_samples": {"type": "integer", "description": "Number of annotation samples to validate. Default: 10", "default": 10},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_randomization",
+            "description": "Analyze domain randomization parameter distributions from an SDG run. Returns per-parameter statistics (min, max, mean, std) and flags misconfiguration like near-constant values or collapsed ranges.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "num_samples": {"type": "integer", "description": "Number of DR samples to analyze. Default: 50", "default": 50},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_domain_gap",
+            "description": "Compare synthetic and real image datasets to diagnose domain gap issues. Returns a FID-like similarity score, per-class distribution differences, and suggested DR adjustments to reduce the gap.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "synthetic_dir": {"type": "string", "description": "Path to synthetic image dataset directory"},
+                    "real_dir": {"type": "string", "description": "Path to real image dataset directory"},
+                    "model_checkpoint": {"type": "string", "description": "Optional path to a model checkpoint for feature extraction"},
+                },
+                "required": ["synthetic_dir", "real_dir"],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",
@@ -2769,6 +2815,69 @@ ISAAC_SIM_TOOLS = [
                     "robot_name": {"type": "string", "description": "Robot name: 'franka', 'ur5', 'ur10', 'g1', 'allegro'. If omitted, auto-detected from path."},
                 },
                 "required": ["articulation_path"],
+            },
+        },
+    },
+
+# ─── SDG Quality (Phase 7B Addendum) ────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_annotations",
+            "description": "Cross-check SDG annotations for common issues: bounding boxes outside image bounds, duplicate instance IDs, zero-area boxes, and missing declared classes. Returns a health report with per-issue details.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "num_samples": {"type": "integer", "description": "Number of annotation samples to validate. Default: 10", "default": 10},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_randomization",
+            "description": "Analyze domain randomization parameter distributions from an SDG run. Returns per-parameter statistics (min, max, mean, std) and flags misconfiguration like near-constant values or collapsed ranges.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "num_samples": {"type": "integer", "description": "Number of DR samples to analyze. Default: 50", "default": 50},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_domain_gap",
+            "description": "Compare synthetic and real image datasets to diagnose domain gap issues. Returns a FID-like similarity score, per-class distribution differences, and suggested DR adjustments to reduce the gap.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "synthetic_dir": {"type": "string", "description": "Path to synthetic image dataset directory"},
+                    "real_dir": {"type": "string", "description": "Path to real image dataset directory"},
+                    "model_checkpoint": {"type": "string", "description": "Optional path to a model checkpoint for feature extraction"},
+                },
+                "required": ["synthetic_dir", "real_dir"],
+            },
+        },
+    },
+
+    # ─── Scene Export ─────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
+                },
+                "required": [],
             },
         },
     },

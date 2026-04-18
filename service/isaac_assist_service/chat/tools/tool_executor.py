@@ -13002,3 +13002,286 @@ async def _handle_apply_robot_fix_profile(args: Dict) -> Dict:
 
 
 DATA_HANDLERS["apply_robot_fix_profile"] = _handle_apply_robot_fix_profile
+
+
+# ── SDG Quality (Phase 7B Addendum) ─────────────────────────────────────────
+
+async def _handle_validate_annotations(args: Dict) -> Dict:
+    """Cross-check SDG annotations for common quality issues.
+
+    Validates: bbox within image bounds, unique instance IDs,
+    no zero-area boxes, declared classes actually appear.
+    """
+    num_samples = args.get("num_samples", 10)
+
+    code = f"""\
+import json, os, glob, random
+
+output_dirs = glob.glob('/tmp/sdg_output*') + glob.glob('workspace/sdg_output*')
+if not output_dirs:
+    print(json.dumps({{"error": "No SDG output directories found"}}))
+else:
+    out_dir = sorted(output_dirs)[-1]
+    ann_files = glob.glob(os.path.join(out_dir, '**', '*.json'), recursive=True)
+    ann_files = [f for f in ann_files if 'bounding_box' in f or 'annotation' in f]
+    samples = ann_files[:{num_samples}] if len(ann_files) <= {num_samples} else random.sample(ann_files, {num_samples})
+
+    issues = []
+    total_boxes = 0
+    instance_ids_seen = set()
+    classes_declared = set()
+    classes_found = set()
+
+    for f in samples:
+        data = json.loads(open(f).read())
+        annotations = data if isinstance(data, list) else data.get('annotations', data.get('data', []))
+        if not isinstance(annotations, list):
+            annotations = [annotations]
+        for ann in annotations:
+            total_boxes += 1
+            bbox = ann.get('bbox') or ann.get('bounding_box') or ann.get('x_min') and [ann['x_min'], ann['y_min'], ann['x_max'], ann['y_max']]
+            if bbox:
+                x0, y0, x1, y1 = bbox[0], bbox[1], bbox[2], bbox[3]
+                if x0 < 0 or y0 < 0:
+                    issues.append({{"type": "out_of_bounds", "file": f, "bbox": bbox, "detail": "Negative coordinates"}})
+                if x1 <= x0 or y1 <= y0:
+                    issues.append({{"type": "zero_area", "file": f, "bbox": bbox, "detail": "Zero or negative area"}})
+                w = ann.get('image_width', 1280)
+                h = ann.get('image_height', 720)
+                if x1 > w or y1 > h:
+                    issues.append({{"type": "out_of_bounds", "file": f, "bbox": bbox, "detail": f"Exceeds image {{w}}x{{h}}"}})
+
+            iid = ann.get('instance_id') or ann.get('id')
+            if iid is not None:
+                if iid in instance_ids_seen:
+                    issues.append({{"type": "duplicate_id", "file": f, "instance_id": iid}})
+                instance_ids_seen.add(iid)
+
+            cls = ann.get('class') or ann.get('label') or ann.get('category')
+            if cls:
+                classes_found.add(cls)
+
+        meta_classes = data.get('declared_classes') or data.get('classes') or data.get('categories')
+        if meta_classes:
+            if isinstance(meta_classes, list):
+                for c in meta_classes:
+                    classes_declared.add(c if isinstance(c, str) else c.get('name', str(c)))
+
+    missing_classes = list(classes_declared - classes_found)
+    if missing_classes:
+        issues.append({{"type": "missing_class", "declared_but_absent": missing_classes}})
+
+    clean = total_boxes - len([i for i in issues if i['type'] != 'missing_class'])
+    health = round(100 * clean / max(total_boxes, 1), 1)
+
+    print(json.dumps({{
+        "samples_checked": len(samples),
+        "total_boxes": total_boxes,
+        "issues": issues,
+        "annotation_health": health,
+        "classes_declared": list(classes_declared),
+        "classes_found": list(classes_found),
+    }}))
+"""
+    result = await kit_tools.queue_exec_patch(code, f"Validate annotations ({num_samples} samples)")
+    return {"type": "data", "queued": result.get("queued", False)}
+
+
+async def _handle_analyze_randomization(args: Dict) -> Dict:
+    """Analyze domain randomization parameter distributions from an SDG run.
+
+    Returns per-parameter statistics and flags near-constant or collapsed
+    distributions that indicate DR misconfiguration.
+    """
+    num_samples = args.get("num_samples", 50)
+
+    code = f"""\
+import json, os, glob, random
+import numpy as np
+
+output_dirs = glob.glob('/tmp/sdg_output*') + glob.glob('workspace/sdg_output*')
+if not output_dirs:
+    print(json.dumps({{"error": "No SDG output directories found"}}))
+else:
+    out_dir = sorted(output_dirs)[-1]
+
+    # Look for DR log / randomization parameter files
+    dr_files = glob.glob(os.path.join(out_dir, '**', '*random*'), recursive=True)
+    dr_files += glob.glob(os.path.join(out_dir, '**', '*param*'), recursive=True)
+    dr_files += glob.glob(os.path.join(out_dir, '**', '*.json'), recursive=True)
+    dr_files = list(set(dr_files))
+    samples = dr_files[:{num_samples}] if len(dr_files) <= {num_samples} else random.sample(dr_files, {num_samples})
+
+    param_values = {{}}  # param_name -> list of values
+
+    for f in samples:
+        try:
+            data = json.loads(open(f).read())
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        params = data.get('randomization_params') or data.get('params') or data.get('dr_params') or {{}}
+        if isinstance(params, dict):
+            for k, v in params.items():
+                if isinstance(v, (int, float)):
+                    param_values.setdefault(k, []).append(v)
+                elif isinstance(v, list) and all(isinstance(x, (int, float)) for x in v):
+                    for i, x in enumerate(v):
+                        param_values.setdefault(f"{{k}}[{{i}}]", []).append(x)
+
+    stats = {{}}
+    warnings = []
+    for pname, vals in param_values.items():
+        arr = np.array(vals, dtype=float)
+        s = {{
+            "min": float(arr.min()),
+            "max": float(arr.max()),
+            "mean": float(arr.mean()),
+            "std": float(arr.std()),
+            "count": len(vals),
+        }}
+        stats[pname] = s
+
+        # Flag near-constant distributions
+        if s["std"] < 1e-6 and s["count"] > 5:
+            warnings.append({{
+                "param": pname,
+                "warning": "near_constant",
+                "detail": f"{{s['count']}} samples all ~{{s['mean']:.4f}} — DR may be misconfigured",
+            }})
+        # Flag extremely narrow range
+        range_val = s["max"] - s["min"]
+        if range_val > 0 and s["std"] / range_val < 0.01 and s["count"] > 10:
+            warnings.append({{
+                "param": pname,
+                "warning": "narrow_range",
+                "detail": f"std/range = {{s['std']/range_val:.4f}} — 99%+ values are the same angle/position",
+            }})
+
+    print(json.dumps({{
+        "samples_analyzed": len(samples),
+        "parameters": stats,
+        "warnings": warnings,
+        "total_params": len(stats),
+    }}))
+"""
+    result = await kit_tools.queue_exec_patch(code, f"Analyze DR randomization ({num_samples} samples)")
+    return {"type": "data", "queued": result.get("queued", False)}
+
+
+async def _handle_diagnose_domain_gap(args: Dict) -> Dict:
+    """Compare synthetic vs real image datasets to diagnose domain gap.
+
+    Returns a FID-like comparison score, per-class distribution differences,
+    and suggested DR adjustments.
+    """
+    synthetic_dir = args.get("synthetic_dir", "")
+    real_dir = args.get("real_dir", "")
+    checkpoint = args.get("model_checkpoint")
+
+    if not synthetic_dir or not real_dir:
+        return {"error": "Both synthetic_dir and real_dir are required"}
+
+    # Sanitize paths
+    import re as _re
+    for d in (synthetic_dir, real_dir):
+        if not _re.match(r'^[a-zA-Z0-9/_. :-]+$', d):
+            return {"error": f"Invalid path characters in: {d}"}
+
+    checkpoint_line = ""
+    if checkpoint:
+        if not _re.match(r'^[a-zA-Z0-9/_. :-]+$', checkpoint):
+            return {"error": f"Invalid path characters in checkpoint: {checkpoint}"}
+        checkpoint_line = f"checkpoint = '{checkpoint}'"
+
+    code = f"""\
+import json, os, glob
+import numpy as np
+
+synthetic_dir = '{synthetic_dir}'
+real_dir = '{real_dir}'
+{checkpoint_line}
+
+def load_image_stats(directory):
+    \"\"\"Compute per-channel mean/std over images in a directory.\"\"\"
+    from PIL import Image
+    files = glob.glob(os.path.join(directory, '**', '*.png'), recursive=True)
+    files += glob.glob(os.path.join(directory, '**', '*.jpg'), recursive=True)
+    if not files:
+        return None, 0
+    samples = files[:200] if len(files) > 200 else files
+    all_means = []
+    all_stds = []
+    for f in samples:
+        try:
+            img = np.array(Image.open(f).convert('RGB'), dtype=np.float32) / 255.0
+            all_means.append(img.mean(axis=(0, 1)))
+            all_stds.append(img.std(axis=(0, 1)))
+        except Exception:
+            continue
+    if not all_means:
+        return None, 0
+    return {{
+        "channel_means": np.mean(all_means, axis=0).tolist(),
+        "channel_stds": np.mean(all_stds, axis=0).tolist(),
+        "count": len(all_means),
+    }}, len(files)
+
+synth_stats, synth_count = load_image_stats(synthetic_dir)
+real_stats, real_count = load_image_stats(real_dir)
+
+if synth_stats is None:
+    print(json.dumps({{"error": f"No images found in synthetic dir: {{synthetic_dir}}"}}))
+elif real_stats is None:
+    print(json.dumps({{"error": f"No images found in real dir: {{real_dir}}"}}))
+else:
+    # Compute FID-like score from channel statistics
+    mean_diff = np.linalg.norm(
+        np.array(synth_stats['channel_means']) - np.array(real_stats['channel_means'])
+    )
+    std_diff = np.linalg.norm(
+        np.array(synth_stats['channel_stds']) - np.array(real_stats['channel_stds'])
+    )
+    # Simplified domain gap score (0 = identical, higher = more gap)
+    gap_score = float(mean_diff * 100 + std_diff * 50)
+
+    # Per-channel analysis
+    channels = ['R', 'G', 'B']
+    per_channel = {{}}
+    adjustments = []
+    for i, ch in enumerate(channels):
+        diff = synth_stats['channel_means'][i] - real_stats['channel_means'][i]
+        per_channel[ch] = {{
+            "synthetic_mean": round(synth_stats['channel_means'][i], 4),
+            "real_mean": round(real_stats['channel_means'][i], 4),
+            "difference": round(diff, 4),
+        }}
+        if abs(diff) > 0.1:
+            direction = "brighter" if diff > 0 else "darker"
+            adjustments.append(f"Synthetic {{ch}} channel is {{direction}} than real by {{abs(diff):.2f}} — adjust lighting/material {{ch}} intensity")
+
+    if gap_score > 15:
+        adjustments.append("High domain gap — consider adding texture/lighting randomization")
+    if gap_score > 30:
+        adjustments.append("Very high domain gap — real-to-sim calibration recommended")
+
+    result = {{
+        "domain_gap_score": round(gap_score, 2),
+        "synthetic_images": synth_count,
+        "real_images": real_count,
+        "synthetic_stats": synth_stats,
+        "real_stats": real_stats,
+        "per_channel_diff": per_channel,
+        "suggested_adjustments": adjustments,
+        "model_checkpoint": '{checkpoint or "none"}',
+    }}
+    print(json.dumps(result))
+"""
+    result = await kit_tools.queue_exec_patch(
+        code, f"Diagnose domain gap: {synthetic_dir} vs {real_dir}"
+    )
+    return {"type": "data", "queued": result.get("queued", False)}
+
+
+DATA_HANDLERS["validate_annotations"] = _handle_validate_annotations
+DATA_HANDLERS["analyze_randomization"] = _handle_analyze_randomization
+DATA_HANDLERS["diagnose_domain_gap"] = _handle_diagnose_domain_gap
