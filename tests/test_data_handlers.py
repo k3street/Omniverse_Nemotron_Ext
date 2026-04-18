@@ -456,6 +456,29 @@ class TestComparePolicies:
         })
         assert result["count"] == 1
         assert "baseline" in result["comparison_table"]
+class TestInspectCamera:
+    """inspect_camera DATA handler — sends read-only code to Kit RPC."""
+
+    @pytest.mark.asyncio
+    async def test_inspect_camera_queues_code(self, mock_kit_rpc):
+        # Add the /exec_patch endpoint to the mock
+        mock_kit_rpc["/exec_patch"] = {"queued": True, "patch_id": "test_patch_cam"}
+        handler = DATA_HANDLERS["inspect_camera"]
+        result = await handler({"camera_path": "/World/Camera"})
+        assert isinstance(result, dict)
+        assert result.get("queued") is True
+
+    @pytest.mark.asyncio
+    async def test_inspect_camera_code_contains_usdgeom(self, mock_kit_rpc):
+        """Verify the generated code references UsdGeom.Camera."""
+        from service.isaac_assist_service.chat.tools.tool_executor import _gen_inspect_camera
+        code = _gen_inspect_camera({"camera_path": "/World/MainCam"})
+        assert "UsdGeom.Camera" in code
+        assert "/World/MainCam" in code
+        assert "focal_length" in code
+        assert "json.dumps" in code
+
+
 class TestCloudLaunch:
     """cloud_launch data handler."""
 

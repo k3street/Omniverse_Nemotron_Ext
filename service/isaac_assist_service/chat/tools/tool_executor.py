@@ -4804,3 +4804,1320 @@ DATA_HANDLERS["cloud_status"] = _handle_cloud_status
 DATA_HANDLERS["cloud_teardown"] = _handle_cloud_teardown
 DATA_HANDLERS["cloud_estimate_cost"] = _handle_cloud_estimate_cost
 CODE_GEN_HANDLERS["cloud_download_results"] = _gen_cloud_download_results
+
+
+# ── Clone Envs (GridCloner) ──────────────────────────────────────────────────
+
+def _gen_clone_envs(args: Dict) -> str:
+    source_path = args["source_path"]
+    num_envs = args["num_envs"]
+    spacing = args.get("spacing", 2.5)
+    collision_filter = args.get("collision_filter", True)
+
+    lines = [
+        "from isaacsim.core.cloner import GridCloner",
+        "",
+        f"cloner = GridCloner(spacing={spacing})",
+        'cloner.define_base_env("/World/envs")',
+        f'prim_paths = cloner.generate_paths("/World/envs/env", {num_envs})',
+        "positions = cloner.clone(",
+        f"    source_prim_path='{source_path}',",
+        "    prim_paths=prim_paths,",
+        "    replicate_physics=True,  # CRITICAL for performance",
+        ")",
+    ]
+    if collision_filter:
+        lines.extend([
+            "# Collision filtering is a SEPARATE step:",
+            "cloner.filter_collisions(",
+            "    physicsscene_path='/World/PhysicsScene',",
+            "    collision_root_path='/World/collisionGroups',",
+            "    prim_paths=prim_paths,",
+            ")",
+        ])
+    lines.append(f"print(f'Cloned {num_envs} environments from {source_path}')")
+    return "\n".join(lines)
+
+
+# ── Debug Draw ──────────────────────────────────────────────────────────────
+
+def _gen_debug_draw(args: Dict) -> str:
+    draw_type = args["draw_type"]
+    points = args["points"]
+    color = args.get("color", [1, 0, 0, 1])
+    size = args.get("size", 5)
+    lifetime = args.get("lifetime", 0)
+
+    lines = [
+        "from isaacsim.util.debug_draw import _debug_draw",
+        "",
+        "draw = _debug_draw.acquire_debug_draw_interface()",
+    ]
+
+    if draw_type == "points":
+        lines.append(f"points = {points}")
+        lines.append(f"colors = [{color}] * len(points)")
+        lines.append(f"sizes = [{size}] * len(points)")
+        lines.append("draw.draw_points(points, colors, sizes)")
+    elif draw_type == "lines":
+        # Points come as pairs: [start, end, start, end, ...]
+        lines.append(f"all_pts = {points}")
+        lines.append("start_points = all_pts[0::2]")
+        lines.append("end_points = all_pts[1::2]")
+        lines.append(f"colors = [{color}] * len(start_points)")
+        lines.append(f"sizes = [{size}] * len(start_points)")
+        lines.append("draw.draw_lines(start_points, end_points, colors, sizes)")
+    elif draw_type == "lines_spline":
+        lines.append(f"points = {points}")
+        lines.append(f"color = {color}")
+        lines.append(f"width = {size}")
+        lines.append("draw.draw_lines_spline(points, color, width, closed=False)")
+
+    if lifetime > 0:
+        lines.extend([
+            "",
+            "# Schedule auto-clear",
+            "import asyncio",
+            f"asyncio.get_event_loop().call_later({lifetime}, draw.clear_points)",
+        ])
+
+    return "\n".join(lines)
+
+
+# ── Occupancy Map ───────────────────────────────────────────────────────────
+
+def _gen_generate_occupancy_map(args: Dict) -> str:
+    origin = args.get("origin", [0, 0])
+    dimensions = args.get("dimensions", [10, 10])
+    resolution = args.get("resolution", 0.05)
+    height_range = args.get("height_range", [0, 2])
+
+    return f"""\
+from isaacsim.asset.gen.omap import MapGenerator
+import carb
+
+gen = MapGenerator()
+gen.update_settings(cell_size={resolution})
+gen.set_transform(
+    origin=carb.Float3({origin[0]}, {origin[1]}, 0),
+    min_bound=carb.Float3({-dimensions[0]/2}, {-dimensions[1]/2}, {height_range[0]}),
+    max_bound=carb.Float3({dimensions[0]/2}, {dimensions[1]/2}, {height_range[1]}),
+)
+gen.generate2d()
+buffer = gen.get_buffer()
+print(f"Occupancy map generated: {int(dimensions[0]/resolution)} x {int(dimensions[1]/resolution)} cells")
+"""
+
+
+# ── Camera inspection / configuration ───────────────────────────────────────
+
+def _gen_inspect_camera(args: Dict) -> str:
+    camera_path = args["camera_path"]
+    return f"""\
+import omni.usd
+from pxr import UsdGeom
+import json
+
+stage = omni.usd.get_context().get_stage()
+cam = UsdGeom.Camera(stage.GetPrimAtPath('{camera_path}'))
+result = {{
+    'camera_path': '{camera_path}',
+    'focal_length': cam.GetFocalLengthAttr().Get(),
+    'horizontal_aperture': cam.GetHorizontalApertureAttr().Get(),
+    'vertical_aperture': cam.GetVerticalApertureAttr().Get(),
+    'clipping_range': list(cam.GetClippingRangeAttr().Get()),
+    'focus_distance': cam.GetFocusDistanceAttr().Get(),
+    'projection': cam.GetProjectionAttr().Get(),
+}}
+print(json.dumps(result))
+"""
+
+
+def _gen_configure_camera(args: Dict) -> str:
+    camera_path = args["camera_path"]
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdGeom, Gf",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        f"cam = UsdGeom.Camera(stage.GetPrimAtPath('{camera_path}'))",
+    ]
+    if "focal_length" in args:
+        lines.append(f"cam.GetFocalLengthAttr().Set({args['focal_length']})")
+    if "horizontal_aperture" in args:
+        lines.append(f"cam.GetHorizontalApertureAttr().Set({args['horizontal_aperture']})")
+    if "vertical_aperture" in args:
+        lines.append(f"cam.GetVerticalApertureAttr().Set({args['vertical_aperture']})")
+    if "clipping_range" in args:
+        cr = args["clipping_range"]
+        lines.append(f"cam.GetClippingRangeAttr().Set(Gf.Vec2f({cr[0]}, {cr[1]}))")
+    if "focus_distance" in args:
+        lines.append(f"cam.GetFocusDistanceAttr().Set({args['focus_distance']})")
+    lines.append(f"print(f'Camera {camera_path} configured')")
+    return "\n".join(lines)
+
+
+# ── Code generation dispatch ─────────────────────────────────────────────────
+
+CODE_GEN_HANDLERS = {
+    "create_prim": _gen_create_prim,
+    "delete_prim": _gen_delete_prim,
+    "set_attribute": _gen_set_attribute,
+    "add_reference": _gen_add_reference,
+    "apply_api_schema": _gen_apply_api_schema,
+    "clone_prim": _gen_clone_prim,
+    "create_deformable_mesh": _gen_deformable,
+    "create_omnigraph": _gen_create_omnigraph,
+    "create_material": _gen_create_material,
+    "assign_material": _gen_assign_material,
+    "sim_control": _gen_sim_control,
+    "set_physics_params": _gen_set_physics_params,
+    "teleport_prim": _gen_teleport_prim,
+    "set_joint_targets": _gen_set_joint_targets,
+    "import_robot": _gen_import_robot,
+    "anchor_robot": _gen_anchor_robot,
+    "set_viewport_camera": _gen_set_viewport_camera,
+    "configure_sdg": _gen_configure_sdg,
+    "clone_envs": _gen_clone_envs,
+    "debug_draw": _gen_debug_draw,
+    "generate_occupancy_map": _gen_generate_occupancy_map,
+    "configure_camera": _gen_configure_camera,
+}
+
+
+# ── Spec / data lookup handlers (no code gen, just return data) ──────────────
+
+async def _handle_lookup_product_spec(args: Dict) -> Dict:
+    """Fuzzy-match a product name against the sensor specs database."""
+    query = args.get("product_name", "").lower()
+    specs = _load_sensor_specs()
+    # Exact match first
+    for s in specs:
+        if s["product"].lower() == query:
+            return {"found": True, "spec": s}
+    # Substring match
+    matches = [s for s in specs if query in s["product"].lower() or
+               any(query in w.lower() for w in s["product"].split())]
+    if matches:
+        return {"found": True, "spec": matches[0], "alternatives": [m["product"] for m in matches[1:4]]}
+    # Fuzzy by manufacturer or type
+    by_type = [s for s in specs if query in s.get("type", "") or query in s.get("subtype", "")]
+    if by_type:
+        return {"found": False, "suggestions": [s["product"] for s in by_type[:5]],
+                "message": f"No exact match for '{args['product_name']}'. Did you mean one of these?"}
+    return {"found": False, "message": f"No sensor specs found for '{args['product_name']}'"}
+
+
+async def _handle_scene_summary(args: Dict) -> Dict:
+    ctx = await kit_tools.get_stage_context(full=False)
+    if "error" in ctx:
+        return ctx
+    text = kit_tools.format_stage_context_for_llm(ctx)
+    return {"summary": text}
+
+
+async def _handle_capture_viewport(args: Dict) -> Dict:
+    max_dim = args.get("max_dim", 1280)
+    return await kit_tools.get_viewport_image(max_dim=max_dim)
+
+
+async def _handle_get_console_errors(args: Dict) -> Dict:
+    ctx = await kit_tools.get_stage_context(full=False)
+    logs = ctx.get("recent_logs", [])
+    min_level = args.get("min_level", "warning")
+    level_order = ["verbose", "info", "warning", "error", "fatal"]
+    min_idx = level_order.index(min_level) if min_level in level_order else 2
+    filtered = [l for l in logs if level_order.index(l.get("level", "info")) >= min_idx]
+    last_n = args.get("last_n", 50)
+    return {"errors": filtered[-last_n:], "total_count": len(filtered)}
+
+
+async def _handle_get_articulation_state(args: Dict) -> Dict:
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+from pxr import UsdPhysics
+import json
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath('{prim_path}')
+joints = []
+for child in prim.GetAllChildren():
+    if child.HasAPI(UsdPhysics.RevoluteJointAPI) or child.HasAPI(UsdPhysics.PrismaticJointAPI):
+        joints.append({{'name': child.GetName(), 'path': str(child.GetPath())}})
+result = {{'articulation_path': '{prim_path}', 'joints': joints}}
+print(json.dumps(result))
+"""
+    return await kit_tools.queue_exec_patch(code, f"Read articulation state for {prim_path}")
+
+
+async def _handle_list_all_prims(args: Dict) -> Dict:
+    ctx = await kit_tools.get_stage_context(full=True)
+    return ctx.get("stage", {})
+
+
+async def _handle_measure_distance(args: Dict) -> Dict:
+    prim_a = args["prim_a"]
+    prim_b = args["prim_b"]
+    code = f"""\
+import omni.usd
+from pxr import UsdGeom, Gf
+import json
+
+stage = omni.usd.get_context().get_stage()
+xf_a = UsdGeom.Xformable(stage.GetPrimAtPath('{prim_a}')).ComputeLocalToWorldTransform(0)
+xf_b = UsdGeom.Xformable(stage.GetPrimAtPath('{prim_b}')).ComputeLocalToWorldTransform(0)
+pos_a = xf_a.ExtractTranslation()
+pos_b = xf_b.ExtractTranslation()
+dist = (pos_a - pos_b).GetLength()
+print(json.dumps({{'prim_a': '{prim_a}', 'prim_b': '{prim_b}', 'distance_m': dist,
+       'position_a': list(pos_a), 'position_b': list(pos_b)}}))
+"""
+    return await kit_tools.queue_exec_patch(code, f"Measure distance {prim_a} ↔ {prim_b}")
+
+
+async def _handle_get_debug_info(args: Dict) -> Dict:
+    """Return perf metrics via Kit RPC /context fallback."""
+    ctx = await kit_tools.get_stage_context(full=False)
+    return {
+        "prim_count": ctx.get("stage", {}).get("prim_count"),
+        "stage_url": ctx.get("stage", {}).get("stage_url"),
+        "note": "Full perf metrics require Kit-side instrumentation",
+    }
+
+
+async def _handle_lookup_knowledge(args: Dict) -> Dict:
+    """Search the version-specific knowledge base for code patterns and docs."""
+    from ...retrieval.context_retriever import (
+        retrieve_context,
+        find_matching_patterns,
+        detect_isaac_version,
+    )
+    query = args.get("query", "")
+    version = detect_isaac_version()
+
+    # Search FTS index
+    fts_results = retrieve_context(query, version=version, limit=3)
+
+    # Search code patterns
+    patterns = find_matching_patterns(query, version=version, limit=3)
+
+    results = []
+    for r in fts_results:
+        results.append({
+            "source": r.get("source_id", "docs"),
+            "section": r.get("section_path", ""),
+            "content": r.get("content", "")[:600],
+        })
+    for p in patterns:
+        results.append({
+            "source": "code_patterns",
+            "title": p.get("title", ""),
+            "code": p.get("code", ""),
+            "note": p.get("note", ""),
+        })
+
+    return {
+        "version": version,
+        "query": query,
+        "results": results,
+        "count": len(results),
+    }
+
+
+# Data-only handlers (no code gen → return data directly to LLM)
+DATA_HANDLERS = {
+    "lookup_product_spec": _handle_lookup_product_spec,
+    "scene_summary": _handle_scene_summary,
+    "capture_viewport": _handle_capture_viewport,
+    "get_console_errors": _handle_get_console_errors,
+    "get_articulation_state": _handle_get_articulation_state,
+    "list_all_prims": _handle_list_all_prims,
+    "measure_distance": _handle_measure_distance,
+    "get_debug_info": _handle_get_debug_info,
+    "lookup_knowledge": _handle_lookup_knowledge,
+    "explain_error": None,  # handled inline by LLM (no tool execution)
+    "inspect_camera": None,  # placeholder — registered after definition below
+}
+
+# ── Camera inspection (DATA handler — reads camera attrs via Kit RPC) ───────
+
+async def _handle_inspect_camera(args: Dict) -> Dict:
+    camera_path = args["camera_path"]
+    code = _gen_inspect_camera(args)
+    return await kit_tools.queue_exec_patch(code, f"Inspect camera at {camera_path}")
+
+
+DATA_HANDLERS["inspect_camera"] = _handle_inspect_camera
+
+
+# ── ROS2 live handlers (via rosbridge / ros-mcp) ────────────────────────────
+try:
+    from .ros_mcp_tools import (
+        handle_ros2_connect,
+        handle_ros2_list_topics,
+        handle_ros2_get_topic_type,
+        handle_ros2_get_message_type,
+        handle_ros2_subscribe_once,
+        handle_ros2_publish,
+        handle_ros2_publish_sequence,
+        handle_ros2_list_services,
+        handle_ros2_call_service,
+        handle_ros2_list_nodes,
+        handle_ros2_get_node_details,
+    )
+    DATA_HANDLERS.update({
+        "ros2_connect": handle_ros2_connect,
+        "ros2_list_topics": handle_ros2_list_topics,
+        "ros2_get_topic_type": handle_ros2_get_topic_type,
+        "ros2_get_message_type": handle_ros2_get_message_type,
+        "ros2_subscribe_once": handle_ros2_subscribe_once,
+        "ros2_publish": handle_ros2_publish,
+        "ros2_publish_sequence": handle_ros2_publish_sequence,
+        "ros2_list_services": handle_ros2_list_services,
+        "ros2_call_service": handle_ros2_call_service,
+        "ros2_list_nodes": handle_ros2_list_nodes,
+        "ros2_get_node_details": handle_ros2_get_node_details,
+    })
+except ImportError:
+    logger.warning("[ToolExecutor] ros-mcp not installed — ROS2 live tools disabled (pip install ros-mcp)")
+    DATA_HANDLERS.update({
+        "ros2_list_topics": None,
+        "ros2_publish": None,
+    })
+
+
+# ── Main dispatch ────────────────────────────────────────────────────────────
+
+async def execute_tool_call(
+    tool_name: str,
+    arguments: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Execute a single tool call and return the result dict.
+
+    Returns:
+        {"type": "code_patch", "code": ..., "description": ...}  for code-gen tools
+        {"type": "data", ...}                                      for data-lookup tools
+        {"type": "error", "error": ...}                            on failure
+    """
+    logger.info(f"[ToolExecutor] Executing tool: {tool_name}({json.dumps(arguments)[:200]})")
+
+    try:
+        # 1. Data handlers — return result directly
+        if tool_name in DATA_HANDLERS:
+            handler = DATA_HANDLERS[tool_name]
+            if handler is None:
+                # Tool handled inline by LLM, no execution needed
+                return {"type": "data", "note": f"{tool_name} is handled by the LLM reasoning, no live execution needed."}
+            result = await handler(arguments)
+            return {"type": "data", **result}
+
+        # 2. run_usd_script — pass through to Kit
+        if tool_name == "run_usd_script":
+            code = arguments.get("code", "")
+            desc = arguments.get("description", "Run custom script")
+            # Pre-flight validation
+            issues = validate_patch(code)
+            if has_blocking_issues(issues):
+                msg = format_issues_for_llm(issues)
+                logger.warning(f"[ToolExecutor] Patch blocked for {tool_name}: {msg}")
+                return {"type": "error", "error": msg, "code": code, "validation_blocked": True}
+            result = await kit_tools.queue_exec_patch(code, desc)
+            return {"type": "code_patch", "code": code, "description": desc, "queued": result.get("queued", False)}
+
+        # 3. Code generation tools — generate code, send to Kit for approval
+        if tool_name in CODE_GEN_HANDLERS:
+            gen_fn = CODE_GEN_HANDLERS[tool_name]
+            code = gen_fn(arguments)
+            desc = f"{tool_name}({', '.join(f'{k}={v!r}' for k, v in list(arguments.items())[:3])})"
+
+            # Pre-flight validation
+            issues = validate_patch(code)
+            if has_blocking_issues(issues):
+                msg = format_issues_for_llm(issues)
+                logger.warning(f"[ToolExecutor] Patch blocked for {tool_name}: {msg}")
+                return {"type": "error", "error": msg, "code": code, "validation_blocked": True}
+
+            # Add sensor spec auto-lookup for add_sensor_to_prim
+            if tool_name == "add_sensor_to_prim" and arguments.get("product_name"):
+                spec_result = await _handle_lookup_product_spec({"product_name": arguments["product_name"]})
+                if spec_result.get("found"):
+                    return {
+                        "type": "code_patch_with_spec",
+                        "code": code,
+                        "description": desc,
+                        "product_spec": spec_result["spec"],
+                    }
+
+            result = await kit_tools.queue_exec_patch(code, desc)
+            return {
+                "type": "code_patch",
+                "code": code,
+                "description": desc,
+                "queued": result.get("queued", False),
+            }
+
+        return {"type": "error", "error": f"Unknown tool: {tool_name}"}
+
+    except Exception as e:
+        logger.error(f"[ToolExecutor] {tool_name} failed: {e}")
+        return {"type": "error", "error": str(e)}
+
+
+def _gen_add_sensor(args: Dict) -> str:
+    """Generate code for adding a sensor based on type and optional product spec."""
+    prim_path = args["prim_path"]
+    sensor_type = args["sensor_type"]
+
+    if sensor_type == "camera":
+        fov = args.get("fov", 60)
+        res = args.get("resolution", [1280, 720])
+        return f"""\
+import omni.usd
+from pxr import UsdGeom, Sdf, Gf
+
+stage = omni.usd.get_context().get_stage()
+cam_path = '{prim_path}/Camera'
+cam = UsdGeom.Camera.Define(stage, cam_path)
+cam.GetHorizontalApertureAttr().Set(20.955)
+cam.GetFocalLengthAttr().Set(10.0 * 20.955 / (2.0 * __import__('math').tan(__import__('math').radians({fov}/2))))
+cam.GetClippingRangeAttr().Set(Gf.Vec2f(0.01, 1000.0))
+"""
+    if sensor_type == "rtx_lidar":
+        return f"""\
+import omni.usd
+from pxr import UsdGeom, Gf
+{_SAFE_XFORM_SNIPPET}
+stage = omni.usd.get_context().get_stage()
+lidar_path = '{prim_path}/RTXLidar'
+lidar_prim = stage.DefinePrim(lidar_path, 'Camera')
+_safe_set_translate(lidar_prim, (0, 0, 0.1))
+
+# Configure RTX Lidar via Isaac Sim extension
+from omni.isaac.sensor import LidarRtx
+lidar = LidarRtx(prim_path=lidar_path)
+"""
+    if sensor_type == "imu":
+        return f"""\
+from omni.isaac.sensor import IMUSensor
+imu = IMUSensor(prim_path='{prim_path}/IMU')
+"""
+    if sensor_type == "contact_sensor":
+        return f"""\
+from omni.isaac.sensor import ContactSensor
+contact = ContactSensor(prim_path='{prim_path}/ContactSensor')
+"""
+    return f"# Sensor type '{sensor_type}' not yet implemented"
+
+
+# Register the sensor generator
+CODE_GEN_HANDLERS["add_sensor_to_prim"] = _gen_add_sensor
+
+
+# ── Motion Planning (RMPflow / Lula) ─────────────────────────────────────────
+
+# Robot config map: robot_type → (rmpflow_config_dir, robot_description_path, urdf_path, end_effector_frame)
+_MOTION_ROBOT_CONFIGS = {
+    "franka": {
+        "rmp_config": "franka/rmpflow",
+        "desc": "franka/robot_descriptor.yaml",
+        "urdf": "franka/lula_franka_gen.urdf",
+        "ee_frame": "panda_hand",
+    },
+    "ur10": {
+        "rmp_config": "universal_robots/ur10/rmpflow",
+        "desc": "universal_robots/ur10/robot_descriptor.yaml",
+        "urdf": "universal_robots/ur10/lula_ur10_gen.urdf",
+        "ee_frame": "ee_link",
+    },
+    "ur5e": {
+        "rmp_config": "universal_robots/ur5e/rmpflow",
+        "desc": "universal_robots/ur5e/robot_descriptor.yaml",
+        "urdf": "universal_robots/ur5e/lula_ur5e_gen.urdf",
+        "ee_frame": "ee_link",
+    },
+    "cobotta": {
+        "rmp_config": "denso/cobotta_pro_900/rmpflow",
+        "desc": "denso/cobotta_pro_900/robot_descriptor.yaml",
+        "urdf": "denso/cobotta_pro_900/lula_cobotta_gen.urdf",
+        "ee_frame": "onrobot_rg6_base_link",
+    },
+}
+
+
+def _gen_move_to_pose(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    target_pos = args["target_position"]
+    target_ori = args.get("target_orientation")
+    planner = args.get("planner", "rmpflow")
+    robot_type = args.get("robot_type", "franka").lower()
+
+    cfg = _MOTION_ROBOT_CONFIGS.get(robot_type, _MOTION_ROBOT_CONFIGS["franka"])
+    ee = cfg["ee_frame"]
+
+    if planner == "lula_rrt":
+        # Global planner — single-shot path plan
+        lines = [
+            "import omni.usd",
+            "import numpy as np",
+            "from isaacsim.robot_motion.motion_generation import LulaTaskSpaceTrajectoryGenerator",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "",
+            "# Load Lula RRT planner config",
+            f"rrt_config = interface_config_loader.load_supported_lula_rrt_config('{robot_type}')",
+            f"rrt = LulaTaskSpaceTrajectoryGenerator(**rrt_config)",
+            "",
+            f"target_pos = np.array({list(target_pos)})",
+        ]
+        if target_ori:
+            lines.append(f"target_ori = np.array({list(target_ori)})")
+        else:
+            lines.append("target_ori = None")
+        lines.extend([
+            "",
+            "# Compute trajectory",
+            f"trajectory = rrt.compute_task_space_trajectory_from_points(",
+            f"    [target_pos], [target_ori] if target_ori is not None else None",
+            f")",
+            "if trajectory is not None:",
+            "    print(f'Lula RRT: planned trajectory with {{len(trajectory)}} waypoints')",
+            "else:",
+            "    print('Lula RRT: failed to find path — try a different target or clear obstacles')",
+        ])
+        return "\n".join(lines)
+
+    # Default: RMPflow (reactive, real-time)
+    lines = [
+        "import omni.usd",
+        "import numpy as np",
+        "from isaacsim.robot_motion.motion_generation import RmpFlow",
+        "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+        "from isaacsim.core.prims import SingleArticulation",
+        "from isaacsim.core.api import World",
+        "",
+        "# Load RMPflow config for the robot",
+        f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+        "rmpflow = RmpFlow(**rmpflow_config)",
+        "",
+        f"# Get the articulation",
+        f"art = SingleArticulation(prim_path='{art_path}')",
+        "world = World.instance()",
+        "if world is None:",
+        "    from isaacsim.core.api import World",
+        "    world = World()",
+        "art.initialize()",
+        "",
+        "# Set target",
+        f"target_pos = np.array({list(target_pos)})",
+    ]
+    if target_ori:
+        lines.append(f"target_ori = np.array({list(target_ori)})")
+    else:
+        lines.append("target_ori = None")
+    lines.extend([
+        f"rmpflow.set_end_effector_target(target_pos, target_ori)",
+        "",
+        "# Get current joint state and compute action",
+        "joint_positions = art.get_joint_positions()",
+        "joint_velocities = art.get_joint_velocities()",
+        "action = rmpflow.get_next_articulation_action(",
+        "    joint_positions, joint_velocities",
+        ")",
+        "",
+        "# Apply joint targets",
+        "art.apply_action(action)",
+        f"print(f'RMPflow: moving {ee} to {{target_pos}} — action applied')",
+    ])
+    return "\n".join(lines)
+
+
+def _gen_plan_trajectory(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    waypoints = args["waypoints"]
+    robot_type = args.get("robot_type", "franka").lower()
+
+    positions_str = "[" + ", ".join(
+        f"np.array({list(wp['position'])})" for wp in waypoints
+    ) + "]"
+    orientations = [wp.get("orientation") for wp in waypoints]
+    has_ori = any(o is not None for o in orientations)
+    if has_ori:
+        ori_str = "[" + ", ".join(
+            f"np.array({list(o)})" if o else "None" for o in orientations
+        ) + "]"
+    else:
+        ori_str = "None"
+
+    lines = [
+        "import numpy as np",
+        "from isaacsim.robot_motion.motion_generation import LulaTaskSpaceTrajectoryGenerator",
+        "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+        "",
+        f"rrt_config = interface_config_loader.load_supported_lula_rrt_config('{robot_type}')",
+        f"planner = LulaTaskSpaceTrajectoryGenerator(**rrt_config)",
+        "",
+        f"positions = {positions_str}",
+        f"orientations = {ori_str}",
+        "",
+        "trajectory = planner.compute_task_space_trajectory_from_points(",
+        "    positions, orientations",
+        ")",
+        "if trajectory is not None:",
+        f"    print(f'Planned trajectory through {len(waypoints)} waypoints')",
+        "else:",
+        "    print('Failed to plan trajectory — try different waypoints')",
+    ]
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["move_to_pose"] = _gen_move_to_pose
+CODE_GEN_HANDLERS["plan_trajectory"] = _gen_plan_trajectory
+
+
+# ── Asset Catalog Search ─────────────────────────────────────────────────────
+
+_asset_index: Optional[List[Dict]] = None
+
+# Robot name map (module-level copy for catalog indexing)
+_CATALOG_ROBOTS = {
+    "franka": "franka.usd",
+    "panda": "franka.usd",
+    "spot": "spot.usd",
+    "spot_with_arm": "spot_with_arm.usd",
+    "carter": "carter_v1.usd",
+    "jetbot": "jetbot.usd",
+    "kaya": "kaya.usd",
+    "ur10": "ur10.usd",
+    "ur5e": "ur5e.usd",
+    "anymal_c": "anymal_c.usd",
+    "anymal_d": "anymal_d.usd",
+    "a1": "a1.usd",
+    "go1": "go1.usd",
+    "go2": "go2.usd",
+    "h1": "h1.usd",
+    "allegro_hand": "allegro_hand.usd",
+    "ridgeback_franka": "ridgeback_franka.usd",
+    "humanoid": "humanoid.usd",
+}
+
+
+def _build_asset_index() -> List[Dict]:
+    """Walk asset directories and build a searchable index of USD files."""
+    global _asset_index
+    if _asset_index is not None:
+        return _asset_index
+
+    index = []
+
+    # 1. Robots from the known robot name map
+    robots_dir = ""
+    assets_root = getattr(config, "assets_root_path", None)
+    robots_sub = getattr(config, "assets_robots_subdir", None)
+    if assets_root and robots_sub:
+        robots_dir = f"{assets_root}/{robots_sub}"
+    for name, filename in _CATALOG_ROBOTS.items():
+        index.append({
+            "name": name,
+            "type": "robot",
+            "path": f"{robots_dir}/{filename}" if robots_dir else filename,
+            "source": "robot_library",
+        })
+
+    # 2. Walk user asset dirs if configured
+    search_dirs = []
+    assets_root = getattr(config, "assets_root_path", None)
+    if assets_root:
+        search_dirs.append(Path(assets_root))
+
+    # 3. Walk workspace/knowledge for any asset manifests
+    manifest_path = _WORKSPACE / "knowledge" / "asset_manifest.jsonl"
+    if manifest_path.exists():
+        for line in manifest_path.read_text().splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    entry = json.loads(line)
+                    index.append(entry)
+                except json.JSONDecodeError:
+                    pass
+
+    # 4. Walk asset directories for USD/USDZ/USDA files
+    for d in search_dirs:
+        if not d.exists():
+            continue
+        try:
+            for f in d.rglob("*"):
+                if f.suffix.lower() in (".usd", ".usda", ".usdz"):
+                    rel = f.relative_to(d)
+                    name_parts = rel.stem.replace("_", " ").replace("-", " ")
+                    # Infer type from path
+                    path_str = str(rel).lower()
+                    if any(k in path_str for k in ("robot", "arm", "gripper", "manipulator")):
+                        atype = "robot"
+                    elif any(k in path_str for k in ("env", "room", "warehouse", "house", "kitchen")):
+                        atype = "environment"
+                    elif any(k in path_str for k in ("sensor", "camera", "lidar")):
+                        atype = "sensor"
+                    elif any(k in path_str for k in ("material", "mdl", "texture")):
+                        atype = "material"
+                    else:
+                        atype = "prop"
+                    index.append({
+                        "name": name_parts,
+                        "type": atype,
+                        "path": str(f),
+                        "source": "filesystem",
+                        "rel_path": str(rel),
+                    })
+        except PermissionError:
+            pass
+
+    _asset_index = index
+    return _asset_index
+
+
+async def _handle_catalog_search(args: Dict) -> Dict:
+    """Fuzzy-match assets by name, type, and path."""
+    query = args.get("query", "").lower()
+    asset_type = args.get("asset_type", "any").lower()
+    limit = args.get("limit", 10)
+
+    index = _build_asset_index()
+    scored = []
+    query_words = query.split()
+
+    for asset in index:
+        if asset_type != "any" and asset.get("type", "any") != asset_type:
+            continue
+
+        name = asset.get("name", "").lower()
+        path = asset.get("path", "").lower()
+        rel_path = asset.get("rel_path", "").lower()
+        searchable = f"{name} {path} {rel_path}"
+
+        # Score: exact match > all words present > partial
+        if query == name:
+            score = 100
+        elif all(w in searchable for w in query_words):
+            score = 70 + sum(10 for w in query_words if w in name)
+        elif any(w in searchable for w in query_words):
+            score = sum(10 for w in query_words if w in searchable)
+        else:
+            continue
+
+        scored.append((score, asset))
+
+    scored.sort(key=lambda x: -x[0])
+    results = [a for _, a in scored[:limit]]
+
+    return {
+        "query": args.get("query", ""),
+        "results": results,
+        "total_matches": len(scored),
+        "index_size": len(index),
+    }
+
+
+DATA_HANDLERS["catalog_search"] = _handle_catalog_search
+
+
+# ── Scene Builder ────────────────────────────────────────────────────────────
+
+def _gen_build_scene_from_blueprint(args: Dict) -> str:
+    """Generate code to build a scene from a structured blueprint."""
+    blueprint = args.get("blueprint", {})
+    objects = blueprint.get("objects", [])
+    dry_run = args.get("dry_run", False)
+
+    if not objects:
+        return "print('Empty blueprint — nothing to build')\n"
+
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdGeom, Gf, Sdf",
+        _SAFE_XFORM_SNIPPET,
+        "stage = omni.usd.get_context().get_stage()",
+        "",
+    ]
+
+    for i, obj in enumerate(objects):
+        name = obj.get("name", f"object_{i}")
+        asset_path = obj.get("asset_path", "")
+        prim_path = obj.get("prim_path", f"/World/{name}")
+        pos = obj.get("position", [0, 0, 0])
+        rot = obj.get("rotation", [0, 0, 0])
+        scale = obj.get("scale", [1, 1, 1])
+        prim_type = obj.get("prim_type")  # for simple prims (Cube, etc.)
+
+        lines.append(f"# --- {name} ---")
+        if asset_path:
+            # Import via USD reference
+            lines.append(f"prim = stage.DefinePrim('{prim_path}', 'Xform')")
+            lines.append(f"prim.GetReferences().AddReference('{asset_path}')")
+        elif prim_type:
+            lines.append(f"prim = stage.DefinePrim('{prim_path}', '{prim_type}')")
+        else:
+            lines.append(f"prim = stage.DefinePrim('{prim_path}', 'Xform')")
+
+        lines.append(f"_safe_set_translate(prim, ({pos[0]}, {pos[1]}, {pos[2]}))")
+        if rot != [0, 0, 0]:
+            lines.append(f"_safe_set_rotate_xyz(prim, ({rot[0]}, {rot[1]}, {rot[2]}))")
+        if scale != [1, 1, 1]:
+            lines.append(f"_safe_set_scale(prim, ({scale[0]}, {scale[1]}, {scale[2]}))")
+        lines.append("")
+
+    lines.append(f"print('Scene built: {len(objects)} objects placed')")
+
+    if dry_run:
+        return f"# DRY RUN — code preview only\n" + "\n".join(lines)
+    return "\n".join(lines)
+
+
+async def _handle_generate_scene_blueprint(args: Dict) -> Dict:
+    """Generate a scene blueprint (data, not code). The LLM fills in the spatial layout."""
+    description = args.get("description", "")
+    room_dims = args.get("room_dimensions")
+    available = args.get("available_assets")
+
+    # If no assets provided, search the catalog
+    if not available:
+        catalog_result = await _handle_catalog_search({"query": description, "limit": 20})
+        available = catalog_result.get("results", [])
+
+    return {
+        "type": "blueprint_request",
+        "description": description,
+        "room_dimensions": room_dims or [6, 6, 3],
+        "available_assets": available,
+        "instructions": (
+            "Based on the description and available assets, generate a blueprint JSON with: "
+            "objects: [{name, asset_path (from available_assets), prim_path (/World/Name), "
+            "position [x,y,z], rotation [rx,ry,rz], scale [sx,sy,sz]}]. "
+            "Ensure objects don't overlap, items sit ON surfaces (not floating), "
+            "robots have 1m clearance. Then call build_scene_from_blueprint with the blueprint."
+        ),
+    }
+
+
+DATA_HANDLERS["generate_scene_blueprint"] = _handle_generate_scene_blueprint
+CODE_GEN_HANDLERS["build_scene_from_blueprint"] = _gen_build_scene_from_blueprint
+
+
+# ── IsaacLab RL Training ─────────────────────────────────────────────────────
+
+_RL_TASK_TEMPLATES = {
+    "manipulation": {
+        "obs": ["joint_pos", "joint_vel", "ee_pos", "ee_ori", "target_pos", "target_rel"],
+        "actions": "joint_positions",
+        "rewards": ["reach_target", "grasp_success", "action_penalty", "is_terminated"],
+    },
+    "locomotion": {
+        "obs": ["base_lin_vel", "base_ang_vel", "projected_gravity", "joint_pos", "joint_vel", "actions"],
+        "actions": "joint_positions",
+        "rewards": ["track_lin_vel", "track_ang_vel", "feet_air_time", "action_rate", "is_terminated"],
+    },
+    "navigation": {
+        "obs": ["base_pos", "base_ori", "base_lin_vel", "target_pos", "target_rel", "lidar_scan"],
+        "actions": "base_velocity",
+        "rewards": ["reach_goal", "collision_penalty", "progress_to_goal", "action_penalty"],
+    },
+    "custom": {
+        "obs": ["joint_pos", "joint_vel"],
+        "actions": "joint_positions",
+        "rewards": ["task_success", "action_penalty"],
+    },
+}
+
+
+async def _handle_create_isaaclab_env(args: Dict) -> Dict:
+    """Generate an IsaacLab env scaffold — returns config as data for the LLM to refine."""
+    task_name = args["task_name"]
+    robot_path = args["robot_path"]
+    task_type = args.get("task_type", "manipulation")
+    num_envs = args.get("num_envs", 64)
+    env_spacing = args.get("env_spacing", 2.0)
+    reward_terms = args.get("reward_terms")
+
+    template = _RL_TASK_TEMPLATES.get(task_type, _RL_TASK_TEMPLATES["custom"])
+    if reward_terms:
+        template = {**template, "rewards": reward_terms}
+
+    env_config = {
+        "task_name": task_name,
+        "robot_path": robot_path,
+        "task_type": task_type,
+        "num_envs": num_envs,
+        "env_spacing": env_spacing,
+        "observation_space": template["obs"],
+        "action_space": template["actions"],
+        "reward_terms": template["rewards"],
+        "episode_length": 500,
+        "decimation": 2,
+        "physics_dt": 1.0 / 120.0,
+    }
+
+    # Generate the Python env class code
+    env_code = _generate_isaaclab_env_code(env_config)
+
+    return {
+        "type": "isaaclab_env",
+        "task_name": task_name,
+        "config": env_config,
+        "generated_code": env_code,
+        "instructions": (
+            f"IsaacLab env '{task_name}' scaffolded with {num_envs} parallel envs. "
+            f"Observations: {template['obs']}. Actions: {template['actions']}. "
+            f"Rewards: {template['rewards']}. "
+            "You can now call launch_training to start training, or refine the config."
+        ),
+    }
+
+
+def _generate_isaaclab_env_code(cfg: Dict) -> str:
+    """Generate a minimal IsaacLab ManagerBasedRLEnv config file."""
+    task = cfg["task_name"]
+    robot = cfg["robot_path"]
+    obs = cfg["observation_space"]
+    acts = cfg["action_space"]
+    rewards = cfg["reward_terms"]
+    num_envs = cfg["num_envs"]
+    spacing = cfg["env_spacing"]
+    ep_len = cfg["episode_length"]
+    decimation = cfg["decimation"]
+
+    obs_terms = "\n".join(f'        "{o}": ObsTerm(func=mdp.{o}),' for o in obs)
+    reward_terms = "\n".join(
+        f'        "{r}": RewTerm(func=mdp.{r}, weight=1.0),' for r in rewards
+    )
+
+    return f'''"""IsaacLab RL environment: {task}
+Auto-generated by Isaac Assist.
+"""
+import isaaclab.envs.mdp as mdp
+from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.managers import (
+    ObservationGroupCfg,
+    ObservationTermCfg as ObsTerm,
+    RewardTermCfg as RewTerm,
+    SceneEntityCfg,
+)
+from isaaclab.scene import InteractiveSceneCfg
+
+
+class {task}EnvCfg(ManagerBasedRLEnvCfg):
+    """Configuration for {task} environment."""
+
+    # Scene
+    scene = InteractiveSceneCfg(
+        num_envs={num_envs},
+        env_spacing={spacing},
+    )
+
+    # Observations
+    observations = ObservationGroupCfg(
+{obs_terms}
+    )
+
+    # Actions
+    actions = mdp.{acts}
+
+    # Rewards
+    rewards = {{
+{reward_terms}
+    }}
+
+    # Episode
+    episode_length_s = {ep_len} * {decimation} / 120.0
+    decimation = {decimation}
+'''
+
+
+def _gen_launch_training(args: Dict) -> str:
+    """Generate code to launch an IsaacLab training run."""
+    task = args["task"]
+    algo = args.get("algo", "ppo")
+    num_steps = args.get("num_steps", 1_000_000)
+    num_envs = args.get("num_envs", 64)
+    ckpt_dir = args.get("checkpoint_dir", f"workspace/rl_checkpoints/{task}")
+
+    # Map algos to IsaacLab train script args
+    algo_map = {
+        "ppo": "rsl_rl",
+        "sac": "skrl",
+        "td3": "skrl",
+        "rsl_rl": "rsl_rl",
+    }
+    runner = algo_map.get(algo, "rsl_rl")
+
+    lines = [
+        "import subprocess",
+        "import sys",
+        "import os",
+        "",
+        f"task = '{task}'",
+        f"algo = '{algo}'",
+        f"num_envs = {num_envs}",
+        f"max_iterations = {num_steps // (num_envs * 24)}  # steps / (envs * horizon)",
+        f"log_dir = '{ckpt_dir}'",
+        "os.makedirs(log_dir, exist_ok=True)",
+        "",
+        "# Launch IsaacLab training",
+        "cmd = [",
+        "    sys.executable, '-m',",
+        f"    'isaaclab.train',",
+        f"    '--task', task,",
+        f"    '--num_envs', str(num_envs),",
+        f"    '--max_iterations', str(max_iterations),",
+        f"    '--log_dir', log_dir,",
+        "]",
+        "print(f'Launching training: {" ".join(cmd)}')",
+        "proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)",
+        "print(f'Training started (PID: {proc.pid}). Checkpoints → {log_dir}')",
+    ]
+    return "\n".join(lines)
+
+
+DATA_HANDLERS["create_isaaclab_env"] = _handle_create_isaaclab_env
+CODE_GEN_HANDLERS["launch_training"] = _gen_launch_training
+
+
+# ─── Vision tools (Gemini Robotics-ER 1.6) ──────────────────────────────────
+
+async def _get_viewport_bytes() -> tuple:
+    """Capture the viewport and return (raw_bytes, mime_type)."""
+    result = await kit_tools.get_viewport_image(max_dim=1280)
+    b64 = result.get("image_b64") or result.get("data", "")
+    if not b64:
+        return None, None
+    import base64
+    return base64.b64decode(b64), "image/png"
+
+
+def _get_vision_provider():
+    from ..vision_gemini import GeminiVisionProvider
+    return GeminiVisionProvider()
+
+
+async def _handle_vision_detect_objects(args: Dict) -> Dict:
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
+    vp = _get_vision_provider()
+    labels = args.get("labels")
+    max_obj = args.get("max_objects", 10)
+    detections = await vp.detect_objects(img, mime, labels=labels, max_objects=max_obj)
+    return {"detections": detections, "count": len(detections), "model": vp.model}
+
+
+async def _handle_vision_bounding_boxes(args: Dict) -> Dict:
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
+    vp = _get_vision_provider()
+    boxes = await vp.detect_bounding_boxes(img, mime, max_objects=args.get("max_objects", 25))
+    return {"bounding_boxes": boxes, "count": len(boxes), "model": vp.model}
+
+
+async def _handle_vision_plan_trajectory(args: Dict) -> Dict:
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
+    vp = _get_vision_provider()
+    points = await vp.plan_trajectory(
+        img, args["instruction"], num_points=args.get("num_points", 15), mime_type=mime,
+    )
+    return {"trajectory": points, "num_points": len(points), "model": vp.model}
+
+
+async def _handle_vision_analyze_scene(args: Dict) -> Dict:
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
+    vp = _get_vision_provider()
+    analysis = await vp.analyze_scene(img, args["question"], mime_type=mime)
+    return {"analysis": analysis, "model": vp.model}
+
+
+DATA_HANDLERS["vision_detect_objects"] = _handle_vision_detect_objects
+DATA_HANDLERS["vision_bounding_boxes"] = _handle_vision_bounding_boxes
+DATA_HANDLERS["vision_plan_trajectory"] = _handle_vision_plan_trajectory
+DATA_HANDLERS["vision_analyze_scene"] = _handle_vision_analyze_scene
+
+
+# ── Scene Package Export ─────────────────────────────────────────────────────
+# Collects all approved code patches from the audit log for a session,
+# then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
+# README.md, and a ros2_topics.yaml listing detected topics.
+
+async def _handle_export_scene_package(args: Dict) -> Dict:
+    """Export the current session's scene setup as a reusable file package."""
+    from pathlib import Path
+    from datetime import datetime as _dt
+    from ..routes import _audit
+
+    session_id = args.get("session_id", "default_session")
+    scene_name = args.get("scene_name", "exported_scene")
+    # Sanitize scene_name for filesystem
+    safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in scene_name)
+
+    out_dir = Path("workspace/scene_exports") / safe_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Collect approved patches from audit log ──────────────────────────
+    entries = _audit.query_logs(limit=500, event_type="patch_executed")
+    patches = []
+    for e in entries:
+        meta = e.metadata or {}
+        if meta.get("success") and meta.get("session_id", "default_session") == session_id:
+            code = meta.get("code", "")
+            if code:
+                patches.append({
+                    "description": meta.get("user_message", ""),
+                    "code": code,
+                })
+
+    if not patches:
+        # Fallback: grab all successful patches regardless of session
+        for e in entries:
+            meta = e.metadata or {}
+            if meta.get("success") and meta.get("code"):
+                patches.append({
+                    "description": meta.get("user_message", ""),
+                    "code": meta["code"],
+                })
+
+    # ── scene_setup.py ───────────────────────────────────────────────────
+    setup_lines = [
+        '"""',
+        f'Scene Setup: {scene_name}',
+        f'Auto-exported by Isaac Assist on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}',
+        f'Patches: {len(patches)}',
+        '"""',
+        'import omni.usd',
+        'from pxr import Usd, UsdGeom, UsdPhysics, PhysxSchema, Gf, Sdf, UsdShade',
+        '',
+        'stage = omni.usd.get_context().get_stage()',
+        '',
+    ]
+    for i, p in enumerate(patches):
+        desc = p["description"] or f"Step {i+1}"
+        setup_lines.append(f'# ── Step {i+1}: {desc}')
+        setup_lines.append(p["code"].rstrip())
+        setup_lines.append('')
+    setup_lines.append('print("Scene setup complete.")')
+    scene_py = "\n".join(setup_lines)
+    (out_dir / "scene_setup.py").write_text(scene_py, encoding="utf-8")
+
+    # ── Detect ROS2 topics from OmniGraph patterns in code ───────────────
+    import re as _re
+    ros2_topics = set()
+    og_node_types = set()
+    robot_paths = set()
+    for p in patches:
+        code = p["code"]
+        # topics: /joint_states, /joint_command, /clock, /tf, etc.
+        ros2_topics.update(_re.findall(r"""['\"](/[a-zA-Z_][a-zA-Z0-9_/]*)['\"]\s*""", code))
+        # OmniGraph node types
+        og_node_types.update(_re.findall(r"""['\"](?:isaacsim|omni\.isaac)\.[a-zA-Z0-9_.]+['\"]""", code))
+        # Robot paths
+        robot_paths.update(_re.findall(r"""['\"](/World/[A-Z][a-zA-Z0-9_]*)['\"]\s*""", code))
+    # Filter to ROS2-style topics only (not USD paths, not physics scene attrs)
+    _NON_TOPIC_PREFIXES = ("/World", "/Physics", "/Collision", "/persistent", "/Render", "/OmniKit")
+    ros2_topics = sorted(
+        t for t in ros2_topics
+        if not any(t.startswith(p) for p in _NON_TOPIC_PREFIXES)
+        and len(t) > 2  # skip bare "/"
+        and not t.endswith(".usd")
+    )
+
+    # ── ros2_topics.yaml ─────────────────────────────────────────────────
+    if ros2_topics or og_node_types:
+        topic_lines = [f"# ROS2 Topics detected in scene: {scene_name}", "topics:"]
+        for t in sorted(ros2_topics):
+            topic_lines.append(f"  - name: \"{t}\"")
+        topic_lines.append("")
+        topic_lines.append("omnigraph_node_types:")
+        for nt in sorted(og_node_types):
+            topic_lines.append(f"  - {nt}")
+        (out_dir / "ros2_topics.yaml").write_text("\n".join(topic_lines) + "\n", encoding="utf-8")
+
+    # ── ros2_launch.py (if ROS2 topics detected) ────────────────────────
+    has_ros2 = bool(ros2_topics)
+    if has_ros2:
+        launch_lines = [
+            '"""',
+            f'ROS2 Launch File for scene: {scene_name}',
+            f'Auto-generated by Isaac Assist on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}',
+            '"""',
+            'from launch import LaunchDescription',
+            'from launch_ros.actions import Node',
+            '',
+            '',
+            'def generate_launch_description():',
+            '    return LaunchDescription([',
+        ]
+        # Add placeholder nodes for each topic
+        for t in sorted(ros2_topics):
+            node_name = t.strip("/").replace("/", "_")
+            launch_lines.append(f'        # Topic: {t}')
+            launch_lines.append(f'        # Node("{node_name}") — configure publisher/subscriber as needed')
+        launch_lines.append('    ])')
+        (out_dir / "ros2_launch.py").write_text("\n".join(launch_lines) + "\n", encoding="utf-8")
+
+    # ── README.md ────────────────────────────────────────────────────────
+    robot_list = ", ".join(f"`{r}`" for r in sorted(robot_paths)) or "None detected"
+    topic_list = "\n".join(f"- `{t}`" for t in sorted(ros2_topics)) or "- None detected"
+    readme = f"""# {scene_name}
+
+Auto-exported by **Isaac Assist** on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}.
+
+## Scene Summary
+
+- **Patches applied:** {len(patches)}
+- **Robots:** {robot_list}
+- **ROS2 Topics:**
+{topic_list}
+
+## Files
+
+| File | Description |
+|------|-------------|
+| `scene_setup.py` | All approved code patches as a single runnable script |
+| `ros2_topics.yaml` | Detected ROS2 topics and OmniGraph node types |
+{"| `ros2_launch.py` | ROS2 launch file template |" if has_ros2 else ""}
+| `README.md` | This file |
+
+## Usage
+
+### Replay Scene in Isaac Sim
+```python
+# In Isaac Sim Script Editor or via Kit RPC:
+exec(open("{out_dir}/scene_setup.py").read())
+```
+
+### ROS2 Topics
+{"Launch the ROS2 nodes alongside Isaac Sim:" if has_ros2 else "No ROS2 topics detected in this scene."}
+{"```bash" if has_ros2 else ""}
+{"ros2 launch " + str(out_dir / "ros2_launch.py") if has_ros2 else ""}
+{"```" if has_ros2 else ""}
+"""
+    (out_dir / "README.md").write_text(readme, encoding="utf-8")
+
+    files_written = ["scene_setup.py", "README.md"]
+    if ros2_topics or og_node_types:
+        files_written.append("ros2_topics.yaml")
+    if has_ros2:
+        files_written.append("ros2_launch.py")
+
+    return {
+        "export_dir": str(out_dir),
+        "files": files_written,
+        "patch_count": len(patches),
+        "ros2_topics": ros2_topics,
+        "robots_detected": sorted(robot_paths),
+        "message": f"Exported {len(patches)} patches to {out_dir}/ — files: {', '.join(files_written)}",
+    }
+
+
+DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package

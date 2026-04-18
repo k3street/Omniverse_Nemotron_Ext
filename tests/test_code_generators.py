@@ -530,6 +530,55 @@ _TEST_VECTORS = [
         {"job_id": "cloud-gcp-def67890", "output_dir": "/tmp/my_results"},
         ["rsync", "subprocess", "cloud-gcp-def67890", "/tmp/my_results"],
     ),
+    # ── Phase 8A: Cloner, Debug Draw, Occupancy Map, Camera ──────────────
+    (
+        "clone_envs",
+        {"source_path": "/World/envs/env_0", "num_envs": 16, "spacing": 2.5, "collision_filter": True},
+        ["GridCloner", "replicate_physics=True", "filter_collisions", "clone("],
+    ),
+    (
+        "clone_envs",
+        {"source_path": "/World/envs/env_0", "num_envs": 8, "collision_filter": False},
+        ["GridCloner", "replicate_physics=True", "clone("],
+    ),
+    (
+        "debug_draw",
+        {"draw_type": "points", "points": [[0, 0, 0], [1, 1, 1]], "color": [1, 0, 0, 1], "size": 10},
+        ["debug_draw", "acquire_debug_draw_interface", "draw_points"],
+    ),
+    (
+        "debug_draw",
+        {
+            "draw_type": "lines",
+            "points": [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]],
+            "color": [0, 1, 0, 1],
+        },
+        ["debug_draw", "draw_lines(", "start_points", "end_points"],
+    ),
+    (
+        "debug_draw",
+        {
+            "draw_type": "lines_spline",
+            "points": [[0, 0, 0], [1, 1, 0], [2, 0, 0]],
+            "lifetime": 5.0,
+        },
+        ["debug_draw", "draw_lines_spline", "call_later"],
+    ),
+    (
+        "generate_occupancy_map",
+        {"origin": [0, 0], "dimensions": [10, 10], "resolution": 0.05, "height_range": [0, 2]},
+        ["MapGenerator", "cell_size=0.05", "generate2d", "get_buffer"],
+    ),
+    (
+        "configure_camera",
+        {"camera_path": "/World/Camera", "focal_length": 35.0},
+        ["UsdGeom.Camera", "FocalLengthAttr", "Set(35.0)"],
+    ),
+    (
+        "configure_camera",
+        {"camera_path": "/World/Camera", "clipping_range": [0.01, 10000.0]},
+        ["UsdGeom.Camera", "ClippingRangeAttr", "Gf.Vec2f(0.01, 10000.0)"],
+    ),
 ]
 
 
@@ -644,6 +693,59 @@ class TestCodeGenEdgeCases:
         )
         _assert_valid_python(code, "build_scene_from_blueprint")
         assert "Empty blueprint" in code
+
+    def test_clone_envs_no_collision_filter(self):
+        """When collision_filter=False, filter_collisions should NOT appear."""
+        code = CODE_GEN_HANDLERS["clone_envs"](
+            {"source_path": "/World/envs/env_0", "num_envs": 4, "collision_filter": False}
+        )
+        _assert_valid_python(code, "clone_envs")
+        assert "filter_collisions" not in code
+        assert "GridCloner" in code
+
+    def test_clone_envs_default_spacing(self):
+        """Default spacing should be 2.5."""
+        code = CODE_GEN_HANDLERS["clone_envs"](
+            {"source_path": "/World/envs/env_0", "num_envs": 8}
+        )
+        _assert_valid_python(code, "clone_envs")
+        assert "spacing=2.5" in code
+
+    def test_debug_draw_lifetime_zero_no_clear(self):
+        """When lifetime is 0 (default), no call_later should be generated."""
+        code = CODE_GEN_HANDLERS["debug_draw"](
+            {"draw_type": "points", "points": [[0, 0, 0]], "lifetime": 0}
+        )
+        _assert_valid_python(code, "debug_draw")
+        assert "call_later" not in code
+
+    def test_occupancy_map_defaults(self):
+        """With no args, should use defaults."""
+        code = CODE_GEN_HANDLERS["generate_occupancy_map"]({})
+        _assert_valid_python(code, "generate_occupancy_map")
+        assert "MapGenerator" in code
+        assert "cell_size=0.05" in code
+
+    def test_configure_camera_multiple_params(self):
+        """Setting multiple camera params at once."""
+        code = CODE_GEN_HANDLERS["configure_camera"]({
+            "camera_path": "/World/Cam",
+            "focal_length": 50.0,
+            "horizontal_aperture": 36.0,
+            "focus_distance": 10.0,
+        })
+        _assert_valid_python(code, "configure_camera")
+        assert "FocalLengthAttr" in code
+        assert "HorizontalApertureAttr" in code
+        assert "FocusDistanceAttr" in code
+
+    def test_configure_camera_no_optional_params(self):
+        """Only camera_path, no optional params — should still produce valid code."""
+        code = CODE_GEN_HANDLERS["configure_camera"](
+            {"camera_path": "/World/Cam"}
+        )
+        _assert_valid_python(code, "configure_camera")
+        assert "UsdGeom.Camera" in code
 
 
 class TestAllCodeGenHandlersCovered:
