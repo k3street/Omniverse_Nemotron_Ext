@@ -86,11 +86,39 @@ def post_check_schema_applied_snippet(
     )
 
 
+def post_check_prim_exists_snippet(prim_path: str, tool_name: str) -> str:
+    """Post-check: verify a prim EXISTS (use after create/define operations)."""
+    return (
+        "import omni.usd as _hon_exists_usd\n"
+        f"_hon_exists_stage = _hon_exists_usd.get_context().get_stage()\n"
+        f"_hon_exists_prim = _hon_exists_stage.GetPrimAtPath({prim_path!r})\n"
+        f"if not _hon_exists_prim.IsValid():\n"
+        f"    raise RuntimeError({tool_name!r} + ': prim was expected at ' + {prim_path!r} + ' after the operation but is not in the stage')\n"
+    )
+
+
+def post_check_prim_absent_snippet(prim_path: str, tool_name: str) -> str:
+    """Post-check: verify a prim does NOT exist (use after delete operations).
+
+    stage.RemovePrim returns False silently on a missing path — pairing the
+    delete with this post-check ensures the effect actually landed.
+    """
+    return (
+        "import omni.usd as _hon_absent_usd\n"
+        f"_hon_absent_stage = _hon_absent_usd.get_context().get_stage()\n"
+        f"_hon_absent_prim = _hon_absent_stage.GetPrimAtPath({prim_path!r})\n"
+        f"if _hon_absent_prim.IsValid():\n"
+        f"    raise RuntimeError({tool_name!r} + ': prim at ' + {prim_path!r} + ' still exists after the operation — delete/remove silently failed')\n"
+    )
+
+
 def honesty_checked(
     *,
     require_prim_paths: Iterable[str] = (),
     require_files: Iterable[str] = (),
     post_schema_checks: Iterable[tuple] = (),  # (prim_arg, schema_arg) pairs
+    post_exists_checks: Iterable[str] = (),     # arg keys expected to exist after
+    post_absent_checks: Iterable[str] = (),     # arg keys expected to be gone after
 ) -> Callable:
     """Wrap a `_gen_*` handler, prepending pre-checks and appending post-checks.
 
@@ -106,6 +134,10 @@ def honesty_checked(
             args[prim_arg_key]. If `schema_name` is itself a dict key
             rather than a literal, the caller should prefer manual
             post-checks — this wrapper keeps the literal case simple.
+        post_exists_checks: arg keys whose value is a prim path expected to
+            EXIST after the operation (use for create/define handlers).
+        post_absent_checks: arg keys whose value is a prim path expected to
+            be ABSENT after the operation (use for delete/remove handlers).
     """
     def _deco(gen_fn: Callable[[Dict], str]) -> Callable[[Dict], str]:
         @functools.wraps(gen_fn)
@@ -129,6 +161,12 @@ def honesty_checked(
                                 str(args[prim_key]), str(schema), tool_name
                             )
                         )
+            for key in post_exists_checks:
+                if key in args and args[key]:
+                    post_blocks.append(post_check_prim_exists_snippet(str(args[key]), tool_name))
+            for key in post_absent_checks:
+                if key in args and args[key]:
+                    post_blocks.append(post_check_prim_absent_snippet(str(args[key]), tool_name))
             return "\n".join(pre_blocks) + ("\n" if pre_blocks else "") + base + (
                 ("\n" + "\n".join(post_blocks)) if post_blocks else ""
             )

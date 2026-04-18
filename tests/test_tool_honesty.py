@@ -95,6 +95,48 @@ def test_honesty_checked_decorator_appends_post_schema_check():
     assert pre_idx < body_idx < post_idx
 
 
+def test_post_check_prim_exists_snippet():
+    from service.isaac_assist_service.chat.tools.tool_honesty import (
+        post_check_prim_exists_snippet,
+    )
+    code = post_check_prim_exists_snippet("/World/NewCube", "create_prim")
+    assert "GetPrimAtPath" in code
+    assert "IsValid()" in code
+    assert "raise RuntimeError" in code
+    assert "was expected at" in code
+
+
+def test_post_check_prim_absent_snippet():
+    from service.isaac_assist_service.chat.tools.tool_honesty import (
+        post_check_prim_absent_snippet,
+    )
+    code = post_check_prim_absent_snippet("/World/ToDelete", "delete_prim")
+    assert "GetPrimAtPath" in code
+    assert "still exists after" in code
+    assert "raise RuntimeError" in code
+
+
+def test_honesty_checked_post_exists_and_absent():
+    from service.isaac_assist_service.chat.tools.tool_honesty import honesty_checked
+
+    @honesty_checked(post_exists_checks=("out_path",))
+    def _gen_create(args):
+        return "stage.DefinePrim(args['out_path'], 'Cube')"
+
+    code = _gen_create({"out_path": "/World/Made"})
+    assert "stage.DefinePrim" in code
+    post_idx = code.index("was expected at")
+    body_idx = code.index("stage.DefinePrim")
+    assert body_idx < post_idx
+
+    @honesty_checked(post_absent_checks=("victim",))
+    def _gen_remove(args):
+        return "stage.RemovePrim(args['victim'])"
+
+    code = _gen_remove({"victim": "/World/Gone"})
+    assert "still exists after" in code
+
+
 def test_honesty_checked_quote_safe_for_paths_with_special_chars():
     """Paths containing single quotes or backslashes must not corrupt the
     generated code — repr() escapes them."""
