@@ -643,3 +643,54 @@ class TestCloudStatus:
             assert result["cost_so_far"] == "$4.84"
         finally:
             del te._cloud_jobs["test-cloud-status-001"]
+
+
+class TestGenerateRobotDescription:
+    """generate_robot_description DATA handler."""
+
+    @pytest.mark.asyncio
+    async def test_known_robot_franka(self):
+        handler = DATA_HANDLERS["generate_robot_description"]
+        result = await handler({
+            "articulation_path": "/World/Franka",
+            "robot_type": "franka",
+        })
+        assert result["supported"] is True
+        assert result["robot_type"] == "franka"
+        assert "config_files" in result
+        assert result["config_files"]["end_effector_frame"] == "panda_hand"
+        assert "rmpflow_config" in result["config_files"]
+        assert "robot_descriptor" in result["config_files"]
+        assert "urdf" in result["config_files"]
+        assert "pre-supported" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_unknown_robot(self):
+        handler = DATA_HANDLERS["generate_robot_description"]
+        result = await handler({
+            "articulation_path": "/World/MyCustomArm",
+            "robot_type": "my_custom_arm",
+        })
+        assert result["supported"] is False
+        assert "XRDF Editor" in result["instructions"]
+        assert "CollisionSphereEditor" in result["instructions"]
+        assert "not pre-supported" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_auto_detect_from_path(self):
+        """Should detect robot type from articulation path when not provided."""
+        handler = DATA_HANDLERS["generate_robot_description"]
+        result = await handler({
+            "articulation_path": "/World/ur10_robot",
+        })
+        assert result["supported"] is True
+        assert result["robot_type"] == "ur10"
+
+    @pytest.mark.asyncio
+    async def test_empty_robot_type_unknown_path(self):
+        """No robot_type and unrecognizable path should return unsupported."""
+        handler = DATA_HANDLERS["generate_robot_description"]
+        result = await handler({
+            "articulation_path": "/World/SomeRandomRobot",
+        })
+        assert result["supported"] is False

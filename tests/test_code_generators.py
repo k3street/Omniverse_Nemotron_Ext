@@ -579,6 +579,52 @@ _TEST_VECTORS = [
         {"camera_path": "/World/Camera", "clipping_range": [0.01, 10000.0]},
         ["UsdGeom.Camera", "ClippingRangeAttr", "Gf.Vec2f(0.01, 10000.0)"],
     ),
+    # ── Phase 8B: Motion Policy, IK ──────────────────────────────────────────
+    (
+        "set_motion_policy",
+        {
+            "articulation_path": "/World/Franka",
+            "policy_type": "add_obstacle",
+            "obstacle_name": "table_top",
+            "obstacle_type": "cuboid",
+            "obstacle_dims": [1.0, 0.6, 0.05],
+            "obstacle_position": [0.5, 0.0, 0.4],
+            "robot_type": "franka",
+        },
+        ["RmpFlow", "add_cuboid", "table_top", "update_world"],
+    ),
+    (
+        "set_motion_policy",
+        {
+            "articulation_path": "/World/Franka",
+            "policy_type": "add_obstacle",
+            "obstacle_name": "ball",
+            "obstacle_type": "sphere",
+            "obstacle_dims": [0.05],
+            "obstacle_position": [0.3, 0.1, 0.5],
+            "robot_type": "franka",
+        },
+        ["RmpFlow", "add_sphere", "ball", "update_world"],
+    ),
+    (
+        "solve_ik",
+        {
+            "articulation_path": "/World/Franka",
+            "target_position": [0.4, 0.0, 0.3],
+            "robot_type": "franka",
+        },
+        ["LulaKinematicsSolver", "ArticulationKinematicsSolver", "compute_inverse_kinematics", "apply_action", "success"],
+    ),
+    (
+        "solve_ik",
+        {
+            "articulation_path": "/World/Franka",
+            "target_position": [0.4, 0.0, 0.3],
+            "target_orientation": [1.0, 0.0, 0.0, 0.0],
+            "robot_type": "franka",
+        },
+        ["LulaKinematicsSolver", "compute_inverse_kinematics", "[1.0, 0.0, 0.0, 0.0]"],
+    ),
 ]
 
 

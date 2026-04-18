@@ -1800,4 +1800,96 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+# ─── Motion Policy / IK / Robot Description ────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "set_motion_policy",
+            "description": "Configure motion policy for a robot articulation: add/remove obstacles for collision avoidance, or adjust joint limit padding. Uses RMPflow under the hood.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root, e.g. '/World/Franka'"},
+                    "policy_type": {
+                        "type": "string",
+                        "enum": ["add_obstacle", "remove_obstacle", "set_joint_limits"],
+                        "description": "Policy action: add/remove obstacle or set joint limit padding",
+                    },
+                    "obstacle_name": {"type": "string", "description": "Name for the obstacle (used as identifier)"},
+                    "obstacle_type": {"type": "string", "enum": ["cuboid", "sphere"], "description": "Obstacle shape type"},
+                    "obstacle_dims": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Dimensions: [x, y, z] for cuboid or [radius] for sphere",
+                    },
+                    "obstacle_position": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Obstacle world position [x, y, z]",
+                    },
+                    "joint_limit_buffers": {"type": "number", "description": "Joint limit padding in radians (for set_joint_limits)"},
+                    "robot_type": {"type": "string", "description": "Robot name for config: 'franka', 'ur10', 'ur5e', 'cobotta'. Default: 'franka'"},
+                },
+                "required": ["articulation_path", "policy_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_robot_description",
+            "description": "Check if a robot has pre-built motion generation configs (URDF, XRDF, Lula descriptors). For supported robots, returns config file paths. For unsupported robots, explains how to create configs using the XRDF Editor.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root"},
+                    "robot_type": {"type": "string", "description": "Robot name to check, e.g. 'franka', 'ur10', 'my_custom_arm'"},
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "solve_ik",
+            "description": "Solve inverse kinematics for a robot arm — compute joint positions that place the end-effector at a target pose. Uses Lula kinematics solver. Applies the solution directly if successful.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root, e.g. '/World/Franka'"},
+                    "target_position": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Target XYZ position [x, y, z] in world space",
+                    },
+                    "target_orientation": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Target orientation as quaternion [w, x, y, z]. Optional — omit to use default.",
+                    },
+                    "robot_type": {"type": "string", "description": "Robot name for config: 'franka', 'ur10', 'ur5e', 'cobotta'. Default: 'franka'"},
+                },
+                "required": ["articulation_path", "target_position"],
+            },
+        },
+    },
+
+    # ─── Scene Export ─────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
+                },
+                "required": [],
+            },
+        },
+    },
 ]

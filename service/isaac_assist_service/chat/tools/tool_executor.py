@@ -5475,6 +5475,1084 @@ CODE_GEN_HANDLERS["move_to_pose"] = _gen_move_to_pose
 CODE_GEN_HANDLERS["plan_trajectory"] = _gen_plan_trajectory
 
 
+# ── Motion Policy (8B.3) ────────────────────────────────────────────────────
+
+def _gen_set_motion_policy(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    policy_type = args["policy_type"]
+    robot_type = args.get("robot_type", "franka").lower()
+
+    if policy_type == "add_obstacle":
+        obs_name = args.get("obstacle_name", "obstacle_0")
+        obs_type = args.get("obstacle_type", "cuboid")
+        obs_dims = args.get("obstacle_dims", [0.1, 0.1, 0.1])
+        obs_pos = args.get("obstacle_position", [0.0, 0.0, 0.0])
+
+        lines = [
+            "import numpy as np",
+            "from isaacsim.robot_motion.motion_generation import RmpFlow",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "",
+            f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+            "rmpflow = RmpFlow(**rmpflow_config)",
+            "",
+        ]
+        if obs_type == "sphere":
+            radius = obs_dims[0] if obs_dims else 0.1
+            lines.extend([
+                f"# Add sphere obstacle '{obs_name}'",
+                f"rmpflow.add_sphere(",
+                f"    name='{obs_name}',",
+                f"    radius={radius},",
+                f"    pose=np.array([{obs_pos[0]}, {obs_pos[1]}, {obs_pos[2]}, 1.0, 0.0, 0.0, 0.0]),",
+                f")",
+                "rmpflow.update_world()",
+                f"print(f'Added sphere obstacle \\'{obs_name}\\' at {obs_pos} with radius {radius}')",
+            ])
+        else:
+            # cuboid (default)
+            lines.extend([
+                f"# Add cuboid obstacle '{obs_name}'",
+                f"rmpflow.add_cuboid(",
+                f"    name='{obs_name}',",
+                f"    dims=np.array({list(obs_dims)}),",
+                f"    pose=np.array([{obs_pos[0]}, {obs_pos[1]}, {obs_pos[2]}, 1.0, 0.0, 0.0, 0.0]),",
+                f")",
+                "rmpflow.update_world()",
+                f"print(f'Added cuboid obstacle \\'{obs_name}\\' at {obs_pos} with dims {list(obs_dims)}')",
+            ])
+        return "\n".join(lines)
+
+    if policy_type == "remove_obstacle":
+        lines = [
+            "from isaacsim.robot_motion.motion_generation import RmpFlow",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "",
+            f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+            "rmpflow = RmpFlow(**rmpflow_config)",
+            "",
+            "# RMPflow has no individual obstacle removal — reset clears all obstacles",
+            "rmpflow.reset()",
+            "print('Motion policy reset — all obstacles cleared')",
+        ]
+        return "\n".join(lines)
+
+    if policy_type == "set_joint_limits":
+        buffer_val = args.get("joint_limit_buffers", 0.05)
+        lines = [
+            "import numpy as np",
+            "from isaacsim.robot_motion.motion_generation import RmpFlow",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "from isaacsim.core.prims import SingleArticulation",
+            "",
+            f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+            "rmpflow = RmpFlow(**rmpflow_config)",
+            "",
+            f"art = SingleArticulation(prim_path='{art_path}')",
+            "art.initialize()",
+            "",
+            "# Get current joint limits and add padding buffer",
+            "lower_limits = art.get_joint_positions()  # read current as reference",
+            f"buffer = {buffer_val}",
+            "dof_count = art.num_dof",
+            "print(f'Applying joint limit buffer of {buffer} rad to {dof_count} joints')",
+            "print(f'Note: Joint limit buffers are applied in the RMPflow config YAML.')",
+            "print(f'For runtime adjustment, modify rmpflow_config[\"joint_limit_buffers\"] before init.')",
+        ]
+        return "\n".join(lines)
+
+    return f"# Unknown policy type: {policy_type}"
+
+
+CODE_GEN_HANDLERS["set_motion_policy"] = _gen_set_motion_policy
+
+
+# ── Robot Description (8B.4) ────────────────────────────────────────────────
+
+# Supported robot names (matches interface_config_loader.get_supported_robot_policy_pairs)
+_SUPPORTED_MOTION_ROBOTS = {
+    "franka", "ur10", "ur5e", "ur3e", "cobotta", "rs007n",
+    "dofbot", "kawasaki", "flexiv_rizon",
+}
+
+
+async def _handle_generate_robot_description(args: Dict) -> Dict:
+    """Check if a robot has pre-built motion generation configs."""
+    art_path = args["articulation_path"]
+    robot_type = args.get("robot_type", "").lower()
+
+    # Try to identify robot type from path if not provided
+    if not robot_type:
+        path_lower = art_path.lower()
+        for name in _SUPPORTED_MOTION_ROBOTS:
+            if name in path_lower:
+                robot_type = name
+                break
+
+    if robot_type in _SUPPORTED_MOTION_ROBOTS:
+        cfg = _MOTION_ROBOT_CONFIGS.get(robot_type, {})
+        return {
+            "supported": True,
+            "robot_type": robot_type,
+            "config_files": {
+                "rmpflow_config": cfg.get("rmp_config", f"{robot_type}/rmpflow"),
+                "robot_descriptor": cfg.get("desc", f"{robot_type}/robot_descriptor.yaml"),
+                "urdf": cfg.get("urdf", f"{robot_type}/lula_gen.urdf"),
+                "end_effector_frame": cfg.get("ee_frame", "ee_link"),
+            },
+            "usage": (
+                "This robot has pre-built configs. Use "
+                "interface_config_loader.load_supported_motion_gen_config("
+                f"'{robot_type}', 'RMPflow') to load them."
+            ),
+            "message": (
+                f"Robot '{robot_type}' is pre-supported for motion generation. "
+                f"Config files are bundled with the isaacsim.robot_motion.motion_generation extension."
+            ),
+        }
+
+    return {
+        "supported": False,
+        "robot_type": robot_type or "(unknown)",
+        "articulation_path": art_path,
+        "instructions": (
+            "This robot does not have pre-built motion generation configs. "
+            "To create them:\n"
+            "1. Open the XRDF Editor GUI (Window > Extensions > XRDF Editor) to "
+            "define collision spheres, joint limits, and end-effector frames.\n"
+            "2. Export the XRDF file and Lula robot descriptor YAML.\n"
+            "3. Use the exported files with LulaKinematicsSolver and RmpFlow.\n\n"
+            "For programmatic collision sphere editing, use the CollisionSphereEditor "
+            "from isaacsim.robot_setup.xrdf_editor:\n"
+            "  - CollisionSphereEditor.add_sphere(link_path, position, radius)\n"
+            "  - CollisionSphereEditor.clear_link_spheres(link_path)\n"
+            "  - CollisionSphereEditor.clear_spheres()\n"
+            "  - CollisionSphereEditor.delete_sphere(sphere_id)"
+        ),
+        "message": (
+            f"Robot '{robot_type or 'unknown'}' at '{art_path}' is not pre-supported. "
+            "Use the XRDF Editor to generate collision spheres and robot descriptors."
+        ),
+    }
+
+
+DATA_HANDLERS["generate_robot_description"] = _handle_generate_robot_description
+
+
+# ── Inverse Kinematics (8B.5) ──────────────────────────────────────────────
+
+def _gen_solve_ik(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    target_pos = args["target_position"]
+    target_ori = args.get("target_orientation")
+    robot_type = args.get("robot_type", "franka").lower()
+
+    cfg = _MOTION_ROBOT_CONFIGS.get(robot_type, _MOTION_ROBOT_CONFIGS["franka"])
+    ee_frame = cfg["ee_frame"]
+
+    lines = [
+        "import numpy as np",
+        "from isaacsim.robot_motion.motion_generation import LulaKinematicsSolver",
+        "from isaacsim.robot_motion.motion_generation import ArticulationKinematicsSolver",
+        "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+        "from isaacsim.core.prims import SingleArticulation",
+        "",
+        f"# Load kinematics config for {robot_type}",
+        f"kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config('{robot_type}')",
+        "kin_solver = LulaKinematicsSolver(**kin_config)",
+        "",
+        f"art = SingleArticulation(prim_path='{art_path}')",
+        "art.initialize()",
+        f"art_kin = ArticulationKinematicsSolver(art, kin_solver, '{ee_frame}')",
+        "",
+        f"target_position = np.array({list(target_pos)})",
+    ]
+    if target_ori:
+        lines.append(f"target_orientation = np.array({list(target_ori)})")
+    else:
+        lines.append("target_orientation = None")
+
+    lines.extend([
+        "",
+        "action, success = art_kin.compute_inverse_kinematics(",
+        "    target_position=target_position,",
+        "    target_orientation=target_orientation,",
+        ")",
+        "if success:",
+        "    art.apply_action(action)",
+        f"    print(f'IK solved successfully — {ee_frame} moving to {{target_position}}')",
+        "else:",
+        "    print('IK failed — target may be unreachable or near singularity')",
+    ])
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["solve_ik"] = _gen_solve_ik
+
+
+# ── Asset Catalog Search ─────────────────────────────────────────────────────
+
+_asset_index: Optional[List[Dict]] = None
+
+# Robot name map (module-level copy for catalog indexing)
+_CATALOG_ROBOTS = {
+    "franka": "franka.usd",
+    "panda": "franka.usd",
+    "spot": "spot.usd",
+    "spot_with_arm": "spot_with_arm.usd",
+    "carter": "carter_v1.usd",
+    "jetbot": "jetbot.usd",
+    "kaya": "kaya.usd",
+    "ur10": "ur10.usd",
+    "ur5e": "ur5e.usd",
+    "anymal_c": "anymal_c.usd",
+    "anymal_d": "anymal_d.usd",
+    "a1": "a1.usd",
+    "go1": "go1.usd",
+    "go2": "go2.usd",
+    "h1": "h1.usd",
+    "allegro_hand": "allegro_hand.usd",
+    "ridgeback_franka": "ridgeback_franka.usd",
+    "humanoid": "humanoid.usd",
+}
+
+
+def _build_asset_index() -> List[Dict]:
+    """Walk asset directories and build a searchable index of USD files."""
+    global _asset_index
+    if _asset_index is not None:
+        return _asset_index
+
+    index = []
+
+    # 1. Robots from the known robot name map
+    robots_dir = ""
+    assets_root = getattr(config, "assets_root_path", None)
+    robots_sub = getattr(config, "assets_robots_subdir", None)
+    if assets_root and robots_sub:
+        robots_dir = f"{assets_root}/{robots_sub}"
+    for name, filename in _CATALOG_ROBOTS.items():
+        index.append({
+            "name": name,
+            "type": "robot",
+            "path": f"{robots_dir}/{filename}" if robots_dir else filename,
+            "source": "robot_library",
+        })
+
+    # 2. Walk user asset dirs if configured
+    search_dirs = []
+    assets_root = getattr(config, "assets_root_path", None)
+    if assets_root:
+        search_dirs.append(Path(assets_root))
+
+    # 3. Walk workspace/knowledge for any asset manifests
+    manifest_path = _WORKSPACE / "knowledge" / "asset_manifest.jsonl"
+    if manifest_path.exists():
+        for line in manifest_path.read_text().splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    entry = json.loads(line)
+                    index.append(entry)
+                except json.JSONDecodeError:
+                    pass
+
+    # 4. Walk asset directories for USD/USDZ/USDA files
+    for d in search_dirs:
+        if not d.exists():
+            continue
+        try:
+            for f in d.rglob("*"):
+                if f.suffix.lower() in (".usd", ".usda", ".usdz"):
+                    rel = f.relative_to(d)
+                    name_parts = rel.stem.replace("_", " ").replace("-", " ")
+                    # Infer type from path
+                    path_str = str(rel).lower()
+                    if any(k in path_str for k in ("robot", "arm", "gripper", "manipulator")):
+                        atype = "robot"
+                    elif any(k in path_str for k in ("env", "room", "warehouse", "house", "kitchen")):
+                        atype = "environment"
+                    elif any(k in path_str for k in ("sensor", "camera", "lidar")):
+                        atype = "sensor"
+                    elif any(k in path_str for k in ("material", "mdl", "texture")):
+                        atype = "material"
+                    else:
+                        atype = "prop"
+                    index.append({
+                        "name": name_parts,
+                        "type": atype,
+                        "path": str(f),
+                        "source": "filesystem",
+                        "rel_path": str(rel),
+                    })
+        except PermissionError:
+            pass
+
+    _asset_index = index
+    return _asset_index
+
+
+async def _handle_catalog_search(args: Dict) -> Dict:
+    """Fuzzy-match assets by name, type, and path."""
+    query = args.get("query", "").lower()
+    asset_type = args.get("asset_type", "any").lower()
+    limit = args.get("limit", 10)
+
+    index = _build_asset_index()
+    scored = []
+    query_words = query.split()
+
+    for asset in index:
+        if asset_type != "any" and asset.get("type", "any") != asset_type:
+            continue
+
+        name = asset.get("name", "").lower()
+        path = asset.get("path", "").lower()
+        rel_path = asset.get("rel_path", "").lower()
+        searchable = f"{name} {path} {rel_path}"
+
+        # Score: exact match > all words present > partial
+        if query == name:
+            score = 100
+        elif all(w in searchable for w in query_words):
+            score = 70 + sum(10 for w in query_words if w in name)
+        elif any(w in searchable for w in query_words):
+            score = sum(10 for w in query_words if w in searchable)
+        else:
+            continue
+
+        scored.append((score, asset))
+
+    scored.sort(key=lambda x: -x[0])
+    results = [a for _, a in scored[:limit]]
+
+    return {
+        "query": args.get("query", ""),
+        "results": results,
+        "total_matches": len(scored),
+        "index_size": len(index),
+    }
+
+
+DATA_HANDLERS["catalog_search"] = _handle_catalog_search
+
+
+# ── Scene Builder ────────────────────────────────────────────────────────────
+
+def _gen_build_scene_from_blueprint(args: Dict) -> str:
+    """Generate code to build a scene from a structured blueprint."""
+    blueprint = args.get("blueprint", {})
+    objects = blueprint.get("objects", [])
+    dry_run = args.get("dry_run", False)
+
+    if not objects:
+        return "print('Empty blueprint — nothing to build')\n"
+
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdGeom, Gf, Sdf",
+        _SAFE_XFORM_SNIPPET,
+        "stage = omni.usd.get_context().get_stage()",
+        "",
+    ]
+
+    for i, obj in enumerate(objects):
+        name = obj.get("name", f"object_{i}")
+        asset_path = obj.get("asset_path", "")
+        prim_path = obj.get("prim_path", f"/World/{name}")
+        pos = obj.get("position", [0, 0, 0])
+        rot = obj.get("rotation", [0, 0, 0])
+        scale = obj.get("scale", [1, 1, 1])
+        prim_type = obj.get("prim_type")  # for simple prims (Cube, etc.)
+
+        lines.append(f"# --- {name} ---")
+        if asset_path:
+            # Import via USD reference
+            lines.append(f"prim = stage.DefinePrim('{prim_path}', 'Xform')")
+            lines.append(f"prim.GetReferences().AddReference('{asset_path}')")
+        elif prim_type:
+            lines.append(f"prim = stage.DefinePrim('{prim_path}', '{prim_type}')")
+        else:
+            lines.append(f"prim = stage.DefinePrim('{prim_path}', 'Xform')")
+
+        lines.append(f"_safe_set_translate(prim, ({pos[0]}, {pos[1]}, {pos[2]}))")
+        if rot != [0, 0, 0]:
+            lines.append(f"_safe_set_rotate_xyz(prim, ({rot[0]}, {rot[1]}, {rot[2]}))")
+        if scale != [1, 1, 1]:
+            lines.append(f"_safe_set_scale(prim, ({scale[0]}, {scale[1]}, {scale[2]}))")
+        lines.append("")
+
+    lines.append(f"print('Scene built: {len(objects)} objects placed')")
+
+    if dry_run:
+        return f"# DRY RUN — code preview only\n" + "\n".join(lines)
+    return "\n".join(lines)
+
+
+async def _handle_generate_scene_blueprint(args: Dict) -> Dict:
+    """Generate a scene blueprint (data, not code). The LLM fills in the spatial layout."""
+    description = args.get("description", "")
+    room_dims = args.get("room_dimensions")
+    available = args.get("available_assets")
+
+    # If no assets provided, search the catalog
+    if not available:
+        catalog_result = await _handle_catalog_search({"query": description, "limit": 20})
+        available = catalog_result.get("results", [])
+
+    return {
+        "type": "blueprint_request",
+        "description": description,
+        "room_dimensions": room_dims or [6, 6, 3],
+        "available_assets": available,
+        "instructions": (
+            "Based on the description and available assets, generate a blueprint JSON with: "
+            "objects: [{name, asset_path (from available_assets), prim_path (/World/Name), "
+            "position [x,y,z], rotation [rx,ry,rz], scale [sx,sy,sz]}]. "
+            "Ensure objects don't overlap, items sit ON surfaces (not floating), "
+            "robots have 1m clearance. Then call build_scene_from_blueprint with the blueprint."
+        ),
+    }
+
+
+DATA_HANDLERS["generate_scene_blueprint"] = _handle_generate_scene_blueprint
+CODE_GEN_HANDLERS["build_scene_from_blueprint"] = _gen_build_scene_from_blueprint
+
+
+# ── IsaacLab RL Training ─────────────────────────────────────────────────────
+
+_RL_TASK_TEMPLATES = {
+    "manipulation": {
+        "obs": ["joint_pos", "joint_vel", "ee_pos", "ee_ori", "target_pos", "target_rel"],
+        "actions": "joint_positions",
+        "rewards": ["reach_target", "grasp_success", "action_penalty", "is_terminated"],
+    },
+    "locomotion": {
+        "obs": ["base_lin_vel", "base_ang_vel", "projected_gravity", "joint_pos", "joint_vel", "actions"],
+        "actions": "joint_positions",
+        "rewards": ["track_lin_vel", "track_ang_vel", "feet_air_time", "action_rate", "is_terminated"],
+    },
+    "navigation": {
+        "obs": ["base_pos", "base_ori", "base_lin_vel", "target_pos", "target_rel", "lidar_scan"],
+        "actions": "base_velocity",
+        "rewards": ["reach_goal", "collision_penalty", "progress_to_goal", "action_penalty"],
+    },
+    "custom": {
+        "obs": ["joint_pos", "joint_vel"],
+        "actions": "joint_positions",
+        "rewards": ["task_success", "action_penalty"],
+    },
+}
+
+
+async def _handle_create_isaaclab_env(args: Dict) -> Dict:
+    """Generate an IsaacLab env scaffold — returns config as data for the LLM to refine."""
+    task_name = args["task_name"]
+    robot_path = args["robot_path"]
+    task_type = args.get("task_type", "manipulation")
+    num_envs = args.get("num_envs", 64)
+    env_spacing = args.get("env_spacing", 2.0)
+    reward_terms = args.get("reward_terms")
+
+    template = _RL_TASK_TEMPLATES.get(task_type, _RL_TASK_TEMPLATES["custom"])
+    if reward_terms:
+        template = {**template, "rewards": reward_terms}
+
+    env_config = {
+        "task_name": task_name,
+        "robot_path": robot_path,
+        "task_type": task_type,
+        "num_envs": num_envs,
+        "env_spacing": env_spacing,
+        "observation_space": template["obs"],
+        "action_space": template["actions"],
+        "reward_terms": template["rewards"],
+        "episode_length": 500,
+        "decimation": 2,
+        "physics_dt": 1.0 / 120.0,
+    }
+
+    # Generate the Python env class code
+    env_code = _generate_isaaclab_env_code(env_config)
+
+    return {
+        "type": "isaaclab_env",
+        "task_name": task_name,
+        "config": env_config,
+        "generated_code": env_code,
+        "instructions": (
+            f"IsaacLab env '{task_name}' scaffolded with {num_envs} parallel envs. "
+            f"Observations: {template['obs']}. Actions: {template['actions']}. "
+            f"Rewards: {template['rewards']}. "
+            "You can now call launch_training to start training, or refine the config."
+        ),
+    }
+
+
+def _generate_isaaclab_env_code(cfg: Dict) -> str:
+    """Generate a minimal IsaacLab ManagerBasedRLEnv config file."""
+    task = cfg["task_name"]
+    robot = cfg["robot_path"]
+    obs = cfg["observation_space"]
+    acts = cfg["action_space"]
+    rewards = cfg["reward_terms"]
+    num_envs = cfg["num_envs"]
+    spacing = cfg["env_spacing"]
+    ep_len = cfg["episode_length"]
+    decimation = cfg["decimation"]
+
+    obs_terms = "\n".join(f'        "{o}": ObsTerm(func=mdp.{o}),' for o in obs)
+    reward_terms = "\n".join(
+        f'        "{r}": RewTerm(func=mdp.{r}, weight=1.0),' for r in rewards
+    )
+
+    return f'''"""IsaacLab RL environment: {task}
+Auto-generated by Isaac Assist.
+"""
+import isaaclab.envs.mdp as mdp
+from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.managers import (
+    ObservationGroupCfg,
+    ObservationTermCfg as ObsTerm,
+    RewardTermCfg as RewTerm,
+    SceneEntityCfg,
+)
+from isaaclab.scene import InteractiveSceneCfg
+
+
+class {task}EnvCfg(ManagerBasedRLEnvCfg):
+    """Configuration for {task} environment."""
+
+    # Scene
+    scene = InteractiveSceneCfg(
+        num_envs={num_envs},
+        env_spacing={spacing},
+    )
+
+    # Observations
+    observations = ObservationGroupCfg(
+{obs_terms}
+    )
+
+    # Actions
+    actions = mdp.{acts}
+
+    # Rewards
+    rewards = {{
+{reward_terms}
+    }}
+
+    # Episode
+    episode_length_s = {ep_len} * {decimation} / 120.0
+    decimation = {decimation}
+'''
+
+
+def _gen_launch_training(args: Dict) -> str:
+    """Generate code to launch an IsaacLab training run."""
+    task = args["task"]
+    algo = args.get("algo", "ppo")
+    num_steps = args.get("num_steps", 1_000_000)
+    num_envs = args.get("num_envs", 64)
+    ckpt_dir = args.get("checkpoint_dir", f"workspace/rl_checkpoints/{task}")
+
+    # Map algos to IsaacLab train script args
+    algo_map = {
+        "ppo": "rsl_rl",
+        "sac": "skrl",
+        "td3": "skrl",
+        "rsl_rl": "rsl_rl",
+    }
+    runner = algo_map.get(algo, "rsl_rl")
+
+    lines = [
+        "import subprocess",
+        "import sys",
+        "import os",
+        "",
+        f"task = '{task}'",
+        f"algo = '{algo}'",
+        f"num_envs = {num_envs}",
+        f"max_iterations = {num_steps // (num_envs * 24)}  # steps / (envs * horizon)",
+        f"log_dir = '{ckpt_dir}'",
+        "os.makedirs(log_dir, exist_ok=True)",
+        "",
+        "# Launch IsaacLab training",
+        "cmd = [",
+        "    sys.executable, '-m',",
+        f"    'isaaclab.train',",
+        f"    '--task', task,",
+        f"    '--num_envs', str(num_envs),",
+        f"    '--max_iterations', str(max_iterations),",
+        f"    '--log_dir', log_dir,",
+        "]",
+        "print(f'Launching training: {" ".join(cmd)}')",
+        "proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)",
+        "print(f'Training started (PID: {proc.pid}). Checkpoints → {log_dir}')",
+    ]
+    return "\n".join(lines)
+
+
+DATA_HANDLERS["create_isaaclab_env"] = _handle_create_isaaclab_env
+CODE_GEN_HANDLERS["launch_training"] = _gen_launch_training
+
+
+# ─── Vision tools (Gemini Robotics-ER 1.6) ──────────────────────────────────
+
+async def _get_viewport_bytes() -> tuple:
+    """Capture the viewport and return (raw_bytes, mime_type)."""
+    result = await kit_tools.get_viewport_image(max_dim=1280)
+    b64 = result.get("image_b64") or result.get("data", "")
+    if not b64:
+        return None, None
+    import base64
+    return base64.b64decode(b64), "image/png"
+
+
+def _get_vision_provider():
+    from ..vision_gemini import GeminiVisionProvider
+    return GeminiVisionProvider()
+
+
+async def _handle_vision_detect_objects(args: Dict) -> Dict:
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
+    vp = _get_vision_provider()
+    labels = args.get("labels")
+    max_obj = args.get("max_objects", 10)
+    detections = await vp.detect_objects(img, mime, labels=labels, max_objects=max_obj)
+    return {"detections": detections, "count": len(detections), "model": vp.model}
+
+
+async def _handle_vision_bounding_boxes(args: Dict) -> Dict:
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
+    vp = _get_vision_provider()
+    boxes = await vp.detect_bounding_boxes(img, mime, max_objects=args.get("max_objects", 25))
+    return {"bounding_boxes": boxes, "count": len(boxes), "model": vp.model}
+
+
+async def _handle_vision_plan_trajectory(args: Dict) -> Dict:
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
+    vp = _get_vision_provider()
+    points = await vp.plan_trajectory(
+        img, args["instruction"], num_points=args.get("num_points", 15), mime_type=mime,
+    )
+    return {"trajectory": points, "num_points": len(points), "model": vp.model}
+
+
+async def _handle_vision_analyze_scene(args: Dict) -> Dict:
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
+    vp = _get_vision_provider()
+    analysis = await vp.analyze_scene(img, args["question"], mime_type=mime)
+    return {"analysis": analysis, "model": vp.model}
+
+
+DATA_HANDLERS["vision_detect_objects"] = _handle_vision_detect_objects
+DATA_HANDLERS["vision_bounding_boxes"] = _handle_vision_bounding_boxes
+DATA_HANDLERS["vision_plan_trajectory"] = _handle_vision_plan_trajectory
+DATA_HANDLERS["vision_analyze_scene"] = _handle_vision_analyze_scene
+
+
+# ── Scene Package Export ─────────────────────────────────────────────────────
+# Collects all approved code patches from the audit log for a session,
+# then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
+# README.md, and a ros2_topics.yaml listing detected topics.
+
+async def _handle_export_scene_package(args: Dict) -> Dict:
+    """Export the current session's scene setup as a reusable file package."""
+    from pathlib import Path
+    from datetime import datetime as _dt
+    from ..routes import _audit
+
+    session_id = args.get("session_id", "default_session")
+    scene_name = args.get("scene_name", "exported_scene")
+    # Sanitize scene_name for filesystem
+    safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in scene_name)
+
+    out_dir = Path("workspace/scene_exports") / safe_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Collect approved patches from audit log ──────────────────────────
+    entries = _audit.query_logs(limit=500, event_type="patch_executed")
+    patches = []
+    for e in entries:
+        meta = e.metadata or {}
+        if meta.get("success") and meta.get("session_id", "default_session") == session_id:
+            code = meta.get("code", "")
+            if code:
+                patches.append({
+                    "description": meta.get("user_message", ""),
+                    "code": code,
+                })
+
+    if not patches:
+        # Fallback: grab all successful patches regardless of session
+        for e in entries:
+            meta = e.metadata or {}
+            if meta.get("success") and meta.get("code"):
+                patches.append({
+                    "description": meta.get("user_message", ""),
+                    "code": meta["code"],
+                })
+
+    # ── scene_setup.py ───────────────────────────────────────────────────
+    setup_lines = [
+        '"""',
+        f'Scene Setup: {scene_name}',
+        f'Auto-exported by Isaac Assist on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}',
+        f'Patches: {len(patches)}',
+        '"""',
+        'import omni.usd',
+        'from pxr import Usd, UsdGeom, UsdPhysics, PhysxSchema, Gf, Sdf, UsdShade',
+        '',
+        'stage = omni.usd.get_context().get_stage()',
+        '',
+    ]
+    for i, p in enumerate(patches):
+        desc = p["description"] or f"Step {i+1}"
+        setup_lines.append(f'# ── Step {i+1}: {desc}')
+        setup_lines.append(p["code"].rstrip())
+        setup_lines.append('')
+    setup_lines.append('print("Scene setup complete.")')
+    scene_py = "\n".join(setup_lines)
+    (out_dir / "scene_setup.py").write_text(scene_py, encoding="utf-8")
+
+    # ── Detect ROS2 topics from OmniGraph patterns in code ───────────────
+    import re as _re
+    ros2_topics = set()
+    og_node_types = set()
+    robot_paths = set()
+    for p in patches:
+        code = p["code"]
+        # topics: /joint_states, /joint_command, /clock, /tf, etc.
+        ros2_topics.update(_re.findall(r"""['\"](/[a-zA-Z_][a-zA-Z0-9_/]*)['\"]\s*""", code))
+        # OmniGraph node types
+        og_node_types.update(_re.findall(r"""['\"](?:isaacsim|omni\.isaac)\.[a-zA-Z0-9_.]+['\"]""", code))
+        # Robot paths
+        robot_paths.update(_re.findall(r"""['\"](/World/[A-Z][a-zA-Z0-9_]*)['\"]\s*""", code))
+    # Filter to ROS2-style topics only (not USD paths, not physics scene attrs)
+    _NON_TOPIC_PREFIXES = ("/World", "/Physics", "/Collision", "/persistent", "/Render", "/OmniKit")
+    ros2_topics = sorted(
+        t for t in ros2_topics
+        if not any(t.startswith(p) for p in _NON_TOPIC_PREFIXES)
+        and len(t) > 2  # skip bare "/"
+        and not t.endswith(".usd")
+    )
+
+    # ── ros2_topics.yaml ─────────────────────────────────────────────────
+    if ros2_topics or og_node_types:
+        topic_lines = [f"# ROS2 Topics detected in scene: {scene_name}", "topics:"]
+        for t in sorted(ros2_topics):
+            topic_lines.append(f"  - name: \"{t}\"")
+        topic_lines.append("")
+        topic_lines.append("omnigraph_node_types:")
+        for nt in sorted(og_node_types):
+            topic_lines.append(f"  - {nt}")
+        (out_dir / "ros2_topics.yaml").write_text("\n".join(topic_lines) + "\n", encoding="utf-8")
+
+    # ── ros2_launch.py (if ROS2 topics detected) ────────────────────────
+    has_ros2 = bool(ros2_topics)
+    if has_ros2:
+        launch_lines = [
+            '"""',
+            f'ROS2 Launch File for scene: {scene_name}',
+            f'Auto-generated by Isaac Assist on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}',
+            '"""',
+            'from launch import LaunchDescription',
+            'from launch_ros.actions import Node',
+            '',
+            '',
+            'def generate_launch_description():',
+            '    return LaunchDescription([',
+        ]
+        # Add placeholder nodes for each topic
+        for t in sorted(ros2_topics):
+            node_name = t.strip("/").replace("/", "_")
+            launch_lines.append(f'        # Topic: {t}')
+            launch_lines.append(f'        # Node("{node_name}") — configure publisher/subscriber as needed')
+        launch_lines.append('    ])')
+        (out_dir / "ros2_launch.py").write_text("\n".join(launch_lines) + "\n", encoding="utf-8")
+
+    # ── README.md ────────────────────────────────────────────────────────
+    robot_list = ", ".join(f"`{r}`" for r in sorted(robot_paths)) or "None detected"
+    topic_list = "\n".join(f"- `{t}`" for t in sorted(ros2_topics)) or "- None detected"
+    readme = f"""# {scene_name}
+
+Auto-exported by **Isaac Assist** on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}.
+
+## Scene Summary
+
+- **Patches applied:** {len(patches)}
+- **Robots:** {robot_list}
+- **ROS2 Topics:**
+{topic_list}
+
+## Files
+
+| File | Description |
+|------|-------------|
+| `scene_setup.py` | All approved code patches as a single runnable script |
+| `ros2_topics.yaml` | Detected ROS2 topics and OmniGraph node types |
+{"| `ros2_launch.py` | ROS2 launch file template |" if has_ros2 else ""}
+| `README.md` | This file |
+
+## Usage
+
+### Replay Scene in Isaac Sim
+```python
+# In Isaac Sim Script Editor or via Kit RPC:
+exec(open("{out_dir}/scene_setup.py").read())
+```
+
+### ROS2 Topics
+{"Launch the ROS2 nodes alongside Isaac Sim:" if has_ros2 else "No ROS2 topics detected in this scene."}
+{"```bash" if has_ros2 else ""}
+{"ros2 launch " + str(out_dir / "ros2_launch.py") if has_ros2 else ""}
+{"```" if has_ros2 else ""}
+"""
+    (out_dir / "README.md").write_text(readme, encoding="utf-8")
+
+    files_written = ["scene_setup.py", "README.md"]
+    if ros2_topics or og_node_types:
+        files_written.append("ros2_topics.yaml")
+    if has_ros2:
+        files_written.append("ros2_launch.py")
+
+    return {
+        "export_dir": str(out_dir),
+        "files": files_written,
+        "patch_count": len(patches),
+        "ros2_topics": ros2_topics,
+        "robots_detected": sorted(robot_paths),
+        "message": f"Exported {len(patches)} patches to {out_dir}/ — files: {', '.join(files_written)}",
+    }
+
+
+DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Motion Policy (8B.3) ────────────────────────────────────────────────────
+
+def _gen_set_motion_policy(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    policy_type = args["policy_type"]
+    robot_type = args.get("robot_type", "franka").lower()
+
+    if policy_type == "add_obstacle":
+        obs_name = args.get("obstacle_name", "obstacle_0")
+        obs_type = args.get("obstacle_type", "cuboid")
+        obs_dims = args.get("obstacle_dims", [0.1, 0.1, 0.1])
+        obs_pos = args.get("obstacle_position", [0.0, 0.0, 0.0])
+
+        lines = [
+            "import numpy as np",
+            "from isaacsim.robot_motion.motion_generation import RmpFlow",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "",
+            f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+            "rmpflow = RmpFlow(**rmpflow_config)",
+            "",
+        ]
+        if obs_type == "sphere":
+            radius = obs_dims[0] if obs_dims else 0.1
+            lines.extend([
+                f"# Add sphere obstacle '{obs_name}'",
+                f"rmpflow.add_sphere(",
+                f"    name='{obs_name}',",
+                f"    radius={radius},",
+                f"    pose=np.array([{obs_pos[0]}, {obs_pos[1]}, {obs_pos[2]}, 1.0, 0.0, 0.0, 0.0]),",
+                f")",
+                "rmpflow.update_world()",
+                f"print(f'Added sphere obstacle \\'{obs_name}\\' at {obs_pos} with radius {radius}')",
+            ])
+        else:
+            # cuboid (default)
+            lines.extend([
+                f"# Add cuboid obstacle '{obs_name}'",
+                f"rmpflow.add_cuboid(",
+                f"    name='{obs_name}',",
+                f"    dims=np.array({list(obs_dims)}),",
+                f"    pose=np.array([{obs_pos[0]}, {obs_pos[1]}, {obs_pos[2]}, 1.0, 0.0, 0.0, 0.0]),",
+                f")",
+                "rmpflow.update_world()",
+                f"print(f'Added cuboid obstacle \\'{obs_name}\\' at {obs_pos} with dims {list(obs_dims)}')",
+            ])
+        return "\n".join(lines)
+
+    if policy_type == "remove_obstacle":
+        lines = [
+            "from isaacsim.robot_motion.motion_generation import RmpFlow",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "",
+            f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+            "rmpflow = RmpFlow(**rmpflow_config)",
+            "",
+            "# RMPflow has no individual obstacle removal — reset clears all obstacles",
+            "rmpflow.reset()",
+            "print('Motion policy reset — all obstacles cleared')",
+        ]
+        return "\n".join(lines)
+
+    if policy_type == "set_joint_limits":
+        buffer_val = args.get("joint_limit_buffers", 0.05)
+        lines = [
+            "import numpy as np",
+            "from isaacsim.robot_motion.motion_generation import RmpFlow",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "from isaacsim.core.prims import SingleArticulation",
+            "",
+            f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+            "rmpflow = RmpFlow(**rmpflow_config)",
+            "",
+            f"art = SingleArticulation(prim_path='{art_path}')",
+            "art.initialize()",
+            "",
+            "# Get current joint limits and add padding buffer",
+            "lower_limits = art.get_joint_positions()  # read current as reference",
+            f"buffer = {buffer_val}",
+            "dof_count = art.num_dof",
+            "print(f'Applying joint limit buffer of {buffer} rad to {dof_count} joints')",
+            "print(f'Note: Joint limit buffers are applied in the RMPflow config YAML.')",
+            "print(f'For runtime adjustment, modify rmpflow_config[\"joint_limit_buffers\"] before init.')",
+        ]
+        return "\n".join(lines)
+
+    return f"# Unknown policy type: {policy_type}"
+
+
+CODE_GEN_HANDLERS["set_motion_policy"] = _gen_set_motion_policy
+
+
+# ── Robot Description (8B.4) ────────────────────────────────────────────────
+
+# Supported robot names (matches interface_config_loader.get_supported_robot_policy_pairs)
+_SUPPORTED_MOTION_ROBOTS = {
+    "franka", "ur10", "ur5e", "ur3e", "cobotta", "rs007n",
+    "dofbot", "kawasaki", "flexiv_rizon",
+}
+
+
+async def _handle_generate_robot_description(args: Dict) -> Dict:
+    """Check if a robot has pre-built motion generation configs."""
+    art_path = args["articulation_path"]
+    robot_type = args.get("robot_type", "").lower()
+
+    # Try to identify robot type from path if not provided
+    if not robot_type:
+        path_lower = art_path.lower()
+        for name in _SUPPORTED_MOTION_ROBOTS:
+            if name in path_lower:
+                robot_type = name
+                break
+
+    if robot_type in _SUPPORTED_MOTION_ROBOTS:
+        cfg = _MOTION_ROBOT_CONFIGS.get(robot_type, {})
+        return {
+            "supported": True,
+            "robot_type": robot_type,
+            "config_files": {
+                "rmpflow_config": cfg.get("rmp_config", f"{robot_type}/rmpflow"),
+                "robot_descriptor": cfg.get("desc", f"{robot_type}/robot_descriptor.yaml"),
+                "urdf": cfg.get("urdf", f"{robot_type}/lula_gen.urdf"),
+                "end_effector_frame": cfg.get("ee_frame", "ee_link"),
+            },
+            "usage": (
+                "This robot has pre-built configs. Use "
+                "interface_config_loader.load_supported_motion_gen_config("
+                f"'{robot_type}', 'RMPflow') to load them."
+            ),
+            "message": (
+                f"Robot '{robot_type}' is pre-supported for motion generation. "
+                f"Config files are bundled with the isaacsim.robot_motion.motion_generation extension."
+            ),
+        }
+
+    return {
+        "supported": False,
+        "robot_type": robot_type or "(unknown)",
+        "articulation_path": art_path,
+        "instructions": (
+            "This robot does not have pre-built motion generation configs. "
+            "To create them:\n"
+            "1. Open the XRDF Editor GUI (Window > Extensions > XRDF Editor) to "
+            "define collision spheres, joint limits, and end-effector frames.\n"
+            "2. Export the XRDF file and Lula robot descriptor YAML.\n"
+            "3. Use the exported files with LulaKinematicsSolver and RmpFlow.\n\n"
+            "For programmatic collision sphere editing, use the CollisionSphereEditor "
+            "from isaacsim.robot_setup.xrdf_editor:\n"
+            "  - CollisionSphereEditor.add_sphere(link_path, position, radius)\n"
+            "  - CollisionSphereEditor.clear_link_spheres(link_path)\n"
+            "  - CollisionSphereEditor.clear_spheres()\n"
+            "  - CollisionSphereEditor.delete_sphere(sphere_id)"
+        ),
+        "message": (
+            f"Robot '{robot_type or 'unknown'}' at '{art_path}' is not pre-supported. "
+            "Use the XRDF Editor to generate collision spheres and robot descriptors."
+        ),
+    }
+
+
+DATA_HANDLERS["generate_robot_description"] = _handle_generate_robot_description
+
+
+# ── Inverse Kinematics (8B.5) ──────────────────────────────────────────────
+
+def _gen_solve_ik(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    target_pos = args["target_position"]
+    target_ori = args.get("target_orientation")
+    robot_type = args.get("robot_type", "franka").lower()
+
+    cfg = _MOTION_ROBOT_CONFIGS.get(robot_type, _MOTION_ROBOT_CONFIGS["franka"])
+    ee_frame = cfg["ee_frame"]
+
+    lines = [
+        "import numpy as np",
+        "from isaacsim.robot_motion.motion_generation import LulaKinematicsSolver",
+        "from isaacsim.robot_motion.motion_generation import ArticulationKinematicsSolver",
+        "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+        "from isaacsim.core.prims import SingleArticulation",
+        "",
+        f"# Load kinematics config for {robot_type}",
+        f"kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config('{robot_type}')",
+        "kin_solver = LulaKinematicsSolver(**kin_config)",
+        "",
+        f"art = SingleArticulation(prim_path='{art_path}')",
+        "art.initialize()",
+        f"art_kin = ArticulationKinematicsSolver(art, kin_solver, '{ee_frame}')",
+        "",
+        f"target_position = np.array({list(target_pos)})",
+    ]
+    if target_ori:
+        lines.append(f"target_orientation = np.array({list(target_ori)})")
+    else:
+        lines.append("target_orientation = None")
+
+    lines.extend([
+        "",
+        "action, success = art_kin.compute_inverse_kinematics(",
+        "    target_position=target_position,",
+        "    target_orientation=target_orientation,",
+        ")",
+        "if success:",
+        "    art.apply_action(action)",
+        f"    print(f'IK solved successfully — {ee_frame} moving to {{target_position}}')",
+        "else:",
+        "    print('IK failed — target may be unreachable or near singularity')",
+    ])
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["solve_ik"] = _gen_solve_ik
+
+
 # ── Asset Catalog Search ─────────────────────────────────────────────────────
 
 _asset_index: Optional[List[Dict]] = None
