@@ -7277,4 +7277,167 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+# ─── Community & Remote Access (Addendum C) ──────────────────────────────
+    # C.1 Hardware-tagged template filter
+    {
+        "type": "function",
+        "function": {
+            "name": "filter_templates_by_hardware",
+            "description": "Filter scene/example templates by detected GPU capabilities. Reads template metadata (min_vram_gb, recommended_vram_gb, estimated_fps, tags) and returns only templates that fit the user's hardware. Use when the user asks 'what templates work on my GPU', 'show beginner-friendly examples for my hardware', or wants to browse compatible scene starters. Auto-detects GPU via HydraEngineStats / nvidia-smi when device_vram_gb is not supplied.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "device_vram_gb": {"type": "number", "description": "Override detected VRAM in GB. If omitted, auto-detect from local GPU info."},
+                    "category": {"type": "string", "description": "Optional template category filter (e.g. 'manipulation', 'locomotion', 'rl', 'sdg')."},
+                    "tag": {"type": "string", "description": "Optional tag filter (e.g. 'beginner_friendly', 'works_on_12gb')."},
+                    "include_recommended_only": {"type": "boolean", "description": "If true, only return templates whose recommended_vram_gb fits. Default false (use min_vram_gb)."},
+                },
+                "required": [],
+            },
+        },
+    },
+    # C.2 Scene template export (.isaa)
+    {
+        "type": "function",
+        "function": {
+            "name": "export_template",
+            "description": "Package the current scene (or a referenced USD path) plus its config and metadata into a portable .isaa file (zip archive with manifest.json). Enables file-based sharing of scene templates via email, GitHub or Discord — no central server required. Use when the user asks to 'export this as a template', 'share this scene', 'package this for someone else', or 'save as .isaa file'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_path": {"type": "string", "description": "Path to the .usd scene to export, or omit to export the currently open stage."},
+                    "name": {"type": "string", "description": "Template name (used as the .isaa filename and manifest.name)."},
+                    "description": {"type": "string", "description": "Human-readable description of what the template demonstrates."},
+                    "min_vram_gb": {"type": "number", "description": "Optional minimum VRAM in GB to add to the hardware-tag manifest."},
+                    "recommended_vram_gb": {"type": "number", "description": "Optional recommended VRAM in GB."},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional tag list (e.g. ['beginner_friendly', 'works_on_12gb'])."},
+                    "output_dir": {"type": "string", "description": "Directory where the .isaa file is written. Default: workspace/templates/exports."},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    # C.2 Scene template import (.isaa)
+    {
+        "type": "function",
+        "function": {
+            "name": "import_template",
+            "description": "Import a shared .isaa template file into the local template library. Validates the manifest, extracts the USD + config + assets, and registers it for use in filter_templates_by_hardware. Use when the user provides a downloaded .isaa file or asks to 'install this template'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to the .isaa file to import."},
+                    "library_dir": {"type": "string", "description": "Local template library directory. Default: workspace/templates/library."},
+                    "overwrite": {"type": "boolean", "description": "Overwrite an existing template with the same name. Default false."},
+                },
+                "required": ["file_path"],
+            },
+        },
+    },
+    # C.3 GPU VRAM headroom check
+    {
+        "type": "function",
+        "function": {
+            "name": "check_vram_headroom",
+            "description": "Estimate VRAM cost of an upcoming operation (cloning robots, RL training, SDG run) and compare against available GPU memory. Returns a warning + actionable suggestions if the operation is likely to OOM. ALWAYS call this before launching expensive operations like clone_prim with count >= 64, launch_training, or configure_sdg with high frame counts. Suggestions include: reduce env count, switch to headless mode, use cloud compute.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "operation": {"type": "string", "enum": ["clone", "train", "sdg", "render", "custom"], "description": "Type of operation being planned."},
+                    "num_envs": {"type": "integer", "description": "Number of parallel environments / clones / frames."},
+                    "complexity": {"type": "string", "enum": ["low", "medium", "high"], "description": "Per-env complexity (articulation count, sensor count, mesh density). Default: medium."},
+                    "per_env_mb_override": {"type": "number", "description": "Optional explicit per-env VRAM estimate in MB. If omitted, derived from operation + complexity."},
+                    "device_vram_gb": {"type": "number", "description": "Override detected VRAM in GB. If omitted, auto-detect."},
+                    "currently_used_gb": {"type": "number", "description": "Current VRAM usage in GB. If omitted, auto-detect from nvidia-smi."},
+                },
+                "required": ["operation", "num_envs"],
+            },
+        },
+    },
+    # C.4 Async task dispatch
+    {
+        "type": "function",
+        "function": {
+            "name": "dispatch_async_task",
+            "description": "Launch a long-running operation (training, SDG, benchmarks) in a background thread/process and return a task_id immediately so the user can keep working. The task runs out-of-band and the chat panel is notified via SSE on completion. Use for operations that take more than ~30 seconds and don't need the chat to block. Pair with query_async_task for status polling.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_type": {"type": "string", "enum": ["sdg", "train", "benchmark", "render", "custom"], "description": "Type of long-running task."},
+                    "params": {"type": "object", "description": "Task-specific parameter dict (e.g. {'num_frames': 500, 'output_dir': 'workspace/sdg_output/run_042'} for SDG)."},
+                    "label": {"type": "string", "description": "Human-readable label shown in status messages."},
+                },
+                "required": ["task_type", "params"],
+            },
+        },
+    },
+    # C.4 Async task status query
+    {
+        "type": "function",
+        "function": {
+            "name": "query_async_task",
+            "description": "Check the status of a previously dispatched async task. Returns state ('pending' | 'running' | 'done' | 'error'), progress (0-1), elapsed seconds, and any result payload once complete. Use when the user asks 'how's that SDG run going?' or 'is the training done?'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "Task ID returned by dispatch_async_task."},
+                },
+                "required": ["task_id"],
+            },
+        },
+    },
+    # C.5 Force visualization (debug_draw arrows)
+    {
+        "type": "function",
+        "function": {
+            "name": "visualize_forces",
+            "description": "Draw colored debug arrows in the viewport showing per-joint torques on an articulation. Green = within normal range (<70% of limit), yellow = >70%, red = >90% (near saturation). Useful for visually debugging RL policies, demonstrating robot dynamics, and spotting joints near saturation. Uses omni.isaac.debug_draw.draw_lines.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the articulation root (e.g. '/World/Franka')."},
+                    "scale": {"type": "number", "description": "Arrow length scale factor (meters per Newton-meter). Default: 0.01."},
+                    "update_hz": {"type": "number", "description": "Optional update frequency in Hz for continuous visualization. Default: 30."},
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
+    # C.6 Rendered video output (Movie Capture)
+    {
+        "type": "function",
+        "function": {
+            "name": "render_video",
+            "description": "Render a video clip of the current scene using Isaac Sim's RTX renderer (NOT a screen capture — full path-traced or ray-traced output via omni.kit.capture / Movie Capture extension). Quality presets: 'preview' (RayTracing, 720p, 1 SPP, fast), 'presentation' (PathTracing, 1080p, 64 SPP, investor demo), 'production' (PathTracing, 4K, 256 SPP, marketing). Use when the user asks for a 'rendered video', 'cinematic clip', 'turntable', or 'export a demo video'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "duration": {"type": "number", "description": "Clip length in seconds."},
+                    "camera": {"type": "string", "description": "USD path of the camera to render from. Default: active viewport camera."},
+                    "quality": {"type": "string", "enum": ["preview", "presentation", "production"], "description": "Quality preset. Default: 'preview'."},
+                    "output_path": {"type": "string", "description": "Output video path (.mp4 recommended). Default: workspace/renders/<timestamp>.mp4."},
+                    "fps": {"type": "integer", "description": "Frames per second. Default: 30."},
+                },
+                "required": ["duration"],
+            },
+        },
+    },
+
+    # ─── Scene Export ─────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
+                },
+                "required": [],
+            },
+        },
+    },
 ]

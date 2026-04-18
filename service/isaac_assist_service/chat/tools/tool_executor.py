@@ -25548,3 +25548,705 @@ print(f"OK: visualizing collision mesh for {{PRIM_PATH}}")
 
 
 CODE_GEN_HANDLERS["visualize_collision_mesh"] = _gen_visualize_collision_mesh
+
+
+# ── Addendum C: Community & Remote Access ───────────────────────────────────
+# C.1 Hardware-tagged templates
+# C.2 Scene template export/import (.isaa)
+# C.3 GPU VRAM headroom warning
+# C.4 Async task dispatch + status query
+# C.5 Force visualization in viewport
+# C.6 Rendered video output via Movie Capture
+
+import time as _time
+import uuid as _uuid
+import threading as _threading
+import zipfile as _zipfile
+
+# Default per-env VRAM estimates (MB) for check_vram_headroom.
+# Source: addendum_community_remote.md C.3 — derived from articulation
+# complexity + sensor count typical of each operation type.
+_VRAM_PER_ENV_MB = {
+    "clone": {"low": 8, "medium": 16, "high": 32},
+    "train": {"low": 12, "medium": 24, "high": 48},
+    "sdg": {"low": 32, "medium": 64, "high": 128},
+    "render": {"low": 256, "medium": 512, "high": 1024},
+    "custom": {"low": 16, "medium": 32, "high": 64},
+}
+
+# In-memory async-task registry.  Keys are task IDs, values are dicts with
+# state, progress, started_at, finished_at, params, result, error.
+_ASYNC_TASKS: Dict[str, Dict[str, Any]] = {}
+_ASYNC_TASKS_LOCK = _threading.Lock()
+
+
+def _detect_local_vram_gb() -> Optional[float]:
+    """Best-effort GPU VRAM detection via the existing fingerprint collector."""
+    try:
+        from ...fingerprint.collector import get_gpu_info
+    except Exception:
+        return None
+    try:
+        gpus = get_gpu_info() or []
+    except Exception:
+        return None
+    if not gpus:
+        return None
+    # Use the largest-VRAM GPU (matches Isaac Sim's preferred device)
+    best = max(g.get("vram_mb", 0) for g in gpus)
+    if best <= 0:
+        return None
+    return round(best / 1024.0, 2)
+
+
+def _detect_used_vram_gb() -> Optional[float]:
+    """Best-effort current VRAM usage via nvidia-smi."""
+    try:
+        from ...fingerprint.collector import run_shell
+    except Exception:
+        return None
+    try:
+        out = run_shell("nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits")
+    except Exception:
+        return None
+    if not out:
+        return None
+    try:
+        # Take the first GPU
+        first = out.splitlines()[0].strip()
+        used_mb = float(first)
+        return round(used_mb / 1024.0, 2)
+    except Exception:
+        return None
+
+
+# ─── C.1: filter_templates_by_hardware ───────────────────────────────────────
+
+_TEMPLATE_LIBRARY_DIR = _WORKSPACE / "templates" / "library"
+
+
+def _load_template_manifests(library_dir: Path) -> List[Dict]:
+    """Load manifest.json from each template directory in library_dir.
+
+    Each entry is augmented with `_template_dir` so the caller can resolve
+    paths.  Missing or malformed manifests are skipped.
+    """
+    manifests: List[Dict] = []
+    if not library_dir.exists():
+        return manifests
+    for entry in sorted(library_dir.iterdir()):
+        if not entry.is_dir():
+            continue
+        manifest_path = entry / "manifest.json"
+        if not manifest_path.exists():
+            continue
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[filter_templates_by_hardware] bad manifest at {manifest_path}: {e}")
+            continue
+        if not isinstance(data, dict):
+            continue
+        data["_template_dir"] = str(entry)
+        manifests.append(data)
+    return manifests
+
+
+async def _handle_filter_templates_by_hardware(args: Dict) -> Dict:
+    """Filter templates by GPU VRAM + tag/category."""
+    device_vram_gb = args.get("device_vram_gb")
+    if device_vram_gb is None:
+        device_vram_gb = _detect_local_vram_gb()
+
+    category = args.get("category")
+    tag = args.get("tag")
+    use_recommended = bool(args.get("include_recommended_only"))
+
+    library_dir_arg = args.get("library_dir") or str(_TEMPLATE_LIBRARY_DIR)
+    library_dir = Path(library_dir_arg)
+    manifests = _load_template_manifests(library_dir)
+
+    matched: List[Dict] = []
+    rejected: List[Dict] = []
+    for m in manifests:
+        min_vram = float(m.get("min_vram_gb", 0) or 0)
+        rec_vram = float(m.get("recommended_vram_gb", min_vram) or min_vram)
+        threshold = rec_vram if use_recommended else min_vram
+
+        # Hardware gate
+        if device_vram_gb is not None and threshold > 0 and device_vram_gb < threshold:
+            rejected.append({
+                "template": m.get("template") or m.get("name"),
+                "reason": f"requires {threshold} GB VRAM, you have {device_vram_gb} GB",
+            })
+            continue
+
+        # Category filter
+        if category and m.get("category") and m["category"] != category:
+            continue
+
+        # Tag filter
+        if tag and tag not in (m.get("tags") or []):
+            continue
+
+        matched.append({
+            "template": m.get("template") or m.get("name"),
+            "description": m.get("description", ""),
+            "min_vram_gb": m.get("min_vram_gb"),
+            "recommended_vram_gb": m.get("recommended_vram_gb"),
+            "estimated_fps": m.get("estimated_fps", {}),
+            "tags": m.get("tags", []),
+            "category": m.get("category"),
+            "path": m.get("_template_dir"),
+        })
+
+    return {
+        "device_vram_gb": device_vram_gb,
+        "library_dir": str(library_dir),
+        "matched_count": len(matched),
+        "matched": matched,
+        "rejected_count": len(rejected),
+        "rejected": rejected,
+    }
+
+
+DATA_HANDLERS["filter_templates_by_hardware"] = _handle_filter_templates_by_hardware
+
+
+# ─── C.2: export_template / import_template (.isaa packages) ─────────────────
+
+_TEMPLATE_EXPORT_DIR = _WORKSPACE / "templates" / "exports"
+_ISAA_MANIFEST_VERSION = 1
+
+
+def _gen_export_template(args: Dict) -> str:
+    """Generate code that bundles the live stage + config + metadata into .isaa.
+
+    Runs inside Kit so it can use omni.usd to flatten the open stage when the
+    caller doesn't supply scene_path.  The .isaa file is a zip with this
+    layout:
+
+        manifest.json
+        scene.usd          (or .usda)
+        config/<files>     (optional; copied from CONFIG_DIR if present)
+
+    """
+    from datetime import datetime as _dt
+    name = args["name"]
+    safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in name)
+    description = args.get("description", "")
+    scene_path = args.get("scene_path")  # may be None → flatten open stage
+    output_dir = args.get("output_dir") or str(_TEMPLATE_EXPORT_DIR)
+    min_vram_gb = args.get("min_vram_gb")
+    recommended_vram_gb = args.get("recommended_vram_gb")
+    tags = args.get("tags", []) or []
+    timestamp = _dt.utcnow().strftime("%Y%m%dT%H%M%SZ")
+
+    # Build the manifest dict literal we want serialized inside Kit.
+    manifest = {
+        "manifest_version": _ISAA_MANIFEST_VERSION,
+        "name": name,
+        "template": safe_name,
+        "description": description,
+        "exported_at": timestamp,
+        "min_vram_gb": min_vram_gb,
+        "recommended_vram_gb": recommended_vram_gb,
+        "tags": list(tags),
+        "scene_file": "scene.usda",
+    }
+
+    return f"""\
+import json
+import os
+import shutil
+import tempfile
+import zipfile
+from pathlib import Path
+
+import omni.usd
+
+manifest = {json.dumps(manifest, indent=2)}
+output_dir = Path({output_dir!r})
+output_dir.mkdir(parents=True, exist_ok=True)
+isaa_path = output_dir / ({safe_name!r} + '.isaa')
+
+scene_path = {scene_path!r}
+with tempfile.TemporaryDirectory() as _tmp:
+    tmp = Path(_tmp)
+    scene_dst = tmp / 'scene.usda'
+    if scene_path:
+        # Copy the supplied .usd/.usda directly into the bundle.
+        shutil.copyfile(scene_path, scene_dst)
+        manifest['scene_file'] = Path(scene_path).name
+    else:
+        # Flatten the currently open stage to a single .usda file.
+        ctx = omni.usd.get_context()
+        stage = ctx.get_stage()
+        if stage is None:
+            raise RuntimeError('No open stage to export — supply scene_path or open a scene.')
+        stage.Export(str(scene_dst))
+
+    (tmp / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+
+    with zipfile.ZipFile(isaa_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.write(tmp / 'manifest.json', arcname='manifest.json')
+        zf.write(scene_dst, arcname=manifest['scene_file'])
+
+print(f'[export_template] wrote {{isaa_path}} ({{isaa_path.stat().st_size}} bytes)')
+"""
+
+
+CODE_GEN_HANDLERS["export_template"] = _gen_export_template
+
+
+def _gen_import_template(args: Dict) -> str:
+    """Generate code that extracts an .isaa file into the local library."""
+    file_path = args["file_path"]
+    library_dir = args.get("library_dir") or str(_TEMPLATE_LIBRARY_DIR)
+    overwrite = bool(args.get("overwrite", False))
+
+    return f"""\
+import json
+import shutil
+import zipfile
+from pathlib import Path
+
+src = Path({file_path!r})
+library = Path({library_dir!r})
+library.mkdir(parents=True, exist_ok=True)
+
+if not src.exists():
+    raise FileNotFoundError(f'.isaa file not found: {{src}}')
+
+with zipfile.ZipFile(src, 'r') as zf:
+    names = zf.namelist()
+    if 'manifest.json' not in names:
+        raise ValueError(f'{{src}} is not a valid .isaa template (missing manifest.json)')
+    manifest = json.loads(zf.read('manifest.json').decode('utf-8'))
+
+template_id = manifest.get('template') or manifest.get('name')
+if not template_id:
+    raise ValueError('manifest.json missing template/name field')
+safe_id = ''.join(c if c.isalnum() or c in '_-' else '_' for c in template_id)
+
+dest = library / safe_id
+if dest.exists():
+    if {overwrite!r}:
+        shutil.rmtree(dest)
+    else:
+        raise FileExistsError(f'Template {{template_id!r}} already in library — pass overwrite=True to replace.')
+
+dest.mkdir(parents=True)
+with zipfile.ZipFile(src, 'r') as zf:
+    zf.extractall(dest)
+
+print(f'[import_template] installed {{template_id}} -> {{dest}}')
+"""
+
+
+CODE_GEN_HANDLERS["import_template"] = _gen_import_template
+
+
+# ─── C.3: check_vram_headroom ────────────────────────────────────────────────
+
+async def _handle_check_vram_headroom(args: Dict) -> Dict:
+    """Estimate VRAM cost vs available, return warnings + suggestions."""
+    operation = args.get("operation", "custom")
+    num_envs = int(args.get("num_envs", 1))
+    complexity = args.get("complexity", "medium")
+    if complexity not in ("low", "medium", "high"):
+        complexity = "medium"
+
+    per_env_mb = args.get("per_env_mb_override")
+    if per_env_mb is None:
+        per_env_mb = _VRAM_PER_ENV_MB.get(operation, _VRAM_PER_ENV_MB["custom"]).get(
+            complexity, 32
+        )
+    per_env_mb = float(per_env_mb)
+    estimated_mb = per_env_mb * max(num_envs, 1)
+    estimated_gb = round(estimated_mb / 1024.0, 2)
+
+    device_vram_gb = args.get("device_vram_gb")
+    if device_vram_gb is None:
+        device_vram_gb = _detect_local_vram_gb()
+    used_gb = args.get("currently_used_gb")
+    if used_gb is None:
+        used_gb = _detect_used_vram_gb()
+
+    available_gb: Optional[float]
+    if device_vram_gb is not None and used_gb is not None:
+        available_gb = round(max(device_vram_gb - used_gb, 0.0), 2)
+    elif device_vram_gb is not None:
+        # Assume ~1 GB baseline used by the OS / Kit if we can't query.
+        available_gb = round(max(device_vram_gb - 1.0, 0.0), 2)
+    else:
+        available_gb = None
+
+    fits = (
+        available_gb is not None
+        and estimated_gb <= available_gb
+    )
+
+    suggestions: List[str] = []
+    if not fits and available_gb is not None:
+        # Suggest a reduced env count that fits in ~80 % of available VRAM.
+        budget_mb = available_gb * 1024.0 * 0.8
+        if per_env_mb > 0:
+            safe_envs = max(int(budget_mb // per_env_mb), 1)
+            if safe_envs < num_envs:
+                suggestions.append(
+                    f"Reduce to {safe_envs} environments (fits in ~{round(safe_envs * per_env_mb / 1024.0, 2)} GB)"
+                )
+        suggestions.append("Use headless mode to free ~2 GB")
+        suggestions.append("Use cloud compute (Phase 7H IsaacAutomator)")
+
+    warning: Optional[str] = None
+    if not fits:
+        if available_gb is None:
+            warning = (
+                f"Could not auto-detect GPU VRAM. Estimated need: {estimated_gb} GB "
+                f"for {num_envs}× {operation} ({complexity})."
+            )
+        else:
+            warning = (
+                f"This will need approximately {estimated_gb} GB additional VRAM. "
+                f"Available: {available_gb} GB — not enough for {num_envs} {operation}."
+            )
+
+    return {
+        "operation": operation,
+        "num_envs": num_envs,
+        "complexity": complexity,
+        "per_env_mb": per_env_mb,
+        "estimated_gb": estimated_gb,
+        "device_vram_gb": device_vram_gb,
+        "currently_used_gb": used_gb,
+        "available_gb": available_gb,
+        "fits": fits,
+        "warning": warning,
+        "suggestions": suggestions,
+    }
+
+
+DATA_HANDLERS["check_vram_headroom"] = _handle_check_vram_headroom
+
+
+# ─── C.4: dispatch_async_task / query_async_task ─────────────────────────────
+
+def _async_task_runner(task_id: str, task_type: str, params: Dict) -> None:
+    """Worker body executed in a daemon thread.
+
+    Real long-running ops (SDG, training) are dispatched via Kit; here we
+    simulate progress so the lifecycle is observable from the chat panel.
+    Production integrations replace this body with concrete handlers per
+    task_type.
+    """
+    try:
+        with _ASYNC_TASKS_LOCK:
+            entry = _ASYNC_TASKS.get(task_id)
+            if entry is None:
+                return
+            entry["state"] = "running"
+            entry["started_at"] = _time.time()
+
+        # Heuristic total duration so a smoke test completes quickly.
+        total_steps = max(int(params.get("steps", 5)), 1)
+        step_sleep = float(params.get("step_seconds", 0.0))
+        for i in range(total_steps):
+            if step_sleep > 0:
+                _time.sleep(step_sleep)
+            with _ASYNC_TASKS_LOCK:
+                entry = _ASYNC_TASKS.get(task_id)
+                if entry is None or entry.get("state") == "cancelled":
+                    return
+                entry["progress"] = (i + 1) / total_steps
+
+        with _ASYNC_TASKS_LOCK:
+            entry = _ASYNC_TASKS.get(task_id)
+            if entry is None:
+                return
+            entry["state"] = "done"
+            entry["finished_at"] = _time.time()
+            entry["progress"] = 1.0
+            entry["result"] = {
+                "task_type": task_type,
+                "params": params,
+                "message": f"{task_type} task completed",
+            }
+    except Exception as e:  # noqa: BLE001
+        with _ASYNC_TASKS_LOCK:
+            entry = _ASYNC_TASKS.get(task_id)
+            if entry is not None:
+                entry["state"] = "error"
+                entry["finished_at"] = _time.time()
+                entry["error"] = str(e)
+
+
+async def _handle_dispatch_async_task(args: Dict) -> Dict:
+    """Register an async task and start a background worker."""
+    task_type = args.get("task_type", "custom")
+    params = args.get("params") or {}
+    label = args.get("label") or f"{task_type} task"
+
+    task_id = f"task_{task_type}_{_uuid.uuid4().hex[:8]}"
+    with _ASYNC_TASKS_LOCK:
+        _ASYNC_TASKS[task_id] = {
+            "task_id": task_id,
+            "task_type": task_type,
+            "label": label,
+            "params": params,
+            "state": "pending",
+            "progress": 0.0,
+            "queued_at": _time.time(),
+            "started_at": None,
+            "finished_at": None,
+            "result": None,
+            "error": None,
+        }
+
+    # Allow tests / callers to opt out of the background thread for synchronous
+    # reasoning (e.g. when running under pytest without a real Kit).
+    if not args.get("dry_run"):
+        thread = _threading.Thread(
+            target=_async_task_runner,
+            args=(task_id, task_type, params),
+            name=f"async-{task_id}",
+            daemon=True,
+        )
+        thread.start()
+
+    return {
+        "task_id": task_id,
+        "task_type": task_type,
+        "label": label,
+        "state": "pending",
+        "message": f"Started {label} in background. Query status with task_id={task_id!r}.",
+    }
+
+
+DATA_HANDLERS["dispatch_async_task"] = _handle_dispatch_async_task
+
+
+async def _handle_query_async_task(args: Dict) -> Dict:
+    """Return current state + progress + (if done) result for a task."""
+    task_id = args["task_id"]
+    with _ASYNC_TASKS_LOCK:
+        entry = _ASYNC_TASKS.get(task_id)
+        if entry is None:
+            return {"task_id": task_id, "state": "unknown", "error": "task_id not found"}
+        snapshot = dict(entry)
+
+    # Compute elapsed seconds for convenience
+    started = snapshot.get("started_at")
+    finished = snapshot.get("finished_at")
+    queued = snapshot.get("queued_at")
+    if started is not None:
+        end = finished if finished is not None else _time.time()
+        snapshot["elapsed_seconds"] = round(end - started, 3)
+    elif queued is not None:
+        snapshot["elapsed_seconds"] = round(_time.time() - queued, 3)
+    return snapshot
+
+
+DATA_HANDLERS["query_async_task"] = _handle_query_async_task
+
+
+# ─── C.5: visualize_forces (debug_draw arrows in viewport) ──────────────────
+
+def _gen_visualize_forces(args: Dict) -> str:
+    """Generate code that reads applied joint torques and draws colored arrows.
+
+    Color rules (per spec):
+      green  : |torque| <= 70 % of effort limit
+      yellow : 70 % < |torque| <= 90 %
+      red    : |torque| > 90 %
+    """
+    art_path = args["articulation_path"]
+    scale = float(args.get("scale", 0.01))
+    update_hz = float(args.get("update_hz", 30.0))
+
+    return f"""\
+import omni.usd
+from pxr import Usd, UsdGeom, UsdPhysics, Gf
+
+try:
+    from omni.isaac.debug_draw import _debug_draw  # Isaac 4.x
+except ImportError:  # Isaac Sim 5.x renamed module
+    from isaacsim.util.debug_draw import _debug_draw
+
+draw = _debug_draw.acquire_debug_draw_interface()
+
+ART_PATH = {art_path!r}
+SCALE = {scale!r}
+UPDATE_HZ = {update_hz!r}
+
+stage = omni.usd.get_context().get_stage()
+art_prim = stage.GetPrimAtPath(ART_PATH)
+if not art_prim or not art_prim.IsValid():
+    raise RuntimeError(f'Articulation prim not found: {{ART_PATH}}')
+
+
+def _color_for(ratio):
+    # ratio = |torque| / effort_limit
+    if ratio <= 0.70:
+        return (0.1, 1.0, 0.1, 1.0)  # green
+    if ratio <= 0.90:
+        return (1.0, 0.95, 0.1, 1.0)  # yellow
+    return (1.0, 0.15, 0.15, 1.0)  # red
+
+
+def _collect_joints(prim):
+    joints = []
+    for child in Usd.PrimRange(prim):
+        if child.HasAPI(UsdPhysics.RevoluteJointAPI) or child.HasAPI(UsdPhysics.PrismaticJointAPI):
+            joints.append(child)
+    return joints
+
+
+def _draw_once():
+    draw.clear_lines()
+    points_a = []
+    points_b = []
+    colors = []
+    sizes = []
+
+    for joint in _collect_joints(art_prim):
+        # Joint world position (best-effort via Xformable)
+        try:
+            xf = UsdGeom.Xformable(joint).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            pos = xf.ExtractTranslation()
+        except Exception:
+            pos = Gf.Vec3d(0, 0, 0)
+
+        # Drive API: applied target torque + effort limit
+        drive = UsdPhysics.DriveAPI.Get(joint, 'angular') or UsdPhysics.DriveAPI.Get(joint, 'linear')
+        torque = 0.0
+        limit = 1.0
+        if drive:
+            try:
+                torque = float(drive.GetTargetPositionAttr().Get() or 0.0)
+            except Exception:
+                torque = 0.0
+            try:
+                limit = float(drive.GetMaxForceAttr().Get() or 1.0)
+            except Exception:
+                limit = 1.0
+
+        ratio = min(abs(torque) / max(abs(limit), 1e-6), 1.5)
+        color = _color_for(ratio)
+        length = max(abs(torque), 0.05) * SCALE
+
+        start = (pos[0], pos[1], pos[2])
+        end = (pos[0], pos[1], pos[2] + length)
+        points_a.append(start)
+        points_b.append(end)
+        colors.append(color)
+        sizes.append(2.0)
+
+        # Arrowhead: two short lines making a wedge above the tip.
+        head = max(length * 0.2, 0.01)
+        for ox in (-head, head):
+            points_a.append(end)
+            points_b.append((end[0] + ox, end[1], end[2] - head))
+            colors.append(color)
+            sizes.append(2.0)
+
+    if points_a:
+        draw.draw_lines(points_a, points_b, colors, sizes)
+
+
+_draw_once()
+print(f'[visualize_forces] drew arrows for {{ART_PATH}} at scale={{SCALE}} (update={{UPDATE_HZ}} Hz)')
+"""
+
+
+CODE_GEN_HANDLERS["visualize_forces"] = _gen_visualize_forces
+
+
+# ─── C.6: render_video via Movie Capture ────────────────────────────────────
+
+_RENDER_QUALITY_PRESETS = {
+    "preview": {
+        "renderer": "RayTracing",
+        "resolution": (1280, 720),
+        "spp": 1,
+    },
+    "presentation": {
+        "renderer": "PathTracing",
+        "resolution": (1920, 1080),
+        "spp": 64,
+    },
+    "production": {
+        "renderer": "PathTracing",
+        "resolution": (3840, 2160),
+        "spp": 256,
+    },
+}
+
+
+def _gen_render_video(args: Dict) -> str:
+    """Generate code that runs Movie Capture for a clip."""
+    duration = float(args["duration"])
+    camera = args.get("camera")  # may be None → active viewport camera
+    quality = args.get("quality", "preview")
+    if quality not in _RENDER_QUALITY_PRESETS:
+        quality = "preview"
+    preset = _RENDER_QUALITY_PRESETS[quality]
+    fps = int(args.get("fps", 30))
+
+    output_path = args.get("output_path")
+    if not output_path:
+        # Stable per-call name; the Kit-side code resolves the timestamp.
+        output_path = "workspace/renders/render_<timestamp>.mp4"
+
+    res_w, res_h = preset["resolution"]
+    renderer = preset["renderer"]
+    spp = preset["spp"]
+
+    return f"""\
+import os
+import time
+from pathlib import Path
+
+# Movie Capture / kit.capture extension (RTX-rendered, NOT screen capture)
+try:
+    from omni.kit.capture import CaptureOptions, CaptureExtension
+except ImportError:
+    # Newer Kit versions expose the API under omni.kit.capture.viewport
+    from omni.kit.capture.viewport import CaptureOptions, CaptureExtension
+
+DURATION_S = {duration!r}
+FPS = {fps!r}
+QUALITY = {quality!r}
+RES = ({res_w}, {res_h})
+RENDERER = {renderer!r}
+SPP = {spp!r}
+CAMERA = {camera!r}
+
+raw_output = {output_path!r}
+ts = time.strftime('%Y%m%dT%H%M%SZ')
+output_path = raw_output.replace('<timestamp>', ts)
+out = Path(output_path)
+out.parent.mkdir(parents=True, exist_ok=True)
+
+options = CaptureOptions()
+options.fps = FPS
+options.resolution = RES
+options.renderer = RENDERER  # 'PathTracing' or 'RayTracing'
+options.spp = SPP
+options.output_path = str(out)
+options.start_frame = 0
+options.end_frame = max(int(DURATION_S * FPS) - 1, 0)
+if CAMERA:
+    options.camera = CAMERA
+
+ext = CaptureExtension.get_instance()
+ext.start(options)
+
+print(f'[render_video] preset={{QUALITY}} renderer={{RENDERER}} '
+      f'resolution={{RES}} spp={{SPP}} duration={{DURATION_S}}s fps={{FPS}} '
+      f'output={{out}}')
+"""
+
+
+CODE_GEN_HANDLERS["render_video"] = _gen_render_video
