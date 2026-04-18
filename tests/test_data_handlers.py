@@ -961,6 +961,7 @@ class TestLookupMaterial:
 # ── Phase 2 Addendum: Smart Debugging ─────────────────────────────────────
 
 @pytest.mark.skipif(_handle_diagnose_physics_error is None, reason="diagnose_physics_error not available on this branch")
+@pytest.mark.skipif(_handle_diagnose_physics_error is None, reason="diagnose_physics_error not on this branch")
 class TestDiagnosePhysicsError:
     """diagnose_physics_error DATA handler — pattern matching against known PhysX errors."""
 
@@ -1021,6 +1022,7 @@ class TestDiagnosePhysicsError:
                     reason="trace_config not available on this branch")
 @pytest.mark.skipif(_handle_trace_config is None, reason="Phase 2 addendum not merged")
 @pytest.mark.skipif(_handle_trace_config is None, reason="trace_config not available on this branch")
+@pytest.mark.skipif(_handle_trace_config is None, reason="trace_config not on this branch")
 class TestTraceConfig:
     """trace_config DATA handler — AST-based parameter tracing."""
 
@@ -1478,3 +1480,179 @@ class TestFindHeavyPrims:
     async def test_find_heavy_prims_registered(self):
         assert "find_heavy_prims" in DATA_HANDLERS
         assert DATA_HANDLERS["find_heavy_prims"] is not None
+# ── Scene Diff ──────────────────────────────────────────────────────────────
+
+from service.isaac_assist_service.chat.tools.tool_executor import (
+    _parse_unified_diff_to_changes,
+    _summarize_changes,
+)
+
+
+class TestParseUnifiedDiffToChanges:
+    """L0 tests for _parse_unified_diff_to_changes — pure function, no Kit needed."""
+
+    def test_empty_diff(self):
+        result = _parse_unified_diff_to_changes([])
+        assert result == []
+
+    def test_added_prim(self):
+        diff = [
+            "--- a",
+            "+++ b",
+            "@@ -0,0 +1,3 @@",
+            '+    def Xform "MyCube"',
+            "+    {",
+            "+    }",
+        ]
+        result = _parse_unified_diff_to_changes(diff)
+        assert len(result) >= 1
+        added = [c for c in result if c["change_type"] == "added"]
+        assert len(added) >= 1
+        assert added[0]["prim_path"] == "MyCube"
+        assert added[0]["details"]["prim_type"] == "Xform"
+
+    def test_removed_prim(self):
+        diff = [
+            "--- a",
+            "+++ b",
+            "@@ -1,3 +0,0 @@",
+            '-    def Mesh "OldTable"',
+            "-    {",
+            "-    }",
+        ]
+        result = _parse_unified_diff_to_changes(diff)
+        removed = [c for c in result if c["change_type"] == "removed"]
+        assert len(removed) >= 1
+        assert removed[0]["prim_path"] == "OldTable"
+        assert removed[0]["details"]["prim_type"] == "Mesh"
+
+    def test_modified_attribute(self):
+        diff = [
+            "--- a",
+            "+++ b",
+            "@@ -1,5 +1,5 @@",
+            '     def Xform "Robot"',
+            "     {",
+            '-        double3 xformOp:translate = (0, 0, 0)',
+            '+        double3 xformOp:translate = (0.3, 0, 0)',
+            "     }",
+        ]
+        result = _parse_unified_diff_to_changes(diff)
+        modified = [c for c in result if c["change_type"] == "modified"]
+        assert len(modified) >= 1
+        assert modified[0]["prim_path"] == "Robot"
+        assert "0.3" in modified[0]["details"]["new_line"]
+
+    def test_headers_only_no_changes(self):
+        """Diff with only headers and context lines should produce no changes."""
+        diff = [
+            "--- a/scene.usda",
+            "+++ b/scene.usda",
+            "@@ -1,3 +1,3 @@",
+            " #usda 1.0",
+            " (",
+            " )",
+        ]
+        result = _parse_unified_diff_to_changes(diff)
+        assert result == []
+
+
+class TestSummarizeChanges:
+    """L0 tests for _summarize_changes — pure function."""
+
+    def test_no_changes(self):
+        summary = _summarize_changes([])
+        assert "No changes" in summary
+
+    def test_added_and_removed(self):
+        changes = [
+            {"prim_path": "/World/Cube", "change_type": "added", "details": {"prim_type": "Cube"}},
+            {"prim_path": "/World/Old", "change_type": "removed", "details": {"prim_type": "Mesh"}},
+        ]
+        summary = _summarize_changes(changes)
+        assert "2 change(s)" in summary
+        assert "+ Added Cube: /World/Cube" in summary
+        assert "- Removed Mesh: /World/Old" in summary
+
+    def test_modified(self):
+        changes = [
+            {
+                "prim_path": "/World/Robot",
+                "change_type": "modified",
+                "details": {"old_line": "translate = (0,0,0)", "new_line": "translate = (1,0,0)"},
+            },
+        ]
+        summary = _summarize_changes(changes)
+        assert "1 change(s)" in summary
+        assert "~ Modified: /World/Robot" in summary
+        assert "translate = (1,0,0)" in summary
+
+
+class TestSceneDiff:
+    """scene_diff DATA handler — needs mock Kit RPC."""
+
+    @pytest.mark.asyncio
+    async def test_scene_diff_missing_args(self, mock_kit_rpc):
+        handler = DATA_HANDLERS["scene_diff"]
+        result = await handler({})
+        assert "error" in result
+        assert "Provide" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_scene_diff_last_save(self, mock_kit_rpc):
+        mock_kit_rpc["/exec_patch"] = {"queued": True, "patch_id": "diff_patch"}
+        handler = DATA_HANDLERS["scene_diff"]
+        result = await handler({"since": "last_save"})
+        assert isinstance(result, dict)
+        # With mock, the handler queues the patch and parses output
+        # Since the mock returns no output, changes will be empty
+        assert "queued" in result or "changes" in result or "error" not in result
+
+    @pytest.mark.asyncio
+    async def test_scene_diff_explicit_snapshots(self, mock_kit_rpc):
+        mock_kit_rpc["/exec_patch"] = {"queued": True, "patch_id": "diff_patch_explicit"}
+        handler = DATA_HANDLERS["scene_diff"]
+        result = await handler({"snapshot_a": "snap_1", "snapshot_b": "snap_2"})
+        assert isinstance(result, dict)
+
+    @pytest.mark.asyncio
+    async def test_scene_diff_invalid_snapshot_name(self, mock_kit_rpc):
+        handler = DATA_HANDLERS["scene_diff"]
+        result = await handler({"snapshot_a": "../etc/passwd", "snapshot_b": "snap_2"})
+        assert "error" in result
+        assert "Invalid" in result["error"]
+
+
+class TestWatchChanges:
+    """watch_changes DATA handler — needs mock Kit RPC."""
+
+    @pytest.mark.asyncio
+    async def test_watch_start(self, mock_kit_rpc):
+        mock_kit_rpc["/exec_patch"] = {"queued": True, "patch_id": "watch_start"}
+        handler = DATA_HANDLERS["watch_changes"]
+        result = await handler({"action": "start"})
+        assert result["status"] == "tracking_started"
+        assert result["queued"] is True
+
+    @pytest.mark.asyncio
+    async def test_watch_stop(self, mock_kit_rpc):
+        mock_kit_rpc["/exec_patch"] = {"queued": True, "patch_id": "watch_stop"}
+        handler = DATA_HANDLERS["watch_changes"]
+        result = await handler({"action": "stop"})
+        assert isinstance(result, dict)
+        # With mock returning no parsable output, should still return status
+        assert "status" in result or "queued" in result
+
+    @pytest.mark.asyncio
+    async def test_watch_query(self, mock_kit_rpc):
+        mock_kit_rpc["/exec_patch"] = {"queued": True, "patch_id": "watch_query"}
+        handler = DATA_HANDLERS["watch_changes"]
+        result = await handler({"action": "query"})
+        assert isinstance(result, dict)
+
+    @pytest.mark.asyncio
+    async def test_watch_unknown_action(self, mock_kit_rpc):
+        handler = DATA_HANDLERS["watch_changes"]
+        result = await handler({"action": "invalid_action"})
+        assert "error" in result
+        assert "Unknown action" in result["error"]

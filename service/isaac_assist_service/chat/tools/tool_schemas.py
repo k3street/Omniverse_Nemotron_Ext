@@ -3849,6 +3849,103 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Scene Diff ──────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "scene_diff",
+            "description": "Show what changed in the scene since last save, last snapshot, or between two explicit snapshots. Returns a structured list of added/removed/modified prims with attribute-level detail, plus an LLM-ready plain-language summary. Use when the user asks 'what changed', 'show diff', 'compare with last save', etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "since": {
+                        "type": "string",
+                        "enum": ["last_save", "last_snapshot"],
+                        "description": "Shortcut: compare current state against last save or last snapshot.",
+                    },
+                    "snapshot_a": {"type": "string", "description": "Snapshot ID for the 'before' state (explicit comparison)."},
+                    "snapshot_b": {"type": "string", "description": "Snapshot ID for the 'after' state (explicit comparison)."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "watch_changes",
+            "description": "Start or stop live change tracking on the USD stage. When started, accumulates structural and value changes via Tf.Notice. Query accumulated changes with scene_diff(since='last_snapshot'). Use when the user asks to 'watch changes', 'track changes', or 'monitor the scene'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["start", "stop", "query"],
+                        "description": "'start' begins tracking, 'stop' ends it, 'query' returns accumulated changes without stopping.",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+
+    # ─── Scene Export ─────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+# ─── Scene Diff ──────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "scene_diff",
+            "description": "Show what changed in the scene since last save, last snapshot, or between two explicit snapshots. Returns a structured list of added/removed/modified prims with attribute-level detail, plus an LLM-ready plain-language summary. Use when the user asks 'what changed', 'show diff', 'compare with last save', etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "since": {
+                        "type": "string",
+                        "enum": ["last_save", "last_snapshot"],
+                        "description": "Shortcut: compare current state against last save or last snapshot.",
+                    },
+                    "snapshot_a": {"type": "string", "description": "Snapshot ID for the 'before' state (explicit comparison)."},
+                    "snapshot_b": {"type": "string", "description": "Snapshot ID for the 'after' state (explicit comparison)."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "watch_changes",
+            "description": "Start or stop live change tracking on the USD stage. When started, accumulates structural and value changes via Tf.Notice. Query accumulated changes with scene_diff(since='last_snapshot'). Use when the user asks to 'watch changes', 'track changes', or 'monitor the scene'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["start", "stop", "query"],
+                        "description": "'start' begins tracking, 'stop' ends it, 'query' returns accumulated changes without stopping.",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",
