@@ -412,6 +412,22 @@ _TEST_VECTORS = [
         },
         ["subprocess.Popen", "isaaclab.train", "reward_fn.py", "Isaac-Lift-Cube-Direct-v0"],
     ),
+    # ── Phase 7F: ZMQ Sensor Streaming ──────────────────────────────────────
+    (
+        "configure_zmq_stream",
+        {"camera_prim": "/World/Camera"},
+        ["og.Controller", "ZMQBridge", "tcp://127.0.0.1:5555", "/World/Camera", "CameraHelper"],
+    ),
+    (
+        "configure_zmq_stream",
+        {"camera_prim": "/World/Lidar", "pub_port": 6000},
+        ["og.Controller", "ZMQBridge", "tcp://127.0.0.1:6000", "/World/Lidar"],
+    ),
+    (
+        "configure_zmq_stream",
+        {"camera_prim": "/World/Camera", "pub_port": 7777, "compression": "none", "resolution": [320, 240], "fps": 15},
+        ["og.Controller", "ZMQBridge", "tcp://127.0.0.1:7777", "none", "320", "240", "15"],
+    ),
     # ── Phase 7D: IsaacLab-Arena Composable Environments ───────────────────
     (
         "create_arena",

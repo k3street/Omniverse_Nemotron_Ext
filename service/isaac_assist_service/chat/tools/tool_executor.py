@@ -1100,6 +1100,54 @@ asyncio.ensure_future(_export_dataset())
 """
 
 
+CODE_GEN_HANDLERS["export_dataset"] = _gen_export_dataset
+
+
+def _gen_configure_zmq_stream(args: Dict) -> str:
+    """Generate OmniGraph code to wire a ZMQ PUB stream via NVIDIA's C++ ZMQ bridge node."""
+    camera_prim = args["camera_prim"]
+    pub_port = args.get("pub_port", 5555)
+    resolution = args.get("resolution", [640, 480])
+    fps = args.get("fps", 30)
+    compression = args.get("compression", "jpeg")
+
+    # Validate port range
+    if not (1024 <= pub_port <= 65535):
+        return (
+            f"# ERROR: pub_port {pub_port} out of valid range (1024-65535)\n"
+            f"raise ValueError('pub_port must be between 1024 and 65535, got {pub_port}')"
+        )
+
+    return f"""\
+import omni.graph.core as og
+
+og.Controller.edit(
+    {{"graph_path": "/ZMQStream", "evaluator_name": "execution"}},
+    {{
+        og.Controller.Keys.CREATE_NODES: [
+            ("OnTick", "omni.graph.action.OnPlaybackTick"),
+            ("ZMQBridge", "isaacsim.bridge.zmq.OgnIsaacBridgeZMQNode"),
+            ("CameraHelper", "isaacsim.ros2.bridge.ROS2CameraHelper"),
+        ],
+        og.Controller.Keys.CONNECT: [
+            ("OnTick.outputs:tick", "CameraHelper.inputs:execIn"),
+            ("CameraHelper.outputs:execOut", "ZMQBridge.inputs:execIn"),
+        ],
+        og.Controller.Keys.SET_VALUES: [
+            ("ZMQBridge.inputs:address", "tcp://127.0.0.1:{pub_port}"),
+            ("ZMQBridge.inputs:compression", "{compression}"),
+            ("CameraHelper.inputs:cameraPrim", "{camera_prim}"),
+            ("CameraHelper.inputs:enabled", True),
+            ("CameraHelper.inputs:width", {resolution[0]}),
+            ("CameraHelper.inputs:height", {resolution[1]}),
+            ("CameraHelper.inputs:fps", {fps}),
+        ],
+    }},
+)
+print("ZMQ stream configured on tcp://127.0.0.1:{pub_port}")
+"""
+
+
 # ── Code generation dispatch ─────────────────────────────────────────────────
 
 CODE_GEN_HANDLERS = {
@@ -1124,6 +1172,7 @@ CODE_GEN_HANDLERS = {
     "create_sdg_pipeline": _gen_create_sdg_pipeline,
     "add_domain_randomizer": _gen_add_domain_randomizer,
     "export_dataset": _gen_export_dataset,
+    "configure_zmq_stream": _gen_configure_zmq_stream,
 }
 
 
