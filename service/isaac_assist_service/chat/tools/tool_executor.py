@@ -23222,6 +23222,17 @@ with Sdf.ChangeBlock():
         except Exception as _e:
             _skipped_create_failed += 1
 
+if _applied == 0 and len(_paths) > 0:
+    # Zero applied across a non-empty prim list is a silent-success: the
+    # agent would narrate "I set X on all prims" while nothing landed.
+    # Raise with the skip breakdown so the agent can report what failed.
+    raise RuntimeError(
+        "bulk_set_attribute: 0 of " + str(len(_paths)) + " paths had the "
+        "attribute set. missing_prim=" + str(_skipped_missing_prim) +
+        ", create_failed=" + str(_skipped_create_failed) +
+        ". Check the paths exist and the attribute name / value type are compatible."
+    )
+
 print(f"bulk_set_attribute: applied={{_applied}} created={{_created}} "
       f"missing_prim={{_skipped_missing_prim}} failed={{_skipped_create_failed}} "
       f"attr={attr!r}")
