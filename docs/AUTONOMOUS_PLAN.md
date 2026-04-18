@@ -137,6 +137,21 @@ Use `docs/qa/tasks/G-01.md` + `workspace/templates/G-01.json` as template.
 Every G-task must be snapshot-measurable (coord + tolerance). Include
 `## Pre-session setup` if the task assumes any existing prims.
 
+**After adding tasks, rebuild the template index** so few-shot retrieval
+picks them up (the lazy-loader only builds the collection once):
+```bash
+python -c "
+import sys; sys.path.insert(0,'service')
+from isaac_assist_service.chat.tools.template_retriever import rebuild_index
+rebuild_index()"
+```
+
+**Snapshot coverage:** the ground-truth snapshot captures `world_translations`,
+`world_rotations_quat_wxyz`, `world_scales`, and type-specific `geometry`
+(cube size, sphere radius, cylinder radius+height+axis, cone/capsule
+dimensions). Only pick success criteria that these fields can verify;
+otherwise the judge has nothing to score against.
+
 ### 4b. FX-series — function-coverage
 Saturation criterion: when the list of uncovered tools drops below 150
 OR the top-5 most-failed tools each have a dedicated FX task.
@@ -224,39 +239,14 @@ git revert <commit>
 
 ## 7. Tool audit (persistent low baseline)
 
-Aggregate all fails across recent campaigns:
+Aggregate recent fails:
 ```bash
-python scripts/qa/aggregate_failures.py  # create this if missing, see template below
+python -m scripts.qa.aggregate_failures        # default: last 24h, infra errors excluded
+python -m scripts.qa.aggregate_failures --hours 2   # tighter window after a batch
+python -m scripts.qa.aggregate_failures --tool <name>   # drill into one tool
 ```
 
-If that script doesn't exist, inline:
-```bash
-python << 'PY'
-import json, glob
-from collections import defaultdict, Counter
-from pathlib import Path
-tool_stats = defaultdict(lambda: {'calls': 0, 'fails': 0, 'errors': Counter()})
-for gt in glob.glob('workspace/qa_runs/campaign_*_groundtruth.jsonl'):
-    for l in Path(gt).read_text().splitlines():
-        r = json.loads(l); tr = Path(r.get('transcript',''))
-        if not tr.exists(): continue
-        for line in tr.read_text().splitlines():
-            try: d = json.loads(line)
-            except: continue
-            if d.get('event') != 'isaac_assist_reply': continue
-            for tc in d.get('tool_calls', []):
-                name = tc.get('tool','?'); result = tc.get('result', {})
-                tool_stats[name]['calls'] += 1
-                if result.get('success') is False or result.get('executed') is False:
-                    tool_stats[name]['fails'] += 1
-                    err = str(result.get('output') or result.get('error') or '')[:100]
-                    tool_stats[name]['errors'][err] += 1
-for name, s in sorted(tool_stats.items(), key=lambda x: -x[1]['fails'])[:10]:
-    if s['fails']==0: break
-    top = s['errors'].most_common(1)[0][0] if s['errors'] else ''
-    print(f"{name}: {s['calls']}c {s['fails']}f — {top[:80]}")
-PY
-```
+The script defaults to a **24-hour window** and **excludes Kit-RPC-down / connection errors** so a single Kit crash doesn't drown real tool bugs in a sea of connection-refused entries. Pass `--all` to include historical campaigns, `--include-infra` to keep infra errors. `infra_fails` column shows them separately so you can see how much noise the filter dropped.
 
 Pick the top-failed tool with a clear error signature. Common 5.x fixes:
 - `GetAllDescendants()` → `list(Usd.PrimRange(prim))[1:]`
@@ -265,8 +255,22 @@ Pick the top-failed tool with a clear error signature. Common 5.x fixes:
 - `omni.isaac.*` import → find `isaacsim.*` equivalent via `lookup_knowledge` or fail-list
 - Missing `Usd` import in `from pxr import ...` line when code uses `Usd.PrimRange`
 
-Apply fix to `service/isaac_assist_service/chat/tools/tool_executor.py`.
-Restart service. Re-run canary. Expect improvement on tasks exercising that tool.
+**Before fixing: live-smoke-test the tool.** Older campaigns may show failures that are already fixed in HEAD. Generate the code for the tool and POST it to `http://127.0.0.1:8001/exec_sync`; if it now passes, the aggregate is just historical noise. Pattern:
+```python
+import httpx, sys; sys.path.insert(0,'service')
+from isaac_assist_service.chat.tools.tool_executor import _gen_<tool>
+code = _gen_<tool>({...args...})
+print(httpx.post('http://127.0.0.1:8001/exec_sync', json={'code':code}, timeout=60).json())
+```
+
+Apply fix to `service/isaac_assist_service/chat/tools/tool_executor.py`. **Restart the assist service** so `CODE_GEN_HANDLERS` rebinds to the new functions (they're captured at import time):
+```bash
+ps aux | grep "uvicorn.*8000" | grep -v grep | awk '{print $2}' | xargs -I {} kill {} 2>/dev/null
+sleep 2
+nohup python3 -c "import uvicorn; uvicorn.run('service.isaac_assist_service.main:app', host='0.0.0.0', port=8000, reload=False)" > /tmp/isaac_assist.log 2>&1 &
+sleep 8
+```
+Re-run canary. Add an L0 regression test in `tests/test_qa_scripts.py` asserting the code-gen output contains the fix (e.g. the right import line).
 
 ## 8. Commit + push discipline
 
