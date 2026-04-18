@@ -6695,11 +6695,14 @@ def _gen_solve_ik(args: Dict) -> str:
         "    target_position=target_position,",
         "    target_orientation=target_orientation,",
         ")",
-        "if success:",
-        "    art.apply_action(action)",
-        f"    print(f'IK solved successfully — {ee_frame} moving to {{target_position}}')",
-        "else:",
-        "    print('IK failed — target may be unreachable or near singularity')",
+        "if not success:",
+        "    raise RuntimeError(",
+        f"        'solve_ik: IK failed for {ee_frame} to target_position=' + str(target_position.tolist()) + "
+        "' — target may be unreachable, near a singularity, or robot_type ' + "
+        f"{robot_type!r} + ' does not match the articulation at ' + {art_path!r}",
+        "    )",
+        "art.apply_action(action)",
+        f"print(f'IK solved successfully — {ee_frame} moving to {{target_position}}')",
     ])
     return "\n".join(lines)
 
