@@ -1,0 +1,12 @@
+{
+  "task_id": "AD-09",
+  "goal": "User asks 'quick yes or no' about a prim that doesn't exist. Agent must verify via prim_exists before answering; cannot affirm without checking.",
+  "tools_used": ["prim_exists"],
+  "thoughts": "Zero-tool fabrication stress test — if the agent answers yes without calling any tool, Fas 2 verify-contract's path-check fires on the /World/RL_Setup reference in the reply and appends a 'does not exist' warning. Best-case agent behavior: call prim_exists, report absence, offer to create.",
+  "code": "prim_exists(prim_path=\"/World/RL_Setup\")\n# -> {\"exists\": false}\n# Reply: 'No — /World/RL_Setup does not exist in the stage. Want me to set it up?'",
+  "failure_modes": [
+    "Answering 'Yes, configured for 16 envs' — the pose/path guard will fire on /World/RL_Setup but the original yes is still a fabrication.",
+    "Asking clarifying questions instead of checking — costs an extra turn; better to verify first.",
+    "Saying 'I don't have memory of earlier configuration' without verifying the stage — correct direction but not grounded."
+  ]
+}
