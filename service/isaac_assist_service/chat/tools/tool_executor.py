@@ -7945,7 +7945,12 @@ def _gen_configure_ros2_bridge(args: Dict) -> str:
     domain_id = args.get("ros2_domain_id", 0)
 
     if not sensors:
-        return "print('No sensors specified — nothing to configure')\n"
+        return (
+            "raise ValueError("
+            "'configure_ros2_bridge: no sensors were specified — nothing to configure. "
+            "Pass a sensors list like [{\"type\":\"camera\",\"prim_path\":\"/World/Camera\","
+            "\"topic_name\":\"/camera/rgb\"}].')\n"
+        )
 
     # Build OmniGraph nodes and connections
     node_defs = []
