@@ -100,3 +100,24 @@ The decorator works and is live on `_gen_set_variant` as demo. Retrofitting all 
 - **24-task canary: 23/24 (95.8%), fab ≤ 3** stable across 3+ consecutive runs.
 - Single failure: T-13.
 - fab_total typically 1-3, all on either T-13 (legitimate fabrication) or FX-01 (one agent-side fabrication of rootJoint removal that the tool's stage output doesn't trigger — LLM-side).
+
+## 2026-04-18 evening cycle — updated baseline
+
+Continued the same methodology (sub-agent enumeration → live-probe → fix with specific RuntimeError + service restart → regression test). Delta from the afternoon baseline:
+
+- **31-task canary: 30/31 (96.8%), fab = 0 across the suite.** First-ever zero-fab run. T-13 still the only fail (capability-bound on Gemini 3 Flash).
+- 18 additional handler silent-success fixes. The heaviest-hitter was `check_physics_health` — when called with `articulation_path=X`, the PhysicsScene existence check was scoped to the X-subtree instead of the whole stage, so a `/World/PhysicsScene` outside that subtree was falsely reported missing. This was the root cause of C-03's persistent fab=1-2 across every prior canary run. Fix: always search the whole stage for `UsdPhysics.Scene` regardless of scope filter. **C-03 fab dropped 2 → 0 on the first run after the fix landed.**
+- 5 new adversarial tasks: AD-12 (Fix B keyword rewrite direct probe), AD-13 (prior-state awareness — don't fabricate "created" for already-existing prims), AD-14 (joint-position false claim), AD-15 (timeline play-state false claim), AD-16 (linear-velocity false claim). All pass first-run.
+- Orchestrator verify-contract (a) refactored: the substring-skip was replaced with `_partition_path_existence(executed_tools) → (present, absent)` helper that parses tool-output payloads for `(prim_path, exists)` pairs. Paths confirmed absent by a tool output now flag immediately without re-probing — closes the inversion-of-meaning gap (agent claims exists while the tool said not).
+- Honesty scan extended with a fourth antipattern: `print('Failed to …')` / `print('No … found')` / `print('Nothing to …')` without a following `raise`. Caught `fix_ros2_qos` as part of the addition.
+- Honesty test suite grew from ~10 tests to **41 tests** across 5 files, all L0 (<0.3s).
+
+### Recurring trap saved to memory
+
+Editing `tool_executor.py` and rerunning `direct_eval` tests stale code — the uvicorn service on port 8000 loads `tool_executor` once at startup and keeps the module cached (reload=False, intentional for stability). **After every substantive service-side edit, kill + relaunch the uvicorn process before claiming verification.** Caught this by investigating why C-03 still showed "Missing PhysicsScene" after the scope fix; found the service had been running since 22:24 with all session-earlier edits dormant. Memory note: `feedback_isaac_assist_service_restart.md`.
+
+### What's left after this cycle
+
+- 277 unaudited handlers, ~1 real bug per 3-handler audit slice at current rate. Diminishing returns but still productive.
+- T-13 capability-bound — needs a model upgrade or multi-turn follow-up (proposed in ARCHITECTURE_REVIEW item 4) to recover.
+- AD-04 fabrication flag is a judge false-positive (agent calls `enable_deterministic_mode` and tool succeeds — judge sometimes interprets "enabled deterministic mode via script" as fabrication). Out of scope for tool/orchestrator fixes.
