@@ -39,6 +39,25 @@ except ImportError:
 
 
 
+# Optional imports — present only on branches that ship those handlers.
+try:
+    from service.isaac_assist_service.chat.tools.tool_executor import (
+        _handle_diagnose_physics_error,
+    )
+except ImportError:
+    _handle_diagnose_physics_error = None
+try:
+    from service.isaac_assist_service.chat.tools.tool_executor import (
+        _handle_trace_config,
+    )
+except ImportError:
+    _handle_trace_config = None
+# Phase 7A Addendum handlers (added on this branch).
+from service.isaac_assist_service.chat.tools.tool_executor import (
+    _handle_diagnose_training,
+    _handle_review_reward,
+    _handle_profile_training_throughput,
+)
 
 
 class TestLookupProductSpec:
@@ -1717,3 +1736,256 @@ class TestSuggestPhysicsSettings:
     async def test_handler_registered_in_data_handlers(self):
         assert "suggest_physics_settings" in DATA_HANDLERS
         assert DATA_HANDLERS["suggest_physics_settings"] is not None
+# ─── Phase 7A Addendum: RL Training Debugging & Quality ────────────────────
+
+class TestDiagnoseTraining:
+    """diagnose_training reads TB scalars + RSL-RL perf logs from a run dir."""
+
+    @pytest.mark.asyncio
+    async def test_missing_run_dir_returns_error(self):
+        result = await _handle_diagnose_training({"run_dir": "/tmp/_no_such_run_dir_xyz"})
+        assert "error" in result
+        assert "does not exist" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_empty_run_dir_returns_unknown_status(self, tmp_path, monkeypatch):
+        """Empty run dir → all checks 'unknown', 0 issues, no crash."""
+        # Force the helpers to return empty even if tensorboard is installed.
+        import service.isaac_assist_service.chat.tools.tool_executor as te
+        monkeypatch.setattr(te, "_read_tb_scalars", lambda *a, **kw: [])
+        monkeypatch.setattr(te, "_read_checkpoint_action_std", lambda *a, **kw: None)
+
+        result = await _handle_diagnose_training({"run_dir": str(tmp_path)})
+        assert "checks" in result
+        assert result["status"].startswith("0 issue")
+        for name in ("action_collapse", "entropy", "reward_hacking", "bimodal", "nan", "throughput"):
+            assert name in result["checks"]
+
+    @pytest.mark.asyncio
+    async def test_action_collapse_detected(self, tmp_path, monkeypatch):
+        import service.isaac_assist_service.chat.tools.tool_executor as te
+        monkeypatch.setattr(te, "_read_tb_scalars", lambda *a, **kw: [])
+        monkeypatch.setattr(te, "_read_checkpoint_action_std", lambda *a, **kw: 0.001)
+
+        result = await _handle_diagnose_training({"run_dir": str(tmp_path)})
+        assert result["checks"]["action_collapse"]["status"] == "critical"
+        assert result["checks"]["action_collapse"]["value"] == 0.001
+        assert any("init_noise_std" in s for s in result["suggestions"])
+
+    @pytest.mark.asyncio
+    async def test_entropy_collapse_detected(self, tmp_path, monkeypatch):
+        import service.isaac_assist_service.chat.tools.tool_executor as te
+
+        def fake_tb(run_dir, tag):
+            if tag == "Loss/entropy":
+                return [1.0, 0.5, 0.2, 0.05]  # collapse to <0.1
+            return []
+
+        monkeypatch.setattr(te, "_read_tb_scalars", fake_tb)
+        monkeypatch.setattr(te, "_read_checkpoint_action_std", lambda *a, **kw: 0.5)
+
+        result = await _handle_diagnose_training({"run_dir": str(tmp_path)})
+        assert result["checks"]["entropy"]["status"] == "warning"
+        assert result["checks"]["entropy"]["value"] == 0.05
+
+    @pytest.mark.asyncio
+    async def test_reward_hacking_detected(self, tmp_path, monkeypatch):
+        import service.isaac_assist_service.chat.tools.tool_executor as te
+
+        def fake_tb(run_dir, tag):
+            if tag == "Train/mean_reward":
+                return [1.0, 5.0, 10.0, 20.0]  # increasing
+            if tag == "Episode/success_rate":
+                return [0.05, 0.05, 0.05, 0.05]  # flat
+            return []
+
+        monkeypatch.setattr(te, "_read_tb_scalars", fake_tb)
+        monkeypatch.setattr(te, "_read_checkpoint_action_std", lambda *a, **kw: 0.5)
+
+        result = await _handle_diagnose_training({"run_dir": str(tmp_path)})
+        assert result["checks"]["reward_hacking"]["status"] == "warning"
+
+    @pytest.mark.asyncio
+    async def test_nan_in_scalars_flags_critical(self, tmp_path, monkeypatch):
+        import service.isaac_assist_service.chat.tools.tool_executor as te
+        nan = float("nan")
+
+        def fake_tb(run_dir, tag):
+            if tag == "Train/mean_reward":
+                return [1.0, 2.0, nan]
+            return []
+
+        monkeypatch.setattr(te, "_read_tb_scalars", fake_tb)
+        monkeypatch.setattr(te, "_read_checkpoint_action_std", lambda *a, **kw: 0.5)
+
+        result = await _handle_diagnose_training({"run_dir": str(tmp_path), "physics_dt": 0.01})
+        assert result["checks"]["nan"]["status"] == "critical"
+        assert "physics_dt" in result["checks"]["nan"]
+
+
+class TestReviewReward:
+    """review_reward runs static analysis on a reward function."""
+
+    @pytest.mark.asyncio
+    async def test_empty_reward_code_errors(self):
+        result = await _handle_review_reward({"reward_code": ""})
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_alive_bonus_without_termination_flagged(self):
+        code = '''
+rewards = {
+    "alive_bonus": RewTerm(func=mdp.alive_bonus, weight=0.5),
+    "action_penalty": RewTerm(func=mdp.action_penalty, weight=-0.01),
+}
+'''
+        result = await _handle_review_reward({
+            "reward_code": code,
+            "has_fall_termination": False,
+        })
+        checks = [i["check"] for i in result["issues"]]
+        assert "hacking_risk" in checks
+        assert any("alive_bonus" in s for s in result["suggestions"])
+
+    @pytest.mark.asyncio
+    async def test_alive_bonus_with_termination_not_flagged(self):
+        code = '''
+rewards = {
+    "alive_bonus": RewTerm(func=mdp.alive_bonus, weight=0.5),
+    "distance_to_goal": RewTerm(func=mdp.distance_to_goal, weight=-1.0),
+    "reach_goal": RewTerm(func=mdp.reach_goal, weight=10.0),
+}
+'''
+        result = await _handle_review_reward({
+            "reward_code": code,
+            "has_fall_termination": True,
+        })
+        checks = [i["check"] for i in result["issues"]]
+        assert "hacking_risk" not in checks
+
+    @pytest.mark.asyncio
+    async def test_dominant_term_detected(self):
+        code = '''
+rewards = {
+    "huge": RewTerm(func=mdp.huge, weight=500.0),
+    "tiny": RewTerm(func=mdp.tiny, weight=0.001),
+    "distance": RewTerm(func=mdp.distance, weight=1.0),
+}
+'''
+        result = await _handle_review_reward({
+            "reward_code": code,
+            "has_fall_termination": True,
+        })
+        checks = [i["check"] for i in result["issues"]]
+        assert "dominant_term" in checks
+
+    @pytest.mark.asyncio
+    async def test_scale_issue_detected(self):
+        code = '''
+rewards = {
+    "tiny": RewTerm(func=mdp.tiny, weight=0.001),
+    "distance": RewTerm(func=mdp.distance, weight=0.001),
+}
+'''
+        result = await _handle_review_reward({
+            "reward_code": code,
+            "has_fall_termination": True,
+            "max_possible_reward": 0.002,
+        })
+        checks = [i["check"] for i in result["issues"]]
+        assert "scale" in checks
+
+    @pytest.mark.asyncio
+    async def test_clean_reward_passes(self):
+        # Weights chosen so max/min ratio stays under the 100x dominant threshold.
+        code = '''
+rewards = {
+    "distance_to_goal": RewTerm(func=mdp.distance_to_goal, weight=-1.0),
+    "reach_goal": RewTerm(func=mdp.reach_goal, weight=10.0),
+    "action_penalty": RewTerm(func=mdp.action_penalty, weight=-0.5),
+}
+'''
+        result = await _handle_review_reward({
+            "reward_code": code,
+            "has_fall_termination": True,
+        })
+        # No critical / warning level issues for hacking or dominant term.
+        warning_checks = {
+            i["check"] for i in result["issues"] if i["status"] == "warning"
+        }
+        assert "hacking_risk" not in warning_checks
+        assert "dominant_term" not in warning_checks
+
+
+class TestProfileTrainingThroughput:
+    """profile_training_throughput identifies sim-bound vs train-bound runs."""
+
+    @pytest.mark.asyncio
+    async def test_missing_run_dir_returns_error(self):
+        result = await _handle_profile_training_throughput(
+            {"run_dir": "/tmp/_no_such_perf_run_xyz"}
+        )
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_missing_perf_scalars_returns_error(self, tmp_path, monkeypatch):
+        import service.isaac_assist_service.chat.tools.tool_executor as te
+        monkeypatch.setattr(te, "_read_tb_scalars", lambda *a, **kw: [])
+        result = await _handle_profile_training_throughput({"run_dir": str(tmp_path)})
+        assert "error" in result
+        assert "missing" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_sim_bound_diagnosis(self, tmp_path, monkeypatch):
+        import service.isaac_assist_service.chat.tools.tool_executor as te
+
+        def fake_tb(run_dir, tag):
+            if tag == "Perf/collection_time":
+                return [90.0]
+            if tag == "Perf/learning_time":
+                return [10.0]
+            if tag == "Perf/total_fps":
+                return [12000.0]
+            return []
+
+        monkeypatch.setattr(te, "_read_tb_scalars", fake_tb)
+        result = await _handle_profile_training_throughput({"run_dir": str(tmp_path)})
+        assert result["bottleneck"] == "sim_bound"
+        assert "TiledCamera" in result["suggestion"]
+        assert result["collection_fraction"] > 0.8
+        assert result["total_fps"] == 12000.0
+
+    @pytest.mark.asyncio
+    async def test_train_bound_diagnosis(self, tmp_path, monkeypatch):
+        import service.isaac_assist_service.chat.tools.tool_executor as te
+
+        def fake_tb(run_dir, tag):
+            if tag == "Perf/collection_time":
+                return [10.0]
+            if tag == "Perf/learning_time":
+                return [40.0]
+            if tag == "Perf/total_fps":
+                return [4000.0]
+            return []
+
+        monkeypatch.setattr(te, "_read_tb_scalars", fake_tb)
+        result = await _handle_profile_training_throughput({"run_dir": str(tmp_path)})
+        assert result["bottleneck"] == "train_bound"
+        assert "PPO epochs" in result["suggestion"] or "network size" in result["suggestion"]
+
+    @pytest.mark.asyncio
+    async def test_balanced_diagnosis(self, tmp_path, monkeypatch):
+        import service.isaac_assist_service.chat.tools.tool_executor as te
+
+        def fake_tb(run_dir, tag):
+            if tag == "Perf/collection_time":
+                return [50.0]
+            if tag == "Perf/learning_time":
+                return [50.0]
+            if tag == "Perf/total_fps":
+                return [10000.0]
+            return []
+
+        monkeypatch.setattr(te, "_read_tb_scalars", fake_tb)
+        result = await _handle_profile_training_throughput({"run_dir": str(tmp_path)})
+        assert result["bottleneck"] == "balanced"

@@ -4947,6 +4947,73 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── RL Training Debugging & Quality (Phase 7A Addendum) ──────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_training",
+            "description": "Diagnose an active or completed RL training run. Reads TensorBoard scalars and RSL-RL perf logs from the run directory, then runs checks for: action collapse (policy std near zero), entropy collapse (premature exploration loss), reward hacking (reward up but success flat), bimodal success (high per-env variance), NaN detection with PD stability check, and throughput. Returns per-check status + concrete suggestions. Use when training appears stuck, diverged, or behaves degenerately.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "run_dir": {"type": "string", "description": "Path to the training run directory containing TensorBoard event files and (optionally) RSL-RL perf logs"},
+                    "physics_dt": {"type": "number", "description": "Physics time step used during training (used by the PD stability check). Default: 1/120"},
+                },
+                "required": ["run_dir"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "review_reward",
+            "description": "Static analysis of an RL reward function — runs BEFORE training to catch common pitfalls. Checks for: sparse reward (reward desert), dominant term (one term swamps others), reward hacking risk (alive bonus without fall termination), scale issue (max reward too small for value learning), and success-alignment (terms don't correlate with success criterion). Returns per-check verdict with specific fix suggestions. Use when reviewing a new reward function before launching training.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reward_code": {"type": "string", "description": "Python source code of the reward function or RewTerm definitions"},
+                    "has_fall_termination": {"type": "boolean", "description": "Whether the env has a fall/early-termination condition. Default: false"},
+                    "max_possible_reward": {"type": "number", "description": "Optional max reward magnitude per step (used for scale check). If omitted, inferred from code."},
+                },
+                "required": ["reward_code"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "profile_training_throughput",
+            "description": "Analyze RSL-RL performance logs (Perf/collection_time, Perf/learning_time, Perf/total_fps) to identify whether a training run is sim-bound or train-bound. Suggests concrete fixes: TiledCamera switch for vision policies (10x faster), reducing num_envs/collision-mesh complexity for sim-bound, smaller networks/batch/PPO epochs for train-bound. Use when training throughput is lower than expected.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "run_dir": {"type": "string", "description": "Path to the training run directory containing RSL-RL perf logs (TensorBoard event files)"},
+                },
+                "required": ["run_dir"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_eval_harness",
+            "description": "Generate a reproducible Python evaluation script for a trained RL policy. Runs num_episodes deterministic rollouts on the given task, records reward/success/length per episode, saves a JSON results file, and optionally records video via gym.wrappers.RecordVideo. Use after training completes to benchmark the learned policy.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_name": {"type": "string", "description": "Gym task ID — e.g. 'Isaac-Reach-Franka-v0'"},
+                    "num_episodes": {"type": "integer", "description": "Number of evaluation episodes. Default: 100"},
+                    "output_dir": {"type": "string", "description": "Directory to write eval_results.json (and optional videos). Default: 'workspace/eval/<task>'"},
+                    "checkpoint_path": {"type": "string", "description": "Optional path to a trained policy checkpoint to load before rollout"},
+                    "record_video": {"type": "boolean", "description": "If true, wrap the env with gym.wrappers.RecordVideo. Default: false"},
+                    "max_steps_per_episode": {"type": "integer", "description": "Hard cap on steps per episode. Default: 1000"},
+                },
+                "required": ["task_name"],
+            },
+        },
+    },
+
     # ─── Vision (Gemini Robotics-ER) ──────────────────────────────────────────
     {
         "type": "function",
@@ -5337,6 +5404,187 @@ ISAAC_SIM_TOOLS = [
                         "description": "Optional: limit checks to a specific robot articulation path",
                     },
                 },
+            },
+        },
+    },
+
+# ─── RL Training Debugging & Quality (Phase 7A Addendum) ──────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_training",
+            "description": "Diagnose an active or completed RL training run. Reads TensorBoard scalars and RSL-RL perf logs from the run directory, then runs checks for: action collapse (policy std near zero), entropy collapse (premature exploration loss), reward hacking (reward up but success flat), bimodal success (high per-env variance), NaN detection with PD stability check, and throughput. Returns per-check status + concrete suggestions. Use when training appears stuck, diverged, or behaves degenerately.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "run_dir": {"type": "string", "description": "Path to the training run directory containing TensorBoard event files and (optionally) RSL-RL perf logs"},
+                    "physics_dt": {"type": "number", "description": "Physics time step used during training (used by the PD stability check). Default: 1/120"},
+                },
+                "required": ["run_dir"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "review_reward",
+            "description": "Static analysis of an RL reward function — runs BEFORE training to catch common pitfalls. Checks for: sparse reward (reward desert), dominant term (one term swamps others), reward hacking risk (alive bonus without fall termination), scale issue (max reward too small for value learning), and success-alignment (terms don't correlate with success criterion). Returns per-check verdict with specific fix suggestions. Use when reviewing a new reward function before launching training.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reward_code": {"type": "string", "description": "Python source code of the reward function or RewTerm definitions"},
+                    "has_fall_termination": {"type": "boolean", "description": "Whether the env has a fall/early-termination condition. Default: false"},
+                    "max_possible_reward": {"type": "number", "description": "Optional max reward magnitude per step (used for scale check). If omitted, inferred from code."},
+                },
+                "required": ["reward_code"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "profile_training_throughput",
+            "description": "Analyze RSL-RL performance logs (Perf/collection_time, Perf/learning_time, Perf/total_fps) to identify whether a training run is sim-bound or train-bound. Suggests concrete fixes: TiledCamera switch for vision policies (10x faster), reducing num_envs/collision-mesh complexity for sim-bound, smaller networks/batch/PPO epochs for train-bound. Use when training throughput is lower than expected.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "run_dir": {"type": "string", "description": "Path to the training run directory containing RSL-RL perf logs (TensorBoard event files)"},
+                },
+                "required": ["run_dir"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_eval_harness",
+            "description": "Generate a reproducible Python evaluation script for a trained RL policy. Runs num_episodes deterministic rollouts on the given task, records reward/success/length per episode, saves a JSON results file, and optionally records video via gym.wrappers.RecordVideo. Use after training completes to benchmark the learned policy.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_name": {"type": "string", "description": "Gym task ID — e.g. 'Isaac-Reach-Franka-v0'"},
+                    "num_episodes": {"type": "integer", "description": "Number of evaluation episodes. Default: 100"},
+                    "output_dir": {"type": "string", "description": "Directory to write eval_results.json (and optional videos). Default: 'workspace/eval/<task>'"},
+                    "checkpoint_path": {"type": "string", "description": "Optional path to a trained policy checkpoint to load before rollout"},
+                    "record_video": {"type": "boolean", "description": "If true, wrap the env with gym.wrappers.RecordVideo. Default: false"},
+                    "max_steps_per_episode": {"type": "integer", "description": "Hard cap on steps per episode. Default: 1000"},
+                },
+                "required": ["task_name"],
+            },
+        },
+    },
+
+    # ─── Vision (Gemini Robotics-ER) ──────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "vision_detect_objects",
+            "description": "Use the Gemini Robotics-ER vision model to detect and locate objects in the current viewport image. Returns normalized 2D points and labels. Use this when the user asks 'what objects are in the scene', 'find the robot', 'locate the cube', etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "labels": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of specific object names to search for (e.g. ['robot', 'cube', 'table']). If omitted, detects all visible objects.",
+                    },
+                    "max_objects": {"type": "integer", "description": "Max objects to return. Default: 10"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "vision_bounding_boxes",
+            "description": "Use the Gemini Robotics-ER vision model to detect objects and return 2D bounding boxes from the viewport. Returns [ymin, xmin, ymax, xmax] coordinates normalized 0-1000.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "max_objects": {"type": "integer", "description": "Max objects to detect. Default: 25"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "vision_plan_trajectory",
+            "description": "Use the Gemini Robotics-ER vision model to plan a 2D trajectory from the current viewport image. Given a task instruction, returns a sequence of points the robot should follow. Use for visual pick-and-place planning.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "instruction": {"type": "string", "description": "Natural language task description — e.g. 'move the red pen to the organizer on the left'"},
+                    "num_points": {"type": "integer", "description": "Number of trajectory waypoints. Default: 15"},
+                },
+                "required": ["instruction"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "vision_analyze_scene",
+            "description": "Use the Gemini Robotics-ER vision model for free-form spatial reasoning about the viewport. Ask questions like 'what object should I move to make room?', 'how full is the container?', 'describe the workspace layout'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "Natural language question about the scene"},
+                },
+                "required": ["question"],
+            },
+        },
+    },
+
+    # ─── Nucleus Browse & Download ─────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "nucleus_browse",
+            "description": "Browse an Omniverse Nucleus server directory to discover available assets (robots, environments, props, materials). Use this to explore the Isaac Sim content library before downloading assets. Returns a list of files and folders at the given path.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Nucleus directory path to browse — e.g. '/NVIDIA/Assets/Isaac/5.1/Robots', '/NVIDIA/Assets/Isaac/5.1/Environments'. Default: '/NVIDIA/Assets/Isaac/5.1'"},
+                    "server": {"type": "string", "description": "Nucleus server URL. Default: 'omniverse://localhost'"},
+                    "limit": {"type": "integer", "description": "Max entries to return. Default: 50"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "download_asset",
+            "description": "Download an asset from an Omniverse Nucleus server to the local Desktop/assets folder and register it in the asset catalog. Use after browsing with nucleus_browse to pull specific USD files locally. The downloaded asset can then be imported into scenes via import_robot or USD references.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nucleus_url": {"type": "string", "description": "Full Nucleus URL — e.g. 'omniverse://localhost/NVIDIA/Assets/Isaac/5.1/Robots/Franka/franka.usd'"},
+                    "local_subdir": {"type": "string", "description": "Local subdirectory under ASSETS_ROOT_PATH. Auto-derived from Nucleus path if omitted."},
+                    "category": {"type": "string", "enum": ["robot", "prop", "scene", "sensor", "material"], "description": "Asset category for catalog registration. Auto-detected from path if omitted."},
+                },
+                "required": ["nucleus_url"],
+            },
+        },
+    },
+
+    # ─── Scene Export ─────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
+                },
+                "required": [],
             },
         },
     },

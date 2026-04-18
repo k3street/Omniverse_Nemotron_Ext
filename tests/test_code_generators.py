@@ -1206,6 +1206,24 @@ _TEST_VECTORS = [
         ["/World/Franka", "GetAllDescendants", "CollisionAPI", "MassAPI",
          "tier1_errors", "auto_fixable"],
     ),
+    # ── Phase 7A Addendum: RL training debugging & quality ─────────────────
+    (
+        "generate_eval_harness",
+        {"task_name": "Isaac-Reach-Franka-v0"},
+        ["gymnasium", "gym.make", "NUM_EPISODES", "eval_results.json", "is_success"],
+    ),
+    (
+        "generate_eval_harness",
+        {
+            "task_name": "Isaac-Lift-Cube-Franka-v0",
+            "num_episodes": 25,
+            "output_dir": "/tmp/eval_out",
+            "checkpoint_path": "/tmp/policy.pt",
+            "record_video": True,
+            "max_steps_per_episode": 500,
+        },
+        ["RecordVideo", "/tmp/eval_out", "Isaac-Lift-Cube-Franka-v0", "NUM_EPISODES = 25", "MAX_STEPS_PER_EPISODE = 500"],
+    ),
 ]
 
 
@@ -1683,6 +1701,45 @@ class TestTemplateDetection:
     def test_detect_none_for_empty(self):
         from service.isaac_assist_service.chat.tools.tool_executor import _detect_template
         assert _detect_template("") is None
+
+    # ── Phase 7A Addendum: RL eval harness codegen ─────────────────────────
+
+    def test_generate_eval_harness_minimal_args(self):
+        """Only task_name is required — defaults should produce valid code."""
+        code = CODE_GEN_HANDLERS["generate_eval_harness"](
+            {"task_name": "Isaac-Reach-Franka-v0"}
+        )
+        _assert_valid_python(code, "generate_eval_harness")
+        # Default num_episodes = 100, no video, default output dir under workspace/eval
+        assert "NUM_EPISODES = 100" in code
+        assert "RECORD_VIDEO = False" in code
+        assert "workspace/eval/Isaac-Reach-Franka-v0" in code
+
+    def test_generate_eval_harness_with_video(self):
+        """record_video=True should import gymnasium's RecordVideo wrapper."""
+        code = CODE_GEN_HANDLERS["generate_eval_harness"]({
+            "task_name": "Isaac-Velocity-Anymal-C-v0",
+            "record_video": True,
+        })
+        _assert_valid_python(code, "generate_eval_harness")
+        assert "RecordVideo" in code
+        assert "RECORD_VIDEO = True" in code
+
+    def test_generate_eval_harness_no_checkpoint_uses_random(self):
+        """Without a checkpoint path, the harness falls back to a random policy."""
+        code = CODE_GEN_HANDLERS["generate_eval_harness"](
+            {"task_name": "Isaac-Reach-Franka-v0"}
+        )
+        _assert_valid_python(code, "generate_eval_harness")
+        assert "random policy" in code
+        assert "action_space.sample()" in code
+
+    def test_generate_eval_harness_task_name_safely_quoted(self):
+        """Task names containing quotes must be safely escaped via repr()."""
+        code = CODE_GEN_HANDLERS["generate_eval_harness"](
+            {"task_name": "Weird'Task\"Name", "num_episodes": 5}
+        )
+        _assert_valid_python(code, "generate_eval_harness")
 
 
 class TestAllCodeGenHandlersCovered:

@@ -19460,6 +19460,503 @@ DATA_HANDLERS["create_isaaclab_env"] = _handle_create_isaaclab_env
 CODE_GEN_HANDLERS["launch_training"] = _gen_launch_training
 
 
+# ─── RL Training Debugging & Quality (Phase 7A Addendum) ────────────────────
+# Tools that detect common RL failure modes automatically:
+#   - diagnose_training: scans an active/completed run for action collapse,
+#     entropy collapse, reward hacking, bimodal success, NaN, throughput.
+#   - review_reward: pre-training static analysis of a reward function.
+#   - profile_training_throughput: identifies sim-bound vs train-bound runs.
+#   - generate_eval_harness: codegen for a reproducible evaluation script.
+
+def _read_tb_scalars(run_dir: str, tag: str) -> List[float]:
+    """Read a TensorBoard scalar tag from event files in run_dir.
+
+    Returns a chronologically ordered list of values. Returns [] if no event
+    files are found, the tag is missing, or TensorBoard is not installed
+    (we fall back gracefully so diagnostics still run on partial data).
+    """
+    try:
+        from tensorboard.backend.event_processing.event_accumulator import (
+            EventAccumulator,
+        )
+    except ImportError:
+        logger.warning("[RLDebug] tensorboard not installed — TB scalar reads disabled")
+        return []
+
+    run_path = Path(run_dir)
+    if not run_path.exists():
+        return []
+
+    # EventAccumulator handles both files and directories; pass the dir.
+    try:
+        acc = EventAccumulator(
+            str(run_path),
+            size_guidance={"scalars": 0},  # 0 == load all
+        )
+        acc.Reload()
+        if tag not in acc.Tags().get("scalars", []):
+            return []
+        return [float(e.value) for e in acc.Scalars(tag)]
+    except Exception as e:
+        logger.warning(f"[RLDebug] TB read failed for {tag}: {e}")
+        return []
+
+
+def _read_checkpoint_action_std(run_dir: str) -> Optional[float]:
+    """Read mean policy action std from the latest .pt checkpoint, if any."""
+    run_path = Path(run_dir)
+    if not run_path.exists():
+        return None
+    ckpts = sorted(run_path.glob("**/*.pt"))
+    if not ckpts:
+        return None
+    try:
+        import torch  # type: ignore
+        # weights_only=False because RSL-RL checkpoints contain pickled cfgs.
+        state = torch.load(str(ckpts[-1]), map_location="cpu", weights_only=False)
+        # RSL-RL stores 'model_state_dict'; key is typically 'std' or 'log_std'.
+        sd = state.get("model_state_dict", state)
+        for key in ("std", "log_std", "action_std"):
+            if key in sd:
+                t = sd[key]
+                if key == "log_std":
+                    t = t.exp()
+                return float(t.mean().item())
+        return None
+    except Exception as e:
+        logger.warning(f"[RLDebug] checkpoint std read failed: {e}")
+        return None
+
+
+async def _handle_diagnose_training(args: Dict) -> Dict:
+    """Run all RL training diagnostics against a run directory."""
+    run_dir = args["run_dir"]
+    physics_dt = float(args.get("physics_dt", 1.0 / 120.0))
+
+    run_path = Path(run_dir)
+    if not run_path.exists():
+        return {
+            "error": f"run_dir does not exist: {run_dir}",
+            "checks": {},
+            "suggestions": [],
+        }
+
+    checks: Dict[str, Dict] = {}
+    suggestions: List[str] = []
+
+    # ── Check 1: Action collapse (policy std near zero) ─────────────────
+    action_std = _read_checkpoint_action_std(run_dir)
+    if action_std is None:
+        checks["action_collapse"] = {
+            "status": "unknown",
+            "message": "No checkpoint found — could not read policy.std",
+        }
+    elif action_std < 0.01:
+        msg = (
+            "CRITICAL: Action std near zero — policy has collapsed to deterministic. "
+            "Try: increase init_noise_std, add entropy bonus, check reward scaling."
+        )
+        checks["action_collapse"] = {"status": "critical", "value": action_std, "message": msg}
+        suggestions.append("Increase init_noise_std (e.g. 0.5 → 1.0)")
+        suggestions.append("Add or raise entropy_coef (e.g. 0.001 → 0.01)")
+    else:
+        checks["action_collapse"] = {"status": "ok", "value": action_std}
+
+    # ── Check 2: Entropy collapse ───────────────────────────────────────
+    entropy = _read_tb_scalars(run_dir, "Loss/entropy")
+    if not entropy:
+        # Try alt tag names
+        entropy = _read_tb_scalars(run_dir, "Train/mean_entropy")
+    total_iters = max(len(entropy), 1)
+    progress_idx = total_iters
+    # We treat "early" as < 30% of recorded iters.
+    if entropy and entropy[-1] < 0.1 and progress_idx < int(total_iters * 0.3 + 1) + total_iters:
+        # NOTE: progress is unknowable without max_iterations, so the
+        # collapse check fires whenever entropy[-1] < 0.1 — early or not.
+        msg = (
+            "WARNING: Entropy collapsed — policy stopped exploring. "
+            "Try: increase entropy_coef to 0.01, reduce desired_kl, "
+            "check init_noise_std."
+        )
+        checks["entropy"] = {"status": "warning", "value": entropy[-1], "message": msg}
+        suggestions.append("Increase entropy_coef from 0.005 to 0.01")
+    elif entropy:
+        checks["entropy"] = {"status": "ok", "value": entropy[-1]}
+    else:
+        checks["entropy"] = {"status": "unknown", "message": "No entropy scalar found in TB logs"}
+
+    # ── Check 3: Reward hacking (reward up, success flat) ───────────────
+    reward = _read_tb_scalars(run_dir, "Train/mean_reward")
+    if not reward:
+        reward = _read_tb_scalars(run_dir, "Episode/reward")
+    success = _read_tb_scalars(run_dir, "Episode/success_rate")
+    if not success:
+        success = _read_tb_scalars(run_dir, "Train/success_rate")
+    if len(reward) >= 4 and len(success) >= 4:
+        reward_trend = reward[-1] - reward[len(reward) // 2]
+        success_trend = success[-1] - success[len(success) // 2]
+        reward_increasing = reward_trend > abs(reward[len(reward) // 2]) * 0.1 + 1e-6
+        success_flat = abs(success_trend) < 0.05
+        if reward_increasing and success_flat:
+            msg = (
+                "WARNING: Reward increasing but success rate flat — possible reward hacking. "
+                "Check reward terms for exploitable shortcuts."
+            )
+            checks["reward_hacking"] = {"status": "warning", "message": msg}
+            suggestions.append("Check reward terms for exploitable shortcuts")
+        else:
+            checks["reward_hacking"] = {"status": "ok"}
+    else:
+        checks["reward_hacking"] = {
+            "status": "unknown",
+            "message": "Need both reward and success scalars to compare trends",
+        }
+
+    # ── Check 4: Bimodal success (per-env variance) ─────────────────────
+    per_env_tags = [
+        t for t in [f"Episode/success_env_{i}" for i in range(64)]
+    ]
+    per_env_values: List[float] = []
+    for t in per_env_tags:
+        s = _read_tb_scalars(run_dir, t)
+        if s:
+            per_env_values.append(s[-1])
+    if per_env_values:
+        try:
+            import numpy as np  # type: ignore
+            arr = np.array(per_env_values, dtype=float)
+            std = float(arr.std())
+            if std > 0.15:
+                msg = (
+                    "WARNING: High variance across environments — policy may be fragile. "
+                    "Some initial conditions succeed, others always fail. "
+                    f"Success range: {arr.min():.0%}\u2013{arr.max():.0%}"
+                )
+                checks["bimodal"] = {"status": "warning", "value": std, "message": msg}
+                suggestions.append("Inspect failing initial conditions — consider curriculum or domain randomization")
+            else:
+                checks["bimodal"] = {"status": "ok", "value": std}
+        except ImportError:
+            checks["bimodal"] = {"status": "unknown", "message": "numpy not installed"}
+    else:
+        checks["bimodal"] = {"status": "unknown", "message": "No per-env success scalars found"}
+
+    # ── Check 5: NaN detection ──────────────────────────────────────────
+    has_nan = False
+    for series in (entropy, reward, success):
+        for v in series:
+            if v != v:  # NaN check (NaN != NaN)
+                has_nan = True
+                break
+        if has_nan:
+            break
+    if has_nan:
+        msg = (
+            "CRITICAL: NaN detected in TB scalars — likely numerical blowup. "
+            f"Check PD stability criterion: kp * physics_dt ({physics_dt}) must be < 0.5 "
+            "for every joint. Reduce physics_dt or lower kp."
+        )
+        checks["nan"] = {"status": "critical", "message": msg, "physics_dt": physics_dt}
+        suggestions.append(
+            f"Verify joint kp * physics_dt < 0.5 (physics_dt={physics_dt}) — reduce dt or kp"
+        )
+    else:
+        checks["nan"] = {"status": "ok"}
+
+    # ── Check 6: Throughput ─────────────────────────────────────────────
+    fps_series = _read_tb_scalars(run_dir, "Perf/total_fps")
+    if fps_series:
+        latest_fps = fps_series[-1]
+        checks["throughput"] = {"status": "ok", "fps": latest_fps}
+    else:
+        checks["throughput"] = {"status": "unknown", "message": "No Perf/total_fps scalar found"}
+
+    issue_count = sum(
+        1 for c in checks.values() if c.get("status") in ("warning", "critical")
+    )
+    return {
+        "run_dir": run_dir,
+        "status": f"{issue_count} issue{'s' if issue_count != 1 else ''} found",
+        "checks": checks,
+        "suggestions": suggestions,
+    }
+
+
+# Patterns used by review_reward static analysis.
+_REWARD_HACK_PATTERNS = [
+    ("alive_bonus", "alive bonus reward without an explicit fall/early-termination is exploitable — robot learns to just stand still"),
+    ("survival_bonus", "survival bonus without termination — same hacking risk as alive_bonus"),
+    ("time_bonus", "time-based reward — robot may stall to milk the bonus"),
+]
+_DOMINANT_TERM_THRESHOLD = 100.0  # one term's |weight| > 100x another → dominant
+_MIN_NONZERO_INIT = 0.01          # <1% of envs getting nonzero reward → sparse
+
+
+async def _handle_review_reward(args: Dict) -> Dict:
+    """Run static checks on a reward function before training starts."""
+    code = args.get("reward_code", "")
+    has_fall_term = bool(args.get("has_fall_termination", False))
+    declared_max = args.get("max_possible_reward")
+
+    issues: List[Dict] = []
+    suggestions: List[str] = []
+
+    if not code.strip():
+        return {"error": "reward_code is empty", "issues": [], "suggestions": []}
+
+    import re
+
+    # ── Check 1: Sparse reward ──────────────────────────────────────────
+    # Heuristic: count non-zero reward terms.  If only success_at_goal /
+    # task_success-style terms are present, training will stall.
+    success_only_terms = re.findall(
+        r"(?:success|reach_goal|task_complete)\w*", code, flags=re.IGNORECASE
+    )
+    other_terms = re.findall(
+        r"(?:RewTerm|reward_term)\(", code
+    )
+    if success_only_terms and (len(other_terms) <= len(success_only_terms)):
+        msg = (
+            "Sparse reward: only success/goal terms detected. <1% of envs will get "
+            "non-zero reward at init — training will stall. Add a dense shaping term "
+            "(e.g. distance-to-goal, progress)."
+        )
+        issues.append({"check": "sparse_reward", "status": "warning", "message": msg})
+        suggestions.append("Add a dense shaping term such as -distance_to_goal")
+
+    # ── Check 2: Dominant term (weight std >100x others) ───────────────
+    weights = [float(m) for m in re.findall(r"weight\s*=\s*(-?\d+(?:\.\d+)?)", code)]
+    if len(weights) >= 2:
+        abs_weights = [abs(w) for w in weights if w != 0]
+        if abs_weights:
+            wmax = max(abs_weights)
+            wmin = min(abs_weights)
+            if wmin > 0 and (wmax / wmin) > _DOMINANT_TERM_THRESHOLD:
+                msg = (
+                    f"Dominant term: max weight {wmax} is >{_DOMINANT_TERM_THRESHOLD:.0f}x "
+                    f"min weight {wmin}. Other terms will be invisible to the optimizer."
+                )
+                issues.append({"check": "dominant_term", "status": "warning", "message": msg})
+                suggestions.append("Rebalance reward weights so no term dominates by >100x")
+
+    # ── Check 3: Reward hacking risk ────────────────────────────────────
+    for pat, hint in _REWARD_HACK_PATTERNS:
+        if re.search(rf"\b{pat}\b", code, flags=re.IGNORECASE):
+            if not has_fall_term:
+                msg = f"Hacking risk: '{pat}' present — {hint}"
+                issues.append({"check": "hacking_risk", "status": "warning", "message": msg})
+                suggestions.append(f"Add a fall/termination condition or remove the '{pat}' term")
+
+    # ── Check 4: Scale issue ────────────────────────────────────────────
+    max_reward = declared_max
+    if max_reward is None and weights:
+        # Approximation: max reward magnitude = sum of |weights| (assumes per-step
+        # contributions normalized to ~1).
+        max_reward = sum(abs(w) for w in weights)
+    if max_reward is not None and max_reward < 0.01:
+        msg = (
+            f"Scale issue: max possible reward {max_reward:.4f} < 0.01 — value function "
+            "will struggle to learn signal. Multiply weights by ~100x."
+        )
+        issues.append({"check": "scale", "status": "warning", "message": msg, "max_reward": max_reward})
+        suggestions.append("Scale up reward weights so per-step magnitude is at least 0.01")
+
+    # ── Check 5: Success alignment ──────────────────────────────────────
+    success_present = bool(success_only_terms)
+    distance_present = bool(re.search(r"distance|reach|track", code, flags=re.IGNORECASE))
+    if success_present and not distance_present:
+        msg = (
+            "Success alignment: success criterion present but no distance/progress term — "
+            "reward components don't correlate with success criterion."
+        )
+        issues.append({"check": "success_alignment", "status": "info", "message": msg})
+        suggestions.append("Add a progress-to-goal shaping term that correlates with success")
+    elif not success_present:
+        msg = (
+            "No explicit success/goal term detected — reward may not measure what you think. "
+            "Confirm a term aligns with your task success criterion."
+        )
+        issues.append({"check": "success_alignment", "status": "info", "message": msg})
+
+    return {
+        "issues": issues,
+        "issue_count": len(issues),
+        "suggestions": suggestions,
+        "weights_analyzed": weights,
+        "has_fall_termination": has_fall_term,
+    }
+
+
+async def _handle_profile_training_throughput(args: Dict) -> Dict:
+    """Identify sim-bound vs train-bound RL training runs from RSL-RL perf logs."""
+    run_dir = args["run_dir"]
+    if not Path(run_dir).exists():
+        return {"error": f"run_dir does not exist: {run_dir}"}
+
+    collection = _read_tb_scalars(run_dir, "Perf/collection_time")
+    learning = _read_tb_scalars(run_dir, "Perf/learning_time")
+    fps_series = _read_tb_scalars(run_dir, "Perf/total_fps")
+
+    if not collection or not learning:
+        return {
+            "run_dir": run_dir,
+            "error": "Required Perf/collection_time and Perf/learning_time scalars missing",
+            "found_scalars": {
+                "collection_time": len(collection),
+                "learning_time": len(learning),
+                "total_fps": len(fps_series),
+            },
+        }
+
+    # Use last value (most recent iteration) for the verdict.
+    collection_ms = float(collection[-1])
+    learning_ms = float(learning[-1])
+    total_ms = collection_ms + learning_ms
+    fps = float(fps_series[-1]) if fps_series else None
+
+    if total_ms <= 0:
+        return {"error": "Total time is zero — perf logs may be malformed"}
+
+    collection_frac = collection_ms / total_ms
+    learning_frac = learning_ms / total_ms
+
+    bottleneck = "balanced"
+    suggestion = ""
+    if collection_frac > 0.8:
+        bottleneck = "sim_bound"
+        suggestion = (
+            "Simulation is the bottleneck. Reduce num_envs, simplify collision meshes, "
+            "or switch cameras to TiledCamera (10x faster than standard Camera)."
+        )
+    elif learning_frac > 0.7:
+        bottleneck = "train_bound"
+        suggestion = (
+            "GPU training is the bottleneck. Reduce network size, batch size, "
+            "or number of PPO epochs."
+        )
+    else:
+        suggestion = (
+            "Sim and learning times are roughly balanced — no single bottleneck. "
+            "Profile individual reward terms or sensors if more throughput is needed."
+        )
+
+    return {
+        "run_dir": run_dir,
+        "bottleneck": bottleneck,
+        "collection_time_ms": collection_ms,
+        "learning_time_ms": learning_ms,
+        "collection_fraction": collection_frac,
+        "learning_fraction": learning_frac,
+        "total_fps": fps,
+        "suggestion": suggestion,
+        "camera_cost_ranking": "TiledCamera << RayCasterCamera < Camera (standard)",
+    }
+
+
+def _gen_eval_harness(args: Dict) -> str:
+    """Generate a reproducible RL evaluation script."""
+    task_name = args["task_name"]
+    num_episodes = int(args.get("num_episodes", 100))
+    output_dir = args.get("output_dir") or f"workspace/eval/{task_name}"
+    checkpoint_path = args.get("checkpoint_path", "")
+    record_video = bool(args.get("record_video", False))
+    max_steps = int(args.get("max_steps_per_episode", 1000))
+
+    # Use repr() so user-supplied paths get safely quoted in the generated code.
+    return f'''"""Evaluation harness for {task_name}.
+Auto-generated by Isaac Assist (Phase 7A Addendum).
+Runs {num_episodes} deterministic rollouts and saves per-episode metrics.
+"""
+import json
+import os
+from pathlib import Path
+
+import gymnasium as gym
+
+TASK_NAME = {task_name!r}
+NUM_EPISODES = {num_episodes}
+OUTPUT_DIR = Path({output_dir!r})
+CHECKPOINT_PATH = {checkpoint_path!r}
+RECORD_VIDEO = {record_video}
+MAX_STEPS_PER_EPISODE = {max_steps}
+
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _load_policy(checkpoint_path: str):
+    """Load a trained RL policy from a checkpoint, or return a random fallback."""
+    if not checkpoint_path or not os.path.exists(checkpoint_path):
+        print(f"[eval] No checkpoint at {{checkpoint_path!r}} — using random policy")
+        return None
+    try:
+        import torch
+        state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        return state.get("model_state_dict", state)
+    except Exception as exc:
+        print(f"[eval] Failed to load checkpoint: {{exc}} — falling back to random")
+        return None
+
+
+def main() -> None:
+    env = gym.make(TASK_NAME)
+    if RECORD_VIDEO:
+        from gymnasium.wrappers import RecordVideo
+        env = RecordVideo(env, video_folder=str(OUTPUT_DIR / "videos"))
+
+    policy = _load_policy(CHECKPOINT_PATH)
+
+    results = []
+    for episode in range(NUM_EPISODES):
+        obs, info = env.reset(seed=episode)
+        episode_reward = 0.0
+        terminated = False
+        truncated = False
+        step = 0
+        while not (terminated or truncated) and step < MAX_STEPS_PER_EPISODE:
+            if policy is None:
+                action = env.action_space.sample()
+            else:
+                # Placeholder forward pass — replace with your actor module.
+                action = env.action_space.sample()
+            obs, reward, terminated, truncated, info = env.step(action)
+            episode_reward += float(reward)
+            step += 1
+        results.append({{
+            "episode": episode,
+            "reward": episode_reward,
+            "success": bool(info.get("is_success", terminated and not truncated)),
+            "length": step,
+        }})
+        print(f"[eval] ep {{episode + 1}}/{{NUM_EPISODES}} reward={{episode_reward:.3f}} "
+              f"success={{results[-1]['success']}} len={{step}}")
+
+    out_file = OUTPUT_DIR / "eval_results.json"
+    out_file.write_text(json.dumps({{
+        "task_name": TASK_NAME,
+        "num_episodes": NUM_EPISODES,
+        "checkpoint_path": CHECKPOINT_PATH,
+        "results": results,
+        "summary": {{
+            "mean_reward": sum(r["reward"] for r in results) / max(len(results), 1),
+            "success_rate": sum(1 for r in results if r["success"]) / max(len(results), 1),
+            "mean_length": sum(r["length"] for r in results) / max(len(results), 1),
+        }},
+    }}, indent=2))
+    print(f"[eval] wrote {{out_file}}")
+    env.close()
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+DATA_HANDLERS["diagnose_training"] = _handle_diagnose_training
+DATA_HANDLERS["review_reward"] = _handle_review_reward
+DATA_HANDLERS["profile_training_throughput"] = _handle_profile_training_throughput
+CODE_GEN_HANDLERS["generate_eval_harness"] = _gen_eval_harness
+
+
 # ─── Vision tools (Gemini Robotics-ER 1.6) ──────────────────────────────────
 
 async def _get_viewport_bytes() -> tuple:
