@@ -1,6 +1,10 @@
 """
 L0 tests for DATA_HANDLERS that can run without Kit RPC.
 Handlers that need Kit are mocked via the mock_kit_rpc fixture.
+
+This file restricts itself to handlers present on this branch — handlers
+introduced in later phases (cloud_*, inspect_camera, behavior_tree, etc.)
+are tested in their respective addendum branches.
 """
 import json
 import pytest
@@ -58,7 +62,6 @@ from service.isaac_assist_service.chat.tools.tool_executor import (
     _handle_review_reward,
     _handle_profile_training_throughput,
 )
-
 
 
 class TestLookupProductSpec:
