@@ -3342,11 +3342,43 @@ def _gen_build_scene_from_blueprint(args: Dict) -> str:
     if not objects:
         return "print('Empty blueprint — nothing to build')\n"
 
+    # Build the per-object placement as a helper function so we can use
+    # early-return semantics (`return` instead of the old unwrapped code
+    # that would need `continue` without a loop to skip bad objects).
     lines = [
+        "import os",
         "import omni.usd",
         "from pxr import UsdGeom, Gf, Sdf",
         _SAFE_XFORM_SNIPPET,
         "stage = omni.usd.get_context().get_stage()",
+        "_placed = 0",
+        "_missing_assets = []",
+        "_ref_not_authored = []",
+        "",
+        "def _place(name, asset_path, prim_path, prim_type, pos, rot, scale):",
+        "    global _placed",
+        "    if asset_path:",
+        "        if not any(asset_path.startswith(p) for p in ('omniverse://','http://','https://','file://','anon:')):",
+        "            if not os.path.exists(asset_path):",
+        "                _missing_assets.append(name)",
+        "                print(f'build_scene_from_blueprint: skipping {name} — asset not found: {asset_path!r}')",
+        "                return",
+        "        prim = stage.DefinePrim(prim_path, 'Xform')",
+        "        prim.GetReferences().AddReference(asset_path)",
+        "        if not prim.HasAuthoredReferences():",
+        "            _ref_not_authored.append(name)",
+        "            print(f'build_scene_from_blueprint: reference not authored on {prim.GetPath()} for {asset_path!r}')",
+        "            return",
+        "    elif prim_type:",
+        "        prim = stage.DefinePrim(prim_path, prim_type)",
+        "    else:",
+        "        prim = stage.DefinePrim(prim_path, 'Xform')",
+        "    _safe_set_translate(prim, (pos[0], pos[1], pos[2]))",
+        "    if rot != [0, 0, 0]:",
+        "        _safe_set_rotate_xyz(prim, (rot[0], rot[1], rot[2]))",
+        "    if scale != [1, 1, 1]:",
+        "        _safe_set_scale(prim, (scale[0], scale[1], scale[2]))",
+        "    _placed += 1",
         "",
     ]
 
@@ -3357,26 +3389,26 @@ def _gen_build_scene_from_blueprint(args: Dict) -> str:
         pos = obj.get("position", [0, 0, 0])
         rot = obj.get("rotation", [0, 0, 0])
         scale = obj.get("scale", [1, 1, 1])
-        prim_type = obj.get("prim_type")  # for simple prims (Cube, etc.)
+        prim_type = obj.get("prim_type")
 
         lines.append(f"# --- {name} ---")
-        if asset_path:
-            # Import via USD reference
-            lines.append(f"prim = stage.DefinePrim('{prim_path}', 'Xform')")
-            lines.append(f"prim.GetReferences().AddReference('{asset_path}')")
-        elif prim_type:
-            lines.append(f"prim = stage.DefinePrim('{prim_path}', '{prim_type}')")
-        else:
-            lines.append(f"prim = stage.DefinePrim('{prim_path}', 'Xform')")
+        lines.append(
+            f"_place({name!r}, {asset_path!r}, {prim_path!r}, "
+            f"{prim_type!r}, {pos!r}, {rot!r}, {scale!r})"
+        )
 
-        lines.append(f"_safe_set_translate(prim, ({pos[0]}, {pos[1]}, {pos[2]}))")
-        if rot != [0, 0, 0]:
-            lines.append(f"_safe_set_rotate_xyz(prim, ({rot[0]}, {rot[1]}, {rot[2]}))")
-        if scale != [1, 1, 1]:
-            lines.append(f"_safe_set_scale(prim, ({scale[0]}, {scale[1]}, {scale[2]}))")
-        lines.append("")
-
-    lines.append(f"print('Scene built: {len(objects)} objects placed')")
+    n = len(objects)
+    lines.append("")
+    lines.append(
+        f"print(f'build_scene_from_blueprint: placed={{_placed}}/{n} requested, "
+        f"missing_assets={{len(_missing_assets)}}, ref_not_authored={{len(_ref_not_authored)}}')"
+    )
+    lines.append(
+        f"if _placed == 0 and {n} > 0:\n"
+        f"    raise RuntimeError("
+        f"        f'build_scene_from_blueprint: 0 of {n} objects placed — '\n"
+        f"        f'missing_assets={{_missing_assets}}, ref_not_authored={{_ref_not_authored}}')"
+    )
 
     if dry_run:
         return f"# DRY RUN — code preview only\n" + "\n".join(lines)
