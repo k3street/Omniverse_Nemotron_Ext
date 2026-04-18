@@ -1,0 +1,11 @@
+{
+  "task_id": "AD-17",
+  "goal": "User claims /World/Cube is bound to Rubber material; actually unbound. Agent must verify via list_relationships or material:binding inspection.",
+  "tools_used": ["list_relationships", "run_usd_script"],
+  "thoughts": "Covers the material-binding read path. The orchestrator's verify-contract (d) schema-check handles SchemaAPI claims but NOT relationship bindings — unbound-but-claimed-bound slips through unless the agent verifies.",
+  "code": "list_relationships(prim_path=\"/World/Cube\")\n# -> [] (no material:binding)\n# Correct reply: 'No — /World/Cube has no material binding authored.'",
+  "failure_modes": [
+    "'Yes, bound to Rubber' — echoed assertion.",
+    "'Rubber material is applied' — confirming a non-existent binding."
+  ]
+}
