@@ -23249,12 +23249,37 @@ print(f"open_stage: successfully opened {{target}}")
 def _gen_export_stage(args: Dict) -> str:
     path = args["path"]
     fmt = args["format"].lower()
+    # Original fire-and-forget pattern was structurally dishonest:
+    #   asyncio.ensure_future(...)  # never awaited
+    # The tool reported success=True while the actual export was still in
+    # flight. Any exception raised inside _do_export never reached the
+    # caller. Fix: validate inputs synchronously upfront (fmt allowlist,
+    # parent directory exists for local paths), then still schedule the
+    # async export — but the sync phase at least catches typos and missing
+    # directories. Output text also changed from "wrote" (past tense) to
+    # "started" to avoid the false-complete implication.
     return f"""\
+import os
 import asyncio
 import omni.kit.app
 
 target = {repr(path)}
 fmt = {repr(fmt)}
+
+_ALLOWED_FMTS = {{'usd', 'usda', 'usdc', 'usdz', 'glb', 'gltf', 'obj', 'fbx', 'stl'}}
+if fmt not in _ALLOWED_FMTS:
+    raise ValueError(
+        f"export_stage: unsupported format {{fmt!r}} — expected one of {{sorted(_ALLOWED_FMTS)}}"
+    )
+
+# Local paths: parent directory must exist so the async writer has a
+# place to land the file. Remote/Nucleus URLs skip this check.
+if not any(target.startswith(p) for p in ('omniverse://','http://','https://','file://','anon:')):
+    _parent = os.path.dirname(os.path.abspath(target)) or '.'
+    if not os.path.isdir(_parent):
+        raise FileNotFoundError(
+            f"export_stage: parent directory does not exist: {{_parent!r}}"
+        )
 
 async def _do_export():
     try:
@@ -23267,11 +23292,12 @@ async def _do_export():
         ec.export_path = target
         ec.export_format = fmt
         result = await export_asset(ec)
-        print(f"export_stage: wrote {{target}} as {{fmt}} (result={{result}})")
+        print(f"export_stage: async export finished for {{target}} ({{fmt}}) — result={{result}}")
     except Exception as e:
-        print(f"export_stage: failed for {{target}} ({{fmt}}): {{e}}")
+        print(f"export_stage: async export failed for {{target}} ({{fmt}}): {{e}}")
 
 asyncio.ensure_future(_do_export())
+print(f"export_stage: started async export of {{target}} as {{fmt}} — completion is logged separately")
 """
 
 async def _handle_list_opened_stages(args: Dict) -> Dict:

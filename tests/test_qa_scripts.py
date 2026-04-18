@@ -425,6 +425,25 @@ def test_gen_import_robot_urdf_verifies_result():
     assert "raise RuntimeError" in code
 
 
+def test_gen_export_stage_validates_inputs_before_fire_and_forget():
+    """Regression: export_stage scheduled a coroutine via asyncio.ensure_future
+    and returned immediately. Any exception inside _do_export was printed,
+    not raised; agent could claim "wrote /tmp/out.X". Now the sync phase
+    rejects unknown formats and missing parent directories upfront, and the
+    success message says "started" (not "wrote") so the agent doesn't imply
+    completion before the async export finishes."""
+    import sys
+    sys.path.insert(0, "service")
+    from isaac_assist_service.chat.tools.tool_executor import _gen_export_stage
+
+    code = _gen_export_stage({"path": "/tmp/x.usd", "format": "usd"})
+    assert "_ALLOWED_FMTS" in code
+    assert "os.path.isdir" in code
+    assert 'raise ValueError' in code or 'raise FileNotFoundError' in code
+    assert '"export_stage: started' in code
+    assert "'wrote'" not in code  # old misleading past tense removed
+
+
 def test_gen_enable_extension_fails_on_unknown_id():
     """Regression: set_extension_enabled_immediate returns False for unknown
     extension ids, and old _gen_enable_extension only printed the result
