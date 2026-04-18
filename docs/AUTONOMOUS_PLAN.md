@@ -4,6 +4,34 @@ Decision-driven plan for long self-directed sessions. Follow linearly: each
 section says "if X, do Y". Never ask Anton for confirmation — make the call
 from this doc + state-signals.
 
+## Current baseline (last updated 2026-04-18 end-of-session)
+
+- **24-task canary: 23/24 (95.8%) stable, fab ≤ 3** over 3 consecutive runs.
+- Only inherent failure: **T-13** (direct-mode single-shot can't produce the
+  cite-able Isaac-Sim-5.x-specific refusal answer the spec requires; LLM
+  capability-bound, not a tool or orchestrator bug).
+- **Stage pollution is the #1 source of phantom regressions**: every
+  "regression" investigated today traced to a parallel `direct_eval` or a
+  live Kit probe I ran while a canary was in flight. Kit is single-tenant;
+  never run two `direct_eval` processes against the same Kit RPC. See
+  `scripts/qa/direct_eval.py` module-docstring warning.
+- **Tool honesty**: 29 `_gen_*` / `_handle_*` handlers fixed today;
+  56 in `AUDITED_CLEAN`; `test_tool_honesty_scan.py` blocks new
+  silent-success antipatterns in CI.
+- **Orchestrator guards**: 5 Fas 2 verify-contract sub-checks live —
+  path-exists / count (shallow+recursive) / pose / schema / attribute-value.
+  See `docs/qa/ARCHITECTURE_REVIEW.md`.
+- **Scaffold**: `@honesty_checked` decorator + helpers in
+  `service/.../chat/tools/tool_honesty.py` — opt-in per handler.
+
+**Good next-session seeds:**
+1. More `@honesty_checked` retrofits on handlers outside `AUDITED_CLEAN`
+   (target the 288 untouched ones).
+2. Extend verify-contract with attribute-in-reverse-order regex
+   ("friction on /World/X is 0.8") — currently only matches path→attr order.
+3. Multi-turn direct-eval (Proposal #4 in architecture doc) as an optional
+   mode for T-13-style refusal tasks.
+
 ## Meta-rules
 
 - **Push only to `anton` remote** (Anton's private fork). Never `origin`
