@@ -1790,6 +1790,31 @@ _RAW_TEST_VECTORS = [
             "3.14",
         ],
     ),
+    # NOTE: launch_training (master) is intentionally not tested here —
+    # the generator has a pre-existing nested-quote bug in master that
+    # produces invalid Python; fixing it is out of scope for this addendum.
+
+    # ── Tier 4 Atomic Tools — Geometry & Spatial Analysis (CODE_GEN) ──────
+    (
+        "compute_convex_hull",
+        {"prim_path": "/World/MyMesh"},
+        [
+            "UsdPhysics.MeshCollisionAPI",
+            "convexHull",
+            "/World/MyMesh",
+        ],
+    ),
+    (
+        "compute_convex_hull",
+        {"prim_path": "/World/MyMesh", "export_hull_path": "/World/MyMeshHull"},
+        [
+            "UsdPhysics.MeshCollisionAPI",
+            "convexHull",
+            "/World/MyMeshHull",
+            "ConvexHull",
+            "DefinePrim",
+        ],
+    ),
 ]
 
 

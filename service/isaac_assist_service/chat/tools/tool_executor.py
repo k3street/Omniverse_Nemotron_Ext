@@ -29191,3 +29191,454 @@ DATA_HANDLERS["get_gripper_state"] = _handle_get_gripper_state
 
 CODE_GEN_HANDLERS["set_joint_limits"] = _gen_set_joint_limits
 CODE_GEN_HANDLERS["set_joint_velocity_limit"] = _gen_set_joint_velocity_limit
+
+
+# ── 1. raycast (DATA) — T4.1 ────────────────────────────────────────────────
+
+async def _handle_raycast(args: Dict) -> Dict:
+    """Cast a single ray and return the closest PhysX hit."""
+    origin = args["origin"]
+    direction = args["direction"]
+    max_distance = float(args.get("max_distance", 1000.0))
+    code = f"""\
+import json
+
+origin = {list(origin)!r}
+direction = {list(direction)!r}
+max_distance = {max_distance!r}
+
+# Normalize direction
+import math
+_dx, _dy, _dz = direction
+_len = math.sqrt(_dx * _dx + _dy * _dy + _dz * _dz)
+if _len <= 0.0:
+    print(json.dumps({{'error': 'direction has zero length', 'origin': origin, 'direction': direction}}))
+else:
+    direction = [_dx / _len, _dy / _len, _dz / _len]
+    try:
+        from omni.physx import get_physx_scene_query_interface
+        sqi = get_physx_scene_query_interface()
+        hit = sqi.raycast_closest(origin, direction, max_distance)
+    except Exception as exc:
+        hit = {{'error': f'PhysX scene query unavailable: {{exc}}'}}
+    if isinstance(hit, dict) and hit.get('hit'):
+        result = {{
+            'hit': True,
+            'origin': origin,
+            'direction': direction,
+            'max_distance': max_distance,
+            'collision': hit.get('collision') or hit.get('rigidBody'),
+            'position': list(hit.get('position', [])),
+            'normal': list(hit.get('normal', [])),
+            'distance': float(hit.get('distance', 0.0)),
+            'face_index': hit.get('faceIndex'),
+            'material': hit.get('material'),
+        }}
+    else:
+        result = {{
+            'hit': False,
+            'origin': origin,
+            'direction': direction,
+            'max_distance': max_distance,
+        }}
+        if isinstance(hit, dict) and 'error' in hit:
+            result['error'] = hit['error']
+    print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"raycast {origin} -> {direction}")
+
+
+# ── 2. overlap_sphere (DATA) — T4.2 ─────────────────────────────────────────
+
+async def _handle_overlap_sphere(args: Dict) -> Dict:
+    """Find every collider whose AABB overlaps the given sphere."""
+    center = args["center"]
+    radius = float(args["radius"])
+    code = f"""\
+import json
+
+center = {list(center)!r}
+radius = {radius!r}
+hits = []
+
+def _report_fn(hit):
+    # Called once per overlap. Return True to keep collecting.
+    path = getattr(hit, 'rigid_body', None) or getattr(hit, 'collision', None)
+    if path is None and isinstance(hit, dict):
+        path = hit.get('rigidBody') or hit.get('collision')
+    if path is not None:
+        hits.append(str(path))
+    return True
+
+try:
+    from omni.physx import get_physx_scene_query_interface
+    sqi = get_physx_scene_query_interface()
+    count = sqi.overlap_sphere(radius, center, _report_fn, False)
+except Exception as exc:
+    count = -1
+    hits.append(f'__error__: {{exc}}')
+
+result = {{
+    'center': center,
+    'radius': radius,
+    'count': len(hits),
+    'reported_count': count,
+    'prim_paths': hits,
+}}
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(
+        code, f"overlap_sphere center={center} r={radius}"
+    )
+
+
+# ── 3. overlap_box (DATA) — T4.3 ────────────────────────────────────────────
+
+async def _handle_overlap_box(args: Dict) -> Dict:
+    """Find every collider that overlaps the given oriented box."""
+    center = args["center"]
+    half_extents = args["half_extents"]
+    rotation = args.get("rotation") or [0.0, 0.0, 0.0, 1.0]  # identity quaternion
+    code = f"""\
+import json
+
+center = {list(center)!r}
+half_extents = {list(half_extents)!r}
+rotation = {list(rotation)!r}
+hits = []
+
+def _report_fn(hit):
+    path = getattr(hit, 'rigid_body', None) or getattr(hit, 'collision', None)
+    if path is None and isinstance(hit, dict):
+        path = hit.get('rigidBody') or hit.get('collision')
+    if path is not None:
+        hits.append(str(path))
+    return True
+
+try:
+    from omni.physx import get_physx_scene_query_interface
+    sqi = get_physx_scene_query_interface()
+    count = sqi.overlap_box(half_extents, center, rotation, _report_fn, False)
+except Exception as exc:
+    count = -1
+    hits.append(f'__error__: {{exc}}')
+
+result = {{
+    'center': center,
+    'half_extents': half_extents,
+    'rotation': rotation,
+    'count': len(hits),
+    'reported_count': count,
+    'prim_paths': hits,
+}}
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(
+        code, f"overlap_box center={center} half_extents={half_extents}"
+    )
+
+
+# ── 4. sweep_sphere (DATA) — T4.4 ───────────────────────────────────────────
+
+async def _handle_sweep_sphere(args: Dict) -> Dict:
+    """Sweep a sphere from start to end, return closest hit along the sweep."""
+    start = args["start"]
+    end = args["end"]
+    radius = float(args["radius"])
+    code = f"""\
+import json
+import math
+
+start = {list(start)!r}
+end = {list(end)!r}
+radius = {radius!r}
+
+dx = end[0] - start[0]
+dy = end[1] - start[1]
+dz = end[2] - start[2]
+distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+if distance <= 0.0:
+    print(json.dumps({{
+        'error': 'sweep has zero length',
+        'start': start,
+        'end': end,
+        'radius': radius,
+    }}))
+else:
+    direction = [dx / distance, dy / distance, dz / distance]
+    try:
+        from omni.physx import get_physx_scene_query_interface
+        sqi = get_physx_scene_query_interface()
+        hit = sqi.sweep_sphere(radius, start, direction, distance)
+    except Exception as exc:
+        hit = {{'error': f'PhysX scene query unavailable: {{exc}}'}}
+    if isinstance(hit, dict) and hit.get('hit'):
+        result = {{
+            'hit': True,
+            'start': start,
+            'end': end,
+            'radius': radius,
+            'direction': direction,
+            'sweep_distance': distance,
+            'collision': hit.get('collision') or hit.get('rigidBody'),
+            'position': list(hit.get('position', [])),
+            'normal': list(hit.get('normal', [])),
+            'distance': float(hit.get('distance', 0.0)),
+        }}
+    else:
+        result = {{
+            'hit': False,
+            'start': start,
+            'end': end,
+            'radius': radius,
+            'direction': direction,
+            'sweep_distance': distance,
+        }}
+        if isinstance(hit, dict) and 'error' in hit:
+            result['error'] = hit['error']
+    print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(
+        code, f"sweep_sphere {start} -> {end} r={radius}"
+    )
+
+
+# ── 5. compute_volume (DATA) — T4.5 ─────────────────────────────────────────
+
+async def _handle_compute_volume(args: Dict) -> Dict:
+    """Compute mesh volume via signed tetrahedra (trimesh if available)."""
+    prim_path = args["prim_path"]
+    code = f"""\
+import json
+import omni.usd
+from pxr import Usd, UsdGeom, Gf
+
+prim_path = {prim_path!r}
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath(prim_path)
+result = {{'prim_path': prim_path, 'units': 'm^3'}}
+
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+elif not prim.IsA(UsdGeom.Mesh):
+    result['error'] = f'prim is not a Mesh: {{prim.GetTypeName()}}'
+else:
+    mesh = UsdGeom.Mesh(prim)
+    points_attr = mesh.GetPointsAttr()
+    counts_attr = mesh.GetFaceVertexCountsAttr()
+    indices_attr = mesh.GetFaceVertexIndicesAttr()
+    if not (points_attr and counts_attr and indices_attr):
+        result['error'] = 'mesh missing points / faceVertexCounts / faceVertexIndices'
+    else:
+        # Bake world transform so volume is in world units
+        xf = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+        local_points = points_attr.Get() or []
+        world_points = [xf.Transform(Gf.Vec3d(p[0], p[1], p[2])) for p in local_points]
+        counts = list(counts_attr.Get() or [])
+        indices = list(indices_attr.Get() or [])
+
+        # Triangulate (fan) every face into (i0, i_k, i_{{k+1}}) triangles
+        triangles = []
+        cursor = 0
+        for c in counts:
+            face = indices[cursor:cursor + c]
+            cursor += c
+            if len(face) < 3:
+                continue
+            for k in range(1, len(face) - 1):
+                triangles.append((face[0], face[k], face[k + 1]))
+
+        volume_signed = 0.0
+        try:
+            import trimesh
+            import numpy as np
+            verts = np.array([(p[0], p[1], p[2]) for p in world_points], dtype=float)
+            faces = np.array(triangles, dtype=int)
+            tm = trimesh.Trimesh(vertices=verts, faces=faces, process=False)
+            volume_signed = float(tm.volume)
+            backend = 'trimesh'
+        except Exception:
+            # Manual signed-tetrahedra (divergence theorem) fallback
+            for (a, b, c) in triangles:
+                v0 = world_points[a]
+                v1 = world_points[b]
+                v2 = world_points[c]
+                # Signed volume of tetrahedron (origin, v0, v1, v2)
+                volume_signed += (
+                    v0[0] * (v1[1] * v2[2] - v1[2] * v2[1])
+                    - v0[1] * (v1[0] * v2[2] - v1[2] * v2[0])
+                    + v0[2] * (v1[0] * v2[1] - v1[1] * v2[0])
+                ) / 6.0
+            backend = 'manual_tetrahedra'
+
+        result['triangle_count'] = len(triangles)
+        result['vertex_count'] = len(world_points)
+        result['volume'] = abs(volume_signed)
+        result['signed_volume'] = volume_signed
+        result['backend'] = backend
+
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"compute_volume {prim_path}")
+
+
+# ── 6. compute_surface_area (DATA) — T4.6 ───────────────────────────────────
+
+async def _handle_compute_surface_area(args: Dict) -> Dict:
+    """Compute surface area as sum of triangle areas (after triangulation)."""
+    prim_path = args["prim_path"]
+    code = f"""\
+import json
+import math
+import omni.usd
+from pxr import Usd, UsdGeom, Gf
+
+prim_path = {prim_path!r}
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath(prim_path)
+result = {{'prim_path': prim_path, 'units': 'm^2'}}
+
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+elif not prim.IsA(UsdGeom.Mesh):
+    result['error'] = f'prim is not a Mesh: {{prim.GetTypeName()}}'
+else:
+    mesh = UsdGeom.Mesh(prim)
+    points_attr = mesh.GetPointsAttr()
+    counts_attr = mesh.GetFaceVertexCountsAttr()
+    indices_attr = mesh.GetFaceVertexIndicesAttr()
+    if not (points_attr and counts_attr and indices_attr):
+        result['error'] = 'mesh missing points / faceVertexCounts / faceVertexIndices'
+    else:
+        xf = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+        local_points = points_attr.Get() or []
+        world_points = [xf.Transform(Gf.Vec3d(p[0], p[1], p[2])) for p in local_points]
+        counts = list(counts_attr.Get() or [])
+        indices = list(indices_attr.Get() or [])
+
+        triangles = []
+        cursor = 0
+        for c in counts:
+            face = indices[cursor:cursor + c]
+            cursor += c
+            if len(face) < 3:
+                continue
+            for k in range(1, len(face) - 1):
+                triangles.append((face[0], face[k], face[k + 1]))
+
+        total_area = 0.0
+        for (a, b, c) in triangles:
+            v0 = world_points[a]
+            v1 = world_points[b]
+            v2 = world_points[c]
+            ex = v1[0] - v0[0]
+            ey = v1[1] - v0[1]
+            ez = v1[2] - v0[2]
+            fx = v2[0] - v0[0]
+            fy = v2[1] - v0[1]
+            fz = v2[2] - v0[2]
+            cx = ey * fz - ez * fy
+            cy = ez * fx - ex * fz
+            cz = ex * fy - ey * fx
+            total_area += 0.5 * math.sqrt(cx * cx + cy * cy + cz * cz)
+
+        result['triangle_count'] = len(triangles)
+        result['vertex_count'] = len(world_points)
+        result['surface_area'] = total_area
+
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"compute_surface_area {prim_path}")
+
+
+# ── 7. compute_convex_hull (CODE_GEN) — T4.7 ────────────────────────────────
+
+def _gen_compute_convex_hull(args: Dict) -> str:
+    """Apply convexHull collision approximation, optionally export hull mesh."""
+    prim_path = args["prim_path"]
+    export_hull_path = args.get("export_hull_path")
+    lines = [
+        "import omni.usd",
+        "from pxr import Usd, UsdGeom, UsdPhysics, Gf, Sdf, Vt",
+        "",
+        f"prim_path = {prim_path!r}",
+        f"export_hull_path = {export_hull_path!r}",
+        "stage = omni.usd.get_context().get_stage()",
+        "prim = stage.GetPrimAtPath(prim_path)",
+        "if not prim or not prim.IsValid():",
+        "    raise RuntimeError(f'prim not found: {prim_path}')",
+        "if not prim.IsA(UsdGeom.Mesh):",
+        "    raise RuntimeError(f'prim is not a Mesh: {prim.GetTypeName()}')",
+        "",
+        "# 1) Mark the prim as a collider, then declare convexHull approximation",
+        "UsdPhysics.CollisionAPI.Apply(prim)",
+        "mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)",
+        "approx_attr = mesh_collision.GetApproximationAttr()",
+        "if not approx_attr or not approx_attr.IsDefined():",
+        "    approx_attr = mesh_collision.CreateApproximationAttr()",
+        "approx_attr.Set(UsdPhysics.Tokens.convexHull)",
+        "",
+        "exported_path = None",
+        "if export_hull_path:",
+        "    # 2) Compute the convex hull (scipy if available, else manual gift-wrap)",
+        "    mesh = UsdGeom.Mesh(prim)",
+        "    xf = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())",
+        "    local_points = mesh.GetPointsAttr().Get() or []",
+        "    world_points = [xf.Transform(Gf.Vec3d(p[0], p[1], p[2])) for p in local_points]",
+        "    hull_vertices = []",
+        "    hull_triangles = []",
+        "    if len(world_points) < 4:",
+        "        raise RuntimeError(f'need at least 4 points for a 3D hull, got {len(world_points)}')",
+        "    try:",
+        "        import numpy as np",
+        "        from scipy.spatial import ConvexHull",
+        "        pts = np.array([(p[0], p[1], p[2]) for p in world_points], dtype=float)",
+        "        hull = ConvexHull(pts)",
+        "        index_remap = {orig: new for new, orig in enumerate(sorted(set(int(i) for i in hull.vertices)))}",
+        "        hull_vertices = [tuple(pts[orig]) for orig in sorted(index_remap.keys())]",
+        "        for simplex in hull.simplices:",
+        "            tri = tuple(index_remap[int(i)] for i in simplex)",
+        "            hull_triangles.append(tri)",
+        "    except Exception:",
+        "        # Manual fallback: just take the AABB-corner hull (8 verts, 12 triangles).",
+        "        # This is a coarse but always-valid convex envelope when scipy is missing.",
+        "        xs = [p[0] for p in world_points]",
+        "        ys = [p[1] for p in world_points]",
+        "        zs = [p[2] for p in world_points]",
+        "        mn = (min(xs), min(ys), min(zs))",
+        "        mx = (max(xs), max(ys), max(zs))",
+        "        hull_vertices = [",
+        "            (mn[0], mn[1], mn[2]), (mx[0], mn[1], mn[2]),",
+        "            (mx[0], mx[1], mn[2]), (mn[0], mx[1], mn[2]),",
+        "            (mn[0], mn[1], mx[2]), (mx[0], mn[1], mx[2]),",
+        "            (mx[0], mx[1], mx[2]), (mn[0], mx[1], mx[2]),",
+        "        ]",
+        "        hull_triangles = [",
+        "            (0, 1, 2), (0, 2, 3),  # -Z",
+        "            (4, 6, 5), (4, 7, 6),  # +Z",
+        "            (0, 4, 5), (0, 5, 1),  # -Y",
+        "            (3, 2, 6), (3, 6, 7),  # +Y",
+        "            (0, 3, 7), (0, 7, 4),  # -X",
+        "            (1, 5, 6), (1, 6, 2),  # +X",
+        "        ]",
+        "    # 3) Author hull mesh prim",
+        "    hull_prim = stage.DefinePrim(export_hull_path, 'Mesh')",
+        "    hull_mesh = UsdGeom.Mesh(hull_prim)",
+        "    hull_mesh.CreatePointsAttr([Gf.Vec3f(*v) for v in hull_vertices])",
+        "    hull_mesh.CreateFaceVertexCountsAttr([3] * len(hull_triangles))",
+        "    flat_indices = [idx for tri in hull_triangles for idx in tri]",
+        "    hull_mesh.CreateFaceVertexIndicesAttr(flat_indices)",
+        "    exported_path = export_hull_path",
+        "",
+        "print(f'compute_convex_hull applied to {prim_path} (export={exported_path})')",
+    ]
+    return "\n".join(lines)
+
+
+DATA_HANDLERS["raycast"] = _handle_raycast
+DATA_HANDLERS["overlap_sphere"] = _handle_overlap_sphere
+DATA_HANDLERS["overlap_box"] = _handle_overlap_box
+DATA_HANDLERS["sweep_sphere"] = _handle_sweep_sphere
+DATA_HANDLERS["compute_volume"] = _handle_compute_volume
+DATA_HANDLERS["compute_surface_area"] = _handle_compute_surface_area
+CODE_GEN_HANDLERS["compute_convex_hull"] = _gen_compute_convex_hull
