@@ -2279,6 +2279,78 @@ _RAW_TEST_VECTORS = [
             "Sdf.CopySpec",
         ],
     ),
+    # ── Tier 15-18 (Viewport / Persistence / Extensions / Audio) ───────────
+    (
+        "highlight_prim",
+        {"prim_path": "/World/Cube"},
+        ["debug_draw", "draw_lines", "/World/Cube", "BBoxCache"],
+    ),
+    (
+        "highlight_prim",
+        {"prim_path": "/World/Robot", "color": [0.2, 0.8, 0.4], "duration": 5.0},
+        ["debug_draw", "0.2", "0.8", "0.4", "5.0"],
+    ),
+    (
+        "focus_viewport_on",
+        {"prim_path": "/World/Robot"},
+        ["set_selected_prim_paths", "frame_viewport_selection", "/World/Robot"],
+    ),
+    (
+        "save_stage",
+        {"path": "/tmp/scene.usda"},
+        ["save_as_stage", "save_stage", "/tmp/scene.usda"],
+    ),
+    (
+        "open_stage",
+        {"path": "omniverse://localhost/scene.usd"},
+        ["open_stage", "omniverse://localhost/scene.usd"],
+    ),
+    (
+        "export_stage",
+        {"path": "/tmp/out.fbx", "format": "fbx"},
+        ["asset_exporter", "export_asset", "ExportContext", "fbx"],
+    ),
+    (
+        "export_stage",
+        {"path": "/tmp/out.glb", "format": "glb"},
+        ["export_asset", "glb"],
+    ),
+    (
+        "enable_extension",
+        {"ext_id": "omni.replicator.core"},
+        ["set_extension_enabled_immediate", "omni.replicator.core", "is_extension_enabled"],
+    ),
+    (
+        "create_audio_prim",
+        {"position": [1.0, 2.0, 3.0], "audio_file": "/tmp/sfx.wav"},
+        ["UsdMedia.SpatialAudio", "Define", "FilePathAttr", "/tmp/sfx.wav"],
+    ),
+    (
+        "create_audio_prim",
+        {
+            "position": [0, 0, 0],
+            "audio_file": "/sfx/loop.ogg",
+            "prim_path": "/World/AudioCustom",
+            "auto_play": False,
+            "start_time": 1.5,
+        },
+        ["UsdMedia.SpatialAudio", "/World/AudioCustom", "1.5", "False"],
+    ),
+    (
+        "set_audio_property",
+        {"prim_path": "/World/Audio_0", "prop": "volume", "value": -6.0},
+        ["UsdMedia.SpatialAudio", "GainAttr", "/World/Audio_0", "-6.0"],
+    ),
+    (
+        "set_audio_property",
+        {"prim_path": "/World/A", "prop": "pitch", "value": 2.0},
+        ["UsdMedia.SpatialAudio", "PitchAttr", "pitch"],
+    ),
+    (
+        "set_audio_property",
+        {"prim_path": "/World/A", "prop": "auto_play", "value": False},
+        ["UsdMedia.SpatialAudio", "PlaybackModeAttr", "auto_play"],
+    ),
 ]
 
 
@@ -2823,6 +2895,16 @@ class TestTemplateDetection:
         """No clearance_mm given should fall back to 50mm stop / 100mm warning."""
         if "set_clearance_monitor" not in CODE_GEN_HANDLERS:
             pytest.skip("set_clearance_monitor not in CODE_GEN_HANDLERS (different branch)")
+    # ── Clearance Detection Addendum edge cases ────────────────────────────
+    # These exercise handlers from the clearance-detection addendum which is
+    # NOT present on this branch. Skipped when those handlers are missing.
+
+    @pytest.mark.skipif(
+        "set_clearance_monitor" not in CODE_GEN_HANDLERS,
+        reason="set_clearance_monitor not present on this branch",
+    )
+    def test_set_clearance_monitor_default_thresholds(self):
+        """No clearance_mm given should fall back to 50mm stop / 100mm warning."""
         code = CODE_GEN_HANDLERS["set_clearance_monitor"]({
             "articulation_path": "/World/Franka",
         })
@@ -2832,11 +2914,8 @@ class TestTemplateDetection:
 
     @pytest.mark.skipif(
         "set_clearance_monitor" not in CODE_GEN_HANDLERS,
-        reason="set_clearance_monitor handler not on this branch",
         reason="Clearance Detection addendum not merged on this branch",
     )
-    def test_set_clearance_monitor_no_targets(self):
-        """Empty target list should still produce valid code (monitors all robot links)."""
     def test_set_clearance_monitor_no_targets(self):
         """Empty target list should still produce valid code (monitors all robot links)."""
         if "set_clearance_monitor" not in CODE_GEN_HANDLERS:
@@ -2851,15 +2930,10 @@ class TestTemplateDetection:
 
     @pytest.mark.skipif(
         "visualize_clearance" not in CODE_GEN_HANDLERS,
-        reason="visualize_clearance handler not on this branch",
         reason="Clearance Detection addendum not merged on this branch",
     )
     def test_visualize_clearance_default_mode_is_heatmap(self):
         """Omitting mode should default to heatmap (SDF + debug draw)."""
-    def test_visualize_clearance_default_mode_is_heatmap(self):
-        """Omitting mode should default to heatmap (SDF + debug draw)."""
-        if "visualize_clearance" not in CODE_GEN_HANDLERS:
-            pytest.skip("visualize_clearance not in CODE_GEN_HANDLERS (different branch)")
         code = CODE_GEN_HANDLERS["visualize_clearance"]({
             "articulation_path": "/World/Franka",
             "target_prims": ["/World/Fixture"],
@@ -2872,15 +2946,10 @@ class TestTemplateDetection:
 
     @pytest.mark.skipif(
         "visualize_clearance" not in CODE_GEN_HANDLERS,
-        reason="visualize_clearance handler not on this branch",
         reason="Clearance Detection addendum not merged on this branch",
     )
     def test_visualize_clearance_zones_uses_triggers(self):
         """zones mode should use PhysxTriggerAPI and skip SDF mesh collision."""
-    def test_visualize_clearance_zones_uses_triggers(self):
-        """zones mode should use PhysxTriggerAPI and skip SDF mesh collision."""
-        if "visualize_clearance" not in CODE_GEN_HANDLERS:
-            pytest.skip("visualize_clearance not in CODE_GEN_HANDLERS (different branch)")
         code = CODE_GEN_HANDLERS["visualize_clearance"]({
             "articulation_path": "/World/Franka",
             "mode": "zones",
@@ -2892,15 +2961,10 @@ class TestTemplateDetection:
 
     @pytest.mark.skipif(
         "check_path_clearance" not in CODE_GEN_HANDLERS,
-        reason="check_path_clearance handler not on this branch",
         reason="Clearance Detection addendum not merged on this branch",
     )
     def test_check_path_clearance_multiple_waypoints(self):
         """Trajectory with multiple waypoints should be embedded as a list-of-lists."""
-    def test_check_path_clearance_multiple_waypoints(self):
-        """Trajectory with multiple waypoints should be embedded as a list-of-lists."""
-        if "check_path_clearance" not in CODE_GEN_HANDLERS:
-            pytest.skip("check_path_clearance not in CODE_GEN_HANDLERS (different branch)")
         code = CODE_GEN_HANDLERS["check_path_clearance"]({
             "articulation_path": "/World/Franka",
             "trajectory": [
@@ -2917,15 +2981,10 @@ class TestTemplateDetection:
 
     @pytest.mark.skipif(
         "check_path_clearance" not in CODE_GEN_HANDLERS,
-        reason="check_path_clearance handler not on this branch",
         reason="Clearance Detection addendum not merged on this branch",
     )
     def test_check_path_clearance_no_obstacles(self):
         """Empty obstacle list is still valid — every waypoint should report inf clearance."""
-    def test_check_path_clearance_no_obstacles(self):
-        """Empty obstacle list is still valid — every waypoint should report inf clearance."""
-        if "check_path_clearance" not in CODE_GEN_HANDLERS:
-            pytest.skip("check_path_clearance not in CODE_GEN_HANDLERS (different branch)")
         code = CODE_GEN_HANDLERS["check_path_clearance"]({
             "articulation_path": "/World/Franka",
             "trajectory": [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]],
@@ -3659,6 +3718,59 @@ class TestTemplateDetection:
         })
         _assert_valid_python(code, "duplicate_prims")
         assert "_offset = (-1.5, 0.0, 2.5)" in code
+
+    # ── Tier 15-18 (Viewport / Persistence / Extensions / Audio) edges ─────
+
+    def test_highlight_prim_default_color_is_yellow(self):
+        code = CODE_GEN_HANDLERS["highlight_prim"]({"prim_path": "/World/X"})
+        _assert_valid_python(code, "highlight_prim")
+        # Default RGB = (1.0, 1.0, 0.0) yellow — the unpacked color tuple shows in code
+        assert "1.0, 1.0, 0.0" in code or "(1.0, 1.0, 0.0," in code
+
+    def test_save_stage_quotes_path_safely(self):
+        code = CODE_GEN_HANDLERS["save_stage"]({"path": "/tmp/scenes/Robot's Garage.usd"})
+        _assert_valid_python(code, "save_stage")
+        # repr() should be used so apostrophes don't break the string literal
+        assert "Robot" in code
+
+    def test_export_stage_format_normalised_to_lowercase(self):
+        code = CODE_GEN_HANDLERS["export_stage"]({"path": "/tmp/out.GLB", "format": "GLB"})
+        _assert_valid_python(code, "export_stage")
+        # We lower() the format inside the generator
+        assert "'glb'" in code
+
+    def test_create_audio_prim_default_path_search(self):
+        """Without prim_path, code should walk /World/Audio_<n> until free."""
+        code = CODE_GEN_HANDLERS["create_audio_prim"]({
+            "position": [0, 0, 0],
+            "audio_file": "/tmp/sfx.wav",
+        })
+        _assert_valid_python(code, "create_audio_prim")
+        assert "/World/Audio_" in code
+        assert "while True" in code
+
+    def test_set_audio_property_unknown_prop_returns_comment(self):
+        """Unknown prop names should produce inert (commented) code."""
+        code = CODE_GEN_HANDLERS["set_audio_property"]({
+            "prim_path": "/World/A",
+            "prop": "invalid_property",
+            "value": 1,
+        })
+        _assert_valid_python(code, "set_audio_property")
+        assert "unknown prop" in code
+
+    def test_enable_extension_uses_immediate_api(self):
+        code = CODE_GEN_HANDLERS["enable_extension"]({"ext_id": "omni.kit.tool.asset_exporter"})
+        _assert_valid_python(code, "enable_extension")
+        assert "set_extension_enabled_immediate" in code
+        assert "is_extension_enabled" in code  # avoid double-enable
+
+    def test_focus_viewport_on_falls_back_to_command(self):
+        """Should try frame_viewport_selection first, fall back to FramePrimsCommand."""
+        code = CODE_GEN_HANDLERS["focus_viewport_on"]({"prim_path": "/World/X"})
+        _assert_valid_python(code, "focus_viewport_on")
+        assert "frame_viewport_selection" in code
+        assert "FramePrimsCommand" in code
 
 
 class TestAllCodeGenHandlersCovered:

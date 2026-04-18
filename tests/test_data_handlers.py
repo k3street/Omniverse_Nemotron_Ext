@@ -73,6 +73,7 @@ except ImportError:
 
 
 
+
 class TestLookupProductSpec:
     """Test the sensor spec lookup handler."""
 
@@ -3075,3 +3076,108 @@ class TestSelectByCriteria:
         result = await handler({"criteria": "not a dict"})
         assert "error" in result
         assert result["count"] == 0
+# ──────────────────────────────────────────────────────────────────────────────
+# Tier 15-18 data handlers
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestTier15Tier18DataHandlers:
+    """Each data handler should be registered and produce valid Kit code via mock_kit_rpc."""
+
+    @pytest.mark.asyncio
+    async def test_get_viewport_camera_registered(self):
+        assert "get_viewport_camera" in DATA_HANDLERS
+        assert DATA_HANDLERS["get_viewport_camera"] is not None
+
+    @pytest.mark.asyncio
+    async def test_get_viewport_camera_runs_with_mock(self, monkeypatch):
+        captured = {}
+
+        async def fake_queue(code, desc=""):
+            captured["code"] = code
+            captured["desc"] = desc
+            return {"queued": True, "patch_id": "p1"}
+
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+        result = await DATA_HANDLERS["get_viewport_camera"]({})
+        assert "code" in captured
+        # Generated Kit-side code must be valid Python
+        compile(captured["code"], "<gvc>", "exec")
+        assert "get_active_viewport" in captured["code"]
+        assert "camera_path" in captured["code"]
+
+    @pytest.mark.asyncio
+    async def test_get_selected_prims_registered(self):
+        assert "get_selected_prims" in DATA_HANDLERS
+        assert DATA_HANDLERS["get_selected_prims"] is not None
+
+    @pytest.mark.asyncio
+    async def test_get_selected_prims_runs_with_mock(self, monkeypatch):
+        captured = {}
+
+        async def fake_queue(code, desc=""):
+            captured["code"] = code
+            return {"queued": True, "patch_id": "p2"}
+
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+        result = await DATA_HANDLERS["get_selected_prims"]({})
+        compile(captured["code"], "<gsp>", "exec")
+        assert "get_selected_prim_paths" in captured["code"]
+
+    @pytest.mark.asyncio
+    async def test_list_opened_stages_registered(self):
+        assert "list_opened_stages" in DATA_HANDLERS
+        assert DATA_HANDLERS["list_opened_stages"] is not None
+
+    @pytest.mark.asyncio
+    async def test_list_opened_stages_runs_with_mock(self, monkeypatch):
+        captured = {}
+
+        async def fake_queue(code, desc=""):
+            captured["code"] = code
+            return {"queued": True, "patch_id": "p3"}
+
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+        result = await DATA_HANDLERS["list_opened_stages"]({})
+        compile(captured["code"], "<los>", "exec")
+        assert "get_context_names" in captured["code"]
+        assert "stage_url" in captured["code"]
+
+    @pytest.mark.asyncio
+    async def test_list_extensions_registered(self):
+        assert "list_extensions" in DATA_HANDLERS
+        assert DATA_HANDLERS["list_extensions"] is not None
+
+    @pytest.mark.asyncio
+    async def test_list_extensions_runs_with_mock(self, monkeypatch):
+        captured = {}
+
+        async def fake_queue(code, desc=""):
+            captured["code"] = code
+            return {"queued": True, "patch_id": "p4"}
+
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+        result = await DATA_HANDLERS["list_extensions"]({"enabled_only": True, "name_filter": "isaac"})
+        compile(captured["code"], "<le>", "exec")
+        assert "get_extension_manager" in captured["code"]
+        # Args propagated into the generated Kit-side code
+        assert "True" in captured["code"]
+        assert "isaac" in captured["code"]
+
+    @pytest.mark.asyncio
+    async def test_list_extensions_default_args(self, monkeypatch):
+        captured = {}
+
+        async def fake_queue(code, desc=""):
+            captured["code"] = code
+            return {"queued": True, "patch_id": "p5"}
+
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+        result = await DATA_HANDLERS["list_extensions"]({})
+        compile(captured["code"], "<le_def>", "exec")
+        # Default name filter is empty string, default enabled_only is False
+        assert "False" in captured["code"]
