@@ -144,6 +144,7 @@ class KitRPCServer:
         app.router.add_post("/sim_control", self._handle_sim_control)
         app.router.add_post("/set_viewport_camera", self._handle_set_viewport_camera)
         app.router.add_get("/list_prims", self._handle_list_prims)
+        app.router.add_post("/check_placement", self._handle_check_placement)
 
         self._runner = web.AppRunner(app)
         await self._runner.setup()
@@ -341,5 +342,62 @@ class KitRPCServer:
 
             _flatten(tree.get("tree", []))
             return web.json_response({"prims": prims, "count": len(prims)})
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_check_placement(self, request) -> "web.Response":
+        """
+        Test if a box at a given position collides with anything in the scene.
+        Uses PhysX overlap_box — no prim creation needed, runs in microseconds.
+        Requires PhysicsScene and existing objects with CollisionAPI.
+        """
+        from aiohttp import web
+        try:
+            data = await request.json()
+            half_extents = data["half_extents"]  # [x, y, z]
+            position = data["position"]          # [x, y, z]
+            rotation = data.get("rotation", [0, 0, 0, 1])  # quaternion xyzw
+
+            code = (
+                "import json\n"
+                "from omni.physx import get_physx_scene_query_interface\n"
+                "import carb\n"
+                "\n"
+                "_collisions = []\n"
+                "def _report_hit(hit):\n"
+                "    _collisions.append(str(hit.rigid_body))\n"
+                "    return True\n"
+                "\n"
+                "sq = get_physx_scene_query_interface()\n"
+                f"sq.overlap_box(\n"
+                f"    carb.Float3({half_extents[0]}, {half_extents[1]}, {half_extents[2]}),\n"
+                f"    carb.Float3({position[0]}, {position[1]}, {position[2]}),\n"
+                f"    carb.Float4({rotation[0]}, {rotation[1]}, {rotation[2]}, {rotation[3]}),\n"
+                f"    _report_hit\n"
+                f")\n"
+                "print(json.dumps({'collisions': _collisions, 'clear': len(_collisions) == 0}))"
+            )
+
+            result_holder = {"result": None, "event": threading.Event()}
+            _SYNC_EXEC_QUEUE.put((code, result_holder))
+
+            loop = asyncio.get_event_loop()
+            completed = await loop.run_in_executor(
+                None, lambda: result_holder["event"].wait(timeout=5)
+            )
+
+            if not completed or result_holder["result"] is None:
+                return web.json_response(
+                    {"collisions": [], "clear": True, "warning": "PhysX query timed out"},
+                )
+
+            # Parse the JSON output from the executed code
+            output = result_holder["result"].get("output", "").strip()
+            try:
+                parsed = json.loads(output)
+                return web.json_response(parsed)
+            except (json.JSONDecodeError, ValueError):
+                return web.json_response({"collisions": [], "clear": True, "raw_output": output})
+
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)

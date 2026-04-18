@@ -728,3 +728,81 @@ class TestGenerateRobotDescription:
             "articulation_path": "/World/SomeRandomRobot",
         })
         assert result["supported"] is False
+
+
+class TestValidateSceneBlueprintPhysX:
+    """Test PhysX overlap validation in validate_scene_blueprint."""
+
+    @pytest.mark.asyncio
+    async def test_physx_collision_detected(self):
+        """When Kit RPC reports collisions, issues should be populated."""
+        handler = DATA_HANDLERS["validate_scene_blueprint"]
+
+        async def mock_is_alive():
+            return True
+
+        async def mock_post(endpoint, data):
+            if endpoint == "/check_placement":
+                return {"collisions": ["/World/Table"], "clear": False}
+            return {}
+
+        with patch("service.isaac_assist_service.chat.tools.tool_executor.kit_tools") as mock_kit:
+            mock_kit.is_kit_rpc_alive = mock_is_alive
+            mock_kit.post = mock_post
+
+            result = await handler({
+                "blueprint": {
+                    "objects": [
+                        {"name": "Box", "position": [1, 0, 0.5], "prim_type": "Cube", "scale": [1, 1, 1]},
+                    ]
+                }
+            })
+            assert any("collides" in issue for issue in result["issues"])
+            assert result["valid"] is False
+
+    @pytest.mark.asyncio
+    async def test_physx_no_collision(self):
+        """When Kit RPC reports clear, no collision issues added."""
+        handler = DATA_HANDLERS["validate_scene_blueprint"]
+
+        async def mock_is_alive():
+            return True
+
+        async def mock_post(endpoint, data):
+            return {"collisions": [], "clear": True}
+
+        with patch("service.isaac_assist_service.chat.tools.tool_executor.kit_tools") as mock_kit:
+            mock_kit.is_kit_rpc_alive = mock_is_alive
+            mock_kit.post = mock_post
+
+            result = await handler({
+                "blueprint": {
+                    "objects": [
+                        {"name": "Box", "position": [5, 5, 0.5], "prim_type": "Cube", "scale": [1, 1, 1]},
+                    ]
+                }
+            })
+            collision_issues = [i for i in result["issues"] if "collides" in i]
+            assert len(collision_issues) == 0
+
+    @pytest.mark.asyncio
+    async def test_physx_kit_rpc_down_graceful(self):
+        """When Kit RPC is not available, PhysX check is skipped gracefully."""
+        handler = DATA_HANDLERS["validate_scene_blueprint"]
+
+        async def mock_is_alive():
+            return False
+
+        with patch("service.isaac_assist_service.chat.tools.tool_executor.kit_tools") as mock_kit:
+            mock_kit.is_kit_rpc_alive = mock_is_alive
+
+            result = await handler({
+                "blueprint": {
+                    "objects": [
+                        {"name": "Box", "position": [0, 0, 0.5], "prim_type": "Cube", "scale": [1, 1, 1]},
+                    ]
+                }
+            })
+            # Should still work — just without PhysX validation
+            assert "object_count" in result
+            assert result["object_count"] == 1
