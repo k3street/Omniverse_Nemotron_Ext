@@ -65,6 +65,7 @@ except ImportError:
 
 
 
+
 class TestLookupProductSpec:
     """Test the sensor spec lookup handler."""
 
@@ -2534,3 +2535,91 @@ class TestTier0Coverage:
         from service.isaac_assist_service.chat.tools.tool_schemas import ISAAC_SIM_TOOLS
         names = {t["function"]["name"] for t in ISAAC_SIM_TOOLS}
         assert name in names, f"Tier 0 tool '{name}' missing from ISAAC_SIM_TOOLS"
+# ─── Atomic Tier 5 — OmniGraph data handlers ────────────────────────────────
+
+
+class TestListGraphs:
+    """list_graphs enumerates OmniGraph prims via Kit RPC."""
+
+    @pytest.mark.asyncio
+    async def test_returns_graphs_when_kit_succeeds(self, monkeypatch):
+        """exec_sync stdout should be parsed into a {graphs, count} dict."""
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+
+        async def fake_exec_sync(code, timeout=10):
+            assert "OmniGraph" in code or "ComputeGraph" in code
+            return {
+                "success": True,
+                "output": '{"graphs": [{"path": "/World/G", "type": "OmniGraph", "name": "G"}], "count": 1}',
+            }
+
+        monkeypatch.setattr(kt, "exec_sync", fake_exec_sync)
+        handler = DATA_HANDLERS["list_graphs"]
+        result = await handler({})
+        assert result["count"] == 1
+        assert result["graphs"][0]["path"] == "/World/G"
+
+    @pytest.mark.asyncio
+    async def test_kit_unavailable_returns_empty(self, monkeypatch):
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+
+        async def fake_exec_sync(code, timeout=10):
+            return {"success": False, "output": "Kit RPC offline"}
+
+        monkeypatch.setattr(kt, "exec_sync", fake_exec_sync)
+        handler = DATA_HANDLERS["list_graphs"]
+        result = await handler({})
+        assert result["count"] == 0
+        assert result["graphs"] == []
+        assert "Kit RPC offline" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_handler_registered(self):
+        assert "list_graphs" in DATA_HANDLERS
+        assert DATA_HANDLERS["list_graphs"] is not None
+
+
+class TestInspectGraph:
+    """inspect_graph returns nodes + connections for a single graph."""
+
+    @pytest.mark.asyncio
+    async def test_returns_node_list(self, monkeypatch):
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+
+        payload = {
+            "graph_path": "/World/G",
+            "nodes": [
+                {"name": "tick", "path": "/World/G/tick", "type": "omni.graph.action.OnPlaybackTick", "attributes": {}},
+            ],
+            "connections": [],
+            "node_count": 1,
+        }
+
+        async def fake_exec_sync(code, timeout=15):
+            assert "/World/G" in code
+            assert "og.Controller.graph" in code
+            return {"success": True, "output": json.dumps(payload)}
+
+        monkeypatch.setattr(kt, "exec_sync", fake_exec_sync)
+        handler = DATA_HANDLERS["inspect_graph"]
+        result = await handler({"graph_path": "/World/G"})
+        assert result["node_count"] == 1
+        assert result["nodes"][0]["name"] == "tick"
+
+    @pytest.mark.asyncio
+    async def test_kit_unavailable_returns_error(self, monkeypatch):
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+
+        async def fake_exec_sync(code, timeout=15):
+            return {"success": False, "output": "Kit not running"}
+
+        monkeypatch.setattr(kt, "exec_sync", fake_exec_sync)
+        handler = DATA_HANDLERS["inspect_graph"]
+        result = await handler({"graph_path": "/World/G"})
+        assert result["graph_path"] == "/World/G"
+        assert "Kit not running" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_handler_registered(self):
+        assert "inspect_graph" in DATA_HANDLERS
+        assert DATA_HANDLERS["inspect_graph"] is not None

@@ -1815,6 +1815,58 @@ _RAW_TEST_VECTORS = [
             "DefinePrim",
         ],
     ),
+    # ── Atomic Tier 5 — OmniGraph (low-level atomic operations) ────────────
+    (
+        "add_node",
+        {
+            "graph_path": "/World/ActionGraph",
+            "node_type": "omni.graph.action.OnPlaybackTick",
+            "name": "tick",
+        },
+        ["og.Controller.edit", "CREATE_NODES", "OnPlaybackTick", "tick"],
+    ),
+    (
+        "add_node",
+        {
+            "graph_path": "/World/ActionGraph",
+            "node_type": "omni.isaac.ros2_bridge.ROS2Context",
+            "name": "ctx",
+        },
+        # Should be remapped via _OG_NODE_TYPE_MAP
+        ["isaacsim.ros2.bridge.ROS2Context", "ctx", "CREATE_NODES"],
+    ),
+    (
+        "connect_nodes",
+        {
+            "graph_path": "/World/ActionGraph",
+            "src": "tick.outputs:tick",
+            "dst": "publishClock.inputs:execIn",
+        },
+        ["og.Controller.edit", "CONNECT", "tick.outputs:tick", "publishClock.inputs:execIn"],
+    ),
+    (
+        "set_graph_variable",
+        {
+            "graph_path": "/World/ActionGraph",
+            "name": "topicName",
+            "value": "/joint_states",
+        },
+        ["og.Controller", "topicName", "/joint_states"],
+    ),
+    (
+        "set_graph_variable",
+        {
+            "graph_path": "/World/ActionGraph",
+            "name": "rate",
+            "value": 60,
+        },
+        ["og.Controller", "rate", "60"],
+    ),
+    (
+        "delete_node",
+        {"graph_path": "/World/ActionGraph", "node_name": "tick"},
+        ["og.Controller.edit", "DELETE_NODES", "tick"],
+    ),
 ]
 
 
@@ -2561,6 +2613,80 @@ class TestTemplateDetection:
     # NOTE: Clearance Detection Addendum edge cases live on the
     # feat/addendum-clearance-detection branch and are intentionally absent
     # here so this branch ships only Tier 2 Physics Bodies & Scene changes.
+    # ── Atomic Tier 5 — OmniGraph edge cases ──────────────────────────────
+
+    def test_add_node_remaps_legacy_namespace(self):
+        """add_node should remap omni.isaac.* to isaacsim.* (Isaac Sim 5.1)."""
+        code = CODE_GEN_HANDLERS["add_node"]({
+            "graph_path": "/World/OG",
+            "node_type": "omni.isaac.ros2_bridge.ROS2PublishClock",
+            "name": "clock_pub",
+        })
+        _assert_valid_python(code, "add_node")
+        assert "isaacsim.ros2.bridge.ROS2PublishClock" in code
+        assert "omni.isaac.ros2_bridge" not in code
+
+    def test_add_node_unknown_type_passes_through(self):
+        """Unknown node types should be passed through unchanged."""
+        code = CODE_GEN_HANDLERS["add_node"]({
+            "graph_path": "/World/OG",
+            "node_type": "omni.graph.action.OnPlaybackTick",
+            "name": "tick",
+        })
+        _assert_valid_python(code, "add_node")
+        assert "omni.graph.action.OnPlaybackTick" in code
+
+    def test_connect_nodes_uses_attribute_paths(self):
+        """connect_nodes wires <node>.outputs:port -> <node>.inputs:port."""
+        code = CODE_GEN_HANDLERS["connect_nodes"]({
+            "graph_path": "/World/OG",
+            "src": "tick.outputs:tick",
+            "dst": "publishJointState.inputs:execIn",
+        })
+        _assert_valid_python(code, "connect_nodes")
+        assert 'keys.CONNECT' in code
+        assert "tick.outputs:tick" in code
+        assert "publishJointState.inputs:execIn" in code
+
+    def test_set_graph_variable_string_value(self):
+        code = CODE_GEN_HANDLERS["set_graph_variable"]({
+            "graph_path": "/World/OG",
+            "name": "topicName",
+            "value": "/joint_states",
+        })
+        _assert_valid_python(code, "set_graph_variable")
+        assert "topicName" in code
+        # repr() of a string value must appear
+        assert "'/joint_states'" in code or '"/joint_states"' in code
+
+    def test_set_graph_variable_numeric_value(self):
+        code = CODE_GEN_HANDLERS["set_graph_variable"]({
+            "graph_path": "/World/OG",
+            "name": "rate_hz",
+            "value": 60,
+        })
+        _assert_valid_python(code, "set_graph_variable")
+        assert "rate_hz" in code
+        assert "60" in code
+
+    def test_set_graph_variable_array_value(self):
+        code = CODE_GEN_HANDLERS["set_graph_variable"]({
+            "graph_path": "/World/OG",
+            "name": "joint_indices",
+            "value": [0, 1, 2, 3],
+        })
+        _assert_valid_python(code, "set_graph_variable")
+        assert "joint_indices" in code
+        assert "[0, 1, 2, 3]" in code
+
+    def test_delete_node_uses_delete_nodes_key(self):
+        code = CODE_GEN_HANDLERS["delete_node"]({
+            "graph_path": "/World/OG",
+            "node_name": "old_node",
+        })
+        _assert_valid_python(code, "delete_node")
+        assert "DELETE_NODES" in code
+        assert "old_node" in code
 
 
 class TestAllCodeGenHandlersCovered:
