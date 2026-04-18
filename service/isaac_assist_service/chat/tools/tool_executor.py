@@ -1621,6 +1621,10 @@ def _gen_apply_api_schema(args: Dict) -> str:
         "PhysxDeformableBodyAPI": ("pxr.PhysxSchema", "PhysxDeformableBodyAPI"),
         "PhysxCollisionAPI": ("pxr.PhysxSchema", "PhysxCollisionAPI"),
     }
+    # Post-apply verification: check GetAppliedSchemas() contains the schema
+    # token. Without this, the Kit command path silently accepts invalid
+    # schema names ('PhysicsVelocityAPI' etc.) and reports success even though
+    # the schema was not applied — an honesty hole.
     if schema in SCHEMA_MAP:
         mod, cls = SCHEMA_MAP[schema]
         return (
@@ -1628,15 +1632,30 @@ def _gen_apply_api_schema(args: Dict) -> str:
             "import omni.usd\n"
             f"stage = omni.usd.get_context().get_stage()\n"
             f"prim = stage.GetPrimAtPath('{prim_path}')\n"
-            f"{cls}.Apply(prim)"
+            f"if not prim.IsValid():\n"
+            f"    raise RuntimeError(f'apply_api_schema: prim not found: {prim_path}')\n"
+            f"{cls}.Apply(prim)\n"
+            f"_applied = list(prim.GetAppliedSchemas() or [])\n"
+            f"if '{cls}' not in _applied and '{schema}' not in _applied:\n"
+            f"    raise RuntimeError(f'apply_api_schema: schema {cls} not in GetAppliedSchemas after Apply (got {{_applied}})')\n"
+            f"print(f'applied {cls} to {prim_path} — schemas now: {{_applied}}')"
         )
-    # Fallback: try Kit command with correct name
+    # Fallback: Kit command path. Must verify via GetAppliedSchemas because
+    # omni.kit.commands.execute('ApplyAPISchemaCommand', api=<bad_name>, ...)
+    # returns None / silent-no-op rather than raising on unknown API names.
     return (
         "import omni.usd\n"
         "import omni.kit.commands\n"
         f"stage = omni.usd.get_context().get_stage()\n"
         f"prim = stage.GetPrimAtPath('{prim_path}')\n"
-        f"omni.kit.commands.execute('ApplyAPISchemaCommand', api='{schema}', prim=prim)"
+        f"if not prim.IsValid():\n"
+        f"    raise RuntimeError(f'apply_api_schema: prim not found: {prim_path}')\n"
+        f"_before = set(prim.GetAppliedSchemas() or [])\n"
+        f"omni.kit.commands.execute('ApplyAPISchemaCommand', api='{schema}', prim=prim)\n"
+        f"_after = set(prim.GetAppliedSchemas() or [])\n"
+        f"if _before == _after:\n"
+        f"    raise RuntimeError(f'apply_api_schema: schema \"{schema}\" was not applied — likely unknown schema name. prim schemas unchanged: {{sorted(_before)}}')\n"
+        f"print(f'applied {schema} to {prim_path} — new schemas: {{sorted(_after - _before)}}')"
     )
 
 
@@ -22743,7 +22762,9 @@ with Sdf.ChangeBlock():
 print(f"bulk_apply_schema: schema={schema!r} applied={{_applied}} "
       f"already_had={{_already}} missing={{_missing}}")
 """
-    # Fallback: ApplyAPISchemaCommand per prim, still inside a ChangeBlock
+    # Fallback: ApplyAPISchemaCommand per prim. Verify each result by diffing
+    # GetAppliedSchemas() before/after — Kit's command silently no-ops on
+    # unknown schema names, so we raise if nothing changed.
     return f"""\
 import omni.usd
 import omni.kit.commands
@@ -22754,6 +22775,7 @@ _paths = {prim_paths!r}
 
 _applied = 0
 _missing = 0
+_silent_noop = 0
 
 with Sdf.ChangeBlock():
     for _p in _paths:
@@ -22761,13 +22783,25 @@ with Sdf.ChangeBlock():
         if not _prim or not _prim.IsValid():
             _missing += 1
             continue
+        _before = set(_prim.GetAppliedSchemas() or [])
         try:
             omni.kit.commands.execute('ApplyAPISchemaCommand', api={schema!r}, prim=_prim)
-            _applied += 1
         except Exception:
             _missing += 1
+            continue
+        _after = set(_prim.GetAppliedSchemas() or [])
+        if _before == _after:
+            _silent_noop += 1
+        else:
+            _applied += 1
 
-print(f"bulk_apply_schema: schema={schema!r} applied={{_applied}} missing={{_missing}}")
+if _silent_noop > 0 and _applied == 0:
+    raise RuntimeError(
+        f'bulk_apply_schema: schema {schema!r} applied to 0 prims; '
+        f'{{_silent_noop}} silent no-ops — likely unknown schema name.'
+    )
+print(f"bulk_apply_schema: schema={schema!r} applied={{_applied}} "
+      f"silent_noops={{_silent_noop}} missing={{_missing}}")
 """
 
 def _gen_group_prims(args: Dict) -> str:

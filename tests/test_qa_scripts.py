@@ -385,6 +385,46 @@ def test_find_prims_by_schema_resolves_physics_prefix():
     assert 'schema_name[len(prefix):]' in src
 
 
+def test_gen_apply_api_schema_verifies_fake_schemas_fail():
+    """Regression: apply_api_schema used to return success=True for
+    unknown schema names because omni.kit.commands.execute silently no-ops
+    on invalid api='...' values. Generated code now diffs GetAppliedSchemas
+    before/after and raises RuntimeError if nothing changed — so fake
+    schemas like PhysicsVelocityAPI fail loudly instead of fabricating
+    success."""
+    import sys
+    sys.path.insert(0, "service")
+    from isaac_assist_service.chat.tools.tool_executor import _gen_apply_api_schema
+
+    # Known schema: must verify via GetAppliedSchemas after Apply
+    code_ok = _gen_apply_api_schema({"prim_path": "/World/C", "schema_name": "PhysicsRigidBodyAPI"})
+    assert "GetAppliedSchemas" in code_ok
+    assert "raise RuntimeError" in code_ok
+
+    # Unknown schema: must use the Kit command fallback with before/after diff
+    code_bad = _gen_apply_api_schema({"prim_path": "/World/C", "schema_name": "MadeUpAPI"})
+    assert "ApplyAPISchemaCommand" in code_bad
+    assert "_before = set(prim.GetAppliedSchemas()" in code_bad
+    assert "_after = set(prim.GetAppliedSchemas()" in code_bad
+    assert "if _before == _after" in code_bad
+    assert "raise RuntimeError" in code_bad
+
+
+def test_gen_bulk_apply_schema_detects_silent_noop():
+    """Same honesty fix for bulk — if all prims see no schema change after
+    the Kit command, raise instead of reporting 'applied=0' as success."""
+    import sys
+    sys.path.insert(0, "service")
+    from isaac_assist_service.chat.tools.tool_executor import _gen_bulk_apply_schema
+    code = _gen_bulk_apply_schema({
+        "prim_paths": ["/World/A", "/World/B"],
+        "schema": "MadeUpAPI",
+    })
+    assert "_silent_noop" in code
+    assert "RuntimeError" in code
+    assert "silent no-ops" in code
+
+
 def test_gen_create_prim_authors_size_radius_height():
     """Regression: agent kept claiming '1m cube' while actually creating a
     2m cube (USD default) because only scale was supported. Tool now accepts
