@@ -34,6 +34,9 @@ _CORE_ALLOWLIST = {
     "os", "sys", "json", "re", "math", "time", "asyncio", "pathlib", "typing",
     "dataclasses", "functools", "itertools", "collections", "enum", "io",
     "numpy", "scipy", "torch", "cv2", "yaml", "pickle",
+    "platform", "hashlib", "datetime", "random", "string", "tempfile",
+    "subprocess", "shutil", "logging", "copy", "warnings", "struct",
+    "carb", "carb.settings", "carb.events", "carb.input",
     # USD stack
     "pxr", "pxr.Usd", "pxr.UsdGeom", "pxr.UsdPhysics", "pxr.Sdf", "pxr.Gf",
     "pxr.UsdShade", "pxr.UsdLux", "pxr.Tf", "pxr.Vt", "pxr.Kind",

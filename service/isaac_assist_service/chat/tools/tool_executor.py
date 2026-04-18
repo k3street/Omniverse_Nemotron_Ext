@@ -2265,9 +2265,14 @@ robot_prim = stage.GetPrimAtPath(robot_path)
 # This tells PhysX the root link is immovable (no need to move ArticulationRootAPI)
 if not robot_prim.HasAPI(PhysxSchema.PhysxArticulationAPI):
     PhysxSchema.PhysxArticulationAPI.Apply(robot_prim)
-artic_api = PhysxSchema.PhysxArticulationAPI(robot_prim)
-artic_api.CreateFixedBaseAttr(True)
-print("Set fixedBase=True on PhysxArticulationAPI")
+# Use raw attribute authoring — Isaac Sim 5.x dropped the CreateFixedBaseAttr
+# convenience; the attribute name physxArticulation:fixedBase is stable.
+from pxr import Sdf as _Sdf
+_fb_attr = robot_prim.GetAttribute('physxArticulation:fixedBase')
+if not _fb_attr or not _fb_attr.IsDefined():
+    _fb_attr = robot_prim.CreateAttribute('physxArticulation:fixedBase', _Sdf.ValueTypeNames.Bool)
+_fb_attr.Set(True)
+print("Set physxArticulation:fixedBase=True on root")
 
 # Step 2: Delete the rootJoint (6-DOF free joint that lets the robot float)
 root_joint_path = robot_path + '/rootJoint'
@@ -2401,7 +2406,7 @@ stage = omni.usd.get_context().get_stage()
 prim = stage.GetPrimAtPath('{prim_path}')
 joints = []
 for child in prim.GetAllChildren():
-    if child.HasAPI(UsdPhysics.RevoluteJointAPI) or child.HasAPI(UsdPhysics.PrismaticJointAPI):
+    if child.IsA(UsdPhysics.RevoluteJoint) or child.IsA(UsdPhysics.PrismaticJoint):
         joints.append({{'name': child.GetName(), 'path': str(child.GetPath())}})
 result = {{'articulation_path': '{prim_path}', 'joints': joints}}
 print(json.dumps(result))
@@ -3800,7 +3805,7 @@ async def _handle_check_collisions(args: Dict) -> Dict:
     prim_path = args["prim_path"]
     code = f"""\
 import omni.usd
-from pxr import UsdPhysics, UsdGeom, PhysxSchema
+from pxr import Usd, UsdPhysics, UsdGeom, PhysxSchema
 import json
 
 stage = omni.usd.get_context().get_stage()
@@ -3815,7 +3820,7 @@ else:
     # Count mesh children that could serve as collision geometry
     mesh_count = 0
     collision_children = 0
-    for child in prim.GetAllDescendants():
+    for child in list(Usd.PrimRange(prim))[1:]:
         if child.IsA(UsdGeom.Mesh):
             mesh_count += 1
         if child.HasAPI(UsdPhysics.CollisionAPI):
@@ -3993,7 +3998,7 @@ for g in graphs:
     elif category == "articulation":
         code = """\
 import omni.usd
-from pxr import UsdPhysics, PhysxSchema
+from pxr import Usd, UsdPhysics, PhysxSchema
 
 stage = omni.usd.get_context().get_stage()
 # Find articulations and verify their setup
@@ -4006,8 +4011,8 @@ for prim in stage.Traverse():
         print(f"Articulation: {path}, has_rigid_body={has_rb}, physx_enabled={fixed}")
         # Count joints
         joint_count = 0
-        for child in prim.GetAllDescendants():
-            if child.HasAPI(UsdPhysics.RevoluteJointAPI) or child.HasAPI(UsdPhysics.PrismaticJointAPI):
+        for child in list(Usd.PrimRange(prim))[1:]:
+            if child.IsA(UsdPhysics.RevoluteJoint) or child.IsA(UsdPhysics.PrismaticJoint):
                 joint_count += 1
         print(f"  Joints: {joint_count}")
 """
@@ -4692,8 +4697,8 @@ def _teleop_physics_step(dt):
     # Iterate joints and apply targets
     joint_idx = 0
     for child in robot.GetAllChildren():
-        is_revolute = child.HasAPI(UsdPhysics.RevoluteJointAPI)
-        is_prismatic = child.HasAPI(UsdPhysics.PrismaticJointAPI)
+        is_revolute = child.IsA(UsdPhysics.RevoluteJoint)
+        is_prismatic = child.IsA(UsdPhysics.PrismaticJoint)
         if not (is_revolute or is_prismatic):
             continue
 
@@ -4757,7 +4762,7 @@ assert robot_prim.IsValid(), f"Robot not found at {{ROBOT_PATH}}"
 if JOINT_NAMES is None:
     JOINT_NAMES = []
     for child in robot_prim.GetAllChildren():
-        if child.HasAPI(UsdPhysics.RevoluteJointAPI) or child.HasAPI(UsdPhysics.PrismaticJointAPI):
+        if child.IsA(UsdPhysics.RevoluteJoint) or child.IsA(UsdPhysics.PrismaticJoint):
             JOINT_NAMES.append(child.GetName())
     print(f"Auto-discovered {{len(JOINT_NAMES)}} joints: {{JOINT_NAMES}}")
 
@@ -4820,7 +4825,7 @@ assert robot_prim.IsValid(), f"Robot not found at {{ROBOT_PATH}}"
 # Discover joints
 _rec_joints = []
 for child in robot_prim.GetAllChildren():
-    if child.HasAPI(UsdPhysics.RevoluteJointAPI) or child.HasAPI(UsdPhysics.PrismaticJointAPI):
+    if child.IsA(UsdPhysics.RevoluteJoint) or child.IsA(UsdPhysics.PrismaticJoint):
         _rec_joints.append(child)
 num_joints = len(_rec_joints)
 
@@ -4838,7 +4843,7 @@ _rec_data = {{
 def _get_joint_positions():
     positions = []
     for j in _rec_joints:
-        is_revolute = j.HasAPI(UsdPhysics.RevoluteJointAPI)
+        is_revolute = j.IsA(UsdPhysics.RevoluteJoint)
         drive_type = 'angular' if is_revolute else 'linear'
         if j.HasAPI(UsdPhysics.DriveAPI):
             drive = UsdPhysics.DriveAPI.Get(j, drive_type)
@@ -4851,7 +4856,7 @@ def _get_joint_positions():
 def _get_joint_velocities():
     velocities = []
     for j in _rec_joints:
-        is_revolute = j.HasAPI(UsdPhysics.RevoluteJointAPI)
+        is_revolute = j.IsA(UsdPhysics.RevoluteJoint)
         drive_type = 'angular' if is_revolute else 'linear'
         if j.HasAPI(UsdPhysics.DriveAPI):
             drive = UsdPhysics.DriveAPI.Get(j, drive_type)
@@ -4997,8 +5002,8 @@ if robot_path:
     if robot_prim.IsValid():
         zeroed = 0
         for child in robot_prim.GetAllChildren():
-            is_revolute = child.HasAPI(UsdPhysics.RevoluteJointAPI)
-            is_prismatic = child.HasAPI(UsdPhysics.PrismaticJointAPI)
+            is_revolute = child.IsA(UsdPhysics.RevoluteJoint)
+            is_prismatic = child.IsA(UsdPhysics.PrismaticJoint)
             if not (is_revolute or is_prismatic):
                 continue
             drive_type = 'angular' if is_revolute else 'linear'
@@ -5110,8 +5115,8 @@ robot_prim = stage.GetPrimAtPath(ROBOT_PATH)
 if robot_prim.IsValid():
     configured = 0
     for child in robot_prim.GetAllChildren():
-        is_revolute = child.HasAPI(UsdPhysics.RevoluteJointAPI)
-        is_prismatic = child.HasAPI(UsdPhysics.PrismaticJointAPI)
+        is_revolute = child.IsA(UsdPhysics.RevoluteJoint)
+        is_prismatic = child.IsA(UsdPhysics.PrismaticJoint)
         if not (is_revolute or is_prismatic):
             continue
         drive_type = 'angular' if is_revolute else 'linear'
@@ -6954,7 +6959,7 @@ print(f"Loaded USD asset → {{dest_path}}")
 
     return f"""\
 import omni.usd
-from pxr import UsdPhysics, PhysxSchema, UsdGeom, Gf
+from pxr import Usd, UsdPhysics, PhysxSchema, UsdGeom, Gf
 
 stage = omni.usd.get_context().get_stage()
 
@@ -6962,7 +6967,7 @@ stage = omni.usd.get_context().get_stage()
 # Step 2: Apply drive defaults for {robot_type} (Kp={stiffness}, Kd={damping})
 robot_prim = stage.GetPrimAtPath(dest_path)
 joint_count = 0
-for child in robot_prim.GetAllDescendants():
+for child in list(Usd.PrimRange(robot_prim))[1:]:
     if child.HasAPI(UsdPhysics.DriveAPI):
         for drive_type in ['angular', 'linear']:
             drive = UsdPhysics.DriveAPI.Get(child, drive_type)
@@ -6974,7 +6979,7 @@ print(f"Applied Kp={stiffness}, Kd={damping} to {{joint_count}} drives")
 
 # Step 3: Apply convex-hull collision meshes
 collision_count = 0
-for child in robot_prim.GetAllDescendants():
+for child in list(Usd.PrimRange(robot_prim))[1:]:
     if child.IsA(UsdGeom.Mesh):
         if not child.HasAPI(UsdPhysics.CollisionAPI):
             UsdPhysics.CollisionAPI.Apply(child)
@@ -7051,14 +7056,14 @@ for drive_type in ['angular', 'linear']:
 
     return f"""\
 import omni.usd
-from pxr import UsdPhysics
+from pxr import Usd, UsdPhysics
 
 stage = omni.usd.get_context().get_stage()
 robot_prim = stage.GetPrimAtPath('{art_path}')
 
 # Set drive gains for all joints
 joint_count = 0
-for child in robot_prim.GetAllDescendants():
+for child in list(Usd.PrimRange(robot_prim))[1:]:
     if child.HasAPI(UsdPhysics.DriveAPI):
         for drive_type in ['angular', 'linear']:
             drive = UsdPhysics.DriveAPI.Get(child, drive_type)
@@ -7601,14 +7606,14 @@ def _traverse(prim, parent_link=None):
 
         # Check for joint relationship to parent
         for child in prim.GetChildren():
-            if child.HasAPI(UsdPhysics.RevoluteJointAPI):
+            if child.IsA(UsdPhysics.RevoluteJoint):
                 joints.append({{
                     "name": child.GetName(),
                     "type": "revolute",
                     "parent": parent_link or "base_link",
                     "child": name,
                 }})
-            elif child.HasAPI(UsdPhysics.PrismaticJointAPI):
+            elif child.IsA(UsdPhysics.PrismaticJoint):
                 joints.append({{
                     "name": child.GetName(),
                     "type": "prismatic",
@@ -7999,13 +8004,13 @@ if not scope_root.IsValid():
     }})
     all_prims = []
 else:
-    all_prims = [scope_root] + list(scope_root.GetAllDescendants())
+    all_prims = [scope_root] + list(Usd.PrimRange(scope_root))[1:]
 """
     else:
         scope_filter = """
 # Check all prims in the stage
 root = stage.GetPseudoRoot()
-all_prims = [root] + list(root.GetAllDescendants())
+all_prims = [root] + list(Usd.PrimRange(root))[1:]
 """
 
     return f"""\
@@ -8087,7 +8092,7 @@ if len(mass_map) >= 2:
 for prim in all_prims:
     if not prim.IsValid():
         continue
-    if prim.HasAPI(UsdPhysics.RevoluteJointAPI):
+    if prim.IsA(UsdPhysics.RevoluteJoint):
         joint = UsdPhysics.RevoluteJoint(prim)
         lower = joint.GetLowerLimitAttr().Get()
         upper = joint.GetUpperLimitAttr().Get()
@@ -8142,7 +8147,7 @@ def _gen_verify_import(args: Dict) -> str:
 
     return f"""\
 import omni.usd
-from pxr import UsdPhysics, UsdGeom, PhysxSchema, Gf
+from pxr import Usd, UsdPhysics, UsdGeom, PhysxSchema, Gf
 import json
 
 stage = omni.usd.get_context().get_stage()
@@ -8151,7 +8156,7 @@ if not root.IsValid():
     raise RuntimeError('Articulation not found: {art_path}')
 
 issues = []
-all_prims = [root] + list(root.GetAllDescendants())
+all_prims = [root] + list(Usd.PrimRange(root))[1:]
 
 # Check 1: ArticulationRootAPI
 has_art_root = False
@@ -8182,7 +8187,7 @@ for prim in all_prims:
     path = str(prim.GetPath())
     if prim.HasAPI(UsdPhysics.RigidBodyAPI) and not prim.HasAPI(UsdPhysics.CollisionAPI):
         has_child_collision = any(
-            c.HasAPI(UsdPhysics.CollisionAPI) for c in prim.GetAllDescendants()
+            c.HasAPI(UsdPhysics.CollisionAPI) for c in list(Usd.PrimRange(prim))[1:]
         )
         if not has_child_collision:
             issues.append({{
@@ -8208,7 +8213,7 @@ for prim in all_prims:
 # Check 5: Infinite joint limits
 for prim in all_prims:
     path = str(prim.GetPath())
-    if prim.IsA(UsdPhysics.RevoluteJoint) or prim.HasAPI(UsdPhysics.RevoluteJointAPI):
+    if prim.IsA(UsdPhysics.RevoluteJoint) or prim.IsA(UsdPhysics.RevoluteJoint):
         lower = prim.GetAttribute('physics:lowerLimit')
         upper = prim.GetAttribute('physics:upperLimit')
         if lower and upper:
@@ -8958,7 +8963,7 @@ def _gen_show_workspace(args: Dict) -> str:
     return f"""\
 import omni.usd
 import numpy as np
-from pxr import UsdPhysics
+from pxr import Usd, UsdPhysics
 from isaacsim.util.debug_draw import _debug_draw
 
 stage = omni.usd.get_context().get_stage()
@@ -8968,8 +8973,8 @@ if not art_prim.IsValid():
 
 # Collect revolute joint limits
 joints = []
-for desc in art_prim.GetAllDescendants():
-    if desc.HasAPI(UsdPhysics.RevoluteJointAPI) or desc.IsA(UsdPhysics.RevoluteJoint):
+for desc in list(Usd.PrimRange(art_prim))[1:]:
+    if desc.IsA(UsdPhysics.RevoluteJoint) or desc.IsA(UsdPhysics.RevoluteJoint):
         lo_attr = desc.GetAttribute('physics:lowerLimit')
         hi_attr = desc.GetAttribute('physics:upperLimit')
         lo = np.radians(lo_attr.Get() if lo_attr and lo_attr.Get() is not None else -180.0)
@@ -9135,7 +9140,7 @@ import omni.usd
 import numpy as np
 import json
 import time
-from pxr import UsdPhysics
+from pxr import Usd, UsdPhysics
 
 stage = omni.usd.get_context().get_stage()
 art_prim = stage.GetPrimAtPath('{art_path}')
@@ -9145,8 +9150,8 @@ if not art_prim.IsValid():
 # Collect joint info
 joint_names = []
 effort_limits = []
-for desc in art_prim.GetAllDescendants():
-    if desc.HasAPI(UsdPhysics.RevoluteJointAPI) or desc.IsA(UsdPhysics.RevoluteJoint):
+for desc in list(Usd.PrimRange(art_prim))[1:]:
+    if desc.IsA(UsdPhysics.RevoluteJoint) or desc.IsA(UsdPhysics.RevoluteJoint):
         joint_names.append(desc.GetName())
         max_force = desc.GetAttribute('drive:angular:physics:maxForce')
         effort_limits.append(max_force.Get() if max_force and max_force.Get() else 1000.0)
@@ -11368,13 +11373,13 @@ if not scope_root.IsValid():
     }})
     all_prims = []
 else:
-    all_prims = [scope_root] + list(scope_root.GetAllDescendants())
+    all_prims = [scope_root] + list(Usd.PrimRange(scope_root))[1:]
 """
     else:
         scope_block = """\
 # Scope: entire stage
 root = stage.GetPseudoRoot()
-all_prims = [root] + list(root.GetAllDescendants())
+all_prims = [root] + list(Usd.PrimRange(root))[1:]
 """
 
     run_tier1 = scope in ("all", "tier1")
@@ -11582,7 +11587,7 @@ for p in all_prims:
         sc_attr = p.GetAttribute('physxArticulation:enabledSelfCollisions')
         if sc_attr and sc_attr.IsValid() and sc_attr.Get() is True:
             # Count mesh children — if many are close, warn
-            mesh_children = [c for c in p.GetAllDescendants() if c.IsA(UsdGeom.Mesh)]
+            mesh_children = [c for c in list(Usd.PrimRange(p))[1:] if c.IsA(UsdGeom.Mesh)]
             if len(mesh_children) > 5:
                 issues.append({
                     'id': 'M15', 'prim': pp,
@@ -16685,7 +16690,7 @@ def _color_for(ratio):
 def _collect_joints(prim):
     joints = []
     for child in Usd.PrimRange(prim):
-        if child.HasAPI(UsdPhysics.RevoluteJointAPI) or child.HasAPI(UsdPhysics.PrismaticJointAPI):
+        if child.IsA(UsdPhysics.RevoluteJoint) or child.IsA(UsdPhysics.PrismaticJoint):
             joints.append(child)
     return joints
 
@@ -18134,6 +18139,109 @@ def _gen_record_trajectory(args: Dict) -> str:
         "print('record_trajectory subscribed', art_path, 'duration=', duration, 'rate=', rate_hz)\n"
     )
 
+async def _handle_prim_exists(args: Dict) -> Dict:
+    """Boolean check for prim presence at a path. Used by verify-contract to
+    validate assistant claims like 'robot at /World/Franka is loaded'."""
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+import json
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+exists = bool(prim and prim.IsValid())
+result = {{'prim_path': {prim_path!r}, 'exists': exists}}
+if exists:
+    result['type_name'] = str(prim.GetTypeName())
+    result['applied_schemas'] = [str(s) for s in (prim.GetAppliedSchemas() or [])]
+    result['child_count'] = len(list(prim.GetChildren()))
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"prim_exists {prim_path}")
+
+
+async def _handle_count_prims_under_path(args: Dict) -> Dict:
+    """Count direct or recursive children under a parent prim path, optionally
+    filtered by type_name. Used to verify 'I cloned N robots' claims."""
+    parent_path = args["parent_path"]
+    type_filter = args.get("type_filter")  # e.g. "Xform", "Mesh" — optional
+    recursive = bool(args.get("recursive", False))
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd
+
+stage = omni.usd.get_context().get_stage()
+parent = stage.GetPrimAtPath({parent_path!r})
+result = {{'parent_path': {parent_path!r}, 'type_filter': {type_filter!r}, 'recursive': {recursive!r}}}
+if not parent or not parent.IsValid():
+    result['error'] = 'parent_path not found'
+    result['count'] = 0
+    result['paths'] = []
+else:
+    if {recursive!r}:
+        prims = [p for p in Usd.PrimRange(parent) if str(p.GetPath()) != str(parent.GetPath())]
+    else:
+        prims = list(parent.GetChildren())
+    if {type_filter!r}:
+        prims = [p for p in prims if str(p.GetTypeName()) == {type_filter!r}]
+    result['count'] = len(prims)
+    result['paths'] = [str(p.GetPath()) for p in prims[:200]]
+    result['truncated'] = len(prims) > 200
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"count_prims {parent_path}")
+
+
+async def _handle_get_joint_targets(args: Dict) -> Dict:
+    """Read per-joint drive/velocity TARGETS (what the controller is aiming
+    for), distinct from current state. Used to verify 'robot will move on
+    Play' claims — if DriveAPI targets aren't authored, the robot won't move."""
+    articulation_path = args["articulation_path"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+root = stage.GetPrimAtPath({articulation_path!r})
+result = {{'articulation_path': {articulation_path!r}}}
+if not root or not root.IsValid():
+    result['error'] = 'articulation not found'
+    result['joints'] = []
+else:
+    joints = []
+    for p in Usd.PrimRange(root):
+        if not (p.IsA(UsdPhysics.RevoluteJoint) or p.IsA(UsdPhysics.PrismaticJoint)):
+            continue
+        entry = {{'path': str(p.GetPath()), 'type': str(p.GetTypeName())}}
+        has_drive = False
+        for suffix in ('angular', 'linear'):
+            drive_api = UsdPhysics.DriveAPI.Get(p, suffix)
+            if drive_api:
+                tp = drive_api.GetTargetPositionAttr()
+                tv = drive_api.GetTargetVelocityAttr()
+                stiffness = drive_api.GetStiffnessAttr()
+                damping = drive_api.GetDampingAttr()
+                if tp and tp.IsAuthored():
+                    entry[f'{{suffix}}_target_position'] = float(tp.Get() or 0.0)
+                    has_drive = True
+                if tv and tv.IsAuthored():
+                    entry[f'{{suffix}}_target_velocity'] = float(tv.Get() or 0.0)
+                    has_drive = True
+                if stiffness and stiffness.IsAuthored():
+                    entry[f'{{suffix}}_stiffness'] = float(stiffness.Get() or 0.0)
+                if damping and damping.IsAuthored():
+                    entry[f'{{suffix}}_damping'] = float(damping.Get() or 0.0)
+        entry['has_drive'] = has_drive
+        joints.append(entry)
+    result['joints'] = joints
+    result['joint_count'] = len(joints)
+    result['joints_with_drive'] = sum(1 for j in joints if j.get('has_drive'))
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_joint_targets {articulation_path}")
+
+
 DATA_HANDLERS["get_attribute"] = _handle_get_attribute
 DATA_HANDLERS["get_world_transform"] = _handle_get_world_transform
 DATA_HANDLERS["get_bounding_box"] = _handle_get_bounding_box
@@ -18141,6 +18249,9 @@ DATA_HANDLERS["get_joint_limits"] = _handle_get_joint_limits
 DATA_HANDLERS["get_contact_report"] = _handle_get_contact_report
 DATA_HANDLERS["get_training_status"] = _handle_get_training_status
 DATA_HANDLERS["pixel_to_world"] = _handle_pixel_to_world
+DATA_HANDLERS["prim_exists"] = _handle_prim_exists
+DATA_HANDLERS["count_prims_under_path"] = _handle_count_prims_under_path
+DATA_HANDLERS["get_joint_targets"] = _handle_get_joint_targets
 CODE_GEN_HANDLERS["set_semantic_label"] = _gen_set_semantic_label
 CODE_GEN_HANDLERS["set_drive_gains"] = _gen_set_drive_gains
 CODE_GEN_HANDLERS["set_render_mode"] = _gen_set_render_mode

@@ -4363,6 +4363,52 @@ ISAAC_SIM_TOOLS = [
             },
         },
 
+    # ── Verify-contract primitives (used to validate assistant claims) ────
+    {
+        "type": "function",
+        "function": {
+            "name": "prim_exists",
+            "description": "Boolean existence check for a USD prim path. Use to verify claims like 'the robot is loaded at /World/Franka' — returns {exists, type_name, applied_schemas, child_count} when the prim is present.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to check, e.g. '/World/Franka'"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "count_prims_under_path",
+            "description": "Count children under a parent prim, optionally filtered by type. Use to verify 'I cloned N robots' / 'created N spheres' claims — compares what was claimed against what is actually authored in the stage. Returns {count, paths[], truncated}.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "parent_path": {"type": "string", "description": "Parent USD path, e.g. '/World/envs'"},
+                    "type_filter": {"type": "string", "description": "Optional USD type name filter, e.g. 'Xform', 'Mesh'. Omit for all types."},
+                    "recursive": {"type": "boolean", "description": "If true, count all descendants (not just direct children). Default: false."},
+                },
+                "required": ["parent_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_joint_targets",
+            "description": "Read per-joint DriveAPI targets (position/velocity/stiffness/damping) on an articulation. Use to verify 'robot will move on Play' claims — returns {joints[], joint_count, joints_with_drive}. If joints_with_drive is 0 the robot cannot move when physics starts, regardless of what other tools appeared to do.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "Path to the articulation root, e.g. '/World/Franka' or '/World/carter'"},
+                },
+                "required": ["articulation_path"],
+            },
+        },
+    },
+
     # ── From feat/atomic-tier0-foundation ─────────────────────────────────
     {
             "type": "function",
