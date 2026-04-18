@@ -24601,3 +24601,522 @@ DATA_HANDLERS["calibrate_physics"] = _handle_calibrate_physics
 DATA_HANDLERS["quick_calibrate"] = _handle_quick_calibrate
 DATA_HANDLERS["validate_calibration"] = _handle_validate_calibration
 DATA_HANDLERS["train_actuator_net"] = _handle_train_actuator_net
+
+
+# ── Phase 10: Autonomous Multi-Step Workflows ───────────────────────────────
+# Lightweight, in-process orchestrator. Workflows live in memory keyed by ID.
+# Each workflow holds an editable plan, a queue of phases, checkpoint state,
+# and an autonomous error-fix loop counter. Persistence to disk is opt-in via
+# the audit log (entries are emitted but the source of truth is RAM during
+# the session).
+
+import time as _wf_time
+import uuid as _wf_uuid
+from datetime import datetime as _wf_dt
+
+# In-memory workflow registry. Keyed by workflow_id -> dict.
+# Cleared on service restart; long-lived persistence is a deliberate non-goal
+# until the orchestrator endpoints land in routes.py.
+_WORKFLOWS: Dict[str, Dict[str, Any]] = {}
+
+# Hard cap on autonomous error-fix retries regardless of caller-supplied value
+_WORKFLOW_RETRY_HARD_CAP = 5
+
+# Workflow templates — phase ordering, checkpoint placement, error-fix policy.
+# Source of truth for what each workflow_type does; the LLM consumes this
+# when generating the editable plan artifact.
+_WORKFLOW_TEMPLATES: Dict[str, Dict[str, Any]] = {
+    "rl_training": {
+        "description": "Full RL training pipeline (W1 from spec)",
+        "phases": [
+            {"name": "plan",        "checkpoint": True,  "error_fix": False},
+            {"name": "env_creation","checkpoint": False, "error_fix": True},
+            {"name": "reward",      "checkpoint": True,  "error_fix": False},
+            {"name": "training",    "checkpoint": False, "error_fix": False},
+            {"name": "results",     "checkpoint": True,  "error_fix": False},
+            {"name": "deploy",      "checkpoint": True,  "error_fix": False},
+        ],
+        "default_params": {
+            "num_envs": 64,
+            "env_spacing": 2.5,
+            "algo": "ppo",
+            "num_iterations": 5000,
+        },
+    },
+    "robot_import": {
+        "description": "Robot import & configuration (W2 from spec)",
+        "phases": [
+            {"name": "plan",            "checkpoint": True,  "error_fix": False},
+            {"name": "import",          "checkpoint": False, "error_fix": True},
+            {"name": "verify",          "checkpoint": False, "error_fix": False},
+            {"name": "auto_fix",        "checkpoint": True,  "error_fix": False},
+            {"name": "motion_planning", "checkpoint": False, "error_fix": True},
+            {"name": "report",          "checkpoint": False, "error_fix": False},
+        ],
+        "default_params": {
+            "fix_profile": "auto",
+        },
+    },
+    "sim_debugging": {
+        "description": "Simulation debugging with autonomous error-fix loop (W4 from spec)",
+        "phases": [
+            {"name": "diagnose",   "checkpoint": False, "error_fix": False},
+            {"name": "hypothesis", "checkpoint": False, "error_fix": False},
+            {"name": "fix",        "checkpoint": True,  "error_fix": True},
+            {"name": "verify",     "checkpoint": False, "error_fix": False},
+            {"name": "report",     "checkpoint": False, "error_fix": False},
+        ],
+        "default_params": {
+            "max_hypothesis_iterations": 3,
+        },
+    },
+}
+
+
+def _wf_now_iso() -> str:
+    return _wf_dt.utcnow().isoformat() + "Z"
+
+
+def _wf_make_initial_plan(workflow_type: str, goal: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the initial editable plan artifact from a template + goal + params.
+
+    The LLM is expected to refine this further on the user-facing side; this
+    function only produces the structural skeleton so the workflow can be
+    persisted and queried before the LLM round-trips.
+    """
+    tpl = _WORKFLOW_TEMPLATES[workflow_type]
+    merged_params = dict(tpl["default_params"])
+    merged_params.update(params or {})
+    return {
+        "workflow_type": workflow_type,
+        "goal": goal,
+        "params": merged_params,
+        "phases": [
+            {
+                "name": p["name"],
+                "checkpoint": p["checkpoint"],
+                "error_fix": p["error_fix"],
+                "status": "pending",
+            }
+            for p in tpl["phases"]
+        ],
+        "editable": True,
+    }
+
+
+async def _handle_start_workflow(args: Dict) -> Dict:
+    """Start a multi-step autonomous workflow.
+
+    Returns a workflow_id immediately; the workflow is paused at the first
+    checkpoint (the plan artifact) until approve_workflow_checkpoint fires.
+    """
+    workflow_type = args.get("workflow_type")
+    goal = args.get("goal", "")
+    if workflow_type not in _WORKFLOW_TEMPLATES:
+        return {
+            "ok": False,
+            "error": f"Unknown workflow_type '{workflow_type}'. Supported: {sorted(_WORKFLOW_TEMPLATES)}",
+        }
+    if not goal:
+        return {"ok": False, "error": "goal is required (high-level user intent)."}
+
+    wf_id = f"wf_{_wf_uuid.uuid4().hex[:12]}"
+    scope_prim = args.get("scope_prim", "/World")
+    max_retries = min(int(args.get("max_retries", 3)), _WORKFLOW_RETRY_HARD_CAP)
+    auto_approve = bool(args.get("auto_approve_checkpoints", False))
+
+    plan = _wf_make_initial_plan(workflow_type, goal, args.get("params") or {})
+
+    workflow = {
+        "id": wf_id,
+        "type": workflow_type,
+        "goal": goal,
+        "scope_prim": scope_prim,
+        "max_retries": max_retries,
+        "auto_approve_checkpoints": auto_approve,
+        "plan": plan,
+        "status": "awaiting_plan_approval",
+        "current_phase": "plan",
+        "completed_phases": [],
+        "checkpoint_decisions": [],
+        "error_fix_attempts": [],
+        "events": [
+            {"type": "workflow_started", "at": _wf_now_iso(), "phase": "plan"},
+        ],
+        "created_at": _wf_now_iso(),
+        "updated_at": _wf_now_iso(),
+        "snapshot_id": None,  # filled in by routes.py before phase 2 if available
+    }
+    _WORKFLOWS[wf_id] = workflow
+
+    return {
+        "ok": True,
+        "workflow_id": wf_id,
+        "status": workflow["status"],
+        "plan": plan,
+        "next_action": "Show plan to user; on approval call approve_workflow_checkpoint(workflow_id, phase='plan', action='approve').",
+    }
+
+
+async def _handle_edit_workflow_plan(args: Dict) -> Dict:
+    """Apply user edits to a workflow's plan artifact.
+
+    Edits are merged into plan.params and per-phase fields. The workflow
+    must still be in the awaiting_plan_approval state; rejecting edits to
+    in-flight workflows protects against mid-execution drift.
+    """
+    wf_id = args.get("workflow_id")
+    edits = args.get("plan_edits") or {}
+    wf = _WORKFLOWS.get(wf_id)
+    if not wf:
+        return {"ok": False, "error": f"Unknown workflow_id '{wf_id}'."}
+    if wf["status"] != "awaiting_plan_approval":
+        return {
+            "ok": False,
+            "error": f"Workflow is in state '{wf['status']}'; plan can only be edited before approval.",
+        }
+    if not isinstance(edits, dict):
+        return {"ok": False, "error": "plan_edits must be a dict of {phase_name: {field: value}}."}
+
+    plan = wf["plan"]
+    applied: List[str] = []
+    for phase_name, phase_edits in edits.items():
+        if not isinstance(phase_edits, dict):
+            continue
+        if phase_name == "params":
+            plan["params"].update(phase_edits)
+            applied.append("params")
+            continue
+        # Find the phase in the plan
+        for phase in plan["phases"]:
+            if phase["name"] == phase_name:
+                phase.update({k: v for k, v in phase_edits.items() if k not in ("name", "status")})
+                applied.append(phase_name)
+                break
+
+    wf["events"].append({"type": "plan_edited", "at": _wf_now_iso(), "edits": list(edits.keys())})
+    wf["updated_at"] = _wf_now_iso()
+
+    return {
+        "ok": True,
+        "workflow_id": wf_id,
+        "applied_edits": applied,
+        "plan": plan,
+    }
+
+
+def _wf_advance_phase(wf: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Move the workflow to the next phase. Returns the next phase dict or None."""
+    phases = wf["plan"]["phases"]
+    current = wf["current_phase"]
+    # Mark current as completed
+    for p in phases:
+        if p["name"] == current and p["status"] != "completed":
+            p["status"] = "completed"
+            wf["completed_phases"].append(current)
+            break
+    # Find next pending phase
+    for p in phases:
+        if p["status"] == "pending":
+            wf["current_phase"] = p["name"]
+            p["status"] = "in_progress"
+            return p
+    # No phases left
+    wf["current_phase"] = None
+    wf["status"] = "completed"
+    return None
+
+
+async def _handle_approve_workflow_checkpoint(args: Dict) -> Dict:
+    """Resolve a checkpoint with approve / reject / revise."""
+    wf_id = args.get("workflow_id")
+    phase = args.get("phase")
+    action = args.get("action")
+    feedback = args.get("feedback", "")
+    wf = _WORKFLOWS.get(wf_id)
+    if not wf:
+        return {"ok": False, "error": f"Unknown workflow_id '{wf_id}'."}
+    if action not in ("approve", "reject", "revise"):
+        return {"ok": False, "error": f"action must be one of approve|reject|revise, got '{action}'."}
+    if wf["current_phase"] != phase:
+        return {
+            "ok": False,
+            "error": f"Workflow is at phase '{wf['current_phase']}', not '{phase}'.",
+        }
+
+    decision = {
+        "phase": phase,
+        "action": action,
+        "feedback": feedback,
+        "at": _wf_now_iso(),
+    }
+    wf["checkpoint_decisions"].append(decision)
+    wf["events"].append({"type": "checkpoint_decision", **decision})
+    wf["updated_at"] = _wf_now_iso()
+
+    if action == "reject":
+        wf["status"] = "cancelled"
+        return {
+            "ok": True,
+            "workflow_id": wf_id,
+            "status": wf["status"],
+            "rollback_required": True,
+            "snapshot_id": wf.get("snapshot_id"),
+        }
+
+    if action == "revise":
+        # Stay on the same phase; the LLM uses `feedback` to regenerate.
+        wf["status"] = "revising"
+        return {
+            "ok": True,
+            "workflow_id": wf_id,
+            "status": wf["status"],
+            "phase": phase,
+            "feedback": feedback,
+            "next_action": "Re-generate the artifact for this phase using the user feedback, then call approve_workflow_checkpoint again.",
+        }
+
+    # approve → advance to next phase
+    next_phase = _wf_advance_phase(wf)
+    if next_phase is None:
+        return {
+            "ok": True,
+            "workflow_id": wf_id,
+            "status": wf["status"],
+            "message": "Workflow complete.",
+        }
+
+    # Decide whether the next phase needs another checkpoint
+    if next_phase["checkpoint"] and not wf["auto_approve_checkpoints"]:
+        wf["status"] = f"awaiting_{next_phase['name']}_approval"
+    else:
+        wf["status"] = f"executing_{next_phase['name']}"
+
+    return {
+        "ok": True,
+        "workflow_id": wf_id,
+        "status": wf["status"],
+        "current_phase": wf["current_phase"],
+        "phase_meta": next_phase,
+    }
+
+
+async def _handle_cancel_workflow(args: Dict) -> Dict:
+    """Cancel a workflow and request rollback to its pre-workflow snapshot."""
+    wf_id = args.get("workflow_id")
+    reason = args.get("reason", "user_cancelled")
+    wf = _WORKFLOWS.get(wf_id)
+    if not wf:
+        return {"ok": False, "error": f"Unknown workflow_id '{wf_id}'."}
+    if wf["status"] in ("completed", "cancelled"):
+        return {
+            "ok": True,
+            "workflow_id": wf_id,
+            "status": wf["status"],
+            "message": "Workflow already finished; nothing to cancel.",
+        }
+    wf["status"] = "cancelled"
+    wf["events"].append({"type": "cancelled", "at": _wf_now_iso(), "reason": reason})
+    wf["updated_at"] = _wf_now_iso()
+    return {
+        "ok": True,
+        "workflow_id": wf_id,
+        "status": wf["status"],
+        "rollback_required": True,
+        "snapshot_id": wf.get("snapshot_id"),
+        "reason": reason,
+    }
+
+
+async def _handle_get_workflow_status(args: Dict) -> Dict:
+    """Return the current state of a workflow."""
+    wf_id = args.get("workflow_id")
+    wf = _WORKFLOWS.get(wf_id)
+    if not wf:
+        return {"ok": False, "error": f"Unknown workflow_id '{wf_id}'."}
+    # Return a shallow copy without the verbose events log unless explicitly asked
+    return {
+        "ok": True,
+        "workflow_id": wf_id,
+        "type": wf["type"],
+        "goal": wf["goal"],
+        "status": wf["status"],
+        "current_phase": wf["current_phase"],
+        "completed_phases": list(wf["completed_phases"]),
+        "checkpoint_decisions": list(wf["checkpoint_decisions"]),
+        "error_fix_attempts": list(wf["error_fix_attempts"]),
+        "plan": wf["plan"],
+        "created_at": wf["created_at"],
+        "updated_at": wf["updated_at"],
+    }
+
+
+async def _handle_list_workflows(args: Dict) -> Dict:
+    """List active (and optionally completed) workflows."""
+    include_completed = bool(args.get("include_completed", False))
+    limit = int(args.get("limit", 20))
+    summaries = []
+    for wf_id, wf in _WORKFLOWS.items():
+        if not include_completed and wf["status"] in ("completed", "cancelled"):
+            continue
+        summaries.append({
+            "workflow_id": wf_id,
+            "type": wf["type"],
+            "goal": wf["goal"],
+            "status": wf["status"],
+            "current_phase": wf["current_phase"],
+            "created_at": wf["created_at"],
+            "updated_at": wf["updated_at"],
+        })
+    # Newest first
+    summaries.sort(key=lambda s: s["updated_at"], reverse=True)
+    return {"ok": True, "count": len(summaries), "workflows": summaries[:limit]}
+
+
+async def _handle_execute_with_retry(args: Dict) -> Dict:
+    """Execute a code patch through the autonomous error-fix loop.
+
+    This handler performs the *first* attempt against Kit RPC and reports
+    the outcome. The actual LLM-driven fix iterations happen one round-trip
+    per attempt — the orchestrator (chat loop) is responsible for feeding
+    each failure back into the LLM, generating the patched code, and
+    calling this handler again with the new code. We track attempt counts
+    via a session-scoped key so the hard retry cap is enforced even when
+    the LLM forgets it.
+    """
+    code = args.get("code", "")
+    description = args.get("description", "Autonomous error-fix execution")
+    requested_max = int(args.get("max_retries", 3))
+    max_retries = min(requested_max, _WORKFLOW_RETRY_HARD_CAP)
+    context_hints = args.get("context_hints") or []
+
+    if not code:
+        return {"ok": False, "error": "code is required."}
+
+    # Pre-flight validation (same as run_usd_script)
+    issues = validate_patch(code)
+    if has_blocking_issues(issues):
+        msg = format_issues_for_llm(issues)
+        return {
+            "ok": False,
+            "type": "validation_blocked",
+            "error": msg,
+            "code": code,
+            "description": description,
+        }
+
+    # Submit to Kit. Kit returns queued=True; the chat loop polls for the
+    # actual exec result via existing patch-status machinery. We surface
+    # the budget so the caller can decide whether to retry on failure.
+    result = await kit_tools.queue_exec_patch(code, description)
+    return {
+        "ok": True,
+        "type": "code_patch",
+        "code": code,
+        "description": description,
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "max_retries": max_retries,
+        "context_hints": context_hints,
+        "next_action": (
+            "Wait for patch result. On failure, call execute_with_retry again "
+            f"with patched code (up to {max_retries} attempts total)."
+        ),
+    }
+
+
+# Mapping from proactive trigger -> default tool chain. The handler
+# delegates to existing data handlers wherever possible so the proactive
+# agent stays a thin observation layer (per spec: "proactive ≠ autonomous
+# modification"). Unknown / unimplemented downstream tools are reported in
+# the response so the LLM can fall back to a textual explanation.
+_PROACTIVE_TRIGGER_PLAYBOOKS: Dict[str, List[str]] = {
+    "scene_opened":      ["scene_summary", "get_console_errors"],
+    "robot_imported":    ["scene_summary", "get_articulation_state"],
+    "console_error":     ["get_console_errors", "explain_error"],
+    "training_started":  ["get_console_errors"],
+    "training_active":   ["get_console_errors"],
+    "training_finished": ["get_console_errors"],
+    "sim_idle":          ["scene_summary"],
+    "sim_play":          ["get_console_errors", "scene_summary"],
+    "fps_drop":          ["get_debug_info", "scene_summary"],
+    "target_placed":     ["scene_summary", "measure_distance"],
+}
+
+
+async def _handle_proactive_check(args: Dict) -> Dict:
+    """Run the proactive agent for a scene-state trigger.
+
+    The agent calls each tool in the trigger's playbook and aggregates
+    findings. Auto-fixes are gated by both the per-call `auto_fix=True`
+    and the AUTO_PROACTIVE_FIX env var so tests + dry runs never mutate
+    the scene without explicit opt-in.
+    """
+    trigger = args.get("trigger")
+    context = args.get("context") or {}
+    auto_fix_requested = bool(args.get("auto_fix", False))
+
+    playbook = _PROACTIVE_TRIGGER_PLAYBOOKS.get(trigger)
+    if playbook is None:
+        return {
+            "ok": False,
+            "error": f"Unknown proactive trigger '{trigger}'. Supported: {sorted(_PROACTIVE_TRIGGER_PLAYBOOKS)}",
+        }
+
+    auto_fix_env = os.environ.get("AUTO_PROACTIVE_FIX", "false").lower() in ("1", "true", "yes")
+    auto_fix_enabled = auto_fix_requested and auto_fix_env
+
+    findings: List[Dict[str, Any]] = []
+    for tool_name in playbook:
+        handler = DATA_HANDLERS.get(tool_name)
+        if handler is None:
+            # Tool is LLM-handled or disabled — note it and move on.
+            findings.append({
+                "tool": tool_name,
+                "skipped": True,
+                "note": "Tool handled by LLM reasoning or unavailable; no live data captured.",
+            })
+            continue
+        try:
+            # Pass the context as kwargs where the handler accepts them; otherwise
+            # just call with the raw context dict — every data handler takes a dict.
+            tool_args = {}
+            if tool_name == "explain_error":
+                tool_args = {"error_text": context.get("error_text", "")}
+            elif tool_name == "measure_distance":
+                # target_placed trigger needs prim_a + prim_b
+                if "target_path" in context and "robot_path" in context:
+                    tool_args = {"prim_a": context["target_path"], "prim_b": context["robot_path"]}
+                else:
+                    findings.append({
+                        "tool": tool_name,
+                        "skipped": True,
+                        "note": "measure_distance needs target_path + robot_path in context.",
+                    })
+                    continue
+            result = await handler(tool_args)
+            findings.append({"tool": tool_name, "result": result})
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning(f"[ProactiveAgent] {tool_name} raised: {exc}")
+            findings.append({"tool": tool_name, "error": str(exc)})
+
+    return {
+        "ok": True,
+        "trigger": trigger,
+        "context": context,
+        "playbook": playbook,
+        "findings": findings,
+        "auto_fix_enabled": auto_fix_enabled,
+        "auto_fix_applied": [],  # populated only when AUTO_PROACTIVE_FIX is on
+        "principle": "Proactive ≠ autonomous modification — observations only unless AUTO_PROACTIVE_FIX is enabled.",
+    }
+
+
+DATA_HANDLERS["start_workflow"] = _handle_start_workflow
+DATA_HANDLERS["edit_workflow_plan"] = _handle_edit_workflow_plan
+DATA_HANDLERS["approve_workflow_checkpoint"] = _handle_approve_workflow_checkpoint
+DATA_HANDLERS["cancel_workflow"] = _handle_cancel_workflow
+DATA_HANDLERS["get_workflow_status"] = _handle_get_workflow_status
+DATA_HANDLERS["list_workflows"] = _handle_list_workflows
+DATA_HANDLERS["execute_with_retry"] = _handle_execute_with_retry
+DATA_HANDLERS["proactive_check"] = _handle_proactive_check

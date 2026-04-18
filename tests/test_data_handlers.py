@@ -52,6 +52,7 @@ except ImportError:
     _handle_profile_training_throughput = None
 
 
+
 class TestLookupProductSpec:
     """Test the sensor spec lookup handler."""
 
