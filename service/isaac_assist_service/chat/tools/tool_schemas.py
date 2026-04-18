@@ -7215,4 +7215,66 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+# ─── Collision Mesh Quality (Addendum) ────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "check_collision_mesh",
+            "description": "Analyze a USD mesh prim's collision quality. Detects fatal issues (out-of-range vertex indices, zero-area triangles, convex hull >255 polys / >64 vertices, missing CollisionAPI) and silent degradation (non-manifold edges, inverted normals, self-intersections, non-watertight, oversized triangles). Returns triangle_count, is_watertight, is_manifold, degenerate_faces, collision_approximation, issues list, and a recommendation. Use BEFORE simulating to catch bad collision meshes — the #1 cause of weird PhysX behavior.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the mesh prim to analyze, e.g. '/World/Robot/link3'"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fix_collision_mesh",
+            "description": "Auto-repair a broken collision mesh: fix normals → remove degenerate triangles → fill holes → simplify (quadric decimation) → convex decompose if needed (CoACD threshold=0.05, max_convex_hull=16) → verify hulls ≤64 vertices → write back to USD. Triangle count guidelines: dynamic rigid body 100-500 (convexDecomposition), static environment 1000-5000 (convexHull or meshSimplification), background 0 (boundingCube). Run this when check_collision_mesh reports issues.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the mesh prim to repair"},
+                    "target_triangles": {"type": "integer", "description": "Target triangle count after simplification. Defaults: 500 for dynamic bodies, 2000 for static, 0 to skip simplification."},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "visualize_collision_mesh",
+            "description": "Show a prim's collision mesh as a wireframe overlay in the viewport (distinct from the visual mesh). Uses omni.physx.ui Physics Debug visualization to enable Collision Shapes display. Helps users SEE what PhysX actually uses for collision vs. what's rendered.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim whose collision shape should be visualized"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+
+    # ─── Scene Export ─────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
+                },
+                "required": [],
+            },
+        },
+    },
 ]

@@ -1502,10 +1502,52 @@ _RAW_TEST_VECTORS = [
         {"lower_rate_hz": 30, "upper_rate_hz": 120},
         ["DualRateWrapper", "DECIMATION = 4"],
     ),
+    # NOTE: launch_training (master) is intentionally not tested here —
+    # the generator has a pre-existing nested-quote bug in master that
+    # produces invalid Python; fixing it is out of scope for this addendum.
+    # ── Collision Mesh Quality Addendum ─────────────────────────────────────
+    (
+        "fix_collision_mesh",
+        {
+            "prim_path": "/World/Robot/link3",
+            "target_triangles": 500,
+        },
+        [
+            "import trimesh",
+            "fix_normals",
+            "fill_holes",
+            "simplify_quadric_decimation",
+            "convex_hull",
+            "MeshCollisionAPI",
+            "/World/Robot/link3",
+        ],
+    ),
+    (
+        "fix_collision_mesh",
+        {"prim_path": "/World/Table"},  # No target_triangles → handler picks default
+        [
+            "import trimesh",
+            "fix_normals",
+            "MeshCollisionAPI",
+            "TARGET_TRIANGLES = None",
+            "/World/Table",
+        ],
+    ),
+    (
+        "visualize_collision_mesh",
+        {"prim_path": "/World/Robot/link3"},
+        [
+            "UsdPhysics.CollisionAPI",
+            "carb.settings",
+            "visualizationCollisionMesh",
+            "/World/Robot/link3",
+        ],
+    ),
 ]
 
 
 # Filter out vectors whose handlers do not exist on this branch.
+# Keeps the file runnable as new addenda are merged into master in any order.
 _TEST_VECTORS = [v for v in _RAW_TEST_VECTORS if v[0] in CODE_GEN_HANDLERS]
 
 
@@ -2091,6 +2133,94 @@ class TestTemplateDetection:
         })
         _assert_valid_python(code, "check_path_clearance")
         assert "obstacle_paths = list([])" in code
+    # ── Collision Mesh Quality Addendum edge cases ─────────────────────────
+
+    def test_fix_collision_mesh_default_target(self):
+        """Omitting target_triangles should embed TARGET_TRIANGLES = None
+        and let the script pick a default based on RigidBodyAPI presence."""
+        code = CODE_GEN_HANDLERS["fix_collision_mesh"]({
+            "prim_path": "/World/Robot/link0",
+        })
+        _assert_valid_python(code, "fix_collision_mesh")
+        assert "TARGET_TRIANGLES = None" in code
+        # Default heuristic must be present
+        assert "RigidBodyAPI" in code
+        assert "500" in code  # dynamic default
+        assert "2000" in code  # static default
+
+    def test_fix_collision_mesh_explicit_target(self):
+        code = CODE_GEN_HANDLERS["fix_collision_mesh"]({
+            "prim_path": "/World/Wall",
+            "target_triangles": 1500,
+        })
+        _assert_valid_python(code, "fix_collision_mesh")
+        assert "TARGET_TRIANGLES = 1500" in code
+
+    def test_fix_collision_mesh_uses_coacd_constants(self):
+        """Spec calls for CoACD threshold=0.05 and max_convex_hull=16."""
+        code = CODE_GEN_HANDLERS["fix_collision_mesh"]({
+            "prim_path": "/World/Bracket",
+            "target_triangles": 500,
+        })
+        _assert_valid_python(code, "fix_collision_mesh")
+        assert "COACD_THRESHOLD = 0.05" in code
+        assert "COACD_MAX_CONVEX_HULL = 16" in code
+        assert "import coacd" in code
+
+    def test_fix_collision_mesh_enforces_hull_limits(self):
+        """Spec: verify all hulls have ≤64 vertices (PhysX GPU limit)."""
+        code = CODE_GEN_HANDLERS["fix_collision_mesh"]({
+            "prim_path": "/World/Hull",
+            "target_triangles": 200,
+        })
+        _assert_valid_python(code, "fix_collision_mesh")
+        assert "PHYSX_HULL_MAX_VERTS = 64" in code
+        assert "PHYSX_HULL_MAX_POLYS = 255" in code
+
+    def test_fix_collision_mesh_writes_back_to_usd(self):
+        """The repaired triangles should be written back to the USD mesh."""
+        code = CODE_GEN_HANDLERS["fix_collision_mesh"]({
+            "prim_path": "/World/Foo",
+            "target_triangles": 500,
+        })
+        _assert_valid_python(code, "fix_collision_mesh")
+        assert "GetPointsAttr().Set" in code
+        assert "GetFaceVertexCountsAttr().Set" in code
+        assert "GetFaceVertexIndicesAttr().Set" in code
+        assert "MeshCollisionAPI" in code
+        assert "CreateApproximationAttr" in code
+
+    def test_fix_collision_mesh_path_with_quotes_sanitized(self):
+        """Quotes in prim_path must not break the generated string literal."""
+        code = CODE_GEN_HANDLERS["fix_collision_mesh"]({
+            "prim_path": "/World/Robot's_link",
+            "target_triangles": 100,
+        })
+        _assert_valid_python(code, "fix_collision_mesh")
+
+    def test_visualize_collision_mesh_uses_omni_physx_ui(self):
+        """Spec: implementation uses omni.physx.ui Physics Debug visualization."""
+        code = CODE_GEN_HANDLERS["visualize_collision_mesh"]({
+            "prim_path": "/World/Robot/link3",
+        })
+        _assert_valid_python(code, "visualize_collision_mesh")
+        assert "omni.physx.ui" in code
+        assert "/World/Robot/link3" in code
+
+    def test_visualize_collision_mesh_applies_collision_api(self):
+        """Should apply CollisionAPI if missing so the collision shape exists to display."""
+        code = CODE_GEN_HANDLERS["visualize_collision_mesh"]({
+            "prim_path": "/World/Foo",
+        })
+        _assert_valid_python(code, "visualize_collision_mesh")
+        assert "UsdPhysics.CollisionAPI" in code
+        assert "Apply(prim)" in code
+
+    def test_visualize_collision_mesh_path_sanitized(self):
+        code = CODE_GEN_HANDLERS["visualize_collision_mesh"]({
+            "prim_path": '/World/"quoted"',
+        })
+        _assert_valid_python(code, "visualize_collision_mesh")
 
 
 class TestAllCodeGenHandlersCovered:

@@ -53,6 +53,7 @@ except ImportError:
 
 
 
+
 class TestLookupProductSpec:
     """Test the sensor spec lookup handler."""
 
@@ -2036,3 +2037,140 @@ class TestDiagnoseWholeBody:
         assert "0.1" in balance["description"]
         ee = next(c for c in result["checks"] if c["id"] == "ee_acceleration")
         assert "2.5" in ee["description"]
+# ── Collision Mesh Quality Addendum ──────────────────────────────────────
+
+
+class TestCheckCollisionMesh:
+    """check_collision_mesh DATA handler — generates read-only USD/trimesh
+    analysis code, ships to Kit RPC, parses the JSON the script prints."""
+
+    @pytest.mark.asyncio
+    async def test_invalid_prim_path_returns_error(self):
+        result = await _handle_check_collision_mesh({"prim_path": ""})
+        assert "error" in result
+        assert "prim_path" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_relative_prim_path_returns_error(self):
+        result = await _handle_check_collision_mesh({"prim_path": "Robot/link3"})
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_handler_registered(self):
+        assert "check_collision_mesh" in DATA_HANDLERS
+        assert DATA_HANDLERS["check_collision_mesh"] is _handle_check_collision_mesh
+
+    @pytest.mark.asyncio
+    async def test_kit_rpc_failure_propagated(self, monkeypatch):
+        """If Kit RPC call fails, the handler should surface a structured error."""
+        import service.isaac_assist_service.chat.tools.tool_executor as te
+
+        async def fake_exec_sync(code, timeout=20):
+            return {"success": False, "output": "Kit RPC unavailable"}
+
+        monkeypatch.setattr(te.kit_tools, "exec_sync", fake_exec_sync)
+        result = await _handle_check_collision_mesh({"prim_path": "/World/Robot"})
+        assert "error" in result
+        assert "Kit RPC" in result["error"]
+        assert "hint" in result
+
+    @pytest.mark.asyncio
+    async def test_kit_rpc_success_returns_parsed_dict(self, monkeypatch):
+        """When Kit returns a valid JSON line on stdout, handler should parse it."""
+        import service.isaac_assist_service.chat.tools.tool_executor as te
+
+        async def fake_exec_sync(code, timeout=20):
+            payload = {
+                "prim": "/World/Robot/link3",
+                "triangle_count": 45000,
+                "is_watertight": False,
+                "is_manifold": False,
+                "degenerate_faces": 12,
+                "collision_approximation": "none",
+                "issues": [
+                    {"type": "non_watertight", "severity": "warning"},
+                    {"type": "degenerate_faces", "severity": "error", "count": 12},
+                ],
+                "recommendation": "Switch to convexDecomposition.",
+            }
+            return {"success": True, "output": json.dumps(payload)}
+
+        monkeypatch.setattr(te.kit_tools, "exec_sync", fake_exec_sync)
+        result = await _handle_check_collision_mesh({"prim_path": "/World/Robot/link3"})
+        assert result["prim"] == "/World/Robot/link3"
+        assert result["triangle_count"] == 45000
+        assert result["is_watertight"] is False
+        assert result["degenerate_faces"] == 12
+        assert any(i["type"] == "non_watertight" for i in result["issues"])
+        assert "convexDecomposition" in result["recommendation"]
+
+    @pytest.mark.asyncio
+    async def test_unparseable_output_returns_error(self, monkeypatch):
+        import service.isaac_assist_service.chat.tools.tool_executor as te
+
+        async def fake_exec_sync(code, timeout=20):
+            return {"success": True, "output": "no json here, just chatter"}
+
+        monkeypatch.setattr(te.kit_tools, "exec_sync", fake_exec_sync)
+        result = await _handle_check_collision_mesh({"prim_path": "/World/Robot"})
+        assert "error" in result
+        assert "raw_output" in result
+
+
+class TestCheckCollisionMeshCodeGen:
+    """The read-only Kit script must compile and reference the right APIs."""
+
+    def test_compiles(self):
+        code = _gen_check_collision_mesh_code("/World/Robot/link3")
+        compile(code, "<check_collision_mesh>", "exec")
+
+    def test_references_required_apis(self):
+        code = _gen_check_collision_mesh_code("/World/Robot/link3")
+        assert "UsdGeom.Mesh" in code
+        assert "UsdPhysics.CollisionAPI" in code
+        assert "UsdPhysics.MeshCollisionAPI" in code
+        assert "GetPointsAttr" in code
+        assert "GetFaceVertexCountsAttr" in code
+        assert "GetFaceVertexIndicesAttr" in code
+
+    def test_includes_two_tier_checks(self):
+        """Spec: fatal (out_of_range_indices, degenerate_faces, hull_exceeds_*,
+        missing_collision_api) and silent degradation (non_watertight,
+        non_manifold_edges, oversized_triangles)."""
+        code = _gen_check_collision_mesh_code("/World/X")
+        for marker in [
+            "out_of_range_indices",
+            "degenerate_faces",
+            "missing_collision_api",
+            "non_watertight",
+            "non_manifold_edges",
+            "oversized_triangles",
+            "hull_exceeds_gpu_limit",
+            "hull_exceeds_polygon_limit",
+        ]:
+            assert marker in code, f"Missing severity-tag marker: {marker}"
+
+    def test_uses_physx_limits(self):
+        """Spec: 255 polygon limit, 64 GPU vertex limit per hull."""
+        code = _gen_check_collision_mesh_code("/World/X")
+        assert "64" in code  # GPU vertex limit
+        assert "255" in code  # polygon limit
+
+    def test_returns_required_fields(self):
+        """Result schema per spec."""
+        code = _gen_check_collision_mesh_code("/World/X")
+        for field in [
+            "triangle_count",
+            "is_watertight",
+            "is_manifold",
+            "degenerate_faces",
+            "collision_approximation",
+            "issues",
+            "recommendation",
+        ]:
+            assert f'"{field}"' in code
+
+    def test_path_is_sanitized(self):
+        """Quotes in the prim path must not break the literal."""
+        code = _gen_check_collision_mesh_code('/World/"weird"/path')
+        compile(code, "<sanitized>", "exec")
