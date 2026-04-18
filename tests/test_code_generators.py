@@ -713,6 +713,74 @@ _TEST_VECTORS = [
         },
         ["auto", "default"],
     ),
+    # ── Phase 8E: Wheeled Robots & Conveyor Systems ──────────────────────────
+    (
+        "create_wheeled_robot",
+        {
+            "robot_path": "/World/Carter",
+            "drive_type": "differential",
+            "wheel_radius": 0.05,
+            "wheel_base": 0.3,
+            "max_linear_speed": 1.5,
+            "max_angular_speed": 3.0,
+        },
+        ["DifferentialController", "wheel_radius=0.05", "wheel_base=0.3", "MAX_LINEAR_SPEED", "drive("],
+    ),
+    (
+        "create_wheeled_robot",
+        {
+            "robot_path": "/World/Kaya",
+            "drive_type": "holonomic",
+            "wheel_radius": 0.04,
+            "wheel_base": 0.2,
+            "wheel_dof_names": ["axle_0", "axle_1", "axle_2"],
+        },
+        ["HolonomicController", "wheel_radius=0.04", "axle_0", "axle_1", "axle_2"],
+    ),
+    (
+        "navigate_to",
+        {
+            "robot_path": "/World/Carter",
+            "target_position": [5.0, 3.0],
+            "planner": "direct",
+        },
+        ["WheelBasePoseController", "DifferentialController", "subscribe_physics_step_events", "5.0, 3.0"],
+    ),
+    (
+        "navigate_to",
+        {
+            "robot_path": "/World/Carter",
+            "target_position": [8.0, 6.0],
+            "planner": "astar",
+        },
+        ["astar", "heapq", "WheelBasePoseController", "occupancy", "waypoints"],
+    ),
+    (
+        "create_conveyor",
+        {
+            "prim_path": "/World/Conveyor",
+            "speed": 0.8,
+            "direction": [1, 0, 0],
+        },
+        ["OgnIsaacConveyor", "useFabric", "WARNING", "ConveyorGraph", "velocity"],
+    ),
+    (
+        "create_conveyor_track",
+        {
+            "waypoints": [[0, 0, 0], [3, 0, 0], [3, 3, 0]],
+            "belt_width": 0.5,
+            "speed": 0.5,
+        },
+        ["ConveyorTrack", "Segment_", "atan2", "OgnIsaacConveyor", "AddRotateZOp"],
+    ),
+    (
+        "merge_meshes",
+        {
+            "prim_paths": ["/World/Mesh1", "/World/Mesh2", "/World/Mesh3"],
+            "output_path": "/World/MergedMesh",
+        },
+        ["MeshMerger", "update_selection", "merge()", "/World/Mesh1"],
+    ),
     # ── Phase 8B: Motion Policy, IK ──────────────────────────────────────────
     (
         "set_motion_policy",
