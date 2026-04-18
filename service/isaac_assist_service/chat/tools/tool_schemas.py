@@ -7921,4 +7921,157 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+# ─── Tier 1 Atomic Tools — USD Core ──────────────────────────────────────
+    # 10 USD-stage inspection primitives (see docs/specs/atomic_tools_catalog.md).
+    # All are DATA handlers except T1.5 (set_prim_metadata, CODE_GEN). They make
+    # scene structure queryable so the LLM can verify what it built and reason
+    # over schemas, metadata, type, kind, and active state.
+    {
+        "type": "function",
+        "function": {
+            "name": "list_attributes",
+            "description": "Enumerate all attributes defined on a USD prim via prim.GetAttributes(). Returns a list of {name, type, has_value, custom} entries — useful for discovering what can be read or set on a prim before calling get_attribute / set_attribute.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim, e.g. '/World/Cube'"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_relationships",
+            "description": "List all relationships on a USD prim via prim.GetRelationships(). Returns each relationship name plus its current target paths — used to inspect material bindings, physics filtered pairs, skeleton bindings, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_applied_schemas",
+            "description": "Return the applied API schemas on a prim via prim.GetAppliedSchemas() (e.g. PhysicsRigidBodyAPI, PhysicsCollisionAPI, MaterialBindingAPI). Lets the LLM verify which APIs are present before applying / removing them.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_prim_metadata",
+            "description": "Read a USD metadata field on a prim via prim.GetMetadata(key). Common keys: 'kind', 'specifier', 'hidden', 'documentation', 'instanceable', 'active', 'apiSchemas'. Returns the value plus its python type.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim"},
+                    "key": {"type": "string", "description": "Metadata key, e.g. 'kind', 'specifier', 'hidden'"},
+                },
+                "required": ["prim_path", "key"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_prim_metadata",
+            "description": "Write a USD metadata field on a prim via prim.SetMetadata(key, value). Useful for setting kind ('component', 'assembly', 'group', 'subcomponent'), hidden, instanceable, documentation, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim"},
+                    "key": {"type": "string", "description": "Metadata key"},
+                    "value": {"description": "New metadata value (string, bool, number, list, dict)"},
+                },
+                "required": ["prim_path", "key", "value"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_prim_type",
+            "description": "Return the typeName of a prim via prim.GetTypeName() — e.g. 'Mesh', 'Xform', 'Camera', 'Cube', 'DistantLight'. Returns empty string for typeless prims.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "find_prims_by_schema",
+            "description": "Traverse the stage and return every prim path where prim.HasAPI(schema) is true. Use to find e.g. all rigid bodies, all articulation roots, all colliders. Schema name accepts the short USD class name (e.g. 'PhysicsRigidBodyAPI', 'PhysicsArticulationRootAPI').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "schema_name": {"type": "string", "description": "API schema class name, e.g. 'PhysicsRigidBodyAPI'"},
+                    "root_path": {"type": "string", "description": "Optional sub-tree root to traverse from. Default: stage root."},
+                    "limit": {"type": "integer", "description": "Max prims to return. Default: 500"},
+                },
+                "required": ["schema_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "find_prims_by_name",
+            "description": "Regex search across all prim paths on the stage. Returns every prim whose path matches the supplied Python regex. Use to locate prims by partial name (e.g. '.*panda_link.*', '/World/Robots/.*Franka.*').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "Python regex pattern matched against full prim paths (re.search semantics)"},
+                    "root_path": {"type": "string", "description": "Optional sub-tree root to traverse from. Default: stage root."},
+                    "limit": {"type": "integer", "description": "Max prims to return. Default: 500"},
+                },
+                "required": ["pattern"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_kind",
+            "description": "Read the Kind metadata of a prim via Usd.ModelAPI(prim).GetKind(). Returns one of 'component', 'assembly', 'group', 'subcomponent', or '' if unset.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_active_state",
+            "description": "Return whether a prim is active on the stage via prim.IsActive(). Inactive prims (and their descendants) are excluded from rendering, physics, and traversal.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
 ]

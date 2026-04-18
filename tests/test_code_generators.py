@@ -1296,6 +1296,20 @@ _RAW_TEST_VECTORS = [
     # NOTE: launch_training (master) is intentionally not tested here —
     # the generator has a pre-existing nested-quote bug in master that
     # produces invalid Python; fixing it is out of scope for this addendum.
+    # NOTE: launch_training (master) is intentionally not tested here —
+    # the generator has a pre-existing nested-quote bug in master that
+    # produces invalid Python; fixing it is out of scope for this addendum.
+    # ── Tier 1 Atomic Tools — USD Core ──────────────────────────────────────
+    (
+        "set_prim_metadata",
+        {"prim_path": "/World/Cube", "key": "kind", "value": "component"},
+        ["SetMetadata", "'kind'", "'component'", "/World/Cube"],
+    ),
+    (
+        "set_prim_metadata",
+        {"prim_path": "/World/X", "key": "hidden", "value": True},
+        ["SetMetadata", "'hidden'", "True"],
+    ),
     # ── Clearance Detection Addendum ────────────────────────────────────────
     (
         "set_clearance_monitor",
@@ -2459,6 +2473,9 @@ class TestTemplateDetection:
         _assert_valid_python(code, "record_trajectory")
         assert "rate_hz = 240.0" in code
         assert "subscribe_physics_step_events" in code
+    # NOTE: Clearance Detection Addendum edge cases live on the
+    # feat/addendum-clearance-detection branch and are intentionally absent
+    # here so this branch ships only Tier 1 USD Core changes.
 
 
 class TestAllCodeGenHandlersCovered:
