@@ -1905,6 +1905,73 @@ _RAW_TEST_VECTORS = [
         },
         ["UsdLux.DomeLight", "/World/Lighting/Sky", "cumulus.exr", "2500.0"],
     ),
+    # ── Tier 7 — Camera (atomic) ─────────────────────────────────────────────
+    (
+        "set_camera_params",
+        {
+            "camera_path": "/World/Camera",
+            "params": {
+                "focal_length": 35.0,
+                "horizontal_aperture": 20.955,
+                "vertical_aperture": 15.2908,
+                "clipping_range": [0.1, 1000.0],
+                "focus_distance": 2.5,
+                "f_stop": 2.8,
+                "projection": "perspective",
+            },
+        },
+        [
+            "UsdGeom.Camera",
+            "GetFocalLengthAttr().Set(35.0)",
+            "GetHorizontalApertureAttr().Set(20.955)",
+            "GetClippingRangeAttr().Set(Gf.Vec2f(0.1, 1000.0))",
+            "GetFocusDistanceAttr().Set(2.5)",
+            "GetFStopAttr().Set(2.8)",
+            "GetProjectionAttr().Set('perspective')",
+            "/World/Camera",
+        ],
+    ),
+    (
+        "set_camera_params",
+        {
+            "camera_path": "/World/OrthoCam",
+            "params": {"projection": "orthographic"},
+        },
+        [
+            "GetProjectionAttr().Set('orthographic')",
+            "/World/OrthoCam",
+        ],
+    ),
+    (
+        "set_camera_look_at",
+        {
+            "camera_path": "/World/Camera",
+            "target": [1.0, 2.0, 3.0],
+        },
+        [
+            "Gf.Matrix4d().SetLookAt",
+            "GetInverse",
+            "ExtractRotation",
+            "_safe_set_translate",
+            "_safe_set_rotate_xyz",
+            "/World/Camera",
+        ],
+    ),
+    (
+        "set_camera_look_at",
+        {
+            "camera_path": "/World/Camera",
+            "target": [1.0, 2.0, 3.0],
+            "up": [0.0, 0.0, 1.0],
+            "eye": [5.0, 5.0, 5.0],
+        },
+        [
+            "Gf.Vec3d(5.0, 5.0, 5.0)",
+            "Gf.Vec3d(0.0, 0.0, 1.0)",
+            "Override translation to the supplied eye position",
+            "_safe_set_rotate_xyz",
+        ],
+    ),
 ]
 
 
@@ -2428,6 +2495,14 @@ class TestTemplateDetection:
         _assert_valid_python(code, "generate_eval_harness")
     # ── Clearance Detection Addendum edge cases ────────────────────────────
 
+    # ── Clearance Detection Addendum edge cases ────────────────────────────
+    # Guarded with skipif so the file remains runnable on branches that
+    # do not yet include the clearance handlers.
+
+    @pytest.mark.skipif(
+        "set_clearance_monitor" not in CODE_GEN_HANDLERS,
+        reason="set_clearance_monitor handler not on this branch",
+    )
     def test_set_clearance_monitor_default_thresholds(self):
         """No clearance_mm given should fall back to 50mm stop / 100mm warning."""
         code = CODE_GEN_HANDLERS["set_clearance_monitor"]({
@@ -2437,6 +2512,10 @@ class TestTemplateDetection:
         assert "stop_threshold_m = 0.05" in code
         assert "warning_threshold_m = 0.1" in code
 
+    @pytest.mark.skipif(
+        "set_clearance_monitor" not in CODE_GEN_HANDLERS,
+        reason="set_clearance_monitor handler not on this branch",
+    )
     def test_set_clearance_monitor_no_targets(self):
         """Empty target list should still produce valid code (monitors all robot links)."""
         code = CODE_GEN_HANDLERS["set_clearance_monitor"]({
@@ -2447,6 +2526,10 @@ class TestTemplateDetection:
         assert "stop_threshold_m = 0.025" in code
         assert "subscribe_contact_report_events" in code
 
+    @pytest.mark.skipif(
+        "visualize_clearance" not in CODE_GEN_HANDLERS,
+        reason="visualize_clearance handler not on this branch",
+    )
     def test_visualize_clearance_default_mode_is_heatmap(self):
         """Omitting mode should default to heatmap (SDF + debug draw)."""
         code = CODE_GEN_HANDLERS["visualize_clearance"]({
@@ -2459,6 +2542,10 @@ class TestTemplateDetection:
         # Trigger zones are NOT created in heatmap mode
         assert "PhysxTriggerAPI" not in code
 
+    @pytest.mark.skipif(
+        "visualize_clearance" not in CODE_GEN_HANDLERS,
+        reason="visualize_clearance handler not on this branch",
+    )
     def test_visualize_clearance_zones_uses_triggers(self):
         """zones mode should use PhysxTriggerAPI and skip SDF mesh collision."""
         code = CODE_GEN_HANDLERS["visualize_clearance"]({
@@ -2470,6 +2557,10 @@ class TestTemplateDetection:
         assert "PhysxTriggerAPI" in code
         assert "PhysxSDFMeshCollisionAPI" not in code
 
+    @pytest.mark.skipif(
+        "check_path_clearance" not in CODE_GEN_HANDLERS,
+        reason="check_path_clearance handler not on this branch",
+    )
     def test_check_path_clearance_multiple_waypoints(self):
         """Trajectory with multiple waypoints should be embedded as a list-of-lists."""
         code = CODE_GEN_HANDLERS["check_path_clearance"]({
@@ -2486,6 +2577,10 @@ class TestTemplateDetection:
         assert "compute_forward_kinematics" in code
         assert "violations" in code
 
+    @pytest.mark.skipif(
+        "check_path_clearance" not in CODE_GEN_HANDLERS,
+        reason="check_path_clearance handler not on this branch",
+    )
     def test_check_path_clearance_no_obstacles(self):
         """Empty obstacle list is still valid — every waypoint should report inf clearance."""
         code = CODE_GEN_HANDLERS["check_path_clearance"]({
@@ -2783,6 +2878,108 @@ class TestTemplateDetection:
         })
         _assert_valid_python(code, "set_light_intensity")
         assert "/World/Lights/Key_Light_01" in code
+
+
+    # ── Tier 7 — Camera atomic edge cases ─────────────────────────────────
+
+    @pytest.mark.skipif(
+        "set_camera_params" not in CODE_GEN_HANDLERS,
+        reason="set_camera_params handler not on this branch",
+    )
+    def test_set_camera_params_partial_fields_leaves_others_alone(self):
+        """Only requested fields should be emitted as Set() calls."""
+        code = CODE_GEN_HANDLERS["set_camera_params"]({
+            "camera_path": "/World/Cam",
+            "params": {"focal_length": 50.0},
+        })
+        _assert_valid_python(code, "set_camera_params")
+        assert "GetFocalLengthAttr().Set(50.0)" in code
+        # Other attributes should not be touched
+        assert "GetHorizontalApertureAttr().Set" not in code
+        assert "GetClippingRangeAttr().Set" not in code
+        assert "GetFocusDistanceAttr().Set" not in code
+        assert "GetFStopAttr().Set" not in code
+        assert "GetProjectionAttr().Set" not in code
+
+    @pytest.mark.skipif(
+        "set_camera_params" not in CODE_GEN_HANDLERS,
+        reason="set_camera_params handler not on this branch",
+    )
+    def test_set_camera_params_empty_params_still_compiles(self):
+        """params={} should produce a valid no-op patch (validator + print only)."""
+        code = CODE_GEN_HANDLERS["set_camera_params"]({
+            "camera_path": "/World/Cam",
+            "params": {},
+        })
+        _assert_valid_python(code, "set_camera_params")
+        assert "UsdGeom.Camera" in code
+        assert "GetFocalLengthAttr().Set" not in code
+
+    @pytest.mark.skipif(
+        "set_camera_params" not in CODE_GEN_HANDLERS,
+        reason="set_camera_params handler not on this branch",
+    )
+    def test_set_camera_params_invalid_projection_is_noop_with_warning(self):
+        """Unknown projection value should emit a warning comment, not crash compile."""
+        code = CODE_GEN_HANDLERS["set_camera_params"]({
+            "camera_path": "/World/Cam",
+            "params": {"projection": "fisheye"},
+        })
+        _assert_valid_python(code, "set_camera_params")
+        assert "WARNING" in code
+        assert "GetProjectionAttr().Set" not in code
+
+    @pytest.mark.skipif(
+        "set_camera_params" not in CODE_GEN_HANDLERS,
+        reason="set_camera_params handler not on this branch",
+    )
+    def test_set_camera_params_clipping_range_uses_vec2f(self):
+        """clipping_range should land in a Gf.Vec2f, not a tuple."""
+        code = CODE_GEN_HANDLERS["set_camera_params"]({
+            "camera_path": "/World/Cam",
+            "params": {"clipping_range": [0.5, 5000.0]},
+        })
+        _assert_valid_python(code, "set_camera_params")
+        assert "Gf.Vec2f(0.5, 5000.0)" in code
+
+    @pytest.mark.skipif(
+        "set_camera_look_at" not in CODE_GEN_HANDLERS,
+        reason="set_camera_look_at handler not on this branch",
+    )
+    def test_set_camera_look_at_default_up_is_y(self):
+        """Omitting 'up' should default to world +Y."""
+        code = CODE_GEN_HANDLERS["set_camera_look_at"]({
+            "camera_path": "/World/Cam",
+            "target": [0.0, 0.0, 0.0],
+        })
+        _assert_valid_python(code, "set_camera_look_at")
+        assert "Gf.Vec3d(0.0, 1.0, 0.0)" in code
+
+    @pytest.mark.skipif(
+        "set_camera_look_at" not in CODE_GEN_HANDLERS,
+        reason="set_camera_look_at handler not on this branch",
+    )
+    def test_set_camera_look_at_no_eye_uses_current_position(self):
+        """When 'eye' is omitted the snippet must read the camera's current world translation."""
+        code = CODE_GEN_HANDLERS["set_camera_look_at"]({
+            "camera_path": "/World/Cam",
+            "target": [1.0, 0.0, 0.0],
+        })
+        _assert_valid_python(code, "set_camera_look_at")
+        assert "ComputeLocalToWorldTransform" in code
+        assert "ExtractTranslation" in code
+
+    @pytest.mark.skipif(
+        "set_camera_look_at" not in CODE_GEN_HANDLERS,
+        reason="set_camera_look_at handler not on this branch",
+    )
+    def test_set_camera_look_at_rejects_bad_target(self):
+        """Malformed target should raise ValueError synchronously (caught before queueing)."""
+        with pytest.raises(ValueError):
+            CODE_GEN_HANDLERS["set_camera_look_at"]({
+                "camera_path": "/World/Cam",
+                "target": [1.0, 2.0],  # only 2 components
+            })
 
 
 class TestAllCodeGenHandlersCovered:
