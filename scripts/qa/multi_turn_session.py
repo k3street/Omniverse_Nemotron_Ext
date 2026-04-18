@@ -74,16 +74,13 @@ else:
                 wt = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
                 tr = wt.ExtractTranslation()
                 transforms_info[path] = [round(float(tr[0]),4), round(float(tr[1]),4), round(float(tr[2]),4)]
-                # Rotation as quaternion (w, x, y, z) — enables orientation checks
-                try:
-                    q = wt.ExtractRotationQuat()
-                    rotations_info[path] = [round(float(q.GetReal()), 4),
-                                            round(float(q.GetImaginary()[0]), 4),
-                                            round(float(q.GetImaginary()[1]), 4),
-                                            round(float(q.GetImaginary()[2]), 4)]
-                except Exception:
-                    pass
-                # Scale — enables size checks
+                # Extract scale from row lengths FIRST so we can strip it out
+                # before reading rotation. ExtractRotationQuat on a matrix that
+                # still contains non-uniform scale produces a non-unit quaternion
+                # that looks like a mutated rotation — verified: for a Cylinder
+                # with scale=(0.2,0.2,0.5) + rotate=(-90,0,0), the un-normalized
+                # quaternion read was [0.55, -0.32, 0, 0] instead of the correct
+                # [0.707, -0.707, 0, 0].
                 try:
                     sx = wt.GetRow(0).GetLength()
                     sy = wt.GetRow(1).GetLength()
@@ -91,38 +88,95 @@ else:
                     if abs(sx-1.0) > 1e-4 or abs(sy-1.0) > 1e-4 or abs(sz-1.0) > 1e-4:
                         scales_info[path] = [round(float(sx),4), round(float(sy),4), round(float(sz),4)]
                 except Exception:
+                    sx = sy = sz = 1.0
+
+                try:
+                    # Orthonormalize the matrix before extracting rotation —
+                    # GetOrthonormalized returns a pure-rotation copy, stripping
+                    # out scale. ExtractRotationQuat on the raw scaled matrix
+                    # returns a non-unit quaternion that misrepresents the
+                    # actual rotation.
+                    _R = wt.GetOrthonormalized()
+                    q = _R.ExtractRotationQuat()
+                    rotations_info[path] = [round(float(q.GetReal()), 4),
+                                            round(float(q.GetImaginary()[0]), 4),
+                                            round(float(q.GetImaginary()[1]), 4),
+                                            round(float(q.GetImaginary()[2]), 4)]
+                except Exception:
                     pass
         except Exception:
             pass
 
-        # Type-specific geometric attributes for primitive shapes
+        # Type-specific geometric attributes for primitive shapes.
+        # Includes both the raw USD attribute AND the effective (scale-adjusted)
+        # dimension, because agents often use scale=0.2 to make a 0.2m sphere
+        # rather than setting the radius attribute. Judges need the effective
+        # value to avoid false-fabrication rulings.
         try:
+            _scale_vec = scales_info.get(path) or [1.0, 1.0, 1.0]
+            _sx, _sy, _sz = _scale_vec
             if p.IsA(UsdGeom.Cube):
                 v = UsdGeom.Cube(p).GetSizeAttr().Get()
                 if v is not None:
-                    geom_info[path] = {"size": round(float(v), 4)}
+                    # Cube's 'size' is edge length; effective edge = size*scale
+                    # (use mean when scales are non-uniform so users get one number)
+                    geom_info[path] = {
+                        "size": round(float(v), 4),
+                        "effective_size_xyz": [round(float(v) * _sx, 4),
+                                               round(float(v) * _sy, 4),
+                                               round(float(v) * _sz, 4)],
+                    }
             elif p.IsA(UsdGeom.Sphere):
                 v = UsdGeom.Sphere(p).GetRadiusAttr().Get()
                 if v is not None:
-                    geom_info[path] = {"radius": round(float(v), 4)}
+                    # Sphere.radius is uniform; under non-uniform scale the shape
+                    # is an ellipsoid and judges should compare all three axes.
+                    geom_info[path] = {
+                        "radius": round(float(v), 4),
+                        "effective_radius_xyz": [round(float(v) * _sx, 4),
+                                                 round(float(v) * _sy, 4),
+                                                 round(float(v) * _sz, 4)],
+                    }
             elif p.IsA(UsdGeom.Cylinder):
                 c = UsdGeom.Cylinder(p)
+                r = float(c.GetRadiusAttr().Get() or 0.0)
+                h = float(c.GetHeightAttr().Get() or 0.0)
+                axis = str(c.GetAxisAttr().Get() or "Z")
+                # Effective radius uses the scale of the two non-axis components;
+                # height uses the scale along the axis direction.
+                s_by_axis = {"X": _sx, "Y": _sy, "Z": _sz}
+                eff_h = h * s_by_axis.get(axis, _sz)
+                eff_r_a, eff_r_b = (
+                    (r * _sy, r * _sz) if axis == "X"
+                    else (r * _sx, r * _sz) if axis == "Y"
+                    else (r * _sx, r * _sy)
+                )
                 geom_info[path] = {
-                    "radius": round(float(c.GetRadiusAttr().Get() or 0.0), 4),
-                    "height": round(float(c.GetHeightAttr().Get() or 0.0), 4),
-                    "axis": str(c.GetAxisAttr().Get() or "Z"),
+                    "radius": round(r, 4),
+                    "height": round(h, 4),
+                    "axis": axis,
+                    "effective_radius": [round(eff_r_a, 4), round(eff_r_b, 4)],
+                    "effective_height": round(eff_h, 4),
                 }
             elif p.IsA(UsdGeom.Cone):
                 c = UsdGeom.Cone(p)
+                r = float(c.GetRadiusAttr().Get() or 0.0)
+                h = float(c.GetHeightAttr().Get() or 0.0)
                 geom_info[path] = {
-                    "radius": round(float(c.GetRadiusAttr().Get() or 0.0), 4),
-                    "height": round(float(c.GetHeightAttr().Get() or 0.0), 4),
+                    "radius": round(r, 4),
+                    "height": round(h, 4),
+                    "effective_radius_xy": [round(r * _sx, 4), round(r * _sy, 4)],
+                    "effective_height": round(h * _sz, 4),
                 }
             elif p.IsA(UsdGeom.Capsule):
                 c = UsdGeom.Capsule(p)
+                r = float(c.GetRadiusAttr().Get() or 0.0)
+                h = float(c.GetHeightAttr().Get() or 0.0)
                 geom_info[path] = {
-                    "radius": round(float(c.GetRadiusAttr().Get() or 0.0), 4),
-                    "height": round(float(c.GetHeightAttr().Get() or 0.0), 4),
+                    "radius": round(r, 4),
+                    "height": round(h, 4),
+                    "effective_radius_xy": [round(r * _sx, 4), round(r * _sy, 4)],
+                    "effective_height": round(h * _sz, 4),
                 }
         except Exception:
             pass
