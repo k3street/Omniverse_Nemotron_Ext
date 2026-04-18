@@ -23100,9 +23100,25 @@ async def _handle_checkpoint_training(args: Dict) -> Dict:
     except Exception as e:
         return {"error": f"IPC query failed: {e}", "run_id": run_id}
 
+    # Without a concrete checkpoint_path the IPC ack can't be trusted as a
+    # real save — training subprocesses sometimes ack the op but fail to
+    # write the file (disk full, permission denied, policy-state race).
+    # Return an explicit error rather than success with checkpoint_path=""
+    # so the agent doesn't narrate "saved to '' ".
+    ckpt_path = ipc_result.get("checkpoint_path") or ""
+    if not ckpt_path:
+        return {
+            "error": (
+                "IPC ack did not include a checkpoint_path — training "
+                "subprocess may have failed to write the file (disk full, "
+                "permission denied, or policy-state race)."
+            ),
+            "run_id": run_id,
+            "ipc_result": ipc_result,
+        }
     return {
         "run_id": run_id,
-        "checkpoint_path": ipc_result.get("checkpoint_path", ""),
+        "checkpoint_path": ckpt_path,
         "step": ipc_result.get("step", entry.get("last_known_step", 0)),
         "iteration": ipc_result.get("iteration", entry.get("last_known_iteration", 0)),
         "size_bytes": ipc_result.get("size_bytes", 0),
