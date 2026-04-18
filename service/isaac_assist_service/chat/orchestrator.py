@@ -386,6 +386,55 @@ class ChatOrchestrator:
 
         reply = response.text or ""
 
+        # Anti-fabrication: if the last round of tool calls contained failures
+        # (success=false or executed=false) and the reply doesn't acknowledge
+        # them — i.e. it sounds like the effect succeeded — force a rewrite.
+        # This is the motion-fabrication pattern seen in R-02 / AM-01: Assist
+        # says "callback registered, hit Play" after run_usd_script failed.
+        if reply.strip() and executed_tools:
+            last_round_fails = [
+                t for t in executed_tools[-6:]  # last ~round of calls
+                if not t.get("result", {}).get("success", True)
+                or t.get("result", {}).get("executed") is False
+            ]
+            reply_l = reply.lower()
+            ack_words = ("fail", "error", "didn't", "did not", "couldn't",
+                         "could not", "not applied", "not authored", "not registered",
+                         "did not succeed", "was not", "wasn't")
+            claims_success = any(w in reply_l for w in
+                ("ready", "registered", "loaded", "is set", "configured",
+                 "applied", "hit play", "press play", "done"))
+            acks_failure = any(w in reply_l for w in ack_words)
+            if last_round_fails and claims_success and not acks_failure:
+                logger.warning(
+                    f"[{session_id}] Reply claims success with {len(last_round_fails)} tool failures — forcing honesty rewrite"
+                )
+                failed_names = ", ".join(
+                    f"{t['tool']}(success={t['result'].get('success')}, executed={t['result'].get('executed')})"
+                    for t in last_round_fails[:4]
+                )
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"Your previous reply described the effect as succeeded "
+                        f"('ready' / 'registered' / 'hit Play' / similar), but "
+                        f"these tool calls FAILED: {failed_names}. "
+                        "Rewrite the reply honestly: say exactly which step failed "
+                        "and why, do NOT tell the user to hit Play if no working "
+                        "drive/callback was actually installed, and propose one "
+                        "concrete next step. Do NOT call more tools. Keep it tight."
+                    ),
+                })
+                try:
+                    rewrite_ctx = dict(context) if isinstance(context, dict) else {}
+                    rewrite_ctx["tools"] = []
+                    rewrite_response = await self.llm_provider.complete(messages, rewrite_ctx)
+                    rewrite = (rewrite_response.text or "").strip()
+                    if rewrite:
+                        reply = rewrite
+                except Exception as e:
+                    logger.warning(f"[{session_id}] Honesty rewrite failed: {e}")
+
         # Anti-ghosting: if the LLM finished calling tools but never produced
         # visible text, the user sees a blank reply and assumes we died. Force
         # one more call with tools disabled, asking for a concise summary.
@@ -418,6 +467,169 @@ class ChatOrchestrator:
                     "Check the stage tree / viewport for the result; frame-focus on the new "
                     "prim if the camera isn't on it yet."
                 )
+
+        # Anti-fabricated-menu-path: Kit menu paths like
+        # "Window > Extensions" or "**Isaac Utils** > **Common Samples** > ..."
+        # are a common hallucination (AM-01 T5). Flag any such path in reply
+        # that did NOT appear in a tool result this session.
+        if reply.strip():
+            try:
+                import re as _re
+                tool_result_blob = " ".join(
+                    json.dumps(t.get("result", {}), default=str)
+                    for t in executed_tools
+                )
+                # Bold-markdown menu paths: **X** > **Y** > **Z** (2+ hops)
+                bold_menu = _re.findall(
+                    r"\*\*([A-Z][A-Za-z0-9 _/-]{1,40})\*\*\s*[>›→]\s*\*\*([A-Z][A-Za-z0-9 _/-]{1,40})\*\*(?:\s*[>›→]\s*\*\*([A-Z][A-Za-z0-9 _/-]{1,40})\*\*)?",
+                    reply,
+                )
+                # Plain menu paths starting with known Kit roots
+                _KIT_ROOTS = ("Window", "File", "Edit", "Tools", "Layout",
+                              "Help", "Create", "Isaac Utils", "Isaac Examples",
+                              "Extension Manager")
+                plain_menu = _re.findall(
+                    rf"\b({'|'.join(_re.escape(r) for r in _KIT_ROOTS)})\s*[>›→]\s*([A-Z][A-Za-z0-9 _/-]{{1,40}})(?:\s*[>›→]\s*([A-Z][A-Za-z0-9 _/-]{{1,40}}))?",
+                    reply,
+                )
+                unverified = []
+                for parts in bold_menu + plain_menu:
+                    nonempty = [p for p in parts if p]
+                    if len(nonempty) < 2:
+                        continue
+                    path_str = " > ".join(nonempty)
+                    # Verified if ALL path components appear in some tool result
+                    if not all(p in tool_result_blob for p in nonempty):
+                        unverified.append(path_str)
+                if unverified:
+                    logger.warning(
+                        f"[{session_id}] Unverified menu paths in reply: {unverified[:3]}"
+                    )
+                    warn = (
+                        "\n\n⚠️ The menu path(s) above ("
+                        + "; ".join(f"'{p}'" for p in unverified[:3])
+                        + ") were not retrieved from any tool this session — "
+                        "they may not exist in your Kit build. Verify via the "
+                        "Extension Manager or share a screenshot of your toolbar."
+                    )
+                    reply = reply + warn
+            except Exception as e:
+                logger.warning(f"[{session_id}] menu-path validation failed: {e}")
+
+        # Verify-before-assert contract: check every scene-state claim in the
+        # reply against ground truth by auto-invoking the verify primitives.
+        # This is the structural (Fas 2) replacement for Fix B's keyword
+        # heuristic — no prompt engineering, model-agnostic, runs after the
+        # LLM has committed to its answer.
+        #
+        # Two claim classes we can verify deterministically right now:
+        #   (a) Prim-path claims — reply mentions `/World/X` → verify prim_exists
+        #   (b) Count claims     — "I cloned N ..." or "N arms" + a path → verify count
+        if reply.strip() and executed_tools is not None:
+            try:
+                import re as _re
+                from .tools.tool_executor import execute_tool_call as _exec
+                verify_warnings = []
+
+                # (a) All USD-like paths mentioned in the reply
+                claimed_paths = set(_re.findall(r"(?<![A-Za-z0-9_])/World[/A-Za-z0-9_]+", reply))
+                # Skip paths that already appeared in any tool output this turn
+                # (those were grounded in real tool observations).
+                tool_output_blob = " ".join(
+                    json.dumps(t.get("result", {}), default=str)
+                    for t in executed_tools
+                )
+                unverified_paths = [p for p in claimed_paths if p not in tool_output_blob]
+                # Cap at 4 verifications to keep cost bounded
+                for p in sorted(unverified_paths)[:4]:
+                    try:
+                        ver = await _exec("prim_exists", {"prim_path": p})
+                        # DATA_HANDLERS return dict with 'output' (json string) OR direct fields
+                        out = ver.get("output") if isinstance(ver, dict) else None
+                        if isinstance(out, str) and out.strip().startswith("{"):
+                            try:
+                                parsed = json.loads(out)
+                            except Exception:
+                                parsed = {}
+                        else:
+                            parsed = ver if isinstance(ver, dict) else {}
+                        exists = parsed.get("exists")
+                        if exists is False:
+                            verify_warnings.append(f"`{p}` does not exist in the stage")
+                    except Exception as e:
+                        logger.debug(f"[{session_id}] verify prim_exists({p}) failed: {e}")
+
+                # (b) Count claims: "N arms", "N robots", "N clones", etc. paired with a path
+                # Matches patterns like "16 arms ... at /World/envs" or "cloned 16 Franka"
+                count_pat = _re.compile(
+                    r"\b(?P<n>\d{1,4})\s+(?P<noun>arms?|robots?|clones?|copies|instances?|envs?|environments?|cubes?|spheres?|cameras?)\b[^\n]{0,200}?(?P<path>/World[/A-Za-z0-9_]+)?",
+                    _re.I,
+                )
+                matched_counts = set()
+                for m in count_pat.finditer(reply):
+                    n = int(m.group("n"))
+                    path = m.group("path")
+                    key = (n, path)
+                    if key in matched_counts or not path:
+                        continue
+                    matched_counts.add(key)
+                    if len(matched_counts) > 2:
+                        break
+                    try:
+                        ver = await _exec("count_prims_under_path", {
+                            "parent_path": path, "recursive": False,
+                        })
+                        out = ver.get("output") if isinstance(ver, dict) else None
+                        parsed = {}
+                        if isinstance(out, str) and out.strip().startswith("{"):
+                            try: parsed = json.loads(out)
+                            except: pass
+                        actual = parsed.get("count")
+                        if isinstance(actual, int) and actual != n:
+                            verify_warnings.append(
+                                f"reply claims {n} {m.group('noun')} under `{path}`, "
+                                f"but count_prims_under_path found {actual}"
+                            )
+                    except Exception as e:
+                        logger.debug(f"[{session_id}] verify count({path}) failed: {e}")
+
+                if verify_warnings:
+                    logger.warning(
+                        f"[{session_id}] verify-contract mismatches: {verify_warnings[:3]}"
+                    )
+                    warn = (
+                        "\n\n⚠️ Verification mismatch — I checked my own claims against the stage and found: "
+                        + "; ".join(verify_warnings[:3])
+                        + ". Treat the summary above as provisional and re-run the failing step."
+                    )
+                    reply = reply + warn
+            except Exception as e:
+                logger.warning(f"[{session_id}] verify-contract failed: {e}")
+
+        # Anti-ModuleNotFoundError: scan inline ```python blocks in the reply
+        # for deprecated `omni.isaac.*` imports before handing to user. Prepend
+        # a visible warning if found — user was about to copy-paste broken code.
+        if reply.strip():
+            try:
+                import re as _re
+                code_blocks = _re.findall(r"```(?:python|py)?\s*\n(.*?)```", reply, _re.S)
+                from .tools.api_validator import validate_code as _api_validate
+                bad = []
+                for blk in code_blocks:
+                    _ok, issues = _api_validate(blk)
+                    for i in issues:
+                        if i.get("severity") == "deprecated":
+                            bad.append(i.get("message", "deprecated import"))
+                if bad:
+                    warn = (
+                        "\n\n⚠️ The code above uses deprecated 4.x namespaces "
+                        "and will raise ModuleNotFoundError on Isaac Sim 5.x: "
+                        + "; ".join(bad[:3])
+                        + ". Ask me to regenerate it with `isaacsim.*` modules."
+                    )
+                    reply = reply + warn
+            except Exception as e:
+                logger.warning(f"[{session_id}] inline-code validation failed: {e}")
 
         logger.info(f"[{session_id}] ASSISTANT: {reply[:200]}")
 
