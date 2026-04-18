@@ -7067,21 +7067,39 @@ def _gen_robot_wizard(args: Dict) -> str:
 
     is_urdf = asset_path.lower().endswith(".urdf")
 
+    # Common precheck for local filesystem paths. Matches the pattern in
+    # import_robot / add_reference / add_usd_reference: URL-scheme prefixes
+    # go through USD's asset resolver, everything else must exist on disk.
+    _path_check = f"""\
+import os as _os
+_asset = {asset_path!r}
+if not any(_asset.startswith(p) for p in ('omniverse://','http://','https://','file://','anon:')):
+    if not _os.path.exists(_asset):
+        raise FileNotFoundError(f'robot_wizard: asset not found on disk: {{_asset!r}}')
+"""
+
     if is_urdf:
-        import_block = f"""\
+        import_block = _path_check + f"""
 # Step 1: Import robot from URDF
 from isaacsim.asset.importer.urdf import import_urdf, ImportConfig
 cfg = ImportConfig()
 cfg.convex_decomposition = False  # use convex hull
-dest_path = import_urdf('{asset_path}', cfg)
+dest_path = import_urdf({asset_path!r}, cfg)
+if not dest_path:
+    raise RuntimeError(f'robot_wizard: import_urdf returned empty dest_path for {{_asset!r}}')
+_imported_prim = stage.GetPrimAtPath(dest_path)
+if not _imported_prim.IsValid():
+    raise RuntimeError(f'robot_wizard: import_urdf said dest_path={{dest_path!r}} but no prim exists there')
 print(f"Imported URDF → {{dest_path}}")
 """
     else:
-        import_block = f"""\
+        import_block = _path_check + f"""
 # Step 1: Import robot from USD
 dest_path = '/World/Robot'
 prim = stage.DefinePrim(dest_path, 'Xform')
-prim.GetReferences().AddReference('{asset_path}')
+prim.GetReferences().AddReference({asset_path!r})
+if not prim.HasAuthoredReferences():
+    raise RuntimeError(f'robot_wizard: AddReference({{_asset!r}}) completed but HasAuthoredReferences is False on {{dest_path}}')
 print(f"Loaded USD asset → {{dest_path}}")
 """
 

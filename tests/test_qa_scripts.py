@@ -447,6 +447,26 @@ def test_gen_batch_set_attributes_reports_accurate_counts():
     assert "raise RuntimeError" in code
 
 
+def test_gen_robot_wizard_validates_asset_path():
+    """Regression: robot_wizard for USD path did `prim.GetReferences().AddReference(asset_path)`
+    without any existence check; for URDF it trusted import_urdf's return.
+    Both now have a precheck for local filesystem paths (skipping remote URLs)
+    and a post-check that the expected prim landed."""
+    import sys
+    sys.path.insert(0, "service")
+    from isaac_assist_service.chat.tools.tool_executor import _gen_robot_wizard
+
+    code_usd = _gen_robot_wizard({"asset_path": "/tmp/r.usd"})
+    assert "_os.path.exists" in code_usd
+    assert "FileNotFoundError" in code_usd
+    assert "HasAuthoredReferences" in code_usd
+
+    code_urdf = _gen_robot_wizard({"asset_path": "/tmp/r.urdf"})
+    assert "import_urdf" in code_urdf
+    assert "not dest_path" in code_urdf  # empty dest_path → raise
+    assert "_imported_prim.IsValid" in code_urdf
+
+
 def test_gen_batch_delete_prims_reports_real_removal_count():
     """Regression: old batch_delete_prims printed 'removed {len(paths)}'
     regardless of whether layer.Apply succeeded, and ignored the atomic
