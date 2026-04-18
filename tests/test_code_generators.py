@@ -917,6 +917,114 @@ _TEST_VECTORS = [
         {"mode": "scaled", "time_scale": 2.0},
         ["useSimTime", "True", "ROS2PublishClock", "Time scale", "2.0"],
     ),
+    # ── Interactive Robot Teaching ─────────────────────────────────────────────
+    (
+        "start_teaching_mode",
+        {
+            "articulation_path": "/World/Franka",
+            "mode": "drag_target",
+            "robot_type": "franka",
+        },
+        ["RmpFlow", "TeachTarget", "subscribe_physics_step_events", "set_end_effector_target", "Sphere"],
+    ),
+    (
+        "start_teaching_mode",
+        {
+            "articulation_path": "/World/Franka",
+            "mode": "keyboard",
+        },
+        ["Se3Keyboard", "pos_sensitivity", "SingleArticulation"],
+    ),
+    (
+        "start_teaching_mode",
+        {
+            "articulation_path": "/World/Franka",
+            "mode": "spacemouse",
+        },
+        ["Se3SpaceMouse", "pos_sensitivity", "SingleArticulation"],
+    ),
+    (
+        "start_teaching_mode",
+        {
+            "articulation_path": "/World/Franka",
+            "mode": "gravity_comp",
+        },
+        ["set_joint_stiffnesses", "set_joint_dampings", "subscribe_physics_step_events", "gravity_comp"],
+    ),
+    (
+        "record_waypoints",
+        {
+            "articulation_path": "/World/Franka",
+            "output_path": "/tmp/waypoints.json",
+            "format": "json",
+        },
+        ["get_joint_positions", "json.dump", "waypoints", "/tmp/waypoints.json"],
+    ),
+    (
+        "record_waypoints",
+        {
+            "articulation_path": "/World/Franka",
+            "output_path": "/tmp/demo.hdf5",
+            "format": "hdf5",
+        },
+        ["h5py", "robomimic", "joint_pos", "joint_vel", "num_demos"],
+    ),
+    (
+        "record_waypoints",
+        {
+            "articulation_path": "/World/Franka",
+            "output_path": "/tmp/waypoints.usd",
+            "format": "usd",
+        },
+        ["TimeSample", "DriveAPI", "SetEndTimeCode"],
+    ),
+    (
+        "replay_trajectory",
+        {
+            "articulation_path": "/World/Franka",
+            "trajectory_path": "/tmp/waypoints.json",
+            "speed": 0.5,
+        },
+        ["subscribe_physics_step_events", "set_joint_position_targets", "waypoints", "0.5"],
+    ),
+    (
+        "interpolate_trajectory",
+        {
+            "articulation_path": "/World/Franka",
+            "waypoints": [
+                {"joint_positions": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
+                {"joint_positions": [0.5, 0.3, 0.1, -0.2, 0.0, 0.4, 0.0]},
+            ],
+            "method": "linear",
+            "num_steps": 50,
+        },
+        ["linspace", "interpolated", "Linear interpolation"],
+    ),
+    (
+        "interpolate_trajectory",
+        {
+            "articulation_path": "/World/Franka",
+            "waypoints": [
+                {"joint_positions": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
+                {"joint_positions": [0.5, 0.3, 0.1, -0.2, 0.0, 0.4, 0.0]},
+            ],
+            "method": "cubic",
+        },
+        ["CubicSpline", "scipy.interpolate", "Cubic interpolation"],
+    ),
+    (
+        "interpolate_trajectory",
+        {
+            "articulation_path": "/World/Franka",
+            "waypoints": [
+                {"joint_positions": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
+                {"joint_positions": [0.5, 0.3, 0.1, -0.2, 0.0, 0.4, 0.0]},
+            ],
+            "method": "rmpflow",
+            "robot_type": "franka",
+        },
+        ["RmpFlow", "interface_config_loader", "RMPflow interpolation", "collision-aware"],
+    ),
     # ── Phase 8B Addendum: Workspace & Singularity ──────────────────────────
     (
         "show_workspace",
@@ -1260,6 +1368,80 @@ class TestCodeGenEdgeCases:
     # ── Phase 8D edge cases ────────────────────────────────────────────────
 
     @pytest.mark.skipif("robot_wizard" not in CODE_GEN_HANDLERS, reason="Phase 8D not merged")
+    # ── Interactive Teaching edge cases ────────────────────────────────────
+
+    def test_start_teaching_unknown_mode(self):
+        """Unknown mode should return a comment, not crash."""
+        code = CODE_GEN_HANDLERS["start_teaching_mode"](
+            {"articulation_path": "/World/Franka", "mode": "telekinesis"}
+        )
+        _assert_valid_python(code, "start_teaching_mode")
+        assert "Unknown" in code
+
+    def test_start_teaching_default_robot_type(self):
+        """When robot_type is omitted, should default to franka."""
+        code = CODE_GEN_HANDLERS["start_teaching_mode"](
+            {"articulation_path": "/World/Franka", "mode": "drag_target"}
+        )
+        _assert_valid_python(code, "start_teaching_mode")
+        assert "'franka'" in code
+
+    def test_record_waypoints_default_format_is_json(self):
+        """When format is omitted, should default to JSON."""
+        code = CODE_GEN_HANDLERS["record_waypoints"](
+            {"articulation_path": "/World/Franka", "output_path": "/tmp/wp.json"}
+        )
+        _assert_valid_python(code, "record_waypoints")
+        assert "json.dump" in code
+
+    def test_replay_trajectory_speed_clamped(self):
+        """Speed should be clamped to [0.1, 4.0]."""
+        code = CODE_GEN_HANDLERS["replay_trajectory"](
+            {"articulation_path": "/World/Franka", "trajectory_path": "/tmp/t.json", "speed": 10.0}
+        )
+        _assert_valid_python(code, "replay_trajectory")
+        assert "4.0" in code  # clamped to max
+
+    def test_replay_trajectory_default_speed(self):
+        """Default speed should be 1.0."""
+        code = CODE_GEN_HANDLERS["replay_trajectory"](
+            {"articulation_path": "/World/Franka", "trajectory_path": "/tmp/t.json"}
+        )
+        _assert_valid_python(code, "replay_trajectory")
+        assert "1.0" in code
+
+    def test_interpolate_trajectory_with_output_path(self):
+        """When output_path is provided, should generate save code."""
+        code = CODE_GEN_HANDLERS["interpolate_trajectory"]({
+            "articulation_path": "/World/Franka",
+            "waypoints": [
+                {"joint_positions": [0.0, 0.0]},
+                {"joint_positions": [1.0, 1.0]},
+            ],
+            "method": "linear",
+            "output_path": "/tmp/smooth.json",
+        })
+        _assert_valid_python(code, "interpolate_trajectory")
+        assert "/tmp/smooth.json" in code
+        assert "json.dump" in code
+
+    def test_interpolate_trajectory_cubic_with_output(self):
+        """Cubic with output_path should save."""
+        code = CODE_GEN_HANDLERS["interpolate_trajectory"]({
+            "articulation_path": "/World/Franka",
+            "waypoints": [
+                {"joint_positions": [0.0]},
+                {"joint_positions": [0.5]},
+                {"joint_positions": [1.0]},
+            ],
+            "method": "cubic",
+            "output_path": "/tmp/cubic.json",
+        })
+        _assert_valid_python(code, "interpolate_trajectory")
+        assert "/tmp/cubic.json" in code
+
+    # ── Phase 8D edge cases ────────────────────────────────────────────────
+
     def test_robot_wizard_humanoid_defaults(self):
         """Humanoid type should use stiffness=800, damping=80."""
         code = CODE_GEN_HANDLERS["robot_wizard"]({

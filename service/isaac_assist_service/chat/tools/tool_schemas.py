@@ -5011,6 +5011,239 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Interactive Robot Teaching ──────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "start_teaching_mode",
+            "description": "Start interactive robot teaching mode. Lets the user move the robot to positions interactively and record waypoints for imitation learning or motion planning. Mode 'drag_target' creates a draggable ghost target that the robot follows via RMPflow. Mode 'keyboard' uses WASD/QE keys for end-effector control. Mode 'spacemouse' uses a 3Dconnexion SpaceMouse. Mode 'gravity_comp' zeroes PD gains so the user can drag the arm with viewport physics force-grab (Shift+drag).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation root, e.g. '/World/Franka'"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["drag_target", "keyboard", "spacemouse", "gravity_comp"],
+                        "description": "Teaching input mode. 'drag_target' (recommended): draggable ghost target + RMPflow tracking. 'keyboard': WASD/QE keys. 'spacemouse': 3Dconnexion device. 'gravity_comp': zero PD gains for backdrivable arm.",
+                    },
+                    "robot_type": {"type": "string", "description": "Robot name for auto-loading RMPflow config: 'franka', 'ur10', 'ur5e', 'cobotta'. Default: 'franka'"},
+                },
+                "required": ["articulation_path", "mode"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "record_waypoints",
+            "description": "Record the current robot joint state as a waypoint, or save all recorded waypoints to a file. Use during teaching mode to capture positions. Supports HDF5 (robomimic schema for imitation learning), JSON (for motion planning replay), and USD TimeSamples (for in-sim replay).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation root"},
+                    "output_path": {"type": "string", "description": "File path to save waypoints. Extension determines format: .hdf5, .json, or .usd"},
+                    "format": {
+                        "type": "string",
+                        "enum": ["hdf5", "json", "usd"],
+                        "description": "Output format: 'hdf5' (robomimic schema), 'json' (motion planning), 'usd' (TimeSamples). Default: 'json'",
+                    },
+                },
+                "required": ["articulation_path", "output_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "replay_trajectory",
+            "description": "Play back a recorded trajectory (from record_waypoints) in the viewport. Reads waypoints from a JSON or HDF5 file and drives the robot through them at adjustable speed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation root"},
+                    "trajectory_path": {"type": "string", "description": "Path to the trajectory file (.json or .hdf5)"},
+                    "speed": {"type": "number", "description": "Playback speed multiplier (0.1 to 4.0). Default: 1.0"},
+                },
+                "required": ["articulation_path", "trajectory_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "interpolate_trajectory",
+            "description": "Generate a smooth trajectory between sparse waypoints. Takes a list of joint-space waypoints and interpolates to produce a dense, smooth trajectory. Methods: 'linear' (joint-space linear), 'cubic' (cubic spline), 'rmpflow' (collision-aware via RMPflow).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation root"},
+                    "waypoints": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "joint_positions": {"type": "array", "items": {"type": "number"}, "description": "Joint positions in radians"},
+                            },
+                            "required": ["joint_positions"],
+                        },
+                        "description": "List of joint-space waypoints to interpolate between",
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["linear", "cubic", "rmpflow"],
+                        "description": "Interpolation method. 'linear': joint-space linear. 'cubic': cubic spline. 'rmpflow': collision-aware. Default: 'linear'",
+                    },
+                    "num_steps": {"type": "integer", "description": "Number of interpolation steps between each pair of waypoints. Default: 50"},
+                    "output_path": {"type": "string", "description": "Optional file path to save the interpolated trajectory (.json)"},
+                    "robot_type": {"type": "string", "description": "Robot name for RMPflow config (only needed for method='rmpflow'). Default: 'franka'"},
+                },
+                "required": ["articulation_path", "waypoints", "method"],
+            },
+        },
+    },
+
+    # ─── Nucleus Browse & Download ─────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "nucleus_browse",
+            "description": "Browse an Omniverse Nucleus server directory to discover available assets (robots, environments, props, materials). Use this to explore the Isaac Sim content library before downloading assets. Returns a list of files and folders at the given path.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Nucleus directory path to browse — e.g. '/NVIDIA/Assets/Isaac/5.1/Robots', '/NVIDIA/Assets/Isaac/5.1/Environments'. Default: '/NVIDIA/Assets/Isaac/5.1'"},
+                    "server": {"type": "string", "description": "Nucleus server URL. Default: 'omniverse://localhost'"},
+                    "limit": {"type": "integer", "description": "Max entries to return. Default: 50"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "download_asset",
+            "description": "Download an asset from an Omniverse Nucleus server to the local Desktop/assets folder and register it in the asset catalog. Use after browsing with nucleus_browse to pull specific USD files locally. The downloaded asset can then be imported into scenes via import_robot or USD references.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nucleus_url": {"type": "string", "description": "Full Nucleus URL — e.g. 'omniverse://localhost/NVIDIA/Assets/Isaac/5.1/Robots/Franka/franka.usd'"},
+                    "local_subdir": {"type": "string", "description": "Local subdirectory under ASSETS_ROOT_PATH. Auto-derived from Nucleus path if omitted."},
+                    "category": {"type": "string", "enum": ["robot", "prop", "scene", "sensor", "material"], "description": "Asset category for catalog registration. Auto-detected from path if omitted."},
+                },
+                "required": ["nucleus_url"],
+            },
+        },
+    },
+
+    # ─── Scene Export ─────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+# ─── Interactive Robot Teaching ──────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "start_teaching_mode",
+            "description": "Start interactive robot teaching mode. Lets the user move the robot to positions interactively and record waypoints for imitation learning or motion planning. Mode 'drag_target' creates a draggable ghost target that the robot follows via RMPflow. Mode 'keyboard' uses WASD/QE keys for end-effector control. Mode 'spacemouse' uses a 3Dconnexion SpaceMouse. Mode 'gravity_comp' zeroes PD gains so the user can drag the arm with viewport physics force-grab (Shift+drag).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation root, e.g. '/World/Franka'"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["drag_target", "keyboard", "spacemouse", "gravity_comp"],
+                        "description": "Teaching input mode. 'drag_target' (recommended): draggable ghost target + RMPflow tracking. 'keyboard': WASD/QE keys. 'spacemouse': 3Dconnexion device. 'gravity_comp': zero PD gains for backdrivable arm.",
+                    },
+                    "robot_type": {"type": "string", "description": "Robot name for auto-loading RMPflow config: 'franka', 'ur10', 'ur5e', 'cobotta'. Default: 'franka'"},
+                },
+                "required": ["articulation_path", "mode"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "record_waypoints",
+            "description": "Record the current robot joint state as a waypoint, or save all recorded waypoints to a file. Use during teaching mode to capture positions. Supports HDF5 (robomimic schema for imitation learning), JSON (for motion planning replay), and USD TimeSamples (for in-sim replay).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation root"},
+                    "output_path": {"type": "string", "description": "File path to save waypoints. Extension determines format: .hdf5, .json, or .usd"},
+                    "format": {
+                        "type": "string",
+                        "enum": ["hdf5", "json", "usd"],
+                        "description": "Output format: 'hdf5' (robomimic schema), 'json' (motion planning), 'usd' (TimeSamples). Default: 'json'",
+                    },
+                },
+                "required": ["articulation_path", "output_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "replay_trajectory",
+            "description": "Play back a recorded trajectory (from record_waypoints) in the viewport. Reads waypoints from a JSON or HDF5 file and drives the robot through them at adjustable speed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation root"},
+                    "trajectory_path": {"type": "string", "description": "Path to the trajectory file (.json or .hdf5)"},
+                    "speed": {"type": "number", "description": "Playback speed multiplier (0.1 to 4.0). Default: 1.0"},
+                },
+                "required": ["articulation_path", "trajectory_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "interpolate_trajectory",
+            "description": "Generate a smooth trajectory between sparse waypoints. Takes a list of joint-space waypoints and interpolates to produce a dense, smooth trajectory. Methods: 'linear' (joint-space linear), 'cubic' (cubic spline), 'rmpflow' (collision-aware via RMPflow).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation root"},
+                    "waypoints": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "joint_positions": {"type": "array", "items": {"type": "number"}, "description": "Joint positions in radians"},
+                            },
+                            "required": ["joint_positions"],
+                        },
+                        "description": "List of joint-space waypoints to interpolate between",
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["linear", "cubic", "rmpflow"],
+                        "description": "Interpolation method. 'linear': joint-space linear. 'cubic': cubic spline. 'rmpflow': collision-aware. Default: 'linear'",
+                    },
+                    "num_steps": {"type": "integer", "description": "Number of interpolation steps between each pair of waypoints. Default: 50"},
+                    "output_path": {"type": "string", "description": "Optional file path to save the interpolated trajectory (.json)"},
+                    "robot_type": {"type": "string", "description": "Robot name for RMPflow config (only needed for method='rmpflow'). Default: 'franka'"},
+                },
+                "required": ["articulation_path", "waypoints", "method"],
+            },
+        },
+    },
+
     # ─── Nucleus Browse & Download ─────────────────────────────────────────────
     {
         "type": "function",

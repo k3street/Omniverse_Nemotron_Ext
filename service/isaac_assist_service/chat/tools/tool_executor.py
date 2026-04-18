@@ -18542,6 +18542,1638 @@ async def _handle_catalog_search(args: Dict) -> Dict:
 DATA_HANDLERS["catalog_search"] = _handle_catalog_search
 
 
+# ── Interactive Robot Teaching ────────────────────────────────────────────────
+
+def _gen_start_teaching_mode(args: Dict) -> str:
+    """Generate code to start interactive robot teaching mode."""
+    art_path = args["articulation_path"]
+    mode = args["mode"]
+    robot_type = args.get("robot_type", "franka").lower()
+
+    if mode == "drag_target":
+        # FollowTarget pattern: ghost target prim + RMPflow tracking
+        return f"""\
+import omni.usd
+import numpy as np
+from pxr import UsdGeom, Gf, Sdf
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+stage = omni.usd.get_context().get_stage()
+
+# Create draggable ghost target at current end-effector position
+target_path = '{art_path}/TeachTarget'
+if not stage.GetPrimAtPath(target_path).IsValid():
+    target_prim = stage.DefinePrim(target_path, 'Sphere')
+    UsdGeom.Gprim(target_prim).GetDisplayColorAttr().Set([(0.2, 0.8, 0.2)])
+    xf = UsdGeom.Xformable(target_prim)
+    xf.AddTranslateOp().Set(Gf.Vec3d(0.4, 0.0, 0.4))
+    xf.AddScaleOp().Set(Gf.Vec3d(0.03, 0.03, 0.03))
+    print(f"Created draggable teach target at {{target_path}}")
+else:
+    target_prim = stage.GetPrimAtPath(target_path)
+    print(f"Teach target already exists at {{target_path}}")
+
+# Load RMPflow controller for tracking
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+# Register physics callback to track target each step
+def _teach_step(step_size):
+    target_xf = UsdGeom.Xformable(stage.GetPrimAtPath('{art_path}/TeachTarget'))
+    target_pos = target_xf.ComputeLocalToWorldTransform(0).ExtractTranslation()
+    rmpflow.set_end_effector_target(
+        np.array([target_pos[0], target_pos[1], target_pos[2]]),
+        None,
+    )
+    joint_positions = art.get_joint_positions()
+    joint_velocities = art.get_joint_velocities()
+    action = rmpflow.get_next_articulation_action(joint_positions, joint_velocities)
+    art.apply_action(action)
+
+import omni.physx
+physx = omni.physx.get_physx_interface()
+_sub = physx.subscribe_physics_step_events(_teach_step)
+
+print("Teaching mode ACTIVE (drag_target): drag the green sphere in the viewport, robot follows via RMPflow.")
+print("Press SPACE in viewport to record waypoints. Stop simulation to exit teaching mode.")
+"""
+
+    if mode == "keyboard":
+        return f"""\
+import numpy as np
+from isaaclab.devices.keyboard import Se3Keyboard
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+# Initialize keyboard device
+keyboard = Se3Keyboard(
+    pos_sensitivity=0.005,
+    rot_sensitivity=0.01,
+)
+keyboard.reset()
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+print("Teaching mode ACTIVE (keyboard):")
+print("  W/S = forward/backward, A/D = left/right, Q/E = up/down")
+print("  Z/X = roll, T/G = pitch, C/V = yaw")
+print("  K = toggle gripper, SPACE = record waypoint")
+print("Stop simulation to exit teaching mode.")
+"""
+
+    if mode == "spacemouse":
+        return f"""\
+import numpy as np
+from isaaclab.devices.spacemouse import Se3SpaceMouse
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+# Initialize SpaceMouse device
+spacemouse = Se3SpaceMouse(
+    pos_sensitivity=0.005,
+    rot_sensitivity=0.005,
+)
+spacemouse.reset()
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+print("Teaching mode ACTIVE (spacemouse): move the 3Dconnexion SpaceMouse to control the end-effector.")
+print("  Button 0 = record waypoint, Button 1 = toggle gripper")
+print("Stop simulation to exit teaching mode.")
+"""
+
+    if mode == "gravity_comp":
+        return f"""\
+import omni.usd
+from pxr import UsdPhysics, PhysxSchema
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+n_dof = art.num_dof
+
+# Zero PD gains for compliance
+art.set_joint_stiffnesses(np.zeros(n_dof))
+art.set_joint_dampings(np.full(n_dof, 0.1))  # small damping to prevent oscillation
+
+# Compute and apply gravity compensation
+import numpy as np
+gravity_comp = art.get_measured_joint_efforts()
+print(f"Gravity compensation forces: {{gravity_comp}}")
+
+# Register physics callback to maintain gravity compensation
+import omni.physx
+physx = omni.physx.get_physx_interface()
+
+def _gravity_comp_step(step_size):
+    efforts = art.get_measured_joint_efforts()
+    art.set_joint_efforts(efforts)
+
+_sub = physx.subscribe_physics_step_events(_gravity_comp_step)
+
+print("Teaching mode ACTIVE (gravity_comp): arm is now compliant.")
+print("  Use Shift+drag in viewport to move joints via physics force grab.")
+print("  The robot will hold position against gravity but yield to your input.")
+print("Stop simulation to exit teaching mode.")
+"""
+    return f"# Unknown teaching mode: {mode}"
+
+
+def _gen_record_waypoints(args: Dict) -> str:
+    """Generate code to record robot waypoints to file."""
+    art_path = args["articulation_path"]
+    output_path = args["output_path"]
+    fmt = args.get("format", "json")
+
+    if fmt == "hdf5":
+        return f"""\
+import numpy as np
+import json
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+# Capture current joint state as a waypoint
+joint_positions = art.get_joint_positions().tolist()
+joint_velocities = art.get_joint_velocities().tolist()
+joint_names = art.dof_names
+
+# Write HDF5 in robomimic schema
+import h5py
+import os
+os.makedirs(os.path.dirname('{output_path}') or '.', exist_ok=True)
+
+with h5py.File('{output_path}', 'a') as f:
+    # robomimic demo schema
+    if 'data' not in f:
+        grp = f.create_group('data')
+        grp.attrs['num_demos'] = 0
+    data = f['data']
+    demo_idx = data.attrs['num_demos']
+    demo_name = f'demo_{{demo_idx}}'
+    demo = data.create_group(demo_name)
+    demo.create_dataset('actions', data=np.array([joint_positions]))
+    obs = demo.create_group('obs')
+    obs.create_dataset('joint_pos', data=np.array([joint_positions]))
+    obs.create_dataset('joint_vel', data=np.array([joint_velocities]))
+    demo.attrs['num_samples'] = 1
+    data.attrs['num_demos'] = demo_idx + 1
+
+print(f"Recorded waypoint to {{'{output_path}'}} (HDF5 robomimic schema, demo {{demo_idx}})")
+print(f"Joint positions: {{[round(p, 4) for p in joint_positions]}}")
+"""
+
+    if fmt == "usd":
+        return f"""\
+import omni.usd
+from pxr import Usd, UsdGeom, Sdf
+import json
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+joint_positions = art.get_joint_positions().tolist()
+
+stage = omni.usd.get_context().get_stage()
+time_code = stage.GetEndTimeCode() + 1
+stage.SetEndTimeCode(time_code)
+
+# Write joint positions as USD TimeSamples on each joint drive
+joint_names = art.dof_names
+for i, jname in enumerate(joint_names):
+    joint_path = '{art_path}/' + jname
+    joint_prim = stage.GetPrimAtPath(joint_path)
+    if joint_prim.IsValid():
+        from pxr import UsdPhysics
+        drive = UsdPhysics.DriveAPI.Get(joint_prim, 'angular')
+        if drive:
+            drive.GetTargetPositionAttr().Set(joint_positions[i], time_code)
+
+print(f"Recorded waypoint as USD TimeSample at time={{time_code}}")
+print(f"Joint positions: {{[round(p, 4) for p in joint_positions]}}")
+"""
+
+    # Default: JSON format
+    return f"""\
+import json
+import os
+import numpy as np
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+joint_positions = art.get_joint_positions().tolist()
+joint_velocities = art.get_joint_velocities().tolist()
+joint_names = list(art.dof_names) if art.dof_names is not None else []
+
+waypoint = {{
+    "joint_positions": joint_positions,
+    "joint_velocities": joint_velocities,
+    "joint_names": joint_names,
+}}
+
+# Append to existing file or create new one
+output_path = '{output_path}'
+os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+
+data = {{"waypoints": []}}
+if os.path.exists(output_path):
+    with open(output_path, 'r') as f:
+        data = json.load(f)
+
+data["waypoints"].append(waypoint)
+
+with open(output_path, 'w') as f:
+    json.dump(data, f, indent=2)
+
+print(f"Recorded waypoint {{len(data['waypoints'])}} to {{output_path}}")
+print(f"Joint positions: {{[round(p, 4) for p in joint_positions]}}")
+"""
+
+
+def _gen_replay_trajectory(args: Dict) -> str:
+    """Generate code to replay a recorded trajectory."""
+    art_path = args["articulation_path"]
+    trajectory_path = args["trajectory_path"]
+    speed = args.get("speed", 1.0)
+    # Clamp speed to valid range
+    speed = max(0.1, min(4.0, speed))
+
+    return f"""\
+import json
+import numpy as np
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+import omni.physx
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+# Load trajectory
+with open('{trajectory_path}', 'r') as f:
+    data = json.load(f)
+waypoints = data.get("waypoints", [])
+if not waypoints:
+    print("No waypoints found in trajectory file.")
+else:
+    # Replay at {speed}x speed
+    speed_factor = {speed}
+    step_interval = max(1, int(10 / speed_factor))  # steps between waypoints
+    _replay_state = {{"idx": 0, "step_count": 0}}
+
+    def _replay_step(step_size):
+        state = _replay_state
+        state["step_count"] += 1
+        if state["step_count"] % step_interval != 0:
+            return
+        idx = state["idx"]
+        if idx >= len(waypoints):
+            print(f"Trajectory replay complete ({{len(waypoints)}} waypoints at {speed}x speed)")
+            return
+        wp = waypoints[idx]
+        joint_pos = np.array(wp["joint_positions"])
+        art.set_joint_position_targets(joint_pos)
+        state["idx"] += 1
+
+    physx = omni.physx.get_physx_interface()
+    _replay_sub = physx.subscribe_physics_step_events(_replay_step)
+
+    print(f"Replaying trajectory: {{len(waypoints)}} waypoints at {speed}x speed")
+"""
+
+
+def _gen_interpolate_trajectory(args: Dict) -> str:
+    """Generate code to interpolate between sparse waypoints."""
+    art_path = args["articulation_path"]
+    waypoints = args["waypoints"]
+    method = args.get("method", "linear")
+    num_steps = args.get("num_steps", 50)
+    output_path = args.get("output_path", "")
+    robot_type = args.get("robot_type", "franka").lower()
+
+    # Serialize waypoints for code injection
+    wp_data = [wp["joint_positions"] for wp in waypoints]
+
+    if method == "cubic":
+        save_block = ""
+        if output_path:
+            save_block = f"""
+# Save interpolated trajectory
+import os
+os.makedirs(os.path.dirname('{output_path}') or '.', exist_ok=True)
+output_waypoints = [{{"joint_positions": row.tolist()}} for row in smooth_trajectory]
+with open('{output_path}', 'w') as f:
+    json.dump({{"waypoints": output_waypoints, "method": "cubic", "num_steps": {num_steps}}}, f, indent=2)
+print(f"Saved interpolated trajectory to {output_path}")
+"""
+        return f"""\
+import numpy as np
+import json
+from scipy.interpolate import CubicSpline
+
+# Sparse waypoints
+waypoints = {wp_data}
+wp_array = np.array(waypoints)  # shape: (N, n_dof)
+
+# Cubic spline interpolation in joint space
+n_waypoints = len(wp_array)
+t_knots = np.linspace(0, 1, n_waypoints)
+cs = CubicSpline(t_knots, wp_array, axis=0)
+
+t_dense = np.linspace(0, 1, (n_waypoints - 1) * {num_steps})
+smooth_trajectory = cs(t_dense)
+
+print(f"Cubic interpolation: {{n_waypoints}} waypoints -> {{len(smooth_trajectory)}} steps")
+{save_block}"""
+
+    if method == "rmpflow":
+        save_block = ""
+        if output_path:
+            save_block = f"""
+# Save interpolated trajectory
+import os
+os.makedirs(os.path.dirname('{output_path}') or '.', exist_ok=True)
+output_waypoints = [{{"joint_positions": pos.tolist()}} for pos in planned_positions]
+with open('{output_path}', 'w') as f:
+    json.dump({{"waypoints": output_waypoints, "method": "rmpflow", "num_steps": {num_steps}}}, f, indent=2)
+print(f"Saved interpolated trajectory to {output_path}")
+"""
+        return f"""\
+import numpy as np
+import json
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+# Load RMPflow
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+# Sparse waypoints (joint space)
+waypoints = {wp_data}
+planned_positions = []
+
+for i, wp in enumerate(waypoints):
+    target_pos = np.array(wp)
+    # Use forward kinematics to get task-space target
+    rmpflow.set_end_effector_target(target_pos[:3], None)
+    # Step through RMPflow for {num_steps} steps
+    current_pos = np.array(waypoints[max(0, i-1)])
+    current_vel = np.zeros_like(current_pos)
+    for step in range({num_steps}):
+        action = rmpflow.get_next_articulation_action(current_pos, current_vel)
+        if action.joint_positions is not None:
+            current_pos = action.joint_positions
+        planned_positions.append(current_pos.copy())
+
+print(f"RMPflow interpolation: {{len(waypoints)}} waypoints -> {{len(planned_positions)}} steps (collision-aware)")
+{save_block}"""
+
+    # Default: linear interpolation
+    save_block = ""
+    if output_path:
+        save_block = f"""
+# Save interpolated trajectory
+import os
+os.makedirs(os.path.dirname('{output_path}') or '.', exist_ok=True)
+output_waypoints = [{{"joint_positions": pos.tolist()}} for pos in interpolated]
+with open('{output_path}', 'w') as f:
+    json.dump({{"waypoints": output_waypoints, "method": "linear", "num_steps": {num_steps}}}, f, indent=2)
+print(f"Saved interpolated trajectory to {output_path}")
+"""
+    return f"""\
+import numpy as np
+import json
+
+# Sparse waypoints
+waypoints = {wp_data}
+wp_array = np.array(waypoints)
+
+# Linear interpolation in joint space
+interpolated = []
+for i in range(len(wp_array) - 1):
+    start = wp_array[i]
+    end = wp_array[i + 1]
+    for t in np.linspace(0, 1, {num_steps}, endpoint=(i == len(wp_array) - 2)):
+        interpolated.append(start + t * (end - start))
+
+interpolated = np.array(interpolated)
+print(f"Linear interpolation: {{len(wp_array)}} waypoints -> {{len(interpolated)}} steps")
+{save_block}"""
+
+
+CODE_GEN_HANDLERS["start_teaching_mode"] = _gen_start_teaching_mode
+CODE_GEN_HANDLERS["record_waypoints"] = _gen_record_waypoints
+CODE_GEN_HANDLERS["replay_trajectory"] = _gen_replay_trajectory
+CODE_GEN_HANDLERS["interpolate_trajectory"] = _gen_interpolate_trajectory
+
+
+# ── Nucleus Browse & Download ────────────────────────────────────────────────
+
+async def _handle_nucleus_browse(args: Dict) -> Dict:
+    """Browse a Nucleus server directory via Kit RPC (omni.client inside Isaac Sim)."""
+    nucleus_path = args.get("path", "/NVIDIA/Assets/Isaac/5.1")
+    # Sanitize: strip shell metacharacters, only allow alphanumeric + / . _ -
+    import re as _re
+    if not _re.match(r'^[a-zA-Z0-9/_. :-]+$', nucleus_path):
+        return {"error": "Invalid path characters"}
+
+    server = args.get("server", "omniverse://localhost")
+    if not _re.match(r'^omniverse://[a-zA-Z0-9._-]+(:\d+)?$', server):
+        return {"error": "Invalid Nucleus server URL. Expected format: omniverse://hostname"}
+
+    full_path = f"{server}{nucleus_path}"
+    limit = min(args.get("limit", 50), 200)
+
+    code = f"""
+import omni.client
+import json
+
+result, entries = omni.client.list("{full_path}")
+items = []
+if result == omni.client.Result.OK:
+    for entry in entries[:{limit}]:
+        items.append({{
+            "name": entry.relative_path,
+            "size": entry.size,
+            "is_folder": entry.flags & omni.client.ItemFlags.CAN_HAVE_CHILDREN != 0,
+            "modified_time": str(entry.modified_time) if hasattr(entry, 'modified_time') else "",
+        }})
+print(json.dumps({{"status": str(result), "path": "{full_path}", "items": items, "count": len(items)}}))
+"""
+    result = await kit_tools.exec_sync(code, timeout=15)
+    if not result.get("success"):
+        return {"error": f"Kit RPC failed: {result.get('output', 'unknown')}",
+                "hint": "Is Isaac Sim running? Is a Nucleus server accessible?"}
+
+    output = result.get("output", "").strip()
+    # Parse the last line as JSON (exec_sync may include other prints)
+    for line in reversed(output.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                pass
+    return {"error": "Failed to parse Nucleus response", "raw_output": output[:500]}
+
+
+async def _handle_download_asset(args: Dict) -> Dict:
+    """Download asset from Nucleus to local Desktop/assets and register in catalog."""
+    import re as _re
+
+    nucleus_url = args.get("nucleus_url", "")
+    # Validate URL format
+    if not nucleus_url.startswith("omniverse://"):
+        return {"error": "nucleus_url must start with omniverse://"}
+    if not _re.match(r'^omniverse://[a-zA-Z0-9._:-]+/[a-zA-Z0-9/_. -]+$', nucleus_url):
+        return {"error": "Invalid nucleus_url format"}
+
+    assets_root = getattr(config, "assets_root_path", "") or ""
+    if not assets_root:
+        return {"error": "ASSETS_ROOT_PATH not configured in .env"}
+
+    # Determine local destination
+    # omniverse://localhost/NVIDIA/Assets/Isaac/5.1/Robots/Franka/franka.usd
+    # → Desktop/assets/Nucleus_Downloads/Robots/Franka/franka.usd
+    subdir = args.get("local_subdir", "")
+    if not subdir:
+        # Auto-derive from Nucleus path: strip server + /NVIDIA/Assets/Isaac/X.X/
+        path_part = nucleus_url.split("/", 3)[-1] if "/" in nucleus_url else ""
+        # Remove common prefixes
+        for prefix in ("NVIDIA/Assets/Isaac/5.1/", "NVIDIA/Assets/Isaac/", "NVIDIA/Assets/", "NVIDIA/"):
+            if path_part.startswith(prefix):
+                path_part = path_part[len(prefix):]
+                break
+        subdir = f"Nucleus_Downloads/{path_part}" if path_part else "Nucleus_Downloads"
+
+    # Extract just the directory part (not filename)
+    if subdir.endswith(".usd") or subdir.endswith(".usda") or subdir.endswith(".usdz"):
+        subdir = str(Path(subdir).parent)
+
+    local_dir = Path(assets_root) / subdir
+    filename = nucleus_url.rsplit("/", 1)[-1]
+    # Sanitize filename
+    filename = _re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+    local_path = local_dir / filename
+
+    if local_path.exists():
+        return {
+            "status": "already_exists",
+            "local_path": str(local_path),
+            "message": f"Asset already downloaded at {local_path}",
+        }
+
+    # Escape paths for code injection safety
+    safe_nucleus = nucleus_url.replace('"', '').replace("'", "").replace("\\", "")
+    safe_local = str(local_path).replace('"', '').replace("'", "").replace("\\", "")
+    safe_dir = str(local_dir).replace('"', '').replace("'", "").replace("\\", "")
+
+    code = f"""
+import omni.client
+import os
+import json
+
+os.makedirs("{safe_dir}", exist_ok=True)
+result = omni.client.copy("{safe_nucleus}", "{safe_local}")
+if result == omni.client.Result.OK:
+    size = os.path.getsize("{safe_local}") if os.path.exists("{safe_local}") else 0
+    print(json.dumps({{"status": "ok", "local_path": "{safe_local}", "size": size}}))
+else:
+    print(json.dumps({{"status": "error", "result": str(result), "nucleus_url": "{safe_nucleus}"}}))
+"""
+    result = await kit_tools.exec_sync(code, timeout=60)
+    if not result.get("success"):
+        return {"error": f"Kit RPC download failed: {result.get('output', 'unknown')}"}
+
+    output = result.get("output", "").strip()
+    dl_result = None
+    for line in reversed(output.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                dl_result = json.loads(line)
+                break
+            except json.JSONDecodeError:
+                pass
+
+    if not dl_result or dl_result.get("status") != "ok":
+        return {"error": "Download failed", "details": dl_result or output[:500]}
+
+    # Register in asset_catalog.json
+    catalog_path = Path(assets_root) / "asset_catalog.json"
+    asset_name = Path(filename).stem.replace("_", " ").replace("-", " ")
+    # Infer category from path
+    path_lower = nucleus_url.lower()
+    if any(k in path_lower for k in ("robot", "arm", "gripper", "manipulator")):
+        category = "robot"
+    elif any(k in path_lower for k in ("env", "room", "warehouse", "scene")):
+        category = "scene"
+    elif any(k in path_lower for k in ("sensor", "camera", "lidar")):
+        category = "sensor"
+    elif any(k in path_lower for k in ("prop", "object", "furniture")):
+        category = "prop"
+    else:
+        category = args.get("category", "prop")
+
+    new_entry = {
+        "name": asset_name,
+        "usd_path": str(local_path),
+        "relative_path": str(local_path.relative_to(Path(assets_root))),
+        "category": category,
+        "tags": [w for w in asset_name.lower().split() if len(w) > 1] + ["nucleus_download"],
+        "nucleus_source": nucleus_url,
+        "meters_per_unit": 1.0,
+    }
+
+    if catalog_path.exists():
+        try:
+            catalog = json.loads(catalog_path.read_text())
+            catalog["assets"].append(new_entry)
+            catalog["metadata"]["total_assets"] = len(catalog["assets"])
+            catalog_path.write_text(json.dumps(catalog, indent=2))
+        except Exception as e:
+            logger.warning(f"[DownloadAsset] Failed to update catalog: {e}")
+
+    # Invalidate cached asset index so next search picks up the new entry
+    global _asset_index
+    _asset_index = None
+
+    return {
+        "status": "downloaded",
+        "local_path": str(local_path),
+        "size": dl_result.get("size", 0),
+        "category": category,
+        "nucleus_source": nucleus_url,
+        "message": f"Downloaded {filename} to {local_path} ({dl_result.get('size', 0)} bytes). Registered in asset catalog.",
+    }
+
+
+DATA_HANDLERS["nucleus_browse"] = _handle_nucleus_browse
+DATA_HANDLERS["download_asset"] = _handle_download_asset
+
+
+# ── Scene Builder ────────────────────────────────────────────────────────────
+
+def _gen_build_scene_from_blueprint(args: Dict) -> str:
+    """Generate code to build a scene from a structured blueprint."""
+    blueprint = args.get("blueprint", {})
+    objects = blueprint.get("objects", [])
+    dry_run = args.get("dry_run", False)
+
+    if not objects:
+        return "print('Empty blueprint — nothing to build')\n"
+
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdGeom, Gf, Sdf",
+        _SAFE_XFORM_SNIPPET,
+        "stage = omni.usd.get_context().get_stage()",
+        "",
+    ]
+
+    for i, obj in enumerate(objects):
+        name = obj.get("name", f"object_{i}")
+        asset_path = obj.get("asset_path", "")
+        prim_path = obj.get("prim_path", f"/World/{name}")
+        pos = obj.get("position", [0, 0, 0])
+        rot = obj.get("rotation", [0, 0, 0])
+        scale = obj.get("scale", [1, 1, 1])
+        prim_type = obj.get("prim_type")  # for simple prims (Cube, etc.)
+
+        lines.append(f"# --- {name} ---")
+        if asset_path:
+            # Import via USD reference
+            lines.append(f"prim = stage.DefinePrim('{prim_path}', 'Xform')")
+            lines.append(f"prim.GetReferences().AddReference('{asset_path}')")
+        elif prim_type:
+            lines.append(f"prim = stage.DefinePrim('{prim_path}', '{prim_type}')")
+        else:
+            lines.append(f"prim = stage.DefinePrim('{prim_path}', 'Xform')")
+
+        lines.append(f"_safe_set_translate(prim, ({pos[0]}, {pos[1]}, {pos[2]}))")
+        if rot != [0, 0, 0]:
+            lines.append(f"_safe_set_rotate_xyz(prim, ({rot[0]}, {rot[1]}, {rot[2]}))")
+        if scale != [1, 1, 1]:
+            lines.append(f"_safe_set_scale(prim, ({scale[0]}, {scale[1]}, {scale[2]}))")
+        lines.append("")
+
+    lines.append(f"print('Scene built: {len(objects)} objects placed')")
+
+    if dry_run:
+        return f"# DRY RUN — code preview only\n" + "\n".join(lines)
+    return "\n".join(lines)
+
+
+async def _handle_generate_scene_blueprint(args: Dict) -> Dict:
+    """Generate a scene blueprint (data, not code). The LLM fills in the spatial layout."""
+    description = args.get("description", "")
+    room_dims = args.get("room_dimensions")
+    available = args.get("available_assets")
+
+    # If no assets provided, search the catalog
+    if not available:
+        catalog_result = await _handle_catalog_search({"query": description, "limit": 20})
+        available = catalog_result.get("results", [])
+
+    return {
+        "type": "blueprint_request",
+        "description": description,
+        "room_dimensions": room_dims or [6, 6, 3],
+        "available_assets": available,
+        "instructions": (
+            "Based on the description and available assets, generate a blueprint JSON with: "
+            "objects: [{name, asset_path (from available_assets), prim_path (/World/Name), "
+            "position [x,y,z], rotation [rx,ry,rz], scale [sx,sy,sz]}]. "
+            "Ensure objects don't overlap, items sit ON surfaces (not floating), "
+            "robots have 1m clearance. Then call build_scene_from_blueprint with the blueprint."
+        ),
+    }
+
+
+DATA_HANDLERS["generate_scene_blueprint"] = _handle_generate_scene_blueprint
+CODE_GEN_HANDLERS["build_scene_from_blueprint"] = _gen_build_scene_from_blueprint
+
+
+# ── IsaacLab RL Training ─────────────────────────────────────────────────────
+
+_RL_TASK_TEMPLATES = {
+    "manipulation": {
+        "obs": ["joint_pos", "joint_vel", "ee_pos", "ee_ori", "target_pos", "target_rel"],
+        "actions": "joint_positions",
+        "rewards": ["reach_target", "grasp_success", "action_penalty", "is_terminated"],
+    },
+    "locomotion": {
+        "obs": ["base_lin_vel", "base_ang_vel", "projected_gravity", "joint_pos", "joint_vel", "actions"],
+        "actions": "joint_positions",
+        "rewards": ["track_lin_vel", "track_ang_vel", "feet_air_time", "action_rate", "is_terminated"],
+    },
+    "navigation": {
+        "obs": ["base_pos", "base_ori", "base_lin_vel", "target_pos", "target_rel", "lidar_scan"],
+        "actions": "base_velocity",
+        "rewards": ["reach_goal", "collision_penalty", "progress_to_goal", "action_penalty"],
+    },
+    "custom": {
+        "obs": ["joint_pos", "joint_vel"],
+        "actions": "joint_positions",
+        "rewards": ["task_success", "action_penalty"],
+    },
+}
+
+
+async def _handle_create_isaaclab_env(args: Dict) -> Dict:
+    """Generate an IsaacLab env scaffold — returns config as data for the LLM to refine."""
+    task_name = args["task_name"]
+    robot_path = args["robot_path"]
+    task_type = args.get("task_type", "manipulation")
+    num_envs = args.get("num_envs", 64)
+    env_spacing = args.get("env_spacing", 2.0)
+    reward_terms = args.get("reward_terms")
+
+    template = _RL_TASK_TEMPLATES.get(task_type, _RL_TASK_TEMPLATES["custom"])
+    if reward_terms:
+        template = {**template, "rewards": reward_terms}
+
+    env_config = {
+        "task_name": task_name,
+        "robot_path": robot_path,
+        "task_type": task_type,
+        "num_envs": num_envs,
+        "env_spacing": env_spacing,
+        "observation_space": template["obs"],
+        "action_space": template["actions"],
+        "reward_terms": template["rewards"],
+        "episode_length": 500,
+        "decimation": 2,
+        "physics_dt": 1.0 / 120.0,
+    }
+
+    # Generate the Python env class code
+    env_code = _generate_isaaclab_env_code(env_config)
+
+    return {
+        "type": "isaaclab_env",
+        "task_name": task_name,
+        "config": env_config,
+        "generated_code": env_code,
+        "instructions": (
+            f"IsaacLab env '{task_name}' scaffolded with {num_envs} parallel envs. "
+            f"Observations: {template['obs']}. Actions: {template['actions']}. "
+            f"Rewards: {template['rewards']}. "
+            "You can now call launch_training to start training, or refine the config."
+        ),
+    }
+
+
+def _generate_isaaclab_env_code(cfg: Dict) -> str:
+    """Generate a minimal IsaacLab ManagerBasedRLEnv config file."""
+    task = cfg["task_name"]
+    robot = cfg["robot_path"]
+    obs = cfg["observation_space"]
+    acts = cfg["action_space"]
+    rewards = cfg["reward_terms"]
+    num_envs = cfg["num_envs"]
+    spacing = cfg["env_spacing"]
+    ep_len = cfg["episode_length"]
+    decimation = cfg["decimation"]
+
+    obs_terms = "\n".join(f'        "{o}": ObsTerm(func=mdp.{o}),' for o in obs)
+    reward_terms = "\n".join(
+        f'        "{r}": RewTerm(func=mdp.{r}, weight=1.0),' for r in rewards
+    )
+
+    return f'''"""IsaacLab RL environment: {task}
+Auto-generated by Isaac Assist.
+"""
+import isaaclab.envs.mdp as mdp
+from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.managers import (
+    ObservationGroupCfg,
+    ObservationTermCfg as ObsTerm,
+    RewardTermCfg as RewTerm,
+    SceneEntityCfg,
+)
+from isaaclab.scene import InteractiveSceneCfg
+
+
+class {task}EnvCfg(ManagerBasedRLEnvCfg):
+    """Configuration for {task} environment."""
+
+    # Scene
+    scene = InteractiveSceneCfg(
+        num_envs={num_envs},
+        env_spacing={spacing},
+    )
+
+    # Observations
+    observations = ObservationGroupCfg(
+{obs_terms}
+    )
+
+    # Actions
+    actions = mdp.{acts}
+
+    # Rewards
+    rewards = {{
+{reward_terms}
+    }}
+
+    # Episode
+    episode_length_s = {ep_len} * {decimation} / 120.0
+    decimation = {decimation}
+'''
+
+
+def _gen_launch_training(args: Dict) -> str:
+    """Generate code to launch an IsaacLab training run."""
+    task = args["task"]
+    algo = args.get("algo", "ppo")
+    num_steps = args.get("num_steps", 1_000_000)
+    num_envs = args.get("num_envs", 64)
+    ckpt_dir = args.get("checkpoint_dir", f"workspace/rl_checkpoints/{task}")
+
+    # Map algos to IsaacLab train script args
+    algo_map = {
+        "ppo": "rsl_rl",
+        "sac": "skrl",
+        "td3": "skrl",
+        "rsl_rl": "rsl_rl",
+    }
+    runner = algo_map.get(algo, "rsl_rl")
+
+    lines = [
+        "import subprocess",
+        "import sys",
+        "import os",
+        "",
+        f"task = '{task}'",
+        f"algo = '{algo}'",
+        f"num_envs = {num_envs}",
+        f"max_iterations = {num_steps // (num_envs * 24)}  # steps / (envs * horizon)",
+        f"log_dir = '{ckpt_dir}'",
+        "os.makedirs(log_dir, exist_ok=True)",
+        "",
+        "# Launch IsaacLab training",
+        "cmd = [",
+        "    sys.executable, '-m',",
+        f"    'isaaclab.train',",
+        f"    '--task', task,",
+        f"    '--num_envs', str(num_envs),",
+        f"    '--max_iterations', str(max_iterations),",
+        f"    '--log_dir', log_dir,",
+        "]",
+        "print(f'Launching training: {" ".join(cmd)}')",
+        "proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)",
+        "print(f'Training started (PID: {proc.pid}). Checkpoints → {log_dir}')",
+    ]
+    return "\n".join(lines)
+
+
+DATA_HANDLERS["create_isaaclab_env"] = _handle_create_isaaclab_env
+CODE_GEN_HANDLERS["launch_training"] = _gen_launch_training
+
+
+# ─── Vision tools (Gemini Robotics-ER 1.6) ──────────────────────────────────
+
+async def _get_viewport_bytes() -> tuple:
+    """Capture the viewport and return (raw_bytes, mime_type)."""
+    result = await kit_tools.get_viewport_image(max_dim=1280)
+    b64 = result.get("image_b64") or result.get("data", "")
+    if not b64:
+        return None, None
+    import base64
+    return base64.b64decode(b64), "image/png"
+
+
+def _get_vision_provider():
+    from ..vision_gemini import GeminiVisionProvider
+    return GeminiVisionProvider()
+
+
+async def _handle_vision_detect_objects(args: Dict) -> Dict:
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
+    vp = _get_vision_provider()
+    labels = args.get("labels")
+    max_obj = args.get("max_objects", 10)
+    detections = await vp.detect_objects(img, mime, labels=labels, max_objects=max_obj)
+    return {"detections": detections, "count": len(detections), "model": vp.model}
+
+
+async def _handle_vision_bounding_boxes(args: Dict) -> Dict:
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
+    vp = _get_vision_provider()
+    boxes = await vp.detect_bounding_boxes(img, mime, max_objects=args.get("max_objects", 25))
+    return {"bounding_boxes": boxes, "count": len(boxes), "model": vp.model}
+
+
+async def _handle_vision_plan_trajectory(args: Dict) -> Dict:
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
+    vp = _get_vision_provider()
+    points = await vp.plan_trajectory(
+        img, args["instruction"], num_points=args.get("num_points", 15), mime_type=mime,
+    )
+    return {"trajectory": points, "num_points": len(points), "model": vp.model}
+
+
+async def _handle_vision_analyze_scene(args: Dict) -> Dict:
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
+    vp = _get_vision_provider()
+    analysis = await vp.analyze_scene(img, args["question"], mime_type=mime)
+    return {"analysis": analysis, "model": vp.model}
+
+
+DATA_HANDLERS["vision_detect_objects"] = _handle_vision_detect_objects
+DATA_HANDLERS["vision_bounding_boxes"] = _handle_vision_bounding_boxes
+DATA_HANDLERS["vision_plan_trajectory"] = _handle_vision_plan_trajectory
+DATA_HANDLERS["vision_analyze_scene"] = _handle_vision_analyze_scene
+
+
+# ── Scene Package Export ─────────────────────────────────────────────────────
+# Collects all approved code patches from the audit log for a session,
+# then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
+# README.md, and a ros2_topics.yaml listing detected topics.
+
+async def _handle_export_scene_package(args: Dict) -> Dict:
+    """Export the current session's scene setup as a reusable file package."""
+    from pathlib import Path
+    from datetime import datetime as _dt
+    from ..routes import _audit
+
+    session_id = args.get("session_id", "default_session")
+    scene_name = args.get("scene_name", "exported_scene")
+    # Sanitize scene_name for filesystem
+    safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in scene_name)
+
+    out_dir = Path("workspace/scene_exports") / safe_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Collect approved patches from audit log ──────────────────────────
+    entries = _audit.query_logs(limit=500, event_type="patch_executed")
+    patches = []
+    for e in entries:
+        meta = e.metadata or {}
+        if meta.get("success") and meta.get("session_id", "default_session") == session_id:
+            code = meta.get("code", "")
+            if code:
+                patches.append({
+                    "description": meta.get("user_message", ""),
+                    "code": code,
+                })
+
+    if not patches:
+        # Fallback: grab all successful patches regardless of session
+        for e in entries:
+            meta = e.metadata or {}
+            if meta.get("success") and meta.get("code"):
+                patches.append({
+                    "description": meta.get("user_message", ""),
+                    "code": meta["code"],
+                })
+
+    # ── scene_setup.py ───────────────────────────────────────────────────
+    setup_lines = [
+        '"""',
+        f'Scene Setup: {scene_name}',
+        f'Auto-exported by Isaac Assist on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}',
+        f'Patches: {len(patches)}',
+        '"""',
+        'import omni.usd',
+        'from pxr import Usd, UsdGeom, UsdPhysics, PhysxSchema, Gf, Sdf, UsdShade',
+        '',
+        'stage = omni.usd.get_context().get_stage()',
+        '',
+    ]
+    for i, p in enumerate(patches):
+        desc = p["description"] or f"Step {i+1}"
+        setup_lines.append(f'# ── Step {i+1}: {desc}')
+        setup_lines.append(p["code"].rstrip())
+        setup_lines.append('')
+    setup_lines.append('print("Scene setup complete.")')
+    scene_py = "\n".join(setup_lines)
+    (out_dir / "scene_setup.py").write_text(scene_py, encoding="utf-8")
+
+    # ── Detect ROS2 topics from OmniGraph patterns in code ───────────────
+    import re as _re
+    ros2_topics = set()
+    og_node_types = set()
+    robot_paths = set()
+    for p in patches:
+        code = p["code"]
+        # topics: /joint_states, /joint_command, /clock, /tf, etc.
+        ros2_topics.update(_re.findall(r"""['\"](/[a-zA-Z_][a-zA-Z0-9_/]*)['\"]\s*""", code))
+        # OmniGraph node types
+        og_node_types.update(_re.findall(r"""['\"](?:isaacsim|omni\.isaac)\.[a-zA-Z0-9_.]+['\"]""", code))
+        # Robot paths
+        robot_paths.update(_re.findall(r"""['\"](/World/[A-Z][a-zA-Z0-9_]*)['\"]\s*""", code))
+    # Filter to ROS2-style topics only (not USD paths, not physics scene attrs)
+    _NON_TOPIC_PREFIXES = ("/World", "/Physics", "/Collision", "/persistent", "/Render", "/OmniKit")
+    ros2_topics = sorted(
+        t for t in ros2_topics
+        if not any(t.startswith(p) for p in _NON_TOPIC_PREFIXES)
+        and len(t) > 2  # skip bare "/"
+        and not t.endswith(".usd")
+    )
+
+    # ── ros2_topics.yaml ─────────────────────────────────────────────────
+    if ros2_topics or og_node_types:
+        topic_lines = [f"# ROS2 Topics detected in scene: {scene_name}", "topics:"]
+        for t in sorted(ros2_topics):
+            topic_lines.append(f"  - name: \"{t}\"")
+        topic_lines.append("")
+        topic_lines.append("omnigraph_node_types:")
+        for nt in sorted(og_node_types):
+            topic_lines.append(f"  - {nt}")
+        (out_dir / "ros2_topics.yaml").write_text("\n".join(topic_lines) + "\n", encoding="utf-8")
+
+    # ── ros2_launch.py (if ROS2 topics detected) ────────────────────────
+    has_ros2 = bool(ros2_topics)
+    if has_ros2:
+        launch_lines = [
+            '"""',
+            f'ROS2 Launch File for scene: {scene_name}',
+            f'Auto-generated by Isaac Assist on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}',
+            '"""',
+            'from launch import LaunchDescription',
+            'from launch_ros.actions import Node',
+            '',
+            '',
+            'def generate_launch_description():',
+            '    return LaunchDescription([',
+        ]
+        # Add placeholder nodes for each topic
+        for t in sorted(ros2_topics):
+            node_name = t.strip("/").replace("/", "_")
+            launch_lines.append(f'        # Topic: {t}')
+            launch_lines.append(f'        # Node("{node_name}") — configure publisher/subscriber as needed')
+        launch_lines.append('    ])')
+        (out_dir / "ros2_launch.py").write_text("\n".join(launch_lines) + "\n", encoding="utf-8")
+
+    # ── README.md ────────────────────────────────────────────────────────
+    robot_list = ", ".join(f"`{r}`" for r in sorted(robot_paths)) or "None detected"
+    topic_list = "\n".join(f"- `{t}`" for t in sorted(ros2_topics)) or "- None detected"
+    readme = f"""# {scene_name}
+
+Auto-exported by **Isaac Assist** on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}.
+
+## Scene Summary
+
+- **Patches applied:** {len(patches)}
+- **Robots:** {robot_list}
+- **ROS2 Topics:**
+{topic_list}
+
+## Files
+
+| File | Description |
+|------|-------------|
+| `scene_setup.py` | All approved code patches as a single runnable script |
+| `ros2_topics.yaml` | Detected ROS2 topics and OmniGraph node types |
+{"| `ros2_launch.py` | ROS2 launch file template |" if has_ros2 else ""}
+| `README.md` | This file |
+
+## Usage
+
+### Replay Scene in Isaac Sim
+```python
+# In Isaac Sim Script Editor or via Kit RPC:
+exec(open("{out_dir}/scene_setup.py").read())
+```
+
+### ROS2 Topics
+{"Launch the ROS2 nodes alongside Isaac Sim:" if has_ros2 else "No ROS2 topics detected in this scene."}
+{"```bash" if has_ros2 else ""}
+{"ros2 launch " + str(out_dir / "ros2_launch.py") if has_ros2 else ""}
+{"```" if has_ros2 else ""}
+"""
+    (out_dir / "README.md").write_text(readme, encoding="utf-8")
+
+    files_written = ["scene_setup.py", "README.md"]
+    if ros2_topics or og_node_types:
+        files_written.append("ros2_topics.yaml")
+    if has_ros2:
+        files_written.append("ros2_launch.py")
+
+    return {
+        "export_dir": str(out_dir),
+        "files": files_written,
+        "patch_count": len(patches),
+        "ros2_topics": ros2_topics,
+        "robots_detected": sorted(robot_paths),
+        "message": f"Exported {len(patches)} patches to {out_dir}/ — files: {', '.join(files_written)}",
+    }
+
+
+DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
+
+
+# ── Interactive Robot Teaching ────────────────────────────────────────────────
+
+def _gen_start_teaching_mode(args: Dict) -> str:
+    """Generate code to start interactive robot teaching mode."""
+    art_path = args["articulation_path"]
+    mode = args["mode"]
+    robot_type = args.get("robot_type", "franka").lower()
+
+    if mode == "drag_target":
+        # FollowTarget pattern: ghost target prim + RMPflow tracking
+        return f"""\
+import omni.usd
+import numpy as np
+from pxr import UsdGeom, Gf, Sdf
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+stage = omni.usd.get_context().get_stage()
+
+# Create draggable ghost target at current end-effector position
+target_path = '{art_path}/TeachTarget'
+if not stage.GetPrimAtPath(target_path).IsValid():
+    target_prim = stage.DefinePrim(target_path, 'Sphere')
+    UsdGeom.Gprim(target_prim).GetDisplayColorAttr().Set([(0.2, 0.8, 0.2)])
+    xf = UsdGeom.Xformable(target_prim)
+    xf.AddTranslateOp().Set(Gf.Vec3d(0.4, 0.0, 0.4))
+    xf.AddScaleOp().Set(Gf.Vec3d(0.03, 0.03, 0.03))
+    print(f"Created draggable teach target at {{target_path}}")
+else:
+    target_prim = stage.GetPrimAtPath(target_path)
+    print(f"Teach target already exists at {{target_path}}")
+
+# Load RMPflow controller for tracking
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+# Register physics callback to track target each step
+def _teach_step(step_size):
+    target_xf = UsdGeom.Xformable(stage.GetPrimAtPath('{art_path}/TeachTarget'))
+    target_pos = target_xf.ComputeLocalToWorldTransform(0).ExtractTranslation()
+    rmpflow.set_end_effector_target(
+        np.array([target_pos[0], target_pos[1], target_pos[2]]),
+        None,
+    )
+    joint_positions = art.get_joint_positions()
+    joint_velocities = art.get_joint_velocities()
+    action = rmpflow.get_next_articulation_action(joint_positions, joint_velocities)
+    art.apply_action(action)
+
+import omni.physx
+physx = omni.physx.get_physx_interface()
+_sub = physx.subscribe_physics_step_events(_teach_step)
+
+print("Teaching mode ACTIVE (drag_target): drag the green sphere in the viewport, robot follows via RMPflow.")
+print("Press SPACE in viewport to record waypoints. Stop simulation to exit teaching mode.")
+"""
+
+    if mode == "keyboard":
+        return f"""\
+import numpy as np
+from isaaclab.devices.keyboard import Se3Keyboard
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+# Initialize keyboard device
+keyboard = Se3Keyboard(
+    pos_sensitivity=0.005,
+    rot_sensitivity=0.01,
+)
+keyboard.reset()
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+print("Teaching mode ACTIVE (keyboard):")
+print("  W/S = forward/backward, A/D = left/right, Q/E = up/down")
+print("  Z/X = roll, T/G = pitch, C/V = yaw")
+print("  K = toggle gripper, SPACE = record waypoint")
+print("Stop simulation to exit teaching mode.")
+"""
+
+    if mode == "spacemouse":
+        return f"""\
+import numpy as np
+from isaaclab.devices.spacemouse import Se3SpaceMouse
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+# Initialize SpaceMouse device
+spacemouse = Se3SpaceMouse(
+    pos_sensitivity=0.005,
+    rot_sensitivity=0.005,
+)
+spacemouse.reset()
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+print("Teaching mode ACTIVE (spacemouse): move the 3Dconnexion SpaceMouse to control the end-effector.")
+print("  Button 0 = record waypoint, Button 1 = toggle gripper")
+print("Stop simulation to exit teaching mode.")
+"""
+
+    if mode == "gravity_comp":
+        return f"""\
+import omni.usd
+from pxr import UsdPhysics, PhysxSchema
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+n_dof = art.num_dof
+
+# Zero PD gains for compliance
+art.set_joint_stiffnesses(np.zeros(n_dof))
+art.set_joint_dampings(np.full(n_dof, 0.1))  # small damping to prevent oscillation
+
+# Compute and apply gravity compensation
+import numpy as np
+gravity_comp = art.get_measured_joint_efforts()
+print(f"Gravity compensation forces: {{gravity_comp}}")
+
+# Register physics callback to maintain gravity compensation
+import omni.physx
+physx = omni.physx.get_physx_interface()
+
+def _gravity_comp_step(step_size):
+    efforts = art.get_measured_joint_efforts()
+    art.set_joint_efforts(efforts)
+
+_sub = physx.subscribe_physics_step_events(_gravity_comp_step)
+
+print("Teaching mode ACTIVE (gravity_comp): arm is now compliant.")
+print("  Use Shift+drag in viewport to move joints via physics force grab.")
+print("  The robot will hold position against gravity but yield to your input.")
+print("Stop simulation to exit teaching mode.")
+"""
+    return f"# Unknown teaching mode: {mode}"
+
+
+def _gen_record_waypoints(args: Dict) -> str:
+    """Generate code to record robot waypoints to file."""
+    art_path = args["articulation_path"]
+    output_path = args["output_path"]
+    fmt = args.get("format", "json")
+
+    if fmt == "hdf5":
+        return f"""\
+import numpy as np
+import json
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+# Capture current joint state as a waypoint
+joint_positions = art.get_joint_positions().tolist()
+joint_velocities = art.get_joint_velocities().tolist()
+joint_names = art.dof_names
+
+# Write HDF5 in robomimic schema
+import h5py
+import os
+os.makedirs(os.path.dirname('{output_path}') or '.', exist_ok=True)
+
+with h5py.File('{output_path}', 'a') as f:
+    # robomimic demo schema
+    if 'data' not in f:
+        grp = f.create_group('data')
+        grp.attrs['num_demos'] = 0
+    data = f['data']
+    demo_idx = data.attrs['num_demos']
+    demo_name = f'demo_{{demo_idx}}'
+    demo = data.create_group(demo_name)
+    demo.create_dataset('actions', data=np.array([joint_positions]))
+    obs = demo.create_group('obs')
+    obs.create_dataset('joint_pos', data=np.array([joint_positions]))
+    obs.create_dataset('joint_vel', data=np.array([joint_velocities]))
+    demo.attrs['num_samples'] = 1
+    data.attrs['num_demos'] = demo_idx + 1
+
+print(f"Recorded waypoint to {{'{output_path}'}} (HDF5 robomimic schema, demo {{demo_idx}})")
+print(f"Joint positions: {{[round(p, 4) for p in joint_positions]}}")
+"""
+
+    if fmt == "usd":
+        return f"""\
+import omni.usd
+from pxr import Usd, UsdGeom, Sdf
+import json
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+joint_positions = art.get_joint_positions().tolist()
+
+stage = omni.usd.get_context().get_stage()
+time_code = stage.GetEndTimeCode() + 1
+stage.SetEndTimeCode(time_code)
+
+# Write joint positions as USD TimeSamples on each joint drive
+joint_names = art.dof_names
+for i, jname in enumerate(joint_names):
+    joint_path = '{art_path}/' + jname
+    joint_prim = stage.GetPrimAtPath(joint_path)
+    if joint_prim.IsValid():
+        from pxr import UsdPhysics
+        drive = UsdPhysics.DriveAPI.Get(joint_prim, 'angular')
+        if drive:
+            drive.GetTargetPositionAttr().Set(joint_positions[i], time_code)
+
+print(f"Recorded waypoint as USD TimeSample at time={{time_code}}")
+print(f"Joint positions: {{[round(p, 4) for p in joint_positions]}}")
+"""
+
+    # Default: JSON format
+    return f"""\
+import json
+import os
+import numpy as np
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+joint_positions = art.get_joint_positions().tolist()
+joint_velocities = art.get_joint_velocities().tolist()
+joint_names = list(art.dof_names) if art.dof_names is not None else []
+
+waypoint = {{
+    "joint_positions": joint_positions,
+    "joint_velocities": joint_velocities,
+    "joint_names": joint_names,
+}}
+
+# Append to existing file or create new one
+output_path = '{output_path}'
+os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+
+data = {{"waypoints": []}}
+if os.path.exists(output_path):
+    with open(output_path, 'r') as f:
+        data = json.load(f)
+
+data["waypoints"].append(waypoint)
+
+with open(output_path, 'w') as f:
+    json.dump(data, f, indent=2)
+
+print(f"Recorded waypoint {{len(data['waypoints'])}} to {{output_path}}")
+print(f"Joint positions: {{[round(p, 4) for p in joint_positions]}}")
+"""
+
+
+def _gen_replay_trajectory(args: Dict) -> str:
+    """Generate code to replay a recorded trajectory."""
+    art_path = args["articulation_path"]
+    trajectory_path = args["trajectory_path"]
+    speed = args.get("speed", 1.0)
+    # Clamp speed to valid range
+    speed = max(0.1, min(4.0, speed))
+
+    return f"""\
+import json
+import numpy as np
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+import omni.physx
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+# Load trajectory
+with open('{trajectory_path}', 'r') as f:
+    data = json.load(f)
+waypoints = data.get("waypoints", [])
+if not waypoints:
+    print("No waypoints found in trajectory file.")
+else:
+    # Replay at {speed}x speed
+    speed_factor = {speed}
+    step_interval = max(1, int(10 / speed_factor))  # steps between waypoints
+    _replay_state = {{"idx": 0, "step_count": 0}}
+
+    def _replay_step(step_size):
+        state = _replay_state
+        state["step_count"] += 1
+        if state["step_count"] % step_interval != 0:
+            return
+        idx = state["idx"]
+        if idx >= len(waypoints):
+            print(f"Trajectory replay complete ({{len(waypoints)}} waypoints at {speed}x speed)")
+            return
+        wp = waypoints[idx]
+        joint_pos = np.array(wp["joint_positions"])
+        art.set_joint_position_targets(joint_pos)
+        state["idx"] += 1
+
+    physx = omni.physx.get_physx_interface()
+    _replay_sub = physx.subscribe_physics_step_events(_replay_step)
+
+    print(f"Replaying trajectory: {{len(waypoints)}} waypoints at {speed}x speed")
+"""
+
+
+def _gen_interpolate_trajectory(args: Dict) -> str:
+    """Generate code to interpolate between sparse waypoints."""
+    art_path = args["articulation_path"]
+    waypoints = args["waypoints"]
+    method = args.get("method", "linear")
+    num_steps = args.get("num_steps", 50)
+    output_path = args.get("output_path", "")
+    robot_type = args.get("robot_type", "franka").lower()
+
+    # Serialize waypoints for code injection
+    wp_data = [wp["joint_positions"] for wp in waypoints]
+
+    if method == "cubic":
+        save_block = ""
+        if output_path:
+            save_block = f"""
+# Save interpolated trajectory
+import os
+os.makedirs(os.path.dirname('{output_path}') or '.', exist_ok=True)
+output_waypoints = [{{"joint_positions": row.tolist()}} for row in smooth_trajectory]
+with open('{output_path}', 'w') as f:
+    json.dump({{"waypoints": output_waypoints, "method": "cubic", "num_steps": {num_steps}}}, f, indent=2)
+print(f"Saved interpolated trajectory to {output_path}")
+"""
+        return f"""\
+import numpy as np
+import json
+from scipy.interpolate import CubicSpline
+
+# Sparse waypoints
+waypoints = {wp_data}
+wp_array = np.array(waypoints)  # shape: (N, n_dof)
+
+# Cubic spline interpolation in joint space
+n_waypoints = len(wp_array)
+t_knots = np.linspace(0, 1, n_waypoints)
+cs = CubicSpline(t_knots, wp_array, axis=0)
+
+t_dense = np.linspace(0, 1, (n_waypoints - 1) * {num_steps})
+smooth_trajectory = cs(t_dense)
+
+print(f"Cubic interpolation: {{n_waypoints}} waypoints -> {{len(smooth_trajectory)}} steps")
+{save_block}"""
+
+    if method == "rmpflow":
+        save_block = ""
+        if output_path:
+            save_block = f"""
+# Save interpolated trajectory
+import os
+os.makedirs(os.path.dirname('{output_path}') or '.', exist_ok=True)
+output_waypoints = [{{"joint_positions": pos.tolist()}} for pos in planned_positions]
+with open('{output_path}', 'w') as f:
+    json.dump({{"waypoints": output_waypoints, "method": "rmpflow", "num_steps": {num_steps}}}, f, indent=2)
+print(f"Saved interpolated trajectory to {output_path}")
+"""
+        return f"""\
+import numpy as np
+import json
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+# Load RMPflow
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+# Sparse waypoints (joint space)
+waypoints = {wp_data}
+planned_positions = []
+
+for i, wp in enumerate(waypoints):
+    target_pos = np.array(wp)
+    # Use forward kinematics to get task-space target
+    rmpflow.set_end_effector_target(target_pos[:3], None)
+    # Step through RMPflow for {num_steps} steps
+    current_pos = np.array(waypoints[max(0, i-1)])
+    current_vel = np.zeros_like(current_pos)
+    for step in range({num_steps}):
+        action = rmpflow.get_next_articulation_action(current_pos, current_vel)
+        if action.joint_positions is not None:
+            current_pos = action.joint_positions
+        planned_positions.append(current_pos.copy())
+
+print(f"RMPflow interpolation: {{len(waypoints)}} waypoints -> {{len(planned_positions)}} steps (collision-aware)")
+{save_block}"""
+
+    # Default: linear interpolation
+    save_block = ""
+    if output_path:
+        save_block = f"""
+# Save interpolated trajectory
+import os
+os.makedirs(os.path.dirname('{output_path}') or '.', exist_ok=True)
+output_waypoints = [{{"joint_positions": pos.tolist()}} for pos in interpolated]
+with open('{output_path}', 'w') as f:
+    json.dump({{"waypoints": output_waypoints, "method": "linear", "num_steps": {num_steps}}}, f, indent=2)
+print(f"Saved interpolated trajectory to {output_path}")
+"""
+    return f"""\
+import numpy as np
+import json
+
+# Sparse waypoints
+waypoints = {wp_data}
+wp_array = np.array(waypoints)
+
+# Linear interpolation in joint space
+interpolated = []
+for i in range(len(wp_array) - 1):
+    start = wp_array[i]
+    end = wp_array[i + 1]
+    for t in np.linspace(0, 1, {num_steps}, endpoint=(i == len(wp_array) - 2)):
+        interpolated.append(start + t * (end - start))
+
+interpolated = np.array(interpolated)
+print(f"Linear interpolation: {{len(wp_array)}} waypoints -> {{len(interpolated)}} steps")
+{save_block}"""
+
+
+CODE_GEN_HANDLERS["start_teaching_mode"] = _gen_start_teaching_mode
+CODE_GEN_HANDLERS["record_waypoints"] = _gen_record_waypoints
+CODE_GEN_HANDLERS["replay_trajectory"] = _gen_replay_trajectory
+CODE_GEN_HANDLERS["interpolate_trajectory"] = _gen_interpolate_trajectory
+
+
 # ── Nucleus Browse & Download ────────────────────────────────────────────────
 
 async def _handle_nucleus_browse(args: Dict) -> Dict:
