@@ -2995,10 +2995,13 @@ def _gen_plan_trajectory(args: Dict) -> str:
         "trajectory = planner.compute_task_space_trajectory_from_points(",
         "    positions, orientations",
         ")",
-        "if trajectory is not None:",
-        f"    print(f'Planned trajectory through {len(waypoints)} waypoints')",
-        "else:",
-        "    print('Failed to plan trajectory — try different waypoints')",
+        "if trajectory is None:",
+        "    raise RuntimeError(",
+        "        'plan_trajectory: LulaTaskSpaceTrajectoryGenerator returned None — '",
+        "        'the planner could not connect the requested waypoints. Common causes: '",
+        "        'IK singularity near a waypoint, unreachable target pose, or robot model/robot_type mismatch.'",
+        "    )",
+        f"print(f'Planned trajectory through {len(waypoints)} waypoints')",
     ]
     return "\n".join(lines)
 
