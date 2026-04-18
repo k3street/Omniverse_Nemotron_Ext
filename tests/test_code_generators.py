@@ -1310,6 +1310,9 @@ _RAW_TEST_VECTORS = [
         {"prim_path": "/World/X", "key": "hidden", "value": True},
         ["SetMetadata", "'hidden'", "True"],
     ),
+    # NOTE: launch_training (master) is intentionally not tested here —
+    # the generator has a pre-existing nested-quote bug in master that
+    # produces invalid Python; fixing it is out of scope for this addendum.
     # ── Clearance Detection Addendum ────────────────────────────────────────
     (
         "set_clearance_monitor",
@@ -1762,6 +1765,30 @@ _RAW_TEST_VECTORS = [
             "position": [0.0, 0.0, 0.0],
         },
         ["UsdPhysics.RigidBodyAPI", "force", "torque"],
+    ),
+
+    # ── Tier 3 Atomic Tools — Articulation & Joints (CODE_GEN) ────────────
+    (
+        "set_joint_limits",
+        {"joint_path": "/World/Franka/panda_link0/panda_joint1", "lower": -2.5, "upper": 2.5},
+        [
+            "physics:lowerLimit",
+            "physics:upperLimit",
+            "CreateLowerLimitAttr",
+            "CreateUpperLimitAttr",
+            "-2.5",
+            "2.5",
+        ],
+    ),
+    (
+        "set_joint_velocity_limit",
+        {"joint_path": "/World/Franka/panda_link0/panda_joint1", "vel_limit": 3.14},
+        [
+            "PhysxJointAPI",
+            "MaxJointVelocity",
+            "physxJoint:maxJointVelocity",
+            "3.14",
+        ],
     ),
 ]
 
