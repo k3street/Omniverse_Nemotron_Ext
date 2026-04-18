@@ -5778,4 +5778,143 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+# ─── Advanced SDG (Phase 7B Addendum) ──────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "scatter_on_surface",
+            "description": "Scatter source prims across the surface of an arbitrary target mesh (e.g. fruit on a plant branch). Samples random points on the mesh surface with optional Poisson-disk spacing, normal alignment, and penetration checks. Use when objects must rest on organic / curved geometry rather than flat planes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source_prims": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "USD paths to the prims to scatter (one is picked at random per placement).",
+                    },
+                    "target_mesh": {"type": "string", "description": "USD path or filesystem path to the target Mesh prim that surfaces are sampled on."},
+                    "count": {"type": "integer", "description": "Number of placements to attempt. Default: 50"},
+                    "spacing": {"type": "number", "description": "Minimum distance between placements in meters (Poisson-disk). 0 disables. Default: 0.0"},
+                    "normal_align": {"type": "boolean", "description": "Align placed object Y-axis to surface normal (e.g. fruit hangs from branch). Default: true"},
+                    "penetration_check": {"type": "boolean", "description": "Reject placements that intersect existing geometry. Default: false"},
+                    "seed": {"type": "integer", "description": "Random seed for reproducibility. Default: 0"},
+                },
+                "required": ["source_prims", "target_mesh", "count"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_differential_sdg",
+            "description": "Configure differential / partial re-render for an SDG pipeline: freeze static scene elements (geometry, materials) and only re-randomize / re-render dynamic ones per frame. Yields 3-10x throughput gain vs full per-frame re-evaluation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "static_elements": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "USD paths to elements that should NOT be re-evaluated each frame (walls, floor, static props).",
+                    },
+                    "dynamic_elements": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "USD paths to elements that ARE re-randomized / re-rendered each frame (lights, cameras, dynamic objects).",
+                    },
+                    "randomize": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["rotation", "position", "color", "intensity", "scale"]},
+                        "description": "Which randomizers to apply to dynamic elements. Default: ['rotation', 'color']",
+                    },
+                },
+                "required": ["static_elements", "dynamic_elements"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_coco_yolo_writer",
+            "description": "Configure a custom COCO/YOLO writer with multi-camera ID handling: globally unique annotation IDs across all cameras, per-camera image-ID namespacing, single merged category map, and optional YOLO (txt + images) output instead of COCO JSON.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "output_dir": {"type": "string", "description": "Directory where annotations and images are written."},
+                    "cameras": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "USD paths to camera prims to attach to.",
+                    },
+                    "format": {"type": "string", "enum": ["coco", "yolo"], "description": "Output format. Default: 'coco'"},
+                    "categories": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Class names in canonical order (becomes shared category map).",
+                    },
+                    "id_offset": {"type": "integer", "description": "Starting offset for per-camera image-ID namespace. Default: 1000000"},
+                },
+                "required": ["output_dir", "cameras"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "benchmark_sdg",
+            "description": "Run a headless SDG throughput benchmark: report frames-per-second per annotator combination, peak VRAM usage, disk I/O throughput, and a coarse bottleneck label (CPU randomization vs GPU render vs disk write). Compares against preset baselines.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pipeline_id": {"type": "string", "description": "Identifier of the SDG pipeline to benchmark (e.g. last configured one)."},
+                    "num_frames": {"type": "integer", "description": "Number of frames to run. Default: 100"},
+                    "annotators": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Annotator combination to benchmark (e.g. ['rgb', 'depth', 'bounding_box_2d']). Default: ['rgb']",
+                    },
+                    "resolution": {"type": "array", "items": {"type": "integer"}, "description": "[width, height]. Default: [1280, 720]"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "enforce_class_balance",
+            "description": "Enforce minimum class-occurrence per frame before writing to disk. If a declared class is missing (e.g. occluded fruit), re-randomize and retry up to max_retries before falling back to writing the partial frame.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "min_per_class": {"type": "integer", "description": "Minimum required occurrences per class per frame. Default: 1"},
+                    "max_retries": {"type": "integer", "description": "Max retry attempts per frame before giving up. Default: 5"},
+                    "classes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional explicit list of class names that must appear. If omitted, derived from the pipeline's semantic labels.",
+                    },
+                    "write_partial_on_fail": {"type": "boolean", "description": "If true, write the frame anyway after retries are exhausted. Default: true"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+    # ─── Scene Export ─────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
+                },
+                "required": [],
+            },
+        },
+    },
 ]

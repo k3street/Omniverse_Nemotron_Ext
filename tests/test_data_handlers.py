@@ -60,6 +60,7 @@ from service.isaac_assist_service.chat.tools.tool_executor import (
 )
 
 
+
 class TestLookupProductSpec:
     """Test the sensor spec lookup handler."""
 

@@ -1224,6 +1224,40 @@ _TEST_VECTORS = [
         },
         ["RecordVideo", "/tmp/eval_out", "Isaac-Lift-Cube-Franka-v0", "NUM_EPISODES = 25", "MAX_STEPS_PER_EPISODE = 500"],
     ),
+    # ── Phase 7B Addendum: Advanced SDG ─────────────────────────────────────
+    (
+        "scatter_on_surface",
+        {"source_prims": ["/World/Apple"], "target_mesh": "/World/Tree", "count": 10},
+        ["_sample_surface_points", "_poisson_filter", "trimesh"],
+    ),
+    (
+        "scatter_on_surface",
+        {
+            "source_prims": ["/World/A", "/World/B"],
+            "target_mesh": "/path/to/branch.usd",
+            "count": 25,
+            "spacing": 0.05,
+            "normal_align": True,
+            "penetration_check": True,
+            "seed": 42,
+        },
+        ["random.seed(42)", "spacing = 0.05", "normal_align = True"],
+    ),
+    (
+        "configure_differential_sdg",
+        {"static_elements": ["/World/Floor"], "dynamic_elements": ["/World/Light"]},
+        ["rep.new_layer", "rep.trigger.on_frame", "rep.randomizer.rotation"],
+    ),
+    (
+        "configure_coco_yolo_writer",
+        {"output_dir": "/tmp/sdg", "cameras": ["/World/Cam1", "/World/Cam2"]},
+        ["categories.json", "_GLOBAL_ANN_ID", "_image_id_for"],
+    ),
+    (
+        "enforce_class_balance",
+        {"min_per_class": 2, "max_retries": 5, "classes": ["apple", "orange"]},
+        ["MIN_PER_CLASS = 2", "_class_counts", "class_balance_gate"],
+    ),
 ]
 
 
