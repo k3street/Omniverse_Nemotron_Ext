@@ -18254,18 +18254,35 @@ def _gen_set_render_mode(args: Dict) -> str:
         f"print('render_mode set to', {mode!r})"
     )
 
+from .tool_honesty import honesty_checked
+
+
+@honesty_checked(require_prim_paths=("prim_path",))
 def _gen_set_variant(args: Dict) -> str:
+    # Demo retrofit: @honesty_checked auto-prepends a prim-exists check
+    # using args['prim_path']. Post-check: verify the variant selection
+    # actually took (vsets silently no-op on unknown variant names).
     prim_path = args["prim_path"]
     variant_set = args["variant_set"]
     variant = args["variant"]
     return (
         "import omni.usd\n"
         "stage = omni.usd.get_context().get_stage()\n"
-        f"prim = stage.GetPrimAtPath({prim_path!r})\n"
-        f"vsets = prim.GetVariantSets()\n"
-        f"vset = vsets.GetVariantSet({variant_set!r}) if vsets.HasVariantSet({variant_set!r}) else vsets.AddVariantSet({variant_set!r})\n"
-        f"vset.SetVariantSelection({variant!r})\n"
-        f"print('variant', {prim_path!r}, {variant_set!r}, '=', {variant!r})"
+        f"_sv_path = {prim_path!r}\n"
+        f"_sv_set = {variant_set!r}\n"
+        f"_sv_variant = {variant!r}\n"
+        "prim = stage.GetPrimAtPath(_sv_path)\n"
+        "vsets = prim.GetVariantSets()\n"
+        "vset = vsets.GetVariantSet(_sv_set) if vsets.HasVariantSet(_sv_set) else vsets.AddVariantSet(_sv_set)\n"
+        "vset.SetVariantSelection(_sv_variant)\n"
+        "_vs_actual = vset.GetVariantSelection()\n"
+        "if _vs_actual != _sv_variant:\n"
+        "    raise RuntimeError(\n"
+        "        f'set_variant: SetVariantSelection({_sv_variant!r}) on {_sv_set!r} of {_sv_path!r} '\n"
+        "        f'did not take — vset.GetVariantSelection() returned {_vs_actual!r} '\n"
+        "        f'(likely unknown variant name)'\n"
+        "    )\n"
+        "print('variant', _sv_path, _sv_set, '=', _sv_variant)"
     )
 
 async def _handle_get_training_status(args: Dict) -> Dict:
