@@ -30187,3 +30187,281 @@ DATA_HANDLERS["get_camera_params"] = _handle_get_camera_params
 DATA_HANDLERS["capture_camera_image"] = _handle_capture_camera_image
 CODE_GEN_HANDLERS["set_camera_params"] = _gen_set_camera_params
 CODE_GEN_HANDLERS["set_camera_look_at"] = _gen_set_camera_look_at
+
+
+# ── Tier 8 — Render Settings (5 atomic tools) ────────────────────────────────
+#
+# T8.1 get_render_config        — DATA   (read /Render/Vars/* + viewport state)
+# T8.2 set_render_config        — CODE   (switch renderer + SPP + max_bounces)
+# T8.3 set_render_resolution    — CODE   (set viewport.resolution)
+# T8.4 enable_post_process      — CODE   (toggle bloom/tonemap/dof/motion_blur)
+# T8.5 set_environment_background — CODE (DomeLight HDRI or solid clearColor)
+
+
+async def _handle_get_render_config(args: Dict) -> Dict:
+    """Read current renderer mode, SPP, max bounces, and viewport resolution.
+
+    Generates a small introspection script and queues it via Kit RPC. The Kit
+    side runs it and returns the printed JSON. When Kit is unreachable we
+    return a structured stub so the LLM still gets predictable shape.
+    """
+    code = """\
+import json
+try:
+    import omni.kit.viewport.utility as vp_util
+    import omni.usd
+    from pxr import Sdf
+
+    vp = vp_util.get_active_viewport()
+    resolution = list(vp.resolution) if vp is not None else [None, None]
+    renderer = vp.hydra_engine if vp is not None else None
+
+    stage = omni.usd.get_context().get_stage()
+
+    def _read(attr_path, default=None):
+        prim_path, _, attr_name = attr_path.rpartition('.')
+        prim = stage.GetPrimAtPath(prim_path)
+        if not prim or not prim.IsValid():
+            return default
+        attr = prim.GetAttribute(attr_name)
+        if attr is None or not attr.HasValue():
+            return default
+        return attr.Get()
+
+    spp = _read('/Render/Vars.samplesPerPixel', 1)
+    max_bounces = _read('/Render/Vars.maxBounces', 4)
+    bloom = bool(_read('/Render/PostProcess/Bloom.enabled', False))
+    tonemap = str(_read('/Render/PostProcess/Tonemap.operator', 'aces'))
+    dof = bool(_read('/Render/PostProcess/DoF.enabled', False))
+    motion_blur = bool(_read('/Render/PostProcess/MotionBlur.enabled', False))
+
+    print(json.dumps({
+        'renderer': renderer,
+        'samples_per_pixel': spp,
+        'max_bounces': max_bounces,
+        'resolution': resolution,
+        'post_process': {
+            'bloom': bloom,
+            'tonemap': tonemap,
+            'dof': dof,
+            'motion_blur': motion_blur,
+        },
+    }))
+except Exception as e:
+    print(json.dumps({'error': str(e)}))
+"""
+    result = await kit_tools.queue_exec_patch(code, "Read current render config")
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "note": (
+            "Render config introspection queued. Kit will print a JSON dict with keys: "
+            "renderer, samples_per_pixel, max_bounces, resolution, post_process."
+        ),
+    }
+
+
+# Renderer enum → hydra delegate string used by omni.kit.viewport.utility
+_RENDERER_HYDRA_MAP = {
+    "RaytracedLighting": "rtx",
+    "PathTracing": "rtx",  # Path tracing is a sub-mode of the rtx delegate
+    "RealTime": "rtx",
+}
+
+
+def _gen_set_render_config(args: Dict) -> str:
+    renderer = args["renderer"]
+    spp = args.get("samples_per_pixel")
+    max_bounces = args.get("max_bounces")
+
+    # PathTracing is enabled by setting /Render/Vars.rendermode = 'PathTracing'
+    # (the default rtx delegate is RaytracedLighting / RealTime).
+    rendermode_attr_value = repr(renderer)
+
+    lines = [
+        "import omni.usd",
+        "from pxr import Sdf",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        "",
+        "# Ensure /Render/Vars container exists",
+        "render_vars = stage.DefinePrim('/Render/Vars', 'Scope')",
+        "",
+        "# Renderer mode (PathTracing | RaytracedLighting | RealTime)",
+        f"render_vars.CreateAttribute('rendermode', Sdf.ValueTypeNames.String).Set({rendermode_attr_value})",
+    ]
+
+    if spp is not None:
+        lines.append(
+            f"render_vars.CreateAttribute('samplesPerPixel', Sdf.ValueTypeNames.Int).Set({int(spp)})"
+        )
+    if max_bounces is not None:
+        lines.append(
+            f"render_vars.CreateAttribute('maxBounces', Sdf.ValueTypeNames.Int).Set({int(max_bounces)})"
+        )
+
+    lines.extend([
+        "",
+        "# Switch the active hydra engine on the viewport",
+        "try:",
+        "    import omni.kit.viewport.utility as vp_util",
+        "    vp = vp_util.get_active_viewport()",
+        "    if vp is not None:",
+        "        vp.hydra_engine = 'rtx'",
+        "except Exception as _e:",
+        f"    print('Viewport switch skipped (headless?):', _e)",
+        "",
+        f"print('Render config updated: renderer={renderer}, spp={spp}, max_bounces={max_bounces}')",
+    ])
+    return "\n".join(lines)
+
+
+def _gen_set_render_resolution(args: Dict) -> str:
+    width = int(args["width"])
+    height = int(args["height"])
+    return (
+        "import omni.kit.viewport.utility as vp_util\n"
+        "vp = vp_util.get_active_viewport()\n"
+        "if vp is None:\n"
+        "    raise RuntimeError('No active viewport — running headless?')\n"
+        f"vp.resolution = ({width}, {height})\n"
+        f"print('Viewport resolution set to {width}x{height}')"
+    )
+
+
+# Effect → (prim_path, attr defaults, valid params)
+_POST_PROCESS_PATHS = {
+    "bloom": "/Render/PostProcess/Bloom",
+    "tonemap": "/Render/PostProcess/Tonemap",
+    "dof": "/Render/PostProcess/DoF",
+    "motion_blur": "/Render/PostProcess/MotionBlur",
+}
+
+
+def _gen_enable_post_process(args: Dict) -> str:
+    effect = args["effect"]
+    params = args.get("params", {}) or {}
+    enabled = args.get("enabled", True)
+
+    prim_path = _POST_PROCESS_PATHS.get(effect, f"/Render/PostProcess/{effect}")
+
+    lines = [
+        "import omni.usd",
+        "from pxr import Sdf",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        f"prim = stage.DefinePrim({prim_path!r}, 'Scope')",
+        "",
+        f"# Toggle the {effect} effect",
+        f"prim.CreateAttribute('enabled', Sdf.ValueTypeNames.Bool).Set({bool(enabled)})",
+    ]
+
+    # Effect-specific parameter writes — kept generic so future params slot in.
+    if effect == "bloom":
+        if "intensity" in params:
+            lines.append(
+                f"prim.CreateAttribute('intensity', Sdf.ValueTypeNames.Float).Set({float(params['intensity'])})"
+            )
+        if "threshold" in params:
+            lines.append(
+                f"prim.CreateAttribute('threshold', Sdf.ValueTypeNames.Float).Set({float(params['threshold'])})"
+            )
+    elif effect == "tonemap":
+        if "operator" in params:
+            lines.append(
+                f"prim.CreateAttribute('operator', Sdf.ValueTypeNames.String).Set({str(params['operator'])!r})"
+            )
+        if "exposure" in params:
+            lines.append(
+                f"prim.CreateAttribute('exposure', Sdf.ValueTypeNames.Float).Set({float(params['exposure'])})"
+            )
+    elif effect == "dof":
+        if "focus_distance" in params:
+            lines.append(
+                f"prim.CreateAttribute('focusDistance', Sdf.ValueTypeNames.Float).Set({float(params['focus_distance'])})"
+            )
+        if "f_stop" in params:
+            lines.append(
+                f"prim.CreateAttribute('fStop', Sdf.ValueTypeNames.Float).Set({float(params['f_stop'])})"
+            )
+    elif effect == "motion_blur":
+        if "shutter_speed" in params:
+            lines.append(
+                f"prim.CreateAttribute('shutterSpeed', Sdf.ValueTypeNames.Float).Set({float(params['shutter_speed'])})"
+            )
+        if "samples" in params:
+            lines.append(
+                f"prim.CreateAttribute('samples', Sdf.ValueTypeNames.Int).Set({int(params['samples'])})"
+            )
+
+    lines.append(f"print('Post-process {effect} enabled={bool(enabled)}')")
+    return "\n".join(lines)
+
+
+def _gen_set_environment_background(args: Dict) -> str:
+    hdri_path = args.get("hdri_path")
+    color = args.get("color")
+    intensity = args.get("intensity", 1000.0)
+    rotation_deg = args.get("rotation_deg", 0.0)
+
+    if hdri_path and color:
+        # Both provided — HDRI wins, but emit a comment so the user sees why.
+        pass
+
+    if hdri_path:
+        return f"""\
+import omni.usd
+from pxr import UsdLux, UsdGeom, Sdf, Gf
+
+stage = omni.usd.get_context().get_stage()
+dome_path = '/World/EnvironmentLight'
+dome = UsdLux.DomeLight.Define(stage, dome_path)
+dome.CreateTextureFileAttr().Set({hdri_path!r})
+dome.CreateIntensityAttr().Set({float(intensity)})
+dome.CreateTextureFormatAttr().Set('latlong')
+
+# Rotate dome around the up-axis
+xf = UsdGeom.Xformable(dome.GetPrim())
+xf.ClearXformOpOrder()
+xf.AddRotateYOp().Set({float(rotation_deg)})
+
+print('Environment HDRI set: {hdri_path} (intensity={intensity}, rotation={rotation_deg} deg)')
+"""
+
+    if color is not None:
+        r, g, b = (float(color[0]), float(color[1]), float(color[2]))
+        return f"""\
+import omni.usd
+from pxr import Sdf, Gf
+
+stage = omni.usd.get_context().get_stage()
+render_vars = stage.DefinePrim('/Render/Vars', 'Scope')
+render_vars.CreateAttribute('clearColor', Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f({r}, {g}, {b}))
+
+# Remove dome if present so the solid color is actually visible
+dome_prim = stage.GetPrimAtPath('/World/EnvironmentLight')
+if dome_prim and dome_prim.IsValid():
+    stage.RemovePrim('/World/EnvironmentLight')
+
+print('Environment background color set to ({r}, {g}, {b})')
+"""
+
+    # Neither provided — clear to a neutral grey by default so this stays a
+    # well-defined no-arg call.
+    return """\
+import omni.usd
+from pxr import Sdf, Gf
+
+stage = omni.usd.get_context().get_stage()
+render_vars = stage.DefinePrim('/Render/Vars', 'Scope')
+render_vars.CreateAttribute('clearColor', Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(0.2, 0.2, 0.2))
+print('Environment background reset to neutral grey (0.2, 0.2, 0.2)')
+"""
+
+
+# Register Tier 8 handlers
+DATA_HANDLERS["get_render_config"] = _handle_get_render_config
+CODE_GEN_HANDLERS["set_render_config"] = _gen_set_render_config
+CODE_GEN_HANDLERS["set_render_resolution"] = _gen_set_render_resolution
+CODE_GEN_HANDLERS["enable_post_process"] = _gen_enable_post_process
+CODE_GEN_HANDLERS["set_environment_background"] = _gen_set_environment_background

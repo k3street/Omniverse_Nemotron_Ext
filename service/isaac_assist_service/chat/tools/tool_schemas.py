@@ -8981,4 +8981,472 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Tier 8 — Render Settings (5 atomic tools) ────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "get_render_config",
+            "description": (
+                "WHAT: Read the current render configuration — active renderer (RaytracedLighting / "
+                "PathTracing / RealTime), samples-per-pixel (SPP), max bounces, and viewport "
+                "resolution — by inspecting /Render/Vars/* and the active hydra engine on the stage. "
+                "WHEN: before switching from preview to final-quality rendering, when verifying SDG "
+                "output settings, when debugging noisy or slow renders, or when reporting the current "
+                "render state to the user. "
+                "RETURNS: data dict {renderer: 'RaytracedLighting'|'PathTracing'|'RealTime', "
+                "samples_per_pixel: int, max_bounces: int, resolution: [width, height], "
+                "post_process: {bloom: bool, tonemap: str, dof: bool, motion_blur: bool}}. "
+                "UNITS: SPP is dimensionless (typical 1-128), resolution in pixels. "
+                "CAVEATS: read-only — does NOT change anything. PathTracing samples are per-pixel "
+                "per-frame and accumulate over time; SPP=1 in PT means 1 sample per progressive "
+                "iteration. Returns null fields when running headless without a viewport."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_render_config",
+            "description": (
+                "WHAT: Switch the renderer mode and adjust quality settings (SPP, max bounces). "
+                "Generates a code patch that updates the active hydra delegate via "
+                "omni.kit.viewport.utility and writes /Render/Vars/* attributes. "
+                "WHEN: switching from preview (fast RaytracedLighting) to final-quality "
+                "(PathTracing for marketing renders or SDG ground-truth), tweaking SPP for SDG "
+                "output, or lowering quality for interactive iteration. "
+                "RETURNS: code patch for approval (queued via Kit RPC /exec). "
+                "UNITS: samples_per_pixel dimensionless (1-1024 typical), max_bounces dimensionless "
+                "(1-16 typical). "
+                "CAVEATS: PathTracing is roughly 10x slower than RaytracedLighting per frame but "
+                "physically correct for caustics/GI. For RL training use 'RealTime' or "
+                "'RaytracedLighting' (PT is too slow). Higher SPP = less noise but proportionally "
+                "slower; double SPP halves noise. Switching renderers may reset accumulated samples."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "renderer": {
+                        "type": "string",
+                        "enum": ["RaytracedLighting", "PathTracing", "RealTime"],
+                        "description": (
+                            "Renderer engine. 'RaytracedLighting' = balanced quality+speed (default "
+                            "for preview), 'PathTracing' = physically-correct GI/caustics (final "
+                            "quality, ~10x slower), 'RealTime' = rasterized (fastest, no RT GI; "
+                            "good for RL training). Example: 'PathTracing'."
+                        ),
+                    },
+                    "samples_per_pixel": {
+                        "type": "integer",
+                        "description": (
+                            "Samples per pixel (SPP). Higher = less noise, slower. Typical: "
+                            "RaytracedLighting 1-4, PathTracing 32-128 for previews and "
+                            "256-1024 for final SDG. Example: 64."
+                        ),
+                    },
+                    "max_bounces": {
+                        "type": "integer",
+                        "description": (
+                            "Maximum light bounces for indirect illumination. PathTracing only. "
+                            "Typical: 4-8. Higher = more accurate caustics/GI but slower. "
+                            "Example: 6."
+                        ),
+                    },
+                },
+                "required": ["renderer"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_render_resolution",
+            "description": (
+                "WHAT: Set the viewport / render-product resolution by writing to the active "
+                "viewport API (omni.kit.viewport.utility.get_active_viewport().resolution = (w, h)). "
+                "WHEN: configuring SDG output resolution before a Replicator run, switching to a "
+                "specific aspect ratio for marketing renders, downscaling for fast iteration, or "
+                "matching a real-world camera sensor's pixel grid for sim-to-real validation. "
+                "RETURNS: code patch for approval. "
+                "UNITS: width and height in pixels (integers). "
+                "CAVEATS: very high resolutions (>4096) cost VRAM proportionally and may OOM on "
+                "consumer GPUs. Resolution affects SPP cost linearly (4K = 4x as many rays as "
+                "1080p). For SDG, set this BEFORE creating the render_product; changing later "
+                "requires recreating the product. Aspect ratio is implicit from width/height — "
+                "if camera FoV stays fixed, the framing changes."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "width": {
+                        "type": "integer",
+                        "description": (
+                            "Render width in pixels. Common: 1280 (720p), 1920 (1080p), 2560 (1440p), "
+                            "3840 (4K). Example: 1920."
+                        ),
+                    },
+                    "height": {
+                        "type": "integer",
+                        "description": (
+                            "Render height in pixels. Common: 720, 1080, 1440, 2160. Example: 1080."
+                        ),
+                    },
+                },
+                "required": ["width", "height"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "enable_post_process",
+            "description": (
+                "WHAT: Enable or configure a post-processing effect on the active viewport — bloom, "
+                "tonemap, depth-of-field (DoF), or motion blur — by toggling the corresponding "
+                "/Render/PostProcess/* attributes on the render settings prim. "
+                "WHEN: matching a cinematic look (bloom + filmic tonemap), simulating real-camera "
+                "DoF for sim-to-real perception training, adding motion blur for fast-moving "
+                "objects in SDG output, or disabling effects to get clean ground-truth frames. "
+                "RETURNS: code patch for approval. "
+                "UNITS: intensity 0.0-1.0 (dimensionless), focus_distance in scene units (meters), "
+                "f_stop dimensionless (typical 1.4-22), shutter_speed in seconds (typical 1/60). "
+                "CAVEATS: post-process effects are baked into RGB output and CANNOT be removed "
+                "later — for clean SDG ground truth disable bloom/DoF/motion_blur. Tonemap affects "
+                "the perceived brightness range; 'aces' is film-standard, 'reinhard' is simpler. "
+                "DoF requires a Camera prim with focusDistance/fStop attributes set. Motion blur "
+                "requires multi-frame sample accumulation (slower)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "effect": {
+                        "type": "string",
+                        "enum": ["bloom", "tonemap", "dof", "motion_blur"],
+                        "description": (
+                            "Post-process effect to enable. 'bloom' = light-bleed glow around bright "
+                            "pixels, 'tonemap' = HDR→LDR mapping curve, 'dof' = depth-of-field blur, "
+                            "'motion_blur' = temporal blur on moving objects. Example: 'bloom'."
+                        ),
+                    },
+                    "params": {
+                        "type": "object",
+                        "description": (
+                            "Effect-specific parameters. bloom: {intensity: 0.0-1.0, threshold: float}. "
+                            "tonemap: {operator: 'aces'|'reinhard'|'linear', exposure: float in EV stops}. "
+                            "dof: {focus_distance: meters, f_stop: float}. "
+                            "motion_blur: {shutter_speed: seconds, samples: int}. "
+                            "Example for bloom: {\"intensity\": 0.5, \"threshold\": 1.0}."
+                        ),
+                    },
+                    "enabled": {
+                        "type": "boolean",
+                        "description": (
+                            "True to enable the effect, False to disable. Default: True. "
+                            "Example: True."
+                        ),
+                    },
+                },
+                "required": ["effect"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_environment_background",
+            "description": (
+                "WHAT: Set the scene's environment background — either an HDRI dome light texture "
+                "(latlong .hdr/.exr) or a solid color clear background — by creating/updating a "
+                "DomeLight prim at /World/EnvironmentLight or writing /Render/Vars/clearColor. "
+                "WHEN: matching real-world lighting from a HDRI capture for sim-to-real, setting "
+                "a neutral grey backdrop for SDG bounding-box training (avoids background bias), "
+                "switching to a sunset/studio HDRI for marketing renders, or using a flat color "
+                "for fast preview iteration. "
+                "RETURNS: code patch for approval. "
+                "UNITS: color is RGB triplet 0.0-1.0 (linear), HDRI intensity in nits (0.0-10000+), "
+                "HDRI rotation in degrees (0-360). "
+                "CAVEATS: HDRI dome lights provide image-based lighting (IBL) — they affect ALL "
+                "scene illumination, not just the background pixels. Solid colors do NOT contribute "
+                "to lighting; you must add explicit lights. Latlong .hdr/.exr files are required "
+                "(cubemaps unsupported by USD DomeLight). Very high intensity (>1000) can wash out "
+                "shadows. For SDG ground truth, prefer solid color OR a fixed HDRI to keep "
+                "lighting reproducible across frames."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hdri_path": {
+                        "type": "string",
+                        "description": (
+                            "Path or Nucleus URL to a latlong .hdr or .exr HDRI texture. "
+                            "Mutually exclusive with 'color'. Example: "
+                            "'omniverse://localhost/NVIDIA/Assets/Skies/2k/kloppenheim_06_2k.hdr'."
+                        ),
+                    },
+                    "color": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": (
+                            "Solid background color [r, g, b] in linear 0.0-1.0. Mutually exclusive "
+                            "with 'hdri_path'. Example: [0.2, 0.2, 0.2] for neutral grey."
+                        ),
+                    },
+                    "intensity": {
+                        "type": "number",
+                        "description": (
+                            "HDRI dome light intensity multiplier in nits. Default: 1000. Typical: "
+                            "500-3000. Example: 1500. Ignored when 'color' is set."
+                        ),
+                    },
+                    "rotation_deg": {
+                        "type": "number",
+                        "description": (
+                            "HDRI rotation around the up-axis in degrees, 0-360. Useful for aiming "
+                            "the sun direction. Default: 0. Example: 90. Ignored when 'color' is set."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+
+# ─── Tier 8 — Render Settings (5 atomic tools) ────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "get_render_config",
+            "description": (
+                "WHAT: Read the current render configuration — active renderer (RaytracedLighting / "
+                "PathTracing / RealTime), samples-per-pixel (SPP), max bounces, and viewport "
+                "resolution — by inspecting /Render/Vars/* and the active hydra engine on the stage. "
+                "WHEN: before switching from preview to final-quality rendering, when verifying SDG "
+                "output settings, when debugging noisy or slow renders, or when reporting the current "
+                "render state to the user. "
+                "RETURNS: data dict {renderer: 'RaytracedLighting'|'PathTracing'|'RealTime', "
+                "samples_per_pixel: int, max_bounces: int, resolution: [width, height], "
+                "post_process: {bloom: bool, tonemap: str, dof: bool, motion_blur: bool}}. "
+                "UNITS: SPP is dimensionless (typical 1-128), resolution in pixels. "
+                "CAVEATS: read-only — does NOT change anything. PathTracing samples are per-pixel "
+                "per-frame and accumulate over time; SPP=1 in PT means 1 sample per progressive "
+                "iteration. Returns null fields when running headless without a viewport."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_render_config",
+            "description": (
+                "WHAT: Switch the renderer mode and adjust quality settings (SPP, max bounces). "
+                "Generates a code patch that updates the active hydra delegate via "
+                "omni.kit.viewport.utility and writes /Render/Vars/* attributes. "
+                "WHEN: switching from preview (fast RaytracedLighting) to final-quality "
+                "(PathTracing for marketing renders or SDG ground-truth), tweaking SPP for SDG "
+                "output, or lowering quality for interactive iteration. "
+                "RETURNS: code patch for approval (queued via Kit RPC /exec). "
+                "UNITS: samples_per_pixel dimensionless (1-1024 typical), max_bounces dimensionless "
+                "(1-16 typical). "
+                "CAVEATS: PathTracing is roughly 10x slower than RaytracedLighting per frame but "
+                "physically correct for caustics/GI. For RL training use 'RealTime' or "
+                "'RaytracedLighting' (PT is too slow). Higher SPP = less noise but proportionally "
+                "slower; double SPP halves noise. Switching renderers may reset accumulated samples."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "renderer": {
+                        "type": "string",
+                        "enum": ["RaytracedLighting", "PathTracing", "RealTime"],
+                        "description": (
+                            "Renderer engine. 'RaytracedLighting' = balanced quality+speed (default "
+                            "for preview), 'PathTracing' = physically-correct GI/caustics (final "
+                            "quality, ~10x slower), 'RealTime' = rasterized (fastest, no RT GI; "
+                            "good for RL training). Example: 'PathTracing'."
+                        ),
+                    },
+                    "samples_per_pixel": {
+                        "type": "integer",
+                        "description": (
+                            "Samples per pixel (SPP). Higher = less noise, slower. Typical: "
+                            "RaytracedLighting 1-4, PathTracing 32-128 for previews and "
+                            "256-1024 for final SDG. Example: 64."
+                        ),
+                    },
+                    "max_bounces": {
+                        "type": "integer",
+                        "description": (
+                            "Maximum light bounces for indirect illumination. PathTracing only. "
+                            "Typical: 4-8. Higher = more accurate caustics/GI but slower. "
+                            "Example: 6."
+                        ),
+                    },
+                },
+                "required": ["renderer"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_render_resolution",
+            "description": (
+                "WHAT: Set the viewport / render-product resolution by writing to the active "
+                "viewport API (omni.kit.viewport.utility.get_active_viewport().resolution = (w, h)). "
+                "WHEN: configuring SDG output resolution before a Replicator run, switching to a "
+                "specific aspect ratio for marketing renders, downscaling for fast iteration, or "
+                "matching a real-world camera sensor's pixel grid for sim-to-real validation. "
+                "RETURNS: code patch for approval. "
+                "UNITS: width and height in pixels (integers). "
+                "CAVEATS: very high resolutions (>4096) cost VRAM proportionally and may OOM on "
+                "consumer GPUs. Resolution affects SPP cost linearly (4K = 4x as many rays as "
+                "1080p). For SDG, set this BEFORE creating the render_product; changing later "
+                "requires recreating the product. Aspect ratio is implicit from width/height — "
+                "if camera FoV stays fixed, the framing changes."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "width": {
+                        "type": "integer",
+                        "description": (
+                            "Render width in pixels. Common: 1280 (720p), 1920 (1080p), 2560 (1440p), "
+                            "3840 (4K). Example: 1920."
+                        ),
+                    },
+                    "height": {
+                        "type": "integer",
+                        "description": (
+                            "Render height in pixels. Common: 720, 1080, 1440, 2160. Example: 1080."
+                        ),
+                    },
+                },
+                "required": ["width", "height"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "enable_post_process",
+            "description": (
+                "WHAT: Enable or configure a post-processing effect on the active viewport — bloom, "
+                "tonemap, depth-of-field (DoF), or motion blur — by toggling the corresponding "
+                "/Render/PostProcess/* attributes on the render settings prim. "
+                "WHEN: matching a cinematic look (bloom + filmic tonemap), simulating real-camera "
+                "DoF for sim-to-real perception training, adding motion blur for fast-moving "
+                "objects in SDG output, or disabling effects to get clean ground-truth frames. "
+                "RETURNS: code patch for approval. "
+                "UNITS: intensity 0.0-1.0 (dimensionless), focus_distance in scene units (meters), "
+                "f_stop dimensionless (typical 1.4-22), shutter_speed in seconds (typical 1/60). "
+                "CAVEATS: post-process effects are baked into RGB output and CANNOT be removed "
+                "later — for clean SDG ground truth disable bloom/DoF/motion_blur. Tonemap affects "
+                "the perceived brightness range; 'aces' is film-standard, 'reinhard' is simpler. "
+                "DoF requires a Camera prim with focusDistance/fStop attributes set. Motion blur "
+                "requires multi-frame sample accumulation (slower)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "effect": {
+                        "type": "string",
+                        "enum": ["bloom", "tonemap", "dof", "motion_blur"],
+                        "description": (
+                            "Post-process effect to enable. 'bloom' = light-bleed glow around bright "
+                            "pixels, 'tonemap' = HDR→LDR mapping curve, 'dof' = depth-of-field blur, "
+                            "'motion_blur' = temporal blur on moving objects. Example: 'bloom'."
+                        ),
+                    },
+                    "params": {
+                        "type": "object",
+                        "description": (
+                            "Effect-specific parameters. bloom: {intensity: 0.0-1.0, threshold: float}. "
+                            "tonemap: {operator: 'aces'|'reinhard'|'linear', exposure: float in EV stops}. "
+                            "dof: {focus_distance: meters, f_stop: float}. "
+                            "motion_blur: {shutter_speed: seconds, samples: int}. "
+                            "Example for bloom: {\"intensity\": 0.5, \"threshold\": 1.0}."
+                        ),
+                    },
+                    "enabled": {
+                        "type": "boolean",
+                        "description": (
+                            "True to enable the effect, False to disable. Default: True. "
+                            "Example: True."
+                        ),
+                    },
+                },
+                "required": ["effect"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_environment_background",
+            "description": (
+                "WHAT: Set the scene's environment background — either an HDRI dome light texture "
+                "(latlong .hdr/.exr) or a solid color clear background — by creating/updating a "
+                "DomeLight prim at /World/EnvironmentLight or writing /Render/Vars/clearColor. "
+                "WHEN: matching real-world lighting from a HDRI capture for sim-to-real, setting "
+                "a neutral grey backdrop for SDG bounding-box training (avoids background bias), "
+                "switching to a sunset/studio HDRI for marketing renders, or using a flat color "
+                "for fast preview iteration. "
+                "RETURNS: code patch for approval. "
+                "UNITS: color is RGB triplet 0.0-1.0 (linear), HDRI intensity in nits (0.0-10000+), "
+                "HDRI rotation in degrees (0-360). "
+                "CAVEATS: HDRI dome lights provide image-based lighting (IBL) — they affect ALL "
+                "scene illumination, not just the background pixels. Solid colors do NOT contribute "
+                "to lighting; you must add explicit lights. Latlong .hdr/.exr files are required "
+                "(cubemaps unsupported by USD DomeLight). Very high intensity (>1000) can wash out "
+                "shadows. For SDG ground truth, prefer solid color OR a fixed HDRI to keep "
+                "lighting reproducible across frames."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hdri_path": {
+                        "type": "string",
+                        "description": (
+                            "Path or Nucleus URL to a latlong .hdr or .exr HDRI texture. "
+                            "Mutually exclusive with 'color'. Example: "
+                            "'omniverse://localhost/NVIDIA/Assets/Skies/2k/kloppenheim_06_2k.hdr'."
+                        ),
+                    },
+                    "color": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": (
+                            "Solid background color [r, g, b] in linear 0.0-1.0. Mutually exclusive "
+                            "with 'hdri_path'. Example: [0.2, 0.2, 0.2] for neutral grey."
+                        ),
+                    },
+                    "intensity": {
+                        "type": "number",
+                        "description": (
+                            "HDRI dome light intensity multiplier in nits. Default: 1000. Typical: "
+                            "500-3000. Example: 1500. Ignored when 'color' is set."
+                        ),
+                    },
+                    "rotation_deg": {
+                        "type": "number",
+                        "description": (
+                            "HDRI rotation around the up-axis in degrees, 0-360. Useful for aiming "
+                            "the sun direction. Default: 0. Example: 90. Ignored when 'color' is set."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]

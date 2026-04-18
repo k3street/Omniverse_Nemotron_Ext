@@ -1972,6 +1972,62 @@ _RAW_TEST_VECTORS = [
             "_safe_set_rotate_xyz",
         ],
     ),
+    # ── Tier 8 — Render Settings ───────────────────────────────────────────
+    (
+        "set_render_config",
+        {"renderer": "PathTracing", "samples_per_pixel": 64, "max_bounces": 6},
+        ["rendermode", "PathTracing", "samplesPerPixel", "64", "maxBounces", "6"],
+    ),
+    (
+        "set_render_config",
+        {"renderer": "RaytracedLighting"},
+        ["rendermode", "RaytracedLighting", "viewport"],
+    ),
+    (
+        "set_render_resolution",
+        {"width": 1920, "height": 1080},
+        ["viewport.utility", "vp.resolution", "(1920, 1080)"],
+    ),
+    (
+        "enable_post_process",
+        {"effect": "bloom", "params": {"intensity": 0.5, "threshold": 1.0}},
+        ["/Render/PostProcess/Bloom", "enabled", "intensity", "0.5"],
+    ),
+    (
+        "enable_post_process",
+        {"effect": "tonemap", "params": {"operator": "aces", "exposure": 0.0}},
+        ["/Render/PostProcess/Tonemap", "operator", "aces"],
+    ),
+    (
+        "enable_post_process",
+        {"effect": "dof", "params": {"focus_distance": 2.5, "f_stop": 2.8}},
+        ["/Render/PostProcess/DoF", "focusDistance", "fStop"],
+    ),
+    (
+        "enable_post_process",
+        {"effect": "motion_blur", "params": {"shutter_speed": 0.0167, "samples": 4}},
+        ["/Render/PostProcess/MotionBlur", "shutterSpeed", "samples"],
+    ),
+    (
+        "enable_post_process",
+        {"effect": "bloom", "enabled": False},
+        ["/Render/PostProcess/Bloom", "enabled"],
+    ),
+    (
+        "set_environment_background",
+        {"hdri_path": "omniverse://localhost/Skies/sunset.hdr", "intensity": 1500.0, "rotation_deg": 90.0},
+        ["UsdLux.DomeLight", "CreateTextureFileAttr", "sunset.hdr", "1500", "AddRotateYOp"],
+    ),
+    (
+        "set_environment_background",
+        {"color": [0.2, 0.2, 0.2]},
+        ["clearColor", "Gf.Vec3f", "0.2"],
+    ),
+    (
+        "set_environment_background",
+        {},
+        ["clearColor", "neutral grey"],
+    ),
 ]
 
 
@@ -2494,14 +2550,12 @@ class TestTemplateDetection:
         )
         _assert_valid_python(code, "generate_eval_harness")
     # ── Clearance Detection Addendum edge cases ────────────────────────────
-
-    # ── Clearance Detection Addendum edge cases ────────────────────────────
-    # Guarded with skipif so the file remains runnable on branches that
-    # do not yet include the clearance handlers.
+    # These run only when the addendum is merged; they auto-skip otherwise so
+    # this file stays runnable as branches land in master in any order.
 
     @pytest.mark.skipif(
         "set_clearance_monitor" not in CODE_GEN_HANDLERS,
-        reason="set_clearance_monitor handler not on this branch",
+        reason="Clearance Detection addendum not merged on this branch",
     )
     def test_set_clearance_monitor_default_thresholds(self):
         """No clearance_mm given should fall back to 50mm stop / 100mm warning."""
@@ -2515,6 +2569,7 @@ class TestTemplateDetection:
     @pytest.mark.skipif(
         "set_clearance_monitor" not in CODE_GEN_HANDLERS,
         reason="set_clearance_monitor handler not on this branch",
+        reason="Clearance Detection addendum not merged on this branch",
     )
     def test_set_clearance_monitor_no_targets(self):
         """Empty target list should still produce valid code (monitors all robot links)."""
@@ -2529,6 +2584,7 @@ class TestTemplateDetection:
     @pytest.mark.skipif(
         "visualize_clearance" not in CODE_GEN_HANDLERS,
         reason="visualize_clearance handler not on this branch",
+        reason="Clearance Detection addendum not merged on this branch",
     )
     def test_visualize_clearance_default_mode_is_heatmap(self):
         """Omitting mode should default to heatmap (SDF + debug draw)."""
@@ -2545,6 +2601,7 @@ class TestTemplateDetection:
     @pytest.mark.skipif(
         "visualize_clearance" not in CODE_GEN_HANDLERS,
         reason="visualize_clearance handler not on this branch",
+        reason="Clearance Detection addendum not merged on this branch",
     )
     def test_visualize_clearance_zones_uses_triggers(self):
         """zones mode should use PhysxTriggerAPI and skip SDF mesh collision."""
@@ -2560,6 +2617,7 @@ class TestTemplateDetection:
     @pytest.mark.skipif(
         "check_path_clearance" not in CODE_GEN_HANDLERS,
         reason="check_path_clearance handler not on this branch",
+        reason="Clearance Detection addendum not merged on this branch",
     )
     def test_check_path_clearance_multiple_waypoints(self):
         """Trajectory with multiple waypoints should be embedded as a list-of-lists."""
@@ -2580,6 +2638,7 @@ class TestTemplateDetection:
     @pytest.mark.skipif(
         "check_path_clearance" not in CODE_GEN_HANDLERS,
         reason="check_path_clearance handler not on this branch",
+        reason="Clearance Detection addendum not merged on this branch",
     )
     def test_check_path_clearance_no_obstacles(self):
         """Empty obstacle list is still valid — every waypoint should report inf clearance."""
@@ -2980,6 +3039,71 @@ class TestTemplateDetection:
                 "camera_path": "/World/Cam",
                 "target": [1.0, 2.0],  # only 2 components
             })
+
+
+    # ── Tier 8 — Render Settings edge cases ────────────────────────────────
+
+    def test_set_render_config_minimal_renderer_only(self):
+        code = CODE_GEN_HANDLERS["set_render_config"]({"renderer": "RealTime"})
+        _assert_valid_python(code, "set_render_config")
+        assert "RealTime" in code
+        # When SPP/max_bounces omitted, those attributes should NOT be written
+        assert "samplesPerPixel" not in code
+        assert "maxBounces" not in code
+
+    def test_set_render_config_pathtracing_with_quality(self):
+        code = CODE_GEN_HANDLERS["set_render_config"]({
+            "renderer": "PathTracing",
+            "samples_per_pixel": 256,
+            "max_bounces": 8,
+        })
+        _assert_valid_python(code, "set_render_config")
+        assert "PathTracing" in code
+        assert "256" in code
+        assert "8" in code
+
+    def test_set_render_resolution_4k(self):
+        code = CODE_GEN_HANDLERS["set_render_resolution"]({"width": 3840, "height": 2160})
+        _assert_valid_python(code, "set_render_resolution")
+        assert "(3840, 2160)" in code
+
+    def test_enable_post_process_disable_flag(self):
+        code = CODE_GEN_HANDLERS["enable_post_process"]({
+            "effect": "bloom",
+            "enabled": False,
+        })
+        _assert_valid_python(code, "enable_post_process")
+        assert "False" in code
+        assert "/Render/PostProcess/Bloom" in code
+
+    def test_enable_post_process_no_params_dict(self):
+        """Omitting params should still produce valid code that just toggles enabled."""
+        code = CODE_GEN_HANDLERS["enable_post_process"]({"effect": "tonemap"})
+        _assert_valid_python(code, "enable_post_process")
+        assert "/Render/PostProcess/Tonemap" in code
+
+    def test_set_environment_background_hdri_with_rotation(self):
+        code = CODE_GEN_HANDLERS["set_environment_background"]({
+            "hdri_path": "/assets/studio.hdr",
+            "rotation_deg": 180.0,
+        })
+        _assert_valid_python(code, "set_environment_background")
+        assert "DomeLight" in code
+        assert "studio.hdr" in code
+        assert "180" in code
+
+    def test_set_environment_background_color_only(self):
+        code = CODE_GEN_HANDLERS["set_environment_background"]({"color": [1.0, 0.0, 0.0]})
+        _assert_valid_python(code, "set_environment_background")
+        assert "clearColor" in code
+        # Solid color path should also remove the dome if present
+        assert "RemovePrim" in code
+
+    def test_set_environment_background_no_args_defaults_to_grey(self):
+        """No args is valid — falls back to neutral grey."""
+        code = CODE_GEN_HANDLERS["set_environment_background"]({})
+        _assert_valid_python(code, "set_environment_background")
+        assert "0.2" in code
 
 
 class TestAllCodeGenHandlersCovered:

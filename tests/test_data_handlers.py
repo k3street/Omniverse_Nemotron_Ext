@@ -68,6 +68,7 @@ except ImportError:
 
 
 
+
 class TestLookupProductSpec:
     """Test the sensor spec lookup handler."""
 
@@ -164,6 +165,25 @@ class TestNoneHandlers:
         result = await execute_tool_call("explain_error", {"error_text": "some error"})
         assert result["type"] == "data"
         assert "handled by the LLM" in result.get("note", "")
+
+
+class TestGetRenderConfig:
+    """Tier 8 — T8.1 get_render_config DATA handler."""
+
+    @pytest.mark.asyncio
+    async def test_get_render_config_queues_introspection(self, mock_kit_rpc):
+        handler = DATA_HANDLERS["get_render_config"]
+        result = await handler({})
+        assert isinstance(result, dict)
+        # The handler must always return a structured result with the shape
+        # the LLM expects — keys: queued, patch_id, note. The note explains
+        # what fields the eventual JSON will contain.
+        assert "queued" in result
+        assert "patch_id" in result
+        assert "note" in result
+        assert "renderer" in result["note"]
+        assert "samples_per_pixel" in result["note"]
+        assert "resolution" in result["note"]
 
 
 class TestCatalogSearch:
