@@ -75,12 +75,13 @@ async def classify_intent(message: str, provider) -> Intent:
         }
     ]
 
-    # Override the system prompt just for this call
-    original_system = getattr(provider, "_system_override", None)
+    # Pass the classifier system prompt per-call. Monkey-patching the provider
+    # instance caused a race under concurrent requests: one session's finally
+    # could delete the override while another relied on it, or a failed cleanup
+    # left INTENT_SYSTEM permanently active and subsequent chat replies came
+    # back as raw {"intent": ..., "confidence": ...} JSON.
     try:
-        # Temporarily inject classifier system prompt
-        provider._system_override = INTENT_SYSTEM
-        response = await provider.complete(messages, {})
+        response = await provider.complete(messages, {"system_override": INTENT_SYSTEM})
         raw = response.text.strip()
 
         # Strip markdown fences if present
@@ -97,8 +98,3 @@ async def classify_intent(message: str, provider) -> Intent:
     except Exception as e:
         logger.warning(f"[IntentRouter] Classification failed ({e}), defaulting to general_query")
         return "general_query"
-    finally:
-        if original_system is None and hasattr(provider, "_system_override"):
-            del provider._system_override
-        elif original_system is not None:
-            provider._system_override = original_system

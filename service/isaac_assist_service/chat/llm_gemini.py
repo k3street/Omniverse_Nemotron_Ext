@@ -35,8 +35,10 @@ class GeminiProvider:
         )
 
     async def complete(self, messages: List[Dict], context: Dict) -> LLMResponse:
-        # Use override, or extract from the distilled messages, or fallback.
-        system = getattr(self, "_system_override", None)
+        # Per-call override via context (used by intent classifier to avoid
+        # racing a shared instance attr), then instance override, then
+        # distilled system message, then default.
+        system = context.get("system_override") or getattr(self, "_system_override", None)
         if not system:
             sys_msgs = [m for m in messages if m.get("role") == "system"]
             if sys_msgs:
