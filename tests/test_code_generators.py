@@ -1632,6 +1632,22 @@ _RAW_TEST_VECTORS = [
         {"fault_type": "inf_joint_limits"},
         ["inf", "LowerLimitAttr"],
     ),
+    # ── Safety & Compliance: enable_deterministic_mode ────────────────────
+    (
+        "enable_deterministic_mode",
+        {},
+        ["TGS", "EnableGPUDynamicsAttr", "42"],
+    ),
+    (
+        "enable_deterministic_mode",
+        {"seed": 123, "physics_dt": 0.01, "solver_iterations": 8},
+        ["123", "0.01", "8"],
+    ),
+    (
+        "enable_deterministic_mode",
+        {"export_archive_path": "/tmp/repro.zip", "seed": 999},
+        ["zipfile", "/tmp/repro.zip", "manifest"],
+    ),
 ]
 
 
