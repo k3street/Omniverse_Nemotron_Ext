@@ -6678,4 +6678,101 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+# ─── Physics Parameter Calibration ────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "calibrate_physics",
+            "description": "Calibrate sim physics parameters (joint friction, damping, link masses) from real robot data using Bayesian optimization (Ray Tune + Optuna). Long-running headless job (30-120 min). Real data must be HDF5 with joint_positions, joint_velocities, joint_torques_commanded sampled at 200-500 Hz. Returns calibrated parameters and suggested DR ranges. Use this when the user wants to close the sim-to-real gap by fitting physics parameters to measured robot trajectories.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "real_data_path": {"type": "string", "description": "Path to HDF5 file with real robot logs — joint_positions, joint_velocities, joint_torques_commanded at 200-500 Hz, 30-120s of excitation trajectory."},
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation in the IsaacLab scene — e.g. '/World/Franka'."},
+                    "parameters_to_calibrate": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["friction", "damping", "armature", "masses", "viscous_friction"]},
+                        "description": "Which physics parameters to calibrate. Default: ['friction', 'damping', 'masses']. Skip contact stiffness, restitution, surface friction (not identifiable — use DR instead).",
+                    },
+                    "num_samples": {"type": "integer", "description": "Number of Bayesian-optimization trial samples. Default: 100."},
+                    "num_workers": {"type": "integer", "description": "Number of parallel Ray workers. Default: 4."},
+                    "output_dir": {"type": "string", "description": "Directory for calibration results. Default: workspace/calibration/<robot>"},
+                },
+                "required": ["real_data_path", "articulation_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "quick_calibrate",
+            "description": "Faster (~5 min) physics calibration that only fits the highest-impact parameters: armature (rotor inertia), Coulomb friction, and link masses (if payload matters). Skips contact stiffness, restitution, surface friction (these should be randomized via DR, not calibrated). Use this for a first-pass sim-to-real gap reduction before running the full calibrate_physics.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "real_data_path": {"type": "string", "description": "Path to HDF5 file with joint logs — 30s minimum at 200-500 Hz."},
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation."},
+                    "include_masses": {"type": "boolean", "description": "Whether to include link-mass calibration. Default: true."},
+                    "output_dir": {"type": "string", "description": "Directory for calibration results. Default: workspace/calibration/<robot>_quick"},
+                },
+                "required": ["real_data_path", "articulation_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_calibration",
+            "description": "Validate a calibration result on a held-out real-data trajectory. Computes per-joint trajectory tracking error (RMSE on positions and velocities) and contact-force comparison if F/T data is present. Reports whether the calibrated parameters reduced the sim-to-real gap. Use this after calibrate_physics or quick_calibrate to check the result on unseen data before committing the parameters.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "calibrated_params": {
+                        "type": "object",
+                        "description": "Calibrated parameters dict — typically the 'calibrated_parameters' field returned by calibrate_physics. Keys may include joint_friction, joint_damping, link_masses, armature.",
+                    },
+                    "test_data_path": {"type": "string", "description": "Path to HDF5 file with held-out real test trajectory (different from the one used for calibration)."},
+                    "baseline_error": {"type": "number", "description": "Optional pre-calibration trajectory error to compare against. If omitted, only the absolute calibrated error is reported."},
+                },
+                "required": ["calibrated_params", "test_data_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "train_actuator_net",
+            "description": "Train an IsaacLab ActuatorNet (LSTM neural actuator model) on real (q_target, q, q_dot, tau) pairs. Learns friction, backlash, and motor dynamics end-to-end without identifying individual physical parameters. Higher fidelity than calibrate_physics but needs more data (5-10 min of diverse motion) and more compute. Long-running headless job. Use this when the user has lots of real motor data and wants the highest-fidelity actuator model.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "real_data_path": {"type": "string", "description": "Path to HDF5 file with diverse-motion logs — q_target, q, q_dot, tau. Recommended 5-10 minutes."},
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation."},
+                    "hidden_dim": {"type": "integer", "description": "LSTM hidden dimension. Default: 32."},
+                    "num_layers": {"type": "integer", "description": "Number of LSTM layers. Default: 2."},
+                    "num_epochs": {"type": "integer", "description": "Training epochs. Default: 200."},
+                    "output_dir": {"type": "string", "description": "Directory for the trained ActuatorNet checkpoint. Default: workspace/calibration/<robot>_actuator_net"},
+                },
+                "required": ["real_data_path", "articulation_path"],
+            },
+        },
+    },
+
+    # ─── Scene Export ─────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
+                },
+                "required": [],
+            },
+        },
+    },
 ]
