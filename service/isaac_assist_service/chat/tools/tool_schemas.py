@@ -7728,4 +7728,197 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+# ─── Tier 0 Atomic Tools — Foundation ────────────────────────────────────
+    # 12 atomic primitives that close the read/write asymmetry of the existing
+    # 50 tools and bridge tool clusters (USD inspection, physics state,
+    # rendering, training, projection, recording). See
+    # docs/specs/atomic_tools_catalog.md for the full Tier 0–18 catalog.
+    {
+        "type": "function",
+        "function": {
+            "name": "get_attribute",
+            "description": "Read a single attribute value from a USD prim. Verifies the result of any set_attribute call and supports general scene introspection. Returns the typed value (number, string, array, bool, or null).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim, e.g. '/World/Cube'"},
+                    "attr_name": {"type": "string", "description": "Attribute name, e.g. 'radius', 'xformOp:translate', 'visibility'"},
+                },
+                "required": ["prim_path", "attr_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_world_transform",
+            "description": "Compute the world-space 4x4 transform of a prim using UsdGeom.Xformable.ComputeLocalToWorldTransform. Returns the 16-element row-major matrix plus extracted translation, rotation (quaternion w,x,y,z) and scale.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim"},
+                    "time_code": {"type": "number", "description": "USD time code. Default: Default (current) time."},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_bounding_box",
+            "description": "Compute the world-space axis-aligned bounding box of a prim using UsdGeom.BBoxCache.ComputeWorldBound. Returns {min: [x,y,z], max: [x,y,z], center: [x,y,z], size: [dx,dy,dz]} for placement and clearance reasoning.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim"},
+                    "purpose": {"type": "string", "description": "BBoxCache purpose token: 'default', 'render', or 'proxy'. Default: 'default'"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_semantic_label",
+            "description": "Apply a Semantics.SemanticsAPI to a prim with the given class name. Used for synthetic data generation (SDG) annotation so Replicator writers emit semantic_segmentation / instance_segmentation / bounding_box outputs for the prim.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim to label"},
+                    "class_name": {"type": "string", "description": "Semantic class name, e.g. 'cube', 'robot', 'table'"},
+                    "semantic_type": {"type": "string", "description": "Semantic type token. Default: 'class'"},
+                },
+                "required": ["prim_path", "class_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_joint_limits",
+            "description": "Read the joint position limits (lower, upper) for a single articulation joint. Use BEFORE issuing motion commands to avoid sending out-of-range targets. Reads UsdPhysics.RevoluteJoint or UsdPhysics.PrismaticJoint LowerLimit / UpperLimit attributes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation": {"type": "string", "description": "USD path to the articulation root, e.g. '/World/Franka'"},
+                    "joint_name": {"type": "string", "description": "Joint name (basename, not full path), e.g. 'panda_joint1'"},
+                },
+                "required": ["articulation", "joint_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_drive_gains",
+            "description": "Set the drive stiffness (kp) and damping (kd) on a UsdPhysics.DriveAPI for a joint. Tuning these gains is the primary lever for reinforcement-learning policy stability and tracking accuracy.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "joint_path": {"type": "string", "description": "USD path to the joint prim, e.g. '/World/Franka/panda_link0/panda_joint1'"},
+                    "kp": {"type": "number", "description": "Drive stiffness (proportional gain)"},
+                    "kd": {"type": "number", "description": "Drive damping (derivative gain)"},
+                    "drive_type": {"type": "string", "enum": ["angular", "linear"], "description": "Drive token type. Default: 'angular' (revolute)"},
+                },
+                "required": ["joint_path", "kp", "kd"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_contact_report",
+            "description": "Read the most recent PhysX contact-report events involving a prim. Requires PhysxContactReportAPI to be applied first. Returns a list of {actor0, actor1, impulse, normal, position} entries — the building block for grasp detection and collision diagnosis.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the rigid body / collider"},
+                    "max_contacts": {"type": "integer", "description": "Maximum number of contact entries to return. Default: 50"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_render_mode",
+            "description": "Switch the active renderer / render mode. 'preview' uses Hydra Storm rasterizer (fast, low-quality); 'rt' uses RTX Real-Time path tracing (interactive PBR); 'path_traced' uses RTX Path-Traced (offline-quality, ground-truth for SDG).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "enum": ["preview", "rt", "path_traced"], "description": "Render mode to activate"},
+                },
+                "required": ["mode"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_variant",
+            "description": "Select a USD variant inside a variant set on a prim. Variant sets allow assets to expose alternative geometry, materials, or rigs (e.g. 'color', 'rig', 'lod'). This calls UsdVariantSet.SetVariantSelection.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the prim that owns the variant set"},
+                    "variant_set": {"type": "string", "description": "Variant set name, e.g. 'color', 'rig', 'lod'"},
+                    "variant": {"type": "string", "description": "Variant token within the set, e.g. 'red', 'high', 'A'"},
+                },
+                "required": ["prim_path", "variant_set", "variant"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_training_status",
+            "description": "Inspect the live status of an IsaacLab RL training run. Reads the run's TensorBoard event files (latest reward / loss / step counter) and the launcher's subprocess state (running / finished / crashed). Returns {run_id, state, step, total_steps, latest_reward, log_dir}.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "run_id": {"type": "string", "description": "Training run identifier returned by launch_training (typically the task name)"},
+                    "log_dir": {"type": "string", "description": "Optional explicit log directory. Default: workspace/rl_checkpoints/<run_id>"},
+                },
+                "required": ["run_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "pixel_to_world",
+            "description": "Project a 2D viewport pixel through a camera and the depth buffer to a 3D world-space point. Returns {world_position: [x,y,z], depth_m, ray_origin, ray_direction} so callers can implement 'click to place' or visual servoing primitives.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "camera": {"type": "string", "description": "USD path to the camera prim"},
+                    "x": {"type": "integer", "description": "Pixel X coordinate (0 = left)"},
+                    "y": {"type": "integer", "description": "Pixel Y coordinate (0 = top)"},
+                    "resolution": {"type": "array", "items": {"type": "integer"}, "description": "Optional [width, height] override for the depth buffer. Default: viewport resolution."},
+                },
+                "required": ["camera", "x", "y"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "record_trajectory",
+            "description": "Subscribe to PhysX step events for `duration` seconds, sample joint positions / velocities / efforts on each tick, and write the recorded trajectory to disk. Returns the output path and per-joint sample counts. Use to capture demonstrations or compare two policies.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation": {"type": "string", "description": "USD path to the articulation root"},
+                    "duration": {"type": "number", "description": "Recording duration in seconds"},
+                    "output_path": {"type": "string", "description": "Filesystem path for the trajectory file (.npz). Default: workspace/trajectories/<timestamp>.npz"},
+                    "rate_hz": {"type": "number", "description": "Sampling rate in Hz. Default: 60"},
+                },
+                "required": ["articulation", "duration"],
+            },
+        },
+    },
 ]

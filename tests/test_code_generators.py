@@ -1648,6 +1648,77 @@ _RAW_TEST_VECTORS = [
         {"export_archive_path": "/tmp/repro.zip", "seed": 999},
         ["zipfile", "/tmp/repro.zip", "manifest"],
     ),
+    # NOTE: launch_training (master) is intentionally not tested here —
+    # the generator has a pre-existing nested-quote bug in master that
+    # produces invalid Python; fixing it is out of scope for this addendum.
+
+    # ── Tier 0 Atomic Tools — Foundation ────────────────────────────────────
+    # CODE_GEN handlers from docs/specs/atomic_tools_catalog.md.
+    (
+        "set_semantic_label",
+        {"prim_path": "/World/Cube", "class_name": "cube"},
+        ["Semantics.SemanticsAPI.Apply", "CreateSemanticDataAttr", "'cube'"],
+    ),
+    (
+        "set_semantic_label",
+        {"prim_path": "/World/Robot", "class_name": "franka", "semantic_type": "instance"},
+        ["Semantics_instance", "'franka'", "CreateSemanticTypeAttr"],
+    ),
+    (
+        "set_drive_gains",
+        {"joint_path": "/World/Franka/joint1", "kp": 100.0, "kd": 5.0},
+        ["UsdPhysics.DriveAPI.Apply", "CreateStiffnessAttr", "CreateDampingAttr", "100.0", "5.0"],
+    ),
+    (
+        "set_drive_gains",
+        {"joint_path": "/World/UR10/elbow", "kp": 250.0, "kd": 12.5, "drive_type": "linear"},
+        ["DriveAPI", "'linear'", "250.0", "12.5"],
+    ),
+    (
+        "set_render_mode",
+        {"mode": "preview"},
+        ["carb.settings", "rendermode", "RaytracedLighting"],
+    ),
+    (
+        "set_render_mode",
+        {"mode": "path_traced"},
+        ["PathTracing", "rendermode"],
+    ),
+    (
+        "set_render_mode",
+        {"mode": "rt"},
+        ["RaytracedLighting"],
+    ),
+    (
+        "set_variant",
+        {"prim_path": "/World/Asset", "variant_set": "color", "variant": "red"},
+        ["GetVariantSets", "SetVariantSelection", "'color'", "'red'"],
+    ),
+    (
+        "set_variant",
+        {"prim_path": "/World/Robot", "variant_set": "rig", "variant": "gripper"},
+        ["AddVariantSet", "'rig'", "'gripper'"],
+    ),
+    (
+        "record_trajectory",
+        {"articulation": "/World/Franka", "duration": 5.0},
+        [
+            "subscribe_physics_step_events",
+            "np.savez",
+            "'/World/Franka'",
+            "duration = 5.0",
+        ],
+    ),
+    (
+        "record_trajectory",
+        {
+            "articulation": "/World/UR10",
+            "duration": 2.5,
+            "output_path": "/tmp/ur10.npz",
+            "rate_hz": 120.0,
+        },
+        ["'/tmp/ur10.npz'", "rate_hz = 120.0", "duration = 2.5"],
+    ),
 ]
 
 
@@ -2326,6 +2397,68 @@ class TestTemplateDetection:
             "prim_path": '/World/"quoted"',
         })
         _assert_valid_python(code, "visualize_collision_mesh")
+    # ── Tier 0 Atomic Tools — edge cases ────────────────────────────────────
+
+    def test_set_semantic_label_default_semantic_type(self):
+        """Omitting semantic_type should default to 'class'."""
+        code = CODE_GEN_HANDLERS["set_semantic_label"]({
+            "prim_path": "/World/Cube",
+            "class_name": "cube",
+        })
+        _assert_valid_python(code, "set_semantic_label")
+        assert "Semantics_class" in code
+        assert "'class'" in code
+
+    def test_set_drive_gains_defaults_to_angular(self):
+        code = CODE_GEN_HANDLERS["set_drive_gains"]({
+            "joint_path": "/World/Franka/joint1",
+            "kp": 400.0,
+            "kd": 40.0,
+        })
+        _assert_valid_python(code, "set_drive_gains")
+        assert "'angular'" in code
+        assert "400.0" in code
+        assert "40.0" in code
+
+    def test_set_render_mode_path_traced_uses_pathtracing(self):
+        code = CODE_GEN_HANDLERS["set_render_mode"]({"mode": "path_traced"})
+        _assert_valid_python(code, "set_render_mode")
+        assert "PathTracing" in code
+        assert "RaytracedLighting" not in code
+
+    def test_set_variant_creates_variant_set_if_missing(self):
+        code = CODE_GEN_HANDLERS["set_variant"]({
+            "prim_path": "/World/Asset",
+            "variant_set": "color",
+            "variant": "red",
+        })
+        _assert_valid_python(code, "set_variant")
+        # Must handle both pre-existing and new variant sets
+        assert "HasVariantSet" in code
+        assert "AddVariantSet" in code
+        assert "SetVariantSelection" in code
+
+    def test_record_trajectory_default_output_path(self):
+        code = CODE_GEN_HANDLERS["record_trajectory"]({
+            "articulation": "/World/Franka",
+            "duration": 10.0,
+        })
+        _assert_valid_python(code, "record_trajectory")
+        # Default output goes under workspace/trajectories/
+        assert "workspace/trajectories/" in code
+        assert "duration = 10.0" in code
+        # Default sample rate
+        assert "rate_hz = 60.0" in code
+
+    def test_record_trajectory_custom_rate(self):
+        code = CODE_GEN_HANDLERS["record_trajectory"]({
+            "articulation": "/World/UR10",
+            "duration": 1.0,
+            "rate_hz": 240.0,
+        })
+        _assert_valid_python(code, "record_trajectory")
+        assert "rate_hz = 240.0" in code
+        assert "subscribe_physics_step_events" in code
 
 
 class TestAllCodeGenHandlersCovered:

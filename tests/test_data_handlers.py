@@ -60,6 +60,7 @@ except ImportError:
 
 
 
+
 class TestLookupProductSpec:
     """Test the sensor spec lookup handler."""
 
@@ -2346,3 +2347,186 @@ class TestGr00tTooling:
         result = await handler({"checkpoint_path": str(ckpt)})
         assert "expected_structure" in result
         assert "embodiment" in result["expected_structure"]
+# ─── Tier 0 Atomic Tools — DATA handlers ─────────────────────────────────────
+# Each handler emits a small snippet through kit_tools.queue_exec_patch; in
+# tests we stub queue_exec_patch so we can assert on the generated snippet
+# without requiring a running Kit RPC server.
+
+
+@pytest.fixture()
+def capture_kit_patches(monkeypatch):
+    """Intercept kit_tools.queue_exec_patch and record the submitted code."""
+    captured: list = []
+
+    async def fake_queue(code, description=""):
+        captured.append({"code": code, "description": description})
+        return {"queued": True, "patch_id": "test_tier0"}
+
+    import service.isaac_assist_service.chat.tools.kit_tools as kt
+    monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+    return captured
+
+
+class TestTier0GetAttribute:
+    @pytest.mark.asyncio
+    async def test_get_attribute_emits_lookup_code(self, capture_kit_patches):
+        handler = DATA_HANDLERS["get_attribute"]
+        result = await handler({"prim_path": "/World/Cube", "attr_name": "radius"})
+        assert result["queued"] is True
+        assert len(capture_kit_patches) == 1
+        code = capture_kit_patches[0]["code"]
+        compile(code, "<get_attribute>", "exec")
+        assert "'/World/Cube'" in code
+        assert "'radius'" in code
+        assert "GetAttribute" in code
+
+
+class TestTier0GetWorldTransform:
+    @pytest.mark.asyncio
+    async def test_get_world_transform_emits_xformable(self, capture_kit_patches):
+        handler = DATA_HANDLERS["get_world_transform"]
+        result = await handler({"prim_path": "/World/Robot"})
+        assert result["queued"] is True
+        code = capture_kit_patches[0]["code"]
+        compile(code, "<get_world_transform>", "exec")
+        assert "ComputeLocalToWorldTransform" in code
+        assert "'/World/Robot'" in code
+
+    @pytest.mark.asyncio
+    async def test_get_world_transform_time_code(self, capture_kit_patches):
+        handler = DATA_HANDLERS["get_world_transform"]
+        await handler({"prim_path": "/World/A", "time_code": 12.5})
+        code = capture_kit_patches[0]["code"]
+        assert "12.5" in code
+
+
+class TestTier0GetBoundingBox:
+    @pytest.mark.asyncio
+    async def test_get_bounding_box_default_purpose(self, capture_kit_patches):
+        handler = DATA_HANDLERS["get_bounding_box"]
+        await handler({"prim_path": "/World/Box"})
+        code = capture_kit_patches[0]["code"]
+        compile(code, "<get_bounding_box>", "exec")
+        assert "BBoxCache" in code
+        assert "UsdGeom.Tokens.default" in code
+
+    @pytest.mark.asyncio
+    async def test_get_bounding_box_render_purpose(self, capture_kit_patches):
+        handler = DATA_HANDLERS["get_bounding_box"]
+        await handler({"prim_path": "/World/Box", "purpose": "render"})
+        code = capture_kit_patches[0]["code"]
+        assert "UsdGeom.Tokens.render" in code
+
+
+class TestTier0GetJointLimits:
+    @pytest.mark.asyncio
+    async def test_get_joint_limits_emits_revolute_check(self, capture_kit_patches):
+        handler = DATA_HANDLERS["get_joint_limits"]
+        await handler({"articulation": "/World/Franka", "joint_name": "panda_joint1"})
+        code = capture_kit_patches[0]["code"]
+        compile(code, "<get_joint_limits>", "exec")
+        assert "'panda_joint1'" in code
+        assert "physics:lowerLimit" in code
+        assert "physics:upperLimit" in code
+
+
+class TestTier0GetContactReport:
+    @pytest.mark.asyncio
+    async def test_get_contact_report_emits_filter(self, capture_kit_patches):
+        handler = DATA_HANDLERS["get_contact_report"]
+        await handler({"prim_path": "/World/Gripper", "max_contacts": 10})
+        code = capture_kit_patches[0]["code"]
+        compile(code, "<get_contact_report>", "exec")
+        assert "_ATOMIC_CONTACT_BUFFER" in code
+        assert "'/World/Gripper'" in code
+        assert "max_contacts = 10" in code
+
+
+class TestTier0GetTrainingStatus:
+    @pytest.mark.asyncio
+    async def test_missing_log_dir_returns_missing(self, tmp_path):
+        handler = DATA_HANDLERS["get_training_status"]
+        result = await handler({"run_id": "nonexistent_run", "log_dir": str(tmp_path / "no_such_dir")})
+        assert result["state"] == "missing"
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_starting_when_no_event_files(self, tmp_path):
+        handler = DATA_HANDLERS["get_training_status"]
+        result = await handler({"run_id": "fresh_run", "log_dir": str(tmp_path)})
+        assert result["state"] == "starting"
+        assert result["events_found"] == 0
+
+    @pytest.mark.asyncio
+    async def test_running_when_event_file_present(self, tmp_path):
+        # Create a dummy tfevents file so events_found > 0
+        (tmp_path / "events.out.tfevents.1700000000.host").write_bytes(b"dummy")
+        handler = DATA_HANDLERS["get_training_status"]
+        result = await handler({"run_id": "live_run", "log_dir": str(tmp_path)})
+        # state should be 'running' when events are present and no pid file
+        assert result["events_found"] == 1
+        assert result["state"] == "running"
+
+
+class TestTier0PixelToWorld:
+    @pytest.mark.asyncio
+    async def test_pixel_to_world_emits_projection_code(self, capture_kit_patches):
+        handler = DATA_HANDLERS["pixel_to_world"]
+        await handler({"camera": "/World/Camera", "x": 640, "y": 360})
+        code = capture_kit_patches[0]["code"]
+        compile(code, "<pixel_to_world>", "exec")
+        assert "'/World/Camera'" in code
+        assert "px = 640" in code
+        assert "py = 360" in code
+        assert "ComputeProjectionMatrix" in code
+
+    @pytest.mark.asyncio
+    async def test_pixel_to_world_resolution_override(self, capture_kit_patches):
+        handler = DATA_HANDLERS["pixel_to_world"]
+        await handler({"camera": "/World/C", "x": 0, "y": 0, "resolution": [1920, 1080]})
+        code = capture_kit_patches[0]["code"]
+        assert "[1920, 1080]" in code
+
+
+# ─── Tier 0 — dispatch coverage ──────────────────────────────────────────────
+# Sanity check: every Tier 0 tool name has a handler registered in either
+# CODE_GEN_HANDLERS or DATA_HANDLERS.
+
+TIER0_TOOLS = [
+    "get_attribute",
+    "get_world_transform",
+    "get_bounding_box",
+    "set_semantic_label",
+    "get_joint_limits",
+    "set_drive_gains",
+    "get_contact_report",
+    "set_render_mode",
+    "set_variant",
+    "get_training_status",
+    "pixel_to_world",
+    "record_trajectory",
+]
+
+
+class TestTier0Coverage:
+    """All 12 Tier 0 tools must be dispatchable."""
+
+    def test_exactly_twelve_tier0_tools(self):
+        assert len(TIER0_TOOLS) == 12
+        assert len(set(TIER0_TOOLS)) == 12
+
+    @pytest.mark.parametrize("name", TIER0_TOOLS)
+    def test_tool_registered(self, name):
+        from service.isaac_assist_service.chat.tools.tool_executor import (
+            CODE_GEN_HANDLERS,
+            DATA_HANDLERS,
+        )
+        assert name in CODE_GEN_HANDLERS or name in DATA_HANDLERS, (
+            f"Tier 0 tool '{name}' has no handler"
+        )
+
+    @pytest.mark.parametrize("name", TIER0_TOOLS)
+    def test_tool_in_schema(self, name):
+        from service.isaac_assist_service.chat.tools.tool_schemas import ISAAC_SIM_TOOLS
+        names = {t["function"]["name"] for t in ISAAC_SIM_TOOLS}
+        assert name in names, f"Tier 0 tool '{name}' missing from ISAAC_SIM_TOOLS"
