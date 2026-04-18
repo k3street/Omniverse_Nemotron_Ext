@@ -72,6 +72,7 @@ except ImportError:
 
 
 
+
 class TestLookupProductSpec:
     """Test the sensor spec lookup handler."""
 
@@ -2985,3 +2986,92 @@ class TestValidateSemanticLabels:
         # The handler's own return shape is the contract with the orchestrator.
         for k in ("queued", "patch_id", "note"):
             assert k in result, f"validate_semantic_labels response missing key: {k}"
+# ── Tier 14.3: select_by_criteria ───────────────────────────────────────────
+
+class TestSelectByCriteria:
+    """select_by_criteria runs Kit-side via queue_exec_patch.
+
+    The handler returns the queued status + the generated query code; the
+    actual matches are produced when the patch executes inside Kit. Tests
+    validate:
+      1. The handler is registered.
+      2. The generated query code is syntactically valid Python.
+      3. Each criterion key produces the expected USD/regex code fragment.
+      4. The handler returns a well-formed dict via the Kit RPC mock.
+    """
+
+    def test_handler_registered(self):
+        if "select_by_criteria" not in DATA_HANDLERS:
+            pytest.skip("select_by_criteria not registered (different branch)")
+        assert DATA_HANDLERS["select_by_criteria"] is not None
+
+    def test_query_code_compiles_minimal(self):
+        from service.isaac_assist_service.chat.tools.tool_executor import (
+            _build_select_by_criteria_code,
+        )
+        code = _build_select_by_criteria_code({"type": "Mesh"})
+        compile(code, "<select_by_criteria>", "exec")
+        assert "stage.Traverse()" in code
+        assert "GetTypeName() != _type" in code
+
+    def test_query_code_uses_subtree_when_parent_given(self):
+        from service.isaac_assist_service.chat.tools.tool_executor import (
+            _build_select_by_criteria_code,
+        )
+        code = _build_select_by_criteria_code({
+            "type": "Mesh",
+            "parent": "/World/Robot",
+        })
+        compile(code, "<select_by_criteria>", "exec")
+        assert "Usd.PrimRange(_root)" in code
+        assert "/World/Robot" in code
+
+    def test_query_code_handles_all_criteria_keys(self):
+        """All documented criteria keys must produce code fragments."""
+        from service.isaac_assist_service.chat.tools.tool_executor import (
+            _build_select_by_criteria_code,
+        )
+        code = _build_select_by_criteria_code({
+            "type": "Mesh",
+            "has_schema": "PhysicsRigidBodyAPI",
+            "name_pattern": "^cam_",
+            "path_pattern": "/World/Robot",
+            "has_attribute": "physics:mass",
+            "kind": "component",
+            "parent": "/World",
+            "active": True,
+        })
+        compile(code, "<select_by_criteria>", "exec")
+        # Every criterion key should produce a corresponding gate
+        assert "GetTypeName()" in code
+        assert "GetAppliedSchemas" in code
+        assert "_name_re" in code
+        assert "_path_re" in code
+        assert "GetAttribute(_has_attr)" in code
+        assert "GetKind()" in code
+        assert "Usd.PrimRange(_root)" in code
+        assert "IsActive()" in code
+
+    @pytest.mark.asyncio
+    async def test_handler_returns_queued_status(self, mock_kit_rpc):
+        if "select_by_criteria" not in DATA_HANDLERS:
+            pytest.skip("select_by_criteria not registered (different branch)")
+        handler = DATA_HANDLERS["select_by_criteria"]
+        result = await handler({"criteria": {"type": "Mesh"}})
+        assert isinstance(result, dict)
+        assert "queued" in result
+        assert "criteria" in result
+        assert result["criteria"] == {"type": "Mesh"}
+        # query_code must round-trip through the response so the LLM/UI can
+        # show the user what's about to run
+        assert "query_code" in result
+        compile(result["query_code"], "<roundtrip>", "exec")
+
+    @pytest.mark.asyncio
+    async def test_handler_rejects_non_dict_criteria(self, mock_kit_rpc):
+        if "select_by_criteria" not in DATA_HANDLERS:
+            pytest.skip("select_by_criteria not registered (different branch)")
+        handler = DATA_HANDLERS["select_by_criteria"]
+        result = await handler({"criteria": "not a dict"})
+        assert "error" in result
+        assert result["count"] == 0

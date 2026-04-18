@@ -11486,6 +11486,531 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Tier 14: Bulk Operations ─────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "bulk_set_attribute",
+            "description": (
+                "WHAT: Atomically set the SAME attribute (e.g. 'visibility', "
+                "'xformOp:translate', 'physics:rigidBodyEnabled', a custom attr) "
+                "to the SAME value on MANY USD prims in a single Sdf.ChangeBlock. "
+                "Wrapping all writes in one ChangeBlock means USD/Hydra fires a "
+                "single notification batch instead of N — orders of magnitude "
+                "faster for large scenes, and avoids partial-state intermediate "
+                "renders. "
+                "WHEN: Use to bulk-toggle visibility on hundreds of prims, "
+                "bulk-disable physics across an environment, set the same color "
+                "on a swarm, reset a custom flag on every robot, etc. Prefer "
+                "this over a Python loop of set_attribute calls whenever the "
+                "value and attribute name are identical across prims. "
+                "RETURNS: {type: 'code_patch', code, description, queued} — the "
+                "generated patch counts how many prims were valid, how many "
+                "lacked the attribute (auto-created on the fly via "
+                "CreateAttribute when the type is inferable from the value), "
+                "and prints a summary line. "
+                "CAVEATS: All prims must accept the same value type — passing a "
+                "Vec3 to a bool attribute will raise per-prim. Missing prims "
+                "are SKIPPED (not an error). For DIFFERENT attributes per prim, "
+                "use repeated set_attribute. For DIFFERENT values per prim, use "
+                "the existing batch_set_attributes tool. The ChangeBlock "
+                "suppresses notifications until the block exits — observers and "
+                "listeners only see the final state."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "USD paths of prims to mutate, e.g. ['/World/Cube_001', '/World/Cube_002', ...]. Missing prims are silently skipped.",
+                    },
+                    "attr": {
+                        "type": "string",
+                        "description": "Attribute name shared by every prim, e.g. 'visibility', 'xformOp:translate', 'primvars:displayColor', 'myCustomFlag'.",
+                    },
+                    "value": {
+                        "description": "Value to assign on every prim (number, bool, string, list of numbers). Must be type-compatible with the attribute on each prim.",
+                    },
+                },
+                "required": ["prim_paths", "attr", "value"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bulk_apply_schema",
+            "description": (
+                "WHAT: Apply the SAME USD API schema (e.g. PhysicsRigidBodyAPI, "
+                "PhysicsCollisionAPI, PhysicsMassAPI, PhysxRigidBodyAPI, a "
+                "custom multi-apply schema) to MANY prims in one atomic "
+                "Sdf.ChangeBlock. Resolves common short-name aliases (e.g. "
+                "'RigidBodyAPI' -> UsdPhysics.RigidBodyAPI) before applying. "
+                "WHEN: Use when an entire group of meshes needs to become rigid "
+                "bodies, when you need to flag every prop in a scene as a "
+                "collider, when adding the same PhysX tuning API to all robot "
+                "links, etc. Prefer this over apply_api_schema in a loop "
+                "whenever the schema name is identical across prims. "
+                "RETURNS: {type: 'code_patch', code, description, queued} — the "
+                "patch reports how many prims successfully had the schema "
+                "applied, how many were missing, and how many already had it "
+                "(idempotent — re-applying is a no-op). "
+                "CAVEATS: Single-apply schemas (RigidBodyAPI) require the prim "
+                "to be Xformable; multi-apply schemas (CollectionAPI) require "
+                "an instance_name (not yet supported here — use "
+                "apply_api_schema for those). Unknown schema names fall back "
+                "to ApplyAPISchemaCommand which may fail silently in older "
+                "Kit. The ChangeBlock prevents intermediate composition "
+                "rebuilds — much faster than a per-prim loop."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "USD paths of prims to receive the schema, e.g. ['/World/Box_a', '/World/Box_b'].",
+                    },
+                    "schema": {
+                        "type": "string",
+                        "description": "Schema name: 'PhysicsRigidBodyAPI', 'PhysicsCollisionAPI', 'PhysicsMassAPI', 'PhysxRigidBodyAPI', 'PhysxCollisionAPI', 'PhysxDeformableBodyAPI'. Bare class name ('RigidBodyAPI') and dotted form ('UsdPhysics.RigidBodyAPI') both accepted.",
+                    },
+                },
+                "required": ["prim_paths", "schema"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "select_by_criteria",
+            "description": (
+                "WHAT: Query the USD stage and return a list of prim paths "
+                "matching a criteria dict. Supported criteria keys: "
+                "'type' (typeName e.g. 'Mesh'/'Xform'/'Camera'), "
+                "'has_schema' (applied API schema name), "
+                "'name_pattern' (regex matched against the prim's leaf name), "
+                "'path_pattern' (regex matched against the full USD path), "
+                "'has_attribute' (attribute name that must exist), "
+                "'kind' (USD Kind metadata: 'component', 'assembly', 'group'), "
+                "'parent' (descendants of this path only), "
+                "'active' (bool — only active or only deactivated prims). "
+                "ALL specified criteria must match (AND semantics). "
+                "WHEN: Use as the first step of a bulk workflow — find every "
+                "Mesh under /World/Robot, every prim with RigidBodyAPI, every "
+                "Camera whose name starts with 'cam_', every component-kind "
+                "prim — then feed the result into bulk_set_attribute, "
+                "bulk_apply_schema, group_prims, or duplicate_prims. "
+                "RETURNS: {type: 'data', matches: ['/World/A', '/World/B', "
+                "...], count: N, criteria: {...}} — paths sorted "
+                "alphabetically. Empty list if nothing matches. "
+                "CAVEATS: Runs against the live Kit stage via /exec — requires "
+                "Kit RPC to be reachable. Regex patterns use Python re.search "
+                "(not anchored — use ^...$ to anchor). 'has_schema' matches "
+                "the unaliased applied-API name as USD reports it (e.g. "
+                "'PhysicsRigidBodyAPI'). Large stages: queries are O(N) over "
+                "every prim — narrow with 'parent' for deep hierarchies."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "criteria": {
+                        "type": "object",
+                        "description": "Dict of filter criteria. Keys: type, has_schema, name_pattern, path_pattern, has_attribute, kind, parent, active. Example: {'type': 'Mesh', 'parent': '/World/Robot', 'has_schema': 'PhysicsCollisionAPI'}.",
+                        "properties": {
+                            "type": {"type": "string", "description": "USD typeName, e.g. 'Mesh', 'Xform', 'Camera', 'Cube'."},
+                            "has_schema": {"type": "string", "description": "Applied API schema name, e.g. 'PhysicsRigidBodyAPI'."},
+                            "name_pattern": {"type": "string", "description": "Python regex matched against the prim's leaf name (re.search)."},
+                            "path_pattern": {"type": "string", "description": "Python regex matched against the full prim path (re.search)."},
+                            "has_attribute": {"type": "string", "description": "Attribute name that must exist on the prim."},
+                            "kind": {"type": "string", "description": "USD Kind metadata, e.g. 'component', 'assembly', 'group', 'subcomponent'."},
+                            "parent": {"type": "string", "description": "Restrict search to descendants of this prim path."},
+                            "active": {"type": "boolean", "description": "Filter on prim active state — true=only active, false=only deactivated."},
+                        },
+                    },
+                },
+                "required": ["criteria"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "group_prims",
+            "description": (
+                "WHAT: Create a new Xform prim and reparent the given prims "
+                "under it, preserving each prim's world transform. Done atomically "
+                "in an Sdf.ChangeBlock so observers see one final hierarchy "
+                "rather than N intermediate moves. "
+                "WHEN: Use to organize a flat scene into logical groups (all "
+                "lights under /World/Lights, all props under /World/Props), to "
+                "create a parent for collective transformation (group ten cubes "
+                "then translate the parent), or to scope variants/visibility "
+                "to a subset of prims. "
+                "RETURNS: {type: 'code_patch', code, description, queued} — the "
+                "generated patch creates the Xform at "
+                "{group_parent}/{group_name} (default group_parent='/World'), "
+                "uses Sdf.CopySpec + RemovePrim to reparent (USD has no native "
+                "MovePrim that preserves composition arcs reliably), then "
+                "bakes the original world transform onto each child as "
+                "translate/rotate/scale ops so visual position is unchanged. "
+                "CAVEATS: Composition-heavy prims (references, payloads, "
+                "variant selections) ARE reparented but their original spec on "
+                "the source layer is removed — undo via the snapshot system if "
+                "needed. Joints/articulations whose body0/body1 relationship "
+                "targets the OLD path will break — fix relationships separately "
+                "or group at the articulation root level. The new group is "
+                "always type Xform; if you need a Scope or other typeless "
+                "container, follow up with set_prim_metadata."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "USD paths to reparent, e.g. ['/World/Cube_a', '/World/Cube_b'].",
+                    },
+                    "group_name": {
+                        "type": "string",
+                        "description": "Name of the new Xform group (leaf name, no slashes), e.g. 'Boxes', 'RedTeam'.",
+                    },
+                    "group_parent": {
+                        "type": "string",
+                        "description": "Parent path under which the group is created. Default '/World'.",
+                    },
+                },
+                "required": ["prim_paths", "group_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "duplicate_prims",
+            "description": (
+                "WHAT: Duplicate each given prim once (via Sdf.CopySpec for "
+                "fidelity — references, payloads, applied schemas, attributes "
+                "all preserved) and apply a positional XYZ offset to each "
+                "copy. All copies created in one Sdf.ChangeBlock. "
+                "WHEN: Use to instance variations across a scene — duplicate a "
+                "row of pillars 1m apart, copy a fixture and shift it for "
+                "left/right hand setups, replicate a robot for two-arm "
+                "scenarios. For LARGE replication of ONE prim into a grid, "
+                "prefer the existing clone_prim tool (uses GPU-batched "
+                "GridCloner). duplicate_prims is for replicating a HETEROGENEOUS "
+                "list of prims with the same offset applied to each. "
+                "RETURNS: {type: 'code_patch', code, description, queued} — the "
+                "patch generates copy paths by appending '_copy' (e.g. "
+                "/World/Cube -> /World/Cube_copy); on collision it appends "
+                "'_copy2', '_copy3', etc. The copy's local translate op is "
+                "SET (or added) to original_translation + offset. Prints a "
+                "summary listing source -> destination pairs. "
+                "CAVEATS: Sdf.CopySpec copies the spec on the current edit "
+                "target only — references/payloads in OTHER layers carry over "
+                "as composition arcs but don't get a fresh spec. Joints/"
+                "articulation relationships pointing at the original prim are "
+                "NOT rewritten — duplicated robots end up sharing the same "
+                "joint targets unless you fix relationships afterward. Offset "
+                "is applied to LOCAL translate (not world); for world-space "
+                "offset under a non-identity parent, transform offset into "
+                "parent space first."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "USD paths to duplicate, e.g. ['/World/Pillar_1', '/World/Pillar_2'].",
+                    },
+                    "offset": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "XYZ translation offset applied to every copy [dx, dy, dz] in stage units.",
+                    },
+                    "suffix": {
+                        "type": "string",
+                        "description": "Suffix appended to each duplicated prim's name. Default '_copy'. Numeric suffixes are auto-appended on naming collision.",
+                    },
+                },
+                "required": ["prim_paths", "offset"],
+            },
+        },
+    },
+
+    # ─── Scene Export ─────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+# ─── Tier 14: Bulk Operations ─────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "bulk_set_attribute",
+            "description": (
+                "WHAT: Atomically set the SAME attribute (e.g. 'visibility', "
+                "'xformOp:translate', 'physics:rigidBodyEnabled', a custom attr) "
+                "to the SAME value on MANY USD prims in a single Sdf.ChangeBlock. "
+                "Wrapping all writes in one ChangeBlock means USD/Hydra fires a "
+                "single notification batch instead of N — orders of magnitude "
+                "faster for large scenes, and avoids partial-state intermediate "
+                "renders. "
+                "WHEN: Use to bulk-toggle visibility on hundreds of prims, "
+                "bulk-disable physics across an environment, set the same color "
+                "on a swarm, reset a custom flag on every robot, etc. Prefer "
+                "this over a Python loop of set_attribute calls whenever the "
+                "value and attribute name are identical across prims. "
+                "RETURNS: {type: 'code_patch', code, description, queued} — the "
+                "generated patch counts how many prims were valid, how many "
+                "lacked the attribute (auto-created on the fly via "
+                "CreateAttribute when the type is inferable from the value), "
+                "and prints a summary line. "
+                "CAVEATS: All prims must accept the same value type — passing a "
+                "Vec3 to a bool attribute will raise per-prim. Missing prims "
+                "are SKIPPED (not an error). For DIFFERENT attributes per prim, "
+                "use repeated set_attribute. For DIFFERENT values per prim, use "
+                "the existing batch_set_attributes tool. The ChangeBlock "
+                "suppresses notifications until the block exits — observers and "
+                "listeners only see the final state."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "USD paths of prims to mutate, e.g. ['/World/Cube_001', '/World/Cube_002', ...]. Missing prims are silently skipped.",
+                    },
+                    "attr": {
+                        "type": "string",
+                        "description": "Attribute name shared by every prim, e.g. 'visibility', 'xformOp:translate', 'primvars:displayColor', 'myCustomFlag'.",
+                    },
+                    "value": {
+                        "description": "Value to assign on every prim (number, bool, string, list of numbers). Must be type-compatible with the attribute on each prim.",
+                    },
+                },
+                "required": ["prim_paths", "attr", "value"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bulk_apply_schema",
+            "description": (
+                "WHAT: Apply the SAME USD API schema (e.g. PhysicsRigidBodyAPI, "
+                "PhysicsCollisionAPI, PhysicsMassAPI, PhysxRigidBodyAPI, a "
+                "custom multi-apply schema) to MANY prims in one atomic "
+                "Sdf.ChangeBlock. Resolves common short-name aliases (e.g. "
+                "'RigidBodyAPI' -> UsdPhysics.RigidBodyAPI) before applying. "
+                "WHEN: Use when an entire group of meshes needs to become rigid "
+                "bodies, when you need to flag every prop in a scene as a "
+                "collider, when adding the same PhysX tuning API to all robot "
+                "links, etc. Prefer this over apply_api_schema in a loop "
+                "whenever the schema name is identical across prims. "
+                "RETURNS: {type: 'code_patch', code, description, queued} — the "
+                "patch reports how many prims successfully had the schema "
+                "applied, how many were missing, and how many already had it "
+                "(idempotent — re-applying is a no-op). "
+                "CAVEATS: Single-apply schemas (RigidBodyAPI) require the prim "
+                "to be Xformable; multi-apply schemas (CollectionAPI) require "
+                "an instance_name (not yet supported here — use "
+                "apply_api_schema for those). Unknown schema names fall back "
+                "to ApplyAPISchemaCommand which may fail silently in older "
+                "Kit. The ChangeBlock prevents intermediate composition "
+                "rebuilds — much faster than a per-prim loop."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "USD paths of prims to receive the schema, e.g. ['/World/Box_a', '/World/Box_b'].",
+                    },
+                    "schema": {
+                        "type": "string",
+                        "description": "Schema name: 'PhysicsRigidBodyAPI', 'PhysicsCollisionAPI', 'PhysicsMassAPI', 'PhysxRigidBodyAPI', 'PhysxCollisionAPI', 'PhysxDeformableBodyAPI'. Bare class name ('RigidBodyAPI') and dotted form ('UsdPhysics.RigidBodyAPI') both accepted.",
+                    },
+                },
+                "required": ["prim_paths", "schema"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "select_by_criteria",
+            "description": (
+                "WHAT: Query the USD stage and return a list of prim paths "
+                "matching a criteria dict. Supported criteria keys: "
+                "'type' (typeName e.g. 'Mesh'/'Xform'/'Camera'), "
+                "'has_schema' (applied API schema name), "
+                "'name_pattern' (regex matched against the prim's leaf name), "
+                "'path_pattern' (regex matched against the full USD path), "
+                "'has_attribute' (attribute name that must exist), "
+                "'kind' (USD Kind metadata: 'component', 'assembly', 'group'), "
+                "'parent' (descendants of this path only), "
+                "'active' (bool — only active or only deactivated prims). "
+                "ALL specified criteria must match (AND semantics). "
+                "WHEN: Use as the first step of a bulk workflow — find every "
+                "Mesh under /World/Robot, every prim with RigidBodyAPI, every "
+                "Camera whose name starts with 'cam_', every component-kind "
+                "prim — then feed the result into bulk_set_attribute, "
+                "bulk_apply_schema, group_prims, or duplicate_prims. "
+                "RETURNS: {type: 'data', matches: ['/World/A', '/World/B', "
+                "...], count: N, criteria: {...}} — paths sorted "
+                "alphabetically. Empty list if nothing matches. "
+                "CAVEATS: Runs against the live Kit stage via /exec — requires "
+                "Kit RPC to be reachable. Regex patterns use Python re.search "
+                "(not anchored — use ^...$ to anchor). 'has_schema' matches "
+                "the unaliased applied-API name as USD reports it (e.g. "
+                "'PhysicsRigidBodyAPI'). Large stages: queries are O(N) over "
+                "every prim — narrow with 'parent' for deep hierarchies."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "criteria": {
+                        "type": "object",
+                        "description": "Dict of filter criteria. Keys: type, has_schema, name_pattern, path_pattern, has_attribute, kind, parent, active. Example: {'type': 'Mesh', 'parent': '/World/Robot', 'has_schema': 'PhysicsCollisionAPI'}.",
+                        "properties": {
+                            "type": {"type": "string", "description": "USD typeName, e.g. 'Mesh', 'Xform', 'Camera', 'Cube'."},
+                            "has_schema": {"type": "string", "description": "Applied API schema name, e.g. 'PhysicsRigidBodyAPI'."},
+                            "name_pattern": {"type": "string", "description": "Python regex matched against the prim's leaf name (re.search)."},
+                            "path_pattern": {"type": "string", "description": "Python regex matched against the full prim path (re.search)."},
+                            "has_attribute": {"type": "string", "description": "Attribute name that must exist on the prim."},
+                            "kind": {"type": "string", "description": "USD Kind metadata, e.g. 'component', 'assembly', 'group', 'subcomponent'."},
+                            "parent": {"type": "string", "description": "Restrict search to descendants of this prim path."},
+                            "active": {"type": "boolean", "description": "Filter on prim active state — true=only active, false=only deactivated."},
+                        },
+                    },
+                },
+                "required": ["criteria"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "group_prims",
+            "description": (
+                "WHAT: Create a new Xform prim and reparent the given prims "
+                "under it, preserving each prim's world transform. Done atomically "
+                "in an Sdf.ChangeBlock so observers see one final hierarchy "
+                "rather than N intermediate moves. "
+                "WHEN: Use to organize a flat scene into logical groups (all "
+                "lights under /World/Lights, all props under /World/Props), to "
+                "create a parent for collective transformation (group ten cubes "
+                "then translate the parent), or to scope variants/visibility "
+                "to a subset of prims. "
+                "RETURNS: {type: 'code_patch', code, description, queued} — the "
+                "generated patch creates the Xform at "
+                "{group_parent}/{group_name} (default group_parent='/World'), "
+                "uses Sdf.CopySpec + RemovePrim to reparent (USD has no native "
+                "MovePrim that preserves composition arcs reliably), then "
+                "bakes the original world transform onto each child as "
+                "translate/rotate/scale ops so visual position is unchanged. "
+                "CAVEATS: Composition-heavy prims (references, payloads, "
+                "variant selections) ARE reparented but their original spec on "
+                "the source layer is removed — undo via the snapshot system if "
+                "needed. Joints/articulations whose body0/body1 relationship "
+                "targets the OLD path will break — fix relationships separately "
+                "or group at the articulation root level. The new group is "
+                "always type Xform; if you need a Scope or other typeless "
+                "container, follow up with set_prim_metadata."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "USD paths to reparent, e.g. ['/World/Cube_a', '/World/Cube_b'].",
+                    },
+                    "group_name": {
+                        "type": "string",
+                        "description": "Name of the new Xform group (leaf name, no slashes), e.g. 'Boxes', 'RedTeam'.",
+                    },
+                    "group_parent": {
+                        "type": "string",
+                        "description": "Parent path under which the group is created. Default '/World'.",
+                    },
+                },
+                "required": ["prim_paths", "group_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "duplicate_prims",
+            "description": (
+                "WHAT: Duplicate each given prim once (via Sdf.CopySpec for "
+                "fidelity — references, payloads, applied schemas, attributes "
+                "all preserved) and apply a positional XYZ offset to each "
+                "copy. All copies created in one Sdf.ChangeBlock. "
+                "WHEN: Use to instance variations across a scene — duplicate a "
+                "row of pillars 1m apart, copy a fixture and shift it for "
+                "left/right hand setups, replicate a robot for two-arm "
+                "scenarios. For LARGE replication of ONE prim into a grid, "
+                "prefer the existing clone_prim tool (uses GPU-batched "
+                "GridCloner). duplicate_prims is for replicating a HETEROGENEOUS "
+                "list of prims with the same offset applied to each. "
+                "RETURNS: {type: 'code_patch', code, description, queued} — the "
+                "patch generates copy paths by appending '_copy' (e.g. "
+                "/World/Cube -> /World/Cube_copy); on collision it appends "
+                "'_copy2', '_copy3', etc. The copy's local translate op is "
+                "SET (or added) to original_translation + offset. Prints a "
+                "summary listing source -> destination pairs. "
+                "CAVEATS: Sdf.CopySpec copies the spec on the current edit "
+                "target only — references/payloads in OTHER layers carry over "
+                "as composition arcs but don't get a fresh spec. Joints/"
+                "articulation relationships pointing at the original prim are "
+                "NOT rewritten — duplicated robots end up sharing the same "
+                "joint targets unless you fix relationships afterward. Offset "
+                "is applied to LOCAL translate (not world); for world-space "
+                "offset under a non-identity parent, transform offset into "
+                "parent space first."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "USD paths to duplicate, e.g. ['/World/Pillar_1', '/World/Pillar_2'].",
+                    },
+                    "offset": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "XYZ translation offset applied to every copy [dx, dy, dz] in stage units.",
+                    },
+                    "suffix": {
+                        "type": "string",
+                        "description": "Suffix appended to each duplicated prim's name. Default '_copy'. Numeric suffixes are auto-appended on naming collision.",
+                    },
+                },
+                "required": ["prim_paths", "offset"],
+            },
+        },
+    },
+
     # ─── Scene Export ─────────────────────────────────────────────────────────
     {
         "type": "function",
