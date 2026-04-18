@@ -1539,12 +1539,36 @@ def _gen_create_prim(args: Dict) -> str:
     size = args.get("size")
     radius = args.get("radius")
     height = args.get("height")
+    # Validate prim_type upfront — DefinePrim accepts ANY string, returns
+    # an untyped prim for unknown types, and every downstream attr setter
+    # (GetSizeAttr / GetRadiusAttr / Xformable) silently no-ops on that.
+    # Live-probed 2026-04-18 with prim_type='BogusUnknownType' — tool
+    # returned success=True with empty output.
+    _KNOWN_PRIM_TYPES = {
+        "Cube", "Sphere", "Cylinder", "Cone", "Capsule", "Mesh", "Xform",
+        "Camera", "DistantLight", "DomeLight", "SphereLight", "RectLight",
+        "DiskLight", "CylinderLight", "Scope", "PointInstancer",
+        "BasisCurves", "Points", "NurbsPatch", "PhysicsScene",
+        "PhysicsFixedJoint", "PhysicsRevoluteJoint", "PhysicsPrismaticJoint",
+        "PhysicsSphericalJoint",
+    }
+    if prim_type and prim_type not in _KNOWN_PRIM_TYPES:
+        _types_str = sorted(_KNOWN_PRIM_TYPES)
+        _msg = f"create_prim: unknown prim_type {prim_type!r} — expected one of {_types_str}"
+        return f"raise ValueError({_msg!r})\n"
     lines = [
         "import omni.usd",
         "from pxr import UsdGeom, Gf",
         _SAFE_XFORM_SNIPPET,
         "stage = omni.usd.get_context().get_stage()",
-        f"prim = stage.DefinePrim('{prim_path}', '{prim_type}')",
+        f"_cp_path = {prim_path!r}",
+        f"_cp_type = {prim_type!r}",
+        "prim = stage.DefinePrim(_cp_path, _cp_type)",
+        "if not prim.IsValid() or str(prim.GetTypeName()) != _cp_type:",
+        "    raise RuntimeError(",
+        "        f'create_prim: DefinePrim({_cp_path!r}, {_cp_type!r}) did not produce '",
+        "        f'a valid prim of the expected type (got type={prim.GetTypeName()!r})'",
+        "    )",
     ]
     if pos:
         lines.append(f"_safe_set_translate(prim, ({pos[0]}, {pos[1]}, {pos[2]}))")
@@ -18205,8 +18229,16 @@ def _gen_set_render_mode(args: Dict) -> str:
         "rt": "RaytracedLighting",
         "path_traced": "PathTracing",
     }
-    hydra = _MODE_TO_HYDRA.get(mode, "rtx")
-    render_mode = _MODE_TO_RENDERMODE.get(mode, "RaytracedLighting")
+    # Live-probed 2026-04-18: unknown mode (e.g. 'bogus_mode_xyz') fell
+    # through to the default 'RaytracedLighting' and tool printed
+    # "render_mode set to bogus_mode_xyz" with success=True. Now reject
+    # unknown modes upfront so the agent doesn't parrot a fake mode name.
+    if mode not in _MODE_TO_RENDERMODE:
+        _allowed = sorted(_MODE_TO_RENDERMODE.keys())
+        _msg = f"set_render_mode: unknown mode {mode!r} — expected one of {_allowed}"
+        return f"raise ValueError({_msg!r})\n"
+    hydra = _MODE_TO_HYDRA[mode]
+    render_mode = _MODE_TO_RENDERMODE[mode]
     return (
         "import carb.settings\n"
         "settings = carb.settings.get_settings()\n"
@@ -20379,19 +20411,47 @@ def _gen_add_node(args: Dict) -> str:
     node_name = args["name"]
     # Reuse the legacy → 5.1 namespace remap so callers can pass either form.
     node_type = _OG_NODE_TYPE_MAP.get(raw_node_type, raw_node_type)
+    # Live-probed 2026-04-18: og.Controller.edit with a non-existent graph
+    # returned success=True and claimed "Added node 'tick' to /World/NoGraph"
+    # — the graph wasn't created, the node doesn't exist. Pre-check the
+    # graph prim and post-check the node actually landed.
     return f"""\
+import omni.usd
 import omni.graph.core as og
 
+# Pre-check the graph exists — Controller.edit silently creates a new
+# graph AND silently fails to create any node under some Kit versions
+# when the parent path is missing. Fail fast instead.
+_stage = omni.usd.get_context().get_stage()
+_graph_path = {graph_path!r}
+_node_name = {node_name!r}
+_node_type = {node_type!r}
+_graph_prim = _stage.GetPrimAtPath(_graph_path)
+if not _graph_prim or not _graph_prim.IsValid():
+    raise RuntimeError(
+        f'add_node: graph not found at {{_graph_path!r}} — '
+        f'create it first with create_omnigraph or create_graph'
+    )
+
 keys = og.Controller.Keys
-og.Controller.edit(
-    {{"graph_path": "{graph_path}"}},
+_result = og.Controller.edit(
+    {{"graph_path": _graph_path}},
     {{
         keys.CREATE_NODES: [
-            ("{node_name}", "{node_type}"),
+            (_node_name, _node_type),
         ],
     }},
 )
-print(f"Added node '{node_name}' ({node_type}) to {graph_path}")
+
+# Post-check: verify the node landed under the graph.
+_node_path = f'{{_graph_path}}/{{_node_name}}'
+_node_prim = _stage.GetPrimAtPath(_node_path)
+if not _node_prim or not _node_prim.IsValid():
+    raise RuntimeError(
+        f'add_node: og.Controller.edit returned but no prim at {{_node_path!r}} — '
+        f'likely unknown node_type {{_node_type!r}} (extension not loaded?)'
+    )
+print(f"Added node '{{_node_name}}' ({{_node_type}}) to {{_graph_path}}")
 """
 
 def _gen_connect_nodes(args: Dict) -> str:
