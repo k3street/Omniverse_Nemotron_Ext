@@ -5961,13 +5961,27 @@ eval_proc.wait()
 
 # Step 3: Collect results
 results_file = os.path.join(results_dir, f'{{task}}_results.json')
-if os.path.exists(results_file):
-    with open(results_file) as f:
-        metrics = json.load(f)
-    print(f'Evaluation complete: success_rate={{metrics.get("success_rate", "N/A")}}')
-    print(f'Task metrics: {{json.dumps(metrics.get("task_metrics", {{}}), indent=2)}}')
-else:
-    print(f'Results file not found at {{results_file}}')
+if not os.path.exists(results_file):
+    # Eval subprocess completed (.wait() returned) but didn't produce a
+    # results JSON — the run failed. Previously we printed the missing
+    # path and returned success=True; the agent would then narrate
+    # "Evaluation complete" with no data. Terminate the server, collect
+    # what stdout we have, then raise.
+    server_proc.terminate()
+    _stdout = b''
+    try:
+        _stdout = eval_proc.stdout.read() if eval_proc.stdout else b''
+    except Exception:
+        pass
+    raise RuntimeError(
+        'evaluate_groot: eval subprocess finished (returncode=' + str(eval_proc.returncode) +
+        ') but no results file at ' + repr(results_file) + '. '
+        'Last stdout: ' + repr(_stdout[-400:])
+    )
+with open(results_file) as f:
+    metrics = json.load(f)
+print(f'Evaluation complete: success_rate={{metrics.get("success_rate", "N/A")}}')
+print(f'Task metrics: {{json.dumps(metrics.get("task_metrics", {{}}), indent=2)}}')
 
 # Step 4: Cleanup policy server
 server_proc.terminate()
