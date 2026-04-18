@@ -13026,7 +13026,9 @@ def _poisson_filter(points, min_dist):
 
 target_prim = stage.GetPrimAtPath(target_mesh_path)
 if not target_prim or not target_prim.IsValid():
-    # Fall back to trimesh for filesystem mesh paths
+    # Fall back to trimesh for filesystem mesh paths. If THAT also fails,
+    # raise — otherwise the tool silently reports "placed 0/N" with
+    # success=True even though the target couldn't be resolved at all.
     try:
         import trimesh
         mesh = trimesh.load(target_mesh_path, force='mesh')
@@ -13036,10 +13038,17 @@ if not target_prim or not target_prim.IsValid():
         samples = [Gf.Vec3d(float(p[0]), float(p[1]), float(p[2])) for p in pts_np]
         normals = [Gf.Vec3d(float(n[0]), float(n[1]), float(n[2])) for n in normals_np]
     except Exception as e:
-        print(f'scatter_on_surface: target not found and trimesh fallback failed: {{e}}')
-        samples, normals = [], []
+        raise RuntimeError(
+            f'scatter_on_surface: target {{target_mesh_path!r}} is not a valid stage prim '
+            f'and trimesh could not load it as a mesh file: {{e}}'
+        )
 else:
     samples, normals = _sample_surface_points(target_prim, count)
+if not samples:
+    raise RuntimeError(
+        f'scatter_on_surface: sampled 0 points on {{target_mesh_path!r}} — '
+        f'mesh may have zero faces or non-finite geometry'
+    )
 
 kept = _poisson_filter(samples, spacing) if samples else []
 
