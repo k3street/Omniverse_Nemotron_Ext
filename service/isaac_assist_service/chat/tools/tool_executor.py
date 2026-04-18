@@ -6458,7 +6458,15 @@ CODE_GEN_HANDLERS["solve_ik"] = _gen_solve_ik
 
 # ══════ From feat/8C-cortex-v2 ══════
 def _gen_create_behavior(args: Dict) -> str:
-    """Generate code to create a Cortex behavior (decider network) for a robot."""
+    """Generate code to create a Cortex behavior (decider network) for a robot.
+
+    NOTE (2026-04): The 5.x Cortex API changed MotionCommander's constructor to
+    take (amp: ArticulationMotionPolicy, target_prim: SingleXFormPrim, ...)
+    instead of a prim-path string. CortexRobot also dropped the motion_commander
+    constructor kwarg. A proper behavior needs an RmpFlow/AMP configured per-
+    robot (URDF + YAML config paths), which we don't have registry access to
+    here. Rather than emit broken code, raise an actionable error when called.
+    """
     art_path = args["articulation_path"]
     behavior = args["behavior_type"]
     target = args.get("target_prim", "/World/Target")
@@ -6467,6 +6475,20 @@ def _gen_create_behavior(args: Dict) -> str:
     speed = params.get("speed", 0.5)
     threshold = params.get("threshold", 0.02)
 
+    # Fail fast with guidance — the old generated code calls
+    # MotionCommander('/path') and CortexRobot(..., motion_commander=...),
+    # both of which are invalid in Isaac Sim 5.x's Cortex framework.
+    return (
+        "raise NotImplementedError(\n"
+        "    'create_behavior is a pre-5.x Cortex API that requires per-robot '\n"
+        "    'RmpFlow + ArticulationMotionPolicy + SingleXFormPrim target plumbing. '\n"
+        "    'For Franka/UR10 pick-and-place in 5.x use isaaclab_tasks.manager_based.manipulation '\n"
+        "    'or the cortex examples bundled with your Isaac Sim install.'\n"
+        ")\n"
+    )
+
+    # --- Legacy branches below are unreachable; preserved as reference for the
+    # --- rewrite against the 5.x Cortex API.
     if behavior == "pick_and_place":
         place_target = params.get("place_target", "/World/PlaceTarget")
         return f"""\

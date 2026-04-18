@@ -348,6 +348,20 @@ def test_gen_check_physics_health_imports_usd():
     assert "Usd" in imports, f"Usd missing from pxr import; got {imports}"
 
 
+def test_gen_create_behavior_fails_fast():
+    """Regression: Isaac Sim 5.x Cortex API requires RmpFlow/AMP plumbing
+    we don't have here. Better to raise NotImplementedError than emit code
+    that calls MotionCommander('/path') and fails with a signature error."""
+    import sys
+    sys.path.insert(0, "service")
+    from isaac_assist_service.chat.tools.tool_executor import _gen_create_behavior
+    code = _gen_create_behavior({"articulation_path": "/World/Franka",
+                                 "behavior_type": "pick_and_place"})
+    assert "raise NotImplementedError" in code
+    import ast
+    ast.parse(code)  # must be valid Python
+
+
 def test_gen_create_graph_drops_pipeline_stage_field():
     """Regression: og.Controller.edit() takes GraphPipelineStage for
     'pipeline_stage', not GraphBackingType. Passing a backing-type value
