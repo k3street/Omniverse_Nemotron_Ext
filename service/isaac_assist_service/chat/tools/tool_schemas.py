@@ -5708,6 +5708,236 @@ ISAAC_SIM_TOOLS = [
     },
 
     # ─── Scene Export ─────────────────────────────────────────────────────────
+    # ─── Tier 9 — USD Layers & Variants (6 atomic tools) ──────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "list_layers",
+            "description": (
+                "WHAT: List every layer participating in the current USD stage's layer stack — "
+                "the root layer, every sublayer attached to it, and every session/anonymous "
+                "layer — together with which one is the current edit target. Walks "
+                "stage.GetLayerStack() and stage.GetEditTarget() and returns identifier, "
+                "display name, anonymous/dirty flags, and stack depth for each. "
+                "WHEN: before adding a sublayer (so the LLM knows what's already wired in), "
+                "before set_edit_target (to confirm the layer exists and is mutable), when "
+                "the user asks 'what layers are loaded' / 'where do my edits go' / 'show me "
+                "the layer stack', or before flatten_layers to preview what will be baked. "
+                "RETURNS: data dict {root_layer: str, edit_target: str, layers: [{identifier, "
+                "display_name, anonymous: bool, dirty: bool, depth: int, is_edit_target: bool}], "
+                "count: int}. "
+                "UNITS: identifier is an .usd/.usda/.usdc filesystem path or anon:0xADDR for "
+                "anonymous (session) layers; depth=0 is the root, deeper means weaker opinion. "
+                "CAVEATS: read-only — no stage mutation. Anonymous layers (depth>0) are session-"
+                "only and lost on stage close. The strongest opinion wins, so layers earlier in "
+                "the list override later ones at the same prim path. Returns an error stub if "
+                "no stage is open."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_sublayer",
+            "description": (
+                "WHAT: Attach a new sublayer to the root layer of the current stage. Generates "
+                "a code patch that calls stage.GetRootLayer().subLayerPaths.insert(0, layer_path) "
+                "and (if the file does not yet exist) creates an empty .usda layer at the given "
+                "path via Sdf.Layer.CreateNew. The new sublayer becomes the strongest sublayer "
+                "below the root. "
+                "WHEN: separating user overrides from a base scene (e.g. attach 'overrides.usda' "
+                "above a referenced robot.usd), composing modular shot files, layering a "
+                "lighting/look pass on top of geometry, or wiring in a Replicator output layer "
+                "before SDG. Pair with set_edit_target if subsequent edits should land in the "
+                "new sublayer. "
+                "RETURNS: code patch for approval (queued via Kit RPC /exec). "
+                "UNITS: layer_path is a filesystem path or omniverse:// URL. "
+                "CAVEATS: insertion position 0 = strongest sublayer (overrides everything below). "
+                "If the file already exists it is referenced as-is — its contents will start "
+                "overriding the stage immediately. Sublayer composition is destructive at "
+                "compose time: a delete in a stronger sublayer can't be 'undone' by a weaker "
+                "one. Anonymous (in-memory) sublayers must be saved with .Export() before stage "
+                "close or they are lost."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "layer_path": {
+                        "type": "string",
+                        "description": (
+                            "Filesystem path or Nucleus URL of the sublayer to attach. Created "
+                            "as an empty .usda if it does not exist. Example: "
+                            "'/tmp/overrides.usda' or 'omniverse://localhost/projects/shot01/lighting.usda'."
+                        ),
+                    },
+                },
+                "required": ["layer_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_edit_target",
+            "description": (
+                "WHAT: Change which USD layer receives subsequent edits by calling "
+                "stage.SetEditTarget(Usd.EditTarget(Sdf.Layer.FindOrOpen(layer_path))). All "
+                "later prim creates / attribute writes / deletes go into this layer instead of "
+                "the root. "
+                "WHEN: separating user-overrides from a base scene, working in a session-only "
+                "layer that won't be saved to disk, applying edits to a specific sublayer "
+                "(e.g. a lighting pass), or recording Replicator randomisations into a dedicated "
+                "output layer. "
+                "RETURNS: code patch for approval. "
+                "UNITS: layer_path is a filesystem path / Nucleus URL / anonymous-layer "
+                "identifier (anon:0x...). "
+                "CAVEATS: edits to anonymous (session) layers are LOST on stage close — call "
+                "Sdf.Layer.Export to persist them. The target layer must already be in the "
+                "layer stack (use list_layers() first to see what's available; use add_sublayer() "
+                "to attach new ones). Switching edit targets does NOT change which opinions are "
+                "active — only where new opinions are written. Edits to a weaker layer can be "
+                "shadowed by stronger layers and may appear to do nothing in the viewport."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "layer_path": {
+                        "type": "string",
+                        "description": (
+                            "Identifier of the layer to make the edit target. Must already be "
+                            "in the layer stack — call list_layers() to see options. Example: "
+                            "'/tmp/overrides.usda' or 'anon:0x7f8a1c0' for a session layer."
+                        ),
+                    },
+                },
+                "required": ["layer_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_variant_sets",
+            "description": (
+                "WHAT: Read every variant set declared on a prim (and on its ancestors via "
+                "inherited composition) by calling prim.GetVariantSets().GetNames() and "
+                "GetVariantSelection() for each. A variant set is a named switch (e.g. 'modelingVariant', "
+                "'shadingVariant', 'lod') with a list of named choices. "
+                "WHEN: discovering what configuration knobs an asset exposes before set_variant, "
+                "answering 'what variants does this prim have', auditing an asset library for "
+                "consistent variant naming, or before list_variants() to enumerate the choices "
+                "in a specific set. "
+                "RETURNS: data dict {prim_path: str, variant_sets: [{name: str, current: str, "
+                "count: int}], count: int}. "
+                "UNITS: counts are integers (number of variants in the set). 'current' is the "
+                "active selection ('' means no selection — falls back to the variant set's "
+                "default or the first one). "
+                "CAVEATS: read-only. Variant sets are inherited along the namespace, so a prim "
+                "may show variant sets defined on its model root. Returns an empty list when "
+                "the prim has no variant sets — that is NOT an error. Returns an error stub if "
+                "the prim path doesn't resolve."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim to inspect. Example: '/World/Asset' or "
+                            "'/World/Robot/geom'."
+                        ),
+                    },
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_variants",
+            "description": (
+                "WHAT: List every named variant choice inside a specific variant set on a prim "
+                "by calling prim.GetVariantSet(variant_set).GetVariantNames(). Also returns "
+                "the currently selected variant. "
+                "WHEN: enumerating asset configurations (e.g. 'red'/'blue'/'green' for a "
+                "shadingVariant; 'low'/'mid'/'high' for a lod set), confirming a variant exists "
+                "before set_variant, or surfacing the choices to the user for selection. "
+                "RETURNS: data dict {prim_path: str, variant_set: str, variants: [str], "
+                "current: str, count: int}. "
+                "UNITS: variants are arbitrary string names defined by the asset author. "
+                "CAVEATS: read-only. Returns an empty variants list (not an error) when the "
+                "variant set exists but has no choices defined yet. Returns an error stub when "
+                "the prim path doesn't resolve OR the variant set isn't declared on the prim "
+                "(use list_variant_sets() first to see what's available)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim to inspect. Example: '/World/Asset'."
+                        ),
+                    },
+                    "variant_set": {
+                        "type": "string",
+                        "description": (
+                            "Name of the variant set to enumerate. Example: 'shadingVariant', "
+                            "'modelingVariant', 'lod'."
+                        ),
+                    },
+                },
+                "required": ["prim_path", "variant_set"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "flatten_layers",
+            "description": (
+                "WHAT: Bake every layer in the current stage's layer stack — root + all "
+                "sublayers + all references — into a single .usda file at output_path by calling "
+                "stage.Flatten().Export(output_path). The result is a self-contained USD file "
+                "with one layer that has zero composition arcs. "
+                "WHEN: shipping a final scene to a renderer or external tool that doesn't "
+                "support composition, freezing a working scene before refactoring layers, "
+                "creating a deterministic snapshot for SDG/training reproducibility, or "
+                "preparing a scene for a USDZ archive. "
+                "RETURNS: code patch for approval. "
+                "UNITS: output_path is a filesystem path; .usda (ASCII) is human-readable, "
+                ".usdc (crate) is binary and ~10x smaller for large scenes. "
+                "CAVEATS: flattening is LOSSY for composition — variant sets, payloads, "
+                "references, and inherits collapse into resolved opinions; you cannot recover "
+                "the layer structure afterwards. Asset metadata, layer customLayerData, and "
+                "layer-level offsets are dropped. Output file size can be very large for scenes "
+                "with many references (each is fully expanded). Run after set_edit_target / "
+                "add_sublayer changes are saved — unsaved anonymous layers are still flattened "
+                "but the source is then lost. Existing files at output_path are overwritten."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "output_path": {
+                        "type": "string",
+                        "description": (
+                            "Filesystem path for the flattened output. Use .usda for ASCII "
+                            "(diff-friendly) or .usdc for binary crate (smaller). Example: "
+                            "'/tmp/flattened_scene.usda'."
+                        ),
+                    },
+                },
+                "required": ["output_path"],
+            },
+        },
+    },
+
     {
         "type": "function",
         "function": {
@@ -9444,6 +9674,252 @@ ISAAC_SIM_TOOLS = [
                             "the sun direction. Default: 0. Example: 90. Ignored when 'color' is set."
                         ),
                     },
+                },
+                "required": [],
+            },
+        },
+    },
+
+# ─── Tier 9 — USD Layers & Variants (6 atomic tools) ──────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "list_layers",
+            "description": (
+                "WHAT: List every layer participating in the current USD stage's layer stack — "
+                "the root layer, every sublayer attached to it, and every session/anonymous "
+                "layer — together with which one is the current edit target. Walks "
+                "stage.GetLayerStack() and stage.GetEditTarget() and returns identifier, "
+                "display name, anonymous/dirty flags, and stack depth for each. "
+                "WHEN: before adding a sublayer (so the LLM knows what's already wired in), "
+                "before set_edit_target (to confirm the layer exists and is mutable), when "
+                "the user asks 'what layers are loaded' / 'where do my edits go' / 'show me "
+                "the layer stack', or before flatten_layers to preview what will be baked. "
+                "RETURNS: data dict {root_layer: str, edit_target: str, layers: [{identifier, "
+                "display_name, anonymous: bool, dirty: bool, depth: int, is_edit_target: bool}], "
+                "count: int}. "
+                "UNITS: identifier is an .usd/.usda/.usdc filesystem path or anon:0xADDR for "
+                "anonymous (session) layers; depth=0 is the root, deeper means weaker opinion. "
+                "CAVEATS: read-only — no stage mutation. Anonymous layers (depth>0) are session-"
+                "only and lost on stage close. The strongest opinion wins, so layers earlier in "
+                "the list override later ones at the same prim path. Returns an error stub if "
+                "no stage is open."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_sublayer",
+            "description": (
+                "WHAT: Attach a new sublayer to the root layer of the current stage. Generates "
+                "a code patch that calls stage.GetRootLayer().subLayerPaths.insert(0, layer_path) "
+                "and (if the file does not yet exist) creates an empty .usda layer at the given "
+                "path via Sdf.Layer.CreateNew. The new sublayer becomes the strongest sublayer "
+                "below the root. "
+                "WHEN: separating user overrides from a base scene (e.g. attach 'overrides.usda' "
+                "above a referenced robot.usd), composing modular shot files, layering a "
+                "lighting/look pass on top of geometry, or wiring in a Replicator output layer "
+                "before SDG. Pair with set_edit_target if subsequent edits should land in the "
+                "new sublayer. "
+                "RETURNS: code patch for approval (queued via Kit RPC /exec). "
+                "UNITS: layer_path is a filesystem path or omniverse:// URL. "
+                "CAVEATS: insertion position 0 = strongest sublayer (overrides everything below). "
+                "If the file already exists it is referenced as-is — its contents will start "
+                "overriding the stage immediately. Sublayer composition is destructive at "
+                "compose time: a delete in a stronger sublayer can't be 'undone' by a weaker "
+                "one. Anonymous (in-memory) sublayers must be saved with .Export() before stage "
+                "close or they are lost."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "layer_path": {
+                        "type": "string",
+                        "description": (
+                            "Filesystem path or Nucleus URL of the sublayer to attach. Created "
+                            "as an empty .usda if it does not exist. Example: "
+                            "'/tmp/overrides.usda' or 'omniverse://localhost/projects/shot01/lighting.usda'."
+                        ),
+                    },
+                },
+                "required": ["layer_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_edit_target",
+            "description": (
+                "WHAT: Change which USD layer receives subsequent edits by calling "
+                "stage.SetEditTarget(Usd.EditTarget(Sdf.Layer.FindOrOpen(layer_path))). All "
+                "later prim creates / attribute writes / deletes go into this layer instead of "
+                "the root. "
+                "WHEN: separating user-overrides from a base scene, working in a session-only "
+                "layer that won't be saved to disk, applying edits to a specific sublayer "
+                "(e.g. a lighting pass), or recording Replicator randomisations into a dedicated "
+                "output layer. "
+                "RETURNS: code patch for approval. "
+                "UNITS: layer_path is a filesystem path / Nucleus URL / anonymous-layer "
+                "identifier (anon:0x...). "
+                "CAVEATS: edits to anonymous (session) layers are LOST on stage close — call "
+                "Sdf.Layer.Export to persist them. The target layer must already be in the "
+                "layer stack (use list_layers() first to see what's available; use add_sublayer() "
+                "to attach new ones). Switching edit targets does NOT change which opinions are "
+                "active — only where new opinions are written. Edits to a weaker layer can be "
+                "shadowed by stronger layers and may appear to do nothing in the viewport."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "layer_path": {
+                        "type": "string",
+                        "description": (
+                            "Identifier of the layer to make the edit target. Must already be "
+                            "in the layer stack — call list_layers() to see options. Example: "
+                            "'/tmp/overrides.usda' or 'anon:0x7f8a1c0' for a session layer."
+                        ),
+                    },
+                },
+                "required": ["layer_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_variant_sets",
+            "description": (
+                "WHAT: Read every variant set declared on a prim (and on its ancestors via "
+                "inherited composition) by calling prim.GetVariantSets().GetNames() and "
+                "GetVariantSelection() for each. A variant set is a named switch (e.g. 'modelingVariant', "
+                "'shadingVariant', 'lod') with a list of named choices. "
+                "WHEN: discovering what configuration knobs an asset exposes before set_variant, "
+                "answering 'what variants does this prim have', auditing an asset library for "
+                "consistent variant naming, or before list_variants() to enumerate the choices "
+                "in a specific set. "
+                "RETURNS: data dict {prim_path: str, variant_sets: [{name: str, current: str, "
+                "count: int}], count: int}. "
+                "UNITS: counts are integers (number of variants in the set). 'current' is the "
+                "active selection ('' means no selection — falls back to the variant set's "
+                "default or the first one). "
+                "CAVEATS: read-only. Variant sets are inherited along the namespace, so a prim "
+                "may show variant sets defined on its model root. Returns an empty list when "
+                "the prim has no variant sets — that is NOT an error. Returns an error stub if "
+                "the prim path doesn't resolve."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim to inspect. Example: '/World/Asset' or "
+                            "'/World/Robot/geom'."
+                        ),
+                    },
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_variants",
+            "description": (
+                "WHAT: List every named variant choice inside a specific variant set on a prim "
+                "by calling prim.GetVariantSet(variant_set).GetVariantNames(). Also returns "
+                "the currently selected variant. "
+                "WHEN: enumerating asset configurations (e.g. 'red'/'blue'/'green' for a "
+                "shadingVariant; 'low'/'mid'/'high' for a lod set), confirming a variant exists "
+                "before set_variant, or surfacing the choices to the user for selection. "
+                "RETURNS: data dict {prim_path: str, variant_set: str, variants: [str], "
+                "current: str, count: int}. "
+                "UNITS: variants are arbitrary string names defined by the asset author. "
+                "CAVEATS: read-only. Returns an empty variants list (not an error) when the "
+                "variant set exists but has no choices defined yet. Returns an error stub when "
+                "the prim path doesn't resolve OR the variant set isn't declared on the prim "
+                "(use list_variant_sets() first to see what's available)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": (
+                            "USD path of the prim to inspect. Example: '/World/Asset'."
+                        ),
+                    },
+                    "variant_set": {
+                        "type": "string",
+                        "description": (
+                            "Name of the variant set to enumerate. Example: 'shadingVariant', "
+                            "'modelingVariant', 'lod'."
+                        ),
+                    },
+                },
+                "required": ["prim_path", "variant_set"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "flatten_layers",
+            "description": (
+                "WHAT: Bake every layer in the current stage's layer stack — root + all "
+                "sublayers + all references — into a single .usda file at output_path by calling "
+                "stage.Flatten().Export(output_path). The result is a self-contained USD file "
+                "with one layer that has zero composition arcs. "
+                "WHEN: shipping a final scene to a renderer or external tool that doesn't "
+                "support composition, freezing a working scene before refactoring layers, "
+                "creating a deterministic snapshot for SDG/training reproducibility, or "
+                "preparing a scene for a USDZ archive. "
+                "RETURNS: code patch for approval. "
+                "UNITS: output_path is a filesystem path; .usda (ASCII) is human-readable, "
+                ".usdc (crate) is binary and ~10x smaller for large scenes. "
+                "CAVEATS: flattening is LOSSY for composition — variant sets, payloads, "
+                "references, and inherits collapse into resolved opinions; you cannot recover "
+                "the layer structure afterwards. Asset metadata, layer customLayerData, and "
+                "layer-level offsets are dropped. Output file size can be very large for scenes "
+                "with many references (each is fully expanded). Run after set_edit_target / "
+                "add_sublayer changes are saved — unsaved anonymous layers are still flattened "
+                "but the source is then lost. Existing files at output_path are overwritten."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "output_path": {
+                        "type": "string",
+                        "description": (
+                            "Filesystem path for the flattened output. Use .usda for ASCII "
+                            "(diff-friendly) or .usdc for binary crate (smaller). Example: "
+                            "'/tmp/flattened_scene.usda'."
+                        ),
+                    },
+                },
+                "required": ["output_path"],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "export_scene_package",
+            "description": "Export the current scene as a reusable file package. Collects all approved code patches from the session and generates: scene_setup.py (runnable script), README.md, ros2_topics.yaml (detected ROS2 topics), and ros2_launch.py (if ROS2 nodes present). Use when the user asks to 'export', 'save the scene files', 'generate a package', or 'create project files'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the scene/project (used for directory name and README title). Default: 'exported_scene'"},
+                    "session_id": {"type": "string", "description": "Chat session ID to export patches from. Default: 'default_session'"},
                 },
                 "required": [],
             },

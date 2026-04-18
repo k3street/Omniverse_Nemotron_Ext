@@ -69,6 +69,7 @@ except ImportError:
 
 
 
+
 class TestLookupProductSpec:
     """Test the sensor spec lookup handler."""
 
@@ -2686,3 +2687,120 @@ class TestGetLightProperties:
         result = await handler({"light_path": "/World/SunLight"})
         assert isinstance(result, dict)
         assert result.get("queued") is True
+# ---------------------------------------------------------------------------
+# Tier 9 — USD Layers & Variants data handlers
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(
+    "list_layers" not in DATA_HANDLERS,
+    reason="Tier 9 (USD Layers & Variants) not merged on this branch",
+)
+class TestListLayers:
+    """list_layers introspects the stage's layer stack via Kit RPC."""
+
+    @pytest.mark.asyncio
+    async def test_list_layers_queues_introspection(self, mock_kit_rpc, monkeypatch):
+        # Patch queue_exec_patch so we can capture the script that would be queued
+        captured = {}
+        async def fake_queue(code, desc):
+            captured["code"] = code
+            captured["desc"] = desc
+            return {"queued": True, "patch_id": "tier9_layers_001"}
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+
+        handler = DATA_HANDLERS["list_layers"]
+        result = await handler({})
+        assert result["queued"] is True
+        assert result["patch_id"] == "tier9_layers_001"
+        # The introspection script must walk the layer stack and emit a JSON dict
+        assert "GetLayerStack" in captured["code"] or "GetRootLayer" in captured["code"]
+        assert "GetEditTarget" in captured["code"]
+        assert "json.dumps" in captured["code"]
+        # The note must describe the response shape so the LLM knows what to expect
+        assert "root_layer" in result["note"]
+        assert "edit_target" in result["note"]
+
+
+@pytest.mark.skipif(
+    "list_variant_sets" not in DATA_HANDLERS,
+    reason="Tier 9 (USD Layers & Variants) not merged on this branch",
+)
+class TestListVariantSets:
+    """list_variant_sets reads prim.GetVariantSets() via Kit RPC."""
+
+    @pytest.mark.asyncio
+    async def test_list_variant_sets_embeds_prim_path(self, mock_kit_rpc, monkeypatch):
+        captured = {}
+        async def fake_queue(code, desc):
+            captured["code"] = code
+            captured["desc"] = desc
+            return {"queued": True, "patch_id": "tier9_vsets_001"}
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+
+        handler = DATA_HANDLERS["list_variant_sets"]
+        result = await handler({"prim_path": "/World/Asset"})
+        assert result["queued"] is True
+        assert result["prim_path"] == "/World/Asset"
+        # Prim path must be embedded into the introspection script (via repr())
+        assert "/World/Asset" in captured["code"]
+        assert "GetVariantSets" in captured["code"]
+        assert "GetVariantSelection" in captured["code"]
+
+    @pytest.mark.asyncio
+    async def test_list_variant_sets_path_with_special_chars(self, mock_kit_rpc, monkeypatch):
+        """Special chars in prim path must round-trip through repr() without breaking syntax."""
+        async def fake_queue(code, desc):
+            # Verify the generated introspection script is valid Python
+            compile(code, "<list_variant_sets>", "exec")
+            return {"queued": True, "patch_id": "ok"}
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+
+        handler = DATA_HANDLERS["list_variant_sets"]
+        result = await handler({"prim_path": "/World/Asset's (v2)"})
+        assert result["queued"] is True
+
+
+@pytest.mark.skipif(
+    "list_variants" not in DATA_HANDLERS,
+    reason="Tier 9 (USD Layers & Variants) not merged on this branch",
+)
+class TestListVariants:
+    """list_variants enumerates a single variant set on a prim."""
+
+    @pytest.mark.asyncio
+    async def test_list_variants_embeds_both_args(self, mock_kit_rpc, monkeypatch):
+        captured = {}
+        async def fake_queue(code, desc):
+            captured["code"] = code
+            captured["desc"] = desc
+            return {"queued": True, "patch_id": "tier9_vlist_001"}
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+
+        handler = DATA_HANDLERS["list_variants"]
+        result = await handler({"prim_path": "/World/Asset", "variant_set": "shadingVariant"})
+        assert result["queued"] is True
+        assert result["prim_path"] == "/World/Asset"
+        assert result["variant_set"] == "shadingVariant"
+        # Both arguments must reach the introspection script
+        assert "/World/Asset" in captured["code"]
+        assert "shadingVariant" in captured["code"]
+        assert "GetVariantNames" in captured["code"]
+        # The script must report 'available' when the requested set is missing,
+        # so the LLM can hint at the closest match
+        assert "available" in captured["code"]
+
+    @pytest.mark.asyncio
+    async def test_list_variants_generated_script_compiles(self, mock_kit_rpc, monkeypatch):
+        async def fake_queue(code, desc):
+            compile(code, "<list_variants>", "exec")
+            return {"queued": True, "patch_id": "ok"}
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+
+        handler = DATA_HANDLERS["list_variants"]
+        result = await handler({"prim_path": "/World/X", "variant_set": "lod"})
+        assert result["queued"] is True

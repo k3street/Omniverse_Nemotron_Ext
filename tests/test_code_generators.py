@@ -2028,6 +2028,37 @@ _RAW_TEST_VECTORS = [
         {},
         ["clearColor", "neutral grey"],
     ),
+    # ── Tier 9 — USD Layers & Variants ─────────────────────────────────────
+    (
+        "add_sublayer",
+        {"layer_path": "/tmp/overrides.usda"},
+        ["Sdf.Layer", "subLayerPaths.insert", "/tmp/overrides.usda"],
+    ),
+    (
+        "add_sublayer",
+        {"layer_path": "omniverse://localhost/projects/shot01/lighting.usda"},
+        ["subLayerPaths", "lighting.usda"],
+    ),
+    (
+        "set_edit_target",
+        {"layer_path": "/tmp/overrides.usda"},
+        ["SetEditTarget", "Usd.EditTarget", "FindOrOpen", "/tmp/overrides.usda"],
+    ),
+    (
+        "set_edit_target",
+        {"layer_path": "anon:0xdeadbeef"},
+        ["SetEditTarget", "Usd.EditTarget", "anon:0xdeadbeef"],
+    ),
+    (
+        "flatten_layers",
+        {"output_path": "/tmp/flattened_scene.usda"},
+        ["stage.Flatten", "Export", "/tmp/flattened_scene.usda"],
+    ),
+    (
+        "flatten_layers",
+        {"output_path": "/tmp/baked.usdc"},
+        ["stage.Flatten", "Export", "/tmp/baked.usdc"],
+    ),
 ]
 
 
@@ -2552,6 +2583,9 @@ class TestTemplateDetection:
     # ── Clearance Detection Addendum edge cases ────────────────────────────
     # These run only when the addendum is merged; they auto-skip otherwise so
     # this file stays runnable as branches land in master in any order.
+    # ── Clearance Detection Addendum edge cases ────────────────────────────
+    # Auto-skip when the clearance addendum isn't merged on this branch so
+    # this file stays runnable across tier branches.
 
     @pytest.mark.skipif(
         "set_clearance_monitor" not in CODE_GEN_HANDLERS,
@@ -3104,6 +3138,80 @@ class TestTemplateDetection:
         code = CODE_GEN_HANDLERS["set_environment_background"]({})
         _assert_valid_python(code, "set_environment_background")
         assert "0.2" in code
+
+    # ── Tier 9 — USD Layers & Variants edge cases ──────────────────────────
+
+    @pytest.mark.skipif(
+        "add_sublayer" not in CODE_GEN_HANDLERS,
+        reason="Tier 9 (USD Layers & Variants) not merged on this branch",
+    )
+    def test_add_sublayer_local_path_creates_if_missing(self):
+        """Local filesystem paths should hit the CreateNew branch."""
+        code = CODE_GEN_HANDLERS["add_sublayer"]({"layer_path": "/tmp/new_layer.usda"})
+        _assert_valid_python(code, "add_sublayer")
+        # Must guard CreateNew on file-existence so we don't clobber existing content
+        assert "os.path.exists" in code
+        assert "Sdf.Layer.CreateNew" in code
+        assert "subLayerPaths.insert(0" in code
+
+    @pytest.mark.skipif(
+        "add_sublayer" not in CODE_GEN_HANDLERS,
+        reason="Tier 9 (USD Layers & Variants) not merged on this branch",
+    )
+    def test_add_sublayer_omniverse_url_skips_create(self):
+        """Nucleus URLs must skip the local CreateNew branch (it'd error on '://')."""
+        code = CODE_GEN_HANDLERS["add_sublayer"](
+            {"layer_path": "omniverse://localhost/p/lighting.usda"}
+        )
+        _assert_valid_python(code, "add_sublayer")
+        assert "://" in code
+        assert "subLayerPaths.insert(0" in code
+
+    @pytest.mark.skipif(
+        "set_edit_target" not in CODE_GEN_HANDLERS,
+        reason="Tier 9 (USD Layers & Variants) not merged on this branch",
+    )
+    def test_set_edit_target_path_with_special_chars(self):
+        """Paths with spaces/parens must be embedded with repr() so they don't break syntax."""
+        code = CODE_GEN_HANDLERS["set_edit_target"](
+            {"layer_path": "/tmp/Project Files (v2)/scene.usda"}
+        )
+        _assert_valid_python(code, "set_edit_target")
+        assert "SetEditTarget" in code
+        assert "Project Files" in code
+
+    @pytest.mark.skipif(
+        "set_edit_target" not in CODE_GEN_HANDLERS,
+        reason="Tier 9 (USD Layers & Variants) not merged on this branch",
+    )
+    def test_set_edit_target_falls_back_to_layer_stack(self):
+        """When FindOrOpen returns None we must scan stage.GetLayerStack() before raising."""
+        code = CODE_GEN_HANDLERS["set_edit_target"]({"layer_path": "anon:0xCAFE"})
+        _assert_valid_python(code, "set_edit_target")
+        assert "GetLayerStack" in code
+        assert "anon:0xCAFE" in code
+
+    @pytest.mark.skipif(
+        "flatten_layers" not in CODE_GEN_HANDLERS,
+        reason="Tier 9 (USD Layers & Variants) not merged on this branch",
+    )
+    def test_flatten_layers_raises_when_no_stage(self):
+        """Generated code must raise (not silently no-op) if the stage is missing."""
+        code = CODE_GEN_HANDLERS["flatten_layers"]({"output_path": "/tmp/out.usda"})
+        _assert_valid_python(code, "flatten_layers")
+        assert "stage.Flatten" in code
+        assert "Export" in code
+        assert "RuntimeError" in code
+
+    @pytest.mark.skipif(
+        "flatten_layers" not in CODE_GEN_HANDLERS,
+        reason="Tier 9 (USD Layers & Variants) not merged on this branch",
+    )
+    def test_flatten_layers_supports_usdc_extension(self):
+        """Binary crate (.usdc) output is just as valid as .usda — same flatten code path."""
+        code = CODE_GEN_HANDLERS["flatten_layers"]({"output_path": "/tmp/scene.usdc"})
+        _assert_valid_python(code, "flatten_layers")
+        assert "/tmp/scene.usdc" in code
 
 
 class TestAllCodeGenHandlersCovered:
