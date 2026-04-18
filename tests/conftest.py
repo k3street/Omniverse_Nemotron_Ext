@@ -10,6 +10,14 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
+Minimal scaffolding focused on the tier-11 SDG-annotation tools — only
+fixtures needed by the test files in this branch.
+"""
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -130,6 +138,7 @@ def fake_llm_response():
 
 # ---------------------------------------------------------------------------
 # Mock Kit RPC (patches aiohttp calls to Kit at port 8001)
+# Mock Kit RPC — patches kit_tools so no running Kit server is required.
 # ---------------------------------------------------------------------------
 
 @pytest.fixture()
@@ -145,6 +154,14 @@ def mock_kit_rpc(monkeypatch):
             "recent_logs": [],
         },
         "/capture": {"image_base64": "iVBOR..."},
+    """Patch kit_tools.queue_exec_patch + _get + _post so handlers run offline.
+
+    Default behavior: queue_exec_patch returns a stub patch_id; tests that
+    need to inspect the generated script override queue_exec_patch with their
+    own monkeypatch (see test_data_handlers.py).
+    """
+    defaults = {
+        "/health": {"ok": True},
         "/exec": {"queued": True, "patch_id": "test_patch_001"},
     }
 
@@ -179,3 +196,12 @@ async def client(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac
+    async def fake_queue(code, desc):
+        return {"queued": True, "patch_id": "test_patch_001"}
+
+    import service.isaac_assist_service.chat.tools.kit_tools as kt
+    monkeypatch.setattr(kt, "_get", fake_get, raising=False)
+    monkeypatch.setattr(kt, "_post", fake_post, raising=False)
+    monkeypatch.setattr(kt, "queue_exec_patch", fake_queue, raising=False)
+
+    return defaults

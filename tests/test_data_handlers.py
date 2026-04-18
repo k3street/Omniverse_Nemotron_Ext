@@ -2705,6 +2705,31 @@ class TestListLayers:
         captured = {}
         async def fake_queue(code, desc):
             captured["code"] = code
+            return {"queued": True, "patch_id": "ok"}
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+
+        handler = DATA_HANDLERS["list_layers"]
+        result = await handler({})
+        assert result["queued"] is True
+
+
+# ---------------------------------------------------------------------------
+# Tier 11 — list_semantic_classes
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(
+    "list_semantic_classes" not in DATA_HANDLERS,
+    reason="Tier 11 (SDG Annotation) not merged on this branch",
+)
+class TestListSemanticClasses:
+    """Walks the stage and gathers every Semantics.SemanticsAPI label."""
+
+    @pytest.mark.asyncio
+    async def test_queues_introspection(self, mock_kit_rpc, monkeypatch):
+        captured = {}
+        async def fake_queue(code, desc):
+            captured["code"] = code
             captured["desc"] = desc
             return {"queued": True, "patch_id": "tier9_layers_001"}
         import service.isaac_assist_service.chat.tools.kit_tools as kt
@@ -2735,6 +2760,50 @@ class TestListVariantSets:
         captured = {}
         async def fake_queue(code, desc):
             captured["code"] = code
+            return {"queued": True, "patch_id": "ok"}
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+
+        handler = DATA_HANDLERS["list_variant_sets"]
+        result = await handler({"prim_path": "/World/Robot"})
+        assert result["queued"] is True
+        assert "/World/Robot" in captured["code"]
+        assert "GetSemanticDataAttr" in captured["code"]
+        assert "json.dumps" in captured["code"]
+        # The note must describe the response shape so the LLM knows what to expect.
+        assert "classes" in result["note"]
+        assert "total_classes" in result["note"]
+        assert "total_labeled_prims" in result["note"]
+
+    @pytest.mark.asyncio
+    async def test_script_compiles(self, mock_kit_rpc, monkeypatch):
+        async def fake_queue(code, desc):
+            compile(code, "<list_semantic_classes>", "exec")
+            return {"queued": True, "patch_id": "ok"}
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+
+        handler = DATA_HANDLERS["list_semantic_classes"]
+        result = await handler({})
+        assert result["queued"] is True
+
+
+# ---------------------------------------------------------------------------
+# Tier 11 — get_semantic_label
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(
+    "get_semantic_label" not in DATA_HANDLERS,
+    reason="Tier 11 (SDG Annotation) not merged on this branch",
+)
+class TestGetSemanticLabel:
+    """Reads every Semantics.SemanticsAPI instance applied to a single prim."""
+
+    @pytest.mark.asyncio
+    async def test_embeds_prim_path(self, mock_kit_rpc, monkeypatch):
+        captured = {}
+        async def fake_queue(code, desc):
+            captured["code"] = code
             captured["desc"] = desc
             return {"queued": True, "patch_id": "tier9_vsets_001"}
         import service.isaac_assist_service.chat.tools.kit_tools as kt
@@ -2755,6 +2824,30 @@ class TestListVariantSets:
         async def fake_queue(code, desc):
             # Verify the generated introspection script is valid Python
             compile(code, "<list_variant_sets>", "exec")
+            return {"queued": True, "patch_id": "tier11_label_001"}
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+
+        handler = DATA_HANDLERS["get_semantic_label"]
+        result = await handler({"prim_path": "/World/Tray/bottle_03"})
+        assert result["queued"] is True
+        assert result["prim_path"] == "/World/Tray/bottle_03"
+        # Prim path must be embedded into the introspection script (via repr()).
+        assert "/World/Tray/bottle_03" in captured["code"]
+        assert "GetPrimAtPath" in captured["code"]
+        assert "Semantics" in captured["code"]
+        assert "GetAll" in captured["code"]
+        # The script must report has_semantics so empty results are not "errors".
+        assert "has_semantics" in captured["code"]
+        # The handler note must describe the response shape.
+        assert "labels" in result["note"]
+        assert "has_semantics" in result["note"]
+
+    @pytest.mark.asyncio
+    async def test_path_with_special_chars(self, mock_kit_rpc, monkeypatch):
+        """Special chars in prim path must round-trip through repr() without breaking syntax."""
+        async def fake_queue(code, desc):
+            compile(code, "<get_semantic_label>", "exec")
             return {"queued": True, "patch_id": "ok"}
         import service.isaac_assist_service.chat.tools.kit_tools as kt
         monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
@@ -2820,85 +2913,74 @@ class TestGetTimelineState:
 
     @pytest.mark.asyncio
     async def test_get_timeline_state_queues_introspection(self, mock_kit_rpc, monkeypatch):
-        captured = {}
-        async def fake_queue(code, desc):
-            captured["code"] = code
-            captured["desc"] = desc
-            return {"queued": True, "patch_id": "tier10_timeline_001"}
-        import service.isaac_assist_service.chat.tools.kit_tools as kt
-        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
-
-        handler = DATA_HANDLERS["get_timeline_state"]
-        result = await handler({})
+        handler = DATA_HANDLERS["get_semantic_label"]
+        result = await handler({"prim_path": "/World/Robot's (v2)/joint"})
         assert result["queued"] is True
-        assert result["patch_id"] == "tier10_timeline_001"
-        # Script must touch both timeline interface AND stage time-code metadata.
-        assert "omni.timeline" in captured["code"]
-        assert "GetTimeCodesPerSecond" in captured["code"]
-        assert "GetStartTimeCode" in captured["code"]
-        assert "GetEndTimeCode" in captured["code"]
-        assert "json.dumps" in captured["code"]
-        # Note must describe the response shape so the LLM knows what keys to expect.
-        assert "current_time" in result["note"]
-        assert "fps" in result["note"]
-        assert "is_playing" in result["note"]
+        assert result["prim_path"] == "/World/Robot's (v2)/joint"
 
-    @pytest.mark.asyncio
-    async def test_get_timeline_state_script_compiles(self, mock_kit_rpc, monkeypatch):
-        async def fake_queue(code, desc):
-            compile(code, "<get_timeline_state>", "exec")
-            return {"queued": True, "patch_id": "ok"}
-        import service.isaac_assist_service.chat.tools.kit_tools as kt
-        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
 
-        handler = DATA_HANDLERS["get_timeline_state"]
-        result = await handler({})
-        assert result["queued"] is True
-
+# ---------------------------------------------------------------------------
+# Tier 11 — validate_semantic_labels
+# ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(
-    "list_keyframes" not in DATA_HANDLERS,
-    reason="Tier 10 (Animation & Timeline) not merged on this branch",
+    "validate_semantic_labels" not in DATA_HANDLERS,
+    reason="Tier 11 (SDG Annotation) not merged on this branch",
 )
-class TestListKeyframes:
-    """list_keyframes enumerates TimeSamples on a single attribute."""
+class TestValidateSemanticLabels:
+    """Lints every Semantics.SemanticsAPI annotation on the current stage."""
 
     @pytest.mark.asyncio
-    async def test_list_keyframes_embeds_both_args(self, mock_kit_rpc, monkeypatch):
+    async def test_queues_validation(self, mock_kit_rpc, monkeypatch):
         captured = {}
         async def fake_queue(code, desc):
             captured["code"] = code
             captured["desc"] = desc
-            return {"queued": True, "patch_id": "tier10_kf_001"}
+            return {"queued": True, "patch_id": "tier11_validate_001"}
         import service.isaac_assist_service.chat.tools.kit_tools as kt
         monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
 
-        handler = DATA_HANDLERS["list_keyframes"]
-        result = await handler({"prim_path": "/World/Cube", "attr": "xformOp:translate"})
+        handler = DATA_HANDLERS["validate_semantic_labels"]
+        result = await handler({})
         assert result["queued"] is True
-        assert result["prim_path"] == "/World/Cube"
-        assert result["attr"] == "xformOp:translate"
-        # Both arguments must reach the introspection script.
-        assert "/World/Cube" in captured["code"]
-        assert "xformOp:translate" in captured["code"]
-        assert "GetTimeSamples" in captured["code"]
-        # Must report has_timesamples + time_range so empty results are not "errors".
-        assert "has_timesamples" in captured["code"]
-        assert "time_range_codes" in captured["code"]
+        assert result["patch_id"] == "tier11_validate_001"
+        # Script must walk the stage and report each issue category.
+        assert "stage.Traverse" in captured["code"]
+        assert "Semantics" in captured["code"]
+        # Issue categories the LLM relies on:
+        assert "empty_class_name" in captured["code"]
+        assert "singleton_class" in captured["code"]
+        assert "conflicting_class_labels" in captured["code"]
+        # Visibility / active checks because labels on hidden prims are dead weight:
+        assert "invisible_labeled_prim" in captured["code"] or "inactive_labeled_prim" in captured["code"]
+        # Output must report the documented schema.
+        assert "summary" in captured["code"]
+        assert "issues" in captured["code"]
+        # Note must distinguish from PR #23 validate_annotations.
+        assert "validate_annotations" in result["note"]
+        assert "USD" in result["note"]
 
     @pytest.mark.asyncio
-    async def test_list_keyframes_path_with_special_chars(self, mock_kit_rpc, monkeypatch):
-        """Special chars in prim path / attr must round-trip through repr() without breaking syntax."""
+    async def test_script_compiles(self, mock_kit_rpc, monkeypatch):
         async def fake_queue(code, desc):
-            compile(code, "<list_keyframes>", "exec")
+            compile(code, "<validate_semantic_labels>", "exec")
             return {"queued": True, "patch_id": "ok"}
         import service.isaac_assist_service.chat.tools.kit_tools as kt
         monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
 
-        handler = DATA_HANDLERS["list_keyframes"]
-        result = await handler({
-            "prim_path": "/World/Robot's (v2)",
-            "attr": "drive:angular:physics:targetPosition",
-        })
+        handler = DATA_HANDLERS["validate_semantic_labels"]
+        result = await handler({})
         assert result["queued"] is True
-        assert result["attr"] == "drive:angular:physics:targetPosition"
+
+    @pytest.mark.asyncio
+    async def test_response_has_documented_keys(self, mock_kit_rpc, monkeypatch):
+        async def fake_queue(code, desc):
+            return {"queued": True, "patch_id": "ok"}
+        import service.isaac_assist_service.chat.tools.kit_tools as kt
+        monkeypatch.setattr(kt, "queue_exec_patch", fake_queue)
+
+        handler = DATA_HANDLERS["validate_semantic_labels"]
+        result = await handler({})
+        # The handler's own return shape is the contract with the orchestrator.
+        for k in ("queued", "patch_id", "note"):
+            assert k in result, f"validate_semantic_labels response missing key: {k}"

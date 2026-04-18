@@ -183,6 +183,39 @@ in **seconds** and converted to USD time codes internally via the stage's
 | T11.3 | `remove_semantic_label(prim_path)` | Clear annotation |
 | T11.4 | `assign_class_to_children(prim_path, class)` | Bulk semantic labeling |
 | T11.5 | `validate_annotations()` | Check all semantically-labeled prims |
+## Tier 11 — SDG Annotation (5 tools) [IMPLEMENTED]
+
+5 tools that wrap the Synthetic-Data-Generation (SDG) annotation surface
+on top of `Semantics.SemanticsAPI`. Together with the existing tier-0
+`set_semantic_label` (PR #59) they form the full SDG-labeling toolkit:
+`set_semantic_label` (write one), this tier (read / discover / bulk-write /
+clear / verify), and PR #23 `validate_annotations` (lint the annotation
+*output files* on disk). The names below are namespaced so the three
+surfaces don't clash.
+
+| # | Tool | Type | Implementation |
+|---|------|------|----------------|
+| T11.1 | `list_semantic_classes()` | DATA | walk stage, collect `Semantics.SemanticsAPI.GetSemanticDataAttr().Get()` per labeled prim |
+| T11.2 | `get_semantic_label(prim_path)` | DATA | enumerate `Semantics_*` API instances on a single prim |
+| T11.3 | `remove_semantic_label(prim_path)` | CODE_GEN | `prim.RemoveAPI(Semantics.SemanticsAPI, instance)` for every Semantics_* instance |
+| T11.4 | `assign_class_to_children(prim_path, class_name)` | CODE_GEN | recurse subtree, apply `Semantics.SemanticsAPI` to every Mesh / Imageable child with the same class |
+| T11.5 | `validate_semantic_labels()` | DATA | report empty class strings, orphan SemanticsAPI applications, classes used on a single prim, and prims with conflicting labels |
+
+**Why a separate name from PR #23 `validate_annotations`:** PR #23's
+`validate_annotations` lints the SDG output FILES (cross-checks bbox bounds,
+unique IDs, zero-area, missing classes inside `_labels.json` / Replicator
+captures on disk). Tier-11 `validate_semantic_labels` lints the USD STAGE
+itself — the upstream Semantics.SemanticsAPI annotations *before* SDG runs.
+Both can fire in the same workflow: tier 11 catches bad source labels,
+PR #23 catches downstream rendering / writer bugs.
+
+**Why a separate tool from tier-0 `set_semantic_label`:** that tool labels
+exactly one prim; `assign_class_to_children` walks a subtree (e.g. a tray
+asset) and applies the same class to every Mesh inside, which is the common
+case when bulk-labeling a robot's links or a referenced asset hierarchy.
+
+All schemas use the WHAT / WHEN / RETURNS / CAVEATS rich-description
+template so the LLM picks the right surface based on user intent.
 
 ## Tier 12 — Asset Management (5 tools)
 
