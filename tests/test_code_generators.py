@@ -1867,6 +1867,44 @@ _RAW_TEST_VECTORS = [
         {"graph_path": "/World/ActionGraph", "node_name": "tick"},
         ["og.Controller.edit", "DELETE_NODES", "tick"],
     ),
+    # NOTE: launch_training (master) is intentionally not tested here —
+    # the generator has a pre-existing nested-quote bug in master that
+    # produces invalid Python; fixing it is out of scope for this addendum.
+    # ── Tier 6 — Lighting ──────────────────────────────────────────────────
+    (
+        "set_light_intensity",
+        {"light_path": "/World/SunLight", "intensity": 5000.0},
+        ["inputs:intensity", "/World/SunLight", "5000.0"],
+    ),
+    (
+        "set_light_intensity",
+        {"light_path": "/World/Lamp", "intensity": 0},
+        ["inputs:intensity", "/World/Lamp"],
+    ),
+    (
+        "set_light_color",
+        {"light_path": "/World/SunLight", "rgb": [1.0, 0.56, 0.2]},
+        ["inputs:color", "Gf.Vec3f", "1.0", "0.56", "0.2"],
+    ),
+    (
+        "set_light_color",
+        {"light_path": "/World/CoolKey", "rgb": [0.4, 0.6, 1.0]},
+        ["inputs:color", "/World/CoolKey"],
+    ),
+    (
+        "create_hdri_skydome",
+        {"hdri_path": "/home/u/sky.hdr"},
+        ["UsdLux.DomeLight", "inputs:texture:file", "/home/u/sky.hdr", "latlong", "1000"],
+    ),
+    (
+        "create_hdri_skydome",
+        {
+            "hdri_path": "omniverse://localhost/Skies/cumulus.exr",
+            "dome_path": "/World/Lighting/Sky",
+            "intensity": 2500.0,
+        },
+        ["UsdLux.DomeLight", "/World/Lighting/Sky", "cumulus.exr", "2500.0"],
+    ),
 ]
 
 
@@ -2687,6 +2725,64 @@ class TestTemplateDetection:
         _assert_valid_python(code, "delete_node")
         assert "DELETE_NODES" in code
         assert "old_node" in code
+    # ── Tier 6 — Lighting edge cases ───────────────────────────────────────
+
+    def test_set_light_intensity_clamps_negative(self):
+        """Negative intensity values must be clamped to 0 (light cannot be < 0)."""
+        code = CODE_GEN_HANDLERS["set_light_intensity"]({
+            "light_path": "/World/Lamp",
+            "intensity": -50.0,
+        })
+        _assert_valid_python(code, "set_light_intensity")
+        # Should write 0.0, not -50
+        assert "Set(0.0)" in code or "Set(0)" in code
+        assert "-50" not in code
+
+    def test_set_light_color_clamps_negative_channels(self):
+        """Negative RGB channels must be clamped to 0."""
+        code = CODE_GEN_HANDLERS["set_light_color"]({
+            "light_path": "/World/Lamp",
+            "rgb": [-0.2, 0.5, 1.5],
+        })
+        _assert_valid_python(code, "set_light_color")
+        # Negative red should not appear; >1 green is allowed (acts as boost)
+        assert "-0.2" not in code
+        assert "0.5" in code
+        assert "1.5" in code
+
+    def test_set_light_color_rejects_wrong_arity(self):
+        """rgb with !=3 elements should raise during code generation."""
+        with pytest.raises(ValueError):
+            CODE_GEN_HANDLERS["set_light_color"]({
+                "light_path": "/World/Lamp",
+                "rgb": [1.0, 0.5],
+            })
+
+    def test_create_hdri_skydome_default_dome_path(self):
+        """Without dome_path the default is /Environment/DomeLight."""
+        code = CODE_GEN_HANDLERS["create_hdri_skydome"]({
+            "hdri_path": "/tmp/sky.exr",
+        })
+        _assert_valid_python(code, "create_hdri_skydome")
+        assert "/Environment/DomeLight" in code
+        assert "latlong" in code
+
+    def test_create_hdri_skydome_default_intensity(self):
+        """Default intensity should be 1000."""
+        code = CODE_GEN_HANDLERS["create_hdri_skydome"]({
+            "hdri_path": "/tmp/sky.exr",
+        })
+        _assert_valid_python(code, "create_hdri_skydome")
+        assert "1000" in code
+
+    def test_set_light_intensity_path_with_special_chars(self):
+        """USD paths with underscores/numbers must round-trip cleanly."""
+        code = CODE_GEN_HANDLERS["set_light_intensity"]({
+            "light_path": "/World/Lights/Key_Light_01",
+            "intensity": 1500.0,
+        })
+        _assert_valid_python(code, "set_light_intensity")
+        assert "/World/Lights/Key_Light_01" in code
 
 
 class TestAllCodeGenHandlersCovered:

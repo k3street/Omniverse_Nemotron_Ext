@@ -66,6 +66,7 @@ except ImportError:
 
 
 
+
 class TestLookupProductSpec:
     """Test the sensor spec lookup handler."""
 
@@ -2623,3 +2624,44 @@ class TestInspectGraph:
     async def test_handler_registered(self):
         assert "inspect_graph" in DATA_HANDLERS
         assert DATA_HANDLERS["inspect_graph"] is not None
+# ── Tier 6 — Lighting DATA handlers ──────────────────────────────────────────
+
+class TestListLights:
+    """list_lights queues a Kit-side script that traverses the stage for UsdLux prims."""
+
+    @pytest.mark.asyncio
+    async def test_list_lights_registered(self):
+        assert "list_lights" in DATA_HANDLERS
+        assert DATA_HANDLERS["list_lights"] is not None
+
+    @pytest.mark.asyncio
+    async def test_list_lights_queues_traversal_script(self, mock_kit_rpc):
+        # Patch the exact /exec_patch endpoint that queue_exec_patch posts to
+        mock_kit_rpc["/exec_patch"] = {"queued": True, "patch_id": "test_lights_001"}
+        handler = DATA_HANDLERS["list_lights"]
+        result = await handler({})
+        assert isinstance(result, dict)
+        assert result.get("queued") is True
+
+
+class TestGetLightProperties:
+    """get_light_properties queues a Kit script reading UsdLux attributes."""
+
+    @pytest.mark.asyncio
+    async def test_get_light_properties_registered(self):
+        assert "get_light_properties" in DATA_HANDLERS
+        assert DATA_HANDLERS["get_light_properties"] is not None
+
+    @pytest.mark.asyncio
+    async def test_get_light_properties_requires_path(self, mock_kit_rpc):
+        handler = DATA_HANDLERS["get_light_properties"]
+        with pytest.raises(KeyError):
+            await handler({})  # no light_path
+
+    @pytest.mark.asyncio
+    async def test_get_light_properties_queues_script(self, mock_kit_rpc):
+        mock_kit_rpc["/exec_patch"] = {"queued": True, "patch_id": "test_lights_002"}
+        handler = DATA_HANDLERS["get_light_properties"]
+        result = await handler({"light_path": "/World/SunLight"})
+        assert isinstance(result, dict)
+        assert result.get("queued") is True
