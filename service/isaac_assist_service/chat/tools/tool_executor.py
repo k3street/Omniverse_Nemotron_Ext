@@ -2583,18 +2583,32 @@ async def _handle_list_all_prims(args: Dict) -> Dict:
 async def _handle_measure_distance(args: Dict) -> Dict:
     prim_a = args["prim_a"]
     prim_b = args["prim_b"]
+    # UsdGeom.Xformable(invalid_prim).ComputeLocalToWorldTransform(0) silently
+    # returns the identity matrix — distance_m = 0.0, success=True. Without
+    # the IsValid gate, missing prims looked like coincident geometry. Raise
+    # with the specific invalid path so the agent can report it.
     code = f"""\
 import omni.usd
 from pxr import UsdGeom, Gf
 import json
 
 stage = omni.usd.get_context().get_stage()
-xf_a = UsdGeom.Xformable(stage.GetPrimAtPath('{prim_a}')).ComputeLocalToWorldTransform(0)
-xf_b = UsdGeom.Xformable(stage.GetPrimAtPath('{prim_b}')).ComputeLocalToWorldTransform(0)
+_pa = stage.GetPrimAtPath({prim_a!r})
+_pb = stage.GetPrimAtPath({prim_b!r})
+if not _pa or not _pa.IsValid():
+    raise RuntimeError('measure_distance: prim_a not found: ' + repr({prim_a!r}))
+if not _pb or not _pb.IsValid():
+    raise RuntimeError('measure_distance: prim_b not found: ' + repr({prim_b!r}))
+_xa = UsdGeom.Xformable(_pa)
+_xb = UsdGeom.Xformable(_pb)
+if not _xa or not _xb:
+    raise RuntimeError('measure_distance: one or both prims are not Xformable')
+xf_a = _xa.ComputeLocalToWorldTransform(0)
+xf_b = _xb.ComputeLocalToWorldTransform(0)
 pos_a = xf_a.ExtractTranslation()
 pos_b = xf_b.ExtractTranslation()
 dist = (pos_a - pos_b).GetLength()
-print(json.dumps({{'prim_a': '{prim_a}', 'prim_b': '{prim_b}', 'distance_m': dist,
+print(json.dumps({{'prim_a': {prim_a!r}, 'prim_b': {prim_b!r}, 'distance_m': dist,
        'position_a': list(pos_a), 'position_b': list(pos_b)}}))
 """
     return await kit_tools.queue_exec_patch(code, f"Measure distance {prim_a} ↔ {prim_b}")
@@ -6411,19 +6425,31 @@ print(f"Occupancy map generated: {int(dimensions[0]/resolution)} x {int(dimensio
 
 def _gen_inspect_camera(args: Dict) -> str:
     camera_path = args["camera_path"]
+    # UsdGeom.Camera(invalid_prim).GetFocalLengthAttr().Get() returns None
+    # silently in some USD builds — JSON printed with every field=null but
+    # success=True to the agent. Pre-check the prim exists AND is a Camera.
     return f"""\
 import omni.usd
 from pxr import UsdGeom
 import json
 
 stage = omni.usd.get_context().get_stage()
-cam = UsdGeom.Camera(stage.GetPrimAtPath('{camera_path}'))
+_cp = {camera_path!r}
+_prim = stage.GetPrimAtPath(_cp)
+if not _prim or not _prim.IsValid():
+    raise RuntimeError('inspect_camera: prim not found: ' + repr(_cp))
+if not _prim.IsA(UsdGeom.Camera):
+    raise RuntimeError(
+        'inspect_camera: prim at ' + repr(_cp) + ' is not a UsdGeom.Camera '
+        '(type_name=' + str(_prim.GetTypeName()) + ')'
+    )
+cam = UsdGeom.Camera(_prim)
 result = {{
-    'camera_path': '{camera_path}',
+    'camera_path': _cp,
     'focal_length': cam.GetFocalLengthAttr().Get(),
     'horizontal_aperture': cam.GetHorizontalApertureAttr().Get(),
     'vertical_aperture': cam.GetVerticalApertureAttr().Get(),
-    'clipping_range': list(cam.GetClippingRangeAttr().Get()),
+    'clipping_range': list(cam.GetClippingRangeAttr().Get() or ()),
     'focus_distance': cam.GetFocusDistanceAttr().Get(),
     'projection': cam.GetProjectionAttr().Get(),
 }}
