@@ -10,6 +10,14 @@ Usage:
     python -m scripts.qa.direct_eval --task G-01
     python -m scripts.qa.direct_eval --all
     python -m scripts.qa.direct_eval --tasks G-01,G-02,G-03,FX-01
+
+WARNING — DO NOT RUN TWO INSTANCES IN PARALLEL against the same Kit RPC
+server. Kit holds a single shared stage and each direct_eval resets +
+seeds it per task. Concurrent runs race on _reset_stage + pre-session
+setup → task A's seed leaks into task B's snapshot → false fabrication
+verdicts. Observed 2026-04-18: running AD-06 concurrently with a 20-task
+canary caused FX-05 to see /World/TestCube (AD-06's fixture) and judge
+it as a task failure. Run sequentially, or spawn separate Kit instances.
 """
 from __future__ import annotations
 import argparse
