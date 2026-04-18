@@ -11463,7 +11463,11 @@ with open('{trajectory_path}', 'r') as f:
     data = json.load(f)
 waypoints = data.get("waypoints", [])
 if not waypoints:
-    print("No waypoints found in trajectory file.")
+    raise RuntimeError(
+        'replay_trajectory: no waypoints in ' + repr({trajectory_path!r}) + ' — '
+        'trajectory file loaded but "waypoints" key is missing or empty. '
+        'Nothing to replay.'
+    )
 else:
     # Replay at {speed}x speed
     speed_factor = {speed}
