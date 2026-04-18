@@ -8354,8 +8354,14 @@ from pxr import Usd, UsdGeom, UsdPhysics, Gf, PhysxSchema
 stage = omni.usd.get_context().get_stage()
 issues = []
 {scope_filter}
-# 1. Check for missing PhysicsScene prim
-physics_scenes = [p for p in all_prims if p.IsA(UsdPhysics.Scene) or p.GetTypeName() == 'PhysicsScene']
+# 1. Check for missing PhysicsScene prim — ALWAYS search the whole stage,
+# not the articulation-scoped all_prims list. A PhysicsScene at
+# /World/PhysicsScene won't appear under /World/Arm, so the scoped
+# search reports "missing" even when one exists. This caused C-03's
+# persistent fabrication where the agent claimed to create a
+# PhysicsScene that was already seeded.
+_all_stage_prims = list(Usd.PrimRange(stage.GetPseudoRoot()))
+physics_scenes = [p for p in _all_stage_prims if p.IsA(UsdPhysics.Scene) or p.GetTypeName() == 'PhysicsScene']
 if not physics_scenes:
     issues.append({{
         'prim': '/World/PhysicsScene',
