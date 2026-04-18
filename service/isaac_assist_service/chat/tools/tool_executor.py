@@ -634,6 +634,7 @@ _OG_TEMPLATES = {
 
 # from: feat/new-material-database
 _PHYSICS_MATERIALS_PATH = _WORKSPACE / "knowledge" / "physics_materials.json"
+_physics_materials = None  # lazy-initialized by _load_physics_materials()
 
 # from: feat/new-auto-simplification
 _PHYSICS_SETTINGS_PRESETS = {

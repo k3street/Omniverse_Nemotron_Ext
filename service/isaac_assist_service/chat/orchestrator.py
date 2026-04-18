@@ -682,6 +682,66 @@ class ChatOrchestrator:
                     except Exception as e:
                         logger.debug(f"[{session_id}] verify schema({path}/{schema}) failed: {e}")
 
+                # (e) Attribute-value claims — "/World/X has mass=1.0" or
+                # "friction=0.8 on /World/Material". Verify via get_attribute.
+                # Cap at 3 checks. Only common physics/appearance attrs to
+                # avoid over-matching plain numbers in prose.
+                attr_pat = _re.compile(
+                    r"(?P<path>/World[/A-Za-z0-9_]+)"
+                    r"[^\n]{0,120}?"
+                    r"(?P<attr>mass|friction|restitution|damping|stiffness|radius|height|density|size)"
+                    r"\s*[=:]\s*(?P<val>-?\d+(?:\.\d+)?)",
+                    _re.I,
+                )
+                _ATTR_NAME_MAP = {
+                    "mass": "physics:mass",
+                    "friction": "physics:dynamicFriction",
+                    "restitution": "physics:restitution",
+                    "damping": "drive:angular:physics:damping",
+                    "stiffness": "drive:angular:physics:stiffness",
+                    "radius": "radius",
+                    "height": "height",
+                    "density": "physics:density",
+                    "size": "size",
+                }
+                matched_attrs = set()
+                for m in attr_pat.finditer(reply):
+                    path = m.group("path")
+                    attr = m.group("attr").lower()
+                    claim = round(float(m.group("val")), 3)
+                    key = (path, attr, claim)
+                    if key in matched_attrs:
+                        continue
+                    matched_attrs.add(key)
+                    if len(matched_attrs) > 3:
+                        break
+                    try:
+                        attr_name = _ATTR_NAME_MAP.get(attr, attr)
+                        ver = await _exec("get_attribute", {
+                            "prim_path": path, "attr_name": attr_name
+                        })
+                        out = ver.get("output") if isinstance(ver, dict) else None
+                        parsed = {}
+                        if isinstance(out, str) and out.strip().startswith("{"):
+                            try: parsed = json.loads(out)
+                            except: pass
+                        actual = parsed.get("value")
+                        if actual is None or parsed.get("error"):
+                            continue  # attr missing — separate class, don't over-flag
+                        try:
+                            actual_num = round(float(actual), 3)
+                        except (TypeError, ValueError):
+                            continue
+                        # 2% tolerance or 0.01 absolute, whichever larger
+                        tol = max(0.01, abs(claim) * 0.02)
+                        if abs(actual_num - claim) > tol:
+                            verify_warnings.append(
+                                f"reply claims `{path}` {attr}={claim}, "
+                                f"but get_attribute returned {actual_num}"
+                            )
+                    except Exception as e:
+                        logger.debug(f"[{session_id}] verify attr({path}/{attr}) failed: {e}")
+
                 if verify_warnings:
                     logger.warning(
                         f"[{session_id}] verify-contract mismatches: {verify_warnings[:3]}"
