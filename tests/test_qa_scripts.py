@@ -410,6 +410,37 @@ def test_gen_apply_api_schema_verifies_fake_schemas_fail():
     assert "raise RuntimeError" in code_bad
 
 
+def test_gen_import_robot_urdf_verifies_result():
+    """Regression: URDFParseAndImportFile returns (result=False, prim_path=None)
+    on missing file / parse error. The old generator ignored both return values
+    and reported success=True. Now pre-checks file existence, raises on
+    (not result or not prim_path), and verifies the prim actually landed."""
+    import sys
+    sys.path.insert(0, "service")
+    from isaac_assist_service.chat.tools.tool_executor import _gen_import_robot
+    code = _gen_import_robot({"file_path": "/tmp/x.urdf", "format": "urdf"})
+    assert "FileNotFoundError" in code
+    assert "not result or not prim_path" in code
+    assert "IsValid()" in code
+    assert "raise RuntimeError" in code
+
+
+def test_gen_add_reference_validates_local_path():
+    """Regression: USD AddReference accepts any asset URL and returns True
+    even if the file doesn't exist (composition is lazy). Tool now pre-checks
+    local paths with os.path.exists and verifies HasAuthoredReferences after."""
+    import sys
+    sys.path.insert(0, "service")
+    from isaac_assist_service.chat.tools.tool_executor import _gen_add_reference
+    code = _gen_add_reference({"prim_path": "/World/X", "reference_path": "/tmp/r.usd"})
+    assert "os.path.exists" in code
+    assert "FileNotFoundError" in code
+    assert "HasAuthoredReferences" in code
+    # Remote/omniverse URLs must be skipped from the file-exists check
+    assert "omniverse://" in code
+    assert "http://" in code
+
+
 def test_gen_bulk_apply_schema_detects_silent_noop():
     """Same honesty fix for bulk — if all prims see no schema change after
     the Kit command, raise instead of reporting 'applied=0' as success."""
