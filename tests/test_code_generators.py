@@ -1569,6 +1569,17 @@ _RAW_TEST_VECTORS = [
         {"output_path": "/tmp/demo2.mp4", "duration": 30, "fps": 60, "camera": "/World/Cam"},
         ["/tmp/demo2.mp4", "60", "/World/Cam"],
     ),
+    # ── Sim-to-Real Gap: create_calibration_experiment ─────────────────
+    (
+        "create_calibration_experiment",
+        {"parameter": "friction", "range": [0.4, 1.0], "num_samples": 7, "real_data_path": "/data/real.h5"},
+        ["friction", "linspace", "0.4", "1.0", "/data/real.h5"],
+    ),
+    (
+        "create_calibration_experiment",
+        {"parameter": "damping", "range": [0.1, 1.0], "real_data_path": "/data/real.csv"},
+        ["damping", "DriveAPI", "DampingAttr"],
+    ),
 ]
 
 

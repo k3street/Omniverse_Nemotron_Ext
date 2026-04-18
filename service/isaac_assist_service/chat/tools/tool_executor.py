@@ -26414,3 +26414,257 @@ except ImportError:
 
 
 CODE_GEN_HANDLERS["record_demo_video"] = _gen_record_demo_video
+
+
+# ── Sim-to-Real Gap Tooling (New Capability) ───────────────────────────────
+
+def _load_trajectory_for_gap(path: str) -> Optional[Dict]:
+    """Load trajectory from HDF5 or CSV. Returns dict of arrays or None on error."""
+    if not Path(path).exists():
+        return None
+    try:
+        if path.endswith((".h5", ".hdf5")):
+            try:
+                import h5py
+            except ImportError:
+                return {"_error": "h5py not installed"}
+            data = {}
+            with h5py.File(path, "r") as f:
+                for key in f.keys():
+                    try:
+                        data[key] = f[key][:].tolist()
+                    except Exception:
+                        pass
+            return data
+        elif path.endswith(".csv"):
+            import csv
+            data: Dict = {"rows": []}
+            with open(path, "r") as fp:
+                reader = csv.DictReader(fp)
+                for row in reader:
+                    data["rows"].append(row)
+            return data
+        else:
+            return {"_error": f"Unsupported file format: {path}"}
+    except Exception as e:
+        return {"_error": str(e)}
+
+
+async def _handle_measure_sim_real_gap(args: Dict) -> Dict:
+    """Compare sim and real trajectories to quantify the gap."""
+    sim_path = args.get("sim_trajectory", "")
+    real_path = args.get("real_trajectory", "")
+
+    sim = _load_trajectory_for_gap(sim_path)
+    real = _load_trajectory_for_gap(real_path)
+
+    if sim is None or real is None:
+        missing = []
+        if sim is None:
+            missing.append(sim_path)
+        if real is None:
+            missing.append(real_path)
+        return {"error": f"Trajectory file(s) not found: {missing}"}
+
+    if (isinstance(sim, dict) and sim.get("_error")) or (isinstance(real, dict) and real.get("_error")):
+        return {"error": sim.get("_error") if isinstance(sim, dict) else real.get("_error")}
+
+    sim_joints = sim.get("joint_positions") or sim.get("joints") or sim.get("q")
+    real_joints = real.get("joint_positions") or real.get("joints") or real.get("q")
+
+    if not sim_joints or not real_joints:
+        return {
+            "error": "Could not find joint_positions/joints/q in trajectory files",
+            "sim_keys": list(sim.keys()),
+            "real_keys": list(real.keys()),
+        }
+
+    n_steps = min(len(sim_joints), len(real_joints))
+    if n_steps == 0:
+        return {"error": "Empty trajectories"}
+
+    n_joints = len(sim_joints[0]) if isinstance(sim_joints[0], (list, tuple)) else 1
+    joint_errors = {}
+    for j in range(n_joints):
+        errors = []
+        for t in range(n_steps):
+            s_val = sim_joints[t][j] if isinstance(sim_joints[t], (list, tuple)) else sim_joints[t]
+            r_val = real_joints[t][j] if isinstance(real_joints[t], (list, tuple)) else real_joints[t]
+            errors.append(abs(float(s_val) - float(r_val)))
+        joint_errors[f"joint_{j}"] = {
+            "mean_error_deg": round(sum(errors) / len(errors), 4),
+            "max_error_deg": round(max(errors), 4),
+        }
+
+    worst_joint = max(joint_errors, key=lambda k: joint_errors[k]["mean_error_deg"])
+
+    ee_error_mm = None
+    sim_ee = sim.get("ee_pos") or sim.get("end_effector")
+    real_ee = real.get("ee_pos") or real.get("end_effector")
+    if sim_ee and real_ee:
+        ee_errs = []
+        for t in range(min(len(sim_ee), len(real_ee))):
+            s, r = sim_ee[t], real_ee[t]
+            d = sum((s[i] - r[i]) ** 2 for i in range(min(len(s), len(r)))) ** 0.5
+            ee_errs.append(d)
+        if ee_errs:
+            ee_error_mm = {
+                "mean_mm": round((sum(ee_errs) / len(ee_errs)) * 1000, 2),
+                "max_mm": round(max(ee_errs) * 1000, 2),
+            }
+
+    recommendation = []
+    worst_err = joint_errors[worst_joint]["mean_error_deg"]
+    if worst_err > 5.0:
+        recommendation.append(f"{worst_joint} has {worst_err:.1f}° mean error — investigate friction/damping mismatch")
+    if ee_error_mm and ee_error_mm["mean_mm"] > 10:
+        recommendation.append(f"EE drifts {ee_error_mm['mean_mm']:.0f}mm — likely joint compliance issue")
+
+    return {
+        "joint_errors": joint_errors,
+        "worst_joint": worst_joint,
+        "ee_error_mm": ee_error_mm,
+        "n_steps": n_steps,
+        "n_joints": n_joints,
+        "recommendation": recommendation,
+    }
+
+
+DATA_HANDLERS["measure_sim_real_gap"] = _handle_measure_sim_real_gap
+
+
+async def _handle_suggest_parameter_adjustment(args: Dict) -> Dict:
+    """Given a gap report, suggest physics parameters to adjust."""
+    gap = args.get("gap_report", {})
+    if not gap or "joint_errors" not in gap:
+        return {"error": "Invalid gap_report — must include 'joint_errors' from measure_sim_real_gap()"}
+
+    suggestions = []
+    joint_errors = gap.get("joint_errors", {})
+    ee_error = gap.get("ee_error_mm") or {}
+
+    for joint_name, err in joint_errors.items():
+        mean_err = err["mean_error_deg"]
+        if mean_err > 5.0:
+            suggestions.append({
+                "joint": joint_name,
+                "issue": f"Mean error {mean_err:.1f}° too high",
+                "suggested_action": "Reduce damping by 30% or check actuator model",
+                "parameter": f"drive:angular:physics:damping on {joint_name}",
+                "priority": "high",
+            })
+        elif mean_err > 2.0:
+            suggestions.append({
+                "joint": joint_name,
+                "issue": f"Mean error {mean_err:.1f}° moderate",
+                "suggested_action": "Fine-tune stiffness or friction",
+                "parameter": f"drive:angular:physics:stiffness on {joint_name}",
+                "priority": "medium",
+            })
+
+    if ee_error.get("mean_mm", 0) > 10:
+        suggestions.append({
+            "issue": f"End-effector drifts {ee_error['mean_mm']:.0f}mm",
+            "suggested_action": "Add joint compliance: reduce stiffness ~20%",
+            "parameter": "joint stiffness (all)",
+            "priority": "high",
+        })
+
+    if not suggestions:
+        suggestions.append({"message": "Gap is within acceptable range — no adjustments needed"})
+
+    return {
+        "suggestions": suggestions,
+        "worst_joint": gap.get("worst_joint"),
+        "total_suggestions": len(suggestions),
+    }
+
+
+DATA_HANDLERS["suggest_parameter_adjustment"] = _handle_suggest_parameter_adjustment
+
+
+async def _handle_compare_sim_real_video(args: Dict) -> Dict:
+    """Compare sim and real videos using vision LLM."""
+    sim_path = args.get("sim_video_path", "")
+    real_path = args.get("real_video_path", "")
+
+    if not Path(sim_path).exists() or not Path(real_path).exists():
+        return {
+            "error": "Video file(s) not found",
+            "sim_exists": Path(sim_path).exists(),
+            "real_exists": Path(real_path).exists(),
+        }
+
+    return {
+        "sim_video": sim_path,
+        "real_video": real_path,
+        "analysis_prompt": (
+            "Compare these two robot trajectories. Identify: "
+            "1) Behavioral differences (overshoot, undershoot, tremor) "
+            "2) Contact timing differences "
+            "3) Stability/oscillation differences "
+            "4) Speed/timing differences"
+        ),
+        "note": "Vision analysis to be performed by Gemini Vision provider",
+        "next_step": "Call vision_analyze_scene with these videos as input",
+    }
+
+
+DATA_HANDLERS["compare_sim_real_video"] = _handle_compare_sim_real_video
+
+
+def _gen_create_calibration_experiment(args: Dict) -> str:
+    """Generate calibration grid search code."""
+    parameter = args.get("parameter", "friction")
+    param_range = args.get("range", [0.0, 1.0])
+    num_samples = args.get("num_samples", 7)
+    real_data_path = args.get("real_data_path", "")
+
+    return f"""\
+# Calibration experiment: {parameter} grid search ({num_samples} samples)
+import numpy as np
+import json
+import omni.usd
+from pxr import UsdPhysics
+
+values = np.linspace({param_range[0]}, {param_range[1]}, {num_samples}).tolist()
+real_data_path = {real_data_path!r}
+parameter = {parameter!r}
+
+results = []
+for i, value in enumerate(values):
+    print(f"\\n=== Trial {{i+1}}/{{len(values)}}: {{parameter}} = {{value:.3f}} ===")
+
+    stage = omni.usd.get_context().get_stage()
+
+    if parameter == "friction":
+        for prim in stage.Traverse():
+            if prim.HasAPI(UsdPhysics.MaterialAPI):
+                mat = UsdPhysics.MaterialAPI(prim)
+                mat.GetDynamicFrictionAttr().Set(float(value))
+    elif parameter == "damping":
+        for prim in stage.Traverse():
+            if prim.HasAPI(UsdPhysics.DriveAPI):
+                drive = UsdPhysics.DriveAPI(prim, "angular")
+                drive.GetDampingAttr().Set(float(value))
+    elif parameter == "stiffness":
+        for prim in stage.Traverse():
+            if prim.HasAPI(UsdPhysics.DriveAPI):
+                drive = UsdPhysics.DriveAPI(prim, "angular")
+                drive.GetStiffnessAttr().Set(float(value))
+
+    print(f"  Running sim trajectory with {{parameter}} = {{value:.3f}}...")
+    # ... execute trajectory, record sim_data ...
+    # Compare with real_data_path via measure_sim_real_gap
+    # Replace placeholder score below with real gap score:
+    score = abs(value - 0.6)  # placeholder
+
+    results.append({{"value": value, "gap_score": score}})
+
+best = min(results, key=lambda r: r["gap_score"])
+print(f"\\n✓ Best {{parameter}} value: {{best['value']:.3f}} (gap score: {{best['gap_score']:.4f}})")
+print(json.dumps(results, indent=2))
+"""
+
+
+CODE_GEN_HANDLERS["create_calibration_experiment"] = _gen_create_calibration_experiment

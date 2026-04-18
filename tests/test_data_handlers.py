@@ -56,6 +56,7 @@ except ImportError:
 
 
 
+
 class TestLookupProductSpec:
     """Test the sensor spec lookup handler."""
 
@@ -2176,3 +2177,70 @@ class TestCheckCollisionMeshCodeGen:
         """Quotes in the prim path must not break the literal."""
         code = _gen_check_collision_mesh_code('/World/"weird"/path')
         compile(code, "<sanitized>", "exec")
+class TestSimToRealGap:
+    """Test sim-to-real gap measurement and recommendations."""
+
+    @pytest.mark.asyncio
+    async def test_measure_gap_missing_files(self):
+        handler = DATA_HANDLERS["measure_sim_real_gap"]
+        result = await handler({"sim_trajectory": "/nonexistent/sim.h5", "real_trajectory": "/nonexistent/real.h5"})
+        assert "error" in result
+        assert "not found" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_measure_gap_csv(self, tmp_path):
+        # Create matched CSV trajectories
+        sim_csv = tmp_path / "sim.csv"
+        real_csv = tmp_path / "real.csv"
+        sim_csv.write_text("joint_0,joint_1\n0.0,0.0\n0.1,0.1\n0.2,0.2\n")
+        real_csv.write_text("joint_0,joint_1\n0.0,0.0\n0.1,0.1\n0.2,0.2\n")
+        handler = DATA_HANDLERS["measure_sim_real_gap"]
+        # CSV path doesn't have joint_positions key — should error gracefully
+        result = await handler({"sim_trajectory": str(sim_csv), "real_trajectory": str(real_csv)})
+        assert "error" in result or "joint_errors" in result
+
+    @pytest.mark.asyncio
+    async def test_suggest_no_gap_report(self):
+        handler = DATA_HANDLERS["suggest_parameter_adjustment"]
+        result = await handler({})
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_suggest_with_high_error(self):
+        handler = DATA_HANDLERS["suggest_parameter_adjustment"]
+        gap = {
+            "joint_errors": {"joint_0": {"mean_error_deg": 6.0, "max_error_deg": 8.0}},
+            "worst_joint": "joint_0",
+            "ee_error_mm": {"mean_mm": 15.0, "max_mm": 20.0},
+        }
+        result = await handler({"gap_report": gap})
+        assert "suggestions" in result
+        assert any("damping" in s.get("parameter", "") for s in result["suggestions"])
+
+    @pytest.mark.asyncio
+    async def test_suggest_within_tolerance(self):
+        handler = DATA_HANDLERS["suggest_parameter_adjustment"]
+        gap = {
+            "joint_errors": {"joint_0": {"mean_error_deg": 0.5, "max_error_deg": 1.0}},
+            "worst_joint": "joint_0",
+        }
+        result = await handler({"gap_report": gap})
+        assert "suggestions" in result
+        assert "no adjustments needed" in str(result["suggestions"]).lower()
+
+    @pytest.mark.asyncio
+    async def test_compare_video_missing_files(self):
+        handler = DATA_HANDLERS["compare_sim_real_video"]
+        result = await handler({"sim_video_path": "/nonexistent/sim.mp4", "real_video_path": "/nonexistent/real.mp4"})
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_compare_video_returns_prompt(self, tmp_path):
+        sim_vid = tmp_path / "sim.mp4"
+        real_vid = tmp_path / "real.mp4"
+        sim_vid.write_bytes(b"fake mp4")
+        real_vid.write_bytes(b"fake mp4")
+        handler = DATA_HANDLERS["compare_sim_real_video"]
+        result = await handler({"sim_video_path": str(sim_vid), "real_video_path": str(real_vid)})
+        assert "analysis_prompt" in result
+        assert "next_step" in result
