@@ -7254,7 +7254,11 @@ print(f"Position RMSE: {{pos_rmse:.6f}}")
 print(f"Velocity RMSE: {{vel_rmse:.6f}}")
 """
 
-    # Manual method: set gains directly via DriveAPI
+    # Manual method: set gains directly via DriveAPI.
+    # Live-probed 2026-04-18: old code let the DriveAPI.Get loop silently
+    # fall through (if joint_prim was invalid OR had no DriveAPI,
+    # `if drive:` was false on both iterations, 0 drives got set, no print
+    # fired, tool reported success=True). Now validate + count explicitly.
     if joint_name:
         return f"""\
 import omni.usd
@@ -7262,14 +7266,23 @@ from pxr import UsdPhysics
 
 stage = omni.usd.get_context().get_stage()
 joint_prim = stage.GetPrimAtPath('{art_path}/{joint_name}')
+if not joint_prim or not joint_prim.IsValid():
+    raise RuntimeError(f'tune_gains: joint not found: {art_path}/{joint_name}')
 
 # Set drive gains for {joint_name}
+_set_count = 0
 for drive_type in ['angular', 'linear']:
     drive = UsdPhysics.DriveAPI.Get(joint_prim, drive_type)
     if drive:
         drive.GetStiffnessAttr().Set({kp})
         drive.GetDampingAttr().Set({kd})
+        _set_count += 1
         print(f"Set {{drive_type}} drive on {joint_name}: Kp={kp}, Kd={kd}")
+if _set_count == 0:
+    raise RuntimeError(
+        f'tune_gains: {joint_name} has no DriveAPI (angular or linear) — '
+        f'drive schema must be applied before gain tuning'
+    )
 """
 
     return f"""\
@@ -7278,6 +7291,8 @@ from pxr import Usd, UsdPhysics
 
 stage = omni.usd.get_context().get_stage()
 robot_prim = stage.GetPrimAtPath('{art_path}')
+if not robot_prim or not robot_prim.IsValid():
+    raise RuntimeError(f'tune_gains: articulation not found: {art_path}')
 
 # Set drive gains for all joints
 joint_count = 0
@@ -7289,6 +7304,11 @@ for child in list(Usd.PrimRange(robot_prim))[1:]:
                 drive.GetStiffnessAttr().Set({kp})
                 drive.GetDampingAttr().Set({kd})
                 joint_count += 1
+if joint_count == 0:
+    raise RuntimeError(
+        f'tune_gains: no DriveAPI drives found under {art_path} — '
+        f'articulation has no tunable joints (apply UsdPhysics.DriveAPI first)'
+    )
 print(f"Set Kp={kp}, Kd={kd} on {{joint_count}} drives")
 """
 
@@ -7325,12 +7345,19 @@ def _gen_configure_self_collision(args: Dict) -> str:
     mode = args["mode"]
     filtered_pairs = args.get("filtered_pairs", [])
 
+    # Live-probed 2026-04-18: old code called .Apply on an invalid prim
+    # returned from stage.GetPrimAtPath('<bad>') and USD's internal Apply
+    # path silently no-oped — tool reported success=True with no effect.
+    # Add explicit guard on the articulation root.
     lines = [
         "import omni.usd",
         "from pxr import UsdPhysics, PhysxSchema",
         "",
         "stage = omni.usd.get_context().get_stage()",
-        f"robot_prim = stage.GetPrimAtPath('{art_path}')",
+        f"_art_path = {art_path!r}",
+        "robot_prim = stage.GetPrimAtPath(_art_path)",
+        "if not robot_prim or not robot_prim.IsValid():",
+        "    raise RuntimeError(f'configure_self_collision: articulation not found: {_art_path!r}')",
         "",
     ]
 
@@ -7368,6 +7395,8 @@ def _gen_configure_self_collision(args: Dict) -> str:
                 lines.extend([
                     f"link_a = stage.GetPrimAtPath('{pair[0]}')",
                     f"link_b = stage.GetPrimAtPath('{pair[1]}')",
+                    "if not link_a.IsValid() or not link_b.IsValid():",
+                    f"    raise RuntimeError('configure_self_collision: filter pair links not found: {pair[0]!r} / {pair[1]!r}')",
                     "filteredPairsAPI = UsdPhysics.FilteredPairsAPI.Apply(robot_prim)",
                     f"filteredPairsAPI.GetFilteredPairsRel().AddTarget('{pair[0]}')",
                     f"filteredPairsAPI.GetFilteredPairsRel().AddTarget('{pair[1]}')",
