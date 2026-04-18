@@ -239,6 +239,7 @@ _TEST_VECTORS = [
             "robot_type": "franka",
         },
         ["RmpFlow", "set_end_effector_target", "apply_action", "add_physics_callback", "update_world", "load_supported_motion_policy_config"],
+        ["RmpFlow", "set_end_effector_target", "apply_action"],
     ),
     (
         "move_to_pose",
@@ -249,6 +250,7 @@ _TEST_VECTORS = [
             "robot_type": "franka",
         },
         ["LulaRRTMotionPolicy"],
+        ["LulaTaskSpaceTrajectoryGenerator"],
     ),
     (
         "plan_trajectory",
@@ -261,6 +263,7 @@ _TEST_VECTORS = [
             "robot_type": "franka",
         },
         ["LulaRRTMotionPolicy", "set_end_effector_target"],
+        ["LulaTaskSpaceTrajectoryGenerator", "compute_task_space_trajectory"],
     ),
     (
         "build_scene_from_blueprint",
@@ -515,6 +518,17 @@ _TEST_VECTORS = [
             "output_dir": "/output/groot_full",
         },
         ["subprocess.Popen", "gr00t.finetune.train", "demos/full_train", "50000", "Full fine-tuning", "/output/groot_full"],
+    ),
+    # ── Phase 7H: IsaacAutomator Cloud Deployment ──────────────────────────
+    (
+        "cloud_download_results",
+        {"job_id": "cloud-aws-abc12345"},
+        ["rsync", "subprocess", "cloud-aws-abc12345", "/results/", "workspace/cloud_results"],
+    ),
+    (
+        "cloud_download_results",
+        {"job_id": "cloud-gcp-def67890", "output_dir": "/tmp/my_results"},
+        ["rsync", "subprocess", "cloud-gcp-def67890", "/tmp/my_results"],
     ),
 ]
 

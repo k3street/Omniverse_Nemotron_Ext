@@ -1572,4 +1572,95 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── IsaacAutomator Cloud Deployment ─────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "cloud_launch",
+            "description": "Launch a cloud GPU instance via IsaacAutomator for training, SDG, evaluation, or headless simulation. Returns the deploy command, estimated cost, and prerequisites. Always requires user approval before execution.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "provider": {
+                        "type": "string",
+                        "enum": ["aws", "gcp", "azure"],
+                        "description": "Cloud provider: aws, gcp, or azure",
+                    },
+                    "instance_type": {"type": "string", "description": "Instance type, e.g. 'g5.2xlarge', 'g2-standard-8', 'NCasT4_v3'"},
+                    "isaac_version": {"type": "string", "description": "Isaac Sim version to deploy. Default: '5.1.0'"},
+                    "script_template": {
+                        "type": "string",
+                        "enum": ["training", "sdg", "evaluation", "headless_sim"],
+                        "description": "Job script template to use on the cloud instance",
+                    },
+                    "num_gpus": {"type": "integer", "description": "Number of GPUs to allocate. Default: 1"},
+                },
+                "required": ["provider", "instance_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cloud_status",
+            "description": "Check the status of a running cloud job launched via cloud_launch. Returns GPU utilization, estimated time remaining, and cost so far.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Job ID returned by cloud_launch"},
+                },
+                "required": ["job_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cloud_download_results",
+            "description": "Generate code to download results from a cloud instance (scp/rsync). Use after a cloud job completes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Job ID of the completed cloud job"},
+                    "output_dir": {"type": "string", "description": "Local directory to download results to. Default: 'workspace/cloud_results'"},
+                },
+                "required": ["job_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cloud_teardown",
+            "description": "Tear down a cloud instance launched via cloud_launch. Returns the teardown command. Always requires approval. Warns about cost if the instance has been running.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Job ID of the cloud instance to terminate"},
+                },
+                "required": ["job_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cloud_estimate_cost",
+            "description": "Estimate the cost of running a cloud GPU instance for a given duration. Uses a built-in pricing table for common GPU instance types.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "provider": {
+                        "type": "string",
+                        "enum": ["aws", "gcp", "azure"],
+                        "description": "Cloud provider",
+                    },
+                    "instance_type": {"type": "string", "description": "Instance type, e.g. 'g5.2xlarge'"},
+                    "hours": {"type": "number", "description": "Estimated runtime in hours"},
+                },
+                "required": ["provider", "instance_type", "hours"],
+            },
+        },
+    },
 ]

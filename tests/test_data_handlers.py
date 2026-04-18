@@ -456,3 +456,167 @@ class TestComparePolicies:
         })
         assert result["count"] == 1
         assert "baseline" in result["comparison_table"]
+class TestCloudLaunch:
+    """cloud_launch data handler."""
+
+    @pytest.mark.asyncio
+    async def test_valid_launch(self):
+        handler = DATA_HANDLERS["cloud_launch"]
+        result = await handler({
+            "provider": "aws",
+            "instance_type": "g5.2xlarge",
+            "isaac_version": "5.1.0",
+            "script_template": "training",
+            "num_gpus": 1,
+        })
+        assert "error" not in result
+        assert result["provider"] == "aws"
+        assert result["instance_type"] == "g5.2xlarge"
+        assert result["gpu_model"] == "A10G"
+        assert result["estimated_cost_per_hour"] == 1.21
+        assert result["always_require_approval"] is True
+        assert result["job_id"].startswith("cloud-aws-")
+        assert "deploy-aws" in result["deploy_command"]
+        assert "training" in result["deploy_command"]
+        assert len(result["prerequisites"]) > 0
+
+    @pytest.mark.asyncio
+    async def test_invalid_script_template(self):
+        handler = DATA_HANDLERS["cloud_launch"]
+        result = await handler({
+            "provider": "aws",
+            "instance_type": "g5.2xlarge",
+            "script_template": "malicious_script",
+        })
+        assert "error" in result
+        assert "malicious_script" in result["error"]
+        assert "Allowed" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_unknown_instance_type(self):
+        handler = DATA_HANDLERS["cloud_launch"]
+        result = await handler({
+            "provider": "gcp",
+            "instance_type": "n1-standard-4",
+            "script_template": "sdg",
+        })
+        assert "error" not in result
+        assert result["estimated_cost_per_hour"] is None
+        assert result["gpu_model"] == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_gcp_provider(self):
+        handler = DATA_HANDLERS["cloud_launch"]
+        result = await handler({
+            "provider": "gcp",
+            "instance_type": "g2-standard-8",
+            "script_template": "evaluation",
+        })
+        assert result["provider"] == "gcp"
+        assert result["gpu_model"] == "L4"
+        assert result["estimated_cost_per_hour"] == 1.35
+        assert "deploy-gcp" in result["deploy_command"]
+
+
+class TestCloudEstimateCost:
+    """cloud_estimate_cost data handler."""
+
+    @pytest.mark.asyncio
+    async def test_known_instance_math(self):
+        handler = DATA_HANDLERS["cloud_estimate_cost"]
+        result = await handler({
+            "provider": "aws",
+            "instance_type": "g5.2xlarge",
+            "hours": 10.0,
+        })
+        assert result["price_per_hour"] == 1.21
+        assert result["cost_usd"] == 12.10
+        assert result["gpu"] == "A10G"
+
+    @pytest.mark.asyncio
+    async def test_azure_instance(self):
+        handler = DATA_HANDLERS["cloud_estimate_cost"]
+        result = await handler({
+            "provider": "azure",
+            "instance_type": "NCasT4_v3",
+            "hours": 5.0,
+        })
+        assert result["price_per_hour"] == 1.10
+        assert result["cost_usd"] == 5.50
+        assert result["gpu"] == "T4"
+
+    @pytest.mark.asyncio
+    async def test_unknown_instance(self):
+        handler = DATA_HANDLERS["cloud_estimate_cost"]
+        result = await handler({
+            "provider": "aws",
+            "instance_type": "p5.48xlarge",
+            "hours": 1.0,
+        })
+        assert result["cost_usd"] is None
+        assert result["price_per_hour"] is None
+        assert result["gpu"] == "unknown"
+
+
+class TestCloudTeardown:
+    """cloud_teardown data handler."""
+
+    @pytest.mark.asyncio
+    async def test_teardown_known_job(self):
+        import service.isaac_assist_service.chat.tools.tool_executor as te
+        te._cloud_jobs["test-cloud-job-001"] = {
+            "status": "running",
+            "provider": "aws",
+            "instance_type": "g5.2xlarge",
+            "gpu_model": "A10G",
+            "price_per_hour": 1.21,
+        }
+        try:
+            handler = DATA_HANDLERS["cloud_teardown"]
+            result = await handler({"job_id": "test-cloud-job-001"})
+            assert result["always_require_approval"] is True
+            assert result["provider"] == "aws"
+            assert "destroy-aws" in result["teardown_command"]
+            assert "test-cloud-job-001" in result["teardown_command"]
+            assert "$1.21" in result["cost_warning"]
+        finally:
+            del te._cloud_jobs["test-cloud-job-001"]
+
+    @pytest.mark.asyncio
+    async def test_teardown_unknown_job(self):
+        handler = DATA_HANDLERS["cloud_teardown"]
+        result = await handler({"job_id": "nonexistent-job-999"})
+        assert result["always_require_approval"] is True
+        assert result["provider"] == "unknown"
+        assert "not found" in result["message"]
+
+
+class TestCloudStatus:
+    """cloud_status data handler."""
+
+    @pytest.mark.asyncio
+    async def test_status_not_found(self):
+        handler = DATA_HANDLERS["cloud_status"]
+        result = await handler({"job_id": "nonexistent-cloud-job"})
+        assert result["status"] == "not_found"
+        assert result["job_id"] == "nonexistent-cloud-job"
+        assert result["gpu_utilization"] is None
+
+    @pytest.mark.asyncio
+    async def test_status_existing_job(self):
+        import service.isaac_assist_service.chat.tools.tool_executor as te
+        te._cloud_jobs["test-cloud-status-001"] = {
+            "status": "running",
+            "gpu_utilization": "85%",
+            "estimated_remaining": "2h 15m",
+            "cost_so_far": "$4.84",
+        }
+        try:
+            handler = DATA_HANDLERS["cloud_status"]
+            result = await handler({"job_id": "test-cloud-status-001"})
+            assert result["status"] == "running"
+            assert result["gpu_utilization"] == "85%"
+            assert result["estimated_remaining"] == "2h 15m"
+            assert result["cost_so_far"] == "$4.84"
+        finally:
+            del te._cloud_jobs["test-cloud-status-001"]
