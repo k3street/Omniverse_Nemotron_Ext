@@ -22,7 +22,7 @@ def init_telemetry():
         tracer = trace.get_tracer("omni.isaac.assist")
         logger.info("[IsaacAssist Telemetry] OpenTelemetry successfully initialized.")
     except ImportError as e:
-        logger.error(f"[IsaacAssist Telemetry] Boot Error: {e}")
+        logger.warning(f"[IsaacAssist Telemetry] OpenTelemetry not installed, tracing disabled: {e}")
 
 def trace_error(operation_name: str):
     def decorator(func):

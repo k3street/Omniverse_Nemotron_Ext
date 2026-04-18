@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from . import kit_tools
@@ -1628,9 +1629,6 @@ async def _export_dataset():
 
 asyncio.ensure_future(_export_dataset())
 """
-
-
-CODE_GEN_HANDLERS["export_dataset"] = _gen_export_dataset
 
 
 def _gen_configure_zmq_stream(args: Dict) -> str:
@@ -34393,3 +34391,222 @@ else:
 
 CODE_GEN_HANDLERS["create_audio_prim"] = _gen_create_audio_prim
 CODE_GEN_HANDLERS["set_audio_property"] = _gen_set_audio_property
+
+
+# ── IRA Actor Control ────────────────────────────────────────────────────────
+
+def _gen_setup_ira_simulation(args: Dict) -> str:
+    num_chars = args.get("num_characters", 1)
+    num_robots = args.get("num_robots", 0)
+    scene_usd = args.get("scene_usd", "")
+
+    scene_block = ""
+    if scene_usd:
+        scene_block = f"""
+# Load environment scene
+import omni.usd
+omni.usd.get_context().open_stage("{scene_usd}")
+import asyncio, omni.kit.app
+await omni.kit.app.get_app().next_update_async()
+"""
+
+    return f"""\
+import carb
+import omni.kit.app
+from omni.kit.scripting import ApplyScriptingAPICommand
+from pxr import UsdGeom, Gf, Usd
+import omni.usd
+
+# 1. Enable IRA extensions
+ext_mgr = omni.kit.app.get_app().get_extension_manager()
+for ext_id in [
+    "omni.anim.people",
+    "isaacsim.anim.robot",
+    "isaacsim.replicator.agent.core",
+]:
+    ext_mgr.set_extension_enabled_immediate(ext_id, True)
+{scene_block}
+stage = omni.usd.get_context().get_stage()
+
+# 2. Ensure parent Xforms exist
+for parent in ["/World/Characters", "/World/Robots"]:
+    if not stage.GetPrimAtPath(parent).IsValid():
+        UsdGeom.Xform.Define(stage, parent)
+
+# 3. Resolve asset paths
+from isaacsim.replicator.agent.core.settings import AssetPaths, BehaviorScriptPaths, PrimPaths
+
+# 4. Spawn characters
+char_asset = AssetPaths.default_character_path()
+biped_asset = AssetPaths.default_biped_asset_path()
+char_behavior = BehaviorScriptPaths.behavior_script_path()
+
+for i in range({num_chars}):
+    name = f"Character_{{i+1:02d}}"
+    prim_path = f"/World/Characters/{{name}}"
+    if stage.GetPrimAtPath(prim_path).IsValid():
+        print(f"{{name}} already exists, skipping spawn")
+        continue
+
+    # Create Xform, add biped reference
+    xform = UsdGeom.Xform.Define(stage, prim_path)
+    xform.GetPrim().GetReferences().AddReference(biped_asset)
+    # Offset each character so they don't overlap
+    xform.AddTranslateOp().Set(Gf.Vec3d(i * 2.0, 0, 0))
+
+    # Attach behavior script via OmniScriptingSchema
+    ApplyScriptingAPICommand(paths=[prim_path]).do()
+    import OmniScriptingSchema
+    scripting_api = OmniScriptingSchema.OmniScriptingAPI(stage.GetPrimAtPath(prim_path))
+    scripting_api.CreateScriptsAttr().Set([char_behavior])
+
+    print(f"Spawned {{name}} at {{prim_path}}")
+
+# 5. Spawn robots
+for i in range({num_robots}):
+    name = f"Nova_Carter_{{i+1:02d}}"
+    prim_path = f"/World/Robots/{{name}}"
+    if stage.GetPrimAtPath(prim_path).IsValid():
+        print(f"{{name}} already exists, skipping spawn")
+        continue
+
+    xform = UsdGeom.Xform.Define(stage, prim_path)
+    # Use Nova Carter asset from Isaac assets
+    carter_path = AssetPaths.cache_isaac_sim_asset_root_path()
+    if carter_path:
+        carter_usd = carter_path + "/Isaac/Robots/NovaCarter/nova_carter.usd"
+    else:
+        carter_usd = "/Isaac/Robots/NovaCarter/nova_carter.usd"
+    xform.GetPrim().GetReferences().AddReference(carter_usd)
+    xform.AddTranslateOp().Set(Gf.Vec3d(i * 3.0, -3.0, 0))
+
+    # Attach robot behavior script
+    robot_behavior = BehaviorScriptPaths.robot_behavior_script_path("nova_carter")
+    ApplyScriptingAPICommand(paths=[prim_path]).do()
+    scripting_api = OmniScriptingSchema.OmniScriptingAPI(stage.GetPrimAtPath(prim_path))
+    scripting_api.CreateScriptsAttr().Set([robot_behavior])
+
+    print(f"Spawned {{name}} at {{prim_path}}")
+
+print("IRA simulation setup complete: {num_chars} characters, {num_robots} robots")
+"""
+
+
+CODE_GEN_HANDLERS["setup_ira_simulation"] = _gen_setup_ira_simulation
+
+
+def _gen_inject_actor_command(args: Dict) -> str:
+    agent_name = args["agent_name"]
+    commands = args["commands"]
+    force = args.get("force", True)
+
+    # Build command list as strings with agent_name prefix
+    cmd_lines = []
+    for cmd in commands:
+        cmd_lines.append(f"{agent_name} {cmd}")
+
+    cmd_list_str = json.dumps(cmd_lines)
+
+    return f"""\
+from isaacsim.replicator.agent.core.agent_manager import AgentManager
+
+mgr = AgentManager.get_instance()
+if mgr is None:
+    print("ERROR: AgentManager not initialized. Run setup_ira_simulation first.")
+else:
+    agent_names = list(mgr.get_all_agent_names())
+    if "{agent_name}" not in agent_names:
+        print(f"ERROR: Agent '{agent_name}' not found. Available: {{agent_names}}")
+    else:
+        commands = {cmd_list_str}
+        mgr.inject_command("{agent_name}", commands, force_inject={force})
+        print(f"Injected {{len(commands)}} command(s) to {agent_name}")
+"""
+
+
+CODE_GEN_HANDLERS["inject_actor_command"] = _gen_inject_actor_command
+
+
+def _gen_actor_goto(args: Dict) -> str:
+    agent_name = args["agent_name"]
+    x = args["x"]
+    y = args["y"]
+    z = args["z"]
+    rotation = args.get("rotation")
+
+    if rotation is not None:
+        goto_cmd = f"{agent_name} GoTo {x} {y} {z} {rotation}"
+    else:
+        goto_cmd = f"{agent_name} GoTo {x} {y} {z} _"
+
+    return f"""\
+from isaacsim.replicator.agent.core.agent_manager import AgentManager
+
+mgr = AgentManager.get_instance()
+if mgr is None:
+    print("ERROR: AgentManager not initialized. Run setup_ira_simulation first.")
+else:
+    agent_names = list(mgr.get_all_agent_names())
+    if "{agent_name}" not in agent_names:
+        print(f"ERROR: Agent '{agent_name}' not found. Available: {{agent_names}}")
+    else:
+        mgr.inject_command("{agent_name}", ["{goto_cmd}"], force_inject=True)
+        print("Sent: {goto_cmd}")
+"""
+
+
+CODE_GEN_HANDLERS["actor_goto"] = _gen_actor_goto
+
+
+async def _handle_list_ira_agents(args: Dict) -> Dict:
+    """List all registered IRA agents via Kit RPC."""
+    code = """\
+from isaacsim.replicator.agent.core.agent_manager import AgentManager
+import json
+
+mgr = AgentManager.get_instance()
+if mgr is None:
+    print(json.dumps({"error": "AgentManager not initialized", "agents": []}))
+else:
+    agents = []
+    for name in mgr.get_all_agent_names():
+        pos = mgr.get_agent_position(name)
+        data = mgr.get_agent_data_by_label_path(name)
+        agents.append({
+            "name": name,
+            "prim_path": data.prim_path if data else "unknown",
+            "position": list(pos) if pos else None,
+        })
+    print(json.dumps({"agents": agents}))
+"""
+    result = await kit_tools.execute_kit_code(code)
+    return result
+
+
+DATA_HANDLERS["list_ira_agents"] = _handle_list_ira_agents
+
+
+def _gen_configure_actor_commands(args: Dict) -> str:
+    lines = [
+        "import carb",
+        "from isaacsim.replicator.agent.core.settings import CommandSetting",
+        "",
+    ]
+
+    if "character_goto_min_distance" in args:
+        lines.append(f"CommandSetting.set_character_goto_min_distance({args['character_goto_min_distance']})")
+    if "character_goto_max_distance" in args:
+        lines.append(f"CommandSetting.set_character_goto_max_distance({args['character_goto_max_distance']})")
+    if "robot_goto_min_distance" in args:
+        lines.append(f"CommandSetting.set_robot_goto_min_distance({args['robot_goto_min_distance']})")
+    if "robot_goto_max_distance" in args:
+        lines.append(f"CommandSetting.set_robot_goto_max_distance({args['robot_goto_max_distance']})")
+    if "interact_object_root_path" in args:
+        lines.append(f'CommandSetting.set_character_interact_object_root_path("{args["interact_object_root_path"]}")')
+
+    lines.append("")
+    lines.append('print("Actor command settings updated")')
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["configure_actor_commands"] = _gen_configure_actor_commands

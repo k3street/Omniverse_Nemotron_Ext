@@ -12771,4 +12771,164 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+    # ── IRA Actor Control ─────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_ira_simulation",
+            "description": (
+                "Set up an IRA (IsaacSim Replicator Agent) simulation. Enables the "
+                "isaacsim.replicator.agent extensions, spawns characters and/or robots "
+                "into the scene under /World/Characters and /World/Robots, and attaches "
+                "behavior scripts so they can receive commands. Call this BEFORE any "
+                "inject_actor_command or actor_goto calls."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "num_characters": {
+                        "type": "integer",
+                        "description": "Number of human characters to spawn (default 1).",
+                    },
+                    "num_robots": {
+                        "type": "integer",
+                        "description": "Number of Nova Carter robots to spawn (default 0).",
+                    },
+                    "scene_usd": {
+                        "type": "string",
+                        "description": (
+                            "Optional Nucleus path to a warehouse/environment USD to load "
+                            "as the scene (e.g. '/Isaac/Environments/Simple_Warehouse/full_warehouse.usd'). "
+                            "If omitted, uses the current stage."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "inject_actor_command",
+            "description": (
+                "Inject a command into a running IRA actor (character or robot) during "
+                "simulation. The actor must already be spawned via setup_ira_simulation. "
+                "Commands interrupt the current action immediately.\n"
+                "Character commands: GoTo x y z rotation, Idle duration, LookAround duration, "
+                "Sit /prim/path duration.\n"
+                "Robot commands: GoTo x y z, Idle duration, LiftUp, LiftDown (iw.hub only)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent_name": {
+                        "type": "string",
+                        "description": (
+                            "Name of the agent, e.g. 'Character_01', 'Nova_Carter_01'. "
+                            "Use list_ira_agents to discover available names."
+                        ),
+                    },
+                    "commands": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "List of command strings WITHOUT the agent name prefix. "
+                            "Example: ['GoTo 10 5 0 90', 'Idle 3', 'LookAround 5']. "
+                            "Commands execute sequentially."
+                        ),
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": "If true, interrupt current command immediately (default true).",
+                    },
+                },
+                "required": ["agent_name", "commands"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "actor_goto",
+            "description": (
+                "Convenience wrapper: move an IRA character or robot to a world position. "
+                "For characters, also accepts an optional ending rotation. "
+                "Equivalent to inject_actor_command with a single GoTo command."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent_name": {
+                        "type": "string",
+                        "description": "Name of the agent, e.g. 'Character_01', 'Nova_Carter_01'.",
+                    },
+                    "x": {"type": "number", "description": "World X coordinate."},
+                    "y": {"type": "number", "description": "World Y coordinate."},
+                    "z": {"type": "number", "description": "World Z coordinate (usually 0 for ground)."},
+                    "rotation": {
+                        "type": "number",
+                        "description": (
+                            "Ending rotation in degrees (characters only). "
+                            "Use '_' or omit to skip rotation constraint."
+                        ),
+                    },
+                },
+                "required": ["agent_name", "x", "y", "z"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_ira_agents",
+            "description": (
+                "List all IRA agents currently registered in the AgentManager. "
+                "Returns agent names, prim paths, and current positions. "
+                "Useful to discover available agent names before injecting commands."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_actor_commands",
+            "description": (
+                "Configure the randomization settings for IRA actor commands. "
+                "Set GoTo distance bounds, interact object root paths, or load "
+                "a custom command transition map JSON for character command randomization."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "character_goto_min_distance": {
+                        "type": "number",
+                        "description": "Minimum GoTo distance in meters (default 5.0).",
+                    },
+                    "character_goto_max_distance": {
+                        "type": "number",
+                        "description": "Maximum GoTo distance in meters (default 20.0).",
+                    },
+                    "robot_goto_min_distance": {
+                        "type": "number",
+                        "description": "Minimum robot GoTo distance in meters (default 5.0).",
+                    },
+                    "robot_goto_max_distance": {
+                        "type": "number",
+                        "description": "Maximum robot GoTo distance in meters (default 20.0).",
+                    },
+                    "interact_object_root_path": {
+                        "type": "string",
+                        "description": "Root prim path for Sit/interact searches (e.g. '/World/Furniture').",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]

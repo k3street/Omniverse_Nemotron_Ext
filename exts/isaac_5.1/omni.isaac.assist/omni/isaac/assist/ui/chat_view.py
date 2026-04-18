@@ -33,13 +33,13 @@ class ChatViewWindow(ui.Window):
                     ui.Spacer()
 
                     # New Scene — clears stage + chat history
-                    ui.Button("🗑 New Scene", width=100, clicked_fn=self._new_scene)
+                    ui.Button("New Scene", width=100, clicked_fn=self._new_scene)
                     
                     # Settings Toggle
                     ui.Button("⚙", width=30, clicked_fn=self._spawn_settings_window)
 
-                    # LiveKit Stream Toggle
-                    self.btn_livekit = ui.Button("Start Vision / Voice", width=150, clicked_fn=self._toggle_livekit)
+                    # LiveKit Stream Toggle (disabled — untested)
+                    # self.btn_livekit = ui.Button("Start Vision / Voice", width=150, clicked_fn=self._toggle_livekit)
                     
                 ui.Spacer(height=5)
                 
