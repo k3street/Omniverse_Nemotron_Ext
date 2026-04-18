@@ -20,6 +20,7 @@ data/
 outputs/
 workspace/*
 !workspace/knowledge/
+!workspace/templates/
 
 # IDEs
 .idea/
