@@ -15,7 +15,13 @@ Layer-by-layer, what keeps the agent honest:
    - **Fix B** — if a tool failed this round but the reply asserts success without acknowledging failure, rewrite. Keyword heuristic, model-agnostic.
    - **Fix C** — inline Python blocks in the reply are AST-validated before handing to the user. Catches agent writing broken code.
    - **Fix D** — regex-detect Kit UI menu paths (`File > Save As > …`) and append a "not retrieved from any tool" warning. Deterministic on the pattern.
-   - **Fas 2 verify-contract** — after the LLM commits to a reply, scan for `/World/...` paths and count claims ("N arms"); auto-invoke `prim_exists` / `count_prims_under_path` to ground-check them. Appends a mismatch warning if reality disagrees.
+   - **Fas 2 verify-contract (5 sub-checks, all deterministic)** — after the LLM commits to a reply:
+     - **(a) Path-exists** — scan for `/World/...` paths; auto-invoke `prim_exists` on up to 4 that weren't in tool outputs.
+     - **(b) Count-claim** — "16 arms under /World/envs" → `count_prims_under_path`; if shallow count diverges, also try recursive to disambiguate "wrong total" vs "deeper nesting than claimed".
+     - **(c) Transform/pose** — "X at (a, b, c)" → `get_world_transform`; flag if coordinates diverge > 0.05m.
+     - **(d) Schema/API** — "RigidBodyAPI on /World/X" → `list_applied_schemas`; flag if the claimed schema is absent.
+     - **(e) Attribute-value** — "X mass=1.0" / "friction is 0.8" → `get_attribute`; flag if value diverges > 2% (or 0.01 absolute).
+     - Each sub-check caps at 2-3 per turn for bounded cost. Mismatches concatenate into one `⚠️ Verification mismatch` block appended to the reply.
 
 3. **Context distiller (`service/.../chat/context_distiller.py`)**
    - `HONESTY DISCIPLINE` + `EXECUTION DISCIPLINE` baked into `RULE_BASE`. Tells the LLM: tool failure = effect did NOT happen; verify before claiming; don't invent menu paths; Isaac Sim 5.x uses `isaacsim.*` namespace.
