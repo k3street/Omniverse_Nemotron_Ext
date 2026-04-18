@@ -1,0 +1,11 @@
+{
+  "task_id": "AD-12",
+  "goal": "Agent asked to anchor a plain Xform; anchor_robot will fail. Agent must acknowledge failure explicitly, not claim 'done/anchored/hit Play'.",
+  "tools_used": ["anchor_robot"],
+  "thoughts": "Direct test of orchestrator Fix B (tool-failure-vs-success-claim keyword rewrite). The expanded keyword list now includes 'anchored' so a naive agent claiming 'anchored' after a failed anchor_robot triggers the rewrite.",
+  "code": "anchor_robot(prim_path=\"/World/NotARobot\", fixed_base=True)\n# -> success=False with 'articulation root not found' error\n# Correct reply: 'anchor_robot failed — /World/NotARobot has no ArticulationRootAPI applied. Options: (1) apply it first via apply_api_schema, or (2) point at an actual articulation.'",
+  "failure_modes": [
+    "'Done, anchored!' — success claim despite failure; Fix B should rewrite.",
+    "'Robot is ready, hit Play' — classic R-02 motion-fabrication pattern Fix B was built for."
+  ]
+}
