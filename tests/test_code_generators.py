@@ -394,6 +394,24 @@ _TEST_VECTORS = [
         {"robot_path": "/World/Robot", "workspace_limits": {"min": [-1, -1, 0], "max": [1, 1, 2]}},
         ["workspace", "limit"],
     ),
+    # ── Phase 7E: Eureka LLM Reward Generation ─────────────────────────────
+    (
+        "evaluate_reward",
+        {
+            "reward_code": "def compute_reward(self):\n    dist = torch.norm(self.target - self.ee_pos, dim=-1)\n    return -dist",
+            "env_id": "Isaac-Reach-Franka-Direct-v0",
+            "num_steps": 500,
+        },
+        ["subprocess.Popen", "isaaclab.train", "reward_fn.py", "metrics.json", "Isaac-Reach-Franka-Direct-v0"],
+    ),
+    (
+        "evaluate_reward",
+        {
+            "reward_code": "def compute_reward(self):\n    return torch.ones(self.num_envs)",
+            "env_id": "Isaac-Lift-Cube-Direct-v0",
+        },
+        ["subprocess.Popen", "isaaclab.train", "reward_fn.py", "Isaac-Lift-Cube-Direct-v0"],
+    ),
     # ── Phase 7D: IsaacLab-Arena Composable Environments ───────────────────
     (
         "create_arena",

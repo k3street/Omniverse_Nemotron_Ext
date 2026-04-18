@@ -138,6 +138,155 @@ class TestCatalogSearch:
         assert result["total_matches"] == 0
 
 
+class TestGenerateReward:
+    """generate_reward Eureka data handler."""
+
+    @pytest.mark.asyncio
+    async def test_generate_reward_returns_eureka_config(self, tmp_path):
+        # Create a fake DirectRLEnv file
+        env_file = tmp_path / "reach_env.py"
+        env_file.write_text(
+            "class ReachEnv(DirectRLEnv):\n"
+            "    def compute_reward(self):\n"
+            "        return torch.zeros(self.num_envs)\n"
+        )
+        handler = DATA_HANDLERS["generate_reward"]
+        result = await handler({
+            "task_description": "reach a target position",
+            "env_source_path": str(env_file),
+            "num_candidates": 6,
+            "num_iterations": 3,
+        })
+        assert "error" not in result
+        assert result["task_description"] == "reach a target position"
+        assert result["num_candidates"] == 6
+        assert result["num_iterations"] == 3
+        assert result["env_type"] == "DirectRLEnv"
+        assert result["env_source_included"] is True
+        assert "initial_prompt" in result
+        assert "compute_reward" in result["initial_prompt"]
+
+    @pytest.mark.asyncio
+    async def test_generate_reward_rejects_manager_based(self, tmp_path):
+        env_file = tmp_path / "bad_env.py"
+        env_file.write_text(
+            "class BadEnv(ManagerBasedRLEnv):\n    pass\n"
+        )
+        handler = DATA_HANDLERS["generate_reward"]
+        result = await handler({
+            "task_description": "locomotion",
+            "env_source_path": str(env_file),
+        })
+        assert "error" in result
+        assert "ManagerBasedRLEnv" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_generate_reward_file_not_found(self):
+        handler = DATA_HANDLERS["generate_reward"]
+        result = await handler({
+            "task_description": "some task",
+            "env_source_path": "/nonexistent/path/env.py",
+        })
+        # Should not crash — returns config with note about missing file
+        assert result["env_source_included"] is False
+        assert "initial_prompt" in result
+
+    @pytest.mark.asyncio
+    async def test_generate_reward_defaults(self, tmp_path):
+        env_file = tmp_path / "env.py"
+        env_file.write_text("class Env(DirectRLEnv): pass\n")
+        handler = DATA_HANDLERS["generate_reward"]
+        result = await handler({
+            "task_description": "test",
+            "env_source_path": str(env_file),
+        })
+        assert result["num_candidates"] == 4
+        assert result["num_iterations"] == 5
+
+
+class TestIterateReward:
+    """iterate_reward Eureka mutation prompt handler."""
+
+    @pytest.mark.asyncio
+    async def test_iterate_with_feedback(self):
+        handler = DATA_HANDLERS["iterate_reward"]
+        result = await handler({
+            "prev_reward_code": "def compute_reward(self):\n    return -dist",
+            "metrics": {
+                "fitness": 0.42,
+                "components": {
+                    "distance": {"mean": [1.0, 0.8, 0.5, 0.3, 0.2], "converged": True},
+                    "action_penalty": {"mean": [0.1, 0.1, 0.1], "converged": False},
+                },
+                "task_success_rate": 0.35,
+            },
+            "user_feedback": "it keeps dropping the handle",
+        })
+        assert "mutation_prompt" in result
+        prompt = result["mutation_prompt"]
+        assert "Previous reward function:" in prompt
+        assert "-dist" in prompt
+        assert "distance" in prompt
+        assert "action_penalty" in prompt
+        assert "0.35" in prompt
+        assert "it keeps dropping the handle" in prompt
+        assert "generate an improved reward function" in prompt
+        assert result["has_user_feedback"] is True
+        assert result["prev_fitness"] == 0.42
+        assert "distance" in result["components_analyzed"]
+
+    @pytest.mark.asyncio
+    async def test_iterate_without_feedback(self):
+        handler = DATA_HANDLERS["iterate_reward"]
+        result = await handler({
+            "prev_reward_code": "def compute_reward(self):\n    return reward",
+            "metrics": {
+                "fitness": 0.7,
+                "components": {},
+                "task_success_rate": 0.5,
+            },
+        })
+        prompt = result["mutation_prompt"]
+        assert "User feedback" not in prompt
+        assert result["has_user_feedback"] is False
+        assert "No component metrics" in prompt
+
+
+class TestEurekaStatus:
+    """eureka_status data handler."""
+
+    @pytest.mark.asyncio
+    async def test_status_not_found(self):
+        handler = DATA_HANDLERS["eureka_status"]
+        result = await handler({"run_id": "nonexistent-run-123"})
+        assert result["status"] == "not_found"
+        assert result["run_id"] == "nonexistent-run-123"
+
+    @pytest.mark.asyncio
+    async def test_status_existing_run(self):
+        import service.isaac_assist_service.chat.tools.tool_executor as te
+        # Insert a fake run
+        te._eureka_runs["test-run-001"] = {
+            "status": "running",
+            "current_iteration": 3,
+            "total_iterations": 5,
+            "candidates_evaluated": 12,
+            "best_fitness": 0.85,
+            "best_reward_code": "def compute_reward(self): return r",
+        }
+        try:
+            handler = DATA_HANDLERS["eureka_status"]
+            result = await handler({"run_id": "test-run-001"})
+            assert result["status"] == "running"
+            assert result["current_iteration"] == 3
+            assert result["total_iterations"] == 5
+            assert result["candidates_evaluated"] == 12
+            assert result["best_fitness"] == 0.85
+            assert result["best_reward_code"] is not None
+        finally:
+            del te._eureka_runs["test-run-001"]
+
+
 class TestArenaLeaderboard:
     """arena_leaderboard data handler."""
 
