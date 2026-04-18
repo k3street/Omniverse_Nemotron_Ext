@@ -10512,22 +10512,46 @@ def _gen_simplify_collision(args: Dict) -> str:
     """Generate code to set collision approximation on a single prim."""
     prim_path = args["prim_path"]
     approximation = args["approximation"]
+    # PhysX accepts the approximation as a free string but silently falls
+    # back to the default for unknown names. Hard-reject the unknowns at
+    # code-gen so the agent gets an immediate, specific failure instead of
+    # a "success" that ran with whatever default PhysX picked.
+    _VALID_APPROXIMATIONS = {
+        "none", "convexHull", "convexDecomposition", "meshSimplification",
+        "boundingSphere", "boundingCube", "sphereFill", "sdf",
+    }
+    if approximation not in _VALID_APPROXIMATIONS:
+        return (
+            "raise ValueError(\n"
+            f"    'simplify_collision: unknown approximation ' + {approximation!r} + '. '\n"
+            f"    'Valid: ' + {sorted(_VALID_APPROXIMATIONS)!r}\n"
+            ")"
+        )
 
     return (
         "import omni.usd\n"
         "from pxr import UsdPhysics\n"
         "\n"
         "stage = omni.usd.get_context().get_stage()\n"
-        f"prim = stage.GetPrimAtPath('{prim_path}')\n"
+        f"_prim_path = {prim_path!r}\n"
+        "prim = stage.GetPrimAtPath(_prim_path)\n"
+        "if not prim or not prim.IsValid():\n"
+        "    raise RuntimeError('simplify_collision: prim not found: ' + repr(_prim_path))\n"
         "\n"
         "# Ensure CollisionAPI is applied\n"
         "if not prim.HasAPI(UsdPhysics.CollisionAPI):\n"
         "    UsdPhysics.CollisionAPI.Apply(prim)\n"
         "\n"
-        "# Apply MeshCollisionAPI and set approximation\n"
+        "# Apply MeshCollisionAPI and set approximation — verify the set took\n"
         "mesh_col = UsdPhysics.MeshCollisionAPI.Apply(prim)\n"
-        f"mesh_col.GetApproximationAttr().Set('{approximation}')\n"
-        f"print(f'Set collision approximation to {approximation} on {prim_path}')"
+        f"_approx = {approximation!r}\n"
+        "_ok = mesh_col.GetApproximationAttr().Set(_approx)\n"
+        "if _ok is False:\n"
+        "    raise RuntimeError(\n"
+        "        'simplify_collision: GetApproximationAttr().Set(' + repr(_approx) + ') returned False '\n"
+        "        'on ' + repr(_prim_path) + ' — attribute refused the value'\n"
+        "    )\n"
+        "print('Set collision approximation to ' + repr(_approx) + ' on ' + repr(_prim_path))"
     )
 
 async def _handle_suggest_physics_settings(args: Dict) -> Dict:
