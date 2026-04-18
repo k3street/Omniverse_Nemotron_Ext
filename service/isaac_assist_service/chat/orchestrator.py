@@ -639,6 +639,49 @@ class ChatOrchestrator:
                     except Exception as e:
                         logger.debug(f"[{session_id}] verify pose({path}) failed: {e}")
 
+                # (d) Schema / API application claims — "RigidBodyAPI applied
+                # to /World/X" or "with CollisionAPI" paired with a path.
+                # Cross-check via list_applied_schemas. Cap at 3 claims.
+                schema_pat = _re.compile(
+                    r"(?P<schema>(?:Physics|Physx|UsdPhysics\.|PhysxSchema\.)?\w+API)"
+                    r"[^\n]{0,120}?"
+                    r"(?P<path>/World[/A-Za-z0-9_]+)"
+                    r"|"
+                    r"(?P<path2>/World[/A-Za-z0-9_]+)"
+                    r"[^\n]{0,120}?"
+                    r"(?P<schema2>(?:Physics|Physx|UsdPhysics\.|PhysxSchema\.)?\w+API)",
+                    _re.I,
+                )
+                matched_schemas = set()
+                for m in schema_pat.finditer(reply):
+                    schema = (m.group("schema") or m.group("schema2") or "").lstrip("UsdPhysics.").lstrip("PhysxSchema.")
+                    path = m.group("path") or m.group("path2")
+                    if not schema or not path:
+                        continue
+                    # Normalize: strip trailing punctuation/whitespace
+                    schema = schema.rstrip(".,;:")
+                    key = (schema, path)
+                    if key in matched_schemas:
+                        continue
+                    matched_schemas.add(key)
+                    if len(matched_schemas) > 3:
+                        break
+                    try:
+                        ver = await _exec("list_applied_schemas", {"prim_path": path})
+                        out = ver.get("output") if isinstance(ver, dict) else None
+                        parsed = {}
+                        if isinstance(out, str) and out.strip().startswith("{"):
+                            try: parsed = json.loads(out)
+                            except: pass
+                        applied = parsed.get("applied_schemas") or parsed.get("schemas") or []
+                        if applied and not any(schema in s for s in applied):
+                            verify_warnings.append(
+                                f"reply claims `{schema}` on `{path}`, "
+                                f"but list_applied_schemas returned {applied}"
+                            )
+                    except Exception as e:
+                        logger.debug(f"[{session_id}] verify schema({path}/{schema}) failed: {e}")
+
                 if verify_warnings:
                     logger.warning(
                         f"[{session_id}] verify-contract mismatches: {verify_warnings[:3]}"
