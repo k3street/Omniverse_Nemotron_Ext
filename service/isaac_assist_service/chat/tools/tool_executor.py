@@ -2002,6 +2002,12 @@ from .rviz_launcher import handle_launch_rviz2, handle_stop_rviz2
 DATA_HANDLERS["launch_rviz2"] = handle_launch_rviz2
 DATA_HANDLERS["stop_rviz2"] = handle_stop_rviz2
 
+# ── RL policy runner (Isaac Lab locomotion) ──────────────────────────────────
+from .rl_policy_runner import handle_deploy_rl_policy, handle_stop_rl_policy
+
+DATA_HANDLERS["deploy_rl_policy"] = handle_deploy_rl_policy
+DATA_HANDLERS["stop_rl_policy"] = handle_stop_rl_policy
+
 
 # ── Main dispatch ────────────────────────────────────────────────────────────
 

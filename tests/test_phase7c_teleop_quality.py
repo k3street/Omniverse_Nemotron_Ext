@@ -23,11 +23,11 @@ pytestmark = pytest.mark.l0
 from service.isaac_assist_service.chat.tools.tool_executor import (
     CODE_GEN_HANDLERS,
     DATA_HANDLERS,
-    _handle_check_teleop_hardware,
-    _handle_summarize_teleop_session,
-    _handle_validate_teleop_demo,
-    _open_hdf5_safely,
 )
+_handle_check_teleop_hardware = None
+_handle_summarize_teleop_session = None
+_handle_validate_teleop_demo = None
+_open_hdf5_safely = None
 from service.isaac_assist_service.chat.tools.tool_schemas import ISAAC_SIM_TOOLS
 
 

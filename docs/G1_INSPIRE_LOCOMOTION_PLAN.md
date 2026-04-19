@@ -26,7 +26,7 @@ No single off-the-shelf checkpoint covers G1 walking + Inspire Hand control toda
 
 **Goal:** G1 walks reliably in the Isaac Sim scene. Hand hangs passively.  
 **ETA:** 1–2 days  
-**Blocker:** None — checkpoint exists today
+**Blocker:** None — checkpoint exists, keyboard works for velocity commands
 
 ### 1.1 Install Isaac Lab
 
@@ -48,15 +48,24 @@ pip install -e .
 
 ### 1.3 Run inference with the pre-trained checkpoint
 
+**Important:** `unitree_rl_gym`'s `play.py` runs the policy autonomously with a fixed velocity — no keyboard input. Use the **Isaac Lab teleop agent** instead, which has built-in keyboard velocity control:
+
 ```bash
-# Flat-ground velocity tracking — the most stable starting policy
-python scripts/play.py \
-  --task=Isaac-Velocity-Flat-G1-v0 \
-  --num_envs=1 \
-  --checkpoint=logs/g1/flat/model_*.pt
+# Isaac Lab 2.3 — keyboard velocity teleop (already installed)
+./isaaclab.sh -p scripts/demos/teleoperation/teleop_se3_agent.py \
+  --task Isaac-Velocity-Flat-G1-v0 \
+  --teleop_device keyboard \
+  --num_envs 1 \
+  --checkpoint deploy/pre_train/g1/motion.pt
 ```
 
-> The checkpoint is at `deploy/pre_train/g1/motion.pt`. If the play script doesn't find it automatically, pass `--checkpoint deploy/pre_train/g1/motion.pt`.
+**Keyboard bindings:**
+- `W / S` — forward / backward
+- `A / D` — turn left / right
+- `Q / E` — strafe left / right
+- `Space` — stop
+
+> The checkpoint is at `unitree_rl_gym/deploy/pre_train/g1/motion.pt`. Pass the absolute path.
 
 ### 1.4 Load your existing scene USD
 
@@ -95,7 +104,7 @@ Map to new tool schema `deploy_rl_policy` in `tool_schemas.py`.
 
 **Goal:** Teleoperate G1 walking while controlling the Inspire Hand. Record demonstrations for Phase 3 fine-tuning.  
 **ETA:** 3–5 days (Isaac Lab 2.3 already installed — main blocker cleared)  
-**Blocker:** ~~Isaac Lab 2.3 install~~ ✅ Done — hardware or VR controller for teleop is the remaining gating item
+**Blocker:** ~~Isaac Lab 2.3 install~~ ✅ Done — VR/SpaceMouse for hand DOFs is the remaining gating item (keyboard covers walking only)
 
 ### 2.1 ~~Upgrade to Isaac Lab 2.3~~ — Already done
 

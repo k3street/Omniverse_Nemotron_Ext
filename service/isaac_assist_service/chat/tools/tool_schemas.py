@@ -13260,4 +13260,66 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+    # ── RL Policy Deployment ─────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "deploy_rl_policy",
+            "description": (
+                "Launch an Isaac Lab RL locomotion policy for a robot in the scene using a "
+                "pre-trained checkpoint. Spawns the Isaac Lab teleop agent as a subprocess. "
+                "For the Unitree G1, use task='Isaac-Velocity-Flat-G1-v0' and the bundled "
+                "'motion.pt' checkpoint. Keyboard controls: W/S=forward/back, A/D=turn, "
+                "Q/E=strafe. Returns the subprocess PID. Use stop_rl_policy to terminate."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": (
+                            "Isaac Lab task name. Examples: "
+                            "'Isaac-Velocity-Flat-G1-v0' (G1 flat ground), "
+                            "'Isaac-Velocity-Rough-G1-v0' (G1 rough terrain), "
+                            "'Isaac-Velocity-Flat-H1-v0' (Unitree H1)."
+                        ),
+                    },
+                    "checkpoint": {
+                        "type": "string",
+                        "description": (
+                            "Absolute path to the policy checkpoint (.pt file). "
+                            "For unitree_rl_gym: 'deploy/pre_train/g1/motion.pt'. "
+                            "Leave empty to use the latest checkpoint in the task log dir."
+                        ),
+                    },
+                    "teleop_device": {
+                        "type": "string",
+                        "enum": ["keyboard", "gamepad", "spacemouse"],
+                        "description": "Input device for velocity commands. Default: 'keyboard'.",
+                    },
+                    "num_envs": {
+                        "type": "integer",
+                        "description": "Number of parallel environments to spawn. Default: 1.",
+                    },
+                    "isaaclab_path": {
+                        "type": "string",
+                        "description": "Absolute path to the IsaacLab root directory if not on PATH.",
+                    },
+                },
+                "required": ["task"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stop_rl_policy",
+            "description": "Stop a running Isaac Lab RL policy subprocess launched by deploy_rl_policy.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
 ]

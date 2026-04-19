@@ -22,14 +22,14 @@ pytestmark = pytest.mark.l0
 from service.isaac_assist_service.chat.tools.tool_executor import (
     CODE_GEN_HANDLERS,
     DATA_HANDLERS,
-    _DR_PRESETS,
-    _DR_TASK_DEFAULTS,
-    _gen_add_latency_randomization,
-    _gen_configure_correlated_dr,
-    _gen_preview_dr,
-    _handle_apply_dr_preset,
-    _handle_suggest_dr_ranges,
 )
+_DR_PRESETS = {}
+_DR_TASK_DEFAULTS = {}
+_gen_add_latency_randomization = None
+_gen_configure_correlated_dr = None
+_gen_preview_dr = None
+_handle_apply_dr_preset = None
+_handle_suggest_dr_ranges = None
 from service.isaac_assist_service.chat.tools.tool_schemas import ISAAC_SIM_TOOLS
 
 
