@@ -188,7 +188,22 @@ CODE RULES:
   Reuse existing ops via xformable.GetOrderedXformOps().
 - Always import: import omni.usd; from pxr import Usd, UsdGeom, UsdPhysics, Gf, Sdf
 - Always get stage via: stage = omni.usd.get_context().get_stage()
-- For transforms on referenced prims, check if xformOps exist first."""
+- For transforms on referenced prims, check if xformOps exist first.
+
+PRIM CREATION RULES (run_usd_script or code_patch):
+- ALWAYS create new prims under /World/<Name> with an explicit path. NEVER let the path default.
+  Correct:   cube = UsdGeom.Cube.Define(stage, "/World/Cube_3")
+  Correct:   prim = stage.DefinePrim("/World/Cube_3", "Cube")
+  FORBIDDEN: omni.kit.commands.execute("CreatePrim", prim_type="Cube") without prim_path=...
+             — this defaults to "/Cube", "/Cube_01" at origin, ignoring any xform code you
+             wrote for "/World/Cube_3". You will report success while the actual prim is
+             at root with wrong position.
+- Set the xform on the SAME path you just defined. After creation:
+    xform = UsdGeom.Xformable(stage.GetPrimAtPath("/World/Cube_3"))
+    _safe_set_translate(xform.GetPrim(), (x, y, z))   # or reuse existing ops
+- Before claiming "placed <X> at <pos>" in your reply, call `get_world_transform("/World/<X>")`
+  and quote the actual returned coordinates. If the read fails, the prim wasn't created where you
+  think — do NOT fabricate success."""
 
 RULE_OMNIGRAPH = """\
 OmniGraph rules (Isaac Sim 5.1):
@@ -221,6 +236,25 @@ Selection awareness: When the user has selected a prim, its path/properties are 
 "this", "it", "selected object", "make this bigger" all refer to the selected prim.
 Use its path directly — do NOT ask the user to specify."""
 
+RULE_MULTI_STEP_PLAN = """\
+Multi-step composition discipline (when the user asks for ≥3 linked actions, or uses "sen"/"och sedan"/"tills"/"om X finns så gör Y"):
+
+BEFORE any stage-mutating tool call, you MUST:
+1. Scan the tool catalog for the HIGHEST-LEVEL tool that matches each step. The catalog has tools like create_conveyor_track (creates both geometry AND motion logic), create_hdri_skydome (one call for dome light), apply_physics_material, clone_envs, etc. If such a tool exists for a step, use it instead of composing the same behavior from raw USD script. Missing the right high-level tool was the 2026-04-19 failure mode — agent built a conveyor manually and lost the motion logic.
+2. Articulate a numbered plan in your reply, with a VERIFIABLE post-condition per step (what tool call + expected output proves the step succeeded). Example:
+   Step 1: create_conveyor_track(waypoints=[...], belt_width=1.0, speed=1.0) → verify `/World/ConveyorTrack/Segment_0` exists + has ConveyorGraph child.
+   Step 2: Measure conveyor top surface Z via get_world_transform + get_bounding_box → obtain top_z.
+   Step 3: Scale each cube to 0.2m via set_attribute(size=0.2) → verify size attr reads 0.2.
+   Step 4: Position cubes on top of conveyor at top_z + half_cube_size → verify translate reads target.
+   Step 5: Start simulation via sim_control(action="play") → verify timeline is playing.
+   Step 6: Monitor cube positions in a bounded loop (max_ticks=300) until all cubes' x > conveyor_end OR z < ground → verify via get_world_transform.
+3. Stop after each executed step and confirm the post-condition BEFORE proceeding. If a step fails, report the failure + stop — do NOT plow ahead to step N+1 on broken state.
+4. "Conditional" phrasing ("om sådan finns", "om det behövs") means: probe the catalog FIRST (e.g. check if `create_conveyor_track` exists in your tools list), then proceed. Do NOT assume tool existence and guess at function calls.
+5. Open-ended steps ("kanske behövs en sensor") mean: propose one concrete option + alternatives + pick one with justification. Do NOT execute without picking.
+
+The goal is to give the user a plan they can SEE and approve or correct before stage state changes — same principle as an approval button, but for the plan itself. A plan with a wrong post-condition is cheap to fix; a stage half-mutated with silent tool-call failures is not."""
+
+
 RULE_DETERMINISM = """\
 Deterministic replay / reproducibility (Isaac Sim 5.x) — WHEN THE USER ASKS ABOUT DETERMINISM, START by calling `lookup_api_deprecation(query="deterministic replay")` to fetch the canonical cite-row. The tool returns tool_5x, deprecated_4x, cite paragraph, caveats — quote them verbatim. THEN cite these names in your reply:
 
@@ -245,6 +279,23 @@ If the user asks for cite material, START YOUR REPLY WITH THIS PARAGRAPH (modifi
 
 # Keyword patterns → which rule sections to include
 _KEYWORD_RULES: List[tuple] = [
+    # Multi-step composition: Swedish "sen / och sedan / tills / om X finns",
+    # English "then / and then / until / if X exists". Also triggered if the
+    # prompt contains ≥3 distinct action verbs in sequence. The 2026-04-19
+    # conveyor test failed because agent never PLANNED — ran 10 tool calls,
+    # 4+ failures, missed `create_conveyor_track` tool, and settled for a
+    # static mock when the user asked for a moving belt.
+    (re.compile(
+        r"\bsen\s+(?:skalar?|placerar?|kör|sätter?|startar?|aktiverar?|lägger?|"
+        r"skapar?|mäter?|flyttar?|ändrar?|uppdaterar?|verifierar?)\b|"
+        r"\boch\s+sedan\b|\btills?\s+(?:alla|de|den|alla\s+boxes)\b|"
+        r"\bom\s+(?:sådan|den|något)\s+(?:finns|behövs)\b|"
+        r"\bthen\s+(?:scale|place|run|start|add|create|measure|move|change|update|verify)\b|"
+        r"\band\s+then\b|\buntil\s+(?:all|the|every)\b|"
+        r"\bif\s+(?:such|one|any|it|a|the)\s+\w+(?:\s+\w+){0,3}\s+(?:exists?|needed|available)\b|"
+        r"\b(?:behövs|needs?)\s+(?:kanske|maybe|possibly)\b",
+        re.I,
+    ), [RULE_MULTI_STEP_PLAN]),
     (re.compile(r"omnigraph|ros2?|graph|publish|subscribe|topic|twist|odom|clock|joint.?state", re.I),
      [RULE_OMNIGRAPH]),
     (re.compile(r"robot|franka|ur10|panda|anchor|articulation|fixed.?base", re.I),

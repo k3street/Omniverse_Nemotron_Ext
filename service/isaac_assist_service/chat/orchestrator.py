@@ -23,6 +23,8 @@ from .context_distiller import (
     DistilledContext,
     distill_context,
     update_knowledge_from_tool,
+    _KEYWORD_RULES,
+    RULE_MULTI_STEP_PLAN,
 )
 from .tools.kit_tools import (
     get_stage_context,
@@ -315,6 +317,52 @@ def _extract_attr_claims(reply: str) -> List[tuple]:
     return out
 
 
+_CREATION_VERB_PAT = _re_mod.compile(
+    r"\b(?:placed?|placerat?|placerade|created?|skapat?|skapade|added?|"
+    r"lade\s+till|lagt\s+till|authored?|genererat|genererade)\b",
+    _re_mod.I,
+)
+_BACKTICK_NAME_PAT = _re_mod.compile(r"`([A-Z][A-Za-z0-9_]{0,40})`")
+
+
+def _extract_bare_prim_name_claims(reply: str) -> List[str]:
+    """Extract bare backtick-quoted prim names used in a creation context.
+
+    Catches the 2026-04-19 failure: reply says
+        "placerat två nya kuber (`Cube_3` och `Cube_4`)"
+    while real prims landed at /Cube, /Cube_01 at root.
+    The (a) path-check only sees /World/... paths; these bare names slip
+    through. Returned as /World/<Name> so the caller can probe prim_exists.
+
+    Gating: only names that appear within 80 chars of a creation verb
+    (placed/placerat/created/skapat/added/lade till/...) and look like
+    prim identifiers (CapCase, alphanum+underscore). Paths already
+    fully-qualified (starting with `/`) are skipped — they're handled
+    by the existing /World/... extractor.
+    """
+    out: List[str] = []
+    seen: set = set()
+    text = reply or ""
+    verb_spans = [m.start() for m in _CREATION_VERB_PAT.finditer(text)]
+    if not verb_spans:
+        return out
+    for m in _BACKTICK_NAME_PAT.finditer(text):
+        name = m.group(1)
+        # Skip path-like tokens — handled by the /World/... extractor.
+        if "/" in name:
+            continue
+        # Require a creation verb within 80 chars before or after.
+        near = any(abs(vs - m.start()) <= 80 for vs in verb_spans)
+        if not near:
+            continue
+        path = f"/World/{name}"
+        if path in seen:
+            continue
+        seen.add(path)
+        out.append(path)
+    return out
+
+
 def _partition_path_existence(
     executed_tools: List[Dict[str, Any]],
 ) -> tuple[set, set]:
@@ -430,6 +478,7 @@ class ChatOrchestrator:
                 _slash["cmd"], _slash["arg"],
                 history=history,
                 emit_trace=_slash_emit,
+                session_id=session_id,
             )
             # Record the slash in history so pin/next turn can see it
             history.append({"role": "user", "content": user_message})
@@ -441,7 +490,39 @@ class ChatOrchestrator:
             return reply
 
         # ── 1. Classify intent ───────────────────────────────────────────────
-        intent = await classify_intent(user_message, self.llm_provider)
+        # Returns a dict {intent, multi_step, confidence}. multi_step drives
+        # the round-0 read-only tool gate below (see _multi_step usage).
+        intent_result = await classify_intent(user_message, self.llm_provider)
+        intent = intent_result["intent"]
+        intent_is_multi_step = intent_result.get("multi_step", False)
+
+        # ── 1.5. Auto turn-snapshot for stage-mutating turns ─────────────────
+        # Before running any tools that might write to the stage, save the
+        # current root-layer USDA to disk. `/undo` restores this snapshot so
+        # a user can revert a turn-worth of agent mischief in one shot —
+        # exactly what was missing from the 2026-04-19 conveyor smoke-test
+        # (scale + delete + conveyor-create was impossible to cleanly revert).
+        # Non-mutating intents skip the snapshot to keep token/rpc cost low.
+        _MUTATING_INTENTS = {"patch_request", "scene_diagnose"}
+        if intent in _MUTATING_INTENTS and await is_kit_rpc_alive():
+            try:
+                from .turn_snapshot import capture as _capture_turn
+                _snap_label = _re_mod.sub(r"[^A-Za-z0-9]", "_", user_message[:30])
+                _snap_result = await _capture_turn(session_id, label=_snap_label)
+                if _snap_result.get("ok"):
+                    _trace_emit(session_id, "turn_snapshot_saved", {
+                        "path": _snap_result.get("path"),
+                        "turn_index": _snap_result.get("turn_index"),
+                        "layer_size": _snap_result.get("layer_size"),
+                    })
+                else:
+                    logger.warning(
+                        f"[{session_id}] turn snapshot failed: "
+                        f"{_snap_result.get('error')}"
+                    )
+            except Exception as e:
+                # Never crash a user turn because snapshotting failed.
+                logger.warning(f"[{session_id}] turn snapshot exception: {e}")
 
         # ── 2. Gather live scene context if Kit is reachable ─────────────────
         scene_context_text = ""
@@ -542,6 +623,50 @@ class ChatOrchestrator:
         _TOOL_CALL_LIMITS = {"lookup_knowledge": 2}
         tool_call_counts: Dict[str, int] = {}
 
+        # Retry-spam halt: count CONSECUTIVE failed patches in the turn.
+        # If the agent runs N patches in a row that all return success=false
+        # — regardless of description — it's stuck. Observed 2026-04-19 in
+        # two turns: the conveyor test spammed 5-8 failing variants with
+        # VARYING descriptions (so a prefix-match halt missed it), but each
+        # was obviously a failing retry of the same fundamental problem.
+        # Threshold is 3 — agent gets two chances to recover after one
+        # failure before we break the loop and force a reasoned summary.
+        _SPAM_HALT_THRESHOLD = 3
+        consecutive_fail_count = 0
+        first_failed_description: str = ""
+        spam_halted = False
+
+        # 2026-04-19 ROLLBACK: earlier this day we gated round 0 of multi-step
+        # turns to a read-only tool subset, aiming to force the agent to plan
+        # before mutating. Empirically this REGRESSED behavior — the agent
+        # read the gate as "prepare a comprehensive mega-patch" and shoved
+        # all steps (create conveyor, scale cubes, place cubes) into a single
+        # atomic script. When the script failed, the subsequent retries
+        # focused only on the last failing sub-step, and the earlier
+        # successful-in-theory sub-steps (cube mutations) were silently
+        # dropped. Reply then fabricated success for the dropped steps.
+        # The stepwise "try small patches, keep what lands" pattern the
+        # default (no gate) already produces beats this manual planning
+        # attempt. Keep the LLM-based multi_step classification for trace
+        # visibility, but don't let it change tool availability.
+        # Use the LLM-based classifier result (set above by classify_intent).
+        # Fall back to the regex keyword patterns if classifier failed or
+        # returned low confidence — defense in depth for the phrasings the
+        # LLM might miss (Swedish edge cases, idiomatic English).
+        _multi_step = bool(intent_is_multi_step)
+        if not _multi_step:
+            # Regex fallback: cheap, catches the obvious sequencing phrases.
+            _multi_step = any(
+                pat.search(user_message or "")
+                and RULE_MULTI_STEP_PLAN in rules
+                for pat, rules in _KEYWORD_RULES
+            )
+        if _multi_step:
+            _trace_emit(session_id, "multi_step_detected", {
+                "prompt_prefix": (user_message or "")[:120],
+                "source": "classifier" if intent_is_multi_step else "regex_fallback",
+            })
+
         max_rounds = config.max_tool_rounds
         for round_idx in range(max_rounds):
             try:
@@ -551,6 +676,22 @@ class ChatOrchestrator:
             except Exception as e:
                 logger.error(f"LLM provider error: {e}")
                 raise
+
+            # Capture Gemini chain-of-thought when GEMINI_EXPOSE_THOUGHTS=1.
+            # Thoughts are stored in the session trace (not shown to user) so
+            # we can post-hoc diagnose reasoning bugs like the 2026-04-19
+            # Cube 3/4 swap without asking the user to repro.
+            _thoughts = getattr(response, "thoughts", None)
+            if _thoughts:
+                for _th in _thoughts:
+                    _trace_emit(session_id, "agent_thought", {
+                        "round": round_idx,
+                        "text": _th[:2000],
+                    })
+                logger.info(
+                    f"[{session_id}] Captured {len(_thoughts)} thought-part(s) "
+                    f"({sum(len(t) for t in _thoughts)} chars)"
+                )
 
             # Check if the LLM wants to call tools
             tool_calls = getattr(response, "tool_calls", None) or response.actions
@@ -586,7 +727,11 @@ class ChatOrchestrator:
                                  "Use the results you already have and proceed with your answer.",
                     }
                 else:
-                    logger.info(f"[{session_id}] TOOL CALL: {fn_name}({json.dumps(fn_args)[:150]})")
+                    # Truncation: 800 chars default, but for run_usd_script we need
+                    # the FULL code to diagnose placement bugs (otherwise we never
+                    # see what the agent actually emitted to Kit).
+                    _limit = 4000 if fn_name == "run_usd_script" else 800
+                    logger.info(f"[{session_id}] TOOL CALL: {fn_name}({json.dumps(fn_args)[:_limit]})")
                     result = await execute_tool_call(fn_name, fn_args)
 
                 executed_tools.append({
@@ -607,6 +752,20 @@ class ChatOrchestrator:
                             "description": result.get("description", ""),
                             "success": result.get("success"),
                         })
+                        # Retry-spam halt: count CONSECUTIVE failures. Reset
+                        # on any success. Description can vary between retries
+                        # (agent often renames "Creating X..." → "Retrying X..."
+                        # → "Setting attrs..." while failing for the same root
+                        # cause) so we don't compare strings — just count.
+                        if result.get("success") is False:
+                            if consecutive_fail_count == 0:
+                                first_failed_description = (
+                                    result.get("description") or ""
+                                )[:80]
+                            consecutive_fail_count += 1
+                        else:
+                            consecutive_fail_count = 0
+                            first_failed_description = ""
                     else:
                         code_patches.append({
                             "code": result.get("code", ""),
@@ -654,8 +813,56 @@ class ChatOrchestrator:
                 "tool_calls": assistant_tool_calls,
             })
             messages.extend(tool_results)
+
+            # Retry-spam halt: break out if ≥N consecutive patches have
+            # returned success=false. Descriptions can vary (agent renames
+            # the operation across retries) — count is the reliable signal.
+            if consecutive_fail_count >= _SPAM_HALT_THRESHOLD:
+                logger.warning(
+                    f"[{session_id}] Retry-spam halt: {consecutive_fail_count} "
+                    f"consecutive failed patches (first='{first_failed_description}') "
+                    f"— breaking tool loop at round {round_idx}"
+                )
+                _trace_emit(session_id, "retry_spam_halt", {
+                    "consecutive_fails": consecutive_fail_count,
+                    "first_failed_description": first_failed_description,
+                    "threshold": _SPAM_HALT_THRESHOLD,
+                    "round": round_idx,
+                })
+                # Nudge the agent to stop and reason.
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"HALT: you've run {consecutive_fail_count} patches in "
+                        f"a row that all returned success=false. Stop calling "
+                        f"tools now. In your reply: (1) summarize what failed "
+                        f"and what specific error repeated across attempts, "
+                        f"(2) state the most likely root cause, (3) propose ONE "
+                        f"concrete next step. Do NOT retry the same pattern. "
+                        f"If an earlier part of the user's multi-step request "
+                        f"is already done (e.g. the conveyor geometry was "
+                        f"created but the motion-logic failed), explicitly "
+                        f"list what DID land vs what did NOT — do not claim "
+                        f"success for steps that never executed."
+                    ),
+                })
+                spam_halted = True
+                break
         else:
             logger.warning(f"[{session_id}] Hit max tool rounds ({max_rounds})")
+
+        # If halted by spam-detection, do one final LLM call WITHOUT tools to
+        # produce the reasoned summary. Tools are excluded so the agent can't
+        # sneak in another retry.
+        if spam_halted:
+            try:
+                halt_ctx = dict(context) if isinstance(context, dict) else {}
+                halt_ctx["tools"] = []
+                halt_response = await self.llm_provider.complete(messages, halt_ctx)
+                if halt_response.text and halt_response.text.strip():
+                    response = halt_response  # reply = response.text on next line
+            except Exception as e:
+                logger.warning(f"[{session_id}] Post-halt summary failed: {e}")
 
         reply = response.text or ""
 
@@ -714,6 +921,49 @@ class ChatOrchestrator:
                         reply = rewrite
                 except Exception as e:
                     logger.warning(f"[{session_id}] Honesty rewrite failed: {e}")
+
+        # Anti-silent-execution: reply is a backend-error placeholder (503
+        # from llm_gemini.py: "trouble reaching my reasoning backend", "backend
+        # returned N", "backend is overloaded") but tool calls in this turn
+        # DID execute successfully — often writing real changes to the stage
+        # (AUTO_APPROVE=true path). The user sees the effect (ljuset tänds)
+        # but the chat says "try again", and history stores the error string,
+        # so the NEXT turn has no memory of what was just done and the agent
+        # confidently says "Jag har inte gjort några ändringar". Rewrite the
+        # reply with a synthesized summary built from executed_tools so both
+        # the user AND future turns see ground truth.
+        _ERROR_REPLY_MARKERS = (
+            "trouble reaching my reasoning backend",
+            "couldn't reach my reasoning backend",
+            "couldn't complete that request (backend returned",
+            "backend is overloaded",
+        )
+        _reply_is_error = any(m in reply.lower() for m in _ERROR_REPLY_MARKERS)
+        _any_successful_tool = any(
+            (t.get("result") or {}).get("success") is True
+            or (t.get("result") or {}).get("executed") is True
+            for t in (executed_tools or [])
+        )
+        if _reply_is_error and _any_successful_tool:
+            logger.warning(
+                f"[{session_id}] Reply is backend-error but {len(executed_tools)} "
+                f"tools ran with successes — synthesizing from tool log"
+            )
+            lines = []
+            for t in executed_tools or []:
+                res = t.get("result") or {}
+                name = t.get("tool") or "?"
+                ok = res.get("success") is True or res.get("executed") is True
+                desc = res.get("description") or res.get("code", "")[:80]
+                mark = "✓" if ok else "✗"
+                lines.append(f"  {mark} {name}({desc[:100]})")
+            reply = (
+                "The reasoning backend hiccupped mid-turn, but these tool calls "
+                "DID run against the stage:\n"
+                + "\n".join(lines[:8])
+                + "\n\nThe effect is in your stage now. If the result looks wrong, "
+                  "say what you see — I'll reconcile from there."
+            )
 
         # Anti-ghosting: if the LLM finished calling tools but never produced
         # visible text, the user sees a blank reply and assumes we died. Force
@@ -813,6 +1063,12 @@ class ChatOrchestrator:
 
                 # (a) All USD-like paths mentioned in the reply
                 claimed_paths = set(_re.findall(r"(?<![A-Za-z0-9_])/World[/A-Za-z0-9_]+", reply))
+                # Also catch bare backtick-quoted prim names used in
+                # creation contexts (e.g. "placerat `Cube_3`" without path) —
+                # the 2026-04-19 regression where agent named Cube_3/Cube_4
+                # while actual prims landed at /Cube, /Cube_01 at root.
+                for _p in _extract_bare_prim_name_claims(reply):
+                    claimed_paths.add(_p)
                 # See _partition_path_existence for the semantics: a path
                 # observed with exists=false in any tool output counts as
                 # CONFIRMED ABSENT and is flagged immediately; a path
@@ -980,6 +1236,43 @@ class ChatOrchestrator:
                     except Exception as e:
                         logger.debug(f"[{session_id}] verify attr({path}/{attr}) failed: {e}")
 
+                # (f) Snapshot-diff path-substantiation check. For mutation
+                # turns (intent=patch_request/scene_diagnose) the agent's
+                # reply mentioning a /World/... path is an implicit claim
+                # that the path was relevant to the mutation. The diff tells
+                # us which paths ACTUALLY changed. Paths mentioned but not
+                # in the diff are unsubstantiated — likely fabrications.
+                #
+                # Language-agnostic by design: no verb regex, no noun-class
+                # classification. Uses intent (LLM-classified) + path regex
+                # (USD invariant) + stage diff (structural).
+                if intent in ("patch_request", "scene_diagnose"):
+                    try:
+                        from .turn_diff import (
+                            compute_diff as _compute_diff,
+                            unsubstantiated_paths as _unsub_paths,
+                        )
+                        _diff = await _compute_diff(session_id)
+                        if _diff.ok:
+                            _trace_emit(session_id, "turn_diff_computed", {
+                                "added": len(_diff.added),
+                                "removed": len(_diff.removed),
+                                "modified": len(_diff.modified),
+                                "total_changes": _diff.total_changes,
+                            })
+                            # Reuse the already-computed claimed_paths from
+                            # the (a) check above. Caller extracted them
+                            # from both /World/... literals and backtick-
+                            # quoted bare names in creation contexts.
+                            _unsub = _unsub_paths(claimed_paths, _diff)
+                            for _p in _unsub[:3]:
+                                verify_warnings.append(
+                                    f"reply mentions `{_p}` but it was not "
+                                    f"added, modified, or removed this turn"
+                                )
+                    except Exception as e:
+                        logger.debug(f"[{session_id}] turn_diff verify failed: {e}")
+
                 if verify_warnings:
                     logger.warning(
                         f"[{session_id}] verify-contract mismatches: {verify_warnings[:3]}"
@@ -1026,11 +1319,19 @@ class ChatOrchestrator:
 
         # Trace the structured turn outcome (for /stuck, /report, debugging)
         for _tc in executed_tools or []:
-            _trace_emit(session_id, "tool_call", {
+            _payload = {
                 "tool": _tc.get("tool"),
                 "args_keys": list((_tc.get("arguments") or {}).keys()),
                 "success": (_tc.get("result") or {}).get("success"),
-            })
+            }
+            # For run_usd_script, capture the first 600 chars of emitted code so
+            # we can diagnose placement/xform bugs post-hoc without asking the
+            # user to reproduce. 600 is enough to see DefinePrim paths + xform.
+            if _tc.get("tool") == "run_usd_script":
+                _code = (_tc.get("arguments") or {}).get("code", "")
+                if _code:
+                    _payload["code_preview"] = _code[:600]
+            _trace_emit(session_id, "tool_call", _payload)
         _trace_emit(session_id, "agent_reply", {
             "text": reply[:500],
             "intent": intent,

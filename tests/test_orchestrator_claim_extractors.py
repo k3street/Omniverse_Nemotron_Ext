@@ -30,6 +30,7 @@ def _E():
         _extract_pose_claims,
         _extract_schema_claims,
         _extract_attr_claims,
+        _extract_bare_prim_name_claims,
         _ATTR_NAME_MAP,
     )
     return {
@@ -37,6 +38,7 @@ def _E():
         "pose": _extract_pose_claims,
         "schema": _extract_schema_claims,
         "attr": _extract_attr_claims,
+        "bare_names": _extract_bare_prim_name_claims,
         "attr_map": _ATTR_NAME_MAP,
     }
 
@@ -192,3 +194,57 @@ def test_attr_rounds_to_three_dp():
     f = _E()["attr"]
     claims = f("/World/X mass=1.23456")
     assert claims[0][2] == 1.235
+
+
+# ── bare-name prim extractor (2026-04-19) ───────────────────────────────
+# Pins the failure where agent replied
+#   "placerat två nya kuber (`Cube_3` och `Cube_4`) 0,4 m ovanför"
+# while actual prims landed at /Cube, /Cube_01 at root. The /World/...
+# extractor (a) never saw them because the names in the reply lacked
+# the /World/ prefix. Bare-name extractor fills that gap.
+
+def test_bare_name_swedish_placerat():
+    f = _E()["bare_names"]
+    reply = "Jag har placerat två nya kuber (`Cube_3` och `Cube_4`) 0,4 m ovanför."
+    assert set(f(reply)) == {"/World/Cube_3", "/World/Cube_4"}
+
+
+def test_bare_name_english_created():
+    f = _E()["bare_names"]
+    reply = "I created `Sphere_A` and `Sphere_B` at the marker."
+    assert set(f(reply)) == {"/World/Sphere_A", "/World/Sphere_B"}
+
+
+def test_bare_name_no_creation_verb_returns_empty():
+    """Backtick-quoted names without a creation verb nearby must NOT be
+    turned into claims — would flood verify-contract with false positives
+    when agent references API names, attribute names, etc."""
+    f = _E()["bare_names"]
+    assert f("The `Cube_3` prim type is UsdGeom.Cube.") == []
+    assert f("The attribute `mass` controls density.") == []
+
+
+def test_bare_name_with_explicit_path_is_ignored():
+    """When the name already contains a slash, skip — the /World/...
+    extractor (a) already handles it."""
+    f = _E()["bare_names"]
+    reply = "Placed `/World/Cube_3` at the origin."
+    assert f(reply) == []
+
+
+def test_bare_name_dedup():
+    f = _E()["bare_names"]
+    reply = "Added `Cube_1`. Added `Cube_1` again."
+    assert f(reply) == ["/World/Cube_1"]
+
+
+def test_bare_name_distance_gate():
+    """Names far from any verb (>80 chars) should not match."""
+    f = _E()["bare_names"]
+    # 'placed' is at the very start, `Cube_X` is ~130 chars later with no
+    # nearer verb. With the 80-char window this must miss.
+    reply = (
+        "Placed the geometry earlier. " + ("x " * 60)
+        + "The `Cube_X` documentation is on confluence."
+    )
+    assert f(reply) == []
