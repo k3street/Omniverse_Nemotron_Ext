@@ -289,6 +289,306 @@ def _check_unsafe_add_xform_op(code: str) -> List[PatchIssue]:
     return issues
 
 
+# Detect Kit CreatePrim/CreateMeshPrim commands without explicit prim_path.
+# These default to "/Cube", "/Cube_01", etc. at the ROOT (not /World) at origin.
+# The agent then typically runs MovePrim/TransformPrimSRT on a DIFFERENT path
+# (the intended one like /World/Cube_3) — silently creating orphaned prims at
+# root + origin while confidently reporting "placed at <correct position>".
+#
+# Real failure observed 2026-04-19: agent emitted
+#     omni.kit.commands.execute('CreateMeshPrimWithDefaultXform', prim_type='Cube')
+#     omni.kit.commands.execute('MovePrim', path_from='/World/Cube', path_to='/World/Cube_3')
+# This only works the FIRST time; second invocation creates /World/Cube again
+# but MovePrim may fail silently, or the xform ends up on the wrong path.
+_RE_UNSAFE_CREATE_PRIM_CMD = re.compile(
+    r"""omni\.kit\.commands\.execute\s*\(\s*["'](Create(?:MeshPrimWithDefaultXform|MeshPrim|Prim))["']\s*,\s*([^)]*)\)""",
+    re.I | re.S,
+)
+
+
+def _check_create_prim_default_path(code: str) -> List[PatchIssue]:
+    """Block omni.kit.commands.execute('Create...Prim...') without prim_path=
+    AND block CreateMeshPrimWithDefaultXform regardless of prim_path because
+    it always authors mesh-geometry attributes (points/faceVertexCounts/normals)
+    on top of the requested TypeName, producing a hybrid prim that Hydra
+    renders as distorted garbage. Observed 2026-04-19: agent's Cube 3 had
+    both TypeName='Cube' AND mesh-data attrs; the render was a warped mesh.
+    """
+    issues: List[PatchIssue] = []
+    for match in _RE_UNSAFE_CREATE_PRIM_CMD.finditer(code):
+        cmd_name = match.group(1)
+        args_blob = match.group(2)
+        # (1) No-path variant — always broken, regardless of command flavor.
+        if "prim_path" not in args_blob:
+            issues.append(PatchIssue(
+                severity="error",
+                rule="usd_create_prim_no_path",
+                message=f"omni.kit.commands.execute('{cmd_name}', ...) called without "
+                        f"prim_path=... — this defaults to /Cube, /Cube_01 at the stage "
+                        f"root at origin (0,0,0), NOT the /World/<Name> path your xform "
+                        f"code below targets. The prim lands orphaned while your reply "
+                        f"claims it was placed correctly.",
+                fix_hint="Use stage.DefinePrim('/World/<Name>', 'Cube') (or "
+                         "UsdGeom.Cube.Define(stage, '/World/<Name>')), then set the "
+                         "xform on the SAME path via _safe_set_translate. Do NOT use "
+                         "Kit's Create*Prim command + MovePrim rename pattern — it's "
+                         "unreliable and produces silent failures.",
+            ))
+            continue
+        # (2) WithDefaultXform variant — even WITH prim_path, it authors mesh
+        # geometry attrs (points, faceVertexCounts, normals, primvars:st,
+        # subdivisionScheme) on top of a Cube TypeName. Hydra then renders
+        # the mesh data, not the parametric Cube, and any Cube-TypeName
+        # consumer (size attribute, extent) desyncs from what's visible.
+        if cmd_name == "CreateMeshPrimWithDefaultXform":
+            issues.append(PatchIssue(
+                severity="error",
+                rule="usd_create_mesh_prim_with_default_xform",
+                message="CreateMeshPrimWithDefaultXform authors mesh-geometry "
+                        "attributes (points, faceVertexCounts, normals, subdivisionScheme) "
+                        "on top of the requested TypeName. The result is a hybrid prim "
+                        "that renders as distorted geometry because Hydra picks the "
+                        "mesh data while tools reading 'size' see the parametric type. "
+                        "Observed 2026-04-19: Cube 3 rendered as a warped star shape.",
+                fix_hint="Use UsdGeom.Cube.Define(stage, '/World/<Name>') and set size "
+                         "via GetSizeAttr().Set(1.0). For spheres/cylinders/cones use "
+                         "UsdGeom.Sphere.Define etc. Never CreateMeshPrimWithDefaultXform "
+                         "for parametric shapes — reserved for actual mesh import.",
+            ))
+    return issues
+
+
+# Detect DeletePrims(paths=[X]) followed by CreatePrim/DefinePrim targeting
+# the same path in the SAME script. Observed 2026-04-19: DeletePrims leaves
+# attribute specs in the session layer; recreating on the same path then
+# composes the stale specs back onto the new prim, producing ghost mesh data
+# that Hydra renders instead of the new geometry. The fix is either (a) use
+# a fresh unique path name, or (b) explicitly wipe the session-layer spec
+# before recreate.
+_RE_DELETE_PRIMS = re.compile(
+    r"""DeletePrims[^)]*?paths\s*=\s*\[([^\]]*)\]""", re.I | re.S,
+)
+_RE_PATH_LITERAL = re.compile(r"""["']([^"']+)["']""")
+
+
+def _check_delete_then_create_same_path(code: str) -> List[PatchIssue]:
+    """Warn when the same path is deleted and recreated in one script."""
+    issues: List[PatchIssue] = []
+    deleted_paths: set = set()
+    for m in _RE_DELETE_PRIMS.finditer(code):
+        for p in _RE_PATH_LITERAL.findall(m.group(1)):
+            deleted_paths.add(p)
+    if not deleted_paths:
+        return issues
+
+    # Find recreation patterns for any of the deleted paths.
+    recreate_patterns = [
+        re.compile(rf"""DefinePrim\s*\(\s*stage\s*,\s*["']{re.escape(p)}["']""")
+        for p in deleted_paths
+    ] + [
+        re.compile(rf"""(?:CreatePrim|CreateMeshPrim|CreateMeshPrimWithDefaultXform)"""
+                   rf"""[^)]*?prim_path\s*=\s*["']{re.escape(p)}["']""", re.I | re.S)
+        for p in deleted_paths
+    ] + [
+        re.compile(rf"""Cube\.Define\s*\(\s*stage\s*,\s*["']{re.escape(p)}["']""")
+        for p in deleted_paths
+    ]
+    for pat in recreate_patterns:
+        if pat.search(code):
+            issues.append(PatchIssue(
+                severity="warning",
+                rule="usd_delete_then_recreate_same_path",
+                message="DeletePrims + recreate on the same path in one script. "
+                        "Kit's DeletePrims does not wipe attribute specs from the "
+                        "session layer, so session-layer opinions from the old prim "
+                        "compose back onto the new prim — Hydra renders the ghost "
+                        "geometry. This is what made Cube 3 render as a warped mesh "
+                        "on 2026-04-19 even after rebuild.",
+                fix_hint="Either (a) recreate on a fresh path ('/World/CubeThree' "
+                         "instead of '/World/Cube3'), then optionally rename via "
+                         "MovePrim AFTER verifying PrimStack is clean; or (b) walk "
+                         "stage.GetLayerStack() and call layer.GetPrimAtPath(path).Clear() "
+                         "on every non-root layer to wipe stale specs before recreate.",
+            ))
+            break  # one warning per script
+    return issues
+
+
+# Detect fabricated Kit commands. Observed 2026-04-19: agent emitted
+#   omni.kit.commands.execute("TransformPrimCommand", path=..., new_translation=...)
+# which doesn't exist. Real names: "TransformPrimSRT" or "TransformPrim".
+# The call silently failed (success=false) but the agent kept going and the
+# user saw no viewport change.
+_KNOWN_KIT_COMMANDS = {
+    "CreatePrim", "CreateMeshPrim", "CreateMeshPrimWithDefaultXform",
+    "DeletePrims", "DeletePrim", "MovePrim", "MovePrims",
+    "TransformPrim", "TransformPrimSRT",
+    "ChangeProperty", "ChangePropertyCommand",
+    "CopyPrim", "CopyPrims", "GroupPrims", "UngroupPrims",
+    "SetDefaultPrim", "ToggleActivePrims", "TogglePayLoadLoadSelectedPrims",
+    "AddReference", "RemoveReference", "AddPayload", "RemovePayload",
+    "BindMaterial", "UnbindMaterial", "CreateMaterial",
+    "SetStageUpAxis", "SetStageMetersPerUnit",
+    "Select", "SelectNone", "SelectPrims",
+    "AddXformOp", "AddXformComposition",
+}
+# Matches omni.kit.commands.execute("Something", ...)
+_RE_KIT_COMMAND_NAME = re.compile(
+    r"""omni\.kit\.commands\.execute\s*\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']"""
+)
+
+
+def _check_kit_command_name(code: str) -> List[PatchIssue]:
+    """Block fabricated Kit command names that silently fail at RPC time."""
+    issues: List[PatchIssue] = []
+    seen = set()
+    for m in _RE_KIT_COMMAND_NAME.finditer(code):
+        name = m.group(1)
+        if name in _KNOWN_KIT_COMMANDS or name in seen:
+            continue
+        seen.add(name)
+        # Heuristic for common LLM fabrications: "Command" suffix on valid name
+        hint = ""
+        # Specific fix hint wins over the generic suffix-strip hint.
+        if name == "TransformPrimCommand":
+            hint = " Use 'TransformPrimSRT' (translate/rotate/scale) or 'TransformPrim' (full matrix)."
+        elif name.endswith("Command") and name[:-7] in _KNOWN_KIT_COMMANDS:
+            hint = f" Did you mean '{name[:-7]}'?"
+        issues.append(PatchIssue(
+            severity="error",
+            rule="kit_unknown_command",
+            message=f"omni.kit.commands.execute('{name}', ...) — '{name}' is not a "
+                    f"registered Kit command. The call will fail silently (success=false) "
+                    f"at RPC time while the reply claims success.{hint}",
+            fix_hint=(
+                "Use the stage/USD API directly (UsdGeom.Xformable.AddTranslateOp, "
+                "stage.DefinePrim, prim.GetAttribute().Set) instead of Kit commands, "
+                "OR verify the command name against omni.kit.commands in the target build."
+            ),
+        ))
+    return issues
+
+
+# Detect og.Controller.edit(...) passing GraphBackingType as pipeline_stage.
+# Observed 2026-04-19: both the LLM agent AND a human debugger hit this. The
+# pipeline_stage parameter takes GraphPipelineStage (SIMULATION/ON_DEMAND/
+# PRE_SIMULATION/POST_SIMULATION), NOT GraphBackingType (FABRIC_SHARED /
+# FLATCACHING). The arg name looks close enough to GraphBackingType that
+# models pattern-match wrongly. Error message is "incompatible function
+# arguments" which is confusing — validator catches it at authoring time
+# with the correct fix.
+_RE_PIPELINE_STAGE_WRONG = re.compile(
+    # Matches both kwarg form `pipeline_stage=GraphBackingType...`
+    # and dict-literal form `"pipeline_stage": GraphBackingType...`
+    r"""["']?pipeline_stage["']?\s*[=:]\s*(?:og\.)?GraphBackingType""",
+)
+_RE_PIPELINE_STAGE_WRONG_VAR = re.compile(
+    r"""GraphBackingType\.GRAPH_BACKING_TYPE_(?:FABRIC_SHARED|FLATCACHE_SHARED|FLATCACHING)"""
+)
+
+
+def _check_pipeline_stage_enum_mismatch(code: str) -> List[PatchIssue]:
+    """Block GraphBackingType where GraphPipelineStage is required."""
+    issues: List[PatchIssue] = []
+    # Direct `pipeline_stage=GraphBackingType.*` — always wrong.
+    if _RE_PIPELINE_STAGE_WRONG.search(code):
+        issues.append(PatchIssue(
+            severity="error",
+            rule="og_pipeline_stage_enum",
+            message="og.Controller.edit(..., pipeline_stage=GraphBackingType.*) — "
+                    "pipeline_stage expects GraphPipelineStage, not GraphBackingType. "
+                    "Runtime error is 'incompatible function arguments'.",
+            fix_hint=(
+                "Use `pipeline_stage=og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_SIMULATION` "
+                "(most common) or omit the pipeline_stage parameter entirely — Kit uses "
+                "a sane default. GraphBackingType is the STORAGE backend (Fabric vs "
+                "Flatcache), set separately via the graph's backing_type setting."
+            ),
+        ))
+    # Indirect pattern: a _backing variable built from GraphBackingType is passed
+    # as pipeline_stage. Same bug class, caught via the backing_* resolver idiom
+    # the agent's conveyor code uses.
+    if (_RE_PIPELINE_STAGE_WRONG_VAR.search(code)
+            and re.search(r"""["']?pipeline_stage["']?\s*[=:]\s*_?backing""", code)):
+        issues.append(PatchIssue(
+            severity="error",
+            rule="og_pipeline_stage_enum_indirect",
+            message="A variable resolved from GraphBackingType.* is being passed as "
+                    "pipeline_stage. Same enum-confusion bug as above.",
+            fix_hint="Replace the pipeline_stage argument with "
+                     "og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_SIMULATION, or drop it.",
+        ))
+    return issues
+
+
+# Detect ClearXformOpOrder() used as a "force-reset" hack. Observed 2026-04-19:
+# agent wrote `xform.ClearXformOpOrder(); xform.AddTranslateOp().Set(pos)` and
+# then couldn't understand why the write didn't land — ClearXformOpOrder()
+# leaves the existing xformOp:translate attribute spec intact but drops it
+# from the ordered-ops list, so AddTranslateOp() may re-add it as a different
+# op (precision mismatch) and the scene shows the stale original value.
+# Safer pattern: find existing translate op via GetOrderedXformOps() and
+# re-Set() its value.
+_RE_CLEAR_XFORM_OP_ORDER = re.compile(r"\.ClearXformOpOrder\s*\(\s*\)")
+
+
+def _check_clear_xform_op_order(code: str) -> List[PatchIssue]:
+    """Warn on ClearXformOpOrder() — it's almost always the wrong tool."""
+    issues: List[PatchIssue] = []
+    if _RE_CLEAR_XFORM_OP_ORDER.search(code):
+        issues.append(PatchIssue(
+            severity="warning",
+            rule="usd_clear_xform_op_order",
+            message="ClearXformOpOrder() clears the xformOpOrder list but leaves "
+                    "xformOp:translate / xformOp:scale / xformOp:rotate attribute "
+                    "specs intact. Subsequent AddTranslateOp() may create a duplicate "
+                    "op spec with different precision — the old value is still in USD "
+                    "and can override the new one in the viewport. Duplicate ops are "
+                    "the common cause of 'the write didn't land' bugs.",
+            fix_hint=(
+                "Use GetOrderedXformOps() to find the existing translate op, then "
+                "call .Set(new_value) on it. Only fall through to AddTranslateOp() "
+                "if no translate op already exists."
+            ),
+        ))
+    return issues
+
+
+# Detect IsA() called on an Applied-API schema (e.g. UsdLux.LightAPI).
+# IsA tests the prim TYPE (DomeLight, DistantLight, etc.) — it returns False
+# for every light in the scene because lights are Dome/DistantLight TYPES
+# that HAVE the LightAPI APPLIED, they aren't "of type LightAPI".
+# Observed 2026-04-19: agent ran `if p.IsA(UsdLux.LightAPI)`, got 0 lights
+# even though /World/DomeLight existed, and then fabricated "Isaac Sim must
+# be using an automatic headlight" to rationalize the wrong data.
+_RE_ISA_API_SCHEMA = re.compile(
+    r"""\.IsA\s*\(\s*(Usd\w+|Physx\w+)\.(\w+API)\s*\)"""
+)
+
+
+def _check_isa_on_api_schema(code: str) -> List[PatchIssue]:
+    """IsA() tests prim type; Applied-API schemas need HasAPI()."""
+    issues: List[PatchIssue] = []
+    for m in _RE_ISA_API_SCHEMA.finditer(code):
+        module = m.group(1)
+        api_name = m.group(2)
+        issues.append(PatchIssue(
+            severity="error",
+            rule="usd_isa_on_api_schema",
+            message=f"IsA({module}.{api_name}) always returns False. "
+                    f"{api_name} is an Applied-API schema, not a prim type. "
+                    "The check silently filters out every real prim that has the "
+                    "API applied, then the caller rationalizes the empty result.",
+            fix_hint=(
+                f"Use prim.HasAPI({module}.{api_name}) to test for an applied API. "
+                "For lights, the TYPE-side alternatives are UsdLux.DomeLight, "
+                "UsdLux.DistantLight, UsdLux.SphereLight, UsdLux.RectLight — "
+                "check via IsA(UsdLux.DomeLight) etc. or use UsdLux.LightAPI via HasAPI."
+            ),
+        ))
+    return issues
+
+
 # Detect CreateAttribute with wrong signature (Python type instead of Sdf.ValueTypeName)
 _RE_CREATE_ATTR_BAD = re.compile(
     r"""\.CreateAttribute\s*\([^)]*,\s*(?:float|int|str|bool|list|tuple|Gf\.)\b"""
@@ -325,6 +625,12 @@ _ALL_VALIDATORS = [
     _check_missing_import_omni_usd,
     _check_raw_list_for_vec,
     _check_unsafe_add_xform_op,
+    _check_create_prim_default_path,
+    _check_delete_then_create_same_path,
+    _check_kit_command_name,
+    _check_pipeline_stage_enum_mismatch,
+    _check_clear_xform_op_order,
+    _check_isa_on_api_schema,
     _check_create_attribute_signature,
 ]
 
