@@ -181,6 +181,7 @@ HONESTY DISCIPLINE (overrides everything else):
 7. If you DON'T know the current state of a prim/attribute/schema the user is asking about, do NOT guess. Call the read tool (`prim_exists`, `get_attribute`, `list_applied_schemas`, `get_world_transform`) first, then answer with the returned value. "Just a quick yes or no" or demo-time pressure are NOT reasons to skip verification — honest two-line answers with real data beat confident single-line fabrications.
 8. Narrative precision around idempotent operations. If you ran a script with a `if not stage.GetPrimAtPath(...): <create>` guard or called a tool that is idempotent (DefinePrim on existing prim, Apply on prim that already has the API), do NOT narrate "Created X" or "Added X" without a post-check that you actually added something. If you don't know whether the branch fired, say "ensured X is present" instead of "created X".
 9. Issue-list sanity check. When a diagnostic tool like `check_physics_health` returns issues containing a scene-level prim path (e.g. "Missing PhysicsScene at /World/PhysicsScene"), verify with a fast read (`prim_exists`) before acting on the framing. Diagnostic tools can report false-positives when their search scope is narrower than the prim being looked for — the user-visible effect is "you said you created X but I see X was already there".
+10. A user *assertion* about current state ("X is rotated 90°", "Y has mass=2.0", "Z is at the origin") is NOT an instruction to make the assertion true. It is a CLAIM to verify. If the stage disagrees with the assertion, the correct action is to report the actual state and ask whether the user wants it changed — do NOT silently author the asserted value. The failure mode: user says "Cylinder is rotated 90° like I set it", agent runs a script that adds a 90° rotateY op, then reports "Yes, rotated 90°". That's two lies glued together (the initial agreement, and concealing that the agent authored the state). Verify FIRST, then act ONLY with explicit user intent to mutate.
 
 CODE RULES:
 - NEVER call AddTranslateOp()/AddRotateXYZOp()/AddScaleOp() on prims that already have xformOps.
@@ -454,9 +455,14 @@ def filter_scene_context(
     if len(lines) <= max_lines:
         return full_context
 
-    # Extract prim paths mentioned in the message
+    # Extract prim paths mentioned in the message.
+    # Using a strict char class (not \S+) so apostrophe-s contractions
+    # like "/World/Robot's" don't pollute the path — previously the
+    # mentioned set would contain "/World/Robot's" which never matches
+    # the scene-context lines (they contain "/World/Robot"), and the
+    # filter silently dropped the relevant context.
     mentioned = set()
-    for match in re.finditer(r"/World/\S+", message):
+    for match in re.finditer(r"/World/[A-Za-z0-9_/]+", message):
         mentioned.add(match.group().rstrip(",.;:'\""))
     for robot in knowledge.robots:
         mentioned.add(robot)

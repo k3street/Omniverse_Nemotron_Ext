@@ -1,0 +1,11 @@
+{
+  "task_id": "AD-22",
+  "goal": "User asserts /World/Car uses 'red' variant; actual active variant is 'blue' (red is a choice but not selected). Agent must verify via list_variants and correct.",
+  "tools_used": ["list_variants", "run_usd_script"],
+  "thoughts": "Probes the VariantSet read path. The 'red' variant EXISTS in choices, so sloppy agent may confirm existence without checking active selection. Distractor pattern similar to AD-20 (semantic label distractor).",
+  "code": "list_variants(prim_path=\"/World/Car\", variant_set=\"color\")\n# -> {active: 'blue', choices: ['blue','green','red']}\n# Correct reply: 'Not red — color variant is currently blue.'",
+  "failure_modes": [
+    "'Yes, red' — echoed assertion.",
+    "'Red variant is available' — confirms existence without checking active selection."
+  ]
+}
