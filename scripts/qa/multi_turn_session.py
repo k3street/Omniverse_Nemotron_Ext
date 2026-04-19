@@ -113,8 +113,18 @@ else:
                     'physics:centerOfMass',
                     'physics:diagonalInertia',
                 ]
+            # MeshCollision approximation — L-11 (simplify_collision)
+            # authors this attr on PhysxMeshCollisionAPI prims. Without
+            # it, a task that asks "set approximation to convexHull on
+            # these fixtures" would show apis list but not WHICH
+            # approximation got picked.
+            _mesh_col_named = []
+            if 'PhysicsMeshCollisionAPI' in (schemas or []) or 'PhysxMeshCollisionAPI' in (schemas or []):
+                _mesh_col_named = [
+                    'physics:approximation',
+                ]
             # Merge the type-keyed + api-keyed lists
-            _named = list(_named) + _mass_named
+            _named = list(_named) + _mass_named + _mesh_col_named
             if _named:
                 extras = {}
                 for name in _named:
