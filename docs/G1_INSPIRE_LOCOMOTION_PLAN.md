@@ -3,6 +3,7 @@
 **Robot:** Unitree G1 humanoid + Inspire Hand (5-finger dexterous)  
 **Goal:** Reliable walking in Isaac Sim, progressing to whole-body loco-manipulation  
 **Date:** April 2026  
+**Isaac Lab:** 2.3 ✅ installed  
 
 ---
 
@@ -93,17 +94,10 @@ Map to new tool schema `deploy_rl_policy` in `tool_schemas.py`.
 ## Phase 2 — Teleop + Demo Collection (Walking + Hand)
 
 **Goal:** Teleoperate G1 walking while controlling the Inspire Hand. Record demonstrations for Phase 3 fine-tuning.  
-**ETA:** 1–2 weeks  
-**Blocker:** Isaac Lab 2.3 install + hardware or VR controller for teleop
+**ETA:** 3–5 days (Isaac Lab 2.3 already installed — main blocker cleared)  
+**Blocker:** ~~Isaac Lab 2.3 install~~ ✅ Done — hardware or VR controller for teleop is the remaining gating item
 
-### 2.1 Upgrade to Isaac Lab 2.3
-
-```bash
-cd IsaacLab
-git pull
-git checkout v2.3.0
-./isaaclab.sh --install
-```
+### 2.1 ~~Upgrade to Isaac Lab 2.3~~ — Already done
 
 ### 2.2 Apply G1 + Inspire Hand PRs
 
@@ -285,8 +279,9 @@ Phase 1 (walking)
        │
        ▼
 Phase 2 (teleop + data)
-  └─ Isaac Lab 2.3 + PR #3242/#3440
-  └─ VR/gamepad controller for teleop
+  └─ Isaac Lab 2.3 ✅ already installed
+  └─ PR #3242/#3440 — verify included in current install
+  └─ VR/gamepad controller for teleop  ◄── remaining gating item
   └─ 50–200 recorded HDF5 demos  ──► Dataset for Phase 3
        │
        ▼
