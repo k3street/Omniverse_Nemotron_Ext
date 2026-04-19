@@ -4266,7 +4266,7 @@ ISAAC_SIM_TOOLS = [
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "tier": {"type": "integer", "enum": [1, 2, 3], "description": "Detection tier (1=cheap, 3=best)"},
+                        "tier": {"type": "integer", "minimum": 1, "maximum": 3, "description": "Detection tier: 1=cheap (action variance), 2=+15ms (DiT variance), 3=best (Mahalanobis)"},
                         "action_sequence": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}, "description": "Recent action history for Tier 1"},
                         "checkpoint_path": {"type": "string", "description": "Path to GR00T checkpoint (for Tier 2/3)"},
                         "calibration_path": {"type": "string", "description": "Path to calibration stats (for Tier 3)"},
