@@ -1280,6 +1280,18 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "diagnose_robot_motion",
+            "description": "Diagnose why a wheeled robot isn't moving correctly. Checks for: caster joints with stiffness resisting rotation, floor/ground surfaces missing physics friction materials, conflicting OmniGraph ArticulationControllers commanding the same joints (e.g. teleop and ROS2 graphs fighting), and gravity misconfiguration. Use when user says 'robot won't move', 'wheels spinning but not moving', 'robot is slow', 'robot barely moves', 'wheels stuck', or 'caster not turning'.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "find_heavy_prims",
             "description": "Find all mesh prims with triangle count above a threshold. Returns sorted list with prim path, triangle count, and collision approximation type. Use to identify geometry that may be causing performance issues.",
             "parameters": {
@@ -1340,7 +1352,7 @@ ISAAC_SIM_TOOLS = [
                     "packs": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional list of validator packs to run. Available: schema_consistency, import_health, material_physics, articulation_integrity, sensor_completeness, ros_bridge_readiness, performance_warnings, isaaclab_sanity. Default: all packs.",
+                        "description": "Optional list of validator packs to run. Available: schema_consistency, import_health, material_physics, articulation_integrity, sensor_completeness, ros_bridge_readiness, performance_warnings, isaaclab_sanity, robot_motion. Default: all packs.",
                     },
                 },
                 "required": [],
@@ -3329,6 +3341,18 @@ ISAAC_SIM_TOOLS = [
         "function": {
             "name": "diagnose_performance",
             "description": "Diagnose why the simulation is slow. Reads PhysX scene statistics, per-zone timing, and GPU/VRAM usage, then returns actionable issues ranked by severity. Use when user asks 'why is my sim slow?', 'low FPS', 'performance problems', or 'profiling'.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_robot_motion",
+            "description": "Diagnose why a wheeled robot isn't moving correctly. Checks for: caster joints with stiffness resisting rotation, floor/ground surfaces missing physics friction materials, conflicting OmniGraph ArticulationControllers commanding the same joints (e.g. teleop and ROS2 graphs fighting), and gravity misconfiguration. Use when user says 'robot won't move', 'wheels spinning but not moving', 'robot is slow', 'robot barely moves', 'wheels stuck', or 'caster not turning'.",
             "parameters": {
                 "type": "object",
                 "properties": {},

@@ -15780,6 +15780,55 @@ DATA_HANDLERS["find_heavy_prims"] = _handle_find_heavy_prims
 CODE_GEN_HANDLERS["optimize_collision"] = _gen_optimize_collision
 
 
+# ── Robot Motion Diagnostics ─────────────────────────────────────────────────
+
+async def _handle_diagnose_robot_motion(args: Dict) -> Dict:
+    """Run the robot_motion validator pack to diagnose wheeled robot issues."""
+    from ...analysis.orchestrator import AnalysisOrchestrator
+
+    if not await kit_tools.is_kit_rpc_alive():
+        return {"error": "Kit RPC is not reachable — cannot diagnose robot motion."}
+
+    try:
+        stage_data = await kit_tools.get_stage_context(full=True)
+    except Exception as e:
+        return {"error": f"Failed to fetch stage context: {e}"}
+
+    analyzer = AnalysisOrchestrator(enabled_packs=["robot_motion"])
+    result = analyzer.run_analysis(stage_data)
+
+    findings = []
+    for f in result.findings:
+        entry = {
+            "rule": f.rule_id,
+            "severity": f.severity,
+            "prim": f.prim_path,
+            "message": f.message,
+            "detail": f.detail,
+        }
+        if f.fix_suggestion:
+            entry["fix_hint"] = f.fix_suggestion.description
+        if f.evidence:
+            entry["evidence"] = f.evidence
+        findings.append(entry)
+
+    if not findings:
+        return {
+            "status": "ok",
+            "message": "No robot motion issues detected. Caster joints, floor friction, gravity, and controller wiring all look correct.",
+            "findings": [],
+        }
+
+    return {
+        "status": "issues_found",
+        "total_issues": len(findings),
+        "findings": findings,
+    }
+
+
+DATA_HANDLERS["diagnose_robot_motion"] = _handle_diagnose_robot_motion
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
@@ -33249,6 +33298,12 @@ DATA_HANDLERS = {
     "explain_error": None,  # handled inline by LLM (no tool execution)
     # cuRobo trajectory execution
     "curobo_execute_trajectory": _handle_curobo_execute_trajectory,
+    # Diagnostics
+    "diagnose_performance": _handle_diagnose_performance,
+    "diagnose_robot_motion": _handle_diagnose_robot_motion,
+    "diagnose_ros2": _handle_diagnose_ros2,
+    "run_stage_analysis": _handle_run_stage_analysis,
+    "find_heavy_prims": _handle_find_heavy_prims,
 }
 
 # ── ROS2 live handlers (via rosbridge / ros-mcp) ────────────────────────────
