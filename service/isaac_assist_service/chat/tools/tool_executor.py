@@ -14058,11 +14058,28 @@ def _gen_setup_ros2_bridge(args: Dict) -> str:
     val_block = ",\n".join(val_lines)
 
     return f"""\
+import os as _ros2_os
 import omni.graph.core as og
 
 # ROS2 bridge profile: {profile_name}
 # {profile['description']}
 # Topics: {', '.join(profile['topics'])}
+
+# Pre-check: the ROS2 bridge nodes load rmw at create time, which needs
+# AMENT_PREFIX_PATH set in the process environment. If Isaac Sim was
+# launched without sourcing /opt/ros/.../setup.bash (the common
+# user-error), og.Controller.edit would emit cryptic "failed to get
+# symbol 'rmw_init_options_init'" errors and leave a half-built graph.
+# Raise early with an actionable message so the agent can relay it.
+if not _ros2_os.environ.get('AMENT_PREFIX_PATH'):
+    raise RuntimeError(
+        'setup_ros2_bridge: AMENT_PREFIX_PATH is not set in Kit\\'s environment. '
+        'ROS2 middleware (rmw) cannot initialize without it. '
+        'Before launching Isaac Sim, source your ROS2 distro setup, e.g.: '
+        '  source /opt/ros/humble/setup.bash   (or your distro\\'s path)   '
+        'then relaunch Isaac Sim. No nodes were created.'
+    )
+
 _bt = og.GraphBackingType
 if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
     _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
