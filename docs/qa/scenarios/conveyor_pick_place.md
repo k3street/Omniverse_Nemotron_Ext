@@ -12,13 +12,23 @@ Set up a pick-and-place cell: a conveyor belt on a table delivers small cubes to
 ## Prompt the user should send
 
 ```
-Set up a pick-and-place cell on a table: a conveyor belt moves small cubes
-to a Franka Panda arm, which picks each cube and drops it into a bin on
-the side of the table. Use realistic industrial dimensions — the Franka
-must actually reach both the belt pick point and the bin.
+Pick-and-place cell on a table: a MOVING conveyor belt carries FOUR
+small cubes toward a Franka Panda arm. The robot picks each cube from
+the belt and drops it INTO an OPEN-TOP bin sitting on the side of the
+table. Realistic industrial dimensions — the Franka must reach both
+the belt pick point and the bin.
 ```
 
-Keep the prompt **free of specific numbers** (belt length, cube size, table height). The agent should derive dimensions from the Franka's reach envelope, which is a tool-discovery test (`lookup_product_spec("franka_panda")` is the expected call).
+Prompt-design rationale (refined 2026-04-19 after first run gave 1/5):
+- "MOVING" is explicit because the first agent created a static belt
+  without surface-velocity APIs
+- "FOUR small cubes" is explicit because "small cubes" (plural) was
+  interpreted as a single cube
+- "OPEN-TOP bin" + "drops INTO" implies a container with walls, not a
+  solid Cube labeled "Bin"
+- Specific numbers (belt length, cube size, table height, speed) are
+  still omitted — the agent must derive these from the Franka reach
+  envelope via `lookup_product_spec("franka_panda")`.
 
 ## Target layout
 

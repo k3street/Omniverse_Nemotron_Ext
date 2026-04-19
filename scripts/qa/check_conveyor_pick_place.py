@@ -472,6 +472,130 @@ def print_summary(results: List[CheckResult]) -> None:
         print("\n🔴 Substantial gaps — investigate agent thoughts + tool choices.")
 
 
+def analyze_trace(session_id: str = "default_session") -> Dict[str, Any]:
+    """Pull recent tool-call patterns from the session trace.
+
+    Reads the per-session JSONL and summarizes the LAST turn (from the
+    most recent non-slash user_msg onward): which tools were called,
+    which succeeded vs failed, whether the agent reached for the right
+    high-level entry points (create_conveyor_track, lookup_product_spec,
+    lookup_api_deprecation), and whether the reply itself contains any
+    deprecated-4x imports that slipped past the inline validator.
+
+    This is orthogonal to the structural checks — those verify the
+    stage; this verifies agent BEHAVIOR. Both matter for scoring.
+    """
+    trace_path = REPO / "workspace" / "session_traces" / f"{session_id}.jsonl"
+    if not trace_path.exists():
+        return {"error": "no trace file"}
+    events = []
+    for line in trace_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            events.append(json.loads(line))
+        except Exception:
+            continue
+    # Slice from the most recent non-slash user_msg onward
+    last_user = None
+    for i, e in enumerate(events):
+        if e.get("type") != "user_msg":
+            continue
+        txt = (e.get("payload") or {}).get("text", "") or ""
+        if txt.lstrip().startswith("/"):
+            continue
+        last_user = i
+    if last_user is None:
+        return {"error": "no non-slash user_msg found"}
+    turn_events = events[last_user:]
+
+    tools_called: Dict[str, Dict[str, int]] = {}
+    for e in turn_events:
+        if e.get("type") != "tool_call":
+            continue
+        pl = e.get("payload") or {}
+        name = pl.get("tool") or "?"
+        ok = pl.get("success")
+        d = tools_called.setdefault(name, {"total": 0, "success": 0, "fail": 0, "null": 0})
+        d["total"] += 1
+        if ok is True:
+            d["success"] += 1
+        elif ok is False:
+            d["fail"] += 1
+        else:
+            d["null"] += 1
+
+    patches = [e for e in turn_events if e.get("type") == "patch_executed"]
+    patch_success = sum(1 for p in patches if (p.get("payload") or {}).get("success") is True)
+    patch_fail = sum(1 for p in patches if (p.get("payload") or {}).get("success") is False)
+
+    # Reply text scan for deprecated-4x tells (agent posted code the user
+    # might copy-paste even though it's broken).
+    reply_text = ""
+    for e in reversed(turn_events):
+        if e.get("type") == "agent_reply":
+            reply_text = (e.get("payload") or {}).get("text", "") or ""
+            break
+    deprecated_mentions = []
+    for token in ("omni.isaac.franka", "omni.isaac.core", "omni.isaac.ros2_bridge",
+                  "omni.isaac.urdf", "omni.isaac.kit"):
+        if token in reply_text:
+            deprecated_mentions.append(token)
+
+    multi_step = any(e.get("type") == "multi_step_detected" for e in turn_events)
+    retry_halt = any(e.get("type") == "retry_spam_halt" for e in turn_events)
+    thought_count = sum(1 for e in turn_events if e.get("type") == "agent_thought")
+    turn_diff = None
+    for e in reversed(turn_events):
+        if e.get("type") == "turn_diff_computed":
+            turn_diff = e.get("payload")
+            break
+
+    expected_high_level = {"create_conveyor_track", "lookup_product_spec",
+                           "lookup_api_deprecation", "create_conveyor"}
+    used_high_level = sorted(expected_high_level & set(tools_called))
+    missed_high_level = sorted(expected_high_level - set(tools_called))
+
+    return {
+        "turn_event_count": len(turn_events),
+        "tools_called": tools_called,
+        "patch_success": patch_success,
+        "patch_fail": patch_fail,
+        "multi_step_detected": multi_step,
+        "retry_spam_halt": retry_halt,
+        "agent_thought_count": thought_count,
+        "turn_diff": turn_diff,
+        "high_level_tools_used": used_high_level,
+        "high_level_tools_missed": missed_high_level,
+        "deprecated_4x_in_reply": deprecated_mentions,
+    }
+
+
+def print_trace_analysis(info: Dict[str, Any]) -> None:
+    print()
+    print("=" * 70)
+    print("TRACE / BEHAVIOR ANALYSIS")
+    print("=" * 70)
+    if "error" in info:
+        print(f"  (no trace: {info['error']})")
+        return
+    tc = info.get("tools_called") or {}
+    print(f"  Tool calls: {sum(d['total'] for d in tc.values())} total across {len(tc)} distinct tools")
+    for name, d in sorted(tc.items(), key=lambda x: -x[1]["total"]):
+        print(f"    {name}: total={d['total']} ok={d['success']} fail={d['fail']} pending={d['null']}")
+    print(f"  patch_executed: {info.get('patch_success',0)} ok / {info.get('patch_fail',0)} fail")
+    print(f"  multi_step_detected: {info.get('multi_step_detected')}")
+    print(f"  retry_spam_halt: {info.get('retry_spam_halt')}")
+    print(f"  agent_thought parts: {info.get('agent_thought_count')}")
+    if info.get("turn_diff"):
+        print(f"  turn_diff: {info['turn_diff']}")
+    print(f"  high-level tools used:   {info.get('high_level_tools_used')}")
+    print(f"  high-level tools missed: {info.get('high_level_tools_missed')}")
+    if info.get("deprecated_4x_in_reply"):
+        print(f"  ⚠️ deprecated 4.x in reply text: {info['deprecated_4x_in_reply']}")
+
+
 def save_result(results: List[CheckResult], include_dynamic: bool) -> Path:
     """Persist to workspace/scenario_results/ for history tracking."""
     out_dir = REPO / "workspace" / "scenario_results"
@@ -501,7 +625,14 @@ def main() -> None:
 
     results = asyncio.run(run_all(include_dynamic=args.dynamic))
     print_summary(results)
+    trace_info = analyze_trace()
+    print_trace_analysis(trace_info)
     out = save_result(results, include_dynamic=args.dynamic)
+    # Also persist the trace analysis alongside the structural scores.
+    if "error" not in trace_info:
+        trace_out = out.with_suffix(".trace.json")
+        trace_out.write_text(json.dumps(trace_info, indent=2), encoding="utf-8")
+        print(f"Trace analysis: {trace_out.relative_to(REPO)}")
     print(f"\nResult saved: {out.relative_to(REPO)}")
 
 
