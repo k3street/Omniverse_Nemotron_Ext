@@ -586,6 +586,35 @@ class ChatOrchestrator:
         except Exception as e:
             logger.warning(f"[{session_id}] Template retrieval failed: {e}")
 
+        # Auto-inject cite-index matches from deprecations.jsonl. Agents
+        # routinely FAIL to call lookup_api_deprecation even when a rule
+        # tells them to, and rule-injection alone has no enforcement. Pull
+        # top-3 cite rows based on prompt keywords and prepend to rag_text
+        # so the canonical recipes (conveyor surface-velocity combo, Franka
+        # import URL, open-top bin structure, etc.) land in the system
+        # prompt without requiring agent tool-call.
+        try:
+            from ..knowledge.deprecations_index import lookup as _cite_lookup
+            cite_rows = _cite_lookup(user_message, top_k=3)
+            if cite_rows:
+                cite_parts = ["## Canonical API / pattern cites for this request", ""]
+                for row in cite_rows:
+                    cite_parts.append(f"### {row['id']}")
+                    cite_parts.append(row.get("cite", "").strip())
+                    if row.get("caveats"):
+                        cite_parts.append("**Caveats:**")
+                        for c in row["caveats"]:
+                            cite_parts.append(f"- {c}")
+                    cite_parts.append("")
+                cite_preamble = "\n".join(cite_parts)
+                rag_text = cite_preamble + ("\n\n" + rag_text if rag_text else "")
+                _trace_emit(session_id, "cites_auto_injected", {
+                    "row_ids": [r["id"] for r in cite_rows],
+                    "chars": len(cite_preamble),
+                })
+        except Exception as e:
+            logger.warning(f"[{session_id}] Cite auto-injection failed: {e}")
+
         # ── 4. DISTILL: build compact context via the distillation pipeline ──
         selected_prim = context.get("selected_prim") if context else None
         selected_prim_path = context.get("selected_prim_path") if context else None
