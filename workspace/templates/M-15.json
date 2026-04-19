@@ -1,0 +1,12 @@
+{
+  "task_id": "M-15",
+  "goal": "10 boxes need per-instance mass in [0.5, 2.0], at least 5 distinct values. Agent must apply MassAPI + set varying mass per prim.",
+  "tools_used": ["find_prims_by_name", "apply_api_schema", "set_attribute"],
+  "thoughts": "Stresses per-prim DR — bulk_set_attribute would set same value everywhere (wrong). Requires loop of set_attribute with varying values. Snapshot attrs now capture physics:mass per MassAPI prim for verification.",
+  "code": "find_prims_by_name(name_pattern='box_*')\nfor i, p in enumerate(paths):\n    apply_api_schema(prim_path=p, schema_name='PhysicsMassAPI')\n    set_attribute(prim_path=p, attr_name='physics:mass', value=0.5 + 1.5*(i/9))\n# Correct reply: '10 boxes vary 0.5-2.0kg, 10 distinct values.'",
+  "failure_modes": [
+    "Using bulk_set_attribute — all boxes end up with same value.",
+    "Claiming 'randomized' but setting mass=1.0 on all.",
+    "Forgetting to apply MassAPI — set_attribute creates the attr but schema marker missing."
+  ]
+}

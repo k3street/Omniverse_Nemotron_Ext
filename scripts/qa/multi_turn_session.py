@@ -102,6 +102,19 @@ else:
                     'drive:linear:physics:stiffness',
                     'drive:linear:physics:damping',
                 ]
+            # MassAPI attrs — captured on any prim with the API applied,
+            # not gated by prim type (can live on Cube, Mesh, Xform).
+            # Separate list because it applies broadly.
+            _mass_named = []
+            if 'PhysicsMassAPI' in (schemas or []):
+                _mass_named = [
+                    'physics:mass',
+                    'physics:density',
+                    'physics:centerOfMass',
+                    'physics:diagonalInertia',
+                ]
+            # Merge the type-keyed + api-keyed lists
+            _named = list(_named) + _mass_named
             if _named:
                 extras = {}
                 for name in _named:
