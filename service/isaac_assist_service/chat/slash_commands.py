@@ -243,13 +243,20 @@ def _thoughts_reply(session_id: Optional[str], arg: str) -> str:
             "with thinking enabled, or the model didn't return any thought-parts."
         )
     # Default: only the most recent user-turn's thoughts. A user_msg event
-    # marks the start of a new turn; we slice from the last user_msg onward.
+    # marks the start of a new turn. EXCLUDE user_msg events that are
+    # slash commands (text starts with "/"), because /thoughts itself is
+    # always the absolute-latest user_msg and slash commands produce no
+    # thoughts — that would always show "empty" and be useless.
     show_all = arg.strip().lower() == "all"
     if not show_all:
         last_user_idx = None
         for i, e in enumerate(events):
-            if e.get("type") == "user_msg":
-                last_user_idx = i
+            if e.get("type") != "user_msg":
+                continue
+            txt = (e.get("payload") or {}).get("text", "") or ""
+            if txt.lstrip().startswith("/"):
+                continue
+            last_user_idx = i
         if last_user_idx is not None:
             thoughts = [
                 e for e in events[last_user_idx:]

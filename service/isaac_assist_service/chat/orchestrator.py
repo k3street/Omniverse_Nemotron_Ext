@@ -624,14 +624,21 @@ class ChatOrchestrator:
         tool_call_counts: Dict[str, int] = {}
 
         # Retry-spam halt: count CONSECUTIVE failed patches in the turn.
-        # If the agent runs N patches in a row that all return success=false
-        # — regardless of description — it's stuck. Observed 2026-04-19 in
-        # two turns: the conveyor test spammed 5-8 failing variants with
-        # VARYING descriptions (so a prefix-match halt missed it), but each
-        # was obviously a failing retry of the same fundamental problem.
-        # Threshold is 3 — agent gets two chances to recover after one
-        # failure before we break the loop and force a reasoned summary.
-        _SPAM_HALT_THRESHOLD = 3
+        # Reset counter on any success. If ≥N failures in a row — regardless
+        # of description — agent is stuck and we break the loop to force a
+        # reasoned summary.
+        #
+        # Threshold history:
+        #   - v1 (2026-04-19, thr=3): fired too early. In the conveyor test
+        #     agent was mid-exploration on attempt 4 when halted, and never
+        #     got to scale/place the cubes — giving HONEST partial success
+        #     but LESS functional output than attempt 1 which had no halt.
+        #   - v2 (2026-04-19, thr=6): current. Catches genuine spam (≥6 in
+        #     a row all failing) but allows agent's natural explore-a-few-
+        #     variants-then-adjust rhythm. In attempt 1 agent needed 5-7
+        #     fails before hitting the working cube-mutation script; that's
+        #     allowed now.
+        _SPAM_HALT_THRESHOLD = 6
         consecutive_fail_count = 0
         first_failed_description: str = ""
         spam_halted = False
