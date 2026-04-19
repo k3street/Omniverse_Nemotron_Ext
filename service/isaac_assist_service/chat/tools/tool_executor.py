@@ -618,31 +618,28 @@ _OG_TEMPLATES = {
     "ros2_lidar": {
         "description": "Publish lidar scans to ROS2",
         "nodes": [
-            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
-            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
-            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
-            ("read_lidar", "isaacsim.sensor.nodes.IsaacReadLidar"),
-            ("publish_laser_scan", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
+            ("read_time", "omni.graph.nodes.ReadSimTime"),
+            ("create_render_product", "omni.isaac.core_nodes.IsaacCreateRenderProduct"),
+            ("lidar_scan", "omni.isaac.ros2_bridge.ROS2RtxLidarHelper"),
+            ("publish_tf", "omni.isaac.ros2_bridge.ROS2PublishTransformTree"),
+            ("publish_clock", "omni.isaac.ros2_bridge.ROS2PublishClock"),
         ],
         "connections": [
-            ("on_playback_tick.outputs:tick", "read_lidar.inputs:execIn"),
-            ("read_lidar.outputs:execOut", "publish_laser_scan.inputs:execIn"),
-            ("ros2_context.outputs:context", "publish_laser_scan.inputs:context"),
-            ("read_sim_time.outputs:simulationTime", "publish_laser_scan.inputs:timeStamp"),
-            ("read_lidar.outputs:azimuthRange", "publish_laser_scan.inputs:azimuthRange"),
-            ("read_lidar.outputs:depthRange", "publish_laser_scan.inputs:depthRange"),
-            ("read_lidar.outputs:horizontalResolution", "publish_laser_scan.inputs:horizontalResolution"),
-            ("read_lidar.outputs:intensitiesData", "publish_laser_scan.inputs:intensitiesData"),
-            ("read_lidar.outputs:linearDepthData", "publish_laser_scan.inputs:linearDepthData"),
-            ("read_lidar.outputs:numCols", "publish_laser_scan.inputs:numCols"),
-            ("read_lidar.outputs:numRows", "publish_laser_scan.inputs:numRows"),
+            ("read_time.outputs:systemTime", "lidar_scan.inputs:timeStamp"),
+            ("create_render_product.outputs:renderProductPath", "lidar_scan.inputs:renderProductPath"),
+            ("read_time.outputs:systemTime", "publish_tf.inputs:timeStamp"),
+            ("read_time.outputs:systemTime", "publish_clock.inputs:timeStamp"),
         ],
         "values": {
-            "read_lidar.inputs:lidarPrimPath": "{lidar_path}",
-            "publish_laser_scan.inputs:topicName": "{topic}",
+            "create_render_product.inputs:cameraPrim": "{lidar_path}",
+            "lidar_scan.inputs:topicName": "{topic}",
+            "lidar_scan.inputs:type": "laser_scan",
+            "lidar_scan.inputs:frameId": "{frame_id}",
+            "lidar_scan.inputs:fullScan": True,
+            "publish_tf.inputs:parentPrim": "{root_prim}",
+            "publish_tf.inputs:targetPrims": "{target_prims}",
         },
-        "param_keys": ["lidar_path", "topic"],
-        "defaults": {"topic": "/scan"},
+        "param_keys": ["lidar_path", "topic", "root_prim", "target_prims", "frame_id"],
     },
     "ros2_cmd_vel": {
         "description": "Subscribe to /cmd_vel and drive a differential robot",
@@ -786,6 +783,13 @@ def _gen_create_graph(args: Dict) -> str:
     for key in tmpl.get("param_keys", []):
         val = args.get(key) or defaults.get(key, "")
         params[key] = val
+
+    # Auto-derive frame_id from lidar_path or camera_path if missing
+    if "frame_id" in tmpl.get("param_keys", []) and not params.get("frame_id"):
+        for k in ["lidar_path", "camera_path", "sensor_path"]:
+            if args.get(k) and isinstance(args[k], str):
+                params["frame_id"] = args[k].split("/")[-1]
+                break
 
     # Build node definitions
     node_defs = ",\n            ".join(
@@ -17760,31 +17764,28 @@ _OG_TEMPLATES = {
     "ros2_lidar": {
         "description": "Publish lidar scans to ROS2",
         "nodes": [
-            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
-            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
-            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
-            ("read_lidar", "isaacsim.sensor.nodes.IsaacReadLidar"),
-            ("publish_laser_scan", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
+            ("read_time", "omni.graph.nodes.ReadSimTime"),
+            ("create_render_product", "omni.isaac.core_nodes.IsaacCreateRenderProduct"),
+            ("lidar_scan", "omni.isaac.ros2_bridge.ROS2RtxLidarHelper"),
+            ("publish_tf", "omni.isaac.ros2_bridge.ROS2PublishTransformTree"),
+            ("publish_clock", "omni.isaac.ros2_bridge.ROS2PublishClock"),
         ],
         "connections": [
-            ("on_playback_tick.outputs:tick", "read_lidar.inputs:execIn"),
-            ("read_lidar.outputs:execOut", "publish_laser_scan.inputs:execIn"),
-            ("ros2_context.outputs:context", "publish_laser_scan.inputs:context"),
-            ("read_sim_time.outputs:simulationTime", "publish_laser_scan.inputs:timeStamp"),
-            ("read_lidar.outputs:azimuthRange", "publish_laser_scan.inputs:azimuthRange"),
-            ("read_lidar.outputs:depthRange", "publish_laser_scan.inputs:depthRange"),
-            ("read_lidar.outputs:horizontalResolution", "publish_laser_scan.inputs:horizontalResolution"),
-            ("read_lidar.outputs:intensitiesData", "publish_laser_scan.inputs:intensitiesData"),
-            ("read_lidar.outputs:linearDepthData", "publish_laser_scan.inputs:linearDepthData"),
-            ("read_lidar.outputs:numCols", "publish_laser_scan.inputs:numCols"),
-            ("read_lidar.outputs:numRows", "publish_laser_scan.inputs:numRows"),
+            ("read_time.outputs:systemTime", "lidar_scan.inputs:timeStamp"),
+            ("create_render_product.outputs:renderProductPath", "lidar_scan.inputs:renderProductPath"),
+            ("read_time.outputs:systemTime", "publish_tf.inputs:timeStamp"),
+            ("read_time.outputs:systemTime", "publish_clock.inputs:timeStamp"),
         ],
         "values": {
-            "read_lidar.inputs:lidarPrimPath": "{lidar_path}",
-            "publish_laser_scan.inputs:topicName": "{topic}",
+            "create_render_product.inputs:cameraPrim": "{lidar_path}",
+            "lidar_scan.inputs:topicName": "{topic}",
+            "lidar_scan.inputs:type": "laser_scan",
+            "lidar_scan.inputs:frameId": "{frame_id}",
+            "lidar_scan.inputs:fullScan": True,
+            "publish_tf.inputs:parentPrim": "{root_prim}",
+            "publish_tf.inputs:targetPrims": "{target_prims}",
         },
-        "param_keys": ["lidar_path", "topic"],
-        "defaults": {"topic": "/scan"},
+        "param_keys": ["lidar_path", "topic", "root_prim", "target_prims", "frame_id"],
     },
     "ros2_cmd_vel": {
         "description": "Subscribe to /cmd_vel and drive a differential robot",
@@ -17928,6 +17929,13 @@ def _gen_create_graph(args: Dict) -> str:
     for key in tmpl.get("param_keys", []):
         val = args.get(key) or defaults.get(key, "")
         params[key] = val
+
+    # Auto-derive frame_id from lidar_path or camera_path if missing
+    if "frame_id" in tmpl.get("param_keys", []) and not params.get("frame_id"):
+        for k in ["lidar_path", "camera_path", "sensor_path"]:
+            if args.get(k) and isinstance(args[k], str):
+                params["frame_id"] = args[k].split("/")[-1]
+                break
 
     # Build node definitions
     node_defs = ",\n            ".join(

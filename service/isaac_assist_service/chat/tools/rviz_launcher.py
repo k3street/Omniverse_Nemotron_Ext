@@ -50,6 +50,71 @@ async def _get_scene_name() -> str:
         logger.debug(f"[RViz2] Could not get scene name: {e}")
     return "scene"
 
+
+async def _detect_tf_fixed_frame() -> str:
+    """Detect the correct Fixed Frame by querying the OmniGraph TF publisher's parentPrim.
+
+    Isaac Sim's ROS2PublishTransformTree uses the prim *name* (not full path)
+    as the TF parent frame_id. For example, parentPrim="/World/NovaCarter" 
+    publishes frame_id="NovaCarter".
+
+    Falls back to checking live /tf data, then to 'World'.
+    """
+    # Strategy 1: Query OmniGraph for a PublishTransformTree node's parentPrim
+    try:
+        from . import kit_tools
+        result = await kit_tools.exec_sync(
+            'import omni.graph.core as og\n'
+            'import omni.usd\n'
+            'stage = omni.usd.get_context().get_stage()\n'
+            'found = []\n'
+            'for prim in stage.Traverse():\n'
+            '    if prim.GetTypeName() == "OmniGraphNode":\n'
+            '        node = og.get_node_by_path(str(prim.GetPath()))\n'
+            '        if node and node.get_type_name() == "isaacsim.ros2.bridge.ROS2PublishTransformTree":\n'
+            '            for attr in node.get_attributes():\n'
+            '                if attr.get_name() == "inputs:parentPrim":\n'
+            '                    val = attr.get()\n'
+            '                    if val:\n'
+            '                        p = str(val[0]) if isinstance(val, (list, tuple)) else str(val)\n'
+            '                        found.append(p)\n'
+            'if found:\n'
+            '    print(found[0])\n'
+            'else:\n'
+            '    print("")\n'
+        )
+        if result and result.get("success"):
+            prim_path = result.get("output", "").strip()
+            if prim_path:
+                # TF frame_id is the prim name (last path component)
+                frame_id = prim_path.rstrip("/").split("/")[-1]
+                if frame_id:
+                    logger.info(f"[RViz2] Detected TF fixed frame from OG: {frame_id} (parentPrim={prim_path})")
+                    return frame_id
+    except Exception as e:
+        logger.debug(f"[RViz2] OG query for TF parent failed: {e}")
+
+    # Strategy 2: Check live /tf topic for the root frame_id
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ros2", "topic", "echo", "/tf", "--once", "--no-arr",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3.0)
+        for line in stdout.decode().splitlines():
+            line = line.strip()
+            if line.startswith("frame_id:"):
+                frame_id = line.split(":", 1)[1].strip().strip('"')
+                if frame_id:
+                    logger.info(f"[RViz2] Detected TF fixed frame from /tf topic: {frame_id}")
+                    return frame_id
+    except Exception as e:
+        logger.debug(f"[RViz2] /tf echo fallback failed: {e}")
+
+    logger.warning("[RViz2] Could not detect TF fixed frame, falling back to 'World'")
+    return "World"
+
 # ── Singleton process registry ──────────────────────────────────────────────
 _rviz_proc: Optional[asyncio.subprocess.Process] = None
 _rviz_config_path: Optional[str] = None
@@ -185,7 +250,7 @@ _TOPIC_RULES: List[Tuple[re.Pattern, Any]] = [
     (re.compile(r"/(rgb|image_raw)$"), _image_config),
     (re.compile(r"/depth$"),        _depth_config),
     (re.compile(r"^/scan$"),        _laserscan_config),
-    (re.compile(r"/points$"),       _pointcloud_config),
+    (re.compile(r"/point_cloud$|/points$"), _pointcloud_config),
     (re.compile(r"/odom$"),         _odometry_config),
     (re.compile(r"^/tf$"),          _tf_config),
     (re.compile(r"^/map$"),         _map_config),
@@ -269,6 +334,9 @@ def build_rviz_config(
                 "Fixed Frame": fixed_frame,
                 "Frame Rate": 30,
             },
+            "Parameters": {
+                "use_sim_time": True,
+            },
             "Name": "root",
             "Tools": [
                 {"Class": "rviz_default_plugins/MoveCamera"},
@@ -308,6 +376,7 @@ async def launch_rviz2_process(config_path: str) -> int:
 
     _rviz_proc = await asyncio.create_subprocess_exec(
         "rviz2", "-d", config_path,
+        "--ros-args", "-p", "use_sim_time:=true",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -349,7 +418,7 @@ async def handle_launch_rviz2(args: Dict[str, Any]) -> Dict[str, Any]:
     4. Launch rviz2 subprocess
     """
     extra_topics = args.get("extra_topics", [])
-    fixed_frame = args.get("fixed_frame", "odom")
+    explicit_frame = args.get("fixed_frame", "")
 
     # 1. Discover topics
     try:
@@ -370,7 +439,13 @@ async def handle_launch_rviz2(args: Dict[str, Any]) -> Dict[str, Any]:
     if not all_topics:
         return {"error": "No active ROS2 topics found. Is the simulation running with ROS2 bridges?"}
 
-    # 2. Build config
+    # 2. Detect fixed frame (auto-detect from TF publisher or use explicit)
+    if explicit_frame:
+        fixed_frame = explicit_frame
+    else:
+        fixed_frame = await _detect_tf_fixed_frame()
+
+    # 3. Build config
     config, summary = build_rviz_config(all_topics, fixed_frame=fixed_frame)
 
     if not summary:
@@ -379,11 +454,11 @@ async def handle_launch_rviz2(args: Dict[str, Any]) -> Dict[str, Any]:
             "all_topics": all_topics,
         }
 
-    # 3. Save config — named after the current USD scene
+    # 4. Save config — named after the current USD scene
     scene_name = await _get_scene_name()
     config_path = save_rviz_config(config, name=scene_name)
 
-    # 4. Launch rviz2
+    # 5. Launch rviz2
     try:
         pid = await launch_rviz2_process(config_path)
     except FileNotFoundError:

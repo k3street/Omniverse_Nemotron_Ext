@@ -289,19 +289,60 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "add_sensor_to_prim",
-            "description": "Attach a sensor (camera, lidar, IMU, contact sensor) to a prim. Optionally configure from a real product spec.",
+            "description": (
+                "Attach a sensor (camera, RTX lidar, IMU, contact sensor, effort sensor) to a prim. "
+                "For RTX LiDAR, uses IsaacSensorCreateRtxLidar to create OmniLidar prims with config presets "
+                "(e.g. 'Example_Rotary', 'Velodyne_VLP16', 'HESAI_XT32_SD10', 'Ouster_OS1_64', 'SICK_picoScan150'). "
+                "For physics sensors (IMU, contact, effort), uses isaacsim.sensors.physics wrappers."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "prim_path": {"type": "string", "description": "Prim to attach the sensor to"},
+                    "prim_path": {"type": "string", "description": "Prim to attach the sensor to (parent path)"},
                     "sensor_type": {"type": "string", "enum": ["camera", "rtx_lidar", "imu", "contact_sensor", "effort_sensor"]},
                     "product_name": {"type": "string", "description": "Real product name for spec lookup (e.g., 'RealSense D435i', 'Velodyne VLP-16')"},
-                    "fov": {"type": "number", "description": "Field of view in degrees"},
+                    "config": {"type": "string", "description": "RTX LiDAR config preset. Examples: 'Example_Rotary', 'Example_Solid_State', 'Velodyne_VLP16', 'HESAI_XT32_SD10', 'Ouster_OS1_64', 'SICK_picoScan150', 'Livox_Mid_360'. Default: 'Example_Rotary'"},
+                    "variant": {"type": "string", "description": "LiDAR variant/profile within a config (e.g. 'Normal_11' for picoScan150)"},
+                    "scan_rate": {"type": "number", "description": "LiDAR scan rate in Hz (overrides config default)"},
+                    "fov": {"type": "number", "description": "Camera field of view in degrees"},
                     "resolution": {"type": "array", "items": {"type": "integer"}, "description": "[width, height]"},
                     "range": {"type": "array", "items": {"type": "number"}, "description": "[min_range, max_range] in meters"},
-                    "fps": {"type": "number"},
+                    "fps": {"type": "number", "description": "Sensor frequency in Hz (for IMU, contact sensor)"},
+                    "filter_width": {"type": "integer", "description": "IMU rolling average filter size (default 10)"},
+                    "min_threshold": {"type": "number", "description": "Contact sensor minimum force threshold"},
+                    "max_threshold": {"type": "number", "description": "Contact sensor maximum force threshold"},
+                    "radius": {"type": "number", "description": "Contact sensor radius (-1 = entire body)"},
+                    "sensor_period": {"type": "number", "description": "Effort sensor measurement period in seconds"},
+                    "translation": {"type": "array", "items": {"type": "number"}, "description": "[x, y, z] offset from parent prim"},
                 },
                 "required": ["prim_path", "sensor_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_sensors",
+            "description": "List all sensor prims on the stage (cameras, RTX LiDARs, IMUs, contact sensors). Returns path, type, and parent for each.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_sensor_data",
+            "description": "Read current data from a sensor prim. For cameras: focal length, aperture, clipping range. For RTX LiDAR: OmniLidar config. For IMU: acceleration, angular velocity, orientation (sim must be running). For contact: force, in_contact.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the sensor prim"},
+                    "sensor_type": {"type": "string", "enum": ["auto", "camera", "rtx_lidar", "imu", "contact_sensor"], "description": "Hint sensor type if auto-detection fails. Default: 'auto'"},
+                },
+                "required": ["prim_path"],
             },
         },
     },
@@ -1669,8 +1710,10 @@ ISAAC_SIM_TOOLS = [
             "name": "launch_rviz2",
             "description": (
                 "Launch RViz2 with an auto-generated display configuration based on currently "
-                "active ROS2 topics. Discovers camera, LiDAR, odometry, TF, map, and other "
-                "topics and creates matching RViz2 display panels. Returns the PID and config path."
+                "active ROS2 topics. Discovers camera, LiDAR, point cloud, odometry, TF, map, and other "
+                "topics and creates matching RViz2 display panels. Auto-detects the correct "
+                "Fixed Frame from the OmniGraph TF publisher (e.g. 'NovaCarter'). "
+                "Launches with use_sim_time=true for Isaac Sim clock sync. Returns the PID and config path."
             ),
             "parameters": {
                 "type": "object",
@@ -1682,7 +1725,7 @@ ISAAC_SIM_TOOLS = [
                     },
                     "fixed_frame": {
                         "type": "string",
-                        "description": "TF fixed frame for RViz2. Default: 'odom' (falls back to 'base_link')",
+                        "description": "TF fixed frame for RViz2. Auto-detected from OmniGraph if omitted (recommended).",
                     },
                 },
                 "required": [],
@@ -4503,19 +4546,60 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "add_sensor_to_prim",
-            "description": "Attach a sensor (camera, lidar, IMU, contact sensor) to a prim. Optionally configure from a real product spec.",
+            "description": (
+                "Attach a sensor (camera, RTX lidar, IMU, contact sensor, effort sensor) to a prim. "
+                "For RTX LiDAR, uses IsaacSensorCreateRtxLidar to create OmniLidar prims with config presets "
+                "(e.g. 'Example_Rotary', 'Velodyne_VLP16', 'HESAI_XT32_SD10', 'Ouster_OS1_64', 'SICK_picoScan150'). "
+                "For physics sensors (IMU, contact, effort), uses isaacsim.sensors.physics wrappers."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "prim_path": {"type": "string", "description": "Prim to attach the sensor to"},
+                    "prim_path": {"type": "string", "description": "Prim to attach the sensor to (parent path)"},
                     "sensor_type": {"type": "string", "enum": ["camera", "rtx_lidar", "imu", "contact_sensor", "effort_sensor"]},
                     "product_name": {"type": "string", "description": "Real product name for spec lookup (e.g., 'RealSense D435i', 'Velodyne VLP-16')"},
-                    "fov": {"type": "number", "description": "Field of view in degrees"},
+                    "config": {"type": "string", "description": "RTX LiDAR config preset. Examples: 'Example_Rotary', 'Example_Solid_State', 'Velodyne_VLP16', 'HESAI_XT32_SD10', 'Ouster_OS1_64', 'SICK_picoScan150', 'Livox_Mid_360'. Default: 'Example_Rotary'"},
+                    "variant": {"type": "string", "description": "LiDAR variant/profile within a config (e.g. 'Normal_11' for picoScan150)"},
+                    "scan_rate": {"type": "number", "description": "LiDAR scan rate in Hz (overrides config default)"},
+                    "fov": {"type": "number", "description": "Camera field of view in degrees"},
                     "resolution": {"type": "array", "items": {"type": "integer"}, "description": "[width, height]"},
                     "range": {"type": "array", "items": {"type": "number"}, "description": "[min_range, max_range] in meters"},
-                    "fps": {"type": "number"},
+                    "fps": {"type": "number", "description": "Sensor frequency in Hz (for IMU, contact sensor)"},
+                    "filter_width": {"type": "integer", "description": "IMU rolling average filter size (default 10)"},
+                    "min_threshold": {"type": "number", "description": "Contact sensor minimum force threshold"},
+                    "max_threshold": {"type": "number", "description": "Contact sensor maximum force threshold"},
+                    "radius": {"type": "number", "description": "Contact sensor radius (-1 = entire body)"},
+                    "sensor_period": {"type": "number", "description": "Effort sensor measurement period in seconds"},
+                    "translation": {"type": "array", "items": {"type": "number"}, "description": "[x, y, z] offset from parent prim"},
                 },
                 "required": ["prim_path", "sensor_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_sensors",
+            "description": "List all sensor prims on the stage (cameras, RTX LiDARs, IMUs, contact sensors). Returns path, type, and parent for each.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_sensor_data",
+            "description": "Read current data from a sensor prim. For cameras: focal length, aperture, clipping range. For RTX LiDAR: OmniLidar config. For IMU: acceleration, angular velocity, orientation (sim must be running). For contact: force, in_contact.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path to the sensor prim"},
+                    "sensor_type": {"type": "string", "enum": ["auto", "camera", "rtx_lidar", "imu", "contact_sensor"], "description": "Hint sensor type if auto-detection fails. Default: 'auto'"},
+                },
+                "required": ["prim_path"],
             },
         },
     },
@@ -13091,6 +13175,88 @@ ISAAC_SIM_TOOLS = [
                     },
                 },
                 "required": [],
+            },
+        },
+    },
+    # ── Scene Workspace ─────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "scene_workspace",
+            "description": (
+                "Manage per-scene companion files — URDF, rviz configs, Isaac Lab environments, "
+                "ROS2 launch files, and other configs. Each USD scene gets its own workspace folder "
+                "that persists as long as the scene exists. Use 'init' to create a workspace for the "
+                "current scene, 'add_file' to store generated files, 'list_files' to see what exists, "
+                "'read_file' to retrieve content, 'list_scenes' to see all tracked scenes."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["init", "list_files", "list_scenes", "add_file", "read_file", "delete_file"],
+                        "description": "Operation to perform on the scene workspace.",
+                    },
+                    "usd_path": {
+                        "type": "string",
+                        "description": "Absolute path to the USD scene file (e.g. from stage.GetRootLayer().identifier). Required for all actions except list_scenes.",
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["urdf", "rviz", "isaaclab", "launch", "config"],
+                        "description": "File category for add_file or list_files filter.",
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "Filename to create (for add_file).",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "File content to write (for add_file).",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional description of the file's purpose.",
+                    },
+                    "relative_path": {
+                        "type": "string",
+                        "description": "Path within the scene workspace (e.g. 'urdf/robot.urdf') for read_file/delete_file.",
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": ["generated", "imported", "user"],
+                        "description": "How the file was created. Default: 'generated'.",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "export_urdf",
+            "description": (
+                "Export a robot articulation from the current USD scene as a URDF file. "
+                "Traverses the articulation tree starting from the specified robot prim, "
+                "extracts links, joints, and their properties, and generates a URDF XML file. "
+                "Also outputs a JSON file with the raw articulation data for reference. "
+                "The URDF can then be stored in the scene workspace for use with ROS2, MoveIt, nav2, etc."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_prim_path": {
+                        "type": "string",
+                        "description": "USD prim path of the robot root (e.g. '/World/NovaCarter').",
+                    },
+                    "output_dir": {
+                        "type": "string",
+                        "description": "Directory to write the URDF and JSON files. Default: /tmp/urdf_export.",
+                    },
+                },
+                "required": ["robot_prim_path"],
             },
         },
     },

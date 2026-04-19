@@ -277,6 +277,14 @@ The FastAPI service exposes the following REST API modules, all prefixed under `
 | `/chat/pipeline/plan` | Pipeline Planner | Template-based multi-phase autonomous scene builder |
 | `/finetune` | Fine-tuning Builder | Knowledge Base → training data pipeline |
 
+### ROS2 & Visualization
+
+| Tool / Module | Description |
+|---|---|
+| RViz2 auto-launch | Discovers active ROS2 topics, generates a `.rviz` config (image, LiDAR, odometry, TF, map displays), and launches `rviz2` with `use_sim_time=true`. Config files are named after the current USD scene and persisted in `workspace/rviz_configs/`. TF Fixed Frame is auto-detected from the OmniGraph `ROS2PublishTransformTree` node. |
+| RTX LiDAR tools | `add_sensor_to_prim` supports `rtx_lidar` with named config presets: `Example_Rotary`, `Velodyne_VLP16`, `HESAI_XT32_SD10`, `Ouster_OS1_64`, `SICK_picoScan150`, `Livox_Mid_360`, `Example_Solid_State`. `list_sensors` enumerates all sensor prims on the stage. `read_sensor_data` reads live camera/LiDAR/IMU/contact data. |
+| ROS2 Bridge Readiness | Stage Analyzer validator checks: ROS2 clock publisher, topic collisions, frame_id consistency, `RtxLidarHelper` `fullScan` flag on rotary LiDARs, missing `RenderProduct` connections, `frameId`/prim-name mismatches, and `ROS2PublishTransformTree` wiring. |
+
 Full interactive documentation: **`http://localhost:8000/docs`**
 
 ---

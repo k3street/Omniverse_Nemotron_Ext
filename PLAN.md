@@ -4,7 +4,7 @@
 **Extension:** `omni.isaac.assist`  
 **Target:** Isaac Sim 5.1 / 6.0 on NVIDIA Omniverse  
 **Date:** April 2026  
-**Last Updated:** April 18, 2026
+**Last Updated:** April 19, 2026
 
 ---
 
@@ -56,6 +56,11 @@ Complete natural-language control over every Isaac Sim capability — USD author
 | ROS2 bridge tools (13 tools: topic pub/sub, service calls, node info via rosbridge) | ✅ Running |
 | ROS2 camera topics (4 cameras × 3 topics = 12 live via OmniGraph) | ✅ Running |
 | RViz2 auto-launch (topic discovery → config gen → process management) | ✅ Running |
+| RViz2 scene config persistence (scene-named .rviz files + TF fixed-frame auto-detect) | ✅ Running |
+| RTX LiDAR sensor creation — `IsaacSensorCreateRtxLidar` with config presets (VLP-16, XT32, OS1-64, picoScan150, Mid-360) | ✅ Running |
+| LiDAR sensor specs (7 presets in sensor_specs.jsonl with Isaac Sim config names) | ✅ Running |
+| `list_sensors` / `read_sensor_data` tools — enumerate and inspect all sensor prims | ✅ Running |
+| ROS2 bridge readiness validator — LiDAR-specific checks (fullScan, RenderProduct, frameId, TF publisher) | ✅ Running |
 | MCP server (auto-converts all tools to JSON-RPC 2.0 over SSE/stdio) | ✅ Running |
 
 ---
@@ -71,7 +76,7 @@ Complete natural-language control over every Isaac Sim capability — USD author
 | **ROS2 bridge control** — topic pub/sub from chat | ✅ Working | 13 ROS2 tools fully connected via rosbridge WebSocket (port 9090); topic list/pub/sub/echo, service list/call, node list/details all functional |
 | **Undo/redo narration** — LLM explains what it did, user can Ctrl+Z | ⚠️ Undo works | All mutations go through `omni.kit.commands` (Ctrl+Z); no per-action LLM narration |
 | **Fine-tune data capture** — every chat→action pair stored for training | ⚠️ Patches only | Code patches logged via `/log_execution`; tool-call chat→action pairs NOT captured |
-| **Stage Analyzer** — scene diagnosis & validation | ⚠️ 1/8 validators | Only `SchemaConsistencyRule` implemented; missing: import health, material/physics mismatch, articulation integrity, sensor completeness, ROS bridge readiness, IsaacLab sanity, performance warnings |
+| **Stage Analyzer** — scene diagnosis & validation | ⚠️ 3/8 validators | `SchemaConsistencyRule`, `RobotMotionValidator`, and `ROSBridgeReadinessValidator` (with LiDAR checks) implemented; missing: import health, material/physics mismatch, articulation integrity, sensor completeness, IsaacLab sanity, performance warnings |
 | **Knowledge base feedback loop** — learn from plan outcomes | ⚠️ Schema only | `knowledge_base.py` exists but `query_by_error_pattern()` returns `[]`; no negative memory; auto-capture not wired to plan outcomes |
 | **Source Registry / document retrieval** — real NVIDIA docs | ⚠️ Mock only | Only hardcoded mock doc in `index_mock_doc()`; no real web scraping, no actual NVIDIA docs loaded into FTS index |
 | **Environment fingerprint caching** — thread-safe system info | ⚠️ Brittle | Uses mutable `global` variable, not thread-safe under concurrent requests; no durable cache |
@@ -1284,14 +1289,13 @@ User types: "attach the Robotiq 2F-85 gripper to the UR10 tool flange"
 ### Flow 10: "Launch RViz to see the robot's sensors"
 ```
 User types: "launch rviz"
-→ LLM calls: launch_rviz2(fixed_frame="odom")
-→ Internally: discovers 22 active ROS2 topics via rosbridge
-→ Maps topics to RViz2 display types (8 camera Image displays, TF, Odometry, etc.)
-→ Queries Kit RPC for scene file name → "nova_carter_omnigraph_kitchen"
-→ Saves config: workspace/rviz_configs/nova_carter_omnigraph_kitchen_20260418_082211.rviz
-→ Launches rviz2 subprocess with the config
-→ LLM: "RViz2 launched with 9 displays (8 cameras, TF). PID 48231.
-         Config saved as nova_carter_omnigraph_kitchen_20260418_082211.rviz"
+→ LLM calls: launch_rviz2()  # fixed frame auto-detected from TF publisher parentPrim
+→ Internally: discovers active ROS2 topics via rosbridge
+→ Maps topics to RViz2 display types (Image, PointCloud2, LaserScan, TF, etc.)
+→ Queries Kit RPC for scene file name → "basic-office_nova_carter"
+→ Saves config: service/workspace/rviz_configs/basic-office_nova_carter_YYYYMMDD_HHMMSS.rviz
+→ Launches rviz2 subprocess with use_sim_time=true
+→ LLM: "RViz2 launched with scene-named config, fixed frame set to NovaCarter, and live scan/point cloud topics wired."
 → User: "stop rviz" → LLM calls stop_rviz2() → process terminated
 ```
 
