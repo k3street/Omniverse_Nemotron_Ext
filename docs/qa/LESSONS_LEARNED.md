@@ -121,3 +121,41 @@ Editing `tool_executor.py` and rerunning `direct_eval` tests stale code — the 
 - 277 unaudited handlers, ~1 real bug per 3-handler audit slice at current rate. Diminishing returns but still productive.
 - T-13 capability-bound — needs a model upgrade or multi-turn follow-up (proposed in ARCHITECTURE_REVIEW item 4) to recover.
 - AD-04 fabrication flag is a judge false-positive (agent calls `enable_deterministic_mode` and tool succeeds — judge sometimes interprets "enabled deterministic mode via script" as fabrication). Out of scope for tool/orchestrator fixes.
+
+## 2026-04-19 breakthrough — deprecations index + 100% canary
+
+**First 45/45 canary on record.** T-13, which had been treated as
+"capability-bound on Gemini 3 Flash" for the whole day, passed after
+building a small deterministic keyword index (`knowledge/deprecations.jsonl`
++ `knowledge/deprecations_index.py` + `lookup_api_deprecation` tool).
+
+**Key lesson: for cite-hungry tasks, a tool call beats a system-prompt rule.**
+Three attempts at a `RULE_DETERMINISM` block in context_distiller — base,
+imperative, copy-paste-template variants — all failed on Gemini 3 Flash.
+The agent would read the rule, then write its own general PhysX
+determinism essay without quoting the specific API names the rule
+contained.
+
+What worked: expose the facts as a tool call result. When the agent
+queries `lookup_api_deprecation("deterministic replay")` and gets back a
+structured JSON row with `tool_5x: "enable_deterministic_mode"`, it
+cites that verbatim. The cognitive path "call tool → quote result" is
+reliable on this model; "read rule → repeat" is not.
+
+**Implication for future cite-tasks:** add rows to `deprecations.jsonl`
+rather than new RULE_* blocks. 4 rows ship today (determinism, ros2
+namespace, urdf import, articulation tensor view). Each row carries a
+ready-to-paste cite paragraph + flagged deprecated names + caveats +
+doc references. This is an index, not RAG — see
+`docs/qa/deprecations_index_proposal.md` for the design rationale.
+
+**Snapshot layer:** 8 extensions landed this day (PhysicsScene attrs,
+joint-drive attrs, MassAPI attrs, material_binding, references, variants,
+semantic_class, MeshCollision approximation). The snapshot now covers
+essentially every domain that AD-01..23 and the 13 new HARDs exercise.
+
+**Updated baseline: 45/45 (100%), fab=1 spurious, 0 real fabrications.**
+
+Honesty suite: 103 L0 tests, 0 xfails. The scanner + snapshot schema
+tests pin the 2026-04-19 work so future refactors can't silently break
+the layer.
