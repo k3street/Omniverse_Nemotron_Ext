@@ -2316,6 +2316,16 @@ _CUROBO_ROBOT_JOINTS = {
         "j2n7s300_joint_4", "j2n7s300_joint_5", "j2n7s300_joint_6",
         "j2n7s300_joint_7",
     ],
+    "tm12.yml": [
+        "joint_1", "joint_2", "joint_3", "joint_4",
+        "joint_5", "joint_6",
+    ],
+    "dual_ur10e.yml": [
+        "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+        "wrist_1_joint", "wrist_2_joint", "wrist_3_joint",
+        "r2_shoulder_pan_joint", "r2_shoulder_lift_joint", "r2_elbow_joint",
+        "r2_wrist_1_joint", "r2_wrist_2_joint", "r2_wrist_3_joint",
+    ],
 }
 
 
@@ -2328,6 +2338,7 @@ def _gen_curobo_motion_plan(args: Dict) -> str:
     interp_dt = args.get("interpolation_dt", 0.02)
     max_attempts = args.get("max_attempts", 5)
     world_obs = args.get("world_obstacles")
+    world_update_hz = args.get("world_update_hz", 0.1)
 
     joint_names = _CUROBO_ROBOT_JOINTS.get(robot_cfg, _CUROBO_ROBOT_JOINTS["franka.yml"])
 
@@ -2372,6 +2383,7 @@ def _gen_curobo_motion_plan(args: Dict) -> str:
         ")",
         "motion_gen = MotionGen(motion_gen_config)",
         "motion_gen.warmup()",
+        f"# World obstacle refresh rate: {world_update_hz}Hz (every {int(1.0/world_update_hz * 60)} sim steps at 60Hz)",
         "",
         "# Read current joint state",
         f"art = SingleArticulation(prim_path='{art_path}')",
@@ -2946,6 +2958,577 @@ print('\\n=== Vision-Guided Pick & Place Complete ===')
     return code
 
 CODE_GEN_HANDLERS["curobo_vision_pick"] = _gen_curobo_vision_pick
+
+
+# ── cuRobo Robot Configuration ───────────────────────────────────────────────
+
+def _gen_configure_curobo_robot(args: Dict) -> str:
+    """Generate code that creates a cuRobo robot YAML configuration file."""
+    urdf_path = args["urdf_path"]
+    base_link = args["base_link"]
+    ee_link = args["ee_link"]
+    joint_names = args["joint_names"]
+    retract_config = args.get("retract_config", [0.0] * len(joint_names))
+    lock_joints = args.get("lock_joints")
+    asset_root = args.get("asset_root_path")
+    output_path = args.get("output_path")
+    max_accel = args.get("max_acceleration", 15.0)
+    max_jerk = args.get("max_jerk", 500.0)
+
+    n_joints = len(joint_names)
+    null_space = [1.0] * n_joints
+    cspace_weight = [1.0] * n_joints
+
+    lines = [
+        "import os, yaml",
+        "",
+        f"urdf_path = '{urdf_path}'",
+        f"asset_root = '{asset_root or 'os.path.dirname(urdf_path)'}'",
+    ]
+
+    if not asset_root:
+        lines.append("asset_root = os.path.dirname(urdf_path)")
+
+    robot_name = "os.path.splitext(os.path.basename(urdf_path))[0]"
+    if output_path:
+        lines.append(f"output_path = '{output_path}'")
+    else:
+        lines.extend([
+            "os.makedirs('workspace/curobo_configs', exist_ok=True)",
+            f"output_path = f'workspace/curobo_configs/{{{robot_name}}}.yml'",
+        ])
+
+    lock_joints_str = json.dumps(lock_joints) if lock_joints else "null"
+    lines.extend([
+        "",
+        "config = {",
+        "    'robot_cfg': {",
+        "        'kinematics': {",
+        "            'usd_path': '',",
+        "            'usd_robot_root': '/robot',",
+        "            'isaac_usd_path': '',",
+        "            'usd_flip_joints': {},",
+        "            'usd_flip_joint_limits': [],",
+        f"            'urdf_path': urdf_path,",
+        f"            'asset_root_path': asset_root,",
+        f"            'base_link': '{base_link}',",
+        f"            'ee_link': '{ee_link}',",
+        "            'link_names': None,",
+        f"            'lock_joints': {lock_joints_str},",
+        "            'extra_links': None,",
+        "            'collision_link_names': None,",
+        "            'collision_spheres': None,",
+        "            'collision_sphere_buffer': 0.005,",
+        "            'extra_collision_spheres': {},",
+        "            'self_collision_ignore': None,",
+        "            'self_collision_buffer': None,",
+        "            'use_global_cumul': True,",
+        "            'mesh_link_names': None,",
+        "            'cspace': {",
+        f"                'joint_names': {json.dumps(joint_names)},",
+        f"                'retract_config': {json.dumps(retract_config)},",
+        f"                'null_space_weight': {json.dumps(null_space)},",
+        f"                'cspace_distance_weight': {json.dumps(cspace_weight)},",
+        f"                'max_jerk': {max_jerk},",
+        f"                'max_acceleration': {max_accel},",
+        "            },",
+        "        },",
+        "    },",
+        "}",
+        "",
+        "with open(output_path, 'w') as f:",
+        "    yaml.dump(config, f, default_flow_style=False, sort_keys=False)",
+        "",
+        "print(f'cuRobo config written to {output_path}')",
+        f"print(f'  Base link: {base_link}')",
+        f"print(f'  EE link: {ee_link}')",
+        f"print(f'  Joints ({n_joints}): {json.dumps(joint_names)}')",
+        "print('  Next: run generate_collision_spheres to add collision model')",
+    ])
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["configure_curobo_robot"] = _gen_configure_curobo_robot
+
+
+def _gen_convert_urdf_to_curobo_usd(args: Dict) -> str:
+    """Generate code to convert URDF to USD and update cuRobo config."""
+    config_path = args["robot_config_path"]
+    output_usd = args.get("output_usd_path")
+    usd_root = args.get("usd_robot_root", "/robot")
+    fix_limits = args.get("fix_joint_limits", True)
+
+    lines = [
+        "import yaml, os",
+        "from isaacsim.asset.importer.urdf import UrdfImporter, ImportConfig",
+        "",
+        f"config_path = '{config_path}'",
+        "with open(config_path) as f:",
+        "    robot_cfg = yaml.safe_load(f)",
+        "",
+        "urdf_path = robot_cfg['robot_cfg']['kinematics']['urdf_path']",
+    ]
+
+    if output_usd:
+        lines.append(f"output_usd = '{output_usd}'")
+    else:
+        lines.append("output_usd = os.path.splitext(urdf_path)[0] + '.usd'")
+
+    lines.extend([
+        "",
+        "import_config = ImportConfig()",
+        f"import_config.fix_base = True",
+        f"import_config.make_default_prim = True",
+        f"import_config.create_physics_scene = False",
+    ])
+
+    if fix_limits:
+        lines.append("import_config.fix_joint_limits = True")
+
+    lines.extend([
+        "",
+        "importer = UrdfImporter()",
+        "result = importer.import_robot(",
+        "    urdf_path=urdf_path,",
+        "    import_config=import_config,",
+        "    dest_path=output_usd,",
+        ")",
+        "",
+        "# Update cuRobo config with USD path",
+        "robot_cfg['robot_cfg']['kinematics']['usd_path'] = output_usd",
+        f"robot_cfg['robot_cfg']['kinematics']['usd_robot_root'] = '{usd_root}'",
+        "",
+        "with open(config_path, 'w') as f:",
+        "    yaml.dump(robot_cfg, f, default_flow_style=False, sort_keys=False)",
+        "",
+        "print(f'Converted {urdf_path} → {output_usd}')",
+        "print(f'Updated cuRobo config: {config_path}')",
+    ])
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["convert_urdf_to_curobo_usd"] = _gen_convert_urdf_to_curobo_usd
+
+
+def _gen_generate_collision_spheres(args: Dict) -> str:
+    """Generate code to fit collision spheres to robot meshes and update config."""
+    config_path = args["robot_config_path"]
+    art_path = args["articulation_path"]
+    max_spheres = args.get("max_spheres_per_link", 10)
+    sphere_buffer = args.get("collision_sphere_buffer", 0.005)
+    base_scale = args.get("base_link_radius_scale", 0.5)
+
+    lines = [
+        "import yaml, numpy as np",
+        "from pxr import Usd, UsdGeom",
+        "import omni.usd",
+        "",
+        f"config_path = '{config_path}'",
+        f"art_path = '{art_path}'",
+        f"MAX_SPHERES = {max_spheres}",
+        f"SPHERE_BUFFER = {sphere_buffer}",
+        f"BASE_SCALE = {base_scale}",
+        "",
+        "with open(config_path) as f:",
+        "    robot_cfg = yaml.safe_load(f)",
+        "",
+        "kin = robot_cfg['robot_cfg']['kinematics']",
+        "base_link = kin['base_link']",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        "robot_prim = stage.GetPrimAtPath(art_path)",
+        "",
+        "def get_link_prims(root):",
+        "    links = {}",
+        "    for prim in Usd.PrimRange(root):",
+        "        if prim.IsA(UsdGeom.Xform) and not prim.IsA(UsdGeom.Mesh):",
+        "            name = prim.GetName()",
+        "            meshes = [c for c in prim.GetChildren() if c.IsA(UsdGeom.Mesh)]",
+        "            if meshes:",
+        "                links[name] = prim",
+        "    return links",
+        "",
+        "def fit_spheres(prim, max_n):",
+        "    '''Fit collision spheres to mesh bounding boxes of a link.'''",
+        "    spheres = []",
+        "    bbox_cache = UsdGeom.BBoxCache(0, [UsdGeom.Tokens.default_])",
+        "    bbox = bbox_cache.ComputeWorldBound(prim)",
+        "    rng = bbox.GetRange()",
+        "    if rng.IsEmpty():",
+        "        return [{'center': [0, 0, 0], 'radius': 0.02}]",
+        "    mn = np.array(rng.GetMin())",
+        "    mx = np.array(rng.GetMax())",
+        "    center = ((mn + mx) / 2).tolist()",
+        "    extent = mx - mn",
+        "    radius = float(np.linalg.norm(extent) / 2)",
+        "    # Simple subdivision along longest axis",
+        "    n = min(max_n, max(1, int(np.max(extent) / (radius * 0.8))))",
+        "    if n == 1:",
+        "        return [{'center': [round(c, 4) for c in center], 'radius': round(radius, 4)}]",
+        "    longest = int(np.argmax(extent))",
+        "    step = extent[longest] / n",
+        "    sub_radius = round(float(np.sqrt((step/2)**2 + (min(extent[i] for i in range(3) if i != longest)/2)**2)), 4)",
+        "    for i in range(n):",
+        "        c = list(center)",
+        "        c[longest] = round(mn[longest] + step * (i + 0.5), 4)",
+        "        spheres.append({'center': c, 'radius': sub_radius})",
+        "    return spheres[:max_n]",
+        "",
+        "links = get_link_prims(robot_prim)",
+        "collision_link_names = []",
+        "collision_spheres = {}",
+        "self_collision_ignore = {}",
+        "self_collision_buffer = {}",
+        "",
+        "link_order = list(links.keys())",
+        "for i, name in enumerate(link_order):",
+        "    collision_link_names.append(name)",
+        "    sph = fit_spheres(links[name], MAX_SPHERES)",
+        "    # Scale down base link to avoid ground collision",
+        "    if name == base_link:",
+        "        for s in sph:",
+        "            s['radius'] = round(s['radius'] * BASE_SCALE, 4)",
+        "    collision_spheres[name] = sph",
+        "    self_collision_buffer[name] = 0.0",
+        "    # Ignore adjacent links",
+        "    neighbors = []",
+        "    if i > 0: neighbors.append(link_order[i-1])",
+        "    if i < len(link_order)-1: neighbors.append(link_order[i+1])",
+        "    if neighbors:",
+        "        self_collision_ignore[name] = neighbors",
+        "",
+        "kin['collision_link_names'] = collision_link_names",
+        "kin['collision_spheres'] = collision_spheres",
+        f"kin['collision_sphere_buffer'] = SPHERE_BUFFER",
+        "kin['self_collision_ignore'] = self_collision_ignore",
+        "kin['self_collision_buffer'] = self_collision_buffer",
+        "",
+        "with open(config_path, 'w') as f:",
+        "    yaml.dump(robot_cfg, f, default_flow_style=False, sort_keys=False)",
+        "",
+        "total = sum(len(v) for v in collision_spheres.values())",
+        "print(f'Generated {total} collision spheres across {len(collision_link_names)} links')",
+        "for name, sph in collision_spheres.items():",
+        "    print(f'  {name}: {len(sph)} spheres')",
+        "print(f'Config updated: {config_path}')",
+    ]
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["generate_collision_spheres"] = _gen_generate_collision_spheres
+
+
+def _gen_curobo_mpc_control(args: Dict) -> str:
+    """Generate code for reactive MPC control via cuRobo MPPI."""
+    art_path = args["articulation_path"]
+    target_pos = args["target_position"]
+    target_ori = args.get("target_orientation")
+    robot_cfg = args.get("robot_config", "franka.yml")
+    control_hz = args.get("control_hz", 100)
+    horizon = args.get("horizon_steps", 32)
+    num_rollouts = args.get("num_rollouts", 1024)
+    duration = args.get("duration_s", 10.0)
+    use_cuda_graph = args.get("use_cuda_graph", True)
+
+    joint_names = _CUROBO_ROBOT_JOINTS.get(robot_cfg, _CUROBO_ROBOT_JOINTS["franka.yml"])
+
+    ori_list = list(target_ori) if target_ori else [1.0, 0.0, 0.0, 0.0]
+    pose_list = list(target_pos) + ori_list
+
+    lines = [
+        "import torch, time",
+        "import numpy as np",
+        "from curobo.wrap.reacher.mpc import MpcSolver, MpcSolverConfig",
+        "from curobo.types.math import Pose",
+        "from curobo.types.robot import JointState as CuroboJointState",
+        "from isaacsim.core.prims import SingleArticulation",
+        "",
+        f"# cuRobo MPC reactive control — {control_hz}Hz for {duration}s",
+        f"robot_cfg_file = '{robot_cfg}'",
+        "",
+        "# Read world from USD stage",
+        "try:",
+        "    from curobo.util.usd_helper import UsdHelper",
+        "    usd_helper = UsdHelper()",
+        "    usd_helper.load_stage(usd_helper.stage)",
+        "    world_config = usd_helper.get_obstacles_from_stage(",
+        f"        reference_prim_path='{art_path}',",
+        "        ignore_substring=['visual', 'finger'],",
+        "    ).get_collision_check_world()",
+        "except Exception as e:",
+        "    print(f'World read failed: {e}, using ground only')",
+        "    world_config = {'cuboid': {'ground': {'dims': [10, 10, 0.01], 'pose': [0, 0, -0.005, 1, 0, 0, 0]}}}",
+        "",
+        "mpc_config = MpcSolverConfig.load_from_robot_config(",
+        "    robot_cfg_file,",
+        "    world_config,",
+        f"    use_cuda_graph={use_cuda_graph},",
+        f"    num_rollouts={num_rollouts},",
+        f"    horizon={horizon},",
+        ")",
+        "mpc = MpcSolver(mpc_config)",
+        "",
+        f"art = SingleArticulation(prim_path='{art_path}')",
+        "art.initialize()",
+        f"joint_names = {joint_names}",
+        "n_dof = len(joint_names)",
+        "",
+        f"goal_pose = Pose.from_list({pose_list})",
+        "",
+        f"dt = 1.0 / {control_hz}",
+        f"steps = int({duration} / dt)",
+        "print(f'Starting MPC: {steps} steps at {dt:.4f}s interval')",
+        "print('WARNING: MPC is experimental — constraints are soft, not hard guarantees')",
+        "",
+        "for step in range(steps):",
+        "    q = art.get_joint_positions()[:n_dof]",
+        "    qd = art.get_joint_velocities()[:n_dof]",
+        "    current = CuroboJointState.from_position(",
+        "        torch.tensor(q, dtype=torch.float32).unsqueeze(0).cuda(),",
+        "        joint_names=joint_names,",
+        "    )",
+        "    current.velocity = torch.tensor(qd, dtype=torch.float32).unsqueeze(0).cuda()",
+        "",
+        "    result = mpc.step(current, goal_pose)",
+        "    if result.success:",
+        "        action = result.action.squeeze().cpu().numpy()",
+        "        art.set_joint_positions(action[:n_dof])",
+        "    else:",
+        "        if step % 100 == 0:",
+        "            print(f'  Step {step}: MPC failed to find solution')",
+        "",
+        "    if step % (steps // 10) == 0:",
+        "        print(f'  Progress: {step}/{steps} ({100*step/steps:.0f}%)')",
+        "",
+        "print('MPC control complete')",
+    ]
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["curobo_mpc_control"] = _gen_curobo_mpc_control
+
+
+def _gen_curobo_ik_reachability(args: Dict) -> str:
+    """Generate code for batched IK reachability analysis."""
+    art_path = args["articulation_path"]
+    center = args["grid_center"]
+    size = args.get("grid_size", [0.6, 0.6, 0.6])
+    res = args.get("grid_resolution", 0.05)
+    ori = args.get("orientation", [0.0, 1.0, 0.0, 0.0])
+    robot_cfg = args.get("robot_config", "franka.yml")
+    collision_aware = args.get("collision_aware", True)
+    visualize = args.get("visualize", True)
+
+    lines = [
+        "import torch, numpy as np",
+        "from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig",
+        "from curobo.types.math import Pose",
+        "",
+        f"# cuRobo batched IK reachability — grid {size} at res {res}m",
+        f"robot_cfg_file = '{robot_cfg}'",
+    ]
+
+    if collision_aware:
+        lines.extend([
+            "",
+            "try:",
+            "    from curobo.util.usd_helper import UsdHelper",
+            "    usd_helper = UsdHelper()",
+            "    usd_helper.load_stage(usd_helper.stage)",
+            "    world_config = usd_helper.get_obstacles_from_stage(",
+            f"        reference_prim_path='{art_path}',",
+            "        ignore_substring=['visual', 'finger'],",
+            "    ).get_collision_check_world()",
+            "except Exception:",
+            "    world_config = None",
+        ])
+    else:
+        lines.append("world_config = None")
+
+    lines.extend([
+        "",
+        "ik_config = IKSolverConfig.load_from_robot_config(",
+        "    robot_cfg_file,",
+        "    world_config,",
+        "    num_seeds=20,",
+        ")",
+        "ik_solver = IKSolver(ik_config)",
+        "",
+        "# Build sample grid",
+        f"center = np.array({center})",
+        f"half = np.array({size}) / 2",
+        f"res = {res}",
+        "xs = np.arange(center[0] - half[0], center[0] + half[0], res)",
+        "ys = np.arange(center[1] - half[1], center[1] + half[1], res)",
+        "zs = np.arange(center[2] - half[2], center[2] + half[2], res)",
+        "xx, yy, zz = np.meshgrid(xs, ys, zs, indexing='ij')",
+        "positions = np.stack([xx.ravel(), yy.ravel(), zz.ravel()], axis=-1)",
+        "n_poses = len(positions)",
+        "print(f'Testing {n_poses} poses in grid...')",
+        "",
+        f"orientation = {ori}",
+        "# Build batched pose tensor",
+        "pose_data = np.zeros((n_poses, 7))",
+        "pose_data[:, :3] = positions",
+        "pose_data[:, 3:] = orientation",
+        "goal = Pose.from_list(torch.tensor(pose_data, dtype=torch.float32).cuda())",
+        "",
+        "# Solve in batches of 1024",
+        "batch_size = 1024",
+        "reachable = np.zeros(n_poses, dtype=bool)",
+        "for i in range(0, n_poses, batch_size):",
+        "    batch = Pose(",
+        "        position=goal.position[i:i+batch_size],",
+        "        quaternion=goal.quaternion[i:i+batch_size],",
+        "    )",
+        "    result = ik_solver.solve_batch(batch)",
+        "    reachable[i:i+batch_size] = result.success.squeeze().cpu().numpy()",
+        "",
+        "n_reach = int(reachable.sum())",
+        "print(f'Reachable: {n_reach}/{n_poses} ({100*n_reach/n_poses:.1f}%)')",
+    ])
+
+    if visualize:
+        lines.extend([
+            "",
+            "# Visualize via debug_draw",
+            "from isaacsim.util.debug_draw import DebugDraw",
+            "draw = DebugDraw()",
+            "draw.clear()",
+            "green = (0.0, 1.0, 0.0, 0.8)",
+            "red = (1.0, 0.0, 0.0, 0.4)",
+            f"pt_size = {res * 8}",
+            "for i in range(n_poses):",
+            "    color = green if reachable[i] else red",
+            "    draw.draw_point(positions[i].tolist(), color, pt_size)",
+            "print('Reachability map drawn in viewport')",
+        ])
+
+    lines.extend([
+        "",
+        "# Summary",
+        "import json as _json",
+        "_result = {'total_poses': n_poses, 'reachable': n_reach,",
+        "           'percent': round(100*n_reach/n_poses, 1),",
+        f"           'grid_center': {center}, 'grid_size': {size}, 'resolution': {res}}}",
+        "print('IK_REACH:' + _json.dumps(_result))",
+    ])
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["curobo_ik_reachability"] = _gen_curobo_ik_reachability
+
+
+def _gen_curobo_multi_arm_plan(args: Dict) -> str:
+    """Generate code for multi-arm motion planning with cuRobo."""
+    art_path = args["articulation_path"]
+    target_positions = args["target_positions"]
+    target_orientations = args.get("target_orientations")
+    robot_cfg = args.get("robot_config", "dual_ur10e.yml")
+    interp_dt = args.get("interpolation_dt", 0.02)
+    max_attempts = args.get("max_attempts", 10)
+
+    joint_names = _CUROBO_ROBOT_JOINTS.get(robot_cfg, _CUROBO_ROBOT_JOINTS.get("dual_ur10e.yml", []))
+    n_arms = len(target_positions)
+
+    # Build goal poses for each arm
+    goals = []
+    for i, pos in enumerate(target_positions):
+        if target_orientations and i < len(target_orientations):
+            ori = target_orientations[i]
+        else:
+            ori = [1.0, 0.0, 0.0, 0.0]
+        goals.append(list(pos) + list(ori))
+
+    lines = [
+        "import torch",
+        "import numpy as np",
+        "from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig",
+        "from curobo.types.math import Pose",
+        "from curobo.types.robot import JointState as CuroboJointState",
+        "from isaacsim.core.prims import SingleArticulation",
+        "",
+        f"# cuRobo multi-arm planning — {n_arms} arms",
+        "print('WARNING: Multi-arm planning is experimental — lower success rate than single-arm')",
+        f"robot_cfg_file = '{robot_cfg}'",
+        "",
+        "# Read world",
+        "try:",
+        "    from curobo.util.usd_helper import UsdHelper",
+        "    usd_helper = UsdHelper()",
+        "    usd_helper.load_stage(usd_helper.stage)",
+        "    world_config = usd_helper.get_obstacles_from_stage(",
+        f"        reference_prim_path='{art_path}',",
+        "        ignore_substring=['visual', 'finger'],",
+        "    ).get_collision_check_world()",
+        "except Exception as e:",
+        "    print(f'World read failed: {e}')",
+        "    world_config = {'cuboid': {'ground': {'dims': [10, 10, 0.01], 'pose': [0, 0, -0.005, 1, 0, 0, 0]}}}",
+        "",
+        "motion_gen_config = MotionGenConfig.load_from_robot_config(",
+        "    robot_cfg_file,",
+        "    world_config,",
+        f"    interpolation_dt={interp_dt},",
+        ")",
+        "motion_gen = MotionGen(motion_gen_config)",
+        "motion_gen.warmup()",
+        "",
+        f"art = SingleArticulation(prim_path='{art_path}')",
+        "art.initialize()",
+        f"joint_names = {joint_names}",
+        "n_dof = len(joint_names)",
+        "",
+        "q_current = art.get_joint_positions()",
+        "start_state = CuroboJointState.from_position(",
+        "    torch.tensor(q_current[:n_dof], dtype=torch.float32).unsqueeze(0).cuda(),",
+        "    joint_names=joint_names,",
+        ")",
+        "",
+        "# Primary EE target (arm 1)",
+        f"goal_pose = Pose.from_list({goals[0]})",
+        "",
+    ]
+
+    # For multi-arm, cuRobo uses extra link targets
+    if n_arms > 1:
+        lines.extend([
+            "# Secondary arm targets via link_poses",
+            "link_poses = {}",
+        ])
+        for i in range(1, n_arms):
+            lines.append(f"link_poses['arm_{i+1}_ee'] = Pose.from_list({goals[i]})")
+        lines.extend([
+            "",
+            f"plan_config = MotionGenPlanConfig(max_attempts={max_attempts})",
+            "result = motion_gen.plan_single(",
+            "    start_state, goal_pose, plan_config,",
+            "    link_poses=link_poses,",
+            ")",
+        ])
+    else:
+        lines.extend([
+            f"result = motion_gen.plan_single(start_state, goal_pose, MotionGenPlanConfig(max_attempts={max_attempts}))",
+        ])
+
+    lines.extend([
+        "",
+        "if result.success:",
+        "    traj = result.get_interpolated_plan()",
+        "    positions = traj.position.cpu().numpy().tolist()",
+        f"    print(f'Multi-arm: planned {{len(positions)}} waypoints (dt={interp_dt}s)')",
+        "    import json as _json",
+        "    _traj_data = {'joint_names': joint_names, 'waypoints': positions,",
+        f"                  'dt': {interp_dt}, 'success': True, 'arms': {n_arms}}}",
+        "    print('CUROBO_TRAJ:' + _json.dumps(_traj_data))",
+        "else:",
+        "    print(f'Multi-arm planning failed: {result.status}')",
+        "    import json as _json",
+        "    print('CUROBO_TRAJ:' + _json.dumps({'success': False, 'status': str(result.status)}))",
+    ])
+    return "\n".join(lines)
+
+
+CODE_GEN_HANDLERS["curobo_multi_arm_plan"] = _gen_curobo_multi_arm_plan
 
 
 # ── Asset Catalog Search ─────────────────────────────────────────────────────
@@ -32498,6 +33081,17 @@ CODE_GEN_HANDLERS = {
     "bulk_apply_schema": _gen_bulk_apply_schema,
     "group_prims": _gen_group_prims,
     "duplicate_prims": _gen_duplicate_prims,
+    # cuRobo GPU Motion Planning
+    "curobo_motion_plan": _gen_curobo_motion_plan,
+    "curobo_pick_place": _gen_curobo_pick_place,
+    "curobo_vision_pick": _gen_curobo_vision_pick,
+    "curobo_mpc_control": _gen_curobo_mpc_control,
+    "curobo_ik_reachability": _gen_curobo_ik_reachability,
+    "curobo_multi_arm_plan": _gen_curobo_multi_arm_plan,
+    # cuRobo Robot Configuration
+    "configure_curobo_robot": _gen_configure_curobo_robot,
+    "convert_urdf_to_curobo_usd": _gen_convert_urdf_to_curobo_usd,
+    "generate_collision_spheres": _gen_generate_collision_spheres,
 }
 
 
@@ -32653,6 +33247,8 @@ DATA_HANDLERS = {
     "get_debug_info": _handle_get_debug_info,
     "lookup_knowledge": _handle_lookup_knowledge,
     "explain_error": None,  # handled inline by LLM (no tool execution)
+    # cuRobo trajectory execution
+    "curobo_execute_trajectory": _handle_curobo_execute_trajectory,
 }
 
 # ── ROS2 live handlers (via rosbridge / ros-mcp) ────────────────────────────

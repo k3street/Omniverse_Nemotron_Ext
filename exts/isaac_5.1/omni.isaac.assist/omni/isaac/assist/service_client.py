@@ -67,12 +67,18 @@ class AssistServiceClient:
             logger.error(f"Error communicating with Assist Service: {e}")
             return {"error": str(e)}
 
-    async def generate_plan(self, user_query: str, findings: list = None) -> dict:
+    async def generate_plan(self, user_query: str, findings: list = None,
+                            scope: str = "scene", mode: str = "auto") -> dict:
         """ Submits findings/intent to the Swarm Plan Generator endpoint. """
         url = f"{self.base_url}/api/v1/plans/generate"
         payload = {
-            "finding_ids": [],
-            "user_request": user_query
+            "req": {
+                "finding_ids": [f.get("finding_id", f) if isinstance(f, dict) else f
+                                for f in (findings or [])],
+                "user_request": user_query,
+                "scope": scope,
+                "mode": mode,
+            }
         }
         try:
             async with aiohttp.ClientSession(json_serialize=self._json_serialize) as session:

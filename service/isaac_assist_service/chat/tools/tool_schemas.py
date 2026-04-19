@@ -1360,13 +1360,14 @@ ISAAC_SIM_TOOLS = [
                     "articulation_path": {"type": "string", "description": "USD path to the robot articulation, e.g. '/World/Franka'"},
                     "target_position": {"type": "array", "items": {"type": "number"}, "description": "Target EE position [x, y, z] in meters"},
                     "target_orientation": {"type": "array", "items": {"type": "number"}, "description": "Target EE orientation as quaternion [qw, qx, qy, qz]. Omit to keep current."},
-                    "robot_config": {"type": "string", "enum": ["franka.yml", "ur5e.yml", "ur10e.yml", "kinova_gen3.yml", "iiwa.yml", "jaco7.yml", "tm12.yml"], "description": "cuRobo robot config file. Default: franka.yml"},
+                    "robot_config": {"type": "string", "enum": ["franka.yml", "ur5e.yml", "ur10e.yml", "kinova_gen3.yml", "iiwa.yml", "jaco7.yml", "tm12.yml", "dual_ur10e.yml"], "description": "cuRobo robot config file. Default: franka.yml"},
                     "interpolation_dt": {"type": "number", "description": "Time step between waypoints in seconds. Default: 0.02"},
                     "max_attempts": {"type": "integer", "description": "Max planning attempts. Default: 5"},
                     "world_obstacles": {
                         "type": "object",
                         "description": "Optional world obstacles as cuboids/meshes dict. If omitted, reads from USD stage via UsdHelper.",
                     },
+                    "world_update_hz": {"type": "number", "description": "Rate in Hz at which cuRobo re-reads obstacles from USD stage. Default: 0.1 (every 10s)"},
                 },
                 "required": ["articulation_path", "target_position"],
             },
@@ -1508,6 +1509,144 @@ ISAAC_SIM_TOOLS = [
                     "execution_rate_hz": {"type": "number", "description": "Rate to play waypoints. Default: 50"},
                 },
                 "required": ["articulation_path", "camera_prim_path", "pick_position", "place_position"],
+            },
+        },
+    },
+    # ─── cuRobo Robot Configuration ──────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_curobo_robot",
+            "description": "Generate a cuRobo robot YAML configuration file from a URDF. Creates the full config needed by CudaRobotGeneratorConfig including kinematics, collision, and cspace blocks. Use this before curobo_motion_plan with a custom robot not in the built-in config list.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "urdf_path": {"type": "string", "description": "Path to the robot URDF file"},
+                    "base_link": {"type": "string", "description": "Name of the base link in the URDF, e.g. 'base_link'"},
+                    "ee_link": {"type": "string", "description": "Name of the end-effector link, e.g. 'tool0' or 'panda_hand'"},
+                    "joint_names": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "Ordered list of actuated joint names for the cspace",
+                    },
+                    "retract_config": {
+                        "type": "array", "items": {"type": "number"},
+                        "description": "Default collision-free joint configuration (same length as joint_names). If omitted, uses zeros.",
+                    },
+                    "lock_joints": {
+                        "type": "object",
+                        "description": "Joints to lock at fixed values, e.g. {'finger_joint1': 0.04}. Use for grippers.",
+                    },
+                    "asset_root_path": {"type": "string", "description": "Root path for mesh assets referenced by URDF. Default: derived from urdf_path"},
+                    "output_path": {"type": "string", "description": "Output YAML file path. Default: <robot_name>.yml in workspace/curobo_configs/"},
+                    "max_acceleration": {"type": "number", "description": "Max joint acceleration in rad/s^2. Default: 15.0"},
+                    "max_jerk": {"type": "number", "description": "Max joint jerk in rad/s^3. Default: 500.0"},
+                },
+                "required": ["urdf_path", "base_link", "ee_link", "joint_names"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "convert_urdf_to_curobo_usd",
+            "description": "Convert a robot URDF to a cuRobo-compatible USD file using Isaac Sim's URDF importer. Updates the cuRobo config YAML with the generated USD path. Run after configure_curobo_robot to get the USD needed for simulation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_config_path": {"type": "string", "description": "Path to the cuRobo robot YAML config (from configure_curobo_robot)"},
+                    "output_usd_path": {"type": "string", "description": "Output USD file path. Default: same directory as URDF with .usd extension"},
+                    "usd_robot_root": {"type": "string", "description": "Root prim path in the USD. Default: '/robot'"},
+                    "fix_joint_limits": {"type": "boolean", "description": "Auto-fix joint limit issues during conversion. Default: true"},
+                },
+                "required": ["robot_config_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_collision_spheres",
+            "description": "Generate a collision sphere model for a robot by fitting spheres to each link mesh. Populates collision_link_names, collision_spheres, self_collision_ignore, and self_collision_buffer in the cuRobo config YAML. Required for collision-aware motion planning with custom robots.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_config_path": {"type": "string", "description": "Path to the cuRobo robot YAML config"},
+                    "articulation_path": {"type": "string", "description": "USD path to the robot in the stage for mesh reading, e.g. '/World/MyRobot'"},
+                    "max_spheres_per_link": {"type": "integer", "description": "Max collision spheres per link. More = accurate but slower. Default: 10"},
+                    "collision_sphere_buffer": {"type": "number", "description": "Extra buffer radius on all spheres in meters. Default: 0.005"},
+                    "base_link_radius_scale": {"type": "number", "description": "Scale factor for base link sphere radius (reduce to avoid ground collision). Default: 0.5"},
+                },
+                "required": ["robot_config_path", "articulation_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "curobo_mpc_control",
+            "description": "Start a reactive model predictive control (MPC) loop using cuRobo's MPPI optimizer. Tracks a target pose with real-time collision avoidance at up to 500Hz. Use for dynamic target following or teleoperation. WARNING: Experimental — constraints are soft (cost terms), not hard guarantees. Test in simulation before real deployment.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "target_position": {"type": "array", "items": {"type": "number"}, "description": "Initial target EE position [x, y, z] in meters"},
+                    "target_orientation": {"type": "array", "items": {"type": "number"}, "description": "Target EE orientation [qw, qx, qy, qz]. Default: current orientation"},
+                    "robot_config": {"type": "string", "description": "cuRobo config file. Default: franka.yml"},
+                    "control_hz": {"type": "number", "description": "MPC update rate in Hz. Default: 100"},
+                    "horizon_steps": {"type": "integer", "description": "MPPI rollout horizon in steps. Default: 32"},
+                    "num_rollouts": {"type": "integer", "description": "Number of parallel MPPI rollouts. Default: 1024"},
+                    "duration_s": {"type": "number", "description": "How long to run the MPC loop in seconds. Default: 10.0"},
+                    "use_cuda_graph": {"type": "boolean", "description": "Use CUDAGraphs for faster execution. Default: true"},
+                },
+                "required": ["articulation_path", "target_position"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "curobo_ik_reachability",
+            "description": "Compute a reachability map by solving batched inverse kinematics on a 3D grid around a position. Uses cuRobo's GPU-accelerated IKSolver to test thousands of poses in parallel. Returns/visualizes a color-coded point cloud: green = reachable, red = unreachable. Supports collision-aware mode.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the robot articulation"},
+                    "grid_center": {"type": "array", "items": {"type": "number"}, "description": "Center of the sampling grid [x, y, z] in meters"},
+                    "grid_size": {"type": "array", "items": {"type": "number"}, "description": "Grid extents [dx, dy, dz] in meters. Default: [0.6, 0.6, 0.6]"},
+                    "grid_resolution": {"type": "number", "description": "Distance between grid sample points in meters. Default: 0.05"},
+                    "orientation": {"type": "array", "items": {"type": "number"}, "description": "Fixed EE orientation [qw, qx, qy, qz] for all grid points. Default: top-down [0, 1, 0, 0]"},
+                    "robot_config": {"type": "string", "description": "cuRobo config file. Default: franka.yml"},
+                    "collision_aware": {"type": "boolean", "description": "Include world obstacles from USD stage in IK solving. Default: true"},
+                    "visualize": {"type": "boolean", "description": "Draw reachability point cloud via debug_draw. Default: true"},
+                },
+                "required": ["articulation_path", "grid_center"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "curobo_multi_arm_plan",
+            "description": "Plan collision-free trajectories for a multi-arm setup (e.g. dual UR10e) using cuRobo. Models both arms as a single kinematic chain and plans coordinated, self-collision-free motions. WARNING: Experimental — lower success rate than single-arm planning.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "articulation_path": {"type": "string", "description": "USD path to the multi-arm articulation, e.g. '/World/DualUR10e'"},
+                    "target_positions": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "number"}},
+                        "description": "Target EE positions for each arm: [[x1,y1,z1], [x2,y2,z2]]",
+                    },
+                    "target_orientations": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "number"}},
+                        "description": "Target orientations per arm: [[qw,qx,qy,qz], ...]. Default: current orientations",
+                    },
+                    "robot_config": {"type": "string", "description": "Multi-arm cuRobo config. Default: dual_ur10e.yml"},
+                    "interpolation_dt": {"type": "number", "description": "Waypoint time step in seconds. Default: 0.02"},
+                    "max_attempts": {"type": "integer", "description": "Max planning attempts. Default: 10"},
+                },
+                "required": ["articulation_path", "target_positions"],
             },
         },
     },

@@ -134,9 +134,81 @@ class AgentBase(ABC):
         ...
 
     def call_llm_api(self, model_tag: str, prompt: str, system: str, temperature: float = 0.2, max_tokens: int = 1500, timeout: int = 600) -> dict[str, Any]:
-        """Calls any OpenAI API compatible endpoint (Ollama/vLLM/OpenAI) using standard payload."""
-        api_base = getattr(config, "openai_api_base", "http://localhost:11434/v1")
-        api_key = getattr(config, "openai_api_key", "sk-local")
+        """Calls the configured LLM provider — Anthropic, OpenAI, Grok, or Ollama."""
+        mode = config.llm_mode.lower()
+
+        if mode == "anthropic":
+            return self._call_anthropic(model_tag, prompt, system, temperature, max_tokens, timeout)
+        elif mode in ("openai", "grok"):
+            return self._call_openai_compat(model_tag, prompt, system, temperature, max_tokens, timeout, mode)
+        else:
+            # Default: Ollama via OpenAI-compatible endpoint
+            return self._call_openai_compat(model_tag, prompt, system, temperature, max_tokens, timeout, "ollama")
+
+    def _call_anthropic(self, model_tag: str, prompt: str, system: str, temperature: float, max_tokens: int, timeout: int) -> dict[str, Any]:
+        """Call Anthropic Claude Messages API with streaming."""
+        import json
+
+        api_key = config.api_key_anthropic
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        }
+        payload: dict[str, Any] = {
+            "model": model_tag,
+            "system": system,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+
+        t0 = time.perf_counter()
+        content_parts = []
+
+        try:
+            http_timeout = httpx.Timeout(connect=30.0, read=float(timeout), write=30.0, pool=30.0)
+            with httpx.Client(timeout=http_timeout) as client:
+                with client.stream("POST", "https://api.anthropic.com/v1/messages", json=payload, headers=headers) as r:
+                    r.raise_for_status()
+                    for line in r.iter_lines():
+                        line = line.strip()
+                        if not line or line.startswith("event:"):
+                            continue
+                        if line.startswith("data: "):
+                            line = line[6:]
+                        try:
+                            chunk = json.loads(line)
+                            if chunk.get("type") == "content_block_delta":
+                                delta = chunk.get("delta", {})
+                                if delta.get("type") == "text_delta":
+                                    content_parts.append(delta["text"])
+                        except Exception:
+                            pass
+        except httpx.TimeoutException:
+            elapsed = time.perf_counter() - t0
+            partial = "".join(content_parts)
+            if partial:
+                return {"content": partial, "latency_s": elapsed, "partial": True}
+            return {"error": f"timeout after {elapsed:.0f}s", "content": "", "latency_s": elapsed}
+        except Exception as exc:
+            return {"error": str(exc), "content": "", "latency_s": 0.0}
+
+        return {"content": "".join(content_parts), "latency_s": time.perf_counter() - t0}
+
+    def _call_openai_compat(self, model_tag: str, prompt: str, system: str, temperature: float, max_tokens: int, timeout: int, mode: str) -> dict[str, Any]:
+        """Call any OpenAI-compatible endpoint (OpenAI, Grok, Ollama) with streaming."""
+        import json
+
+        if mode == "openai":
+            api_base = "https://api.openai.com/v1"
+            api_key = config.api_key_openai
+        elif mode == "grok":
+            api_base = "https://api.x.ai/v1"
+            api_key = config.api_key_grok
+        else:
+            api_base = getattr(config, "openai_api_base", "http://localhost:11434/v1")
+            api_key = "ollama"
         
         payload = {
             "model": model_tag,
@@ -156,10 +228,9 @@ class AgentBase(ABC):
         
         t0 = time.perf_counter()
         content_parts = []
-        final_stats = {}
         
         try:
-            http_timeout = httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0)
+            http_timeout = httpx.Timeout(connect=30.0, read=float(timeout), write=30.0, pool=30.0)
             with httpx.Client(timeout=http_timeout) as client:
                 with client.stream("POST", f"{api_base.rstrip('/')}/chat/completions", json=payload, headers=headers) as r:
                     r.raise_for_status()
@@ -170,7 +241,6 @@ class AgentBase(ABC):
                         if line.startswith("data: "):
                             line = line[6:]
                         try:
-                            import json
                             chunk = json.loads(line)
                             choices = chunk.get("choices", [])
                             if choices:
@@ -179,7 +249,7 @@ class AgentBase(ABC):
                                     content_parts.append(delta["content"])
                         except Exception:
                             pass
-        except httpx.TimeoutException as exc:
+        except httpx.TimeoutException:
             elapsed = time.perf_counter() - t0
             partial = "".join(content_parts)
             if partial:
@@ -188,9 +258,7 @@ class AgentBase(ABC):
         except Exception as exc:
             return {"error": str(exc), "content": "", "latency_s": 0.0}
 
-        final_stats["latency_s"] = time.perf_counter() - t0
-        final_stats["content"] = "".join(content_parts)
-        return final_stats
+        return {"content": "".join(content_parts), "latency_s": time.perf_counter() - t0}
 
     # ── Helper factories ──────────────────────────────────────────────────────
 

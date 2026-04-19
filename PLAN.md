@@ -108,7 +108,7 @@ Complete natural-language control over every Isaac Sim capability — USD author
 | **Manipulator abstractions** — gripper/end-effector wrappers via `isaacsim.robot.manipulators` | P1 |
 | **Eureka reward generation** — LLM-authored reward functions with iterative refinement | P2 |
 | **IsaacSimZMQ bridge** — ZMQ pub/sub for external process comms | P2 |
-| **GR00T N1 policy eval** — deploy foundation policies and evaluate in sim | P2 |
+| **GR00T N1.7 policy eval** — deploy VLA foundation policies, finetune, and evaluate in sim | P2 |
 | **Grasp editor** — author grasp poses via `isaacsim.robot_setup.grasp_editor` | P2 |
 | **Camera inspector** — inspect/modify all camera properties via `isaacsim.util.camera_inspector` | P2 |
 | **Mesh merge utility** — combine meshes into one prim via `isaacsim.util.merge_mesh` | P2 |
@@ -577,16 +577,67 @@ User types: "Create a 3D model from this image and place it at 0, 0, 1"
 - [ ] **7F.4** Tool: `zmq_list_connections()` — show active ZMQ links and throughput stats
 - [ ] **7F.5** User flow: "stream the lidar data over ZMQ to my Python training script" → auto-configures pub socket + topic
 
-### 7G — GR00T N1 Foundation Policy Evaluation (Tier 3)
+### 7G — GR00T N1.7 Foundation Policy Integration (Tier 3)
 
-**Goal:** Deploy NVIDIA GR00T N1 foundation robot policies in Isaac Sim and benchmark them on custom scenes.
+**Goal:** Deploy NVIDIA GR00T N1.7 vision-language-action (VLA) foundation model in Isaac Sim for zero-shot inference, fine-tuning on custom demonstrations, and closed-loop evaluation. GR00T N1.7 uses a Cosmos-Reason2-2B VLM backbone (Qwen3-VL) + diffusion transformer action head, is cross-embodiment (bimanual, semi-humanoid, humanoid), and runs on DGX Spark (CUDA 13, Python 3.12).
+
+**Key refs:** [GitHub](https://github.com/NVIDIA/Isaac-GR00T) | [HuggingFace](https://huggingface.co/collections/nvidia/gr00t-n17) | [Paper](https://arxiv.org/abs/2503.14734)
+
+**Available checkpoints:**
+- `nvidia/GR00T-N1.7-3B` — base model (zero-shot on pretrain embodiments)
+- `nvidia/GR00T-N1.7-LIBERO` — finetuned Franka Panda (LIBERO benchmark)
+- `nvidia/GR00T-N1.7-DROID` — finetuned DROID dataset
+- `nvidia/GR00T-N1.7-SimplerEnv-Bridge` — finetuned WidowX
+- `nvidia/GR00T-N1.7-SimplerEnv-Fractal` — finetuned Google Robot
+
+**Hardware:** Inference: 16 GB+ VRAM (DGX Spark OK). Fine-tuning: 40 GB+ recommended (H100/L40).
 
 #### Tasks
 
-- [ ] **7G.1** Tool: `load_groot_policy(model_id, robot_path)` — download and attach a GR00T N1 checkpoint
-- [ ] **7G.2** Tool: `evaluate_groot(model_id, task, num_episodes)` — run zero-shot or fine-tuned policy, report metrics
-- [ ] **7G.3** Tool: `finetune_groot(model_id, demo_data, num_steps)` — fine-tune on user's teleop demonstrations (from 7C.3)
-- [ ] **7G.4** Comparison dashboard: "compare GR00T N1 vs my RL policy on the pick-and-place task"
+- [ ] **7G.1** Tool: `groot_setup()` — install/verify GR00T N1.7 environment
+  - Clone repo with `--recurse-submodules`, `uv sync --python 3.12`
+  - Patch Triton for CUDA 13 (`scripts/patch_triton_cuda13.sh`)
+  - Verify with `import gr00t`
+  - DGX Spark uses `torchcodec` (aarch64 prebuilt wheel) as video backend
+- [ ] **7G.2** Tool: `load_groot_policy(model_id, embodiment_tag, device)` — download and initialize a GR00T policy
+  - Downloads from HuggingFace automatically (`nvidia/GR00T-N1.7-3B`, etc.)
+  - `embodiment_tag` determines modality config (state/action keys, normalization)
+  - Pretrain tags: `OXE_DROID_RELATIVE_EEF_RELATIVE_JOINT`, `LIBERO_PANDA`, `SIMPLER_ENV_WIDOWX`, `SIMPLER_ENV_GOOGLE`
+  - Custom robots use `NEW_EMBODIMENT` tag with custom `modality.json`
+  - Returns `Gr00tPolicy` instance ready for `get_action(obs)` calls
+- [ ] **7G.3** Tool: `groot_inference(model_id, dataset_path, embodiment_tag, traj_ids, action_horizon)` — open-loop inference
+  - Runs `standalone_inference_script.py` comparing predicted vs ground-truth actions
+  - Supports `--inference-mode pytorch` (default) or TensorRT for 2x+ speedup
+  - Generates MSE visualization at `/tmp/open_loop_eval/traj_{id}.jpeg`
+  - Zero-shot: use base model + pretrain tag; Finetuned: use checkpoint + posttrain tag
+- [ ] **7G.4** Tool: `groot_server(model_id, embodiment_tag, port, device)` — start GR00T policy server
+  - Launches `gr00t/eval/run_gr00t_server.py` as background process via ZMQ
+  - Server-client architecture: policy on GPU, lightweight client sends observations
+  - Isaac Sim connects as client via `PolicyClient(host, port)` for closed-loop control
+  - "start a GR00T policy server for the Franka on port 5555" → server running, ready for eval
+- [ ] **7G.5** Tool: `groot_eval_closed_loop(model_id, task, num_episodes, env_config)` — closed-loop simulation evaluation
+  - Connects to policy server (7G.4) as client, runs episodes in Isaac Sim
+  - Reports success rate, trajectory length, cumulative reward
+  - Supports LIBERO, SimplerEnv, DROID, and custom environments
+  - ReplayPolicy mode: `--dataset-path` without `--model-path` replays recorded actions for env verification
+- [ ] **7G.6** Tool: `groot_prepare_data(demo_path, embodiment_tag, modality_config)` — convert demonstrations to GR00T LeRobot format
+  - Converts teleop demonstrations (from 7C.3) to LeRobot v2 format with `modality.json`
+  - Required structure: `meta/` (info.json, episodes.jsonl, tasks.jsonl, modality.json), `data/`, `videos/`
+  - LeRobot v3→v2 conversion via `scripts/lerobot_conversion/convert_v3_to_v2.py`
+  - "convert my teleoperation recordings to GR00T training format" → dataset ready for finetuning
+- [ ] **7G.7** Tool: `finetune_groot(base_model, dataset_path, embodiment_tag, modality_config, num_steps, num_gpus)` — fine-tune on custom data
+  - Wraps `gr00t/experiment/launch_finetune.py` with Weights & Biases logging
+  - Single GPU: `CUDA_VISIBLE_DEVICES=0`, Multi-GPU: `torchrun --nproc_per_node=N`
+  - Key hyperparams: `--global-batch-size 32`, `--max-steps 2000`, `--state_dropout_prob 0.2`
+  - Custom embodiments use `NEW_EMBODIMENT` tag + modality config Python file
+  - "fine-tune GR00T on my 50 pick-and-place demos for the UR5e" → checkpoint saved
+- [ ] **7G.8** Tool: `groot_export(checkpoint_path, format)` — export finetuned model for deployment
+  - Exports to ONNX and TensorRT for accelerated inference
+  - N1.7 has improved full-pipeline export support
+  - "export my finetuned model to TensorRT for real-time deployment" → .engine file ready
+- [ ] **7G.9** Tool: `groot_compare(models, task, num_episodes)` — compare multiple policies
+  - Runs A/B evaluation between GR00T checkpoints, RL policies (Eureka), or cuRobo baselines
+  - "compare GR00T zero-shot vs my finetuned model on the pick-and-place task" → side-by-side metrics
 
 ### 7H — IsaacAutomator Cloud Deployment (Tier 3)
 
@@ -665,6 +716,45 @@ User types: "Create a 3D model from this image and place it at 0, 0, 1"
 - [ ] **8B.5** IK solver integration: single-shot inverse kinematics without full trajectory planning
   - "what joint angles put the gripper at [0.5, 0, 0.3]?" → returns joint config
   - Useful for teleop target computation (feeds into Phase 7C)
+- [ ] **8B.6** Tool: `configure_curobo_robot(urdf_path, base_link, ee_link, joint_names, ...)` — generate cuRobo robot YAML config
+  - Creates the YAML file required by `CudaRobotGeneratorConfig` from a URDF
+  - Sets `kinematics` block: `urdf_path`, `base_link`, `ee_link`, `asset_root_path`
+  - Configures `cspace`: `joint_names`, `retract_config`, `null_space_weight`, `cspace_distance_weight`
+  - Supports `lock_joints` for fixed grippers, `extra_links` for attached objects
+  - Sets `max_jerk` (500) and `max_acceleration` (15) defaults
+  - Produces a ready-to-use YAML that `curobo_motion_plan` can consume as `robot_config`
+  - "I have a custom UR5e URDF, generate a cuRobo config for it" → YAML file written to workspace
+- [ ] **8B.7** Tool: `convert_urdf_to_curobo_usd(robot_config_path)` — convert URDF to cuRobo-compatible USD
+  - Wraps `curobo/examples/isaac_sim/utils/convert_urdf_to_usd.py`
+  - Reads the cuRobo robot YAML (from 8B.6) and converts the referenced URDF to USD
+  - Sets `usd_path` and `usd_robot_root` in the config automatically
+  - "convert my robot URDF to USD for cuRobo" → USD file + updated config YAML
+- [ ] **8B.8** Tool: `generate_collision_spheres(robot_config_path, articulation_path)` — generate collision sphere model
+  - Uses Lula Robot Description Editor API (`isaacsim.robot_setup.lula_util`) or cuRobo's sphere fitting
+  - Reads robot mesh from USD, fits collision spheres per link
+  - Populates `collision_link_names`, `collision_spheres`, `collision_sphere_buffer` in robot YAML
+  - Auto-generates `self_collision_ignore` for adjacent/kinematically-limited link pairs
+  - Sets `self_collision_buffer` per link (conservative for base, tight for EE)
+  - "generate collision spheres for my UR5e" → sphere YAML merged into robot config
+- [ ] **8B.9** Tool: `curobo_mpc_control(articulation_path, target_position, ...)` — reactive MPC via MPPI
+  - Uses `curobo.wrap.reacher.mpc` for 500Hz reactive control loop
+  - Tracks moving target poses with collision avoidance
+  - Lower trajectory quality than MotionGen but handles dynamic environments
+  - Safety: experimental, constraints as cost terms — must test in sim before real deployment
+  - "reactively follow this moving target while avoiding obstacles" → MPPI control loop
+- [ ] **8B.10** Tool: `curobo_ik_reachability(articulation_path, grid_center, grid_size, ...)` — batched IK reachability analysis
+  - Uses `curobo.wrap.reacher.ik_solver.IKSolver` with GPU batch solving
+  - Samples XYZ grid around a position, solves IK for all poses in parallel
+  - Returns reachability map: green (reachable) / red (unreachable) per grid cell
+  - Supports collision-aware mode (reads world from USD stage)
+  - Visualizes via `debug_draw` (8A.2) in viewport
+  - "show me the reachable workspace of the Franka" → colored point cloud in viewport
+- [ ] **8B.11** Tool: `curobo_multi_arm_plan(articulations, targets, robot_config)` — multi-arm motion planning
+  - Uses dual-arm cuRobo configs (e.g. `dual_ur10e.yml`) treating two arms as single kinematic chain
+  - Plans collision-free trajectories for both arms simultaneously
+  - Each arm has its own target pose + optional `extra_link` targets
+  - Experimental: open research area, lower success rate than single-arm
+  - "plan both UR10e arms to their respective targets without colliding" → coordinated trajectories
 
 ### 8C — Cortex Behaviors & Manipulation (Weeks 33–34)
 
@@ -1015,9 +1105,15 @@ All tools are exposed to the LLM via structured function-calling schemas. The LL
 | `start_zmq_bridge` | 7F | ZMQ Comms |
 | `zmq_publish` | 7F | ZMQ Comms |
 | `zmq_subscribe` | 7F | ZMQ Comms |
-| `load_groot_policy` | 7G | GR00T N1 |
-| `evaluate_groot` | 7G | GR00T N1 |
-| `finetune_groot` | 7G | GR00T N1 |
+| `load_groot_policy` | 7G | GR00T N1.7 |
+| `groot_inference` | 7G | GR00T N1.7 |
+| `groot_server` | 7G | GR00T N1.7 |
+| `groot_eval_closed_loop` | 7G | GR00T N1.7 |
+| `groot_prepare_data` | 7G | GR00T N1.7 |
+| `finetune_groot` | 7G | GR00T N1.7 |
+| `groot_export` | 7G | GR00T N1.7 |
+| `groot_compare` | 7G | GR00T N1.7 |
+| `groot_setup` | 7G | GR00T N1.7 |
 | `cloud_launch` | 7H | Cloud Deploy |
 | `cloud_status` | 7H | Cloud Deploy |
 | `cloud_download_results` | 7H | Cloud Deploy |
@@ -1033,6 +1129,12 @@ All tools are exposed to the LLM via structured function-calling schemas. The LL
 | `plan_trajectory` | 8B | Motion Planning |
 | `set_motion_policy` | 8B | Motion Planning |
 | `generate_robot_description` | 8B | Robot Setup |
+| `configure_curobo_robot` | 8B | cuRobo Config |
+| `convert_urdf_to_curobo_usd` | 8B | cuRobo Config |
+| `generate_collision_spheres` | 8B | cuRobo Config |
+| `curobo_mpc_control` | 8B | cuRobo MPC |
+| `curobo_ik_reachability` | 8B | cuRobo IK |
+| `curobo_multi_arm_plan` | 8B | cuRobo Multi-Arm |
 | `create_behavior` | 8C | Cortex / Behaviors |
 | `create_gripper` | 8C | Manipulation |
 | `grasp_object` | 8C | Manipulation |
