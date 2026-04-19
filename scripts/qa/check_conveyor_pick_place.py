@@ -189,11 +189,21 @@ print(json.dumps({"ok": True, "cubes": cubes, "qualifying_count": len(qualifying
 
 
 async def c4_franka_imported() -> CheckResult:
-    """Franka under /World/ with ArticulationRootAPI, base Z ≈ 0.75."""
+    """Franka under /World/ with ArticulationRootAPI AND ≥10 children (real
+    model has many links) AND base Z between 0.65 and 0.85.
+
+    Hardened 2026-04-19: previous check only required ArticulationRootAPI,
+    which falsely passed on empty Xforms where the USD reference had
+    404'd at composition time. A real Franka Panda has ~15 link prims
+    (panda_link0 ... panda_link8 + gripper + fingers + joints subtree).
+    Setting the threshold to ≥10 is conservative and catches the silent-
+    load failure while tolerating minor hierarchy differences between
+    asset versions.
+    """
     script = """
 import json
 import omni.usd
-from pxr import UsdPhysics, UsdGeom
+from pxr import UsdPhysics, UsdGeom, Usd
 stage = omni.usd.get_context().get_stage()
 robots = []
 for prim in stage.Traverse():
@@ -206,21 +216,27 @@ for prim in stage.Traverse():
     is_franka = any(k in name_lower for k in ("franka", "panda"))
     xf = UsdGeom.Xformable(prim)
     wt = xf.ComputeLocalToWorldTransform(0).ExtractTranslation() if xf else None
+    descendant_count = sum(1 for _ in Usd.PrimRange(prim)) - 1  # excl. self
     robots.append({
         "path": p,
         "is_franka": is_franka,
         "base_z": wt[2] if wt else None,
+        "descendant_count": descendant_count,
     })
 franka = [r for r in robots if r["is_franka"]]
-on_table = [r for r in franka if r["base_z"] is not None and 0.65 <= r["base_z"] <= 0.85]
-print(json.dumps({"ok": True, "robots": robots, "franka": franka, "on_table_count": len(on_table)}))
+on_table_and_loaded = [r for r in franka
+                       if r["base_z"] is not None
+                       and 0.65 <= r["base_z"] <= 0.85
+                       and r["descendant_count"] >= 10]
+print(json.dumps({"ok": True, "robots": robots, "franka": franka,
+                  "qualifying_count": len(on_table_and_loaded)}))
 """
     r = await run_kit(script)
-    on_table = r.get("on_table_count") or 0
+    q = r.get("qualifying_count") or 0
     return CheckResult(
-        id="C4", name="Franka imported on table (ArticulationRoot, base Z 0.65-0.85)",
-        passed=on_table >= 1,
-        details=f"Franka-like robots on table: {on_table}; all articulations: {r.get('robots') or []}",
+        id="C4", name="Franka imported on table with ≥10 descendant prims (verified load)",
+        passed=q >= 1,
+        details=f"Qualifying (on-table AND loaded): {q}; all Franka-like: {r.get('franka') or []}",
         raw=r,
     )
 
