@@ -1,12 +1,12 @@
 {
   "task_id": "T-14",
-  "goal": "Constrain /World/Cobot/joint_elbow to [-90°, +90°] in radians (lower≈-1.5708, upper≈1.5708) for a safety case. Uses set_joint_limits. Snapshot verifies attrs.physics:lowerLimit/upperLimit.",
+  "goal": "Constrain /World/Cobot/joint_elbow to [-90°, +90°] via set_joint_limits. USD stores revolute joint limits in DEGREES — lower=-90, upper=90. Snapshot verifies attrs.physics:lowerLimit/upperLimit.",
   "tools_used": ["get_joint_limits", "set_joint_limits"],
-  "thoughts": "Exercises the joint-limit snapshot attr path added earlier. Agent must author radians (not degrees) — common units trap. Safety case rationale must be in the reply, not just 'done'.",
-  "code": "get_joint_limits(joint_path='/World/Cobot/joint_elbow')\nset_joint_limits(joint_path='/World/Cobot/joint_elbow', lower=-1.5708, upper=1.5708)\nget_joint_limits(joint_path='/World/Cobot/joint_elbow')\n# Correct reply: 'Joint now constrained to ±90° (±π/2 rad). Required for safety case — defaults to ±inf are unacceptable bounds.'",
+  "thoughts": "Units trap: USD PhysicsRevoluteJoint physics:lowerLimit is DEGREES (not radians). Passing π/2 would yield a 1.57° window — effectively locked. Agent must use degrees.",
+  "code": "get_joint_limits(joint_path='/World/Cobot/joint_elbow')\nset_joint_limits(joint_path='/World/Cobot/joint_elbow', lower=-90, upper=90)\nget_joint_limits(joint_path='/World/Cobot/joint_elbow')\n# Correct reply: 'Joint elbow constrained to ±90° (USD stores as degrees). Required for safety case.'",
   "failure_modes": [
-    "Passing degrees instead of radians.",
+    "Passing radians (π/2≈1.5708) when USD expects degrees — effective lock-up.",
     "Deleting the joint instead of constraining.",
-    "Saying 'done' without stating the authored values."
+    "Saying 'done' without stating the authored values or safety-case rationale."
   ]
 }
