@@ -221,6 +221,28 @@ Selection awareness: When the user has selected a prim, its path/properties are 
 "this", "it", "selected object", "make this bigger" all refer to the selected prim.
 Use its path directly — do NOT ask the user to specify."""
 
+RULE_DETERMINISM = """\
+Deterministic replay / reproducibility (Isaac Sim 5.x) — WHEN THE USER ASKS ABOUT DETERMINISM, CITE THESE SPECIFIC NAMES VERBATIM IN YOUR REPLY:
+
+**Required citations** (do NOT paraphrase these — use the exact names):
+1. The correct 5.x tool is `enable_deterministic_mode` (takes seed, physics_dt, solver_iterations). This IS a registered tool — call it, don't just mention it.
+2. The deprecated 4.x API is `omni.isaac.core.SimulationContext.set_deterministic` — REMOVED in 5.0, raises ImportError. Flag it explicitly as deprecated if the user mentions it.
+3. Protocol name: "archive-with-version-pin" — pin the Kit build hash, solver config, and seed alongside the USD for CI rosbag-diff reproducibility.
+
+**Technical facts to back the citations:**
+- `enable_deterministic_mode` authors TGS solver + fixed timestep (60 Hz default) + CPU dynamics on /World/PhysicsScene.
+- GPU dynamics (PhysX tensor view) is NOT fully deterministic across runs even on identical hardware. CPU dynamics required for bit-identical replay.
+- Determinism is HARDWARE-DEPENDENT for floating-point ordering: same seed + same code → bit-identical only on same GPU model + same CUDA driver.
+- Never claim "fully deterministic" without the hardware-pin caveat.
+
+If asked for a cite-able statement, produce a paragraph the user can paste, containing the tool name + the deprecated-API warning + the hardware caveat + the archive-with-version-pin protocol.
+
+**Copy-paste template** (adapt the bracketed parts to the user's context, but DO NOT remove the API names or caveats):
+
+> "In Isaac Sim 5.x, reproducible replay is set up via the `enable_deterministic_mode(seed=..., physics_dt=..., solver_iterations=...)` tool, which authors the TGS solver + fixed timestep + CPU dynamics on /World/PhysicsScene. The 4.x `omni.isaac.core.SimulationContext.set_deterministic()` method [that <PM/user> referenced] was removed in 5.0 and raises ImportError. Note that PhysX float ordering is hardware-dependent: bit-identical replay is only guaranteed on the same GPU model + CUDA driver, so the CI rig must be pinned. For rosbag-diff regression, follow the 'archive-with-version-pin' protocol — ship the Kit build hash, solver config, and seed alongside the USD stage as CI artifacts."
+
+If the user asks for cite material, START YOUR REPLY WITH THIS PARAGRAPH (modified for their specific scenario), then add any clarifying caveats. Do not write a general PhysX determinism essay as a substitute."""
+
 # Keyword patterns → which rule sections to include
 _KEYWORD_RULES: List[tuple] = [
     (re.compile(r"omnigraph|ros2?|graph|publish|subscribe|topic|twist|odom|clock|joint.?state", re.I),
@@ -231,6 +253,11 @@ _KEYWORD_RULES: List[tuple] = [
      [RULE_NOVA_CARTER, RULE_ROBOT]),
     (re.compile(r"clone|grid|batch|replicate", re.I),
      [RULE_CLONER]),
+    (re.compile(
+        r"determini(?:stic|sm)|repeatab|bit.?identical|reproducib|"
+        r"ci\s*regression|rosbag\s*diff|same\s*seed|fixed\s*timestep",
+        re.I,
+    ), [RULE_DETERMINISM]),
 ]
 
 
