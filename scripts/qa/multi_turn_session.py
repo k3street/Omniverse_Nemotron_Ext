@@ -134,6 +134,23 @@ else:
                     entry['attrs'] = extras
         except Exception:
             pass
+        # Material binding — captured for any prim that has a direct
+        # material:binding relationship. Surfaces WHICH material each
+        # prim is bound to so tasks like P-12 (per-apple material
+        # instancing) can be stage-verified without sampling via
+        # list_relationships. Only the default-purpose binding is
+        # captured; full-inheritance chain is out of scope.
+        try:
+            from pxr import UsdShade
+            binding_api = UsdShade.MaterialBindingAPI(p)
+            if binding_api:
+                mat = binding_api.ComputeBoundMaterial()[0]
+                if mat:
+                    mat_path = str(mat.GetPath())
+                    if mat_path:
+                        entry['material_binding'] = mat_path
+        except Exception:
+            pass
         prims_info.append(entry)
 
         # World transform for all Xformables (position + rotation + scale ground-truth)

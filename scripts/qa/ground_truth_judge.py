@@ -111,6 +111,11 @@ def _snapshot_summary(snap: Dict) -> str:
         if p_attrs:
             a_compact = ", ".join(f"{k}={v}" for k, v in p_attrs.items())
             extras.append(f"attrs={{{a_compact}}}")
+        # Material binding target — lets the judge see which material
+        # each prim resolves to (P-12 per-apple-instancing verification).
+        mb = p.get("material_binding")
+        if mb:
+            extras.append(f"material_binding={mb}")
         if extras:
             line += "  " + " ".join(extras)
         lines.append(line)
