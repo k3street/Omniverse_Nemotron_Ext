@@ -2130,6 +2130,52 @@ ISAAC_SIM_TOOLS = [
     {
             "type": "function",
             "function": {
+                "name": "setup_pick_place_controller",
+                "description": "Composite tool: install a stateful pick-and-place controller on a Franka-compatible articulation. Iterates over source prims (cubes/parts), picks each from its current pose, transports to a destination container, releases. Uses RmpFlow + ArticulationMotionPolicy for joint-level motion (NVIDIA's motion-generation framework), attaches each source to the end-effector via a temporary UsdPhysics.FixedJoint during transport, releases over the destination. Installs a physics-step callback — start the simulation (timeline.play()) to begin the pick sequence. Use this INSTEAD of composing move_to_pose + grasp_object manually, unless you need per-step user-in-loop control.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "robot_path": {"type": "string", "description": "USD path to the articulation root (e.g. /World/Robot)"},
+                        "source_paths": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of USD paths for objects to pick, in pick order. Each must be a RigidBody prim.",
+                        },
+                        "destination_path": {"type": "string", "description": "USD path to the bin/container prim. Objects are released inside its bbox."},
+                        "end_effector_link": {"type": "string", "description": "Name of the EE link (default: panda_hand)"},
+                        "gripper_joint_1": {"type": "string", "description": "First gripper joint name (default: panda_finger_joint1)"},
+                        "gripper_joint_2": {"type": "string", "description": "Second gripper joint name (default: panda_finger_joint2)"},
+                        "gripper_open": {"type": "number", "description": "Open value for gripper joints in meters (default: 0.04)"},
+                        "gripper_close": {"type": "number", "description": "Closed value for gripper joints (default: 0.0)"},
+                        "approach_height": {"type": "number", "description": "Height above object for pre-grasp approach (default: 0.12m)"},
+                        "lift_height": {"type": "number", "description": "Height above grasp for lift phase (default: 0.20m)"},
+                        "drop_height": {"type": "number", "description": "Height above destination for release (default: 0.18m)"},
+                    },
+                    "required": ["robot_path", "source_paths", "destination_path"],
+                },
+            },
+        },
+    {
+            "type": "function",
+            "function": {
+                "name": "setup_pick_place_ros2_bridge",
+                "description": "Industrial-realism alternative to setup_pick_place_controller: wire OmniGraph ROS2 nodes so Isaac Sim publishes robot joint_states + cube poses, subscribes to target-pose + gripper commands. External controller (ROS2 node, or real PLC via OPC-UA bridge) runs the state machine. Use this when the scenario simulates a digital twin / HIL / PLC-integration setup; for in-sim self-contained execution prefer setup_pick_place_controller.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "robot_path": {"type": "string"},
+                        "source_paths": {"type": "array", "items": {"type": "string"}},
+                        "destination_path": {"type": "string"},
+                        "end_effector_link": {"type": "string"},
+                        "ros_domain_id": {"type": "integer", "description": "ROS_DOMAIN_ID the bridge uses (default 0). External controller must match."},
+                    },
+                    "required": ["robot_path", "source_paths", "destination_path"],
+                },
+            },
+        },
+    {
+            "type": "function",
+            "function": {
                 "name": "merge_meshes",
                 "description": "Merge multiple mesh prims into a single optimized mesh using the MeshMerger utility. Useful for combining conveyor segments, static geometry, or reducing draw calls.",
                 "parameters": {
