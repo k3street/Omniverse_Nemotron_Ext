@@ -47,6 +47,23 @@ All coordinates in meters, Z-up, Y perpendicular to belt travel.
 
 **Belt direction**: +X (cubes travel toward robot). Speed: 0.2 m/s (slow enough for robot reaction).
 
+## Persona-driven architectures
+
+The same template is run against FOUR different controller architectures,
+each representing a real Isaac Sim user persona. A tool-catalog is
+considered "complete" for the template when all four one-shot successfully.
+
+| Persona | target_source mode | Extra tools used | Sim2real-honest |
+|---|---|---|---|
+| ML researcher (demo-gen / imitation) | `cube_tracking` | RmpFlow reads ground-truth cube pose | ❌ — omniscient |
+| Industrial-robotics engineer | `sensor_gated` | `add_proximity_sensor`, `teach_robot_pose`, `load_robot_pose` | ✅ — binary sensor, pre-taught poses |
+| RL-trainer / research with sensing | `cube_tracking` + custom obs pipeline | Vision/contact sensors for observation | Partial — depends on sensor realism |
+| Digital-twin / PLC-in-loop | `ros2_cmd` or `setup_pick_place_ros2_bridge` | External controller, OPC-UA optional | ✅ — external logic, Isaac Sim = physics only |
+
+Per-persona checks may differ — the industrial persona MUST pass C9-C11
+(sensor exists, belt pauses on trigger, resumes after release). The
+cube_tracking persona may skip C9-C11.
+
 ## Required subsystems
 
 The agent must correctly orchestrate:

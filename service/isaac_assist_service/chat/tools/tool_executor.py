@@ -24261,10 +24261,35 @@ CODE_GEN_HANDLERS["generate_occupancy_map"] = _gen_generate_occupancy_map
 # ══════════════════════════════════════════════════════════════════════
 
 def _gen_setup_pick_place_controller(args: Dict) -> str:
-    """Generate a physics-callback state machine for pick-and-place."""
+    """Generate a physics-callback state machine for pick-and-place.
+
+    Mode-driven (2026-04-19 refactor). Same tool, four architectures:
+
+      - "cube_tracking": poll source prim world-pose each frame, retarget
+        RmpFlow continuously. Omniscient — NOT sim2real-honest. Useful
+        for ML demo-generation where ground-truth is fair game.
+
+      - "sensor_gated": belt runs continuously; robot waits for a
+        proximity sensor at a fixed pick station to trigger; then picks
+        from the PRE-TAUGHT pick pose (not cube's live pose); resumes
+        belt after release. Sim2real-honest industrial pattern.
+
+      - "fixed_poses": deterministic sequence of pre-taught poses. No
+        sensor, timer-driven. Simplest. Demos, validation.
+
+      - "ros2_cmd": subscribe to /isaac/robot/target_pose and
+        /isaac/robot/gripper_cmd; external controller drives the state
+        machine. For digital-twin / PLC-in-loop.
+
+    Shared across modes: RmpFlow + ArticulationMotionPolicy for
+    joint-level control, UsdPhysics.FixedJoint for cube-to-EE attach
+    during transport, gripper joint targets for open/close.
+    """
+    mode = args.get("target_source", "cube_tracking")
+    if mode not in {"cube_tracking", "sensor_gated", "fixed_poses", "ros2_cmd"}:
+        raise ValueError(f"setup_pick_place_controller: unknown target_source {mode!r}")
+
     robot_path = args["robot_path"]
-    source_paths = args["source_paths"]  # list of cube paths
-    destination_path = args["destination_path"]  # bin prim (walls+floor Xform)
     ee_link = args.get("end_effector_link", "panda_hand")
     fj1 = args.get("gripper_joint_1", "panda_finger_joint1")
     fj2 = args.get("gripper_joint_2", "panda_finger_joint2")
@@ -24273,6 +24298,36 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
     approach_h = float(args.get("approach_height", 0.12))
     lift_h = float(args.get("lift_height", 0.20))
     drop_h = float(args.get("drop_height", 0.18))
+
+    if mode == "sensor_gated":
+        return _gen_pick_place_sensor_gated(
+            robot_path=robot_path,
+            sensor_path=args["sensor_path"],
+            belt_path=args.get("belt_path"),
+            pick_pose_name=args.get("pick_pose_name", "pick"),
+            drop_pose_name=args.get("drop_pose_name", "drop"),
+            home_pose_name=args.get("home_pose_name", "home"),
+            ee_link=ee_link, fj1=fj1, fj2=fj2,
+            open_val=open_val, close_val=close_val,
+        )
+    if mode == "fixed_poses":
+        return _gen_pick_place_fixed_poses(
+            robot_path=robot_path,
+            pose_sequence=args["pose_sequence"],
+            cycles=int(args.get("cycles", 1)),
+            ee_link=ee_link, fj1=fj1, fj2=fj2,
+        )
+    if mode == "ros2_cmd":
+        return _gen_pick_place_ros2_cmd(
+            robot_path=robot_path,
+            target_topic=args.get("target_topic", "/isaac/robot/target_pose"),
+            gripper_topic=args.get("gripper_topic", "/isaac/robot/gripper_cmd"),
+            ee_link=ee_link, fj1=fj1, fj2=fj2,
+        )
+
+    # Default / legacy: cube_tracking (uses source_paths + destination_path)
+    source_paths = args["source_paths"]
+    destination_path = args["destination_path"]
 
     return f"""\
 # ── setup_pick_place_controller ──────────────────────────────────────
@@ -24638,3 +24693,655 @@ print(json.dumps({{
 
 
 CODE_GEN_HANDLERS["setup_pick_place_ros2_bridge"] = _gen_setup_pick_place_ros2_bridge
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Phase-12 toolkit — proximity sensor + teach/load pose + mode-driven
+# pick-place controller. Built 2026-04-19 after conveyor_pick_place
+# template surfaced these gaps across ML-researcher, industrial, and
+# vision personas.
+# ══════════════════════════════════════════════════════════════════════
+
+def _gen_add_proximity_sensor(args: Dict) -> str:
+    """Create a physics trigger volume that sets a custom attribute when
+    any prim matching a pattern enters the volume. The attribute is what
+    controllers read to know whether a cube is at the pick station.
+
+    Implementation:
+      - Invisible Cube prim at position, scaled to detection_size
+      - UsdPhysics.CollisionAPI + PhysxTriggerAPI → PhysX treats it as
+        a sensing volume, no physical interaction with dynamic bodies
+      - Custom attr `isaac_sensor:triggered` (bool) + `isaac_sensor:last_triggered_path` (string)
+      - Python callback via omni.physx subscribe_physics_on_step_events that
+        runs overlap_box each step, updates attrs
+
+    This is sim2real-honest: the sensor is binary (in-zone or not), no
+    ground-truth pose leakage. A real beam-break sensor has the same
+    interface. Stationary pick stations use exactly this pattern in
+    real cells.
+    """
+    sensor_path = args["sensor_path"]
+    position = args["position"]
+    size = args.get("size", [0.1, 0.1, 0.1])
+    watched_pattern = args.get("watched_path_pattern", "/World/")
+
+    return f"""\
+import omni.usd
+import omni.physx
+from pxr import UsdGeom, UsdPhysics, PhysxSchema, Sdf, Gf
+
+sensor_path = {sensor_path!r}
+pos = {position}
+size = {size}
+pattern = {watched_pattern!r}
+
+stage = omni.usd.get_context().get_stage()
+
+# 1. Create invisible Cube as the sensing volume
+sensor = UsdGeom.Cube.Define(stage, sensor_path)
+sensor.CreateSizeAttr(1.0)
+xf = UsdGeom.Xformable(sensor)
+# Reuse existing translate op if present (safe pattern)
+_t_op = None
+_s_op = None
+for op in xf.GetOrderedXformOps():
+    if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+        _t_op = op
+    elif op.GetOpType() == UsdGeom.XformOp.TypeScale:
+        _s_op = op
+if _t_op is None:
+    _t_op = xf.AddTranslateOp()
+_t_op.Set(Gf.Vec3d(*pos))
+if _s_op is None:
+    _s_op = xf.AddScaleOp()
+_s_op.Set(Gf.Vec3f(size[0]*0.5, size[1]*0.5, size[2]*0.5))
+# Make invisible
+sensor.GetPurposeAttr().Set(UsdGeom.Tokens.guide)  # shows only in guide-view
+sensor.GetPrim().GetAttribute("visibility").Set("invisible") if sensor.GetPrim().HasAttribute("visibility") else None
+
+# 2. Trigger volume APIs — note PhysxTriggerAPI treats the prim as a
+#    sensor, no collision response. Dynamic bodies pass through.
+sensor_prim = sensor.GetPrim()
+if not sensor_prim.HasAPI(UsdPhysics.CollisionAPI):
+    UsdPhysics.CollisionAPI.Apply(sensor_prim)
+if not sensor_prim.HasAPI(PhysxSchema.PhysxTriggerAPI):
+    PhysxSchema.PhysxTriggerAPI.Apply(sensor_prim)
+
+# 3. Custom attributes for triggered state
+trig_attr = sensor_prim.GetAttribute("isaac_sensor:triggered")
+if not trig_attr or not trig_attr.IsDefined():
+    trig_attr = sensor_prim.CreateAttribute("isaac_sensor:triggered", Sdf.ValueTypeNames.Bool)
+trig_attr.Set(False)
+last_attr = sensor_prim.GetAttribute("isaac_sensor:last_triggered_path")
+if not last_attr or not last_attr.IsDefined():
+    last_attr = sensor_prim.CreateAttribute("isaac_sensor:last_triggered_path", Sdf.ValueTypeNames.String)
+last_attr.Set("")
+
+# 4. Physics-step callback: overlap-box query each step, update attrs
+_physx = omni.physx.get_physx_scene_query_interface()
+
+def _sensor_step(dt):
+    hits = []
+    def _cb(hit):
+        hp = str(hit.rigid_body)
+        if hp.startswith(pattern):
+            hits.append(hp)
+        return True  # continue
+    # overlap_box centered at pos with half-extents size/2
+    _physx.overlap_box(
+        (size[0]*0.5, size[1]*0.5, size[2]*0.5),
+        (pos[0], pos[1], pos[2]),
+        (0.0, 0.0, 0.0, 1.0),  # identity quaternion (x,y,z,w)
+        _cb,
+        False,  # any overlap counts
+    )
+    trig_attr.Set(bool(hits))
+    last_attr.Set(hits[0] if hits else "")
+
+# Remove stale callback if re-configured
+try:
+    from isaacsim.core.api import World
+    w = World.instance() or World()
+    try:
+        w.remove_physics_callback(f"sensor_{{sensor_path}}")
+    except Exception:
+        pass
+    w.add_physics_callback(f"sensor_{{sensor_path}}", _sensor_step)
+except Exception as e:
+    # Fallback: subscribe directly via omni.physx (no World dependency)
+    _sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_sensor_step)
+    # Keep a reference to prevent garbage collection
+    sensor_prim.CreateAttribute("isaac_sensor:_sub_handle", Sdf.ValueTypeNames.String).Set(str(id(_sub)))
+
+import json
+print(json.dumps({{
+    "ok": True,
+    "sensor_path": sensor_path,
+    "position": pos,
+    "detection_size": size,
+    "triggered_attr": f"{{sensor_path}}.isaac_sensor:triggered",
+    "last_attr": f"{{sensor_path}}.isaac_sensor:last_triggered_path",
+}}))
+"""
+
+
+CODE_GEN_HANDLERS["add_proximity_sensor"] = _gen_add_proximity_sensor
+
+
+def _gen_teach_robot_pose(args: Dict) -> str:
+    """Record the current joint configuration of a robot to a JSON file
+    under workspace/robot_poses/. Used like a 'teach pendant': jog the
+    robot manually (via Kit joint-drive UI or a separate script) to the
+    desired pose, then call this to snapshot it. Industrial workflow:
+    teach home, pick_approach, pick, pick_lift, drop_approach, drop.
+    """
+    robot_path = args["robot_path"]
+    pose_name = args["pose_name"]
+    return f"""\
+import os, json, datetime, re
+import omni.usd
+from pxr import Usd, UsdPhysics
+
+robot_path = {robot_path!r}
+pose_name = {pose_name!r}
+
+from isaacsim.core.prims import SingleArticulation
+
+art = SingleArticulation(robot_path)
+art.initialize()
+
+dof_names = list(art.dof_names) if art.dof_names else []
+positions = art.get_joint_positions()
+if positions is None or len(dof_names) == 0:
+    raise RuntimeError(f"teach_robot_pose: {{robot_path}} has no readable joints. "
+                       f"Is simulation playing? Articulation must be initialized via physics step.")
+
+pose = {{
+    "robot_path": robot_path,
+    "pose_name": pose_name,
+    "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    "dof_names": dof_names,
+    "joint_positions": [float(x) for x in positions],
+}}
+
+robot_key = re.sub(r"[^A-Za-z0-9]+", "_", robot_path.strip("/"))
+out_dir = os.path.expanduser(f"~/projects/Omniverse_Nemotron_Ext/workspace/robot_poses/{{robot_key}}")
+os.makedirs(out_dir, exist_ok=True)
+out_path = os.path.join(out_dir, f"{{pose_name}}.json")
+with open(out_path, "w") as f:
+    json.dump(pose, f, indent=2)
+
+print(json.dumps({{
+    "ok": True,
+    "pose_file": out_path,
+    "joint_count": len(dof_names),
+    "note": f"Pose {{pose_name!r}} saved. Use load_robot_pose to restore it.",
+}}))
+"""
+
+
+CODE_GEN_HANDLERS["teach_robot_pose"] = _gen_teach_robot_pose
+
+
+def _gen_load_robot_pose(args: Dict) -> str:
+    """Move a robot's joints to a previously-taught pose saved by
+    teach_robot_pose. With interpolation_seconds=0 (default) the move
+    is instantaneous; with >0 the positions interpolate linearly over N
+    seconds via a physics-step callback.
+    """
+    robot_path = args["robot_path"]
+    pose_name = args["pose_name"]
+    interp_s = float(args.get("interpolation_seconds", 0.0))
+    return f"""\
+import os, json, re
+import numpy as np
+
+robot_path = {robot_path!r}
+pose_name = {pose_name!r}
+interp_s = {interp_s}
+
+robot_key = re.sub(r"[^A-Za-z0-9]+", "_", robot_path.strip("/"))
+pose_path = os.path.expanduser(
+    f"~/projects/Omniverse_Nemotron_Ext/workspace/robot_poses/{{robot_key}}/{{pose_name}}.json"
+)
+if not os.path.isfile(pose_path):
+    raise FileNotFoundError(f"load_robot_pose: {{pose_path}} not found. "
+                            f"Did teach_robot_pose run for this robot and name?")
+with open(pose_path) as f:
+    pose = json.load(f)
+
+from isaacsim.core.prims import SingleArticulation
+
+art = SingleArticulation(robot_path)
+art.initialize()
+
+live_dof_names = list(art.dof_names) if art.dof_names else []
+saved_dof = pose["dof_names"]
+saved_q = pose["joint_positions"]
+
+# Remap saved_q to live_dof_names order — handles the case where the
+# saved pose was taken on a robot whose DOF order differs slightly.
+target_q = []
+for name in live_dof_names:
+    if name in saved_dof:
+        target_q.append(saved_q[saved_dof.index(name)])
+    else:
+        # Joint not in saved pose — leave current
+        current = art.get_joint_positions()
+        target_q.append(float(current[live_dof_names.index(name)]) if current is not None else 0.0)
+target_q = np.array(target_q)
+
+if interp_s <= 0.0:
+    # Instant
+    try:
+        art.set_joint_position_targets(target_q)
+    except Exception:
+        art.set_joint_positions(target_q)
+    import json
+    print(json.dumps({{"ok": True, "pose": pose_name, "mode": "instant", "joints": len(target_q)}}))
+else:
+    # Linear interpolation via physics callback
+    start_q = art.get_joint_positions()
+    if start_q is None:
+        start_q = np.zeros_like(target_q)
+    state = {{"t": 0.0, "done": False}}
+    
+    def _interp_step(dt):
+        if state["done"]:
+            return
+        state["t"] += dt
+        alpha = min(1.0, state["t"] / interp_s)
+        q = start_q + alpha * (target_q - start_q)
+        try:
+            art.set_joint_position_targets(q)
+        except Exception:
+            art.set_joint_positions(q)
+        if alpha >= 1.0:
+            state["done"] = True
+    
+    try:
+        from isaacsim.core.api import World
+        w = World.instance() or World()
+        cb_name = f"load_pose_{{robot_key}}_{{pose_name}}"
+        try:
+            w.remove_physics_callback(cb_name)
+        except Exception:
+            pass
+        w.add_physics_callback(cb_name, _interp_step)
+    except Exception as e:
+        import omni.physx
+        _sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_interp_step)
+    
+    import json
+    print(json.dumps({{"ok": True, "pose": pose_name, "mode": "interpolated",
+                      "duration_s": interp_s, "joints": len(target_q)}}))
+"""
+
+
+CODE_GEN_HANDLERS["load_robot_pose"] = _gen_load_robot_pose
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Mode-specific generators for setup_pick_place_controller
+# ══════════════════════════════════════════════════════════════════════
+
+_PP_RMPFLOW_HEADER = """
+import os
+import json
+import numpy as np
+import omni.usd
+from pxr import UsdGeom, UsdPhysics, Sdf, Gf
+from isaacsim.robot_motion.motion_generation import RmpFlow, ArticulationMotionPolicy
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+def _find_franka_configs():
+    roots = ["/home/anton/.local/share/ov/data/exts",
+             "/home/anton/.local/share/ov/pkg",
+             "/opt/isaac-sim",
+             os.environ.get("ISAAC_PATH", "")]
+    for root in roots:
+        if not root or not os.path.isdir(root):
+            continue
+        for dirpath, _, files in os.walk(root):
+            if "motion_policy_configs" in dirpath and dirpath.endswith("franka/rmpflow"):
+                fs = set(files)
+                if "franka_rmpflow_common.yaml" in fs and "robot_descriptor.yaml" in fs:
+                    urdf = os.path.normpath(os.path.join(dirpath, "..", "lula_franka_gen.urdf"))
+                    if not os.path.isfile(urdf):
+                        urdf = None
+                    return {{
+                        "rmpflow": os.path.join(dirpath, "franka_rmpflow_common.yaml"),
+                        "descriptor": os.path.join(dirpath, "robot_descriptor.yaml"),
+                        "urdf": urdf,
+                    }}
+    return None
+"""
+
+
+def _gen_pick_place_sensor_gated(robot_path, sensor_path, belt_path, pick_pose_name,
+                                  drop_pose_name, home_pose_name, ee_link, fj1, fj2,
+                                  open_val, close_val):
+    """Industrial-pattern controller: belt runs continuously until a proximity
+    sensor triggers at a fixed pick station. On trigger, belt pauses; robot
+    executes pre-taught pick pose; gripper closes; belt resumes (cube is
+    attached to EE via FixedJoint); robot moves to pre-taught drop pose;
+    releases; returns home. Repeats until timeout or external stop.
+
+    Sim2real-honest: sensor is binary, all poses are pre-taught (not
+    derived from ground-truth object pose). Translates directly to real
+    cells via OPC-UA or ROS2 bridging.
+    """
+    return f"""\
+# ── pick_place_controller (sensor_gated) ─────────────────────────────
+# Industrial pattern: sensor-gated state machine with pre-taught poses.
+# Maps 1:1 to PLC ladder logic for real cell deployment.
+{_PP_RMPFLOW_HEADER}
+
+ROBOT_PATH = {robot_path!r}
+SENSOR_PATH = {sensor_path!r}
+BELT_PATH = {belt_path!r}
+PICK_POSE = {pick_pose_name!r}
+DROP_POSE = {drop_pose_name!r}
+HOME_POSE = {home_pose_name!r}
+EE_LINK = {ee_link!r}
+FJ1, FJ2 = {fj1!r}, {fj2!r}
+GRIPPER_OPEN = {open_val}
+GRIPPER_CLOSE = {close_val}
+
+import re
+robot_key = re.sub(r"[^A-Za-z0-9]+", "_", ROBOT_PATH.strip("/"))
+POSE_DIR = os.path.expanduser(f"~/projects/Omniverse_Nemotron_Ext/workspace/robot_poses/{{robot_key}}")
+
+def _load_pose(name):
+    p = os.path.join(POSE_DIR, f"{{name}}.json")
+    if not os.path.isfile(p):
+        raise FileNotFoundError(f"pose '{{name}}' not found — run teach_robot_pose first: {{p}}")
+    with open(p) as f:
+        return json.load(f)
+
+pose_pick = _load_pose(PICK_POSE)
+pose_drop = _load_pose(DROP_POSE)
+pose_home = _load_pose(HOME_POSE)
+
+stage = omni.usd.get_context().get_stage()
+world = World.instance() or World()
+if not world.is_playing():
+    world.reset()
+
+franka = SingleArticulation(ROBOT_PATH)
+franka.initialize()
+
+sensor_prim = stage.GetPrimAtPath(SENSOR_PATH)
+if not sensor_prim or not sensor_prim.IsValid():
+    raise RuntimeError(f"Sensor {{SENSOR_PATH}} not found — call add_proximity_sensor first.")
+sensor_trig_attr = sensor_prim.GetAttribute("isaac_sensor:triggered")
+sensor_last_attr = sensor_prim.GetAttribute("isaac_sensor:last_triggered_path")
+
+belt_prim = stage.GetPrimAtPath(BELT_PATH) if BELT_PATH else None
+belt_sv_attr = (belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocity")
+                if belt_prim and belt_prim.IsValid() else None)
+_nominal_belt_velocity = None
+if belt_sv_attr and belt_sv_attr.IsDefined():
+    v = belt_sv_attr.Get()
+    if v is not None:
+        _nominal_belt_velocity = (float(v[0]), float(v[1]), float(v[2]))
+
+def _pause_belt():
+    if belt_sv_attr and belt_sv_attr.IsDefined():
+        belt_sv_attr.Set(Gf.Vec3f(0.0, 0.0, 0.0))
+def _resume_belt():
+    if belt_sv_attr and belt_sv_attr.IsDefined() and _nominal_belt_velocity:
+        belt_sv_attr.Set(Gf.Vec3f(*_nominal_belt_velocity))
+
+def _set_joints(q):
+    try:
+        franka.set_joint_position_targets(np.array(q))
+    except Exception:
+        franka.set_joint_positions(np.array(q))
+
+def _at_pose(target_q, tol=0.05):
+    cur = franka.get_joint_positions()
+    if cur is None:
+        return False
+    return float(np.linalg.norm(np.array(cur) - np.array(target_q))) < tol
+
+def _pose_targets(pose_dict):
+    # remap to live DOF order
+    live = list(franka.dof_names) if franka.dof_names else []
+    saved = pose_dict["dof_names"]
+    sq = pose_dict["joint_positions"]
+    out = []
+    for n in live:
+        out.append(sq[saved.index(n)] if n in saved else 0.0)
+    return out
+
+def _grip(value):
+    live = list(franka.dof_names) if franka.dof_names else []
+    q = franka.get_joint_positions()
+    if q is None:
+        return
+    q = list(q)
+    for j in (FJ1, FJ2):
+        if j in live:
+            q[live.index(j)] = value
+    _set_joints(q)
+
+S = {{
+    "phase": "home", "enter_t": 0.0, "elapsed_t": 0.0,
+    "grasp_joint": None, "picked_path": None,
+    "cubes_delivered": 0,
+}}
+
+_set_joints(_pose_targets(pose_home))
+_grip(GRIPPER_OPEN)
+
+def _step(dt):
+    S["elapsed_t"] += dt
+    now = S["elapsed_t"]
+    phase = S["phase"]
+
+    if phase == "home":
+        if _at_pose(_pose_targets(pose_home)) or now - S["enter_t"] > 3.0:
+            S["phase"] = "wait_sensor"
+            S["enter_t"] = now
+
+    elif phase == "wait_sensor":
+        if sensor_trig_attr and sensor_trig_attr.Get():
+            _pause_belt()
+            S["picked_path"] = sensor_last_attr.Get() if sensor_last_attr else None
+            _set_joints(_pose_targets(pose_pick))
+            S["phase"] = "moving_to_pick"
+            S["enter_t"] = now
+
+    elif phase == "moving_to_pick":
+        if _at_pose(_pose_targets(pose_pick)) or now - S["enter_t"] > 4.0:
+            _grip(GRIPPER_CLOSE)
+            S["phase"] = "gripping"
+            S["enter_t"] = now
+
+    elif phase == "gripping":
+        if now - S["enter_t"] > 0.5:
+            # Attach cube (if we know which one) to EE via FixedJoint
+            if S["picked_path"]:
+                ee = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/{{EE_LINK}}")
+                cube = stage.GetPrimAtPath(S["picked_path"])
+                if ee and ee.IsValid() and cube and cube.IsValid():
+                    jp = f"{{S['picked_path']}}_pp_grasp"
+                    fj = UsdPhysics.FixedJoint.Define(stage, jp)
+                    fj.CreateBody0Rel().SetTargets([Sdf.Path(str(ee.GetPath()))])
+                    fj.CreateBody1Rel().SetTargets([Sdf.Path(S["picked_path"])])
+                    S["grasp_joint"] = jp
+            _set_joints(_pose_targets(pose_drop))
+            S["phase"] = "moving_to_drop"
+            S["enter_t"] = now
+            _resume_belt()  # belt can move while arm transits
+
+    elif phase == "moving_to_drop":
+        if _at_pose(_pose_targets(pose_drop)) or now - S["enter_t"] > 4.0:
+            if S["grasp_joint"] and stage.GetPrimAtPath(S["grasp_joint"]).IsValid():
+                stage.RemovePrim(S["grasp_joint"])
+                S["grasp_joint"] = None
+            _grip(GRIPPER_OPEN)
+            S["cubes_delivered"] += 1
+            S["phase"] = "returning_home"
+            S["enter_t"] = now
+
+    elif phase == "returning_home":
+        _set_joints(_pose_targets(pose_home))
+        if _at_pose(_pose_targets(pose_home)) or now - S["enter_t"] > 3.0:
+            S["phase"] = "wait_sensor"
+            S["enter_t"] = now
+
+try:
+    world.remove_physics_callback("pick_place_sensor_gated")
+except Exception:
+    pass
+world.add_physics_callback("pick_place_sensor_gated", _step)
+
+print(json.dumps({{
+    "ok": True,
+    "mode": "sensor_gated",
+    "sensor_path": SENSOR_PATH,
+    "belt_path": BELT_PATH,
+    "poses": {{"pick": PICK_POSE, "drop": DROP_POSE, "home": HOME_POSE}},
+    "initial_state": "home → wait_sensor",
+    "note": "Start Play. On sensor-trigger belt pauses; robot picks; belt resumes during transit; robot drops; returns home; waits for next trigger.",
+}}))
+"""
+
+
+def _gen_pick_place_fixed_poses(robot_path, pose_sequence, cycles, ee_link, fj1, fj2):
+    """Pose-sequence controller: visit each named pose in order, repeat N cycles.
+    No sensor, no grasp logic — pure replay. Useful for demos or cycle-time
+    measurement before adding control logic.
+    """
+    import json as _json
+    return f"""\
+# ── pick_place_controller (fixed_poses) ──────────────────────────────
+# Timer-driven pose sequence. No sensing, no gripping — pure demo replay.
+import os, json, re, numpy as np
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+ROBOT_PATH = {robot_path!r}
+POSE_SEQUENCE = {_json.dumps(pose_sequence)}
+CYCLES = {cycles}
+
+robot_key = re.sub(r"[^A-Za-z0-9]+", "_", ROBOT_PATH.strip("/"))
+POSE_DIR = os.path.expanduser(f"~/projects/Omniverse_Nemotron_Ext/workspace/robot_poses/{{robot_key}}")
+
+def _load_pose(name):
+    p = os.path.join(POSE_DIR, f"{{name}}.json")
+    with open(p) as f:
+        return json.load(f)
+
+poses = [_load_pose(n) for n in POSE_SEQUENCE]
+
+world = World.instance() or World()
+if not world.is_playing():
+    world.reset()
+franka = SingleArticulation(ROBOT_PATH)
+franka.initialize()
+
+def _pose_targets(pose_dict):
+    live = list(franka.dof_names) if franka.dof_names else []
+    saved = pose_dict["dof_names"]
+    sq = pose_dict["joint_positions"]
+    return [sq[saved.index(n)] if n in saved else 0.0 for n in live]
+
+def _at_pose(q, tol=0.05):
+    cur = franka.get_joint_positions()
+    if cur is None:
+        return False
+    return float(np.linalg.norm(np.array(cur) - np.array(q))) < tol
+
+S = {{"idx": 0, "cycle": 0, "enter_t": 0.0, "elapsed_t": 0.0, "done": False}}
+try:
+    franka.set_joint_position_targets(np.array(_pose_targets(poses[0])))
+except Exception:
+    franka.set_joint_positions(np.array(_pose_targets(poses[0])))
+
+def _step(dt):
+    if S["done"]:
+        return
+    S["elapsed_t"] += dt
+    now = S["elapsed_t"]
+    tgt = _pose_targets(poses[S["idx"]])
+    if _at_pose(tgt) or now - S["enter_t"] > 4.0:
+        S["idx"] += 1
+        if S["idx"] >= len(poses):
+            S["idx"] = 0
+            S["cycle"] += 1
+            if S["cycle"] >= CYCLES:
+                S["done"] = True
+                return
+        S["enter_t"] = now
+        try:
+            franka.set_joint_position_targets(np.array(_pose_targets(poses[S["idx"]])))
+        except Exception:
+            franka.set_joint_positions(np.array(_pose_targets(poses[S["idx"]])))
+
+try:
+    world.remove_physics_callback("pick_place_fixed_poses")
+except Exception:
+    pass
+world.add_physics_callback("pick_place_fixed_poses", _step)
+
+print(json.dumps({{"ok": True, "mode": "fixed_poses",
+                  "pose_sequence": POSE_SEQUENCE, "cycles": CYCLES}}))
+"""
+
+
+def _gen_pick_place_ros2_cmd(robot_path, target_topic, gripper_topic, ee_link, fj1, fj2):
+    """ROS2-commanded controller stub: subscribes to external target-pose and
+    gripper-command topics, applies them to the robot. State machine lives
+    OUTSIDE Isaac Sim — this tool only wires the I/O.
+    """
+    return f"""\
+# ── pick_place_controller (ros2_cmd) ─────────────────────────────────
+# External controller via ROS2. Isaac Sim is pure sim + I/O.
+import json
+import omni.graph.core as og
+
+ROBOT_PATH = {robot_path!r}
+TARGET_TOPIC = {target_topic!r}
+GRIPPER_TOPIC = {gripper_topic!r}
+
+# Ensure ROS2 bridge extension enabled
+import omni.kit.app
+mgr = omni.kit.app.get_app().get_extension_manager()
+try:
+    mgr.set_extension_enabled_immediate("isaacsim.ros2.bridge", True)
+except Exception:
+    pass
+
+graph_path = "/World/ROS2PickPlaceController"
+keys = og.Controller.Keys
+og.Controller.edit(
+    {{"graph_path": graph_path, "evaluator_name": "execution"}},
+    {{
+        keys.CREATE_NODES: [
+            ("OnTick", "omni.graph.action.OnPlaybackTick"),
+            ("SubTargetPose", "isaacsim.ros2.bridge.ROS2SubscribeTwist"),
+            ("PubJointState", "isaacsim.ros2.bridge.ROS2PublishJointState"),
+            ("ReadTime", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+        ],
+        keys.CONNECT: [
+            ("OnTick.outputs:tick", "SubTargetPose.inputs:execIn"),
+            ("OnTick.outputs:tick", "PubJointState.inputs:execIn"),
+            ("ReadTime.outputs:simulationTime", "PubJointState.inputs:timeStamp"),
+        ],
+        keys.SET_VALUES: [
+            ("SubTargetPose.inputs:topicName", TARGET_TOPIC),
+            ("PubJointState.inputs:topicName", "/isaac/robot/joint_states"),
+            ("PubJointState.inputs:targetPrim", ROBOT_PATH),
+        ],
+    }},
+)
+
+print(json.dumps({{"ok": True, "mode": "ros2_cmd",
+                  "target_topic": TARGET_TOPIC, "gripper_topic": GRIPPER_TOPIC,
+                  "graph_path": graph_path,
+                  "note": "External ROS2 node must subscribe to /isaac/robot/joint_states and publish to target-pose topic."}}))
+"""
