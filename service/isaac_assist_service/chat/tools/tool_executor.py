@@ -8077,7 +8077,18 @@ def _gen_configure_ros2_bridge(args: Dict) -> str:
     sensor_summary = ", ".join(s.get("type", "?") for s in sensors)
 
     return f'''\
+import os as _ros2_os
 import omni.graph.core as og
+
+# Same pre-check as setup_ros2_bridge: rmw init fails cryptically
+# without AMENT_PREFIX_PATH in Kit's environment. Raise before
+# attempting graph build.
+if not _ros2_os.environ.get("AMENT_PREFIX_PATH"):
+    raise RuntimeError(
+        "configure_ros2_bridge: AMENT_PREFIX_PATH is not set in Kit's environment. "
+        "Source your ROS2 distro setup (e.g. /opt/ros/humble/setup.bash) "
+        "before launching Isaac Sim, then relaunch. No nodes were created."
+    )
 
 # Handle Isaac Sim version namespace differences
 import isaacsim
