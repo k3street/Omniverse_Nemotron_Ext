@@ -31,6 +31,8 @@ from .tools.kit_tools import (
 )
 from .tools.tool_schemas import ISAAC_SIM_TOOLS
 from .tools.tool_executor import execute_tool_call
+from .slash_commands import parse_slash, execute_slash
+from .session_trace import emit as _trace_emit
 from ..retrieval.context_retriever import (
     retrieve_context,
     format_retrieved_context,
@@ -412,6 +414,31 @@ class ChatOrchestrator:
             session_id, ConversationKnowledge(session_id=session_id)
         )
         logger.info(f"[{session_id}] USER: {user_message}")
+
+        # Trace the user message (silent on IO failure)
+        _trace_emit(session_id, "user_msg", {"text": user_message})
+
+        # ── 0. Slash-command interception ────────────────────────────────────
+        # /note /block /pin /cite /help short-circuit the LLM — deterministic,
+        # free, fast. Anything else falls through to the normal pipeline.
+        _slash = parse_slash(user_message)
+        if _slash is not None:
+            def _slash_emit(ev_type: str, payload: Dict[str, Any]) -> None:
+                _trace_emit(session_id, ev_type, payload)
+
+            reply = await execute_slash(
+                _slash["cmd"], _slash["arg"],
+                history=history,
+                emit_trace=_slash_emit,
+            )
+            # Record the slash in history so pin/next turn can see it
+            history.append({"role": "user", "content": user_message})
+            history.append({"role": "assistant", "content": reply["reply"]})
+            _trace_emit(session_id, "agent_reply", {
+                "text": reply["reply"][:500],
+                "intent": "slash_command",
+            })
+            return reply
 
         # ── 1. Classify intent ───────────────────────────────────────────────
         intent = await classify_intent(user_message, self.llm_provider)
@@ -984,6 +1011,20 @@ class ChatOrchestrator:
         # ── 6. Persist to session history ────────────────────────────────────
         history.append({"role": "user", "content": user_message})
         history.append({"role": "assistant", "content": reply})
+
+        # Trace the structured turn outcome (for /stuck, /report, debugging)
+        for _tc in executed_tools or []:
+            _trace_emit(session_id, "tool_call", {
+                "tool": _tc.get("tool"),
+                "args_keys": list((_tc.get("arguments") or {}).keys()),
+                "success": (_tc.get("result") or {}).get("success"),
+            })
+        _trace_emit(session_id, "agent_reply", {
+            "text": reply[:500],
+            "intent": intent,
+            "tool_count": len(executed_tools or []),
+            "patch_count": len(code_patches or []),
+        })
 
         return {
             "intent": intent,
