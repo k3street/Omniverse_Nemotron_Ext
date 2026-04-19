@@ -6639,7 +6639,14 @@ def _gen_set_motion_policy(args: Dict) -> str:
         ]
         return "\n".join(lines)
 
-    return f"# Unknown policy type: {policy_type}"
+    return (
+        "raise ValueError("
+        + repr(
+            f"set_motion_policy: unknown policy_type {policy_type!r}. "
+            f"Valid: add_obstacle, remove_obstacle, set_joint_limits."
+        )
+        + ")"
+    )
 
 async def _handle_generate_robot_description(args: Dict) -> Dict:
     """Check if a robot has pre-built motion generation configs."""
@@ -9901,7 +9908,12 @@ import omni.usd
 from pxr import UsdPhysics, Sdf
 
 stage = omni.usd.get_context().get_stage()
-prim = stage.GetPrimAtPath('{prim_path}')
+_target_path = {prim_path!r}
+prim = stage.GetPrimAtPath(_target_path)
+if not prim or not prim.IsValid():
+    raise RuntimeError(
+        'apply_physics_material: prim not found: ' + repr(_target_path)
+    )
 
 # Ensure CollisionAPI is applied
 if not prim.HasAPI(UsdPhysics.CollisionAPI):
@@ -9921,7 +9933,7 @@ binding_api = UsdPhysics.MaterialAPI(prim)
 rel = prim.CreateRelationship('physics:materialBinding', custom=False)
 rel.SetTargets([Sdf.Path(mat_path)])
 
-print(f"Applied {{mat_path}} to {prim_path}: static_friction={sf}, dynamic_friction={df}, restitution={rest}, density={density}")
+print(f"Applied {{mat_path}} to " + repr(_target_path) + ": static_friction={sf}, dynamic_friction={df}, restitution={rest}, density={density}")
 """
 
 async def _handle_lookup_material(args: Dict) -> Dict:
@@ -11057,7 +11069,14 @@ UsdPhysics.CollisionAPI.Apply(ground)
 print('Template empty_robot loaded: physics + ground. Add a Franka with: import_robot(file_path="franka", format="asset_library")')
 """
 
-    return f"# Unknown template: {template}"
+    return (
+        "raise ValueError("
+        + repr(
+            f"load_scene_template: unknown template {template!r}. "
+            f"Valid: pick_and_place, mobile_nav, warehouse, empty_robot, drop_test."
+        )
+        + ")"
+    )
 
 DATA_HANDLERS["scene_aware_starter_prompts"] = _handle_scene_aware_starter_prompts
 DATA_HANDLERS["hardware_compatibility_check"] = _handle_hardware_compatibility_check
@@ -11466,7 +11485,14 @@ print("  Use Shift+drag in viewport to move joints via physics force grab.")
 print("  The robot will hold position against gravity but yield to your input.")
 print("Stop simulation to exit teaching mode.")
 """
-    return f"# Unknown teaching mode: {mode}"
+    return (
+        "raise ValueError("
+        + repr(
+            f"start_teaching_mode: unknown mode {mode!r}. "
+            f"Valid modes: drag_target, keyboard, spacemouse, gravity_comp."
+        )
+        + ")"
+    )
 
 def _gen_record_waypoints(args: Dict) -> str:
     """Generate code to record robot waypoints to file."""
