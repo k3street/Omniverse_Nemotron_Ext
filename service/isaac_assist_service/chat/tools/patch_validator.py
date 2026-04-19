@@ -600,8 +600,13 @@ _RE_WRONG_FRANKA_URL = re.compile(
     # FrankaRobotics/FrankaPanda parent dir, and all 404 on the 5.1 endpoint.
     r"""Isaac/Robots/Franka(?!Robotics)/[A-Za-z0-9_]+\.usd|"""
     r"""Isaac/Robots/FrankaEmika/|"""
-    # The deprecated 4.2 asset_root fallback is also a 404 on 5.x systems.
-    r"""omniverse://localhost/NVIDIA/Assets/Isaac/4\.[0-9]+"""
+    # Deprecated 4.x asset_root fallbacks are 404 on 5.x systems. Match
+    # against BOTH the omniverse://localhost nucleus path AND the public
+    # s3 cloud-CDN (omniverse-content-production.s3-us-west-2.amazonaws.com)
+    # which the agent picks up via stale training data. Caught
+    # 2026-04-19 on Run 3 of the conveyor build scenario.
+    r"""omniverse://localhost/NVIDIA/Assets/Isaac/4\.[0-9]+|"""
+    r"""omniverse-content-production\.s3-us-west-2\.amazonaws\.com/Assets/Isaac/4\.[0-9]+"""
 )
 
 

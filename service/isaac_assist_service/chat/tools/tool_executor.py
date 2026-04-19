@@ -1056,6 +1056,45 @@ _ROBOT_TYPE_DEFAULTS = {
     "humanoid":    {"stiffness": 800,  "damping": 80},
 }
 
+# Named-robot registry for robot_wizard — maps a known name to the
+# canonical RELATIVE path under the Isaac asset root (5.x layout).
+# robot_wizard resolves to a local disk path when ASSETS_ROOT_PATH is
+# set and the file exists (faster, offline-capable), otherwise falls
+# back to the cloud HTTPS URL.
+#
+# Relationship to _CATALOG_ROBOTS (module-level, used by catalog_search):
+# _CATALOG_ROBOTS is a flat filename map assuming Collected_Robots/*.usd
+# layout. That layout is WRONG for 5.x — Franka actually lives at
+# Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd. This registry is
+# the authoritative import source; _CATALOG_ROBOTS just drives search.
+_ROBOT_WIZARD_REGISTRY = {
+    "franka_panda": {
+        "rel_path": "Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd",
+        "robot_type": "manipulator",
+    },
+    # Aliases
+    "franka": "franka_panda",
+    "panda": "franka_panda",
+    "franka_emika_panda": "franka_panda",
+}
+
+
+def _resolve_robot_asset(entry: Dict) -> str:
+    """Return the best asset path for a robot registry entry.
+
+    Prefers local disk (ASSETS_ROOT_PATH + rel_path) when present, since
+    USD's asset resolver is ~50-100× faster off disk than over HTTPS and
+    doesn't depend on internet. Falls back to the cloud URL otherwise.
+    """
+    import os as _os
+    assets_root = _os.environ.get("ASSETS_ROOT_PATH", "").rstrip("/")
+    if assets_root and entry.get("rel_path"):
+        local = f"{assets_root}/{entry['rel_path']}"
+        if _os.path.exists(local):
+            return local
+    return entry.get("cloud_url", "")
+
 # from: feat/addendum-phase8F-ros2-quality
 _ROS2_QOS_PRESETS = {
     "scan": ("BEST_EFFORT", "VOLATILE", "Laser scan data — high-frequency, drop-tolerant"),
@@ -1539,6 +1578,7 @@ def _gen_create_prim(args: Dict) -> str:
     size = args.get("size")
     radius = args.get("radius")
     height = args.get("height")
+    intensity = args.get("intensity")
     # Validate prim_type upfront — DefinePrim accepts ANY string, returns
     # an untyped prim for unknown types, and every downstream attr setter
     # (GetSizeAttr / GetRadiusAttr / Xformable) silently no-ops on that.
@@ -1597,6 +1637,19 @@ def _gen_create_prim(args: Dict) -> str:
             lines.append(f"UsdGeom.Cone(prim).GetHeightAttr().Set({float(height)})")
         elif prim_type == "Capsule":
             lines.append(f"UsdGeom.Capsule(prim).GetHeightAttr().Set({float(height)})")
+    # Light intensity: apply when prim_type is a Light. Default to 1000 if
+    # the agent creates a Light without explicit intensity — an unset
+    # `inputs:intensity` attribute reads as None (or 0 in some renderers)
+    # so the scene stays dark despite the DomeLight prim existing.
+    _LIGHT_TYPES = {"DomeLight", "DistantLight", "SphereLight", "RectLight",
+                    "DiskLight", "CylinderLight"}
+    if prim_type in _LIGHT_TYPES:
+        _i = float(intensity) if intensity is not None else 1000.0
+        lines.append("from pxr import Sdf as _Sdf")
+        lines.append("_ia = prim.GetAttribute('inputs:intensity')")
+        lines.append("if not _ia or not _ia.IsDefined():")
+        lines.append("    _ia = prim.CreateAttribute('inputs:intensity', _Sdf.ValueTypeNames.Float)")
+        lines.append(f"_ia.Set({_i})")
     return "\n".join(lines)
 
 
@@ -2399,6 +2452,32 @@ stage = omni.usd.get_context().get_stage()
 robot_path = '{robot_path}'
 base_link_path = robot_path + '/{base_link}'
 robot_prim = stage.GetPrimAtPath(robot_path)
+
+# Pre-check: the robot must actually exist AND have loaded children. The old
+# generator blindly called HasAPI/CreateAttribute on a potentially-missing
+# prim, which threw obscure Usd/PhysX errors that the agent mis-diagnosed as
+# "anchor_robot is broken". The real cause is almost always "robot was never
+# imported". Catch it up-front with a clear message.
+if not robot_prim.IsValid():
+    raise RuntimeError(
+        f"anchor_robot: prim at {{robot_path!r}} does not exist. "
+        f"Import the robot FIRST via robot_wizard(asset_path=...) or "
+        f"add_reference / run_usd_script with AddReference(), then call "
+        f"anchor_robot on the resulting prim."
+    )
+# HasAuthoredReferences catches the silent-404 case where DefinePrim +
+# AddReference succeeded at USD level but the asset resolver failed to
+# fetch the payload (common with deprecated 4.x asset URLs). Child count
+# is the hard check: a real Franka has ~34 descendants, a silent 404
+# gives you an empty Xform.
+_desc_count = len(list(Usd.PrimRange(robot_prim))[1:])
+if _desc_count < 2:
+    raise RuntimeError(
+        f"anchor_robot: prim at {{robot_path!r}} exists but has {{_desc_count}} "
+        f"descendants — the asset reference likely failed to resolve. "
+        f"Check the asset_path (deprecated /Isaac/4.2/ paths can 404 silently). "
+        f"Use robot_wizard or add_reference with a current 5.x asset URL."
+    )
 
 # Step 1: Set fixedBase=True on PhysxArticulationAPI
 # This tells PhysX the root link is immovable (no need to move ArticulationRootAPI)
@@ -7287,20 +7366,76 @@ DATA_HANDLERS["visualize_behavior_tree"] = _handle_visualize_behavior_tree
 
 # ══════ From feat/8D-robot-setup ══════
 def _gen_robot_wizard(args: Dict) -> str:
-    asset_path = args["asset_path"]
-    robot_type = args.get("robot_type", "manipulator")
+    # Resolve `robot_name` against the registry BEFORE requiring asset_path.
+    # This is the deterministic path: agent says robot_name="franka_panda"
+    # and we fill in the verified URL + robot_type. Falls through to the
+    # explicit asset_path for unknown robots / custom URDFs.
+    robot_name = args.get("robot_name", "")
+    registry_hit = None
+    if robot_name:
+        key = robot_name.lower().replace("-", "_").replace(" ", "_")
+        entry = _ROBOT_WIZARD_REGISTRY.get(key)
+        while isinstance(entry, str):  # alias → canonical
+            entry = _ROBOT_WIZARD_REGISTRY.get(entry)
+        if isinstance(entry, dict):
+            registry_hit = entry
+    if registry_hit:
+        asset_path = _resolve_robot_asset(registry_hit)
+        if not asset_path:
+            return (
+                f"raise RuntimeError('robot_wizard: registry entry for "
+                f"{robot_name!r} has no resolvable asset — neither local "
+                f"(ASSETS_ROOT_PATH + rel_path) nor cloud_url available')\n"
+            )
+        robot_type = args.get("robot_type") or registry_hit.get("robot_type", "manipulator")
+    else:
+        if not args.get("asset_path"):
+            return (
+                "raise ValueError("
+                "'robot_wizard: either robot_name (one of "
+                + ", ".join(sorted(k for k, v in _ROBOT_WIZARD_REGISTRY.items() if isinstance(v, dict)))
+                + ") or asset_path (explicit URL/URDF) must be provided')\n"
+            )
+        asset_path = args["asset_path"]
+        robot_type = args.get("robot_type", "manipulator")
     defaults = _ROBOT_TYPE_DEFAULTS.get(robot_type, _ROBOT_TYPE_DEFAULTS["manipulator"])
     stiffness = args.get("drive_stiffness", defaults["stiffness"])
     damping = args.get("drive_damping", defaults["damping"])
+    # dest_path is only used for USD-reference imports. URDF goes through
+    # import_urdf which returns its own dest_path (and respects the
+    # URDF's own root-link naming). Hard-coded /World/Robot before caused
+    # path mismatches when the task spec expected /World/Franka.
+    dest_path_arg = args.get("dest_path", "/World/Robot")
+
+    # Accept a position arg so the agent doesn't need a separate run_usd_script
+    # call to place the robot (which often fails validator's missing-import
+    # check). Applied AFTER the reference resolves, via the safe-translate
+    # pattern to avoid duplicate xformOps.
+    position = args.get("position")
 
     is_urdf = asset_path.lower().endswith(".urdf")
 
     # Common precheck for local filesystem paths. Matches the pattern in
     # import_robot / add_reference / add_usd_reference: URL-scheme prefixes
     # go through USD's asset resolver, everything else must exist on disk.
+    #
+    # Also rejects known-deprecated 4.x cloud/nucleus asset roots up-front.
+    # These return HTTP 200 with an empty stage (or 404 depending on CDN
+    # edge), and AddReference is non-erroring on both — you get an empty
+    # Xform with no children. The agent then treats the robot as "loaded".
+    # Caught 2026-04-19 on conveyor build Run 3.
     _path_check = f"""\
 import os as _os
 _asset = {asset_path!r}
+import re as _re
+if _re.search(r'/Isaac/4\\.[0-9]+', _asset):
+    raise ValueError(
+        f'robot_wizard: asset_path contains deprecated Isaac 4.x path segment '
+        f'({{_asset!r}}). Use a 5.x path instead, e.g. '
+        f'/Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd on the current '
+        f'asset_root. Call lookup_api_deprecation("franka panda") for the '
+        f'canonical 5.x URL recipe.'
+    )
 if not any(_asset.startswith(p) for p in ('omniverse://','http://','https://','file://','anon:')):
     if not _os.path.exists(_asset):
         raise FileNotFoundError(f'robot_wizard: asset not found on disk: {{_asset!r}}')
@@ -7323,12 +7458,24 @@ print(f"Imported URDF → {{dest_path}}")
     else:
         import_block = _path_check + f"""
 # Step 1: Import robot from USD
-dest_path = '/World/Robot'
+dest_path = {dest_path_arg!r}
 prim = stage.DefinePrim(dest_path, 'Xform')
 prim.GetReferences().AddReference({asset_path!r})
 if not prim.HasAuthoredReferences():
     raise RuntimeError(f'robot_wizard: AddReference({{_asset!r}}) completed but HasAuthoredReferences is False on {{dest_path}}')
-print(f"Loaded USD asset → {{dest_path}}")
+# Verify the reference actually resolved — AddReference is lazy and will
+# not error on a 404. An empty Xform (≤1 descendant) means the asset
+# server rejected the URL. Deprecated /Isaac/4.2/ paths are the most
+# common offender; Isaac Sim 5.x uses /Isaac/5.0/ or /Isaac/Assets/.
+from pxr import Usd as _Usd
+_desc = len(list(_Usd.PrimRange(prim))[1:])
+if _desc < 2:
+    raise RuntimeError(
+        f'robot_wizard: AddReference({{_asset!r}}) left {{dest_path}} with '
+        f'{{_desc}} descendants — asset URL likely failed to resolve. '
+        f'Check for deprecated 4.x paths; use a 5.x asset URL.'
+    )
+print(f"Loaded USD asset → {{dest_path}} ({{_desc}} descendants)")
 """
 
     return f"""\
@@ -7364,6 +7511,23 @@ for child in list(Usd.PrimRange(robot_prim))[1:]:
         collision_count += 1
 print(f"Applied convex-hull collision to {{collision_count}} meshes")
 
+# Step 4 (optional): apply position. Reuse existing translate op if the
+# referenced USD already authored one, otherwise add a fresh op. Prevents
+# the xformOp stack from growing on repeated tool calls.
+{("" if not position else f'''
+from pxr import UsdGeom as _UsdGeom, Gf as _Gf
+_pos = ({position[0]}, {position[1]}, {position[2]})
+_xf = _UsdGeom.Xformable(robot_prim)
+_tr_op = None
+for _op in _xf.GetOrderedXformOps():
+    if _op.GetOpType() == _UsdGeom.XformOp.TypeTranslate:
+        _tr_op = _op
+        break
+if _tr_op is None:
+    _tr_op = _xf.AddTranslateOp()
+_tr_op.Set(_Gf.Vec3d(*_pos))
+print(f"Positioned robot at {{_pos}}")
+''')}
 # Summary
 print(f"Robot setup complete: type={robot_type}, drives={{joint_count}}, collisions={{collision_count}}")
 """
@@ -7920,10 +8084,107 @@ merger.merge()
 print(f"Merged {{len(prim_paths)}} meshes: {{prim_paths}}")
 """
 
+def _gen_create_bin(args: Dict) -> str:
+    """Build an open-top container from 5 thin Cubes (floor + 4 walls).
+
+    Added 2026-04-19 after the conveyor_pick_place scenario showed agents
+    following the open_top_bin cite's STRUCTURE (5 children with
+    CollisionAPI) but improvising internally-inconsistent DIMENSIONS —
+    floor overhanging walls, walls offset below floor, etc. A dedicated
+    tool eliminates that class of error by computing all offsets from
+    the same size argument.
+
+    All 5 child Cubes get UsdPhysics.CollisionAPI so dropped objects
+    collide and come to rest. Parent Xform gets no physics API and
+    carries the world transform. Wall thickness defaults to 0.01m
+    (PhysX contact-detection minimum at normal velocities).
+    """
+    prim_path = args["prim_path"]
+    size = args.get("size", [0.3, 0.3, 0.15])
+    position = args.get("position", [0.0, 0.0, 0.0])
+    wall_thickness = args.get("wall_thickness", 0.01)
+
+    return f"""\
+import omni.usd
+from pxr import Usd, UsdGeom, UsdPhysics, Gf, Sdf
+
+prim_path = '{prim_path}'
+w, d, h = {size[0]}, {size[1]}, {size[2]}
+px, py, pz = {position[0]}, {position[1]}, {position[2]}
+t = {wall_thickness}
+
+stage = omni.usd.get_context().get_stage()
+
+# Parent Xform carries the world transform. Children use local coords
+# computed from (w, d, h) so they stay consistent regardless of how the
+# parent is later moved.
+parent_prim = stage.GetPrimAtPath(prim_path)
+if not parent_prim or not parent_prim.IsValid():
+    parent_prim = stage.DefinePrim(prim_path, 'Xform')
+
+xf = UsdGeom.Xformable(parent_prim)
+# Reuse existing translate op if present (avoids op-stack duplication)
+translate_op = None
+for op in xf.GetOrderedXformOps():
+    if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+        translate_op = op
+        break
+if translate_op is None:
+    translate_op = xf.AddTranslateOp()
+translate_op.Set(Gf.Vec3d(float(px), float(py), float(pz)))
+
+def _define_cube(child_name, scale, local_translate):
+    cube_path = f"{{prim_path}}/{{child_name}}"
+    cube_prim = stage.GetPrimAtPath(cube_path)
+    if not cube_prim or not cube_prim.IsValid():
+        cube_prim = UsdGeom.Cube.Define(stage, cube_path).GetPrim()
+    cube = UsdGeom.Cube(cube_prim)
+    # UsdGeom.Cube defaults to size=2 (−1..1 extent). Use scale to set true dimensions.
+    cube.GetSizeAttr().Set(2.0)
+    cube_xf = UsdGeom.Xformable(cube_prim)
+    # Clear existing ops, set scale+translate in consistent order
+    cube_xf.ClearXformOpOrder()
+    ts_op = cube_xf.AddTranslateOp()
+    ts_op.Set(Gf.Vec3d(*local_translate))
+    sc_op = cube_xf.AddScaleOp()
+    sc_op.Set(Gf.Vec3f(scale[0]/2.0, scale[1]/2.0, scale[2]/2.0))
+    if not cube_prim.HasAPI(UsdPhysics.CollisionAPI):
+        UsdPhysics.CollisionAPI.Apply(cube_prim)
+    return cube_path
+
+# Floor: covers w × d footprint, thickness = t, sits at z=0 (bottom of bin)
+floor = _define_cube("Floor", (w, d, t), (0.0, 0.0, t/2.0))
+
+# Wall centers: walls sit on top of floor (z from t to h), thickness t
+wall_mid_z = t + (h - t) / 2.0
+wall_inner_h = h - t
+
+# Two walls along X-axis (short walls, full width in Y) at ±(w/2 − t/2)
+wall_x1 = _define_cube("WallX1", (t, d, wall_inner_h), (-(w - t)/2.0, 0.0, wall_mid_z))
+wall_x2 = _define_cube("WallX2", (t, d, wall_inner_h), ( (w - t)/2.0, 0.0, wall_mid_z))
+
+# Two walls along Y-axis (long walls, between the X walls) at ±(d/2 − t/2)
+# Length is (w − 2t) so they don't overlap the X-walls.
+wall_y1 = _define_cube("WallY1", (w - 2*t, t, wall_inner_h), (0.0, -(d - t)/2.0, wall_mid_z))
+wall_y2 = _define_cube("WallY2", (w - 2*t, t, wall_inner_h), (0.0,  (d - t)/2.0, wall_mid_z))
+
+import json
+print(json.dumps({{
+    "ok": True,
+    "prim_path": prim_path,
+    "children": [floor, wall_x1, wall_x2, wall_y1, wall_y2],
+    "interior_wxdxh": [round(w - 2*t, 4), round(d - 2*t, 4), round(h - t, 4)],
+    "world_position": [px, py, pz],
+    "note": "Open-top container with 5 collision-enabled Cubes. Interior volume is (w-2t) × (d-2t) × (h-t). Drop objects from above z=position[2]+h.",
+}}))
+"""
+
+
 CODE_GEN_HANDLERS["create_wheeled_robot"] = _gen_create_wheeled_robot
 CODE_GEN_HANDLERS["navigate_to"] = _gen_navigate_to
 CODE_GEN_HANDLERS["create_conveyor"] = _gen_create_conveyor
 CODE_GEN_HANDLERS["create_conveyor_track"] = _gen_create_conveyor_track
+CODE_GEN_HANDLERS["create_bin"] = _gen_create_bin
 CODE_GEN_HANDLERS["merge_meshes"] = _gen_merge_meshes
 
 # ══════ From feat/8F-ros2-deep ══════
@@ -21129,9 +21390,55 @@ def _gen_create_hdri_skydome(args: Dict) -> str:
         f"print('Created HDRI skydome at ' + dome_path + ' with texture {safe_hdri}')"
     )
 
+def _gen_add_default_light(args: Dict) -> str:
+    """Add a plain DomeLight so the viewport isn't black.
+
+    Added 2026-04-19 after conveyor_pick_place scenario runs repeatedly
+    produced correct geometry but unlit scenes — the text-only
+    scene_needs_light cite was insufficient to force Gemini Flash to
+    author a UsdLux.DomeLight. A registered tool gives the agent a
+    concrete named action to take.
+
+    Minimal: no HDRI texture, no environment setup. Use
+    create_hdri_skydome for textured dome environments.
+    """
+    light_path = args.get("light_path", "/World/DomeLight")
+    intensity = float(args.get("intensity", 1000.0))
+    if intensity < 0:
+        intensity = 0.0
+    return f"""\
+import omni.usd
+from pxr import UsdLux, Sdf
+
+stage = omni.usd.get_context().get_stage()
+light_path = '{light_path}'
+
+# Idempotent: re-define reuses the existing prim if present.
+dome = UsdLux.DomeLight.Define(stage, light_path)
+prim = dome.GetPrim()
+if not prim.IsValid():
+    raise RuntimeError('add_default_light: could not define DomeLight at ' + light_path)
+
+intensity_attr = prim.GetAttribute('inputs:intensity')
+if not intensity_attr or not intensity_attr.IsDefined():
+    intensity_attr = prim.CreateAttribute('inputs:intensity', Sdf.ValueTypeNames.Float)
+intensity_attr.Set({intensity})
+
+import json
+print(json.dumps({{
+    "ok": True,
+    "light_path": light_path,
+    "intensity": {intensity},
+    "type": "DomeLight",
+    "note": "Plain DomeLight — no HDRI texture. For environment HDRI, use create_hdri_skydome instead.",
+}}))
+"""
+
+
 CODE_GEN_HANDLERS["set_light_intensity"] = _gen_set_light_intensity
 CODE_GEN_HANDLERS["set_light_color"] = _gen_set_light_color
 CODE_GEN_HANDLERS["create_hdri_skydome"] = _gen_create_hdri_skydome
+CODE_GEN_HANDLERS["add_default_light"] = _gen_add_default_light
 DATA_HANDLERS["list_lights"] = _handle_list_lights
 DATA_HANDLERS["get_light_properties"] = _handle_get_light_properties
 
@@ -24509,7 +24816,12 @@ def _advance(dt):
             cube = _bbox_center_np(S["current_cube"])
             if cube is None:
                 S["remaining"].pop(0); S["phase"] = "next"; return
-            tgt = cube + np.array([0, 0, 0.015])  # just above cube top
+            # panda_hand (the EE frame) is the gripper palm; fingertips
+            # extend ~0.105m below. Target the palm at cube_top + 0.105m
+            # so the fingertips wrap the cube. Previously we targeted
+            # cube + 0.015m which put the fingertips 9cm inside the belt,
+            # and RmpFlow refused to penetrate the collision.
+            tgt = cube + np.array([0, 0, 0.105])
             S["current_target"] = tgt
             _set_target(tgt)
             S["phase"] = "descend"
@@ -24523,8 +24835,39 @@ def _advance(dt):
 
     elif phase == "grasp":
         if now - S["phase_enter_t"] > 0.4:  # brief pause for gripper to close
-            S["grasp_joint"] = _attach_cube_to_ee(S["current_cube"])
+            # Contact gate: verify EE (panda_hand palm) is at the descend
+            # target (cube + 0.105m so fingertips wrap the cube). Checking
+            # against cube center directly would always fail since palm-to-
+            # cube-center is ~0.105m by design. Observed 2026-04-19: without
+            # this gate, FixedJoint.Apply preserves a 0.5m offset when
+            # descend times out.
             ee = _ee_pos_np()
+            cube = _bbox_center_np(S["current_cube"])
+            target_pos = cube + np.array([0, 0, 0.105]) if cube is not None else None
+            _grip_ok = (ee is not None and target_pos is not None
+                        and float(np.linalg.norm(ee - target_pos)) <= 0.06)
+            if not _grip_ok:
+                # Retry descend up to 2 times; after that, give up on this cube.
+                S.setdefault("grasp_retries", 0)
+                S["grasp_retries"] += 1
+                if S["grasp_retries"] >= 3:
+                    # Abandon this cube, reset retry counter, try next
+                    S["grasp_retries"] = 0
+                    _gripper(GRIPPER_OPEN)
+                    S["remaining"].pop(0)
+                    S["phase"] = "next"
+                    return
+                # Re-aim descend just above the cube current position
+                if cube is not None:
+                    tgt = cube + np.array([0, 0, 0.015])
+                    S["current_target"] = tgt
+                    _set_target(tgt)
+                _gripper(GRIPPER_OPEN)
+                S["phase"] = "descend"
+                S["phase_enter_t"] = now
+                return
+            S["grasp_retries"] = 0
+            S["grasp_joint"] = _attach_cube_to_ee(S["current_cube"])
             if ee is None:
                 S["phase"] = "release"; return
             tgt = ee + np.array([0, 0, LIFT_H])
@@ -24565,12 +24908,31 @@ def _physics_cb(dt):
         if action is not None:
             franka.apply_action(action)
 
-# Remove any stale callback from a prior setup in this session
-try:
-    world.remove_physics_callback("pick_place_controller_sm")
-except Exception:
-    pass
-world.add_physics_callback("pick_place_controller_sm", _physics_cb)
+# Subscribe via omni.physx directly (not world.add_physics_callback).
+# World.add_physics_callback goes through SimulationContext._physics_context
+# which is None unless World was constructed against an already-initialized
+# PhysicsScene AND world.reset_async() completed. In a freshly-built stage
+# from exec_sync, that precondition is unreliable and raises
+# AttributeError: 'NoneType' object has no attribute '_physx_interface'.
+# The physx interface itself is available directly, so bypass the World
+# layer and subscribe to raw physics step events.
+_physx = omni.physx.get_physx_interface()
+if _physx is None:
+    raise RuntimeError(
+        "setup_pick_place_controller: omni.physx interface unavailable — "
+        "ensure the PhysX extension is loaded (omni.physx, omni.physx.flatcache)."
+    )
+# Cache the subscription so repeated calls replace rather than stack.
+import builtins as _builtins
+_sub_attr = "_pick_place_controller_physx_sub"
+_old_sub = getattr(_builtins, _sub_attr, None)
+if _old_sub is not None:
+    try:
+        _old_sub.unsubscribe()
+    except Exception:
+        pass
+_sub = _physx.subscribe_physics_step_events(_physics_cb)
+setattr(_builtins, _sub_attr, _sub)
 
 print(json.dumps({{
     "ok": True,
@@ -24798,20 +25160,23 @@ def _sensor_step(dt):
     trig_attr.Set(bool(hits))
     last_attr.Set(hits[0] if hits else "")
 
-# Remove stale callback if re-configured
-try:
-    from isaacsim.core.api import World
-    w = World.instance() or World()
-    try:
-        w.remove_physics_callback(f"sensor_{{sensor_path}}")
-    except Exception:
-        pass
-    w.add_physics_callback(f"sensor_{{sensor_path}}", _sensor_step)
-except Exception as e:
-    # Fallback: subscribe directly via omni.physx (no World dependency)
-    _sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_sensor_step)
-    # Keep a reference to prevent garbage collection
-    sensor_prim.CreateAttribute("isaac_sensor:_sub_handle", Sdf.ValueTypeNames.String).Set(str(id(_sub)))
+# Subscribe via omni.physx directly. World.add_physics_callback goes
+# through SimulationContext._physics_context which is often None in
+# exec_sync contexts (raises AttributeError at registration). The
+# raw omni.physx subscription fires reliably under manual
+# update_simulation stepping AND live timeline.play.
+import builtins as _builtins
+_sub_attr_name = "_sensor_" + sensor_path.replace("/", "_") + "_sub"
+_old_sub = getattr(_builtins, _sub_attr_name, None)
+if _old_sub is not None:
+    try: _old_sub.unsubscribe()
+    except Exception: pass
+_sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_sensor_step)
+# Pin the subscription to a module-level attribute so Python's GC
+# doesn't collect it and kill the callback. Storing on USD as
+# str(id(_sub)) (the previous pattern) pinned only an integer string,
+# not the Python object — the subscription died immediately.
+setattr(_builtins, _sub_attr_name, _sub)
 
 import json
 print(json.dumps({{
@@ -24990,6 +25355,7 @@ import os
 import json
 import numpy as np
 import omni.usd
+import omni.physx
 from pxr import UsdGeom, UsdPhysics, Sdf, Gf
 from isaacsim.robot_motion.motion_generation import RmpFlow, ArticulationMotionPolicy
 from isaacsim.core.prims import SingleArticulation
@@ -25066,10 +25432,18 @@ pose_home = _load_pose(HOME_POSE)
 
 stage = omni.usd.get_context().get_stage()
 world = World.instance() or World()
-if not world.is_playing():
-    world.reset()
 
-franka = SingleArticulation(ROBOT_PATH)
+# Register the articulation with world.scene BEFORE reset/initialize.
+# Without this, apply_action() silently no-ops — drive targets never
+# update, joints never move. Observed 2026-04-19 in sensor_gated runs:
+# controller cycled through phases correctly but robot stayed frozen.
+franka = SingleArticulation(ROBOT_PATH, name="franka_pp_sg")
+try:
+    world.scene.add(franka)
+except Exception:
+    # Already registered from a prior install — that's fine
+    pass
+world.reset()
 franka.initialize()
 
 sensor_prim = stage.GetPrimAtPath(SENSOR_PATH)
@@ -25094,9 +25468,10 @@ def _resume_belt():
     if belt_sv_attr and belt_sv_attr.IsDefined() and _nominal_belt_velocity:
         belt_sv_attr.Set(Gf.Vec3f(*_nominal_belt_velocity))
 
+from isaacsim.core.utils.types import ArticulationAction
 def _set_joints(q):
     try:
-        franka.set_joint_position_targets(np.array(q))
+        franka.apply_action(ArticulationAction(joint_positions=np.array(q)))
     except Exception:
         franka.set_joint_positions(np.array(q))
 
@@ -25193,11 +25568,20 @@ def _step(dt):
             S["phase"] = "wait_sensor"
             S["enter_t"] = now
 
-try:
-    world.remove_physics_callback("pick_place_sensor_gated")
-except Exception:
-    pass
-world.add_physics_callback("pick_place_sensor_gated", _step)
+# Subscribe via omni.physx directly (World.add_physics_callback hits
+# NoneType._physx_interface in exec_sync contexts where SimulationContext
+# didn't fully initialize). Same pattern as cube_tracking mode.
+import builtins as _builtins
+_sub_attr = "_pick_place_sensor_gated_physx_sub"
+_old_sub = getattr(_builtins, _sub_attr, None)
+if _old_sub is not None:
+    try: _old_sub.unsubscribe()
+    except Exception: pass
+_physx = omni.physx.get_physx_interface()
+if _physx is None:
+    raise RuntimeError("sensor_gated: omni.physx interface unavailable")
+_sub = _physx.subscribe_physics_step_events(_step)
+setattr(_builtins, _sub_attr, _sub)
 
 print(json.dumps({{
     "ok": True,

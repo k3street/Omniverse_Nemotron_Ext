@@ -19,19 +19,23 @@ ISAAC_SIM_TOOLS = [
                 "IMPORTANT — USD primitive defaults: Cube.size=2m (edge length), Sphere.radius=1m, "
                 "Cylinder/Cone/Capsule radius=1m height=2m. If the user wants a 1m cube, EITHER pass "
                 "size=1.0 (preferred, authors the USD attribute directly) OR scale=[0.5,0.5,0.5] (scales the 2m default). "
-                "Passing scale=[1,1,1] on a Cube leaves it at 2m, not 1m. Same caveat for sphere/cylinder radius/height."
+                "Passing scale=[1,1,1] on a Cube leaves it at 2m, not 1m. Same caveat for sphere/cylinder radius/height. "
+                "POSITION: if omitted, the prim is placed at world origin (0, 0, 0). Always pass `position` "
+                "unless you specifically want origin. Lights: pass `intensity` (defaults to 1000 if omitted for "
+                "DomeLight / DistantLight / SphereLight / RectLight / DiskLight / CylinderLight)."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "prim_path": {"type": "string", "description": "USD path for the new prim, e.g. '/World/MyCube'"},
                     "prim_type": {"type": "string", "description": "Type: Cube, Sphere, Cylinder, Cone, Capsule, Mesh, Xform, Camera, DistantLight, DomeLight"},
-                    "position": {"type": "array", "items": {"type": "number"}, "description": "XYZ position in world space [x, y, z]"},
+                    "position": {"type": "array", "items": {"type": "number"}, "description": "XYZ position in world space [x, y, z]. IF OMITTED: prim is placed at origin (0, 0, 0). Always specify this for geometry you don't want stacked at origin."},
                     "scale": {"type": "array", "items": {"type": "number"}, "description": "XYZ scale [sx, sy, sz]. Multiplies the primitive's geometric defaults (see description)."},
                     "rotation_euler": {"type": "array", "items": {"type": "number"}, "description": "Euler rotation in degrees [rx, ry, rz]"},
                     "size": {"type": "number", "description": "Cube: edge length in meters. Overrides the USD default (2m). Ignored for non-Cube types."},
                     "radius": {"type": "number", "description": "Sphere/Cylinder/Cone/Capsule: radius in meters. Overrides the USD default (1m). Ignored for non-round types."},
                     "height": {"type": "number", "description": "Cylinder/Cone/Capsule: height in meters. Overrides the USD default (2m). Ignored for types without height."},
+                    "intensity": {"type": "number", "description": "Light intensity (inputs:intensity). Only used for Light prim types. Default: 1000 if a Light type is specified without explicit intensity."},
                 },
                 "required": ["prim_path", "prim_type"],
             },
@@ -1948,20 +1952,23 @@ ISAAC_SIM_TOOLS = [
             "type": "function",
             "function": {
                 "name": "robot_wizard",
-                "description": "Import a robot from URDF/USD, apply sensible drive defaults based on robot type (manipulator, mobile, humanoid), apply convex-hull collision meshes, and print a configuration summary.",
+                "description": "Import a robot from URDF/USD, apply sensible drive defaults based on robot type, apply convex-hull collision meshes, and print a configuration summary. PREFERRED USAGE: pass `robot_name` (e.g. 'franka_panda') — the tool resolves a verified canonical Isaac Sim 5.1 URL, no guessing needed. Fallback: pass `asset_path` for custom URLs/URDFs. For USD assets, the reference is added at `dest_path` (default /World/Robot) — pass `dest_path` explicitly for paths like /World/Franka.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "asset_path": {"type": "string", "description": "Path to URDF or USD robot file"},
+                        "robot_name": {"type": "string", "description": "Known-robot name. Currently supports: 'franka_panda' (aliases: 'franka', 'panda'). When provided, the tool uses the registered canonical 5.1 asset URL — preferred over asset_path for supported robots because it eliminates URL-guessing drift."},
+                        "asset_path": {"type": "string", "description": "Path to URDF or USD robot file. Use this for custom robots or when robot_name is not in the registry. Required if robot_name is not set."},
+                        "dest_path": {"type": "string", "description": "USD path where the robot should be created. Default: /World/Robot. Pass /World/Franka or /World/UR10 etc. when the task specifies a path. URDF imports ignore this."},
+                        "position": {"type": "array", "items": {"type": "number"}, "description": "XYZ world position to place the robot base at [x, y, z]. If omitted, the robot stays at the reference's default origin (usually (0,0,0)). ALWAYS pass this when the robot should sit on a table top — e.g. position=[0, 0, 0.75] for a 0.75m-tall table."},
                         "robot_type": {
                             "type": "string",
                             "enum": ["manipulator", "mobile", "humanoid"],
-                            "description": "Robot category — determines default drive stiffness/damping. Default: manipulator",
+                            "description": "Robot category — determines default drive stiffness/damping. Auto-resolved from robot_name when available. Default: manipulator.",
                         },
                         "drive_stiffness": {"type": "number", "description": "Override default Kp (position gain)"},
                         "drive_damping": {"type": "number", "description": "Override default Kd (damping gain)"},
                     },
-                    "required": ["asset_path"],
+                    "required": [],
                 },
             },
         },
@@ -2102,6 +2109,31 @@ ISAAC_SIM_TOOLS = [
                             "items": {"type": "number"},
                             "description": "Belt direction vector [x, y, z]. Default: [1, 0, 0]",
                         },
+                    },
+                    "required": ["prim_path"],
+                },
+            },
+        },
+    {
+            "type": "function",
+            "function": {
+                "name": "create_bin",
+                "description": "Build an open-top container (5 thin collision-enabled Cubes: floor + 4 walls) at a world position with consistent internal dimensions. Use this instead of authoring the 5-prim pattern manually — the tool computes all wall offsets from the size argument so the floor, walls, and interior stay geometrically coherent. Each child Cube gets UsdPhysics.CollisionAPI. Canonical pick-and-place drop-off target; pairs well with create_conveyor + robot pick-place controllers.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "prim_path": {"type": "string", "description": "USD path for the bin parent Xform, e.g. '/World/Bin'."},
+                        "size": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "description": "External [width, depth, height] in meters. Default: [0.3, 0.3, 0.15]. Interior volume will be (w - 2t) × (d - 2t) × (h - t) where t is wall_thickness.",
+                        },
+                        "position": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "description": "World [x, y, z] of the bin base corner (floor bottom). Default: [0, 0, 0]. To place bin on a table-top at z=0.75, pass [x, y, 0.75].",
+                        },
+                        "wall_thickness": {"type": "number", "description": "Wall + floor thickness in meters. Default: 0.01 (PhysX-reliable minimum)."},
                     },
                     "required": ["prim_path"],
                 },
@@ -5518,6 +5550,21 @@ ISAAC_SIM_TOOLS = [
                         },
                     },
                     "required": ["light_path", "rgb"],
+                },
+            },
+        },
+    {
+            "type": "function",
+            "function": {
+                "name": "add_default_light",
+                "description": "Add a plain UsdLux.DomeLight to illuminate the scene so the viewport isn't black. Use this for any new scene / industrial cell / pick-and-place demo that does not already have a light authored — Isaac Sim does NOT auto-add one. Minimal: no HDRI texture, no background environment — just enough ambient light for the geometry to render. For textured environment/photorealistic lighting use create_hdri_skydome instead.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "light_path": {"type": "string", "description": "USD path for the DomeLight. Default: '/World/DomeLight'."},
+                        "intensity": {"type": "number", "description": "Light intensity. Default: 1000. Scale up for very large scenes, down for interiors."},
+                    },
+                    "required": [],
                 },
             },
         },
