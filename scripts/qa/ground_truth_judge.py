@@ -123,6 +123,15 @@ def _snapshot_summary(snap: Dict) -> str:
             extras.append(f"references={refs}")
         elif p.get("has_refs"):
             extras.append("has_refs=true")
+        # Variant selections — AD-22 active-variant verification.
+        vmap = p.get("variants")
+        if vmap:
+            v_compact = ", ".join(f"{k}={v}" for k, v in vmap.items())
+            extras.append(f"variants={{{v_compact}}}")
+        # Semantic class — AD-20 "is X tagged 'obstacle'?" verification.
+        sem = p.get("semantic_class")
+        if sem:
+            extras.append(f"semantic={sem}")
         if extras:
             line += "  " + " ".join(extras)
         lines.append(line)

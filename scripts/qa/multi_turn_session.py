@@ -151,6 +151,47 @@ else:
                         entry['material_binding'] = mat_path
         except Exception:
             pass
+        # Variant selections — { variant_set: active_variant } dict.
+        # AD-22 ("is variant 'red' active on /World/Car?") becomes
+        # snapshot-verifiable without relying on judge reading list_variants
+        # output in the reply prose.
+        try:
+            vsets = p.GetVariantSets()
+            if vsets and vsets.GetNames():
+                _vmap = {}
+                for vname in vsets.GetNames():
+                    try:
+                        vs = vsets.GetVariantSet(vname)
+                        _vmap[vname] = str(vs.GetVariantSelection())
+                    except Exception:
+                        pass
+                if _vmap:
+                    entry['variants'] = _vmap
+        except Exception:
+            pass
+        # Semantic label via Semantics.SemanticsAPI. AD-20 ("is /World/X
+        # tagged with 'obstacle'?") becomes snapshot-verifiable.
+        try:
+            from pxr import Semantics
+            _sem_data = None
+            try:
+                instances = Semantics.SemanticsAPI.GetAll(p) if hasattr(
+                    Semantics.SemanticsAPI, 'GetAll'
+                ) else []
+            except Exception:
+                instances = []
+            for inst in instances or []:
+                try:
+                    d = inst.GetSemanticDataAttr().Get()
+                    if d:
+                        _sem_data = str(d)
+                        break
+                except Exception:
+                    continue
+            if _sem_data:
+                entry['semantic_class'] = _sem_data
+        except Exception:
+            pass
         # References — paths of authored references on the prim. Lets
         # the judge verify "is /World/X referenced from Y?" claims
         # (AD-23) directly from snapshot rather than needing
