@@ -110,7 +110,20 @@ def format_stage_context_for_llm(ctx: Dict[str, Any]) -> str:
     if "error" not in stage:
         lines.append(f"## Active Stage")
         lines.append(f"- URL: {stage.get('stage_url', 'unknown')}")
-        lines.append(f"- Prim count: {stage.get('prim_count', '?')}")
+        total = stage.get("prim_count", None)
+        user_n, system_n = _count_user_vs_system_prims(stage.get("tree", []))
+        if total is not None and (user_n + system_n) > 0:
+            # Break the total down so the agent doesn't quote "15 prims" to the
+            # user when only 3 of them are user-authored. Observed 2026-04-19:
+            # agent said "scene has 15 prims" after user created 2 cubes + 1 dome,
+            # triggering confusion ("det är väl bara 3?"). The system prim count
+            # includes /Render, /OmniverseKit_*, /persistent — default stage.
+            lines.append(
+                f"- Prim count: {total} total — {user_n} user-authored (under /World), "
+                f"{system_n} default/system (render settings, cameras, etc.)"
+            )
+        else:
+            lines.append(f"- Prim count: {total if total is not None else '?'}")
         if stage.get("truncated"):
             lines.append("- (tree truncated at 500 prims)")
         if "tree" in stage:
@@ -144,6 +157,50 @@ def format_stage_context_for_llm(ctx: Dict[str, Any]) -> str:
             lines.append(f"  [{w['source']}] {w['msg'][:100]}")
 
     return "\n".join(lines) if lines else "(No scene context available)"
+
+
+# Prim-path prefixes that Kit / Isaac Sim authors automatically on any fresh
+# stage. Anything under these is "system" (render settings, default cameras,
+# persistent layer machinery) — not part of what the user created.
+_SYSTEM_PRIM_PREFIXES = (
+    "/Render",
+    "/OmniverseKit",
+    "/omni",
+    "/persistent",
+)
+# Note: /Environment is user-authored (create_hdri_skydome lands lights there)
+# and intentionally NOT in _SYSTEM_PRIM_PREFIXES — it counts toward user prims.
+
+
+def _count_user_vs_system_prims(nodes) -> tuple[int, int]:
+    """Walk the tree from stage_reader and split nodes into user vs system.
+    User = under /World (or any other non-system top-level). System = under
+    the _SYSTEM_PRIM_PREFIXES list. Root-level default prims (like /cameras)
+    also count as system.
+    """
+    user = 0
+    system = 0
+
+    def _walk(node):
+        nonlocal user, system
+        path = node.get("path", "")
+        if path:
+            # Allow prefix followed by '/' (child under prefix), '_' (Kit
+            # style /OmniverseKit_Persp), or exact match (the root prim itself).
+            is_sys = any(
+                path == p or path.startswith(p + "/") or path.startswith(p + "_")
+                for p in _SYSTEM_PRIM_PREFIXES
+            )
+            if is_sys:
+                system += 1
+            else:
+                user += 1
+        for child in node.get("children", []) or []:
+            _walk(child)
+
+    for top in nodes or []:
+        _walk(top)
+    return user, system
 
 
 def _tree_to_text(nodes, indent=0, max_nodes=40, _count=[0]) -> str:
