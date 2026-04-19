@@ -91,6 +91,9 @@ Complete natural-language control over every Isaac Sim capability — USD author
 | **NL scene builder** — "build a kitchen with my robot" → full spatial layout from asset catalog | P0 |
 | **Asset catalog search** — fuzzy-match local/Nucleus assets by name, tag, type | ✅ Done |
 | **RViz2 integration** — auto-configured launch with topic discovery + scene-named configs | ✅ Done |
+| **G1 locomotion — Phase 1** — deploy `unitree_rl_gym` `motion.pt` checkpoint into Isaac Sim; wire joint commands via `isaacsim.robot.policy.examples` | P0 |
+| **G1 locomotion — Phase 2** — Isaac Lab 2.3 + PR #3242/#3440: G1+Inspire Hand teleop stack, joint retargeting, demo recording pipeline | P0 |
+| **G1 locomotion — Phase 3** — fine-tune GR00T N1.7 on collected teleop demos; ZMQ inference bridge; whole-body loco-manipulation policy eval | P1 |
 | **IsaacLab RL training** — env scaffolding, training launch, live metrics from chat | P0 |
 | **Motion planning (RMPflow/Lula)** — "move arm to this pose" via `isaacsim.robot_motion` | P0 |
 | **GPU-batched cloning** — replace naive clone loop with `isaacsim.core.cloner` | P0 |
@@ -107,13 +110,13 @@ Complete natural-language control over every Isaac Sim capability — USD author
 | **Robot assembler** — "attach this gripper to the arm" via `isaacsim.robot_setup.assembler` | P1 |
 | **Gain tuner** — auto-tune articulation PD gains via `isaacsim.robot_setup.gain_tuner` | P1 |
 | **Occupancy map gen** — 2D walkable-area maps via `isaacsim.asset.gen.omap` | P1 |
-| **RL policy deployment** — load trained policies via `isaacsim.robot.policy.examples` | P1 |
+| **RL policy deployment** — load trained policies via `isaacsim.robot.policy.examples`; needed for G1 Phase 1 | P0 |
 | **URDF importer migration** — switch legacy `omni.isaac.urdf` to `isaacsim.asset.importer.urdf` | P1 |
 | **Replicator DR nodes** — use built-in DR OmniGraph nodes via `isaacsim.replicator.domain_randomization` | P1 |
 | **Manipulator abstractions** — gripper/end-effector wrappers via `isaacsim.robot.manipulators` | P1 |
 | **Eureka reward generation** — LLM-authored reward functions with iterative refinement | P2 |
-| **IsaacSimZMQ bridge** — ZMQ pub/sub for external process comms | P2 |
-| **GR00T N1.7 policy eval** — deploy VLA foundation policies, finetune, and evaluate in sim | P2 |
+| **IsaacSimZMQ bridge** — ZMQ pub/sub for external process comms; required for GR00T N1.7 inference server↔Isaac Sim communication | P1 |
+| **GR00T N1.7 policy eval** — deploy VLA foundation policies, fine-tune on G1+Inspire demos, evaluate in sim. Note: no public G1+Inspire checkpoint exists; teleop data collection (Phase 2) is the prerequisite. N1.7 uses Cosmos-Reason2-2B backbone; inference needs 16GB+ VRAM; WBC repo still on N1.5/N1.6 | P1→P2 |
 | **Grasp editor** — author grasp poses via `isaacsim.robot_setup.grasp_editor` | P2 |
 | **Camera inspector** — inspect/modify all camera properties via `isaacsim.util.camera_inspector` | P2 |
 | **Mesh merge utility** — combine meshes into one prim via `isaacsim.util.merge_mesh` | P2 |

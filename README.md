@@ -287,6 +287,18 @@ The FastAPI service exposes the following REST API modules, all prefixed under `
 
 Full interactive documentation: **`http://localhost:8000/docs`**
 
+### Unitree G1 + Inspire Hand Locomotion Roadmap
+
+Getting a G1 with Inspire Hand walking reliably is a three-phase process. No single off-the-shelf checkpoint covers walking + dexterous hand control today.
+
+| Phase | Approach | Repos | Status |
+|---|---|---|---|
+| **Phase 1 — Walking** | Deploy `unitree_rl_gym` pre-trained `motion.pt` (12 DOF legs only). Hand hangs passively. Fastest path to a stable walking G1 in Isaac Sim. | [unitree_rl_gym](https://github.com/unitreerobotics/unitree_rl_gym) | Not yet wired into Isaac Assist |
+| **Phase 2 — Teleop + Data** | Isaac Lab 2.3 + merged PRs [#3242](https://github.com/isaac-sim/IsaacLab/pull/3242) / [#3440](https://github.com/isaac-sim/IsaacLab/pull/3440): G1+Inspire Hand USD assets, joint retargeting, demo recording pipeline. Collect loco-manipulation demonstrations. | [unitree_rl_lab](https://github.com/unitreerobotics/unitree_rl_lab) · [IsaacLab](https://github.com/isaac-sim/IsaacLab) | Isaac Lab 2.3 released |
+| **Phase 3 — Whole-body policy** | Fine-tune GR00T N1.7 (Cosmos-Reason2-2B backbone, 20K hrs EgoScale pretraining) on Phase 2 demos. ZMQ inference bridge → Isaac Sim. No public G1+Inspire checkpoint exists yet; Phase 2 data is the prerequisite. Needs 16GB+ VRAM for inference, 40GB+ for fine-tuning. | [Isaac-GR00T](https://github.com/NVIDIA/Isaac-GR00T) · [GR00T-WBC](https://github.com/NVlabs/GR00T-WholeBodyControl) | WBC repo on N1.5/N1.6; N1.7 deployment community WIP |
+
+See [docs/G1_INSPIRE_LOCOMOTION_PLAN.md](docs/G1_INSPIRE_LOCOMOTION_PLAN.md) for the detailed implementation plan.
+
 ---
 
 ## 9. Contributing Data & Helping Train the Model
