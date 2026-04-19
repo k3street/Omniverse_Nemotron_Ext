@@ -1306,6 +1306,65 @@ class ChatOrchestrator:
                                     f"reply mentions `{_p}` but it was not "
                                     f"added, modified, or removed this turn"
                                 )
+
+                        # Silent-robot-import check: detect the specific
+                        # robot_wizard / anchor_robot / add_reference
+                        # silent-success pattern where the tool returns
+                        # success=True but the composed prim has zero
+                        # children (asset URL 404'd at composition).
+                        # Observed 2026-04-19: agent imported Franka three
+                        # runs in a row; all three times /World/Robot ended
+                        # up as an empty Xform because the guessed asset
+                        # URL was wrong. The tool reports success, the
+                        # reply claims success, nothing else catches it.
+                        _robot_tools_called = {
+                            t.get("tool") for t in (executed_tools or [])
+                            if t.get("tool") in {
+                                "robot_wizard", "anchor_robot", "import_robot",
+                                "add_reference", "add_usd_reference",
+                            }
+                        }
+                        if _robot_tools_called:
+                            try:
+                                _robot_script = """
+import json
+import omni.usd
+from pxr import Usd, UsdPhysics
+stage = omni.usd.get_context().get_stage()
+empty_robots = []
+for prim in stage.Traverse():
+    p = prim.GetPath().pathString
+    name_low = p.lower().rsplit('/', 1)[-1]
+    has_art = 'PhysxArticulationAPI' in prim.GetAppliedSchemas() or \
+              'PhysicsArticulationRootAPI' in prim.GetAppliedSchemas()
+    is_robot_name = any(k in name_low for k in
+                        ('robot', 'franka', 'panda', 'ur5', 'ur10',
+                         'carter', 'jetbot'))
+    if has_art or is_robot_name:
+        child_count = len(list(prim.GetAllChildren()))
+        if child_count == 0:
+            empty_robots.append(p)
+print(json.dumps({'empty_robots': empty_robots}))
+"""
+                                _ex = await kit_tools.exec_sync(_robot_script, timeout=15)
+                                _out = (_ex.get('output') or '').strip()
+                                for line in reversed(_out.splitlines()):
+                                    line = line.strip()
+                                    if line.startswith('{'):
+                                        try:
+                                            _parsed = json.loads(line)
+                                        except Exception:
+                                            _parsed = {}
+                                        for _rp in (_parsed.get('empty_robots') or [])[:2]:
+                                            verify_warnings.append(
+                                                f"`{_rp}` appears to be a robot/articulation but has "
+                                                f"ZERO children — the asset reference likely 404'd at "
+                                                f"composition time despite the import tool reporting "
+                                                f"success. Check the asset URL (see /cite franka import)."
+                                            )
+                                        break
+                            except Exception as _e:
+                                logger.debug(f"[{session_id}] empty-robot check failed: {_e}")
                     except Exception as e:
                         logger.debug(f"[{session_id}] turn_diff verify failed: {e}")
 
