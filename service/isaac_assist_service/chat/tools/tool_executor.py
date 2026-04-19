@@ -17435,9 +17435,41 @@ print("Step 2/5: Setting up {scene_style} lighting...")
 dome = UsdLux.DomeLight.Define(stage, "/World/DomeLight")
 dome.CreateIntensityAttr().Set({style['intensity']})
 
-# 3. Robot placeholder (call import_robot('{robot}') as follow-up for full asset)
+# 3. Robot — actually import the asset (was previously only a placeholder
+#    Xform with a comment telling the caller to follow up; observed
+#    2026-04-19 that the follow-up never happened, leaving an empty
+#    Robot Xform that failed scenario verification.)
 print("Step 3/5: Importing robot ({robot})...")
-robot_xform = UsdGeom.Xform.Define(stage, "/World/Robot")
+import carb as _carb
+_asset_root = _carb.settings.get_settings().get("/persistent/isaac/asset_root/default") or \
+              "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1"
+# Known-good canonical URLs by robot name. Paths here are the 5.1 parent
+# directory for each robot family + the primary .usd file name. If a
+# robot name isn't in the map we fall back to the placeholder behaviour
+# and print a clear note so callers know to follow up.
+_ROBOT_ASSETS = {{
+    "franka": "/Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd",
+    "panda": "/Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd",
+    "franka_emika": "/Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd",
+    "ur10": "/Isaac/Robots/UniversalRobots/ur10/ur10.usd",
+    "ur5": "/Isaac/Robots/UniversalRobots/ur5e/ur5e.usd",
+    "ur5e": "/Isaac/Robots/UniversalRobots/ur5e/ur5e.usd",
+    "jetbot": "/Isaac/Robots/NVIDIA/Jetbot/jetbot.usd",
+    "carter": "/Isaac/Robots/NVIDIA/Carter/carter_v1.usd",
+    "nova_carter": "/Isaac/Robots/NVIDIA/NovaCarter/nova_carter.usd",
+}}
+_robot_rel = _ROBOT_ASSETS.get({robot!r}.lower())
+robot_xform_prim = stage.DefinePrim("/World/Robot", "Xform")
+if _robot_rel:
+    _robot_url = f"{{_asset_root}}{{_robot_rel}}"
+    robot_xform_prim.GetReferences().AddReference(_robot_url)
+    _n_children = len(list(robot_xform_prim.GetAllChildren()))
+    if _n_children == 0:
+        print(f"WARNING: AddReference({{_robot_url}}) resolved to 0 children — asset URL may have 404'd")
+    else:
+        print(f"  → loaded {{_n_children}} descendant prims from {{_robot_url}}")
+else:
+    print(f"  → robot={robot!r} is not in the known-URL map; left as empty Xform placeholder. Call import_robot() as follow-up.")
 
 # 4. Demo objects
 print("Step 4/5: Placing {len(objects)} demo objects...")
