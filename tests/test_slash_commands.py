@@ -207,3 +207,91 @@ def test_trace_missing_session_returns_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(st, "_TRACE_ROOT", tmp_path)
     assert st.read_trace("does_not_exist") == []
     assert st.trace_summary("does_not_exist")["event_count"] == 0
+
+
+# ── /thoughts (2026-04-19) — chain-of-thought exposure ─────────────────
+def test_parse_slash_recognizes_thoughts():
+    from service.isaac_assist_service.chat.slash_commands import parse_slash
+    assert parse_slash("/thoughts") == {"cmd": "thoughts", "arg": ""}
+    assert parse_slash("/thoughts all") == {"cmd": "thoughts", "arg": "all"}
+
+
+def test_execute_thoughts_disabled_when_env_off(monkeypatch):
+    from service.isaac_assist_service.chat.slash_commands import execute_slash
+    monkeypatch.delenv("GEMINI_EXPOSE_THOUGHTS", raising=False)
+    reply = asyncio.run(execute_slash(
+        "thoughts", "", history=[], emit_trace=lambda *a: None,
+        session_id="test",
+    ))
+    assert "disabled" in reply["reply"].lower()
+    assert "GEMINI_EXPOSE_THOUGHTS=1" in reply["reply"]
+
+
+def test_execute_thoughts_shows_last_turn(tmp_path, monkeypatch):
+    """/thoughts without arg should return only the latest turn's thoughts —
+    the slice from the most recent user_msg onward."""
+    from service.isaac_assist_service.chat.slash_commands import execute_slash
+    from service.isaac_assist_service.chat import session_trace as st
+    monkeypatch.setenv("GEMINI_EXPOSE_THOUGHTS", "1")
+    monkeypatch.setattr(st, "_TRACE_ROOT", tmp_path)
+
+    sess = "test_thoughts_last_turn"
+    # Two turns — we should only see turn 2's thought.
+    st.emit(sess, "user_msg", {"text": "first msg"})
+    st.emit(sess, "agent_thought", {"round": 0, "text": "turn 1 thinking"})
+    st.emit(sess, "agent_reply", {"text": "turn 1 reply"})
+    st.emit(sess, "user_msg", {"text": "second msg"})
+    st.emit(sess, "agent_thought", {"round": 0, "text": "turn 2 thinking"})
+    st.emit(sess, "agent_reply", {"text": "turn 2 reply"})
+
+    reply = asyncio.run(execute_slash(
+        "thoughts", "", history=[], emit_trace=lambda *a: None,
+        session_id=sess,
+    ))
+    assert "turn 2 thinking" in reply["reply"]
+    assert "turn 1 thinking" not in reply["reply"]
+
+
+def test_execute_thoughts_all_shows_every_turn(tmp_path, monkeypatch):
+    from service.isaac_assist_service.chat.slash_commands import execute_slash
+    from service.isaac_assist_service.chat import session_trace as st
+    monkeypatch.setenv("GEMINI_EXPOSE_THOUGHTS", "1")
+    monkeypatch.setattr(st, "_TRACE_ROOT", tmp_path)
+
+    sess = "test_thoughts_all"
+    st.emit(sess, "user_msg", {"text": "msg1"})
+    st.emit(sess, "agent_thought", {"round": 0, "text": "thought 1"})
+    st.emit(sess, "user_msg", {"text": "msg2"})
+    st.emit(sess, "agent_thought", {"round": 0, "text": "thought 2"})
+
+    reply = asyncio.run(execute_slash(
+        "thoughts", "all", history=[], emit_trace=lambda *a: None,
+        session_id=sess,
+    ))
+    assert "thought 1" in reply["reply"]
+    assert "thought 2" in reply["reply"]
+
+
+def test_execute_thoughts_no_thoughts_captured(tmp_path, monkeypatch):
+    from service.isaac_assist_service.chat.slash_commands import execute_slash
+    from service.isaac_assist_service.chat import session_trace as st
+    monkeypatch.setenv("GEMINI_EXPOSE_THOUGHTS", "1")
+    monkeypatch.setattr(st, "_TRACE_ROOT", tmp_path)
+
+    sess = "test_thoughts_empty"
+    st.emit(sess, "user_msg", {"text": "hi"})
+    st.emit(sess, "agent_reply", {"text": "hey"})
+
+    reply = asyncio.run(execute_slash(
+        "thoughts", "", history=[], emit_trace=lambda *a: None,
+        session_id=sess,
+    ))
+    assert "No thoughts captured yet" in reply["reply"]
+
+
+def test_help_now_lists_thoughts():
+    from service.isaac_assist_service.chat.slash_commands import execute_slash
+    reply = asyncio.run(execute_slash(
+        "help", "", history=[], emit_trace=lambda *a: None,
+    ))
+    assert "/thoughts" in reply["reply"]

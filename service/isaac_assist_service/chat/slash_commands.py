@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 # Order matters — more specific first
 _CMD_PATTERN = re.compile(
-    r"^/(?P<cmd>note|block|pin|cite|help)\b(?:\s+(?P<arg>.*))?$",
+    r"^/(?P<cmd>note|block|pin|cite|thoughts|undo|help)\b(?:\s+(?P<arg>.*))?$",
     re.S | re.I,
 )
 
@@ -55,6 +55,10 @@ _HELP_TEXT = """**Slash commands** (executed locally, no LLM cost):
 - `/pin <text>` — pin arbitrary text as an artifact
 - `/cite <topic>` — fetch a ready-to-paste paragraph from the deprecations corpus
   (try: `/cite deterministic`, `/cite ros2 namespace`, `/cite urdf importer`)
+- `/thoughts` — show the agent's chain-of-thought from this session's last turn
+  (requires `GEMINI_EXPOSE_THOUGHTS=1`)
+- `/undo` — revert the last stage-mutating turn (restores root layer from
+  auto-snapshot). `/undo N` reverts N turns. `/undo clear` wipes history.
 - `/help` — this message
 
 Session traces live in `workspace/session_traces/{session_id}.jsonl`."""
@@ -66,10 +70,17 @@ async def execute_slash(
     *,
     history: List[Dict],
     emit_trace,  # callable(event_type: str, payload: dict) -> None
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run a slash command. Returns a Reply dict matching handle_message shape."""
     if cmd == "help":
         return _reply(_HELP_TEXT)
+
+    if cmd == "thoughts":
+        return _reply(_thoughts_reply(session_id, arg))
+
+    if cmd == "undo":
+        return _reply(await _undo_reply(session_id, arg, emit_trace))
 
     if cmd == "note":
         if not arg:
@@ -148,6 +159,113 @@ async def execute_slash(
 
     # Shouldn't reach here due to regex allow-list, but defensively:
     return _reply(f"Unknown slash command: `/{cmd}`. Try `/help`.")
+
+
+async def _undo_reply(session_id: Optional[str], arg: str, emit_trace) -> str:
+    """Roll back the stage by N turns via the turn_snapshot module.
+
+    `/undo` → rollback 1 turn.
+    `/undo 3` → rollback 3 turns.
+    `/undo clear` → wipe snapshot history for this session.
+    """
+    if not session_id:
+        return "No session_id available — can't run /undo."
+    from . import turn_snapshot
+    arg_clean = (arg or "").strip().lower()
+
+    if arg_clean == "clear":
+        removed = turn_snapshot.clear(session_id)
+        emit_trace("undo_clear", {"removed": removed})
+        return f"🧹 Cleared {removed} snapshot(s). New turns will start fresh."
+
+    if not arg_clean:
+        steps = 1
+    else:
+        try:
+            steps = int(arg_clean)
+        except ValueError:
+            return (
+                f"Usage: `/undo` (revert last turn) or `/undo N` (revert N turns) "
+                f"or `/undo clear` (wipe history). Got: `{arg}`"
+            )
+        if steps < 1:
+            return "`/undo N` requires N >= 1."
+
+    available = turn_snapshot.snapshot_count(session_id)
+    if available == 0:
+        return (
+            "No snapshots available for this session yet. Snapshots are saved "
+            "automatically before stage-mutating turns; send one first."
+        )
+    if steps > available:
+        return (
+            f"Requested `{steps}` step(s) but only `{available}` snapshot(s) "
+            f"are available. Try `/undo {available}` to go back as far as possible."
+        )
+
+    result = await turn_snapshot.restore(session_id, steps=steps)
+    if not result.get("ok"):
+        emit_trace("undo_failed", {"steps": steps, "error": result.get("error")})
+        return f"❌ Undo failed: {result.get('error', 'unknown error')}"
+
+    emit_trace("undo_applied", {
+        "steps": steps,
+        "path": result.get("path"),
+        "remaining_snapshots": result.get("remaining_snapshots"),
+    })
+    return (
+        f"↺ Reverted {steps} turn{'s' if steps != 1 else ''}. "
+        f"Restored {result.get('imported_size', 0)} chars of root-layer state. "
+        f"{result.get('remaining_snapshots', 0)} snapshot(s) remain."
+    )
+
+
+def _thoughts_reply(session_id: Optional[str], arg: str) -> str:
+    """Pull `agent_thought` events from the session trace for display.
+
+    Without arg: show thoughts from the LAST user turn (most recent run).
+    With arg 'all': show every captured thought in the session.
+    """
+    import os
+    if os.environ.get("GEMINI_EXPOSE_THOUGHTS", "0") != "1":
+        return (
+            "Chain-of-thought exposure is disabled. Set "
+            "`GEMINI_EXPOSE_THOUGHTS=1` and restart the service to enable."
+        )
+    if not session_id:
+        return "No session_id available — can't look up thoughts."
+    from .session_trace import read_trace
+    events = read_trace(session_id)
+    thoughts = [e for e in events if e.get("type") == "agent_thought"]
+    if not thoughts:
+        return (
+            "No thoughts captured yet. Either the agent hasn't run a turn "
+            "with thinking enabled, or the model didn't return any thought-parts."
+        )
+    # Default: only the most recent user-turn's thoughts. A user_msg event
+    # marks the start of a new turn; we slice from the last user_msg onward.
+    show_all = arg.strip().lower() == "all"
+    if not show_all:
+        last_user_idx = None
+        for i, e in enumerate(events):
+            if e.get("type") == "user_msg":
+                last_user_idx = i
+        if last_user_idx is not None:
+            thoughts = [
+                e for e in events[last_user_idx:]
+                if e.get("type") == "agent_thought"
+            ]
+    if not thoughts:
+        return "No thoughts for the latest turn."
+    lines = [
+        f"**Agent thoughts** ({len(thoughts)} part{'s' if len(thoughts) != 1 else ''}, "
+        f"{'all session' if show_all else 'last turn'}):\n"
+    ]
+    for i, th in enumerate(thoughts, 1):
+        rnd = th.get("payload", {}).get("round", "?")
+        text = th.get("payload", {}).get("text", "")
+        lines.append(f"**Round {rnd}, part {i}:**\n{text}\n")
+    return "\n---\n".join(lines)
 
 
 def _reply(text: str) -> Dict[str, Any]:
