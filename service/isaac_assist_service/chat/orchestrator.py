@@ -208,7 +208,11 @@ def _extract_count_claims(reply: str) -> List[tuple]:
 
 
 def _extract_pose_claims(reply: str) -> List[tuple]:
-    """Extract (path, (x, y, z)) pose claims. Coordinates rounded to 3 dp.
+    """Extract (path, (x, y, z)) TRANSLATION pose claims. Coordinates rounded
+    to 3 dp. Rotation-verb phrasings ("rotated to (0, 90, 0)") are excluded
+    because the orchestrator's verify-contract (c) cross-checks against
+    get_world_transform's TRANSLATION field — matching rotation tuples there
+    would produce false-positive mismatch warnings (AD-21 surfaced this).
 
     Matches "/World/X at (1, 2, 3)", "... moved to (a, b, c)", etc. Deduped
     on the full (path, claim) tuple.
@@ -216,6 +220,14 @@ def _extract_pose_claims(reply: str) -> List[tuple]:
     seen = set()
     out: List[tuple] = []
     for m in _POSE_PAT.finditer(reply or ""):
+        # Exclude rotation-verb phrasings. The verb alternation includes
+        # "to", which matches inside "rotated to" — so the regex picks up
+        # rotation claims we don't want to cross-check via translation.
+        # Inspect the text from path-start to verb-start for a rotation
+        # marker.
+        span_text = (reply or "")[m.start():m.end()]
+        if _re_mod.search(r"\brotat(?:ed|ion|e)\b", span_text, _re_mod.I):
+            continue
         path = m.group("path")
         claim = (
             round(float(m.group("x")), 3),

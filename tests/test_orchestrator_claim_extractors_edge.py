@@ -188,21 +188,22 @@ def test_attr_value_before_path_phrasing_unsupported():
     assert claims != []
 
 
-@pytest.mark.xfail(reason="Known gap 2026-04-19 via AD-21: pose extractor matches "
-                   "'rotated to (0, 90, 0)' as a pose claim and the orchestrator's "
-                   "verify-contract (c) then cross-checks against get_world_transform's "
-                   "TRANSLATION field — false positive because user claimed rotation. "
-                   "Fix: either tag the claim with verb-kind (translation|rotation) or "
-                   "add 'rotated' to an excluded list and dispatch rotation claims to "
-                   "a separate check.")
 def test_pose_rotation_verb_not_dispatched_to_translation_check():
+    """2026-04-19 fix: pose extractor excludes rotation-verb phrasings.
+    The translation verify-contract (c) path cross-checks against
+    get_world_transform's translation field; if a rotation claim
+    "rotated to (0, 90, 0)" matched as a translation claim, it would
+    produce a false-positive mismatch warning.
+
+    Fix: post-match filter drops any match whose span contains
+    'rotate[d|ion|e]'. AD-21 is the canary for this regression."""
     E = _E()
-    # This SHOULDN'T be returned as a translation claim — "rotated to (0, 90, 0)"
-    # is about rotation, not position. Until the extractor splits verb classes,
-    # false positives in verify-contract (c) can occur on rotation-phrased replies.
-    claims = E["pose"]("/World/X is rotated to (0, 90, 0)")
-    # Desired future behavior: pose extractor returns [] for rotation-verb phrasings
-    assert claims == []
+    assert E["pose"]("/World/X is rotated to (0, 90, 0)") == []
+    assert E["pose"]("/World/Y rotation set to (10, 20, 30)") == []
+    assert E["pose"]("/World/Z rotated (0, 0, 0)") == []
+    # But translation claims still work
+    assert E["pose"]("/World/X at (1, 2, 3)") == [("/World/X", (1.0, 2.0, 3.0))]
+    assert E["pose"]("/World/X moved to (0.5, 0.5, 0.5)") == [("/World/X", (0.5, 0.5, 0.5))]
 
 
 @pytest.mark.xfail(reason="Known gap: count regex can span sentences. "
