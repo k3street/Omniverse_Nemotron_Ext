@@ -116,6 +116,13 @@ def _snapshot_summary(snap: Dict) -> str:
         mb = p.get("material_binding")
         if mb:
             extras.append(f"material_binding={mb}")
+        # Authored references — path or boolean. AD-23's "is X referenced
+        # from Y?" becomes snapshot-verifiable.
+        refs = p.get("references")
+        if refs:
+            extras.append(f"references={refs}")
+        elif p.get("has_refs"):
+            extras.append("has_refs=true")
         if extras:
             line += "  " + " ".join(extras)
         lines.append(line)

@@ -151,6 +151,34 @@ else:
                         entry['material_binding'] = mat_path
         except Exception:
             pass
+        # References — paths of authored references on the prim. Lets
+        # the judge verify "is /World/X referenced from Y?" claims
+        # (AD-23) directly from snapshot rather than needing
+        # list_references probes.
+        try:
+            refs = p.GetReferences()
+            if refs and p.HasAuthoredReferences():
+                # GetMetadata returns the referenceList op; iterate
+                # authored items for their asset paths.
+                _ref_list = []
+                try:
+                    meta = p.GetMetadata('references')
+                    if meta:
+                        for item in (meta.GetAddedOrExplicitItems() or []):
+                            ap = str(item.assetPath) if hasattr(item, 'assetPath') else str(item)
+                            if ap:
+                                _ref_list.append(ap)
+                except Exception:
+                    pass
+                if _ref_list:
+                    entry['references'] = _ref_list[:5]  # cap for compactness
+                else:
+                    # Even if we can't enumerate exactly, record the
+                    # boolean HasAuthoredReferences so the judge can
+                    # distinguish "no refs" from "unknown refs".
+                    entry['has_refs'] = True
+        except Exception:
+            pass
         prims_info.append(entry)
 
         # World transform for all Xformables (position + rotation + scale ground-truth)
