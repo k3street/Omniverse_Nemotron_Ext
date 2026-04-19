@@ -70,130 +70,20 @@ class TurnDiff:
                 if rx.search(p)]
 
 
-def _parse_usda_prim_specs(usda_text: str) -> Dict[str, Dict[str, str]]:
-    """Extract ``{prim_path: {attr_name: attr_value_string}}`` from USDA text.
-
-    We use pxr.Sdf.Layer's anonymous-layer machinery when available because
-    it's the canonical parser; fall back to a regex approximation if Sdf
-    cannot be imported (outside Kit). The fallback is lossy but catches
-    the common case: "def Cube \"Cube1\"" + "xformOp:translate = (x,y,z)".
-
-    Returns a flat map — nested hierarchies are addressable via full path.
-    Attribute values are normalized to their repr string for comparison
-    (we don't need semantic diffing, just "is it different").
-    """
-    try:
-        from pxr import Sdf
-    except Exception:
-        return _parse_usda_regex_fallback(usda_text)
-
-    try:
-        layer = Sdf.Layer.CreateAnonymous()
-        ok = layer.ImportFromString(usda_text)
-        if not ok:
-            logger.warning("turn_diff: Sdf import returned false")
-            return _parse_usda_regex_fallback(usda_text)
-    except Exception as e:
-        logger.warning(f"turn_diff: Sdf parse failed ({e}); using regex fallback")
-        return _parse_usda_regex_fallback(usda_text)
-
-    out: Dict[str, Dict[str, str]] = {}
-
-    def _walk(path):
-        spec = layer.GetPrimAtPath(path)
-        if spec is None:
-            return
-        attrs: Dict[str, str] = {
-            "__typeName__": str(spec.typeName or ""),
-            "__specifier__": str(spec.specifier),
-            "__active__": str(spec.active) if spec.HasInfo("active") else "inherit",
-        }
-        for prop_name, prop_spec in spec.properties.items():
-            try:
-                val = prop_spec.default
-            except Exception:
-                val = None
-            attrs[prop_name] = repr(val)
-        out[str(path)] = attrs
-        for child_name in spec.nameChildren.keys():
-            _walk(f"{path}/{child_name}" if str(path) != "/" else f"/{child_name}")
-
-    _walk(Sdf.Path("/"))
-    return out
-
-
-_RE_DEF_PRIM = re.compile(
-    r'\n\s*def\s+(?P<type>\w+)?\s*"(?P<name>[^"]+)"',
-)
-_RE_ATTR = re.compile(
-    r'\n\s+(?:uniform\s+|custom\s+|rel\s+)?(\w+(?::\w+)*)\s*=\s*(.+?)(?=\n)',
-)
-
-
-def _parse_usda_regex_fallback(usda_text: str) -> Dict[str, Dict[str, str]]:
-    """Last-resort parser for environments without pxr. Only catches top-level
-    def <Type> "Name" stanzas and inline attribute assignments; nested prims
-    are flattened wrong. Used only when Sdf.Layer.CreateAnonymous fails.
-    """
-    out: Dict[str, Dict[str, str]] = {}
-    # Very rough: split by `def ` blocks, extract name + attrs.
-    # Good enough for flat /World/* stages — good enough for the smoke-test use.
-    for m in _RE_DEF_PRIM.finditer(usda_text):
-        path = f"/{m.group('name')}"
-        out[path] = {"__typeName__": m.group("type") or ""}
-    return out
-
-
-async def _read_current_root_layer_text() -> Optional[str]:
-    """Ask Kit to export the current root layer's USDA. Returns None on error.
-
-    Mirrors the export logic in turn_snapshot.capture, but without writing
-    to disk — we need the text for in-memory comparison.
-    """
-    try:
-        from .tools import kit_tools
-    except Exception as e:
-        logger.warning(f"turn_diff: kit_tools import failed: {e}")
-        return None
-
-    script = """
-import json
-import omni.usd
-stage = omni.usd.get_context().get_stage()
-if stage is None:
-    print(json.dumps({'ok': False, 'error': 'no stage'}))
-else:
-    try:
-        text = stage.GetRootLayer().ExportToString()
-        print(json.dumps({'ok': True, 'text': text}))
-    except Exception as exc:
-        print(json.dumps({'ok': False, 'error': str(exc)}))
-"""
-    rpc = await kit_tools.exec_sync(script, timeout=30)
-    if not rpc.get("success"):
-        return None
-    out = (rpc.get("output") or "").strip()
-    for line in reversed(out.splitlines()):
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            parsed = json.loads(line)
-        except Exception:
-            continue
-        if parsed.get("ok"):
-            return parsed.get("text") or ""
-    return None
-
-
 async def compute_diff(session_id: str) -> TurnDiff:
     """Diff the latest turn_snapshot against the current stage.
 
-    Returns TurnDiff. The caller decides how to act on it — typically the
-    orchestrator's verify-contract uses ``diff.paths_under("/World/Cube")``
-    or ``diff.total_changes`` to validate mutation claims in the reply.
+    The parse runs INSIDE Kit because pxr.Sdf is only available there —
+    the service process doesn't have pxr bindings. Previously this fell
+    back to a regex parser that stripped the /World parent path from
+    nested prims, causing false-positive "path not in diff" warnings on
+    every /World/... path (2026-04-19).
+
+    Returns TurnDiff with full-qualified paths. The caller decides how to
+    act on it — typically the orchestrator's verify-contract uses
+    ``diff.paths_under("/World/Cube")`` or ``diff.total_changes`` to
+    validate mutation claims in the reply.
     """
-    # Find the most recent snapshot for this session.
     try:
         from .turn_snapshot import _session_dir
     except Exception as e:
@@ -208,13 +98,89 @@ async def compute_diff(session_id: str) -> TurnDiff:
     except Exception as e:
         return TurnDiff(ok=False, error=f"snapshot read: {e}")
 
-    after_text = await _read_current_root_layer_text()
-    if after_text is None:
-        return TurnDiff(ok=False, error="could not read current root layer")
+    # Run the whole diff computation inside Kit. Kit has pxr.Sdf and
+    # omni.usd; it parses the snapshot USDA into an anonymous layer and
+    # walks both it and the live root layer, emitting the flat prim-spec
+    # maps as JSON. We then compute the set-diff in Python.
+    try:
+        from .tools import kit_tools
+    except Exception as e:
+        return TurnDiff(ok=False, error=f"kit_tools import: {e}")
 
-    before_map = _parse_usda_prim_specs(before_text)
-    after_map = _parse_usda_prim_specs(after_text)
+    script = f"""
+import json
+from pxr import Sdf
+import omni.usd
 
+# Embed the snapshot USDA literally via a JSON string literal — survives
+# triple quotes and backslashes in the USDA.
+snap_text = json.loads({json.dumps(json.dumps(before_text))})
+
+# Tag the anonymous layer with a .usda tag so ImportFromString
+# parses as USDA text (otherwise Sdf tries the native .sdf format
+# and rejects '#usda 1.0' as an unexpected magic cookie).
+anon = Sdf.Layer.CreateAnonymous('.usda')
+if not anon.ImportFromString(snap_text):
+    print(json.dumps({{'ok': False, 'error': 'snapshot import failed'}}))
+else:
+    stage = omni.usd.get_context().get_stage()
+    if stage is None:
+        print(json.dumps({{'ok': False, 'error': 'no stage'}}))
+    else:
+        current_layer = stage.GetRootLayer()
+
+        def walk(layer, path_obj, out):
+            spec = layer.GetPrimAtPath(path_obj)
+            if spec is None:
+                return
+            key = str(path_obj)
+            attrs = {{
+                '__typeName__': str(spec.typeName or ''),
+                '__specifier__': str(spec.specifier),
+                '__active__': str(spec.active) if spec.HasInfo('active') else 'inherit',
+            }}
+            for prop_name, prop_spec in spec.properties.items():
+                try:
+                    val = prop_spec.default
+                except Exception:
+                    val = None
+                attrs[prop_name] = repr(val)
+            out[key] = attrs
+            for child_name in spec.nameChildren.keys():
+                child_path = path_obj.AppendChild(child_name)
+                walk(layer, child_path, out)
+
+        before = {{}}
+        walk(anon, Sdf.Path('/'), before)
+
+        after = {{}}
+        walk(current_layer, Sdf.Path('/'), after)
+
+        print(json.dumps({{'ok': True, 'before': before, 'after': after}}))
+"""
+    rpc = await kit_tools.exec_sync(script, timeout=30)
+    if not rpc.get("success"):
+        return TurnDiff(ok=False, error=f"kit exec failed: {rpc.get('output', '')[:200]}")
+
+    out = (rpc.get("output") or "").strip()
+    payload = None
+    for line in reversed(out.splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            parsed = json.loads(line)
+        except Exception:
+            continue
+        if "ok" in parsed:
+            payload = parsed
+            break
+    if not payload or not payload.get("ok"):
+        err = (payload or {}).get("error") if payload else out[:200]
+        return TurnDiff(ok=False, error=f"parse failed: {err}")
+
+    before_map = payload.get("before") or {}
+    after_map = payload.get("after") or {}
     before_paths = set(before_map)
     after_paths = set(after_map)
 
