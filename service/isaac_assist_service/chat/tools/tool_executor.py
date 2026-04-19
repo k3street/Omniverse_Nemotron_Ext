@@ -2624,6 +2624,33 @@ async def _handle_get_debug_info(args: Dict) -> Dict:
     }
 
 
+async def _handle_lookup_api_deprecation(args: Dict) -> Dict:
+    """Deterministic keyword index over the 4.x→5.x deprecations corpus.
+
+    Returns structured cite-facts so the agent can quote exact API
+    names verbatim. See knowledge/deprecations_index.py for corpus +
+    scoring semantics; this is an INDEX, not RAG — no LLM-side
+    synthesis in the retrieval path.
+    """
+    from ...knowledge.deprecations_index import lookup as _deprec_lookup
+    query = args.get("query", "") or ""
+    top_k = int(args.get("top_k", 3))
+    rows = _deprec_lookup(query, top_k=top_k)
+    return {
+        "query": query,
+        "results": rows,
+        "count": len(rows),
+        "note": (
+            "These rows are verbatim cite-facts. Use tool_5x names "
+            "exactly as returned and flag deprecated_4x names as removed. "
+            "Do not paraphrase the API names."
+        ) if rows else (
+            "No deprecations corpus match. Fall back to lookup_knowledge "
+            "for general docs, or acknowledge that no cite-fact is on file."
+        ),
+    }
+
+
 async def _handle_lookup_knowledge(args: Dict) -> Dict:
     """Search the version-specific knowledge base for code patterns and docs."""
     from ...retrieval.context_retriever import (
@@ -2674,6 +2701,7 @@ DATA_HANDLERS = {
     "measure_distance": _handle_measure_distance,
     "get_debug_info": _handle_get_debug_info,
     "lookup_knowledge": _handle_lookup_knowledge,
+    "lookup_api_deprecation": _handle_lookup_api_deprecation,
     "explain_error": None,  # handled inline by LLM (no tool execution)
 }
 

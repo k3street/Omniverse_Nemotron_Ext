@@ -688,6 +688,27 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_api_deprecation",
+            "description": "Retrieve EXACT cite-facts about Isaac Sim 4.x→5.x API migrations. Use this whenever the user asks for a cite-able technical statement, a deprecation warning, or the correct 5.x name for a tool/method they mentioned in 4.x terms. Returns structured rows with tool_5x (authoritative name), deprecated_4x (names to flag as removed), a ready-to-paste cite paragraph, caveats, and references. This is a DETERMINISTIC KEYWORD INDEX — if the returned row's tool_5x is 'X', use 'X' verbatim in your reply. Do NOT paraphrase the API names. Examples of when to call: 'is deterministic replay supported?', 'can I still use SimulationContext.set_deterministic?', 'what's the 5.x ROS2 namespace?'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Free-text query — e.g. 'deterministic replay for CI regression', 'ros2 bridge migration', 'urdf importer 5.x'.",
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Max rows to return (default 3). Use 1 when you want the single best match.",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
 
     # ─── Motion Planning (RMPflow / Lula) ─────────────────────────────────────
     {

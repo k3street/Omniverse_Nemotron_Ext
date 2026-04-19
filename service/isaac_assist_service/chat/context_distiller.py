@@ -145,7 +145,7 @@ _INTENT_CATEGORIES: Dict[str, Set[str]] = {
 }
 
 # Always-included tools regardless of category (cheap, essential)
-_ALWAYS_TOOLS = {"run_usd_script", "scene_summary", "lookup_knowledge"}
+_ALWAYS_TOOLS = {"run_usd_script", "scene_summary", "lookup_knowledge", "lookup_api_deprecation"}
 
 # Build a fast name→schema lookup
 _TOOL_BY_NAME: Dict[str, Dict] = {
@@ -222,7 +222,7 @@ Selection awareness: When the user has selected a prim, its path/properties are 
 Use its path directly — do NOT ask the user to specify."""
 
 RULE_DETERMINISM = """\
-Deterministic replay / reproducibility (Isaac Sim 5.x) — WHEN THE USER ASKS ABOUT DETERMINISM, CITE THESE SPECIFIC NAMES VERBATIM IN YOUR REPLY:
+Deterministic replay / reproducibility (Isaac Sim 5.x) — WHEN THE USER ASKS ABOUT DETERMINISM, START by calling `lookup_api_deprecation(query="deterministic replay")` to fetch the canonical cite-row. The tool returns tool_5x, deprecated_4x, cite paragraph, caveats — quote them verbatim. THEN cite these names in your reply:
 
 **Required citations** (do NOT paraphrase these — use the exact names):
 1. The correct 5.x tool is `enable_deterministic_mode` (takes seed, physics_dt, solver_iterations). This IS a registered tool — call it, don't just mention it.
