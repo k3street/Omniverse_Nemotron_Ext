@@ -34,6 +34,7 @@ Intent = Literal[
 class IntentClassification(TypedDict):
     intent: Intent
     multi_step: bool
+    complexity: str   # "single" | "multi" | "complex"
     confidence: float
 
 
@@ -56,32 +57,45 @@ Classify the user message on TWO axes:
    conditions ("run until all fall off"). false if it's a single discrete action
    or a pure question.
 
-Multi-step examples:
-  "create a conveyor, scale cubes, start simulation" → multi_step=true (3 actions)
-  "if a conveyor tool exists, use it, then run it until done" → multi_step=true
-  "add a cube and then delete the old one" → multi_step=true
-  "place a cube at (1,2,3)" → multi_step=false (single action)
-  "what is USD?" → multi_step=false (question)
-  "scale this" → multi_step=false (single action with pronoun)
+3. complexity — "single" | "multi" | "complex".
+   - "single": one discrete action with a single tool call, no dependencies.
+     Example: "place a cube at (1,2,3)" or "what's a USD prim?"
+   - "multi": a chain of 2-4 actions with simple dependencies. No need for a
+     written spec; step-by-step tool calls suffice.
+     Example: "add a cube then scale it down"
+   - "complex": an industrial-realistic composition with 5+ components, multiple
+     subsystems (physics + robot + sensor + I/O), and verifiable post-conditions
+     per component. A structured spec + gap-analysis is mandatory before writes.
+     Example: "pick-and-place cell with conveyor, Franka, bin, sensor"
+     Example: "RL training setup for Nova Carter navigation"
+     Example: "digital twin of a QC inspection line with ROS2 bridge"
 
-Reply with ONLY valid JSON: {"intent": "<one>", "multi_step": <bool>, "confidence": 0.0-1.0}
+Multi-step examples:
+  "create a conveyor, scale cubes, start simulation" → multi_step=true, complexity="multi"
+  "pick-and-place cell with Franka and a bin" → multi_step=true, complexity="complex"
+  "place a cube at (1,2,3)" → multi_step=false, complexity="single"
+  "what is USD?" → multi_step=false, complexity="single"
+
+Reply with ONLY valid JSON: {"intent": "<one>", "multi_step": <bool>, "complexity": "<single|multi|complex>", "confidence": 0.0-1.0}
 """
 
 INTENT_EXAMPLES = [
-    # (user_message, intent, multi_step)
-    ("what is a USD prim?", "general_query", False),
-    ("why is my robot floating above the ground?", "scene_diagnose", False),
-    ("show me the viewport", "vision_inspect", False),
-    ("fix the joint damping", "patch_request", False),
-    ("add a cube at (1, 2, 3)", "patch_request", False),
+    # (user_message, intent, multi_step, complexity)
+    ("what is a USD prim?", "general_query", False, "single"),
+    ("why is my robot floating above the ground?", "scene_diagnose", False, "single"),
+    ("show me the viewport", "vision_inspect", False, "single"),
+    ("fix the joint damping", "patch_request", False, "single"),
+    ("add a cube at (1, 2, 3)", "patch_request", False, "single"),
     ("create a conveyor, scale the cubes to fit, run it until they fall off",
-     "patch_request", True),
+     "patch_request", True, "multi"),
     ("if a conveyor tool exists use it, then place cubes on top",
-     "patch_request", True),
-    ("add 4 cubes, then stack them, then add a light above them",
-     "patch_request", True),
-    ("any errors in the console?", "console_review", False),
-    ("select the robot arm", "navigation", False),
+     "patch_request", True, "multi"),
+    ("pick-and-place cell on a table: conveyor + Franka + bin + sensor, realistic industrial dimensions",
+     "patch_request", True, "complex"),
+    ("RL training setup for Nova Carter autonomous navigation with reward design",
+     "patch_request", True, "complex"),
+    ("any errors in the console?", "console_review", False, "single"),
+    ("select the robot arm", "navigation", False, "single"),
 ]
 
 
@@ -93,8 +107,8 @@ async def classify_intent(message: str, provider) -> IntentClassification:
     read the `intent` and `multi_step` fields explicitly.
     """
     few_shot = "\n".join(
-        f'User: "{u}" → {{"intent": "{i}", "multi_step": {str(ms).lower()}}}'
-        for u, i, ms in INTENT_EXAMPLES[:8]
+        f'User: "{u}" → {{"intent": "{i}", "multi_step": {str(ms).lower()}, "complexity": "{cx}"}}'
+        for u, i, ms, cx in INTENT_EXAMPLES[:8]
     )
 
     messages = [
@@ -124,14 +138,18 @@ async def classify_intent(message: str, provider) -> IntentClassification:
         parsed = json.loads(raw)
         intent = parsed.get("intent", "general_query")
         multi_step = bool(parsed.get("multi_step", False))
+        complexity = parsed.get("complexity", "multi" if multi_step else "single")
+        if complexity not in ("single", "multi", "complex"):
+            complexity = "multi" if multi_step else "single"
         confidence = float(parsed.get("confidence", 0.5))
         logger.info(
             f"[IntentRouter] '{message[:60]}' → {intent} "
-            f"(multi_step={multi_step}, conf={confidence:.2f})"
+            f"(multi_step={multi_step}, complexity={complexity}, conf={confidence:.2f})"
         )
         return {
             "intent": intent,
             "multi_step": multi_step,
+            "complexity": complexity,
             "confidence": confidence,
         }  # type: ignore
 
@@ -140,5 +158,6 @@ async def classify_intent(message: str, provider) -> IntentClassification:
         return {
             "intent": "general_query",
             "multi_step": False,
+            "complexity": "single",
             "confidence": 0.0,
         }

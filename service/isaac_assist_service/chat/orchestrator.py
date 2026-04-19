@@ -490,11 +490,59 @@ class ChatOrchestrator:
             return reply
 
         # ── 1. Classify intent ───────────────────────────────────────────────
-        # Returns a dict {intent, multi_step, confidence}. multi_step drives
-        # the round-0 read-only tool gate below (see _multi_step usage).
+        # Returns a dict {intent, multi_step, complexity, confidence}.
+        # complexity=="complex" triggers the spec-first pipeline below:
+        # a structured plan is generated via a reasoning LLM, then matched
+        # against the tool catalog to surface gaps before the tool-loop.
         intent_result = await classify_intent(user_message, self.llm_provider)
         intent = intent_result["intent"]
         intent_is_multi_step = intent_result.get("multi_step", False)
+        intent_complexity = intent_result.get("complexity", "single")
+
+        # ── 1.5a. Spec-first pipeline for complex requests ───────────────────
+        # Generate a structured JSON plan + gap report BEFORE the tool-loop
+        # runs. The agent sees the spec summary in its context and can
+        # follow the step list instead of improvising. Gap report warns
+        # about missing/typo'd tool names so the agent corrects up-front.
+        spec = None
+        gap_report = None
+        if intent_complexity == "complex":
+            try:
+                from .spec_generator import generate_spec, get_spec_llm_provider
+                from .gap_analyzer import analyze as _gap_analyze, load_tool_catalog
+                spec_provider = get_spec_llm_provider(fallback_provider=self.llm_provider)
+                catalog_preview = sorted(load_tool_catalog())
+                spec = await generate_spec(
+                    user_message,
+                    available_tool_names=catalog_preview,
+                    llm_provider=spec_provider,
+                )
+                if spec.parse_ok and spec.steps:
+                    gap_report = _gap_analyze(spec, set(catalog_preview))
+                    _trace_emit(session_id, "spec_generated", {
+                        "goal": spec.goal[:200],
+                        "step_count": len(spec.steps),
+                        "components": spec.components[:10],
+                        "success_criteria": spec.success_criteria[:5],
+                    })
+                    _trace_emit(session_id, "gap_report", {
+                        "coverage": gap_report.coverage,
+                        "matched": len(gap_report.matched),
+                        "partial": len(gap_report.partial),
+                        "missing": len(gap_report.missing),
+                        "missing_intents": [
+                            g.step.intent[:80] for g in gap_report.missing
+                        ],
+                    })
+                else:
+                    _trace_emit(session_id, "spec_generation_failed", {
+                        "reason": "parse_error" if not spec.parse_ok else "no_steps",
+                        "raw_preview": (spec.raw_response or "")[:200],
+                    })
+            except Exception as e:
+                logger.warning(f"[{session_id}] spec-first pipeline failed: {e}")
+                spec = None
+                gap_report = None
 
         # ── 1.5. Auto turn-snapshot for stage-mutating turns ─────────────────
         # Before running any tools that might write to the stage, save the
@@ -585,6 +633,33 @@ class ChatOrchestrator:
                     patterns_text = tpl_text
         except Exception as e:
             logger.warning(f"[{session_id}] Template retrieval failed: {e}")
+
+        # Inject generated spec + gap report into rag_text so the agent's
+        # tool-loop sees the plan it's expected to follow. Spec-first
+        # pipeline runs BEFORE the cite-injection below; cites can still
+        # complement the plan.
+        if spec is not None and spec.parse_ok and spec.steps:
+            spec_parts = ["## Structured plan for this request", "",
+                          f"**Goal**: {spec.goal}", "", "**Steps**:"]
+            for s in spec.steps:
+                tool_str = f" → `{s.expected_tool}`" if s.expected_tool else ""
+                spec_parts.append(
+                    f"  {s.n}. {s.intent}{tool_str}  \n"
+                    f"     *Post-condition*: {s.post_condition}"
+                )
+            if spec.components:
+                spec_parts.append("\n**Expected components**: " + ", ".join(
+                    f"`{c}`" for c in spec.components
+                ))
+            if spec.success_criteria:
+                spec_parts.append("\n**Success criteria**:")
+                for sc in spec.success_criteria:
+                    spec_parts.append(f"  - {sc}")
+            if gap_report is not None:
+                spec_parts.append("\n## Tool-coverage analysis")
+                spec_parts.append(gap_report.summary_text())
+            spec_preamble = "\n".join(spec_parts)
+            rag_text = spec_preamble + ("\n\n" + rag_text if rag_text else "")
 
         # Auto-inject cite-index matches from deprecations.jsonl. Agents
         # routinely FAIL to call lookup_api_deprecation even when a rule
