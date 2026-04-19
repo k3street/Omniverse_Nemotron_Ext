@@ -554,6 +554,102 @@ def _check_clear_xform_op_order(code: str) -> List[PatchIssue]:
     return issues
 
 
+# Detect omni.usd.get_context().new_stage() inside a run_usd_script patch.
+# Observed 2026-04-19 during conveyor+Franka scenario: agent's "clean
+# rebuild" attempt called new_stage() mid-script, which WIPES every prim
+# created by earlier successful patches in the same turn. Only the last
+# patch's creations survive. The agent then reports "scene setup" success
+# based on the final patch alone, and the user sees only a fraction of
+# the intended cell. This is never what the user wants within a run_usd_script;
+# a full stage reset should come from the user or /undo, not mid-patch.
+_RE_NEW_STAGE = re.compile(
+    r"""(?:omni\.usd\.get_context\(\)\.new_stage|get_context\(\)\.new_stage)\s*\("""
+)
+
+
+def _check_new_stage_mid_patch(code: str) -> List[PatchIssue]:
+    """Block destructive new_stage() calls inside authoring patches."""
+    if _RE_NEW_STAGE.search(code):
+        return [PatchIssue(
+            severity="error",
+            rule="usd_destructive_new_stage",
+            message="omni.usd.get_context().new_stage() inside run_usd_script WIPES "
+                    "every prim created by earlier patches this turn. The user typically "
+                    "loses all previous work from the same prompt, and the agent then "
+                    "reports success based only on this patch. If you need a clean stage, "
+                    "ask the user to use /undo or start a new scene — never call "
+                    "new_stage() from a mutation script.",
+            fix_hint=(
+                "Remove the new_stage() call. Build on top of what's already in the "
+                "stage. If duplicate prims at the same paths are the problem, use "
+                "omni.kit.commands.execute('DeletePrims', paths=[...]) for the "
+                "specific paths you want to replace."
+            ),
+        )]
+    return []
+
+
+# Detect the specific wrong Franka URL pattern. The agent routinely
+# guesses "Isaac/Robots/Franka/franka.usd" but the correct 5.1 path is
+# "Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd". The 5.1 endpoint
+# 404s the shorter form. Caught repeatedly 2026-04-19.
+_RE_WRONG_FRANKA_URL = re.compile(
+    r"""Isaac/Robots/Franka(?!Robotics)/franka\.usd|"""
+    r"""Isaac/Robots/FrankaEmika/"""
+)
+
+
+def _check_wrong_franka_url(code: str) -> List[PatchIssue]:
+    """Block known-404 Franka asset URL patterns."""
+    if _RE_WRONG_FRANKA_URL.search(code):
+        return [PatchIssue(
+            severity="error",
+            rule="asset_wrong_franka_url",
+            message="The Franka asset URL pattern you used returns HTTP 404 on the "
+                    "Isaac Sim 5.1 asset endpoint. Isaac/Robots/Franka/franka.usd and "
+                    "Isaac/Robots/FrankaEmika/panda/panda.usd both 404 — the correct "
+                    "5.1 path is Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd.",
+            fix_hint=(
+                "Use: f'{assets_root}/Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd' "
+                "OR call lookup_api_deprecation(query='franka panda') to get the "
+                "canonical URL + post-import verification recipe. After adding the "
+                "reference, verify len(list(prim.GetAllChildren())) >= 10 before "
+                "claiming the robot loaded."
+            ),
+        )]
+    return []
+
+
+# Detect deprecated omni.isaac.core.utils.* imports that are aliased in
+# some Kit builds but not all. Safer to use the Isaac Sim 5.x
+# isaacsim.core.* equivalents OR the pxr Usd APIs directly.
+_RE_DEPRECATED_CORE_UTILS = re.compile(
+    r"""from\s+omni\.isaac\.core\.utils\.(?:nucleus|stage|prims)\s+import|"""
+    r"""import\s+omni\.isaac\.core\.utils\."""
+)
+
+
+def _check_deprecated_core_utils(code: str) -> List[PatchIssue]:
+    """Warn on deprecated omni.isaac.core.utils.* imports."""
+    if _RE_DEPRECATED_CORE_UTILS.search(code):
+        return [PatchIssue(
+            severity="warning",
+            rule="deprecated_isaac_core_utils",
+            message="omni.isaac.core.utils.{nucleus,stage,prims} is the 4.x utility "
+                    "namespace. Some Isaac Sim 5.x builds alias it for compatibility; "
+                    "others raise ModuleNotFoundError. Relying on this path is fragile.",
+            fix_hint=(
+                "Use the 5.x isaacsim.core.utils.* equivalents, OR author "
+                "references directly via pxr: "
+                "prim = stage.DefinePrim(path, 'Xform'); "
+                "prim.GetReferences().AddReference(usd_url). "
+                "For asset-root discovery in 5.x: "
+                "carb.settings.get_settings().get('/persistent/isaac/asset_root/default')."
+            ),
+        )]
+    return []
+
+
 # Detect IsA() called on an Applied-API schema (e.g. UsdLux.LightAPI).
 # IsA tests the prim TYPE (DomeLight, DistantLight, etc.) — it returns False
 # for every light in the scene because lights are Dome/DistantLight TYPES
@@ -630,6 +726,9 @@ _ALL_VALIDATORS = [
     _check_kit_command_name,
     _check_pipeline_stage_enum_mismatch,
     _check_clear_xform_op_order,
+    _check_new_stage_mid_patch,
+    _check_wrong_franka_url,
+    _check_deprecated_core_utils,
     _check_isa_on_api_schema,
     _check_create_attribute_signature,
 ]
