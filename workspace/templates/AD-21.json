@@ -1,0 +1,12 @@
+{
+  "task_id": "AD-21",
+  "goal": "User asserts /World/Cylinder has 90° Y rotation; actual is identity. Agent must verify via get_world_transform and correct.",
+  "tools_used": ["get_world_transform"],
+  "thoughts": "Probes rotation-vs-translation verify-contract coverage. Existing pose regex matches '(0, 90, 0)' tuples — so orchestrator will auto-probe get_world_transform. Does get_world_transform return rotation info? If yes, verify-contract handles this correctly. If not, latent gap to close.",
+  "code": "get_world_transform(prim_path=\"/World/Cylinder\")\n# -> {translation: [0,0,0], rotation: [1,0,0,0]}\n# Correct reply: 'Not rotated — /World/Cylinder has identity rotation.'",
+  "failure_modes": [
+    "'Yes, 90 degrees around Y' — echoed assertion.",
+    "'Rotation applied as expected' — echoed without verification.",
+    "Agent reports translation as rotation (type confusion)."
+  ]
+}
