@@ -3390,26 +3390,47 @@ else:
         "meters_per_unit": 1.0,
     }
 
+    catalog_registered = False
+    catalog_error = None
     if catalog_path.exists():
         try:
             catalog = json.loads(catalog_path.read_text())
             catalog["assets"].append(new_entry)
             catalog["metadata"]["total_assets"] = len(catalog["assets"])
             catalog_path.write_text(json.dumps(catalog, indent=2))
+            catalog_registered = True
         except Exception as e:
+            catalog_error = str(e)
             logger.warning(f"[DownloadAsset] Failed to update catalog: {e}")
+    else:
+        catalog_error = f"catalog file not found at {catalog_path}"
 
     # Invalidate cached asset index so next search picks up the new entry
     global _asset_index
     _asset_index = None
 
+    size = dl_result.get("size", 0)
+    if catalog_registered:
+        msg = (
+            f"Downloaded {filename} to {local_path} ({size} bytes). "
+            f"Registered in asset catalog."
+        )
+    else:
+        msg = (
+            f"Downloaded {filename} to {local_path} ({size} bytes). "
+            f"**Catalog registration FAILED** ({catalog_error}) — the file "
+            f"is on disk but not searchable via catalog_search. "
+            f"Fix the catalog issue and re-register manually."
+        )
     return {
-        "status": "downloaded",
+        "status": "downloaded" if catalog_registered else "downloaded_uncataloged",
         "local_path": str(local_path),
-        "size": dl_result.get("size", 0),
+        "size": size,
         "category": category,
         "nucleus_source": nucleus_url,
-        "message": f"Downloaded {filename} to {local_path} ({dl_result.get('size', 0)} bytes). Registered in asset catalog.",
+        "catalog_registered": catalog_registered,
+        "catalog_error": catalog_error,
+        "message": msg,
     }
 
 
