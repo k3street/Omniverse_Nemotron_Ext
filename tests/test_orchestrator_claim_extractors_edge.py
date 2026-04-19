@@ -188,6 +188,23 @@ def test_attr_value_before_path_phrasing_unsupported():
     assert claims != []
 
 
+@pytest.mark.xfail(reason="Known gap 2026-04-19 via AD-21: pose extractor matches "
+                   "'rotated to (0, 90, 0)' as a pose claim and the orchestrator's "
+                   "verify-contract (c) then cross-checks against get_world_transform's "
+                   "TRANSLATION field — false positive because user claimed rotation. "
+                   "Fix: either tag the claim with verb-kind (translation|rotation) or "
+                   "add 'rotated' to an excluded list and dispatch rotation claims to "
+                   "a separate check.")
+def test_pose_rotation_verb_not_dispatched_to_translation_check():
+    E = _E()
+    # This SHOULDN'T be returned as a translation claim — "rotated to (0, 90, 0)"
+    # is about rotation, not position. Until the extractor splits verb classes,
+    # false positives in verify-contract (c) can occur on rotation-phrased replies.
+    claims = E["pose"]("/World/X is rotated to (0, 90, 0)")
+    # Desired future behavior: pose extractor returns [] for rotation-verb phrasings
+    assert claims == []
+
+
 @pytest.mark.xfail(reason="Known gap: count regex can span sentences. "
                    "'16 robots. /World/envs is empty.' matches even though "
                    "the robots and the path are logically separate. Tighten "
