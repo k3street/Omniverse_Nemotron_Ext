@@ -1,6 +1,19 @@
-# Proposal: Deprecations / cite-facts RAG index
+# Proposal: Deprecations / cite-facts **INDEX** (not RAG)
 
 **Status:** proposal, not implemented. Written 2026-04-19 as a placeholder for when keyword-rule coverage (option 1 below) saturates.
+
+**Important terminology correction:** this is an **index**, not RAG. Difference matters:
+
+|  | **Index** (what we want) | **RAG** (what we don't want here) |
+|---|---|---|
+| Corpus | 50–200 curated rows | MB of docs |
+| Retrieval | Keyword/tag lookup | Embedding-similarity |
+| Output to LLM | Structured exact facts | Text chunks to synthesize |
+| Right when | Agent must cite EXACT names | Agent needs conceptual context |
+
+For T-13-style cite tasks, we need `enable_deterministic_mode` written verbatim. Index returns `{tool_5x: "enable_deterministic_mode"}` — no paraphrase possible. RAG would embedding-match "deterministic replay" and hand the LLM text-chunks from which the LLM may or may not extract the exact name (and on Gemini 3 Flash, empirically, often doesn't).
+
+The rest of this doc uses "index" throughout.
 
 ## Problem
 
