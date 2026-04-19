@@ -213,15 +213,24 @@ for prim in stage.Traverse():
     if "PhysicsArticulationRootAPI" not in prim.GetAppliedSchemas():
         continue
     name_lower = p.lower()
-    is_franka = any(k in name_lower for k in ("franka", "panda"))
+    # Match by prim name OR by any descendant whose name contains
+    # franka-specific tokens. quick_demo names the parent /World/Robot
+    # and the real Franka links are panda_link0..7 as descendants, so
+    # the parent alone wouldn't match "franka". Deep check handles both.
+    self_match = any(k in name_lower for k in ("franka", "panda"))
+    descendants = list(Usd.PrimRange(prim))[1:]
+    descendant_match = any(
+        any(k in d.GetPath().pathString.lower() for k in ("franka", "panda_link", "panda_hand"))
+        for d in descendants
+    )
+    is_franka = self_match or descendant_match
     xf = UsdGeom.Xformable(prim)
     wt = xf.ComputeLocalToWorldTransform(0).ExtractTranslation() if xf else None
-    descendant_count = sum(1 for _ in Usd.PrimRange(prim)) - 1  # excl. self
     robots.append({
         "path": p,
         "is_franka": is_franka,
         "base_z": wt[2] if wt else None,
-        "descendant_count": descendant_count,
+        "descendant_count": len(descendants),
     })
 franka = [r for r in robots if r["is_franka"]]
 on_table_and_loaded = [r for r in franka
