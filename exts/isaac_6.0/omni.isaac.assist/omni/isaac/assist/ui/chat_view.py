@@ -43,15 +43,9 @@ class ChatViewWindow(ui.Window):
                 ui.Spacer(height=5)
                 
                 # Input Area
-                # multiline=True gives reliable paste (Ctrl+V) behavior across
-                # Kit versions — the single-line variant has inconsistent
-                # clipboard handling in 5.x/6.x. We constrain height so it
-                # still LOOKS like a single-line input. add_end_edit_fn fires
-                # on Enter for submit.
                 with ui.HStack(height=30, spacing=5):
-                    self.input_field = ui.StringField(multiline=True, height=28)
+                    self.input_field = ui.StringField(multiline=False)
                     self.input_field.model.add_value_changed_fn(self._on_input_changed)
-                    self.input_field.model.add_end_edit_fn(lambda m: self._submit_message())
                     ui.Button("Send", width=60, clicked_fn=self._submit_message)
 
     def _on_input_changed(self, model):
@@ -83,24 +77,15 @@ class ChatViewWindow(ui.Window):
                 self._add_chat_bubble("Isaac Assist", msg.get("content", ""), is_user=False)
 
     def _add_chat_bubble(self, sender: str, text: str, is_user: bool, error: bool = False):
-        # Use a read-only multiline StringField for the body text instead of
-        # ui.Label so users can SELECT and COPY the agent's replies (Ctrl+C,
-        # right-click copy). Labels in omni.ui are not selectable.
         with self.chat_layout:
             bg_color = 0xFF444444 if is_user else 0xFF222222
             text_color = 0xFF8888FF if error else 0xFFDDDDDD
-
+            
             with ui.ZStack():
                 ui.Rectangle(style={"background_color": bg_color, "border_radius": 5})
-                with ui.VStack(margin=5, spacing=2):
+                with ui.VStack(margin=5):
                     ui.Label(sender, height=15, style={"color": 0xFFAAAAAA, "font_size": 12})
-                    _lines = max(1, (len(text) // 60) + text.count("\n") + 1)
-                    _h = min(400, max(22, _lines * 18))
-                    body = ui.StringField(multiline=True, read_only=True, height=_h,
-                                          style={"color": text_color,
-                                                 "background_color": 0x00000000,
-                                                 "border_color": 0x00000000})
-                    body.model.set_value(text)
+                    ui.Label(text, word_wrap=True, style={"color": text_color})
 
     def _new_scene(self):
         """Clear the stage and reset conversation history."""
