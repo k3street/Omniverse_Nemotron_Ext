@@ -1,16 +1,25 @@
 import aiohttp
 import logging
 import json
+import os
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
+
+# Env-gated: expose Gemini's chain-of-thought (thought-parts) for debugging.
+# Default OFF — thoughts cost 2-4x more tokens and are noise in production.
+# Set GEMINI_EXPOSE_THOUGHTS=1 during smoke-testing or when diagnosing a
+# reasoning bug (Cube 3/4 swap, wrong tool pick, fabricated verify claim).
+_EXPOSE_THOUGHTS = os.environ.get("GEMINI_EXPOSE_THOUGHTS", "0") == "1"
+
 
 @dataclass
 class LLMResponse:
     text: str
     actions: List[Dict] = field(default_factory=list)
     tool_calls: Optional[List[Dict]] = None
+    thoughts: Optional[List[str]] = None
 
 SYSTEM_PROMPT = (
     "You are Isaac Assist, an expert AI embedded inside NVIDIA Isaac Sim — "
@@ -73,13 +82,23 @@ class GeminiProvider:
         )
         gemini_messages = self._format_messages(messages)
 
+        gen_config = {
+            "temperature": 0.2,
+            "maxOutputTokens": 4096,
+        }
+        if _EXPOSE_THOUGHTS:
+            # Ask Gemini 3 to return thought-parts. includeThoughts=True turns
+            # on the `thought: true` marker on returned parts; thinkingBudget
+            # caps the max thought-token spend per turn (1024 is enough for
+            # most agent-turn reasoning without blowing the budget).
+            gen_config["thinkingConfig"] = {
+                "includeThoughts": True,
+                "thinkingBudget": 1024,
+            }
         payload = {
             "system_instruction": {"parts": [{"text": system}]},
             "contents": gemini_messages,
-            "generationConfig": {
-                "temperature": 0.2,
-                "maxOutputTokens": 4096,
-            },
+            "generationConfig": gen_config,
         }
 
         # Convert OpenAI tool schemas to Gemini function declarations
@@ -224,8 +243,16 @@ class GeminiProvider:
 
         text_parts = []
         tool_calls = []
+        thoughts = []
 
         for part in parts:
+            # Gemini 3 thought-parts carry `thought: true` alongside `text`.
+            # Route them to `thoughts` so they don't bleed into user-facing
+            # text — only the final non-thought text should reach the chat.
+            if part.get("thought") is True:
+                if "text" in part:
+                    thoughts.append(part["text"])
+                continue
             if "text" in part:
                 text_parts.append(part["text"])
             elif "functionCall" in part:
@@ -249,6 +276,7 @@ class GeminiProvider:
             text=text,
             actions=self._parse_actions(text),
             tool_calls=tool_calls if tool_calls else None,
+            thoughts=thoughts if thoughts else None,
         )
 
     def _clean_params(self, params: Dict) -> Dict:
