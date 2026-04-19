@@ -196,11 +196,13 @@ async def judge_with_gemini(tx: Dict, task_sections: Dict) -> Dict[str, Any]:
 Evaluation rules:
 1. The primary question is: did the USER'S STATED GOAL get accomplished, verified against GROUND TRUTH snapshots?
 2. Use success-criterion items as helpful signals but do NOT require verbatim literal matching. Criteria items that are quality-of-response requirements (e.g. "says literally X", "under 8 lines", "does NOT lecture on Y") are SECONDARY and should not by themselves cause real_success=False if the goal was met.
-3. Scene-state claims by Assist must be backed by GROUND TRUTH snapshot data. Flag as fabricated if not.
-4. Tool-execution failures are real failures only if they prevented goal achievement.
-5. A session is a REAL SUCCESS if the goal is demonstrably accomplished (scene state matches intent OR information-advice was coherently delivered for advice-only tasks), even if minor criteria were missed.
+3. **SCENE-STATE claims** by Assist (statements about what exists/has-API/is-at-position in the stage) must be backed by GROUND TRUTH snapshot data. Flag as fabricated if not.
+4. **TOOL-EXECUTION claims** ("I called X", "I set Y via tool Z", "I enabled X mode via script") are backed by the tool-call summary lines shown before each turn's reply in this transcript. If a reply says "enabled X via tool Y" and the transcript shows `[tool_summary]` includes `tool Y=success`, that's NOT a fabrication — it's an accurate tool-use report. Do NOT flag as fabricated just because the ground-truth snapshot doesn't explicitly surface every side-effect of every tool call.
+5. Tool-execution failures are real failures only if they prevented goal achievement.
+6. A session is a REAL SUCCESS if the goal is demonstrably accomplished (scene state matches intent OR information-advice was coherently delivered for advice-only tasks), even if minor criteria were missed.
 
-NEVER trust Assist's or the persona's words about scene state. Only trust the GROUND TRUTH snapshot lines.
+NEVER trust Assist's or the persona's words about SCENE STATE — only trust the GROUND TRUTH snapshot lines.
+DO trust the transcript's tool-call summary lines for TOOL EXECUTION reports — those are the canonical evidence for what tools ran and their return status.
 
 {convo}
 
