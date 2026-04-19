@@ -176,16 +176,23 @@ def test_pose_at_to_both_match_separately():
 
 
 # ── known-limitation (xfail) tests pinning gaps for future widening ───
-@pytest.mark.xfail(reason="Known gap 2026-04-19: attr-first regex requires "
-                   "value AFTER path, not before. 'height set to 2.0 on "
-                   "/World/X' doesn't match because value-then-path phrasing "
-                   "is neither branch. Widen the regex when a canary task "
-                   "surfaces this as a real fabrication.")
-def test_attr_value_before_path_phrasing_unsupported():
+def test_attr_value_before_path_phrasing_supported():
+    """2026-04-19 fix: added _ATTR_PAT_VAL_BEFORE_PATH as a third
+    pattern covering attr → value → on → path phrasing ("height set
+    to 2.0 on /World/Cylinder"). Previously neither path-first nor
+    attr-first (val-after-path) regexes matched this natural phrasing,
+    so the verify-contract (e) check silently ignored it — agent could
+    false-claim this phrasing without triggering the structural guard."""
     E = _E()
-    # This phrasing is natural English but neither regex branch catches it
-    claims = E["attr"]("height set to 2.0 on /World/Cylinder")
-    assert claims != []
+    assert E["attr"]("height set to 2.0 on /World/Cylinder") == [
+        ("/World/Cylinder", "height", 2.0)
+    ]
+    assert E["attr"]("friction is 0.8 for /World/Floor") == [
+        ("/World/Floor", "friction", 0.8)
+    ]
+    assert E["attr"]("density of 5000 on /World/Concrete") == [
+        ("/World/Concrete", "density", 5000.0)
+    ]
 
 
 def test_pose_rotation_verb_not_dispatched_to_translation_check():
@@ -206,19 +213,25 @@ def test_pose_rotation_verb_not_dispatched_to_translation_check():
     assert E["pose"]("/World/X moved to (0.5, 0.5, 0.5)") == [("/World/X", (0.5, 0.5, 0.5))]
 
 
-@pytest.mark.xfail(reason="Known gap: count regex can span sentences. "
-                   "'16 robots. /World/envs is empty.' matches even though "
-                   "the robots and the path are logically separate. Tighten "
-                   "the {0,200}? window or add a sentence-boundary guard "
-                   "if this surfaces as a real false-positive.")
-def test_count_sentence_boundary_not_enforced():
+def test_count_sentence_boundary_enforced():
+    """2026-04-19 fix: _COUNT_PAT gap-fill char class is [^.\\n] so the
+    regex can't cross a period. '16 robots. /World/envs is empty.' no
+    longer produces a false-positive (16, 'robots', '/World/envs') link.
+
+    Commas still work as intra-sentence separators:
+    '16 robots, at /World/envs' still matches.
+    """
     E = _E()
-    # Agent mentions 16 robots in one sentence, /World/envs in another —
-    # current extractor links them, which can cause false-flag verification
-    # of claims the agent never actually paired together.
-    claims = E["count"]("we have 16 robots. /World/envs is empty.")
-    # If this ever actually returns [], the behavior was tightened intentionally
-    assert claims == []  # desired future behavior
+    assert E["count"]("we have 16 robots. /World/envs is empty.") == []
+    # valid intra-sentence forms still match
+    assert E["count"]("16 robots at /World/envs") == [(16, "robots", "/World/envs")]
+    assert E["count"]("16 robots, at /World/envs") == [(16, "robots", "/World/envs")]
+    # Multi-claim: first sentence's count+path should link, second shouldn't
+    # bleed through the period boundary
+    claims = E["count"]("cloned 16 clones into /World/A. 4 more at /World/B")
+    assert (16, "clones", "/World/A") in claims
+    # 4 more at /World/B is also a valid claim, and it sits AFTER the period,
+    # so the regex should find it on a fresh scan (no leakage in either direction)
 
 
 # ── many-claim replies ────────────────────────────────────────────────

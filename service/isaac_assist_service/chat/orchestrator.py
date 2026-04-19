@@ -130,8 +130,14 @@ import re as _re_mod
 # Net effect: count-claim verification was silently disabled. Making path
 # non-optional forces the engine to consume enough to reach a /World/...
 # reference; matches without a path no longer produce a count claim.
+#
+# The gap-fill char class uses `[^.\n]` instead of `[^\n]` so the regex
+# can NOT cross a period — stops the count+path linkage from jumping
+# sentence boundaries (e.g. "16 robots. /World/envs is empty." no
+# longer produces a spurious (16, "robots", "/World/envs") claim).
+# Commas are still allowed as intra-sentence separators.
 _COUNT_PAT = _re_mod.compile(
-    r"\b(?P<n>\d{1,4})\s+(?P<noun>arms?|robots?|clones?|copies|instances?|envs?|environments?|cubes?|spheres?|cameras?)\b[^\n]{0,200}?(?P<path>/World[/A-Za-z0-9_]+)",
+    r"\b(?P<n>\d{1,4})\s+(?P<noun>arms?|robots?|clones?|copies|instances?|envs?|environments?|cubes?|spheres?|cameras?)\b[^.\n]{0,200}?(?P<path>/World[/A-Za-z0-9_]+)",
     _re_mod.I,
 )
 _POSE_PAT = _re_mod.compile(
@@ -170,6 +176,20 @@ _ATTR_PAT_ATTR_FIRST = _re_mod.compile(
     r"[^\n]{0,40}?"
     r"(?:is|of|set to|=|:)\s*"
     r"(?P<val>-?\d+(?:\.\d+)?)",
+    _re_mod.I,
+)
+# attr → (connector) → value → (on/of/for) → path
+# Covers "height set to 2.0 on /World/Cylinder" — the val-before-path
+# phrasing that neither path-first nor attr-first (val-after-path)
+# patterns match. Surfaced as an xfail in the edge-case tests.
+_ATTR_PAT_VAL_BEFORE_PATH = _re_mod.compile(
+    r"\b(?P<attr>" + _ATTR_WORDS + r")\b"
+    r"[^\n]{0,20}?"
+    r"(?:is|of|set to|=|:)\s*"
+    r"(?P<val>-?\d+(?:\.\d+)?)"
+    r"[^\n]{0,30}?"
+    r"(?:on\s+|of\s+|for\s+)"
+    r"(?P<path>/World[/A-Za-z0-9_]+)",
     _re_mod.I,
 )
 _ATTR_NAME_MAP = {
@@ -277,8 +297,10 @@ def _extract_attr_claims(reply: str) -> List[tuple]:
     """
     seen = set()
     out: List[tuple] = []
-    for m in list(_ATTR_PAT_PATH_FIRST.finditer(reply or "")) + list(
-        _ATTR_PAT_ATTR_FIRST.finditer(reply or "")
+    for m in (
+        list(_ATTR_PAT_PATH_FIRST.finditer(reply or ""))
+        + list(_ATTR_PAT_ATTR_FIRST.finditer(reply or ""))
+        + list(_ATTR_PAT_VAL_BEFORE_PATH.finditer(reply or ""))
     ):
         path = m.group("path")
         attr = m.group("attr").lower()
