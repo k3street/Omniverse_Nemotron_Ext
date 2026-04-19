@@ -594,8 +594,14 @@ def _check_new_stage_mid_patch(code: str) -> List[PatchIssue]:
 # "Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd". The 5.1 endpoint
 # 404s the shorter form. Caught repeatedly 2026-04-19.
 _RE_WRONG_FRANKA_URL = re.compile(
-    r"""Isaac/Robots/Franka(?!Robotics)/franka\.usd|"""
-    r"""Isaac/Robots/FrankaEmika/"""
+    # Any .usd file under Isaac/Robots/Franka/ (NOT FrankaRobotics) is wrong.
+    # Caught variants 2026-04-19: franka.usd, franka_alt_fingers.usd,
+    # franka_instanceable.usd. The agent invents filenames without the
+    # FrankaRobotics/FrankaPanda parent dir, and all 404 on the 5.1 endpoint.
+    r"""Isaac/Robots/Franka(?!Robotics)/[A-Za-z0-9_]+\.usd|"""
+    r"""Isaac/Robots/FrankaEmika/|"""
+    # The deprecated 4.2 asset_root fallback is also a 404 on 5.x systems.
+    r"""omniverse://localhost/NVIDIA/Assets/Isaac/4\.[0-9]+"""
 )
 
 
