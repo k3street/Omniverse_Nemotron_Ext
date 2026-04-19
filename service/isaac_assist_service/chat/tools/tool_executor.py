@@ -8085,9 +8085,12 @@ import omni.graph.core as og
 # attempting graph build.
 if not _ros2_os.environ.get("AMENT_PREFIX_PATH"):
     raise RuntimeError(
-        "configure_ros2_bridge: AMENT_PREFIX_PATH is not set in Kit's environment. "
-        "Source your ROS2 distro setup (e.g. /opt/ros/humble/setup.bash) "
-        "before launching Isaac Sim, then relaunch. No nodes were created."
+        "configure_ros2_bridge: AMENT_PREFIX_PATH is not set in the Kit process "
+        "environment. This is a pre-launch env config — the agent running inside "
+        "Kit cannot fix it retroactively. Relay to the user: close Isaac Sim, "
+        "source ROS2 setup in the terminal "
+        "(e.g. `source /opt/ros/humble/setup.bash`), then relaunch Isaac Sim "
+        "from that terminal. No nodes were created this call."
     )
 
 # Handle Isaac Sim version namespace differences
@@ -14084,11 +14087,14 @@ import omni.graph.core as og
 # Raise early with an actionable message so the agent can relay it.
 if not _ros2_os.environ.get('AMENT_PREFIX_PATH'):
     raise RuntimeError(
-        'setup_ros2_bridge: AMENT_PREFIX_PATH is not set in Kit\\'s environment. '
-        'ROS2 middleware (rmw) cannot initialize without it. '
-        'Before launching Isaac Sim, source your ROS2 distro setup, e.g.: '
-        '  source /opt/ros/humble/setup.bash   (or your distro\\'s path)   '
-        'then relaunch Isaac Sim. No nodes were created.'
+        'setup_ros2_bridge: AMENT_PREFIX_PATH is not set in the Kit process '
+        'environment. ROS2 middleware (rmw) cannot initialize without it. '
+        'The fix has to happen OUTSIDE Kit (the agent running inside Kit cannot '
+        'set this retroactively). Ask the user to: (1) close Isaac Sim, '
+        '(2) in the terminal, source their ROS2 distro setup '
+        '(e.g. `source /opt/ros/humble/setup.bash`), then '
+        '(3) relaunch Isaac Sim from that terminal. Until then, no ROS2 graph '
+        'can be built. No nodes were created this call.'
     )
 
 _bt = og.GraphBackingType
