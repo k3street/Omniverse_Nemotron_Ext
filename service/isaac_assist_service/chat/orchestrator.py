@@ -596,10 +596,22 @@ class ChatOrchestrator:
                 })
 
                 if result.get("type") == "code_patch":
-                    code_patches.append({
-                        "code": result.get("code", ""),
-                        "description": result.get("description", ""),
-                    })
+                    # If the patch already ran (AUTO_APPROVE=true or other
+                    # auto-exec path), it's already in the stage — don't
+                    # re-surface it as an Approve & Execute button, which
+                    # confuses the user into clicking to redo completed work.
+                    # The tool call record (executed_tools) still captures
+                    # that it ran with success/output.
+                    if result.get("executed"):
+                        _trace_emit(session_id, "patch_executed", {
+                            "description": result.get("description", ""),
+                            "success": result.get("success"),
+                        })
+                    else:
+                        code_patches.append({
+                            "code": result.get("code", ""),
+                            "description": result.get("description", ""),
+                        })
 
                 update_knowledge_from_tool(knowledge, fn_name, fn_args, result)
 
