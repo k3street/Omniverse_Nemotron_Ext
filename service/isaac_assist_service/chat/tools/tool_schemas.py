@@ -579,7 +579,7 @@ ISAAC_SIM_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "max_dim": {"type": "integer", "description": "Maximum image dimension in pixels", "default": 1280},
+                    "max_dim": {"type": "integer", "description": "Maximum image dimension in pixels (hard-capped at 768; default 512 is optimal for LLM vision)", "default": 512},
                 },
             },
         },
@@ -3635,7 +3635,7 @@ ISAAC_SIM_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "max_dim": {"type": "integer", "description": "Maximum image dimension in pixels", "default": 1280},
+                    "max_dim": {"type": "integer", "description": "Maximum image dimension in pixels (hard-capped at 768; default 512 is optimal for LLM vision)", "default": 512},
                 },
             },
         },
@@ -4804,7 +4804,7 @@ ISAAC_SIM_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "max_dim": {"type": "integer", "description": "Maximum image dimension in pixels", "default": 1280},
+                    "max_dim": {"type": "integer", "description": "Maximum image dimension in pixels (hard-capped at 768; default 512 is optimal for LLM vision)", "default": 512},
                 },
             },
         },

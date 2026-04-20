@@ -1744,7 +1744,7 @@ async def _handle_scene_summary(args: Dict) -> Dict:
 
 
 async def _handle_capture_viewport(args: Dict) -> Dict:
-    max_dim = args.get("max_dim", 1280)
+    max_dim = args.get("max_dim", 512)
     return await kit_tools.get_viewport_image(max_dim=max_dim)
 
 
@@ -6619,7 +6619,7 @@ async def _handle_scene_summary(args: Dict) -> Dict:
 
 
 async def _handle_capture_viewport(args: Dict) -> Dict:
-    max_dim = args.get("max_dim", 1280)
+    max_dim = args.get("max_dim", 512)
     return await kit_tools.get_viewport_image(max_dim=max_dim)
 
 
@@ -18572,7 +18572,7 @@ async def _handle_scene_summary(args: Dict) -> Dict:
 
 
 async def _handle_capture_viewport(args: Dict) -> Dict:
-    max_dim = args.get("max_dim", 1280)
+    max_dim = args.get("max_dim", 512)
     return await kit_tools.get_viewport_image(max_dim=max_dim)
 
 
@@ -33190,7 +33190,7 @@ async def _handle_scene_summary(args: Dict) -> Dict:
 
 
 async def _handle_capture_viewport(args: Dict) -> Dict:
-    max_dim = args.get("max_dim", 1280)
+    max_dim = args.get("max_dim", 512)
     return await kit_tools.get_viewport_image(max_dim=max_dim)
 
 

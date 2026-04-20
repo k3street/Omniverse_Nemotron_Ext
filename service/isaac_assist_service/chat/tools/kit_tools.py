@@ -52,9 +52,16 @@ async def get_stage_context(full: bool = False) -> Dict[str, Any]:
     return await _get("/context", params={"full": "true" if full else "false"})
 
 
-async def get_viewport_image(max_dim: int = 1280) -> Dict[str, Any]:
-    """Capture the active viewport and return base64 PNG."""
-    return await _get("/capture", params={"max_dim": str(max_dim)})
+async def get_viewport_image(max_dim: int = 512) -> Dict[str, Any]:
+    """Capture the active viewport and return base64 PNG.
+
+    Default 512px: fits in 1-2 Anthropic vision tiles (~1700-3400 tokens as a
+    proper image block vs ~150 K+ tokens if the base64 leaks into text).
+    Hard-capped at 768px — higher resolutions rarely improve LLM scene
+    understanding and dramatically inflate context size.
+    """
+    capped = min(max_dim, 768)
+    return await _get("/capture", params={"max_dim": str(capped)})
 
 
 async def queue_exec_patch(code: str, description: str = "") -> Dict[str, Any]:
