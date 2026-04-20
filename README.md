@@ -96,6 +96,7 @@ cp service/isaac_assist_service/.env.example service/isaac_assist_service/.env
 | `ROSBRIDGE_HOST` | `127.0.0.1` | rosbridge WebSocket host (for live ROS2 tools) |
 | `ROSBRIDGE_PORT` | `9090` | rosbridge WebSocket port |
 | `LIVEKIT_URL` | `ws://localhost:7880` | LiveKit server URL |
+| `ISAACLAB_PATH` | *(empty)* | Absolute path to your IsaacLab root (contains `isaaclab.sh`). Required for `deploy_rl_policy` (G1 locomotion). Example: `/home/kimate/Documents/Github/open_arm_10Things/IsaacLab` |
 
 #### Pull the local model (if using `LLM_MODE=local`)
 
@@ -128,6 +129,48 @@ Interactive API docs are available at **`http://localhost:8000/docs`**.
 curl -X PUT http://localhost:8000/api/v1/settings/llm_mode \
   -H "Content-Type: application/json" -d '{"mode": "local"}'
 ```
+
+Or use the **⚙ Settings** button in the Isaac Assist panel — select the provider from the dropdown, enter your API key, and click **Save Settings**. The provider reloads instantly; no service restart needed.
+
+### 3.4 Isaac Lab setup (G1 locomotion — optional)
+
+Required only if you want to deploy RL locomotion policies (e.g. Unitree G1 walking via `deploy_rl_policy`).
+
+**Point the service at your existing Isaac Lab install** — do not clone a second copy:
+
+```bash
+# In your .env or .env.local
+ISAACLAB_PATH=/home/kimate/Documents/Github/open_arm_10Things/IsaacLab
+```
+
+The service searches for `isaaclab.sh` in this order:
+1. `ISAACLAB_PATH` env var
+2. `~/Documents/Github/open_arm_10Things/IsaacLab` (project default)
+3. `~/IsaacLab`, `~/isaac-lab`, `/opt/IsaacLab`
+4. `PATH`
+
+**Clone the G1 pre-trained checkpoint** (one-time):
+
+```bash
+git clone https://github.com/unitreerobotics/unitree_rl_gym
+cd unitree_rl_gym && pip install -e .
+# Checkpoint is at: deploy/pre_train/g1/motion.pt
+```
+
+**Deploy from chat:**
+
+```
+"Deploy the G1 walking policy"
+```
+
+Isaac Assist will:
+1. Stop the simulation
+2. Lock arm joints in a down-at-sides pose (correct CG)
+3. Freeze all 24 Inspire Hand joints at neutral
+4. Launch the Isaac Lab teleop agent with keyboard control
+5. Prompt you to press **Play** in Isaac Sim
+
+Keyboard controls once Play is pressed: `W/S` = forward/back · `A/D` = turn · `Q/E` = strafe
 
 ---
 
