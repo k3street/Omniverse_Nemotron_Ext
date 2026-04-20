@@ -54,12 +54,19 @@ class AnthropicProvider:
         anthropic_msgs = []
         for m in filtered_msgs:
             if m.get("role") == "tool":
+                # content may be a plain string or a list of content blocks
+                # (multimodal, e.g. image + text from capture_viewport)
+                raw_content = m.get("content", "")
+                if isinstance(raw_content, list):
+                    tool_content = raw_content  # already content-block format
+                else:
+                    tool_content = raw_content  # plain string — Anthropic accepts this
                 anthropic_msgs.append({
                     "role": "user",
                     "content": [{
                         "type": "tool_result",
                         "tool_use_id": m.get("tool_call_id", ""),
-                        "content": m.get("content", ""),
+                        "content": tool_content,
                     }]
                 })
             elif m.get("role") == "assistant" and m.get("tool_calls"):

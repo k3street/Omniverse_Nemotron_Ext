@@ -47,6 +47,65 @@ logger = logging.getLogger(__name__)
 _audit = AuditLogger()
 _kb = KnowledgeBase()
 
+# Max chars per tool result (non-image) before truncation
+_MAX_TOOL_RESULT_CHARS = 80_000
+# Image keys that may appear in tool results
+_IMAGE_KEYS = ("image_base64", "image_data", "png_data", "jpeg_data")
+
+
+def _tool_result_content(result: Dict) -> Any:
+    """
+    Build the tool result `content` value for the messages list.
+
+    - If the result contains a base64 image, return a list of content blocks
+      (Anthropic multimodal format): one image block + one text block with
+      the remaining metadata.  This is how the LLM actually *sees* the image.
+    - Otherwise return a plain JSON string, capped at 80 K chars.
+    """
+    image_key = next((k for k in _IMAGE_KEYS if k in result), None)
+    if image_key:
+        b64 = result[image_key]
+        meta = {k: v for k, v in result.items() if k not in _IMAGE_KEYS}
+        return [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": b64,
+                },
+            },
+            {"type": "text", "text": json.dumps(meta, default=str)[:2000]},
+        ]
+    serialized = json.dumps(result, default=str)
+    if len(serialized) > _MAX_TOOL_RESULT_CHARS:
+        return serialized[:_MAX_TOOL_RESULT_CHARS] + '... [truncated]"}'
+    return serialized
+
+
+def _scrub_images_from_messages(messages: List[Dict]) -> None:
+    """
+    Replace image content blocks in tool-result messages with a short
+    summary string.  Called after each LLM round so images don't
+    accumulate across rounds and blow up the context window.
+    """
+    for msg in messages:
+        if msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        if isinstance(content, list):
+            has_image = any(
+                isinstance(block, dict) and block.get("type") == "image"
+                for block in content
+            )
+            if has_image:
+                text_parts = [
+                    block.get("text", "")
+                    for block in content
+                    if isinstance(block, dict) and block.get("type") == "text"
+                ]
+                msg["content"] = "[image captured — " + (text_parts[0][:200] if text_parts else "no metadata") + "]"
+
 SYSTEM_PROMPT = """\
 You are Isaac Assist, an expert AI embedded inside NVIDIA Isaac Sim — authored by 10Things, Inc. (www.10things.tech).
 You help robotics engineers build, diagnose, and control simulations using natural language.
@@ -339,7 +398,7 @@ class ChatOrchestrator:
                 tool_results.append({
                     "role": "tool",
                     "tool_call_id": tc_id,
-                    "content": json.dumps(result, default=str),
+                    "content": _tool_result_content(result),
                 })
 
             # Single assistant message for all parallel tool calls in this round
@@ -349,6 +408,11 @@ class ChatOrchestrator:
                 "tool_calls": assistant_tool_calls,
             })
             messages.extend(tool_results)
+
+            # Scrub image data from previous rounds — images are single-use;
+            # keeping base64 blobs in the context across rounds wastes ~200 K
+            # tokens per image and causes "prompt is too long" failures.
+            _scrub_images_from_messages(messages[:-len(tool_results)])
         else:
             logger.warning(f"[{session_id}] Hit max tool rounds ({max_rounds})")
 
