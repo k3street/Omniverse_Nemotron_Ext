@@ -84,9 +84,15 @@ _PLAY_SCRIPT = "scripts/demos/policy_runner.py"
 def _find_isaaclab(hint: Optional[str] = None) -> Optional[str]:
     """Locate the isaaclab.sh launcher."""
     candidates = []
-    if hint:
-        candidates.append(Path(hint) / "isaaclab.sh")
+    # 1. Explicit hint (from tool arg or ISAACLAB_PATH env var)
+    env_hint = os.environ.get("ISAACLAB_PATH", "")
+    for h in [hint, env_hint]:
+        if h:
+            p = Path(h)
+            candidates.append(p / "isaaclab.sh" if p.suffix != ".sh" else p)
+    # 2. Known project location
     candidates += [
+        Path.home() / "Documents/Github/open_arm_10Things/IsaacLab/isaaclab.sh",
         Path.home() / "IsaacLab" / "isaaclab.sh",
         Path.home() / "isaac-lab" / "isaaclab.sh",
         Path("/opt/IsaacLab/isaaclab.sh"),
@@ -94,9 +100,7 @@ def _find_isaaclab(hint: Optional[str] = None) -> Optional[str]:
     for p in candidates:
         if p.exists():
             return str(p)
-    # Also check PATH
-    found = shutil.which("isaaclab.sh")
-    return found
+    return shutil.which("isaaclab.sh")
 
 
 def _build_freeze_upper_body_script(robot_prim_path: str) -> str:
