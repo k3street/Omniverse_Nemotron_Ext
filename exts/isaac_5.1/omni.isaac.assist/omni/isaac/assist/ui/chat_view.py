@@ -118,69 +118,122 @@ class ChatViewWindow(ui.Window):
             pass
         return None
 
+    # LLM mode → (display label, env key used for API key, placeholder model name)
+    _LLM_MODES = [
+        ("local  — Ollama",     "local",      "LOCAL_MODEL_NAME",   "qwen3.5:35b"),
+        ("cloud  — Gemini",     "cloud",      "API_KEY_GEMINI",     "gemini-2.0-flash"),
+        ("anthropic — Claude",  "anthropic",  "ANTHROPIC_API_KEY",  "claude-sonnet-4-6"),
+        ("openai — GPT",        "openai",     "OPENAI_API_KEY",     "gpt-4o"),
+        ("grok   — xAI",        "grok",       "GROK_API_KEY",       "grok-3"),
+    ]
+
     def _spawn_settings_window(self):
-        self._settings_window = ui.Window("Isaac Assist Settings", width=400, height=300)
+        current_mode = os.environ.get("LLM_MODE", "local").strip().lower()
+        mode_labels = [m[0] for m in self._LLM_MODES]
+        mode_keys   = [m[1] for m in self._LLM_MODES]
+        current_idx = mode_keys.index(current_mode) if current_mode in mode_keys else 0
+
+        self._settings_window = ui.Window("Isaac Assist Settings", width=440, height=380)
         with self._settings_window.frame:
             with ui.VStack(spacing=10, margin=15):
                 ui.Label("Engine Configuration", style={"font_size": 16, "color": 0xFF00FF00, "font_weight": "bold"})
                 ui.Spacer(height=5)
-                
-                with ui.HStack(height=20):
-                    ui.Label("OpenAI API Base:", width=150)
+
+                # ── LLM Provider ─────────────────────────────────────
+                with ui.HStack(height=22):
+                    ui.Label("LLM Provider:", width=150)
+                    self.llm_mode_combo = ui.ComboBox(current_idx, *mode_labels)
+
+                # ── API Key (context-sensitive label) ─────────────────
+                with ui.HStack(height=22):
+                    self.api_key_label = ui.Label("API Key:", width=150)
+                    self.api_key_field = ui.StringField(password_mode=True)
+                    # Show the key for whichever mode is currently active
+                    _, _, key_env, _ = self._LLM_MODES[current_idx]
+                    self.api_key_field.model.set_value(os.environ.get(key_env, ""))
+
+                def _on_mode_changed(model, _):
+                    idx = model.get_item_value_model().as_int
+                    _, mode, key_env, placeholder = self._LLM_MODES[idx]
+                    self.api_key_label.text = f"{key_env}:"
+                    self.api_key_field.model.set_value(os.environ.get(key_env, ""))
+
+                self.llm_mode_combo.model.add_item_changed_fn(_on_mode_changed)
+                # Fire once to sync label
+                _on_mode_changed(self.llm_mode_combo.model, None)
+
+                # ── Model name ────────────────────────────────────────
+                with ui.HStack(height=22):
+                    ui.Label("Model Name:", width=150)
+                    self.model_field = ui.StringField()
+                    self.model_field.model.set_value(os.environ.get("CLOUD_MODEL_NAME", "claude-sonnet-4-6"))
+
+                # ── Ollama base (local mode only) ─────────────────────
+                with ui.HStack(height=22):
+                    ui.Label("Ollama Base URL:", width=150)
                     self.api_base_field = ui.StringField()
                     self.api_base_field.model.set_value(os.environ.get("OPENAI_API_BASE", "http://localhost:11434/v1"))
-                    
-                with ui.HStack(height=20):
-                    ui.Label("API Key:", width=150)
-                    self.api_key_field = ui.StringField(password_mode=True)
-                    self.api_key_field.model.set_value(os.environ.get("OPENAI_API_KEY", ""))
-                    
-                with ui.HStack(height=20):
-                    ui.Label("LLM Model:", width=150)
-                    self.model_field = ui.StringField()
-                    self.model_field.model.set_value(os.environ.get("CLOUD_MODEL_NAME", "claude-opus-4-7"))
-                
-                with ui.HStack(height=20):
+
+                ui.Separator()
+
+                with ui.HStack(height=22):
                     self.contribute_cb = ui.CheckBox()
-                    is_contrib = os.environ.get("CONTRIBUTE_DATA", "false").lower() == "true"
-                    self.contribute_cb.model.set_value(is_contrib)
+                    self.contribute_cb.model.set_value(os.environ.get("CONTRIBUTE_DATA", "false").lower() == "true")
                     ui.Label("Contribute Fine-Tuning Data (Opt-In)", width=0)
 
-                with ui.HStack(height=20):
+                with ui.HStack(height=22):
                     self.auto_approve_cb = ui.CheckBox()
                     self.auto_approve_cb.model.set_value(self._auto_approve)
                     ui.Label("Auto-Approve Code Patches (skip approval dialog)", width=0)
 
-                with ui.HStack(height=20):
+                with ui.HStack(height=22):
                     ui.Label("Max Tool Rounds:", width=150)
                     self.max_tool_rounds_field = ui.IntField()
                     self.max_tool_rounds_field.model.set_value(int(os.environ.get("MAX_TOOL_ROUNDS", "10")))
-                    
+
                 ui.Spacer(height=10)
-                
+
                 with ui.HStack(height=30, spacing=5):
                     ui.Button("Save Settings", style={"background_color": 0xFF22AA22}, clicked_fn=self._save_settings)
                     ui.Button("Export Training Data", clicked_fn=self._export_data)
 
     def _save_settings(self):
         self._auto_approve = self.auto_approve_cb.model.get_value_as_bool()
+
+        # Resolve selected mode
+        idx = self.llm_mode_combo.model.get_item_value_model().as_int
+        _, mode, key_env, _ = self._LLM_MODES[idx]
+        api_key_value = self.api_key_field.model.get_value_as_string()
+
         payload = {
-            "OPENAI_API_BASE": self.api_base_field.model.get_value_as_string(),
-            "OPENAI_API_KEY": self.api_key_field.model.get_value_as_string(),
+            "LLM_MODE":        mode,
+            key_env:           api_key_value,          # write to the right env var
             "CLOUD_MODEL_NAME": self.model_field.model.get_value_as_string(),
+            "OPENAI_API_BASE": self.api_base_field.model.get_value_as_string(),
             "CONTRIBUTE_DATA": "true" if self.contribute_cb.model.get_value_as_bool() else "false",
-            "AUTO_APPROVE": "true" if self._auto_approve else "false",
-            "MAX_TOOL_ROUNDS": str(self.max_tool_rounds_field.model.get_value_as_int())
+            "AUTO_APPROVE":    "true" if self._auto_approve else "false",
+            "MAX_TOOL_ROUNDS": str(self.max_tool_rounds_field.model.get_value_as_int()),
         }
-        self._add_chat_bubble("System", "Saving engine settings...", is_user=False)
+        self._add_chat_bubble("System", f"Switching to {mode} provider…", is_user=False)
         asyncio.ensure_future(self._handle_save_settings(payload))
 
     async def _handle_save_settings(self, payload: dict):
         resp = await self.service.update_settings(payload)
         if "error" in resp:
             self._add_chat_bubble("System", f"Failed to save settings: {resp['error']}", is_user=False, error=True)
+            return
+
+        # Hot-switch the LLM provider — this reloads the orchestrator's provider
+        mode = payload.get("LLM_MODE", "")
+        if mode:
+            switch_resp = await self.service.switch_llm_mode(mode)
+            if "error" in switch_resp:
+                self._add_chat_bubble("System", f"Settings saved but provider switch failed: {switch_resp['error']}", is_user=False, error=True)
+            else:
+                model = switch_resp.get("model", "")
+                self._add_chat_bubble("System", f"Provider switched to {mode} ({model}). Ready.", is_user=False)
         else:
-            self._add_chat_bubble("System", "Settings successfully updated dynamically.", is_user=False)
+            self._add_chat_bubble("System", "Settings saved.", is_user=False)
 
     def _export_data(self):
         self._add_chat_bubble("System", "Triggering local Knowledge Base export for Fine-tuning...", is_user=False)

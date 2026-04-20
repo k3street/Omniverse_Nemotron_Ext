@@ -24,6 +24,24 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+# ── Inspire Hand joint names on the Unitree G1 ──────────────────────────────
+# These DOFs are not controlled by the locomotion policy (12 DOF legs only).
+# Leaving them free causes the extra mass to destabilize the robot at spawn.
+# Freeze strategy: high stiffness (500 Nm/rad) + high damping (50 Nms/rad) at 0.
+_INSPIRE_HAND_JOINTS = [
+    # Left hand
+    "left_hand_j1", "left_hand_j2", "left_hand_j3", "left_hand_j4",
+    "left_hand_j5", "left_hand_j6", "left_hand_j7", "left_hand_j8",
+    "left_hand_j9", "left_hand_j10", "left_hand_j11", "left_hand_j12",
+    # Right hand
+    "right_hand_j1", "right_hand_j2", "right_hand_j3", "right_hand_j4",
+    "right_hand_j5", "right_hand_j6", "right_hand_j7", "right_hand_j8",
+    "right_hand_j9", "right_hand_j10", "right_hand_j11", "right_hand_j12",
+]
+
+_FREEZE_HAND_STIFFNESS = 500.0   # Nm/rad — stiff enough to hold position
+_FREEZE_HAND_DAMPING   = 50.0    # Nms/rad
+
 # ── Singleton process registry ──────────────────────────────────────────────
 _policy_proc: Optional[asyncio.subprocess.Process] = None
 _policy_task_name: Optional[str] = None
@@ -52,6 +70,56 @@ def _find_isaaclab(hint: Optional[str] = None) -> Optional[str]:
     return found
 
 
+def _build_freeze_hand_script(robot_prim_path: str) -> str:
+    """
+    Generate a USD/PhysX script that freezes Inspire Hand joints in place.
+    Sets high stiffness + damping on all hand joints so the locomotion policy
+    (which only controls the 12 leg DOFs) doesn't have to fight free-floating
+    hand mass.
+    """
+    joints_repr = repr(_INSPIRE_HAND_JOINTS)
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+robot_path = "{robot_prim_path}"
+hand_joints = {joints_repr}
+stiffness = {_FREEZE_HAND_STIFFNESS}
+damping   = {_FREEZE_HAND_DAMPING}
+
+frozen = []
+for prim in stage.Traverse():
+    prim_name = prim.GetPath().name
+    if prim_name in hand_joints and prim.IsA(UsdPhysics.RevoluteJoint):
+        drive = UsdPhysics.DriveAPI.Apply(prim, "angular")
+        drive.GetStiffnessAttr().Set(stiffness)
+        drive.GetDampingAttr().Set(damping)
+        drive.GetTargetPositionAttr().Set(0.0)
+        frozen.append(str(prim.GetPath()))
+
+print(f"Froze {{len(frozen)}} Inspire Hand joints at neutral position.")
+"""
+
+
+async def _freeze_inspire_hand(robot_prim_path: str) -> Dict[str, Any]:
+    """Run the hand-freeze script via Kit RPC before launching the policy."""
+    try:
+        from . import kit_tools
+        script = _build_freeze_hand_script(robot_prim_path)
+        result = await kit_tools.exec_sync(script)
+        if result and result.get("success"):
+            output = result.get("output", "").strip()
+            logger.info(f"[RLRunner] Hand freeze: {output}")
+            return {"frozen": True, "output": output}
+        else:
+            logger.warning(f"[RLRunner] Hand freeze failed: {result}")
+            return {"frozen": False, "error": str(result)}
+    except Exception as e:
+        logger.warning(f"[RLRunner] Hand freeze exception: {e}")
+        return {"frozen": False, "error": str(e)}
+
+
 async def handle_deploy_rl_policy(args: Dict[str, Any]) -> Dict[str, Any]:
     """
     Tool handler for deploy_rl_policy.
@@ -68,9 +136,20 @@ async def handle_deploy_rl_policy(args: Dict[str, Any]) -> Dict[str, Any]:
     teleop_device = args.get("teleop_device", "keyboard")
     num_envs = int(args.get("num_envs", 1))
     isaaclab_path = args.get("isaaclab_path", "")
+    robot_prim_path = args.get("robot_prim_path", "/World/G1")
+    freeze_hand = args.get("freeze_hand", True)  # default True for G1+Inspire stability
 
     # Kill any existing policy
     await _stop_policy()
+
+    # Freeze Inspire Hand joints before starting the locomotion policy.
+    # The motion.pt checkpoint only controls 12 leg DOFs; uncontrolled hand
+    # joints destabilize the robot at spawn due to free-floating mass.
+    freeze_result = {}
+    if freeze_hand:
+        freeze_result = await _freeze_inspire_hand(robot_prim_path)
+        if not freeze_result.get("frozen"):
+            logger.warning("[RLRunner] Could not freeze hand joints — robot may be unstable")
 
     isaaclab_sh = _find_isaaclab(isaaclab_path or None)
     if not isaaclab_sh:
@@ -127,6 +206,7 @@ async def handle_deploy_rl_policy(args: Dict[str, Any]) -> Dict[str, Any]:
         "checkpoint": checkpoint or "latest in task log dir",
         "num_envs": num_envs,
         "isaaclab_root": isaaclab_root,
+        "hand_joints_frozen": freeze_result.get("frozen", False),
     }
 
     if teleop_device == "keyboard":

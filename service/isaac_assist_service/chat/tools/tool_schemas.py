@@ -13305,6 +13305,14 @@ ISAAC_SIM_TOOLS = [
                         "type": "string",
                         "description": "Absolute path to the IsaacLab root directory if not on PATH.",
                     },
+                    "robot_prim_path": {
+                        "type": "string",
+                        "description": "USD path to the G1 robot prim (e.g. '/World/G1'). Used to locate and freeze Inspire Hand joints before launching. Default: '/World/G1'.",
+                    },
+                    "freeze_hand": {
+                        "type": "boolean",
+                        "description": "If true (default), freezes all Inspire Hand joints at neutral position with high stiffness before launching. Critical for stability — the locomotion policy only controls 12 leg DOFs and uncontrolled hand joints cause the robot to fall.",
+                    },
                 },
                 "required": ["task"],
             },

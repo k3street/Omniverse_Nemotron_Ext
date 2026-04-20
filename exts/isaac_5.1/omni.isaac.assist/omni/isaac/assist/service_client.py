@@ -118,6 +118,18 @@ class AssistServiceClient:
         except Exception as e:
             return {"error": str(e)}
 
+    async def switch_llm_mode(self, mode: str) -> dict:
+        """Hot-switch the LLM provider without restarting the service."""
+        url = f"{self.base_url}/api/v1/settings/llm_mode"
+        try:
+            async with aiohttp.ClientSession(json_serialize=self._json_serialize) as session:
+                async with session.put(url, json={"mode": mode}) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    return {"error": f"Failed (HTTP {response.status})"}
+        except Exception as e:
+            return {"error": str(e)}
+
     async def export_knowledge(self) -> dict:
         """ Triggers JSONL finetuning extraction from the Knowledge Base """
         url = f"{self.base_url}/api/v1/finetune/export"
