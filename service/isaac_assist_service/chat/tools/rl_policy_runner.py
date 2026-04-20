@@ -24,23 +24,52 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-# ── Inspire Hand joint names on the Unitree G1 ──────────────────────────────
-# These DOFs are not controlled by the locomotion policy (12 DOF legs only).
-# Leaving them free causes the extra mass to destabilize the robot at spawn.
-# Freeze strategy: high stiffness (500 Nm/rad) + high damping (50 Nms/rad) at 0.
+# ── G1 upper-body joint targets for stable locomotion CG ────────────────────
+# The motion.pt checkpoint controls only the 12 leg DOFs. Arms and hands must
+# be held in a natural down position — arms at the sides keeps the CG centred
+# over the feet. Raised or outstretched arms shift the CG forward/sideways and
+# cause falls even if the hand joints are individually locked.
+#
+# Target positions are in radians; values match the G1's neutral standing pose
+# used during unitree_rl_gym training.
+#
+# PhysX reads DriveAPI attributes at simulation start (not mid-step), so the
+# simulation MUST be stopped before applying these — the freeze script calls
+# omni.timeline.get_timeline_interface().stop() first, then the user presses Play.
+
+_ARM_JOINT_TARGETS = {
+    # ── Left arm (natural hang, elbow slightly bent) ──
+    "left_shoulder_pitch_joint":  0.20,   # slight forward lean keeps arm away from torso
+    "left_shoulder_roll_joint":   0.15,   # slight abduction
+    "left_shoulder_yaw_joint":    0.00,
+    "left_elbow_pitch_joint":     0.40,   # 23° bend — natural hang
+    "left_wrist_roll_joint":      0.00,
+    "left_wrist_pitch_joint":     0.00,
+    "left_wrist_yaw_joint":       0.00,
+    # ── Right arm (mirror of left) ──
+    "right_shoulder_pitch_joint":  0.20,
+    "right_shoulder_roll_joint":  -0.15,
+    "right_shoulder_yaw_joint":    0.00,
+    "right_elbow_pitch_joint":     0.40,
+    "right_wrist_roll_joint":      0.00,
+    "right_wrist_pitch_joint":     0.00,
+    "right_wrist_yaw_joint":       0.00,
+}
+
+# Inspire Hand — all finger joints locked at 0 (open/neutral)
 _INSPIRE_HAND_JOINTS = [
-    # Left hand
-    "left_hand_j1", "left_hand_j2", "left_hand_j3", "left_hand_j4",
-    "left_hand_j5", "left_hand_j6", "left_hand_j7", "left_hand_j8",
-    "left_hand_j9", "left_hand_j10", "left_hand_j11", "left_hand_j12",
-    # Right hand
+    "left_hand_j1",  "left_hand_j2",  "left_hand_j3",  "left_hand_j4",
+    "left_hand_j5",  "left_hand_j6",  "left_hand_j7",  "left_hand_j8",
+    "left_hand_j9",  "left_hand_j10", "left_hand_j11", "left_hand_j12",
     "right_hand_j1", "right_hand_j2", "right_hand_j3", "right_hand_j4",
     "right_hand_j5", "right_hand_j6", "right_hand_j7", "right_hand_j8",
-    "right_hand_j9", "right_hand_j10", "right_hand_j11", "right_hand_j12",
+    "right_hand_j9", "right_hand_j10","right_hand_j11","right_hand_j12",
 ]
 
-_FREEZE_HAND_STIFFNESS = 500.0   # Nm/rad — stiff enough to hold position
-_FREEZE_HAND_DAMPING   = 50.0    # Nms/rad
+_ARM_STIFFNESS  = 300.0   # Nm/rad — firm but not rigid (allows small sway)
+_ARM_DAMPING    = 30.0    # Nms/rad
+_HAND_STIFFNESS = 500.0   # Nm/rad — stiff (fingers don't need to move)
+_HAND_DAMPING   = 50.0    # Nms/rad
 
 # ── Singleton process registry ──────────────────────────────────────────────
 _policy_proc: Optional[asyncio.subprocess.Process] = None
@@ -70,53 +99,84 @@ def _find_isaaclab(hint: Optional[str] = None) -> Optional[str]:
     return found
 
 
-def _build_freeze_hand_script(robot_prim_path: str) -> str:
+def _build_freeze_upper_body_script(robot_prim_path: str) -> str:
     """
-    Generate a USD/PhysX script that freezes Inspire Hand joints in place.
-    Sets high stiffness + damping on all hand joints so the locomotion policy
-    (which only controls the 12 leg DOFs) doesn't have to fight free-floating
-    hand mass.
+    Generate a Kit script that:
+      1. Stops the simulation (PhysX only reads DriveAPI at sim-start)
+      2. Sets arm joints to natural down-at-sides pose (correct CG for locomotion)
+      3. Locks all Inspire Hand joints at neutral (open hand)
+    The user must press Play after this runs.
     """
-    joints_repr = repr(_INSPIRE_HAND_JOINTS)
+    arm_targets_repr  = repr(_ARM_JOINT_TARGETS)
+    hand_joints_repr  = repr(_INSPIRE_HAND_JOINTS)
     return f"""\
 import omni.usd
-from pxr import UsdPhysics
+import omni.timeline
+import math
+from pxr import UsdPhysics, Gf
+
+# 1. Stop sim — PhysX reads DriveAPI attributes at simulation start only
+timeline = omni.timeline.get_timeline_interface()
+was_playing = timeline.is_playing()
+if was_playing:
+    timeline.stop()
 
 stage = omni.usd.get_context().get_stage()
-robot_path = "{robot_prim_path}"
-hand_joints = {joints_repr}
-stiffness = {_FREEZE_HAND_STIFFNESS}
-damping   = {_FREEZE_HAND_DAMPING}
 
-frozen = []
+arm_targets  = {arm_targets_repr}   # joint_name -> target_rad
+hand_joints  = {hand_joints_repr}
+arm_stiffness  = {_ARM_STIFFNESS}
+arm_damping    = {_ARM_DAMPING}
+hand_stiffness = {_HAND_STIFFNESS}
+hand_damping   = {_HAND_DAMPING}
+
+arm_frozen, hand_frozen, skipped = [], [], []
+
 for prim in stage.Traverse():
-    prim_name = prim.GetPath().name
-    if prim_name in hand_joints and prim.IsA(UsdPhysics.RevoluteJoint):
-        drive = UsdPhysics.DriveAPI.Apply(prim, "angular")
-        drive.GetStiffnessAttr().Set(stiffness)
-        drive.GetDampingAttr().Set(damping)
-        drive.GetTargetPositionAttr().Set(0.0)
-        frozen.append(str(prim.GetPath()))
+    name = prim.GetPath().name
+    if not prim.IsA(UsdPhysics.RevoluteJoint):
+        skipped.append(name)
+        continue
 
-print(f"Froze {{len(frozen)}} Inspire Hand joints at neutral position.")
+    drive = UsdPhysics.DriveAPI.Apply(prim, "angular")
+
+    if name in arm_targets:
+        target_deg = math.degrees(arm_targets[name])
+        drive.GetStiffnessAttr().Set(arm_stiffness)
+        drive.GetDampingAttr().Set(arm_damping)
+        drive.GetTargetPositionAttr().Set(target_deg)
+        arm_frozen.append(name)
+
+    elif name in hand_joints:
+        drive.GetStiffnessAttr().Set(hand_stiffness)
+        drive.GetDampingAttr().Set(hand_damping)
+        drive.GetTargetPositionAttr().Set(0.0)
+        hand_frozen.append(name)
+
+print(f"Arms set: {{len(arm_frozen)}}, hands frozen: {{len(hand_frozen)}}")
+print(f"Sim was playing: {{was_playing}} — press Play to restart with new drives.")
 """
 
 
-async def _freeze_inspire_hand(robot_prim_path: str) -> Dict[str, Any]:
-    """Run the hand-freeze script via Kit RPC before launching the policy."""
+async def _freeze_upper_body(robot_prim_path: str) -> Dict[str, Any]:
+    """
+    Stop the sim, set arm joints to down-at-sides pose, lock hand joints.
+    Kit RPC (exec_sync) runs synchronously inside Isaac Sim Python.
+    PhysX only reads DriveAPI on sim-start, so the script stops first.
+    """
     try:
         from . import kit_tools
-        script = _build_freeze_hand_script(robot_prim_path)
+        script = _build_freeze_upper_body_script(robot_prim_path)
         result = await kit_tools.exec_sync(script)
         if result and result.get("success"):
             output = result.get("output", "").strip()
-            logger.info(f"[RLRunner] Hand freeze: {output}")
-            return {"frozen": True, "output": output}
+            logger.info(f"[RLRunner] Upper-body freeze: {output}")
+            return {"frozen": True, "output": output, "restart_required": True}
         else:
-            logger.warning(f"[RLRunner] Hand freeze failed: {result}")
+            logger.warning(f"[RLRunner] Upper-body freeze failed: {result}")
             return {"frozen": False, "error": str(result)}
     except Exception as e:
-        logger.warning(f"[RLRunner] Hand freeze exception: {e}")
+        logger.warning(f"[RLRunner] Upper-body freeze exception: {e}")
         return {"frozen": False, "error": str(e)}
 
 
@@ -142,14 +202,14 @@ async def handle_deploy_rl_policy(args: Dict[str, Any]) -> Dict[str, Any]:
     # Kill any existing policy
     await _stop_policy()
 
-    # Freeze Inspire Hand joints before starting the locomotion policy.
-    # The motion.pt checkpoint only controls 12 leg DOFs; uncontrolled hand
-    # joints destabilize the robot at spawn due to free-floating mass.
+    # Stop sim + set arms down + lock hands before starting the locomotion policy.
+    # PhysX only reads DriveAPI on sim-start, so the sim must be stopped first.
+    # Arms-at-sides keeps the CG centred over the feet (critical for stability).
     freeze_result = {}
     if freeze_hand:
-        freeze_result = await _freeze_inspire_hand(robot_prim_path)
+        freeze_result = await _freeze_upper_body(robot_prim_path)
         if not freeze_result.get("frozen"):
-            logger.warning("[RLRunner] Could not freeze hand joints — robot may be unstable")
+            logger.warning("[RLRunner] Could not freeze upper body — robot may be unstable")
 
     isaaclab_sh = _find_isaaclab(isaaclab_path or None)
     if not isaaclab_sh:
@@ -216,6 +276,14 @@ async def handle_deploy_rl_policy(args: Dict[str, Any]) -> Dict[str, Any]:
             "Q / E": "strafe left / right",
             "Space": "stop",
         }
+
+    if freeze_result.get("restart_required"):
+        result["action_required"] = (
+            "Simulation was stopped to apply arm/hand joint drives. "
+            "Press Play in Isaac Sim to restart — arms will hold at sides, "
+            "hands locked open. Then the policy subprocess will control the legs."
+        )
+    else:
         result["note"] = (
             "Isaac Sim window must have focus for keyboard input. "
             "Use stop_rl_policy to terminate the subprocess."
