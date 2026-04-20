@@ -38,22 +38,25 @@ logger = logging.getLogger(__name__)
 # omni.timeline.get_timeline_interface().stop() first, then the user presses Play.
 
 _ARM_JOINT_TARGETS = {
-    # ── Left arm (natural hang, elbow slightly bent) ──
-    "left_shoulder_pitch_joint":  0.20,   # slight forward lean keeps arm away from torso
-    "left_shoulder_roll_joint":   0.15,   # slight abduction
+    # Values match G1_CFG.init_state.joint_pos from isaaclab_assets/robots/unitree.py —
+    # the exact pose used during Isaac-Velocity-Flat-G1-v0 training.
+    # Elbow at 0.87 rad (50°) is the relaxed hang angle for the G1 arm geometry;
+    # shoulder pitch 0.35 brings the arm slightly forward so the hand clears the thigh.
+    "left_shoulder_pitch_joint":  0.35,
+    "left_shoulder_roll_joint":   0.16,
     "left_shoulder_yaw_joint":    0.00,
-    "left_elbow_pitch_joint":     0.40,   # 23° bend — natural hang
+    "left_elbow_pitch_joint":     0.87,   # 50° — fully relaxed hang, matches training default
     "left_wrist_roll_joint":      0.00,
     "left_wrist_pitch_joint":     0.00,
     "left_wrist_yaw_joint":       0.00,
-    # ── Right arm (mirror of left) ──
-    "right_shoulder_pitch_joint":  0.20,
-    "right_shoulder_roll_joint":  -0.15,
-    "right_shoulder_yaw_joint":    0.00,
-    "right_elbow_pitch_joint":     0.40,
-    "right_wrist_roll_joint":      0.00,
-    "right_wrist_pitch_joint":     0.00,
-    "right_wrist_yaw_joint":       0.00,
+    # ── Right arm (mirror) ──
+    "right_shoulder_pitch_joint": 0.35,
+    "right_shoulder_roll_joint": -0.16,
+    "right_shoulder_yaw_joint":   0.00,
+    "right_elbow_pitch_joint":    0.87,
+    "right_wrist_roll_joint":     0.00,
+    "right_wrist_pitch_joint":    0.00,
+    "right_wrist_yaw_joint":      0.00,
 }
 
 # Inspire Hand — all finger joints locked at 0 (open/neutral)
@@ -75,11 +78,30 @@ _HAND_DAMPING   = 50.0    # Nms/rad
 _policy_proc: Optional[asyncio.subprocess.Process] = None
 _policy_task_name: Optional[str] = None
 
-# G1 locomotion demo script (keyboard-controlled, downloads pretrained checkpoint from Nucleus)
-_G1_DEMO_SCRIPT = "scripts/demos/g1_locomotion.py"
-# RSL-RL play script — used when the demo script isn't present.
-# Pass --use_pretrained_checkpoint to auto-download from NVIDIA Nucleus on first run.
+# RSL-RL play script — generic, works for any IsaacLab locomotion task.
+# Adds --use_pretrained_checkpoint to auto-download from NVIDIA Nucleus when no checkpoint given.
 _PLAY_SCRIPT = "scripts/reinforcement_learning/rsl_rl/play.py"
+# G1-specific keyboard demo (better UX but G1-only; falls back to _PLAY_SCRIPT if absent)
+_G1_DEMO_SCRIPT = "scripts/demos/g1_locomotion.py"
+
+# Known robot → IsaacLab task mappings (flat preferred: simpler, same checkpoint source)
+# These all support --use_pretrained_checkpoint via NVIDIA Nucleus.
+_ROBOT_TASK_MAP: Dict[str, str] = {
+    # Unitree G1
+    "g1":  "Isaac-Velocity-Flat-G1-v0",
+    # Unitree H1 / H1-2
+    "h1":  "Isaac-Velocity-Rough-H1-v0",
+    "h1_2": "Isaac-Velocity-Rough-H1-2-v0",
+    # Boston Dynamics Spot
+    "spot": "Isaac-Velocity-Flat-Spot-v0",
+    # Anybotics ANYmal C / D
+    "anymal_c": "Isaac-Velocity-Rough-Anymal-C-v0",
+    "anymal_d": "Isaac-Velocity-Rough-Anymal-D-v0",
+    # MIT Cheetah / Unitree A1 / Go1 / Go2
+    "a1":  "Isaac-Velocity-Flat-Unitree-A1-v0",
+    "go1": "Isaac-Velocity-Flat-Unitree-Go1-v0",
+    "go2": "Isaac-Velocity-Flat-Unitree-Go2-v0",
+}
 
 
 def _find_isaaclab(hint: Optional[str] = None) -> Optional[str]:
@@ -196,13 +218,13 @@ async def handle_deploy_rl_policy(args: Dict[str, Any]) -> Dict[str, Any]:
     """
     global _policy_proc, _policy_task_name
 
-    task = args.get("task", "Isaac-Velocity-Flat-G1-v0")
+    robot_name = args.get("robot_name", "g1").lower().replace("-", "_").replace(" ", "_")
+    task = args.get("task", "") or _ROBOT_TASK_MAP.get(robot_name, "Isaac-Velocity-Flat-G1-v0")
     checkpoint = args.get("checkpoint", "")
-    teleop_device = args.get("teleop_device", "keyboard")
     num_envs = int(args.get("num_envs", 1))
     isaaclab_path = args.get("isaaclab_path", "")
     robot_prim_path = args.get("robot_prim_path", "/World/G1")
-    freeze_hand = args.get("freeze_hand", True)  # default True for G1+Inspire stability
+    freeze_hand = args.get("freeze_hand", True)
 
     # Kill any existing policy
     await _stop_policy()
@@ -227,31 +249,30 @@ async def handle_deploy_rl_policy(args: Dict[str, Any]) -> Dict[str, Any]:
 
     isaaclab_root = str(Path(isaaclab_sh).parent)
 
-    # Prefer the G1 keyboard demo; fall back to rsl_rl/play.py + auto-download
-    demo_script = str(Path(isaaclab_root) / _G1_DEMO_SCRIPT)
     play_script = str(Path(isaaclab_root) / _PLAY_SCRIPT)
+    demo_script = str(Path(isaaclab_root) / _G1_DEMO_SCRIPT)
 
-    if os.path.exists(demo_script):
-        # Full interactive demo: keyboard control + pretrained checkpoint download
+    # Use the G1 keyboard demo only when task is G1-flat and demo exists
+    is_g1_flat = task == "Isaac-Velocity-Flat-G1-v0"
+    if is_g1_flat and os.path.exists(demo_script):
         cmd = [isaaclab_sh, "-p", demo_script, "--num_envs", str(num_envs)]
         if checkpoint:
             cmd += ["--checkpoint", checkpoint]
         using_demo = True
     elif os.path.exists(play_script):
-        # Headless play script: --use_pretrained_checkpoint downloads from Nucleus
+        # Generic path: works for any IsaacLab task with --use_pretrained_checkpoint
         cmd = [isaaclab_sh, "-p", play_script, "--task", task, "--num_envs", str(num_envs)]
         if checkpoint:
             cmd += ["--checkpoint", checkpoint]
         else:
             cmd += ["--use_pretrained_checkpoint"]
         using_demo = False
-        teleop_device = None
-        logger.info("[RLRunner] Using rsl_rl/play.py with --use_pretrained_checkpoint (no keyboard control)")
+        logger.info(f"[RLRunner] Using rsl_rl/play.py for task={task}")
     else:
         return {
             "error": (
-                f"No locomotion script found under {isaaclab_root}. "
-                f"Expected: {demo_script} or {play_script}"
+                f"rsl_rl/play.py not found under {isaaclab_root}. "
+                "Ensure Isaac Lab 2.3+ is installed."
             )
         }
 
@@ -273,16 +294,23 @@ async def handle_deploy_rl_policy(args: Dict[str, Any]) -> Dict[str, Any]:
         "status": "policy_launched",
         "pid": _policy_proc.pid,
         "task": task,
+        "robot": robot_name,
         "checkpoint": checkpoint or "NVIDIA Nucleus pretrained (auto-downloaded on first run)",
         "num_envs": num_envs,
         "isaaclab_root": isaaclab_root,
         "hand_joints_frozen": freeze_result.get("frozen", False),
-        "script": "g1_locomotion.py (keyboard demo)" if using_demo else "rsl_rl/play.py (autonomous)",
+        "script": "g1_locomotion.py (keyboard demo)" if using_demo else f"rsl_rl/play.py --task {task}",
+        "architecture_note": (
+            "This opens a SEPARATE Isaac Sim window with its own physics environment. "
+            "It does NOT inject a policy into your existing scene. "
+            "To see the robot walk: interact with the new Isaac Sim window that opens, "
+            "click a robot to select it, then use arrow keys."
+        ),
     }
 
     if using_demo:
         result["keyboard_controls"] = {
-            "Click robot": "select it for keyboard control",
+            "Click robot in NEW window": "select for keyboard control",
             "UP / DOWN":   "forward / stop",
             "LEFT / RIGHT": "turn left / right",
             "C": "toggle third-person camera",

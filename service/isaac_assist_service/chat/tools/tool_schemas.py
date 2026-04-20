@@ -13266,36 +13266,38 @@ ISAAC_SIM_TOOLS = [
         "function": {
             "name": "deploy_rl_policy",
             "description": (
-                "Launch an Isaac Lab RL locomotion policy for a robot in the scene using a "
-                "pre-trained checkpoint. Spawns the Isaac Lab teleop agent as a subprocess. "
-                "For the Unitree G1, use task='Isaac-Velocity-Flat-G1-v0' and the bundled "
-                "'motion.pt' checkpoint. Keyboard controls: W/S=forward/back, A/D=turn, "
-                "Q/E=strafe. Returns the subprocess PID. Use stop_rl_policy to terminate."
+                "Launch an Isaac Lab RL locomotion policy as a SEPARATE Isaac Sim window. "
+                "Opens a new simulation with the robot and pre-trained checkpoint (auto-downloaded "
+                "from NVIDIA Nucleus on first run). Supports any robot that has an IsaacLab task: "
+                "G1, H1, H1-2, Spot, ANYmal-C/D, A1, Go1, Go2. "
+                "Interact with the NEW window: click a robot to select it, then use arrow keys. "
+                "Does NOT inject a policy into your existing scene. "
+                "Returns subprocess PID. Use stop_rl_policy to terminate."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "robot_name": {
+                        "type": "string",
+                        "description": (
+                            "Robot name — used to auto-select the correct IsaacLab task. "
+                            "Supported: 'g1', 'h1', 'h1_2', 'spot', 'anymal_c', 'anymal_d', "
+                            "'a1', 'go1', 'go2'. Override with 'task' for custom task names."
+                        ),
+                    },
                     "task": {
                         "type": "string",
                         "description": (
-                            "Isaac Lab task name. Examples: "
-                            "'Isaac-Velocity-Flat-G1-v0' (G1 flat ground), "
-                            "'Isaac-Velocity-Rough-G1-v0' (G1 rough terrain), "
-                            "'Isaac-Velocity-Flat-H1-v0' (Unitree H1)."
+                            "IsaacLab task name override (optional — inferred from robot_name). "
+                            "Examples: 'Isaac-Velocity-Flat-G1-v0', 'Isaac-Velocity-Rough-H1-v0'."
                         ),
                     },
                     "checkpoint": {
                         "type": "string",
                         "description": (
-                            "Absolute path to the policy checkpoint (.pt file). "
-                            "For unitree_rl_gym: 'deploy/pre_train/g1/motion.pt'. "
-                            "Leave empty to use the latest checkpoint in the task log dir."
+                            "Absolute path to a .pt checkpoint file. "
+                            "Leave empty to auto-download NVIDIA's pretrained checkpoint from Nucleus."
                         ),
-                    },
-                    "teleop_device": {
-                        "type": "string",
-                        "enum": ["keyboard", "gamepad", "spacemouse"],
-                        "description": "Input device for velocity commands. Default: 'keyboard'.",
                     },
                     "num_envs": {
                         "type": "integer",
@@ -13307,14 +13309,14 @@ ISAAC_SIM_TOOLS = [
                     },
                     "robot_prim_path": {
                         "type": "string",
-                        "description": "USD path to the G1 robot prim (e.g. '/World/G1'). Used to locate and freeze Inspire Hand joints before launching. Default: '/World/G1'.",
+                        "description": "USD path to the robot in your EXISTING scene (e.g. '/World/G1'). Used to freeze arm/hand joints before launching, to stabilise CG. Default: '/World/G1'.",
                     },
                     "freeze_hand": {
                         "type": "boolean",
-                        "description": "If true (default), freezes all Inspire Hand joints at neutral position with high stiffness before launching. Critical for stability — the locomotion policy only controls 12 leg DOFs and uncontrolled hand joints cause the robot to fall.",
+                        "description": "Freeze arm and hand joints at neutral (arms-at-sides) in the existing scene before launch. Critical for G1+Inspire: the policy controls only 12 leg DOFs; uncontrolled upper-body joints shift the CG and cause falls.",
                     },
                 },
-                "required": ["task"],
+                "required": [],
             },
         },
     },
