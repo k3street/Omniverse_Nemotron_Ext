@@ -157,6 +157,12 @@ class ChatViewWindow(ui.Window):
                     _, mode, key_env, placeholder = self._LLM_MODES[idx]
                     self.api_key_label.text = f"{key_env}:"
                     self.api_key_field.model.set_value(os.environ.get(key_env, ""))
+                    # Sync model name: keep saved value when returning to active mode,
+                    # otherwise show the provider's canonical default as a hint
+                    if hasattr(self, "model_field"):
+                        saved = os.environ.get("CLOUD_MODEL_NAME", "")
+                        active_mode = os.environ.get("LLM_MODE", "cloud")
+                        self.model_field.model.set_value(saved if (mode == active_mode and saved) else placeholder)
 
                 self.llm_mode_combo.model.add_item_changed_fn(_on_mode_changed)
                 # Fire once to sync label
@@ -166,7 +172,11 @@ class ChatViewWindow(ui.Window):
                 with ui.HStack(height=22):
                     ui.Label("Model Name:", width=150)
                     self.model_field = ui.StringField()
-                    self.model_field.model.set_value(os.environ.get("CLOUD_MODEL_NAME", "claude-sonnet-4-6"))
+                    _, cur_mode, _, cur_placeholder = self._LLM_MODES[current_idx]
+                    saved_model = os.environ.get("CLOUD_MODEL_NAME", "")
+                    self.model_field.model.set_value(saved_model if saved_model else cur_placeholder)
+                # Fire again now that model_field exists to finish syncing
+                _on_mode_changed(self.llm_mode_combo.model, None)
 
                 # ── Ollama base (local mode only) ─────────────────────
                 with ui.HStack(height=22):

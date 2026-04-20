@@ -13,8 +13,17 @@ class SettingsManager:
 
     # Map env var names to config attribute names where they differ
     _ENV_TO_ATTR = {
-        "OPENAI_API_KEY": "api_key_openai",
-        "API_KEY_GEMINI": "api_key_gemini",
+        "LLM_MODE":          "llm_mode",
+        "CLOUD_MODEL_NAME":  "cloud_model_name",
+        "LOCAL_MODEL_NAME":  "local_model_name",
+        "API_KEY_GEMINI":    "api_key_gemini",
+        "GEMINI_API_KEY":    "api_key_gemini",
+        "ANTHROPIC_API_KEY": "api_key_anthropic",
+        "OPENAI_API_KEY":    "api_key_openai",
+        "GROK_API_KEY":      "api_key_grok",
+        "XAI_API_KEY":       "api_key_grok",
+        "OPENAI_API_BASE":   "openai_api_base",
+        "MAX_TOOL_ROUNDS":   "max_tool_rounds",
     }
     _BOOL_KEYS = {"CONTRIBUTE_DATA", "AUTO_APPROVE"}
     _INT_KEYS  = {"MAX_TOOL_ROUNDS"}
