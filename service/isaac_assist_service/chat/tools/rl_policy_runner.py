@@ -75,10 +75,11 @@ _HAND_DAMPING   = 50.0    # Nms/rad
 _policy_proc: Optional[asyncio.subprocess.Process] = None
 _policy_task_name: Optional[str] = None
 
-# Default Isaac Lab teleop script path relative to isaaclab root
-_TELEOP_SCRIPT = "scripts/demos/teleoperation/teleop_se3_agent.py"
-# Fallback play script (autonomous, no keyboard input)
-_PLAY_SCRIPT = "scripts/demos/policy_runner.py"
+# G1 locomotion demo script (keyboard-controlled, downloads pretrained checkpoint from Nucleus)
+_G1_DEMO_SCRIPT = "scripts/demos/g1_locomotion.py"
+# RSL-RL play script — used when the demo script isn't present.
+# Pass --use_pretrained_checkpoint to auto-download from NVIDIA Nucleus on first run.
+_PLAY_SCRIPT = "scripts/reinforcement_learning/rsl_rl/play.py"
 
 
 def _find_isaaclab(hint: Optional[str] = None) -> Optional[str]:
@@ -225,28 +226,34 @@ async def handle_deploy_rl_policy(args: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     isaaclab_root = str(Path(isaaclab_sh).parent)
-    teleop_script = str(Path(isaaclab_root) / _TELEOP_SCRIPT)
 
-    if not os.path.exists(teleop_script):
-        # Fall back to play script (autonomous)
-        play_script = str(Path(isaaclab_root) / _PLAY_SCRIPT)
-        if not os.path.exists(play_script):
-            return {
-                "error": (
-                    f"Neither teleop script nor play script found under {isaaclab_root}. "
-                    "Ensure Isaac Lab 2.3+ is installed."
-                ),
-                "looked_for": teleop_script,
-            }
-        teleop_script = play_script
-        logger.warning("[RLRunner] Teleop script not found, falling back to play script (no keyboard input)")
+    # Prefer the G1 keyboard demo; fall back to rsl_rl/play.py + auto-download
+    demo_script = str(Path(isaaclab_root) / _G1_DEMO_SCRIPT)
+    play_script = str(Path(isaaclab_root) / _PLAY_SCRIPT)
+
+    if os.path.exists(demo_script):
+        # Full interactive demo: keyboard control + pretrained checkpoint download
+        cmd = [isaaclab_sh, "-p", demo_script, "--num_envs", str(num_envs)]
+        if checkpoint:
+            cmd += ["--checkpoint", checkpoint]
+        using_demo = True
+    elif os.path.exists(play_script):
+        # Headless play script: --use_pretrained_checkpoint downloads from Nucleus
+        cmd = [isaaclab_sh, "-p", play_script, "--task", task, "--num_envs", str(num_envs)]
+        if checkpoint:
+            cmd += ["--checkpoint", checkpoint]
+        else:
+            cmd += ["--use_pretrained_checkpoint"]
+        using_demo = False
         teleop_device = None
-
-    cmd = [isaaclab_sh, "-p", teleop_script, "--task", task, "--num_envs", str(num_envs)]
-    if teleop_device:
-        cmd += ["--teleop_device", teleop_device]
-    if checkpoint:
-        cmd += ["--checkpoint", checkpoint]
+        logger.info("[RLRunner] Using rsl_rl/play.py with --use_pretrained_checkpoint (no keyboard control)")
+    else:
+        return {
+            "error": (
+                f"No locomotion script found under {isaaclab_root}. "
+                f"Expected: {demo_script} or {play_script}"
+            )
+        }
 
     logger.info(f"[RLRunner] Launching: {' '.join(cmd)}")
 
@@ -266,19 +273,19 @@ async def handle_deploy_rl_policy(args: Dict[str, Any]) -> Dict[str, Any]:
         "status": "policy_launched",
         "pid": _policy_proc.pid,
         "task": task,
-        "teleop_device": teleop_device or "none (autonomous)",
-        "checkpoint": checkpoint or "latest in task log dir",
+        "checkpoint": checkpoint or "NVIDIA Nucleus pretrained (auto-downloaded on first run)",
         "num_envs": num_envs,
         "isaaclab_root": isaaclab_root,
         "hand_joints_frozen": freeze_result.get("frozen", False),
+        "script": "g1_locomotion.py (keyboard demo)" if using_demo else "rsl_rl/play.py (autonomous)",
     }
 
-    if teleop_device == "keyboard":
+    if using_demo:
         result["keyboard_controls"] = {
-            "W / S": "forward / backward",
-            "A / D": "turn left / right",
-            "Q / E": "strafe left / right",
-            "Space": "stop",
+            "Click robot": "select it for keyboard control",
+            "UP / DOWN":   "forward / stop",
+            "LEFT / RIGHT": "turn left / right",
+            "C": "toggle third-person camera",
         }
 
     if freeze_result.get("restart_required"):
