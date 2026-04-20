@@ -22,7 +22,12 @@ import signal
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from ...config import config
+
 logger = logging.getLogger(__name__)
+
+# Absolute path to our bundled G1 demo script (lives in this repo, not in external IsaacLab)
+_OWN_SCRIPTS_DIR = Path(__file__).parent.parent.parent.parent.parent / "scripts" / "locomotion"
 
 # ── G1 upper-body joint targets for stable locomotion CG ────────────────────
 # The motion.pt checkpoint controls only the 12 leg DOFs. Arms and hands must
@@ -105,15 +110,15 @@ _ROBOT_TASK_MAP: Dict[str, str] = {
 
 
 def _find_isaaclab(hint: Optional[str] = None) -> Optional[str]:
-    """Locate the isaaclab.sh launcher."""
+    """Locate the isaaclab.sh launcher.
+
+    Priority: tool arg → config.isaaclab_path → ISAACLAB_PATH env → known paths → PATH.
+    """
     candidates = []
-    # 1. Explicit hint (from tool arg or ISAACLAB_PATH env var)
-    env_hint = os.environ.get("ISAACLAB_PATH", "")
-    for h in [hint, env_hint]:
+    for h in [hint, config.isaaclab_path, os.environ.get("ISAACLAB_PATH", "")]:
         if h:
             p = Path(h)
             candidates.append(p / "isaaclab.sh" if p.suffix != ".sh" else p)
-    # 2. Known project location
     candidates += [
         Path.home() / "Documents/Github/open_arm_10Things/IsaacLab/isaaclab.sh",
         Path.home() / "IsaacLab" / "isaaclab.sh",
@@ -250,9 +255,9 @@ async def handle_deploy_rl_policy(args: Dict[str, Any]) -> Dict[str, Any]:
     isaaclab_root = str(Path(isaaclab_sh).parent)
 
     play_script = str(Path(isaaclab_root) / _PLAY_SCRIPT)
-    demo_script = str(Path(isaaclab_root) / _G1_DEMO_SCRIPT)
+    # Demo script lives in our repo (not in external IsaacLab)
+    demo_script = str(_OWN_SCRIPTS_DIR / "g1_locomotion.py")
 
-    # Use the G1 keyboard demo only when task is G1-flat and demo exists
     is_g1_flat = task == "Isaac-Velocity-Flat-G1-v0"
     if is_g1_flat and os.path.exists(demo_script):
         cmd = [isaaclab_sh, "-p", demo_script, "--num_envs", str(num_envs)]

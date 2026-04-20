@@ -51,10 +51,10 @@ class Config:
         self.auto_approve     = os.environ.get("AUTO_APPROVE", "false").lower() == "true"
         self.max_tool_rounds = int(os.environ.get("MAX_TOOL_ROUNDS", "10"))
         # ── Assets ───────────────────────────────────────────────────────────
-        # Local filesystem path to Isaac Sim assets (robots, environments, etc.)
-        # Also supports Nucleus server URLs: omniverse://localhost/NVIDIA/Assets/Isaac/5.1
         self.assets_root_path = os.environ.get("ASSETS_ROOT_PATH", "")
         self.assets_robots_subdir = os.environ.get("ASSETS_ROBOTS_SUBDIR", "Collected_Robots")
+        # ── External tools ───────────────────────────────────────────────────
+        self.isaaclab_path = os.environ.get("ISAACLAB_PATH", "")
 
 
 config = Config()
