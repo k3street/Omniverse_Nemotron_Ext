@@ -1097,6 +1097,229 @@ curl -s -X POST http://localhost:8000/api/v1/chat/message \
 
 ---
 
+### T62 — Scene Readiness Check
+**Type:**
+> Is the scene ready for navigation?
+
+**Expected:** Calls `check_scene_ready`. Returns structured report:
+- Simulation playing state
+- Robot(s) found in scene
+- Drive graph wired (diff drive / holonomic / joint)
+- Camera, LiDAR, IMU, odom, TF, clock topics
+- Map availability
+- Score (e.g. 7/11) + `suggested_next_steps` list
+
+---
+
+### T63 — Machine Specs + Suggestions
+**Type:**
+> What should I do next?
+
+**Expected:** Calls `suggest_next_steps` (which internally calls `get_machine_specs` + `check_scene_ready`).
+
+Example on DGX Spark:
+- "Your RTX 6000 Ada (48 GB) supports full-resolution sensors and rtabmap SLAM."
+- "Missing: no LiDAR topic — add one to enable SLAM and Nav2."
+- "Suggested: 'add a Velodyne VLP-16 to the robot'"
+
+---
+
+### T64 — Launch RViz2 (Full)
+**Prerequisite:** T41 or T57 (robot with active ROS2 topics). Rosbridge running.
+
+**Type:**
+> Launch RViz2 with all available sensors
+
+**Expected:** Calls `launch_rviz2`. Auto-discovers topics, generates `.rviz` config with:
+- Image panels for each camera topic
+- LaserScan / PointCloud2 displays
+- Odometry arrows
+- TF tree
+- Map display (if `/map` topic present)
+
+Config saved to `workspace/rviz_configs/<scene_name>.rviz`.
+
+**Verify:** RViz2 window opens with panels showing live sensor data.
+
+---
+
+### T65 — SLAM Mapping Session
+**Prerequisite:** Robot with LiDAR or stereo cameras, ROS2 drive graph wired. Rosbridge running.
+
+**Step 1 — Start SLAM:**
+**Type:**
+> Start mapping this room
+
+**Expected:** Calls `slam_start`. Isaac Assist:
+1. Calls `check_sensor_health` — verifies LiDAR or camera is healthy
+2. Detects sensor type → selects algorithm (slam_toolbox for 2D LiDAR, rtabmap for RGB-D)
+3. Launches SLAM node with auto-generated params
+4. "Mapping started with slam_toolbox. Drive the robot around to build the map."
+
+**Step 2 — Drive the robot** (from a ROS2 terminal):
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
+  "{linear: {x: 0.3}, angular: {z: 0.3}}"
+```
+Verify map building in RViz2 or: `ros2 topic hz /map`
+
+**Step 3 — Save the map:**
+**Type:**
+> Stop mapping and save the map
+
+**Expected:** Calls `slam_stop`. Saves to `workspace/maps/<scene>/map.pgm + map.yaml`. Returns coverage estimate.
+
+---
+
+### T66 — Nav2 Autonomous Navigation
+**Prerequisite:** T65 complete (map saved). Robot with odom + LiDAR/scan publishing. Rosbridge running.
+
+**Step 1 — Launch Nav2:**
+**Type:**
+> Launch navigation with the saved map
+
+**Expected:** Calls `launch_nav2`:
+1. Checks prerequisites (odom, scan, TF, clock)
+2. Auto-generates `nav2_params.yaml` from scene state
+3. Launches `ros2 launch nav2_bringup bringup_launch.py`
+
+**Step 2 — Navigate to a coordinate:**
+**Type:**
+> Go to position 3, 2
+
+**Expected:** Calls `nav2_goto(x=3.0, y=2.0)`. Publishes `/goal_pose`. Reports progress:
+- "Navigating to (3.0, 2.0)... distance remaining: 2.4m"
+- "✅ Arrived at (3.0, 2.0)"
+
+**Step 3 — Navigate to a named location:**
+First save a location:
+> Save this location as kitchen
+
+Then navigate:
+> Go to the kitchen
+
+**Expected:** Recalls saved pose, sends Nav2 goal.
+
+---
+
+### T67 — Vision-Language Navigation
+**Prerequisite:** T42 (robot camera active), T66 (Nav2 running). Objects in scene.
+
+**Type:**
+> Move toward the red cube
+
+**Expected flow:**
+1. `capture_viewport()` → image
+2. Gemini detects red cube at pixel (u, v)
+3. Subscribes to depth topic → gets depth at pixel
+4. Back-projects using camera intrinsics → 3D world coords
+5. TF transform to map frame
+6. `nav2_goto(x=world_x, y=world_y)`
+
+**Verify:** Robot navigates toward the red cube in viewport.
+
+---
+
+### T68 — Semantic Segmentation Map
+**Prerequisite:** Robot camera active in scene with semantically labelled prims.
+
+**Step 1 — Label the scene:**
+**Type:**
+> Label all objects in the scene for segmentation
+
+**Expected:** Auto-applies `SemanticLabel` API to all prims by name/type.
+
+**Step 2 — Get segmentation map:**
+**Type:**
+> Show me the segmentation map from the robot's camera
+
+**Expected:** Returns base64 segmentation image + label map JSON:
+```json
+{"labels": {"0": "background", "1": "floor", "2": "table", "3": "robot"}}
+```
+
+---
+
+### T69 — Export Project ZIP
+**Prerequisite:** Several patches approved + maps saved (e.g. after T65–T66).
+
+**Type:**
+> Export everything as a zip
+
+**Expected flow:** Calls `export_project_zip`. Returns path to ZIP containing:
+- `scene_setup.py` — all Isaac Sim patches
+- `launch/` — `full_demo.launch.py`, `navigation.launch.py`, `visualization.launch.py`
+- `config/nav2_params.yaml`, `slam_params.yaml`, `rviz_config.rviz`
+- `maps/map.pgm` + `map.yaml`
+- `urdf/robot.urdf`
+- `scripts/teleop.py`, `patrol.py`
+- `package.xml`, `CMakeLists.txt`
+
+**Download:**
+```bash
+curl "http://localhost:8000/api/v1/chat/export_project_zip/download?path=workspace/exports/<name>.zip" -o project.zip
+```
+
+---
+
+### T70 — Connect User's Own Robot Model
+**Type:**
+> Load my robot from ~/my_project/robot.urdf
+
+**Expected flow:** Calls `connect_user_model`:
+1. Validates and parses URDF
+2. Imports into Isaac Sim via `import_robot`
+3. Auto-detects joints, drive type, sensor mounts
+4. Reports capabilities + suggests next steps:
+   - "Differential drive detected (left_wheel, right_wheel)"
+   - "1 camera mount at camera_link"
+   - "Next: 'create a diff drive OmniGraph for /World/MyRobot'"
+5. Registers in asset catalog for future sessions
+
+---
+
+### T71 — Full Autonomy Pipeline
+**Prerequisite:** Fresh scene, `AUTO_APPROVE=true`.
+
+**Type:**
+> pipeline: Nova Carter autonomous navigation in a warehouse
+
+**Expected flow (8 phases):**
+1. **Scene Setup** — Ground plane + warehouse (shelves, walls, loading dock)
+2. **Robot Import** — Nova Carter with physics, no fixedBase
+3. **Drive Graph** — Diff drive OmniGraph + odom + clock
+4. **Full Sensor Suite** — Stereo cameras + LiDAR + IMU + TF
+5. **Verify ROS2** — Topic health check, all sensors green
+6. **Launch SLAM** — slam_toolbox started; drive robot around
+7. **Launch Nav2** — Map saved, Nav2 bringup with auto-generated params
+8. **Final Verify** — Scene summary + topic list + suggested next steps
+
+Each phase shows ✅ or ❌. Failed phases retry once with fix hint.
+
+**Verify:**
+- "Pipeline complete: 8/8 phases succeeded"
+- Nova Carter in a warehouse scene with working ROS2 stack
+- Type "go to position 5, 3" → robot navigates autonomously
+
+---
+
+### T72 — Sensor Health Check
+**Prerequisite:** Robot with sensors running and ROS2 topics publishing.
+
+**Type:**
+> Check all sensor health
+
+**Expected:** Calls `check_sensor_health`. Per-sensor report:
+```
+/camera/rgb       — ✅ healthy (30.1 Hz, 1280×720, rgb8)
+/camera/depth     — ✅ healthy (30.0 Hz, 32FC1, range 0.3–8.0m)
+/scan             — ⚠️  warning (5.2 Hz — expected ≥10 Hz)
+/imu/data         — ❌ error (not publishing — check OmniGraph wiring)
+```
+With fix recommendations for each warning/error.
+
+---
+
 ## Summary Checklist
 
 | # | Category | Prompt | Requires Approval? |
@@ -1162,6 +1385,17 @@ curl -s -X POST http://localhost:8000/api/v1/chat/message \
 | T59 | Nucleus | Browse content library | ❌ (data only) |
 | T60 | Nucleus | Download asset to local | ❌ (data only) |
 | T61 | Nucleus | Search → Download → Import | ✅ (import patch) |
+| T62 | Autonomy | Scene readiness check | ❌ (data only) |
+| T63 | Autonomy | Machine specs + next steps | ❌ (data only) |
+| T64 | Autonomy | Launch RViz2 (full auto) | ❌ (subprocess) |
+| T65 | Autonomy | SLAM mapping session | ❌ (subprocess) |
+| T66 | Autonomy | Nav2 navigation + goto | ❌ (subprocess + data) |
+| T67 | Autonomy | Vision-language navigation | ❌ (data only) |
+| T68 | Autonomy | Semantic segmentation map | ✅ (labelling patch) |
+| T69 | Autonomy | Export project ZIP | ❌ (data only) |
+| T70 | Autonomy | Connect user robot model | ✅ (import patch) |
+| T71 | Autonomy | Full 8-phase autonomy pipeline | ✅ (auto-approve) |
+| T72 | Autonomy | Sensor health check | ❌ (data only) |
 
 ## Troubleshooting
 
@@ -1178,3 +1412,8 @@ curl -s -X POST http://localhost:8000/api/v1/chat/message \
 | "ros-mcp not installed" warning in logs | Run `pip install ros-mcp` in the service Python environment |
 | "Kit RPC failed" on Nucleus browse | Isaac Sim not running or Nucleus server not accessible — check `omniverse://localhost` in content browser |
 | Download returns "copy failed" | Nucleus server may require authentication — check Omniverse Hub login |
+| `launch_nav2` fails prereq check | Missing `/odom` or `/scan` or `/tf` topic — ensure drive graph + sensor OmniGraph nodes are running and sim is playing |
+| `launch_slam` says "no sensor" | No LiDAR or camera topics detected — wire sensor OmniGraph first, or use `add_full_sensor_suite` |
+| `nav2_goto` goal not reached | Nav2 costmap may be blocking path — check `/global_costmap/costmap` in RViz2; obstacles may need inflation radius tuning |
+| SLAM map not building | Drive the robot around — SLAM needs sensor data from new positions. `ros2 topic hz /scan` to verify LiDAR publishing |
+| `export_project_zip` empty launch files | Ensure phases 3–7 ran successfully (drive graph + sensors + Nav2 wired) before exporting |

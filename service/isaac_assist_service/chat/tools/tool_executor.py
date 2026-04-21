@@ -611,9 +611,10 @@ _OG_TEMPLATES = {
         "values": {
             "camera_helper.inputs:cameraPrimPath": "{camera_path}",
             "camera_helper.inputs:topicName": "{topic}",
+            "camera_helper.inputs:type": "{image_type}",
         },
-        "param_keys": ["camera_path", "topic"],
-        "defaults": {"topic": "/camera/image_raw"},
+        "param_keys": ["camera_path", "topic", "image_type"],
+        "defaults": {"topic": "/camera/image_raw", "image_type": "rgb"},
     },
     "ros2_lidar": {
         "description": "Publish lidar scans to ROS2",
@@ -730,6 +731,53 @@ _OG_TEMPLATES = {
         "param_keys": ["chassis_path", "topic"],
         "defaults": {"topic": "/odom"},
     },
+    "ros2_stereo_camera": {
+        "description": (
+            "Publish stereo camera pair (left RGB + left depth + right RGB) for "
+            "Isaac ROS Visual SLAM (cuVSLAM). Topics default to the isaac_ros_visual_slam "
+            "Isaac Sim launch remapping convention: front_stereo_camera/left/image_rect_color, "
+            "front_stereo_camera/left/depth, front_stereo_camera/right/image_rect_color."
+        ),
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context",     "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time",    "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("cam_left_rgb",     "isaacsim.ros2.bridge.ROS2CameraHelper"),
+            ("cam_left_depth",   "isaacsim.ros2.bridge.ROS2CameraHelper"),
+            ("cam_right_rgb",    "isaacsim.ros2.bridge.ROS2CameraHelper"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick",        "cam_left_rgb.inputs:execIn"),
+            ("on_playback_tick.outputs:tick",        "cam_left_depth.inputs:execIn"),
+            ("on_playback_tick.outputs:tick",        "cam_right_rgb.inputs:execIn"),
+            ("ros2_context.outputs:context",         "cam_left_rgb.inputs:context"),
+            ("ros2_context.outputs:context",         "cam_left_depth.inputs:context"),
+            ("ros2_context.outputs:context",         "cam_right_rgb.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "cam_left_rgb.inputs:timeStamp"),
+            ("read_sim_time.outputs:simulationTime", "cam_left_depth.inputs:timeStamp"),
+            ("read_sim_time.outputs:simulationTime", "cam_right_rgb.inputs:timeStamp"),
+        ],
+        "values": {
+            "cam_left_rgb.inputs:cameraPath":   "{left_camera_path}",
+            "cam_left_rgb.inputs:topicName":    "{left_topic}",
+            "cam_left_rgb.inputs:type":         "rgb",
+            "cam_left_depth.inputs:cameraPath": "{left_camera_path}",
+            "cam_left_depth.inputs:topicName":  "{left_depth_topic}",
+            "cam_left_depth.inputs:type":       "depth",
+            "cam_right_rgb.inputs:cameraPath":  "{right_camera_path}",
+            "cam_right_rgb.inputs:topicName":   "{right_topic}",
+            "cam_right_rgb.inputs:type":        "rgb",
+        },
+        "param_keys": [
+            "left_camera_path", "right_camera_path",
+            "left_topic", "left_depth_topic", "right_topic",
+        ],
+        "defaults": {
+            "left_topic":       "front_stereo_camera/left/image_rect_color",
+            "left_depth_topic": "front_stereo_camera/left/depth",
+            "right_topic":      "front_stereo_camera/right/image_rect_color",
+        },
+    },
 }
 
 # Keyword → template mapping for auto-detection from description
@@ -742,6 +790,10 @@ _TEMPLATE_KEYWORDS = {
     "ros2_tf": ["tf", "transform tree", "transforms", "tf2"],
     "ros2_imu": ["imu", "inertial", "accelerometer", "gyroscope"],
     "ros2_odom": ["odom", "odometry"],
+    "ros2_stereo_camera": [
+        "stereo camera", "stereo", "visual slam", "hawk camera",
+        "front_stereo_camera", "stereo pair", "cuvslam", "isaac ros visual slam",
+    ],
 }
 
 
@@ -2007,6 +2059,153 @@ from .rl_policy_runner import handle_deploy_rl_policy, handle_stop_rl_policy
 
 DATA_HANDLERS["deploy_rl_policy"] = handle_deploy_rl_policy
 DATA_HANDLERS["stop_rl_policy"] = handle_stop_rl_policy
+
+# ── Phase 9 — ROS2 Autonomy Stack ────────────────────────────────────────────
+from .ros2_node_scaffolder import (
+    handle_scaffold_ros2_node,
+    handle_launch_ros2_node,
+)
+from .ros2_isaac_ros_tools import (
+    handle_launch_object_detection,
+    handle_launch_pose_estimation,
+    handle_launch_nvblox,
+)
+from .ros2_segmentation_tools import (
+    handle_launch_unet_segmentation,
+    handle_launch_segformer,
+    handle_launch_segment_anything,
+    handle_launch_segment_anything2,
+    handle_sam2_add_objects,
+    handle_sam2_remove_object,
+    handle_configure_segmentation_for_nvblox,
+)
+from .ros2_cumotion_tools import (
+    handle_launch_cumotion_planner,
+    handle_launch_robot_segmenter,
+    handle_launch_esdf_visualizer,
+    handle_launch_cumotion_moveit,
+    handle_launch_goal_setter,
+    handle_set_cumotion_target_pose,
+    handle_launch_object_attachment,
+    handle_attach_object,
+    handle_generate_xrdf,
+)
+from .ros2_localization_tools import (
+    handle_launch_occupancy_grid_localizer,
+    handle_trigger_grid_search_localization,
+    handle_launch_pointcloud_to_flatscan,
+    handle_launch_laserscan_to_flatscan,
+    handle_launch_visual_global_localization,
+    handle_trigger_visual_localization,
+    handle_build_visual_map,
+    handle_load_visual_slam_map,
+    handle_localize_in_visual_slam_map,
+    handle_reset_visual_slam,
+    handle_get_visual_slam_poses,
+    handle_set_visual_slam_pose,
+)
+
+from .ros2_gemini_robotics_tools import (
+    handle_launch_gemini_robotics_bridge,
+)
+from .ros2_curobo_world_tools import (
+    handle_configure_curobo_world,
+    handle_add_world_obstacle,
+    handle_remove_world_obstacle,
+    handle_update_obstacle_pose,
+    handle_enable_world_obstacle,
+    handle_query_sphere_collision,
+    handle_launch_world_collision_manager,
+)
+
+from .ros2_autonomy_tools import (
+    handle_check_scene_ready,
+    handle_get_machine_specs,
+    handle_suggest_next_steps,
+    handle_check_sensor_health,
+    handle_launch_nav2,
+    handle_launch_slam,
+    handle_list_launched,
+    handle_stop_launched,
+    handle_restart_launched,
+    handle_slam_start,
+    handle_slam_stop,
+    handle_slam_status,
+    handle_map_export,
+    handle_nav2_goto,
+    handle_save_location,
+    handle_launch_visual_slam,
+    handle_launch_depth_to_laserscan,
+    handle_save_visual_slam_map,
+)
+
+DATA_HANDLERS.update({
+    "check_scene_ready":   handle_check_scene_ready,
+    "get_machine_specs":   handle_get_machine_specs,
+    "suggest_next_steps":  handle_suggest_next_steps,
+    "check_sensor_health": handle_check_sensor_health,
+    "launch_nav2":         handle_launch_nav2,
+    "launch_slam":         handle_launch_slam,
+    "list_launched":       handle_list_launched,
+    "stop_launched":       handle_stop_launched,
+    "restart_launched":    handle_restart_launched,
+    "slam_start":          handle_slam_start,
+    "slam_stop":           handle_slam_stop,
+    "slam_status":         handle_slam_status,
+    "map_export":          handle_map_export,
+    "nav2_goto":           handle_nav2_goto,
+    "save_location":              handle_save_location,
+    "launch_visual_slam":         handle_launch_visual_slam,
+    "launch_depth_to_laserscan":  handle_launch_depth_to_laserscan,
+    "save_visual_slam_map":       handle_save_visual_slam_map,
+    "scaffold_ros2_node":         handle_scaffold_ros2_node,
+    "launch_ros2_node":           handle_launch_ros2_node,
+    "launch_object_detection":              handle_launch_object_detection,
+    "launch_pose_estimation":               handle_launch_pose_estimation,
+    "launch_nvblox":                        handle_launch_nvblox,
+    # Image segmentation stack
+    "launch_unet_segmentation":              handle_launch_unet_segmentation,
+    "launch_segformer":                      handle_launch_segformer,
+    "launch_segment_anything":               handle_launch_segment_anything,
+    "launch_segment_anything2":              handle_launch_segment_anything2,
+    "sam2_add_objects":                      handle_sam2_add_objects,
+    "sam2_remove_object":                    handle_sam2_remove_object,
+    "configure_segmentation_for_nvblox":     handle_configure_segmentation_for_nvblox,
+    # cuMotion manipulation stack
+    "launch_cumotion_planner":      handle_launch_cumotion_planner,
+    "launch_robot_segmenter":       handle_launch_robot_segmenter,
+    "launch_esdf_visualizer":       handle_launch_esdf_visualizer,
+    "launch_cumotion_moveit":       handle_launch_cumotion_moveit,
+    "launch_goal_setter":           handle_launch_goal_setter,
+    "set_cumotion_target_pose":     handle_set_cumotion_target_pose,
+    "launch_object_attachment":     handle_launch_object_attachment,
+    "attach_object":                handle_attach_object,
+    "generate_xrdf":                handle_generate_xrdf,
+    # Localization stack
+    "launch_occupancy_grid_localizer":      handle_launch_occupancy_grid_localizer,
+    "trigger_grid_search_localization":     handle_trigger_grid_search_localization,
+    "launch_pointcloud_to_flatscan":        handle_launch_pointcloud_to_flatscan,
+    "launch_laserscan_to_flatscan":         handle_launch_laserscan_to_flatscan,
+    "launch_visual_global_localization":    handle_launch_visual_global_localization,
+    "trigger_visual_localization":          handle_trigger_visual_localization,
+    "build_visual_map":                     handle_build_visual_map,
+    # cuVSLAM map services
+    "load_visual_slam_map":                 handle_load_visual_slam_map,
+    "localize_in_visual_slam_map":          handle_localize_in_visual_slam_map,
+    "reset_visual_slam":                    handle_reset_visual_slam,
+    "get_visual_slam_poses":                handle_get_visual_slam_poses,
+    "set_visual_slam_pose":                 handle_set_visual_slam_pose,
+    # Gemini Robotics ER bridge
+    "launch_gemini_robotics_bridge":        handle_launch_gemini_robotics_bridge,
+    # cuRobo world collision
+    "configure_curobo_world":               handle_configure_curobo_world,
+    "add_world_obstacle":                   handle_add_world_obstacle,
+    "remove_world_obstacle":                handle_remove_world_obstacle,
+    "update_obstacle_pose":                 handle_update_obstacle_pose,
+    "enable_world_obstacle":                handle_enable_world_obstacle,
+    "query_sphere_collision":               handle_query_sphere_collision,
+    "launch_world_collision_manager":       handle_launch_world_collision_manager,
+})
 
 
 # ── Main dispatch ────────────────────────────────────────────────────────────
@@ -17763,9 +17962,10 @@ _OG_TEMPLATES = {
         "values": {
             "camera_helper.inputs:cameraPrimPath": "{camera_path}",
             "camera_helper.inputs:topicName": "{topic}",
+            "camera_helper.inputs:type": "{image_type}",
         },
-        "param_keys": ["camera_path", "topic"],
-        "defaults": {"topic": "/camera/image_raw"},
+        "param_keys": ["camera_path", "topic", "image_type"],
+        "defaults": {"topic": "/camera/image_raw", "image_type": "rgb"},
     },
     "ros2_lidar": {
         "description": "Publish lidar scans to ROS2",
@@ -18737,6 +18937,22 @@ except ImportError:
         "ros2_list_nodes": None,
         "ros2_get_node_details": None,
     })
+
+# ── RViz2 launch tools ──────────────────────────────────────────────────────
+from .rviz_launcher import handle_launch_rviz2, handle_stop_rviz2
+
+DATA_HANDLERS["launch_rviz2"] = handle_launch_rviz2
+DATA_HANDLERS["stop_rviz2"] = handle_stop_rviz2
+
+# ── RL policy runner (Isaac Lab locomotion) ─────────────────────────────────
+try:
+    from .rl_policy_runner import handle_deploy_rl_policy, handle_stop_rl_policy
+    DATA_HANDLERS["deploy_rl_policy"] = handle_deploy_rl_policy
+    DATA_HANDLERS["stop_rl_policy"] = handle_stop_rl_policy
+except Exception as e:
+    logger.warning(f"[ToolExecutor] RL policy tools disabled: {e}")
+    DATA_HANDLERS["deploy_rl_policy"] = None
+    DATA_HANDLERS["stop_rl_policy"] = None
 
 
 # ── Main dispatch ────────────────────────────────────────────────────────────
@@ -33363,6 +33579,22 @@ except ImportError:
         "ros2_list_nodes": None,
         "ros2_get_node_details": None,
     })
+
+# ── RViz2 launch tools ──────────────────────────────────────────────────────
+from .rviz_launcher import handle_launch_rviz2, handle_stop_rviz2
+
+DATA_HANDLERS["launch_rviz2"] = handle_launch_rviz2
+DATA_HANDLERS["stop_rviz2"] = handle_stop_rviz2
+
+# ── RL policy runner (Isaac Lab locomotion) ─────────────────────────────────
+try:
+    from .rl_policy_runner import handle_deploy_rl_policy, handle_stop_rl_policy
+    DATA_HANDLERS["deploy_rl_policy"] = handle_deploy_rl_policy
+    DATA_HANDLERS["stop_rl_policy"] = handle_stop_rl_policy
+except Exception as e:
+    logger.warning(f"[ToolExecutor] RL policy tools disabled: {e}")
+    DATA_HANDLERS["deploy_rl_policy"] = None
+    DATA_HANDLERS["stop_rl_policy"] = None
 
 
 # ── Main dispatch ────────────────────────────────────────────────────────────

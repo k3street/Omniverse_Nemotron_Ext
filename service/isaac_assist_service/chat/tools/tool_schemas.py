@@ -245,7 +245,7 @@ ISAAC_SIM_TOOLS = [
                         "enum": [
                             "ros2_clock", "ros2_joint_state", "ros2_camera",
                             "ros2_lidar", "ros2_cmd_vel", "ros2_tf",
-                            "ros2_imu", "ros2_odom",
+                            "ros2_imu", "ros2_odom", "ros2_stereo_camera",
                         ],
                         "description": "Explicit template name. If omitted, auto-detected from description.",
                     },
@@ -253,6 +253,7 @@ ISAAC_SIM_TOOLS = [
                     "robot_path": {"type": "string", "description": "USD path to the robot articulation, e.g. '/World/Franka'. Required for joint_state, cmd_vel."},
                     "topic": {"type": "string", "description": "ROS2 topic name override, e.g. '/joint_states', '/camera/image_raw'"},
                     "camera_path": {"type": "string", "description": "USD path to the camera prim (for ros2_camera template)"},
+                    "image_type": {"type": "string", "description": "Camera image type for ros2_camera: 'rgb' (default), 'depth', 'semantic_segmentation', 'instance_segmentation', 'normals', 'bounding_box_2d_tight', 'bounding_box_2d_loose', 'bounding_box_3d'"},
                     "lidar_path": {"type": "string", "description": "USD path to the lidar prim (for ros2_lidar template)"},
                     "imu_path": {"type": "string", "description": "USD path to the IMU prim (for ros2_imu template)"},
                     "chassis_path": {"type": "string", "description": "USD path to the chassis prim (for ros2_odom template)"},
@@ -1769,6 +1770,1474 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+
+    # ─── Phase 9 — ROS2 Autonomy Stack ───────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "check_scene_ready",
+            "description": (
+                "Run 11 readiness checks on the current Isaac Sim scene and ROS2 system: "
+                "rosbridge connectivity, sim playing, robot articulation present, drive graph "
+                "wired (/cmd_vel), camera/LiDAR/IMU/odom/TF/clock topics publishing, and map "
+                "available. Returns a structured report with a score (0-100), per-check pass/fail, "
+                "missing items, and actionable fix suggestions. "
+                "Use when the user asks 'is the scene ready?', 'can I start Nav2?', "
+                "'what's missing for navigation?'."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_machine_specs",
+            "description": (
+                "Detect GPU/VRAM, CPU cores, RAM, disk space, ROS2 distro, architecture, "
+                "and check which critical ROS2 packages are installed (nav2, slam_toolbox, "
+                "rtabmap, ros2_control, rosbridge, vision_msgs). Returns machine-aware install "
+                "suggestions and sensor resolution recommendations. "
+                "Use when the user asks 'what can my machine handle?', 'what do I need to install?', "
+                "'which SLAM should I use?'."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "suggest_next_steps",
+            "description": (
+                "Combine check_scene_ready + get_machine_specs + live topic list into an ordered "
+                "priority ladder of what to do next to get the robot navigating autonomously. "
+                "Each step has a priority number, category (scene/environment/navigation), and "
+                "a concrete action string. "
+                "Use when the user asks 'what should I do next?', 'how do I get started?', "
+                "'guide me through setup'."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_sensor_health",
+            "description": (
+                "Check per-sensor publishing health: Hz, encoding validity, and data presence "
+                "for camera RGB/Depth, LiDAR scan/pointcloud, IMU, odometry, joint states, clock, "
+                "and TF. Returns healthy/warning/error status per sensor with fix hints. "
+                "Use when the user asks 'are my sensors working?', 'why isn't the camera publishing?', "
+                "'check all sensor health'."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_nav2",
+            "description": (
+                "Auto-generate a Nav2 params.yaml from the current scene state (scan topic, base "
+                "frame, robot speed, radius) and launch nav2_bringup. Checks prerequisites "
+                "(odom, TF, clock, scan) and returns actionable fixes if any are missing. "
+                "Requires a saved map — run slam_stop first or provide map_yaml_path. "
+                "Use when the user says 'launch navigation', 'start Nav2', 'enable autonomous navigation'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "map_yaml_path": {"type": "string", "description": "Path to an existing Nav2 map YAML file. If omitted, uses the most recently saved map from slam_stop."},
+                    "base_frame": {"type": "string", "description": "Robot base frame ID for Nav2 (default: 'base_link')"},
+                    "scan_topic": {"type": "string", "description": "LiDAR/scan topic for Nav2 costmaps (auto-detected if omitted)"},
+                    "max_linear_vel": {"type": "number", "description": "Maximum linear velocity in m/s (default: 0.5)"},
+                    "max_rotational_vel": {"type": "number", "description": "Maximum rotational velocity in rad/s (default: 1.0)"},
+                    "robot_radius": {"type": "number", "description": "Robot collision radius in metres for costmap inflation (default: 0.3)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_slam",
+            "description": (
+                "Launch SLAM. Auto-selects algorithm: slam_toolbox for 2D LiDAR (/scan), "
+                "rtabmap for 3D pointcloud or stereo/RGB-D. Auto-generates params YAML. "
+                "Use when the user says 'start SLAM', 'begin mapping', 'launch slam_toolbox'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "algorithm": {
+                        "type": "string",
+                        "enum": ["auto", "slam_toolbox", "rtabmap"],
+                        "description": "SLAM algorithm to use. 'auto' selects based on available sensor topics.",
+                    },
+                    "base_frame": {"type": "string", "description": "Robot base frame ID (default: 'base_link')"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_launched",
+            "description": (
+                "List all ROS2 subprocesses currently managed by Isaac Assist (nav2, slam, rviz2, etc). "
+                "Shows name, PID, running status, launch time, and topics used. "
+                "Use when the user asks 'what is running?', 'show launched processes'."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stop_launched",
+            "description": (
+                "Stop a named Isaac Assist–managed ROS2 subprocess (nav2, slam, rviz2, etc). "
+                "If name is omitted, stops ALL managed processes. "
+                "Use when the user says 'stop Nav2', 'kill slam', 'stop everything'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Process name to stop (e.g. 'nav2', 'slam', 'rviz2'). Omit to stop all."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "restart_launched",
+            "description": (
+                "Restart a named Isaac Assist–managed ROS2 subprocess using its original launch command. "
+                "Use when the user says 'restart Nav2', 'reload slam', 'restart rviz2'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Process name to restart (e.g. 'nav2', 'slam', 'rviz2')"},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "slam_start",
+            "description": (
+                "Start SLAM with a sensor health gate — checks that lidar_scan, odom, and TF are healthy "
+                "before launching. Delegates to launch_slam after passing the gate. "
+                "Use when the user says 'start mapping', 'start SLAM', 'begin exploring'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "algorithm": {
+                        "type": "string",
+                        "enum": ["auto", "slam_toolbox", "rtabmap"],
+                        "description": "SLAM algorithm (default: auto-detect from sensor topics)",
+                    },
+                    "base_frame": {"type": "string", "description": "Robot base frame ID (default: 'base_link')"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "slam_stop",
+            "description": (
+                "Save the current SLAM map (via slam_toolbox/save_map service or nav2 map_saver_cli), "
+                "then stop the SLAM process. The saved map files (pgm+yaml) can be used with launch_nav2. "
+                "Use when the user says 'stop mapping', 'save the map and stop SLAM', 'I'm done mapping'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "map_name": {"type": "string", "description": "Name prefix for the saved map directory (default: 'map')"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "slam_status",
+            "description": (
+                "Get the current SLAM process status: running/stopped, PID, algorithm, launch time, "
+                "and whether the /map topic is active. "
+                "Use when the user asks 'is SLAM running?', 'slam status'."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "map_export",
+            "description": (
+                "Export the current occupancy map in multiple formats: Nav2 pgm+yaml (via map_saver_cli), "
+                "PNG image (via Pillow or ImageMagick), or ROS2 bag. "
+                "Requires /map topic to be active (Nav2 or SLAM running). "
+                "Use when the user says 'export the map', 'save map as PNG', 'download the map'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "map_name": {"type": "string", "description": "Name prefix for the exported map directory (default: 'map')"},
+                    "formats": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["nav2", "png", "bag"]},
+                        "description": "Export formats (default: ['nav2']). 'nav2' = pgm+yaml, 'png' = PNG image, 'bag' = ROS2 bag.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nav2_goto",
+            "description": (
+                "Send a Nav2 navigation goal by coordinates, named location, or yaw heading. "
+                "Publishes a PoseStamped to /goal_pose. Requires Nav2 to be running (launch_nav2). "
+                "Use when the user says 'go to position 3, 2', 'navigate to the kitchen', "
+                "'move to coordinates x=1 y=5', 'go to (2, 3)'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "number", "description": "Target X coordinate in the map frame"},
+                    "y": {"type": "number", "description": "Target Y coordinate in the map frame"},
+                    "yaw": {"type": "number", "description": "Target heading in radians (default: 0.0)"},
+                    "frame_id": {"type": "string", "description": "Coordinate frame for the goal (default: 'map')"},
+                    "location_name": {"type": "string", "description": "Named location saved with save_location tool (overrides x/y/yaw if provided)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_location",
+            "description": (
+                "Save the robot's current /odom pose under a user-defined name for later use with nav2_goto. "
+                "Use when the user says 'save this location as kitchen', 'remember this spot as docking station'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Name to save the current pose under (e.g. 'kitchen', 'docking_station', 'start')"},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_visual_slam",
+            "description": (
+                "Launch NVIDIA Isaac ROS Visual SLAM (cuVSLAM) — GPU-accelerated stereo visual odometry "
+                "and 3D mapping. Supports three tracking modes: stereo (default), Visual-Inertial (IMU fusion), "
+                "and RGBD. Map is auto-saved on shutdown; supports load_map_folder_path for re-localization. "
+                "Exposes ROS2 services: /visual_slam/save_map, /visual_slam/load_map, /visual_slam/reset, "
+                "/visual_slam/localize_in_map, /visual_slam/get_all_poses. "
+                "Requires stereo OmniGraph (create_omnigraph_from_template template='ros2_stereo_camera'). "
+                "Use when the user says 'launch visual slam', 'start cuVSLAM', 'use camera odometry', "
+                "'3D SLAM with stereo cameras', 'visual inertial odometry'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "left_image_topic": {
+                        "type": "string",
+                        "description": "Left stereo camera image topic",
+                    },
+                    "right_image_topic": {
+                        "type": "string",
+                        "description": "Right stereo camera image topic",
+                    },
+                    "left_camera_info_topic": {"type": "string", "description": "Left camera_info (auto-derived if omitted)"},
+                    "right_camera_info_topic": {"type": "string", "description": "Right camera_info (auto-derived if omitted)"},
+                    "base_frame": {"type": "string", "description": "Robot base TF frame (default: base_link)"},
+                    "tracking_mode": {
+                        "type": "integer",
+                        "enum": [0, 1, 2],
+                        "description": "0=Multi-camera stereo (default), 1=Visual-Inertial (requires imu_topic), 2=RGBD (requires depth_topic)",
+                    },
+                    "imu_topic": {"type": "string", "description": "IMU topic for tracking_mode=1 (default: imu/data)"},
+                    "depth_topic": {"type": "string", "description": "Depth image topic for tracking_mode=2"},
+                    "enable_localization_n_mapping": {
+                        "type": "boolean",
+                        "description": "Enable full SLAM map building (true) vs odometry-only mode (false). Default: true.",
+                    },
+                    "enable_slam_visualization": {
+                        "type": "boolean",
+                        "description": "Publish landmark cloud + pose graph visualization topics. Default: true.",
+                    },
+                    "enable_ground_constraint": {
+                        "type": "boolean",
+                        "description": "Constrain camera motion to horizontal plane — useful for wheeled robots. Default: false.",
+                    },
+                    "save_map_folder_path": {
+                        "type": "string",
+                        "description": "Path to auto-save map on shutdown (default: scene_dir/visual_slam/map_autosave)",
+                    },
+                    "load_map_folder_path": {
+                        "type": "string",
+                        "description": "Path to load an existing cuVSLAM map on startup for re-localization",
+                    },
+                    "localize_on_startup": {
+                        "type": "boolean",
+                        "description": "Automatically localize in the loaded map on startup (requires load_map_folder_path). Default: false.",
+                    },
+                    "gyro_noise_density":  {"type": "number", "description": "IMU gyro white noise (tracking_mode=1)"},
+                    "accel_noise_density": {"type": "number", "description": "IMU accel white noise (tracking_mode=1)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_depth_to_laserscan",
+            "description": (
+                "Launch depthimage_to_laserscan to convert a stereo depth image into a 2D LaserScan "
+                "(/scan) for use by Nav2 costmap_2d. This bridges the gap between visual SLAM "
+                "(which provides no occupancy data) and Nav2 obstacle avoidance. "
+                "Requires a depth topic publishing — wire the stereo OmniGraph first. "
+                "Use when the user says 'create 2D costmap from depth camera', 'convert depth to laser scan', "
+                "'enable obstacle avoidance with camera', 'generate /scan from depth image'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "depth_topic": {
+                        "type": "string",
+                        "description": "Depth image topic to convert (default: 'front_stereo_camera/left/depth')",
+                    },
+                    "camera_info_topic": {
+                        "type": "string",
+                        "description": "Camera info topic paired with the depth image (auto-derived if omitted)",
+                    },
+                    "scan_topic": {
+                        "type": "string",
+                        "description": "Output LaserScan topic name (default: '/scan')",
+                    },
+                    "output_frame": {
+                        "type": "string",
+                        "description": "TF frame for the output scan (default: 'base_link')",
+                    },
+                    "range_min": {
+                        "type": "number",
+                        "description": "Minimum range in metres (default: 0.1)",
+                    },
+                    "range_max": {
+                        "type": "number",
+                        "description": "Maximum range in metres (default: 10.0)",
+                    },
+                    "scan_height": {
+                        "type": "integer",
+                        "description": "Number of pixel rows to use from the depth image (default: 1)",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_visual_slam_map",
+            "description": (
+                "Save the current Isaac ROS Visual SLAM (cuVSLAM) 3D map to disk via the "
+                "/visual_slam/save_map service. Saves to workspace/scenes/<scene>/visual_slam/map_<ts>/. "
+                "The saved map can be reloaded later with /visual_slam/load_map_and_localize "
+                "for re-localization without re-running full SLAM from scratch. "
+                "Use when the user says 'save the 3D map', 'save visual slam map', 'persist the map'."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+
+    # ── ROS2 Node Scaffolder ────────────────────────────────────────────────
+
+    {
+        "type": "function",
+        "function": {
+            "name": "scaffold_ros2_node",
+            "description": (
+                "Generate a complete colcon-ready ROS2 Python package for a custom node "
+                "from a natural language description. Creates setup.py, package.xml, launch file, "
+                "and the node Python file under workspace/scenes/<scene>/ros2_nodes/<package_name>/. "
+                "Supports a pre-built 'classify_objects' template (torchvision inference + colour fallback) "
+                "or a generic stub that you describe in plain English. "
+                "Use when the user says 'create a node', 'write a ROS2 node', 'build a classify node', "
+                "'generate a package', 'scaffold a node', or describes custom robotics perception/processing logic."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "node_name": {
+                        "type": "string",
+                        "description": "Snake-case name for the node and executable, e.g. 'classify_objects', 'obstacle_filter', 'goal_sender'",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Natural language description of what the node does — used in docstrings and package.xml",
+                    },
+                    "node_type": {
+                        "type": "string",
+                        "enum": [
+                            "classify_objects",
+                            "isaac_ros_object_detection",
+                            "isaac_ros_pose_estimation",
+                            "semantic_segmentation",
+                            "vla_action_inference",
+                            "cumotion_manipulation",
+                            "generic",
+                        ],
+                        "description": (
+                            "'classify_objects' — torchvision ImageNet classifier (ResNet/EfficientNet/MobileNet), CUDA-aware, colour fallback. "
+                            "'isaac_ros_object_detection' — ultralytics YOLOv8 / RT-DETR wrapper publishing Detection2DArray. "
+                            "'isaac_ros_pose_estimation' — depth-based 6DoF centroid node, interfaces with FoundationPose. "
+                            "'semantic_segmentation' — processes raw segmentation masks (UNet/SAM/SAM2); filters target classes, computes per-class area stats, publishes JSON + binary mask. "
+                            "'vla_action_inference' — NVIDIA Cosmos NIM or Google Gemini Robotics ER endpoint; sends camera frame + goal, publishes Twist + JSON. "
+                            "'cumotion_manipulation' — full MoveIt 2 + cuMotion pipeline node; subscribes to PoseStamped goals, plans collision-free trajectories, publishes status. "
+                            "'generic' — stub with one subscriber and one publisher, ready for custom logic."
+                        ),
+                    },
+                    "planning_group": {
+                        "type": "string",
+                        "description": "MoveIt 2 planning group name for cumotion_manipulation template (default: ur_manipulator)",
+                    },
+                    "end_effector_link": {
+                        "type": "string",
+                        "description": "End-effector link name for cumotion_manipulation template (default: wrist_3_link)",
+                    },
+                    "input_topic": {
+                        "type": "string",
+                        "description": "Default ROS2 topic the node subscribes to, e.g. '/front_stereo_camera/left/image_rect_color'",
+                    },
+                    "output_topic": {
+                        "type": "string",
+                        "description": "Default ROS2 topic the node publishes results to, e.g. '/classify_objects/results'",
+                    },
+                    "maintainer": {
+                        "type": "string",
+                        "description": "Package maintainer name for package.xml (default: Isaac Assist)",
+                    },
+                    "maintainer_email": {
+                        "type": "string",
+                        "description": "Package maintainer email for package.xml",
+                    },
+                    "version": {
+                        "type": "string",
+                        "description": "Package version string (default: 0.1.0)",
+                    },
+                },
+                "required": ["node_name", "description"],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_ros2_node",
+            "description": (
+                "Launch a ROS2 node that was previously scaffolded by scaffold_ros2_node (or any installed package). "
+                "Uses 'ros2 run <package> <node>' or 'ros2 launch <package> <node>.launch.py'. "
+                "The node is tracked in the process registry and can be stopped with stop_launched. "
+                "Use after colcon build is complete and the workspace is sourced."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "package_name": {
+                        "type": "string",
+                        "description": "ROS2 package name, e.g. 'classify_objects'",
+                    },
+                    "node_name": {
+                        "type": "string",
+                        "description": "Executable / node name within the package, e.g. 'classify_objects'",
+                    },
+                    "use_launch": {
+                        "type": "boolean",
+                        "description": "If true, use 'ros2 launch' with the generated launch file instead of 'ros2 run' (default: false)",
+                    },
+                    "parameters": {
+                        "type": "object",
+                        "description": "Optional ROS2 parameters to pass via --ros-args -p, e.g. {\"image_topic\": \"/camera/image_raw\", \"top_k\": \"3\"}",
+                    },
+                },
+                "required": ["package_name", "node_name"],
+            },
+        },
+    },
+
+    # ── Isaac ROS Perception Stack ──────────────────────────────────────────
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_object_detection",
+            "description": (
+                "Launch Isaac ROS RT-DETR or YOLOv8 object detection pipeline. "
+                "Subscribes to a camera image topic and publishes vision_msgs/Detection2DArray. "
+                "Saves params YAML to workspace/scenes/<scene>/object_detection/. "
+                "Tracked in the process registry — use list_launched / stop_launched to manage. "
+                "Use when the user says 'detect objects', 'run YOLO', 'start object detection', "
+                "'launch RT-DETR', or wants bounding box detections from the robot camera."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "model": {
+                        "type": "string",
+                        "enum": ["rtdetr", "yolov8"],
+                        "description": "'rtdetr' — Isaac ROS RT-DETR (higher accuracy, needs isaac_ros_rtdetr). 'yolov8' — YOLOv8 via isaac_ros_yolov8 (faster, broader model zoo).",
+                    },
+                    "image_topic": {
+                        "type": "string",
+                        "description": "Input RGB image topic, e.g. '/front_stereo_camera/left/image_rect_color'",
+                    },
+                    "camera_info_topic": {
+                        "type": "string",
+                        "description": "CameraInfo topic matching the image topic",
+                    },
+                    "output_topic": {
+                        "type": "string",
+                        "description": "Output Detection2DArray topic (default: /detections)",
+                    },
+                    "confidence_threshold": {
+                        "type": "number",
+                        "description": "Minimum detection confidence 0–1 (default: 0.5)",
+                    },
+                    "engine_file_path": {
+                        "type": "string",
+                        "description": "Optional path to pre-built TensorRT .plan engine file",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_pose_estimation",
+            "description": (
+                "Launch Isaac ROS 6-DoF object pose estimation: FoundationPose, DOPE, or CenterPose. "
+                "Subscribes to RGB + depth + camera_info, publishes Detection3DArray / PoseArray. "
+                "FoundationPose requires a 3D mesh file of the target object (most accurate, RGB-D). "
+                "DOPE/CenterPose work from RGB alone but need pre-trained per-object TensorRT models. "
+                "Saves params YAML to workspace/scenes/<scene>/pose_estimation/. "
+                "See: https://nvidia-isaac-ros.github.io/repositories_and_packages/isaac_ros_pose_estimation/index.html"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "model": {
+                        "type": "string",
+                        "enum": ["foundationpose", "dope", "centerpose"],
+                        "description": (
+                            "'foundationpose' — zero-shot 6DoF from RGB-D + mesh (recommended). "
+                            "'dope' — single-stage RGB-only, needs per-object .onnx weights. "
+                            "'centerpose' — category-level pose from RGB, needs per-category weights."
+                        ),
+                    },
+                    "image_topic": {"type": "string", "description": "RGB camera topic"},
+                    "depth_topic": {"type": "string", "description": "Depth image topic (required for FoundationPose)"},
+                    "camera_info_topic": {"type": "string", "description": "CameraInfo topic"},
+                    "output_topic": {"type": "string", "description": "Output pose topic (default: /pose_estimation/output)"},
+                    "mesh_file_path": {
+                        "type": "string",
+                        "description": "Path to .obj or .ply mesh of the target object (required for foundationpose)",
+                    },
+                    "texture_path": {
+                        "type": "string",
+                        "description": "Optional texture image path for FoundationPose",
+                    },
+                    "object_name": {
+                        "type": "string",
+                        "description": "Object class name for DOPE/CenterPose, e.g. 'cracker_box'",
+                    },
+                    "model_file_path": {
+                        "type": "string",
+                        "description": "Path to pre-built TensorRT .plan weights for DOPE/CenterPose",
+                    },
+                    "score_threshold": {
+                        "type": "number",
+                        "description": "Minimum pose score 0–1 (default: 0.5)",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_nvblox",
+            "description": (
+                "Launch Isaac ROS Nvblox for dense 3D volumetric reconstruction and ESDF generation. "
+                "Integrates RGB + depth frames into a voxel map, publishes a mesh and an ESDF slice "
+                "that can be used as a Nav2 costmap_2d layer for obstacle avoidance. "
+                "Pairs naturally with launch_visual_slam (cuVSLAM provides odometry) and launch_nav2. "
+                "Saves params to workspace/scenes/<scene>/nvblox/. "
+                "Use when the user says 'build a 3D map', 'dense reconstruction', 'nvblox', "
+                "'3D obstacle map', or wants richer environment geometry beyond 2D SLAM."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image_topic": {
+                        "type": "string",
+                        "description": "RGB color image topic (default: /front_stereo_camera/left/image_rect_color)",
+                    },
+                    "depth_topic": {
+                        "type": "string",
+                        "description": "Depth image topic (default: /front_stereo_camera/left/depth)",
+                    },
+                    "camera_info_topic": {
+                        "type": "string",
+                        "description": "CameraInfo topic for the depth camera",
+                    },
+                    "odom_topic": {
+                        "type": "string",
+                        "description": "Odometry topic — use 'visual_slam/tracking/odometry' when cuVSLAM is running (default)",
+                    },
+                    "voxel_size": {
+                        "type": "number",
+                        "description": "Voxel resolution in metres (default: 0.05). Smaller = more detail, more GPU memory.",
+                    },
+                    "max_integration_distance": {
+                        "type": "number",
+                        "description": "Maximum depth integration distance in metres (default: 5.0)",
+                    },
+                    "mapping_type": {
+                        "type": "string",
+                        "enum": ["static", "people_segmentation", "dynamic"],
+                        "description": "'static' — no dynamic objects. 'people_segmentation' — filters people out of map. 'dynamic' — full dynamic object handling.",
+                    },
+                    "publish_esdf_slice": {
+                        "type": "boolean",
+                        "description": "Publish a 2D ESDF slice for Nav2 costmap integration (default: true)",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+
+    # ── Isaac ROS Mapping & Localization ────────────────────────────────────
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_occupancy_grid_localizer",
+            "description": (
+                "Launch isaac_ros_occupancy_grid_localizer for GPU-accelerated 2D global localization "
+                "in a pre-built occupancy map (pgm + yaml from slam_stop / map_export). "
+                "Subscribes to /flatscan (FlatScan) — use launch_pointcloud_to_flatscan or "
+                "launch_laserscan_to_flatscan to bridge lidar. "
+                "Publishes /localization_result (PoseWithCovarianceStamped). "
+                "Call trigger_grid_search_localization to initiate a localization sweep. "
+                "Use when the user says 'localize in the saved map', '2D global localization', "
+                "'find where I am on the map', 'AMCL alternative', 'occupancy grid localizer'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "map_yaml_path": {
+                        "type": "string",
+                        "description": "Absolute path to map .yaml (auto-discovered from scene/maps/ if omitted)",
+                    },
+                    "loc_result_frame": {"type": "string", "description": "TF frame for localization result (default: map)"},
+                    "robot_radius": {"type": "number", "description": "Robot radius in metres for obstacle clearance (default: 0.25)"},
+                    "occupied_thresh": {"type": "number", "description": "Pixel occupancy threshold 0–1 (default: 0.65)"},
+                    "resolution": {"type": "number", "description": "Map resolution metres/pixel (default: 0.05)"},
+                    "min_scan_fov_degrees": {"type": "number", "description": "Minimum lidar FoV required (default: 270)"},
+                    "use_nav2_integration": {
+                        "type": "boolean",
+                        "description": "Use the Nav2-compatible launch variant that wires localization_result into initialpose (default: false)",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "trigger_grid_search_localization",
+            "description": (
+                "Trigger a global grid-search localization sweep in the occupancy grid localizer "
+                "via the /trigger_grid_search_localization service. "
+                "OccupancyGridLocalizer must already be running (launch_occupancy_grid_localizer). "
+                "The most recent buffered /flatscan message is used. "
+                "Use when the user says 'localize now', 'run grid search', 'trigger localization'."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_pointcloud_to_flatscan",
+            "description": (
+                "Launch isaac_ros_pointcloud_to_flatscan to convert PointCloud2 → FlatScan "
+                "for the OccupancyGridLocalizer. Slices the 3D cloud to a configurable Z range "
+                "to extract a flat 2D scan. "
+                "Use when the user has a 3D lidar or depth cloud and needs input for the occupancy grid localizer."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "input_topic":  {"type": "string", "description": "PointCloud2 input topic (default: /point_cloud)"},
+                    "output_topic": {"type": "string", "description": "FlatScan output topic (default: /flatscan)"},
+                    "min_z": {"type": "number", "description": "Minimum Z height to include (default: -0.1 m)"},
+                    "max_z": {"type": "number", "description": "Maximum Z height to include (default: 0.1 m)"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_laserscan_to_flatscan",
+            "description": (
+                "Launch isaac_ros_laserscan_to_flatscan to convert sensor_msgs/LaserScan → FlatScan "
+                "for the OccupancyGridLocalizer. "
+                "Use when you have a 2D lidar producing /scan and need it as FlatScan."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "input_topic":  {"type": "string", "description": "LaserScan input topic (default: /scan)"},
+                    "output_topic": {"type": "string", "description": "FlatScan output topic (default: /flatscan)"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_visual_global_localization",
+            "description": (
+                "Launch isaac_ros_visual_global_localization (cuVGL) — camera-based global localization "
+                "using a pre-built visual map (built with build_visual_map). "
+                "Works without lidar — uses stereo camera images to estimate 6-DoF global pose. "
+                "Subscribes to stereo image topics, publishes visual_localization/pose. "
+                "Call trigger_visual_localization to initiate a localization attempt. "
+                "Use when the user says 'visual localization', 'camera-based localization', "
+                "'localize without lidar', 'cuVGL', 'visual global localization'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "map_dir": {
+                        "type": "string",
+                        "description": "Path to cuVGL map directory (auto-discovered from scene/visual_global_localization/map/ if omitted)",
+                    },
+                    "config_dir": {"type": "string", "description": "Path to cuVGL config directory"},
+                    "model_dir":  {"type": "string", "description": "Path to neural network model files"},
+                    "left_image_topic":  {"type": "string", "description": "Left stereo image topic"},
+                    "right_image_topic": {"type": "string", "description": "Right stereo image topic"},
+                    "base_frame": {"type": "string", "description": "Robot base TF frame (default: base_link)"},
+                    "map_frame":  {"type": "string", "description": "Map TF frame (default: vmap)"},
+                    "localization_precision_level": {
+                        "type": "integer",
+                        "enum": [0, 1, 2],
+                        "description": "0=lowest/fastest, 1=medium, 2=highest accuracy (default: 2)",
+                    },
+                    "enable_continuous_localization": {
+                        "type": "boolean",
+                        "description": "Keep attempting localization after first success (default: true)",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "trigger_visual_localization",
+            "description": (
+                "Trigger a visual global localization attempt via /visual_localization/trigger_localization. "
+                "Requires launch_visual_global_localization to be running. "
+                "Use when the user says 'trigger visual localization', 'localize visually', 'find pose visually'."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "build_visual_map",
+            "description": (
+                "Extract images and poses from a ROS2 bag file using isaac_mapping_ros "
+                "rosbag_to_mapping_data — first step of the cuVGL visual map building pipeline. "
+                "Returns the output directory and the full sequence of commands to run offline "
+                "(feature_extractor_main → generate_bow_vocabulary_main → generate_bow_index_main) "
+                "to produce a map usable by launch_visual_global_localization. "
+                "Use when the user says 'build a visual map', 'create a localization map from bag', "
+                "'train the visual localizer', 'process rosbag for mapping'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bag_file": {
+                        "type": "string",
+                        "description": "Absolute path to the ROS2 bag (.db3 or folder) containing stereo images and SLAM odometry",
+                    },
+                    "pose_topic": {
+                        "type": "string",
+                        "description": "Odometry topic in the bag (default: /visual_slam/vis/slam_odometry)",
+                    },
+                    "left_image_topic":  {"type": "string", "description": "Left camera image topic in the bag"},
+                    "right_image_topic": {"type": "string", "description": "Right camera image topic in the bag"},
+                    "min_inter_frame_distance": {
+                        "type": "number",
+                        "description": "Minimum distance between keyframes in metres (default: 0.1)",
+                    },
+                    "min_inter_frame_rotation_degrees": {
+                        "type": "number",
+                        "description": "Minimum rotation between keyframes in degrees (default: 5.0)",
+                    },
+                    "rectify_images": {
+                        "type": "boolean",
+                        "description": "Rectify images during extraction (default: false if already rectified)",
+                    },
+                },
+                "required": ["bag_file"],
+            },
+        },
+    },
+
+    # ── cuVSLAM map services ────────────────────────────────────────────────
+
+    {
+        "type": "function",
+        "function": {
+            "name": "load_visual_slam_map",
+            "description": (
+                "Load a previously saved cuVSLAM map via /visual_slam/load_map service "
+                "(visual_slam must be running). After loading, call localize_in_visual_slam_map "
+                "to relocalize in the map. Map directory auto-discovered from scene folder if omitted. "
+                "Use when the user says 'load the slam map', 'reload map', 'restore previous map'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "map_dir": {
+                        "type": "string",
+                        "description": "Path to saved cuVSLAM map directory (auto-discovered if omitted)",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "localize_in_visual_slam_map",
+            "description": (
+                "Relocalize in the currently loaded cuVSLAM map via /visual_slam/localize_in_map. "
+                "Optionally provide a pose hint to narrow the search radius. "
+                "Use after load_visual_slam_map or when the user says 'relocalize', "
+                "'find my position in the map', 'localize in cuVSLAM map'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x":  {"type": "number", "description": "Pose hint position X (default: 0.0)"},
+                    "y":  {"type": "number", "description": "Pose hint position Y (default: 0.0)"},
+                    "z":  {"type": "number", "description": "Pose hint position Z (default: 0.0)"},
+                    "qw": {"type": "number", "description": "Pose hint orientation quaternion W (default: 1.0)"},
+                    "qx": {"type": "number", "description": "Pose hint orientation quaternion X"},
+                    "qy": {"type": "number", "description": "Pose hint orientation quaternion Y"},
+                    "qz": {"type": "number", "description": "Pose hint orientation quaternion Z"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "reset_visual_slam",
+            "description": (
+                "Reset cuVSLAM state via /visual_slam/reset — clears the current map and "
+                "restarts tracking from scratch on the next stereo frame. "
+                "Use when the user says 'reset visual slam', 'clear the map', 'restart SLAM'."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "get_visual_slam_poses",
+            "description": (
+                "Retrieve all poses in the current cuVSLAM map via /visual_slam/get_all_poses. "
+                "Returns the full pose graph — useful for inspecting map coverage. "
+                "Use when the user says 'show slam poses', 'get all map poses', 'how many keyframes'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "max_count": {
+                        "type": "integer",
+                        "description": "Maximum number of poses to return (default: 200)",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "set_visual_slam_pose",
+            "description": (
+                "Override the current cuVSLAM pose via /visual_slam/set_slam_pose. "
+                "Useful for injecting a known starting pose from GPS, April tags, or another localizer. "
+                "Use when the user says 'set the slam pose', 'inject pose', 'correct the robot position'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x":  {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"},
+                    "qx": {"type": "number"}, "qy": {"type": "number"},
+                    "qz": {"type": "number"}, "qw": {"type": "number", "description": "Default: 1.0"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+    # ── Isaac ROS Image Segmentation ───────────────────────────────────────
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_unet_segmentation",
+            "description": (
+                "Launch the Isaac ROS UNet segmentation pipeline for pixel-level scene understanding. "
+                "Chains DnnImageEncoder → TensorRT/Triton inference → UNetDecoder. "
+                "Publishes unet/raw_segmentation_mask (mono8, pixel=class_id) and "
+                "unet/colored_segmentation_mask (rgb8 false-colour). "
+                "Default model: PeopleSemSegNet (people/person class segmentation). "
+                "Pairs with launch_nvblox mapping_type='people_segmentation' to remove people from 3D maps. "
+                "Use when the user says 'semantic segmentation', 'segment people', 'pixel classification', "
+                "'unet segmentation', 'run people segmentation'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "backend": {
+                        "type": "string",
+                        "enum": ["tensorrt", "triton"],
+                        "description": "'tensorrt' — faster, needs pre-built .plan engine. 'triton' — flexible, needs model repository (default: triton)",
+                    },
+                    "model_name":    {"type": "string", "description": "Triton model name (default: peoplesemsegnet)"},
+                    "image_topic":   {"type": "string", "description": "Input RGB image topic (default: /image_rect)"},
+                    "mask_width":    {"type": "integer", "description": "Output mask width in pixels (default: 960)"},
+                    "mask_height":   {"type": "integer", "description": "Output mask height in pixels (default: 544)"},
+                    "network_output_type": {
+                        "type": "string",
+                        "enum": ["softmax", "argmax", "sigmoid"],
+                        "description": "DNN output activation type (default: softmax)",
+                    },
+                    "engine_file_path":      {"type": "string", "description": "TensorRT .plan engine file path (tensorrt backend)"},
+                    "model_repository_path": {"type": "string", "description": "Triton model repository directory (triton backend)"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_segformer",
+            "description": (
+                "Launch PeopleSemSegFormer — transformer-based people semantic segmentation, "
+                "higher accuracy than UNet for crowded scenes. "
+                "Publishes /segformer/raw_segmentation_mask and /segformer/colored_segmentation_mask. "
+                "Use when the user says 'segformer', 'people segmentation with transformer', "
+                "'high accuracy people segmentation'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "backend":     {"type": "string", "enum": ["tensorrt", "triton"], "description": "Inference backend (default: triton)"},
+                    "model_name":  {"type": "string", "description": "Triton model name (default: peoplesemsegformer)"},
+                    "image_topic": {"type": "string", "description": "Input image topic"},
+                    "engine_file_path":      {"type": "string", "description": "TensorRT engine file (tensorrt backend)"},
+                    "model_repository_path": {"type": "string", "description": "Triton model repository (triton backend)"},
+                    "interface_specs_file":  {"type": "string", "description": "Model interface specs config file"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_segment_anything",
+            "description": (
+                "Launch SAM (Segment Anything Model) or Mobile SAM for prompt-driven "
+                "instance segmentation. Accepts bounding box or point prompts from any "
+                "Detection2DArray source — pipe RT-DETR/YOLO detections directly as prompts. "
+                "Single-frame (not video tracking — use launch_segment_anything2 for tracking). "
+                "Output feeds into FoundationPose (segmentation_image) or nvblox people_segmentation. "
+                "Use when the user says 'segment anything', 'SAM', 'instance segmentation', "
+                "'segment detected objects', 'generate object masks'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "model_name": {
+                        "type": "string",
+                        "description": "Model variant: 'mobile_sam' (fast, default), 'sam_vit_h' (highest accuracy), 'sam_vit_l'",
+                    },
+                    "image_topic":   {"type": "string", "description": "Input RGB image topic"},
+                    "prompt_topic":  {"type": "string", "description": "Detection2DArray prompt topic (default: /prompts). Remap from object detection output here."},
+                    "prompt_input_type": {
+                        "type": "string",
+                        "enum": ["bbox", "point"],
+                        "description": "'bbox' — bounding box prompts from detection (default). 'point' — centre-point prompts.",
+                    },
+                    "max_batch_size":  {"type": "integer", "description": "Max prompts per frame (default: 20)"},
+                    "image_width":     {"type": "integer", "description": "Input image width (default: 1200)"},
+                    "image_height":    {"type": "integer", "description": "Input image height (default: 632)"},
+                    "mask_width":      {"type": "integer", "description": "Output mask width (default: 960)"},
+                    "mask_height":     {"type": "integer", "description": "Output mask height (default: 544)"},
+                    "model_repository_path": {"type": "string", "description": "Triton model repository directory"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_segment_anything2",
+            "description": (
+                "Launch SAM2 for video object tracking — unlike single-frame SAM, SAM2 maintains "
+                "object memory across frames for continuous tracking. "
+                "Register objects with sam2_add_objects after launch; remove with sam2_remove_object. "
+                "Publishes /segment_anything2/raw_segmentation_mask. "
+                "Only Triton ONNX backend supported. "
+                "Use when the user says 'SAM2', 'track objects in video', 'continuous segmentation', "
+                "'segment and track across frames'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image_topic":     {"type": "string", "description": "Input image topic (default: /image_rect)"},
+                    "max_num_objects": {"type": "integer", "description": "Max simultaneously tracked objects (default: 10)"},
+                    "image_width":     {"type": "integer", "description": "Input image width (default: 640)"},
+                    "image_height":    {"type": "integer", "description": "Input image height (default: 480)"},
+                    "model_repository_path": {"type": "string", "description": "Triton model repository directory"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "sam2_add_objects",
+            "description": (
+                "Register objects for SAM2 tracking via /add_objects service. "
+                "Provide initial bounding box or point prompts — SAM2 will track "
+                "these objects across subsequent video frames automatically. "
+                "launch_segment_anything2 must be running. "
+                "Use when the user says 'track this object', 'add object to SAM2', "
+                "'start tracking bounding box'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "objects": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "List of object prompts, e.g. [{\"id\": 1, \"bbox\": [x1, y1, x2, y2]}, {\"id\": 2, \"point\": [cx, cy]}]",
+                    },
+                },
+                "required": ["objects"],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "sam2_remove_object",
+            "description": (
+                "Remove a tracked object from SAM2 by object ID via /remove_object service. "
+                "Use when the user says 'stop tracking object', 'remove object from SAM2'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "object_id": {"type": "integer", "description": "Object ID to remove from tracking"},
+                },
+                "required": ["object_id"],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_segmentation_for_nvblox",
+            "description": (
+                "Return the configuration needed to pipe segmentation output into nvblox "
+                "for people-aware 3D mapping (mapping_type='people_segmentation'). "
+                "Nvblox removes segmented people from the occupancy map so the robot "
+                "navigates around static obstacles only, not dynamic pedestrians. "
+                "Use when the user says 'ignore people in the map', 'dynamic object filtering', "
+                "'people-aware mapping', 'remove humans from 3D map'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "segmentation_source": {
+                        "type": "string",
+                        "enum": ["unet", "segformer", "sam", "sam2"],
+                        "description": "Which segmentation pipeline is running (determines mask topic)",
+                    },
+                    "depth_topic":        {"type": "string", "description": "Depth topic for nvblox"},
+                    "color_topic":        {"type": "string", "description": "Color image topic for nvblox"},
+                    "camera_info_topic":  {"type": "string", "description": "CameraInfo topic"},
+                    "odom_topic":         {"type": "string", "description": "Odometry topic"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+    # ── Isaac ROS cuMotion ──────────────────────────────────────────────────
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_cumotion_planner",
+            "description": (
+                "Launch the cuMotion action server — CUDA-accelerated time-optimal, collision-free "
+                "trajectory planning for robot manipulators. Exposes cumotion/move_group action "
+                "(moveit_msgs/MoveGroup) used by MoveIt 2 when 'cuMotion' is selected as planner. "
+                "Auto-enables ESDF world reading if nvblox is already running. "
+                "Requires robot XRDF + URDF — generate XRDF skeleton with generate_xrdf. "
+                "Saves params to workspace/scenes/<scene>/cumotion/planner_params.yaml. "
+                "Use when the user says 'launch cuMotion', 'start motion planner', "
+                "'collision-free arm planning', 'trajectory planning for manipulation'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_xrdf": {
+                        "type": "string",
+                        "description": "Path to XRDF file or built-in name e.g. 'ur5e.xrdf', 'ur10e.xrdf', 'franka.xrdf'",
+                    },
+                    "urdf_path": {"type": "string", "description": "Path to robot URDF file"},
+                    "time_dilation_factor": {
+                        "type": "number",
+                        "description": "Speed scaling 0–1 (default: 0.5 = half speed, safer for testing)",
+                    },
+                    "max_attempts": {"type": "integer", "description": "Planning retries on failure (default: 10)"},
+                    "voxel_size": {"type": "number", "description": "World voxel resolution in metres (default: 0.05)"},
+                    "read_esdf_world": {
+                        "type": "boolean",
+                        "description": "Query nvblox ESDF for live obstacle data (auto-enabled if nvblox is running)",
+                    },
+                    "publish_curobo_world_as_voxels": {
+                        "type": "boolean",
+                        "description": "Publish /curobo/voxels marker for RViz debugging (default: false)",
+                    },
+                    "joint_states_topic": {"type": "string", "description": "Joint states topic (default: /joint_states)"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_robot_segmenter",
+            "description": (
+                "Launch CumotionRobotSegmenter — segments robot arm geometry out of depth images "
+                "using cuMotion's collision sphere model. Outputs world_depth (depth without robot) "
+                "for feeding into nvblox, preventing the robot arm from appearing as an obstacle. "
+                "Also outputs robot_mask images for visualization. "
+                "Use when the user says 'segment robot from depth', 'remove robot from point cloud', "
+                "'prevent self-occlusion in nvblox', 'robot depth masking'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_xrdf": {"type": "string", "description": "XRDF file path or name"},
+                    "urdf_path":  {"type": "string", "description": "URDF file path"},
+                    "depth_image_topics": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "Depth image topics to process (default: ['/cumotion/depth_1/image_raw'])",
+                    },
+                    "depth_camera_infos": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "Corresponding CameraInfo topics",
+                    },
+                    "joint_states_topic": {"type": "string", "description": "Joint states topic (default: /joint_states)"},
+                    "distance_threshold": {
+                        "type": "number",
+                        "description": "Sphere-to-pixel distance threshold in metres for masking (default: 0.1)",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_esdf_visualizer",
+            "description": (
+                "Launch ESDFVisualizer to query nvblox ESDF and render obstacle voxels in RViz. "
+                "Publishes /curobo/voxels (visualization_msgs/Marker). "
+                "Requires nvblox to be running. "
+                "Use when the user says 'show obstacle voxels', 'visualize ESDF', "
+                "'debug cuMotion world', 'see what cuMotion sees'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "grid_size_m":   {"type": "array", "items": {"type": "number"}, "description": "[x, y, z] grid extent in metres (default: [2.0, 2.0, 2.0])"},
+                    "grid_center_m": {"type": "array", "items": {"type": "number"}, "description": "[x, y, z] grid centre in metres (default: [0, 0, 0])"},
+                    "voxel_size":    {"type": "number", "description": "Voxel resolution in metres (default: 0.05)"},
+                    "robot_base_frame": {"type": "string", "description": "Robot base TF frame (default: base_link)"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_cumotion_moveit",
+            "description": (
+                "Launch the full MoveIt 2 stack with cuMotion as the trajectory planner for Isaac Sim. "
+                "Supports UR robots (ur5e, ur10e, ur3e), Franka Panda, and custom robots. "
+                "Isaac Sim scene must be open with the robot loaded and timeline playing. "
+                "After launch, open RViz → MotionPlanning → Planning Library → 'isaac_ros_cumotion' → Planner → 'cuMotion'. "
+                "Use when the user says 'launch MoveIt with cuMotion', 'start arm motion planning in Isaac Sim', "
+                "'plan robot arm trajectory', 'use cuMotion with UR5e'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_type": {
+                        "type": "string",
+                        "enum": ["ur5e", "ur10e", "ur3e", "franka", "custom"],
+                        "description": "Robot type to load MoveIt config for (default: ur5e)",
+                    },
+                    "robot_xrdf": {"type": "string", "description": "XRDF path for custom robots"},
+                    "urdf_path":  {"type": "string", "description": "URDF path for custom robots"},
+                    "robot_ip":   {"type": "string", "description": "Robot IP for real hardware (default: 192.56.1.2, ignored for Isaac Sim)"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_goal_setter",
+            "description": (
+                "Launch GoalSetterNode — exposes /set_target_pose service for sending "
+                "end-effector pose goals to MoveIt 2 + cuMotion. "
+                "Simpler than building MoveGroup action requests directly. "
+                "Use before calling set_cumotion_target_pose."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "planner_group_name": {"type": "string", "description": "MoveIt planning group (default: ur_manipulator)"},
+                    "end_effector_link":  {"type": "string", "description": "End-effector link name (default: wrist_3_link)"},
+                    "robot_type":         {"type": "string", "description": "Robot type for launch args (default: ur5e)"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "set_cumotion_target_pose",
+            "description": (
+                "Send a target end-effector pose to cuMotion via /set_target_pose service. "
+                "launch_goal_setter or launch_cumotion_moveit must be running. "
+                "cuMotion plans a collision-free trajectory and MoveIt 2 executes it. "
+                "Use when the user says 'move arm to position', 'reach pose', "
+                "'go to XYZ', 'plan to end-effector pose'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "number", "description": "Target position X in metres"},
+                    "y": {"type": "number", "description": "Target position Y in metres"},
+                    "z": {"type": "number", "description": "Target position Z in metres"},
+                    "qx": {"type": "number", "description": "Orientation quaternion X (default: 0)"},
+                    "qy": {"type": "number", "description": "Orientation quaternion Y (default: 0)"},
+                    "qz": {"type": "number", "description": "Orientation quaternion Z (default: 0)"},
+                    "qw": {"type": "number", "description": "Orientation quaternion W (default: 1)"},
+                    "frame_id": {"type": "string", "description": "Reference frame for the pose (default: base_link)"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_object_attachment",
+            "description": (
+                "Launch the cuMotion object attachment server for collision-aware manipulation "
+                "of grasped objects. Clusters depth points near the gripper, fits sphere geometry, "
+                "and adds it to cuMotion's collision model so the held object avoids obstacles. "
+                "Also clears the object AABB from nvblox ESDF. "
+                "Use when the user says 'grasp-aware planning', 'collision avoidance with grasped object', "
+                "'attach object to gripper for planning', 'prevent held object collision'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_xrdf":    {"type": "string", "description": "XRDF path (default: ur5e_robotiq_2f_140.xrdf)"},
+                    "urdf_path":     {"type": "string", "description": "URDF path"},
+                    "depth_topic":   {"type": "string", "description": "World-depth topic from robot_segmenter (default: /cumotion/camera_1/world_depth)"},
+                    "camera_info_topic": {"type": "string", "description": "CameraInfo matching depth_topic"},
+                    "joint_states_topic": {"type": "string", "description": "Joint states topic"},
+                    "search_radius": {"type": "number", "description": "Clustering search radius around gripper in metres (default: 0.2)"},
+                    "surface_sphere_radius": {"type": "number", "description": "Sphere radius for surface points (default: 0.01)"},
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "attach_object",
+            "description": (
+                "Send an AttachObject action goal to attach or detach a grasped object's "
+                "collision geometry from cuMotion. "
+                "launch_object_attachment must be running. "
+                "Call with attach=true after gripper closes, attach=false after placing. "
+                "Use when the user says 'attach object', 'detach object', 'gripper picked up object', "
+                "'robot put object down'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "attach": {
+                        "type": "boolean",
+                        "description": "true = cluster and attach object geometry, false = detach (default: true)",
+                    },
+                    "fallback_radius": {
+                        "type": "number",
+                        "description": "Sphere radius fallback if clustering finds no points (default: 0.1 m)",
+                    },
+                    "action_name": {
+                        "type": "string",
+                        "description": "Action server name (default: segmenter_attach_object). Use planner_attach_object for planner-side attachment.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_xrdf",
+            "description": (
+                "Parse a robot URDF and generate an XRDF skeleton for cuMotion. "
+                "Extracts non-fixed joints, link names, and creates placeholder collision sphere geometry. "
+                "The generated file must be reviewed — sphere radii and acceleration/jerk limits "
+                "are placeholders (radius=0.05m, accel=10, jerk=500). "
+                "For production, use Isaac Sim Robot Description Editor (4.0+) for guided XRDF creation. "
+                "Use when the user says 'generate XRDF', 'create robot config for cuMotion', "
+                "'set up custom robot for motion planning', 'convert URDF to XRDF'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "urdf_path": {
+                        "type": "string",
+                        "description": "Absolute path to the robot URDF file",
+                    },
+                    "robot_name": {
+                        "type": "string",
+                        "description": "Name for the output XRDF file (auto-detected from URDF robot name if omitted)",
+                    },
+                    "tool_frame": {
+                        "type": "string",
+                        "description": "End-effector / tool frame name to register in XRDF (default: tool0)",
+                    },
+                    "joint_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Explicit ordered list of planning joint names (auto-detected if omitted)",
+                    },
+                },
+                "required": ["urdf_path"],
+            },
+        },
+    },
+
     {
         "type": "function",
         "function": {
@@ -4502,7 +5971,7 @@ ISAAC_SIM_TOOLS = [
                         "enum": [
                             "ros2_clock", "ros2_joint_state", "ros2_camera",
                             "ros2_lidar", "ros2_cmd_vel", "ros2_tf",
-                            "ros2_imu", "ros2_odom",
+                            "ros2_imu", "ros2_odom", "ros2_stereo_camera",
                         ],
                         "description": "Explicit template name. If omitted, auto-detected from description.",
                     },
@@ -4510,6 +5979,7 @@ ISAAC_SIM_TOOLS = [
                     "robot_path": {"type": "string", "description": "USD path to the robot articulation, e.g. '/World/Franka'. Required for joint_state, cmd_vel."},
                     "topic": {"type": "string", "description": "ROS2 topic name override, e.g. '/joint_states', '/camera/image_raw'"},
                     "camera_path": {"type": "string", "description": "USD path to the camera prim (for ros2_camera template)"},
+                    "image_type": {"type": "string", "description": "Camera image type for ros2_camera: 'rgb' (default), 'depth', 'semantic_segmentation', 'instance_segmentation', 'normals', 'bounding_box_2d_tight', 'bounding_box_2d_loose', 'bounding_box_3d'"},
                     "lidar_path": {"type": "string", "description": "USD path to the lidar prim (for ros2_lidar template)"},
                     "imu_path": {"type": "string", "description": "USD path to the IMU prim (for ros2_imu template)"},
                     "chassis_path": {"type": "string", "description": "USD path to the chassis prim (for ros2_odom template)"},
@@ -13266,17 +14736,27 @@ ISAAC_SIM_TOOLS = [
         "function": {
             "name": "deploy_rl_policy",
             "description": (
-                "Launch an Isaac Lab RL locomotion policy as a SEPARATE Isaac Sim window. "
-                "Opens a new simulation with the robot and pre-trained checkpoint (auto-downloaded "
-                "from NVIDIA Nucleus on first run). Supports any robot that has an IsaacLab task: "
-                "G1, H1, H1-2, Spot, ANYmal-C/D, A1, Go1, Go2. "
-                "Interact with the NEW window: click a robot to select it, then use arrow keys. "
-                "Does NOT inject a policy into your existing scene. "
-                "Returns subprocess PID. Use stop_rl_policy to terminate."
+                "Launch a locomotion policy for a humanoid/quadruped robot. "
+                "Two controller backends: "
+                "(1) 'isaaclab' (default) — opens a separate Isaac Sim window with RSL-RL; "
+                "supports G1, H1, H1-2, Spot, ANYmal-C/D, A1, Go1, Go2 via pretrained checkpoints. "
+                "(2) 'groot_wbc' — launches NVIDIA GR00T-WholeBodyControl (GEAR-SONIC model): "
+                "decoupled WBC with RL lower-body + IK upper-body, trained on 142K human motions; "
+                "runs as MuJoCo sim2sim (two subprocesses); checkpoint auto-downloaded from HuggingFace. "
+                "Use stop_rl_policy to terminate."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "controller_type": {
+                        "type": "string",
+                        "enum": ["isaaclab", "groot_wbc"],
+                        "description": (
+                            "'isaaclab' (default) — Isaac Lab RSL-RL policy in a new Isaac Sim window. "
+                            "'groot_wbc' — GR00T-WholeBodyControl GEAR-SONIC sim2sim (MuJoCo); "
+                            "requires the repo cloned locally (see groot_wbc_path)."
+                        ),
+                    },
                     "robot_name": {
                         "type": "string",
                         "description": (
@@ -13295,25 +14775,54 @@ ISAAC_SIM_TOOLS = [
                     "checkpoint": {
                         "type": "string",
                         "description": (
-                            "Absolute path to a .pt checkpoint file. "
+                            "Absolute path to a .pt checkpoint file (isaaclab mode). "
                             "Leave empty to auto-download NVIDIA's pretrained checkpoint from Nucleus."
                         ),
                     },
                     "num_envs": {
                         "type": "integer",
-                        "description": "Number of parallel environments to spawn. Default: 1.",
+                        "description": "Number of parallel environments to spawn (isaaclab mode). Default: 1.",
                     },
                     "isaaclab_path": {
                         "type": "string",
-                        "description": "Absolute path to the IsaacLab root directory if not on PATH.",
+                        "description": "Absolute path to the IsaacLab root directory if not on PATH (isaaclab mode).",
                     },
                     "robot_prim_path": {
                         "type": "string",
-                        "description": "USD path to the robot in your EXISTING scene (e.g. '/World/G1'). Used to freeze arm/hand joints before launching, to stabilise CG. Default: '/World/G1'.",
+                        "description": "USD path to the robot in your EXISTING scene (e.g. '/World/G1'). Used to freeze arm/hand joints before launching (isaaclab mode). Default: '/World/G1'.",
                     },
                     "freeze_hand": {
                         "type": "boolean",
-                        "description": "Freeze arm and hand joints at neutral (arms-at-sides) in the existing scene before launch. Critical for G1+Inspire: the policy controls only 12 leg DOFs; uncontrolled upper-body joints shift the CG and cause falls.",
+                        "description": "Freeze arm and hand joints at neutral before launch (isaaclab mode). Critical for G1+Inspire to keep CG centred.",
+                    },
+                    "deployment_mode": {
+                        "type": "string",
+                        "enum": ["separate_window", "existing_scene"],
+                        "description": "Where to run the policy (isaaclab mode). 'separate_window' (default) launches Isaac Lab in a new process.",
+                    },
+                    "fallback_to_separate_window": {
+                        "type": "boolean",
+                        "description": "When deployment_mode='existing_scene', fall back to separate_window if dependencies are missing (isaaclab mode). Default: true.",
+                    },
+                    "groot_wbc_path": {
+                        "type": "string",
+                        "description": (
+                            "Absolute path to the cloned GR00T-WholeBodyControl repo root (groot_wbc mode). "
+                            "If omitted, checked against GROOT_WBC_PATH env var and ~/GR00T-WholeBodyControl. "
+                            "Setup: git clone https://github.com/NVlabs/GR00T-WholeBodyControl "
+                            "&& cd GR00T-WholeBodyControl && git lfs pull "
+                            "&& bash install_scripts/install_mujoco_sim.sh"
+                        ),
+                    },
+                    "groot_wbc_input_type": {
+                        "type": "string",
+                        "enum": ["keyboard", "zmq_manager", "gamepad"],
+                        "description": (
+                            "Control input for groot_wbc mode. Default: 'keyboard'. "
+                            "'keyboard' — kinematic planner driven by key presses in the MuJoCo window. "
+                            "'zmq_manager' — receive pose commands on ZMQ port 5556 (topic: 'pose'). "
+                            "'gamepad' — gamepad/joystick input."
+                        ),
                     },
                 },
                 "required": [],
@@ -13328,6 +14837,341 @@ ISAAC_SIM_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {},
+                "required": [],
+            },
+        },
+    },
+
+    # ── Gemini Robotics ER bridge ──────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_gemini_robotics_bridge",
+            "description": (
+                "Scaffold and optionally launch a colcon-ready ROS2 package that exposes all "
+                "Gemini Robotics ER 1.6 capabilities as ROS2 services and actions.\n\n"
+                "The generated package (gemini_robotics_bridge) contains:\n"
+                "  - srv/GeminiQuery.srv  — universal service: (capability, prompt, parameters, image_topic) → JSON result\n"
+                "  - action/GeminiTask.action — long-running task with progress feedback\n"
+                "  - scripts/gemini_robotics_node.py — Python bridge node\n\n"
+                "Services exposed after build:\n"
+                "  /gemini_robotics/query           — all capabilities via GeminiQuery\n"
+                "  /gemini_robotics/detect_objects  — point-level object detection\n"
+                "  /gemini_robotics/detect_bboxes   — bounding box detection\n"
+                "  /gemini_robotics/plan_trajectory — ordered waypoint trajectory\n"
+                "  /gemini_robotics/orchestrate     — multi-function orchestration\n"
+                "  /gemini_robotics/plan_grasp      — grasp planning (point + approach direction)\n"
+                "  /gemini_robotics/read_sensor     — gauge/fluid/text reading\n"
+                "  /gemini_robotics/segment_objects — pixel-level segmentation masks (Gemini 2.5+)\n"
+                "  /gemini_robotics/spatial_query   — spatial constraint-based object finding\n"
+                "  /gemini_robotics/task            — GeminiTask action for multi-step workflows\n\n"
+                "All service responses include both normalized 0-1000 coordinates (Gemini native) "
+                "AND pixel coordinates computed from the live image resolution.\n\n"
+                "Requires GOOGLE_API_KEY environment variable and pip install google-genai.\n"
+                "Uses gemini-robotics-er-1.6-preview by default."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image_topic": {
+                        "type": "string",
+                        "description": "ROS2 topic providing sensor_msgs/Image for inference. Default: /camera/image_raw",
+                        "default": "/camera/image_raw",
+                    },
+                    "depth_topic": {
+                        "type": "string",
+                        "description": "Optional depth image topic (sensor_msgs/Image). Used for 3D grasp planning.",
+                        "default": "/camera/depth/image_rect_raw",
+                    },
+                    "model_id": {
+                        "type": "string",
+                        "description": "Gemini model ID to use.",
+                        "enum": [
+                            "gemini-robotics-er-1.6-preview",
+                            "gemini-2.5-pro",
+                            "gemini-2.5-flash",
+                            "gemini-2.0-flash",
+                        ],
+                        "default": "gemini-robotics-er-1.6-preview",
+                    },
+                    "api_key_env": {
+                        "type": "string",
+                        "description": "Name of the environment variable holding the Google API key. Default: GOOGLE_API_KEY",
+                        "default": "GOOGLE_API_KEY",
+                    },
+                    "inference_rate_hz": {
+                        "type": "number",
+                        "description": "Maximum API calls per second for continuous/streaming mode. Default: 2.0",
+                        "default": 2.0,
+                    },
+                    "save_annotated": {
+                        "type": "boolean",
+                        "description": "Save annotated images (bboxes/points overlaid) to output_dir for each inference call.",
+                        "default": True,
+                    },
+                    "ros_workspace": {
+                        "type": "string",
+                        "description": "Path to the ROS2 workspace where the package will be symlinked. Default: ~/ros2_ws",
+                        "default": "~/ros2_ws",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+
+    # ── cuRobo World Collision ──────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_curobo_world",
+            "description": (
+                "Generate a cuRobo WorldConfig YAML and WorldCollisionConfig YAML for the scene.\n\n"
+                "Creates scene_dir/curobo/world_config.yaml (obstacles) and "
+                "world_collision_config.yaml (cache sizes, cost params).\n\n"
+                "Collision checker types by obstacle kind (fastest → most accurate):\n"
+                "  cuboid (OBB)  — custom CUDA kernels, ~4× faster than mesh\n"
+                "  mesh          — BVH traversal via NVIDIA Warp\n"
+                "  blox          — nvblox live depth integration (WorldBloxCollision)\n"
+                "  voxel         — ESDF signed distance grid (WorldVoxelCollision)\n\n"
+                "The generated world_config.yaml is passed to cumotion_planner_node via "
+                "'--params-file' or the 'world_config' parameter.\n\n"
+                "Cache pre-allocates GPU buffers so dynamic obstacle updates do NOT "
+                "require CUDA graph re-compilation (important for live manipulation).\n\n"
+                "Cost function uses activation distance η:\n"
+                "  cost(d) = 0             when d ≤ -η\n"
+                "  cost(d) = (1/η)(d+η)²   when -η < d ≤ 0\n"
+                "  cost(d) = d + 0.5η      when d > 0\n\n"
+                "Docs: https://curobo.org/get_started/2c_world_collision.html"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cuboids": {
+                        "type": "array",
+                        "description": (
+                            "List of cuboid (OBB) obstacles. Each entry: "
+                            "{name, dims:[dx,dy,dz], pose:[x,y,z,qw,qx,qy,qz]}. "
+                            "Use cuboids wherever possible — ~4× faster than mesh."
+                        ),
+                        "items": {"type": "object"},
+                        "default": [],
+                    },
+                    "meshes": {
+                        "type": "array",
+                        "description": (
+                            "List of mesh obstacles. Each entry: "
+                            "{name, file_path, pose:[x,y,z,qw,qx,qy,qz], scale:[sx,sy,sz]}."
+                        ),
+                        "items": {"type": "object"},
+                        "default": [],
+                    },
+                    "use_blox": {
+                        "type": "boolean",
+                        "description": "Include nvblox WorldBloxCollision section (live depth integration). Auto-enabled if nvblox is running.",
+                        "default": False,
+                    },
+                    "blox_voxel_size": {
+                        "type": "number",
+                        "description": "Voxel size (metres) for nvblox integration. Default: 0.02",
+                        "default": 0.02,
+                    },
+                    "integrator_type": {
+                        "type": "string",
+                        "enum": ["occupancy", "tsdf"],
+                        "description": "nvblox integrator type. 'occupancy' for binary, 'tsdf' for TSDF.",
+                        "default": "occupancy",
+                    },
+                    "use_voxel": {
+                        "type": "boolean",
+                        "description": "Include a static ESDF voxel section (WorldVoxelCollision).",
+                        "default": False,
+                    },
+                    "voxel_dims": {
+                        "type": "array",
+                        "description": "Dimensions [x,y,z] in metres for the voxel grid. Default: [2.0, 2.0, 2.0]",
+                        "items": {"type": "number"},
+                        "default": [2.0, 2.0, 2.0],
+                    },
+                    "voxel_size": {
+                        "type": "number",
+                        "description": "Voxel resolution in metres. Default: 0.02",
+                        "default": 0.02,
+                    },
+                    "cache_obb": {
+                        "type": "integer",
+                        "description": "Pre-allocated OBB slots in GPU buffer (enables zero-downtime dynamic updates). Default: 20",
+                        "default": 20,
+                    },
+                    "cache_mesh": {
+                        "type": "integer",
+                        "description": "Pre-allocated mesh slots in GPU buffer. Default: 5",
+                        "default": 5,
+                    },
+                    "activation_distance": {
+                        "type": "number",
+                        "description": "Cost ramp-up zone around obstacles in metres (η). Default: 0.01",
+                        "default": 0.01,
+                    },
+                    "max_distance": {
+                        "type": "number",
+                        "description": "Beyond this distance, collision cost = 0. Default: 0.5",
+                        "default": 0.5,
+                    },
+                    "use_sweep": {
+                        "type": "boolean",
+                        "description": "Enable speed-weighted continuous collision checking (prevents fast trajectories passing through thin obstacles).",
+                        "default": True,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_world_obstacle",
+            "description": (
+                "Add or update a single obstacle in the scene's world_config.yaml.\n\n"
+                "Supports cuboid (OBB) and mesh types. Updates the YAML on disk — "
+                "the cuMotion planner will pick up the change on next reload.\n"
+                "For zero-downtime live updates, use launch_world_collision_manager "
+                "with a pre-allocated cache, then publish to the manager's topic.\n\n"
+                "Pose format: [x, y, z, qw, qx, qy, qz] (quaternion w-first, metres, robot base frame)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name":      {"type": "string",  "description": "Unique obstacle name."},
+                    "type":      {"type": "string",  "enum": ["cuboid", "mesh"], "description": "Obstacle geometry type.", "default": "cuboid"},
+                    "dims":      {"type": "array",   "description": "Cuboid [dx, dy, dz] in metres (cuboid only).", "items": {"type": "number"}, "default": [0.1, 0.1, 0.1]},
+                    "file_path": {"type": "string",  "description": "Path to .obj/.stl mesh file (mesh only)."},
+                    "scale":     {"type": "array",   "description": "Mesh scale [sx, sy, sz] (mesh only).", "items": {"type": "number"}, "default": [1.0, 1.0, 1.0]},
+                    "pose":      {"type": "array",   "description": "Pose [x, y, z, qw, qx, qy, qz].", "items": {"type": "number"}, "default": [0,0,0,1,0,0,0]},
+                    "enabled":   {"type": "boolean", "description": "Enable collision checking for this obstacle.", "default": True},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "remove_world_obstacle",
+            "description": "Remove a named obstacle from the scene's world_config.yaml.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Name of the obstacle to remove."},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_obstacle_pose",
+            "description": (
+                "Update the pose of a named obstacle in world_config.yaml.\n\n"
+                "Pose format: [x, y, z, qw, qx, qy, qz] (quaternion w-first, metres).\n"
+                "For live updates without planner restart, publish to the "
+                "WorldCollisionManager /add_obstacle topic with the new pose."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Name of the obstacle."},
+                    "pose": {
+                        "type": "array",
+                        "description": "New pose [x, y, z, qw, qx, qy, qz].",
+                        "items": {"type": "number"},
+                    },
+                },
+                "required": ["name", "pose"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "enable_world_obstacle",
+            "description": (
+                "Enable or disable collision checking for a named cuboid obstacle.\n\n"
+                "Disabled obstacles remain in the YAML but are ignored during planning — "
+                "cheaper than remove/re-add (no geometry reallocation).\n"
+                "Note: mesh obstacles cannot be disabled; use remove_world_obstacle instead."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name":    {"type": "string",  "description": "Name of the obstacle."},
+                    "enabled": {"type": "boolean", "description": "True to enable, false to disable.", "default": True},
+                },
+                "required": ["name", "enabled"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_sphere_collision",
+            "description": (
+                "Test one or more spheres against the current world_config.yaml using cuRobo.\n\n"
+                "Useful for debugging collision geometries, validating obstacle placement, "
+                "and testing robot sphere approximations before motion planning.\n\n"
+                "Input: list of spheres as [x, y, z, radius] (metres, robot base frame).\n"
+                "Output: signed distance per sphere:\n"
+                "  positive (d > 0) → sphere is within activation_distance of or penetrating an obstacle\n"
+                "  negative (d < 0) → sphere is clear\n\n"
+                "Query format matches cuRobo's get_sphere_distance() — tensor shape [1,1,N,4].\n"
+                "Requires: pip install curobo"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "spheres": {
+                        "type": "array",
+                        "description": "List of spheres, each [x, y, z, radius] in metres.",
+                        "items": {"type": "array", "items": {"type": "number"}},
+                    },
+                },
+                "required": ["spheres"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_world_collision_manager",
+            "description": (
+                "Launch a cuRobo WorldCollisionManager ROS2 node.\n\n"
+                "The node maintains a live WorldConfig and exposes:\n"
+                "  Topics:\n"
+                "    /<node_name>/add_obstacle    — String (JSON) → add/update obstacle\n"
+                "    /<node_name>/remove_obstacle — String → remove by name\n"
+                "    /curobo_world/markers        — MarkerArray visualization\n"
+                "    /curobo_world/status         — JSON world summary\n"
+                "  Services:\n"
+                "    /curobo_world/get_config     — Trigger → YAML of current world\n"
+                "    /curobo_world/query_spheres  — Trigger → sphere collision check\n\n"
+                "Syncs obstacle poses from TF at sync_rate_hz. Writes changes to "
+                "world_config.yaml for planner pickup. With use_curobo=true, runs "
+                "live signed-distance queries using WorldPrimitiveCollision.\n\n"
+                "Pre-allocates GPU buffer cache (cache_obb, cache_mesh) so dynamic "
+                "obstacle CRUD does NOT require CUDA graph recompilation."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "node_name":         {"type": "string",  "description": "ROS2 node and package name. Default: world_collision_manager", "default": "world_collision_manager"},
+                    "robot_base_frame":  {"type": "string",  "description": "TF frame used as world origin for obstacle poses. Default: base_link", "default": "base_link"},
+                    "sync_rate_hz":      {"type": "number",  "description": "TF pose sync rate in Hz. Default: 10.0", "default": 10.0},
+                    "use_curobo":        {"type": "boolean", "description": "Enable live cuRobo SDF queries (requires curobo installed).", "default": True},
+                    "cache_obb":         {"type": "integer", "description": "Pre-allocated OBB GPU buffer slots. Default: 20", "default": 20},
+                    "cache_mesh":        {"type": "integer", "description": "Pre-allocated mesh GPU buffer slots. Default: 5", "default": 5},
+                },
                 "required": [],
             },
         },

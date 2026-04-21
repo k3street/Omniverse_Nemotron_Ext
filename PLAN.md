@@ -128,6 +128,33 @@ Complete natural-language control over every Isaac Sim capability — USD author
 | **ROS2 TF viewer** — show transform tree in viewport via `isaacsim.ros2.tf_viewer` | P2 |
 | **IsaacAutomator cloud deploy** — one-click cloud launch of headless Isaac Sim | P3 |
 
+### ROS2 Autonomy Stack (Phase 9 — see detail section below)
+
+| Gap | Priority |
+|---|---|
+| **`check_scene_ready`** — inspect scene + ROS2 state and return structured readiness report (sim playing, robot present, drive graph wired, topics publishing, map available) | ✅ Done |
+| **`get_machine_specs`** — detect GPU/CPU/RAM/disk/ROS2 distro/arch; produce machine-aware install suggestions and sensor resolution recommendations | ✅ Done |
+| **`suggest_next_steps`** — combine scene_ready + machine_specs + topic list into ordered "what to do next" list | ✅ Done |
+| **`check_sensor_health`** — per-sensor Hz, encoding, range validity checks for camera/lidar/IMU/contact; returns health report with recommendations | ✅ Done |
+| **`launch_nav2`** — auto-generate Nav2 params YAML from scene state, launch `nav2_bringup`; prerequisite checks with actionable fix suggestions | ✅ Done |
+| **`launch_slam`** — detect sensor type → choose algorithm (slam_toolbox for 2D lidar, rtabmap for stereo/RGB-D) → launch with auto-generated params | ✅ Done |
+| **`launch_ros2_control`** — generate ros2_control YAML + `topic_based_ros2_control` plugin config for diff-drive / arm / humanoid controllers | P1 |
+| **`launch_gazebo`** — export scene as SDF, configure `ros_gz_bridge` for Isaac Sim ↔ Gazebo co-simulation | P3 |
+| **`list_launched` / `stop_launched` / `restart_launched`** — process registry for all Isaac Assist–managed ROS2 tool subprocesses | ✅ Done |
+| **`add_full_sensor_suite`** — one-command: add all sensors appropriate for robot type (cameras + lidar + IMU + odom + TF + clock) and wire OmniGraph | P1 |
+| **`slam_start` / `slam_stop` / `slam_status`** — SLAM lifecycle wrappers with sensor health gate, coverage monitoring, map save on stop | ✅ Done |
+| **`map_export`** — export current map in Nav2 format (pgm+yaml), PNG, ROS2 bag, Isaac Sim USD occupancy prim | ✅ Done |
+| **`nav2_goto`** — send Nav2 goal by coordinates, named location, relative offset, or vision description; monitor progress | ✅ Done |
+| **`nav2_waypoints`** — follow a sequence of waypoints / named location patrol loop | P2 |
+| **`save_location`** — save current `/odom` pose with a user-defined name for later `nav2_goto` use | ✅ Done |
+| **`classify_objects`** — Gemini Robotics-ER + Isaac Sim ground-truth segmentation; report what the robot's camera sees | P2 |
+| **`get_segmentation_map`** — semantic/instance/panoptic segmentation from Isaac Sim renderer; auto-add OmniGraph helper if not wired | P2 |
+| **`vision_command`** — NL vision-to-action: "move toward blue ball", "pick up the cube", "follow the person" → detect → 3D project → Nav2 goal | P2 |
+| **`label_scene_for_segmentation`** — auto-apply `SemanticLabel` API to all prims by name/type for ground-truth segmentation | P2 |
+| **`export_project_zip`** — full ROS2 project ZIP: scene_setup.py + launch files + Nav2/SLAM/ros2_control configs + maps + URDF + teleop scripts + package.xml | P1 |
+| **`scaffold_ros2_workspace`** — create a `colcon build`-ready `~/ros2_ws/src/<project>/` with all configs and launch files from current session | P2 |
+| **`connect_user_model`** — import user's own URDF/USD/MJCF from their project folder; auto-detect joints/sensors; watch for file changes; register in catalog | P2 |
+
 ---
 
 ## Extension Audit (Isaac Sim 5.1 API)
@@ -1367,6 +1394,109 @@ User types: "Create a 3D model from this image and put it on the table"
 → User: "make it a bit bigger and add physics"
 → LLM adjusts scale + applies RigidBodyAPI + CollisionAPI
 ```
+
+---
+
+## Phase 9 — ROS2 Autonomy Stack
+
+**Target:** Isaac Sim 5.1 on DGX Spark (aarch64) / ROS2 Jazzy  
+**Depends on:** Existing rosbridge MCP tools, Gemini Vision provider, Pipeline planner, Export system
+
+### Goal
+
+Extend Isaac Assist from "build and drive a robot in sim" to a full autonomy stack: SLAM mapping, Nav2 navigation, object classification, segmentation, vision-language commands, ros2_control, and Gazebo co-sim — all launchable from chat or MCP. The system checks scene readiness, detects machine capabilities, and exports complete ROS2 project packages.
+
+### Phase A — Scene Readiness & Machine-Aware Suggestions (P0)
+
+- **`check_scene_ready`**: Runs 11 checks (sim playing, robot present, drive graph, camera/lidar/IMU/odom/TF/clock topics, map, rosbridge). Returns structured JSON report with score, missing items, and `suggested_next_steps` array.
+- **`get_machine_specs`**: Detects GPU/VRAM, CPU, RAM, disk, ROS_DISTRO, architecture, Isaac Sim version, available ROS2 packages. Produces machine-aware install suggestions (e.g. "No slam_toolbox: `sudo apt install ros-${ROS_DISTRO}-slam-toolbox`").
+- **`suggest_next_steps`**: Combines the above + live topic list into an ordered 11-step recommendation ladder (sim not playing → no robot → no drive graph → no odom → … → Nav2 running → export ZIP).
+- **`check_sensor_health`**: Per-sensor Hz, encoding, range, and data validity checks for camera RGB/Depth/Segmentation, LiDAR 2D/3D, IMU, CameraInfo, Contact. Returns `healthy / warning / error` with fix hints.
+
+### Phase B — Launch Tools (P0–P1)
+
+All launched processes registered in `_LAUNCHED_PROCESSES` dict (`name, pid, config_path, launch_time, topics_used`) with `list_launched / stop_launched / restart_launched` management tools.
+
+- **`launch_rviz2`** *(already done)*: Auto-generates `.rviz` config from discovered topics, writes to `workspace/rviz_configs/<scene>.rviz`, launches subprocess.
+- **`launch_nav2`** (P0): Prerequisite check (odom + scan + TF + clock). Auto-generate Nav2 `params.yaml` from scene state (drive type, max speeds from DiffController, sensor topic auto-detect). Launches `ros2 launch nav2_bringup bringup_launch.py`.
+- **`launch_slam`** (P1): Sensor-aware algorithm selection: 2D LiDAR → `slam_toolbox`; 3D LiDAR / stereo / RGB-D → `rtabmap`. Machine-aware (RAM < 16 GB prefers slam_toolbox). Auto-generates params, monitors `/map` topic.
+- **`launch_ros2_control`** (P1): Generates `ros2_control` URDF tags + controller YAML using `topic_based_ros2_control` plugin. Supports `diff_drive_controller`, `joint_trajectory_controller`, `effort_controllers`.
+- **`launch_gazebo`** (P3): Export scene as SDF/URDF, configure `ros_gz_bridge` for co-simulation.
+
+### Phase C — Full Sensor Suite (P1)
+
+- **`add_full_sensor_suite`**: One-command sensor setup per robot type. Nova Carter: stereo cameras (front + rear), 2D LiDAR, IMU, odom, TF, clock → all OmniGraph nodes wired with `IsaacCreateRenderProduct`. Franka: wrist camera + gripper contact sensors.
+- Sensor-to-ROS2 matrix: 18 sensor types covered (RGB, Depth, CameraInfo, Semantic/Instance Segmentation, BBox 2D/3D, Depth PCL, 2D/3D LiDAR, IMU, Contact, GPS, Odom, Clock, JointState, TF).
+
+### Phase D — Mapping & Navigation (P1)
+
+- **`slam_start` / `slam_stop` / `slam_status`**: Sensor health gate before start. Coverage area monitoring during mapping. On stop: save map via `slam_toolbox/save_map` service → `workspace/maps/<scene>/map.pgm + map.yaml`.
+- **`map_export`**: Multi-format export: Nav2 pgm+yaml, PNG, ROS2 bag, Isaac Sim USD occupancy prim.
+- **`nav2_goto`** (P1): Send Nav2 goals by coordinates, named location, relative offset, or vision description. Monitors `/navigate_to_pose` action status. Publishes to `/goal_pose`.
+- **`nav2_waypoints`** (P2): Patrol sequence via `/follow_waypoints`. Named location support.
+- **`save_location`** (P2): Record current `/odom` pose under a user-defined name (e.g. "kitchen") for later use with `nav2_goto`.
+
+### Phase E — Perception & Classification (P2)
+
+- **`classify_objects`**: Gemini Robotics-ER zero-shot detection from viewport or robot camera topic. Overlaid with Isaac Sim ground-truth semantic labels.
+- **`get_segmentation_map`**: Returns semantic/instance/panoptic segmentation image + label map. Auto-adds `ROS2CameraHelper` OmniGraph node if not yet wired.
+- **`vision_command`**: NL vision-to-action pipeline: detect object → depth back-project pixel to 3D → TF to map frame → Nav2 goal. Supports "move toward", "pick up", "follow", "avoid", "go to nearest".
+- **`label_scene_for_segmentation`**: Auto-walk stage tree and apply `SemanticLabel` API by prim name/type.
+
+### Phase F — Export & Project Integration (P1–P2)
+
+- **`export_project_zip`** (P1): Full ROS2 project ZIP: `scene_setup.py`, launch files, Nav2/SLAM/ros2_control configs, maps, URDF, teleop script, patrol example, `package.xml`, `CMakeLists.txt`. Download via `GET /api/v1/chat/export_project_zip/download`.
+- **`scaffold_ros2_workspace`** (P2): Create `~/ros2_ws/src/<project>/` as a `colcon build`-ready ROS2 package with all generated launch files and configs.
+- **`connect_user_model`** (P2): Import user's URDF/USD/MJCF from their project folder. Auto-detect joints, drive type, sensor mount points. Watch file for changes. Register in catalog.
+
+### Phase G — Full Autonomy Pipeline Template (P1)
+
+8-phase pipeline template: `pipeline: Nova Carter autonomous navigation in a warehouse`
+
+| Phase | Name | Content |
+|---|---|---|
+| 1 | Scene Setup | Ground plane + warehouse environment |
+| 2 | Robot Import | Nova Carter with physics, no fixedBase |
+| 3 | Drive Graph | Diff drive OmniGraph + odom + clock |
+| 4 | Full Sensor Suite | Stereo cameras + LiDAR + IMU + TF |
+| 5 | Verify ROS2 | Topic health check, sensor health green |
+| 6 | Launch SLAM | slam_toolbox, drive around to map |
+| 7 | Launch Nav2 | Save map, bringup Nav2 with config |
+| 8 | Final Verify | Scene summary + topic list + next steps |
+
+`check_scene_ready` runs as a gate between phases. Failed gates provide actionable fix suggestions before retrying.
+
+### Dependencies
+
+```bash
+# Navigation
+sudo apt install ros-${ROS_DISTRO}-navigation2 ros-${ROS_DISTRO}-nav2-bringup
+# SLAM
+sudo apt install ros-${ROS_DISTRO}-slam-toolbox
+sudo apt install ros-${ROS_DISTRO}-rtabmap-ros    # stereo/RGB-D SLAM
+# Control
+sudo apt install ros-${ROS_DISTRO}-ros2-control ros-${ROS_DISTRO}-ros2-controllers
+# Vision message types
+sudo apt install ros-${ROS_DISTRO}-vision-msgs
+# Python (service)
+pip install psutil pyyaml
+```
+
+### Test Scenarios
+
+| # | Prompt | Tool |
+|---|--------|------|
+| T62 | "is the scene ready for navigation?" | `check_scene_ready` |
+| T63 | "what should I do next?" | `suggest_next_steps` + `get_machine_specs` |
+| T64 | "launch rviz2 with all available sensors" | `launch_rviz2` |
+| T65 | "start mapping this room" → drive → "save the map" | `slam_start / slam_stop / map_export` |
+| T66 | "launch navigation with the saved map" → "go to position 3, 2" | `launch_nav2` + `nav2_goto` |
+| T67 | "move toward the blue ball" | `vision_command` |
+| T68 | "show me the segmentation map from the robot's camera" | `get_segmentation_map` |
+| T69 | "export everything as a zip" | `export_project_zip` |
+| T70 | "load my robot from ~/my_project/robot.urdf" | `connect_user_model` |
+| T71 | "pipeline: Nova Carter autonomous navigation in a warehouse" | Full autonomy pipeline (8 phases) |
+| T72 | "check all sensor health" | `check_sensor_health` |
 
 ---
 
