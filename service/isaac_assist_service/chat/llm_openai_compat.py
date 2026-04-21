@@ -50,10 +50,14 @@ class OpenAICompatProvider:
         else:
             full_messages = messages
 
+        # gpt-5.x and o-series models require max_completion_tokens; older models use max_tokens
+        _use_completion_tokens = (
+            self.model.startswith("gpt-5") or self.model.startswith("o1") or self.model.startswith("o3")
+        )
         payload = {
             "model": self.model,
             "messages": full_messages,
-            "max_tokens": 4096,
+            ("max_completion_tokens" if _use_completion_tokens else "max_tokens"): 4096,
             "temperature": 0.2,
         }
 

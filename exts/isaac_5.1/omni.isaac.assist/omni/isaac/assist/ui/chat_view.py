@@ -19,6 +19,8 @@ class ChatViewWindow(ui.Window):
         self.service = AssistServiceClient()
         self.webrtc = None
         self._auto_approve = os.environ.get("AUTO_APPROVE", "false").lower() == "true"
+        self._busy = False
+        self._cancel_event = asyncio.Event()
         try:
             self._build_ui()
         except Exception as e:
@@ -36,7 +38,7 @@ class ChatViewWindow(ui.Window):
                     ui.Button("New Scene", width=100, clicked_fn=self._new_scene)
                     
                     # Settings Toggle
-                    ui.Button("⚙", width=30, clicked_fn=self._spawn_settings_window)
+                    ui.Button("Cfg", width=30, clicked_fn=self._spawn_settings_window)
 
                     # LiveKit Stream Toggle (disabled — untested)
                     # self.btn_livekit = ui.Button("Start Vision / Voice", width=150, clicked_fn=self._toggle_livekit)
@@ -57,11 +59,30 @@ class ChatViewWindow(ui.Window):
                 with ui.HStack(height=30, spacing=5):
                     self.input_field = ui.StringField(multiline=False)
                     self.input_field.model.add_value_changed_fn(self._on_input_changed)
-                    ui.Button("Send", width=60, clicked_fn=self._submit_message)
+                    self.send_btn = ui.Button("Send", width=60, clicked_fn=self._submit_message)
+                    self.stop_btn = ui.Button("Stop", width=40,
+                                             style={"background_color": 0xFF882222},
+                                             clicked_fn=self._cancel_request)
+                    self.stop_btn.enabled = False
 
     def _on_input_changed(self, model):
         # Optional placeholder logic
         pass
+
+    def _cancel_request(self):
+        """Signal the running async handler to stop after the current step."""
+        if self._busy:
+            self._cancel_event.set()
+            self._add_chat_bubble("System", "[Stop] Request received — finishing current step...", is_user=False)
+
+    def _set_busy(self, busy: bool):
+        self._busy = busy
+        if not busy:
+            self._cancel_event.clear()
+        if hasattr(self, "send_btn"):
+            self.send_btn.enabled = not busy
+        if hasattr(self, "stop_btn"):
+            self.stop_btn.enabled = busy
 
     def _submit_message(self):
         text = self.input_field.model.get_value_as_string().strip()
@@ -86,13 +107,13 @@ class ChatViewWindow(ui.Window):
 
         # Dispatch async to service: route by prefix
         if text.lower().startswith("pipeline:") or text.lower().startswith("pipeline "):
-            # Strip prefix for the pipeline planner
             pipeline_prompt = text.split(":", 1)[1].strip() if ":" in text else text.split(" ", 1)[1].strip()
             asyncio.ensure_future(self._handle_pipeline_request(pipeline_prompt))
         elif text.lower().startswith("patch") or text.lower().startswith("fix"):
             asyncio.ensure_future(self._handle_swarm_request(text))
         else:
             asyncio.ensure_future(self._handle_service_request(text, selected_prim_info=selected_prim_info))
+        self._set_busy(True)
 
     def _get_selected_prim_path(self):
         """Get the currently selected prim path, or None."""
@@ -120,11 +141,11 @@ class ChatViewWindow(ui.Window):
 
     # LLM mode → (display label, env key used for API key, placeholder model name)
     _LLM_MODES = [
-        ("local  — Ollama",     "local",      "LOCAL_MODEL_NAME",   "qwen3.5:35b"),
-        ("cloud  — Gemini",     "cloud",      "API_KEY_GEMINI",     "gemini-2.0-flash"),
-        ("anthropic — Claude",  "anthropic",  "ANTHROPIC_API_KEY",  "claude-sonnet-4-6"),
-        ("openai — GPT",        "openai",     "OPENAI_API_KEY",     "gpt-4o"),
-        ("grok   — xAI",        "grok",       "GROK_API_KEY",       "grok-3"),
+        ("local  — Ollama",     "local",      "LOCAL_MODEL_NAME",   "LOCAL_MODEL_NAME",    "qwen3.5:35b"),
+        ("google — Gemini",     "google",     "GEMINI_API_KEY",     "GEMINI_MODEL_NAME",   "gemini-3.1-pro-preview"),
+        ("anthropic — Claude",  "anthropic",  "ANTHROPIC_API_KEY",  "CLOUD_MODEL_NAME",    "claude-sonnet-4-6"),
+        ("openai — GPT",        "openai",     "OPENAI_API_KEY",     "CLOUD_MODEL_NAME",    "gpt-5.4"),
+        ("grok   — xAI",        "grok",       "GROK_API_KEY",       "CLOUD_MODEL_NAME",    "grok-3"),
     ]
 
     def _spawn_settings_window(self):
@@ -149,20 +170,18 @@ class ChatViewWindow(ui.Window):
                     self.api_key_label = ui.Label("API Key:", width=150)
                     self.api_key_field = ui.StringField(password_mode=True)
                     # Show the key for whichever mode is currently active
-                    _, _, key_env, _ = self._LLM_MODES[current_idx]
+                    _, _, key_env, model_env, _ = self._LLM_MODES[current_idx]
                     self.api_key_field.model.set_value(os.environ.get(key_env, ""))
 
                 def _on_mode_changed(model, _):
                     idx = model.get_item_value_model().as_int
-                    _, mode, key_env, placeholder = self._LLM_MODES[idx]
+                    _, mode, key_env, model_env, placeholder = self._LLM_MODES[idx]
                     self.api_key_label.text = f"{key_env}:"
                     self.api_key_field.model.set_value(os.environ.get(key_env, ""))
-                    # Sync model name: keep saved value when returning to active mode,
-                    # otherwise show the provider's canonical default as a hint
+                    # Sync model name: use the per-mode env var, fall back to placeholder
                     if hasattr(self, "model_field"):
-                        saved = os.environ.get("CLOUD_MODEL_NAME", "")
-                        active_mode = os.environ.get("LLM_MODE", "cloud")
-                        self.model_field.model.set_value(saved if (mode == active_mode and saved) else placeholder)
+                        saved = os.environ.get(model_env, "")
+                        self.model_field.model.set_value(saved if saved else placeholder)
 
                 self.llm_mode_combo.model.add_item_changed_fn(_on_mode_changed)
                 # Fire once to sync label
@@ -172,8 +191,8 @@ class ChatViewWindow(ui.Window):
                 with ui.HStack(height=22):
                     ui.Label("Model Name:", width=150)
                     self.model_field = ui.StringField()
-                    _, cur_mode, _, cur_placeholder = self._LLM_MODES[current_idx]
-                    saved_model = os.environ.get("CLOUD_MODEL_NAME", "")
+                    _, cur_mode, _, cur_model_env, cur_placeholder = self._LLM_MODES[current_idx]
+                    saved_model = os.environ.get(cur_model_env, "")
                     self.model_field.model.set_value(saved_model if saved_model else cur_placeholder)
                 # Fire again now that model_field exists to finish syncing
                 _on_mode_changed(self.llm_mode_combo.model, None)
@@ -212,13 +231,13 @@ class ChatViewWindow(ui.Window):
 
         # Resolve selected mode
         idx = self.llm_mode_combo.model.get_item_value_model().as_int
-        _, mode, key_env, _ = self._LLM_MODES[idx]
+        _, mode, key_env, model_env, _ = self._LLM_MODES[idx]
         api_key_value = self.api_key_field.model.get_value_as_string()
 
         payload = {
-            "LLM_MODE":        mode,
-            key_env:           api_key_value,          # write to the right env var
-            "CLOUD_MODEL_NAME": self.model_field.model.get_value_as_string(),
+            "LLM_MODE":  mode,
+            key_env:     api_key_value,          # write to the right env var
+            model_env:   self.model_field.model.get_value_as_string(),  # per-mode model key
             "OPENAI_API_BASE": self.api_base_field.model.get_value_as_string(),
             "CONTRIBUTE_DATA": "true" if self.contribute_cb.model.get_value_as_bool() else "false",
             "AUTO_APPROVE":    "true" if self._auto_approve else "false",
@@ -258,28 +277,35 @@ class ChatViewWindow(ui.Window):
             self._add_chat_bubble("System", f"Export successful. {msg}", is_user=False)
 
     async def _handle_swarm_request(self, text: str):
-        self._add_chat_bubble("System", "Submitting query to the Coder/QA/Critic multi-agent swarm. Please wait (this can take 1-3 minutes)...", is_user=False)
-        response = await self.service.generate_plan(user_query=text)
-        
-        if "error" in response:
-            self._add_chat_bubble("Agent Swarm", response["error"], is_user=False, error=True)
-        else:
-            actions = response.get("actions", [])
-            conf = response.get("overall_confidence", 0.0)
-            desc = response.get("description", "")
-            
-            if not actions:
-                self._add_chat_bubble("Agent Swarm", f"Swarm analysis completed but no code patches generated:\n{desc}", is_user=False)
-                return
-                
-            for action in actions:
-                if self._auto_approve:
-                    script_code = action.get("new_value", "")
-                    if script_code:
-                        self._add_chat_bubble("System", f"Auto-approved swarm patch (confidence: {conf*100:.1f}%)", is_user=False)
-                        self._execute_patch(script_code)
-                else:
-                    self._render_patch_action(action, conf)
+        self._set_busy(True)
+        try:
+            self._add_chat_bubble("System", "Submitting query to the Coder/QA/Critic multi-agent swarm. Please wait (this can take 1-3 minutes)...", is_user=False)
+            response = await self.service.generate_plan(user_query=text)
+
+            if "error" in response:
+                self._add_chat_bubble("Agent Swarm", response["error"], is_user=False, error=True)
+            else:
+                actions = response.get("actions", [])
+                conf = response.get("overall_confidence", 0.0)
+                desc = response.get("description", "")
+
+                if not actions:
+                    self._add_chat_bubble("Agent Swarm", f"Swarm analysis completed but no code patches generated:\n{desc}", is_user=False)
+                    return
+
+                for action in actions:
+                    if self._cancel_event.is_set():
+                        self._add_chat_bubble("System", "[Stop] Halted before executing swarm patch.", is_user=False)
+                        break
+                    if self._auto_approve:
+                        script_code = action.get("new_value", "")
+                        if script_code:
+                            self._add_chat_bubble("System", f"Auto-approved swarm patch (confidence: {conf*100:.1f}%)", is_user=False)
+                            self._execute_patch(script_code)
+                    else:
+                        self._render_patch_action(action, conf)
+        finally:
+            self._set_busy(False)
 
     # ── Pipeline Executor ────────────────────────────────────────────────────
 
@@ -290,10 +316,15 @@ class ChatViewWindow(ui.Window):
         2. Executes each phase sequentially with verification
         3. On failure, asks the LLM to fix and retries once
         """
-        self._add_chat_bubble("Pipeline", f"Generating pipeline plan for: {prompt}", is_user=False)
+        self._set_busy(True)
+        try:
+            await self._run_pipeline(prompt)
+        finally:
+            self._set_busy(False)
 
-        # Step 1: Get plan
-        plan = await self.service.get_pipeline_plan(prompt)
+    async def _run_pipeline(self, prompt: str):
+
+        self._add_chat_bubble("Pipeline", f"Generating pipeline plan for: {prompt}", is_user=False)
         if "error" in plan:
             self._add_chat_bubble("Pipeline", f"Planning failed: {plan['error']}", is_user=False, error=True)
             return
@@ -413,14 +444,18 @@ class ChatViewWindow(ui.Window):
                         self._add_chat_bubble("Verification", content, is_user=False)
 
             status = "ok" if phase_success else "failed"
-            status_icon = "✅" if phase_success else "❌"
+            status_icon = "[OK]" if phase_success else "[X]"
             self._add_chat_bubble("Pipeline",
-                f"{status_icon} Phase {phase_id}: {phase_name} — {status}",
+                f"{status_icon} Phase {phase_id}: {phase_name} - {status}",
                 is_user=False)
             results.append({"phase": phase_id, "name": phase_name, "status": status})
 
             # Allow Kit to process a frame between phases
             await asyncio.sleep(0.1)
+
+            if self._cancel_event.is_set():
+                self._add_chat_bubble("Pipeline", "[Stop] Pipeline cancelled by user.", is_user=False)
+                break
 
         # Step 3: Summary
         ok_count = sum(1 for r in results if r["status"] == "ok")
@@ -550,29 +585,34 @@ class ChatViewWindow(ui.Window):
             carb.log_warn(f"[IsaacAssist] Failed to log execution: {log_err}")
 
     async def _handle_service_request(self, text: str, selected_prim_info: dict = None):
-        context = {}
-        if selected_prim_info:
-            context["selected_prim"] = selected_prim_info
-            context["selected_prim_path"] = selected_prim_info.get("path")
-        response = await self.service.send_message(text, context=context)
+        self._set_busy(True)
+        try:
+            context = {}
+            if selected_prim_info:
+                context["selected_prim"] = selected_prim_info
+                context["selected_prim_path"] = selected_prim_info.get("path")
+            response = await self.service.send_message(text, context=context)
 
-        if "error" in response:
-            self._add_chat_bubble("System", response["error"], is_user=False, error=True)
-        else:
-            # Parse responses
-            for msg in response.get("response_messages", []):
-                self._add_chat_bubble("Isaac Assist", msg.get("content", ""), is_user=False)
+            if "error" in response:
+                self._add_chat_bubble("System", response["error"], is_user=False, error=True)
+            else:
+                for msg in response.get("response_messages", []):
+                    self._add_chat_bubble("Isaac Assist", msg.get("content", ""), is_user=False)
 
-            # Show approvable code patches
-            actions = response.get("actions_to_approve") or []
-            for action in actions:
-                code = action.get("code", "")
-                desc = action.get("description", "")
-                if self._auto_approve:
-                    self._add_chat_bubble("System", f"Auto-approved: {desc}", is_user=False)
-                    self._execute_patch(code)
-                else:
-                    self._render_code_patch(code, desc)
+                actions = response.get("actions_to_approve") or []
+                for action in actions:
+                    if self._cancel_event.is_set():
+                        self._add_chat_bubble("System", "[Stop] Halted before executing patch.", is_user=False)
+                        break
+                    code = action.get("code", "")
+                    desc = action.get("description", "")
+                    if self._auto_approve:
+                        self._add_chat_bubble("System", f"Auto-approved: {desc}", is_user=False)
+                        self._execute_patch(code)
+                    else:
+                        self._render_code_patch(code, desc)
+        finally:
+            self._set_busy(False)
 
     def _add_chat_bubble(self, sender: str, text: str, is_user: bool, error: bool = False):
         with self.chat_layout:

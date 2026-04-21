@@ -1324,25 +1324,25 @@ With fix recommendations for each warning/error.
 
 | # | Category | Prompt | Requires Approval? |
 |---|----------|--------|-------------------|
-| T01 | Create prim | Create a cube | ✅ |
-| T02 | Create prim | Add a sphere | ✅ |
-| T03 | Create prim | Create a cylinder | ✅ |
-| T04 | Delete prim | Delete a prim | ✅ |
-| T05 | Data query | Scene summary | ❌ (text only) |
-| T06 | Physics | Add rigid body | ✅ |
-| T07 | Physics | Ground collider | ✅ |
-| T08 | Deformable | Cloth simulation | ✅ |
-| T09 | Material | Red metallic | ✅ |
-| T10 | Material | Glass | ✅ |
-| T11 | Import | Franka robot | ✅ |
-| T12 | Sim control | Play/Pause/Stop/Step | ✅ |
-| T13 | Selection | Scale selected prim | ✅ |
-| T14 | Selection | Color selected prim | ✅ |
-| T15 | Create camera | Top-down camera | ✅ |
-| T16 | Viewport | Switch camera | ✅ |
-| T17 | Data query | Capture screenshot | ❌ |
-| T18 | Lighting | Dome light | ✅ |
-| T19 | OmniGraph | ROS2 clock graph | ✅ |
+| T01 | Create prim | Create a cube | ✅ tested 2026-04-21 |
+| T02 | Create prim | Add a sphere | ✅ tested 2026-04-21 |
+| T03 | Create prim | Create a cylinder | ✅ tested 2026-04-21 |
+| T04 | Delete prim | Delete a prim | ✅ tested 2026-04-21 |
+| T05 | Data query | Scene summary | ✅ tested 2026-04-21 (text only) |
+| T06 | Physics | Add rigid body | ✅ tested 2026-04-21 |
+| T07 | Physics | Ground collider | ✅ tested 2026-04-21 |
+| T08 | Deformable | Cloth simulation | ✅ tested 2026-04-21 |
+| T09 | Material | Red metallic | ✅ tested 2026-04-21 |
+| T10 | Material | Glass | ✅ tested 2026-04-21 |
+| T11 | Import | Franka robot | ✅ tested 2026-04-21 |
+| T12 | Sim control | Play/Pause/Stop/Step | ✅ tested 2026-04-21 |
+| T13 | Selection | Scale selected prim | ✅ tested 2026-04-21 |
+| T14 | Selection | Color selected prim | ✅ tested 2026-04-21 |
+| T15 | Create camera | Top-down camera | ✅ tested 2026-04-21 |
+| T16 | Viewport | Switch camera | ✅ tested 2026-04-21 |
+| T17 | Data query | Capture screenshot | ✅ tested 2026-04-21 (text only) |
+| T18 | Lighting | Dome light | ✅ tested 2026-04-21 |
+| T19 | OmniGraph | ROS2 clock graph | ✅ tested 2026-04-21 |
 | T20 | Complex | Multi-object scene | ✅ |
 | T21 | Data query | Console errors | ❌ (text only) |
 | T22 | Knowledge | Sensor specs | ❌ (text only) |
@@ -1359,7 +1359,7 @@ With fix recommendations for each warning/error.
 | T33 | Clone (batch) | GPU-batched GridCloner | ✅ |
 | T34 | Motion planning | Move robot to pose | ✅ |
 | T35 | Motion planning | Multi-waypoint trajectory | ✅ |
-| T36 | Data query | Asset catalog search | ❌ (text only) |
+| T36 | Data query | Asset catalog search | ✅ tested |
 | T37 | Scene builder | NL warehouse scene | ✅ |
 | T38 | IsaacLab RL | RL env + launch training | ✅ |
 | T39 | Settings | Auto-approve toggle | ✅ (then ❌) |
