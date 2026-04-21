@@ -14920,6 +14920,102 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ── MediaPipe Teleop ───────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_mediapipe_teleop",
+            "description": (
+                "Open a MediaPipe body-pose teleoperation panel inside Isaac Sim.\n\n"
+                "Creates an omni.ui window with:\n"
+                "  • Stay-in-frame 5×5 position grid — shows the user's torso position "
+                "relative to the safe detection zone; green = good, yellow = edge, red = out\n"
+                "  • Metric bars — torso forward/lateral lean, shoulder yaw, wrist height (all normalised –1..+1)\n"
+                "  • Hand open/close indicators (left + right, green = open / red = closed)\n"
+                "  • Live fps counter and pose-detected status LED\n"
+                "  • Start / Stop / E-Stop buttons + arm selector (right / left / both)\n\n"
+                "The webcam runs in a daemon thread; Se3MediaPipe.advance() is called on "
+                "every Isaac Sim tick to produce a 7-D SE(3) command [dx,dy,dz, rx,ry,rz, gripper].\n\n"
+                "Requires platform_sdk (opencv-python + mediapipe) to be installed in the "
+                "Isaac Sim Python environment.\n"
+                "Install: pip install opencv-python mediapipe  (inside the Isaac Sim venv)\n\n"
+                "The default pose_to_se3_fn maps:\n"
+                "  torso_forward   → +x delta (forward)\n"
+                "  torso_lateral   → +y delta (left)\n"
+                "  wrist_height    → +z delta (up)\n"
+                "  shoulder_yaw    → z rotation\n"
+                "  right_hand_open → gripper (+1 open / -1 close)\n\n"
+                "To connect to a real robot, uncomment the ROS2 JointState publish block "
+                "in the generated code and supply a robot-specific IK solver."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "platform_sdk_path": {
+                        "type": "string",
+                        "description": (
+                            "Absolute path to the platform_sdk Python package root. "
+                            "Default: /home/kimate/Documents/Github/open_arm_10Things/platform_sdk/python"
+                        ),
+                        "default": "/home/kimate/Documents/Github/open_arm_10Things/platform_sdk/python",
+                    },
+                    "camera_index": {
+                        "type": "integer",
+                        "description": "OpenCV webcam device index. Default: 0",
+                        "default": 0,
+                    },
+                    "width": {
+                        "type": "integer",
+                        "description": "Webcam capture width in pixels. Default: 640",
+                        "default": 640,
+                    },
+                    "height": {
+                        "type": "integer",
+                        "description": "Webcam capture height in pixels. Default: 480",
+                        "default": 480,
+                    },
+                    "smoothing": {
+                        "type": "number",
+                        "description": "Exponential moving average smoothing factor [0, 1). Higher = smoother but more lag. Default: 0.2",
+                        "default": 0.2,
+                    },
+                    "delta_scale": {
+                        "type": "number",
+                        "description": "Metres of end-effector motion per unit of body pose feature. Default: 0.02",
+                        "default": 0.02,
+                    },
+                    "hand_open_threshold": {
+                        "type": "number",
+                        "description": "Thumb–index distance threshold above which the hand is considered open. Default: 0.05",
+                        "default": 0.05,
+                    },
+                    "active_arm": {
+                        "type": "string",
+                        "enum": ["right", "left", "both"],
+                        "description": "Which arm(s) to control. Can be changed at runtime via the UI buttons. Default: right",
+                        "default": "right",
+                    },
+                    "robot_prim_path": {
+                        "type": "string",
+                        "description": "USD prim path of the robot articulation for direct Isaac Sim control. Leave empty to use ROS2 topic output only.",
+                        "default": "",
+                    },
+                    "output_joint_topic": {
+                        "type": "string",
+                        "description": "ROS2 JointState topic for publishing robot commands. Default: /joint_commands",
+                        "default": "/joint_commands",
+                    },
+                    "window_title": {
+                        "type": "string",
+                        "description": "Title of the omni.ui panel. Default: MediaPipe Teleop",
+                        "default": "MediaPipe Teleop",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+
     # ── cuRobo World Collision ──────────────────────────────────────────────────
     {
         "type": "function",
@@ -15171,6 +15267,90 @@ ISAAC_SIM_TOOLS = [
                     "use_curobo":        {"type": "boolean", "description": "Enable live cuRobo SDF queries (requires curobo installed).", "default": True},
                     "cache_obb":         {"type": "integer", "description": "Pre-allocated OBB GPU buffer slots. Default: 20", "default": 20},
                     "cache_mesh":        {"type": "integer", "description": "Pre-allocated mesh GPU buffer slots. Default: 5", "default": 5},
+                },
+                "required": [],
+            },
+        },
+    },
+    # ── LingBot-Map streaming 3D reconstruction ───────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_lingbot_map",
+            "description": (
+                "Scaffold and launch a LingBot-Map streaming 3D reconstruction ROS2 node. "
+                "LingBot-Map is a feed-forward Geometric Context Transformer (GCT) that "
+                "processes a camera image stream and produces real-time 3D world-frame "
+                "point clouds, depth maps, confidence maps, and camera poses at ~20 FPS.\n\n"
+                "Generated package `lingbot_map_ros` publishes:\n"
+                "  /lingbot/pointcloud   — sensor_msgs/PointCloud2 (world-frame)\n"
+                "  /lingbot/camera_pose  — geometry_msgs/PoseStamped\n"
+                "  /lingbot/depth        — sensor_msgs/Image (float32 metric depth)\n"
+                "  /lingbot/conf         — sensor_msgs/Image (float32 confidence)\n\n"
+                "Includes export_lingbot_to_curobo.py script to accumulate the point "
+                "cloud and write a cuRobo world_config.yaml mesh entry for collision "
+                "avoidance with cuMotion.\n\n"
+                "Model variants (HuggingFace: robbyant/*):\n"
+                "  lingbot-map-long   — recommended for mapping sessions (default)\n"
+                "  lingbot-map        — standard model\n"
+                "  lingbot-map-stage1 — lightweight stage-1 weights\n\n"
+                "Prerequisite: git clone https://github.com/Robbyant/lingbot-map && pip install -e ."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image_topic": {
+                        "type": "string",
+                        "description": "ROS2 camera image topic (sensor_msgs/Image). Default: /camera/image_raw",
+                        "default": "/camera/image_raw",
+                    },
+                    "model_variant": {
+                        "type": "string",
+                        "enum": ["lingbot-map-long", "lingbot-map", "lingbot-map-stage1"],
+                        "description": "HuggingFace model variant. lingbot-map-long is recommended for long sessions.",
+                        "default": "lingbot-map-long",
+                    },
+                    "checkpoint_path": {
+                        "type": "string",
+                        "description": "Path to a local .pt checkpoint. If empty the model is downloaded from HuggingFace.",
+                        "default": "",
+                    },
+                    "keyframe_interval": {
+                        "type": "integer",
+                        "description": "Process every N-th frame (1 = every frame). Higher values reduce GPU load. Default: 1",
+                        "default": 1,
+                    },
+                    "conf_threshold": {
+                        "type": "number",
+                        "description": "Minimum world_points_conf value to include a point in the published cloud [0,1]. Default: 0.3",
+                        "default": 0.3,
+                    },
+                    "mask_sky": {
+                        "type": "boolean",
+                        "description": "Enable ONNX sky segmentation masking (recommended for outdoor scenes). Requires onnxruntime.",
+                        "default": False,
+                    },
+                    "output_device": {
+                        "type": "string",
+                        "enum": ["cpu", "cuda"],
+                        "description": "Device for storing inference outputs. Use cpu to offload tensors and save GPU VRAM. Default: cpu",
+                        "default": "cpu",
+                    },
+                    "publish_rate": {
+                        "type": "number",
+                        "description": "Rate in Hz at which buffered frames are processed and results published. Default: 10.0",
+                        "default": 10.0,
+                    },
+                    "max_buffer_frames": {
+                        "type": "integer",
+                        "description": "Maximum number of image frames to buffer between publish ticks. Default: 8",
+                        "default": 8,
+                    },
+                    "ros_workspace": {
+                        "type": "string",
+                        "description": "Path to the ROS2 colcon workspace. Default: ~/ros2_ws",
+                        "default": "~/ros2_ws",
+                    },
                 },
                 "required": [],
             },

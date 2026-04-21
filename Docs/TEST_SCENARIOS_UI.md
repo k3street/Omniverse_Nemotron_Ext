@@ -1396,6 +1396,300 @@ With fix recommendations for each warning/error.
 | T70 | Autonomy | Connect user robot model | ✅ (import patch) |
 | T71 | Autonomy | Full 8-phase autonomy pipeline | ✅ (auto-approve) |
 | T72 | Autonomy | Sensor health check | ❌ (data only) |
+| T73 | MediaPipe Teleop | MediaPipe stay-in-frame teleop panel | ✅ (code gen patch) |
+| T74 | Gemini Robotics | Scaffold Gemini Robotics ER bridge package | ❌ (data only) |
+| T75 | cuRobo | Generate cuRobo world collision config | ❌ (data only) |
+| T76 | cuRobo | Dynamic obstacle CRUD (add / update / remove) | ❌ (data only) |
+| T77 | cuRobo | Sphere collision distance query | ❌ (data only) |
+| T78 | cuRobo | Launch WorldCollisionManager node | ❌ (subprocess) |
+| T79 | Isaac ROS | Object detection pipeline (RT-DETR / YOLOv8) | ❌ (subprocess) |
+| T80 | Isaac ROS | Segmentation pipeline (UNet / Segformer / SAM / SAM2) | ❌ (subprocess) |
+| T81 | cuMotion | cuMotion planner + MoveIt 2 integration | ❌ (subprocess) |
+| T82 | Localization | Visual SLAM map build + load + localize | ❌ (subprocess) |
+| T83 | Localization | Occupancy grid localizer + grid-search trigger | ❌ (subprocess) |
+| T84 | LingBot-Map | Streaming 3D reconstruction → PointCloud2 + cuRobo mesh | ❌ (subprocess) |
+
+---
+
+## T73 — MediaPipe Stay-in-Frame Teleop Panel
+
+**Goal**: Verify that `launch_mediapipe_teleop` produces a working Kit script that opens the teleop UI and lets the user drive a robot arm with hand gestures.
+
+**Prerequisites**: Isaac Sim running. `platform_sdk` cloned at the path configured via `sdk_path`. Webcam connected.
+
+**Steps**:
+1. In the chat panel type: `"Launch MediaPipe teleop for /World/Nova_Carter/arm"`
+2. The assistant should call `launch_mediapipe_teleop` and send a code patch.
+3. Approve the patch (or auto-approve in test mode).
+4. A floating window **"MediaPipe Teleop"** should appear in the Isaac Sim viewport.
+5. Verify the 5×5 position grid is visible.
+6. Click **Start** — the camera feed should start (webcam LED lights up).
+7. Move your hand in/out of the grid center — the dot should turn green (center) → yellow → red (edge).
+8. Click **Stop** — camera feed stops.
+9. Click **E-Stop** — a stop patch should be sent, halting any in-flight motion.
+
+**Pass criteria**:
+- Window appears without Python traceback in the Isaac Sim console.
+- Grid dot changes color as described.
+- Start/Stop/E-Stop buttons respond without error.
+
+---
+
+## T74 — Gemini Robotics ER Bridge Scaffold
+
+**Goal**: Verify `launch_gemini_robotics_bridge` scaffolds a complete, buildable colcon package.
+
+**Prerequisites**: ROS2 Humble/Iron workspace at `~/ros2_ws`. `GOOGLE_API_KEY` set in `.env`.
+
+**Steps**:
+1. Chat: `"Set up a Gemini Robotics ER bridge for /camera/image_raw"`
+2. Confirm the assistant calls `launch_gemini_robotics_bridge`.
+3. The response should list the generated file paths.
+4. In a terminal: `cd ~/ros2_ws && colcon build --packages-select gemini_robotics_bridge`
+5. Source the workspace: `source install/setup.bash`
+6. Launch: `ros2 launch gemini_robotics_bridge gemini_robotics.launch.py`
+7. Call the detect service: `ros2 service call /gemini_robotics/detect_objects gemini_robotics_bridge/srv/GeminiQuery "{capability: 'detect_objects', prompt: 'red cup', image_topic: '/camera/image_raw'}"`
+
+**Pass criteria**:
+- `colcon build` completes with zero errors.
+- Node starts and prints "Gemini Robotics Bridge node started".
+- Service call returns `success: true` with `result_json` containing detected objects.
+
+---
+
+## T75 — cuRobo World Collision Config Generation
+
+**Goal**: Verify `configure_curobo_world` produces valid YAML files that cuRobo can load.
+
+**Prerequisites**: cuRobo installed (`pip install curobo`). Isaac Sim running.
+
+**Steps**:
+1. Chat: `"Configure cuRobo world with a table (0.6×0.6×0.05 m at z=0.4) and pre-allocate 20 OBB cache slots"`
+2. Confirm the assistant calls `configure_curobo_world` with cuboid + cache params.
+3. Note the output YAML paths (e.g., `workspace/scenes/untitled/curobo/`).
+4. Inspect `world_config.yaml` — verify `cuboid.table.dims: [0.6, 0.6, 0.05]`.
+5. Inspect `world_collision_config.yaml` — verify `cache.obb: 20`.
+6. In a Python shell: `import yaml; d = yaml.safe_load(open("world_config.yaml")); print(d["cuboid"])`
+
+**Pass criteria**:
+- Both YAML files are created and parse cleanly.
+- Cuboid entry matches the requested parameters.
+- `world_collision_config.yaml` contains the specified cache sizes and activation distance.
+
+---
+
+## T76 — cuRobo Dynamic Obstacle CRUD
+
+**Goal**: Verify obstacle add/update/remove/enable handlers keep `world_config.yaml` consistent.
+
+**Prerequisites**: T75 completed (world_config.yaml exists).
+
+**Steps**:
+1. Chat: `"Add a box obstacle named shelf_left at position [1.2, -0.3, 0.6]"`
+2. Verify `add_world_obstacle` is called; YAML updated with `shelf_left`.
+3. Chat: `"Move shelf_left to [1.2, -0.3, 0.8]"`
+4. Verify `update_obstacle_pose` is called; YAML shows new pose.
+5. Chat: `"Disable shelf_left temporarily"`
+6. Verify `enable_world_obstacle` sets `enable: false`.
+7. Chat: `"Remove shelf_left from the world"`
+8. Verify `remove_world_obstacle` removes the entry from YAML.
+
+**Pass criteria**:
+- Each operation returns `status: "added/updated/removed"`.
+- YAML file reflects each change immediately (no server restart needed).
+- After remove, the key is absent from `world_config.yaml`.
+
+---
+
+## T77 — cuRobo Sphere Collision Distance Query
+
+**Goal**: Verify `query_sphere_collision` returns signed distances for robot link spheres.
+
+**Prerequisites**: cuRobo installed. `world_config.yaml` exists with at least one cuboid.
+
+**Steps**:
+1. Chat: `"Query sphere collision for 3 arm link spheres: center [0.3,0,0.5] r=0.05, center [0.5,0,0.5] r=0.05, center [0.7,0,0.5] r=0.05"`
+2. Confirm `query_sphere_collision` is called.
+3. Review the returned distances: negative = free, positive = in collision.
+
+**Pass criteria**:
+- Returns a list of 3 signed distances, one per input sphere.
+- Distances are floats (not errors).
+- A sphere placed inside the table cuboid returns a positive distance.
+
+---
+
+## T78 — WorldCollisionManager ROS2 Node
+
+**Goal**: Verify `launch_world_collision_manager` scaffolds and starts the manager node.
+
+**Prerequisites**: ROS2 running. T75 world_config.yaml exists.
+
+**Steps**:
+1. Chat: `"Launch the world collision manager node"`
+2. Confirm the assistant calls `launch_world_collision_manager`.
+3. Verify node appears: `ros2 node list | grep world_collision_manager`
+4. Check marker array: `ros2 topic echo /curobo/world_markers --once`
+5. Call add service: `ros2 service call /curobo/add_obstacle std_srvs/srv/Trigger {}`
+
+**Pass criteria**:
+- Node appears in `ros2 node list`.
+- `/curobo/world_markers` publishes `MarkerArray` messages.
+- Service calls return `success: true`.
+
+---
+
+## T79 — Isaac ROS Object Detection Pipeline
+
+**Goal**: Verify `launch_object_detection` starts RT-DETR or YOLOv8 and detections publish.
+
+**Prerequisites**: Isaac ROS Humble installed. TensorRT engine file built or auto-build enabled. Camera publishing on `/image_rect`.
+
+**Steps**:
+1. Chat: `"Launch RT-DETR object detection on /camera/image_rect with 0.6 confidence"`
+2. Confirm `launch_object_detection` is called with `model=rtdetr`.
+3. Verify node starts: `ros2 node list | grep rtdetr`
+4. Check detections: `ros2 topic echo /detections --once`
+5. Chat: `"Switch to YOLOv8 for faster inference"`
+6. Confirm a second call with `model=yolov8`.
+
+**Pass criteria**:
+- First detection on `/detections` arrives within 10 seconds of node start.
+- Bounding boxes have valid `center.x/y` and `size_x/y` fields.
+- YOLOv8 model starts without error after RT-DETR is already running.
+
+---
+
+## T80 — Isaac ROS Segmentation Pipeline
+
+**Goal**: Verify UNet / Segformer / SAM / SAM2 segmentation launchers work end-to-end.
+
+**Prerequisites**: Isaac ROS Humble + respective model packages installed.
+
+**Steps**:
+1. Chat: `"Launch UNet semantic segmentation on /image_rect"`
+2. Verify segmentation mask publishes on `/unet/colored_segmentation_mask`.
+3. Chat: `"Switch to Segment Anything 2 with objects: cup, bottle, robot_arm"`
+4. Confirm `launch_segment_anything2` then `sam2_add_objects` are called.
+5. Verify `/sam2/mask_array` publishes per-object masks.
+6. Chat: `"Remove cup from SAM2 tracking"` → confirm `sam2_remove_object`.
+7. Chat: `"Configure segmentation output for nvblox freespace estimation"`
+
+**Pass criteria**:
+- UNet mask topic publishes colored images.
+- SAM2 tracks the three requested objects with distinct mask IDs.
+- After remove, cup mask no longer appears.
+- nvblox segmentation config YAML is written to disk.
+
+---
+
+## T81 — cuMotion Planner + MoveIt 2 Integration
+
+**Goal**: Verify the full cuMotion stack (planner + robot segmenter + MoveIt 2) launches and accepts goals.
+
+**Prerequisites**: Isaac ROS Humble. cuMotion package. Robot URDF/XRDF. MoveIt 2.
+
+**Steps**:
+1. Chat: `"Generate XRDF for the Franka Panda arm"`
+2. Confirm `generate_xrdf` is called; `.xrdf` file created in workspace.
+3. Chat: `"Launch cuMotion planner for Franka with world_config from T75"`
+4. Confirm `launch_cumotion_planner` is called.
+5. Chat: `"Launch robot segmenter to mask the arm from nvblox"`
+6. Confirm `launch_robot_segmenter`.
+7. Chat: `"Launch cuMotion MoveIt 2 bridge"` → confirm `launch_cumotion_moveit`.
+8. In RViz2, use MotionPlanning panel to set a goal pose.
+9. Click Plan & Execute — arm should move without collision.
+
+**Pass criteria**:
+- All three nodes appear in `ros2 node list`.
+- MoveIt 2 plan succeeds (returns SUCCEEDED in RViz2 status).
+- Robot does not collide with the table obstacle from T75.
+
+---
+
+## T82 — Visual SLAM Map Build, Load, and Localize
+
+**Goal**: Verify Isaac ROS Visual SLAM map workflow: build → save → load → localize.
+
+**Prerequisites**: Isaac ROS Visual SLAM (`isaac_ros_visual_slam`) installed. Stereo camera publishing.
+
+**Steps**:
+1. Chat: `"Start building a visual SLAM map"`
+2. Confirm `build_visual_map` is called.
+3. Drive the robot around the scene (teleop or Nav2) to build coverage.
+4. Chat: `"Save the SLAM map to /tmp/office_map.db"`
+5. Confirm map file created.
+6. Restart Isaac Sim to a new scene.
+7. Chat: `"Load the SLAM map from /tmp/office_map.db"`
+8. Confirm `load_visual_slam_map` is called.
+9. Chat: `"Localize the robot in the loaded map"`
+10. Confirm `localize_in_visual_slam_map` is called.
+11. Verify pose estimate converges: `ros2 topic echo /visual_slam/tracking/odometry --once`
+
+**Pass criteria**:
+- Map file exists and is non-empty after step 5.
+- After localize, odometry topic publishes with `pose_covariance` decreasing over 5 seconds.
+- `get_visual_slam_poses` returns at least one keyframe pose.
+
+---
+
+## T83 — Occupancy Grid Localizer + Grid-Search Trigger
+
+**Goal**: Verify occupancy grid global localization initializes robot pose from a pre-built map.
+
+**Prerequisites**: Isaac ROS Occupancy Grid Localizer. 2D LiDAR map (`.yaml` + `.pgm`) from Nav2 mapping.
+
+**Steps**:
+1. Chat: `"Launch occupancy grid localizer with map /maps/office.yaml"`
+2. Confirm `launch_occupancy_grid_localizer` is called.
+3. Verify node: `ros2 node list | grep occupancy_grid_localizer`
+4. Chat: `"Trigger a grid search localization to find the robot's initial pose"`
+5. Confirm `trigger_grid_search_localization` is called.
+6. In RViz2, check that the particle cloud converges to the robot's actual position within 30 seconds.
+7. Chat: `"Convert the 3D pointcloud to flatscan for localization"`
+8. Confirm `launch_pointcloud_to_flatscan` is called.
+
+**Pass criteria**:
+- Localizer node starts and `/initialpose` topic is available.
+- Grid search trigger returns `success: true` within 5 seconds.
+- After convergence, estimated pose error < 0.3 m from ground truth.
+- Flatscan topic (`/flatscan`) publishes after pointcloud converter starts.
+
+---
+
+## T84 — LingBot-Map Streaming 3D Reconstruction
+
+**Goal**: Verify `launch_lingbot_map` scaffolds the ROS2 node and produces `/lingbot/pointcloud` from a live camera, then exports the accumulated reconstruction as a cuRobo world obstacle.
+
+**Prerequisites**: LingBot-Map installed (`pip install -e .` from cloned repo). ROS2 workspace. Camera publishing on the configured topic.
+
+**Steps**:
+1. Chat: `"Launch LingBot-Map streaming reconstruction on /camera/image_raw with sky masking for outdoor scene"`
+2. Confirm the assistant calls `launch_lingbot_map` with `mask_sky=true`.
+3. Note the scaffolded package path in the response.
+4. Build: `cd ~/ros2_ws && colcon build --packages-select lingbot_map_ros && source install/setup.bash`
+5. Launch: `ros2 launch lingbot_map_ros lingbot_map.launch.py image_topic:=/camera/image_raw model_variant:=lingbot-map-long`
+6. Verify topics appear:
+   ```bash
+   ros2 topic list | grep lingbot
+   ```
+   Expected: `/lingbot/pointcloud`, `/lingbot/camera_pose`, `/lingbot/depth`, `/lingbot/conf`
+7. Drive the robot (or move the camera) for 30 seconds to build up the point cloud.
+8. Visualize in RViz2: add PointCloud2 display → topic `/lingbot/pointcloud`, frame `map`.
+9. Run the cuRobo export script to write a world obstacle:
+   ```bash
+   python scripts/export_lingbot_to_curobo.py \
+     --world_config ~/ros2_ws/src/.../curobo/world_config.yaml \
+     --mesh_out /tmp/lingbot_scene.ply \
+     --frames 200
+   ```
+10. Verify `world_config.yaml` now contains a `mesh.lingbot_scene` entry.
+
+**Pass criteria**:
+- Node starts and model loads without error (check `ros2 topic hz /lingbot/pointcloud` ≥ 5 Hz).
+- PointCloud2 in RViz2 shows the scene geometry (walls, floor, objects).
+- After export, `world_config.yaml` has a valid `mesh` entry pointing to the `.ply` file.
+- Re-launch cuMotion planner → it loads the new mesh as a collision obstacle.
 
 ## Troubleshooting
 

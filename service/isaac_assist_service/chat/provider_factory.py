@@ -20,6 +20,7 @@ def get_llm_provider():
 
     if mode == "anthropic":
         _require(config.api_key_anthropic, "ANTHROPIC_API_KEY", mode)
+        _require_model(config.cloud_model_name, mode)
         return AnthropicProvider(
             api_key=config.api_key_anthropic,
             model=config.cloud_model_name,
@@ -27,6 +28,7 @@ def get_llm_provider():
 
     if mode == "openai":
         _require(config.api_key_openai, "OPENAI_API_KEY", mode)
+        _require_model(config.cloud_model_name, mode)
         return OpenAICompatProvider(
             api_key=config.api_key_openai,
             model=config.cloud_model_name,
@@ -35,6 +37,7 @@ def get_llm_provider():
 
     if mode == "grok":
         _require(config.api_key_grok, "GROK_API_KEY / XAI_API_KEY", mode)
+        _require_model(config.cloud_model_name, mode)
         return OpenAICompatProvider(
             api_key=config.api_key_grok,
             model=config.cloud_model_name,
@@ -43,6 +46,7 @@ def get_llm_provider():
 
     if mode == "cloud":
         _require(config.api_key_gemini, "API_KEY_GEMINI / GEMINI_API_KEY", mode)
+        _require_model(config.cloud_model_name, mode)
         return GeminiProvider(
             api_key=config.api_key_gemini,
             model=config.cloud_model_name,
@@ -52,6 +56,7 @@ def get_llm_provider():
     # Uses /v1/chat/completions instead of /api/chat to avoid
     # Qwen 3.5 tool-call JSON parsing bugs in the native Ollama API.
     # See: https://github.com/ollama/ollama/issues/14493
+    _require_model(config.local_model_name, mode)
     ollama_base = config.openai_api_base.rstrip("/")
     if not ollama_base.endswith("/chat/completions"):
         ollama_base += "/chat/completions"
@@ -65,6 +70,15 @@ def get_llm_provider():
 def _require(value: str, key_name: str, mode: str):
     if not value:
         raise ValueError(f"LLM_MODE={mode} but {key_name} is missing from .env")
+
+
+def _require_model(model: str, mode: str):
+    if not model or not model.strip():
+        raise ValueError(
+            f"LLM_MODE={mode} but model name is empty. "
+            f"Set LOCAL_MODEL_NAME (or OLLAMA_MODEL) in service/.env for local mode, "
+            f"or CLOUD_MODEL_NAME for cloud modes."
+        )
 
 
 def get_distiller_provider():
