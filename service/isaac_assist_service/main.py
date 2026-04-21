@@ -62,7 +62,7 @@ if __name__ == "__main__":
     import argparse
     import uvicorn
 
-    VALID_MODES = ["local", "cloud", "anthropic", "openai", "grok"]
+    VALID_MODES = ["local", "google", "anthropic", "openai", "grok"]
 
     parser = argparse.ArgumentParser(description="Isaac Assist Service")
     parser.add_argument(

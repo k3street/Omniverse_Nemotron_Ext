@@ -63,7 +63,7 @@ async def pull_local_model(req: ModelPullRequest, background_tasks: BackgroundTa
 
 # ── Quick LLM mode switch ────────────────────────────────────────────────────
 
-VALID_MODES = ("local", "cloud", "anthropic", "openai", "grok", "gemini")
+VALID_MODES = ("local", "google", "anthropic", "openai", "grok", "gemini")
 
 
 class ModeSwitchRequest(BaseModel):
@@ -85,7 +85,7 @@ async def switch_llm_mode(req: ModeSwitchRequest):
     """
     Hot-switch the LLM provider without restarting the service.
 
-    Accepted modes: local, cloud, anthropic, openai, grok
+    Accepted modes: local, google, anthropic, openai, grok
     """
     mode = req.mode.strip().lower()
     if mode not in VALID_MODES:

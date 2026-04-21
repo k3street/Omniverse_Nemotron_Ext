@@ -44,7 +44,7 @@ class SwarmPlanGenerator:
         # Select model based on LLM mode — cloud models when configured,
         # local Ollama model otherwise.
         mode = config.llm_mode.lower()
-        if mode in ("anthropic", "openai", "grok", "cloud"):
+        if mode in ("anthropic", "openai", "grok", "google"):
             model_tag = config.cloud_model_name
             logger.info(f"Swarm using cloud model: {model_tag} (mode={mode})")
         else:

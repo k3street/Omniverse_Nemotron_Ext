@@ -15,9 +15,10 @@ class SettingsManager:
     _ENV_TO_ATTR = {
         "LLM_MODE":          "llm_mode",
         "CLOUD_MODEL_NAME":  "cloud_model_name",
+        "GEMINI_MODEL_NAME": "gemini_model_name",
         "LOCAL_MODEL_NAME":  "local_model_name",
-        "API_KEY_GEMINI":    "api_key_gemini",
         "GEMINI_API_KEY":    "api_key_gemini",
+        "API_KEY_GEMINI":    "api_key_gemini",
         "ANTHROPIC_API_KEY": "api_key_anthropic",
         "OPENAI_API_KEY":    "api_key_openai",
         "GROK_API_KEY":      "api_key_grok",
@@ -29,8 +30,8 @@ class SettingsManager:
     _INT_KEYS  = {"MAX_TOOL_ROUNDS"}
 
     def __init__(self):
-        # We target the .env located right next to the main config.py
-        self.env_path = Path(os.path.dirname(os.path.dirname(__file__))) / ".env"
+        # Target the root repo .env (where all API keys live)
+        self.env_path = Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))) / ".env"
     
     def get_settings(self) -> Dict[str, Any]:
         """Returns the current loaded configuration settings."""
@@ -38,8 +39,9 @@ class SettingsManager:
             "LLM_MODE": config.llm_mode,
             "LOCAL_MODEL_NAME": config.local_model_name,
             "CLOUD_MODEL_NAME": config.cloud_model_name,
+            "GEMINI_MODEL_NAME": config.gemini_model_name,
             "VISION_MODEL_NAME": config.vision_model_name,
-            "API_KEY_GEMINI": config.api_key_gemini,
+            "GEMINI_API_KEY": config.api_key_gemini,
             "OPENAI_API_BASE": config.openai_api_base,
             "OPENAI_API_KEY": config.api_key_openai,
             "CONTRIBUTE_DATA": str(config.contribute_data).lower(),

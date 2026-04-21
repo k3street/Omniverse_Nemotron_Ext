@@ -11,7 +11,7 @@ def get_llm_provider():
 
     LLM_MODE options:
       local       → Ollama (LOCAL_MODEL_NAME)
-      cloud       → Gemini (CLOUD_MODEL_NAME + API_KEY_GEMINI / GEMINI_API_KEY)
+      google      → Gemini (GEMINI_MODEL_NAME + GEMINI_API_KEY)
       anthropic   → Claude (CLOUD_MODEL_NAME + ANTHROPIC_API_KEY)
       openai      → OpenAI (CLOUD_MODEL_NAME + OPENAI_API_KEY)
       grok        → xAI Grok (CLOUD_MODEL_NAME + GROK_API_KEY / XAI_API_KEY)
@@ -44,12 +44,12 @@ def get_llm_provider():
             base_url=PROVIDER_URLS["grok"],
         )
 
-    if mode == "cloud":
-        _require(config.api_key_gemini, "API_KEY_GEMINI / GEMINI_API_KEY", mode)
-        _require_model(config.cloud_model_name, mode)
+    if mode == "google":
+        _require(config.api_key_gemini, "GEMINI_API_KEY", mode)
+        _require_model(config.gemini_model_name, mode)
         return GeminiProvider(
             api_key=config.api_key_gemini,
-            model=config.cloud_model_name,
+            model=config.gemini_model_name,
         )
 
     # Default → local Ollama via OpenAI-compatible endpoint
@@ -77,7 +77,7 @@ def _require_model(model: str, mode: str):
         raise ValueError(
             f"LLM_MODE={mode} but model name is empty. "
             f"Set LOCAL_MODEL_NAME (or OLLAMA_MODEL) in service/.env for local mode, "
-            f"or CLOUD_MODEL_NAME for cloud modes."
+            f"or CLOUD_MODEL_NAME for non-local modes."
         )
 
 

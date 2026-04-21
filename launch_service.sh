@@ -7,7 +7,7 @@
 #   ./launch_service.sh                  # Interactive menu
 #   ./launch_service.sh local            # Ollama (local)
 #   ./launch_service.sh anthropic        # Claude
-#   ./launch_service.sh cloud            # Gemini
+#   ./launch_service.sh google           # Gemini
 #   ./launch_service.sh openai           # OpenAI
 #   ./launch_service.sh grok             # xAI Grok
 
@@ -29,7 +29,7 @@ if [ -z "$MODE" ]; then
     echo "╠══════════════════════════════════════╣"
     echo "║  1) local      — Ollama (local GPU)  ║"
     echo "║  2) anthropic  — Claude              ║"
-    echo "║  3) cloud      — Gemini              ║"
+    echo "║  3) google     — Gemini              ║"
     echo "║  4) openai     — OpenAI              ║"
     echo "║  5) grok       — xAI Grok            ║"
     echo "╚══════════════════════════════════════╝"
@@ -39,7 +39,7 @@ if [ -z "$MODE" ]; then
     case "$CHOICE" in
         1|local)      MODE="local" ;;
         2|anthropic)  MODE="anthropic" ;;
-        3|cloud)      MODE="cloud" ;;
+        3|google)     MODE="google" ;;
         4|openai)     MODE="openai" ;;
         5|grok)       MODE="grok" ;;
         "")           MODE="${LLM_MODE:-local}" ;;
@@ -49,9 +49,9 @@ fi
 
 # ── Validate ──────────────────────────────────────────────────────────────────
 case "$MODE" in
-    local|cloud|anthropic|openai|grok) ;;
+    local|google|anthropic|openai|grok) ;;
     *)
-        echo "Error: Invalid mode '$MODE'. Choose: local, cloud, anthropic, openai, grok"
+        echo "Error: Invalid mode '$MODE'. Choose: local, google, anthropic, openai, grok"
         exit 1
         ;;
 esac
@@ -59,8 +59,10 @@ esac
 # ── Resolve model name for display ────────────────────────────────────────────
 if [ "$MODE" = "local" ]; then
     MODEL="${LOCAL_MODEL_NAME:-qwen3.5:35b}"
+elif [ "$MODE" = "google" ]; then
+    MODEL="${GEMINI_MODEL_NAME:-gemini-3.1-pro-preview}"
 else
-    MODEL="${CLOUD_MODEL_NAME:-claude-opus-4-7}"
+    MODEL="${CLOUD_MODEL_NAME:-claude-sonnet-4-6}"
 fi
 
 export LLM_MODE="$MODE"
