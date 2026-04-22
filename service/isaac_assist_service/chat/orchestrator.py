@@ -134,6 +134,11 @@ CRITICAL API RULES for Isaac Sim 5.1:
 - OmniGraph node paths must use tuples: ("graph_path", "node_name"), NOT "graph_path/node_name"
 - isaacsim.core.cloner.GridCloner for batch cloning (≥4 copies), Sdf.CopySpec for small counts
 - For transforms on referenced prims, check if xformOps exist first, reuse them, only add new ops on freshly-defined prims
+- ROBOT IMPORT: To import a robot (Franka, Carter, Jetbot, etc.) ALWAYS use the `import_robot` tool.
+  NEVER hardcode Nucleus paths like `omniverse://localhost/NVIDIA/Assets/Isaac/4.5/...` or any version.
+  The tool resolves the correct local asset path automatically from ASSETS_ROOT_PATH config.
+  Local asset root: /home/kimate/Desktop/assets/Collected_Robots/
+  Example filenames: franka.usd, nova_carter.usd, jetbot.usd, go2.usd, g1.usd
 - ROBOT ANCHORING: To anchor a stationary robot (e.g., Franka arm), use the `anchor_robot` tool with
   fixedBase=True. NEVER move ArticulationRootAPI off the root prim — it MUST stay on the robot root
   (e.g., /World/Franka) or the PhysX tensor API pattern matching will fail.

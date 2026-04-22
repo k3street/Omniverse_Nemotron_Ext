@@ -10,14 +10,28 @@ import json
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
-KIT_RPC_BASE = "http://127.0.0.1:8001"
+_KIT_RPC_DEFAULT = "http://127.0.0.1:8001"
+
+
+def _get_kit_rpc_base() -> str:
+    """Read the port the Kit RPC server actually bound to (written to /tmp at startup)."""
+    try:
+        with open("/tmp/isaac_assist_rpc_port") as f:
+            port = int(f.read().strip())
+            return f"http://127.0.0.1:{port}"
+    except Exception:
+        return _KIT_RPC_DEFAULT
+
+
+KIT_RPC_BASE = _KIT_RPC_DEFAULT  # kept for backward compat; _get_kit_rpc_base() used at call time
 
 
 async def _get(path: str, params: Dict = None) -> Dict[str, Any]:
+    base = _get_kit_rpc_base()
     try:
         import aiohttp
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{KIT_RPC_BASE}{path}", params=params, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+            async with session.get(f"{base}{path}", params=params, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status != 200:
                     return {"error": f"Kit RPC {path} returned {resp.status}"}
                 return await resp.json()
@@ -27,10 +41,11 @@ async def _get(path: str, params: Dict = None) -> Dict[str, Any]:
 
 
 async def _post(path: str, body: Dict) -> Dict[str, Any]:
+    base = _get_kit_rpc_base()
     try:
         import aiohttp
         async with aiohttp.ClientSession() as session:
-            async with session.post(f"{KIT_RPC_BASE}{path}", json=body, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+            async with session.post(f"{base}{path}", json=body, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status != 200:
                     return {"error": f"Kit RPC {path} returned {resp.status}"}
                 return await resp.json()
@@ -80,9 +95,10 @@ async def exec_sync(code: str, timeout: float = 30) -> Dict[str, Any]:
     """
     try:
         import aiohttp
+        base = _get_kit_rpc_base()
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                f"{KIT_RPC_BASE}/exec_sync",
+                f"{base}/exec_sync",
                 json={"code": code, "timeout": timeout},
                 timeout=aiohttp.ClientTimeout(total=timeout + 5),
             ) as resp:

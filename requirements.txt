@@ -24,3 +24,8 @@ livekit-plugins-noise-cancellation>=0.2.0
 # trl
 # peft
 # datasets
+
+# Teleoperation and Computer Vision Dependencies
+mediapipe
+opencv-python
+websockets

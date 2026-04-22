@@ -1343,9 +1343,9 @@ With fix recommendations for each warning/error.
 | T17 | Data query | Capture screenshot | ✅ tested 2026-04-21 (text only) |
 | T18 | Lighting | Dome light | ✅ tested 2026-04-21 |
 | T19 | OmniGraph | ROS2 clock graph | ✅ tested 2026-04-21 |
-| T20 | Complex | Multi-object scene | ✅ |
-| T21 | Data query | Console errors | ❌ (text only) |
-| T22 | Knowledge | Sensor specs | ❌ (text only) |
+| T20 | Complex | Multi-object scene | ✅ tested 2026-04-21 |
+| T21 | Data query | Console errors | ✅ tested 2026-04-21 (text only) |
+| T22 | Knowledge | Sensor specs | ✅ tested 2026-04-21 (text only) |
 | T23 | Sensor | Add camera sensor | ✅ |
 | T24 | Clone | Clone a prim | ✅ |
 | T25 | Transform | Move a prim | ✅ |
@@ -1690,6 +1690,23 @@ With fix recommendations for each warning/error.
 - PointCloud2 in RViz2 shows the scene geometry (walls, floor, objects).
 - After export, `world_config.yaml` has a valid `mesh` entry pointing to the `.ply` file.
 - Re-launch cuMotion planner → it loads the new mesh as a collision obstacle.
+
+---
+
+### T73 — MediaPipe Hand Pose Teleop
+**Type:**
+> Launch the MediaPipe hand teleop tool and map it to my URDF robotic hand.
+
+**Expected Flow:**
+1. A prompt appears indicating the teleop panel might have missing internal dependencies.
+2. We launch the teleoperation server in an isolated environment (`~/Desktop/alt-bionics/.venv` with `mediapipe`, `opencv-python`, `websockets`).
+3. Running the pipeline opens the `MediaPipe Bionic Hand Teleop` viewport with your webcam feed.
+4. Finger curls in the webcam correlate visually to joint values over WebSockets.
+
+**Verify:**
+- Point the camera at your hand and curl your fingers.
+- The ROS2 WebSockets listener receives real-time articulation positions.
+- The URDF hand inside Isaac Sim acts upon the published positions via OmniGraph `ArticulationController`.
 
 ## Troubleshooting
 

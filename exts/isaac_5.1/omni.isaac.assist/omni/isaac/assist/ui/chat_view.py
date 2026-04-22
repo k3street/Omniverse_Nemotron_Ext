@@ -21,6 +21,7 @@ class ChatViewWindow(ui.Window):
         self._auto_approve = os.environ.get("AUTO_APPROVE", "false").lower() == "true"
         self._busy = False
         self._cancel_event = asyncio.Event()
+        self._current_task = None
         try:
             self._build_ui()
         except Exception as e:
@@ -70,10 +71,12 @@ class ChatViewWindow(ui.Window):
         pass
 
     def _cancel_request(self):
-        """Signal the running async handler to stop after the current step."""
+        """Cancel the running async handler immediately by cancelling the task."""
         if self._busy:
             self._cancel_event.set()
-            self._add_chat_bubble("System", "[Stop] Request received — finishing current step...", is_user=False)
+            if self._current_task and not self._current_task.done():
+                self._current_task.cancel()
+            self._add_chat_bubble("System", "[Stop] Cancelling...", is_user=False)
 
     def _set_busy(self, busy: bool):
         self._busy = busy
@@ -108,11 +111,11 @@ class ChatViewWindow(ui.Window):
         # Dispatch async to service: route by prefix
         if text.lower().startswith("pipeline:") or text.lower().startswith("pipeline "):
             pipeline_prompt = text.split(":", 1)[1].strip() if ":" in text else text.split(" ", 1)[1].strip()
-            asyncio.ensure_future(self._handle_pipeline_request(pipeline_prompt))
+            self._current_task = asyncio.ensure_future(self._handle_pipeline_request(pipeline_prompt))
         elif text.lower().startswith("patch") or text.lower().startswith("fix"):
-            asyncio.ensure_future(self._handle_swarm_request(text))
+            self._current_task = asyncio.ensure_future(self._handle_swarm_request(text))
         else:
-            asyncio.ensure_future(self._handle_service_request(text, selected_prim_info=selected_prim_info))
+            self._current_task = asyncio.ensure_future(self._handle_service_request(text, selected_prim_info=selected_prim_info))
         self._set_busy(True)
 
     def _get_selected_prim_path(self):
@@ -304,10 +307,13 @@ class ChatViewWindow(ui.Window):
                             self._execute_patch(script_code)
                     else:
                         self._render_patch_action(action, conf)
+        except asyncio.CancelledError:
+            self._add_chat_bubble("System", "[Stop] Swarm request cancelled.", is_user=False)
+            raise
         finally:
             self._set_busy(False)
 
-    # ── Pipeline Executor ────────────────────────────────────────────────────
+    # -- Pipeline Executor --
 
     async def _handle_pipeline_request(self, prompt: str):
         """
@@ -319,6 +325,9 @@ class ChatViewWindow(ui.Window):
         self._set_busy(True)
         try:
             await self._run_pipeline(prompt)
+        except asyncio.CancelledError:
+            self._add_chat_bubble("System", "[Stop] Pipeline cancelled.", is_user=False)
+            raise
         finally:
             self._set_busy(False)
 
@@ -611,6 +620,9 @@ class ChatViewWindow(ui.Window):
                         self._execute_patch(code)
                     else:
                         self._render_code_patch(code, desc)
+        except asyncio.CancelledError:
+            self._add_chat_bubble("System", "[Stop] Request cancelled.", is_user=False)
+            raise
         finally:
             self._set_busy(False)
 

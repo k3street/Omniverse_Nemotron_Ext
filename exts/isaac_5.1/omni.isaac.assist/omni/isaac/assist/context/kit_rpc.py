@@ -115,6 +115,7 @@ class KitRPCServer:
             return
 
         self._loop = asyncio.new_event_loop()
+        self._serve_task = None
         self._thread = threading.Thread(target=self._run, daemon=True, name="IsaacAssist-RPC")
         self._thread.start()
         _server_instance = self
@@ -122,14 +123,29 @@ class KitRPCServer:
 
     def stop(self) -> None:
         if self._loop and self._loop.is_running():
-            self._loop.call_soon_threadsafe(self._loop.stop)
+            # Cancel the serve task so _runner.cleanup() runs inside the loop
+            def _cancel():
+                if self._serve_task and not self._serve_task.done():
+                    self._serve_task.cancel()
+            self._loop.call_soon_threadsafe(_cancel)
         if self._thread:
-            self._thread.join(timeout=3)
+            self._thread.join(timeout=5)
+        # Remove the port file
+        try:
+            import os
+            os.unlink("/tmp/isaac_assist_rpc_port")
+        except Exception:
+            pass
         carb.log_warn("[IsaacAssist] Kit RPC server stopped")
 
     def _run(self) -> None:
         asyncio.set_event_loop(self._loop)
-        self._loop.run_until_complete(self._serve())
+        try:
+            self._loop.run_until_complete(self._serve())
+        except RuntimeError:
+            pass  # loop stopped before future completed — expected on shutdown
+        finally:
+            self._loop.close()
 
     async def _serve(self) -> None:
         from aiohttp import web
@@ -148,11 +164,35 @@ class KitRPCServer:
 
         self._runner = web.AppRunner(app)
         await self._runner.setup()
-        site = web.TCPSite(self._runner, self.host, self.port)
-        await site.start()
+
+        # Try the configured port first, then fall back to the next 9 ports
+        bound_port = None
+        for candidate in range(self.port, self.port + 10):
+            try:
+                site = web.TCPSite(self._runner, self.host, candidate,
+                                   reuse_address=True)
+                await site.start()
+                bound_port = candidate
+                break
+            except OSError:
+                carb.log_warn(f"[IsaacAssist] Port {candidate} in use, trying next...")
+
+        if bound_port is None:
+            carb.log_error("[IsaacAssist] Could not bind Kit RPC server on any port in range "
+                           f"{self.port}-{self.port + 9}. Kit RPC disabled.")
+            return
+
+        self.port = bound_port
+        # Write bound port to a well-known file so the FastAPI service can discover it
+        try:
+            with open("/tmp/isaac_assist_rpc_port", "w") as _pf:
+                _pf.write(str(bound_port))
+        except Exception:
+            pass
         carb.log_warn(f"[IsaacAssist] Kit RPC listening on http://{self.host}:{self.port}")
 
-        # Keep the server alive until the event loop is stopped
+        # Keep the server alive until cancelled
+        self._serve_task = asyncio.current_task()
         try:
             while True:
                 await asyncio.sleep(3600)
