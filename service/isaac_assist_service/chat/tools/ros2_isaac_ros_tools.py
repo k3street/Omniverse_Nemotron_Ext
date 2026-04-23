@@ -513,3 +513,72 @@ async def handle_launch_nvblox(args: Dict[str, Any]) -> Dict[str, Any]:
             f"Mesh on /nvblox_node/mesh. Params saved to {params_yaml}."
         ),
     }
+
+# ── Isaac ROS Image Pipeline ────────────────────────────────────────────
+
+async def handle_launch_isaac_ros_image_pipeline(**kwargs: Any) -> Dict[str, Any]:
+    node_type = kwargs.get("node_type", "rectify")
+    camera_name = kwargs.get("camera_name", "camera")
+    input_topic = kwargs.get("input_topic", f"/{camera_name}/image_raw")
+    camera_info_topic = kwargs.get("camera_info_topic", f"/{camera_name}/camera_info")
+    
+    scene_dir = await _get_scene_dir()
+    image_pipeline_dir = scene_dir / "image_pipeline"
+    image_pipeline_dir.mkdir(parents=True, exist_ok=True)
+    
+    launch_path = image_pipeline_dir / f"launch_{node_type}.py"
+    
+    components = {
+        "rectify": "isaac_ros_image_proc::RectifyNode",
+        "resize": "isaac_ros_image_proc::ResizeNode",
+        "crop": "isaac_ros_image_proc::CropNode",
+        "format_converter": "isaac_ros_image_proc::ImageFormatConverterNode",
+        "stereo": "isaac_ros_stereo_image_proc::DisparityNode"
+    }
+    
+    pkg = "isaac_ros_stereo_image_proc" if node_type == "stereo" else "isaac_ros_image_proc"
+    component = components.get(node_type, components["rectify"])
+    
+    launch_code = textwrap.dedent(f'''\
+        import launch
+        from launch_ros.actions import ComposableNodeContainer
+        from launch_ros.descriptions import ComposableNode
+
+        def generate_launch_description():
+            container = ComposableNodeContainer(
+                name='image_pipeline_container',
+                namespace='{camera_name}',
+                package='rclcpp_components',
+                executable='component_container_mt',
+                composable_node_descriptions=[
+                    ComposableNode(
+                        package='{pkg}',
+                        plugin='{component}',
+                        name='{node_type}_node',
+                        parameters=[{{
+                            'output_width': 640,
+                            'output_height': 480,
+                            'encoding_desired': 'rgb8',
+                        }}],
+                        remappings=[
+                            ('image', '{input_topic}'),
+                            ('camera_info', '{camera_info_topic}'),
+                            ('image_rect', '{input_topic.replace("raw", "rect")}'),
+                            ('image_resized', '{input_topic.replace("raw", "resized")}'),
+                            ('disparity', '/{camera_name}/disparity')
+                        ]
+                    )
+                ],
+                output='screen'
+            )
+            return launch.LaunchDescription([container])
+    ''')
+    
+    launch_path.write_text(launch_code)
+    
+    return {
+        "type": "code_patch",
+        "description": f"Generated Isaac ROS hardware-accelerated {node_type} launch file at {launch_path}. Run with: ros2 launch {launch_path}",
+        "code": launch_code,
+        "launch_file": str(launch_path)
+    }

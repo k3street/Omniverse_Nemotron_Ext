@@ -36082,3 +36082,8 @@ DATA_HANDLERS.update({
     "query_sphere_collision":               handle_query_sphere_collision,
     "launch_world_collision_manager":       handle_launch_world_collision_manager,
 })
+
+from .ros2_isaac_ros_tools import handle_launch_isaac_ros_image_pipeline
+
+DATA_HANDLERS["launch_isaac_ros_image_pipeline"] = handle_launch_isaac_ros_image_pipeline
+

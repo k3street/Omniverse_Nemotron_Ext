@@ -2954,6 +2954,44 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ── Isaac ROS Image Pipeline ────────────────────────────────────────────
+
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_isaac_ros_image_pipeline",
+            "description": (
+                "Launch the Isaac ROS image pipeline — hardware-accelerated image processing "
+                "nodes including image format parsing, rectification, resizing, or stereo matching "
+                "using Nitros components. Use when the user asks to 'rectify an image', "
+                "'run isaac_ros_image_proc', 'compress images', 'resize camera feed', or "
+                "'calculate disparity/stereo depth'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "node_type": {
+                        "type": "string",
+                        "enum": ["rectify", "resize", "stereo", "crop", "format_converter"],
+                        "description": "The type of node to scaffold (default: 'rectify')",
+                    },
+                    "camera_name": {
+                        "type": "string",
+                        "description": "Base topic namespace (e.g., 'camera')",
+                    },
+                    "input_topic": {
+                        "type": "string",
+                        "description": "Image input topic (e.g., '/camera/image_raw')",
+                    },
+                    "camera_info_topic": {
+                        "type": "string",
+                        "description": "Camera info input topic (e.g., '/camera/camera_info')",
+                    },
+                },
+            },
+        },
+    },
+
     # ── Isaac ROS cuMotion ──────────────────────────────────────────────────
 
     {
