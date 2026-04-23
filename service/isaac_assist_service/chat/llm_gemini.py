@@ -161,14 +161,19 @@ class GeminiProvider:
                 if msg.get("content"):
                     parts.append({"text": msg["content"]})
                 for tc in msg["tool_calls"]:
-                    fn = tc.get("function", {})
-                    args = fn.get("arguments", "{}")
-                    parts.append({
-                        "functionCall": {
-                            "name": fn["name"],
-                            "args": json.loads(args) if isinstance(args, str) else args,
-                        }
-                    })
+                    if "gemini_part" in tc:
+                        parts.append(tc["gemini_part"])
+                    elif "gemini_fc" in tc:
+                        parts.append({"functionCall": tc["gemini_fc"]})
+                    else:
+                        fn = tc.get("function", {})
+                        args = fn.get("arguments", "{}")
+                        parts.append({
+                            "functionCall": {
+                                "name": fn["name"],
+                                "args": json.loads(args) if isinstance(args, str) else args,
+                            }
+                        })
                 gemini_msgs.append({"role": "model", "parts": parts})
                 continue
 
@@ -196,6 +201,7 @@ class GeminiProvider:
                 text_parts.append(part["text"])
             elif "functionCall" in part:
                 fc = part["functionCall"]
+                logger.info(f"Raw Gemini Part: {part}")
                 tool_calls.append({
                     "id": f"gemini_{fc['name']}",
                     "type": "function",
@@ -203,6 +209,8 @@ class GeminiProvider:
                         "name": fc["name"],
                         "arguments": json.dumps(fc.get("args", {})),
                     },
+                    "gemini_fc": fc,
+                    "gemini_part": part,
                 })
 
         text = "\n".join(text_parts)
