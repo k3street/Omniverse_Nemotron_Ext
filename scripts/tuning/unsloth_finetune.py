@@ -1,8 +1,8 @@
-\"\"\"
+"""
 Fine-Tuning Nemotron via Unsloth (QLoRA)
 This script loads a base model (e.g. nemotron-cascade-2 base / llama-3 architecture),
 attaches LoRA adapters, trains on the generated jsonl dataset, and saves the adapter.
-\"\"\"
+"""
 import os
 import torch
 # Make sure to install unsloth, transformers, trl, peft

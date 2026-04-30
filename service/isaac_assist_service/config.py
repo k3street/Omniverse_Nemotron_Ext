@@ -31,6 +31,11 @@ class Config:
         self.gemini_model_name = os.environ.get("GEMINI_MODEL_NAME", "gemini-3.1-pro-preview")
         self.distiller_model_name = os.environ.get("DISTILLER_MODEL_NAME", "")  # small LLM for context compression; blank = use local_model_name
         self.vision_model_name = os.environ.get("VISION_MODEL_NAME", "gemini-robotics-er-1.6-preview")
+        # Vision provider routing: "ollama" | "gemini" | "auto" (default = auto: Ollama→Gemini)
+        self.vision_provider   = os.environ.get("VISION_PROVIDER", "auto").lower()
+        self.ollama_vision_model = os.environ.get("OLLAMA_VISION_MODEL", "nemotron3:33b")
+        self.ollama_host       = os.environ.get("OLLAMA_HOST", "127.0.0.1")
+        self.ollama_vision_port = int(os.environ.get("OLLAMA_VISION_PORT", "11434"))
 
         # ── API keys (pulled from root .env or service .env) ─────────────────
         self.api_key_gemini    = os.environ.get("GEMINI_API_KEY") or os.environ.get("API_KEY_GEMINI", "")
@@ -53,8 +58,9 @@ class Config:
 
         # ── Misc ─────────────────────────────────────────────────────────────
         self.openai_api_base  = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
-        self.contribute_data  = os.environ.get("CONTRIBUTE_DATA", "false").lower() == "true"
-        self.auto_approve     = os.environ.get("AUTO_APPROVE", "false").lower() == "true"
+        self.contribute_data       = os.environ.get("CONTRIBUTE_DATA", "false").lower() == "true"
+        self.auto_approve          = os.environ.get("AUTO_APPROVE", "false").lower() == "true"
+        self.auto_inject_viewport  = os.environ.get("AUTO_INJECT_VIEWPORT", "false").lower() == "true"
         self.max_tool_rounds = int(os.environ.get("MAX_TOOL_ROUNDS", "10"))
         # ── Assets ───────────────────────────────────────────────────────────
         self.assets_root_path = os.environ.get("ASSETS_ROOT_PATH", "")

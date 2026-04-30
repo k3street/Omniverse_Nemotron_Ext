@@ -37,6 +37,30 @@ class FTSStore:
         ''', (content, source_id, section_path, url, version_scope, trust_tier))
         self.conn.commit()
 
+    def count_chunks(self, source_id: str = None) -> int:
+        """Return the number of indexed chunks, optionally filtered by source_id."""
+        c = self.conn.cursor()
+        if source_id:
+            # FTS5 tables don't support WHERE on UNINDEXED columns in normal COUNT,
+            # but we can use a shadow-table trick with content= or just iterate.
+            # Safest approach: use a metadata table or content scan.
+            c.execute(
+                "SELECT COUNT(*) FROM document_index WHERE source_id = ?",
+                (source_id,),
+            )
+        else:
+            c.execute("SELECT COUNT(*) FROM document_index")
+        row = c.fetchone()
+        return row[0] if row else 0
+
+    def delete_source(self, source_id: str) -> int:
+        """Delete all chunks for a source. Returns count deleted."""
+        c = self.conn.cursor()
+        c.execute("DELETE FROM document_index WHERE source_id = ?", (source_id,))
+        deleted = c.rowcount
+        self.conn.commit()
+        return deleted
+
     def search(self, query: str, limit: int = 5, version_scope: str = None) -> List[Dict[str, Any]]:
         c = self.conn.cursor()
         # Simple BM25 ranking built into SQLite FTS5 extension.

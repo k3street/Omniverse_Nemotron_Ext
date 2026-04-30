@@ -145,3 +145,39 @@ def index_mock_doc(source_id: str):
         version="6.0.0"
     )
     return {"chunks_indexed": count}
+
+
+@router.get("/sources/{source_id}/stats")
+def source_stats(source_id: str):
+    """Return the number of FTS chunks indexed for a source."""
+    count = store.count_chunks(source_id=source_id)
+    return {"source_id": source_id, "chunk_count": count}
+
+
+@router.post("/sources/{source_id}/ingest")
+def ingest_source(source_id: str, reset: bool = False):
+    """
+    Trigger a real web crawl of the registered source and load it into FTS.
+    Imports the scraper lazily to avoid network calls at app startup.
+    """
+    source_map = {s.source_id: s for s in registry.get_sources()}
+    if source_id not in source_map:
+        raise HTTPException(status_code=404, detail=f"Unknown source: {source_id}")
+
+    try:
+        from scripts.scrape_isaac_docs import SOURCES, crawl_source  # noqa: PLC0415
+        cfg = next((s for s in SOURCES if s["source_id"] == source_id), None)
+        if cfg is None:
+            raise HTTPException(status_code=422,
+                                detail=f"No crawler config for source '{source_id}'")
+
+        pages, chunks = crawl_source(
+            source=cfg,
+            indexer=indexer,
+            store=store,
+            reset=reset,
+        )
+        return {"source_id": source_id, "pages_crawled": pages, "chunks_indexed": chunks}
+    except ImportError as exc:
+        raise HTTPException(status_code=500,
+                            detail=f"Crawler not available: {exc}") from exc

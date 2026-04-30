@@ -28,6 +28,7 @@ from .tools.kit_tools import (
     get_stage_context,
     format_stage_context_for_llm,
     is_kit_rpc_alive,
+    get_viewport_image,
 )
 from .tools.tool_schemas import ISAAC_SIM_TOOLS
 from .tools.tool_executor import execute_tool_call
@@ -304,6 +305,35 @@ class ChatOrchestrator:
 
         messages = distilled.messages
         selected_tools = distilled.tools
+
+        # ── 4b. Auto-inject viewport (if enabled) ────────────────────────────
+        if config.auto_inject_viewport and await is_kit_rpc_alive():
+            try:
+                vp_result = await get_viewport_image(max_dim=1280)
+                vp_b64 = vp_result.get("image_b64") or vp_result.get("data", "")
+                if vp_b64:
+                    # Find the last user message and upgrade its content to multimodal
+                    for i in range(len(messages) - 1, -1, -1):
+                        if messages[i].get("role") == "user":
+                            original_text = messages[i].get("content", "")
+                            if isinstance(original_text, str):
+                                messages[i] = {
+                                    "role": "user",
+                                    "content": [
+                                        {
+                                            "type": "image_url",
+                                            "image_url": {
+                                                "url": f"data:image/png;base64,{vp_b64}",
+                                                "detail": "low",
+                                            },
+                                        },
+                                        {"type": "text", "text": original_text},
+                                    ],
+                                }
+                            break
+                    logger.info(f"[{session_id}] Viewport auto-injected into turn")
+            except Exception as e:
+                logger.warning(f"[{session_id}] Viewport auto-inject failed: {e}")
 
         logger.info(
             f"[{session_id}] Distilled: ~{distilled.token_estimate} tokens, "

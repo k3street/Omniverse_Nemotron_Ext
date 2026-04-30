@@ -1309,7 +1309,7 @@ result, prim_path = omni.kit.commands.execute(
             "raise RuntimeError('ASSETS_ROOT_PATH not set in .env — cannot resolve robot assets')"
         )
 
-    is_nucleus = _LOCAL_ASSETS.startswith("omniverse://")
+    is_nucleus = bool(_LOCAL_ASSETS) and _LOCAL_ASSETS.startswith("omniverse://")
 
     if fmt == "asset_library" or local_file:
         if local_file:
@@ -1951,11 +1951,7 @@ async def _handle_lookup_material(args: Dict) -> Dict:
 
 async def _handle_lookup_knowledge(args: Dict) -> Dict:
     """Search the version-specific knowledge base for code patterns and docs."""
-    from ...retrieval.context_retriever import (
-        retrieve_context,
-        find_matching_patterns,
-        detect_isaac_version,
-    )
+    from ...retrieval.context_retriever import retrieve_context, find_matching_patterns, detect_isaac_version
     query = args.get("query", "")
     version = detect_isaac_version()
 
@@ -2006,19 +2002,7 @@ DATA_HANDLERS = {
 
 # ── ROS2 live handlers (via rosbridge / ros-mcp) ────────────────────────────
 try:
-    from .ros_mcp_tools import (
-        handle_ros2_connect,
-        handle_ros2_list_topics,
-        handle_ros2_get_topic_type,
-        handle_ros2_get_message_type,
-        handle_ros2_subscribe_once,
-        handle_ros2_publish,
-        handle_ros2_publish_sequence,
-        handle_ros2_list_services,
-        handle_ros2_call_service,
-        handle_ros2_list_nodes,
-        handle_ros2_get_node_details,
-    )
+    from .ros_mcp_tools import handle_ros2_connect, handle_ros2_list_topics, handle_ros2_get_topic_type, handle_ros2_get_message_type, handle_ros2_subscribe_once, handle_ros2_publish, handle_ros2_publish_sequence, handle_ros2_list_services, handle_ros2_call_service, handle_ros2_list_nodes, handle_ros2_get_node_details
     DATA_HANDLERS.update({
         "ros2_connect": handle_ros2_connect,
         "ros2_list_topics": handle_ros2_list_topics,
@@ -2061,83 +2045,16 @@ DATA_HANDLERS["deploy_rl_policy"] = handle_deploy_rl_policy
 DATA_HANDLERS["stop_rl_policy"] = handle_stop_rl_policy
 
 # ── Phase 9 — ROS2 Autonomy Stack ────────────────────────────────────────────
-from .ros2_node_scaffolder import (
-    handle_scaffold_ros2_node,
-    handle_launch_ros2_node,
-)
-from .ros2_isaac_ros_tools import (
-    handle_launch_object_detection,
-    handle_launch_pose_estimation,
-    handle_launch_nvblox,
-)
-from .ros2_segmentation_tools import (
-    handle_launch_unet_segmentation,
-    handle_launch_segformer,
-    handle_launch_segment_anything,
-    handle_launch_segment_anything2,
-    handle_sam2_add_objects,
-    handle_sam2_remove_object,
-    handle_configure_segmentation_for_nvblox,
-)
-from .ros2_cumotion_tools import (
-    handle_launch_cumotion_planner,
-    handle_launch_robot_segmenter,
-    handle_launch_esdf_visualizer,
-    handle_launch_cumotion_moveit,
-    handle_launch_goal_setter,
-    handle_set_cumotion_target_pose,
-    handle_launch_object_attachment,
-    handle_attach_object,
-    handle_generate_xrdf,
-)
-from .ros2_localization_tools import (
-    handle_launch_occupancy_grid_localizer,
-    handle_trigger_grid_search_localization,
-    handle_launch_pointcloud_to_flatscan,
-    handle_launch_laserscan_to_flatscan,
-    handle_launch_visual_global_localization,
-    handle_trigger_visual_localization,
-    handle_build_visual_map,
-    handle_load_visual_slam_map,
-    handle_localize_in_visual_slam_map,
-    handle_reset_visual_slam,
-    handle_get_visual_slam_poses,
-    handle_set_visual_slam_pose,
-)
+from .ros2_node_scaffolder import handle_scaffold_ros2_node, handle_launch_ros2_node
+from .ros2_isaac_ros_tools import handle_launch_object_detection, handle_launch_pose_estimation, handle_launch_nvblox
+from .ros2_segmentation_tools import handle_launch_unet_segmentation, handle_launch_segformer, handle_launch_segment_anything, handle_launch_segment_anything2, handle_sam2_add_objects, handle_sam2_remove_object, handle_configure_segmentation_for_nvblox
+from .ros2_cumotion_tools import handle_launch_cumotion_planner, handle_launch_robot_segmenter, handle_launch_esdf_visualizer, handle_launch_cumotion_moveit, handle_launch_goal_setter, handle_set_cumotion_target_pose, handle_launch_object_attachment, handle_attach_object, handle_generate_xrdf
+from .ros2_localization_tools import handle_launch_occupancy_grid_localizer, handle_trigger_grid_search_localization, handle_launch_pointcloud_to_flatscan, handle_launch_laserscan_to_flatscan, handle_launch_visual_global_localization, handle_trigger_visual_localization, handle_build_visual_map, handle_load_visual_slam_map, handle_localize_in_visual_slam_map, handle_reset_visual_slam, handle_get_visual_slam_poses, handle_set_visual_slam_pose
 
-from .ros2_gemini_robotics_tools import (
-    handle_launch_gemini_robotics_bridge,
-)
-from .ros2_curobo_world_tools import (
-    handle_configure_curobo_world,
-    handle_add_world_obstacle,
-    handle_remove_world_obstacle,
-    handle_update_obstacle_pose,
-    handle_enable_world_obstacle,
-    handle_query_sphere_collision,
-    handle_launch_world_collision_manager,
-)
+from .ros2_gemini_robotics_tools import handle_launch_gemini_robotics_bridge
+from .ros2_curobo_world_tools import handle_configure_curobo_world, handle_add_world_obstacle, handle_remove_world_obstacle, handle_update_obstacle_pose, handle_enable_world_obstacle, handle_query_sphere_collision, handle_launch_world_collision_manager
 
-from .ros2_autonomy_tools import (
-    handle_check_scene_ready,
-    handle_get_machine_specs,
-    handle_suggest_next_steps,
-    handle_check_sensor_health,
-    handle_launch_nav2,
-    handle_launch_slam,
-    handle_list_launched,
-    handle_stop_launched,
-    handle_restart_launched,
-    handle_slam_start,
-    handle_slam_stop,
-    handle_slam_status,
-    handle_map_export,
-    handle_nav2_goto,
-    handle_save_location,
-    handle_launch_visual_slam,
-    handle_launch_depth_to_laserscan,
-    handle_save_visual_slam_map,
-)
+from .ros2_autonomy_tools import handle_check_scene_ready, handle_get_machine_specs, handle_suggest_next_steps, handle_check_sensor_health, handle_launch_nav2, handle_launch_slam, handle_list_launched, handle_stop_launched, handle_restart_launched, handle_slam_start, handle_slam_stop, handle_slam_status, handle_map_export, handle_nav2_goto, handle_save_location, handle_launch_visual_slam, handle_launch_depth_to_laserscan, handle_save_visual_slam_map
 
 DATA_HANDLERS.update({
     "check_scene_ready":   handle_check_scene_ready,
@@ -6889,11 +6806,7 @@ async def _handle_get_debug_info(args: Dict) -> Dict:
 
 async def _handle_lookup_knowledge(args: Dict) -> Dict:
     """Search the version-specific knowledge base for code patterns and docs."""
-    from ...retrieval.context_retriever import (
-        retrieve_context,
-        find_matching_patterns,
-        detect_isaac_version,
-    )
+    from ...retrieval.context_retriever import retrieve_context, find_matching_patterns, detect_isaac_version
     query = args.get("query", "")
     version = detect_isaac_version()
 
@@ -6954,19 +6867,7 @@ DATA_HANDLERS["inspect_camera"] = _handle_inspect_camera
 
 # ── ROS2 live handlers (via rosbridge / ros-mcp) ────────────────────────────
 try:
-    from .ros_mcp_tools import (
-        handle_ros2_connect,
-        handle_ros2_list_topics,
-        handle_ros2_get_topic_type,
-        handle_ros2_get_message_type,
-        handle_ros2_subscribe_once,
-        handle_ros2_publish,
-        handle_ros2_publish_sequence,
-        handle_ros2_list_services,
-        handle_ros2_call_service,
-        handle_ros2_list_nodes,
-        handle_ros2_get_node_details,
-    )
+    from .ros_mcp_tools import handle_ros2_connect, handle_ros2_list_topics, handle_ros2_get_topic_type, handle_ros2_get_message_type, handle_ros2_subscribe_once, handle_ros2_publish, handle_ros2_publish_sequence, handle_ros2_list_services, handle_ros2_call_service, handle_ros2_list_nodes, handle_ros2_get_node_details
     DATA_HANDLERS.update({
         "ros2_connect": handle_ros2_connect,
         "ros2_list_topics": handle_ros2_list_topics,
@@ -11003,19 +10904,7 @@ DATA_HANDLERS = {
 
 # ── ROS2 live handlers (via rosbridge / ros-mcp) ────────────────────────────
 try:
-    from .ros_mcp_tools import (
-        handle_ros2_connect,
-        handle_ros2_list_topics,
-        handle_ros2_get_topic_type,
-        handle_ros2_get_message_type,
-        handle_ros2_subscribe_once,
-        handle_ros2_publish,
-        handle_ros2_publish_sequence,
-        handle_ros2_list_services,
-        handle_ros2_call_service,
-        handle_ros2_list_nodes,
-        handle_ros2_get_node_details,
-    )
+    from .ros_mcp_tools import handle_ros2_connect, handle_ros2_list_topics, handle_ros2_get_topic_type, handle_ros2_get_message_type, handle_ros2_subscribe_once, handle_ros2_publish, handle_ros2_publish_sequence, handle_ros2_list_services, handle_ros2_call_service, handle_ros2_list_nodes, handle_ros2_get_node_details
     DATA_HANDLERS.update({
         "ros2_connect": handle_ros2_connect,
         "ros2_list_topics": handle_ros2_list_topics,
@@ -18552,7 +18441,7 @@ result, prim_path = omni.kit.commands.execute(
             "raise RuntimeError('ASSETS_ROOT_PATH not set in .env — cannot resolve robot assets')"
         )
 
-    is_nucleus = _LOCAL_ASSETS.startswith("omniverse://")
+    is_nucleus = bool(_LOCAL_ASSETS) and _LOCAL_ASSETS.startswith("omniverse://")
 
     if fmt == "asset_library" or local_file:
         if local_file:
@@ -18843,11 +18732,7 @@ async def _handle_get_debug_info(args: Dict) -> Dict:
 
 async def _handle_lookup_knowledge(args: Dict) -> Dict:
     """Search the version-specific knowledge base for code patterns and docs."""
-    from ...retrieval.context_retriever import (
-        retrieve_context,
-        find_matching_patterns,
-        detect_isaac_version,
-    )
+    from ...retrieval.context_retriever import retrieve_context, find_matching_patterns, detect_isaac_version
     query = args.get("query", "")
     version = detect_isaac_version()
 
@@ -18896,19 +18781,7 @@ DATA_HANDLERS = {
 
 # ── ROS2 live handlers (via rosbridge / ros-mcp) ────────────────────────────
 try:
-    from .ros_mcp_tools import (
-        handle_ros2_connect,
-        handle_ros2_list_topics,
-        handle_ros2_get_topic_type,
-        handle_ros2_get_message_type,
-        handle_ros2_subscribe_once,
-        handle_ros2_publish,
-        handle_ros2_publish_sequence,
-        handle_ros2_list_services,
-        handle_ros2_call_service,
-        handle_ros2_list_nodes,
-        handle_ros2_get_node_details,
-    )
+    from .ros_mcp_tools import handle_ros2_connect, handle_ros2_list_topics, handle_ros2_get_topic_type, handle_ros2_get_message_type, handle_ros2_subscribe_once, handle_ros2_publish, handle_ros2_publish_sequence, handle_ros2_list_services, handle_ros2_call_service, handle_ros2_list_nodes, handle_ros2_get_node_details
     DATA_HANDLERS.update({
         "ros2_connect": handle_ros2_connect,
         "ros2_list_topics": handle_ros2_list_topics,
@@ -33477,11 +33350,7 @@ async def _handle_get_debug_info(args: Dict) -> Dict:
 
 async def _handle_lookup_knowledge(args: Dict) -> Dict:
     """Search the version-specific knowledge base for code patterns and docs."""
-    from ...retrieval.context_retriever import (
-        retrieve_context,
-        find_matching_patterns,
-        detect_isaac_version,
-    )
+    from ...retrieval.context_retriever import retrieve_context, find_matching_patterns, detect_isaac_version
     query = args.get("query", "")
     version = detect_isaac_version()
 
@@ -33538,19 +33407,7 @@ DATA_HANDLERS = {
 
 # ── ROS2 live handlers (via rosbridge / ros-mcp) ────────────────────────────
 try:
-    from .ros_mcp_tools import (
-        handle_ros2_connect,
-        handle_ros2_list_topics,
-        handle_ros2_get_topic_type,
-        handle_ros2_get_message_type,
-        handle_ros2_subscribe_once,
-        handle_ros2_publish,
-        handle_ros2_publish_sequence,
-        handle_ros2_list_services,
-        handle_ros2_call_service,
-        handle_ros2_list_nodes,
-        handle_ros2_get_node_details,
-    )
+    from .ros_mcp_tools import handle_ros2_connect, handle_ros2_list_topics, handle_ros2_get_topic_type, handle_ros2_get_message_type, handle_ros2_subscribe_once, handle_ros2_publish, handle_ros2_publish_sequence, handle_ros2_list_services, handle_ros2_call_service, handle_ros2_list_nodes, handle_ros2_get_node_details
     DATA_HANDLERS.update({
         "ros2_connect": handle_ros2_connect,
         "ros2_list_topics": handle_ros2_list_topics,
@@ -34507,8 +34364,23 @@ async def _get_viewport_bytes() -> tuple:
 
 
 def _get_vision_provider():
-    from ..vision_gemini import GeminiVisionProvider
-    return GeminiVisionProvider()
+    """
+    Return the active vision provider based on config.vision_provider.
+
+    "ollama"  -> OllamaVisionProvider only (nemotron3:33b by default)
+    "gemini"  -> GeminiVisionProvider only
+    "auto"    -> VisionRouter: Ollama primary, Gemini fallback (default)
+    """
+    from ...config import config as _cfg
+    mode = _cfg.vision_provider
+    if mode == "gemini":
+        from ..vision_gemini import GeminiVisionProvider
+        return GeminiVisionProvider()
+    if mode == "ollama":
+        from ..vision_ollama import OllamaVisionProvider
+        return OllamaVisionProvider()
+    from ..vision_router import build_vision_router
+    return build_vision_router()
 
 
 async def _handle_vision_detect_objects(args: Dict) -> Dict:
@@ -35982,56 +35854,13 @@ CODE_GEN_HANDLERS["configure_actor_commands"] = _gen_configure_actor_commands
 
 # ── Late registrations: Isaac ROS Perception / Segmentation / cuMotion / Localization / Gemini / cuRobo ──
 
-from .ros2_isaac_ros_tools import (
-    handle_launch_object_detection,
-    handle_launch_pose_estimation,
-    handle_launch_nvblox,
-)
-from .ros2_segmentation_tools import (
-    handle_launch_unet_segmentation,
-    handle_launch_segformer,
-    handle_launch_segment_anything,
-    handle_launch_segment_anything2,
-    handle_sam2_add_objects,
-    handle_sam2_remove_object,
-    handle_configure_segmentation_for_nvblox,
-)
-from .ros2_cumotion_tools import (
-    handle_launch_cumotion_planner,
-    handle_launch_robot_segmenter,
-    handle_launch_esdf_visualizer,
-    handle_launch_cumotion_moveit,
-    handle_launch_goal_setter,
-    handle_set_cumotion_target_pose,
-    handle_launch_object_attachment,
-    handle_attach_object,
-    handle_generate_xrdf,
-)
-from .ros2_localization_tools import (
-    handle_launch_occupancy_grid_localizer,
-    handle_trigger_grid_search_localization,
-    handle_launch_pointcloud_to_flatscan,
-    handle_launch_laserscan_to_flatscan,
-    handle_launch_visual_global_localization,
-    handle_trigger_visual_localization,
-    handle_build_visual_map,
-    handle_load_visual_slam_map,
-    handle_localize_in_visual_slam_map,
-    handle_reset_visual_slam,
-    handle_get_visual_slam_poses,
-    handle_set_visual_slam_pose,
-)
+from .ros2_isaac_ros_tools import handle_launch_object_detection, handle_launch_pose_estimation, handle_launch_nvblox
+from .ros2_segmentation_tools import handle_launch_unet_segmentation, handle_launch_segformer, handle_launch_segment_anything, handle_launch_segment_anything2, handle_sam2_add_objects, handle_sam2_remove_object, handle_configure_segmentation_for_nvblox
+from .ros2_cumotion_tools import handle_launch_cumotion_planner, handle_launch_robot_segmenter, handle_launch_esdf_visualizer, handle_launch_cumotion_moveit, handle_launch_goal_setter, handle_set_cumotion_target_pose, handle_launch_object_attachment, handle_attach_object, handle_generate_xrdf
+from .ros2_localization_tools import handle_launch_occupancy_grid_localizer, handle_trigger_grid_search_localization, handle_launch_pointcloud_to_flatscan, handle_launch_laserscan_to_flatscan, handle_launch_visual_global_localization, handle_trigger_visual_localization, handle_build_visual_map, handle_load_visual_slam_map, handle_localize_in_visual_slam_map, handle_reset_visual_slam, handle_get_visual_slam_poses, handle_set_visual_slam_pose
 from .ros2_gemini_robotics_tools import handle_launch_gemini_robotics_bridge
 from .ros2_lingbot_tools import handle_launch_lingbot_map
-from .ros2_curobo_world_tools import (
-    handle_configure_curobo_world,
-    handle_add_world_obstacle,
-    handle_remove_world_obstacle,
-    handle_update_obstacle_pose,
-    handle_enable_world_obstacle,
-    handle_query_sphere_collision,
-    handle_launch_world_collision_manager,
-)
+from .ros2_curobo_world_tools import handle_configure_curobo_world, handle_add_world_obstacle, handle_remove_world_obstacle, handle_update_obstacle_pose, handle_enable_world_obstacle, handle_query_sphere_collision, handle_launch_world_collision_manager
 
 DATA_HANDLERS.update({
     # Isaac ROS Perception

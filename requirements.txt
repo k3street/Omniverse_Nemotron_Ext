@@ -25,6 +25,9 @@ livekit-plugins-noise-cancellation>=0.2.0
 # peft
 # datasets
 
+# Training run monitoring
+tensorboard>=2.14.0
+
 # Teleoperation and Computer Vision Dependencies
 mediapipe
 opencv-python

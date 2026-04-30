@@ -41,11 +41,16 @@ class SettingsManager:
             "CLOUD_MODEL_NAME": config.cloud_model_name,
             "GEMINI_MODEL_NAME": config.gemini_model_name,
             "VISION_MODEL_NAME": config.vision_model_name,
+            "VISION_PROVIDER": config.vision_provider,
+            "OLLAMA_VISION_MODEL": config.ollama_vision_model,
+            "OLLAMA_HOST": config.ollama_host,
+            "OLLAMA_VISION_PORT": str(config.ollama_vision_port),
             "GEMINI_API_KEY": config.api_key_gemini,
             "OPENAI_API_BASE": config.openai_api_base,
             "OPENAI_API_KEY": config.api_key_openai,
             "CONTRIBUTE_DATA": str(config.contribute_data).lower(),
             "AUTO_APPROVE": str(config.auto_approve).lower(),
+            "AUTO_INJECT_VIEWPORT": str(config.auto_inject_viewport).lower(),
             "MAX_TOOL_ROUNDS": str(config.max_tool_rounds)
         }
 

@@ -14,7 +14,7 @@ def generate_synthetic_code_pairs(output_file: str):
         {
             "instruction": "Write a Python script to create a simple physics scene with a ground plane and a falling cube in Isaac Sim.",
             "input": "",
-            "output": \"\"\"import omni.usd
+            "output": """import omni.usd
 from pxr import UsdGeom, Gf
 
 def create_physics_scene():
@@ -38,12 +38,12 @@ def create_physics_scene():
     # Move cube up
     xform = UsdGeom.Xformable(cube_prim)
     xform.AddTranslateOp().Set(Gf.Vec3f(0, 0, 500))
-    \"\"\"
+    """
         },
         {
             "instruction": "How do I subscribe to selection changes in an Omniverse extension?",
             "input": "",
-            "output": \"\"\"import omni.usd
+            "output": """import omni.usd
 
 class SelectionObserver:
     def __init__(self):
@@ -60,7 +60,7 @@ class SelectionObserver:
     def destroy(self):
         self._sub = None
         self._events = None
-\"\"\"
+"""
         }
     ]
     

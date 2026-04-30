@@ -216,3 +216,212 @@ class TestVersionSanitization:
         knowledge_base.add_entry("", "Q", "A")
         entries = knowledge_base.get_entries("")
         assert len(entries) == 1
+
+
+# ---------------------------------------------------------------------------
+# Negative pattern persistence and deduplication
+# ---------------------------------------------------------------------------
+
+class TestNegativePatterns:
+
+    def test_add_stores_entry(self, knowledge_base):
+        ok = knowledge_base.add_negative_pattern(
+            version="5.1.0",
+            error_signature="AttributeError: NoneType has no startswith",
+            failing_code="is_nucleus = asset.startswith('omniverse://')",
+            root_cause="asset can be None when LOCAL_ASSETS is unset",
+            fix_applied="guard with bool(asset) and asset.startswith(...)",
+        )
+        assert ok is True
+        patterns = knowledge_base._load_negative_patterns("5.1.0")
+        assert len(patterns) == 1
+        assert patterns[0]["error_signature"] == "AttributeError: NoneType has no startswith"
+
+    def test_add_deduplicates_within_24h(self, knowledge_base):
+        sig = "TypeError: unsupported operand int + str"
+        ok1 = knowledge_base.add_negative_pattern(
+            "5.1.0", sig, "x = 1 + 'a'", "type mismatch", "cast to int"
+        )
+        ok2 = knowledge_base.add_negative_pattern(
+            "5.1.0", sig, "x = 1 + 'a'", "type mismatch", "cast to int"
+        )
+        assert ok1 is True
+        assert ok2 is False  # duplicate within 24 h
+        patterns = knowledge_base._load_negative_patterns("5.1.0")
+        assert len(patterns) == 1
+
+    def test_add_different_signatures_both_stored(self, knowledge_base):
+        knowledge_base.add_negative_pattern(
+            "5.1.0", "SigA", "code_a", "cause_a", "fix_a"
+        )
+        knowledge_base.add_negative_pattern(
+            "5.1.0", "SigB", "code_b", "cause_b", "fix_b"
+        )
+        patterns = knowledge_base._load_negative_patterns("5.1.0")
+        sigs = {p["error_signature"] for p in patterns}
+        assert "SigA" in sigs and "SigB" in sigs
+
+    def test_load_negative_patterns_empty_version(self, knowledge_base):
+        patterns = knowledge_base._load_negative_patterns("nonexistent_ver")
+        assert patterns == []
+
+
+# ---------------------------------------------------------------------------
+# get_negative_patterns — keyword-based retrieval
+# ---------------------------------------------------------------------------
+
+class TestGetNegativePatterns:
+
+    def test_returns_by_keyword_overlap(self, knowledge_base):
+        knowledge_base.add_negative_pattern(
+            "5.1.0",
+            "physics rigid body crash",
+            "RigidBodyAPI.Apply(prim)",
+            "prim not on stage",
+            "check prim.IsValid() first",
+        )
+        results = knowledge_base.get_negative_patterns(
+            "5.1.0", "rigid body physics", limit=5
+        )
+        assert len(results) >= 1
+
+    def test_no_match_returns_empty(self, knowledge_base):
+        knowledge_base.add_negative_pattern(
+            "5.1.0", "collision mesh crash", "mesh = ...", "bad mesh", "fix"
+        )
+        results = knowledge_base.get_negative_patterns(
+            "5.1.0", "completely unrelated query", limit=5
+        )
+        assert results == []
+
+    def test_empty_patterns_returns_empty(self, knowledge_base):
+        results = knowledge_base.get_negative_patterns("5.1.0", "some query", limit=5)
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# format_negative_patterns — output formatting
+# ---------------------------------------------------------------------------
+
+class TestFormatNegativePatterns:
+
+    def test_empty_list_returns_empty_string(self, knowledge_base):
+        assert knowledge_base.format_negative_patterns([]) == ""
+
+    def test_nonempty_includes_header(self, knowledge_base):
+        patterns = [
+            {
+                "error_signature": "NullError",
+                "root_cause": "None value",
+                "fix_applied": "add None check",
+            }
+        ]
+        text = knowledge_base.format_negative_patterns(patterns)
+        assert "KNOWN FAILURE PATTERNS" in text
+
+    def test_nonempty_includes_signature(self, knowledge_base):
+        patterns = [
+            {
+                "error_signature": "My special error sig",
+                "root_cause": "cause here",
+                "fix_applied": "the fix",
+            }
+        ]
+        text = knowledge_base.format_negative_patterns(patterns)
+        assert "My special error sig" in text
+
+
+# ---------------------------------------------------------------------------
+# query_by_error_pattern — searches both error learnings AND negative patterns
+# ---------------------------------------------------------------------------
+
+class TestQueryByErrorPattern:
+
+    def test_matches_error_learnings(self, knowledge_base):
+        knowledge_base.add_error(
+            "5.1.0",
+            "AttributeError rigid body prim crash",
+            "Apply RigidBodyAPI to prim",
+            "AttributeError: rigid body prim is None",
+        )
+        results = knowledge_base.query_by_error_pattern(
+            "5.1.0", "rigid body prim", limit=5
+        )
+        assert len(results) >= 1
+
+    def test_matches_negative_patterns(self, knowledge_base):
+        knowledge_base.add_negative_pattern(
+            "5.1.0",
+            "rigid body prim AttributeError",
+            "RigidBodyAPI.Apply(prim)",
+            "prim invalid",
+            "check IsValid()",
+        )
+        results = knowledge_base.query_by_error_pattern(
+            "5.1.0", "rigid body prim", limit=5
+        )
+        assert len(results) >= 1
+
+    def test_no_overlap_returns_empty(self, knowledge_base):
+        knowledge_base.add_error(
+            "5.1.0",
+            "collision mesh import error",
+            "import mesh from USD file",
+            "ImportError: mesh file not found",
+        )
+        results = knowledge_base.query_by_error_pattern(
+            "5.1.0", "articulation joint xyz", limit=5
+        )
+        assert results == []
+
+    def test_empty_base_returns_empty(self, knowledge_base):
+        results = knowledge_base.query_by_error_pattern("5.1.0", "any error", limit=5)
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# capture_plan_outcome — routes success / failure to the right store
+# ---------------------------------------------------------------------------
+
+class TestCapturePlanOutcome:
+
+    def test_success_adds_to_success_learnings(self, knowledge_base):
+        knowledge_base.capture_plan_outcome(
+            version="5.1.0",
+            user_message="add a cube with rigid body",
+            plan_steps=["Create Xform", "Apply RigidBodyAPI"],
+            success=True,
+            error_output=None,
+            code="stage.DefinePrim('/World/Cube')",
+        )
+        entries = knowledge_base.get_entries("5.1.0")
+        assert any("cube" in e.get("instruction", "").lower() for e in entries)
+
+    def test_failure_adds_negative_pattern(self, knowledge_base):
+        knowledge_base.capture_plan_outcome(
+            version="5.1.0",
+            user_message="set joint drive stiffness",
+            plan_steps=["Find joint prim", "Set stiffness"],
+            success=False,
+            error_output="AttributeError: 'NoneType' object has no attribute 'GetDriveAPI'",
+            code="joint.GetDriveAPI('linear').GetStiffnessAttr().Set(1000)",
+        )
+        patterns = knowledge_base._load_negative_patterns("5.1.0")
+        assert len(patterns) >= 1
+        # Error signature should contain some part of the error
+        sigs = [p["error_signature"] for p in patterns]
+        assert any("AttributeError" in s or "NoneType" in s or "stiffness" in s.lower()
+                   for s in sigs)
+
+    def test_success_with_empty_code_still_stores(self, knowledge_base):
+        ok_before = len(knowledge_base.get_entries("5.1.0"))
+        knowledge_base.capture_plan_outcome(
+            version="5.1.0",
+            user_message="run simulation",
+            plan_steps=["start"],
+            success=True,
+            error_output=None,
+            code="",
+        )
+        assert len(knowledge_base.get_entries("5.1.0")) >= ok_before
+
