@@ -3313,6 +3313,155 @@ async def _handle_catalog_search(args: Dict) -> Dict:
 DATA_HANDLERS["catalog_search"] = _handle_catalog_search
 
 
+# ── Local Filesystem Search ──────────────────────────────────────────────────
+# When the user references "this URDF" / "the STEP file you imported" without
+# a path, the agent needs to discover local files. Without this tool the agent
+# either asks the user (annoying) or generates ad-hoc glob.glob() code-patches
+# (unguarded). This is a guarded discovery primitive scoped to known asset
+# roots — not a general filesystem walker.
+import os as _os_files
+import glob as _glob_files
+import fnmatch as _fnmatch_files
+
+_LIST_LOCAL_DEFAULT_ROOTS = [
+    "/home/anton/projects/Omniverse_Nemotron_Ext/workspace",
+    "/home/anton/projects/Omniverse_Nemotron_Ext/data",
+    "/home/anton/Downloads",
+    "/home/anton/Documents",
+    "/tmp",
+]
+# Hard cap to stop the agent from triggering massive filesystem walks.
+_LIST_LOCAL_MAX_RESULTS = 200
+_LIST_LOCAL_MAX_DEPTH = 6
+# Asset-relevant extensions only — refuse to surface secrets / source code.
+_LIST_LOCAL_ALLOWED_EXTS = {
+    ".urdf", ".usd", ".usda", ".usdc", ".usdz",
+    ".step", ".stp", ".iges", ".igs", ".stl", ".obj", ".fbx", ".gltf", ".glb",
+    ".ifc", ".ifczip",
+    ".yaml", ".yml", ".json",  # config, scene templates
+    ".pcd", ".ply",  # point clouds
+    ".png", ".jpg", ".jpeg", ".exr", ".hdr",  # textures (filtered by name pattern)
+}
+
+
+async def _handle_list_local_files(args: Dict) -> Dict:
+    """Search the local filesystem under known asset roots for matching files.
+
+    Use this before asking the user for a file path. The agent should call this
+    with a name-pattern + extension hint and inspect results before falling back
+    to "please give me the path".
+
+    Args:
+        pattern: glob-style pattern matched against basename. Example: "*ur10*"
+        extensions: list of file extensions to limit results, e.g. [".urdf",".usd"]
+        search_paths: optional override of the default asset roots
+        max_results: cap (default 50, hard max 200)
+
+    Returns:
+        {"matches": [{"path": str, "size": int, "ext": str, "rel_root": str}, ...],
+         "n_matches": int,
+         "n_searched_roots": int,
+         "truncated": bool,
+         "skipped_dirs": [...]}  // dirs skipped due to depth cap or perm errors
+    """
+    pattern = (args.get("pattern") or "*").strip()
+    extensions_raw = args.get("extensions") or []
+    if isinstance(extensions_raw, str):
+        extensions_raw = [extensions_raw]
+    extensions = {("." + e.lstrip(".")).lower() for e in extensions_raw if e}
+    if not extensions:
+        # If caller didn't specify extensions, restrict to asset-relevant set
+        extensions = set(_LIST_LOCAL_ALLOWED_EXTS)
+    else:
+        # Honor caller's choice but never widen beyond the safety set
+        extensions = extensions & _LIST_LOCAL_ALLOWED_EXTS
+        if not extensions:
+            return {
+                "matches": [],
+                "n_matches": 0,
+                "n_searched_roots": 0,
+                "truncated": False,
+                "skipped_dirs": [],
+                "error": (
+                    "list_local_files: requested extensions are outside the "
+                    "allowed asset-discovery set. Allowed: "
+                    + ", ".join(sorted(_LIST_LOCAL_ALLOWED_EXTS))
+                ),
+            }
+
+    requested_paths = args.get("search_paths") or _LIST_LOCAL_DEFAULT_ROOTS
+    if isinstance(requested_paths, str):
+        requested_paths = [requested_paths]
+    # Resolve + filter to existing directories. Refuse anything outside the
+    # default roots unless explicitly listed by the agent (the agent runs as
+    # a trusted-but-bounded process; this is a brake, not a wall).
+    search_paths = []
+    for p in requested_paths:
+        p_abs = _os_files.path.abspath(_os_files.path.expanduser(p))
+        if _os_files.path.isdir(p_abs):
+            search_paths.append(p_abs)
+
+    max_results = min(int(args.get("max_results") or 50), _LIST_LOCAL_MAX_RESULTS)
+
+    matches: list[dict] = []
+    skipped: list[str] = []
+    truncated = False
+
+    for root in search_paths:
+        if len(matches) >= max_results:
+            truncated = True
+            break
+        for dirpath, dirnames, filenames in _os_files.walk(root, followlinks=False):
+            # Depth gate
+            rel = _os_files.path.relpath(dirpath, root)
+            depth = 0 if rel == "." else rel.count(_os_files.sep) + 1
+            if depth >= _LIST_LOCAL_MAX_DEPTH:
+                # Stop descending further from this dir
+                dirnames[:] = []
+                skipped.append(dirpath + " (depth-cap)")
+                continue
+            # Skip hidden directories — node_modules, .git, .cache, .venv etc
+            dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in
+                           ("node_modules", "__pycache__", "tool_index")]
+
+            for fname in filenames:
+                ext = _os_files.path.splitext(fname)[1].lower()
+                if ext not in extensions:
+                    continue
+                if not _fnmatch_files.fnmatch(fname.lower(), pattern.lower()):
+                    continue
+                full = _os_files.path.join(dirpath, fname)
+                try:
+                    size = _os_files.path.getsize(full)
+                except OSError:
+                    continue
+                matches.append({
+                    "path": full,
+                    "size": size,
+                    "ext": ext,
+                    "rel_root": root,
+                })
+                if len(matches) >= max_results:
+                    truncated = True
+                    break
+            if truncated:
+                break
+        if truncated:
+            break
+
+    return {
+        "matches": matches,
+        "n_matches": len(matches),
+        "n_searched_roots": len(search_paths),
+        "truncated": truncated,
+        "skipped_dirs": skipped[:20],
+        "extensions_used": sorted(extensions),
+    }
+
+
+DATA_HANDLERS["list_local_files"] = _handle_list_local_files
+
+
 # ── Nucleus Browse & Download ────────────────────────────────────────────────
 
 async def _handle_nucleus_browse(args: Dict) -> Dict:

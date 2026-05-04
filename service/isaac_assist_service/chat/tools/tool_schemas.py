@@ -762,6 +762,46 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Local Filesystem Search ──────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "list_local_files",
+            "description": (
+                "Search the local filesystem under known asset roots (workspace, "
+                "Downloads, Documents, /tmp) for asset files (URDF, USD, STEP, "
+                "IFC, etc). USE THIS BEFORE asking the user for a file path — if "
+                "the user says 'this URDF' or 'my STEP file' without giving a "
+                "path, search first. Only ask the user when search returns zero "
+                "matches or multiple plausible matches."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Glob-style pattern matched against the filename basename (case-insensitive). Examples: '*ur10*', 'franka*.urdf', '*warehouse*.usd'. Default '*' (match all).",
+                    },
+                    "extensions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Limit to these file extensions. Examples: ['.urdf'], ['.step','.stp','.iges'], ['.usd','.usda','.usdc']. Defaults to all asset-relevant extensions.",
+                    },
+                    "search_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Override default search roots. Default: [workspace/, data/, ~/Downloads, ~/Documents, /tmp].",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Max matches to return (default 50, hard cap 200).",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+
     # ─── Asset Catalog Search ─────────────────────────────────────────────────
     {
         "type": "function",
