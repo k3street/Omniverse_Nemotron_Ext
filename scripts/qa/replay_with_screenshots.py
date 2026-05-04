@@ -45,6 +45,63 @@ OUT_ROOT = Path("/tmp/canary_replays")
 
 
 KIT_CAPTURE_URL = "http://127.0.0.1:8001/capture"
+KIT_EXEC_URL = "http://127.0.0.1:8001/exec_sync"
+
+
+def ensure_viewer_light_and_camera():
+    """Make sure the scene is lit + the camera is at a sensible angle.
+
+    Replays run after a stage-reset which strips lights and resets the camera.
+    Without this the screenshots are pitch black and centered on the world
+    origin from far away. The agent's auto-light guard may add a DomeLight
+    later, but we want BEFORE to be visible too.
+
+    Adds /World/_ViewerDomeLight (only if no Light prim exists yet) and points
+    the active camera at /World from a 45° elevation 3m away. The leading
+    underscore in the prim name makes it easy for ground-truth diff to ignore.
+    """
+    code = '''
+import json
+import omni.usd
+from pxr import UsdLux, Gf, UsdGeom, Sdf
+
+stage = omni.usd.get_context().get_stage()
+
+# 1. Light if none
+has_light = any("Light" in str(p.GetTypeName()) for p in stage.Traverse())
+added_light = False
+if not has_light:
+    p = stage.DefinePrim("/World/_ViewerDomeLight", "DomeLight")
+    UsdLux.LightAPI(p).GetIntensityAttr().Set(2000.0)
+    added_light = True
+
+# 2. Frame camera on /World from 3m, 45° elevation
+try:
+    from omni.kit.viewport.utility import get_active_viewport
+    vp = get_active_viewport()
+    if vp is not None:
+        cam_path = str(vp.camera_path) if hasattr(vp, "camera_path") else "/OmniverseKit_Persp"
+        cam_prim = stage.GetPrimAtPath(cam_path)
+        if cam_prim and cam_prim.IsValid():
+            cam_xf = UsdGeom.Xformable(cam_prim)
+            # Clear xform ops, set translate + rotate
+            cam_xf.ClearXformOpOrder()
+            t = cam_xf.AddTranslateOp()
+            t.Set(Gf.Vec3d(2.5, -2.5, 1.8))
+            r = cam_xf.AddRotateXYZOp()
+            r.Set(Gf.Vec3d(60.0, 0.0, 45.0))
+except Exception as _e:
+    pass
+
+print(json.dumps({"added_light": added_light}))
+'''
+    try:
+        r = httpx.post(KIT_EXEC_URL, json={"code": code}, timeout=20.0)
+        r.raise_for_status()
+        return r.json().get("success", False)
+    except Exception as e:
+        print(f"  light/camera setup failed: {e}", file=sys.stderr)
+        return False
 
 
 def kit_capture_viewport_png(out_path: Path, max_dim: int = 1280) -> bool:
@@ -86,6 +143,12 @@ def replay_task(task_id: str) -> dict:
     _reset_stage()
     _apply_pre_session_setup(task_id)
 
+    # 1b. Make scene visible — add light + frame camera (post-reset is dark)
+    ensure_viewer_light_and_camera()
+
+    # Give Kit a beat to settle the new light/camera before capture
+    time.sleep(0.5)
+
     # 2. Capture BEFORE
     before_ok = kit_capture_viewport_png(out_dir / "before.png")
 
@@ -113,6 +176,9 @@ def replay_task(task_id: str) -> dict:
 
     (out_dir / "reply.txt").write_text(reply_text)
     (out_dir / "tool_calls.json").write_text(json.dumps(tool_calls, indent=2, default=str))
+
+    # Give Kit a beat to settle prim creation before capture
+    time.sleep(0.5)
 
     # 4. Capture AFTER
     after_ok = kit_capture_viewport_png(out_dir / "after.png")
