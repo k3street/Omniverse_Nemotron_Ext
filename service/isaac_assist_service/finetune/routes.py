@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import FileResponse
 
-from service.isaac_assist_service.knowledge.knowledge_base import KnowledgeBase
+from ..knowledge.knowledge_base import KnowledgeBase
 from .exporters import FinetuneExporter
 
 logger = logging.getLogger(__name__)
