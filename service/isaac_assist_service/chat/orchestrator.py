@@ -490,11 +490,63 @@ class ChatOrchestrator:
             return reply
 
         # ── 1. Classify intent ───────────────────────────────────────────────
-        # Returns a dict {intent, multi_step, confidence}. multi_step drives
-        # the round-0 read-only tool gate below (see _multi_step usage).
+        # Returns a dict {intent, multi_step, complexity, confidence}. multi_step
+        # drives the round-0 read-only tool gate below (see _multi_step usage).
+        # complexity gates the negotiator (Fas 2 of strategic-brain layer).
         intent_result = await classify_intent(user_message, self.llm_provider)
         intent = intent_result["intent"]
         intent_is_multi_step = intent_result.get("multi_step", False)
+        intent_complexity = intent_result.get("complexity", "single")
+        _trace_emit(session_id, "intent_complexity", {
+            "complexity": intent_complexity,
+            "multi_step": intent_is_multi_step,
+            "intent": intent,
+            "message_preview": user_message[:80],
+        })
+
+        # ── 1.2. Negotiator gate (only for complex prompts) ──────────────────
+        # When the prompt is "complex", run a single fast-LLM clarification
+        # check BEFORE template_retriever / tool_loop. If required inputs are
+        # missing, reply with questions immediately and end the turn — the
+        # user fills them in and the next turn proceeds normally.
+        # Avoids the v1 template_retriever collision that killed b93bcca.
+        # Env-gated: STRATEGIC_NEGOTIATOR=off skips entirely (default: on).
+        # Disabled when intent is a pure question (general_query) — answering
+        # comes first, clarification on doing-things only.
+        import os as _os_mod
+        _negotiator_enabled = _os_mod.environ.get(
+            "STRATEGIC_NEGOTIATOR", "on"
+        ).lower() != "off"
+        if (
+            _negotiator_enabled
+            and intent_complexity == "complex"
+            and intent != "general_query"
+        ):
+            try:
+                from .negotiator import negotiate, format_clarification_reply
+                neg = await negotiate(user_message, self.llm_provider)
+                _trace_emit(session_id, "negotiator", {
+                    "needs_clarification": neg["needs_clarification"],
+                    "n_questions": len(neg["questions"]),
+                    "reasoning": neg["reasoning"],
+                })
+                if neg["needs_clarification"]:
+                    clarif_text = format_clarification_reply(neg, user_message)
+                    history.append({"role": "user", "content": user_message})
+                    history.append({"role": "assistant", "content": clarif_text})
+                    _trace_emit(session_id, "agent_reply", {
+                        "text": clarif_text[:500],
+                        "intent": "negotiation_clarification",
+                    })
+                    return {
+                        "intent": "negotiation_clarification",
+                        "reply": clarif_text,
+                        "tool_calls": [],
+                        "code_patches": [],
+                    }
+            except Exception as _ne:
+                # Fail-open — never let negotiation block normal flow
+                logger.warning(f"[Negotiator] gate failed ({_ne}), proceeding")
 
         # ── 1.5. Auto turn-snapshot for stage-mutating turns ─────────────────
         # Before running any tools that might write to the stage, save the

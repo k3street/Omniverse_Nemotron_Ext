@@ -31,15 +31,19 @@ Intent = Literal[
 ]
 
 
+Complexity = Literal["single", "multi", "complex"]
+
+
 class IntentClassification(TypedDict):
     intent: Intent
     multi_step: bool
+    complexity: Complexity
     confidence: float
 
 
 INTENT_SYSTEM = """You are an intent classifier for an AI assistant embedded in NVIDIA Isaac Sim.
 
-Classify the user message on TWO axes:
+Classify the user message on THREE axes:
 
 1. intent — exactly ONE of:
 - general_query     : General robotics / USD / Omniverse questions that don't need live scene data
@@ -56,32 +60,48 @@ Classify the user message on TWO axes:
    conditions ("run until all fall off"). false if it's a single discrete action
    or a pure question.
 
-Multi-step examples:
-  "create a conveyor, scale cubes, start simulation" → multi_step=true (3 actions)
-  "if a conveyor tool exists, use it, then run it until done" → multi_step=true
-  "add a cube and then delete the old one" → multi_step=true
-  "place a cube at (1,2,3)" → multi_step=false (single action)
-  "what is USD?" → multi_step=false (question)
-  "scale this" → multi_step=false (single action with pronoun)
+3. complexity — exactly ONE of:
+- "single"  : One discrete action with a single tool call, no dependencies, or a
+              pure question. Example: "place a cube at (1,2,3)" or "what is USD?"
+- "multi"   : 2-4 chained actions with simple sequential dependencies. No formal
+              spec needed; step-by-step tool calls suffice. Example: "add a cube
+              then scale it" or "create conveyor, place cubes, run sim".
+- "complex" : Industrial-realistic composition with 5+ components, multiple
+              subsystems (physics + robot + sensor + I/O), domain-specific
+              vocabulary (CATIA, ROS2 bridge, RL training, IFC), or pedagogical
+              walkthroughs. Likely needs negotiation for missing inputs and a
+              structured plan before tool execution.
+              Examples:
+                "Build a pick-and-place cell with conveyor, Franka, sensor, bin"
+                "Set up RL training environment for Nova Carter navigation"
+                "Import this STEP end-of-arm tool and run a clearance audit"
+                "First-lecture hello-robot demo for undergrads"
 
-Reply with ONLY valid JSON: {"intent": "<one>", "multi_step": <bool>, "confidence": 0.0-1.0}
+Reply with ONLY valid JSON:
+{"intent": "<one>", "multi_step": <bool>, "complexity": "<single|multi|complex>", "confidence": 0.0-1.0}
 """
 
 INTENT_EXAMPLES = [
-    # (user_message, intent, multi_step)
-    ("what is a USD prim?", "general_query", False),
-    ("why is my robot floating above the ground?", "scene_diagnose", False),
-    ("show me the viewport", "vision_inspect", False),
-    ("fix the joint damping", "patch_request", False),
-    ("add a cube at (1, 2, 3)", "patch_request", False),
+    # (user_message, intent, multi_step, complexity)
+    ("what is a USD prim?", "general_query", False, "single"),
+    ("why is my robot floating above the ground?", "scene_diagnose", False, "single"),
+    ("show me the viewport", "vision_inspect", False, "single"),
+    ("fix the joint damping", "patch_request", False, "single"),
+    ("add a cube at (1, 2, 3)", "patch_request", False, "single"),
     ("create a conveyor, scale the cubes to fit, run it until they fall off",
-     "patch_request", True),
+     "patch_request", True, "multi"),
     ("if a conveyor tool exists use it, then place cubes on top",
-     "patch_request", True),
+     "patch_request", True, "multi"),
     ("add 4 cubes, then stack them, then add a light above them",
-     "patch_request", True),
-    ("any errors in the console?", "console_review", False),
-    ("select the robot arm", "navigation", False),
+     "patch_request", True, "multi"),
+    ("Build a pick-and-place cell: Franka on a table, conveyor, 4 cubes, sensor-gated bin",
+     "patch_request", True, "complex"),
+    ("Set up an RL training scene for Nova Carter with randomised obstacles",
+     "patch_request", True, "complex"),
+    ("Import the UR10 from this STEP file and verify clearance to the cabinet",
+     "patch_request", True, "complex"),
+    ("any errors in the console?", "console_review", False, "single"),
+    ("select the robot arm", "navigation", False, "single"),
 ]
 
 
@@ -93,8 +113,8 @@ async def classify_intent(message: str, provider) -> IntentClassification:
     read the `intent` and `multi_step` fields explicitly.
     """
     few_shot = "\n".join(
-        f'User: "{u}" → {{"intent": "{i}", "multi_step": {str(ms).lower()}}}'
-        for u, i, ms in INTENT_EXAMPLES[:8]
+        f'User: "{u}" → {{"intent": "{i}", "multi_step": {str(ms).lower()}, "complexity": "{c}"}}'
+        for u, i, ms, c in INTENT_EXAMPLES[:10]
     )
 
     messages = [
@@ -124,14 +144,21 @@ async def classify_intent(message: str, provider) -> IntentClassification:
         parsed = json.loads(raw)
         intent = parsed.get("intent", "general_query")
         multi_step = bool(parsed.get("multi_step", False))
+        # complexity defaults to "multi" if multi_step else "single" — handles
+        # older classifier responses that don't include the field
+        default_complexity = "multi" if multi_step else "single"
+        complexity = parsed.get("complexity", default_complexity)
+        if complexity not in ("single", "multi", "complex"):
+            complexity = default_complexity
         confidence = float(parsed.get("confidence", 0.5))
         logger.info(
             f"[IntentRouter] '{message[:60]}' → {intent} "
-            f"(multi_step={multi_step}, conf={confidence:.2f})"
+            f"(multi_step={multi_step}, complexity={complexity}, conf={confidence:.2f})"
         )
         return {
             "intent": intent,
             "multi_step": multi_step,
+            "complexity": complexity,
             "confidence": confidence,
         }  # type: ignore
 
@@ -140,5 +167,6 @@ async def classify_intent(message: str, provider) -> IntentClassification:
         return {
             "intent": "general_query",
             "multi_step": False,
+            "complexity": "single",
             "confidence": 0.0,
         }
