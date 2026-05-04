@@ -51,7 +51,11 @@ class SettingsManager:
             "CONTRIBUTE_DATA": str(config.contribute_data).lower(),
             "AUTO_APPROVE": str(config.auto_approve).lower(),
             "AUTO_INJECT_VIEWPORT": str(config.auto_inject_viewport).lower(),
-            "MAX_TOOL_ROUNDS": str(config.max_tool_rounds)
+            "MAX_TOOL_ROUNDS": str(config.max_tool_rounds),
+            # Manipulation stack
+            "CONTINUITY_MANAGER_URL": config.continuity_manager_url,
+            "POLICY_BANK_URL": config.policy_bank_url,
+            "EMBODIMENT_ID": config.manipulation_embodiment_id,
         }
 
     def update_settings(self, new_settings: Dict[str, str]) -> bool:

@@ -17,6 +17,7 @@ from .governance.routes import router as governance_router
 from .settings.routes import router as settings_router
 from .finetune.routes import router as finetune_router
 from .scene_workspace.routes import router as scene_workspace_router
+from .manipulation.routes import router as manipulation_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ app.include_router(governance_router, prefix="/api/v1/governance", tags=["Approv
 app.include_router(settings_router, prefix="/api/v1/settings", tags=["Configuration Options"])
 app.include_router(finetune_router, prefix="/api/v1/finetune", tags=["Fine-tuning Builder"])
 app.include_router(scene_workspace_router, prefix="/api/v1/scenes", tags=["Scene Workspace"])
+app.include_router(manipulation_router, prefix="/api/v1/manipulation", tags=["Manipulation Planner"])
 
 @app.get("/health")
 async def health_check():

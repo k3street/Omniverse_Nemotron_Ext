@@ -20,6 +20,7 @@ Intent = Literal[
     "physics_query",
     "console_review",
     "navigation",
+    "manipulation_task",
 ]
 
 INTENT_SYSTEM = """You are an intent classifier for an AI assistant embedded in NVIDIA Isaac Sim.
@@ -33,6 +34,7 @@ Classify the user message into EXACTLY ONE of these intents:
 - physics_query     : Asks about joint states, forces, velocities, rigid body data
 - console_review    : Asks about errors, warnings, or logs in the console
 - navigation        : Wants to select, move, focus on, or navigate to a prim
+- manipulation_task : Wants to pick, place, grasp, fold, or execute a physical manipulation task on the robot
 
 Reply with ONLY valid JSON: {"intent": "<one of the above>", "confidence": 0.0-1.0}
 """
@@ -51,6 +53,11 @@ INTENT_EXAMPLES = [
     ("any errors in the console?", "console_review"),
     ("select the robot arm", "navigation"),
     ("go to /World/Cube", "navigation"),
+    ("pick up the red mug and place it on the tray", "manipulation_task"),
+    ("grasp the object on the left", "manipulation_task"),
+    ("execute a pick and place", "manipulation_task"),
+    ("fold the cloth", "manipulation_task"),
+    ("open the drawer", "manipulation_task"),
 ]
 
 

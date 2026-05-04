@@ -68,5 +68,10 @@ class Config:
         # ── External tools ───────────────────────────────────────────────────
         self.isaaclab_path = os.environ.get("ISAACLAB_PATH", "")
 
+        # ── Manipulation stack (RL+VLA pipeline) ─────────────────────────────
+        self.continuity_manager_url  = os.environ.get("CONTINUITY_MANAGER_URL", "http://localhost:7100")
+        self.policy_bank_url         = os.environ.get("POLICY_BANK_URL",        "http://localhost:7101")
+        self.manipulation_embodiment_id = os.environ.get("EMBODIMENT_ID", "tenthings_v1_open_arm_bimanual")
+
 
 config = Config()
