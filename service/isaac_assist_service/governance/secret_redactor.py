@@ -2,7 +2,7 @@ import re
 import logging
 from typing import List, Optional
 
-from service.isaac_assist_service.governance.models import GovernanceConfig
+from .models import GovernanceConfig
 
 logger = logging.getLogger(__name__)
 

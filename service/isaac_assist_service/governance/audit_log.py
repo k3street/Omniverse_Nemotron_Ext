@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import List, Optional
 
-from service.isaac_assist_service.governance.models import AuditEntry
+from .models import AuditEntry
 
 logger = logging.getLogger(__name__)
 

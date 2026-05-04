@@ -7,7 +7,7 @@ from .models import GovernanceConfig, AuditEntry
 from .policy_engine import PolicyEngine
 from .secret_redactor import SecretRedactor
 from .audit_log import AuditLogger
-from service.isaac_assist_service.planner.models import PatchAction
+from ..planner.models import PatchAction
 
 router = APIRouter()
 

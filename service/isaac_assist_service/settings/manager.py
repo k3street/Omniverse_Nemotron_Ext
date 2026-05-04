@@ -6,7 +6,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from service.isaac_assist_service.config import config
+from ..config import config
 
 class SettingsManager:
     """Manages reading and writing configuration settings to the .env file."""
