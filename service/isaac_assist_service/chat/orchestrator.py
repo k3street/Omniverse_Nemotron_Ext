@@ -638,6 +638,46 @@ class ChatOrchestrator:
         except Exception as e:
             logger.warning(f"[{session_id}] Template retrieval failed: {e}")
 
+        # ── 3.5. Strategic-brain Fas 3: spec_generator + gap_analyzer ────────
+        # When complexity=="complex", produce a structured execution plan and
+        # inject as a dedicated CHECKLIST in patterns_text. Templates still
+        # flow normally — the spec is supplementary, with clear "REQUIRED"
+        # framing that differentiates from "reference templates".
+        # Empirically motivated: 40% of broad-canary fails were
+        # "skipped_required_tool" — agent didn't call tools task-spec
+        # mandates. The spec lists those tools by name as post-conditions.
+        # Env-gated: STRATEGIC_SPEC=off disables.
+        _spec_enabled = (
+            _os_mod.environ.get("STRATEGIC_SPEC", "on").lower() != "off"
+        )
+        if (
+            _spec_enabled
+            and intent_complexity == "complex"
+            and intent != "general_query"
+        ):
+            try:
+                from .spec_generator import generate_spec, format_spec_as_checklist
+                from .gap_analyzer import analyze as gap_analyze, get_registered_tools
+                spec = await generate_spec(user_message, self.llm_provider)
+                if spec:
+                    registered = get_registered_tools()
+                    gap = gap_analyze(spec.get("steps", []), registered)
+                    checklist = format_spec_as_checklist(spec, gap_report=gap)
+                    if patterns_text:
+                        patterns_text = checklist + "\n\n---\n\n" + patterns_text
+                    else:
+                        patterns_text = checklist
+                    _trace_emit(session_id, "spec_generated", {
+                        "n_steps": len(spec.get("steps", [])),
+                        "matched": len(gap.get("matched", [])),
+                        "partial": len(gap.get("partial", {})),
+                        "missing": len(gap.get("missing", [])),
+                        "reasoning": spec.get("reasoning", "")[:120],
+                    })
+            except Exception as _se:
+                # Fail-open — never block normal flow on spec generation
+                logger.warning(f"[SpecGenerator] gate failed ({_se}), proceeding")
+
         # Auto-inject cite-index matches from deprecations.jsonl. Agents
         # routinely FAIL to call lookup_api_deprecation even when a rule
         # tells them to, and rule-injection alone has no enforcement. Pull
