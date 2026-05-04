@@ -95,24 +95,36 @@ def _load() -> None:
     )
 
 
-def lookup(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
-    """Return up to `top_k` rows scored by keyword overlap.
+def lookup(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    """Return up to `top_k` rows scored by IDF-weighted keyword overlap.
 
-    A row's score = number of its keywords that appear as substrings
-    in the lowercased query. Rows with score 0 are dropped.
+    A row's score is the sum of inverse-document-frequency weights for the
+    keywords (in that row) that appear in the lowercased query. This makes
+    rare/specific keywords contribute more than common ones — without IDF,
+    a cite with many generic keywords (e.g. "import", "set") drowned out
+    cites with one highly-specific keyword (e.g. "URDFParseAndImportFile").
+
+    Default top_k bumped from 3 → 5 (2026-05-05): empirically the cite
+    budget is ~2K chars, even at top_k=5 we stay under 3K which leaves
+    room for templates and tool schemas.
     """
+    import math
     _load()
     assert _KEYWORD_TO_ROW_IDS is not None and _ROW_BY_ID is not None
+    n_rows = max(len(_ROW_BY_ID), 1)
 
     q = (query or "").lower()
     if not q:
         return []
 
-    scores: Counter = Counter()
+    scores: Dict[str, float] = {}
     for kw, row_ids in _KEYWORD_TO_ROW_IDS.items():
-        if kw and kw in q:
-            for rid in row_ids:
-                scores[rid] += 1
+        if not kw or kw not in q:
+            continue
+        df = max(len(row_ids), 1)
+        idf = math.log(1.0 + n_rows / df)
+        for rid in row_ids:
+            scores[rid] = scores.get(rid, 0.0) + idf
 
     if not scores:
         return []
