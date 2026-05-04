@@ -3328,6 +3328,9 @@ _LIST_LOCAL_DEFAULT_ROOTS = [
     "/home/anton/projects/Omniverse_Nemotron_Ext/data",
     "/home/anton/Downloads",
     "/home/anton/Documents",
+    "/home/anton/robots",
+    "/home/anton/projects/myarm",
+    "/home/anton/projects/sharp_football",
     "/tmp",
 ]
 # Hard cap to stop the agent from triggering massive filesystem walks.
