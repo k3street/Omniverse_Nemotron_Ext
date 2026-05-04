@@ -26,6 +26,9 @@ workspace/*
 service/workspace/
 logs/
 
+# Brainstorming notes (local only)
+brainstorm/
+
 # IDEs
 .idea/
 .vscode/

@@ -1960,13 +1960,16 @@ ISAAC_SIM_TOOLS = [
                         "asset_path": {"type": "string", "description": "Path to URDF or USD robot file. Use this for custom robots or when robot_name is not in the registry. Required if robot_name is not set."},
                         "dest_path": {"type": "string", "description": "USD path where the robot should be created. Default: /World/Robot. Pass /World/Franka or /World/UR10 etc. when the task specifies a path. URDF imports ignore this."},
                         "position": {"type": "array", "items": {"type": "number"}, "description": "XYZ world position to place the robot base at [x, y, z]. If omitted, the robot stays at the reference's default origin (usually (0,0,0)). ALWAYS pass this when the robot should sit on a table top — e.g. position=[0, 0, 0.75] for a 0.75m-tall table."},
+                        "orientation": {"type": "array", "items": {"type": "number"}, "description": "Robot base orientation. Pass a 4-element quaternion (w, x, y, z) or a 3-element euler angle [roll, pitch, yaw] in radians. Use this when the spec requires a specific facing direction — e.g. orientation=[0.7071, 0, 0, 0.7071] (90° around Z) to rotate Franka from its default +X-forward to +Y-forward. If omitted, robot keeps its USD-authored default orient (usually identity)."},
                         "robot_type": {
                             "type": "string",
                             "enum": ["manipulator", "mobile", "humanoid"],
                             "description": "Robot category — determines default drive stiffness/damping. Auto-resolved from robot_name when available. Default: manipulator.",
                         },
-                        "drive_stiffness": {"type": "number", "description": "Override default Kp (position gain)"},
-                        "drive_damping": {"type": "number", "description": "Override default Kd (damping gain)"},
+                        "drive_stiffness": {"type": "number", "description": "Override Kp (position gain). For known robots (robot_name), auto-resolved from profile (Franka=6000). Only set this if the profile default is wrong for your scenario."},
+                        "drive_damping": {"type": "number", "description": "Override Kd (damping gain). For known robots, auto-resolved from profile (Franka=500)."},
+                        "variants": {"type": "object", "description": "USD variant selections to apply after loading (e.g. {'Gripper': 'AlternateFinger'} for Franka). For known robots this is auto-applied from the profile — only pass to override."},
+                        "home_joints": {"type": "array", "items": {"type": "number"}, "description": "Default joint positions in radians, one per DOF (7 arm + 2 finger for Franka). Applied as drive target positions so the robot holds this pose after play. For known robots auto-applied from profile."},
                     },
                     "required": [],
                 },
@@ -2163,23 +2166,45 @@ ISAAC_SIM_TOOLS = [
             "type": "function",
             "function": {
                 "name": "setup_pick_place_controller",
-                "description": "Composite stateful pick-and-place controller. Four architectures via target_source: 'cube_tracking' (ML-research: polls live cube poses, RmpFlow chases — NOT sim2real-honest but useful for demo-gen), 'sensor_gated' (INDUSTRIAL: proximity sensor triggers pre-taught poses, belt pauses while picking — maps 1:1 to PLC ladder logic), 'fixed_poses' (demo/cycle-time replay: timer-driven sequence), 'ros2_cmd' (digital-twin: subscribes to external ROS2 commands). Uses RmpFlow + ArticulationMotionPolicy + UsdPhysics.FixedJoint for cube-to-EE attach. Installs physics-step callback — start the simulation to begin.",
+                "description": "Composite stateful pick-and-place controller with a full matrix of motion architectures via target_source. Pick based on hardware + scenario: 'auto' (let the system probe the env and pick — recommended default when hardware is unknown); 'native' (Franka + CPU, reactive RmpFlow, 1/4 baseline delivery on conveyor-pick-place); 'spline' (CPU-only, deterministic pre-planned Cartesian waypoints with scipy.CubicSpline — beats native 3x at 3/4 delivery; best CPU choice); 'curobo' (GPU-accelerated global optimization with collision awareness — shortest cycle, requires NVIDIA GPU >= Volta + cuRobo lib + Warp 1.9+); 'sensor_gated' (industrial PLC-mimic, pre-taught or coord-IK poses, belt pause gated on photoelectric sensor); 'fixed_poses' (timer-driven pose replay, no sensing); 'cube_tracking' (omniscient — NOT sim2real); 'ros2_cmd' (external ROS2/MoveIt drives state machine); 'diffik' (Isaac Lab stateless Jacobian, teleop use case); 'osc' (experimental task-space impedance). Before calling, invoke list_available_controllers to see which modes are runnable on the current env. Installs physics-step callback — start the simulation to begin.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "robot_path": {"type": "string", "description": "USD path to articulation root"},
                         "target_source": {
                             "type": "string",
-                            "description": "Control architecture. 'sensor_gated' is the industrial/sim2real-honest default; 'cube_tracking' is the research/demo mode.",
-                            "enum": ["cube_tracking", "sensor_gated", "fixed_poses", "ros2_cmd"],
+                            "description": (
+                                "Motion controller architecture. Decision guide: "
+                                "(1) 'auto' — probe env and pick best; safe default when the user's hardware is unknown. "
+                                "(2) 'curobo' — fastest cycle time and only option with true collision-aware planning; requires NVIDIA GPU (Volta 7.0+, 4GB VRAM) AND cuRobo package. Production quality. "
+                                "(3) 'spline' — best CPU-only option. Deterministic 6-waypoint Cartesian trajectory, warm-start IK chaining, scipy.CubicSpline interpolation. Verified 3/4 delivery on conveyor scenario (beats native 3x). Use for CPU-only machines, sim2real demos, reproducible cycles. "
+                                "(4) 'native' — canonical Franka PickPlaceController (only Franka supported). Reactive, RmpFlow-based, 1/4 delivery baseline. Use when the user explicitly wants the stock Isaac Sim controller. "
+                                "(5) 'sensor_gated' — industrial PLC-mimic with pre-taught or coord-IK PICK/DROP/HOME. Use for PLC/teach-pendant sim2real workflows (non-Franka arms, CPU). "
+                                "(6) 'ros2_cmd' — external ROS2/MoveIt drives state machine. Digital-twin / PLC-in-loop. "
+                                "(7) 'fixed_poses' — timer-driven pose replay. Cycle-time demos / validation only. "
+                                "(8) 'cube_tracking' — omniscient live retargeting. ML demo-gen ONLY (NOT sim2real honest). "
+                                "(9) 'diffik' — Isaac Lab Jacobian IK. Teleop / Cartesian RL obs. No obstacle awareness. "
+                                "(10) 'osc' — Isaac Lab operational-space impedance (experimental, contact-rich tasks)."
+                            ),
+                            "enum": ["auto", "native", "spline", "curobo", "diffik", "osc",
+                                     "sensor_gated", "fixed_poses", "cube_tracking", "ros2_cmd"],
                         },
-                        "source_paths": {"type": "array", "items": {"type": "string"}, "description": "cube_tracking mode: objects to pick in order"},
-                        "destination_path": {"type": "string", "description": "cube_tracking mode: bin prim"},
-                        "sensor_path": {"type": "string", "description": "sensor_gated mode: USD path to a proximity sensor (from add_proximity_sensor)"},
-                        "belt_path": {"type": "string", "description": "sensor_gated mode: conveyor prim to pause/resume on trigger"},
-                        "pick_pose_name": {"type": "string", "description": "sensor_gated mode: name of pre-taught pick pose"},
-                        "drop_pose_name": {"type": "string", "description": "sensor_gated mode: name of pre-taught drop pose"},
-                        "home_pose_name": {"type": "string", "description": "sensor_gated mode: name of pre-taught home/idle pose"},
+                        "source_paths": {"type": "array", "items": {"type": "string"}, "description": "native/cube_tracking mode: objects to pick (in priority order)"},
+                        "destination_path": {"type": "string", "description": "native/cube_tracking mode: bin prim — controller drops at its top-center + 0.05m clearance unless drop_target overrides"},
+                        "sensor_path": {"type": "string", "description": "native/sensor_gated mode: USD path to a proximity sensor (from add_proximity_sensor). In native mode, if omitted the controller free-runs (picks first available cube continuously)."},
+                        "belt_path": {"type": "string", "description": "native/sensor_gated mode: conveyor prim to pause during pick and resume after release"},
+                        "end_effector_offset": {"type": "array", "items": {"type": "number"}, "description": "native mode: [x, y, z] offset from EE frame to grasp point. Default [0, 0.005, 0] — verified from Franka standalone. Do NOT set a z-offset like [0, 0, -0.098] unless you know your gripper requires it; the canonical controller handles TCP internally."},
+                        "pick_pose_name": {"type": "string", "description": "sensor_gated mode (pose-replay style): name of pre-taught pick pose. Requires teach_robot_pose to have run first. Use this OR pick_target, not both."},
+                        "drop_pose_name": {"type": "string", "description": "sensor_gated mode (pose-replay): name of pre-taught drop pose"},
+                        "home_pose_name": {"type": "string", "description": "sensor_gated mode (pose-replay): name of pre-taught home/idle pose"},
+                        "pick_target": {"type": "array", "items": {"type": "number"}, "description": "sensor_gated mode (coord-IK style): world position [x, y, z] the end-effector should reach at the pick station. Controller uses RmpFlow IK at runtime — no teach step needed. Use this for automated sim pipelines where playing sim + teaching poses would add unnecessary complexity. Override: if all three of pick_target, drop_target, home_target are set, coord mode is used and pose_name args are ignored."},
+                        "drop_target": {"type": "array", "items": {"type": "number"}, "description": "sensor_gated mode (coord-IK): world position [x, y, z] for the drop point (above the bin)"},
+                        "home_target": {"type": "array", "items": {"type": "number"}, "description": "sensor_gated mode (coord-IK): world position [x, y, z] for the idle/home pose (clear of belt and bin)"},
+                        "grip_style": {
+                            "type": "string",
+                            "enum": ["fixed_joint", "friction"],
+                            "description": "sensor_gated mode: how the cube is held during transport. 'fixed_joint' (default) creates a UsdPhysics.FixedJoint between end-effector and cube — robust, demo-stable, but physically dishonest (cube follows EE regardless of finger contact). 'friction' skips the joint; fingers close via position-drive and the cube is held by contact friction alone — bind source cubes + fingers to a high-friction PhysicsMaterialAPI at install. More realistic but flaky under belt motion or wrong tuning; expect iteration on mass, friction coefficients, and drive gains.",
+                        },
                         "pose_sequence": {"type": "array", "items": {"type": "string"}, "description": "fixed_poses mode: ordered list of pose names"},
                         "cycles": {"type": "integer", "description": "fixed_poses mode: how many times to repeat the sequence"},
                         "target_topic": {"type": "string", "description": "ros2_cmd mode: topic for EE target pose"},
@@ -2192,9 +2217,23 @@ ISAAC_SIM_TOOLS = [
                         "approach_height": {"type": "number"},
                         "lift_height": {"type": "number"},
                         "drop_height": {"type": "number"},
+                        "end_effector_initial_height": {"type": "number", "description": "native/spline mode: absolute world-Z (m) for trajectory approach/retreat. If omitted, auto-computed as max(source_z, drop_z) + 0.2m clearance. Override when robot is on a tall pedestal or when default clearance clips above the workspace."},
+                        "events_dt": {"type": "array", "items": {"type": "number"}, "description": "native mode only: 10-element list overriding PickPlaceController event phase durations. Default [0.008, 0.002, 1, 0.025, 0.05, 0.05, 0.0025, 1, 0.008, 0.08] (approach, descend, grip-wait, grip-close, lift, transit, place-descend, release-wait, release-open, retreat). Lower values = faster cycle but more RmpFlow tracking failure."},
+                        "spline_waypoint_dt": {"type": "number", "description": "spline mode: seconds per segment between the 6 Cartesian waypoints. Default 1.5s. Total cycle ~10s with 1.2s dwells. Decrease for faster cycle (requires higher joint-drive gains); increase if fingers miss cubes during close."},
+                        "curobo_world_yml": {"type": "string", "description": "curobo mode: path to cuRobo world_config YAML (cuboid/mesh obstacles). If omitted, the live USD stage is used to auto-build a Cuboid scene for collision checking."},
+                        "planning_obstacles": {"type": "array", "items": {"type": "string"}, "description": "curobo mode: list of USD paths to include as collision obstacles during planning. Each prim's world-bound is converted to a Cuboid. Use to avoid the conveyor/table/walls during transit."},
+                        "diffik_method": {"type": "string", "enum": ["dls", "svd", "pinv"], "description": "diffik mode: Jacobian inversion method. 'dls' (damped least-squares, default, λ=0.05) handles singularities gracefully; 'pinv' is Moore-Penrose pseudoinverse; 'svd' is truncated SVD. Use 'dls' unless you know you need the others."},
                     },
                     "required": ["robot_path", "target_source"],
                 },
+            },
+        },
+    {
+            "type": "function",
+            "function": {
+                "name": "list_available_controllers",
+                "description": "Probe the current Kit runtime and report which pick-place controller modes (target_source values) are available, plus hardware capabilities (GPU arch + VRAM, scipy version, cuRobo presence, Isaac Lab presence). Use this BEFORE setup_pick_place_controller to pick a target_source that actually works on the user's machine. Returns a list of recommended controllers in priority order ('curobo' first if available, else 'spline'/'native'), and for each controller: hardware_req, cycle_class, motion_quality (1-5), collision_aware, use_case_fit tags, and reason_if_not available.",
+                "parameters": {"type": "object", "properties": {}, "required": []},
             },
         },
     {

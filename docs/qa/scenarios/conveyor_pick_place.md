@@ -3,7 +3,14 @@
 **Scenario ID**: `conveyor_pick_place`
 **Tier**: 1 (5-7 steps, 3-4 subsystems)
 **Date authored**: 2026-04-19
+**Last modified**: 2026-04-19 — switched primary architecture from
+cube_tracking to sensor_gated after scenario runs showed belt carried
+cubes off-station when robot couldn't keep up. Sensor-gated is the
+industrial-realistic pattern that matches real PLC-driven cells and
+eliminates the timing-race failure mode.
 **Status**: active — first industrial-style scenario
+**Primary architecture**: `sensor_gated` (industrial/PLC-equivalent). See
+persona matrix below for when to use the other three modes.
 
 ## Goal (human-readable)
 
@@ -50,17 +57,29 @@ All coordinates in meters, Z-up, Y perpendicular to belt travel.
 ## Persona-driven architectures
 
 The same template is run against FOUR different controller architectures,
-each representing a real Isaac Sim user persona. A tool-catalog is
-considered "complete" for the template when all four one-shot successfully.
+each representing a real Isaac Sim user persona. **sensor_gated is the
+default** — it matches industrial practice, handles robot timing
+gracefully, and maps 1:1 to real PLC / OPC-UA cell deployments. Use the
+other modes only when explicitly warranted by persona intent.
 
-| Persona | target_source mode | Extra tools used | Sim2real-honest |
-|---|---|---|---|
-| ML researcher (demo-gen / imitation) | `cube_tracking` | RmpFlow reads ground-truth cube pose | ❌ — omniscient |
-| Industrial-robotics engineer | `sensor_gated` | `add_proximity_sensor`, `teach_robot_pose`, `load_robot_pose` | ✅ — binary sensor, pre-taught poses |
-| RL-trainer / research with sensing | `cube_tracking` + custom obs pipeline | Vision/contact sensors for observation | Partial — depends on sensor realism |
-| Digital-twin / PLC-in-loop | `ros2_cmd` or `setup_pick_place_ros2_bridge` | External controller, OPC-UA optional | ✅ — external logic, Isaac Sim = physics only |
+| Persona | target_source mode | Extra tools used | Sim2real-honest | When to use |
+|---|---|---|---|---|
+| **Industrial-robotics engineer (DEFAULT)** | `sensor_gated` | `add_proximity_sensor`, `teach_robot_pose` × 3 (pick/drop/home), belt_path | ✅ — binary sensor, pre-taught poses | All industrial / factory / realistic pick-place demos. Belt pauses on trigger so robot has all the time it needs. |
+| ML researcher (demo-gen / imitation) | `cube_tracking` | RmpFlow reads ground-truth cube pose each frame | ❌ — omniscient | Only when you specifically want live-pose chasing for ML demo generation. Requires robot to outpace belt. |
+| RL-trainer / research with sensing | `cube_tracking` + custom obs pipeline | Vision / contact sensors for observation | Partial | When training policies with realistic sensor inputs, but ground-truth pose is still read. |
+| Digital-twin / PLC-in-loop | `ros2_cmd` or `setup_pick_place_ros2_bridge` | External controller, OPC-UA optional | ✅ — external logic, Isaac Sim = physics only | When the real plant's PLC drives the sim via ROS2 / OPC-UA. |
 
-Per-persona checks may differ — the industrial persona MUST pass C9-C11
+### Why sensor_gated is the default
+
+Previous runs with cube_tracking demonstrated the belt carried cubes past
+the pick station when the robot's planning/IK took longer than the cubes'
+transit time. That's a useful ML-research failure mode (tests robot
+throughput) but it's not representative of industrial pick-and-place
+cells. Real cells use sensors: cubes arrive, sensor triggers, belt pauses,
+robot picks without time pressure, belt resumes. That's the canonical
+pattern and what this scenario now validates by default.
+
+Per-persona checks differ — the industrial persona MUST pass C9-C11
 (sensor exists, belt pauses on trigger, resumes after release). The
 cube_tracking persona may skip C9-C11.
 

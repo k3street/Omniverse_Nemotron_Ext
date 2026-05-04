@@ -25,10 +25,17 @@ Build an industrial pick-and-place cell in Isaac Sim 5.x with these exact dimens
 
 TABLE: create a Cube at /World/Table, position (0, 0, 0.375),
 scaled so final world dimensions are 2.0m × 1.0m × 0.75m (top surface at Z=0.75).
-Remember UsdGeom.Cube has default size=2, so scale accordingly.
+Remember UsdGeom.Cube has default size=2, so scale accordingly. Apply
+PhysicsCollisionAPI so cubes and robot can rest on it.
 
 FRANKA PANDA: import at /World/Franka, base on table top at (0, 0, 0.75),
 facing +Y. Must have ArticulationRootAPI and ≥10 descendant link prims.
+Use robot_wizard(robot_name='franka_panda', dest_path='/World/Franka',
+position=[0,0,0.75], orientation=[0.7071068, 0, 0, 0.7071068]).
+The orientation quat rotates 90° around Z so the robot's default +X-forward
+becomes +Y-forward. Profile auto-applies drive gains (kp=6000, kd=500),
+switches to the AlternateFinger variant, and sets the home joint config —
+no separate tune_gains / variant / home-pose calls needed.
 
 CONVEYOR BELT: create at /World/ConveyorBelt, center (0, 0.3, 0.80),
 dimensions 1.6m × 0.3m × 0.1m (top surface at Z=0.85). Runs along X axis,
@@ -40,8 +47,10 @@ FOUR CUBES: /World/Cube_1..4 at X = -0.6, -0.4, -0.2, 0.0, all Y=0.3, Z=0.875.
 Size 0.05m, mass 0.1 kg, RigidBodyAPI + CollisionAPI + MassAPI. Cubes are on the belt
 moving toward +X — the Franka picks them as they approach X≈0.
 
-BIN: /World/Bin at world (0, -0.4, 0.80), open-top container of 5 Cube children
+BIN: /World/Bin at world (0, -0.4, 0.75), open-top container of 5 Cube children
 (floor + 4 walls), each with CollisionAPI. External size 0.3m × 0.3m × 0.15m.
+The parent Xform translate z=0.75 puts the bin floor bottom flush on the
+table top (also z=0.75); bin walls extend up to z=0.90.
 Placed BEHIND the Franka (Y=-0.4), so robot turns around to drop cubes.
 
 DOME LIGHT: /World/DomeLight at (0, 0, 2.0), intensity 1000.

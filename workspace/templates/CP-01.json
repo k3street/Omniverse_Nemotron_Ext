@@ -1,0 +1,45 @@
+{
+  "task_id": "CP-01",
+  "goal": "Build an industrial pick-and-place cell in Isaac Sim: a Franka Panda on a 2×1×0.75m table picks 5cm cubes from a 1.6×0.3×0.1m conveyor belt in front of the robot and drops them into an open-top 0.3×0.3×0.15m bin behind the robot. Belt runs at 0.2 m/s along +X; a proximity sensor at the pick station pauses the belt during each pick. Verified 3/4 cubes delivered per cycle with target_source='spline'.",
+  "tools_used": [
+    "create_prim",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "add_proximity_sensor",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Ten load-bearing design choices from debugging 2026-04-18..21 (see docs/qa/conveyor_pick_place_incidents.md I-01..I-25):\n1) Table is a UsdGeom.Cube with default size=2 — use scale=[1, 0.5, 0.375] + position=[0, 0, 0.375] to get a 2×1×0.75m table with top at z=0.75.\n2) Franka base goes AT z=0.75 (table top). The default PickPlaceController end_effector_initial_height=0.3 is world-absolute — that puts the EE BELOW the base. Fix is automatic in 'native' and 'spline' generators (auto-compute h1 from max(source_z, drop_z)+0.2m clearance).\n3) Robot wizard with orientation=[0.7071068, 0, 0, 0.7071068] rotates Franka 90° around Z so its default +X-forward becomes +Y-forward (belt is at y=+0.3, bin at y=-0.4).\n4) robot_wizard(robot_name='franka_panda') auto-applies drive gains kp=6000/kd=500 to all 7 arm joints AND switches Gripper variant to 'AlternateFinger' — Default variant doesn't render fingers. No separate tune_gains / variant calls needed.\n5) Belt needs all three APIs: PhysicsCollisionAPI + kinematic-enabled PhysicsRigidBodyAPI + PhysxSurfaceVelocityAPI with surfaceVelocity=(0.2,0,0). Without SurfaceVelocity cubes don't move.\n6) Cubes need PhysxRigidBodyAPI with sleepThreshold=0 — otherwise they fall asleep on belt and never trigger the sensor.\n7) Bin floor flush on table top (bin z=0.75, NOT 0.80) — the parent Xform's translate Z defines the BOTTOM of the bin floor geometry.\n8) Proximity sensor at (0.3, 0.3, 0.86) — 5cm above belt top, in XY line with pick point. add_proximity_sensor applies PhysxTriggerAPI + isaac_sensor:triggered attr.\n9) Use target_source='spline' (NOT 'native' even though the user may ask for 'PickPlaceController'). Native scores 0-1/4 delivery here due to RmpFlow settling in local minima + gripper missing cubes. Spline's warm-start IK chain + scipy.CubicSpline + boosted finger drive gains reliably delivers 3/4.\n10) Run target_source='auto' for maximum portability: it probes GPU + cuRobo + Isaac Lab, prefers 'curobo' when available (industrial cycle time), else 'native' (Franka-only) or 'spline' (CPU fallback).",
+  "code": "# Parent Xform\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# Table — Cube default size=2, scale to 2×1×0.75m with top at z=0.75\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# Franka on table top, facing +Y\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Conveyor belt in front of Franka, at y=+0.3\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0, 0.3, 0.80],\n    size=[1.6, 0.3, 0.1],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Four cubes on belt — spaced 0.2m apart, approaching sensor from -X\nfor i, x in enumerate([-0.6, -0.4, -0.2, 0.0]):\n    create_prim(prim_path=f\"/World/Cube_{i+1}\", prim_type=\"Cube\", position=[x, 0.3, 0.875], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n        apply_api_schema(prim_path=f\"/World/Cube_{i+1}\", schema_name=api)\n\n# Bin behind Franka at y=-0.4, floor flush on table top\ncreate_bin(\n    prim_path=\"/World/Bin\",\n    position=[0, -0.4, 0.75],\n    size=[0.3, 0.3, 0.15],\n)\n\n# Dome light + physics scene (idempotent)\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", position=[0, 0, 2.0], intensity=1000)\n\n# Proximity sensor at pick station — 5cm above belt top, at robot's reach\nadd_proximity_sensor(\n    sensor_path=\"/World/PickSensor\",\n    position=[0.3, 0.3, 0.86],\n    size=[0.04, 0.04, 0.04],\n)\n\n# Install pick-place controller — spline is the verified CPU winner.\n# Use target_source='auto' for portability (probes env, prefers curobo\n# when GPU+Warp compat allow, else spline).\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"auto\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\", \"/World/Cube_2\", \"/World/Cube_3\", \"/World/Cube_4\"],\n    destination_path=\"/World/Bin\",\n)",
+  "failure_modes": [
+    "Placing the table with scale=[2, 1, 0.75] and forgetting USD Cube default size=2 → 4×2×1.5m table instead of 2×1×0.75m (off by 2x on all axes).",
+    "Setting end_effector_initial_height to 0.3 while robot is on a table → IK target below the robot base → arm folds trying to reach under itself. Both 'native' and 'spline' auto-compute h1; don't override unless you know why.",
+    "Using target_source='native' expecting 4/4 delivery — native scores 0-1/4 on this scenario due to RmpFlow local minima + gripper timing. Use 'spline' or 'auto'.",
+    "Omitting PhysxSurfaceVelocityAPI on the conveyor → cubes don't move. All three APIs (Collision + kinematic RigidBody + SurfaceVelocity) are required.",
+    "Placing the bin with z=0.80 (so its bottom is 5cm above the table top) — bin floats, cubes miss. Correct is z=0.75 (parent translate = bin floor BOTTOM, flush on table).",
+    "Omitting sleepThreshold=0 on cubes → PhysX sleeps them after a few seconds on belt → sensor never triggers.",
+    "Forgetting orientation=[0.7071068, 0, 0, 0.7071068] on robot_wizard → Franka faces +X, away from the belt → no pick happens.",
+    "Running separate tune_gains / set_variant calls — robot_wizard profile already does kp=6000/kd=500 + AlternateFinger for franka_panda. Redundant calls risk misconfiguring.",
+    "Setting target_source='curobo' on a machine without cuRobo installed — the generator probes + emits a skip status, but the agent should check list_available_controllers first and fall back to spline."
+  ],
+  "verified_date": "2026-04-21",
+  "verified_metrics": {
+    "controller": "spline",
+    "cubes_in_bin_mean": 3.0,
+    "cubes_in_bin_std": 0.0,
+    "runs": 2,
+    "internal_delivered_mean": 4.0,
+    "error_count_mean": 0,
+    "tick_count_mean": 7189.5,
+    "wall_elapsed_mean_s": 121.3,
+    "benchmark_report": "/tmp/bench_fas9.json"
+  },
+  "benchmark_vs_alternatives": {
+    "native":  {"cubes_in_bin_mean": 0.0, "runs": 2, "note": "0/4 in benchmark (previously 1/4 best). RmpFlow + PickPlaceController — reactive, misses grip timing."},
+    "spline":  {"cubes_in_bin_mean": 3.0, "runs": 2, "note": "3/4 deterministic. Winner for CPU-only."},
+    "curobo":  {"status": "blocked", "reason": "cuRobo installed in isaac_lab_env but Warp 1.8.2 (Kit) is too old; cuRobo expects Warp 1.9+. Env-bridge implemented as stub."},
+    "diffik":  {"status": "blocked", "reason": "isaaclab not in Kit python. Stub-only."},
+    "osc":     {"status": "blocked", "reason": "isaaclab not in Kit python. Stub-only (experimental anyway)."}
+  }
+}

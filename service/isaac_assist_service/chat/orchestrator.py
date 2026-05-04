@@ -1365,6 +1365,58 @@ print(json.dumps({'empty_robots': empty_robots}))
                                         break
                             except Exception as _e:
                                 logger.debug(f"[{session_id}] empty-robot check failed: {_e}")
+
+                        # Scene-lighting guard: if the turn added geometry but
+                        # the stage has no UsdLux light prim, auto-author a
+                        # DomeLight so the viewport is not black. Text cites
+                        # + dedicated add_default_light tool alone did not
+                        # reliably pull Gemini Flash into calling them for
+                        # scene-construction prompts — the agent focuses on
+                        # the "task words" (conveyor, robot, bin) and skips
+                        # ambient infrastructure. This hook only runs when
+                        # new prims were actually added this turn, so it
+                        # does not spam lights into chat-only turns.
+                        try:
+                            if _diff and _diff.ok and len(_diff.added) > 0:
+                                from .tools import kit_tools as _kit_tools
+                                _light_check = """
+import json
+import omni.usd
+stage = omni.usd.get_context().get_stage()
+has_light = False
+for prim in stage.Traverse():
+    if 'Light' in str(prim.GetTypeName()):
+        has_light = True
+        break
+print(json.dumps({'has_light': has_light}))
+"""
+                                _ex = await _kit_tools.exec_sync(_light_check, timeout=10)
+                                _out = (_ex.get('output') or '').strip()
+                                _has_light = False
+                                for line in reversed(_out.splitlines()):
+                                    line = line.strip()
+                                    if line.startswith('{'):
+                                        try:
+                                            _has_light = bool(json.loads(line).get('has_light'))
+                                        except Exception:
+                                            pass
+                                        break
+                                if not _has_light:
+                                    from .tools.tool_executor import _gen_add_default_light
+                                    _light_code = _gen_add_default_light({})
+                                    _r = await _kit_tools.exec_sync(_light_code, timeout=15)
+                                    _trace_emit(session_id, "auto_light_authored", {
+                                        "reason": "scene-construction turn produced geometry but no light was authored",
+                                        "light_path": "/World/DomeLight",
+                                        "intensity": 1000.0,
+                                        "kit_success": bool(_r.get("success")),
+                                    })
+                                    logger.info(
+                                        f"[{session_id}] auto-authored /World/DomeLight "
+                                        f"(turn had {len(_diff.added)} prims added, no light present)"
+                                    )
+                        except Exception as _e:
+                            logger.debug(f"[{session_id}] scene-light guard failed: {_e}")
                     except Exception as e:
                         logger.debug(f"[{session_id}] turn_diff verify failed: {e}")
 

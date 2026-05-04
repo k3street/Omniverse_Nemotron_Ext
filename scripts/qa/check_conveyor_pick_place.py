@@ -289,14 +289,20 @@ print(json.dumps({"ok": True, "bins": bins, "qualifying_count": len(qualifying)}
 # ──────────────────────────────────────────────────────────────────────
 
 async def c6_belt_moves_cubes() -> CheckResult:
-    """After 3s simulation, at least one cube's X changed by ≥ 0.1m."""
+    """After 3s simulation, at least one cube's X changed by ≥ 0.1m.
+
+    Uses manual omni.physx.update_simulation(dt) stepping instead of
+    timeline.play + time.sleep. Verified 2026-04-19: inside exec_sync a
+    falling-cube test dropped 0m under timeline.play + time.sleep(2),
+    dropped 4.987m under 60 manual steps at dt=1/60. Manual stepping
+    also fires physics-step callbacks installed by
+    setup_pick_place_controller, so robot state machines run too."""
     script = """
-import json, time
+import json
 import omni.usd
-import omni.timeline
+import omni.physx
 from pxr import UsdGeom
 stage = omni.usd.get_context().get_stage()
-# Snapshot initial X positions of all /World/Cube* prims
 cubes = [p for p in stage.Traverse() if p.GetPath().pathString.startswith("/World/")
          and p.IsA(UsdGeom.Cube) and "bin" not in p.GetPath().pathString.lower()
          and "conveyor" not in p.GetPath().pathString.lower()
@@ -305,11 +311,10 @@ initial_x = {}
 for c in cubes:
     wt = UsdGeom.Xformable(c).ComputeLocalToWorldTransform(0).ExtractTranslation()
     initial_x[c.GetPath().pathString] = wt[0]
-# Play, wait 3s, stop, re-read
-tl = omni.timeline.get_timeline_interface()
-tl.play()
-time.sleep(3.0)
-tl.stop()
+phx = omni.physx.get_physx_interface()
+for i in range(180):
+    phx.update_simulation(elapsedStep=1/60, currentTime=i*1/60)
+phx.update_transformations(updateToFastCache=True, updateToUsd=True, updateVelocitiesToUsd=True)
 final_x = {}
 for c in cubes:
     wt = UsdGeom.Xformable(c).ComputeLocalToWorldTransform(0).ExtractTranslation()
@@ -362,18 +367,20 @@ cubes = cube_paths()
 if ee is None:
     print(json.dumps({"ok": True, "error": "no end-effector found", "min_dist": None}))
 else:
-    tl = omni.timeline.get_timeline_interface()
-    tl.play()
+    import omni.physx
+    phx = omni.physx.get_physx_interface()
     min_dist = 1e9
-    for _ in range(40):  # 40 samples over ~10s
-        time.sleep(0.25)
-        ee_pos = UsdGeom.Xformable(ee).ComputeLocalToWorldTransform(0).ExtractTranslation()
-        for c in cubes:
-            cp = UsdGeom.Xformable(c).ComputeLocalToWorldTransform(0).ExtractTranslation()
-            d = (Gf.Vec3d(ee_pos) - Gf.Vec3d(cp)).GetLength()
-            if d < min_dist:
-                min_dist = d
-    tl.stop()
+    # 600 steps at dt=1/60 = 10s sim. Sample EE-to-cube distance every 15 steps (~0.25s).
+    for i in range(600):
+        phx.update_simulation(elapsedStep=1/60, currentTime=i*1/60)
+        if i % 15 == 0:
+            phx.update_transformations(updateToFastCache=True, updateToUsd=True, updateVelocitiesToUsd=True)
+            ee_pos = UsdGeom.Xformable(ee).ComputeLocalToWorldTransform(0).ExtractTranslation()
+            for c in cubes:
+                cp = UsdGeom.Xformable(c).ComputeLocalToWorldTransform(0).ExtractTranslation()
+                d = (Gf.Vec3d(ee_pos) - Gf.Vec3d(cp)).GetLength()
+                if d < min_dist:
+                    min_dist = d
     print(json.dumps({"ok": True, "min_dist": min_dist, "ee_path": str(ee.GetPath())}))
 """
     r = await run_kit(script)
@@ -410,10 +417,11 @@ else:
     bb = UsdGeom.Imageable(bin_prim).ComputeWorldBound(0, UsdGeom.Tokens.default_)
     bin_range = bb.ComputeAlignedRange()
     b_min, b_max = bin_range.GetMin(), bin_range.GetMax()
-    tl = omni.timeline.get_timeline_interface()
-    tl.play()
-    time.sleep(30.0)
-    tl.stop()
+    import omni.physx
+    phx = omni.physx.get_physx_interface()
+    for i in range(1800):  # 30s at 60Hz
+        phx.update_simulation(elapsedStep=1/60, currentTime=i*1/60)
+    phx.update_transformations(updateToFastCache=True, updateToUsd=True, updateVelocitiesToUsd=True)
     # count cubes inside bin bbox
     in_bin = 0
     cube_info = []
@@ -446,7 +454,40 @@ else:
 # Runner + CLI
 # ──────────────────────────────────────────────────────────────────────
 
+async def c0_scene_has_light() -> CheckResult:
+    """At least one UsdLux light prim exists. Without a light the viewport
+    is black regardless of how correct the geometry is. This is the #1
+    'scene looks broken' miss (2026-04-19 scenario runs had 5/5 geometry
+    checks pass but zero lights authored)."""
+    script = """
+import json
+import omni.usd
+stage = omni.usd.get_context().get_stage()
+lights = []
+for prim in stage.Traverse():
+    t = str(prim.GetTypeName())
+    # UsdLux types: DomeLight, DistantLight, SphereLight, RectLight, DiskLight, CylinderLight
+    if "Light" in t and t != "":
+        a = prim.GetAttribute("inputs:intensity")
+        intensity = None
+        if a and a.HasAuthoredValue():
+            intensity = float(a.Get())
+        lights.append({"path": prim.GetPath().pathString, "type": t, "intensity": intensity})
+print(json.dumps({"ok": True, "lights": lights}))
+"""
+    r = await run_kit(script)
+    lights = r.get("lights") or []
+    passed = len(lights) >= 1
+    return CheckResult(
+        id="C0", name="Scene has at least one light (viewport not black)",
+        passed=passed,
+        details=f"Found {len(lights)} light(s): {lights}" if lights else "NO lights authored — viewport will be black",
+        raw=r,
+    )
+
+
 STRUCTURAL_CHECKS = [
+    c0_scene_has_light,
     c1_table_exists,
     c2_belt_surface_velocity,
     c3_cubes_on_belt,
