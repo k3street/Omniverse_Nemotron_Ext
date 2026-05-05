@@ -58,7 +58,36 @@ COL_DOT_BAD         = 0xFF4444FF
 COL_BORDER_PULSE    = 0xFF00B976
 COL_BORDER_NEUTRAL  = 0x00000000
 
-# ── Spinner glyphs (Braille; slow + calm cadence for peripheral panel) ──
+# ── Undo button styles (defined here so both _attach and state transitions
+# read from one source of truth — easier to retune the visual). Solid
+# backgrounds + bigger fonts so the button reads as an actual button,
+# not as decorative text in the bubble.
+UNDO_BTN_STYLE_IDLE = {
+    "font_size": 12,
+    "color": COL_TEXT,
+    "background_color": 0xFF3A3E43,  # dark grey, lighter than bubble bg
+    "border_radius": 4,
+}
+UNDO_BTN_STYLE_CONFIRM = {
+    "font_size": 13,
+    "color": 0xFF000000,             # near-black on amber for max contrast
+    "background_color": COL_AMBER,   # solid amber — "click to commit destructive"
+    "border_radius": 4,
+}
+UNDO_BTN_STYLE_PENDING = {
+    "font_size": 12,
+    "color": COL_TEXT_SUBTLE,
+    "background_color": 0xFF2A2E33,
+    "border_radius": 4,
+}
+UNDO_BTN_STYLE_FAILED = {
+    "font_size": 12,
+    "color": COL_TEXT,
+    "background_color": COL_RED,     # solid red — failure state, click to retry
+    "border_radius": 4,
+}
+
+# ── Spinner glyphs (ASCII; bundled font lacks Braille) ──────────────────
 SPINNER_GLYPHS = "|/-\\"
 SPIN_INTERVAL_S = 0.20
 SLOW_THRESHOLD_S = 10.0
@@ -1018,24 +1047,22 @@ class ChatViewWindow(ui.Window):
         slot = bubble.get("diff_slot")
         if not slot:
             return
-        # The diff chip already lives in the slot; we append a row with
-        # the undo button. Keep handles to mutate text/style and remove.
+        # Solid-background button (was transparent + dim text — read as
+        # decoration, not as an interactive control). Same row as the
+        # diff chip, right-aligned. Bigger font + padding so it actually
+        # looks like a button.
         with slot:
-            with ui.HStack(height=18) as undo_row:
+            with ui.HStack(height=26) as undo_row:
                 ui.Spacer()
                 btn = ui.Button(
                     "Undo",
-                    width=44,
-                    height=16,
+                    width=64,
+                    height=22,
                     clicked_fn=lambda b=bubble: self._on_undo_clicked(b),
-                    style={
-                        "font_size": 11,
-                        "color": COL_TEXT_DIM,
-                        "background_color": 0x00000000,
-                    },
+                    style=UNDO_BTN_STYLE_IDLE,
                     tooltip=self._undo_tooltip(bubble.get("diff_summary", {})),
                 )
-                ui.Spacer(width=4)
+                ui.Spacer(width=8)
         bubble["undo_btn"] = btn
         bubble["undo_row"] = undo_row
 
@@ -1079,26 +1106,18 @@ class ChatViewWindow(ui.Window):
         state = bubble.get("undo_state", "idle")
         btn = bubble.get("undo_btn")
         if state == "idle":
-            # Confirm-state shows a clear "click again to commit" affordance:
-            # checkmark in amber. Pedagogical (✓ = commit) AND warning-coloured
-            # (amber = destructive). 3-second window then auto-revert to idle.
+            # Confirm state: solid amber background, bigger text, checkmark.
+            # Reads unmistakably as "click here to commit, this is a
+            # destructive action." 3-second window then revert to idle.
             bubble["undo_state"] = "confirm"
-            btn.text = "Confirm ✓"  # ✓ U+2713 — common in fonts
-            btn.style = {
-                "font_size": 11,
-                "color": COL_AMBER,
-                "background_color": 0x00000000,
-            }
-            btn.width = ui.Pixel(70)
+            btn.text = "Confirm Undo  ✓"
+            btn.style = UNDO_BTN_STYLE_CONFIRM
+            btn.width = ui.Pixel(130)
             asyncio.ensure_future(self._reset_undo_after(bubble, 3.0))
         elif state == "confirm":
             bubble["undo_state"] = "pending"
-            btn.text = "..."  # ASCII triple-dot — Unicode … breaks in this font
-            btn.style = {
-                "font_size": 11,
-                "color": COL_TEXT_SUBTLE,
-                "background_color": 0x00000000,
-            }
+            btn.text = "Reverting..."
+            btn.style = UNDO_BTN_STYLE_PENDING
             btn.enabled = False
             asyncio.ensure_future(self._do_undo())
 
@@ -1109,12 +1128,8 @@ class ChatViewWindow(ui.Window):
             btn = bubble.get("undo_btn")
             if btn:
                 btn.text = "Undo"
-                btn.style = {
-                    "font_size": 11,
-                    "color": COL_TEXT_DIM,
-                    "background_color": 0x00000000,
-                }
-                btn.width = ui.Pixel(44)
+                btn.style = UNDO_BTN_STYLE_IDLE
+                btn.width = ui.Pixel(64)
 
     async def _do_undo(self):
         # Show progress in the live strip — restore can take a few seconds
@@ -1168,14 +1183,10 @@ class ChatViewWindow(ui.Window):
             b["undo_state"] = "idle"
             btn = b.get("undo_btn")
             if btn:
-                btn.text = "Undo"
-                btn.width = ui.Pixel(44)
+                btn.text = "Retry Undo"
+                btn.width = ui.Pixel(96)
                 btn.enabled = True
-                btn.style = {
-                    "font_size": 11,
-                    "color": COL_RED,
-                    "background_color": 0x00000000,
-                }
+                btn.style = UNDO_BTN_STYLE_FAILED
                 btn.tooltip = f"Undo failed: {err}\nClick to retry."
         if self._undo_progress_row:
             try:
