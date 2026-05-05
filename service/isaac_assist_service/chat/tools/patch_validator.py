@@ -240,6 +240,39 @@ def _check_missing_import_omni_usd(code: str) -> List[PatchIssue]:
     return issues
 
 
+# pxr-module presence checks. Each module has many ways the agent might
+# reference it; we detect any qualified usage and demand a matching import.
+# Error severity because the script crashes immediately at runtime
+# without it. Caught in test session ext_d5abf2ec turn 18: agent's
+# run_usd_script for "5 rubber cubes" called UsdGeom + UsdPhysics without
+# importing them, the validator let it through, Kit raised NameError mid-
+# script and the rubber-physics setup half-applied.
+_PXR_MODULES = ("UsdGeom", "UsdPhysics", "UsdLux", "UsdShade", "Sdf", "Gf", "PhysxSchema", "Usd", "Vt")
+
+
+def _check_missing_pxr_imports(code: str) -> List[PatchIssue]:
+    issues = []
+    for mod in _PXR_MODULES:
+        # Match qualified usage: <Module>.<anything> or <Module>(
+        usage_re = re.compile(r"\b" + mod + r"\s*[.(]")
+        # Match an import. Either `from pxr import ..., <Module>, ...`
+        # or `import pxr as ... ; pxr.<Module>` (rare but valid).
+        # We accept any line that has `from pxr import` and the module
+        # name as a token (allowing trailing comma / newline / paren).
+        import_re = re.compile(
+            r"from\s+pxr\s+import\b[^\n]*\b" + mod + r"\b"
+        )
+        if usage_re.search(code) and not import_re.search(code):
+            issues.append(PatchIssue(
+                severity="error",
+                rule="missing_import_" + mod.lower(),
+                message=f"Code references {mod} but does not import it from pxr. "
+                        f"Will fail with 'name {mod} is not defined'.",
+                fix_hint=f"Add 'from pxr import {mod}' (or extend an existing 'from pxr import ...' line).",
+            ))
+    return issues
+
+
 _RE_RAW_LIST_SET = re.compile(
     r"""\.Set\s*\(\s*\[[\d.,\s-]+\]\s*\)"""
 )
@@ -730,6 +763,7 @@ _ALL_VALIDATORS = [
     _check_carter_joint_names,
     _check_triangle_mesh_on_wheels,
     _check_missing_import_omni_usd,
+    _check_missing_pxr_imports,
     _check_raw_list_for_vec,
     _check_unsafe_add_xform_op,
     _check_create_prim_default_path,
