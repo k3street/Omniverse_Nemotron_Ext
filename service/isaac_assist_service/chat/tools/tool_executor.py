@@ -2694,7 +2694,7 @@ async def _handle_place_on_top_of(args: Dict) -> Dict:
     """
     source_path = args.get("prim_path") or args.get("source_prim_path") or ""
     target_path = args.get("target_prim_path") or args.get("on_top_of") or ""
-    clearance = float(args.get("clearance", 0.01))
+    clearance = float(args.get("clearance", 0.001))
     xy_align = args.get("xy_align", "center")
     if not source_path or not target_path:
         return {"error": "place_on_top_of requires prim_path (source) and target_prim_path"}
