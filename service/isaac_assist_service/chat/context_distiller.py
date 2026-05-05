@@ -156,6 +156,7 @@ _ALWAYS_TOOLS = {
     "resolve_material_properties", "resolve_constraint_phrase",
     "resolve_sequence_phrase", "resolve_context_reference",
     "resolve_skill_composition",
+    "resolve_success_condition", "verify_pickplace_pipeline",
 }
 
 # Build a fast name→schema lookup

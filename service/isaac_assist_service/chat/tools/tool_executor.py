@@ -3144,6 +3144,16 @@ _SKILL_RECIPES = {
         "tool_chain": [
             {"tool": "setup_pick_place_controller", "args_template": {"robot_path": "<ROBOT>", "target_prim_path": "<OBJECT>", "destination": "<BIN>"}},
         ],
+        "verify_step": {
+            "tool": "verify_pickplace_pipeline",
+            "args_template": {"stages": [{"robot_path": "<ROBOT>", "pick_path": "<OBJECT>", "place_path": "<BIN>"}]},
+            "rationale": "Confirm the robot can reach both the pick and place targets before claiming the cell works.",
+        },
+        "success_condition": {
+            "intent": "object_traversal",
+            "start_state": "<OBJECT> located at <PICK_SURFACE>",
+            "end_state": "<OBJECT> located at <PLACE_SURFACE>",
+        },
     },
     "calibrate_camera": {
         "description": "Place a calibration board + camera and run the calibration routine.",
@@ -3180,6 +3190,261 @@ _SKILL_RECIPES = {
     "ros2": "ros2_bridge", "ros": "ros2_bridge", "bridge": "ros2_bridge",
     "teleop": "teleop_demo", "teleoperation": "teleop_demo",
 }
+
+
+# Default reach radius (meters) per robot type. Used by
+# verify_pickplace_pipeline when no explicit reach is supplied.
+# These are conservative envelope estimates from the manufacturer specs;
+# actual cuRobo / Lula IK can refine but the envelope is what matters
+# for pipeline-feasibility-without-running-IK.
+_ROBOT_REACH_M = {
+    "franka_panda": 0.855,  # Franka Panda — 855mm reach
+    "ur5e":         0.850,
+    "ur10":         1.300,
+    "ur10e":        1.300,
+    "kinova":       0.902,
+    "h1":           0.580,  # H1 humanoid arm reach (one arm)
+    "g1":           0.450,
+    "default":      0.800,
+}
+
+
+_SUCCESS_CONDITION_TEMPLATES = {
+    # intent_kind: {fields it needs, structured form}
+    "object_traversal": {
+        "fields": ["object", "start_location", "end_location"],
+        "verify_with": "verify_pickplace_pipeline",
+        "rationale": "Object moves from start_location to end_location. Verifier checks reach + handoffs.",
+    },
+    "static_layout": {
+        "fields": ["components"],
+        "verify_with": None,  # snapshot diff is enough
+        "rationale": "Specific components present at specific positions. Verifier optional — scene_summary suffices.",
+    },
+    "controller_setup": {
+        "fields": ["robot", "controller_type"],
+        "verify_with": None,
+        "rationale": "A controller is configured on a robot. Verifier should test the controller responds.",
+    },
+    "data_pipeline": {
+        "fields": ["source", "sink", "throughput"],
+        "verify_with": None,
+        "rationale": "Data flows from source to sink. Verifier should sample N frames and check format.",
+    },
+}
+
+
+async def _handle_resolve_success_condition(args: Dict) -> Dict:
+    """Extract a structured success condition from a prompt's intent.
+
+    The third resolver class — counterpart to input-resolvers and
+    output-verifiers. This one extracts what 'done' means for the
+    current intent so the agent can plan the verify step in advance.
+
+    Args:
+      intent_kind: one of {object_traversal, static_layout, controller_setup, data_pipeline}
+      object: the thing that traverses (for traversal kind)
+      start_location: where it begins (path or descriptor)
+      end_location: where it must end up (path or descriptor)
+      components: list of expected prims (for static_layout)
+
+    Returns: {kind, success_condition: {start_state, end_state}, verify_with, rationale}.
+    Agent uses this to know what verifier to call before declaring done.
+    """
+    kind = (args.get("intent_kind") or "").strip().lower()
+    if not kind:
+        return {"error": "resolve_success_condition requires intent_kind",
+                "known_kinds": sorted(_SUCCESS_CONDITION_TEMPLATES.keys())}
+    template = _SUCCESS_CONDITION_TEMPLATES.get(kind)
+    if not template:
+        return {"error": f"unknown intent_kind {kind!r}",
+                "known_kinds": sorted(_SUCCESS_CONDITION_TEMPLATES.keys())}
+
+    out = {
+        "intent_kind": kind,
+        "success_condition": {},
+        "verify_with": template["verify_with"],
+        "rationale": template["rationale"],
+        "fields_required": template["fields"],
+    }
+    if kind == "object_traversal":
+        obj = args.get("object", "")
+        start = args.get("start_location", "")
+        end = args.get("end_location", "")
+        out["success_condition"] = {
+            "start_state": f"{obj} located at {start}" if obj and start else "(unspecified — call again with object+start_location)",
+            "end_state": f"{obj} located at {end}" if obj and end else "(unspecified — call again with object+end_location)",
+            "object": obj, "start_location": start, "end_location": end,
+        }
+        # Surface ambiguity if any field empty — agent should ASK.
+        missing = [f for f in template["fields"] if not args.get(f)]
+        if missing:
+            out["needs_clarification"] = True
+            out["missing_fields"] = missing
+            out["suggested_question"] = (
+                f"To verify the assembly is complete I need: {', '.join(missing)}. "
+                f"Could you specify?"
+            )
+    elif kind == "static_layout":
+        components = args.get("components") or []
+        out["success_condition"] = {"required_components": list(components)}
+    elif kind == "controller_setup":
+        out["success_condition"] = {
+            "robot": args.get("robot", ""),
+            "controller_type": args.get("controller_type", ""),
+        }
+    elif kind == "data_pipeline":
+        out["success_condition"] = {
+            "source": args.get("source", ""),
+            "sink": args.get("sink", ""),
+            "throughput": args.get("throughput", ""),
+        }
+    return out
+
+
+async def _handle_verify_pickplace_pipeline(args: Dict) -> Dict:
+    """Verify a pick-place pipeline is physically executable.
+
+    Pilot of the *verifier* tool class — counterpart to *resolvers*.
+    Resolvers translate input to structured values; verifiers check that
+    a built scene actually meets the functional requirements of a skill.
+
+    Use case: after building a pick-place cell, call this to confirm
+    every (robot, pick, place) stage is within the robot's workspace.
+    Returns per-stage reach data + a boolean `pipeline_ok` summary +
+    a list of `issues` describing any unreachable stages or handoff
+    gaps. Agent's protocol: call this BEFORE declaring the build done.
+    If pipeline_ok is False, either fix the layout or surface the
+    issue to the user.
+
+    Args (one of):
+      stages: list of {"robot_path": str, "pick_path": str, "place_path": str,
+                       optional "robot_kind": str, "reach_m": float}
+      OR pairwise: robot_path, pick_path, place_path for a single stage
+    """
+    stages = args.get("stages")
+    if not stages:
+        # Allow a single-stage shorthand
+        rp = args.get("robot_path"); pp = args.get("pick_path"); pl = args.get("place_path")
+        if rp and pp and pl:
+            stages = [{"robot_path": rp, "pick_path": pp, "place_path": pl,
+                       "robot_kind": args.get("robot_kind", ""),
+                       "reach_m": args.get("reach_m")}]
+    if not stages:
+        return {"error": "verify_pickplace_pipeline requires 'stages' (list of {robot_path,pick_path,place_path}) or single robot_path+pick_path+place_path"}
+
+    # Build the Kit script that resolves world positions per stage.
+    import json as _j
+    stages_json = _j.dumps(stages)
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Usd
+
+stage = omni.usd.get_context().get_stage()
+cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+ROBOT_REACH = {_ROBOT_REACH_M!r}
+stages = {stages_json}
+
+def _world_pos(path):
+    \"\"\"Return bbox center as a fallback. Used only for the robot base call below.\"\"\"
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid():
+        return None
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty():
+        try:
+            xf = UsdGeom.Xformable(p)
+            t = xf.ComputeLocalToWorldTransform(0).ExtractTranslation()
+            return [float(t[0]), float(t[1]), float(t[2])]
+        except Exception:
+            return None
+    c = b.GetMidpoint()
+    return [float(c[0]), float(c[1]), float(c[2])]
+
+def _robot_base_pos(path):
+    \"\"\"Robot base = (xy center of bbox, min z). Reach is measured from
+    the floor-mounted base, not the mid-height bbox center.\"\"\"
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid():
+        return None
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty():
+        return _world_pos(path)
+    c = b.GetMidpoint(); mn = b.GetMin()
+    return [float(c[0]), float(c[1]), float(mn[2])]
+
+def _closest_point_on_bbox(path, ref):
+    \"\"\"Return the point on prim's world-space bbox closest to ref. For
+    a long conveyor or a wide bin this lets reach calculations target
+    the nearest accessible point, not the (possibly far) bbox center.\"\"\"
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid():
+        return None
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty():
+        return _world_pos(path)
+    mn = b.GetMin(); mx = b.GetMax()
+    return [
+        float(max(mn[0], min(ref[0], mx[0]))),
+        float(max(mn[1], min(ref[1], mx[1]))),
+        float(max(mn[2], min(ref[2], mx[2]))),
+    ]
+
+def _dist(a, b):
+    return ((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2) ** 0.5
+
+results = []
+issues = []
+prev_place = None
+for i, s in enumerate(stages):
+    rp = s.get('robot_path',''); pkp = s.get('pick_path',''); plp = s.get('place_path','')
+    rk = (s.get('robot_kind','') or '').lower()
+    reach = s.get('reach_m')
+    if reach is None:
+        reach = ROBOT_REACH.get(rk) if rk in ROBOT_REACH else ROBOT_REACH.get('default', 0.8)
+    rpos = _robot_base_pos(rp)
+    pkpos = _closest_point_on_bbox(pkp, rpos) if rpos else _world_pos(pkp)
+    plpos = _closest_point_on_bbox(plp, rpos) if rpos else _world_pos(plp)
+    stage_result = {{'index': i, 'robot_path': rp, 'pick_path': pkp, 'place_path': plp,
+                     'robot_pos': rpos, 'pick_pos': pkpos, 'place_pos': plpos,
+                     'reach_m': reach}}
+    bad = False
+    if rpos is None:
+        issues.append(f'stage {{i}}: robot prim {{rp!r}} not found'); bad = True
+    if pkpos is None:
+        issues.append(f'stage {{i}}: pick prim {{pkp!r}} not found'); bad = True
+    if plpos is None:
+        issues.append(f'stage {{i}}: place prim {{plp!r}} not found'); bad = True
+    if rpos and pkpos:
+        d = _dist(rpos, pkpos); stage_result['pick_distance'] = d
+        if d > reach:
+            issues.append(f'stage {{i}}: pick at {{pkp}} is {{d:.2f}}m from robot {{rp}} (>reach {{reach:.2f}}m)'); bad = True
+    if rpos and plpos:
+        d = _dist(rpos, plpos); stage_result['place_distance'] = d
+        if d > reach:
+            issues.append(f'stage {{i}}: place at {{plp}} is {{d:.2f}}m from robot {{rp}} (>reach {{reach:.2f}}m)'); bad = True
+    stage_result['reachable'] = not bad
+    if prev_place is not None and pkpos is not None:
+        # Handoff gap: distance from previous stage's place point to this stage's pick.
+        # In a conveyor pipeline these can differ (cube travels along the conveyor)
+        # but if the conveyor doesn't span the gap, the cube never arrives.
+        gap = _dist(prev_place, pkpos)
+        stage_result['handoff_gap_to_prev'] = gap
+        if gap > 3.0:  # very loose — flag obviously broken handoffs
+            issues.append(f'stage {{i}}: handoff gap from previous place to this pick is {{gap:.2f}}m — is there a conveyor bridging?')
+    prev_place = plpos
+    results.append(stage_result)
+
+ok = all(s.get('reachable', False) for s in results) and not any('handoff' in i for i in issues)
+out = {{
+    'stages': results,
+    'issues': issues,
+    'pipeline_ok': ok,
+    'rationale': 'Per-stage reach distance compared to robot workspace radius; handoff gaps flagged when >3m from previous place to next pick.',
+}}
+print(json.dumps(out))
+"""
+    return await kit_tools.queue_exec_patch(code, "verify_pickplace_pipeline")
 
 
 async def _handle_resolve_skill_composition(args: Dict) -> Dict:
@@ -3621,6 +3886,8 @@ DATA_HANDLERS = {
     "resolve_sequence_phrase": _handle_resolve_sequence_phrase,
     "resolve_context_reference": _handle_resolve_context_reference,
     "resolve_skill_composition": _handle_resolve_skill_composition,
+    "resolve_success_condition": _handle_resolve_success_condition,
+    "verify_pickplace_pipeline": _handle_verify_pickplace_pipeline,
     "get_debug_info": _handle_get_debug_info,
     "lookup_knowledge": _handle_lookup_knowledge,
     "lookup_api_deprecation": _handle_lookup_api_deprecation,

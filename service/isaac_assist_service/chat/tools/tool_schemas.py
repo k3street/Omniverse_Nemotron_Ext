@@ -574,6 +574,75 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "resolve_success_condition",
+            "description": (
+                "ACCEPTANCE-EXTRACTOR. Extract a structured 'done' condition from "
+                "the prompt's intent. Use BEFORE building so you know which "
+                "verifier to call afterwards. Maps high-level intents (object_traversal, "
+                "static_layout, controller_setup, data_pipeline) into "
+                "{start_state, end_state, verify_with} tuples. If the agent can't fill "
+                "all required fields, the resolver flags needs_clarification — ASK "
+                "the user, don't guess. Pairs with the verify_* tools to close the "
+                "loop on 'is this build actually done?'"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "intent_kind": {
+                        "type": "string",
+                        "enum": ["object_traversal", "static_layout", "controller_setup", "data_pipeline"],
+                        "description": "Category of intent: object_traversal (cube goes A→B), static_layout (specific prims at specific positions), controller_setup (robot configured for an action), data_pipeline (data flows from source to sink).",
+                    },
+                    "object": {"type": "string", "description": "For object_traversal: the prim that traverses."},
+                    "start_location": {"type": "string", "description": "For object_traversal: where it begins (prim path or descriptor)."},
+                    "end_location": {"type": "string", "description": "For object_traversal: where it must end up."},
+                    "components": {"type": "array", "items": {"type": "string"}, "description": "For static_layout: list of expected prim paths or class descriptors."},
+                    "robot": {"type": "string", "description": "For controller_setup: robot prim path."},
+                    "controller_type": {"type": "string", "description": "For controller_setup: kind of controller (rmpflow / pickplace / etc)."},
+                    "source": {"type": "string", "description": "For data_pipeline: data source."},
+                    "sink": {"type": "string", "description": "For data_pipeline: data sink."},
+                    "throughput": {"type": "string", "description": "For data_pipeline: optional throughput / rate target."},
+                },
+                "required": ["intent_kind"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "verify_pickplace_pipeline",
+            "description": (
+                "VERIFIER (counterpart to resolvers). Check that a built pick-place "
+                "pipeline is physically executable: every (robot, pick_target, "
+                "place_target) stage must be within the robot's workspace radius, "
+                "and handoff gaps between consecutive stages must not be wider than "
+                "what intermediate conveyors can bridge. USE THIS after building a "
+                "pick-place / assembly-line / multi-station scene and BEFORE "
+                "declaring the build done — if pipeline_ok=false, fix the layout "
+                "or surface the issue to the user instead of falsely claiming "
+                "success. Returns {stages: [{pick_distance, place_distance, "
+                "reachable, ...}], issues, pipeline_ok}."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "stages": {
+                        "type": "array",
+                        "description": "List of pipeline stages. Each stage is {robot_path, pick_path, place_path, optional robot_kind: 'franka_panda'|'ur10e'|... for default reach lookup, optional reach_m to override}.",
+                        "items": {"type": "object"},
+                    },
+                    "robot_path": {"type": "string", "description": "Single-stage shorthand: robot."},
+                    "pick_path": {"type": "string", "description": "Single-stage shorthand: pick target."},
+                    "place_path": {"type": "string", "description": "Single-stage shorthand: place target."},
+                    "robot_kind": {"type": "string", "description": "Single-stage shorthand: robot kind for reach lookup."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "resolve_skill_composition",
             "description": (
                 "Map a skill-composition name ('pick-and-place', 'calibration', 'ros2', "
