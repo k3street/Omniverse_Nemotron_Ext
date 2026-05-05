@@ -505,18 +505,24 @@ ISAAC_SIM_TOOLS = [
         "function": {
             "name": "place_on_top_of",
             "description": (
+                "Place stack on top above. ovanpå på toppen uppepå ovanför över ovanpå kub box bord robot. "
+                "Spatial relation tool. Robot on cube. Cube on table. Object on object. "
+                "Place X on top of Y. Stack X on Y. Position above Y. Sit on Y. "
                 "Place a source prim on top of a target prim, aligned correctly. "
-                "USE THIS whenever the user uses spatial language — "
-                "Swedish 'ovanpå', 'på toppen av', 'uppepå'; English 'on top of', "
-                "'on the', 'sit on'. Do NOT compute z yourself from `size` or "
-                "`scale` — this tool reads the target's authoritative world-space "
-                "bounding box and the source's local bbox, then places the source so "
-                "the lowest point of its mesh sits exactly `clearance` (default 1cm) "
-                "above the target's top surface. Handles the common gotchas the LLM "
-                "gets wrong: USD Cube `size`-as-edge-length vs half-extent confusion, "
-                "and asset-origin-vs-mesh-base offsets like Franka's flange thickness. "
-                "Variables to extract from the prompt: source prim path, target prim "
-                "path. Stop and identify those two before calling."
+                "USE THIS whenever the user uses spatial language — Swedish 'ovanpå', "
+                "'på toppen av', 'uppepå', 'uppe på', 'ovan'; English 'on top of', "
+                "'on the', 'sit on', 'stack on', 'above', 'place on'. "
+                "When the user says 'placera robot ovanpå kuben' or 'put the robot on "
+                "the cube', call THIS tool — do NOT use robot_wizard's `position` arg "
+                "and do NOT compute z manually from `size` or `scale`. This tool reads "
+                "the target's authoritative world-space bounding box and the source's "
+                "local bbox, then places the source so the lowest point of its mesh "
+                "sits exactly `clearance` (default 1mm) above the target's top surface. "
+                "Handles the common gotchas the LLM gets wrong: USD Cube `size`-as-"
+                "edge-length vs half-extent confusion, and asset-origin-vs-mesh-base "
+                "offsets like Franka's flange thickness. Variables to extract from the "
+                "prompt: source prim path, target prim path. Stop and identify those "
+                "two before calling."
             ),
             "parameters": {
                 "type": "object",
