@@ -121,18 +121,50 @@ class GeminiProvider:
         # Google recommends exponential backoff for these; keep total wait bounded
         # so we don't blow the caller's timeout.
         import asyncio as _asyncio_rt
+        import time as _time_rt
         retry_statuses = {429, 500, 502, 503, 504}
         max_attempts = 4
         backoff = 2.0  # seconds; doubles each retry
         last_error = None
+
+        # Instrumentation: log payload size + attempt timing so we can
+        # tell apart "Gemini is slow" from "we're retrying 503s" from
+        # "our prompt grew huge". One log line per attempt + a summary
+        # at the end. Look for "[GeminiCall]" in the uvicorn output.
+        try:
+            _payload_bytes = len(json.dumps(payload, default=str).encode("utf-8"))
+        except Exception:
+            _payload_bytes = -1
+        _call_t0 = _time_rt.monotonic()
+        logger.warning(
+            f"[GeminiCall] start payload={_payload_bytes} bytes "
+            f"messages={len(messages)} tools={len(payload.get('tools', [{}])[0].get('functionDeclarations', []))}"
+        )
+
         for attempt in range(1, max_attempts + 1):
+            _att_t0 = _time_rt.monotonic()
             async with aiohttp.ClientSession() as session:
                 try:
                     async with session.post(self.base_url, json=payload) as response:
+                        _att_dt = _time_rt.monotonic() - _att_t0
                         if response.status == 200:
                             data = await response.json()
+                            _total_dt = _time_rt.monotonic() - _call_t0
+                            try:
+                                _resp_bytes = len(json.dumps(data, default=str).encode("utf-8"))
+                            except Exception:
+                                _resp_bytes = -1
+                            logger.warning(
+                                f"[GeminiCall] OK 200 attempt={attempt} "
+                                f"attempt_dt={_att_dt:.2f}s total_dt={_total_dt:.2f}s "
+                                f"resp={_resp_bytes}b"
+                            )
                             return self._parse_response(data)
                         error_text = await response.text()
+                        logger.warning(
+                            f"[GeminiCall] HTTP {response.status} attempt={attempt} "
+                            f"attempt_dt={_att_dt:.2f}s err={error_text[:120]}"
+                        )
                         if response.status in retry_statuses and attempt < max_attempts:
                             logger.warning(
                                 f"Gemini {response.status} (attempt {attempt}/{max_attempts}), "
