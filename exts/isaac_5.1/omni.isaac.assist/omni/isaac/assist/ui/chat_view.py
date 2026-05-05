@@ -1624,10 +1624,25 @@ class ChatViewWindow(ui.Window):
         self._force_reset_turn_state()
 
     def _force_reset_turn_state(self):
-        """Hard reset to idle state. Use when local UI state has lost
-        sync with server (server hang, missed agent_reply event, manual
-        recovery, New/Clear during a live turn)."""
-        was_active = self._turn_active
+        """Hard reset to local UI state. Does NOT touch the server.
+
+        Earlier this fired cancel_turn() with a comment claiming to 'drop
+        the lingering flag' — but cancel_turn() SETS the flag (same call
+        as the Stop button), so any New/Clear click would preemptively
+        cancel the next prompt. A conditional 'only-if-was-active' guard
+        followed but didn't survive the async race in _do_new_scene:
+        _force_reset_turn_state runs at the END of the New chain, so by
+        the time it reads _turn_active the user may have already typed
+        and submitted the next prompt — was_active reads True, cancel
+        fires, the brand-new turn gets killed at round 0. The reset
+        button then permanently nukes whatever the user typed next.
+
+        Cleaner contract: New / Clear reset local UI only. The user is
+        the one who decides to cancel a server-side turn — that's the
+        Stop button's job. If the user clicks New mid-turn the server
+        finishes the previous turn quietly, its events are dropped at
+        the UI because we cleared chat_layout.
+        """
         self._turn_active = False
         self._turn_rendered_via_sse = False
         self._turn_started_at = None
@@ -1635,20 +1650,6 @@ class ChatViewWindow(ui.Window):
             self._set_button_state("idle")
         except Exception:
             pass
-        # Cancel ONLY when a turn really was in flight. The previous code
-        # always fired cancel_turn() with the "drop the lingering flag"
-        # comment — but cancel_turn() SETS the flag (it's the same call as
-        # the Stop button). When New/Clear was clicked between turns this
-        # set the flag preemptively, and a quick follow-up prompt would
-        # arrive at the orchestrator's round-0 cancel check before the
-        # post-message cancel-clear could win the race — surfacing as
-        # "Stopped. Completed 0 steps" with no Stop click in sight.
-        # Now we only cancel when the local UI says the turn is alive.
-        if was_active:
-            try:
-                asyncio.ensure_future(self.service.cancel_turn())
-            except Exception:
-                pass
 
     def _toggle_livekit(self):
         if self.webrtc and self.webrtc._streaming:
