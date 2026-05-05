@@ -3234,6 +3234,187 @@ _SUCCESS_CONDITION_TEMPLATES = {
 }
 
 
+_COORD_LANDMARKS = {
+    # Named anchor points — return position relative to a reference prim
+    # (or world origin when no reference). Ordered most-specific first.
+    "origin": "world",
+    "world origin": "world",
+    "center of stage": "world",
+    "stage center": "world",
+}
+
+
+async def _handle_resolve_coordinate_reference(args: Dict) -> Dict:
+    """Resolve a named coordinate reference ('origin', 'center of X',
+    'top-left corner of Y', 'edge of Z') to world-space coordinates.
+
+    Pilot of the coordinate-landmark resolver class. Eliminates LLM-
+    invented coordinates for descriptors like 'corner of the table'
+    (which the LLM otherwise just guesses, often badly).
+
+    Args:
+      landmark: the descriptor — one of 'origin', 'center', 'top',
+                'bottom', 'top-left', 'top-right', 'bottom-left',
+                'bottom-right', 'edge_+x', 'edge_-x', 'edge_+y', 'edge_-y'
+      reference_prim: prim path the landmark is relative to. Empty/None
+                      means world (origin/center is world origin).
+
+    Returns: {position: [x,y,z], landmark, reference_prim, rationale}.
+    """
+    landmark = (args.get("landmark") or "").strip().lower()
+    ref = (args.get("reference_prim") or "").strip()
+    if not landmark:
+        return {"error": "resolve_coordinate_reference requires landmark (origin/center/corner/edge/...)"}
+
+    # World-anchored landmarks
+    if landmark in ("origin", "world origin", "center of stage", "stage center"):
+        return {
+            "position": [0.0, 0.0, 0.0],
+            "landmark": landmark,
+            "reference_prim": "world",
+            "rationale": "World origin — the canonical (0,0,0) anchor.",
+        }
+
+    if not ref:
+        return {
+            "error": f"landmark {landmark!r} requires a reference_prim (e.g. 'top of /World/Cube')",
+            "known_landmarks": ["origin", "center", "top", "bottom",
+                                "top-left", "top-right", "bottom-left", "bottom-right",
+                                "edge_+x", "edge_-x", "edge_+y", "edge_-y"],
+        }
+
+    # Prim-relative landmarks need a Kit RPC call to get the bbox.
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Usd
+
+stage = omni.usd.get_context().get_stage()
+ref = {ref!r}
+landmark = {landmark!r}
+
+p = stage.GetPrimAtPath(ref)
+if not p or not p.IsValid():
+    print(json.dumps({{'error': 'reference_prim not found: ' + ref}}))
+else:
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty():
+        print(json.dumps({{'error': 'reference_prim has empty bbox'}}))
+    else:
+        mn = b.GetMin(); mx = b.GetMax(); c = b.GetMidpoint()
+        # Map landmark → point.
+        candidates = {{
+            'center':       [float(c[0]), float(c[1]), float(c[2])],
+            'top':          [float(c[0]), float(c[1]), float(mx[2])],
+            'bottom':       [float(c[0]), float(c[1]), float(mn[2])],
+            'top-left':     [float(mn[0]), float(c[1]), float(mx[2])],
+            'top-right':    [float(mx[0]), float(c[1]), float(mx[2])],
+            'bottom-left':  [float(mn[0]), float(c[1]), float(mn[2])],
+            'bottom-right': [float(mx[0]), float(c[1]), float(mn[2])],
+            'edge_+x':      [float(mx[0]), float(c[1]), float(c[2])],
+            'edge_-x':      [float(mn[0]), float(c[1]), float(c[2])],
+            'edge_+y':      [float(c[0]), float(mx[1]), float(c[2])],
+            'edge_-y':      [float(c[0]), float(mn[1]), float(c[2])],
+            'left':         [float(mn[0]), float(c[1]), float(c[2])],
+            'right':        [float(mx[0]), float(c[1]), float(c[2])],
+            'front':        [float(c[0]), float(mn[1]), float(c[2])],
+            'back':         [float(c[0]), float(mx[1]), float(c[2])],
+        }}
+        pos = candidates.get(landmark)
+        if pos is None:
+            print(json.dumps({{'error': 'unknown landmark', 'known': sorted(candidates.keys())}}))
+        else:
+            print(json.dumps({{
+                'position': pos,
+                'landmark': landmark,
+                'reference_prim': ref,
+                'bbox_min': [float(mn[0]),float(mn[1]),float(mn[2])],
+                'bbox_max': [float(mx[0]),float(mx[1]),float(mx[2])],
+                'rationale': 'Computed from world-space bbox; landmark mapped to bbox corner/face/center.',
+            }}))
+"""
+    return await kit_tools.queue_exec_patch(code, f"resolve_coordinate_reference {landmark!r} of {ref!r}")
+
+
+_RELATIONAL_PATTERN_RE = __import__("re").compile(
+    r"(?P<factor>\d+(?:\.\d+)?)\s*[xX×]?\s*(?P<rel>times|x|×|the size of|larger than|smaller than|bigger than)?",
+    __import__("re").IGNORECASE,
+)
+
+
+async def _handle_resolve_relational_property(args: Dict) -> Dict:
+    """Resolve a relational property like 'twice the size of X' or 'same
+    color as Y' or '50% of Z's height' to a concrete numeric value or
+    attribute reference.
+
+    Pilot for cross-prim relations. Tightly scoped to size/scale
+    relations for now (most common); color/material/orientation can
+    extend later.
+
+    Args:
+      relation: one of 'size_factor' (twice/half/N×), 'same_size_as',
+                'opposite_facing', 'same_height_as', 'same_color_as'
+      reference_prim: prim to base the relation on (Kit RPC reads it)
+      factor: numeric multiplier when relation is size_factor (default 2.0)
+
+    Returns: {relation, value (or reference), rationale}.
+    """
+    relation = (args.get("relation") or "").strip().lower()
+    ref = (args.get("reference_prim") or "").strip()
+    factor = float(args.get("factor", 2.0))
+
+    if not relation:
+        return {"error": "resolve_relational_property requires relation"}
+    if not ref:
+        return {"error": f"relation {relation!r} requires reference_prim"}
+
+    if relation in ("size_factor", "twice the size of", "half the size of",
+                    "n times bigger", "n× larger", "scaled relative to",
+                    "same_size_as", "same size as"):
+        if relation in ("same_size_as", "same size as"):
+            factor = 1.0
+        if "half" in relation:
+            factor = 0.5
+        code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Usd
+
+stage = omni.usd.get_context().get_stage()
+ref = {ref!r}
+
+p = stage.GetPrimAtPath(ref)
+if not p or not p.IsValid():
+    print(json.dumps({{'error': 'reference_prim not found: ' + ref}}))
+else:
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty():
+        print(json.dumps({{'error': 'reference_prim has empty bbox'}}))
+    else:
+        mn = b.GetMin(); mx = b.GetMax()
+        size_xyz = [float(mx[0]-mn[0]), float(mx[1]-mn[1]), float(mx[2]-mn[2])]
+        avg = sum(size_xyz) / 3.0
+        scaled = [s * {factor!r} for s in size_xyz]
+        scaled_avg = avg * {factor!r}
+        out = {{
+            'reference_prim': ref,
+            'reference_size_xyz': size_xyz,
+            'reference_size_avg': avg,
+            'factor': {factor!r},
+            'derived_size_xyz': scaled,
+            'derived_size_avg': scaled_avg,
+            'rationale': 'Reference size from world bbox; derived = reference × factor.',
+        }}
+        print(json.dumps(out))
+"""
+        return await kit_tools.queue_exec_patch(code, f"resolve_relational_property {relation!r} ref={ref}")
+
+    return {
+        "error": f"unsupported relation {relation!r}",
+        "supported": ["size_factor", "same_size_as", "twice the size of", "half the size of"],
+    }
+
+
 async def _handle_resolve_success_condition(args: Dict) -> Dict:
     """Extract a structured success condition from a prompt's intent.
 
@@ -3887,6 +4068,8 @@ DATA_HANDLERS = {
     "resolve_context_reference": _handle_resolve_context_reference,
     "resolve_skill_composition": _handle_resolve_skill_composition,
     "resolve_success_condition": _handle_resolve_success_condition,
+    "resolve_coordinate_reference": _handle_resolve_coordinate_reference,
+    "resolve_relational_property": _handle_resolve_relational_property,
     "verify_pickplace_pipeline": _handle_verify_pickplace_pipeline,
     "get_debug_info": _handle_get_debug_info,
     "lookup_knowledge": _handle_lookup_knowledge,
