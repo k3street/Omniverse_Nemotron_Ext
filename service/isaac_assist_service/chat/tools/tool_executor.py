@@ -2675,6 +2675,99 @@ async def _handle_list_all_prims(args: Dict) -> Dict:
     return ctx.get("stage", {})
 
 
+async def _handle_place_on_top_of(args: Dict) -> Dict:
+    """Place `prim_path` on top of `target_prim_path` using authoritative
+    bounding-box geometry.
+
+    The "spatial-language → coordinates" middle layer: the LLM identifies
+    that the user said "X on top of Y" (variables: source=X, target=Y) and
+    calls this tool. No numeric reasoning by the LLM — top z is read from
+    the target's world-space bbox, source's bottom z is read from its local
+    bbox, the translate is computed so the source's mesh sits exactly on
+    top with `clearance` (default 1cm) of gap.
+
+    Robust to:
+      - Cube `size`/`scale`/`translate` interactions (bbox is authoritative).
+      - Source assets whose origin is NOT at the geometric base (e.g. Franka's
+        flange thickness extending below local z=0).
+      - Nested xform parents on either prim.
+    """
+    source_path = args.get("prim_path") or args.get("source_prim_path") or ""
+    target_path = args.get("target_prim_path") or args.get("on_top_of") or ""
+    clearance = float(args.get("clearance", 0.01))
+    xy_align = args.get("xy_align", "center")
+    if not source_path or not target_path:
+        return {"error": "place_on_top_of requires prim_path (source) and target_prim_path"}
+    if xy_align not in ("center", "preserve"):
+        return {"error": f"xy_align must be 'center' or 'preserve', got {xy_align!r}"}
+
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdGeom, Gf
+
+stage = omni.usd.get_context().get_stage()
+src = stage.GetPrimAtPath({source_path!r})
+tgt = stage.GetPrimAtPath({target_path!r})
+result = {{'source': {source_path!r}, 'target': {target_path!r}, 'clearance': {clearance!r}}}
+
+if not src or not src.IsValid():
+    result['error'] = 'source prim not found: ' + {source_path!r}
+elif not tgt or not tgt.IsValid():
+    result['error'] = 'target prim not found: ' + {target_path!r}
+else:
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    tgt_bbox = cache.ComputeWorldBound(tgt).ComputeAlignedRange()
+    if tgt_bbox.IsEmpty():
+        result['error'] = 'target prim has empty bounding box (no geometry?)'
+    else:
+        top_z = tgt_bbox.GetMax()[2]
+        target_center = tgt_bbox.GetMidpoint()
+        result['target_top_z'] = float(top_z)
+        result['target_center'] = [float(target_center[0]), float(target_center[1]), float(target_center[2])]
+
+        # Source's bbox in its own LOCAL frame (we'll set the world translate
+        # so that source_local_bottom + world_translate.z = top_z + clearance).
+        # ComputeLocalBound returns the bbox excluding the prim's own xform —
+        # exactly what we need to figure out how far the geometry extends
+        # below the local origin.
+        src_bbox_local = cache.ComputeLocalBound(src).ComputeAlignedRange()
+        if src_bbox_local.IsEmpty():
+            # Robot articulations sometimes report empty local bbox — fall back
+            # to assuming geometric origin at flange (offset = 0).
+            src_bottom_local = 0.0
+            result['source_local_bottom_fallback'] = True
+        else:
+            src_bottom_local = src_bbox_local.GetMin()[2]
+        result['source_bottom_local_z'] = float(src_bottom_local)
+
+        desired_world_z = float(top_z) + {clearance!r} - float(src_bottom_local)
+
+        xf = UsdGeom.Xformable(src)
+        translate_op = None
+        for op in xf.GetOrderedXformOps():
+            if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+                translate_op = op
+                break
+        if translate_op is None:
+            translate_op = xf.AddTranslateOp()
+
+        cur = translate_op.Get() or Gf.Vec3d(0.0, 0.0, 0.0)
+        if {xy_align!r} == 'center':
+            new_x, new_y = float(target_center[0]), float(target_center[1])
+        else:  # preserve
+            new_x, new_y = float(cur[0]), float(cur[1])
+        translate_op.Set(Gf.Vec3d(new_x, new_y, desired_world_z))
+        result['placed_at'] = [new_x, new_y, desired_world_z]
+        result['success'] = True
+
+print(json.dumps(result))
+"""
+    return await kit_tools.queue_exec_patch(
+        code, f"place_on_top_of {source_path} on {target_path} clearance={clearance}"
+    )
+
+
 async def _handle_measure_distance(args: Dict) -> Dict:
     prim_a = args["prim_a"]
     prim_b = args["prim_b"]
@@ -2794,6 +2887,7 @@ DATA_HANDLERS = {
     "get_articulation_state": _handle_get_articulation_state,
     "list_all_prims": _handle_list_all_prims,
     "measure_distance": _handle_measure_distance,
+    "place_on_top_of": _handle_place_on_top_of,
     "get_debug_info": _handle_get_debug_info,
     "lookup_knowledge": _handle_lookup_knowledge,
     "lookup_api_deprecation": _handle_lookup_api_deprecation,
