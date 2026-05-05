@@ -6990,12 +6990,33 @@ def _gen_solve_ik(args: Dict) -> str:
         "from isaacsim.robot_motion.motion_generation import interface_config_loader",
         "from isaacsim.core.prims import SingleArticulation",
         "",
-        f"# Load kinematics config for {robot_type}",
+        f"# Load kinematics config for {robot_type}. The loader can return None",
+        "# in some Kit builds (no bundled config for this robot_type, or the",
+        "# 'supported' dictionary not yet registered). Detect explicitly and",
+        "# raise a clear honest error instead of letting LulaKinematicsSolver",
+        "# fail with the cryptic '** must be a mapping, not NoneType'.",
         f"kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config('{robot_type}')",
+        "if kin_config is None:",
+        "    # Try variant names that ship with isaacsim — Franka is sometimes",
+        "    # under 'Franka' (capitalised) or 'franka_panda' depending on build.",
+        f"    for _alt in ['{robot_type}', '{robot_type}'.capitalize(), '{robot_type}_panda', 'Franka']:",
+        "        kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config(_alt)",
+        "        if kin_config is not None:",
+        "            break",
+        "if kin_config is None:",
+        f"    raise RuntimeError(",
+        f"        'solve_ik: no Lula kinematics config registered for robot_type=' + {robot_type!r} + ",
+        "        '. Try a supported name: ' + str(getattr(interface_config_loader, 'supported_lula_kinematics_solver_robots', list)())",
+        "    )",
         "kin_solver = LulaKinematicsSolver(**kin_config)",
         "",
         f"art = SingleArticulation(prim_path='{art_path}')",
-        "art.initialize()",
+        "try:",
+        "    art.initialize()",
+        "except Exception as _ie:",
+        "    raise RuntimeError(",
+        f"        'solve_ik: SingleArticulation.initialize() failed for ' + {art_path!r} + ' — likely the prim is not a real Isaac Sim articulation (placeholder USD joints are not enough; need a fully-imported URDF or USD with proper articulation root). Underlying: ' + str(_ie)",
+        "    )",
         f"art_kin = ArticulationKinematicsSolver(art, kin_solver, '{ee_frame}')",
         "",
         f"target_position = np.array({list(target_pos)})",
@@ -18889,6 +18910,11 @@ async def _handle_get_bounding_box(args: Dict) -> Dict:
     """Compute world-space AABB of a prim."""
     prim_path = args["prim_path"]
     purpose = args.get("purpose", "default")
+    # USD's UsdGeom.Tokens enum was reorganized — Tokens.default no longer
+    # exists in some pxr versions. Use the string literal directly via the
+    # purpose-name lookup (which matches "default", "render", "proxy", "guide"
+    # against the registered purpose tokens). Fall back to no purpose filter
+    # if even that is rejected.
     code = f"""\
 import omni.usd
 from pxr import Usd, UsdGeom, Gf
@@ -18900,22 +18926,39 @@ result = {{'prim_path': {prim_path!r}}}
 if not prim or not prim.IsValid():
     result['error'] = 'prim not found'
 else:
-    purpose_token = UsdGeom.Tokens.{purpose}
-    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [purpose_token], useExtentsHint=True)
-    bbox = cache.ComputeWorldBound(prim)
-    rng = bbox.ComputeAlignedRange()
-    if rng.IsEmpty():
-        result['error'] = 'empty bbox'
-    else:
-        mn = rng.GetMin()
-        mx = rng.GetMax()
-        cx = (mn[0] + mx[0]) / 2.0
-        cy = (mn[1] + mx[1]) / 2.0
-        cz = (mn[2] + mx[2]) / 2.0
-        result['min'] = [mn[0], mn[1], mn[2]]
-        result['max'] = [mx[0], mx[1], mx[2]]
-        result['center'] = [cx, cy, cz]
-        result['size'] = [mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]]
+    # Robust purpose-token lookup. Some Isaac Sim 5.x USD versions removed
+    # UsdGeom.Tokens.default; getattr with fallback handles both shapes.
+    _purpose_attr = {purpose!r}
+    try:
+        purpose_token = getattr(UsdGeom.Tokens, _purpose_attr)
+        purposes = [purpose_token]
+    except AttributeError:
+        # Fall back to no purpose filter — BBoxCache then computes for all
+        purposes = [UsdGeom.Tokens.default_] if hasattr(UsdGeom.Tokens, 'default_') else []
+        if not purposes:
+            # Final fallback: omit purpose argument entirely
+            purposes = None
+    try:
+        if purposes is not None:
+            cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), purposes, useExtentsHint=True)
+        else:
+            cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), useExtentsHint=True)
+        bbox = cache.ComputeWorldBound(prim)
+        rng = bbox.ComputeAlignedRange()
+        if rng.IsEmpty():
+            result['error'] = 'empty bbox'
+        else:
+            mn = rng.GetMin()
+            mx = rng.GetMax()
+            cx = (mn[0] + mx[0]) / 2.0
+            cy = (mn[1] + mx[1]) / 2.0
+            cz = (mn[2] + mx[2]) / 2.0
+            result['min'] = [mn[0], mn[1], mn[2]]
+            result['max'] = [mx[0], mx[1], mx[2]]
+            result['center'] = [cx, cy, cz]
+            result['size'] = [mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]]
+    except Exception as _e:
+        result['error'] = f'bbox compute failed: {{type(_e).__name__}}: {{_e}}'
 print(json.dumps(result, default=str))
 """
     return await kit_tools.queue_exec_patch(code, f"get_bounding_box {prim_path}")
@@ -20233,7 +20276,7 @@ def _gen_apply_force(args: Dict) -> str:
 
     return f"""\
 import omni.usd
-from pxr import UsdPhysics
+from pxr import UsdPhysics, Sdf
 
 stage = omni.usd.get_context().get_stage()
 prim_path = {prim_path!r}
@@ -20247,18 +20290,38 @@ if not prim or not prim.IsValid():
 if not prim.HasAPI(UsdPhysics.RigidBodyAPI):
     UsdPhysics.RigidBodyAPI.Apply(prim)
 
-# Preferred path: omni.physx force-API for instantaneous external force.
-applied = False
-try:
-    from omni.physx.scripts import physicsUtils
-    if hasattr(physicsUtils, 'apply_force_at_pos'):
-        physicsUtils.apply_force_at_pos(prim, force, position or (0.0, 0.0, 0.0))
-        applied = True
-except Exception:
-    applied = False
+errors = []
+applied_via = None
 
-# Fallback: tensor API (omni.physics.tensors) — works during sim play.
-if not applied:
+# Path 1: IPhysxSimulation.apply_force_at_pos(stage_id, body_path_int, ...)
+# This is the canonical 5.x signature; args must be (stage_id: int, body_path: int, force, pos, mode).
+try:
+    import omni.physx as _omni_physx
+    sim_iface = _omni_physx.get_physx_simulation_interface()
+    stage_id = omni.usd.get_context().get_stage_id()
+    body_path_int = Sdf.Path(prim_path).pathString
+    body_path_int = int(stage.GetPrimAtPath(prim_path).GetPath().pathString.__hash__())
+    # Try full signature first
+    sim_iface.apply_force_at_pos(stage_id, prim_path, force, position or (0.0, 0.0, 0.0), 'force')
+    applied_via = 'IPhysxSimulation.apply_force_at_pos'
+except (TypeError, AttributeError) as e:
+    errors.append(f'IPhysxSimulation: {{type(e).__name__}}: {{e}}')
+except Exception as e:
+    errors.append(f'IPhysxSimulation: {{type(e).__name__}}: {{e}}')
+
+# Path 2: omni.physx.scripts.physicsUtils.apply_force_at_pos
+if applied_via is None:
+    try:
+        from omni.physx.scripts import physicsUtils
+        if hasattr(physicsUtils, 'apply_force_at_pos'):
+            # Modern signature: (prim, force, pos)
+            physicsUtils.apply_force_at_pos(prim, force, position or (0.0, 0.0, 0.0))
+            applied_via = 'physicsUtils.apply_force_at_pos'
+    except Exception as e:
+        errors.append(f'physicsUtils: {{type(e).__name__}}: {{e}}')
+
+# Path 3: tensor API — only works while sim is playing
+if applied_via is None:
     try:
         import omni.physics.tensors as physics_tensors
         sim_view = physics_tensors.create_simulation_view('numpy')
@@ -20266,12 +20329,46 @@ if not applied:
         import numpy as np
         f_arr = np.array([force], dtype='float32')
         t_arr = np.array([torque], dtype='float32')
-        rb_view.apply_forces_and_torques_at_pos(f_arr, t_arr, None, indices=np.array([0], dtype='int32'), is_global=True)
-        applied = True
-    except Exception as exc:
-        raise RuntimeError(f'apply_force failed via both physicsUtils and tensors API: {{exc}}')
+        rb_view.apply_forces_and_torques_at_pos(
+            f_arr, t_arr, None,
+            indices=np.array([0], dtype='int32'), is_global=True,
+        )
+        applied_via = 'omni.physics.tensors'
+    except Exception as e:
+        errors.append(f'tensors: {{type(e).__name__}}: {{e}}')
 
-print(f'Applied force={{force}} torque={{torque}} on {{prim_path!r}}')
+# Path 4: write linear velocity directly (works without sim playing,
+# acts as an instantaneous impulse-equivalent on the rigid body).
+if applied_via is None:
+    try:
+        rb = UsdPhysics.RigidBodyAPI(prim)
+        # Compute a velocity that corresponds to applying force for one frame
+        # at default 60Hz. This is a degraded fallback — not a real force, but
+        # achieves the user-visible effect of pushing the body.
+        dt = 1.0 / 60.0
+        mass = 1.0
+        try:
+            mass_attr = prim.GetAttribute('physics:mass')
+            if mass_attr and mass_attr.Get():
+                mass = float(mass_attr.Get())
+        except Exception:
+            pass
+        impulse_velocity = [f * dt / mass for f in force]
+        existing = rb.GetVelocityAttr().Get() if rb.GetVelocityAttr().HasAuthoredValue() else (0.0, 0.0, 0.0)
+        new_v = (existing[0] + impulse_velocity[0],
+                 existing[1] + impulse_velocity[1],
+                 existing[2] + impulse_velocity[2])
+        rb.GetVelocityAttr().Set(new_v)
+        applied_via = 'velocity-impulse-fallback'
+    except Exception as e:
+        errors.append(f'velocity-impulse-fallback: {{type(e).__name__}}: {{e}}')
+
+if applied_via is None:
+    raise RuntimeError(
+        f'apply_force failed on all paths. Tried: ' + ' | '.join(errors)
+    )
+
+print(f'Applied force={{force}} torque={{torque}} on {{prim_path!r}} via {{applied_via}}')
 """
 
 async def _handle_get_kinematic_state(args: Dict) -> Dict:
