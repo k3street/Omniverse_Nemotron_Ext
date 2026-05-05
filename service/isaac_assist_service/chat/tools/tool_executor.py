@@ -12927,7 +12927,7 @@ if graphs_available:
     return f"""\
 import omni.usd
 import json
-from pxr import UsdGeom, UsdPhysics, Gf, PhysxSchema
+from pxr import Usd, UsdGeom, UsdPhysics, UsdLux, Gf, PhysxSchema
 
 stage = omni.usd.get_context().get_stage()
 issues = []
