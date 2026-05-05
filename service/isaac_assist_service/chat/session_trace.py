@@ -26,6 +26,7 @@ is full or permission denied, the chat continues.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from pathlib import Path
@@ -37,6 +38,34 @@ _TRACE_ROOT = (
     / "session_traces"
 )
 
+# ── Live subscribers (in-process pub/sub) ───────────────────────────────
+# Per-session list of asyncio.Queue. Subscribers (the SSE endpoint) call
+# subscribe() on connect and unsubscribe() in a finally block. emit()
+# fans out via put_nowait — slow consumers get dropped events rather
+# than blocking the orchestrator hot path. Queue size 200 is deep
+# enough to absorb a typical turn's worth of events comfortably.
+_listeners: Dict[str, List["asyncio.Queue"]] = {}
+
+
+def subscribe(session_id: str) -> "asyncio.Queue":
+    """Subscribe to live trace events for a session.
+
+    Returns an asyncio.Queue that the caller drains. Caller MUST call
+    :func:`unsubscribe` when done (typically in a try/finally around
+    the consume loop) to avoid leaking queues across reconnects.
+    """
+    q: "asyncio.Queue" = asyncio.Queue(maxsize=200)
+    _listeners.setdefault(session_id, []).append(q)
+    return q
+
+
+def unsubscribe(session_id: str, q: "asyncio.Queue") -> None:
+    """Drop a subscriber queue. Safe if already removed."""
+    if session_id in _listeners:
+        _listeners[session_id] = [x for x in _listeners[session_id] if x is not q]
+        if not _listeners[session_id]:
+            del _listeners[session_id]
+
 
 def _trace_path(session_id: str) -> Path:
     _TRACE_ROOT.mkdir(parents=True, exist_ok=True)
@@ -45,17 +74,31 @@ def _trace_path(session_id: str) -> Path:
 
 
 def emit(session_id: str, event_type: str, payload: Dict[str, Any] | None = None) -> None:
-    """Append one event line. Best-effort; never raises."""
+    """Append one event line and fan out to live subscribers.
+
+    Best-effort on both legs: disk write failures are swallowed (chat
+    must never break because of trace I/O), and queue.put_nowait drops
+    silently on QueueFull (slow SSE consumer doesn't block emit).
+    """
+    line = {
+        "ts": time.time(),
+        "type": event_type,
+        "payload": payload or {},
+    }
+    # 1. Disk write
     try:
-        line = {
-            "ts": time.time(),
-            "type": event_type,
-            "payload": payload or {},
-        }
         with _trace_path(session_id).open("a", encoding="utf-8") as f:
             f.write(json.dumps(line, default=str, ensure_ascii=False) + "\n")
     except Exception:
         pass
+    # 2. Live fan-out — never blocks orchestrator
+    for q in list(_listeners.get(session_id, [])):
+        try:
+            q.put_nowait(line)
+        except asyncio.QueueFull:
+            pass  # slow consumer; drop event silently
+        except Exception:
+            pass  # belt-and-braces — emit() must never raise
 
 
 def read_trace(session_id: str) -> List[Dict]:

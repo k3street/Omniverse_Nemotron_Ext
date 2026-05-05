@@ -1,4 +1,7 @@
+import asyncio
+import json
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -6,6 +9,8 @@ import uuid
 import logging
 from .orchestrator import ChatOrchestrator
 from .pipeline import PipelinePlanner
+from . import session_trace
+from . import cancel_registry
 from ..governance.audit_log import AuditLogger
 from ..governance.models import AuditEntry
 from ..knowledge.knowledge_base import KnowledgeBase
@@ -90,6 +95,76 @@ async def send_message(req: ChatMessageRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Live progress: SSE stream + cancel endpoint ─────────────────────────────
+# Events the UI cares about. The session_trace module emits ~20 types; the
+# rest are diagnostic noise. Filtering server-side keeps the wire small.
+_USER_VISIBLE_EVENTS = {
+    "turn_started",
+    "tool_call_started",
+    "tool_call_finished",
+    "patch_executed",
+    "retry_spam_halt",
+    "cancel_acknowledged",
+    "turn_diff_computed",
+    "agent_reply",
+    "error",
+}
+
+
+@router.get("/stream/{session_id}")
+async def stream_session(session_id: str):
+    """Server-Sent Events stream of live trace events for a session.
+
+    Client subscribes once at window open and keeps the connection open
+    for the window's lifetime. On reconnect there is no event replay —
+    callers rely on the POST /message blob for canonical state.
+    """
+    q = session_trace.subscribe(session_id)
+
+    async def gen():
+        try:
+            yield "event: connected\ndata: {}\n\n"
+            while True:
+                try:
+                    evt = await asyncio.wait_for(q.get(), timeout=15.0)
+                    if evt["type"] in _USER_VISIBLE_EVENTS:
+                        yield (
+                            f"event: {evt['type']}\n"
+                            f"data: {json.dumps(evt, default=str)}\n\n"
+                        )
+                except asyncio.TimeoutError:
+                    # Keepalive — prevents idle-connection killers from
+                    # silently dropping the stream.
+                    yield ": keepalive\n\n"
+        finally:
+            session_trace.unsubscribe(session_id, q)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+class CancelRequest(BaseModel):
+    session_id: str = "default_session"
+
+
+@router.post("/cancel")
+async def cancel_turn(req: CancelRequest):
+    """Request cancellation of the in-flight turn for this session.
+
+    Sets a flag; orchestrator polls it between rounds and between tools
+    within a round. The currently-executing tool (if any) completes;
+    subsequent tools are skipped and a canned reply is returned.
+    """
+    cancel_registry.request_cancel(req.session_id)
+    return {"status": "cancel_requested"}
 
 
 class LogExecutionRequest(BaseModel):
