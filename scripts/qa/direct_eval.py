@@ -228,8 +228,19 @@ def run_direct(task_id: str, runs_dir: Path, timeout_s: int = 600,
     while multi_turn and followup_index < len(scripted_followups) and turn < max_turns:
         last_tool_calls = last_reply.get("tool_calls", []) or []
         last_intent = last_reply.get("intent", "")
-        if not _agent_asking_clarification(last_assistant_msg, last_tool_calls, last_intent):
-            # Agent built / answered without asking — end the dialog
+        agent_asked = _agent_asking_clarification(last_assistant_msg, last_tool_calls, last_intent)
+        agent_acted = bool(last_tool_calls)
+        # Continue the dialog when the agent either asked a clarifying
+        # question (waiting on user) OR actually did work and the test
+        # has more refinement followups queued. Iterative-refinement
+        # tasks like VR-15 ('create cube' → 'make it bigger' → 'move
+        # it') don't require the agent to ask between turns — the user
+        # drives the iteration. Without this 'agent_acted'-also-OK
+        # branch, the second prompt never fires and refinement steps
+        # silently drop.
+        if not agent_asked and not agent_acted:
+            # Agent neither asked nor did anything — pointless to push
+            # more followups at it, end the dialog.
             break
         # Send the next scripted followup as the user's turn-N+1 message
         followup_text = scripted_followups[followup_index]
