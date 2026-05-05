@@ -121,12 +121,22 @@ def _agent_asking_clarification(reply_text: str, tool_calls: list, intent: str) 
     Heuristics (in order):
       1. Intent == 'negotiation_clarification' (negotiator gate fired)
       2. Reply contains a '?' AND no tool calls were made
-      3. Reply mentions the canonical clarification phrase pattern
+      3. Reply ENDS with a '?' (or '?' + trailing whitespace) — covers
+         the "did work AND asked next" pattern that VR-15 hit, where a
+         multi-turn refinement task creates the cube on turn 1, then
+         asks 'what next?' — Rule 2 misses it because tool_calls is
+         non-empty, but the trailing question mark is unambiguous.
+      4. Reply mentions the canonical clarification phrase pattern
     Otherwise — agent is acting / done.
     """
     if intent == "negotiation_clarification":
         return True
     if not tool_calls and "?" in reply_text:
+        return True
+    # Tool calls + reply ending in a question = "did some work, now waiting".
+    # Handle Markdown trailing chars too.
+    stripped = reply_text.rstrip().rstrip("`*_)\"'")
+    if stripped.endswith("?"):
         return True
     # Phrases the negotiator's format_clarification_reply uses or
     # template-driven assistants commonly emit
