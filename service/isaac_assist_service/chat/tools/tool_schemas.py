@@ -21,7 +21,12 @@ ISAAC_SIM_TOOLS = [
                 "size=1.0 (preferred, authors the USD attribute directly) OR scale=[0.5,0.5,0.5] (scales the 2m default). "
                 "Passing scale=[1,1,1] on a Cube leaves it at 2m, not 1m. Same caveat for sphere/cylinder radius/height. "
                 "POSITION: if omitted, the prim is placed at world origin (0, 0, 0). Always pass `position` "
-                "unless you specifically want origin. Lights: pass `intensity` (defaults to 1000 if omitted for "
+                "unless you specifically want origin. "
+                "GEOMETRY: a Cube with `size=S` at `position=(x,y,z)` has its bounds at "
+                "[x-S/2 .. x+S/2, y-S/2 .. y+S/2, z-S/2 .. z+S/2] — its TOP face is at z+S/2, NOT at z+S. "
+                "If you need to place another prim on top, do NOT compute z yourself — call `place_on_top_of` "
+                "which reads the actual bbox. "
+                "Lights: pass `intensity` (defaults to 1000 if omitted for "
                 "DomeLight / DistantLight / SphereLight / RectLight / DiskLight / CylinderLight)."
             ),
             "parameters": {
@@ -492,6 +497,49 @@ ISAAC_SIM_TOOLS = [
                     "prim_b": {"type": "string"},
                 },
                 "required": ["prim_a", "prim_b"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "place_on_top_of",
+            "description": (
+                "Place a source prim on top of a target prim, aligned correctly. "
+                "USE THIS whenever the user uses spatial language — "
+                "Swedish 'ovanpå', 'på toppen av', 'uppepå'; English 'on top of', "
+                "'on the', 'sit on'. Do NOT compute z yourself from `size` or "
+                "`scale` — this tool reads the target's authoritative world-space "
+                "bounding box and the source's local bbox, then places the source so "
+                "the lowest point of its mesh sits exactly `clearance` (default 1cm) "
+                "above the target's top surface. Handles the common gotchas the LLM "
+                "gets wrong: USD Cube `size`-as-edge-length vs half-extent confusion, "
+                "and asset-origin-vs-mesh-base offsets like Franka's flange thickness. "
+                "Variables to extract from the prompt: source prim path, target prim "
+                "path. Stop and identify those two before calling."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {
+                        "type": "string",
+                        "description": "USD path of the source prim — what to place. Must already exist in the stage.",
+                    },
+                    "target_prim_path": {
+                        "type": "string",
+                        "description": "USD path of the target prim — what to place on. Must already exist with geometry (bbox).",
+                    },
+                    "clearance": {
+                        "type": "number",
+                        "description": "Vertical gap above the target's top surface, in stage units (default 0.01 = 1cm). Use 0.0 for flush stacking; raise for visual breathing room.",
+                    },
+                    "xy_align": {
+                        "type": "string",
+                        "enum": ["center", "preserve"],
+                        "description": "'center' (default): center the source's xy on the target's xy. 'preserve': keep the source's existing xy translate (only adjust z).",
+                    },
+                },
+                "required": ["prim_path", "target_prim_path"],
             },
         },
     },
