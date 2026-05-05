@@ -87,8 +87,10 @@ UNDO_BTN_STYLE_FAILED = {
     "border_radius": 4,
 }
 
-# ── Spinner glyphs (ASCII; bundled font lacks Braille) ──────────────────
-SPINNER_GLYPHS = "|/-\\"
+# ── Spinner glyphs (ASCII; bundled font lacks Braille AND backslash) ───
+# Tested: "|/-\\" rendered the backslash frame as "?" in Isaac Sim 5.1's
+# font. Three-char rotation reads as smooth motion at 200 ms cadence.
+SPINNER_GLYPHS = "|/-"
 SPIN_INTERVAL_S = 0.20
 SLOW_THRESHOLD_S = 10.0
 VERY_SLOW_THRESHOLD_S = 20.0
@@ -842,6 +844,16 @@ class ChatViewWindow(ui.Window):
                     row["verb_lbl"].tooltip = f"FAILED:\n{err[:500]}"
                 except Exception:
                     pass
+        # Between rounds: if no other tools are running, the agent is
+        # back at the LLM waiting for the next round's response. Show a
+        # "Thinking..." row so the user sees the strip is still alive.
+        # _on_tool_started will remove the thinking row when the next
+        # tool fires; agent_reply collapses the whole strip.
+        any_running = any(
+            r.get("state") == "running" for r in self._live_rows.values()
+        )
+        if not any_running and "__thinking__" not in self._live_rows:
+            self._add_thinking_row()
 
     def _on_spam_halt(self, payload):
         with self.live_rows_layout:
