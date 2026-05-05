@@ -42,7 +42,13 @@ def setup_world(physics: bool = True, light: bool = True, ground: bool = False) 
     if physics and not stage.GetPrimAtPath("/World/PhysicsScene").IsValid():
         UsdPhysics.Scene.Define(stage, "/World/PhysicsScene")
     if light and not stage.GetPrimAtPath("/World/DomeLight").IsValid():
-        UsdLux.DomeLight.Define(stage, "/World/DomeLight")
+        dl = UsdLux.DomeLight.Define(stage, "/World/DomeLight")
+        # USD schema default for inputs:intensity is 1.0 — effectively
+        # black in the viewport. Set to 1000 (Isaac Sim's typical default
+        # and what create_prim's light path uses) so the scene actually
+        # lights up. Caught when VR-18's stage rendered black despite
+        # light=True being passed.
+        dl.GetIntensityAttr().Set(1000.0)
     if ground:
         gpath = "/World/Ground"
         if not stage.GetPrimAtPath(gpath).IsValid():
