@@ -281,11 +281,12 @@ class ChatViewWindow(ui.Window):
 
     def _build_header(self):
         with ui.HStack(height=26, spacing=6):
-            self._L(
+            # Panel title is CHROME — does NOT scale with the text-size
+            # control (otherwise it dominates the panel at 175 %).
+            ui.Label(
                 "Isaac Assist",
-                font_size=13,
                 width=0,
-                style={"color": COL_TEXT},
+                style={"color": COL_TEXT, "font_size": 13},
             )
             # 6 px connection-health dot. Green = SSE connected; amber =
             # reconnecting; red = exhausted/stopped. State transitions
@@ -348,11 +349,11 @@ class ChatViewWindow(ui.Window):
                 ui.Spacer(height=4)
                 with ui.HStack(height=14):
                     ui.Spacer(width=6)
-                    self._L(
+                    # Strip header is CHROME — fixed size.
+                    ui.Label(
                         "Live",
-                        font_size=10,
                         width=0,
-                        style={"color": COL_TEXT_SUBTLE},
+                        style={"color": COL_TEXT_SUBTLE, "font_size": 10},
                     )
                     ui.Spacer()
                 self.live_rows_layout = ui.VStack(spacing=2)
@@ -883,16 +884,21 @@ class ChatViewWindow(ui.Window):
     # Bubble rendering
     # ═══════════════════════════════════════════════════════════════════════
     def _add_user_bubble(self, text: str):
+        # Bubble auto-fits content height. Pattern: ZStack(height=0) over
+        # Rectangle + VStack(margin) → ZStack sizes to VStack's content,
+        # Rectangle fills the ZStack as background. Without height=0 the
+        # ZStack defaults to fractional fill and the bubble grows to
+        # consume the entire scroll area when there are few messages.
         with self.chat_layout:
-            with ui.HStack():
-                ui.Spacer(width=24)  # right-bias so user msgs visually distinct
-                with ui.ZStack():
+            with ui.HStack(height=0):
+                ui.Spacer(width=24)  # right-bias so user msgs are visually distinct
+                with ui.ZStack(height=0):
                     ui.Rectangle(
                         style={"background_color": COL_BG_USER, "border_radius": 6}
                     )
-                    with ui.VStack():
+                    with ui.VStack(spacing=2):
                         ui.Spacer(height=4)
-                        with ui.HStack():
+                        with ui.HStack(height=14):
                             ui.Spacer(width=8)
                             self._L(
                                 "You",
@@ -901,8 +907,6 @@ class ChatViewWindow(ui.Window):
                                 style={"color": COL_TEXT_SUBTLE},
                             )
                             ui.Spacer()
-                            # Re-run: clicking populates the input field with
-                            # this prompt for one-keystroke iteration.
                             ui.Button(
                                 "R",
                                 width=18,
@@ -916,7 +920,7 @@ class ChatViewWindow(ui.Window):
                                 tooltip="Re-run this prompt",
                             )
                             ui.Spacer(width=4)
-                        with ui.HStack():
+                        with ui.HStack(height=0):
                             ui.Spacer(width=8)
                             self._L(
                                 text,
@@ -931,9 +935,11 @@ class ChatViewWindow(ui.Window):
         self.input_field.model.set_value(text)
 
     def _add_assistant_bubble(self, text: str, error: bool = False) -> Optional[Dict]:
+        # Same height=0 pattern as user bubble — fits content rather than
+        # filling the available scroll area.
         bubble_refs: Dict = {}
         with self.chat_layout:
-            with ui.ZStack():
+            with ui.ZStack(height=0):
                 # Border rect for pulse animation (sits behind body).
                 bubble_refs["border_rect"] = ui.Rectangle(
                     style={
@@ -941,45 +947,42 @@ class ChatViewWindow(ui.Window):
                         "border_radius": 8,
                     }
                 )
-                with ui.VStack():
-                    ui.Spacer(height=2)
-                    with ui.HStack():
-                        ui.Spacer(width=2)
-                        with ui.ZStack():
-                            # Inner bg — what dims when the bubble is undone (Phase 6).
-                            bubble_refs["inner_bg_rect"] = ui.Rectangle(
-                                style={
-                                    "background_color": COL_BG_ASSIST,
-                                    "border_radius": 6,
-                                }
-                            )
-                            with ui.VStack():
-                                ui.Spacer(height=4)
-                                with ui.HStack():
-                                    ui.Spacer(width=8)
-                                    bubble_refs["header_lbl"] = self._L(
-                                        "Isaac Assist",
-                                        font_size=10,
-                                        width=0,
-                                        style={"color": COL_TEXT_SUBTLE},
-                                    )
-                                    ui.Spacer()
-                                with ui.HStack():
-                                    ui.Spacer(width=8)
-                                    body_color = COL_RED if error else COL_TEXT
-                                    bubble_refs["body_lbl"] = self._L(
-                                        text,
-                                        font_size=12,
-                                        word_wrap=True,
-                                        style={"color": body_color},
-                                    )
-                                    ui.Spacer(width=8)
-                                # Diff chip + Phase 6 undo button both write
-                                # into this slot. Height grows when populated.
-                                bubble_refs["diff_slot"] = ui.VStack(spacing=0, height=0)
-                                ui.Spacer(height=4)
-                        ui.Spacer(width=24)
-                    ui.Spacer(height=2)
+                with ui.HStack(height=0):
+                    ui.Spacer(width=2)
+                    with ui.ZStack(height=0):
+                        # Inner bg — what dims when the bubble is undone (Phase 6).
+                        bubble_refs["inner_bg_rect"] = ui.Rectangle(
+                            style={
+                                "background_color": COL_BG_ASSIST,
+                                "border_radius": 6,
+                            }
+                        )
+                        with ui.VStack(spacing=2):
+                            ui.Spacer(height=4)
+                            with ui.HStack(height=14):
+                                ui.Spacer(width=8)
+                                bubble_refs["header_lbl"] = self._L(
+                                    "Isaac Assist",
+                                    font_size=10,
+                                    width=0,
+                                    style={"color": COL_TEXT_SUBTLE},
+                                )
+                                ui.Spacer()
+                            with ui.HStack(height=0):
+                                ui.Spacer(width=8)
+                                body_color = COL_RED if error else COL_TEXT
+                                bubble_refs["body_lbl"] = self._L(
+                                    text,
+                                    font_size=12,
+                                    word_wrap=True,
+                                    style={"color": body_color},
+                                )
+                                ui.Spacer(width=8)
+                            # Diff chip + undo button slot. Height grows
+                            # when populated by _attach_diff_chip.
+                            bubble_refs["diff_slot"] = ui.VStack(spacing=0, height=0)
+                            ui.Spacer(height=4)
+                    ui.Spacer(width=24)
         return bubble_refs
 
     # ═══════════════════════════════════════════════════════════════════════
