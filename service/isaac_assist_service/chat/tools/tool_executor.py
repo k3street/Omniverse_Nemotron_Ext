@@ -20116,13 +20116,22 @@ if scene_prim is None:
 else:
     result['scene_path'] = str(scene_prim.GetPath())
     scene = UsdPhysics.Scene(scene_prim)
+    # Always report gravity — `.Get()` returns the USD-schema default
+    # (direction (0,0,-1), magnitude 9.81) when not explicitly authored.
+    # Without this fallback the agent sees missing keys and has historically
+    # fabricated "nan / -inf" claims (see CW-49 run-2 verdict).
     g_dir_attr = scene.GetGravityDirectionAttr()
     g_mag_attr = scene.GetGravityMagnitudeAttr()
-    if g_dir_attr and g_dir_attr.HasAuthoredValue():
+    if g_dir_attr:
         d = g_dir_attr.Get()
-        result['gravity_direction'] = [float(d[0]), float(d[1]), float(d[2])]
-    if g_mag_attr and g_mag_attr.HasAuthoredValue():
-        result['gravity_magnitude'] = float(g_mag_attr.Get())
+        if d is not None:
+            result['gravity_direction'] = [float(d[0]), float(d[1]), float(d[2])]
+            result['gravity_direction_authored'] = bool(g_dir_attr.HasAuthoredValue())
+    if g_mag_attr:
+        m = g_mag_attr.Get()
+        if m is not None:
+            result['gravity_magnitude'] = float(m)
+            result['gravity_magnitude_authored'] = bool(g_mag_attr.HasAuthoredValue())
     try:
         from pxr import PhysxSchema
         if scene_prim.HasAPI(PhysxSchema.PhysxSceneAPI):
