@@ -503,6 +503,60 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "resolve_count_vagueness",
+            "description": (
+                "Map a vague count phrase ('a few', 'several', 'many', 'lots', 'dozens') "
+                "to a canonical integer. USE THIS whenever the user asks for an "
+                "unspecified plural — do NOT invent a number ('a few cubes' should not "
+                "be 7 one turn and 4 the next; use this resolver for stable results). "
+                "Variables to extract from the prompt: the count phrase. Returns "
+                "{count: int, alternatives}. Use the count directly in the next tool "
+                "(loop create_prim N times, etc). Known phrases include English (one, "
+                "couple, pair, few, several, some, many, lots, dozens, hundreds) and "
+                "Swedish (en, ett par, några, flera, många, dussintals, hundratals)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "term": {
+                        "type": "string",
+                        "description": "The count phrase from the user prompt, lowercase. Examples: 'a few', 'many', 'several', 'a couple', 'lots'.",
+                    },
+                },
+                "required": ["term"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resolve_robot_class",
+            "description": (
+                "Map a generic robot class phrase ('a manipulator', 'a humanoid', 'a "
+                "wheeled robot') to a concrete robot_name from the registry. USE THIS "
+                "when the user asks for a robot by class without naming a specific "
+                "model — do NOT invent asset paths or robot names. Returns "
+                "{robot_name, asset_url, robot_type, alternatives}. Pass the resolved "
+                "robot_name straight to robot_wizard, or use the asset_url with "
+                "import_robot. Known classes: manipulator/arm (→franka_panda), "
+                "wheeled/mobile/amr (→nova_carter), humanoid/biped (→h1), "
+                "quadruped/dog (→anymal_c, spot), hand/gripper (→allegro)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_class": {
+                        "type": "string",
+                        "description": "The robot class phrase from the user prompt, lowercase. Examples: 'manipulator', 'humanoid', 'wheeled robot', 'quadruped'.",
+                    },
+                },
+                "required": ["robot_class"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "resolve_size_adjective",
             "description": (
                 "Map a size adjective ('small', 'tiny', 'large', 'huge') for a given "

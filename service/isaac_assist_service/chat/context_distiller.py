@@ -151,7 +151,8 @@ _ALWAYS_TOOLS = {
     # Always relevant when their linguistic pattern fires. They compete
     # poorly against action-tools in embedding-rank (action verbs dominate),
     # so include them unconditionally rather than rely on retrieval.
-    "place_on_top_of", "resolve_prim_reference", "resolve_size_adjective",
+    "place_on_top_of", "resolve_prim_reference",
+    "resolve_size_adjective", "resolve_count_vagueness", "resolve_robot_class",
 }
 
 # Build a fast name→schema lookup
