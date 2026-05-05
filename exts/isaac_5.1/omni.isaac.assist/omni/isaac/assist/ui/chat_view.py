@@ -634,6 +634,11 @@ class ChatViewWindow(ui.Window):
     def _set_button_state(self, state: str):
         """state ∈ {idle, busy, stopping}."""
         self._btn_state = state
+        # Track the most recent transition for the debounce in
+        # _on_send_or_stop — a stray second event right after idle→busy
+        # (double-click, queued event, Enter-then-Send) would otherwise
+        # turn the second click into an unintended cancel.
+        self._last_btn_state_change_at = time.monotonic()
         if state == "idle":
             self.btn_send.text = "Send"
             self.btn_send.enabled = True
@@ -652,6 +657,14 @@ class ChatViewWindow(ui.Window):
         if self._btn_state == "idle":
             self._submit_message()
         elif self._btn_state == "busy":
+            # Debounce: a second event within 500ms of idle→busy is almost
+            # always a doubled click / Enter-then-Send race, NOT an honest
+            # stop intent. Without this guard the user types one prompt and
+            # gets "Stopped. Completed 0 steps" because the second event
+            # processes against the freshly-set busy state.
+            elapsed = time.monotonic() - getattr(self, "_last_btn_state_change_at", 0.0)
+            if elapsed < 0.5:
+                return
             self._set_button_state("stopping")
             asyncio.ensure_future(self.service.cancel_turn())
         # "stopping" → button is disabled; clicks are no-ops.
@@ -1613,7 +1626,8 @@ class ChatViewWindow(ui.Window):
     def _force_reset_turn_state(self):
         """Hard reset to idle state. Use when local UI state has lost
         sync with server (server hang, missed agent_reply event, manual
-        recovery). Cancels any in-flight cancel-request to the server too."""
+        recovery, New/Clear during a live turn)."""
+        was_active = self._turn_active
         self._turn_active = False
         self._turn_rendered_via_sse = False
         self._turn_started_at = None
@@ -1621,12 +1635,20 @@ class ChatViewWindow(ui.Window):
             self._set_button_state("idle")
         except Exception:
             pass
-        # Best-effort: tell the server to drop any cancel flag we might
-        # have left lingering. Non-blocking — fire and forget.
-        try:
-            asyncio.ensure_future(self.service.cancel_turn())
-        except Exception:
-            pass
+        # Cancel ONLY when a turn really was in flight. The previous code
+        # always fired cancel_turn() with the "drop the lingering flag"
+        # comment — but cancel_turn() SETS the flag (it's the same call as
+        # the Stop button). When New/Clear was clicked between turns this
+        # set the flag preemptively, and a quick follow-up prompt would
+        # arrive at the orchestrator's round-0 cancel check before the
+        # post-message cancel-clear could win the race — surfacing as
+        # "Stopped. Completed 0 steps" with no Stop click in sight.
+        # Now we only cancel when the local UI says the turn is alive.
+        if was_active:
+            try:
+                asyncio.ensure_future(self.service.cancel_turn())
+            except Exception:
+                pass
 
     def _toggle_livekit(self):
         if self.webrtc and self.webrtc._streaming:
