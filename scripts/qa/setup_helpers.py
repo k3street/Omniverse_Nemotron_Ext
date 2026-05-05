@@ -126,10 +126,20 @@ def _articulation_has_joints(stage, dest_path: str) -> bool:
     return _walk(p)
 
 
+_ROBOT_NAME_TO_URDF = {
+    "franka": "/home/anton/robots/franka_panda/franka_panda.urdf",
+    "panda": "/home/anton/robots/franka_panda/franka_panda.urdf",
+    "ur10e": "/home/anton/robots/ur10e/ur10e.urdf",
+}
+
+
 def import_urdf_safe(
-    urdf_path: str,
+    urdf_path: str = "",
     dest_path: str = "/World/Robot",
     require_joints: bool = True,
+    *,
+    robot_name: str = "",
+    prim_path: str = "",
 ) -> dict:
     """Robust URDF import. Tries modern + legacy paths, falls back to a
     manually-authored placeholder if all imports fail.
@@ -143,11 +153,20 @@ def import_urdf_safe(
     `require_joints=True` (default) means we treat an "import succeeded but
     articulation has no joints" outcome as a failure and fall back to the
     placeholder. Set False if you don't care (just need a prim there).
+
+    Convenience aliases: pass `robot_name="franka"` instead of a full
+    urdf_path, and/or `prim_path="/World/Foo"` instead of `dest_path=`.
     """
     import os
     import omni.usd
 
     warnings: list[str] = []
+    if robot_name and not urdf_path:
+        urdf_path = _ROBOT_NAME_TO_URDF.get(robot_name.lower(), "")
+        if not urdf_path:
+            warnings.append(f"unknown robot_name {robot_name!r}; falling back to placeholder")
+    if prim_path:
+        dest_path = prim_path
     stage = omni.usd.get_context().get_stage()
     if stage is None:
         # No stage — pre-session-setup contract violated. Be loud.
