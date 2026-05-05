@@ -1528,6 +1528,10 @@ class ChatViewWindow(ui.Window):
         self.chips_container.visible = True
         self.chips_container.height = ui.Pixel(22)
         self._collapse_live_strip()
+        # Defense in depth: even if a turn is somehow stuck (server hang,
+        # missed agent_reply), Clear forcibly resets the Stop-button to
+        # idle so the user is never trapped in the "Stopping..." state.
+        self._force_reset_turn_state()
 
     # ═══════════════════════════════════════════════════════════════════════
     # New scene (soft-confirm) + LiveKit toggle (existing behavior preserved)
@@ -1574,6 +1578,28 @@ class ChatViewWindow(ui.Window):
         self._chips_shown = True
         self.chips_container.visible = True
         self.chips_container.height = ui.Pixel(22)
+        # Defense in depth: even if a turn is mid-flight on the server,
+        # New Scene resets the local UI to idle so the user is never
+        # stuck staring at "Stopping..." that never resolves.
+        self._force_reset_turn_state()
+
+    def _force_reset_turn_state(self):
+        """Hard reset to idle state. Use when local UI state has lost
+        sync with server (server hang, missed agent_reply event, manual
+        recovery). Cancels any in-flight cancel-request to the server too."""
+        self._turn_active = False
+        self._turn_rendered_via_sse = False
+        self._turn_started_at = None
+        try:
+            self._set_button_state("idle")
+        except Exception:
+            pass
+        # Best-effort: tell the server to drop any cancel flag we might
+        # have left lingering. Non-blocking — fire and forget.
+        try:
+            asyncio.ensure_future(self.service.cancel_turn())
+        except Exception:
+            pass
 
     def _toggle_livekit(self):
         if self.webrtc and self.webrtc._streaming:
