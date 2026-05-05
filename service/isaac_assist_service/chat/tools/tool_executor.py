@@ -1092,6 +1092,58 @@ _ROBOT_WIZARD_REGISTRY = {
     "franka": "franka_panda",
     "panda": "franka_panda",
     "franka_emika_panda": "franka_panda",
+
+    # Additional robots — minimal entries (cloud URL only, no fine-grained
+    # profile). Sufficient for robot_wizard / resolve_robot_class pipelines:
+    # the wizard's `if registry_hit:` branch fills in defaults from the
+    # generic robot_type table when a profile isn't specified. Cloud URLs
+    # follow Isaac Sim 5.1 conventions; if a specific path drifts, edit
+    # here once rather than every caller.
+    # Paths verified against the user's local 5.0 asset bundle on
+    # /mnt/shared_data/isaac-sim-assets-complete-5.0.0; cloud_url uses
+    # the same relative path against the public S3 prefix. _resolve_robot_asset
+    # prefers local-disk lookup when ASSETS_ROOT_PATH is set, falling back
+    # to the cloud URL when it isn't.
+    "h1": {
+        "rel_path": "Isaac/Robots/Unitree/H1/h1.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/H1/h1.usd",
+        "robot_type": "humanoid",
+    },
+    "g1": {
+        "rel_path": "Isaac/Robots/Unitree/G1/g1.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/g1.usd",
+        "robot_type": "humanoid",
+    },
+    "spot": {
+        "rel_path": "Isaac/Robots/BostonDynamics/spot/spot.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/BostonDynamics/spot/spot.usd",
+        "robot_type": "mobile",
+    },
+    "anymal_c": {
+        "rel_path": "Isaac/Robots/ANYbotics/anymal_c/anymal_c.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/ANYbotics/anymal_c/anymal_c.usd",
+        "robot_type": "mobile",
+    },
+    "nova_carter": {
+        "rel_path": "Isaac/Robots/NVIDIA/NovaCarter/nova_carter.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/NVIDIA/NovaCarter/nova_carter.usd",
+        "robot_type": "mobile",
+    },
+    "ur10e": {
+        "rel_path": "Isaac/Robots/UniversalRobots/ur10e/ur10e.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/UniversalRobots/ur10e/ur10e.usd",
+        "robot_type": "manipulator",
+    },
+    "allegro": {
+        "rel_path": "Isaac/Robots/WonikRobotics/AllegroHand/allegro_hand.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/WonikRobotics/AllegroHand/allegro_hand.usd",
+        "robot_type": "manipulator",
+    },
+    # Aliases for the robots above
+    "unitree_h1": "h1",
+    "unitree_g1": "g1",
+    "carter": "nova_carter",
+    "ur10": "ur10e",
 }
 
 
@@ -2858,6 +2910,294 @@ async def _handle_resolve_robot_class(args: Dict) -> Dict:
     }
 
 
+_MATERIAL_PROPERTIES = {
+    # term: {density (kg/m^3), static_friction, dynamic_friction, restitution, body_type}
+    "metal":     {"density": 7800, "static_friction": 0.6, "dynamic_friction": 0.4, "restitution": 0.3, "body_type": "rigid"},
+    "steel":     {"density": 7850, "static_friction": 0.6, "dynamic_friction": 0.4, "restitution": 0.3, "body_type": "rigid"},
+    "aluminum":  {"density": 2700, "static_friction": 0.5, "dynamic_friction": 0.3, "restitution": 0.3, "body_type": "rigid"},
+    "wood":      {"density": 700,  "static_friction": 0.5, "dynamic_friction": 0.4, "restitution": 0.4, "body_type": "rigid"},
+    "plastic":   {"density": 950,  "static_friction": 0.4, "dynamic_friction": 0.3, "restitution": 0.5, "body_type": "rigid"},
+    "rubber":    {"density": 1200, "static_friction": 0.9, "dynamic_friction": 0.8, "restitution": 0.8, "body_type": "rigid"},
+    "glass":     {"density": 2500, "static_friction": 0.4, "dynamic_friction": 0.3, "restitution": 0.2, "body_type": "rigid"},
+    "concrete":  {"density": 2400, "static_friction": 0.7, "dynamic_friction": 0.6, "restitution": 0.2, "body_type": "rigid"},
+    "rigid":     {"density": 1000, "static_friction": 0.5, "dynamic_friction": 0.4, "restitution": 0.3, "body_type": "rigid"},
+    "soft":      {"density": 100,  "static_friction": 0.5, "dynamic_friction": 0.4, "restitution": 0.1, "body_type": "deformable"},
+    "deformable":{"density": 100,  "static_friction": 0.5, "dynamic_friction": 0.4, "restitution": 0.1, "body_type": "deformable"},
+    "fabric":    {"density": 100,  "static_friction": 0.6, "dynamic_friction": 0.5, "restitution": 0.0, "body_type": "deformable"},
+    # Swedish aliases
+    "metall":   "metal", "trä": "wood", "gummi": "rubber", "glas": "glass",
+    "betong": "concrete", "stål": "steel", "plast": "plastic",
+}
+
+
+async def _handle_resolve_material_properties(args: Dict) -> Dict:
+    """Map a material descriptor ('metal', 'rubber', 'soft', 'deformable')
+    to physics properties (density, friction, restitution, body_type).
+
+    Pilot #6. Replaces LLM-invented numbers for material properties with
+    canonical defaults the user can refine. Body_type signals to the agent
+    whether to reach for RigidBodyAPI or PhysxDeformableBodyAPI.
+    """
+    term = (args.get("material") or args.get("term") or "").strip().lower()
+    if not term:
+        return {"error": "resolve_material_properties requires a material term"}
+    entry = _MATERIAL_PROPERTIES.get(term)
+    while isinstance(entry, str):
+        entry = _MATERIAL_PROPERTIES.get(entry)
+    if not entry:
+        return {
+            "material": term,
+            "warning": f"unknown material {term!r}",
+            "known_materials": sorted(k for k, v in _MATERIAL_PROPERTIES.items() if isinstance(v, dict)),
+        }
+    return {
+        "material": term,
+        **entry,
+        "rationale": f"Canonical physics properties for {term!r}; SI units (kg/m^3 for density, dimensionless for friction/restitution).",
+    }
+
+
+_CONSTRAINT_RE_NUMERIC = __import__("re").compile(
+    r"(?P<value>-?\d+(?:\.\d+)?)\s*(?P<unit>mm|cm|m|meters?|metre|millimet(?:re|er)|centimet(?:re|er)|kg|kilo(?:gram)?|g|gram|s|sec|second|min|hr|hour|°|deg|rad)?",
+    __import__("re").IGNORECASE,
+)
+_UNIT_TO_SI = {
+    "mm": ("meters", 0.001), "millimeter": ("meters", 0.001), "millimetre": ("meters", 0.001),
+    "cm": ("meters", 0.01), "centimeter": ("meters", 0.01), "centimetre": ("meters", 0.01),
+    "m": ("meters", 1.0), "meter": ("meters", 1.0), "meters": ("meters", 1.0), "metre": ("meters", 1.0),
+    "kg": ("kilograms", 1.0), "kilo": ("kilograms", 1.0), "kilogram": ("kilograms", 1.0),
+    "g": ("kilograms", 0.001), "gram": ("kilograms", 0.001),
+    "s": ("seconds", 1.0), "sec": ("seconds", 1.0), "second": ("seconds", 1.0),
+    "min": ("seconds", 60.0), "hr": ("seconds", 3600.0), "hour": ("seconds", 3600.0),
+    "°": ("degrees", 1.0), "deg": ("degrees", 1.0), "rad": ("radians", 1.0),
+}
+
+
+async def _handle_resolve_constraint_phrase(args: Dict) -> Dict:
+    """Parse a constraint phrase ('with 5cm clearance', '10kg max weight',
+    'within 2 minutes', 'no closer than 1m') into structured numeric data.
+
+    Pilot #7. Returns the extracted value normalised to SI units plus the
+    constraint kind heuristically classified from keyword presence
+    (clearance / mass / time / distance / angular / collision-avoidance).
+    """
+    phrase = (args.get("phrase") or args.get("constraint") or "").strip().lower()
+    if not phrase:
+        return {"error": "resolve_constraint_phrase requires a phrase"}
+
+    # Heuristic constraint-kind classification
+    kind = "unknown"
+    if any(k in phrase for k in ("clearance", "gap", "spacing", "avstånd", "mellanrum")):
+        kind = "clearance"
+    elif any(k in phrase for k in ("weight", "mass", "kg", "vikt", "tung", "lätt")):
+        kind = "mass"
+    elif any(k in phrase for k in ("time", "duration", "within", "tid", "minut", "second")):
+        kind = "time"
+    elif any(k in phrase for k in ("collide", "collision", "krock", "without hitting", "without colliding")):
+        kind = "collision_avoidance"
+    elif any(k in phrase for k in ("angle", "rotation", "vinkel", "rad", "deg")):
+        kind = "angular"
+    elif any(k in phrase for k in ("fit", "fits in", "passar", "max", "limit", "size")):
+        kind = "size"
+
+    # Parse first numeric+unit; ignore "no closer than" sign — the
+    # numeric magnitude is what matters for the agent.
+    m = _CONSTRAINT_RE_NUMERIC.search(phrase)
+    parsed = None
+    if m:
+        try:
+            value = float(m.group("value"))
+            unit_raw = (m.group("unit") or "").lower()
+            si_unit, mult = _UNIT_TO_SI.get(unit_raw, (None, 1.0))
+            parsed = {
+                "value": value * mult,
+                "raw_value": value,
+                "raw_unit": unit_raw or None,
+                "si_unit": si_unit,
+            }
+        except Exception:
+            pass
+
+    return {
+        "phrase": phrase,
+        "kind": kind,
+        "parsed": parsed,
+        "rationale": (
+            f"Constraint kind heuristically classified as {kind!r}; "
+            f"value extracted via regex. Use parsed.value (SI) in tool args."
+        ),
+    }
+
+
+async def _handle_resolve_sequence_phrase(args: Dict) -> Dict:
+    """Split a sequence phrase ('first X, then Y', 'after X do Y') into an
+    ordered list of intent fragments.
+
+    Pilot #8. Pure text parsing — no scene access needed. Returns the
+    fragments in order so the agent can issue tool calls in sequence.
+    Detects common ordering markers in English + Swedish.
+    """
+    phrase = (args.get("phrase") or args.get("text") or "").strip()
+    if not phrase:
+        return {"error": "resolve_sequence_phrase requires a phrase"}
+
+    import re as _re
+    # Split on ordering markers; lower-cased copy used for boundary detection.
+    pl = phrase.lower()
+    # Replace separators with a unique split-token.
+    split_pat = _re.compile(
+        r"\b(?:then|after that|afterwards|next|finally|sen|sedan|därefter|sista|först|first)\b|;|\.|,",
+        _re.IGNORECASE,
+    )
+    raw_parts = [p.strip() for p in split_pat.split(phrase) if p and p.strip()]
+    # Discard empty fragments and strip leading conjunctions.
+    fragments = []
+    for p in raw_parts:
+        p = _re.sub(r"^(and|och|sen|then)\s+", "", p, flags=_re.IGNORECASE).strip()
+        if p:
+            fragments.append(p)
+    return {
+        "phrase": phrase,
+        "fragments": fragments,
+        "count": len(fragments),
+        "rationale": "Parsed sequence fragments in execution order; issue tool calls in this order.",
+    }
+
+
+async def _handle_resolve_context_reference(args: Dict) -> Dict:
+    """Resolve an implicit context reference ('another one', 'the same as
+    before', 'the last cube I made') by querying the stage.
+
+    Pilot #9. Without conversation-history access we can still answer
+    most cases by looking at what's currently in the stage and picking
+    the most-recently-named prim of the requested class.
+
+    Args: noun_class (cube/sphere/robot/...), recency ('last' default).
+    """
+    noun_class = (args.get("noun_class") or args.get("class") or "").strip().lower()
+    if not noun_class:
+        return {"error": "resolve_context_reference requires a noun_class"}
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+noun = {noun_class!r}
+
+TYPE_MAP = {{
+    'cube':['Cube'], 'box':['Cube'],
+    'sphere':['Sphere'], 'ball':['Sphere'],
+    'cylinder':['Cylinder'], 'cone':['Cone'],
+    'mesh':['Mesh'],
+    'camera':['Camera'],
+    'light':['DistantLight','DomeLight','SphereLight','RectLight','DiskLight','CylinderLight'],
+}}
+matches = []
+for p in stage.Traverse():
+    if not p.IsValid() or not p.IsActive():
+        continue
+    type_name = str(p.GetTypeName() or '')
+    path = str(p.GetPath())
+    if path.startswith('/Render') or path.startswith('/OmniverseKit') or '/HydraTextures' in path:
+        continue
+    is_match = False
+    if noun in ('robot','articulation'):
+        is_match = p.HasAPI(UsdPhysics.ArticulationRootAPI)
+    elif noun in TYPE_MAP:
+        is_match = type_name in TYPE_MAP[noun]
+    elif type_name.lower() == noun:
+        is_match = True
+    if is_match:
+        matches.append({{'prim_path': path, 'type': type_name}})
+
+# Pick the LAST in stage-traversal order; that's a heuristic for "most
+# recently created" since USD doesn't store timestamps and Omniverse adds
+# new prims at the end of their parent's children.
+result = {{
+    'noun_class': noun,
+    'matches': matches,
+    'count': len(matches),
+    'last': matches[-1] if matches else None,
+    'first': matches[0] if matches else None,
+}}
+print(json.dumps(result))
+"""
+    return await kit_tools.queue_exec_patch(code, f"resolve_context_reference {noun_class!r}")
+
+
+_SKILL_RECIPES = {
+    "pick_and_place": {
+        "description": "Pick an object from one surface and place it on another using PickPlaceController.",
+        "tool_chain": [
+            {"tool": "setup_pick_place_controller", "args_template": {"robot_path": "<ROBOT>", "target_prim_path": "<OBJECT>", "destination": "<BIN>"}},
+        ],
+    },
+    "calibrate_camera": {
+        "description": "Place a calibration board + camera and run the calibration routine.",
+        "tool_chain": [
+            {"tool": "create_calibration_experiment", "args_template": {"camera_path": "<CAMERA>"}},
+            {"tool": "quick_calibrate", "args_template": {"camera_path": "<CAMERA>"}},
+        ],
+    },
+    "rl_training_env": {
+        "description": "Spin up an Isaac Lab env scaffold for RL training.",
+        "tool_chain": [
+            {"tool": "create_isaaclab_env", "args_template": {"task_type": "manipulation", "task_name": "<NAME>", "robot_path": "<ROBOT>"}},
+        ],
+    },
+    "ros2_bridge": {
+        "description": "Set up a ROS2 OmniGraph bridge for an articulation.",
+        "tool_chain": [
+            {"tool": "configure_ros2_bridge", "args_template": {"robot_path": "<ROBOT>"}},
+        ],
+    },
+    "teleop_demo": {
+        "description": "Set up teleop mapping + start a recording session.",
+        "tool_chain": [
+            {"tool": "configure_teleop_mapping", "args_template": {"robot_path": "<ROBOT>"}},
+            {"tool": "start_teleop_session", "args_template": {}},
+        ],
+    },
+    # English aliases
+    "pick-and-place": "pick_and_place", "pickplace": "pick_and_place",
+    "pick and place": "pick_and_place", "manipulation": "pick_and_place",
+    "calibration": "calibrate_camera", "camera calibration": "calibrate_camera",
+    "rl env": "rl_training_env", "rl": "rl_training_env",
+    "training env": "rl_training_env", "training environment": "rl_training_env",
+    "ros2": "ros2_bridge", "ros": "ros2_bridge", "bridge": "ros2_bridge",
+    "teleop": "teleop_demo", "teleoperation": "teleop_demo",
+}
+
+
+async def _handle_resolve_skill_composition(args: Dict) -> Dict:
+    """Map a skill-composition name ('pick-and-place', 'calibration', 'ros2')
+    to a known tool chain. Pilot #10.
+
+    Returns the recipe so the agent can issue the tool calls in order.
+    Args_template fields like '<ROBOT>' tell the agent it needs to fill
+    that in (typically by calling resolve_prim_reference first).
+    """
+    name = (args.get("skill") or args.get("name") or "").strip().lower()
+    if not name:
+        return {"error": "resolve_skill_composition requires a skill name"}
+    entry = _SKILL_RECIPES.get(name)
+    while isinstance(entry, str):
+        entry = _SKILL_RECIPES.get(entry)
+    if not entry:
+        return {
+            "skill": name,
+            "warning": f"unknown skill {name!r}",
+            "known_skills": sorted(k for k, v in _SKILL_RECIPES.items() if isinstance(v, dict)),
+        }
+    return {
+        "skill": name,
+        "description": entry["description"],
+        "tool_chain": entry["tool_chain"],
+        "rationale": "Canonical recipe; fill <ANGLE_BRACKET> placeholders with resolved prim paths before calling each tool in order.",
+    }
+
+
 async def _handle_resolve_size_adjective(args: Dict) -> Dict:
     """Map a size adjective ('small', 'large', 'tiny') for a given object
     class to a canonical numeric extent in meters.
@@ -3264,6 +3604,11 @@ DATA_HANDLERS = {
     "resolve_size_adjective": _handle_resolve_size_adjective,
     "resolve_count_vagueness": _handle_resolve_count_vagueness,
     "resolve_robot_class": _handle_resolve_robot_class,
+    "resolve_material_properties": _handle_resolve_material_properties,
+    "resolve_constraint_phrase": _handle_resolve_constraint_phrase,
+    "resolve_sequence_phrase": _handle_resolve_sequence_phrase,
+    "resolve_context_reference": _handle_resolve_context_reference,
+    "resolve_skill_composition": _handle_resolve_skill_composition,
     "get_debug_info": _handle_get_debug_info,
     "lookup_knowledge": _handle_lookup_knowledge,
     "lookup_api_deprecation": _handle_lookup_api_deprecation,
