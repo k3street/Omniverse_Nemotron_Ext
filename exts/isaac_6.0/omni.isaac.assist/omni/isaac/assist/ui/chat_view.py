@@ -386,6 +386,10 @@ class ChatViewWindow(ui.Window):
     def _build_input(self):
         with ui.HStack(height=28, spacing=4):
             self.input_field = ui.StringField(multiline=False, style={"font_size": 12})
+            # Enter (end-edit on a single-line StringField) submits the
+            # message — same as clicking Send. Loses focus afterwards
+            # which is the standard chat UX.
+            self.input_field.model.add_end_edit_fn(self._on_input_enter)
             # Same button doubles as Send (idle) / Stop (turn active) /
             # "Stopping..." (cancel sent, waiting for orchestrator return).
             self.btn_send = ui.Button(
@@ -396,6 +400,15 @@ class ChatViewWindow(ui.Window):
                 style={"font_size": 12},
             )
             self._btn_state = "idle"
+
+    def _on_input_enter(self, model):
+        # Triggered by Enter key OR by focus loss. Only treat as a submit
+        # when there's actual text and we're not mid-turn — otherwise
+        # focus changes would silently submit empty / racing messages.
+        text = model.get_value_as_string().strip()
+        if not text or self._turn_active:
+            return
+        self._submit_message()
 
     # ═══════════════════════════════════════════════════════════════════════
     # Send / Stop button state machine
@@ -513,7 +526,7 @@ class ChatViewWindow(ui.Window):
             with ui.HStack(height=14):
                 ui.Spacer(width=10)
                 ui.Label(
-                    "■ Stopped by user",
+                    "[stopped by user]",
                     style={"color": COL_TEXT_DIM, "font_size": 11},
                 )
 
@@ -588,7 +601,7 @@ class ChatViewWindow(ui.Window):
             row["spinner_lbl"].style = {"color": COL_RED, "font_size": 13}
             err = payload.get("error", "")
             if err:
-                err_short = (str(err)[:50] + "…") if len(str(err)) > 50 else str(err)
+                err_short = (str(err)[:50] + "...") if len(str(err)) > 50 else str(err)
                 row["args_lbl"].text = err_short
                 row["args_lbl"].style = {"color": COL_RED, "font_size": 11}
 
@@ -598,7 +611,7 @@ class ChatViewWindow(ui.Window):
                 ui.Spacer(width=10)
                 n = payload.get("consecutive_fails", 0)
                 ui.Label(
-                    f"⚠ Stopped after {n} failed attempts",
+                    f"[!] Stopped after {n} failed attempts",
                     style={"color": COL_AMBER, "font_size": 11},
                 )
 
@@ -651,7 +664,7 @@ class ChatViewWindow(ui.Window):
         if added:
             parts.append(f"+{len(added)} added")
         if rem:
-            parts.append(f"−{len(rem)} removed")
+            parts.append(f"-{len(rem)} removed")
         if mod:
             parts.append(f"~{len(mod)} modified")
         full_paths = ""
@@ -1011,8 +1024,8 @@ class ChatViewWindow(ui.Window):
             with ui.HStack(height=18) as undo_row:
                 ui.Spacer()
                 btn = ui.Button(
-                    "↶",
-                    width=22,
+                    "Undo",
+                    width=44,
                     height=16,
                     clicked_fn=lambda b=bubble: self._on_undo_clicked(b),
                     style={
@@ -1034,11 +1047,11 @@ class ChatViewWindow(ui.Window):
         if a:
             parts.append(f"+{len(a)} added")
         if r:
-            parts.append(f"−{len(r)} removed")
+            parts.append(f"-{len(r)} removed")
         if m:
             parts.append(f"~{len(m)} modified")
         head = (
-            "Undo this turn — will revert: " + " ".join(parts)
+            "Undo this turn - will revert: " + " ".join(parts)
             if parts
             else "Undo this turn"
         )
@@ -1066,18 +1079,21 @@ class ChatViewWindow(ui.Window):
         state = bubble.get("undo_state", "idle")
         btn = bubble.get("undo_btn")
         if state == "idle":
+            # Confirm-state shows a clear "click again to commit" affordance:
+            # checkmark in amber. Pedagogical (✓ = commit) AND warning-coloured
+            # (amber = destructive). 3-second window then auto-revert to idle.
             bubble["undo_state"] = "confirm"
-            btn.text = "Undo?"
+            btn.text = "Confirm ✓"  # ✓ U+2713 — common in fonts
             btn.style = {
                 "font_size": 11,
                 "color": COL_AMBER,
                 "background_color": 0x00000000,
             }
-            btn.width = ui.Pixel(48)
+            btn.width = ui.Pixel(70)
             asyncio.ensure_future(self._reset_undo_after(bubble, 3.0))
         elif state == "confirm":
             bubble["undo_state"] = "pending"
-            btn.text = "…"
+            btn.text = "..."  # ASCII triple-dot — Unicode … breaks in this font
             btn.style = {
                 "font_size": 11,
                 "color": COL_TEXT_SUBTLE,
@@ -1092,13 +1108,13 @@ class ChatViewWindow(ui.Window):
             bubble["undo_state"] = "idle"
             btn = bubble.get("undo_btn")
             if btn:
-                btn.text = "↶"
+                btn.text = "Undo"
                 btn.style = {
                     "font_size": 11,
                     "color": COL_TEXT_DIM,
                     "background_color": 0x00000000,
                 }
-                btn.width = ui.Pixel(22)
+                btn.width = ui.Pixel(44)
 
     async def _do_undo(self):
         # Show progress in the live strip — restore can take a few seconds
@@ -1152,7 +1168,8 @@ class ChatViewWindow(ui.Window):
             b["undo_state"] = "idle"
             btn = b.get("undo_btn")
             if btn:
-                btn.text = "↶"
+                btn.text = "Undo"
+                btn.width = ui.Pixel(44)
                 btn.enabled = True
                 btn.style = {
                     "font_size": 11,
