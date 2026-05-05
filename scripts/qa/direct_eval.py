@@ -66,15 +66,104 @@ _CONTINUATION_PROMPT = (
 )
 
 
+def _extract_scripted_followups(task_id: str) -> list[str]:
+    """Read the '## Scripted followups' YAML-list block from a task spec.
+
+    Used by T4 (high-level intent) tasks where the agent is expected to
+    ask 1-3 clarifying questions before building. Each followup is the
+    canned user response applied turn-by-turn (no keyword matching —
+    just next-in-list).
+
+    Format expected in task .md:
+
+        ## Scripted followups
+
+        - "First answer text"
+        - "Second answer text"
+
+    Returns [] when the section is absent (single-turn task — current
+    direct_eval default behavior).
+    """
+    p = REPO_ROOT / "docs" / "qa" / "tasks" / f"{task_id}.md"
+    if not p.exists():
+        return []
+    text = p.read_text()
+    import re
+    m = re.search(
+        r"##\s*Scripted\s*followups\s*\n+(.*?)(?=\n##|\n\Z)",
+        text, re.S | re.I,
+    )
+    if not m:
+        return []
+    block = m.group(1)
+    # Match leading-dash list items, accept both quoted and unquoted text
+    items = []
+    for line in block.splitlines():
+        line = line.strip()
+        if not line or not line.startswith("-"):
+            continue
+        body = line[1:].strip()
+        # Strip surrounding quotes if present
+        if (body.startswith('"') and body.endswith('"')) or \
+           (body.startswith("'") and body.endswith("'")):
+            body = body[1:-1]
+        if body:
+            items.append(body)
+    return items
+
+
+def _agent_asking_clarification(reply_text: str, tool_calls: list, intent: str) -> bool:
+    """Detect whether the agent's reply is asking for clarification rather
+    than acting. Used in the multi-turn loop to decide whether to send
+    the next scripted_followup (yes — agent is waiting on user) vs end
+    the dialog (agent has built / answered).
+
+    Heuristics (in order):
+      1. Intent == 'negotiation_clarification' (negotiator gate fired)
+      2. Reply contains a '?' AND no tool calls were made
+      3. Reply mentions the canonical clarification phrase pattern
+    Otherwise — agent is acting / done.
+    """
+    if intent == "negotiation_clarification":
+        return True
+    if not tool_calls and "?" in reply_text:
+        return True
+    # Phrases the negotiator's format_clarification_reply uses or
+    # template-driven assistants commonly emit
+    asking_phrases = [
+        "before i start",
+        "could you tell",
+        "could you specify",
+        "could you confirm",
+        "what would you like",
+        "please provide",
+        "please confirm",
+        "should i use",
+    ]
+    rl = reply_text.lower()
+    return any(p in rl for p in asking_phrases) and not tool_calls
+
+
 def run_direct(task_id: str, runs_dir: Path, timeout_s: int = 600,
-               followup: bool = False) -> Dict:
+               followup: bool = False, multi_turn: bool = True,
+               max_turns: int = 5) -> Dict:
     """Run a direct-mode eval on `task_id`.
 
     When `followup=True`, send one additional "are you really done?" turn
-    after the first reply. This probes whether LLM truncation is what's
-    costing us the ~2 failures on the 20-task suite (T-13, C-03) — if the
-    agent CAN produce the full answer given a second shot, the failure was
-    output-length-bound rather than capability-bound.
+    after the first reply. (Legacy probe for output-length-bound failures.)
+
+    When `multi_turn=True` (default for tasks with `## Scripted followups`):
+      Loop up to `max_turns` turns. After each agent reply:
+        - If agent appears to be asking for clarification AND a scripted
+          followup is available, send the next followup as the user's
+          turn-N+1 message.
+        - Otherwise, end the dialog and snapshot/judge against the final
+          stage state.
+      This unblocks T4 (high-level intent) tasks where the agent is
+      *expected* to ask 1-3 clarifying questions before building.
+      Single-shot direct_eval can never pass these: agent asks → no answer
+      → session ends. Scripted followups give the agent the missing inputs
+      so the actual capability (turn-2/3 building) gets exercised.
     """
     run_id = datetime.now().strftime("run_direct_%Y%m%dT%H%M%S") + f"_{uuid.uuid4().hex[:6]}"
     out_dir = runs_dir / run_id
@@ -119,7 +208,48 @@ def run_direct(task_id: str, runs_dir: Path, timeout_s: int = 600,
     total_tool_calls += len(reply.get("tool_calls", []))
     total_chars += len(assistant_msg)
 
-    if followup:
+    # ── Multi-turn loop with scripted followups ────────────────────────────
+    # Pull task-declared followups; if none present, behave as single-turn.
+    scripted_followups = _extract_scripted_followups(task_id) if multi_turn else []
+    followup_index = 0
+    last_reply = reply
+    last_assistant_msg = assistant_msg
+    turn = 1
+    while multi_turn and followup_index < len(scripted_followups) and turn < max_turns:
+        last_tool_calls = last_reply.get("tool_calls", []) or []
+        last_intent = last_reply.get("intent", "")
+        if not _agent_asking_clarification(last_assistant_msg, last_tool_calls, last_intent):
+            # Agent built / answered without asking — end the dialog
+            break
+        # Send the next scripted followup as the user's turn-N+1 message
+        followup_text = scripted_followups[followup_index]
+        followup_index += 1
+        turn += 1
+        log({"event": "stage_snapshot", "when": f"after_turn_{turn-1}",
+             "snapshot": _snapshot_stage()})
+        log({"event": "scripted_followup", "turn": turn,
+             "text": followup_text, "followup_index": followup_index})
+        try:
+            with httpx.Client(timeout=timeout_s) as client:
+                r_next = client.post(ISAAC_ASSIST_URL, json={
+                    "session_id": session_id, "message": followup_text,
+                })
+                r_next.raise_for_status()
+                last_reply = r_next.json()
+        except Exception as e:
+            log({"event": "isaac_assist_error", "error": str(e), "turn": turn})
+            break
+        last_assistant_msg = "\n".join(
+            m.get("content", "") for m in last_reply.get("response_messages", [])
+        ).strip()
+        log({"event": "isaac_assist_reply", "turn": turn, "text": last_assistant_msg,
+             "intent": last_reply.get("intent"),
+             "tool_calls": last_reply.get("tool_calls", [])})
+        total_tool_calls += len(last_reply.get("tool_calls", []))
+        total_chars += len(last_assistant_msg)
+
+    # ── Legacy single-followup mode (--followup CLI flag) ──────────────────
+    if followup and not scripted_followups:
         log({"event": "stage_snapshot", "when": "after_turn_1", "snapshot": _snapshot_stage()})
         log({"event": "persona_message", "turn": 2, "text": _CONTINUATION_PROMPT})
         try:
@@ -143,7 +273,8 @@ def run_direct(task_id: str, runs_dir: Path, timeout_s: int = 600,
             total_chars += len(assistant_msg_2)
 
     log({"event": "stage_snapshot", "when": "after_direct", "snapshot": _snapshot_stage()})
-    log({"event": "direct_eval_end"})
+    log({"event": "direct_eval_end", "n_turns": turn,
+         "n_followups_used": followup_index})
     return {"task": task_id, "transcript": str(transcript),
             "tool_calls": total_tool_calls,
             "reply_chars": total_chars}

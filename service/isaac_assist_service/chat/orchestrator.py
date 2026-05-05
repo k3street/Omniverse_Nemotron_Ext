@@ -33,8 +33,14 @@ from .tools.kit_tools import (
 )
 from .tools.tool_schemas import ISAAC_SIM_TOOLS
 from .tools.tool_executor import execute_tool_call
+from .tools.descriptions import describe as _describe_tool
 from .slash_commands import parse_slash, execute_slash
 from .session_trace import emit as _trace_emit
+from .cancel_registry import (
+    is_cancelled as _is_cancelled,
+    clear as _cancel_clear,
+)
+import time as _t
 from ..retrieval.context_retriever import (
     retrieve_context,
     format_retrieved_context,
@@ -405,6 +411,25 @@ def _partition_path_existence(
     return confirmed_present, confirmed_absent
 
 
+def _summarize_args(args: Dict[str, Any]) -> str:
+    """One-line summary of tool-call args for the live UI strip.
+
+    Priority: prim_path leaf → path leaf → first non-empty value.
+    Truncated to 30 chars. Full args still flow through args_full for
+    the tooltip.
+    """
+    if not args:
+        return ""
+    for key in ("prim_path", "path", "prim", "target"):
+        if key in args and args[key]:
+            v = str(args[key])
+            return v.rsplit("/", 1)[-1] if "/" in v else v[:30]
+    for v in args.values():
+        if v not in (None, "", [], {}):
+            return str(v)[:30]
+    return ""
+
+
 class ChatOrchestrator:
     """
     Manages multi-turn chat sessions, injects stage context, and calls the
@@ -465,6 +490,14 @@ class ChatOrchestrator:
 
         # Trace the user message (silent on IO failure)
         _trace_emit(session_id, "user_msg", {"text": user_message})
+        # Live progress: signal turn start so the UI can show "Thinking…"
+        # immediately, before the LLM call latency begins.
+        _trace_emit(session_id, "turn_started", {
+            "user_message_preview": (user_message or "")[:120],
+        })
+        # Drop any stale cancel flag from a previous turn before we start
+        # polling it in the round loop.
+        _cancel_clear(session_id)
 
         # ── 0. Slash-command interception ────────────────────────────────────
         # /note /block /pin /cite /help short-circuit the LLM — deterministic,
@@ -517,10 +550,26 @@ class ChatOrchestrator:
         _negotiator_enabled = _os_mod.environ.get(
             "STRATEGIC_NEGOTIATOR", "on"
         ).lower() != "off"
+        # Skip negotiator if the previous assistant turn already issued a
+        # clarification — the user is now ANSWERING our questions, not making
+        # a fresh ambiguous request. Continuing to negotiate would loop
+        # forever ("Before I start, I need a few things..." → user answers
+        # → "Before I start, I need a few things..."). The orchestrator's
+        # job in turn N+1 is to USE the answer, not re-litigate ambiguity.
+        _last_assistant = None
+        for h in reversed(history):
+            if h.get("role") == "assistant":
+                _last_assistant = h.get("content", "")
+                break
+        _prior_was_clarification = bool(_last_assistant) and (
+            "Before I start, I need a few things" in _last_assistant
+            or "Once you confirm, I'll continue" in _last_assistant
+        )
         if (
             _negotiator_enabled
             and intent_complexity == "complex"
             and intent != "general_query"
+            and not _prior_was_clarification
         ):
             try:
                 from .negotiator import negotiate, format_clarification_reply
@@ -547,6 +596,10 @@ class ChatOrchestrator:
             except Exception as _ne:
                 # Fail-open — never let negotiation block normal flow
                 logger.warning(f"[Negotiator] gate failed ({_ne}), proceeding")
+        elif _prior_was_clarification:
+            _trace_emit(session_id, "negotiator_skipped", {
+                "reason": "prior turn was clarification — proceeding to act on user's answer",
+            })
 
         # ── 1.5. Auto turn-snapshot for stage-mutating turns ─────────────────
         # Before running any tools that might write to the stage, save the
@@ -555,6 +608,9 @@ class ChatOrchestrator:
         # exactly what was missing from the 2026-04-19 conveyor smoke-test
         # (scale + delete + conveyor-create was impossible to cleanly revert).
         # Non-mutating intents skip the snapshot to keep token/rpc cost low.
+        # Hoisted out of the if so we can read it later when emitting agent_reply
+        # — the UI uses has_snapshot to gate the per-bubble undo button.
+        _snap_result: Optional[Dict[str, Any]] = None
         _MUTATING_INTENTS = {"patch_request", "scene_diagnose"}
         if intent in _MUTATING_INTENTS and await is_kit_rpc_alive():
             try:
@@ -796,7 +852,15 @@ class ChatOrchestrator:
             })
 
         max_rounds = config.max_tool_rounds
+        cancelled = False
         for round_idx in range(max_rounds):
+            # Cancel check at the top of each round — between LLM rounds is
+            # the natural decision point. If the user hit Stop, exit cleanly
+            # before issuing another LLM call.
+            if _is_cancelled(session_id):
+                _trace_emit(session_id, "cancel_acknowledged", {"round": round_idx})
+                cancelled = True
+                break
             try:
                 response = await self.llm_provider.complete(
                     messages, {"tools": selected_tools}
@@ -839,6 +903,16 @@ class ChatOrchestrator:
             tool_results = []
 
             for tc in real_tool_calls:
+                # Inner cancel check — between tools within a round. Lets us
+                # bail mid-round so we don't fire all queued tools after the
+                # user hit Stop.
+                if _is_cancelled(session_id):
+                    _trace_emit(session_id, "cancel_acknowledged", {
+                        "round": round_idx,
+                        "remaining_in_round": len(real_tool_calls) - real_tool_calls.index(tc),
+                    })
+                    cancelled = True
+                    break
                 fn_name = tc.get("function", {}).get("name") or tc.get("name", "")
                 fn_args_raw = tc.get("function", {}).get("arguments") or tc.get("arguments", "{}")
                 fn_args = json.loads(fn_args_raw) if isinstance(fn_args_raw, str) else fn_args_raw
@@ -860,7 +934,31 @@ class ChatOrchestrator:
                     # see what the agent actually emitted to Kit).
                     _limit = 4000 if fn_name == "run_usd_script" else 800
                     logger.info(f"[{session_id}] TOOL CALL: {fn_name}({json.dumps(fn_args)[:_limit]})")
+                    # Live progress: bracket the tool call with started/finished
+                    # events so the UI can render a row, spin during execution,
+                    # then mark ✓/✗. tc_id ties them together.
+                    _t0 = _t.monotonic()
+                    _trace_emit(session_id, "tool_call_started", {
+                        "tc_id": tc_id,
+                        "tool": fn_name,
+                        "args_preview": _summarize_args(fn_args),
+                        "args_full": fn_args,
+                        "description": _describe_tool(fn_name),
+                    })
                     result = await execute_tool_call(fn_name, fn_args)
+                    _elapsed_ms = int((_t.monotonic() - _t0) * 1000)
+                    _success = (
+                        result.get("success")
+                        if "success" in result
+                        else (result.get("type") != "error")
+                    )
+                    _trace_emit(session_id, "tool_call_finished", {
+                        "tc_id": tc_id,
+                        "tool": fn_name,
+                        "success": bool(_success),
+                        "elapsed_ms": _elapsed_ms,
+                        "error": (result.get("error") if result.get("type") == "error" else None),
+                    })
 
                 executed_tools.append({
                     "tool": fn_name,
@@ -942,6 +1040,11 @@ class ChatOrchestrator:
             })
             messages.extend(tool_results)
 
+            # If cancel fired inside the per-tool loop, break the round loop
+            # too — don't issue another LLM call.
+            if cancelled:
+                break
+
             # Retry-spam halt: break out if ≥N consecutive patches have
             # returned success=false. Descriptions can vary (agent renames
             # the operation across retries) — count is the reliable signal.
@@ -994,12 +1097,26 @@ class ChatOrchestrator:
 
         reply = response.text or ""
 
+        # Cancel reply path: if the user hit Stop, short-circuit the
+        # post-loop pipeline (verify, anti-fabrication, code-block check)
+        # and return a canned summary. The agent_reply trace event still
+        # fires below — the UI relies on it to clear the live strip.
+        if cancelled:
+            n = len(executed_tools or [])
+            reply = (
+                f"Stopped. Completed {n} step{'s' if n != 1 else ''} before stop. "
+                "Type a new prompt to continue or refine."
+            )
+            _cancel_clear(session_id)
+
         # Anti-fabrication: if the last round of tool calls contained failures
         # (success=false or executed=false) and the reply doesn't acknowledge
         # them — i.e. it sounds like the effect succeeded — force a rewrite.
         # This is the motion-fabrication pattern seen in R-02 / AM-01: Assist
         # says "callback registered, hit Play" after run_usd_script failed.
-        if reply.strip() and executed_tools:
+        # Skip on cancel — the canned "Stopped" reply contains "completed"
+        # which would falsely trigger the rewrite.
+        if reply.strip() and executed_tools and not cancelled:
             last_round_fails = [
                 t for t in executed_tools[-6:]  # last ~round of calls
                 if not t.get("result", {}).get("success", True)
@@ -1387,6 +1504,10 @@ class ChatOrchestrator:
                                 "removed": len(_diff.removed),
                                 "modified": len(_diff.modified),
                                 "total_changes": _diff.total_changes,
+                                # Path samples for the UI diff chip + tooltip
+                                "added_paths": list(_diff.added)[:8],
+                                "removed_paths": list(_diff.removed)[:8],
+                                "modified_paths": list(_diff.modified.keys())[:8],
                             })
                             # Reuse the already-computed claimed_paths from
                             # the (a) check above. Caller extracted them
@@ -1576,6 +1697,9 @@ print(json.dumps({'has_light': has_light}))
             "intent": intent,
             "tool_count": len(executed_tools or []),
             "patch_count": len(code_patches or []),
+            # UI gates the per-bubble undo button on this — only mutating
+            # turns with a successfully captured snapshot are undoable.
+            "has_snapshot": bool(_snap_result and _snap_result.get("ok")),
         })
 
         return {
