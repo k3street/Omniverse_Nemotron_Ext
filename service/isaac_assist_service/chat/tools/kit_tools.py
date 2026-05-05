@@ -68,13 +68,21 @@ async def queue_exec_patch(code: str, description: str = "") -> Dict[str, Any]:
     import os
     if os.environ.get("AUTO_APPROVE", "false").lower() == "true":
         result = await exec_sync(code)
-        return {
+        success = result.get("success", False)
+        output = result.get("output", "")
+        out: Dict[str, Any] = {
             "queued": False,
             "executed": True,
-            "success": result.get("success", False),
-            "output": result.get("output", ""),
+            "success": success,
+            "output": output,
         }
-    return await _post("/exec_patch", {"code": code, "description": description})
+        if not success and "error" not in out:
+            out["error"] = (output or "").strip() or "Kit RPC execution failed"
+        return out
+    result = await _post("/exec_patch", {"code": code, "description": description})
+    if isinstance(result, dict) and result.get("success") is False and "error" not in result:
+        result["error"] = (result.get("output") or "").strip() or "Kit RPC patch failed"
+    return result
 
 
 async def exec_sync(code: str, timeout: float = 30) -> Dict[str, Any]:

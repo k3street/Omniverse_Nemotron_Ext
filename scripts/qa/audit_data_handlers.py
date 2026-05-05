@@ -32,11 +32,17 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+# Force AUTO_APPROVE so queue_exec_patch executes synchronously via Kit RPC's
+# /exec_sync. Without this, code-gen handlers post to /exec_patch (approval
+# queue) and hang waiting for UI to drain, masquerading as handler timeouts.
+os.environ.setdefault("AUTO_APPROVE", "true")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
