@@ -17,7 +17,13 @@ import logging
 import os
 import json
 import time
-from typing import Optional, Dict
+from typing import Optional, Dict, List, Tuple
+
+try:
+    import carb.settings
+    HAS_CARB_SETTINGS = True
+except Exception:
+    HAS_CARB_SETTINGS = False
 
 from ..service_client import AssistServiceClient
 from ..webrtc_client import ViewportWebRTCClient
@@ -25,6 +31,15 @@ from .verbs import verb_for
 from . import animations as anim
 
 logger = logging.getLogger(__name__)
+
+# ── Text scaling (Phase 7) ───────────────────────────────────────────────
+# Seven discrete steps. Default = 100%. v1 scales font sizes only —
+# widget widths and heights stay fixed, which is acceptable at this
+# range (80-175%) and avoids a full UI rebuild on scale change.
+SCALE_STEPS = [0.80, 0.90, 1.00, 1.10, 1.25, 1.50, 1.75]
+SCALE_LABELS = ["80%", "90%", "100%", "110%", "125%", "150%", "175%"]
+DEFAULT_SCALE_INDEX = 2
+SCALE_SETTING_KEY = "/persistent/exts/omni.isaac.assist/text_scale_index"
 
 # ── Color palette (omni.ui ABGR: 0xAABBGGRR) ─────────────────────────────
 COL_BG_USER         = 0xFF2A2E33
@@ -76,9 +91,156 @@ class ChatViewWindow(ui.Window):
         self._undo_handled_via_sse = False
         self._clear_chat_confirm = False
 
+        # Text scaling (Phase 7). Loaded from carb settings if available,
+        # else defaults to 100%. _scaled_labels is the registry: each
+        # entry is (Label, base_font_size_int). _change_scale walks it
+        # and mutates label.style in place — no UI rebuild required.
+        self._settings = carb.settings.get_settings() if HAS_CARB_SETTINGS else None
+        self._scale_index = self._load_scale_index()
+        self._scale = SCALE_STEPS[self._scale_index]
+        self._scaled_labels: List[Tuple[ui.Label, int]] = []
+        self._scale_popup: Optional[ui.Window] = None
+        self._scale_lbl: Optional[ui.Label] = None
+
         self._build_ui()
         self.service.start_stream(self._on_sse_event)
         self._spin_task = asyncio.ensure_future(self._tick_loop())
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Text scaling (Phase 7)
+    # ═══════════════════════════════════════════════════════════════════════
+    def _sz(self, n: int) -> int:
+        """Scale a font size by current factor; never below 1."""
+        return max(1, int(round(n * self._scale)))
+
+    def _track_label(self, label, base_font_size: int):
+        """Register a label so subsequent scale changes will update its font."""
+        self._scaled_labels.append((label, base_font_size))
+        return label
+
+    def _L(self, text: str, font_size: int = 12, **kw):
+        """Construct a Label with scale-aware font size and register it.
+
+        kw["style"] (if present) is merged with the scaled font size.
+        Returns the constructed Label.
+        """
+        style = dict(kw.pop("style", {}))
+        style["font_size"] = self._sz(font_size)
+        lbl = ui.Label(text, style=style, **kw)
+        self._track_label(lbl, font_size)
+        return lbl
+
+    def _load_scale_index(self) -> int:
+        if not self._settings:
+            return DEFAULT_SCALE_INDEX
+        try:
+            idx = self._settings.get(SCALE_SETTING_KEY)
+        except Exception:
+            return DEFAULT_SCALE_INDEX
+        if not isinstance(idx, int) or not (0 <= idx < len(SCALE_STEPS)):
+            return DEFAULT_SCALE_INDEX
+        return idx
+
+    def _save_scale_index(self, idx: int):
+        if not self._settings:
+            return
+        try:
+            self._settings.set(SCALE_SETTING_KEY, idx)
+        except Exception:
+            pass
+
+    def _change_scale(self, delta: int):
+        """delta = +1 / -1 / 0 (reset). No-op during a turn."""
+        if self._turn_active:
+            return
+        if delta == 0:
+            new_idx = DEFAULT_SCALE_INDEX
+        else:
+            new_idx = max(0, min(len(SCALE_STEPS) - 1, self._scale_index + delta))
+        if new_idx == self._scale_index:
+            return
+        self._scale_index = new_idx
+        self._scale = SCALE_STEPS[new_idx]
+        self._save_scale_index(new_idx)
+        self._apply_scale_to_all()
+        if self._scale_lbl:
+            try:
+                self._scale_lbl.text = SCALE_LABELS[new_idx]
+            except Exception:
+                pass
+
+    def _apply_scale_to_all(self):
+        """Walk the registry, update each label's font_size in place."""
+        new_size_for = lambda base: self._sz(base)
+        survivors: List[Tuple] = []
+        for lbl, base in self._scaled_labels:
+            try:
+                cur = lbl.style or {}
+                lbl.style = {**cur, "font_size": new_size_for(base)}
+                survivors.append((lbl, base))
+            except Exception:
+                # Widget destroyed (bubble cleared etc.) — drop from registry.
+                pass
+        self._scaled_labels = survivors
+
+    def _open_scale_popup(self):
+        """Small floating popup with [A−] [label] [A+] [Reset]."""
+        # If already exists, just toggle visibility.
+        if self._scale_popup is not None:
+            try:
+                self._scale_popup.visible = True
+                return
+            except Exception:
+                self._scale_popup = None
+        self._scale_popup = ui.Window(
+            "Text size",
+            width=180,
+            height=84,
+            flags=(
+                ui.WINDOW_FLAGS_NO_TITLE_BAR
+                | ui.WINDOW_FLAGS_NO_RESIZE
+                | ui.WINDOW_FLAGS_NO_SCROLLBAR
+            ),
+        )
+        with self._scale_popup.frame:
+            with ui.VStack(spacing=4):
+                ui.Spacer(height=4)
+                with ui.HStack(spacing=6):
+                    ui.Spacer(width=6)
+                    ui.Label(
+                        "Text size",
+                        style={"color": COL_TEXT_DIM, "font_size": self._sz(10)},
+                    )
+                    ui.Spacer()
+                with ui.HStack(spacing=6):
+                    ui.Spacer(width=6)
+                    ui.Button(
+                        "A−",
+                        width=28,
+                        clicked_fn=lambda: self._change_scale(-1),
+                        style={"font_size": self._sz(12)},
+                    )
+                    self._scale_lbl = ui.Label(
+                        SCALE_LABELS[self._scale_index],
+                        style={"color": COL_TEXT, "font_size": self._sz(12)},
+                        alignment=ui.Alignment.CENTER,
+                    )
+                    ui.Button(
+                        "A+",
+                        width=28,
+                        clicked_fn=lambda: self._change_scale(1),
+                        style={"font_size": self._sz(12)},
+                    )
+                    ui.Spacer(width=6)
+                with ui.HStack(spacing=6):
+                    ui.Spacer(width=6)
+                    ui.Button(
+                        "Reset",
+                        clicked_fn=lambda: self._change_scale(0),
+                        style={"font_size": self._sz(11)},
+                    )
+                    ui.Spacer(width=6)
+                ui.Spacer(height=4)
 
     # ═══════════════════════════════════════════════════════════════════════
     # UI construction
@@ -94,10 +256,11 @@ class ChatViewWindow(ui.Window):
 
     def _build_header(self):
         with ui.HStack(height=26, spacing=6):
-            ui.Label(
+            self._L(
                 "Isaac Assist",
+                font_size=13,
                 width=0,
-                style={"color": COL_TEXT, "font_size": 13},
+                style={"color": COL_TEXT},
             )
             # 6 px connection-health dot. Green = SSE connected; amber =
             # reconnecting; red = exhausted/stopped. State transitions
@@ -108,6 +271,14 @@ class ChatViewWindow(ui.Window):
                 style={"background_color": COL_DOT_GOOD, "border_radius": 3},
             )
             ui.Spacer()
+            self.btn_scale = ui.Button(
+                "Aa",
+                width=24,
+                height=22,
+                clicked_fn=self._open_scale_popup,
+                style={"font_size": 11},
+                tooltip="Text size",
+            )
             self.btn_new = ui.Button(
                 "New",
                 width=40,
@@ -152,10 +323,11 @@ class ChatViewWindow(ui.Window):
                 ui.Spacer(height=4)
                 with ui.HStack(height=14):
                     ui.Spacer(width=6)
-                    ui.Label(
+                    self._L(
                         "Live",
+                        font_size=10,
                         width=0,
-                        style={"color": COL_TEXT_SUBTLE, "font_size": 10},
+                        style={"color": COL_TEXT_SUBTLE},
                     )
                     ui.Spacer()
                 self.live_rows_layout = ui.VStack(spacing=2)
@@ -466,9 +638,10 @@ class ChatViewWindow(ui.Window):
         with slot:
             with ui.HStack(height=18):
                 ui.Spacer(width=8)
-                bubble["diff_chip_lbl"] = ui.Label(
+                bubble["diff_chip_lbl"] = self._L(
                     "Changed: " + " ".join(parts),
-                    style={"color": COL_NV_GREEN, "font_size": 10},
+                    font_size=10,
+                    style={"color": COL_NV_GREEN},
                     tooltip=full_paths,
                 )
                 ui.Spacer()
@@ -545,15 +718,17 @@ class ChatViewWindow(ui.Window):
         with self.live_rows_layout:
             with ui.HStack(height=18, spacing=6) as row:
                 ui.Spacer(width=6)
-                spin = ui.Label(
+                spin = self._L(
                     SPINNER_GLYPHS[0],
+                    font_size=13,
                     width=14,
-                    style={"color": COL_NV_GREEN, "font_size": 13},
+                    style={"color": COL_NV_GREEN},
                 )
-                lbl = ui.Label(
+                lbl = self._L(
                     "Thinking…",
+                    font_size=12,
                     width=0,
-                    style={"color": COL_TEXT_DIM, "font_size": 12},
+                    style={"color": COL_TEXT_DIM},
                 )
         self._live_rows["__thinking__"] = {
             "row": row,
@@ -598,28 +773,32 @@ class ChatViewWindow(ui.Window):
         with self.live_rows_layout:
             with ui.HStack(height=18, spacing=6) as row:
                 ui.Spacer(width=6)
-                spinner_lbl = ui.Label(
+                spinner_lbl = self._L(
                     SPINNER_GLYPHS[0],
+                    font_size=13,
                     width=14,
-                    style={"color": COL_NV_GREEN, "font_size": 13},
+                    style={"color": COL_NV_GREEN},
                 )
-                verb_lbl = ui.Label(
+                verb_lbl = self._L(
                     verb,
+                    font_size=12,
                     width=0,
-                    style={"color": COL_TEXT, "font_size": 12},
+                    style={"color": COL_TEXT},
                     tooltip=verb_tooltip,
                 )
-                args_lbl = ui.Label(
+                args_lbl = self._L(
                     args_preview,
+                    font_size=11,
                     width=0,
-                    style={"color": COL_TEXT_DIM, "font_size": 11},
+                    style={"color": COL_TEXT_DIM},
                     tooltip=full_args_json,
                 )
                 ui.Spacer()
-                elapsed_lbl = ui.Label(
+                elapsed_lbl = self._L(
                     "0.0s",
+                    font_size=10,
                     width=40,
-                    style={"color": COL_TEXT_SUBTLE, "font_size": 10},
+                    style={"color": COL_TEXT_SUBTLE},
                 )
                 ui.Spacer(width=4)
 
@@ -690,10 +869,11 @@ class ChatViewWindow(ui.Window):
                         ui.Spacer(height=4)
                         with ui.HStack():
                             ui.Spacer(width=8)
-                            ui.Label(
+                            self._L(
                                 "You",
+                                font_size=10,
                                 width=0,
-                                style={"color": COL_TEXT_SUBTLE, "font_size": 10},
+                                style={"color": COL_TEXT_SUBTLE},
                             )
                             ui.Spacer()
                             # Re-run: clicking populates the input field with
@@ -713,10 +893,11 @@ class ChatViewWindow(ui.Window):
                             ui.Spacer(width=4)
                         with ui.HStack():
                             ui.Spacer(width=8)
-                            ui.Label(
+                            self._L(
                                 text,
+                                font_size=12,
                                 word_wrap=True,
-                                style={"color": COL_TEXT, "font_size": 12},
+                                style={"color": COL_TEXT},
                             )
                             ui.Spacer(width=8)
                         ui.Spacer(height=4)
@@ -751,22 +932,21 @@ class ChatViewWindow(ui.Window):
                                 ui.Spacer(height=4)
                                 with ui.HStack():
                                     ui.Spacer(width=8)
-                                    bubble_refs["header_lbl"] = ui.Label(
+                                    bubble_refs["header_lbl"] = self._L(
                                         "Isaac Assist",
+                                        font_size=10,
                                         width=0,
-                                        style={
-                                            "color": COL_TEXT_SUBTLE,
-                                            "font_size": 10,
-                                        },
+                                        style={"color": COL_TEXT_SUBTLE},
                                     )
                                     ui.Spacer()
                                 with ui.HStack():
                                     ui.Spacer(width=8)
                                     body_color = COL_RED if error else COL_TEXT
-                                    bubble_refs["body_lbl"] = ui.Label(
+                                    bubble_refs["body_lbl"] = self._L(
                                         text,
+                                        font_size=12,
                                         word_wrap=True,
-                                        style={"color": body_color, "font_size": 12},
+                                        style={"color": body_color},
                                     )
                                     ui.Spacer(width=8)
                                 # Diff chip + Phase 6 undo button both write
