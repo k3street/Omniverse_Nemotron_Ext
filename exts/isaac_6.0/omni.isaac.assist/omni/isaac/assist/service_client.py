@@ -155,10 +155,17 @@ class AssistServiceClient:
         self._stream_task = asyncio.ensure_future(self._stream_loop(on_event))
 
     def stop_stream(self):
-        """Tell the SSE consumer to exit and cancel its task."""
+        """Tell the SSE consumer to exit and cancel its task.
+
+        Nulls the task ref so a follow-up start_stream() can spawn a fresh
+        one without waiting for cancel propagation. start_stream's guard
+        (`if self._stream_task and not self._stream_task.done()`) sees
+        None and proceeds.
+        """
         self._stream_stop = True
         if self._stream_task:
             self._stream_task.cancel()
+            self._stream_task = None
 
     async def _stream_loop(self, on_event):
         if not HAS_AIOHTTP:
