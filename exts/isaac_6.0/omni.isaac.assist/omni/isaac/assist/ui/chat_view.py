@@ -1583,6 +1583,21 @@ class ChatViewWindow(ui.Window):
                 logger.warning(f"[IsaacAssist] reset_session error: {resp['error']}")
         except Exception as e:
             logger.warning(f"[IsaacAssist] reset_session call failed: {e}")
+        # new_stage() can block Kit's asyncio loop long enough that the SSE
+        # sock_read (30s) trips and the connection lands in a stale state
+        # that backoff-reconnect doesn't always recover from. Force a clean
+        # stop+start cycle so the live-feed is guaranteed alive after the
+        # reset. start_stream is idempotent and re-runs immediately when the
+        # task is None or already finished.
+        try:
+            self.service.stop_stream()
+            await asyncio.sleep(0)  # let the cancel propagate one tick
+        except Exception as e:
+            logger.warning(f"[IsaacAssist] stop_stream failed: {e}")
+        try:
+            self.service.start_stream(self._on_sse_event)
+        except Exception as e:
+            logger.warning(f"[IsaacAssist] start_stream failed: {e}")
         self.chat_layout.clear()
         self._undoable_bubbles = []
         self._collapse_live_strip()
