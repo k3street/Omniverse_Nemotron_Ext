@@ -853,6 +853,15 @@ class ChatOrchestrator:
 
         max_rounds = config.max_tool_rounds
         cancelled = False
+        # Pre-init so the post-loop `reply = response.text` doesn't NameError
+        # if cancel fires BEFORE the first LLM call ever returns. Use a tiny
+        # stub object that exposes .text — keeps the existing reply-assembly
+        # code path uniform without sprinkling None checks everywhere.
+        class _StubResponse:
+            text = ""
+            actions = None
+            tool_calls = None
+        response = _StubResponse()
         for round_idx in range(max_rounds):
             # Cancel check at the top of each round — between LLM rounds is
             # the natural decision point. If the user hit Stop, exit cleanly
