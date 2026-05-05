@@ -59,7 +59,7 @@ COL_BORDER_PULSE    = 0xFF00B976
 COL_BORDER_NEUTRAL  = 0x00000000
 
 # ── Spinner glyphs (Braille; slow + calm cadence for peripheral panel) ──
-SPINNER_GLYPHS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+SPINNER_GLYPHS = "|/-\\"
 SPIN_INTERVAL_S = 0.20
 SLOW_THRESHOLD_S = 10.0
 VERY_SLOW_THRESHOLD_S = 20.0
@@ -184,23 +184,22 @@ class ChatViewWindow(ui.Window):
         self._scaled_labels = survivors
 
     def _open_scale_popup(self):
-        """Small floating popup with [A−] [label] [A+] [Reset]."""
-        # If already exists, just toggle visibility.
+        """Small floating popup with [A-] [label] [A+] [Close]."""
+        # Toggle: if already visible, close it (so the Aa header button
+        # also acts as a dismiss).
         if self._scale_popup is not None:
             try:
-                self._scale_popup.visible = True
+                self._scale_popup.visible = not self._scale_popup.visible
                 return
             except Exception:
                 self._scale_popup = None
+        # Keep title bar so the OS X-button is available; user-friendly
+        # close via header button or by clicking Aa again.
         self._scale_popup = ui.Window(
             "Text size",
             width=180,
-            height=84,
-            flags=(
-                ui.WINDOW_FLAGS_NO_TITLE_BAR
-                | ui.WINDOW_FLAGS_NO_RESIZE
-                | ui.WINDOW_FLAGS_NO_SCROLLBAR
-            ),
+            height=110,
+            flags=ui.WINDOW_FLAGS_NO_RESIZE | ui.WINDOW_FLAGS_NO_SCROLLBAR,
         )
         with self._scale_popup.frame:
             with ui.VStack(spacing=4):
@@ -215,7 +214,7 @@ class ChatViewWindow(ui.Window):
                 with ui.HStack(spacing=6):
                     ui.Spacer(width=6)
                     ui.Button(
-                        "A−",
+                        "A-",
                         width=28,
                         clicked_fn=lambda: self._change_scale(-1),
                         style={"font_size": self._sz(12)},
@@ -239,8 +238,20 @@ class ChatViewWindow(ui.Window):
                         clicked_fn=lambda: self._change_scale(0),
                         style={"font_size": self._sz(11)},
                     )
+                    ui.Button(
+                        "Close",
+                        clicked_fn=self._close_scale_popup,
+                        style={"font_size": self._sz(11)},
+                    )
                     ui.Spacer(width=6)
                 ui.Spacer(height=4)
+
+    def _close_scale_popup(self):
+        if self._scale_popup is not None:
+            try:
+                self._scale_popup.visible = False
+            except Exception:
+                pass
 
     # ═══════════════════════════════════════════════════════════════════════
     # UI construction
@@ -361,7 +372,7 @@ class ChatViewWindow(ui.Window):
         with ui.HStack(height=28, spacing=4):
             self.input_field = ui.StringField(multiline=False, style={"font_size": 12})
             # Same button doubles as Send (idle) / Stop (turn active) /
-            # "Stopping…" (cancel sent, waiting for orchestrator return).
+            # "Stopping..." (cancel sent, waiting for orchestrator return).
             self.btn_send = ui.Button(
                 "Send",
                 width=64,
@@ -387,7 +398,7 @@ class ChatViewWindow(ui.Window):
             # Amber to read as "interruption affordance" without screaming red
             self.btn_send.style = {"font_size": 12, "color": COL_AMBER}
         elif state == "stopping":
-            self.btn_send.text = "Stopping…"
+            self.btn_send.text = "Stopping..."
             self.btn_send.enabled = False
             self.btn_send.style = {"font_size": 12, "color": COL_TEXT_SUBTLE}
 
@@ -725,7 +736,7 @@ class ChatViewWindow(ui.Window):
                     style={"color": COL_NV_GREEN},
                 )
                 lbl = self._L(
-                    "Thinking…",
+                    "Thinking...",
                     font_size=12,
                     width=0,
                     style={"color": COL_TEXT_DIM},
@@ -879,7 +890,7 @@ class ChatViewWindow(ui.Window):
                             # Re-run: clicking populates the input field with
                             # this prompt for one-keystroke iteration.
                             ui.Button(
-                                "↻",
+                                "R",
                                 width=18,
                                 height=14,
                                 clicked_fn=lambda t=text: self._rerun(t),
@@ -1081,7 +1092,7 @@ class ChatViewWindow(ui.Window):
                 ui.Spacer(width=6)
                 ui.Label("⠋", width=14, style={"color": COL_AMBER, "font_size": 13})
                 ui.Label(
-                    "Reverting…",
+                    "Reverting...",
                     style={"color": COL_TEXT_DIM, "font_size": 12},
                 )
         self._undo_progress_row = row
@@ -1093,7 +1104,7 @@ class ChatViewWindow(ui.Window):
 
     def _on_undo_started(self, payload):
         # If undo was triggered via /undo slash command (not via the
-        # button), there's no "Reverting…" row yet. Render one.
+        # button), there's no "Reverting..." row yet. Render one.
         if not self._undo_progress_row:
             self._show_live_strip()
             with self.live_rows_layout:
@@ -1101,7 +1112,7 @@ class ChatViewWindow(ui.Window):
                     ui.Spacer(width=6)
                     ui.Label("⠋", width=14, style={"color": COL_AMBER, "font_size": 13})
                     ui.Label(
-                        "Reverting…",
+                        "Reverting...",
                         style={"color": COL_TEXT_DIM, "font_size": 12},
                     )
             self._undo_progress_row = row
