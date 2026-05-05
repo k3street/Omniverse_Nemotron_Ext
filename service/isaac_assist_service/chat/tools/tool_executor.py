@@ -8483,7 +8483,14 @@ def _gen_robot_wizard(args: Dict) -> str:
     home_joints = args.get("home_joints", profile.get("home_joints"))
     import json as _json_rw
     variants_json = _json_rw.dumps(variants)
-    home_joints_json = _json_rw.dumps(home_joints) if home_joints else "null"
+    # Generated code is Python, not JSON — must be 'None' not 'null' when
+    # the profile has no home_joints (Franka is the only profile with a
+    # home pose; humanoid / mobile / quadruped registry entries omit it).
+    # Caught by 'name null is not defined' on h1 in test session
+    # ext_d5abf2ec turn 10: asset loaded, drives applied, then the home-
+    # joint block tried to read a Python-level `null` and the script
+    # failed at the very end — leaving a half-set-up robot.
+    home_joints_json = _json_rw.dumps(home_joints) if home_joints else "None"
     # dest_path is only used for USD-reference imports. URDF goes through
     # import_urdf which returns its own dest_path (and respects the
     # URDF's own root-link naming). Hard-coded /World/Robot before caused
