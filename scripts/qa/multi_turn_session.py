@@ -495,18 +495,46 @@ def _extract_pre_session_code(task_id: str) -> Optional[str]:
     return m.group(1).strip() if m else None
 
 
+_SETUP_HELPERS_CACHE: Optional[str] = None
+
+
+def _load_setup_helpers() -> str:
+    """Read setup_helpers.py once and cache. Prepended to every pre-session-setup
+    so helper names (setup_world, import_urdf_safe, ...) are available as
+    globals without each task .md having to import them. Cached because
+    the file rarely changes between canary runs.
+    """
+    global _SETUP_HELPERS_CACHE
+    if _SETUP_HELPERS_CACHE is not None:
+        return _SETUP_HELPERS_CACHE
+    helpers_path = REPO_ROOT / "scripts" / "qa" / "setup_helpers.py"
+    _SETUP_HELPERS_CACHE = helpers_path.read_text() if helpers_path.exists() else ""
+    return _SETUP_HELPERS_CACHE
+
+
 def _apply_pre_session_setup(task_id: str) -> Dict[str, Any]:
-    """Run task-declared stage-seeding code via Kit RPC before the session starts."""
+    """Run task-declared stage-seeding code via Kit RPC before the session starts.
+
+    Prepends scripts/qa/setup_helpers.py so task .md files can call
+    `setup_world(...)` and `import_urdf_safe(...)` without redefining the
+    URDF-import fallback chain in every spec.
+    """
     code = _extract_pre_session_code(task_id)
     if not code:
         return {"applied": False, "task_id": task_id}
+    helpers = _load_setup_helpers()
+    full_code = (
+        helpers + "\n\n# ── Task-specific setup ──\n" + code
+        if helpers else code
+    )
     try:
         with httpx.Client(timeout=60) as client:
-            r = client.post(KIT_RPC_EXEC, json={"code": code})
+            r = client.post(KIT_RPC_EXEC, json={"code": full_code})
             r.raise_for_status()
             data = r.json()
             data["applied"] = True
             data["task_id"] = task_id
+            data["helpers_loaded"] = bool(helpers)
             return data
     except Exception as e:
         return {"applied": False, "task_id": task_id, "error": str(e)}
