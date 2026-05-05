@@ -871,62 +871,30 @@ class ChatOrchestrator:
                 _trace_emit(session_id, "cancel_acknowledged", {"round": round_idx})
                 cancelled = True
                 break
-            # Cancelable LLM call without aggressive polling.
+            # Pure direct await + asyncio.wait_for as the only wrapper.
+            # This matches the orchestrator's pre-3677f25 shape, which
+            # the user observed running stably for days. Stop only takes
+            # effect between rounds (the cancel check at the top of the
+            # loop), not mid-LLM-call — acceptable trade-off if the
+            # additional polling-based wrappers were causing the slow
+            # round-2 calls user reported.
             #
-            # The previous design used asyncio.wait_for(asyncio.shield(...),
-            # timeout=0.5) in a loop, which raised 500+ TimeoutError
-            # exceptions per long call and competed with aiohttp inside
-            # complete() for event-loop time. User reported that
-            # gemini-3-flash-preview, which had been stable for days
-            # before that change, started taking 250s+ on round 2 calls.
-            #
-            # Replaced with asyncio.wait(FIRST_COMPLETED) + a low-frequency
-            # cancel watcher (1s tick). Total event-loop overhead ~10x lower,
-            # zero exceptions in the hot path.
+            # Hard 300 s timeout is the only safety net around a truly
+            # hung request.
             _LLM_HARD_TIMEOUT = 300.0
-
-            async def _cancel_watcher_for(sid: str):
-                while True:
-                    await asyncio.sleep(1.0)
-                    if _is_cancelled(sid):
-                        return  # signals "user hit Stop"
-
-            llm_task = asyncio.ensure_future(
-                self.llm_provider.complete(messages, {"tools": selected_tools})
-            )
-            watcher = asyncio.ensure_future(_cancel_watcher_for(session_id))
             response = None
             try:
-                done, pending = await asyncio.wait(
-                    {llm_task, watcher},
-                    return_when=asyncio.FIRST_COMPLETED,
+                response = await asyncio.wait_for(
+                    self.llm_provider.complete(messages, {"tools": selected_tools}),
                     timeout=_LLM_HARD_TIMEOUT,
                 )
-                if not done:
-                    # Hard timeout — nothing finished within 5 min.
-                    llm_task.cancel()
-                    watcher.cancel()
-                    _trace_emit(session_id, "error", {
-                        "where": "llm_call",
-                        "reason": f"LLM did not respond within {_LLM_HARD_TIMEOUT:.0f}s",
-                    })
-                    cancelled = True
-                elif watcher in done:
-                    # User clicked Stop while LLM was in flight.
-                    llm_task.cancel()
-                    _trace_emit(session_id, "cancel_acknowledged", {
-                        "round": round_idx,
-                        "during": "llm_call",
-                    })
-                    cancelled = True
-                else:
-                    # Normal completion.
-                    watcher.cancel()
-                    response = llm_task.result()
-            except asyncio.CancelledError:
+            except asyncio.TimeoutError:
+                _trace_emit(session_id, "error", {
+                    "where": "llm_call",
+                    "reason": f"LLM did not respond within {_LLM_HARD_TIMEOUT:.0f}s",
+                })
                 cancelled = True
             except Exception as e:
-                watcher.cancel()
                 logger.error(f"LLM provider error: {e}")
                 raise
 
