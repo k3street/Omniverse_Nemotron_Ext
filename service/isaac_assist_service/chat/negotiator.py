@@ -78,6 +78,15 @@ DO NOT ask for plumbing inputs the assistant can fetch with its own tools:
 - Things present in the current stage — scene_summary will surface them.
 - Things template_retriever or knowledge KB will provide.
 
+DO NOT ask on inspection / audit / diagnosis prompts. When the user asks the
+assistant to LOOK AT existing state and report (verbs: inspect, review,
+audit, diagnose, analyze, find issues, suggest improvements, summarize,
+what's wrong with…), the right response is to call scene_summary /
+list_all_prims / check_physics_health and answer based on what's there. The
+assistant has no reason to ask "what should I focus on?" — the answer is
+"everything that's broken or missing." Asking instead of inspecting wastes
+the user's turn and drops the task.
+
 Posing-rule: when you DO ask, frame it as INTENT-disambiguation, not data-fetch.
 - ❌ "What is the file path to the STEP file?"
 - ✅ "Should I use the local workspace assets, or are you bringing your own?"
@@ -128,6 +137,16 @@ User: "Set up ROS2 bridge for Nav2"
 → {"needs_clarification": false,
    "questions": [],
    "reasoning": "specific task, established defaults; assistant can proceed"}
+
+User: "Agent inspects an existing partial scene, identifies issues, and suggests prioritized improvements"
+→ {"needs_clarification": false,
+   "questions": [],
+   "reasoning": "inspection task — call scene_summary/list_all_prims and report what's broken; nothing to ask"}
+
+User: "Review my scene and tell me what's missing for RL training"
+→ {"needs_clarification": false,
+   "questions": [],
+   "reasoning": "audit prompt — discover via tools, don't ask"}
 """
 
 
