@@ -94,6 +94,137 @@ SLOW_THRESHOLD_S = 10.0
 VERY_SLOW_THRESHOLD_S = 20.0
 
 
+# ── Natural-language phrasing for live progress rows ────────────────────
+# We compose ONE phrase per tool call (e.g. "Adding Franka Panda") instead
+# of showing tool name + args separately. The technical detail (function
+# name, full arg dict) lives in the tooltip. This matches the "Thinking..."
+# style — a single readable status line.
+def _path_leaf(p: str) -> str:
+    if not p:
+        return ""
+    return p.rsplit("/", 1)[-1] if "/" in p else p
+
+
+def humanize_tool_action(tool_name: str, args: dict) -> str:
+    """Return one natural-language phrase describing what the tool is
+    about to do, using args for context. Falls back to verb_for() +
+    path leaf for tools without a special case."""
+    args = args or {}
+
+    if tool_name == "robot_wizard":
+        product = (
+            args.get("product_name") or args.get("robot") or "robot"
+        ).replace("_", " ").title()
+        return f"Adding {product}"
+
+    if tool_name == "create_prim":
+        ptype = args.get("type") or args.get("prim_type", "prim")
+        leaf = _path_leaf(args.get("prim_path") or args.get("path", ""))
+        return f"Creating {ptype} {leaf}".strip() if leaf else f"Creating {ptype}"
+
+    if tool_name == "delete_prim":
+        leaf = _path_leaf(args.get("prim_path") or args.get("path", ""))
+        return f"Removing {leaf}" if leaf else "Removing prim"
+
+    if tool_name == "duplicate_prims" or tool_name == "clone_prim":
+        leaf = _path_leaf(args.get("prim_path") or args.get("path", ""))
+        return f"Cloning {leaf}" if leaf else "Cloning prim"
+
+    if tool_name == "apply_physics_material":
+        mat = args.get("material") or args.get("preset", "physics")
+        leaf = _path_leaf(args.get("prim_path", ""))
+        return f"Adding {mat} physics to {leaf}" if leaf else f"Adding {mat} physics"
+
+    if tool_name == "apply_dr_preset":
+        preset = args.get("preset_name") or args.get("preset", "randomization")
+        return f"Applying {preset} randomization"
+
+    if tool_name == "anchor_robot":
+        anchor_leaf = _path_leaf(
+            args.get("anchor_to") or args.get("anchor_path") or args.get("target", "")
+        )
+        return f"Anchoring robot to {anchor_leaf}" if anchor_leaf else "Anchoring robot"
+
+    if tool_name == "run_usd_script":
+        desc = (args.get("description") or "").strip()
+        if desc and len(desc) < 70:
+            # First-letter-capitalize without breaking acronyms
+            return desc[0].upper() + desc[1:] if desc[0].isalpha() else desc
+        return "Running script"
+
+    if tool_name == "queue_exec_patch":
+        desc = (args.get("description") or "").strip()
+        if desc and len(desc) < 70:
+            return desc[0].upper() + desc[1:] if desc[0].isalpha() else desc
+        return "Applying patch"
+
+    if tool_name == "scatter_on_surface":
+        n = args.get("count") or args.get("num_objects", "")
+        return f"Scattering {n} objects".strip() if n else "Scattering objects"
+
+    if tool_name == "set_camera_look_at":
+        leaf = _path_leaf(args.get("target_path") or args.get("target", ""))
+        return f"Aiming camera at {leaf}" if leaf else "Aiming camera"
+
+    if tool_name == "set_attribute":
+        attr = args.get("attribute") or args.get("attr_name", "attribute")
+        leaf = _path_leaf(args.get("prim_path", ""))
+        return f"Setting {attr} on {leaf}" if leaf else f"Setting {attr}"
+
+    if tool_name == "get_attribute":
+        attr = args.get("attribute") or args.get("attr_name", "attribute")
+        leaf = _path_leaf(args.get("prim_path", ""))
+        return f"Reading {attr} of {leaf}" if leaf else f"Reading {attr}"
+
+    if tool_name in ("scene_summary", "scene_diff"):
+        return "Reading scene"
+
+    if tool_name in ("get_viewport_image", "capture_viewport"):
+        return "Capturing viewport"
+
+    if tool_name in ("lookup_knowledge", "lookup_product_spec", "lookup_material"):
+        q = args.get("query") or args.get("name") or args.get("product_name", "")
+        return f"Looking up {q}" if q else "Looking up reference"
+
+    if tool_name == "import_robot":
+        leaf = _path_leaf(args.get("urdf_path") or args.get("file_path", ""))
+        return f"Importing {leaf}" if leaf else "Importing robot"
+
+    if tool_name in ("save_delta_snapshot", "restore_delta_snapshot"):
+        return "Saving snapshot" if "save" in tool_name else "Restoring snapshot"
+
+    if tool_name == "preflight_check":
+        return "Running pre-flight checks"
+
+    if tool_name == "find_prims_by_name" or tool_name == "find_prims_by_schema":
+        q = args.get("name") or args.get("schema") or args.get("pattern", "")
+        return f"Finding {q}" if q else "Finding prims"
+
+    if tool_name == "list_all_prims":
+        return "Listing scene prims"
+
+    if tool_name == "build_stage_index":
+        return "Indexing stage"
+
+    if tool_name == "console_error_autodetect":
+        return "Checking console for errors"
+
+    if tool_name.startswith("ros2_"):
+        topic = args.get("topic") or args.get("service") or args.get("node", "")
+        action = tool_name.replace("ros2_", "").replace("_", " ")
+        return f"ROS2 {action}{(' ' + topic) if topic else ''}"
+
+    # Fallback — verbs.py + path leaf if available
+    verb = verb_for(tool_name)
+    leaf = ""
+    for k in ("prim_path", "path", "prim", "target", "target_path"):
+        v = args.get(k)
+        if v:
+            leaf = _path_leaf(str(v))
+            break
+    return f"{verb} {leaf}".strip() if leaf else verb
+
+
 class ChatViewWindow(ui.Window):
     def __init__(self, title: str, **kwargs):
         super().__init__(title, **kwargs)
@@ -631,9 +762,14 @@ class ChatViewWindow(ui.Window):
             existing["attempts"] += 1
             existing["spinner_lbl"].text = SPINNER_GLYPHS[0]
             existing["spinner_lbl"].style = {"color": COL_NV_GREEN, "font_size": 13}
-            verb_text = f"{verb_for(tool)} ×{existing['attempts']}"
-            existing["verb_lbl"].text = verb_text
-            existing["args_lbl"].text = args_preview
+            phrase = humanize_tool_action(tool, payload.get("args_full", {}))
+            existing["verb_lbl"].text = f"{phrase} (attempt {existing['attempts']})"
+            # Reset to default text colour (a previous failure may have
+            # left the label red — we're retrying, not still failing).
+            existing["verb_lbl"].style = {
+                **(existing["verb_lbl"].style or {}),
+                "color": COL_TEXT,
+            }
             existing["state"] = "running"
             existing["started_at"] = time.monotonic()
             existing["tc_id"] = tc_id
@@ -653,6 +789,7 @@ class ChatViewWindow(ui.Window):
         row["state"] = "done_ok" if success else "done_fail"
         row["elapsed_lbl"].text = f"{elapsed_ms / 1000:.1f}s"
         if success:
+            # ✓ U+2713 — confirmed renders OK in this font (used on Confirm Undo button)
             row["spinner_lbl"].text = "✓"
             spinner = row["spinner_lbl"]
             verb = row["verb_lbl"]
@@ -677,13 +814,22 @@ class ChatViewWindow(ui.Window):
                 )
             )
         else:
-            row["spinner_lbl"].text = "✗"
+            row["spinner_lbl"].text = "X"  # ✗ U+2717 — uncertain in font, ASCII safer
             row["spinner_lbl"].style = {"color": COL_RED, "font_size": 13}
+            # Append a short failure tag to the existing phrase rather than
+            # overwriting it (the phrase IS the user's mental anchor for
+            # what just failed). Full error stays in the tooltip.
             err = payload.get("error", "")
+            current = row["verb_lbl"].text
             if err:
-                err_short = (str(err)[:50] + "...") if len(str(err)) > 50 else str(err)
-                row["args_lbl"].text = err_short
-                row["args_lbl"].style = {"color": COL_RED, "font_size": 11}
+                err_short = (str(err)[:40] + "...") if len(str(err)) > 40 else str(err)
+                row["verb_lbl"].text = f"{current}  -  failed: {err_short}"
+            else:
+                row["verb_lbl"].text = f"{current}  -  failed"
+            row["verb_lbl"].style = {
+                **(row["verb_lbl"].style or {}),
+                "color": COL_RED,
+            }
 
     def _on_spam_halt(self, payload):
         with self.live_rows_layout:
@@ -880,14 +1026,17 @@ class ChatViewWindow(ui.Window):
         args_full: dict,
         description: str = "",
     ):
-        verb = verb_for(tool)
+        # ONE natural-language phrase ("Adding Franka Panda") replaces the
+        # old verb + args two-column layout. Tool-name + raw-args go to
+        # the tooltip — engineers can still inspect, normal users see only
+        # what they need. Same one-line shape as the "Thinking..." row.
+        phrase = humanize_tool_action(tool, args_full)
         full_args_json = json.dumps(args_full, default=str)[:500]
-        # Tooltip layout: description on top (if any), then signature.
         tooltip_parts = []
         if description:
             tooltip_parts.append(description)
         tooltip_parts.append(f"{tool}({full_args_json})")
-        verb_tooltip = "\n\n".join(tooltip_parts)
+        phrase_tooltip = "\n\n".join(tooltip_parts)
 
         with self.live_rows_layout:
             with ui.HStack(height=18, spacing=6) as row:
@@ -899,18 +1048,11 @@ class ChatViewWindow(ui.Window):
                     style={"color": COL_NV_GREEN},
                 )
                 verb_lbl = self._L(
-                    verb,
+                    phrase,
                     font_size=12,
                     width=0,
                     style={"color": COL_TEXT},
-                    tooltip=verb_tooltip,
-                )
-                args_lbl = self._L(
-                    args_preview,
-                    font_size=11,
-                    width=0,
-                    style={"color": COL_TEXT_DIM},
-                    tooltip=full_args_json,
+                    tooltip=phrase_tooltip,
                 )
                 ui.Spacer()
                 elapsed_lbl = self._L(
@@ -925,7 +1067,10 @@ class ChatViewWindow(ui.Window):
             "row": row,
             "spinner_lbl": spinner_lbl,
             "verb_lbl": verb_lbl,
-            "args_lbl": args_lbl,
+            # args_lbl alias points at the same widget so the existing
+            # failure / retry-compression code paths keep working without
+            # a separate column. They mutate the visible phrase directly.
+            "args_lbl": verb_lbl,
             "elapsed_lbl": elapsed_lbl,
             "started_at": time.monotonic(),
             "state": "running",
