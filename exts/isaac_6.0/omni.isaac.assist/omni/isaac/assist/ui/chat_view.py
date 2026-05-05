@@ -130,6 +130,8 @@ class ChatViewWindow(ui.Window):
         self._scaled_labels: List[Tuple[ui.Label, int]] = []
         self._scale_popup: Optional[ui.Window] = None
         self._scale_lbl: Optional[ui.Label] = None
+        # Debounce: rapid A+/A- clicks coalesce into one apply task.
+        self._scale_apply_task: Optional[asyncio.Task] = None
 
         self._build_ui()
         self.service.start_stream(self._on_sse_event)
@@ -193,7 +195,16 @@ class ChatViewWindow(ui.Window):
             pass
 
     def _change_scale(self, delta: int):
-        """delta = +1 / -1 / 0 (reset). No-op during a turn."""
+        """delta = +1 / -1 / 0 (reset). No-op during a turn.
+
+        Click handling is split into three concerns:
+          1. State update + popup-label refresh — INSTANT, so rapid clicks
+             feel responsive even if the actual mutation is heavier.
+          2. Disk write (carb settings) — debounced behind a 100 ms timer
+             so a burst of clicks results in one disk flush.
+          3. Widget mutations — debounced + chunked + yields to the UI
+             loop between chunks so the panel stays interactive.
+        """
         if self._turn_active:
             return
         if delta == 0:
@@ -204,17 +215,36 @@ class ChatViewWindow(ui.Window):
             return
         self._scale_index = new_idx
         self._scale = SCALE_STEPS[new_idx]
-        self._save_scale_index(new_idx)
-        self._apply_scale_to_all()
+        # Instant feedback: popup-label updates RIGHT NOW (no I/O, no
+        # widget walk). Even if the actual font mutations take a beat,
+        # the user sees their click took effect.
         if self._scale_lbl:
             try:
                 self._scale_lbl.text = SCALE_LABELS[new_idx]
             except Exception:
                 pass
+        # Debounce: cancel any in-flight apply, schedule a new one. Last
+        # click within the window wins; intermediate states are skipped.
+        if self._scale_apply_task and not self._scale_apply_task.done():
+            self._scale_apply_task.cancel()
+        self._scale_apply_task = asyncio.ensure_future(self._scale_apply_debounced())
+
+    async def _scale_apply_debounced(self):
+        try:
+            # Coalesce window — rapid clicks land here and the previous
+            # task gets cancelled before it reaches the work below.
+            await asyncio.sleep(0.10)
+            self._save_scale_index(self._scale_index)
+            await self._apply_scale_to_all_async()
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logger.warning(f"Scale apply failed: {e}")
 
     def _apply_scale_to_all(self):
-        """Walk the registry, update each label's font_size in place."""
-        new_size_for = lambda base: self._sz(base)
+        """Synchronous fallback (used by pre-warm and other call sites
+        that aren't async). Walks the registry once with no yields."""
+        new_size_for = self._sz
         survivors: List[Tuple] = []
         for lbl, base in self._scaled_labels:
             try:
@@ -222,8 +252,29 @@ class ChatViewWindow(ui.Window):
                 lbl.style = {**cur, "font_size": new_size_for(base)}
                 survivors.append((lbl, base))
             except Exception:
-                # Widget destroyed (bubble cleared etc.) — drop from registry.
                 pass
+        self._scaled_labels = survivors
+
+    async def _apply_scale_to_all_async(self):
+        """Same work as _apply_scale_to_all but yields to the asyncio
+        loop every CHUNK labels so omni.ui can process layout passes
+        progressively. The text grows over ~100-200 ms instead of
+        freezing the panel for the full duration."""
+        CHUNK = 4
+        new_size_for = self._sz
+        survivors: List[Tuple] = []
+        work = list(self._scaled_labels)
+        for i in range(0, len(work), CHUNK):
+            for lbl, base in work[i : i + CHUNK]:
+                try:
+                    cur = lbl.style or {}
+                    lbl.style = {**cur, "font_size": new_size_for(base)}
+                    survivors.append((lbl, base))
+                except Exception:
+                    pass
+            # Yield once after each chunk — lets omni.ui run a layout
+            # pass and lets other async tasks (spinner tick, SSE) breathe.
+            await asyncio.sleep(0)
         self._scaled_labels = survivors
 
     def _open_scale_popup(self):

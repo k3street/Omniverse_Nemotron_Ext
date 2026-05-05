@@ -1,15 +1,19 @@
 """Regenerate descriptions.py from the current tool_executor.py.
 
-Diff-aware: only calls Claude for tools that are NEW or MISSING from the
+Diff-aware: only calls the LLM for tools that are NEW or MISSING from the
 existing ``_GENERATED`` dict. Existing entries are kept. ``_OVERRIDES`` is
 never touched. Safe to run as a pre-commit hook.
+
+Provider auto-detect (preference order):
+  1. ``GEMINI_API_KEY``  → google-genai SDK (cheap, fast — recommended)
+  2. ``ANTHROPIC_API_KEY`` → anthropic SDK
+  Force one when both are set:  ``PROVIDER=gemini`` or ``PROVIDER=anthropic``
+  Override model:  ``REGEN_GEMINI_MODEL=...`` or ``REGEN_ANTHROPIC_MODEL=...``
 
 Usage:
     python scripts/regenerate_descriptions.py             # incremental
     python scripts/regenerate_descriptions.py --rebuild   # regenerate all
     python scripts/regenerate_descriptions.py --dry-run   # show what would change
-
-Requires ``ANTHROPIC_API_KEY`` in env (only when there's actual work to do).
 """
 from __future__ import annotations
 
@@ -120,31 +124,94 @@ def describe(tool_name: str) -> str:
     DESCRIPTIONS.write_text(out, encoding="utf-8")
 
 
-def call_claude_batched(handlers_to_doc: Dict[str, str], batch_size: int = 30) -> Dict[str, str]:
-    try:
-        import anthropic
-    except ImportError:
-        print("ERROR: anthropic SDK not installed. `pip install anthropic`.", file=sys.stderr)
-        sys.exit(1)
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("ERROR: ANTHROPIC_API_KEY not set in environment.", file=sys.stderr)
-        sys.exit(1)
+def _make_caller():
+    """Auto-detect available LLM provider and return (call_fn, model_name).
 
-    client = anthropic.Anthropic()
+    Preference order: GEMINI_API_KEY → google-genai (cheap, fast),
+    then ANTHROPIC_API_KEY → anthropic (fallback). Whichever you have
+    set wins — no flag needed for the common case.
+
+    The user can force a specific provider via PROVIDER=gemini|anthropic
+    if both are set.
+    """
+    forced = os.environ.get("PROVIDER", "").lower()
+
+    def _try_gemini():
+        try:
+            from google import genai
+        except ImportError:
+            print("ERROR: google-genai SDK not installed. `pip install google-genai`.",
+                  file=sys.stderr)
+            sys.exit(1)
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            print("ERROR: GEMINI_API_KEY not set.", file=sys.stderr)
+            sys.exit(1)
+        # Use the same model the FastAPI service uses by default. Override
+        # via REGEN_GEMINI_MODEL if you want something cheaper/different.
+        model = os.environ.get("REGEN_GEMINI_MODEL", "gemini-2.5-flash")
+        client = genai.Client(api_key=api_key)
+
+        def call(prompt: str) -> str:
+            r = client.models.generate_content(model=model, contents=prompt)
+            return (r.text or "").strip()
+
+        return call, model
+
+    def _try_anthropic():
+        try:
+            import anthropic
+        except ImportError:
+            print("ERROR: anthropic SDK not installed. `pip install anthropic`.",
+                  file=sys.stderr)
+            sys.exit(1)
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            print("ERROR: ANTHROPIC_API_KEY not set.", file=sys.stderr)
+            sys.exit(1)
+        client = anthropic.Anthropic()
+        model = os.environ.get("REGEN_ANTHROPIC_MODEL", "claude-opus-4-7")
+
+        def call(prompt: str) -> str:
+            msg = client.messages.create(
+                model=model,
+                max_tokens=2048,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return (msg.content[0].text or "").strip()
+
+        return call, model
+
+    if forced == "gemini":
+        return _try_gemini()
+    if forced == "anthropic":
+        return _try_anthropic()
+    if os.environ.get("GEMINI_API_KEY"):
+        return _try_gemini()
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return _try_anthropic()
+    print(
+        "ERROR: no LLM provider configured. Set GEMINI_API_KEY or "
+        "ANTHROPIC_API_KEY (or pass PROVIDER=gemini|anthropic).",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+def call_llm_batched(handlers_to_doc: Dict[str, str], batch_size: int = 30) -> Dict[str, str]:
+    call, model_name = _make_caller()
+    print(f"  using model: {model_name}", file=sys.stderr)
     out: Dict[str, str] = {}
     items = list(handlers_to_doc.items())
+    n_batches = (len(items) + batch_size - 1) // batch_size
     for i in range(0, len(items), batch_size):
         batch = items[i : i + batch_size]
         block = "\n\n".join(f"### {name}\n```python\n{src}\n```" for name, src in batch)
-        print(f"  batch {i // batch_size + 1}/{(len(items) + batch_size - 1) // batch_size} "
-              f"({len(batch)} tools)...", file=sys.stderr)
-        msg = client.messages.create(
-            model="claude-opus-4-7",
-            max_tokens=2048,
-            messages=[{"role": "user", "content": PROMPT_TEMPLATE.format(tools_block=block)}],
-        )
-        text = msg.content[0].text.strip()
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
+        print(f"  batch {i // batch_size + 1}/{n_batches} ({len(batch)} tools)...",
+              file=sys.stderr)
+        text = call(PROMPT_TEMPLATE.format(tools_block=block))
+        # Strip code fences if the model added them despite instructions.
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```\s*$", "", text)
         try:
             parsed = json.loads(text)
             out.update(parsed)
@@ -159,7 +226,7 @@ def main() -> None:
     ap.add_argument("--rebuild", action="store_true",
                     help="Regenerate ALL descriptions, not just missing ones")
     ap.add_argument("--dry-run", action="store_true",
-                    help="Print what would be regenerated; don't call Claude or write files")
+                    help="Print what would be regenerated; don't call the LLM or write files")
     args = ap.parse_args()
 
     handlers = extract_handlers(TOOL_EXECUTOR.read_text(encoding="utf-8"))
@@ -184,7 +251,7 @@ def main() -> None:
         return
 
     print(f"\nGenerating {len(missing)} new description(s)...")
-    new = call_claude_batched(missing)
+    new = call_llm_batched(missing)
     merged = {**existing, **new}
     # Drop entries for tools that no longer exist
     merged = {k: v for k, v in merged.items() if k in handlers}
