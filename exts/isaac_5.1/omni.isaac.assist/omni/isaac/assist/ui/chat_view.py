@@ -105,6 +105,20 @@ class ChatViewWindow(ui.Window):
         self._build_ui()
         self.service.start_stream(self._on_sse_event)
         self._spin_task = asyncio.ensure_future(self._tick_loop())
+        # Pre-warm the slow paths that hit on first scale change:
+        # carb settings flush to disk + omni.ui style-mutation layout pass.
+        # Boot already takes seconds; user won't notice another ~100ms here,
+        # but they'll thank us when A+/A- responds instantly later.
+        asyncio.ensure_future(self._prewarm_scale_paths())
+
+    async def _prewarm_scale_paths(self):
+        # Yield once so widget construction finishes before we mutate.
+        await asyncio.sleep(0.0)
+        try:
+            self._save_scale_index(self._scale_index)
+            self._apply_scale_to_all()
+        except Exception:
+            pass
 
     # ═══════════════════════════════════════════════════════════════════════
     # Text scaling (Phase 7)
