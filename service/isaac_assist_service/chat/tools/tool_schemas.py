@@ -531,7 +531,7 @@ ISAAC_SIM_TOOLS = [
                     },
                     "clearance": {
                         "type": "number",
-                        "description": "Vertical gap above the target's top surface, in stage units (default 0.01 = 1cm). Use 0.0 for flush stacking; raise for visual breathing room.",
+                        "description": "Vertical gap above the target's top surface, in stage units (default 0.001 = 1mm — beats z-fighting in the depth buffer while staying within PhysX's contact-offset so physics treats them as touching). Raise to 0.01+ if you want a visible gap.",
                     },
                     "xy_align": {
                         "type": "string",
