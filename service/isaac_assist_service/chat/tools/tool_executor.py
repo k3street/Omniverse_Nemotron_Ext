@@ -2711,6 +2711,153 @@ _SIZE_BUCKETS = {
 }
 
 
+_COUNT_BUCKETS = {
+    "one": 1, "single": 1, "a": 1, "an": 1, "ett": 1, "en": 1,
+    "two": 2, "pair": 2, "couple": 2, "two of them": 2, "ett par": 2, "två": 2,
+    "few": 3, "a few": 3, "några": 3, "några få": 3,
+    "several": 5, "some": 4, "handful": 5, "flera": 5,
+    "many": 10, "lots": 10, "lots of": 10, "a lot": 10, "många": 10, "en massa": 10,
+    "dozens": 24, "dozen": 12, "twenty": 20, "tjugo": 20, "ett dussin": 12, "dussintals": 24,
+    "hundreds": 100, "a hundred": 100, "hundra": 100, "hundratals": 100,
+}
+
+
+async def _handle_resolve_count_vagueness(args: Dict) -> Dict:
+    """Map a vague count phrase ('a few', 'many', 'several') to a canonical
+    integer. Pilot #4 of the typed-variable resolver pattern.
+
+    Same shape as resolve_size_adjective: extract the count phrase from
+    the prompt, get a stable integer, use it in the next tool call. The
+    fallback for unknown phrases is 3 (smallest non-pair group) with a
+    warning so the agent doesn't silently crash on an unrecognised term.
+
+    Returns alternatives so the agent can pick a different count if the
+    user pushes back ('not THAT many, more like a couple').
+    """
+    term_raw = (args.get("term") or "").strip().lower()
+    if not term_raw:
+        return {"error": "resolve_count_vagueness requires a term ('few', 'many', etc)"}
+
+    count = _COUNT_BUCKETS.get(term_raw)
+    if count is None:
+        # Try matching the first word of multi-word phrases.
+        first = term_raw.split()[0]
+        count = _COUNT_BUCKETS.get(first)
+    if count is None:
+        return {
+            "term": term_raw,
+            "count": 3,
+            "warning": f"unknown count term {term_raw!r} — defaulted to 3",
+            "known_terms": sorted(set(_COUNT_BUCKETS.keys()))[:30],
+        }
+    # Group the alternatives in increasing order — agent can pivot up/down.
+    alternatives = {
+        "one": 1, "couple": 2, "few": 3, "several": 5, "many": 10,
+        "dozens": 24, "hundreds": 100,
+    }
+    return {
+        "term": term_raw,
+        "count": count,
+        "alternatives": alternatives,
+        "rationale": f"Canonical count for {term_raw!r}; tuned to common usage.",
+    }
+
+
+# robot-class → registry key. Anchors generic class language ('a manipulator',
+# 'a humanoid', 'a wheeled robot') to the same name resolution that
+# robot_wizard / import_robot already understand. Avoids the agent inventing
+# random asset paths when it should be selecting a known-good default.
+_ROBOT_CLASS_DEFAULTS = {
+    # Manipulator arms
+    "manipulator": "franka_panda",
+    "arm": "franka_panda",
+    "robotic arm": "franka_panda",
+    "robotarm": "franka_panda",
+    # Wheeled / mobile bases
+    "wheeled": "nova_carter",
+    "wheeled robot": "nova_carter",
+    "mobile": "nova_carter",
+    "mobile robot": "nova_carter",
+    "amr": "nova_carter",
+    "agv": "nova_carter",
+    "carter": "nova_carter",
+    "nova carter": "nova_carter",
+    # Humanoids
+    "humanoid": "h1",
+    "biped": "h1",
+    "human-shaped": "h1",
+    "h1": "h1",
+    "g1": "g1",
+    "unitree humanoid": "h1",
+    # Quadrupeds
+    "quadruped": "anymal_c",
+    "dog": "spot",
+    "spot": "spot",
+    "anymal": "anymal_c",
+    # Hands / grippers
+    "hand": "allegro",
+    "gripper": "allegro",
+    "allegro": "allegro",
+}
+
+
+async def _handle_resolve_robot_class(args: Dict) -> Dict:
+    """Map a generic robot class phrase ('a manipulator', 'a wheeled robot')
+    to a concrete robot_name from the robot_wizard registry. Pilot #5.
+
+    Use case: user asks for 'a manipulator' or 'a humanoid' without
+    specifying which model. Without this resolver the LLM either invents
+    a name + path (often wrong) or asks unnecessarily. With it, the
+    agent gets a sane default + the registry's canonical asset URL.
+
+    Returns the resolved robot_name + the registry entry's cloud URL so
+    the agent can pass robot_name=... straight to robot_wizard or use
+    the URL for import_robot. Includes alternatives the agent can pivot
+    to if the user pushes back ('not Franka, give me a UR10').
+    """
+    class_raw = (args.get("robot_class") or args.get("class") or "").strip().lower()
+    if not class_raw:
+        return {"error": "resolve_robot_class requires a robot_class (e.g. 'manipulator', 'humanoid')"}
+
+    robot_name = _ROBOT_CLASS_DEFAULTS.get(class_raw)
+    if robot_name is None:
+        # Try matching the head noun.
+        for word in reversed(class_raw.split()):
+            if word in _ROBOT_CLASS_DEFAULTS:
+                robot_name = _ROBOT_CLASS_DEFAULTS[word]
+                break
+    if robot_name is None:
+        return {
+            "robot_class": class_raw,
+            "warning": f"unknown robot class {class_raw!r}",
+            "known_classes": sorted(set(_ROBOT_CLASS_DEFAULTS.keys())),
+        }
+
+    entry = _ROBOT_WIZARD_REGISTRY.get(robot_name) or {}
+    if isinstance(entry, str):
+        entry = _ROBOT_WIZARD_REGISTRY.get(entry, {})
+    asset_url = ""
+    try:
+        asset_url = _resolve_robot_asset(entry) if entry else ""
+    except Exception:
+        pass
+
+    return {
+        "robot_class": class_raw,
+        "robot_name": robot_name,
+        "asset_url": asset_url,
+        "robot_type": entry.get("robot_type", "manipulator") if isinstance(entry, dict) else "manipulator",
+        "alternatives": {
+            "manipulator": "franka_panda",
+            "wheeled": "nova_carter",
+            "humanoid": "h1",
+            "quadruped": "anymal_c",
+            "hand": "allegro",
+        },
+        "rationale": f"Registry default for class {class_raw!r}; resolves to {robot_name!r}.",
+    }
+
+
 async def _handle_resolve_size_adjective(args: Dict) -> Dict:
     """Map a size adjective ('small', 'large', 'tiny') for a given object
     class to a canonical numeric extent in meters.
@@ -3115,6 +3262,8 @@ DATA_HANDLERS = {
     "place_on_top_of": _handle_place_on_top_of,
     "resolve_prim_reference": _handle_resolve_prim_reference,
     "resolve_size_adjective": _handle_resolve_size_adjective,
+    "resolve_count_vagueness": _handle_resolve_count_vagueness,
+    "resolve_robot_class": _handle_resolve_robot_class,
     "get_debug_info": _handle_get_debug_info,
     "lookup_knowledge": _handle_lookup_knowledge,
     "lookup_api_deprecation": _handle_lookup_api_deprecation,
