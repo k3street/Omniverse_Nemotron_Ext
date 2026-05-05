@@ -234,6 +234,9 @@ class ChatViewWindow(ui.Window):
         # Turn lifecycle state
         self._turn_active = False
         self._turn_rendered_via_sse = False
+        # Wall-clock timer: clicked Send → agent_reply. Drives the
+        # "Live · 4.2s" header. None when no turn is in flight.
+        self._turn_started_at: Optional[float] = None
 
         # Live strip rows by tc_id (plus the special "__thinking__" row
         # placeholder shown between turn_started and the first real tool).
@@ -560,8 +563,10 @@ class ChatViewWindow(ui.Window):
                 ui.Spacer(height=4)
                 with ui.HStack(height=14):
                     ui.Spacer(width=6)
-                    # Strip header is CHROME — fixed size.
-                    ui.Label(
+                    # Strip header — chrome (fixed size). Text mutates to
+                    # "Live · 4.2s" during a turn so the user sees total
+                    # elapsed time from clicking Send to agent_reply.
+                    self.live_header_lbl = ui.Label(
                         "Live",
                         width=0,
                         style={"color": COL_TEXT_SUBTLE, "font_size": 10},
@@ -743,6 +748,7 @@ class ChatViewWindow(ui.Window):
 
     # ── Turn lifecycle ───────────────────────────────────────────────────
     def _on_turn_started(self, payload):
+        self._turn_started_at = time.monotonic()
         self._show_live_strip()
         self._add_thinking_row()
 
@@ -814,22 +820,27 @@ class ChatViewWindow(ui.Window):
                 )
             )
         else:
-            row["spinner_lbl"].text = "X"  # ✗ U+2717 — uncertain in font, ASCII safer
-            row["spinner_lbl"].style = {"color": COL_RED, "font_size": 13}
-            # Append a short failure tag to the existing phrase rather than
-            # overwriting it (the phrase IS the user's mental anchor for
-            # what just failed). Full error stays in the tooltip.
-            err = payload.get("error", "")
+            # Calm presentation while in-flight: a failed step that the
+            # agent immediately retries shouldn't read as an alarm. The
+            # row goes to a dim "retrying..." state. Only at agent_reply
+            # do we retroactively paint un-recovered failures red — see
+            # _on_agent_reply / _flag_unrecovered_failures.
+            row["spinner_lbl"].text = "."
+            row["spinner_lbl"].style = {"color": COL_TEXT_SUBTLE, "font_size": 13}
             current = row["verb_lbl"].text
-            if err:
-                err_short = (str(err)[:40] + "...") if len(str(err)) > 40 else str(err)
-                row["verb_lbl"].text = f"{current}  -  failed: {err_short}"
-            else:
-                row["verb_lbl"].text = f"{current}  -  failed"
+            row["verb_lbl"].text = f"{current}  (retrying...)"
             row["verb_lbl"].style = {
                 **(row["verb_lbl"].style or {}),
-                "color": COL_RED,
+                "color": COL_TEXT_DIM,
             }
+            # Stash the error in the tooltip so engineers can still
+            # inspect on hover.
+            err = payload.get("error", "")
+            if err:
+                try:
+                    row["verb_lbl"].tooltip = f"FAILED:\n{err[:500]}"
+                except Exception:
+                    pass
 
     def _on_spam_halt(self, payload):
         with self.live_rows_layout:
@@ -977,6 +988,13 @@ class ChatViewWindow(ui.Window):
         self.live_strip_container.height = ui.Pixel(0)
         self.live_rows_layout.clear()
         self._live_rows.clear()
+        # Reset header text + stop the wall-clock timer.
+        self._turn_started_at = None
+        try:
+            if hasattr(self, "live_header_lbl") and self.live_header_lbl:
+                self.live_header_lbl.text = "Live"
+        except Exception:
+            pass
 
     def _add_thinking_row(self):
         """Placeholder row shown between turn_started and the first tool."""
@@ -1095,12 +1113,20 @@ class ChatViewWindow(ui.Window):
         self.live_strip_container.height = ui.Pixel(14 + n * 18 + 8) if (self._live_strip_visible and n > 0) else ui.Pixel(28 if self._live_strip_visible else 0)
 
     async def _tick_loop(self):
-        """Drive spinner glyph + elapsed time for all running rows."""
+        """Drive spinner glyph + elapsed time for all running rows AND
+        the wall-clock timer in the live-strip header."""
         i = 0
         while not self._destroyed:
             i += 1
             glyph = SPINNER_GLYPHS[i % len(SPINNER_GLYPHS)]
             now = time.monotonic()
+            # Header timer: total wall-clock from turn_started → agent_reply.
+            if self._turn_started_at is not None:
+                turn_elapsed = now - self._turn_started_at
+                try:
+                    self.live_header_lbl.text = f"Live - {turn_elapsed:.1f}s"
+                except Exception:
+                    pass
             for r in list(self._live_rows.values()):
                 if r["state"] != "running":
                     continue
