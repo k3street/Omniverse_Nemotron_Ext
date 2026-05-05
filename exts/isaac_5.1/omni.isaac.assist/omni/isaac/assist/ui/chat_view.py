@@ -665,6 +665,7 @@ class ChatViewWindow(ui.Window):
             return
         self.input_field.model.set_value("")
         self._add_user_bubble(text)
+        self._scroll_to_bottom()
         self._hide_chips()
         self._turn_active = True
         self._turn_rendered_via_sse = False
@@ -880,6 +881,9 @@ class ChatViewWindow(ui.Window):
             self._pending_diff = None
         self._collapse_live_strip()
         self._turn_rendered_via_sse = True
+        # Auto-scroll to the just-added assistant bubble so the user
+        # doesn't have to drag the chat scroll manually after every reply.
+        self._scroll_to_bottom()
 
     def _attach_diff_chip(self, bubble: dict, diff: dict):
         """Render a small 'Changed: +N added −N removed' chip in the
@@ -1147,6 +1151,21 @@ class ChatViewWindow(ui.Window):
     # ═══════════════════════════════════════════════════════════════════════
     # Bubble rendering
     # ═══════════════════════════════════════════════════════════════════════
+    def _scroll_to_bottom(self):
+        """Scroll the chat to the latest bubble. Runs after a short
+        delay so omni.ui has actually computed the new content height —
+        setting scroll_y immediately after appending a child is a no-op
+        because layout hasn't run yet. omni.ui ScrollingFrame clamps
+        scroll_y to the actual maximum, so a large value works."""
+        async def _do():
+            await asyncio.sleep(0.05)
+            try:
+                # Big number → clamped to actual max scroll position.
+                self.scroll.scroll_y = 1_000_000
+            except Exception:
+                pass
+        asyncio.ensure_future(_do())
+
     def _add_user_bubble(self, text: str):
         # Bubble auto-fits content height. Pattern: ZStack(height=0) over
         # Rectangle + VStack(margin) → ZStack sizes to VStack's content,
@@ -1287,6 +1306,14 @@ class ChatViewWindow(ui.Window):
                 ui.Spacer(width=8)
         bubble["undo_btn"] = btn
         bubble["undo_row"] = undo_row
+        # Diff chip set slot.height = 20 (chip-only). Now we need room
+        # for a 26 px button row underneath. Without this the button
+        # gets clipped at the slot's bottom edge → user sees a partial
+        # button or it hides behind the next bubble.
+        try:
+            slot.height = ui.Pixel(20 + 26 + 4)
+        except Exception:
+            pass
 
     def _undo_tooltip(self, diff: dict) -> str:
         a = diff.get("added_paths", [])
@@ -1335,6 +1362,10 @@ class ChatViewWindow(ui.Window):
             btn.text = "Confirm Undo  ✓"
             btn.style = UNDO_BTN_STYLE_CONFIRM
             btn.width = ui.Pixel(130)
+            # Make sure the just-changed button is visible — if the bubble
+            # sits at the bottom edge of the chat scroll, the wider Confirm
+            # state would otherwise be partially hidden under the input.
+            self._scroll_to_bottom()
             asyncio.ensure_future(self._reset_undo_after(bubble, 3.0))
         elif state == "confirm":
             bubble["undo_state"] = "pending"
