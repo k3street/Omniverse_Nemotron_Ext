@@ -503,6 +503,42 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "resolve_size_adjective",
+            "description": (
+                "Map a size adjective ('small', 'tiny', 'large', 'huge') for a given "
+                "object class to a canonical numeric extent in meters. USE THIS whenever "
+                "the user uses a size adjective in a prompt — do NOT invent specific "
+                "numbers like 0.5 or 0.1 yourself, because each invocation will pick a "
+                "different value and 'a small cube' will be different sizes across turns. "
+                "Variables to extract from the prompt: the size adjective ('small', "
+                "'large', etc) and the head noun describing the object class (cube, "
+                "sphere, table, conveyor, robot, ...). Stop and identify those before "
+                "calling. Returns {value, unit: 'meters', bucket, alternatives}. Use the "
+                "value directly in the next tool's size/scale arg. If the user "
+                "subsequently pushes back ('no, smaller'), call again with a smaller "
+                "bucket — alternatives gives you the neighbouring values so you don't "
+                "have to guess. Known adjectives: tiny / small / medium / large / huge "
+                "and Swedish equivalents (liten/litet, mellan, stor/stort, enorm)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "adjective": {
+                        "type": "string",
+                        "description": "The size adjective from the user prompt, lowercase. Examples: 'small', 'large', 'tiny', 'huge'. Swedish: 'liten', 'stor', 'enorm', 'mellan'.",
+                    },
+                    "object_class": {
+                        "type": "string",
+                        "description": "The head noun for the object being sized, lowercase singular. Examples: 'cube', 'sphere', 'table', 'conveyor', 'bin', 'wall', 'room'. If unknown, leave empty — the resolver falls back to a sane default scale.",
+                    },
+                },
+                "required": ["adjective"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "resolve_prim_reference",
             "description": (
                 "Resolve a deictic reference ('the cube', 'the robot', 'this one', 'the light') "

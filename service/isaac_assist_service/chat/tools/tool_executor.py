@@ -2675,6 +2675,100 @@ async def _handle_list_all_prims(args: Dict) -> Dict:
     return ctx.get("stage", {})
 
 
+_SIZE_BUCKET_ALIASES = {
+    "tiny": "tiny", "very small": "tiny", "minuscule": "tiny", "miniature": "tiny",
+    "pyttig": "tiny", "pyttigt": "tiny", "pytteliten": "tiny",
+    "small": "small", "little": "small", "compact": "small",
+    "liten": "small", "litet": "small", "lilla": "small",
+    "medium": "medium", "moderate": "medium", "mid-sized": "medium", "mid sized": "medium", "average": "medium",
+    "mellan": "medium", "mellanstor": "medium", "lagom": "medium", "normalstor": "medium",
+    "large": "large", "big": "large", "sizable": "large", "substantial": "large",
+    "stor": "large", "stort": "large", "stora": "large",
+    "huge": "huge", "very large": "huge", "massive": "huge", "enormous": "huge", "giant": "huge",
+    "väldig": "huge", "väldigt stor": "huge", "enorm": "huge", "jätte": "huge", "jättestor": "huge",
+}
+
+# Per-object-class size buckets in meters. The "default" row handles
+# unknown classes with sensible cube-like defaults. Tuned to match
+# common Isaac Sim / industrial-robotics conventions: small cubes are
+# 5cm (manipulation benchmark size), tables are 1.2m (workbench).
+_SIZE_BUCKETS = {
+    "cube":     {"tiny": 0.02, "small": 0.05, "medium": 0.15, "large": 0.5,  "huge": 1.5},
+    "box":      {"tiny": 0.05, "small": 0.10, "medium": 0.30, "large": 0.70, "huge": 1.5},
+    "sphere":   {"tiny": 0.02, "small": 0.05, "medium": 0.15, "large": 0.5,  "huge": 1.5},
+    "ball":     {"tiny": 0.02, "small": 0.05, "medium": 0.15, "large": 0.5,  "huge": 1.5},
+    "cylinder": {"tiny": 0.02, "small": 0.05, "medium": 0.15, "large": 0.5,  "huge": 1.5},
+    "bin":      {"tiny": 0.10, "small": 0.20, "medium": 0.30, "large": 0.6,  "huge": 1.0},
+    "tray":     {"tiny": 0.10, "small": 0.20, "medium": 0.40, "large": 0.7,  "huge": 1.2},
+    "table":    {"tiny": 0.50, "small": 0.80, "medium": 1.20, "large": 2.0,  "huge": 4.0},
+    "desk":     {"tiny": 0.50, "small": 0.80, "medium": 1.20, "large": 2.0,  "huge": 4.0},
+    "conveyor": {"tiny": 0.50, "small": 1.00, "medium": 1.60, "large": 3.0,  "huge": 5.0},
+    "wall":     {"tiny": 1.00, "small": 2.00, "medium": 3.00, "large": 5.0,  "huge": 10.0},
+    "room":     {"tiny": 2.00, "small": 4.00, "medium": 6.00, "large": 10.0, "huge": 20.0},
+    "warehouse":{"tiny": 5.00, "small": 10.0, "medium": 20.0, "large": 40.0, "huge": 80.0},
+    # Default fallback when class is unknown.
+    "default":  {"tiny": 0.05, "small": 0.10, "medium": 0.30, "large": 0.70, "huge": 1.50},
+}
+
+
+async def _handle_resolve_size_adjective(args: Dict) -> Dict:
+    """Map a size adjective ('small', 'large', 'tiny') for a given object
+    class to a canonical numeric extent in meters.
+
+    Pilot #3 of the typed-variable resolver pattern. The LLM extracts the
+    adjective and the head noun (object class) from the user's prompt
+    and calls this tool. Returns one canonical value plus the bucket
+    map so the agent can pick a different bucket if the user pushes
+    back ('not THAT small, more like medium').
+
+    Examples:
+      'a small cube'    → {value: 0.05, unit: 'meters', class: 'cube', bucket: 'small'}
+      'a large table'   → {value: 2.0,  unit: 'meters', class: 'table', bucket: 'large'}
+      'a tiny sphere'   → {value: 0.02, unit: 'meters', class: 'sphere', bucket: 'tiny'}
+
+    Side benefits:
+      - Eliminates LLM-invented numbers (each invocation gives different
+        sizes for "a small cube"; this gives the same one).
+      - Forces agreement across multi-prim prompts ("a small cube and
+        a small sphere" become the same bucket → comparable sizes).
+      - Future canary tests can pin specific values for regression checks.
+    """
+    adjective_raw = (args.get("adjective") or "").strip().lower()
+    object_class_raw = (args.get("object_class") or "").strip().lower()
+    if not adjective_raw:
+        return {"error": "resolve_size_adjective requires an adjective (e.g. 'small', 'tiny')"}
+
+    bucket = _SIZE_BUCKET_ALIASES.get(adjective_raw)
+    if bucket is None:
+        # Unknown adjective — return medium as safe default + warn.
+        return {
+            "adjective": adjective_raw,
+            "object_class": object_class_raw or "default",
+            "bucket": "medium",
+            "value": _SIZE_BUCKETS.get(object_class_raw, _SIZE_BUCKETS["default"])["medium"],
+            "unit": "meters",
+            "warning": f"unknown size adjective {adjective_raw!r} — defaulted to 'medium'",
+            "known_adjectives": sorted(set(_SIZE_BUCKET_ALIASES.values())),
+        }
+
+    class_key = object_class_raw if object_class_raw in _SIZE_BUCKETS else "default"
+    bucket_map = _SIZE_BUCKETS[class_key]
+    value = bucket_map[bucket]
+    return {
+        "adjective": adjective_raw,
+        "bucket": bucket,
+        "object_class": class_key,
+        "object_class_known": object_class_raw in _SIZE_BUCKETS,
+        "value": value,
+        "unit": "meters",
+        "alternatives": bucket_map,  # full map so agent sees neighbour buckets
+        "rationale": (
+            f"Canonical {bucket}-bucket value for {class_key!r}; "
+            "tuned to common Isaac Sim / industrial-robotics conventions."
+        ),
+    }
+
+
 async def _handle_resolve_prim_reference(args: Dict) -> Dict:
     """Resolve a deictic noun phrase ('kuben', 'the cube', 'roboten') to one
     or more concrete prim paths in the current stage.
@@ -3020,6 +3114,7 @@ DATA_HANDLERS = {
     "measure_distance": _handle_measure_distance,
     "place_on_top_of": _handle_place_on_top_of,
     "resolve_prim_reference": _handle_resolve_prim_reference,
+    "resolve_size_adjective": _handle_resolve_size_adjective,
     "get_debug_info": _handle_get_debug_info,
     "lookup_knowledge": _handle_lookup_knowledge,
     "lookup_api_deprecation": _handle_lookup_api_deprecation,
