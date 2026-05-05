@@ -80,6 +80,7 @@ class ChatViewWindow(ui.Window):
                 self._build_header()
                 self._build_chat_area()
                 self._build_live_strip()
+                self._build_chips()
                 self._build_input()
 
     def _build_header(self):
@@ -142,6 +143,30 @@ class ChatViewWindow(ui.Window):
                 self.live_rows_layout = ui.VStack(spacing=2)
                 ui.Spacer(height=4)
 
+    def _build_chips(self):
+        """Empty-state suggestion chips. Visible until first message ever
+        sent; clicking a chip fills the input field. Disappears after
+        first send and stays hidden for the window's lifetime."""
+        self.chips_container = ui.HStack(height=22, spacing=4)
+        self._chips_shown = True
+        with self.chips_container:
+            ui.Spacer(width=2)
+            for label in (
+                "Build a pick-and-place scene",
+                "Add a Franka arm",
+                "Inspect the stage",
+            ):
+                ui.Button(
+                    label,
+                    height=20,
+                    clicked_fn=lambda t=label: self._on_chip(t),
+                    style={
+                        "font_size": 10,
+                        "background_color": 0xFF2A2E33,
+                        "color": COL_TEXT_DIM,
+                    },
+                )
+
     def _build_input(self):
         with ui.HStack(height=28, spacing=4):
             self.input_field = ui.StringField(multiline=False, style={"font_size": 12})
@@ -195,10 +220,20 @@ class ChatViewWindow(ui.Window):
             return
         self.input_field.model.set_value("")
         self._add_user_bubble(text)
+        self._hide_chips()
         self._turn_active = True
         self._turn_rendered_via_sse = False
         self._set_button_state("busy")
         asyncio.ensure_future(self._handle_service_request(text))
+
+    def _on_chip(self, text: str):
+        self.input_field.model.set_value(text)
+
+    def _hide_chips(self):
+        if self._chips_shown:
+            self.chips_container.visible = False
+            self.chips_container.height = ui.Pixel(0)
+            self._chips_shown = False
 
     async def _handle_service_request(self, text: str):
         try:
@@ -237,6 +272,10 @@ class ChatViewWindow(ui.Window):
                 self._on_spam_halt(payload)
             elif evt_type == "cancel_acknowledged":
                 self._on_cancel_ack(payload)
+            elif evt_type == "turn_diff_computed":
+                # Stash; attach to the assistant bubble when agent_reply
+                # arrives (event order is not strictly guaranteed).
+                self._pending_diff = payload
             elif evt_type == "agent_reply":
                 self._on_agent_reply(payload)
         except Exception as e:
@@ -354,27 +393,107 @@ class ChatViewWindow(ui.Window):
                     down_ms=700,
                 )
             )
+        # Attach the diff chip if a turn_diff_computed event preceded us.
+        diff = getattr(self, "_pending_diff", None)
+        if diff and bubble:
+            self._attach_diff_chip(bubble, diff)
+            self._pending_diff = None
         self._collapse_live_strip()
         self._turn_rendered_via_sse = True
 
+    def _attach_diff_chip(self, bubble: dict, diff: dict):
+        """Render a small 'Changed: +N added −N removed' chip in the
+        bubble's diff_slot. Hover shows the full path lists."""
+        if not bubble or "diff_slot" not in bubble:
+            return
+        if diff.get("total_changes", 0) == 0:
+            return
+        slot = bubble["diff_slot"]
+        try:
+            slot.clear()
+            slot.height = ui.Pixel(20)
+        except Exception:
+            return
+        added = diff.get("added_paths", [])
+        rem = diff.get("removed_paths", [])
+        mod = diff.get("modified_paths", [])
+        parts = []
+        if added:
+            parts.append(f"+{len(added)} added")
+        if rem:
+            parts.append(f"−{len(rem)} removed")
+        if mod:
+            parts.append(f"~{len(mod)} modified")
+        full_paths = ""
+        if added:
+            full_paths += "Added:\n  " + "\n  ".join(added[:8])
+        if rem:
+            full_paths += ("\n\n" if full_paths else "") + "Removed:\n  " + "\n  ".join(rem[:8])
+        if mod:
+            full_paths += ("\n\n" if full_paths else "") + "Modified:\n  " + "\n  ".join(mod[:8])
+        with slot:
+            with ui.HStack(height=18):
+                ui.Spacer(width=8)
+                bubble["diff_chip_lbl"] = ui.Label(
+                    "Changed: " + " ".join(parts),
+                    style={"color": COL_NV_GREEN, "font_size": 10},
+                    tooltip=full_paths,
+                )
+                ui.Spacer()
+
     def _on_connection_state(self, state):
-        # Color-only state for now. Phase 5 polish will add the slow-pulse
-        # animation when reconnecting.
+        # Cancel any in-flight pulse before switching state, so a previous
+        # reconnecting-pulse doesn't keep mutating the dot after we go green.
+        prev_task = getattr(self, "_dot_pulse_task", None)
+        if prev_task and not prev_task.done():
+            prev_task.cancel()
         if state == "connected":
             self.conn_dot.style = {
                 "background_color": COL_DOT_GOOD,
                 "border_radius": 3,
             }
         elif state == "reconnecting":
+            # Steady amber baseline + slow pulse to amber-bright. Reads as
+            # "trying" without screaming for attention.
             self.conn_dot.style = {
                 "background_color": COL_DOT_WARN,
                 "border_radius": 3,
             }
+            self._dot_pulse_task = asyncio.ensure_future(
+                self._pulse_conn_dot_until_destroyed()
+            )
         elif state in ("stopped", "error"):
             self.conn_dot.style = {
                 "background_color": COL_DOT_BAD,
                 "border_radius": 3,
             }
+
+    async def _pulse_conn_dot_until_destroyed(self):
+        # ABGR amber-bright vs amber-dim
+        bright = 0xFF00C8FF
+        dim = 0xFF005A80
+        while not self._destroyed:
+            try:
+                await anim.lerp_color(
+                    lambda c: self.conn_dot.__setattr__(
+                        "style", {"background_color": c, "border_radius": 3}
+                    ),
+                    dim,
+                    bright,
+                    ms=750,
+                )
+                await anim.lerp_color(
+                    lambda c: self.conn_dot.__setattr__(
+                        "style", {"background_color": c, "border_radius": 3}
+                    ),
+                    bright,
+                    dim,
+                    ms=750,
+                )
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                return
 
     # ═══════════════════════════════════════════════════════════════════════
     # Live strip operations
@@ -545,6 +664,21 @@ class ChatViewWindow(ui.Window):
                                 style={"color": COL_TEXT_SUBTLE, "font_size": 10},
                             )
                             ui.Spacer()
+                            # Re-run: clicking populates the input field with
+                            # this prompt for one-keystroke iteration.
+                            ui.Button(
+                                "↻",
+                                width=18,
+                                height=14,
+                                clicked_fn=lambda t=text: self._rerun(t),
+                                style={
+                                    "color": COL_TEXT_SUBTLE,
+                                    "font_size": 10,
+                                    "background_color": 0x00000000,
+                                },
+                                tooltip="Re-run this prompt",
+                            )
+                            ui.Spacer(width=4)
                         with ui.HStack():
                             ui.Spacer(width=8)
                             ui.Label(
@@ -554,6 +688,9 @@ class ChatViewWindow(ui.Window):
                             )
                             ui.Spacer(width=8)
                         ui.Spacer(height=4)
+
+    def _rerun(self, text: str):
+        self.input_field.model.set_value(text)
 
     def _add_assistant_bubble(self, text: str, error: bool = False) -> Optional[Dict]:
         bubble_refs: Dict = {}
@@ -571,7 +708,8 @@ class ChatViewWindow(ui.Window):
                     with ui.HStack():
                         ui.Spacer(width=2)
                         with ui.ZStack():
-                            ui.Rectangle(
+                            # Inner bg — what dims when the bubble is undone (Phase 6).
+                            bubble_refs["inner_bg_rect"] = ui.Rectangle(
                                 style={
                                     "background_color": COL_BG_ASSIST,
                                     "border_radius": 6,
@@ -581,7 +719,7 @@ class ChatViewWindow(ui.Window):
                                 ui.Spacer(height=4)
                                 with ui.HStack():
                                     ui.Spacer(width=8)
-                                    ui.Label(
+                                    bubble_refs["header_lbl"] = ui.Label(
                                         "Isaac Assist",
                                         width=0,
                                         style={
@@ -593,24 +731,47 @@ class ChatViewWindow(ui.Window):
                                 with ui.HStack():
                                     ui.Spacer(width=8)
                                     body_color = COL_RED if error else COL_TEXT
-                                    ui.Label(
+                                    bubble_refs["body_lbl"] = ui.Label(
                                         text,
                                         word_wrap=True,
                                         style={"color": body_color, "font_size": 12},
                                     )
                                     ui.Spacer(width=8)
+                                # Diff chip + Phase 6 undo button both write
+                                # into this slot. Height grows when populated.
+                                bubble_refs["diff_slot"] = ui.VStack(spacing=0, height=0)
                                 ui.Spacer(height=4)
                         ui.Spacer(width=24)
                     ui.Spacer(height=2)
         return bubble_refs
 
     # ═══════════════════════════════════════════════════════════════════════
-    # New scene + LiveKit toggle (existing behavior preserved)
+    # New scene (soft-confirm) + LiveKit toggle (existing behavior preserved)
     # ═══════════════════════════════════════════════════════════════════════
     def _new_scene(self):
-        asyncio.ensure_future(self._new_scene_async())
+        # Two-click commit pattern: first click changes the button to
+        # "Confirm?" for 3s; a second click within that window actually
+        # wipes; otherwise it reverts to "New". Avoids destroying work
+        # on accidental clicks without a heavy modal dialog.
+        if not getattr(self, "_new_scene_confirm", False):
+            self._new_scene_confirm = True
+            self.btn_new.text = "Confirm?"
+            self.btn_new.style = {"font_size": 11, "color": COL_AMBER}
+            asyncio.ensure_future(self._reset_new_scene_after(3.0))
+        else:
+            self._new_scene_confirm = False
+            self.btn_new.text = "New"
+            self.btn_new.style = {"font_size": 11}
+            asyncio.ensure_future(self._do_new_scene())
 
-    async def _new_scene_async(self):
+    async def _reset_new_scene_after(self, sec: float):
+        await asyncio.sleep(sec)
+        if self._new_scene_confirm:
+            self._new_scene_confirm = False
+            self.btn_new.text = "New"
+            self.btn_new.style = {"font_size": 11}
+
+    async def _do_new_scene(self):
         try:
             import omni.usd
             omni.usd.get_context().new_stage()
@@ -624,6 +785,10 @@ class ChatViewWindow(ui.Window):
             logger.warning(f"[IsaacAssist] reset_session call failed: {e}")
         self.chat_layout.clear()
         self._collapse_live_strip()
+        # Re-show the empty-state chips after a wipe — feels like a fresh start.
+        self._chips_shown = True
+        self.chips_container.visible = True
+        self.chips_container.height = ui.Pixel(22)
 
     def _toggle_livekit(self):
         if self.webrtc and self.webrtc._streaming:
