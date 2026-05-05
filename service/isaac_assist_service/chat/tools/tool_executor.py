@@ -2758,6 +2758,18 @@ _SIZE_BUCKETS = {
     "wall":     {"tiny": 1.00, "small": 2.00, "medium": 3.00, "large": 5.0,  "huge": 10.0},
     "room":     {"tiny": 2.00, "small": 4.00, "medium": 6.00, "large": 10.0, "huge": 20.0},
     "warehouse":{"tiny": 5.00, "small": 10.0, "medium": 20.0, "large": 40.0, "huge": 80.0},
+    # Robots — "size" here means full standing/wingspan height in meters.
+    # The buckets are tighter than for objects because real robot models
+    # cluster around fixed dimensions; sizing across buckets typically
+    # implies SELECTING a different model, not rescaling the asset.
+    # Without those bucket values the default cube-scale was applied,
+    # producing 0.1m "small humanoids" — agents would then scale H1
+    # (1.8m natively) by 18× to match.
+    "humanoid":   {"tiny": 1.10, "small": 1.50, "medium": 1.70, "large": 1.85, "huge": 2.00},
+    "manipulator":{"tiny": 0.50, "small": 0.70, "medium": 0.85, "large": 1.10, "huge": 1.40},
+    "robot":      {"tiny": 0.50, "small": 0.85, "medium": 1.10, "large": 1.50, "huge": 1.85},
+    "quadruped":  {"tiny": 0.40, "small": 0.55, "medium": 0.70, "large": 0.90, "huge": 1.20},
+    "mobile":     {"tiny": 0.30, "small": 0.45, "medium": 0.65, "large": 0.85, "huge": 1.20},
     # Default fallback when class is unknown.
     "default":  {"tiny": 0.05, "small": 0.10, "medium": 0.30, "large": 0.70, "huge": 1.50},
 }
