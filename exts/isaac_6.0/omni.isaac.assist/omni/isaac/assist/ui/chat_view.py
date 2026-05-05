@@ -145,13 +145,44 @@ class ChatViewWindow(ui.Window):
     def _build_input(self):
         with ui.HStack(height=28, spacing=4):
             self.input_field = ui.StringField(multiline=False, style={"font_size": 12})
+            # Same button doubles as Send (idle) / Stop (turn active) /
+            # "Stopping…" (cancel sent, waiting for orchestrator return).
             self.btn_send = ui.Button(
                 "Send",
                 width=64,
                 height=24,
-                clicked_fn=self._submit_message,
+                clicked_fn=self._on_send_or_stop,
                 style={"font_size": 12},
             )
+            self._btn_state = "idle"
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Send / Stop button state machine
+    # ═══════════════════════════════════════════════════════════════════════
+    def _set_button_state(self, state: str):
+        """state ∈ {idle, busy, stopping}."""
+        self._btn_state = state
+        if state == "idle":
+            self.btn_send.text = "Send"
+            self.btn_send.enabled = True
+            self.btn_send.style = {"font_size": 12}
+        elif state == "busy":
+            self.btn_send.text = "Stop"
+            self.btn_send.enabled = True
+            # Amber to read as "interruption affordance" without screaming red
+            self.btn_send.style = {"font_size": 12, "color": COL_AMBER}
+        elif state == "stopping":
+            self.btn_send.text = "Stopping…"
+            self.btn_send.enabled = False
+            self.btn_send.style = {"font_size": 12, "color": COL_TEXT_SUBTLE}
+
+    def _on_send_or_stop(self):
+        if self._btn_state == "idle":
+            self._submit_message()
+        elif self._btn_state == "busy":
+            self._set_button_state("stopping")
+            asyncio.ensure_future(self.service.cancel_turn())
+        # "stopping" → button is disabled; clicks are no-ops.
 
     # ═══════════════════════════════════════════════════════════════════════
     # Submit / receive
@@ -161,11 +192,12 @@ class ChatViewWindow(ui.Window):
         if not text:
             return
         if self._turn_active:
-            return  # one turn at a time; Phase 4 will add the Stop button
+            return
         self.input_field.model.set_value("")
         self._add_user_bubble(text)
         self._turn_active = True
         self._turn_rendered_via_sse = False
+        self._set_button_state("busy")
         asyncio.ensure_future(self._handle_service_request(text))
 
     async def _handle_service_request(self, text: str):
@@ -177,6 +209,7 @@ class ChatViewWindow(ui.Window):
                 self._collapse_live_strip()
         finally:
             self._turn_active = False
+            self._set_button_state("idle")
 
     def _render_assistant_from_post(self, response: dict):
         if "error" in response:
@@ -202,10 +235,24 @@ class ChatViewWindow(ui.Window):
                 self._on_tool_finished(payload)
             elif evt_type == "retry_spam_halt":
                 self._on_spam_halt(payload)
+            elif evt_type == "cancel_acknowledged":
+                self._on_cancel_ack(payload)
             elif evt_type == "agent_reply":
                 self._on_agent_reply(payload)
         except Exception as e:
             logger.exception(f"SSE handler failed for {evt_type}: {e}")
+
+    def _on_cancel_ack(self, payload):
+        """Server confirmed it has stopped issuing tool calls. Show a
+        dim "stopped" indicator in the live strip; the agent_reply event
+        that follows shortly carries the canned 'Stopped' summary."""
+        with self.live_rows_layout:
+            with ui.HStack(height=14):
+                ui.Spacer(width=10)
+                ui.Label(
+                    "■ Stopped by user",
+                    style={"color": COL_TEXT_DIM, "font_size": 11},
+                )
 
     # ── Turn lifecycle ───────────────────────────────────────────────────
     def _on_turn_started(self, payload):
