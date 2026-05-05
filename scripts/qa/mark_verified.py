@@ -31,6 +31,8 @@ INDEX_PATH = "workspace/tool_index"
 def load_judged(path: Path) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for line in path.open():
+        if not line.strip():
+            continue
         d = json.loads(line)
         v = d.get("verdict", {}) or {}
         out[d["task"]] = {
