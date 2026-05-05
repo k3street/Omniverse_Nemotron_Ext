@@ -574,6 +574,51 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "resolve_coordinate_reference",
+            "description": (
+                "Resolve a named landmark ('origin', 'center of /World/Cube', "
+                "'top-left corner of the table', 'edge of the conveyor') to "
+                "world-space coordinates. USE THIS instead of guessing positions "
+                "for descriptors like 'the corner', 'the top', 'the back side'. "
+                "World-anchored landmarks (origin, world center) need no reference "
+                "prim. Prim-relative landmarks (top, bottom, edges, corners) take "
+                "reference_prim and read its actual world bbox."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "landmark": {"type": "string", "description": "Named anchor: origin, center, top, bottom, top-left, top-right, bottom-left, bottom-right, edge_+x, edge_-x, edge_+y, edge_-y, left, right, front, back."},
+                    "reference_prim": {"type": "string", "description": "USD path the landmark is relative to. Empty/world for the global origin landmarks."},
+                },
+                "required": ["landmark"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resolve_relational_property",
+            "description": (
+                "Resolve a relational property like 'twice the size of X' or 'half "
+                "the height of Y' to a concrete numeric value derived from another "
+                "prim's measured bbox. USE THIS instead of guessing the absolute "
+                "size when the user references it relatively. Currently supports "
+                "size relations (twice/half/N×); color/orientation can be added."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "relation": {"type": "string", "description": "Type of relation: 'size_factor' (with factor arg), 'same_size_as', 'twice the size of', 'half the size of'."},
+                    "reference_prim": {"type": "string", "description": "USD path of the prim the relation references."},
+                    "factor": {"type": "number", "description": "Multiplier for size_factor (default 2.0). Use 0.5 for half, 3 for triple, etc."},
+                },
+                "required": ["relation", "reference_prim"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "resolve_success_condition",
             "description": (
                 "ACCEPTANCE-EXTRACTOR. Extract a structured 'done' condition from "
