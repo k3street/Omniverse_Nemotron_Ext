@@ -3139,6 +3139,25 @@ print(json.dumps(result))
 
 
 _SKILL_RECIPES = {
+    "assembly_line": {
+        "description": "Multi-station pick-place pipeline transporting an item from start bin through N stations to a final bin via robots and conveyors.",
+        "tool_chain": [
+            {"tool": "create_bin", "args_template": {"prim_path": "<INPUT_BIN>"}},
+            {"tool": "create_conveyor", "args_template": {"prim_path": "<CONVEYOR_1>"}},
+            {"tool": "robot_wizard", "args_template": {"robot_name": "<ROBOT>", "dest_path": "<ROBOT_PATH>"}},
+            {"tool": "create_bin", "args_template": {"prim_path": "<OUTPUT_BIN>"}},
+        ],
+        "verify_step": {
+            "tool": "verify_pickplace_pipeline",
+            "args_template": {"stages": [{"robot_path": "<ROBOT_PATH>", "pick_path": "<PICK>", "place_path": "<PLACE>"}]},
+            "rationale": "MANDATORY for multi-station builds. Confirms each robot can reach its pick AND place targets. Without this you might claim 'done' on a layout where robots can't physically perform the pipeline (caught VR-18 / VR-19).",
+        },
+        "success_condition": {
+            "intent": "object_traversal",
+            "start_state": "<ITEM> located at <INPUT_BIN>",
+            "end_state": "<ITEM> located at <OUTPUT_BIN>",
+        },
+    },
     "pick_and_place": {
         "description": "Pick an object from one surface and place it on another using PickPlaceController.",
         "tool_chain": [
@@ -3184,6 +3203,9 @@ _SKILL_RECIPES = {
     # English aliases
     "pick-and-place": "pick_and_place", "pickplace": "pick_and_place",
     "pick and place": "pick_and_place", "manipulation": "pick_and_place",
+    "assembly line": "assembly_line", "assembly-line": "assembly_line",
+    "production line": "assembly_line", "manufacturing line": "assembly_line",
+    "multi-station": "assembly_line", "pipeline": "assembly_line",
     "calibration": "calibrate_camera", "camera calibration": "calibrate_camera",
     "rl env": "rl_training_env", "rl": "rl_training_env",
     "training env": "rl_training_env", "training environment": "rl_training_env",
