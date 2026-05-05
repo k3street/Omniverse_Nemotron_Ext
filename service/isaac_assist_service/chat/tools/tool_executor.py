@@ -2854,12 +2854,15 @@ else:
         result['target_top_z'] = float(top_z)
         result['target_center'] = [float(target_center[0]), float(target_center[1]), float(target_center[2])]
 
-        # Source's bbox in its own LOCAL frame (we'll set the world translate
-        # so that source_local_bottom + world_translate.z = top_z + clearance).
-        # ComputeLocalBound returns the bbox excluding the prim's own xform —
-        # exactly what we need to figure out how far the geometry extends
-        # below the local origin.
-        src_bbox_local = cache.ComputeLocalBound(src).ComputeAlignedRange()
+        # Source's bbox in its OWN local frame (no transforms applied).
+        # ComputeUntransformedBound is the correct call: it gives the
+        # geometric extent of the prim before its own translate/scale/orient
+        # is applied. ComputeLocalBound (which we used initially) returns
+        # bbox in the PARENT'S frame and INCLUDES the prim's own translate
+        # — that produced the embedded-in-cube bug for a sphere translated
+        # to z=0.5: src_bottom came back as 0.25 instead of -0.25 (the
+        # sphere radius), so the sphere ended up half a metre too low.
+        src_bbox_local = cache.ComputeUntransformedBound(src).ComputeAlignedRange()
         if src_bbox_local.IsEmpty():
             # Robot articulations sometimes report empty local bbox — fall back
             # to assuming geometric origin at flange (offset = 0).
