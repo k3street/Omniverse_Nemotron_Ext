@@ -2675,6 +2675,134 @@ async def _handle_list_all_prims(args: Dict) -> Dict:
     return ctx.get("stage", {})
 
 
+async def _handle_resolve_prim_reference(args: Dict) -> Dict:
+    """Resolve a deictic noun phrase ('kuben', 'the cube', 'roboten') to one
+    or more concrete prim paths in the current stage.
+
+    Pilot #2 of the typed-variable-resolver pattern (after place_on_top_of).
+    The LLM identifies a deictic reference in the user prompt, extracts a
+    `name_hint` (the head noun, normalised) and optionally a `prim_type`
+    (Cube/Sphere/Robot/Camera/Light/...), and calls this tool. The tool
+    returns the matching candidates.
+
+    The agent's protocol after the call:
+      - 1 match → use the returned prim_path directly
+      - >1 match → ask the user "which one?" with the candidate list
+      - 0 match → tell the user nothing matches; offer to create or rename
+
+    No numerical reasoning by the LLM; no prim-path hallucination. The
+    "ambiguous → ask" path is the resolver-level clarification mechanism
+    we want to prove out — it's strictly more focused than the
+    whole-prompt negotiator.
+    """
+    name_hint = (args.get("name_hint") or args.get("description") or "").strip().lower()
+    prim_type = (args.get("prim_type") or "").strip()
+    if not name_hint and not prim_type:
+        return {"error": "resolve_prim_reference requires either name_hint or prim_type"}
+
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdGeom, UsdPhysics, UsdLux, Gf
+
+stage = omni.usd.get_context().get_stage()
+name_hint = {name_hint!r}
+prim_type_filter = {prim_type!r}
+
+# Map common natural-language hints to USD typeNames + schema APIs.
+# Includes Swedish + English heads. Order matters: most specific first.
+TYPE_HINTS = {{
+    'cube': ['Cube'], 'kub': ['Cube'], 'kuben': ['Cube'], 'box': ['Cube'],
+    'sphere': ['Sphere'], 'sfär': ['Sphere'], 'boll': ['Sphere'], 'ball': ['Sphere'],
+    'cylinder': ['Cylinder'],
+    'cone': ['Cone'], 'kon': ['Cone'],
+    'capsule': ['Capsule'], 'kapsel': ['Capsule'],
+    'mesh': ['Mesh'],
+    'camera': ['Camera'], 'kamera': ['Camera'], 'kameran': ['Camera'],
+    'light': ['DistantLight','DomeLight','SphereLight','RectLight','DiskLight','CylinderLight'],
+    'ljus': ['DistantLight','DomeLight','SphereLight','RectLight','DiskLight','CylinderLight'],
+    'ljuset': ['DistantLight','DomeLight','SphereLight','RectLight','DiskLight','CylinderLight'],
+    'lampa': ['DistantLight','DomeLight','SphereLight','RectLight','DiskLight','CylinderLight'],
+}}
+hint_types = TYPE_HINTS.get(name_hint, [])
+
+# Normalise the name hint for substring matching against prim paths.
+# Strip common Swedish definite-article suffixes so 'kuben' also matches
+# /World/Cube_3 (the agent's lookup hint is more useful than a literal
+# substring search would be).
+def _normalise(h):
+    h = h.lower()
+    for suf in ('en', 'er', 'et', 'na', 's'):
+        if h.endswith(suf) and len(h) - len(suf) >= 3:
+            return h[:-len(suf)]
+    return h
+
+stem = _normalise(name_hint) if name_hint else ''
+
+def _is_robot(prim):
+    return prim.HasAPI(UsdPhysics.ArticulationRootAPI)
+
+def _is_light(prim):
+    schemas = prim.GetTypeName()
+    return schemas in TYPE_HINTS['light']
+
+candidates = []
+for p in stage.Traverse():
+    if not p.IsValid() or not p.IsActive():
+        continue
+    type_name = str(p.GetTypeName() or '')
+    path = str(p.GetPath())
+    pl = path.lower()
+
+    # Filter by explicit prim_type when supplied. 'Robot' / 'robot' is a
+    # virtual class — match articulations regardless of typeName.
+    if prim_type_filter:
+        ptf = prim_type_filter.lower()
+        if ptf in ('robot','robotar','articulation','manipulator','humanoid'):
+            if not _is_robot(p): continue
+        elif ptf in ('light','ljus','lamp'):
+            if not _is_light(p): continue
+        elif type_name.lower() != ptf:
+            continue
+    elif name_hint in ('robot','roboten','robotar'):
+        if not _is_robot(p): continue
+    elif hint_types:
+        if type_name not in hint_types and not _is_light(p) and name_hint not in ('light','ljus','ljuset','lampa'):
+            if type_name not in hint_types: continue
+    elif stem:
+        if stem not in pl and stem not in type_name.lower():
+            continue
+
+    # Skip Kit's internal scopes (render config, environment skydome etc)
+    if path.startswith('/Render') or path.startswith('/OmniverseKit') or '/HydraTextures' in path:
+        continue
+
+    cand = {{'prim_path': path, 'type': type_name}}
+    try:
+        xf = UsdGeom.Xformable(p)
+        if xf:
+            t = xf.ComputeLocalToWorldTransform(0).ExtractTranslation()
+            cand['position'] = [float(t[0]), float(t[1]), float(t[2])]
+    except Exception:
+        pass
+    candidates.append(cand)
+
+result = {{
+    'name_hint': name_hint,
+    'prim_type_filter': prim_type_filter,
+    'candidates': candidates,
+    'count': len(candidates),
+    'exact_match': candidates[0]['prim_path'] if len(candidates) == 1 else None,
+    'ambiguous': len(candidates) > 1,
+    'no_match': len(candidates) == 0,
+}}
+print(json.dumps(result))
+"""
+    return await kit_tools.queue_exec_patch(
+        code, f"resolve_prim_reference name_hint={name_hint!r} type={prim_type!r}"
+    )
+
+
 async def _handle_place_on_top_of(args: Dict) -> Dict:
     """Place `prim_path` on top of `target_prim_path` using authoritative
     bounding-box geometry.
@@ -2888,6 +3016,7 @@ DATA_HANDLERS = {
     "list_all_prims": _handle_list_all_prims,
     "measure_distance": _handle_measure_distance,
     "place_on_top_of": _handle_place_on_top_of,
+    "resolve_prim_reference": _handle_resolve_prim_reference,
     "get_debug_info": _handle_get_debug_info,
     "lookup_knowledge": _handle_lookup_knowledge,
     "lookup_api_deprecation": _handle_lookup_api_deprecation,

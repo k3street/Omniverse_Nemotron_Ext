@@ -145,7 +145,14 @@ _INTENT_CATEGORIES: Dict[str, Set[str]] = {
 }
 
 # Always-included tools regardless of category (cheap, essential)
-_ALWAYS_TOOLS = {"run_usd_script", "scene_summary", "lookup_knowledge", "lookup_api_deprecation"}
+_ALWAYS_TOOLS = {
+    "run_usd_script", "scene_summary", "lookup_knowledge", "lookup_api_deprecation",
+    # Typed-variable resolvers — meta-tools that gate other tools' inputs.
+    # Always relevant when their linguistic pattern fires. They compete
+    # poorly against action-tools in embedding-rank (action verbs dominate),
+    # so include them unconditionally rather than rely on retrieval.
+    "place_on_top_of", "resolve_prim_reference",
+}
 
 # Build a fast name→schema lookup
 _TOOL_BY_NAME: Dict[str, Dict] = {
