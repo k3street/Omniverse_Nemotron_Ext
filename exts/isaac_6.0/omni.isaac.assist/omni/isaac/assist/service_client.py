@@ -101,6 +101,39 @@ class AssistServiceClient:
         except Exception as e:
             return {"error": str(e)}
 
+    async def undo_turn(self, steps: int = 1) -> dict:
+        """Revert the last N stage-mutating turns. Server emits
+        undo_started/undo_applied/undo_failed via SSE — the UI listens
+        and dims the corresponding bubble(s)."""
+        if not HAS_AIOHTTP:
+            return {"ok": False, "error": "aiohttp missing"}
+        url = f"{self.base_url}/api/v1/chat/undo"
+        payload = {"session_id": self.session_id, "steps": steps}
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    return {"ok": False, "error": f"HTTP {resp.status}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    async def clear_chat(self) -> dict:
+        """Wipe conversation history without touching the stage or
+        the snapshot stack. Distinct from reset_session which also
+        opens a fresh stage."""
+        if not HAS_AIOHTTP:
+            return {"status": "skipped"}
+        url = f"{self.base_url}/api/v1/chat/clear_chat"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json={"session_id": self.session_id}) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    return {"error": f"HTTP {resp.status}"}
+        except Exception as e:
+            return {"error": str(e)}
+
     # ── SSE consumer ────────────────────────────────────────────────────
     def start_stream(self, on_event):
         """Start the SSE consumer in the background. Idempotent.

@@ -67,6 +67,15 @@ class ChatViewWindow(ui.Window):
         self._spin_task: Optional[asyncio.Task] = None
         self._destroyed = False
 
+        # Undo state (Phase 6). Bubbles eligible for undo, in
+        # chronological order. Latest entry = the only one with a visible
+        # ↶ button. SSE undo_applied pops + dims; the new latest gets
+        # the button.
+        self._undoable_bubbles: list = []
+        self._undo_progress_row = None
+        self._undo_handled_via_sse = False
+        self._clear_chat_confirm = False
+
         self._build_ui()
         self.service.start_stream(self._on_sse_event)
         self._spin_task = asyncio.ensure_future(self._tick_loop())
@@ -101,14 +110,23 @@ class ChatViewWindow(ui.Window):
             ui.Spacer()
             self.btn_new = ui.Button(
                 "New",
-                width=44,
+                width=40,
                 height=22,
                 clicked_fn=self._new_scene,
                 style={"font_size": 11},
+                tooltip="Wipe stage AND chat. Confirm required.",
+            )
+            self.btn_clear = ui.Button(
+                "Clear",
+                width=44,
+                height=22,
+                clicked_fn=self._on_clear_chat_clicked,
+                style={"font_size": 11},
+                tooltip="Clear chat history (keeps stage and undo). Confirm required.",
             )
             self.btn_livekit = ui.Button(
                 "Vision",
-                width=58,
+                width=54,
                 height=22,
                 clicked_fn=self._toggle_livekit,
                 style={"font_size": 11},
@@ -278,6 +296,14 @@ class ChatViewWindow(ui.Window):
                 self._pending_diff = payload
             elif evt_type == "agent_reply":
                 self._on_agent_reply(payload)
+            elif evt_type == "undo_started":
+                self._on_undo_started(payload)
+            elif evt_type == "undo_applied":
+                self._on_undo_applied(payload)
+            elif evt_type == "undo_failed":
+                self._on_undo_failed(payload)
+            elif evt_type == "chat_cleared":
+                pass  # UI handled it locally — server confirmation only
         except Exception as e:
             logger.exception(f"SSE handler failed for {evt_type}: {e}")
 
@@ -380,6 +406,7 @@ class ChatViewWindow(ui.Window):
 
     def _on_agent_reply(self, payload):
         text = payload.get("text", "")
+        has_snapshot = payload.get("has_snapshot", False)
         bubble = self._add_assistant_bubble(text)
         # Pulse the bubble border to mark "turn complete" peripherally.
         if bubble and "border_rect" in bubble:
@@ -397,6 +424,11 @@ class ChatViewWindow(ui.Window):
         diff = getattr(self, "_pending_diff", None)
         if diff and bubble:
             self._attach_diff_chip(bubble, diff)
+            # Undo eligibility: turn must have mutated the stage AND a
+            # snapshot must have been captured. The latest mutating
+            # bubble is the only one with a visible ↶ button.
+            if has_snapshot and diff.get("total_changes", 0) > 0:
+                self._transfer_undo_button(bubble, diff)
             self._pending_diff = None
         self._collapse_live_strip()
         self._turn_rendered_via_sse = True
@@ -746,6 +778,269 @@ class ChatViewWindow(ui.Window):
         return bubble_refs
 
     # ═══════════════════════════════════════════════════════════════════════
+    # Undo (per-bubble ↶, latest-only, soft-confirm)
+    # ═══════════════════════════════════════════════════════════════════════
+    # Snapshot stack lives on disk in turn_snapshot.py (auto-pruned by
+    # restore). UI just tracks which bubbles correspond to undoable
+    # turns. The latest entry has the ↶ button; on undo_applied we
+    # pop + dim, then attach the button to the new latest.
+    def _transfer_undo_button(self, new_bubble: dict, diff: dict):
+        if self._undoable_bubbles:
+            prev = self._undoable_bubbles[-1]
+            self._remove_undo_button(prev)
+        new_bubble["diff_summary"] = diff
+        new_bubble["undo_state"] = "idle"
+        self._attach_undo_button(new_bubble)
+        self._undoable_bubbles.append(new_bubble)
+
+    def _attach_undo_button(self, bubble: dict):
+        slot = bubble.get("diff_slot")
+        if not slot:
+            return
+        # The diff chip already lives in the slot; we append a row with
+        # the undo button. Keep handles to mutate text/style and remove.
+        with slot:
+            with ui.HStack(height=18) as undo_row:
+                ui.Spacer()
+                btn = ui.Button(
+                    "↶",
+                    width=22,
+                    height=16,
+                    clicked_fn=lambda b=bubble: self._on_undo_clicked(b),
+                    style={
+                        "font_size": 11,
+                        "color": COL_TEXT_DIM,
+                        "background_color": 0x00000000,
+                    },
+                    tooltip=self._undo_tooltip(bubble.get("diff_summary", {})),
+                )
+                ui.Spacer(width=4)
+        bubble["undo_btn"] = btn
+        bubble["undo_row"] = undo_row
+
+    def _undo_tooltip(self, diff: dict) -> str:
+        a = diff.get("added_paths", [])
+        r = diff.get("removed_paths", [])
+        m = diff.get("modified_paths", [])
+        parts = []
+        if a:
+            parts.append(f"+{len(a)} added")
+        if r:
+            parts.append(f"−{len(r)} removed")
+        if m:
+            parts.append(f"~{len(m)} modified")
+        head = (
+            "Undo this turn — will revert: " + " ".join(parts)
+            if parts
+            else "Undo this turn"
+        )
+        if a:
+            head += "\n\nAdded:\n  " + "\n  ".join(a[:8])
+        if r:
+            head += "\n\nRemoved:\n  " + "\n  ".join(r[:8])
+        if m:
+            head += "\n\nModified:\n  " + "\n  ".join(m[:8])
+        return head
+
+    def _remove_undo_button(self, bubble: dict):
+        # omni.ui has no clean "remove single child" — hide the row.
+        row = bubble.get("undo_row")
+        if row:
+            try:
+                row.visible = False
+                row.height = ui.Pixel(0)
+            except Exception:
+                pass
+
+    def _on_undo_clicked(self, bubble: dict):
+        if self._turn_active:
+            return  # never undo during a live turn
+        state = bubble.get("undo_state", "idle")
+        btn = bubble.get("undo_btn")
+        if state == "idle":
+            bubble["undo_state"] = "confirm"
+            btn.text = "Undo?"
+            btn.style = {
+                "font_size": 11,
+                "color": COL_AMBER,
+                "background_color": 0x00000000,
+            }
+            btn.width = ui.Pixel(48)
+            asyncio.ensure_future(self._reset_undo_after(bubble, 3.0))
+        elif state == "confirm":
+            bubble["undo_state"] = "pending"
+            btn.text = "…"
+            btn.style = {
+                "font_size": 11,
+                "color": COL_TEXT_SUBTLE,
+                "background_color": 0x00000000,
+            }
+            btn.enabled = False
+            asyncio.ensure_future(self._do_undo())
+
+    async def _reset_undo_after(self, bubble: dict, sec: float):
+        await asyncio.sleep(sec)
+        if bubble.get("undo_state") == "confirm":
+            bubble["undo_state"] = "idle"
+            btn = bubble.get("undo_btn")
+            if btn:
+                btn.text = "↶"
+                btn.style = {
+                    "font_size": 11,
+                    "color": COL_TEXT_DIM,
+                    "background_color": 0x00000000,
+                }
+                btn.width = ui.Pixel(22)
+
+    async def _do_undo(self):
+        # Show progress in the live strip — restore can take a few seconds
+        # on large stages and the user needs to know it's working.
+        self._show_live_strip()
+        with self.live_rows_layout:
+            with ui.HStack(height=18, spacing=6) as row:
+                ui.Spacer(width=6)
+                ui.Label("⠋", width=14, style={"color": COL_AMBER, "font_size": 13})
+                ui.Label(
+                    "Reverting…",
+                    style={"color": COL_TEXT_DIM, "font_size": 12},
+                )
+        self._undo_progress_row = row
+        result = await self.service.undo_turn(steps=1)
+        # Server emits undo_applied/undo_failed via SSE; if POST returned
+        # an error and SSE didn't deliver, surface it locally.
+        if not result.get("ok") and not self._undo_handled_via_sse:
+            self._on_undo_failed({"error": result.get("error", "unknown")})
+
+    def _on_undo_started(self, payload):
+        # If undo was triggered via /undo slash command (not via the
+        # button), there's no "Reverting…" row yet. Render one.
+        if not self._undo_progress_row:
+            self._show_live_strip()
+            with self.live_rows_layout:
+                with ui.HStack(height=18, spacing=6) as row:
+                    ui.Spacer(width=6)
+                    ui.Label("⠋", width=14, style={"color": COL_AMBER, "font_size": 13})
+                    ui.Label(
+                        "Reverting…",
+                        style={"color": COL_TEXT_DIM, "font_size": 12},
+                    )
+            self._undo_progress_row = row
+
+    def _on_undo_applied(self, payload):
+        self._undo_handled_via_sse = True
+        steps = payload.get("steps", 1)
+        for _ in range(min(steps, len(self._undoable_bubbles))):
+            popped = self._undoable_bubbles.pop()
+            self._dim_bubble_as_undone(popped)
+        if self._undoable_bubbles:
+            self._attach_undo_button(self._undoable_bubbles[-1])
+        asyncio.ensure_future(self._collapse_undo_progress())
+
+    def _on_undo_failed(self, payload):
+        self._undo_handled_via_sse = True
+        err = payload.get("error", "unknown error")
+        if self._undoable_bubbles:
+            b = self._undoable_bubbles[-1]
+            b["undo_state"] = "idle"
+            btn = b.get("undo_btn")
+            if btn:
+                btn.text = "↶"
+                btn.enabled = True
+                btn.style = {
+                    "font_size": 11,
+                    "color": COL_RED,
+                    "background_color": 0x00000000,
+                }
+                btn.tooltip = f"Undo failed: {err}\nClick to retry."
+        if self._undo_progress_row:
+            try:
+                self._undo_progress_row.clear()
+                with self._undo_progress_row:
+                    ui.Spacer(width=6)
+                    ui.Label("✗", width=14, style={"color": COL_RED, "font_size": 13})
+                    ui.Label(
+                        f"Undo failed: {str(err)[:50]}",
+                        style={"color": COL_RED, "font_size": 12},
+                    )
+            except Exception:
+                pass
+        asyncio.ensure_future(self._collapse_undo_progress(delay=3.0))
+
+    async def _collapse_undo_progress(self, delay: float = 0.5):
+        await asyncio.sleep(delay)
+        self._collapse_live_strip()
+        self._undo_progress_row = None
+        self._undo_handled_via_sse = False
+
+    def _dim_bubble_as_undone(self, bubble: dict):
+        """Visually mark this bubble as undone: ~50% bg alpha, dim text,
+        '(undone)' header tag, recolor diff chip, remove ↶ button.
+        Bubble stays in the chat scroll as a record of what was tried."""
+        r = bubble.get("inner_bg_rect")
+        if r:
+            try:
+                r.style = {"background_color": 0x801E2125, "border_radius": 6}
+            except Exception:
+                pass
+        for key in ("body_lbl", "header_lbl"):
+            lbl = bubble.get(key)
+            if lbl:
+                try:
+                    cur = lbl.style or {}
+                    lbl.style = {**cur, "color": COL_TEXT_DIM}
+                except Exception:
+                    pass
+        hl = bubble.get("header_lbl")
+        if hl:
+            try:
+                hl.text = "Isaac Assist (undone)"
+            except Exception:
+                pass
+        chip = bubble.get("diff_chip_lbl")
+        if chip:
+            try:
+                chip.style = {"color": COL_TEXT_DIM, "font_size": 10}
+            except Exception:
+                pass
+        self._remove_undo_button(bubble)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Clear chat (soft-confirm)
+    # ═══════════════════════════════════════════════════════════════════════
+    def _on_clear_chat_clicked(self):
+        if self._turn_active:
+            return  # never clear during a live turn
+        if not self._clear_chat_confirm:
+            self._clear_chat_confirm = True
+            self.btn_clear.text = "Confirm?"
+            self.btn_clear.style = {"font_size": 11, "color": COL_AMBER}
+            asyncio.ensure_future(self._reset_clear_chat_after(3.0))
+        else:
+            self._clear_chat_confirm = False
+            self.btn_clear.text = "Clear"
+            self.btn_clear.style = {"font_size": 11}
+            asyncio.ensure_future(self._do_clear_chat())
+
+    async def _reset_clear_chat_after(self, sec: float):
+        await asyncio.sleep(sec)
+        if self._clear_chat_confirm:
+            self._clear_chat_confirm = False
+            self.btn_clear.text = "Clear"
+            self.btn_clear.style = {"font_size": 11}
+
+    async def _do_clear_chat(self):
+        try:
+            await self.service.clear_chat()
+        except Exception as e:
+            logger.warning(f"clear_chat failed: {e}")
+        self.chat_layout.clear()
+        self._undoable_bubbles = []
+        self._chips_shown = True
+        self.chips_container.visible = True
+        self.chips_container.height = ui.Pixel(22)
+        self._collapse_live_strip()
+
+    # ═══════════════════════════════════════════════════════════════════════
     # New scene (soft-confirm) + LiveKit toggle (existing behavior preserved)
     # ═══════════════════════════════════════════════════════════════════════
     def _new_scene(self):
@@ -784,6 +1079,7 @@ class ChatViewWindow(ui.Window):
         except Exception as e:
             logger.warning(f"[IsaacAssist] reset_session call failed: {e}")
         self.chat_layout.clear()
+        self._undoable_bubbles = []
         self._collapse_live_strip()
         # Re-show the empty-state chips after a wipe — feels like a fresh start.
         self._chips_shown = True

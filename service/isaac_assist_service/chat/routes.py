@@ -110,6 +110,11 @@ _USER_VISIBLE_EVENTS = {
     "turn_diff_computed",
     "agent_reply",
     "error",
+    # Phase 6 — undo & clear chat
+    "undo_started",
+    "undo_applied",
+    "undo_failed",
+    "chat_cleared",
 }
 
 
@@ -165,6 +170,57 @@ async def cancel_turn(req: CancelRequest):
     """
     cancel_registry.request_cancel(req.session_id)
     return {"status": "cancel_requested"}
+
+
+class UndoRequest(BaseModel):
+    session_id: str = "default_session"
+    steps: int = 1
+
+
+@router.post("/undo")
+async def undo_chat_turn(req: UndoRequest):
+    """Revert N most-recent stage-mutating turns by re-importing the
+    saved root layer. Snapshot stack is implicit on disk in
+    workspace/turn_snapshots/{sid}/ — turn_snapshot.restore() removes
+    consumed snapshots, so successive undo calls naturally chain
+    backwards through history.
+    """
+    from . import turn_snapshot
+
+    session_trace.emit(req.session_id, "undo_started", {"steps": req.steps})
+    available = turn_snapshot.snapshot_count(req.session_id)
+    if available == 0:
+        session_trace.emit(req.session_id, "undo_failed", {"error": "no snapshots"})
+        return {"ok": False, "error": "No undo history for this session."}
+    # Silently cap rather than 4xx — caller intent is "undo as much as I can".
+    steps = min(req.steps, available)
+    result = await turn_snapshot.restore(req.session_id, steps=steps)
+    if result.get("ok"):
+        session_trace.emit(req.session_id, "undo_applied", {
+            "steps": steps,
+            "remaining_snapshots": result.get("remaining_snapshots", 0),
+        })
+    else:
+        session_trace.emit(req.session_id, "undo_failed", {
+            "steps": steps,
+            "error": result.get("error", "unknown"),
+        })
+    return result
+
+
+class ClearChatRequest(BaseModel):
+    session_id: str = "default_session"
+
+
+@router.post("/clear_chat")
+async def clear_chat(req: ClearChatRequest):
+    """Wipe in-memory conversation history WITHOUT touching the stage
+    or the snapshot stack — undo still works on prior turns. Distinct
+    from /reset which also opens a fresh stage.
+    """
+    orchestrator.reset_session(req.session_id)
+    session_trace.emit(req.session_id, "chat_cleared", {})
+    return {"status": "cleared"}
 
 
 class LogExecutionRequest(BaseModel):
