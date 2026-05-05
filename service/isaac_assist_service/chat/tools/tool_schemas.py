@@ -503,6 +503,95 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "resolve_material_properties",
+            "description": (
+                "Map a material descriptor ('metal', 'rubber', 'wood', 'soft', 'rigid', "
+                "'deformable') to canonical physics properties: density (kg/m^3), "
+                "static/dynamic friction, restitution, and body_type (rigid|deformable). "
+                "USE THIS instead of inventing per-material physics numbers. body_type "
+                "tells you whether to apply RigidBodyAPI or PhysxDeformableBodyAPI."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"material": {"type": "string", "description": "Material name. English: metal, steel, aluminum, wood, plastic, rubber, glass, concrete, rigid, soft, deformable, fabric. Swedish: metall, trä, gummi, glas, betong."}},
+                "required": ["material"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resolve_constraint_phrase",
+            "description": (
+                "Parse a constraint phrase ('with 5cm clearance', '10kg max weight', "
+                "'within 2 minutes', 'no closer than 1m') into structured numeric data: "
+                "{kind: clearance|mass|time|collision_avoidance|angular|size, parsed: "
+                "{value, raw_value, raw_unit, si_unit}}. USE THIS to extract numeric "
+                "limits before passing them to physics / clearance / fit-check tools."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"phrase": {"type": "string", "description": "The full constraint phrase from the prompt, e.g. 'with 5cm clearance' or 'maximum 10kg'."}},
+                "required": ["phrase"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resolve_sequence_phrase",
+            "description": (
+                "Split a sequence phrase ('first X, then Y', 'after X do Y', 'sen Y') "
+                "into an ordered list of intent fragments. USE THIS to recover the "
+                "execution order before issuing tool calls — issue them in the order "
+                "the fragments appear in the returned array. Pure text parsing; no "
+                "scene access needed."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"phrase": {"type": "string", "description": "The full sequence phrase from the prompt."}},
+                "required": ["phrase"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resolve_context_reference",
+            "description": (
+                "Resolve an implicit context reference like 'another one', 'the same as "
+                "before', 'the last cube I made' by querying the stage for the most "
+                "recently-created prim of the requested class. USE THIS when the prompt "
+                "refers to a recently-made object without naming it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"noun_class": {"type": "string", "description": "Object class to look for: cube/sphere/cylinder/camera/light/robot/etc."}},
+                "required": ["noun_class"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resolve_skill_composition",
+            "description": (
+                "Map a skill-composition name ('pick-and-place', 'calibration', 'ros2', "
+                "'teleop', 'rl env') to a known tool-chain recipe. USE THIS when the "
+                "user asks for a high-level skill by name — the recipe tells you which "
+                "tools to call and in what order. Args_template fields like '<ROBOT>' "
+                "are placeholders to fill in (typically via resolve_prim_reference)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"skill": {"type": "string", "description": "Skill / composition name. Known: pick_and_place, calibrate_camera, rl_training_env, ros2_bridge, teleop_demo (plus aliases like 'pick-and-place', 'manipulation', 'calibration', 'rl env')."}},
+                "required": ["skill"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "resolve_count_vagueness",
             "description": (
                 "Map a vague count phrase ('a few', 'several', 'many', 'lots', 'dozens') "

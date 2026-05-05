@@ -153,6 +153,9 @@ _ALWAYS_TOOLS = {
     # so include them unconditionally rather than rely on retrieval.
     "place_on_top_of", "resolve_prim_reference",
     "resolve_size_adjective", "resolve_count_vagueness", "resolve_robot_class",
+    "resolve_material_properties", "resolve_constraint_phrase",
+    "resolve_sequence_phrase", "resolve_context_reference",
+    "resolve_skill_composition",
 }
 
 # Build a fast name→schema lookup
