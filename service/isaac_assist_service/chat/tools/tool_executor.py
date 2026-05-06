@@ -3559,7 +3559,7 @@ async def _handle_verify_pickplace_pipeline(args: Dict) -> Dict:
     import json as _j
     stages_json = _j.dumps(stages)
     code = f"""\
-import omni.usd, json
+import omni.usd, json, builtins as _bi
 from pxr import UsdGeom, Usd, PhysxSchema
 
 stage = omni.usd.get_context().get_stage()
@@ -3661,9 +3661,28 @@ def _segment_overlaps_bbox_xy(a, b, bbox, samples=20):
             return True
     return False
 
+def _controller_installed(robot_path, n_robots_in_pipeline):
+    \"\"\"Check builtins for a pick-place controller subscription tied to this
+    robot. Returns (attr_name, kind) or None.
+
+    cuRobo scopes its subscription per-robot (_curobo_pp_sub_<TAG>) so multi-
+    robot scenes can be checked unambiguously. Other controllers (native,
+    spline, diffik, osc) use un-tagged names — those can only be attributed
+    to a robot when there's a single robot in the pipeline.\"\"\"
+    tag = robot_path.replace('/', '_').strip('_')
+    if hasattr(_bi, '_curobo_pp_sub_' + tag):
+        return ('_curobo_pp_sub_' + tag, 'curobo')
+    if n_robots_in_pipeline == 1:
+        for prefix, kind in (('_native_pp_sub', 'native'), ('_spline_pp_sub', 'spline'),
+                             ('_diffik_pp_sub', 'diffik'), ('_osc_pp_sub', 'osc')):
+            if hasattr(_bi, prefix):
+                return (prefix, kind)
+    return None
+
 results = []
 issues = []
 prev_place = None
+_n_robots = len({{s.get('robot_path','') for s in stages if s.get('robot_path','')}})
 for i, s in enumerate(stages):
     rp = s.get('robot_path',''); pkp = s.get('pick_path',''); plp = s.get('place_path','')
     rk = (s.get('robot_kind','') or '').lower()
@@ -3692,6 +3711,15 @@ for i, s in enumerate(stages):
         if d > reach:
             issues.append(f'stage {{i}}: place at {{plp}} is {{d:.2f}}m from robot {{rp}} (>reach {{reach:.2f}}m)'); bad = True
     stage_result['reachable'] = not bad
+    # controller_installed check: per-robot subscription must exist in builtins
+    if rp:
+        ci = _controller_installed(rp, _n_robots)
+        stage_result['controller_installed'] = ci is not None
+        if ci is None:
+            issues.append(f'[controller_installed] stage {{i}}: no pick-place controller subscription found in builtins for robot {{rp}} (looked for _curobo_pp_sub_<tag>; un-tagged variants only matched when single-robot)')
+        else:
+            stage_result['controller_attr'] = ci[0]
+            stage_result['controller_kind'] = ci[1]
     if prev_place is not None and pkpos is not None:
         # Handoff gap: distance from previous stage's place point to this stage's pick.
         # In a conveyor pipeline these can differ (cube travels along the conveyor)
@@ -3719,13 +3747,15 @@ for i, s in enumerate(stages):
 
 ok = (all(s.get('reachable', False) for s in results)
       and all(s.get('conveyor_active', True) for s in results)
+      and all(s.get('controller_installed', True) for s in results)
       and not any('handoff' in i for i in issues)
-      and not any(i.startswith('[conveyor_active]') for i in issues))
+      and not any(i.startswith('[conveyor_active]') for i in issues)
+      and not any(i.startswith('[controller_installed]') for i in issues))
 out = {{
     'stages': results,
     'issues': issues,
     'pipeline_ok': ok,
-    'rationale': 'Per-stage reach distance compared to robot workspace radius; handoff gaps >0.30m must be spanned by an active conveyor (PhysxSurfaceVelocityAPI + non-zero velocity); >3m gap flagged loosely.',
+    'rationale': 'Per-stage: reach distance vs workspace; controller subscription present in builtins; handoff gaps >0.30m spanned by an active conveyor (PhysxSurfaceVelocityAPI + non-zero velocity).',
 }}
 print(json.dumps(out))
 """
