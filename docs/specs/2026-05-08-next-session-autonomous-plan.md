@@ -1,399 +1,508 @@
-# Next-session autonomous plan (2026-05-08)
+# Next-session plan — 5-step roadmap with form+function dual gate
 
-You are picking up where the 2026-05-07 session left off. Read
+You are picking up from the 2026-05-07 session. Read
 `docs/specs/2026-05-07-vr19-form-function-verification.md` first for
 the post-mortem of yesterday's chaos.
 
-The user's ask: do meaningful, isolated work autonomously for ~3-4
-hours, without bouncing decisions back. Don't stack changes.
-Smoke-test between every phase. Commit per phase. Then report.
+---
 
-## What's already in place (do not redo)
+## What the user wants
 
-- `scripts/qa/run_cp01.py` and `scripts/qa/run_cp02.py` — persistent
-  deterministic test scripts. Build CP-01 / CP-02 scenes via direct
-  imports of `execute_tool_call`, no LLM, no orchestrator. Verify
-  manually with Stop+Play.
-- `workspace/templates/CP-01.json` and `CP-02.json` — canonical
-  patterns, code-field has the ground-truth tool-call sequence.
-- HEAD = `c73473e` ("chat+ui: model switcher (M button) + Moonshot/Kimi
-  provider + task browser") on `feat/live-progress-ui`.
-- PR #89 is OPEN against k3street:master. **Do not modify it.** Don't
-  push to `fork`. Working branch is `feat/live-progress-ui`, push to
-  `anton` only.
+Anton's vision: type a free-form prompt into Isaac Assist
+("bygg en sorteringsstation, röda kuber i röd bin, blå i blå") and
+have the agent build a working scene. The 5-step QA roadmap (VR-19,
+sortering, constraint, re-orient, multi-modal) is the
+generalization-test — does the same form+function architecture
+handle every typed-variable category we care about?
 
-## Hard constraints
+End-state worth aiming for: five verified canonical patterns
+(CP-01..05), four task specs (VR-19, SORT-01, CONSTRAINT-01,
+REORIENT-01) with goal-aligned success criteria, an agent that
+follows them or surfaces issues honestly when it can't.
 
-1. **ONE substantive change per phase.** Smoke-test before the next
-   phase begins.
-2. **Concrete numbers, not vibes.** "Scripts pass 4/4 cubes-in-bin"
-   not "scenes look right."
-3. **Stop on failure.** If a phase smoke-test fails, roll back that
-   phase's commit, write `docs/specs/2026-05-08-blocker.md` with the
-   exact output and what you tried, and wait. Do not proceed to next
-   phase. Do not improvise around the failure.
-4. **Don't touch the orchestrator.** Yesterday's bug was there. Out
-   of scope for this autonomous block.
-5. **Don't re-implement strengthened verify_pickplace_pipeline or
-   simulate_traversal_check.** Phase 3 builds the smoke-test
-   FRAMEWORK so a later session can do that work safely. The
-   verifier rebuild is not in scope for THIS session.
-6. **Don't run VR-19 against an LLM.** No agent-eval calls. The
-   autonomous block is preparation.
-7. **Don't switch LLM model or env vars.** Pro+thinking experiment
-   is the user's call.
-8. **Push to `anton` after each commit.** Never to `fork` or
-   `origin`.
-9. If Isaac Sim crashes during a smoke-test: stop, do not relaunch,
-   write the blocker doc, wait.
+That's the legacy.
 
 ---
 
-## Phase 1 — `/mnt/shared_data` ghost hunt (~45 min)
+## What's already in place
 
-### Why
+- `scripts/qa/run_cp01.py` and `run_cp02.py` — persistent
+  deterministic test scripts. Build the verified canonical scenes
+  via direct `execute_tool_call` imports. No LLM, no orchestrator.
+- `workspace/templates/CP-01.json` and `CP-02.json` — canonical
+  patterns. The `code` field is the ground-truth tool-call sequence.
+- `verify_pickplace_pipeline` tool exists, but is form-shallow (only
+  reach + handoff distance — passes scenes that are mechanically
+  broken).
+- HEAD = `c73473e` on `feat/live-progress-ui`. PR #89 is open against
+  k3street:master, do NOT modify it. Working branch only. Push to
+  `anton` remote.
 
-Yesterday's VR-19 run had the agent calling `run_usd_script` with
-`/mnt/shared_data/isaac-sim-assets-complete-5.0.0/.../franka.usd`, a
-Kimate-machine path that doesn't exist on our box. The agent kept
-re-importing with the same broken path 4 times. The ghost lives
-somewhere in our context plumbing and surfaces in retrieval. Until
-sanitized, every agent build-task has a chance of hitting it.
+---
 
-### Action
+## What yesterday taught us — embedded in this plan
 
+1. **Procedural compliance is not task success.** Counting tool calls
+   ("agent called verify") doesn't probe whether the cube actually
+   arrived. Every task spec in this plan uses a form + function dual
+   gate.
+2. **Agentic iteration on verify-feedback is brittle.** When the
+   agent gets "reach failed" it thrashes (rebuild from scratch)
+   instead of reasoning (move robot 0.5m). This may be a
+   model-behavior limit, not a tool-design fix.
+3. **For task shapes that match a canonical, plan-then-execute
+   beats agentic-iteration.** Build the canonical first
+   (deterministic). Validate. THEN run as agent-eval. Canonical
+   proves the BUILD is achievable. Agent-eval tests if the AGENT can
+   do it. Two separate things; don't conflate.
+4. **Stale data poisons retrieval.** `/mnt/shared_data` ghost in
+   `audit.jsonl` and `workspace/knowledge/*.jsonl` surfaces in every
+   agent run. Sanitize before any agent-eval.
+5. **One change at a time.** Yesterday's cascade was four
+   simultaneous edits. Root-cause isolation became impossible.
+   Smoke-test between every change.
+
+---
+
+## The 5-step roadmap (improved)
+
+Each step has the same shape:
+- A canonical template (CP-N) — built first via deterministic
+  script. Proves the BUILD is achievable.
+- A task spec (VR-19, SORT-01, …) — form + function success criteria.
+- An agent-eval run against the spec — only after canonical is
+  verified.
+- Honest analysis — pass/fail with concrete numbers.
+
+### Step 1 — VR-19: assembly line, cube traverses A → C
+
+Probes: introspection (does the agent verify?) + form+function dual
+gate at the simplest geometry.
+
+- **Canonical:** CP-02 (already verified — cube traverses
+  Conv1 → Robot1 → Conv2 → Robot2 → Bin).
+- **Form gate:** ≥2 robots, ≥2 conveyors, ≥3 stations, ≥1 cube;
+  topological bridge from cube source to destination; reach OK
+  (≤0.855m for Franka); each robot has a controller installed.
+- **Function gate:** at t=60s after Stop+Play —
+  - cube xy ∈ Station_C bbox
+  - cube z ≥ Station_C floor − 0.10m
+  - |cube velocity| < 0.05 m/s
+- **Tooling needed:** strengthened `verify_pickplace_pipeline` +
+  new `simulate_traversal_check`.
+
+### Step 2 — SORT-01: color-routed sorting
+
+Probes: typed-resolver for color, conditional logic, multi-cube
+scheduling.
+
+- **Canonical:** CP-03 (NEW). One robot, one belt, two bins (red and
+  blue). Two cubes (red, blue) on belt. Robot picks each, routes by
+  color.
+- **Form gate:** ≥1 robot, ≥1 conveyor, ≥2 bins (each with a
+  distinct visual + physics material binding), ≥2 cubes (one of
+  each color); controllers installed; bins reach-OK.
+- **Function gate:** at t=90s — every red cube in red_bin xy, every
+  blue cube in blue_bin xy, all at rest.
+- **Open architectural question for canonical design:** is colour
+  routing a controller-arg (`color_routing={"red": "/World/RedBin",
+  "blue": "/World/BlueBin"}`) or a separate
+  `resolve_color_routing` typed-resolver the agent calls and uses to
+  parameterise two `setup_pick_place_controller` calls? Discuss
+  with user before implementing.
+
+### Step 3 — CONSTRAINT-01: bounded footprint
+
+Probes: spatial reasoning under hard constraint, reach-analysis,
+honest-asking-when-impossible.
+
+- **Canonical:** CP-04 (NEW). Pick-place cell that fits in 2×2m
+  footprint, 4 cubes.
+- **Form gate:** every prim's xy bbox within [−1, 1] × [−1, 1];
+  ≥1 robot, ≥4 cubes, ≥1 bin; reach OK; controller installed.
+- **Function gate:** at t=120s — ≥3/4 cubes delivered to bin AND at
+  rest.
+- **The interesting probe:** does the agent ASK the user when the
+  footprint is too tight ("a 1.5m belt won't fit; do you want
+  fewer cubes or smaller cubes?") or silently force-fit a broken
+  layout? The honesty signal matters.
+
+### Step 4 — REORIENT-01: pose transformation
+
+Probes: sequential motion, intermediate-state design, pose-aware
+grip.
+
+- **Canonical:** CP-05 (NEW). Cube arrives lying on its side. An
+  intermediate flip-station (passive ramp or active actuator) flips
+  it upright. Two-robot or two-pick sequence: Robot 1 (or first
+  pick) places on flip-station; second pick takes the upright cube
+  to destination.
+- **Form gate:** intermediate flip-station present; ≥2 picks;
+  cube starts non-upright (orientation explicitly set).
+- **Function gate:** at t=120s — cube in destination AND
+  |cube.up_vector · world_up| > 0.95 (~within 18° of upright) AND
+  at rest.
+- **Hardest of the four canonicals.** May need new tooling for
+  the flip-station physics. Design discussion needed before
+  implementing.
+
+### Step 5 — MULTIMODAL-01: sketch input
+
+Probes: input-pipeline breadth, modality-parser.
+
+- **Acknowledged not ready** — modality-parser doesn't exist.
+- When the parser ships: it takes a 2D sketch (PNG/JPG), produces a
+  structured spec (rooms, walls, robot positions, intent). Spec
+  pipes into the existing canonical+task pattern.
+- Out of scope for this roadmap. Build steps 1-4 first; multi-modal
+  is purely additive.
+
+---
+
+## Execution order across sessions
+
+The roadmap is multi-session work. The next session should do
+Phase 0 autonomously, then check in.
+
+### Phase 0 — Foundation (AUTONOMOUS)
+
+Four sub-phases. Each ends with a commit + smoke-test pass + push to
+`anton`. STOP between sub-phases if any smoke-test fails. Do not
+combine.
+
+#### 0.1 — Scrub `/mnt/shared_data` ghost
+
+**Where it lives:**
 ```
 grep -c '/mnt/shared_data' workspace/audit.jsonl
 grep -rn '/mnt/shared_data' workspace/knowledge/ 2>/dev/null
 grep -rn '/mnt/shared_data' workspace/turn_snapshots/ 2>/dev/null | head
 ```
 
-For `workspace/audit.jsonl` (read-only history): redact in place.
-Replace the path with `<sanitized-asset-path>` everywhere. Use a
-single `sed -i` pass + a count-after grep to confirm.
+**Action:** in-place redact path → `<sanitized-asset-path>` in
+audit.jsonl + knowledge/*.jsonl. Delete any ChromaDB index
+directories under `workspace/` that depend on these (typically
+`workspace/tool_index/`, `workspace/knowledge_index/` —
+service rebuilds them on next startup from sanitized sources).
 
-For `workspace/knowledge/*.jsonl`: same — these are RAG-indexed by
-ChromaDB so the ghost must die there too.
+**Leave alone:** two intentional references in `tool_executor.py`
+(`_LULA_LIB_PATHS` fallback + comment). They are robotics-search
+paths, not asset paths the agent emits.
 
-After redaction, rebuild any ChromaDB index that depends on these.
-Look for `workspace/tool_index/` or `workspace/knowledge_index/` —
-delete and let next service-startup rebuild from scratch.
-
-There are also two existing references inside
-`service/isaac_assist_service/chat/tools/tool_executor.py` (in a
-comment + as an `_LULA_LIB_PATHS` entry). These are intentional
-fallback search paths — leave them alone unless you can confirm they
-also leak into agent context.
-
-### Success criterion
-
+**Success criterion:** after redaction,
 ```
 grep -rn '/mnt/shared_data' workspace/ docs/ scripts/ exts/ | wc -l
 ```
+prints ≤2 (only post-mortem doc that *describes* the past failure).
 
-Should print a small number (≤2 — only the post-mortem doc that
-*describes* the past failure). Must NOT include audit.jsonl,
-knowledge/*.jsonl, or any indexed source.
+**Commit + push to `anton`.** STOP if hits exceed ~500 in any one
+file (write a blocker doc, ask).
 
-### Commit
+#### 0.2 — Slim CP-01 + CP-02 `thoughts`
 
-```
-workspace+knowledge: scrub /mnt/shared_data ghost from audit.jsonl + RAG corpus
+**Why:** thoughts carry implementation rationale ("cuRobo's
+_DOWN_Q_BASE constant", "settling state 8 ticks") that's HOW our
+code works, not WHAT the agent should do. Dilutes attention.
 
-Yesterday's VR-19 run hit a stale Kimate-machine path
-(/mnt/shared_data/isaac-sim-assets-complete-5.0.0/...) that the agent
-grabbed from somewhere in our context plumbing — likely the
-ChromaDB-indexed audit.jsonl or RAG corpus. Path doesn't exist here,
-so every Franka import via run_usd_script failed.
+**Action:** edit `workspace/templates/CP-01.json` and `CP-02.json`
+thoughts field. Keep WHAT-to-do, WHY for non-obvious choices,
+failure-modes-of-this-pattern. Cut implementation rationale,
+code-derivable numbers, historical context. Aim ≈50% word reduction.
 
-Redacted N occurrences in audit.jsonl, M in knowledge/*.jsonl. Tool
-and template-retrieval ChromaDB collections cleared so they rebuild
-on next service start.
-
-Two references in tool_executor.py (_LULA_LIB_PATHS fallback + one
-comment) are intentional and untouched.
-```
-
----
-
-## Phase 2 — Slim CP-01 + CP-02 `thoughts` (~30 min)
-
-### Why
-
-The user observed that `thoughts` in canonical templates carry
-implementation rationale ("cuRobo's _DOWN_Q_BASE constant",
-"settling state 8 ticks", "fingertips at 0.94 - 0.105 = 0.835") that
-is HOW our code works, not WHAT the agent should do. It dilutes
-attention payload. This was bundled into yesterday's verifier-rebuild
-and got reverted with everything else. Now do it as an isolated
-change with a smoke-test.
-
-### Action
-
-Edit `workspace/templates/CP-01.json` and `CP-02.json` thoughts
-fields.
-
-Keep:
-- WHAT the agent should do that isn't obvious from `code`
-- WHY for the non-obvious choices (one short sentence each)
-- Failure-mode-of-this-pattern lessons
-
-Cut:
-- Implementation rationale of our internals
-- Numerical specifics that come straight from `code`
-- Historical context ("verified end-to-end with Anton 2026-05-06" —
-  that's what `verified_date` and `verified_metrics` are for)
-
-Aim for ≈50% reduction in word count without losing actionable info.
-
-### Smoke test
-
+**Smoke test:**
 ```
 cd /home/anton/projects/Omniverse_Nemotron_Ext
-# Make sure uvicorn + Isaac Sim are up first
 python scripts/qa/run_cp01.py
-# In Isaac Sim viewport: Stop, then Play.
-# Verify: 4 cubes spawn on belt, all 4 land in bin within 60s.
-# Then for CP-02:
 python scripts/qa/run_cp02.py
-# In Isaac Sim: Stop, Play.
-# Verify: cube traverses Conv1 → Robot1 → Conv2 → Robot2 → Bin.
 ```
+Both must run clean (build phase). Visual cube-delivery verification
+deferred to user; note that explicitly in commit message.
 
-If you cannot do the visual verification yourself (you usually
-can't), that's fine — write the script result + a short note "ran
-clean, agent-side scripted output matches CP-01 expectations" in the
-commit message. The user will visual-verify in their own pass; if
-something regressed they'll roll back.
+**Commit + push.** STOP if either script regresses.
 
-### Commit
+#### 0.3 — Verifier smoke-test framework
 
-```
-templates: slim CP-01 + CP-02 thoughts to agent-actionable rules
+**Why:** yesterday's verifier work failed because we wired changes
+in without isolation. Build the test scaffolding FIRST, before any
+verifier change. Future strengthening can regression-test against
+this.
 
-Per Anton's 2026-05-07 observation: thoughts field carried
-implementation rationale (cuRobo internals, finger geometry,
-settling-tick counts) that dilutes attention payload. Sliced to:
-WHAT the agent should do, WHY for non-obvious choices, and
-failure-mode-of-this-pattern lessons. ~50% word reduction.
+**Action:** create `scripts/qa/verifier_smoke_tests.py`. Three
+fixtures:
+- `known_good_cp01` — full CP-01 build via the existing script's
+  main coroutine.
+- `known_broken_no_velocity` — CP-01 build, then zero out
+  conveyor's `physxSurfaceVelocity:surfaceVelocity` attribute.
+- `known_broken_no_controller` — CP-01 build minus the final
+  `setup_pick_place_controller` call.
 
-scripts/qa/run_cp01.py + run_cp02.py ran clean post-edit (build
-phase). Visual cube-delivery verification deferred to user.
-```
+For each: call `execute_tool_call("verify_pickplace_pipeline", {
+stages: [...], cube_path: "/World/Cube_1" })`, capture result,
+print fixture × pipeline_ok × len(issues) table.
 
----
+This phase EXPOSES that current production verifier is form-shallow
+— known-broken scenes pass `pipeline_ok=true` because the verifier
+doesn't yet check conveyor activity or controller presence. That's
+intentional — the smoke-test framework becomes the regression
+boundary the next verifier-strengthening session targets.
 
-## Phase 3 — Verifier smoke-test framework (~1.5 h)
+**Success criterion:** `python scripts/qa/verifier_smoke_tests.py`
+exits 0 with the table printed.
 
-### Why
+**Commit + push.** STOP on Python exception or Kit crash.
 
-Yesterday's verifier work failed because we wired strengthened
-checks into `verify_pickplace_pipeline` without first having a
-known-good and known-broken scene to validate against. Build the
-framework now. Future verifier changes can run against it before
-touching production.
+#### 0.4 — VR-19 v2 success criterion (doc only)
 
-This phase does NOT change the production verifier. It only adds
-test infrastructure.
+**Why:** yesterday's reverted dual-gate is the design intent.
+Re-introduce as documentation now; the code work follows in Phase 1.
 
-### Action
+**Action:** edit `docs/qa/tasks/VR-19.md`. Replace the success
+criterion section with form (≥counts, topological bridge, reach,
+controller installed) AND function (cube xy ∈ Station_C bbox at
+t=60s, z within tolerance, at rest). Both required. Add an
+agent-discipline note: "if verify fails, surface issues honestly —
+do not silently rebuild from scratch."
 
-Create `scripts/qa/verifier_smoke_tests.py`:
-
-1. Imports `execute_tool_call` and `kit_tools` like
-   `scripts/qa/run_cp01.py` does.
-2. Defines two scene-fixture functions:
-   - `build_known_good_cp01()` — invokes CP-01's tool-call sequence
-     by running scripts/qa/run_cp01.py as a subprocess, OR by
-     importing and calling its main coroutine.
-   - `build_known_broken_no_conveyor_velocity()` — same as above
-     but immediately after, sets the conveyor's `surfaceVelocity`
-     attribute to (0,0,0) via a `run_usd_script`-style direct kit
-     call. This simulates the "agent built a Cube prim and called it
-     conveyor without applying surface velocity" failure mode.
-   - `build_known_broken_no_controller()` — builds CP-01 minus the
-     final `setup_pick_place_controller` call.
-3. For each fixture, calls `execute_tool_call("verify_pickplace_pipeline", {...})` with the right stages
-   args and captures the result.
-4. Asserts:
-   - known_good → `pipeline_ok=true`, `issues=[]` (or empty)
-   - known_broken_no_velocity → `pipeline_ok=false` AND issues
-     mention either "reach" or "handoff" depending on what the
-     current verify checks. Note: production verify doesn't yet
-     check conveyor activity — so for a no-velocity scene, current
-     verify might still return ok. Document this as expected; the
-     framework still asserts that BUILDING the broken scene was
-     successful, even if the assertion on issues will be added when
-     the strengthened verifier lands.
-   - known_broken_no_controller → same nuance.
-5. Prints concrete PASS/FAIL summary per fixture with the exact
-   issues list.
-
-Important: this framework should EXPOSE that the current verifier
-is form-shallow — i.e., known-broken scenes return ok on shallow
-checks. That's the case the next verifier-rebuild session needs to
-fix. The smoke-test then becomes the regression boundary.
-
-### Success criterion
-
-```
-python scripts/qa/verifier_smoke_tests.py
-```
-
-Runs to completion (no Python exceptions, no Kit crashes), prints a
-table of fixture-name × pipeline_ok × len(issues), and exits 0.
-
-The output should make it OBVIOUS to a future reader that
-known-broken scenes pass the current shallow verifier (which is the
-known weakness). That's intentional — this is the framework that
-proves it.
-
-### Commit
-
-```
-scripts: verifier smoke-test framework (known-good CP-01 + 2 known-broken)
-
-Adds scripts/qa/verifier_smoke_tests.py. Three scene fixtures:
-- known_good_cp01 (full CP-01 build)
-- known_broken_no_conveyor_velocity (CP-01 with surfaceVelocity zero)
-- known_broken_no_controller (CP-01 minus setup_pick_place_controller)
-
-Each runs verify_pickplace_pipeline against the built scene and
-captures the result. Future verifier-strengthening changes (form
-checks for conveyor activity, controller installation, cube-source
-bridge) can be regression-tested against these fixtures before
-touching production.
-
-Demonstrates that current production verifier is form-shallow —
-known-broken scenes pass. Intentional surface — this is the
-boundary the next verifier-rebuild session targets.
-```
-
----
-
-## Phase 4 — VR-19 v2 success criterion (doc only, ~30 min)
-
-### Why
-
-Yesterday's VR-19.md was rewritten to require form + function dual
-gate. Got reverted with everything else. Re-introduce as
-documentation only. No code changes. The spec serves as design
-intent for the eventual verifier+simulate work.
-
-### Action
-
-Edit `docs/qa/tasks/VR-19.md`. Replace the success-criterion section
-with:
-
-```markdown
-**Success criterion — form AND function, both required.**
-
-A scene that passes one but not the other fails the task. Both
-gates below must pass.
-
-### FORM (necessary conditions on the built scene)
-
-1. ≥2 robots, ≥2 conveyors, ≥3 stations, ≥1 cube
-2. Path from A to C is topologically bridged: every gap between
-   source-of-cube and destination is either covered by a conveyor
-   with active surface velocity (PhysxSurfaceVelocityAPI applied
-   AND non-zero velocity) OR within reach of a robot doing
-   pick-place between stages.
-3. Each robot reachable to BOTH its pick AND its place target
-   (≤ 0.855m horizontal for Franka).
-4. Each robot has a controller installed (setup_pick_place_controller
-   call). Without it the robot is a static prop.
-
-### FUNCTION (operational test)
-
-The cube's world position at t = 60s after Stop+Play must satisfy:
-
-- cube.x ∈ Station_C.bbox.x_range
-- cube.y ∈ Station_C.bbox.y_range
-- cube.z ≥ Station_C.bbox.z_min - 0.10m (didn't fall through)
-- |cube.velocity| < 0.05 m/s (came to rest)
-
-Form-pass without function-pass = "looks correct, doesn't function"
-— the canonical failure VR-19 catches.
-
-Function-pass without form-pass = teleport hack — also fail.
-
-### Agent-discipline note
-
-If you build something that fails verify, surface the issues
-honestly. Do NOT silently rebuild the scene from scratch — that's
-thrash, not reasoning. Acknowledge the specific issue, fix the
-specific cause, re-verify.
-```
-
-Keep the rest of VR-19.md as-is. This is a doc-only edit.
-
-### No smoke-test required
-
-It's a markdown file. Confirm with `git diff docs/qa/tasks/VR-19.md`
+**No smoke test.** It's a markdown file. Confirm with `git diff`
 that the change is what you intended.
 
-### Commit
+**Commit + push.** No code changes.
 
-```
-docs: VR-19 success criterion — form + function dual gate (spec, no code)
+#### After Phase 0: report and check in
 
-Re-introduces yesterday's reverted form+function dual-gate design
-as documentation only. No code or tool changes. The spec serves as
-target design for the eventual verifier+simulate rebuild.
+Compose ≤200 words to the user covering:
+- 4 sub-phase commit hashes + smoke-test outcomes
+- `/mnt/shared_data` count before/after, files touched
+- thoughts-slim subjective notes — anything cut where you weren't
+  sure, so user can spot-check
+- smoke-test framework fixture results
+- proposed next direction (Phase 1.1 verifier strengthening?
+  Pro+thinking experiment first? Move to Step 2?)
 
-Both gates must pass: form (≥counts, topological bridge, reach,
-controller installed) AND function (cube ends in Station_C bbox at
-t=60s, came to rest, didn't fall through).
-
-Adds an explicit agent-discipline note: if verify fails, surface
-issues honestly — don't rebuild from scratch.
-```
+Then STOP. Wait for user.
 
 ---
 
-## After autonomous block: report back
+### Phase 1 — VR-19 verifier rebuild + agent-eval (CHECK IN BEFORE STARTING)
 
-When all four phases land cleanly, write a single message to the
-user (≤ 200 words) covering:
+**Why check-in:** verifier rebuild touches production code.
+Yesterday's mistakes were here. Confirm direction with user before
+this work.
 
-1. **Phases done** — 4 commit hashes, smoke-test results per phase.
-2. **`/mnt/shared_data` cleanup specifics** — count before/after,
-   files touched, what was sanitized vs left alone.
-3. **Thoughts-slim subjective notes** — anything you cut and
-   weren't 100% sure was safe to remove (so user can spot-check).
-4. **Smoke-test framework usage** — one-liner for the user to use it
-   next time.
-5. **What next session should decide on** — e.g., "Pro+thinking
-   experiment? Verifier rebuild now that smoke-tests exist? Move to
-   step 2 of the 5-step plan (sortering)?"
+#### 1.1 — Strengthen `verify_pickplace_pipeline`
 
-Don't push to fork. Don't open PR. Just commit + push to anton.
+Add three form-checks to the existing handler, ONE AT A TIME, each
+smoke-tested via `verifier_smoke_tests.py` before the next:
 
-## What to do if the autonomous block can't be completed
+1. **`conveyor_active`** — for every handoff_gap > 0.30m, look for a
+   prim with `PhysxSurfaceVelocityAPI` applied AND non-zero velocity
+   whose bbox xy intersects the segment between place and pick.
+   Without it the cube is stranded.
+2. **`controller_installed`** — for each unique robot in stages,
+   check `builtins` for a per-robot pick-place subscription
+   (`_curobo_pp_sub_<tag>`, etc.). Without it the robot is a static
+   prop.
+3. **`cube_source_bridged`** — if `cube_path` given, the cube must
+   either be at the first pick zone xy (within 0.20m) OR be on an
+   active conveyor that bridges into it.
 
-If Phase 1 fails (audit.jsonl scrub broke something or path is in
-too many places to safely batch-redact):
-- Stop. Don't continue with Phase 2-4.
-- Write `docs/specs/2026-05-08-blocker.md` with concrete output.
-- Wait.
+After each check is added, re-run smoke tests. Expected:
+- known_good: `pipeline_ok=true`, issues=[]
+- known_broken_no_velocity: `pipeline_ok=false` with a
+  conveyor_active issue (after check 1 lands)
+- known_broken_no_controller: `pipeline_ok=false` with a
+  controller_installed issue (after check 2 lands)
 
-If any phase's smoke-test fails:
-- `git reset --hard HEAD~1` (un-commit that phase)
-- Stop. Don't continue.
-- Write the blocker doc.
-- Wait.
+**One commit per check.** STOP on any smoke-test regression.
 
-If you hit a model timeout or service crash:
-- Stop. Don't relaunch services aggressively. Wait.
+#### 1.2 — `simulate_traversal_check` (new tool)
 
-## Success looks like
+Add as new handler. Schema in `tool_schemas.py`. Add to
+`_ALWAYS_TOOLS`. Action: stop timeline, capture cube initial pos,
+play for `duration_s` of sim time (default 60), capture final
+pos+velocity, compare to target bbox. Return success=true only if
+inside target xy AND above target floor minus tolerance AND at rest.
 
-- 4 commits on `feat/live-progress-ui`, pushed to `anton`
-- All 4 commits' smoke-tests passed concretely (with numbers in
-  commit messages)
-- One short report to user
-- Repo state strictly better than starting state
-- No regressions to CP-01 or CP-02 (their scripts still pass 4/4
-  cubes-in-bin)
-- The user picks up next session knowing exactly where to go
+Extend smoke-test framework with:
+- `known_good_cp01` → simulate_traversal_check from cube to bin
+  → success=True
+- `known_broken_no_controller` → success=False (cube doesn't move)
+
+**Important:** in smoke tests use `duration_s=30` to halve sim
+time. Default 60 stays for production calls.
+
+**STOP** if any smoke-test fails or Kit crashes.
+
+#### 1.3 — Run VR-19 v2 (Flash, thinking-off — current config)
+
+Now we have working verifiers + sanitized data + slimmed templates.
+Re-run VR-19 against the same Gemini config that failed yesterday.
+Capture concretely:
+- Did the agent call `verify_pickplace_pipeline`? (yes/no, with
+  args)
+- Did it call `simulate_traversal_check`? (yes/no, with args)
+- Did it use `/mnt/shared_data`? Should be no after Phase 0.1.
+- Did it use `robot_wizard` or `run_usd_script` for Franka import?
+- Form gate result (pipeline_ok)
+- Function gate result (success from simulate)
+
+**Two outcomes:**
+- **Both gates pass** → form+function architecture works. Move to
+  Step 2.
+- **Either gate fails** → user decides whether to try
+  Pro+thinking-on (Phase 1.4) before declaring agent-reasoning is
+  the bottleneck.
+
+#### 1.4 — Pro+thinking-on experiment (only if 1.3 fails)
+
+Set:
+- `LLM_MODE=cloud`
+- `CLOUD_MODEL_NAME=gemini-3-pro-preview`
+- `GEMINI_EXPOSE_THOUGHTS=1`
+
+Re-run VR-19. Capture the same data as 1.3.
+
+If Pro+thinking passes where Flash failed: bottleneck was reasoning
+budget, not architecture. Plan accordingly. If Pro+thinking still
+fails: agentic-iteration over verify-feedback is structurally bad.
+Pivot to template-instantiation pattern (see post-mortem).
+
+---
+
+### Phase 2 — SORT-01 (CHECK IN BEFORE STARTING)
+
+#### 2.1 — Design discussion
+
+Decide with user: is colour routing a controller-arg
+(`color_routing={"red": "/World/RedBin", "blue": "/World/BlueBin"}`
+extending `setup_pick_place_controller`) or a typed-resolver
+(`resolve_color_routing` that the agent uses to parameterise two
+controller calls)?
+
+Either is defensible. The arg is simpler; the resolver is more
+composable but adds complexity.
+
+#### 2.2 — Build CP-03 deterministic canonical
+
+NEW canonical template + script. Pattern from CP-02 + add:
+- Two cubes with distinct colours (apply different visual + physics
+  materials).
+- Two bins.
+- Per-cube destination based on colour.
+
+**Smoke test:** `python scripts/qa/run_cp03.py` builds the scene;
+user visual-verifies red→red, blue→blue.
+
+**Commit + push.**
+
+#### 2.3 — Write `docs/qa/tasks/SORT-01.md`
+
+Form gate: ≥2 differently-coloured cubes, ≥2 bins (one per colour),
+≥1 robot, ≥1 conveyor; controllers installed; bins reach-OK.
+Function gate: at t=90s, every red cube in red_bin xy, every blue
+cube in blue_bin xy, all at rest.
+
+#### 2.4 — Run SORT-01 agent-eval + analyse
+
+Same approach as VR-19. Capture concrete data. Honest pass/fail.
+
+---
+
+### Phase 3 — CONSTRAINT-01 (CHECK IN BEFORE STARTING)
+
+Same shape as Phase 2. Build CP-04 first (compact 2×2m cell).
+Smoke-test deterministically. Write CONSTRAINT-01 task spec with
+form (footprint bound + counts) + function (≥3/4 delivered).
+Run agent-eval. Probe: does the agent ask when constraints are
+infeasible, or silently force-fit?
+
+---
+
+### Phase 4 — REORIENT-01 (CHECK IN BEFORE STARTING)
+
+Hardest. Build CP-05 (intermediate flip-station). May need new
+tooling for the flip-station mechanism. Design discussion with user
+first. Then deterministic, smoke-test, agent-eval.
+
+Function gate: cube in destination AND
+|cube.up_vector · world_up| > 0.95 AND at rest.
+
+---
+
+### Phase 5 — MULTIMODAL-01 (deferred)
+
+Add when modality-parser exists.
+
+---
+
+## Hard constraints (apply to ALL phases)
+
+- ONE substantive change per commit. Smoke-test between.
+- Concrete numbers in commit messages ("CP-01 4/4 cube delivery"
+  not "looks good").
+- Stop on smoke-test failure. `git reset --hard HEAD~1` that
+  phase. Write `docs/specs/<date>-blocker.md` with concrete output
+  + what was tried. Wait.
+- Don't push to `fork` or k3street. Working branch + `anton` only.
+  PR #89 is untouchable.
+- Don't touch the orchestrator outside Phase 1.x scope.
+- After every phase that has a check-in marked: write ≤200 word
+  report, STOP, wait.
+- If Kit crashes, services hang, or data is in unsafe shape: STOP.
+  Don't relaunch aggressively. Don't improvise. Write blocker.
+  Wait.
+
+---
+
+## Done conditions
+
+**Per-step done:** the canonical CP-N is verified deterministically
+AND the task spec exists AND at least one agent-eval has been run
+with honest pass/fail recorded.
+
+**Roadmap done:** all four agent-evals (VR-19, SORT-01,
+CONSTRAINT-01, REORIENT-01) have been run with results captured.
+The form+function dual-gate architecture either works (>50% pass
+rate across the four) or has been honestly declared
+model-limited and pivoted to template-instantiation.
+
+**The user-visible outcome:** Anton can type a free-form
+single-paragraph prompt for any of the four task shapes and get a
+working scene from Isaac Assist. That's the test.
+
+---
+
+## Failure handling
+
+- Phase 0 sub-phase smoke-test fails → roll back the commit, write
+  blocker doc, wait.
+- Phase 1.1 strengthening fails CP-01 verification → the new check
+  is too strict for the canonical. Revert it. Tighten the check
+  rule (e.g. raise threshold) before re-trying.
+- Phase 1.3 VR-19 fails on agent run with stale `/mnt/shared_data`
+  appearing → Phase 0.1 was incomplete. Stop. Hunt the remaining
+  source. Don't run agent-evals again until clean.
+- Phase 2-4 canonical fails to deliver via deterministic script →
+  the canonical itself has a bug (not the agent). Fix in CP-N
+  before writing any task spec.
+- Any phase produces results that contradict prior runs → don't
+  paper over. Write the contradiction in the report. The user
+  resolves.
+
+---
+
+## Notes for the agent picking this up
+
+You are Claude. You have these tendencies the user has called out:
+- declaring success early (count tool calls = "it worked")
+- lumping multiple changes together (yesterday's cascade)
+- skipping smoke-tests under time pressure
+- talking while doing instead of doing then talking
+
+The plan above is structured to make those harder. The smoke-tests,
+one-thing-per-commit rule, and STOP-on-failure conditions are not
+process theatre — they exist because they prevent the failure modes
+that actually happened yesterday. Respect them.
+
+When in doubt: stop and ask. Costs less than rolling back a broken
+PR or crashing Isaac Sim.
