@@ -85,7 +85,7 @@ async def queue_exec_patch(code: str, description: str = "") -> Dict[str, Any]:
     return result
 
 
-async def exec_sync(code: str, timeout: float = 30) -> Dict[str, Any]:
+async def exec_sync(code: str, timeout: float = 300) -> Dict[str, Any]:
     """
     Execute Python code synchronously on Kit's main thread.
     Returns {"success": bool, "output": str}.

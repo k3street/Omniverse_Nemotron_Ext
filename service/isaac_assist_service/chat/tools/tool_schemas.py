@@ -2533,16 +2533,31 @@ ISAAC_SIM_TOOLS = [
             "type": "function",
             "function": {
                 "name": "create_conveyor",
-                "description": "Turn an existing mesh prim into a conveyor belt using OmniGraph with the OgnIsaacConveyor node. Includes a GPU/Fabric physics check (conveyors require CPU physics).",
+                "description": "Build a working conveyor belt — applies the PhysX 3-API combo (CollisionAPI + kinematic RigidBodyAPI + PhysxSurfaceVelocityAPI) so dynamic bodies on top get carried in the velocity direction at sim Play. Auto-creates a Cube belt geometry at `prim_path` if the prim doesn't exist yet (using `size` + `position`); applies the physics on top of existing geometry if it does. Single-shot: agents do NOT need to create_prim first.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "prim_path": {"type": "string", "description": "USD path to the conveyor mesh prim"},
-                        "speed": {"type": "number", "description": "Belt speed in m/s. Default: 0.5"},
+                        "prim_path": {"type": "string", "description": "USD path for the belt prim, e.g. '/World/ConveyorBelt'. Created if missing."},
+                        "size": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "description": "Belt geometry [length, width, height] in meters. Used only when auto-creating the prim. Default: [1.0, 0.3, 0.05].",
+                        },
+                        "position": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "description": "World [x, y, z] of the belt center. Used only when auto-creating the prim. Default: [0, 0, 0].",
+                        },
+                        "surface_velocity": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "description": "Belt surface velocity vector [vx, vy, vz] in m/s, local-space. Carries dynamic bodies riding on top. Preferred over speed+direction.",
+                        },
+                        "speed": {"type": "number", "description": "Legacy: scalar belt speed in m/s. Used only if `surface_velocity` is not provided. Default: 0.5"},
                         "direction": {
                             "type": "array",
                             "items": {"type": "number"},
-                            "description": "Belt direction vector [x, y, z]. Default: [1, 0, 0]",
+                            "description": "Legacy: belt direction unit vector [x, y, z]. Used with `speed` if `surface_velocity` is not provided. Default: [1, 0, 0]",
                         },
                     },
                     "required": ["prim_path"],
