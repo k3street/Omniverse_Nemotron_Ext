@@ -129,7 +129,25 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "run_usd_script",
-            "description": "Execute arbitrary Python code inside the Kit process. Use for complex operations that don't fit other tools. Code has access to omni.usd, pxr, omni.kit.commands, and all Isaac Sim APIs. Requires user approval before execution.",
+            "description": (
+                "LAST-RESORT escape hatch — runs arbitrary Python in Kit. "
+                "Use this ONLY when NO specific tool covers the operation. "
+                "Before reaching for it, check whether one of these covers your "
+                "need: create_prim (primitive prims), create_conveyor (PhysX "
+                "conveyor with surface-velocity), create_bin (multi-prim bin), "
+                "robot_wizard (robot import + drives + collisions), "
+                "setup_pick_place_controller (pickplace runtime), "
+                "apply_api_schema (UsdPhysics/PhysxSchema APIs), teleport_prim "
+                "(move existing prim), set_attribute (any attribute on any prim), "
+                "set_joint_targets / set_drive_gains (articulation control). "
+                "When you DO use run_usd_script, you bypass our physics-API "
+                "validators and become responsible for authoring RigidBodyAPI, "
+                "CollisionAPI, MassAPI, ConveyorBeltAPI etc. correctly — easy to "
+                "miss, common cause of 'cube falls through ground at Play'. "
+                "If you find yourself writing the same run_usd_script pattern "
+                "twice, that's a signal a dedicated tool is missing — surface "
+                "it to the user instead of silently expanding the script."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
