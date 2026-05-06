@@ -32,6 +32,7 @@ class Config:
         self.api_key_anthropic = os.environ.get("ANTHROPIC_API_KEY", "")
         self.api_key_openai    = os.environ.get("OPENAI_API_KEY", "")
         self.api_key_grok      = os.environ.get("GROK_API_KEY") or os.environ.get("XAI_API_KEY", "")
+        self.api_key_moonshot  = os.environ.get("MOONSHOT_API_KEY", "")
 
         # ── LiveKit ──────────────────────────────────────────────────────────
         self.livekit_url        = os.environ.get("LIVEKIT_URL", "")

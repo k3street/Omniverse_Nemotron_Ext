@@ -41,6 +41,14 @@ def get_llm_provider():
             base_url=PROVIDER_URLS["grok"],
         )
 
+    if mode == "moonshot":
+        _require(config.api_key_moonshot, "MOONSHOT_API_KEY", mode)
+        return OpenAICompatProvider(
+            api_key=config.api_key_moonshot,
+            model=config.cloud_model_name,
+            base_url=PROVIDER_URLS["moonshot"],
+        )
+
     if mode == "cloud":
         _require(config.api_key_gemini, "API_KEY_GEMINI / GEMINI_API_KEY", mode)
         return GeminiProvider(

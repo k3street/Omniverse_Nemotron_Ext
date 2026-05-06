@@ -63,7 +63,7 @@ async def pull_local_model(req: ModelPullRequest, background_tasks: BackgroundTa
 
 # ── Quick LLM mode switch ────────────────────────────────────────────────────
 
-VALID_MODES = ("local", "cloud", "anthropic", "openai", "grok")
+VALID_MODES = ("local", "cloud", "anthropic", "openai", "grok", "moonshot")
 
 
 class ModeSwitchRequest(BaseModel):

@@ -19,6 +19,7 @@ SYSTEM_PROMPT = (
 PROVIDER_URLS = {
     "openai": "https://api.openai.com/v1/chat/completions",
     "grok":   "https://api.x.ai/v1/chat/completions",
+    "moonshot": "https://api.moonshot.ai/v1/chat/completions",  # Kimi K2 — global endpoint, NOT api.moonshot.cn
     "ollama_openai": "http://localhost:11434/v1/chat/completions",  # Ollama OpenAI-compat endpoint
 }
 
@@ -56,6 +57,10 @@ class OpenAICompatProvider:
             "max_tokens": 4096,
             "temperature": 0.2,
         }
+        # Kimi K2.6 (Moonshot) rejects any temperature != 1 with 400.
+        # Detect by model name and override.
+        if self.model and ("kimi-k2.6" in self.model or "kimi-k2-thinking" in self.model):
+            payload["temperature"] = 1.0
 
         # Add tools if provided
         tools = context.get("tools")
@@ -80,7 +85,18 @@ class OpenAICompatProvider:
                     try:
                         choice = data["choices"][0]
                         message = choice["message"]
-                        reply = message.get("content") or ""
+                        # Kimi K2.6 / k2-thinking return chain-of-thought
+                        # in `reasoning_content` and the actual JSON/answer
+                        # in `content`. But for some queries content can be
+                        # empty while the substantive output is in
+                        # reasoning_content. Fall back so callers (intent
+                        # router, negotiator, distiller) that parse JSON
+                        # don't get an empty string.
+                        reply = (
+                            message.get("content")
+                            or message.get("reasoning_content")
+                            or ""
+                        )
                         raw_tool_calls = message.get("tool_calls")
                     except (KeyError, IndexError):
                         return LLMResponse(text="Parsing error: " + json.dumps(data))

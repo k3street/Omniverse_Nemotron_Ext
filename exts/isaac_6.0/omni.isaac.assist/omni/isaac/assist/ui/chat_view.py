@@ -265,6 +265,8 @@ class ChatViewWindow(ui.Window):
         self._scale = SCALE_STEPS[self._scale_index]
         self._scaled_labels: List[Tuple[ui.Label, int]] = []
         self._scale_popup: Optional[ui.Window] = None
+        self._model_popup: Optional[ui.Window] = None
+        self._current_model_label: str = "?"
         self._scale_lbl: Optional[ui.Label] = None
         # Debounce: rapid A+/A- clicks coalesce into one apply task.
         self._scale_apply_task: Optional[asyncio.Task] = None
@@ -484,6 +486,88 @@ class ChatViewWindow(ui.Window):
                 pass
 
     # ═══════════════════════════════════════════════════════════════════════
+    # Model switcher (M button)
+    # ═══════════════════════════════════════════════════════════════════════
+    # Each entry: (label_shown_to_user, llm_mode, cloud_or_local_model_name)
+    # Free / cheap options first; high-cost models last so users notice.
+    _MODEL_OPTIONS = (
+        ("Gemini 3 Flash",          "cloud",     "gemini-3-flash-preview"),
+        ("Gemini 2.5 Flash",        "cloud",     "gemini-2.5-flash"),
+        ("Gemini 2.5 Pro",          "cloud",     "gemini-2.5-pro"),
+        ("Kimi K2 (Moonshot)",      "moonshot",  "kimi-k2-0905-preview"),
+        ("Claude Opus 4.7",         "anthropic", "claude-opus-4-7"),
+        ("Claude Sonnet 4.6",       "anthropic", "claude-sonnet-4-6"),
+        ("Local Qwen3.5 35B",       "local",     "qwen3.5:35b"),
+    )
+
+    def _open_model_popup(self):
+        """Floating popup with model presets. Click → switch via /settings/."""
+        if self._model_popup is not None:
+            try:
+                self._model_popup.visible = not self._model_popup.visible
+                return
+            except Exception:
+                self._model_popup = None
+        self._model_popup = ui.Window(
+            "Model",
+            width=260,
+            height=24 + 26 * len(self._MODEL_OPTIONS) + 16,
+            flags=ui.WINDOW_FLAGS_NO_RESIZE | ui.WINDOW_FLAGS_NO_SCROLLBAR,
+        )
+        with self._model_popup.frame:
+            with ui.VStack(spacing=2):
+                ui.Spacer(height=4)
+                ui.Label(
+                    f"Current: {self._current_model_label}",
+                    style={"color": COL_TEXT_DIM, "font_size": self._sz(10)},
+                    height=14,
+                )
+                ui.Spacer(height=4)
+                for label, mode, model in self._MODEL_OPTIONS:
+                    ui.Button(
+                        label,
+                        height=22,
+                        clicked_fn=lambda m=mode, n=model, l=label: self._switch_model(m, n, l),
+                        style={"font_size": self._sz(11)},
+                    )
+
+    def _switch_model(self, mode: str, model_name: str, label: str):
+        """POST {LLM_MODE, CLOUD_MODEL_NAME or LOCAL_MODEL_NAME} to /settings/."""
+        import asyncio
+        import aiohttp
+        async def _do_switch():
+            key = "LOCAL_MODEL_NAME" if mode == "local" else "CLOUD_MODEL_NAME"
+            settings = {"LLM_MODE": mode, key: model_name}
+            url = "http://localhost:8000/api/v1/settings/"
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        url,
+                        json={"settings": settings},
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.status == 200:
+                            self._current_model_label = label
+                            self.btn_model.tooltip = f"Current: {label}"
+                        else:
+                            try:
+                                logger.warning(
+                                    f"[ModelSwitch] HTTP {resp.status}: {await resp.text()}"
+                                )
+                            except Exception: pass
+            except Exception as e:
+                logger.warning(f"[ModelSwitch] error: {e}")
+            # Close popup either way
+            if self._model_popup is not None:
+                try: self._model_popup.visible = False
+                except Exception: pass
+
+        try:
+            asyncio.ensure_future(_do_switch())
+        except Exception as e:
+            logger.warning(f"[ModelSwitch] dispatch failed: {e}")
+
+    # ═══════════════════════════════════════════════════════════════════════
     # UI construction
     # ═══════════════════════════════════════════════════════════════════════
     def _build_ui(self):
@@ -543,6 +627,14 @@ class ChatViewWindow(ui.Window):
                 height=22,
                 clicked_fn=self._toggle_livekit,
                 style={"font_size": 11},
+            )
+            self.btn_model = ui.Button(
+                "M",
+                width=24,
+                height=22,
+                clicked_fn=self._open_model_popup,
+                style={"font_size": 11},
+                tooltip="Switch LLM model / provider",
             )
 
     def _build_chat_area(self):
