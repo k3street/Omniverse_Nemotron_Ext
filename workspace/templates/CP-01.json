@@ -28,11 +28,13 @@
   "verified_date": "2026-05-06",
   "verified_metrics": {
     "controller": "curobo",
-    "cubes_delivered": "4/4 (last verified run)",
+    "cubes_delivered": "4/4 verified twice end-to-end",
     "pick_success_rate_steady": "~90% per attempt over 10 trials",
-    "belt_motion": "visible between picks",
+    "belt_motion": "visible between picks (cubes start outside reach, belt carries each into pick zone)",
     "motion_quality": "smooth, mid-waypoints prevent wrist-cube collisions on descent",
     "cycle_time_per_cube": "~5-7s",
+    "home_return": "robot returns to HOME_Q after all cubes processed",
+    "tools_only": "no run_usd_script — pure tool calls verified end-to-end",
     "open_known_issues": "small inter-run variance in trajectory path (cuRobo seed randomness with num_ik_seeds=4); occasional grip slip ~10% of attempts"
   },
   "benchmark_vs_alternatives": {

@@ -1783,8 +1783,12 @@ def _gen_add_reference(args: Dict) -> str:
 def _gen_apply_api_schema(args: Dict) -> str:
     schema = args['schema_name']
     prim_path = args['prim_path']
-    # Map common schema names to their pxr module + class
+    # Map common schema names to their pxr module + class. Names without
+    # a module prefix and with PhysX/Usd-prefix variants both supported.
+    # Kit's ApplyAPISchemaCommand fallback fails silently on PhysxSchema
+    # entries, so each PhysxSchema must have an explicit map entry.
     SCHEMA_MAP = {
+        # UsdPhysics
         "PhysicsRigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
         "UsdPhysics.RigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
         "RigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
@@ -1793,8 +1797,23 @@ def _gen_apply_api_schema(args: Dict) -> str:
         "CollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
         "PhysicsMassAPI": ("pxr.UsdPhysics", "MassAPI"),
         "UsdPhysics.MassAPI": ("pxr.UsdPhysics", "MassAPI"),
-        "PhysxDeformableBodyAPI": ("pxr.PhysxSchema", "PhysxDeformableBodyAPI"),
+        "MassAPI": ("pxr.UsdPhysics", "MassAPI"),
+        "PhysicsArticulationRootAPI": ("pxr.UsdPhysics", "ArticulationRootAPI"),
+        "ArticulationRootAPI": ("pxr.UsdPhysics", "ArticulationRootAPI"),
+        "PhysicsMaterialAPI": ("pxr.UsdPhysics", "MaterialAPI"),
+        "PhysicsMeshCollisionAPI": ("pxr.UsdPhysics", "MeshCollisionAPI"),
+        "PhysicsFilteredPairsAPI": ("pxr.UsdPhysics", "FilteredPairsAPI"),
+        # PhysxSchema (Kit fallback fails silently for these)
+        "PhysxRigidBodyAPI": ("pxr.PhysxSchema", "PhysxRigidBodyAPI"),
         "PhysxCollisionAPI": ("pxr.PhysxSchema", "PhysxCollisionAPI"),
+        "PhysxSurfaceVelocityAPI": ("pxr.PhysxSchema", "PhysxSurfaceVelocityAPI"),
+        "PhysxTriggerAPI": ("pxr.PhysxSchema", "PhysxTriggerAPI"),
+        "PhysxArticulationAPI": ("pxr.PhysxSchema", "PhysxArticulationAPI"),
+        "PhysxJointAPI": ("pxr.PhysxSchema", "PhysxJointAPI"),
+        "PhysxDeformableBodyAPI": ("pxr.PhysxSchema", "PhysxDeformableBodyAPI"),
+        "PhysxParticleSystemAPI": ("pxr.PhysxSchema", "PhysxParticleSystemAPI"),
+        "PhysxContactReportAPI": ("pxr.PhysxSchema", "PhysxContactReportAPI"),
+        "PhysxVehicleAPI": ("pxr.PhysxSchema", "PhysxVehicleAPI"),
     }
     # Post-apply verification: check GetAppliedSchemas() contains the schema
     # token. Without this, the Kit command path silently accepts invalid
@@ -29694,6 +29713,16 @@ def _on_step(dt):
                 S["picked_path"] = picked; _a_picked.Set(picked)
                 S["settle_ticks"] = 8  # ~0.13s @ 60Hz, enough for cube friction-stop
                 S["mode"] = "settling"
+            elif (len(S["delivered"]) + len(S.get("failed", set()))) >= len(SOURCE_PATHS) and not S.get("home_returned"):
+                # All cubes processed → return arm to home pose so it doesn't
+                # idle at the drop position with arm extended awkwardly.
+                # Set home_returned flag so we don't loop on it.
+                _grip_open()
+                art_ctrl.apply_action(ArticulationAction(
+                    joint_positions=_HOME_Q[:7].astype(np.float64),
+                    joint_indices=np.arange(7),
+                ))
+                S["home_returned"] = True
             return
 
         if S["mode"] == "settling":
@@ -29810,6 +29839,7 @@ def _curobo_pp_reset_hook():
         S["picked_path"] = None
         S["segments"] = None; S["seg_idx"] = 0; S["seg_start_t"] = None
         S["cubes"] = 0; S["errors"] = 0; S["ticks"] = 0
+        S["home_returned"] = False
         _a_cubes.Set(0); _a_err.Set(0); _a_tick.Set(0)
         _a_last_err.Set(""); _a_picked.Set(""); _a_phase.Set("wait_sensor")
         _resume_belt()
