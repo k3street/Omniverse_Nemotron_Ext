@@ -29308,17 +29308,36 @@ EE_OFFSET = np.array({_json.dumps(list(ee_offset))}, dtype=np.float32)
 EE_INIT_H_OVERRIDE = {end_effector_initial_height!r}
 PLANNING_OBSTACLES = {_obs}
 
-# Cleanup prior subscriptions + stale Scene Reset hooks
-_SUB_ATTR = "_curobo_pp_sub"
+# Per-robot subscription + scene-reset name. Earlier hardcoded
+# "_curobo_pp_sub" / "curobo_pp" meant a second install (e.g. for a
+# second robot in a multi-station pipeline) tore down the first
+# robot's controller. Now each install scopes its names to its
+# ROBOT_PATH so multiple curobo controllers coexist.
+_ROBOT_TAG = "{robot_path}".replace("/", "_").strip("_")
+_SUB_ATTR = "_curobo_pp_sub_" + _ROBOT_TAG
+_MGR_HOOK_NAME = "curobo_pp_" + _ROBOT_TAG
+
+# Tear down ONLY this robot's prior subscription. Other robots' subs
+# are left alone so a re-install of robot A doesn't kill robot B.
 _old = getattr(builtins, _SUB_ATTR, None)
 if _old is not None:
     try: _old.unsubscribe()
     except Exception: pass
     try: delattr(builtins, _SUB_ATTR)
     except Exception: pass
+# Stale per-robot tl-callback cleanup (keep narrow)
 for _a in list(vars(builtins).keys()):
-    if _a.startswith(("_native_pp_", "_pick_place_", "_sensor_gated_", "_spline_pp_",
-                       "_diffik_pp_", "_osc_pp_", "_curobo_pp_tl_")):
+    if _a == "_curobo_pp_tl_" + _ROBOT_TAG:
+        _s = getattr(builtins, _a, None)
+        if _s:
+            try: _s.unsubscribe()
+            except Exception: pass
+        try: delattr(builtins, _a)
+        except Exception: pass
+# Other-controller-flavor cleanup (different mode for same robot)
+for _a in list(vars(builtins).keys()):
+    if _a.startswith(("_native_pp_", "_pick_place_", "_sensor_gated_",
+                       "_spline_pp_", "_diffik_pp_", "_osc_pp_")) and _ROBOT_TAG in _a:
         _s = getattr(builtins, _a, None)
         if _s:
             try: _s.unsubscribe()
@@ -29327,9 +29346,14 @@ for _a in list(vars(builtins).keys()):
         except Exception: pass
 _mgr_pre = getattr(builtins, "_scene_reset_manager", None)
 if _mgr_pre is not None:
-    for _hn in ("native_pp", "spline_pp", "diffik_pp", "osc_pp", "curobo_pp"):
-        try: _mgr_pre.unregister(_hn)
+    # Only unregister this robot's hooks across modes
+    for _mode in ("native_pp", "spline_pp", "diffik_pp", "osc_pp", "curobo_pp"):
+        try: _mgr_pre.unregister(_mode + "_" + _ROBOT_TAG)
         except Exception: pass
+    # Also unregister the legacy un-tagged "curobo_pp" if present
+    # (from pre-multi-robot installs)
+    try: _mgr_pre.unregister("curobo_pp")
+    except Exception: pass
 
 stage = omni.usd.get_context().get_stage()
 tl = omni.timeline.get_timeline_interface()
@@ -29343,10 +29367,11 @@ except Exception: pass
 _physics_sim_view = SimulationManager.get_physics_sim_view()
 
 world = World.instance() or World()
-franka = Franka(prim_path=ROBOT_PATH, name="curobo_pp_franka")
+_FRANKA_NAME = "curobo_pp_franka_" + _ROBOT_TAG
+franka = Franka(prim_path=ROBOT_PATH, name=_FRANKA_NAME)
 try: world.scene.add(franka)
 except Exception:
-    _existing = world.scene.get_object("curobo_pp_franka")
+    _existing = world.scene.get_object(_FRANKA_NAME)
     if _existing is not None: franka = _existing
 
 try:
@@ -29847,7 +29872,7 @@ def _curobo_pp_reset_hook():
     except Exception as _re:
         print(f"(curobo_pp reset exception: {{_re}})"); return False
 
-getattr(builtins, _MGR_ATTR).register("curobo_pp", _curobo_pp_reset_hook)
+getattr(builtins, _MGR_ATTR).register(_MGR_HOOK_NAME, _curobo_pp_reset_hook)
 
 print(json.dumps({{
     "ok": True,
