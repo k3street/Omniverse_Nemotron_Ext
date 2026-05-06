@@ -3560,7 +3560,7 @@ async def _handle_verify_pickplace_pipeline(args: Dict) -> Dict:
     stages_json = _j.dumps(stages)
     code = f"""\
 import omni.usd, json
-from pxr import UsdGeom, Usd
+from pxr import UsdGeom, Usd, PhysxSchema
 
 stage = omni.usd.get_context().get_stage()
 cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
@@ -3615,6 +3615,52 @@ def _closest_point_on_bbox(path, ref):
 def _dist(a, b):
     return ((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2) ** 0.5
 
+def _bbox_xy_of(prim_or_path):
+    \"\"\"Return ((xmin,ymin),(xmax,ymax)) of prim's world bbox xy, or None.\"\"\"
+    if isinstance(prim_or_path, str):
+        p = stage.GetPrimAtPath(prim_or_path)
+    else:
+        p = prim_or_path
+    if not p or not p.IsValid():
+        return None
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty():
+        return None
+    mn = b.GetMin(); mx = b.GetMax()
+    return ((float(mn[0]), float(mn[1])), (float(mx[0]), float(mx[1])))
+
+def _active_conveyors():
+    \"\"\"Discover prims with PhysxSurfaceVelocityAPI applied AND non-zero velocity.
+    Returns list of (path, ((xmin,ymin),(xmax,ymax)), speed_m_per_s).\"\"\"
+    out = []
+    for prim in stage.Traverse():
+        if not prim.HasAPI(PhysxSchema.PhysxSurfaceVelocityAPI):
+            continue
+        api = PhysxSchema.PhysxSurfaceVelocityAPI(prim)
+        attr = api.GetSurfaceVelocityAttr()
+        v = attr.Get() if attr else None
+        if v is None:
+            continue
+        speed = (float(v[0])**2 + float(v[1])**2 + float(v[2])**2) ** 0.5
+        if speed < 1e-6:
+            continue
+        bb = _bbox_xy_of(prim)
+        if bb is None:
+            continue
+        out.append((str(prim.GetPath()), bb, speed))
+    return out
+
+def _segment_overlaps_bbox_xy(a, b, bbox, samples=20):
+    \"\"\"Sample segment a->b in xy; True if any sample lies inside bbox.\"\"\"
+    (xmin, ymin), (xmax, ymax) = bbox
+    for k in range(samples + 1):
+        t = k / samples
+        x = a[0] + (b[0] - a[0]) * t
+        y = a[1] + (b[1] - a[1]) * t
+        if xmin <= x <= xmax and ymin <= y <= ymax:
+            return True
+    return False
+
 results = []
 issues = []
 prev_place = None
@@ -3654,15 +3700,32 @@ for i, s in enumerate(stages):
         stage_result['handoff_gap_to_prev'] = gap
         if gap > 3.0:  # very loose — flag obviously broken handoffs
             issues.append(f'stage {{i}}: handoff gap from previous place to this pick is {{gap:.2f}}m — is there a conveyor bridging?')
+        if gap > 0.30:
+            # conveyor_active check: must have an active conveyor whose xy bbox
+            # intersects the place->pick segment, otherwise the cube is stranded.
+            actives = _active_conveyors()
+            bridge = None
+            for cpath, cbbox, cspd in actives:
+                if _segment_overlaps_bbox_xy(prev_place, pkpos, cbbox):
+                    bridge = (cpath, cspd); break
+            stage_result['conveyor_active'] = bridge is not None
+            if bridge is None:
+                issues.append(f'[conveyor_active] stage {{i}}: no active conveyor bridges the {{gap:.2f}}m place->pick handoff (looking for any prim with PhysxSurfaceVelocityAPI applied AND non-zero velocity whose xy bbox intersects the segment)')
+            else:
+                stage_result['bridging_conveyor'] = bridge[0]
+                stage_result['bridging_conveyor_speed'] = bridge[1]
     prev_place = plpos
     results.append(stage_result)
 
-ok = all(s.get('reachable', False) for s in results) and not any('handoff' in i for i in issues)
+ok = (all(s.get('reachable', False) for s in results)
+      and all(s.get('conveyor_active', True) for s in results)
+      and not any('handoff' in i for i in issues)
+      and not any(i.startswith('[conveyor_active]') for i in issues))
 out = {{
     'stages': results,
     'issues': issues,
     'pipeline_ok': ok,
-    'rationale': 'Per-stage reach distance compared to robot workspace radius; handoff gaps flagged when >3m from previous place to next pick.',
+    'rationale': 'Per-stage reach distance compared to robot workspace radius; handoff gaps >0.30m must be spanned by an active conveyor (PhysxSurfaceVelocityAPI + non-zero velocity); >3m gap flagged loosely.',
 }}
 print(json.dumps(out))
 """
