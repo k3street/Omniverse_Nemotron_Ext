@@ -251,25 +251,55 @@ _PXR_MODULES = ("UsdGeom", "UsdPhysics", "UsdLux", "UsdShade", "Sdf", "Gf", "Phy
 
 
 def _check_missing_pxr_imports(code: str) -> List[PatchIssue]:
+    """Catch UsdGeom/UsdPhysics/etc. used without importing from pxr.
+
+    Uses AST parsing rather than regex because regex over the raw source
+    matches occurrences inside string literals — false-positiving on
+    error-message strings like "Create geometry first (UsdGeom.Cube.Define
+    or similar)" inside create_conveyor's generated code, blocking a
+    canonical pattern that's actually correct. AST sees only real
+    Attribute / Call nodes referencing a module, not string content.
+    """
+    import ast as _ast
+    try:
+        tree = _ast.parse(code)
+    except SyntaxError:
+        # If the code doesn't parse, leave the syntax error to other
+        # validators / Kit's own runtime — we can't reliably analyse it.
+        return []
+
+    imported: set = set()
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.ImportFrom) and node.module == "pxr":
+            for alias in node.names:
+                imported.add(alias.name)
+        elif isinstance(node, _ast.Import):
+            for alias in node.names:
+                imported.add(alias.name)
+                if alias.asname:
+                    imported.add(alias.asname)
+
+    used: set = set()
+    pxr_set = set(_PXR_MODULES)
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Attribute) and isinstance(node.value, _ast.Name):
+            if node.value.id in pxr_set:
+                used.add(node.value.id)
+        elif isinstance(node, _ast.Call) and isinstance(node.func, _ast.Name):
+            if node.func.id in pxr_set:
+                used.add(node.func.id)
+        elif isinstance(node, _ast.Name) and node.id in pxr_set:
+            used.add(node.id)
+
     issues = []
-    for mod in _PXR_MODULES:
-        # Match qualified usage: <Module>.<anything> or <Module>(
-        usage_re = re.compile(r"\b" + mod + r"\s*[.(]")
-        # Match an import. Either `from pxr import ..., <Module>, ...`
-        # or `import pxr as ... ; pxr.<Module>` (rare but valid).
-        # We accept any line that has `from pxr import` and the module
-        # name as a token (allowing trailing comma / newline / paren).
-        import_re = re.compile(
-            r"from\s+pxr\s+import\b[^\n]*\b" + mod + r"\b"
-        )
-        if usage_re.search(code) and not import_re.search(code):
-            issues.append(PatchIssue(
-                severity="error",
-                rule="missing_import_" + mod.lower(),
-                message=f"Code references {mod} but does not import it from pxr. "
-                        f"Will fail with 'name {mod} is not defined'.",
-                fix_hint=f"Add 'from pxr import {mod}' (or extend an existing 'from pxr import ...' line).",
-            ))
+    for mod in sorted(used - imported):
+        issues.append(PatchIssue(
+            severity="error",
+            rule="missing_import_" + mod.lower(),
+            message=f"Code references {mod} but does not import it from pxr. "
+                    f"Will fail with 'name {mod} is not defined'.",
+            fix_hint=f"Add 'from pxr import {mod}' (or extend an existing 'from pxr import ...' line).",
+        ))
     return issues
 
 
