@@ -30832,6 +30832,18 @@ def _apply_arm_joints(q7):
     # (still-opening) positions kept overwriting the gripper-controller's
     # close target every physics tick → grip never reached close pose.
     q7_arr = np.asarray(q7, dtype=np.float64)[:7]
+    # NaN/Inf-safety: cuRobo's planner occasionally returns trajectories
+    # with NaN values under bad seeds (CP-09 stochastic-failure mode —
+    # cube velocity reaches 6118 m/s, position z=-23000m). Detect and
+    # skip rather than feed NaN to PhysX.
+    if not np.all(np.isfinite(q7_arr)):
+        S.setdefault("nan_skipped", 0)
+        S["nan_skipped"] += 1
+        try:
+            _a_last_err.Set(f"NaN trajectory skipped (n={{S['nan_skipped']}})")
+        except Exception:
+            pass
+        return
     art_ctrl.apply_action(ArticulationAction(
         joint_positions=q7_arr,
         joint_indices=np.arange(7),
