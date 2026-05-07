@@ -33,14 +33,22 @@ _KEEP_LAST_TOOL_RESULTS_FULL = int(os.environ.get("KEEP_LAST_TOOL_RESULTS_FULL",
 _COMPRESS_OUTPUT_MAX_CHARS = int(os.environ.get("COMPRESS_OUTPUT_MAX_CHARS", "600"))
 
 
+_TRUNCATION_MARKER = "...[truncated"  # Marker in already-compressed content
+
+
 def _compress_tool_result_content(content_str: str, max_output_chars: int = _COMPRESS_OUTPUT_MAX_CHARS) -> str:
     """Compress a JSON-stringified tool result. Drop the verbose `code`
     field (generated patch source), truncate `output` to max_output_chars,
-    keep success/error/type/queued/executed and small auxiliary fields."""
+    keep success/error/type/queued/executed and small auxiliary fields.
+
+    Idempotent: applying twice yields the same result as once. We detect
+    already-truncated content via the marker and skip re-truncation."""
     try:
         d = json.loads(content_str)
     except (json.JSONDecodeError, TypeError, ValueError):
-        # Non-JSON: just truncate raw
+        # Non-JSON: just truncate raw, but only if not already truncated
+        if _TRUNCATION_MARKER in content_str:
+            return content_str
         if len(content_str) > max_output_chars:
             return content_str[:max_output_chars] + f"...[truncated {len(content_str)} chars]"
         return content_str
@@ -51,10 +59,13 @@ def _compress_tool_result_content(content_str: str, max_output_chars: int = _COM
     for k in ("type", "success", "executed", "queued", "error", "description"):
         if k in d:
             compressed[k] = d[k]
-    # Truncate `output` if present
+    # Truncate `output` if present (idempotent: skip if already marked)
     if "output" in d:
         out_str = str(d["output"])
-        if len(out_str) > max_output_chars:
+        if _TRUNCATION_MARKER in out_str:
+            # Already compressed — keep as-is to avoid marker-doubling
+            compressed["output"] = out_str
+        elif len(out_str) > max_output_chars:
             compressed["output"] = (
                 out_str[:max_output_chars] + f"...[truncated {len(out_str)} chars]"
             )
