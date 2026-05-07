@@ -57,7 +57,23 @@ def _get_collection():
 
 
 def _build_index() -> None:
-    """Embed all templates' goal+tools text for retrieval."""
+    """Embed templates with goal + thoughts + tools_used for retrieval.
+
+    Calibration history (2026-05-08):
+        Original embed: `goal + tools_used` only
+            VR-19 prompt → CP-01 ranked above CP-02 (wrong; gap 0.006)
+            CP-01 and CP-02 have very similar tools_used → goal alone wasn't
+            enough signal to discriminate "single-station pick-place" from
+            "multi-station assembly line"
+        Adding `thoughts`:
+            CP-01 thoughts focus on single-robot mechanics (orientation,
+            settling, friction)
+            CP-02 thoughts focus on MULTI-ROBOT specifics ("Two robots
+            coexist...", "shared cube in source_paths", "explicit drop_target",
+            "two-robot orientation mirror")
+            These are highly discriminating tokens that match VR-19's "two
+            Franka robots" + "3-station" phrasing.
+    """
     docs, ids, metas = [], [], []
     for tf in sorted(_TEMPLATES_DIR.glob("*.json")):
         try:
@@ -67,8 +83,12 @@ def _build_index() -> None:
             continue
         tid = t.get("task_id", tf.stem)
         goal = t.get("goal", "")
+        thoughts = t.get("thoughts", "")
         tools = " ".join(t.get("tools_used", []))
-        doc = f"{goal}\n{tools}".strip()
+        # Order matters for embedding emphasis: goal first (highest weight
+        # for the user's prompt match), thoughts second (discriminating
+        # task-specific tokens), tools last (low-signal vocabulary).
+        doc = f"{goal}\n\n{thoughts}\n\n{tools}".strip()
         if not doc:
             continue
         docs.append(doc)
