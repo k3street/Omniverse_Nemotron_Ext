@@ -737,6 +737,8 @@ ISAAC_SIM_TOOLS = [
                     "xy_tolerance": {"type": "number", "description": "Extra xy slack on target bbox in meters. Default 0.0 (strict).", "default": 0.0},
                     "floor_tolerance": {"type": "number", "description": "Allowed z drop below target floor in meters (for end-of-run bounce). Default 0.10.", "default": 0.10},
                     "rest_speed_threshold": {"type": "number", "description": "Max speed in m/s to consider the cube at rest. Default 0.05.", "default": 0.05},
+                    "require_upright": {"type": "boolean", "description": "REORIENT-01: when true, success requires cube's local +Z dotted with world +Z >= upright_tolerance_dot at sim end (cube finishes upright, not on its side). Default false.", "default": False},
+                    "upright_tolerance_dot": {"type": "number", "description": "Min dot product of cube up vs world up (default 0.95 ≈ within 18° of vertical). Only used when require_upright=true.", "default": 0.95},
                 },
                 "required": ["cube_path", "target_path"],
             },

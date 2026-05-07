@@ -3870,6 +3870,8 @@ async def _handle_simulate_traversal_check(args: Dict) -> Dict:
     xy_tolerance = float(args.get("xy_tolerance", 0.0))
     floor_tolerance = float(args.get("floor_tolerance", 0.10))
     rest_speed = float(args.get("rest_speed_threshold", 0.05))
+    require_upright = bool(args.get("require_upright", False))
+    upright_tol = float(args.get("upright_tolerance_dot", 0.95))
 
     code = f"""\
 import omni.usd, omni.timeline, omni.kit.app, json, time as _t
@@ -3912,6 +3914,30 @@ duration_s = {duration_s}
 xy_tol = {xy_tolerance}
 floor_tol = {floor_tolerance}
 rest_speed = {rest_speed}
+require_upright = {require_upright}
+upright_tol = {upright_tol}
+
+def _world_up_dot(path):
+    \"\"\"Read prim's world rotation, return cube_up_vector · world_up.
+    Cube's local +Z transformed to world. Dot with world +Z gives the
+    'upright-ness' in [-1, 1] (1 = perfectly upright, -1 = upside-down,
+    0 = on its side).\"\"\"
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid():
+        return None
+    try:
+        xf = UsdGeom.Xformable(p)
+        m = xf.ComputeLocalToWorldTransform(0)
+        # world up vector after rotation = third column of rotation matrix
+        # (m * [0,0,1] direction; ignore translation)
+        col_z = (float(m[2][0]), float(m[2][1]), float(m[2][2]))
+        # Normalize (in case scale != 1)
+        n = (col_z[0]**2 + col_z[1]**2 + col_z[2]**2) ** 0.5
+        if n < 1e-9: return None
+        # Dot with world up (0,0,1) = z component normalized
+        return float(col_z[2] / n)
+    except Exception:
+        return None
 
 tl = omni.timeline.get_timeline_interface()
 app = omni.kit.app.get_app()
@@ -3963,7 +3989,14 @@ else:
     above_floor = (p_final is not None
                    and p_final[2] >= bb['min'][2] - floor_tol)
     at_rest = speed < rest_speed
-    success = bool(in_xy and above_floor and at_rest)
+
+    # Orientation check (REORIENT-01): cube's local +Z dotted with world +Z.
+    # 1.0 = perfectly upright; require_upright=True flips success to False
+    # if the dot < upright_tol (default 0.95 → within ~18° of vertical).
+    upright_dot = _world_up_dot(cube_path)
+    upright_ok = (not require_upright) or (upright_dot is not None and upright_dot >= upright_tol)
+
+    success = bool(in_xy and above_floor and at_rest and upright_ok)
 
     print(json.dumps({{
         'success': success,
@@ -3976,10 +4009,14 @@ else:
         'in_target_xy': in_xy,
         'above_floor': above_floor,
         'at_rest': at_rest,
+        'cube_upright_dot': upright_dot,
+        'upright_ok': upright_ok,
+        'require_upright': require_upright,
         'sim_t_reached': cur_t,
         'duration_s_requested': duration_s,
         'rest_speed_threshold': rest_speed,
         'floor_tolerance': floor_tol,
+        'upright_tolerance_dot': upright_tol,
     }}))
 """
     return await kit_tools.queue_exec_patch(code, "simulate_traversal_check")
