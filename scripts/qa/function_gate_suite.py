@@ -82,6 +82,14 @@ SUITE: List[Tuple[str, str, str, str, int, Dict, bool]] = [
     ("CP-09 (probe)",
      "workspace/templates/CP-09.json",
      "/World/Cube_1", "/World/TowerBase", 90, {}, False),
+    # CP-10 — 9-cube 3x3 grid palletizer (scaled CP-08).
+    ("CP-10",
+     "workspace/templates/CP-10.json",
+     "/World/Cube_1", "/World/Pallet", 90, {}, True),
+    # CP-11 — 8-cube pinwheel donut_3x3 palletizer.
+    ("CP-11",
+     "workspace/templates/CP-11.json",
+     "/World/Cube_1", "/World/Pallet", 90, {}, True),
 ]
 
 
