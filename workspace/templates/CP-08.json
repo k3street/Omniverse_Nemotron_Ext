@@ -1,0 +1,57 @@
+{
+  "task_id": "CP-08",
+  "goal": "Build a 2×2 grid palletizer: a Franka Panda picks 5cm cubes from a conveyor and stacks them in a 2×2 grid on top of a flat pallet behind the robot. Each cube goes to a DISTINCT drop position computed via compute_stack_placement (Tier A tool). First canonical demonstrating per-cube drop targeting via drop_targets={cube_path: [x,y,z]} on cuRobo controller.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "compute_stack_placement",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six 2x2-palletizer specifics for CP-08 (extends CP-01: orientation rule, CPU dynamics, sleepThreshold, rubber-on-cube, target_source='curobo' all inherited):\n1) Pallet replaces bin from CP-01: a flat 0.30x0.30x0.05m Cube at [0, -0.4, 0.775] (top z=0.80, bottom flush with table top z=0.75). No walls — open palletizing surface.\n2) compute_stack_placement(target='/World/Pallet', pattern='grid_2x2', n_items=4, cube_size=0.05, spacing=0.08, anchor='top') returns 4 positions: 2x2 grid centered on pallet xy, all at z=0.825 (= 0.80 top + 0.025 cube/2).\n3) drop_targets={cube_path: [x,y,z]} on setup_pick_place_controller routes each cube to its specific grid slot. cuRobo handler's _bin_drop_pos(cube_path) checks DROP_TARGETS dict first.\n4) Cube → slot mapping is by source_paths order: Cube_1 → grid[0], Cube_2 → grid[1], etc. Predictable for verification.\n5) Spacing 0.08m (vs cube_size 0.05m) leaves 0.03m gap between cubes — accommodates ~5° gripper alignment slop on each drop without colliding with already-placed neighbor.\n6) compute_stack_placement is a DESIGN-TIME tool: the 4 positions are computed once during canonical authoring and baked into the template. Template's `code` block hardcodes the result in drop_targets. Future canonical-executor enhancement may allow inline tool calls with result-passing (kcode-spec gap).",
+  "code": "# DomeLight + parent Xform + table (CP-01 inheritance)\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Franka — same pose as CP-01\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Conveyor (CP-01 inheritance)\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 4 cubes on conveyor at CP-01 positions\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Pallet — replaces CP-01's bin. Flat 0.30x0.30x0.05m at [0, -0.4, 0.775]\n# Cube primitive default size=2; scale=[0.15, 0.15, 0.025] → 0.30x0.30x0.05m\n# bbox: [-0.15, -0.55, 0.75] -> [0.15, -0.25, 0.80] (top flush at table top + 5cm)\ncreate_prim(prim_path=\"/World/Pallet\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.15, 0.15, 0.025])\napply_api_schema(prim_path=\"/World/Pallet\", schema_name=\"PhysicsCollisionAPI\")\n\n# Pick sensor (CP-01 inheritance)\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# cuRobo controller with drop_targets dict — each cube → specific grid slot.\n# Positions computed via:\n#   compute_stack_placement(target='/World/Pallet', pattern='grid_2x2',\n#                            n_items=4, cube_size=0.05, spacing=0.08, anchor='top')\n# Result baked here (canonical executor doesn't pass tool results between calls):\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Pallet\",\n    drop_targets={\n        \"/World/Cube_1\": [-0.04, -0.44, 0.825],\n        \"/World/Cube_2\": [ 0.04, -0.44, 0.825],\n        \"/World/Cube_3\": [-0.04, -0.36, 0.825],\n        \"/World/Cube_4\": [ 0.04, -0.36, 0.825],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Pallet\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [-1.4,  0.4, 0.835],
+      "/World/Cube_2": [-1.15, 0.4, 0.835],
+      "/World/Cube_3": [-0.9,  0.4, 0.835],
+      "/World/Cube_4": [-0.65, 0.4, 0.835]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.2, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/Pallet",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Pallet",
+    "duration_s": 90
+  },
+  "extends": "CP-01",
+  "extension_notes": "CP-08 introduces compute_stack_placement (Tier A tool) and drop_targets dict on setup_pick_place_controller. Same pick mechanics as CP-01 but bin → pallet, single drop_target → per-cube drop positions. Validates cuRobo handler's _bin_drop_pos(cube_path) DROP_TARGETS branch. Future variants: 8-cube 2-layer brick stack (layer_rotation_deg=90), 9-cube 3x3, mixed-SKU palletizer (cubes of different sizes — needs spacing tuning per cube).",
+  "failure_modes": [
+    "drop_targets keys not matching source_paths — _bin_drop_pos falls through to DEST_PATH bbox center, all 4 cubes go to pallet center → tower of 4 cubes (collision after 1st). Verify keys are exact /World/Cube_N matches.",
+    "Spacing too tight (e.g. 0.05m flush) — adjacent placement collides with already-placed cube during descent. Use 0.07-0.10m spacing for 5cm cubes.",
+    "Pallet not in planning_obstacles — cuRobo plans paths through pallet during transit. Add /World/Pallet to obstacles.",
+    "Manually computed drop_targets z forgetting cube_size/2 offset — cube spawns at pallet top z, gets pushed up by physics. Use anchor='top' which adds cube_size/2 automatically.",
+    "drop_targets passed to non-curobo target_source — currently only cuRobo handler supports DROP_TARGETS branch. Spline/native ignore it (silent fall-through to destination_path)."
+  ],
+  "verified_status": "build-spec-2026-05-07; form-gate verification pending; function-gate (4 cubes delivered to grid slots) pending physics test",
+  "compute_stack_placement_verified_2026_05_07": "Tool returned 4 positions matching the hardcoded drop_targets above. Computed via grid_2x2 anchor=top spacing=0.08."
+}
