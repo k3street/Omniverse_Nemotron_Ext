@@ -145,18 +145,24 @@ Each shipped canonical:
 | CP-05 | Reorient (passive flip) | ⚠️ probe | (prior) | physics tuning gap |
 | CP-06 | Franka + bundled PickPlaceController | 🛑 blocked | Sprint 1 | infra built; cube transport fails (FixedJoint missing). Postponed to Sprint 3. See `workspace/templates/CP-06.json#blocked`. |
 | CP-07 | 4× Franka factory (multi-robot scoping) | ✅ form-gate shipped | Sprint 1 | 127/127 build, 16 cubes + 4 conveyors via settle_state, pipeline_ok=True. Function-gate testing pending. |
-| CP-08 | 2x2 grid palletizer | ✅ form-gate shipped | Sprint 2 | First user of `compute_stack_placement` + `drop_targets` dict. 37/37 build, pipeline_ok=True. |
-| CP-09 | Graduated tower (5-cube column) | ✅ form-gate shipped | Sprint 2 | Vertical column-stacking; tallest target z=1.025m, EE_INITIAL_HEIGHT auto-clears at 1.225m. 43/43 build, pipeline_ok=True. |
-| CP-10..CP-38 | TBD | 📋 planned | — | — |
+| CP-08 | 2x2 grid palletizer | ✅ shipped | Sprint 2 | First user of `compute_stack_placement` + `drop_targets`. 37/37 build, form-gate ✓, function-gate ✓ on Cube_1. |
+| CP-09 | Graduated tower (5-cube column) | ⚠️ probe | Sprint 2 | Column-stack vertical motion. 43/43 build, form-gate ✓, function-gate stochastic (cuRobo seed × narrow placement margin). |
+| CP-10 | 3x3 grid palletizer (9 cubes) | ✅ form-gate shipped | Sprint 2 | Scales CP-08 pattern; 9-entry drop_targets dict, 67/67 build, form-gate ✓. |
+| CP-11 | Pinwheel palletizer (donut_3x3) | ✅ form-gate shipped | Sprint 2 | First user of compute_stack_placement v2's `donut_RxC` (8 cubes + center gap). 61/61 build, form-gate ✓. |
+| CP-12..CP-38 | TBD | 📋 planned | — | — |
 
-**2026-05-07 progress**:
-- **Phase A (settle_state)**: 9 atomic commits — replaced regex-based settle extraction with structural `settle_state` JSON field (kcode-spec sec 4 anti-fragility). CP-01..CP-05 migrated; CP-07 unblocked; CP-06 postponed.
-- **Phase B (Tier A tools)**:
-  - `compute_stack_placement(target_path, pattern, n_items, ...)` — pure-data placement computer. Supports `column` and `grid_RxC` patterns. Tier A tool — 7 canonicals depend.
-  - `setup_pick_place_controller(drop_targets={cube_path: [x,y,z]})` — cuRobo handler now supports per-cube drop positions. _compute_h1 considers all DROP_TARGETS z so EE clears tallest target.
-  - CP-08 (2x2 palletizer) and CP-09 (5-cube tower) ship form-gate-verified using both new pieces.
+**2026-05-07/2026-05-08 progress** — 19 atomic commits since structural work began. Smoke regression (6 fixtures) green throughout:
 
-Total: 13 atomic commits since structural work began. Smoke regression suite (6 fixtures) passes throughout.
+- **Phase A (settle_state)** — 9 commits. Replaced regex-based settle extraction with structural `settle_state` JSON field (kcode-spec sec 4 anti-fragility). CP-01..CP-05 migrated; CP-07 unblocked; CP-06 postponed.
+- **Phase B (Tier A tool + canonicals)** — 10 commits:
+  - **`compute_stack_placement` v1+v2** — pure-data placement computer. Patterns: `column`, `grid_RxC`, `donut_RxC` (RxC minus center). Tier A — 7 scenarios depend.
+  - **`drop_targets` dict in cuRobo handler** — per-cube drop position dispatch. Falls through to drop_target → DEST_PATH bbox center for unmapped cubes. `_compute_h1` extended to clear all targets.
+  - **4 new canonicals**: CP-08, CP-09, CP-10, CP-11 — all form-gate-verified, all using the new tool stack.
+  - **function_gate_suite** extended with CP-08 (expect_pass=True) and CP-09 (probe).
+
+**Function-gate observation**: stack-placement canonicals appear stochastic on cuRobo single-runs — consistent with T4-stochastic memory. Future work: N-of-M acceptance threshold + per-canonical seed-stability tuning.
+
+**Postponed (Sprint 3)**: CP-06 builtin handler (FixedJoint integration), `add_vision_classifier_gate` (Tier A #2 tool — 6 scenarios depend), per-cube cube_size for mixed-SKU palletizers.
 
 ## Source documents
 
