@@ -269,7 +269,48 @@ async def execute_template_verify(template: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-async def execute_template_canonical(template: Dict[str, Any]) -> Dict[str, Any]:
+def substitute_template_params(
+    code: str,
+    parameters: Dict[str, Any] | None,
+    overrides: Dict[str, Any] | None = None,
+) -> tuple[str, Dict[str, Any]]:
+    """T2 (parameterized canonicals) — substitute {{name}} placeholders in
+    a template's code field with values from parameters + overrides.
+
+    Returns (substituted_code, effective_params). effective_params lists
+    the values actually used (defaults + overrides) for transparency in
+    the directive shown to the LLM.
+
+    Backwards-compat: templates without `parameters` field or with no
+    placeholders in `code` are returned unchanged.
+
+    Future work: extract param values from user prompt via resolvers
+    (resolve_count_vagueness for n_cubes, resolve_robot_class for
+    robot_name, etc.). Today this just substitutes defaults.
+
+    Substitution is unconditional string replacement. Values are
+    str()-coerced. For lists/dicts, callers should serialize as JSON
+    in the parameters field if they want literal Python syntax, e.g.,
+    `"colors": "['red', 'blue']"` so substitution yields valid Python.
+    """
+    if not parameters:
+        return code, {}
+    eff = dict(parameters)
+    if overrides:
+        eff.update(overrides)
+    if not code:
+        return code, eff
+    out = code
+    for k, v in eff.items():
+        placeholder = "{{" + str(k) + "}}"
+        out = out.replace(placeholder, str(v))
+    return out, eff
+
+
+async def execute_template_canonical(
+    template: Dict[str, Any],
+    param_overrides: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     """Run a canonical template's `code` field as tool-call sequence.
 
     Returns:
@@ -285,13 +326,19 @@ async def execute_template_canonical(template: Dict[str, Any]) -> Dict[str, Any]
         DATA_HANDLERS, CODE_GEN_HANDLERS, execute_tool_call,
     )
 
-    code = template.get("code") or ""
+    raw_code = template.get("code") or ""
     task_id = template.get("task_id", "?")
-    if not code.strip():
+    if not raw_code.strip():
         return {
             "task_id": task_id, "n_calls": 0, "executed": [], "errors": ["empty code field"],
             "instantiated": False,
         }
+
+    # T2 parameter substitution — `{{name}}` placeholders → values from
+    # template's `parameters` field + caller's `param_overrides`.
+    code, effective_params = substitute_template_params(
+        raw_code, template.get("parameters"), param_overrides
+    )
 
     captured: List[tuple] = []  # list of (tool_name, kwargs)
 
@@ -352,6 +399,7 @@ async def execute_template_canonical(template: Dict[str, Any]) -> Dict[str, Any]
         "executed": executed,
         "errors": errors,
         "instantiated": True,
+        "effective_params": effective_params,
     }
 
 
