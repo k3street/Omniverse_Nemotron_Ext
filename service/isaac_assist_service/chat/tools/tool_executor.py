@@ -26885,6 +26885,8 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             planning_obstacles=args.get("planning_obstacles") or [],
             curobo_world_yml=args.get("curobo_world_yml"),
             color_routing=args.get("color_routing"),
+            require_upright=bool(args.get("require_upright", False)),
+            upright_dot_threshold=float(args.get("upright_dot_threshold", 0.85)),
         )
     if mode == "diffik":
         return _gen_pick_place_diffik(
@@ -29742,7 +29744,9 @@ def _gen_pick_place_curobo(robot_path, sensor_path, belt_path,
                            end_effector_initial_height=None,
                            planning_obstacles=None,
                            curobo_world_yml=None,
-                           color_routing=None):
+                           color_routing=None,
+                           require_upright=False,
+                           upright_dot_threshold=0.85):
     """GPU-accelerated global trajectory optimization via cuRobo MotionPlanner.
 
     **Unlocked 2026-04-21** — four breakthroughs:
@@ -30277,6 +30281,18 @@ def _cube_to_pick():
         if cp is None: continue
         if cp[2] < base_z - 0.30 or cp[2] > base_z + 0.50: continue
         if float(np.linalg.norm(cp[:2] - base_xy)) > 0.70: continue
+        # REORIENT-01 require_upright filter: skip cubes whose +Z axis
+        # isn't aligned with world up. Lets cube ride past pick zone on
+        # its side, hit a passive flip-wall, become upright, then pick.
+        if {require_upright!r}:
+            try:
+                _m = UsdGeom.Xformable(stage.GetPrimAtPath(sp)).ComputeLocalToWorldTransform(0)
+                _cz = (_m[2][0], _m[2][1], _m[2][2])
+                _cn = (_cz[0]**2 + _cz[1]**2 + _cz[2]**2) ** 0.5
+                _up_dot = float(_cz[2] / _cn) if _cn > 1e-9 else 0.0
+                if _up_dot < {upright_dot_threshold}: continue
+            except Exception:
+                continue
         cands.append((float(np.linalg.norm(cp[:2] - sxy)), sp))
     if not cands: return None
     cands.sort(); return cands[0][1]
