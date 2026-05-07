@@ -43,8 +43,10 @@ from service.isaac_assist_service.chat.tools.template_retriever import (
 )
 from service.isaac_assist_service.chat.canonical_instantiator import (
     execute_template_canonical, execute_template_verify,
-    ALLOWED_AFTER_INSTANTIATE,
+    settle_after_canonical, ALLOWED_AFTER_INSTANTIATE,
 )
+import json as _json
+from pathlib import Path
 from service.isaac_assist_service.chat.tools import kit_tools
 
 
@@ -154,13 +156,40 @@ async def fix_low_confidence_match():
     }
 
 
+async def fix_cp04_compact_via_settle():
+    """CP-04 has cubes near the robot; setup_pick_place_controller fires
+    _pause_belt within ~0.25s of physics ticks during install, mutating
+    surface velocity to 0. Without settle, verify's cube_source_bridged
+    check fails. With settle (stop timeline + restore authored values),
+    verify should return pipeline_ok=true."""
+    await kit_tools.exec_sync(RESET_CODE, timeout=10)
+    cp04 = _json.loads((REPO_ROOT / "workspace/templates/CP-04.json").read_text())
+    inst = await execute_template_canonical(cp04)
+    if not inst.get("instantiated"):
+        return False, {"reason": "CP-04 instantiate failed", "errors": inst.get("errors", [])[:3]}
+    settle = await settle_after_canonical(cp04)
+    ver = await execute_template_verify(cp04)
+    return bool(ver.get("pipeline_ok")) and len(ver.get("issues", [])) == 0, {
+        "instantiated_ok": f"{inst.get('n_ok')}/{inst.get('n_calls')}",
+        "settled_cubes": settle.get("n_cubes_restored", 0),
+        "settled_conveyors": settle.get("n_conveyors_restored", 0),
+        "pipeline_ok": ver.get("pipeline_ok"),
+        "issues": len(ver.get("issues", [])),
+        "footprint_violations": len(ver.get("issues", []) and
+                                    [i for i in ver.get("issues", [])
+                                     if i.startswith("[footprint_bounds]")]),
+    }
+
+
 FIXTURES = [
-    ("confident_match_cp02",   fix_confident_match_cp02,
+    ("confident_match_cp02",       fix_confident_match_cp02,
      "expect: confident → instantiate + verify returns pipeline_ok=True"),
-    ("ambiguous_match",        fix_ambiguous_match,
+    ("ambiguous_match",            fix_ambiguous_match,
      "expect: NOT confident (small margin) → falls back to few-shot"),
-    ("low_confidence_match",   fix_low_confidence_match,
+    ("low_confidence_match",       fix_low_confidence_match,
      "expect: NOT confident (low similarity) → falls back to few-shot"),
+    ("cp04_compact_via_settle",    fix_cp04_compact_via_settle,
+     "expect: CP-04 (compact, cubes near robot) builds + settles + verifies"),
 ]
 
 
