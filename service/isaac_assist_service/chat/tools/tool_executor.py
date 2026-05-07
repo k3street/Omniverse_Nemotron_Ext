@@ -26764,6 +26764,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             end_effector_initial_height=args.get("end_effector_initial_height"),
             spline_waypoint_dt=args.get("spline_waypoint_dt"),
             grip_style=args.get("grip_style", "fixed_joint"),
+            color_routing=args.get("color_routing"),
         )
     if mode == "curobo":
         return _gen_pick_place_curobo(
@@ -28970,7 +28971,8 @@ def _gen_pick_place_spline(robot_path, sensor_path, belt_path,
                            drop_target, ee_offset,
                            end_effector_initial_height=None,
                            spline_waypoint_dt=None,
-                           grip_style="friction"):
+                           grip_style="friction",
+                           color_routing=None):
     """Deterministic CPU-only pick-place: pre-plan 6-waypoint Cartesian
     trajectory per cube, warm-start IK chain for consistent redundancy
     branch, interpolate via scipy.CubicSpline (or numpy linear fallback).
@@ -29031,6 +29033,11 @@ EE_OFFSET = np.array({_json.dumps(list(ee_offset))}, dtype=np.float32)
 EE_INIT_H_OVERRIDE = {end_effector_initial_height!r}
 WAYPOINT_DT = {_json.dumps(spline_waypoint_dt) if spline_waypoint_dt else 'None'}
 GRIP_STYLE = {grip_style_norm!r}
+# SORT-01 enabler: same color_routing dispatch as cuRobo target_source.
+# When non-empty, _bin_drop_pos selects destination per cube based on
+# the cube's Semantics_color (or Semantics_class) class_name. Falls
+# through to DEST_PATH when no entry matches.
+COLOR_ROUTING = {_json.dumps(color_routing or {})}
 
 # ── Clean up any prior subscription + stale Scene Reset Manager hooks ─
 _SUB_ATTR = "_spline_pp_sub"
@@ -29176,20 +29183,54 @@ def _world_pos(path):
     t = UsdGeom.Xformable(p).ComputeLocalToWorldTransform(0).ExtractTranslation()
     return np.array([float(t[0]), float(t[1]), float(t[2])])
 
-_BIN_DROP_CACHE = [None]  # freeze first valid bin_drop (avoid bbox drift as bin fills)
-def _bin_drop_pos():
+def _cube_semantic_class(prim_path):
+    \"\"\"Return cube's Semantics_color/colour/class data (lowercase) or None.
+    Used by color_routing dispatch.\"\"\"
+    try:
+        from pxr import Semantics
+    except Exception:
+        return None
+    p = stage.GetPrimAtPath(prim_path)
+    if not p or not p.IsValid():
+        return None
+    for sname in ("Semantics_color", "Semantics_colour", "Semantics_class"):
+        try:
+            sem = Semantics.SemanticsAPI.Get(p, sname)
+            if not sem: continue
+            data_attr = sem.GetSemanticDataAttr()
+            if data_attr and data_attr.IsValid():
+                v = data_attr.Get()
+                if v: return str(v).lower()
+        except Exception:
+            continue
+    return None
+
+def _destination_path_for(cube_path):
+    \"\"\"Color-routing dispatch — returns destination prim per cube's
+    Semantics class. Falls back to DEST_PATH when no routing match.\"\"\"
+    if COLOR_ROUTING and cube_path:
+        col = _cube_semantic_class(cube_path)
+        if col and col in COLOR_ROUTING:
+            return COLOR_ROUTING[col]
+    return DEST_PATH
+
+# Per-color drop-position cache (avoid recomputing bbox per pick)
+_BIN_DROP_CACHE = {{}}
+def _bin_drop_pos(cube_path=None):
     if DROP_TARGET is not None:
         return np.array(DROP_TARGET, dtype=np.float32)
-    if _BIN_DROP_CACHE[0] is not None:
-        return _BIN_DROP_CACHE[0]
-    if DEST_PATH:
-        p = stage.GetPrimAtPath(DEST_PATH)
-        if p and p.IsValid():
-            bb = UsdGeom.Imageable(p).ComputeWorldBound(0, UsdGeom.Tokens.default_).ComputeAlignedRange()
-            mn, mx = bb.GetMin(), bb.GetMax()
-            pos = np.array([(mn[0]+mx[0])/2, (mn[1]+mx[1])/2, float(mx[2]) + 0.05], dtype=np.float32)
-            _BIN_DROP_CACHE[0] = pos
-            return pos
+    dest = _destination_path_for(cube_path) if cube_path else DEST_PATH
+    if not dest:
+        return None
+    if dest in _BIN_DROP_CACHE:
+        return _BIN_DROP_CACHE[dest]
+    p = stage.GetPrimAtPath(dest)
+    if p and p.IsValid():
+        bb = UsdGeom.Imageable(p).ComputeWorldBound(0, UsdGeom.Tokens.default_).ComputeAlignedRange()
+        mn, mx = bb.GetMin(), bb.GetMax()
+        pos = np.array([(mn[0]+mx[0])/2, (mn[1]+mx[1])/2, float(mx[2]) + 0.05], dtype=np.float32)
+        _BIN_DROP_CACHE[dest] = pos
+        return pos
     return None
 
 def _compute_h1():
@@ -29457,7 +29498,8 @@ def _on_step(dt):
 
         if S["mode"] == "planning":
             cube_pos = _world_pos(S["picked_path"])
-            drop_pos = _bin_drop_pos()
+            # Pass cube_path so COLOR_ROUTING can dispatch per cube
+            drop_pos = _bin_drop_pos(S["picked_path"])
             if cube_pos is None or drop_pos is None:
                 _record_err(RuntimeError("planning: missing cube or drop position"))
                 S["mode"] = "wait_sensor"; S["picked_path"] = None
