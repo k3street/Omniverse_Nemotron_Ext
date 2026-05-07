@@ -23507,24 +23507,25 @@ else:
         #   col index 0..cols-1, with center at (cols-1)/2.0
         #   row index 0..rows-1, with center at (rows-1)/2.0
         positions = []
+        # For column mixed-SKU: z stacks cumulatively. For grid mixed-SKU
+        # multi-layer: z increment per layer assumes layer height = current
+        # item's size (genuinely ambiguous for mixed grid; documented).
+        is_column = (rows == 1 and cols == 1)
+        floor_z = target_bot_z if anchor == 'inside_floor' else target_top_z
         for i in range(n_items):
             layer = i // per_layer
             slot = i % per_layer
             row, col = layer_slots[slot]
             x = cx + (col - (cols - 1) * 0.5) * spacing
             y = cy + (row - (rows - 1) * 0.5) * spacing
-            # z depends on this item's own size (mixed-SKU support).
-            # Anchor: first item's z = base_z. Multi-layer: each layer adds
-            # cube_size (or this item's size if cube_sizes provided — single-layer
-            # mixed-SKU is the supported pattern; multi-layer + mixed-SKU gives
-            # uneven heights and is best used with care).
             this_size = cube_sizes[i] if cube_sizes else cube_size
             if cube_sizes:
-                # Per-item z anchored at base_z; size affects center height
-                # (z = base_z if first item, else base_z + layer*cube_size adjusted).
-                # For single-layer (per_layer >= n_items), all on base layer:
-                z = (target_bot_z if anchor == 'inside_floor' else target_top_z) + this_size * 0.5
-                z += layer * this_size  # multi-layer assumes uniform within layer
+                if is_column:
+                    # Cumulative stack: sum of all lower cubes + half this one
+                    z = floor_z + sum(cube_sizes[:i]) + this_size * 0.5
+                else:
+                    # Grid mixed-SKU multi-layer: uniform-within-layer assumption
+                    z = floor_z + this_size * 0.5 + layer * this_size
             else:
                 z = base_z + layer * cube_size
             yaw = (layer * layer_rotation_deg) % 360.0
