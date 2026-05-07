@@ -691,23 +691,31 @@ class ChatOrchestrator:
         #     reference; agent still authors its own tool chain.
         # Env-gated: CANONICAL_INSTANTIATE=off disables hard-instantiate path.
         # Two thresholds: top-similarity AND top-vs-second margin. Both
-        # required. Calibration on 2026-05-08 prompts:
+        # required. Calibration anchored on 2026-05-08 prompts (sentence-
+        # transformers all-MiniLM-L6-v2 default embeddings):
         #   own-goal-text query              → top sim 0.89-0.91, gap 0.39-0.41
         #   "pick and place cell with Franka" → CP-01 sim 0.49, gap 0.24 (confident)
         #   CP-02 paraphrase                  → CP-02 sim 0.55, gap 0.21 (confident)
         #   VR-19 actual prompt               → CP-02 sim 0.51, gap 0.006 (ambiguous —
         #                                       CP-01 right behind, fall back to iter)
         # Gap requirement is the key — it stops false positives when two
-        # canonicals are similarly relevant.
-        _canonical_min_sim = 0.45
-        _canonical_min_margin = 0.20
+        # canonicals are similarly relevant. Env-tunable so we can adjust
+        # without code changes when retrieval improves or embedding model
+        # changes (different models give different distance distributions).
+        _canonical_min_sim = float(os.environ.get("CANONICAL_MIN_SIM", "0.45"))
+        _canonical_min_margin = float(os.environ.get("CANONICAL_MIN_MARGIN", "0.20"))
         _canonical_enabled = (os.environ.get("CANONICAL_INSTANTIATE", "on").lower()
                               in ("on", "true", "1", "yes"))
         try:
             from .tools.template_retriever import (
                 retrieve_templates_with_scores, format_for_prompt
             )
-            scored = retrieve_templates_with_scores(user_message, top_k=3)
+            # top_k tradeoff: higher k → more gap signal for confidence, but
+            # more attention dilution + larger system prompt. 3 is the
+            # default (fits CP-{01,02,N} for assembly-line family without
+            # bloating prompt). Env-tunable for experimentation.
+            _template_top_k = int(os.environ.get("TEMPLATE_TOP_K", "3"))
+            scored = retrieve_templates_with_scores(user_message, top_k=_template_top_k)
             top_sim = scored[0]["similarity"] if scored else 0.0
             second_sim = scored[1]["similarity"] if len(scored) > 1 else 0.0
             margin = top_sim - second_sim

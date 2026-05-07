@@ -134,32 +134,51 @@ async def execute_template_canonical(template: Dict[str, Any]) -> Dict[str, Any]
 
 
 def format_instantiation_summary(result: Dict[str, Any]) -> str:
-    """Concise system-prompt addendum describing what was pre-built."""
+    """Strong directive system-prompt addendum — tells the LLM the scene is
+    already built and lists which tools are FORBIDDEN to call again."""
     if not result.get("instantiated"):
         return ""
     tid = result.get("task_id", "?")
     n_ok = result.get("n_ok", 0)
     n_total = result.get("n_calls", 0)
     err_count = len(result.get("errors", []))
-    head = (
-        f"[CANONICAL_INSTANTIATION] The scene was pre-scaffolded from "
-        f"verified canonical template {tid}. "
-        f"{n_ok}/{n_total} tool calls executed successfully"
-    )
-    if err_count:
-        head += f"; {err_count} returned errors (first three below)"
-    head += ".\n"
 
-    lines = [head]
+    # Names of tools that built the scene — agent must NOT call them again.
+    forbidden = sorted({e["tool"] for e in result.get("executed", [])
+                        if e.get("ok")})
+
+    lines = [
+        "## CRITICAL: Scene already built — do NOT rebuild",
+        "",
+        f"The scene has been pre-scaffolded from verified canonical template "
+        f"**{tid}**. {n_ok}/{n_total} build tool calls executed successfully"
+        + (f"; {err_count} returned errors." if err_count else "."),
+        "",
+        "**Your role for this turn is VERIFICATION ONLY.** The build phase is "
+        "complete. You MUST NOT call any of these tools again — they would "
+        "create duplicate prims or tear down the canonical scaffold:",
+    ]
+    if forbidden:
+        lines.append("  Forbidden (already executed): "
+                     + ", ".join(f"`{t}`" for t in forbidden))
+
     if err_count:
-        for err in result.get("errors", [])[:3]:
-            lines.append(f"  - {err}")
         lines.append("")
+        lines.append("Errors during instantiation (do not retry the same call; "
+                     "if these block verification, surface them honestly):")
+        for err in result.get("errors", [])[:5]:
+            lines.append(f"  - {err}")
 
-    lines.append(
-        "Your task now is verification, not building. Call "
-        "verify_pickplace_pipeline (form gate) and simulate_traversal_check "
-        "(function gate). Report results honestly — do NOT rebuild from scratch. "
-        "If verify reports issues, surface them and propose a targeted fix."
-    )
+    lines.extend([
+        "",
+        "**Required tool calls for this turn (in this order):**",
+        "  1. `verify_pickplace_pipeline` — form gate. Pass stages list "
+        "(robot_path, pick_path, place_path) inferred from the scene.",
+        "  2. `simulate_traversal_check` — function gate. Pass cube_path + "
+        "target_path; default duration_s=60s.",
+        "  3. Reply with the results, honestly. If either gate fails, "
+        "surface the specific issue and propose a targeted fix using "
+        "tools like `teleport_prim`, `set_attribute`, or `set_drive_gains` "
+        "— do NOT re-run any of the forbidden build tools.",
+    ])
     return "\n".join(lines)
