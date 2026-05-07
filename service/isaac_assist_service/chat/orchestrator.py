@@ -20,6 +20,93 @@ from typing import Any, Dict, List, Optional
 from .provider_factory import get_llm_provider, get_distiller_provider
 from .intent_router import classify_intent
 from ..config import config
+
+
+# ── Conversation-history compression (Gemini 503 mitigation) ───────────────
+# Tool results accumulate verbose content (generated patch code, full output
+# strings) across multi-round agent flows. After ~10-15 tool rounds the
+# request payload reaches 1-3 MB, which Gemini Flash 503-throttles
+# aggressively. Compressing OLDER tool_result content keeps recent context
+# full-detail (so the agent can reason about what just happened) while
+# preventing unbounded payload growth.
+_KEEP_LAST_TOOL_RESULTS_FULL = int(os.environ.get("KEEP_LAST_TOOL_RESULTS_FULL", "3"))
+_COMPRESS_OUTPUT_MAX_CHARS = int(os.environ.get("COMPRESS_OUTPUT_MAX_CHARS", "600"))
+
+
+def _compress_tool_result_content(content_str: str, max_output_chars: int = _COMPRESS_OUTPUT_MAX_CHARS) -> str:
+    """Compress a JSON-stringified tool result. Drop the verbose `code`
+    field (generated patch source), truncate `output` to max_output_chars,
+    keep success/error/type/queued/executed and small auxiliary fields."""
+    try:
+        d = json.loads(content_str)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        # Non-JSON: just truncate raw
+        if len(content_str) > max_output_chars:
+            return content_str[:max_output_chars] + f"...[truncated {len(content_str)} chars]"
+        return content_str
+    if not isinstance(d, dict):
+        return content_str
+    compressed: Dict[str, Any] = {}
+    # Always keep core diagnostic fields
+    for k in ("type", "success", "executed", "queued", "error", "description"):
+        if k in d:
+            compressed[k] = d[k]
+    # Truncate `output` if present
+    if "output" in d:
+        out_str = str(d["output"])
+        if len(out_str) > max_output_chars:
+            compressed["output"] = (
+                out_str[:max_output_chars] + f"...[truncated {len(out_str)} chars]"
+            )
+        else:
+            compressed["output"] = out_str
+    # Keep other small auxiliary fields, drop verbose ones (`code`)
+    for k, v in d.items():
+        if k in compressed or k == "code":
+            continue
+        s = json.dumps(v, default=str) if not isinstance(v, str) else v
+        if len(s) <= 200:
+            compressed[k] = v
+    return json.dumps(compressed, default=str)
+
+
+def _compress_old_tool_results(messages: List[Dict], keep_last_n: int = _KEEP_LAST_TOOL_RESULTS_FULL) -> List[Dict]:
+    """Compress tool_result messages except the most recent keep_last_n.
+    Recent results stay full-detail so the agent can reason about what
+    just happened; older results get content trimmed to reduce payload."""
+    tool_indices = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+    if len(tool_indices) <= keep_last_n:
+        return messages
+    to_compress = set(tool_indices[:-keep_last_n])
+    out: List[Dict] = []
+    for i, m in enumerate(messages):
+        if i in to_compress:
+            new_content = _compress_tool_result_content(m.get("content", ""))
+            new_msg = dict(m)
+            new_msg["content"] = new_content
+            out.append(new_msg)
+        else:
+            out.append(m)
+    return out
+
+
+def _measure_messages_bytes(messages: List[Dict]) -> int:
+    """Sum json.dumps size of all messages — proxy for request payload bytes."""
+    return sum(len(json.dumps(m, default=str)) for m in messages)
+
+
+def _compress_for_llm(messages: List[Dict], session_id: str = "") -> List[Dict]:
+    """Apply tool_result compression and log payload-size delta (Track C
+    instrumentation: makes 503 root-cause analysis data-driven)."""
+    pre = _measure_messages_bytes(messages)
+    out = _compress_old_tool_results(messages)
+    post = _measure_messages_bytes(out)
+    if pre != post:
+        logger.info(
+            f"[{session_id}] payload compress: {pre} → {post} bytes "
+            f"({100 * post / pre:.0f}%, saved {pre - post})"
+        )
+    return out
 from .context_distiller import (
     ConversationKnowledge,
     DistilledContext,
@@ -1006,10 +1093,13 @@ class ChatOrchestrator:
             # Hard 300 s timeout is the only safety net around a truly
             # hung request.
             _LLM_HARD_TIMEOUT = 300.0
+            # Compress old tool_result content to prevent payload bloat
+            # across multi-round flows (Gemini Flash 503-throttles >1MB).
+            llm_messages = _compress_for_llm(messages, session_id)
             response = None
             try:
                 response = await asyncio.wait_for(
-                    self.llm_provider.complete(messages, {"tools": selected_tools}),
+                    self.llm_provider.complete(llm_messages, {"tools": selected_tools}),
                     timeout=_LLM_HARD_TIMEOUT,
                 )
             except asyncio.TimeoutError:
@@ -1245,7 +1335,7 @@ class ChatOrchestrator:
             try:
                 halt_ctx = dict(context) if isinstance(context, dict) else {}
                 halt_ctx["tools"] = []
-                halt_response = await self.llm_provider.complete(messages, halt_ctx)
+                halt_response = await self.llm_provider.complete(_compress_for_llm(messages, session_id), halt_ctx)
                 if halt_response.text and halt_response.text.strip():
                     response = halt_response  # reply = response.text on next line
             except Exception as e:
@@ -1316,7 +1406,7 @@ class ChatOrchestrator:
                 try:
                     rewrite_ctx = dict(context) if isinstance(context, dict) else {}
                     rewrite_ctx["tools"] = []
-                    rewrite_response = await self.llm_provider.complete(messages, rewrite_ctx)
+                    rewrite_response = await self.llm_provider.complete(_compress_for_llm(messages, session_id), rewrite_ctx)
                     rewrite = (rewrite_response.text or "").strip()
                     if rewrite:
                         reply = rewrite
@@ -1386,7 +1476,7 @@ class ChatOrchestrator:
             try:
                 summary_ctx = dict(context) if isinstance(context, dict) else {}
                 summary_ctx["tools"] = []  # disable tool-calling for summary
-                summary_response = await self.llm_provider.complete(messages, summary_ctx)
+                summary_response = await self.llm_provider.complete(_compress_for_llm(messages, session_id), summary_ctx)
                 reply = (summary_response.text or "").strip()
             except Exception as e:
                 logger.warning(f"[{session_id}] Anti-ghosting summary failed: {e}")
