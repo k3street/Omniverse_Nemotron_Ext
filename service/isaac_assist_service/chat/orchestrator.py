@@ -735,6 +735,7 @@ class ChatOrchestrator:
                 # HARD-INSTANTIATE PATH
                 from .canonical_instantiator import (
                     execute_template_canonical,
+                    settle_after_canonical,
                     execute_template_verify,
                     format_instantiation_summary,
                 )
@@ -746,6 +747,20 @@ class ChatOrchestrator:
                     f"hard-instantiating template code"
                 )
                 inst_result = await execute_template_canonical(top["template"])
+                # Settle: stop timeline, restore cube positions + conveyor
+                # velocities to template-authored values. Setup_pick_place_
+                # controller install starts physics; for compact scenes
+                # (cubes near robot, e.g. CP-04), the controller can fire
+                # _pause_belt before verify runs, mutating surface velocity
+                # to 0 and drifting cubes. Settle gives verify a clean
+                # design-time scene state.
+                settle_result = await settle_after_canonical(top["template"])
+                if settle_result.get("settled"):
+                    logger.info(
+                        f"[{session_id}] Settled: "
+                        f"{settle_result.get('n_cubes_restored', 0)} cubes, "
+                        f"{settle_result.get('n_conveyors_restored', 0)} conveyors restored"
+                    )
                 # Also pre-execute verify_pickplace_pipeline using the
                 # canonical's prescribed verify_args. This eliminates the
                 # LLM path-naming creativity issue: the LLM gets verify

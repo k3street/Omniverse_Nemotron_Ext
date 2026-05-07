@@ -85,6 +85,145 @@ _SAFE_BUILTINS = {
 }
 
 
+async def settle_after_canonical(template: Dict[str, Any]) -> Dict[str, Any]:
+    """After execute_template_canonical, controller install starts the
+    timeline and may have already fired _pause_belt for cubes that entered
+    reach. That mutates conveyor surface_velocity to (0,0,0) and drifts
+    cube positions, which then makes cube_source_bridged in verify fail
+    for compact scenes (e.g. CP-04 with cubes close to robot).
+
+    This settle step:
+      1. Stops the timeline
+      2. Restores cube positions to their template-authored translate
+      3. Restores surface velocities on conveyors to template-authored values
+
+    Reads template's code field to extract authored values via regex.
+    Idempotent — running on a clean scene is a no-op.
+    """
+    from .tools import kit_tools
+    import re as _re
+
+    code = template.get("code") or ""
+    if not code:
+        return {"settled": False, "reason": "template has no code field"}
+
+    # Extract create_prim cube positions: create_prim(prim_path="/World/Cube_X", ..., position=[x, y, z], ...)
+    # Match prim_path + position together using the line.
+    cube_pos: Dict[str, Any] = {}  # path → [x, y, z]
+    # Pattern matches assignments inside the for-loop body too — captures
+    # both literal and f-string paths.
+    create_pat = _re.compile(
+        r'create_prim\(\s*prim_path\s*=\s*([^,]+?),\s*[^)]*?position\s*=\s*\[([^\]]+)\]'
+    )
+    # Loop pattern for "for i, x in enumerate([..]): path = f'.../{i+1}'"
+    enum_pat = _re.compile(
+        r'for\s+i,\s*x\s+in\s+enumerate\(\[([^\]]+)\]\)\s*:\s*\n.*?path\s*=\s*f["\'](\S+?){i\s*\+\s*1}["\']\s*\n.*?create_prim\([^)]*?position\s*=\s*\[([^\]]+)\]',
+        _re.DOTALL,
+    )
+    # Detect simple loop: for i, x in enumerate([...]):
+    for m in enum_pat.finditer(code):
+        xs_str = m.group(1)
+        path_prefix = m.group(2)
+        pos_template = m.group(3)
+        try:
+            xs = [float(s.strip()) for s in xs_str.split(",")]
+        except Exception:
+            continue
+        # Substitute x and y/z from pos_template (likely "x, 0.4, 0.835")
+        for i, xv in enumerate(xs, start=1):
+            full_path = f"{path_prefix}{i}"
+            # Replace 'x' in position template with the literal value
+            try:
+                pos_filled = []
+                for tok in pos_template.split(","):
+                    tok = tok.strip()
+                    if tok == "x":
+                        pos_filled.append(xv)
+                    else:
+                        pos_filled.append(float(tok))
+                cube_pos[full_path] = pos_filled
+            except Exception:
+                pass
+
+    # Also match standalone create_prim calls
+    for m in create_pat.finditer(code):
+        path_token = m.group(1).strip().strip("'\"")
+        if "/" not in path_token or "{" in path_token:
+            continue  # skip f-string templates that didn't substitute
+        try:
+            pos = [float(s.strip()) for s in m.group(2).split(",")]
+            if path_token not in cube_pos:
+                cube_pos[path_token] = pos
+        except Exception:
+            continue
+
+    # Extract conveyor velocities: create_conveyor(prim_path="/World/X", ..., surface_velocity=[a, b, c])
+    conv_vel: Dict[str, Any] = {}
+    conv_pat = _re.compile(
+        r'create_conveyor\(\s*prim_path\s*=\s*["\'](/[^"\']+)["\'][^)]*?surface_velocity\s*=\s*\[([^\]]+)\]',
+        _re.DOTALL,
+    )
+    for m in conv_pat.finditer(code):
+        path = m.group(1)
+        try:
+            vel = [float(s.strip()) for s in m.group(2).split(",")]
+            conv_vel[path] = vel
+        except Exception:
+            continue
+
+    # Build the kit-side script: stop, restore translate + velocity
+    import json as _j
+    settle_code = f"""
+import omni.usd, omni.timeline
+from pxr import Gf
+omni.timeline.get_timeline_interface().stop()
+omni.timeline.get_timeline_interface().set_current_time(0.0)
+
+stage = omni.usd.get_context().get_stage()
+restored_cubes = []
+for path, pos in {_j.dumps(cube_pos)}.items():
+    p = stage.GetPrimAtPath(path)
+    if p and p.IsValid():
+        attr = p.GetAttribute('xformOp:translate')
+        if attr and attr.IsValid():
+            attr.Set(Gf.Vec3d(*pos))
+            restored_cubes.append(path)
+
+restored_conveyors = []
+for path, vel in {_j.dumps(conv_vel)}.items():
+    p = stage.GetPrimAtPath(path)
+    if p and p.IsValid():
+        attr = p.GetAttribute('physxSurfaceVelocity:surfaceVelocity')
+        if attr and attr.IsValid():
+            attr.Set(Gf.Vec3f(*vel))
+            restored_conveyors.append(path)
+
+import json
+print(json.dumps({{
+    'restored_cubes': restored_cubes,
+    'restored_conveyors': restored_conveyors,
+}}))
+"""
+    res = await kit_tools.exec_sync(settle_code, timeout=10)
+    if not res.get("success"):
+        return {"settled": False, "error": (res.get("output") or "")[:200]}
+    out = (res.get("output") or "").strip()
+    parsed = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                import json as _jp
+                parsed = _jp.loads(line); break
+            except Exception:
+                continue
+    return {
+        "settled": True,
+        "n_cubes_restored": len((parsed or {}).get("restored_cubes", [])),
+        "n_conveyors_restored": len((parsed or {}).get("restored_conveyors", [])),
+    }
+
+
 async def execute_template_verify(template: Dict[str, Any]) -> Dict[str, Any]:
     """Run the canonical's verify_args (form gate) and parse the result.
     Called by the orchestrator AFTER execute_template_canonical, BEFORE the
