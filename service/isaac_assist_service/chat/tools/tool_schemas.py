@@ -706,6 +706,39 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "simulate_traversal_check",
+            "description": (
+                "FUNCTION GATE for pick-place / assembly-line scenes — counterpart "
+                "to verify_pickplace_pipeline's FORM gate. Plays the timeline for "
+                "duration_s of sim time, captures the cube's position twice (for "
+                "velocity), then checks whether the cube actually arrived at "
+                "target_path's world bbox AND came to rest. Returns success=true "
+                "ONLY if cube xy is inside the target bbox AND cube z is "
+                "at-or-above target floor (minus floor_tolerance) AND "
+                "|cube velocity| < rest_speed_threshold. USE THIS as the second "
+                "gate before declaring an assembly-line build complete: form-gate "
+                "(verify_pickplace_pipeline) confirms reach + bridging + controllers, "
+                "but only this function-gate confirms the cube actually traverses. "
+                "Default duration is 60s sim time; expect the call itself to take "
+                "~60s wall-clock."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cube_path": {"type": "string", "description": "Prim path of the cube to track (e.g. /World/Cube_1)."},
+                    "target_path": {"type": "string", "description": "Prim path of the destination whose world bbox is the target (e.g. /World/Bin)."},
+                    "duration_s": {"type": "number", "description": "Sim duration in seconds. Default 60. Use 30 for smoke tests.", "default": 60},
+                    "xy_tolerance": {"type": "number", "description": "Extra xy slack on target bbox in meters. Default 0.0 (strict).", "default": 0.0},
+                    "floor_tolerance": {"type": "number", "description": "Allowed z drop below target floor in meters (for end-of-run bounce). Default 0.10.", "default": 0.10},
+                    "rest_speed_threshold": {"type": "number", "description": "Max speed in m/s to consider the cube at rest. Default 0.05.", "default": 0.05},
+                },
+                "required": ["cube_path", "target_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "resolve_skill_composition",
             "description": (
                 "Map a skill-composition name ('pick-and-place', 'calibration', 'ros2', "

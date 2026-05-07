@@ -67,7 +67,7 @@ for k in list(vars(builtins).keys()):
 
 mgr = getattr(builtins, "_scene_reset_manager", None)
 if mgr is not None:
-    for _hn in list(getattr(mgr, "_hooks", {}).keys()):
+    for _hn in list(getattr(mgr, "hooks", {}).keys()):
         try:
             mgr.unregister(_hn)
         except Exception:
@@ -203,6 +203,30 @@ for i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):
         )
 
 
+async def _simulate_traversal(cube_path: str, target_path: str,
+                              duration_s: float = 30) -> tuple[bool, dict]:
+    """Call simulate_traversal_check and parse result. Returns (success, full_result)."""
+    res = await execute_tool_call("simulate_traversal_check", {
+        "cube_path": cube_path,
+        "target_path": target_path,
+        "duration_s": duration_s,
+    })
+    if res.get("type") == "error":
+        raise RuntimeError(f"simulate error: {res.get('error', '?')}")
+    out = (res.get("output") or "").strip()
+    parsed = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                parsed = json.loads(line)
+            except Exception:
+                continue
+    if parsed is None:
+        raise RuntimeError(f"could not parse simulate output: {out[:300]!r}")
+    return bool(parsed.get("success")), parsed
+
+
 async def _verify(stages: list, cube_path: str = "/World/Cube_1") -> tuple[bool, list]:
     """Call verify_pickplace_pipeline and parse the JSON line from output.
     Returns (pipeline_ok, issues)."""
@@ -257,6 +281,28 @@ FIXTURES = [
 ]
 
 
+# ── simulate_traversal_check fixtures (function gate) ───────────────────────
+
+async def sim_known_good_cp01() -> tuple[bool, dict]:
+    await _reset_scene()
+    await _build_cp01(install_controller=True)
+    await _settle_for_verify(conveyor_vel=(0.2, 0.0, 0.0))
+    return await _simulate_traversal("/World/Cube_1", "/World/Bin", duration_s=30)
+
+
+async def sim_known_broken_no_controller() -> tuple[bool, dict]:
+    await _reset_scene()
+    await _build_cp01(install_controller=False)
+    await _settle_for_verify(conveyor_vel=(0.2, 0.0, 0.0))
+    return await _simulate_traversal("/World/Cube_1", "/World/Bin", duration_s=30)
+
+
+SIMULATE_FIXTURES = [
+    ("known_good_cp01",            sim_known_good_cp01),
+    ("known_broken_no_controller", sim_known_broken_no_controller),
+]
+
+
 # ── Driver ──────────────────────────────────────────────────────────────────
 
 async def main() -> int:
@@ -265,6 +311,9 @@ async def main() -> int:
         print("       Launch Isaac Sim with the Isaac Assist extension first.")
         return 1
 
+    skip_simulate = "--no-simulate" in sys.argv
+
+    print("=== verify_pickplace_pipeline (form gate) ===")
     rows: list[tuple[str, bool, int, list]] = []
     for name, fn in FIXTURES:
         print(f"  fixture: {name} ...")
@@ -283,10 +332,43 @@ async def main() -> int:
         flag = "true " if ok else "false"
         print(f"{name:<{width}}  {flag:<11}  {n_issues}")
     print()
-    print("Expected (after Phase 1.1 form checks landed):")
+    print("Expected (verify form gate, after Phase 1.1):")
     print("  known_good_cp01            pipeline_ok=true,  issues=0")
     print("  known_broken_no_velocity   pipeline_ok=false, issues>=1 (cube_source_bridged)")
     print("  known_broken_no_controller pipeline_ok=false, issues>=1 (controller_installed)")
+
+    if skip_simulate:
+        print()
+        print("(skipped simulate_traversal_check fixtures — pass without --no-simulate to include)")
+        return 0
+
+    print()
+    print("=== simulate_traversal_check (function gate, ~30s/fixture) ===")
+    sim_rows: list[tuple[str, bool, dict]] = []
+    for name, fn in SIMULATE_FIXTURES:
+        print(f"  fixture: {name} (running 30s sim) ...")
+        try:
+            ok, result = await fn()
+        except Exception as e:
+            print(f"\n[FAIL] simulate fixture {name!r} crashed: {e}")
+            return 3
+        sim_rows.append((name, ok, result))
+
+    print()
+    width = max(len(r[0]) for r in sim_rows)
+    print(f"{'fixture':<{width}}  success  in_xy  above_floor  at_rest  cube_speed")
+    print("-" * (width + 50))
+    for name, ok, r in sim_rows:
+        flag = "true " if ok else "false"
+        print(f"{name:<{width}}  {flag:<7}  "
+              f"{str(r.get('in_target_xy')):<5}  "
+              f"{str(r.get('above_floor')):<11}  "
+              f"{str(r.get('at_rest')):<7}  "
+              f"{r.get('cube_speed', 0):.4f}")
+    print()
+    print("Expected (simulate function gate):")
+    print("  known_good_cp01            success=true   (cube delivered to bin)")
+    print("  known_broken_no_controller success=false  (cube doesn't reach bin)")
     return 0
 
 

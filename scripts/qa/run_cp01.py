@@ -53,7 +53,7 @@ for k in list(vars(builtins).keys()):
 
 mgr = getattr(builtins, "_scene_reset_manager", None)
 if mgr is not None:
-    for _hn in list(getattr(mgr, "_hooks", {}).keys()):
+    for _hn in list(getattr(mgr, "hooks", {}).keys()):
         try:
             mgr.unregister(_hn)
         except Exception:

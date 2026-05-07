@@ -3802,6 +3802,146 @@ print(json.dumps(out))
     return await kit_tools.queue_exec_patch(code, "verify_pickplace_pipeline")
 
 
+async def _handle_simulate_traversal_check(args: Dict) -> Dict:
+    """Function-gate counterpart to verify_pickplace_pipeline's form-gate.
+
+    Plays the timeline for `duration_s` of sim time, samples cube position
+    twice (once just before stop for velocity, once at stop for final pose),
+    and checks whether the cube actually arrived at target_path's bbox AND
+    came to rest. Returns {success, cube_initial, cube_final, cube_velocity,
+    target_bbox, in_target_xy, above_floor, at_rest, sim_duration}.
+
+    Args:
+      cube_path: prim path of the cube to track (required)
+      target_path: prim path of the destination (its world bbox is the target)
+      duration_s: sim duration in seconds (default 60)
+      xy_tolerance: xy bbox tolerance in meters (default 0.0 — strict)
+      floor_tolerance: z below target floor allowed in meters (default 0.10)
+      rest_speed_threshold: max speed (m/s) to consider "at rest" (default 0.05)
+    """
+    cube_path = (args.get("cube_path") or "").strip()
+    target_path = (args.get("target_path") or "").strip()
+    if not cube_path or not target_path:
+        return {"error": "simulate_traversal_check requires cube_path and target_path"}
+    duration_s = float(args.get("duration_s", 60))
+    xy_tolerance = float(args.get("xy_tolerance", 0.0))
+    floor_tolerance = float(args.get("floor_tolerance", 0.10))
+    rest_speed = float(args.get("rest_speed_threshold", 0.05))
+
+    code = f"""\
+import omni.usd, omni.timeline, omni.kit.app, json, time as _t
+from pxr import UsdGeom, Usd
+
+stage = omni.usd.get_context().get_stage()
+cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+
+def _world_pos(path):
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid():
+        return None
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if not b.IsEmpty():
+        c = b.GetMidpoint()
+        return [float(c[0]), float(c[1]), float(c[2])]
+    try:
+        xf = UsdGeom.Xformable(p)
+        t = xf.ComputeLocalToWorldTransform(0).ExtractTranslation()
+        return [float(t[0]), float(t[1]), float(t[2])]
+    except Exception:
+        return None
+
+def _world_bbox(path):
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid():
+        return None
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty():
+        return None
+    mn = b.GetMin(); mx = b.GetMax()
+    return {{
+        'min': [float(mn[0]), float(mn[1]), float(mn[2])],
+        'max': [float(mx[0]), float(mx[1]), float(mx[2])],
+    }}
+
+cube_path = {cube_path!r}
+target_path = {target_path!r}
+duration_s = {duration_s}
+xy_tol = {xy_tolerance}
+floor_tol = {floor_tolerance}
+rest_speed = {rest_speed}
+
+tl = omni.timeline.get_timeline_interface()
+app = omni.kit.app.get_app()
+
+tl.stop()
+tl.set_current_time(0.0)
+tl.set_end_time(max(tl.get_end_time(), duration_s + 5.0))
+
+p_init = _world_pos(cube_path)
+target_bbox = _world_bbox(target_path)
+if p_init is None or target_bbox is None:
+    print(json.dumps({{
+        'success': False,
+        'error': f'cube_path or target_path not found: cube={{p_init is not None}}, target={{target_bbox is not None}}',
+    }}))
+else:
+    tl.play()
+    p_pre = list(p_init)
+    real_start = _t.time()
+    last_t = 0.0
+    while True:
+        app.update()
+        cur_t = float(tl.get_current_time())
+        # Pre-end sample for velocity (capture ~0.1s before duration_s)
+        if cur_t >= duration_s - 0.15 and last_t < duration_s - 0.15:
+            _pre = _world_pos(cube_path)
+            if _pre is not None: p_pre = _pre
+        if cur_t >= duration_s:
+            break
+        if _t.time() - real_start > duration_s + 60:
+            break  # safety: 60s real-time slack
+        last_t = cur_t
+
+    p_final = _world_pos(cube_path)
+    cur_t = float(tl.get_current_time())
+    tl.stop()
+
+    dt = max(cur_t - last_t, 1e-3)
+    if p_final is None:
+        velocity = [0.0, 0.0, 0.0]; speed = 0.0
+    else:
+        velocity = [(p_final[i] - p_pre[i]) / dt for i in range(3)]
+        speed = (velocity[0]**2 + velocity[1]**2 + velocity[2]**2) ** 0.5
+
+    bb = target_bbox
+    in_xy = (p_final is not None
+             and bb['min'][0] - xy_tol <= p_final[0] <= bb['max'][0] + xy_tol
+             and bb['min'][1] - xy_tol <= p_final[1] <= bb['max'][1] + xy_tol)
+    above_floor = (p_final is not None
+                   and p_final[2] >= bb['min'][2] - floor_tol)
+    at_rest = speed < rest_speed
+    success = bool(in_xy and above_floor and at_rest)
+
+    print(json.dumps({{
+        'success': success,
+        'cube_initial': p_init,
+        'cube_final': p_final,
+        'cube_velocity': velocity,
+        'cube_speed': speed,
+        'target_path': target_path,
+        'target_bbox': target_bbox,
+        'in_target_xy': in_xy,
+        'above_floor': above_floor,
+        'at_rest': at_rest,
+        'sim_t_reached': cur_t,
+        'duration_s_requested': duration_s,
+        'rest_speed_threshold': rest_speed,
+        'floor_tolerance': floor_tol,
+    }}))
+"""
+    return await kit_tools.queue_exec_patch(code, "simulate_traversal_check")
+
+
 async def _handle_resolve_skill_composition(args: Dict) -> Dict:
     """Map a skill-composition name ('pick-and-place', 'calibration', 'ros2')
     to a known tool chain. Pilot #10.
@@ -4245,6 +4385,7 @@ DATA_HANDLERS = {
     "resolve_coordinate_reference": _handle_resolve_coordinate_reference,
     "resolve_relational_property": _handle_resolve_relational_property,
     "verify_pickplace_pipeline": _handle_verify_pickplace_pipeline,
+    "simulate_traversal_check": _handle_simulate_traversal_check,
     "get_debug_info": _handle_get_debug_info,
     "lookup_knowledge": _handle_lookup_knowledge,
     "lookup_api_deprecation": _handle_lookup_api_deprecation,
