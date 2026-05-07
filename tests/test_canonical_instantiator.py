@@ -255,3 +255,105 @@ def test_summary_with_pre_executed_verify_failure_lists_issues():
     )
     assert "FALSE" in out or "failed" in out.lower() or "✗" in out
     assert "foo" in out or "bar" in out
+
+
+# ── _extract_cube_positions_from_code (settle_after_canonical helper) ──
+
+
+def _imp_settle():
+    from service.isaac_assist_service.chat.canonical_instantiator import (
+        _extract_cube_positions_from_code,
+        _extract_conveyor_velocities_from_code,
+    )
+    return _extract_cube_positions_from_code, _extract_conveyor_velocities_from_code
+
+
+def test_extract_cubes_simple_create_prim():
+    fn, _ = _imp_settle()
+    code = 'create_prim(prim_path="/World/Cube_A", prim_type="Cube", position=[1.0, 2.0, 0.5], size=0.05)'
+    out = fn(code)
+    assert out == {"/World/Cube_A": [1.0, 2.0, 0.5]}
+
+
+def test_extract_cubes_enumerate_loop_pattern():
+    """CP-01 / CP-04 use this exact pattern. Must extract Cube_1..Cube_4
+    with x-positions from the enumerate list."""
+    fn, _ = _imp_settle()
+    code = (
+        'for i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n'
+        '    path = f"/World/Cube_{i+1}"\n'
+        '    create_prim(prim_path=path, prim_type="Cube", position=[x, 0.4, 0.835], size=0.05)\n'
+    )
+    out = fn(code)
+    assert out["/World/Cube_1"] == [-1.4, 0.4, 0.835]
+    assert out["/World/Cube_2"] == [-1.15, 0.4, 0.835]
+    assert out["/World/Cube_3"] == [-0.9, 0.4, 0.835]
+    assert out["/World/Cube_4"] == [-0.65, 0.4, 0.835]
+
+
+def test_extract_cubes_skips_unsubstituted_fstring():
+    """f-string templates that didn't get substituted should be skipped,
+    not return a path containing literal `{` braces."""
+    fn, _ = _imp_settle()
+    code = 'create_prim(prim_path=f"/World/{name}", position=[0, 0, 0])'
+    out = fn(code)
+    assert out == {}
+
+
+def test_extract_cubes_empty_code():
+    fn, _ = _imp_settle()
+    assert fn("") == {}
+    assert fn(None) == {}
+
+
+def test_extract_cubes_no_cubes_in_code():
+    fn, _ = _imp_settle()
+    code = "import omni.usd\nstage = omni.usd.get_context().get_stage()"
+    assert fn(code) == {}
+
+
+def test_extract_cubes_handles_multiple_create_prim():
+    fn, _ = _imp_settle()
+    code = (
+        'create_prim(prim_path="/World/A", prim_type="Cube", position=[0, 0, 0])\n'
+        'create_prim(prim_path="/World/B", prim_type="Cube", position=[1, 1, 1])\n'
+    )
+    out = fn(code)
+    assert "/World/A" in out and "/World/B" in out
+
+
+def test_extract_conveyor_basic():
+    _, fn = _imp_settle()
+    code = 'create_conveyor(prim_path="/World/Belt", position=[0, 0, 0], surface_velocity=[0.2, 0, 0])'
+    out = fn(code)
+    assert out == {"/World/Belt": [0.2, 0.0, 0.0]}
+
+
+def test_extract_conveyor_multiple():
+    _, fn = _imp_settle()
+    code = (
+        'create_conveyor(prim_path="/World/Belt1", surface_velocity=[0.1, 0, 0])\n'
+        'create_conveyor(prim_path="/World/Belt2", surface_velocity=[-0.2, 0, 0])\n'
+    )
+    out = fn(code)
+    assert out["/World/Belt1"] == [0.1, 0.0, 0.0]
+    assert out["/World/Belt2"] == [-0.2, 0.0, 0.0]
+
+
+def test_extract_conveyor_no_conveyors():
+    _, fn = _imp_settle()
+    code = 'create_prim(prim_path="/World/X", position=[0,0,0])'
+    assert fn(code) == {}
+
+
+def test_extract_conveyor_empty_code():
+    _, fn = _imp_settle()
+    assert fn("") == {}
+    assert fn(None) == {}
+
+
+def test_extract_cubes_position_with_negative_floats():
+    fn, _ = _imp_settle()
+    code = 'create_prim(prim_path="/World/Q", prim_type="Cube", position=[-1.5, -0.4, -0.1])'
+    out = fn(code)
+    assert out == {"/World/Q": [-1.5, -0.4, -0.1]}

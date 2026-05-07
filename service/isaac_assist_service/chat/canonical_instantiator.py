@@ -85,6 +85,82 @@ _SAFE_BUILTINS = {
 }
 
 
+_SETTLE_CREATE_PAT = __import__("re").compile(
+    r'create_prim\(\s*prim_path\s*=\s*([^,]+?),\s*[^)]*?position\s*=\s*\[([^\]]+)\]'
+)
+# Loop pattern for "for i, x in enumerate([..]): path = f'.../{i+1}'"
+_SETTLE_ENUM_PAT = __import__("re").compile(
+    r'for\s+i,\s*x\s+in\s+enumerate\(\[([^\]]+)\]\)\s*:\s*\n.*?path\s*=\s*f["\'](\S+?){i\s*\+\s*1}["\']\s*\n.*?create_prim\([^)]*?position\s*=\s*\[([^\]]+)\]',
+    __import__("re").DOTALL,
+)
+_SETTLE_CONV_PAT = __import__("re").compile(
+    r'create_conveyor\(\s*prim_path\s*=\s*["\'](/[^"\']+)["\'][^)]*?surface_velocity\s*=\s*\[([^\]]+)\]',
+    __import__("re").DOTALL,
+)
+
+
+def _extract_cube_positions_from_code(code: str) -> Dict[str, List[float]]:
+    """Pure helper: parse template `code` field and extract authored
+    cube positions to restore during settle_after_canonical. Handles
+    both simple `create_prim(prim_path=..., position=[...])` and the
+    enumerate-loop pattern used by CP-01/CP-04."""
+    cube_pos: Dict[str, List[float]] = {}
+    if not code:
+        return cube_pos
+
+    # Detect simple loop: for i, x in enumerate([...]):
+    for m in _SETTLE_ENUM_PAT.finditer(code):
+        xs_str = m.group(1)
+        path_prefix = m.group(2)
+        pos_template = m.group(3)
+        try:
+            xs = [float(s.strip()) for s in xs_str.split(",")]
+        except Exception:
+            continue
+        for i, xv in enumerate(xs, start=1):
+            full_path = f"{path_prefix}{i}"
+            try:
+                pos_filled = []
+                for tok in pos_template.split(","):
+                    tok = tok.strip()
+                    if tok == "x":
+                        pos_filled.append(xv)
+                    else:
+                        pos_filled.append(float(tok))
+                cube_pos[full_path] = pos_filled
+            except Exception:
+                pass
+
+    # Match standalone create_prim calls
+    for m in _SETTLE_CREATE_PAT.finditer(code):
+        path_token = m.group(1).strip().strip("'\"")
+        if "/" not in path_token or "{" in path_token:
+            continue  # skip f-string templates that didn't substitute
+        try:
+            pos = [float(s.strip()) for s in m.group(2).split(",")]
+            if path_token not in cube_pos:
+                cube_pos[path_token] = pos
+        except Exception:
+            continue
+    return cube_pos
+
+
+def _extract_conveyor_velocities_from_code(code: str) -> Dict[str, List[float]]:
+    """Pure helper: parse template `code` and extract authored conveyor
+    surface_velocity values to restore during settle_after_canonical."""
+    conv_vel: Dict[str, List[float]] = {}
+    if not code:
+        return conv_vel
+    for m in _SETTLE_CONV_PAT.finditer(code):
+        path = m.group(1)
+        try:
+            vel = [float(s.strip()) for s in m.group(2).split(",")]
+            conv_vel[path] = vel
+        except Exception:
+            continue
+    return conv_vel
+
+
 async def settle_after_canonical(template: Dict[str, Any]) -> Dict[str, Any]:
     """After execute_template_canonical, controller install starts the
     timeline and may have already fired _pause_belt for cubes that entered
@@ -101,75 +177,13 @@ async def settle_after_canonical(template: Dict[str, Any]) -> Dict[str, Any]:
     Idempotent — running on a clean scene is a no-op.
     """
     from .tools import kit_tools
-    import re as _re
 
     code = template.get("code") or ""
     if not code:
         return {"settled": False, "reason": "template has no code field"}
 
-    # Extract create_prim cube positions: create_prim(prim_path="/World/Cube_X", ..., position=[x, y, z], ...)
-    # Match prim_path + position together using the line.
-    cube_pos: Dict[str, Any] = {}  # path → [x, y, z]
-    # Pattern matches assignments inside the for-loop body too — captures
-    # both literal and f-string paths.
-    create_pat = _re.compile(
-        r'create_prim\(\s*prim_path\s*=\s*([^,]+?),\s*[^)]*?position\s*=\s*\[([^\]]+)\]'
-    )
-    # Loop pattern for "for i, x in enumerate([..]): path = f'.../{i+1}'"
-    enum_pat = _re.compile(
-        r'for\s+i,\s*x\s+in\s+enumerate\(\[([^\]]+)\]\)\s*:\s*\n.*?path\s*=\s*f["\'](\S+?){i\s*\+\s*1}["\']\s*\n.*?create_prim\([^)]*?position\s*=\s*\[([^\]]+)\]',
-        _re.DOTALL,
-    )
-    # Detect simple loop: for i, x in enumerate([...]):
-    for m in enum_pat.finditer(code):
-        xs_str = m.group(1)
-        path_prefix = m.group(2)
-        pos_template = m.group(3)
-        try:
-            xs = [float(s.strip()) for s in xs_str.split(",")]
-        except Exception:
-            continue
-        # Substitute x and y/z from pos_template (likely "x, 0.4, 0.835")
-        for i, xv in enumerate(xs, start=1):
-            full_path = f"{path_prefix}{i}"
-            # Replace 'x' in position template with the literal value
-            try:
-                pos_filled = []
-                for tok in pos_template.split(","):
-                    tok = tok.strip()
-                    if tok == "x":
-                        pos_filled.append(xv)
-                    else:
-                        pos_filled.append(float(tok))
-                cube_pos[full_path] = pos_filled
-            except Exception:
-                pass
-
-    # Also match standalone create_prim calls
-    for m in create_pat.finditer(code):
-        path_token = m.group(1).strip().strip("'\"")
-        if "/" not in path_token or "{" in path_token:
-            continue  # skip f-string templates that didn't substitute
-        try:
-            pos = [float(s.strip()) for s in m.group(2).split(",")]
-            if path_token not in cube_pos:
-                cube_pos[path_token] = pos
-        except Exception:
-            continue
-
-    # Extract conveyor velocities: create_conveyor(prim_path="/World/X", ..., surface_velocity=[a, b, c])
-    conv_vel: Dict[str, Any] = {}
-    conv_pat = _re.compile(
-        r'create_conveyor\(\s*prim_path\s*=\s*["\'](/[^"\']+)["\'][^)]*?surface_velocity\s*=\s*\[([^\]]+)\]',
-        _re.DOTALL,
-    )
-    for m in conv_pat.finditer(code):
-        path = m.group(1)
-        try:
-            vel = [float(s.strip()) for s in m.group(2).split(",")]
-            conv_vel[path] = vel
-        except Exception:
-            continue
+    cube_pos = _extract_cube_positions_from_code(code)
+    conv_vel = _extract_conveyor_velocities_from_code(code)
 
     # Build the kit-side script: stop, restore translate + velocity
     import json as _j
