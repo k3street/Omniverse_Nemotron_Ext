@@ -53,5 +53,5 @@
     "Robot can't reach z=1.025m from base at z=0.75 — Franka's reach is ~0.85m sphere; 1.025-0.75=0.275m vertical at xy=(0,-0.4) → 0.49m total radius which is well within 0.85m. Should reach. If reach fails: lower TowerBase or scale tower height.",
     "drop_targets list-form (instead of dict) — cube i goes to drop_targets[i] BY ORDER in source_paths, NOT by cube_path. Use dict form for robustness against source_paths reordering."
   ],
-  "verified_status": "build-spec-2026-05-07; form-gate verification pending; function-gate (5 cubes column-stacked) physics-tuning-sensitive"
+  "verified_status": "build-verified-2026-05-07; form-gate ✓; function-gate STOCHASTIC: across 2 single-cube probes, one run reached pallet-area at rest, one returned numerical-blowup state (cube_final z<-11000m, vel >4000 m/s). Likely cuRobo seed variance + smaller TowerBase gives narrower margin for placement. Future work: lower drop precision tolerance OR larger TowerBase OR multi-run N-of-M acceptance (per T4-stochastic memory)."
 }

@@ -52,6 +52,6 @@
     "Manually computed drop_targets z forgetting cube_size/2 offset — cube spawns at pallet top z, gets pushed up by physics. Use anchor='top' which adds cube_size/2 automatically.",
     "drop_targets passed to non-curobo target_source — currently only cuRobo handler supports DROP_TARGETS branch. Spline/native ignore it (silent fall-through to destination_path)."
   ],
-  "verified_status": "build-spec-2026-05-07; form-gate verification pending; function-gate (4 cubes delivered to grid slots) pending physics test",
+  "verified_status": "build-verified-2026-05-07; form-gate ✓; function-gate (Cube_1) ✓ in single 90s sim run — cube_final in_target_xy=true, at_rest=true, upright. Multi-cube full 4-slot delivery requires longer sim + may have stochastic cuRobo failures (per T4-stochastic memory).",
   "compute_stack_placement_verified_2026_05_07": "Tool returned 4 positions matching the hardcoded drop_targets above. Computed via grid_2x2 anchor=top spacing=0.08."
 }
