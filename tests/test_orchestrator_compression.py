@@ -244,3 +244,107 @@ def test_compression_actually_reduces_bytes():
     assert post < pre, f"compression must reduce bytes: pre={pre} post={post}"
     # Should reduce by >50% with 7/10 messages compressed
     assert post < pre * 0.6
+
+
+# ── _apply_per_call_budget (P2) ───────────────────────────────────────
+
+
+def _imp_budget():
+    from service.isaac_assist_service.chat.orchestrator import (
+        _apply_per_call_budget,
+        _measure_messages_bytes,
+    )
+    return _apply_per_call_budget, _measure_messages_bytes
+
+
+def test_budget_under_threshold_unchanged():
+    fn, _ = _imp_budget()
+    msgs = [_msg("user", "hi"), _msg("tool", "small", tool_call_id="x")]
+    assert fn(msgs, budget_bytes=10000) == msgs
+
+
+def test_budget_over_threshold_drops_oldest_tool():
+    """FIFO drop: oldest tool_result gets marker; newest preserved."""
+    fn, meas = _imp_budget()
+    big = "X" * 50000
+    msgs = [
+        _msg("user", "do it"),
+        _msg("assistant", "ok"),
+        _msg("tool", big, tool_call_id="old"),
+        _msg("tool", big, tool_call_id="mid"),
+        _msg("tool", "recent_result", tool_call_id="new"),
+    ]
+    out = fn(msgs, budget_bytes=60000)
+    assert meas(out) <= 60000
+    assert "dropped tool_result" in out[2]["content"]
+    # Newest tool preserved
+    assert out[4]["content"] == "recent_result"
+
+
+def test_budget_preserves_message_count_and_order():
+    fn, _ = _imp_budget()
+    big = "X" * 50000
+    msgs = [
+        _msg("user", "u1"),
+        _msg("tool", big, tool_call_id="a"),
+        _msg("tool", big, tool_call_id="b"),
+    ]
+    out = fn(msgs, budget_bytes=60000)
+    assert len(out) == len(msgs)
+    # tool_call_ids preserved (assistant chain stays valid)
+    assert out[1]["tool_call_id"] == "a"
+    assert out[2]["tool_call_id"] == "b"
+    assert out[1]["role"] == "tool"
+
+
+def test_budget_env_disable():
+    import os
+    fn, _ = _imp_budget()
+    msgs = [_msg("tool", "X" * 50000, tool_call_id="x")]
+    os.environ["PER_CALL_BUDGET"] = "off"
+    try:
+        out = fn(msgs, budget_bytes=100)
+        assert out == msgs
+    finally:
+        os.environ.pop("PER_CALL_BUDGET", None)
+
+
+def test_budget_idempotent():
+    fn, _ = _imp_budget()
+    big = "X" * 50000
+    msgs = [
+        _msg("tool", big, tool_call_id="a"),
+        _msg("tool", big, tool_call_id="b"),
+        _msg("tool", "recent", tool_call_id="c"),
+    ]
+    once = fn(msgs, budget_bytes=60000)
+    twice = fn(once, budget_bytes=60000)
+    assert once == twice
+
+
+def test_budget_marker_preserves_size_info():
+    """Marker should encode original size + msg index for debugging."""
+    fn, _ = _imp_budget()
+    msgs = [
+        _msg("tool", "Y" * 50000, tool_call_id="a"),
+        _msg("tool", "small", tool_call_id="b"),
+    ]
+    out = fn(msgs, budget_bytes=10000)
+    marker = out[0]["content"]
+    assert "n=" in marker
+    assert "from_msg=" in marker
+    assert "per_call_budget" in marker
+
+
+def test_budget_skips_already_dropped():
+    """Idempotency depends on not re-dropping marker content."""
+    fn, _ = _imp_budget()
+    msgs = [
+        _msg("tool", "<dropped tool_result n=999 from_msg=0 reason=per_call_budget>",
+             tool_call_id="a"),
+        _msg("tool", "X" * 50000, tool_call_id="b"),
+    ]
+    out = fn(msgs, budget_bytes=10000)
+    # Already-dropped should be left alone; only the big one drops
+    assert out[0]["content"].startswith("<dropped tool_result")
+    assert out[1]["content"].startswith("<dropped tool_result")

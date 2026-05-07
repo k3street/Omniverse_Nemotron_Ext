@@ -106,11 +106,71 @@ def _measure_messages_bytes(messages: List[Dict]) -> int:
     return sum(len(json.dumps(m, default=str)) for m in messages)
 
 
+# P2 — per-call request budget (kcode-spec sec 6.3). Complement to P1
+# (per-tool single-call cap in tool_executor): bounds CUMULATIVE payload
+# growth across many tool results. Drops oldest tool_result content with
+# a marker until total bytes ≤ budget. Preserves message order and the
+# message itself (so tool_call_id linkage stays intact).
+_PER_CALL_BUDGET_DEFAULT = int(os.environ.get("PER_CALL_BUDGET_BYTES", "200000"))
+
+
+def _apply_per_call_budget(
+    messages: List[Dict], budget_bytes: int = _PER_CALL_BUDGET_DEFAULT,
+) -> List[Dict]:
+    """Drop oldest tool_result content (FIFO) until total bytes ≤ budget.
+
+    Returns a new list of messages with old tool_results' content
+    replaced by a `<dropped tool_result n=N from message=I>` marker.
+    The tool_call_id and role fields are preserved so the assistant
+    reply chain still resolves correctly.
+
+    Idempotent — re-applying on already-budgeted messages is a no-op
+    (markers can't be re-dropped since they're already small).
+    """
+    if os.environ.get("PER_CALL_BUDGET", "on").lower() in ("off", "0", "false"):
+        return messages
+    total = _measure_messages_bytes(messages)
+    if total <= budget_bytes:
+        return messages
+    out = [dict(m) for m in messages]
+    # Walk from oldest tool_result forward; replace each with marker
+    # until total fits.
+    for i, m in enumerate(out):
+        if total <= budget_bytes:
+            break
+        if m.get("role") != "tool":
+            continue
+        content = m.get("content") or ""
+        if not isinstance(content, str):
+            continue
+        if content.startswith("<dropped tool_result"):
+            continue  # already budgeted
+        # Estimate savings = current size minus marker size
+        marker = (
+            f"<dropped tool_result n={len(content)} from_msg={i} "
+            f"reason=per_call_budget>"
+        )
+        before = len(json.dumps(m, default=str))
+        m["content"] = marker
+        after = len(json.dumps(m, default=str))
+        total -= (before - after)
+    return out
+
+
 def _compress_for_llm(messages: List[Dict], session_id: str = "") -> List[Dict]:
-    """Apply tool_result compression and log payload-size delta (Track C
-    instrumentation: makes 503 root-cause analysis data-driven)."""
+    """Apply tool_result compression + per-call budget, log size delta.
+
+    Pipeline:
+    1. P0 (always): compress old tool_results (drop verbose code, truncate output)
+    2. P2 (env-flagged): if total bytes > budget, FIFO-drop oldest tool_results
+
+    Track C instrumentation: log every reduction so 503 root-cause
+    analysis is data-driven.
+    """
     pre = _measure_messages_bytes(messages)
     out = _compress_old_tool_results(messages)
+    post_compress = _measure_messages_bytes(out)
+    out = _apply_per_call_budget(out)
     post = _measure_messages_bytes(out)
     if pre != post:
         logger.info(
