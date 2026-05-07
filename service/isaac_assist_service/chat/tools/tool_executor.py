@@ -29756,6 +29756,40 @@ for _a in list(vars(builtins).keys()):
             except Exception: pass
         try: delattr(builtins, _a)
         except Exception: pass
+# Stale-subscription scan: subs from prior installs against deleted
+# robots still fire on each physics step and emit Boost.Python errors
+# from inside _on_step. Decode the robot path from each sub-attribute's
+# name and unsub if the path no longer exists in the current stage.
+# Diagnosed 2026-05-07; see docs/audits/function_gate_diagnosis_2026-05-07.md
+_PP_SUB_PREFIXES = (
+    "_curobo_pp_sub_", "_native_pp_sub_", "_spline_pp_sub_",
+    "_diffik_pp_sub_", "_osc_pp_sub_", "_sensor_gated_pp_sub_",
+    "_curobo_pp_tl_",
+)
+_pre_stage = omni.usd.get_context().get_stage()
+for _a in list(vars(builtins).keys()):
+    for _pre in _PP_SUB_PREFIXES:
+        if not _a.startswith(_pre):
+            continue
+        _tag = _a[len(_pre):]
+        # Decode tag back to path: "_World_Franka" → "/World/Franka".
+        # Best-effort: paths with underscores in component names won't
+        # round-trip cleanly. Conservative: only unsub if the decoded
+        # path is clearly invalid (no prim, no validity).
+        if not _tag:
+            break
+        _candidate = "/" + _tag.replace("_", "/").lstrip("/")
+        try:
+            if not _pre_stage.GetPrimAtPath(_candidate).IsValid():
+                _s = getattr(builtins, _a, None)
+                if _s:
+                    try: _s.unsubscribe()
+                    except Exception: pass
+                try: delattr(builtins, _a)
+                except Exception: pass
+        except Exception:
+            pass
+        break
 _mgr_pre = getattr(builtins, "_scene_reset_manager", None)
 if _mgr_pre is not None:
     # Only unregister this robot's hooks across modes
