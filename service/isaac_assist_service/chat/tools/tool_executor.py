@@ -29916,6 +29916,29 @@ if _mgr_pre is not None:
     # (from pre-multi-robot installs)
     try: _mgr_pre.unregister("curobo_pp")
     except Exception: pass
+    # Stale-hook scan: hooks registered in this Kit RPC session whose
+    # robot path has since been deleted from the stage. Without this,
+    # those hooks fire on every physics step and emit
+    # `(curobo_pp reset exception: ...)` Tracebacks that pollute
+    # diagnostic output. Decoded path-validity check mirrors the
+    # stale-subscription scan a few lines below for `_*_pp_sub_*`.
+    _pre_stage = omni.usd.get_context().get_stage()
+    for _hn in list(getattr(_mgr_pre, 'hooks', {{}}).keys()):
+        # Hook names: <mode>_<TAG> where TAG = path with / replaced by _
+        for _mode_pre in ("native_pp_", "spline_pp_", "diffik_pp_",
+                          "osc_pp_", "curobo_pp_", "sensor_gated_pp_"):
+            if not _hn.startswith(_mode_pre):
+                continue
+            _tag = _hn[len(_mode_pre):]
+            if not _tag:
+                break
+            _candidate = "/" + _tag.replace("_", "/").lstrip("/")
+            try:
+                if not _pre_stage.GetPrimAtPath(_candidate).IsValid():
+                    _mgr_pre.unregister(_hn)
+            except Exception:
+                pass
+            break
 
 stage = omni.usd.get_context().get_stage()
 # Pre-flight prim-existence check (silent-success fix 2026-05-07).
