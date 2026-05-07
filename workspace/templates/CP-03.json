@@ -35,7 +35,7 @@
   "failure_modes": [
     "Forgetting set_semantic_label on cubes — controller falls through to destination_path for all cubes (no routing happens).",
     "Mismatched class_name between set_semantic_label (e.g., 'Red' capitalized) and color_routing key ('red') — lookup fails, falls through to destination_path. The dispatcher lowercases the cube's class_name before dict lookup.",
-    "Using target_source other than 'curobo' — color_routing arg is silently ignored; only cuRobo's _bin_drop_pos dispatches by color today (other variants planned).",
+    "Using target_source other than 'curobo' or 'spline' — color_routing arg is silently ignored; native, sensor_gated, fixed_poses, and other variants haven't received the color_routing extension yet (planned).",
     "Both bins at same position — visually identical in viewport; routing is invisible. Place RedBin and BlueBin on different sides of the robot.",
     "Forgetting create_material+assign_material — cubes look identical (default grey) and the human verification of routing becomes impossible.",
     "Bins outside Franka's 0.855m reach — verify_pickplace_pipeline catches via reach check. Position bins symmetrically at ~0.4m offset on opposite sides."

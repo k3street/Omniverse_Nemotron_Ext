@@ -221,20 +221,45 @@ hard-instantiate path should substitute them before sandbox-exec.
 
 ## Recommended sequence (in order of leverage)
 
-1. **Add cross-cutting B.1** (`footprint_within_bounds` to verify) —
-   ~1h, unblocks CONSTRAINT-01.
-2. **Build CP-04 (compact 2×2 m pick-place)** — ~2-3h. CONSTRAINT-01
-   becomes runnable.
-3. **Add SORT-01 controller extension (Option A: `color_routing` arg)**
-   + build CP-03 — ~5h together. SORT-01 becomes runnable.
-4. **Extend `simulate_traversal_check` with orientation check** —
-   ~1h, unblocks REORIENT-01 verification.
-5. **Build CP-05 (passive flip-station ramp)** — ~3-5h. REORIENT-01
-   runnable.
+1. ✅ **Add cross-cutting B.1** (`footprint_within_bounds` to verify) —
+   commit `b93baa4`. CONSTRAINT-01 enabled.
+2. ✅ **Build CP-04 (compact 2×2 m pick-place)** — commit `d0915fe`.
+   Form-gate verified; visual delivery test pending user.
+3. ✅ **Add SORT-01 controller extension (`color_routing` arg) +
+   build CP-03** — commits `46fafe1` (cuRobo), `81459a5` (spline),
+   CP-03 in `46fafe1`. cuRobo + spline target_sources support color
+   routing.
+4. ✅ **Extend `simulate_traversal_check` with orientation check** —
+   commit `2196d4f`. `require_upright` + `upright_tolerance_dot` args.
+5. ✅ **Build CP-05 (passive flip-station)** — commit `9742374`.
+   Form-gate verified; function-gate orientation test requires user
+   visual + physics tuning.
 6. **MULTIMODAL-01 deferred indefinitely.**
 
-Total ~12-17 hours of canonical work to make all four roadmap tasks
-end-to-end runnable. Independent of agent-eval performance, which is
-a separate question that depends on the model + harness work
-(complexity routing, payload mitigation, hard-instantiate ranking
-quality).
+All five sequence items complete. Status: all four roadmap canonicals
+have build + form-gate coverage. Agent-eval performance is the next
+frontier — depends on model + harness work (complexity routing,
+payload mitigation, hard-instantiate ranking quality, and the
+remaining cross-cutting concerns C below).
+
+## Cross-cutting status
+
+- A. **Composite visual + physics material tool** — NOT IMPLEMENTED.
+  Skipped on review: explicit `create_material` + `assign_material` +
+  `apply_physics_material` calls in templates make the dependencies
+  visible to agents reading the canonical patterns. A composite would
+  hide the dependency surface. Reconsider if SORT-01 + future
+  color-aware tasks accumulate enough boilerplate to warrant it.
+
+- B. **Verifier extensions** — DONE for footprint_bounds (CONSTRAINT-01)
+  and orientation (REORIENT-01). The pattern (incremental form-checks
+  on `verify_pickplace_pipeline` + flag-based opt-in args on
+  `simulate_traversal_check`) is now established and can be applied
+  to future task types without a tool-redesign.
+
+- C. **Template `params` schema (T2)** — NOT IMPLEMENTED. Template
+  format additions to support parameter substitution before
+  hard-instantiate sandbox-exec. Would let CP-N templates serve a
+  family of variants (e.g., CP-01 with N-cubes parameter) without
+  duplicating templates per variant. Future work — bigger
+  architectural change.
