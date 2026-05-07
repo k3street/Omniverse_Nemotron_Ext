@@ -1,0 +1,43 @@
+{
+  "task_id": "CP-05",
+  "goal": "Build a reorient-and-deliver station: a 5cm cube starts ON ITS SIDE on a conveyor, hits a passive flip-wall at the conveyor end that tips it upright, lands in a small landing zone, then is picked by a Franka and placed upright in a destination bin. The function-gate uses require_upright=True so verification depends on the cube actually finishing upright (cube_up_vector · world_up >= 0.95).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six REORIENT-01 specifics for the passive flip-wall design (extends CP-01: orientation rule, CPU dynamics, sleepThreshold, rubber-on-cube, target_source='curobo', cuRobo per-robot subscription tag — all inherited):\n1) Cube starts with rotation [90, 0, 0] (90° around X) — long axis vertical → cube is laying on its side. Authored via xformOp:orient or set_attribute on rotation.\n2) Flip-wall: a thin static collider at the conveyor's exit edge, height matching cube's top edge when on side (~0.05m above belt). When cube reaches wall, leading edge stops; top continues forward → cube tips around its bottom edge → lands upright.\n3) Friction tuning: cube has rubber material (mu≈1.0). Belt has default-mu surface. Rubber-cube-on-default-belt gives ~0.75 effective friction. High enough for the belt to drive the cube forward, but not so high that cube can't slide off conveyor end.\n4) Landing zone: a small rubber-tinted pad just past the flip-wall where the cube comes to rest upright. Robot picks from here.\n5) Function-gate require_upright=True with default upright_tolerance_dot=0.95 — cube_up_vector · world_up >= 0.95 means within ~18° of vertical at sim end. The success threshold is intentionally tight to catch cubes that 'almost' flipped.\n6) PHYSICS TUNING WARNING: passive flips depend on geometry + friction in a non-trivial way. This canonical is a STARTING POINT — flip-wall position, height, and cube initial orientation may need iteration. If cube doesn't reliably tip on first try, adjust flip-wall x position by 0.01-0.02m at a time, or its height up/down by 0.01m. Active flip-station (revolute joint) is a future alternative.",
+  "code": "# DomeLight + Ground (foundational)\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Table\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Franka at +X side (picks cube AFTER it has flipped upright)\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[1.0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Conveyor — 2m wide so it spans cube start, flip-wall, AND landing zone.\n# The whole reorient + delivery sequence happens on a single belt surface.\ncreate_conveyor(\n    prim_path=\"/World/Conveyor\",\n    position=[0.0, 0.4, 0.78],\n    size=[2.0, 0.3, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Cube on its side: rotation_euler=[90, 0, 0] tilts cube 90° around X (long axis vertical)\ncreate_prim(prim_path=\"/World/Cube\", prim_type=\"Cube\", position=[-0.9, 0.4, 0.835], size=0.05, rotation_euler=[90.0, 0.0, 0.0])\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube\", schema_name=api)\n\n# sleepThreshold + rubber\nbulk_set_attribute(\n    prim_paths=[\"/World/Cube\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\napply_physics_material(prim_path=\"/World/Cube\", material_name=\"rubber\")\n\n# Flip-wall: thin static collider on the belt. Cube hits, tips forward.\ncreate_prim(prim_path=\"/World/FlipWall\", prim_type=\"Cube\", position=[0.4, 0.4, 0.83], scale=[0.01, 0.15, 0.025])\napply_api_schema(prim_path=\"/World/FlipWall\", schema_name=\"PhysicsCollisionAPI\")\n\n# Landing-zone marker: small static prim past the flip-wall, INSIDE the conveyor's xy bbox\n# so verify_pickplace_pipeline's cube_source_bridged sees the conveyor as the bridge.\n# Cube settles here after tipping; sensor at this xy triggers controller pick.\ncreate_prim(prim_path=\"/World/LandingZone\", prim_type=\"Cube\", position=[0.6, 0.4, 0.81], scale=[0.05, 0.05, 0.001])\napply_api_schema(prim_path=\"/World/LandingZone\", schema_name=\"PhysicsCollisionAPI\")\n\n# Bin behind robot (cube ends upright in bin)\ncreate_bin(prim_path=\"/World/Bin\", position=[1.0, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\n# Pick sensor centered on landing zone\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.6, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# cuRobo controller — picks the now-upright cube from landing zone\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/Conveyor\",\n    source_paths=[\"/World/Cube\"],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/Conveyor\", \"/World/FlipWall\", \"/World/LandingZone\", \"/World/Bin\"],\n)",
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/Franka", "pick_path": "/World/LandingZone", "place_path": "/World/Bin", "robot_kind": "franka_panda"}
+    ],
+    "cube_path": "/World/Cube"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube",
+    "target_path": "/World/Bin",
+    "duration_s": 90,
+    "require_upright": true,
+    "upright_tolerance_dot": 0.95
+  },
+  "extends": "CP-01",
+  "extension_notes": "CP-05 adds a passive flip-station (FlipWall + LandingZone) before the pick zone. Cube starts with rotateXYZ=[90,0,0] (on side) and is expected to flip upright after hitting the wall. Function gate uses require_upright=True so test-pass requires cube_up_vector · world_up >= 0.95 at sim end. Hardest of the 4 canonicals because passive physics flips are sensitive to friction + collision geometry.",
+  "failure_modes": [
+    "Cube doesn't reach the flip-wall at all — belt velocity too low, or cube rotated 90° around Z instead of X (not actually on side). Verify cube's rotateXYZ is [90, 0, 0] (X-axis tilt).",
+    "Cube hits flip-wall but bounces back instead of tipping — wall too tall. Reduce wall height (scale z) to ~0.025 (matches cube edge at z=0.83).",
+    "Cube tips forward past wall but doesn't land upright — wall too short OR cube's contact-friction with belt vs wall is unbalanced. Rubber on cube + default friction on wall should give it forward+down momentum.",
+    "Cube tips correctly but rolls past landing zone — landing zone too short OR cube has too much momentum. Increase landing zone scale[0] OR add a stop-wall behind landing zone.",
+    "Robot picks before cube settles — sensor triggers on tipping cube. Move sensor to centered on landing zone (currently [0.5, 0.4, 0.835]).",
+    "Robot picks tilted cube and drops tilted in bin — function gate (require_upright) catches this. Robot's natural pick orientation is palm-down; if cube is upright by then, pick + place preserves orientation."
+  ],
+  "verified_status": "build-spec-2026-05-08; physics-tuning-required (passive flips are geometry-sensitive); visual delivery + orientation test pending user"
+}

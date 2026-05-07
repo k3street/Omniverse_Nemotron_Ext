@@ -156,6 +156,27 @@ async def fix_low_confidence_match():
     }
 
 
+async def fix_cp05_reorient():
+    """CP-05 builds the passive flip-station scene: cube on side + flip-wall +
+    landing zone + robot + bin. The form-gate (reach + bridge + controller)
+    is checked; orientation correctness is a function-gate concern requiring
+    Stop+Play physics simulation, not deterministic-build verification."""
+    await kit_tools.exec_sync(RESET_CODE, timeout=10)
+    cp05 = _json.loads((REPO_ROOT / "workspace/templates/CP-05.json").read_text())
+    inst = await execute_template_canonical(cp05)
+    if not inst.get("instantiated"):
+        return False, {"reason": "CP-05 instantiate failed", "errors": inst.get("errors", [])[:3]}
+    settle = await settle_after_canonical(cp05)
+    ver = await execute_template_verify(cp05)
+    return bool(ver.get("pipeline_ok")) and len(ver.get("issues", [])) == 0, {
+        "instantiated_ok": f"{inst.get('n_ok')}/{inst.get('n_calls')}",
+        "settled_cubes": settle.get("n_cubes_restored", 0),
+        "settled_conveyors": settle.get("n_conveyors_restored", 0),
+        "pipeline_ok": ver.get("pipeline_ok"),
+        "issues": len(ver.get("issues", [])),
+    }
+
+
 async def fix_cp03_color_routed():
     """CP-03 builds a color-sorting station (red+blue cubes, two bins,
     color_routing in setup_pick_place_controller). After build + settle,
@@ -213,6 +234,9 @@ FIXTURES = [
      "expect: CP-03 (color-sort, 2 cubes + 2 bins via color_routing) builds + settles + verifies"),
     ("cp04_compact_via_settle",    fix_cp04_compact_via_settle,
      "expect: CP-04 (compact, cubes near robot) builds + settles + verifies"),
+    ("cp05_reorient",              fix_cp05_reorient,
+     "expect: CP-05 (passive flip-station) builds + settles + form-gate verifies "
+     "(function-gate orientation check is physics-tuning-dependent, not asserted here)"),
 ]
 
 
