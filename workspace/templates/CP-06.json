@@ -1,5 +1,23 @@
 {
   "task_id": "CP-06",
+  "blocked": {
+    "since": "2026-05-07",
+    "status": "infrastructure-built-but-controller-fails-delivery",
+    "reason": "_gen_pick_place_builtin handler installs successfully (build 36/36, form-gate ok, _builtin_pp_sub_<TAG> registered, ctrl.is_done() fires). But cube is never physically transported to the bin even on a STATIC tabletop (probe_builtin_tabletop.py: cube ends at [4.05, 0.09, 0.53] vs target [0.7, 0.7, 0.025]). Both conveyor and tabletop probes fail identically.",
+    "root_cause_hypothesis": "Bundled NVIDIA PickPlaceController + ParallelGripper rely on a FixedJoint cube↔gripper attach during transport (matching what our cuRobo handler does via grip_style='fixed_joint'). The bundled task wrapper in NVIDIA's standalone examples sets this up; our manual SingleArticulation+ParallelGripper integration doesn't. Friction-only grip on a 5cm cube doesn't survive the controller's RMPflow whip motion.",
+    "next_steps": [
+      "1. Reverse-engineer NVIDIA's PickPlace task wrapper to find the FixedJoint/grip mechanism we're missing",
+      "2. Either add explicit FixedJoint logic to _gen_pick_place_builtin (mirror cuRobo's pattern), or refactor to use NVIDIA's task wrapper directly",
+      "3. Validate with probe_builtin_tabletop.py — cube must reach target xy",
+      "4. Re-enable CP-06 by removing this blocked field"
+    ],
+    "infrastructure_kept": "_gen_pick_place_builtin handler in tool_executor.py + dispatcher allowlist + _PP_SUB_PREFIXES. Opt-in via target_source='builtin' so it doesn't affect existing cuRobo/spline/native paths. Safe to leave in tree until properly fixed.",
+    "diagnostic_artifacts": [
+      "scripts/qa/probe_world_physics_view.py — confirms SingleArticulation+SimulationManager works (sequence G)",
+      "scripts/qa/probe_builtin_singlearticulation.py — full pipeline on conveyor scene",
+      "scripts/qa/probe_builtin_tabletop.py — full pipeline on STATIC tabletop scene (also fails)"
+    ]
+  },
   "goal": "Build a Franka pick-and-place cell using the **bundled NVIDIA PickPlaceController** (RMPflow + ParallelGripper) instead of cuRobo. Demonstrates the alternative controller path for users who don't have cuRobo configured or want simpler RMPflow-based motion. Same scene as CP-01 (table, conveyor, 4 cubes, bin) but `target_source='builtin'` invokes the per-robot bundled controller from isaacsim.robot.manipulators.examples.franka. Robot-agnostic infrastructure: builtin handler dispatches to franka/ur10/ur10e/cobotta per robot_family arg.",
   "tools_used": [
     "create_prim",

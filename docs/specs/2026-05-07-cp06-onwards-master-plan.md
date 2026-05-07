@@ -143,8 +143,11 @@ Each shipped canonical:
 | CP-03 | Color-routed sort | ✅ shipped | (prior) | red→Red, blue→Blue |
 | CP-04 | Compact 2x2m | ✅ shipped | (prior) | 4 cubes 100% |
 | CP-05 | Reorient (passive flip) | ⚠️ probe | (prior) | physics tuning gap |
-| CP-06 | UR10 PickPlace | 🔧 in-progress | Sprint 1 | port from standalone |
-| CP-07..CP-38 | TBD | 📋 planned | — | — |
+| CP-06 | Franka + bundled PickPlaceController | 🛑 blocked | Sprint 1 | infra built; cube transport fails (FixedJoint missing). Postponed to Sprint 3. See `workspace/templates/CP-06.json#blocked`. |
+| CP-07 | 4× Franka factory (multi-robot scoping) | ✅ form-gate shipped | Sprint 1 | 127/127 build, 16 cubes + 4 conveyors via settle_state, pipeline_ok=True. Function-gate testing pending. |
+| CP-08..CP-38 | TBD | 📋 planned | — | — |
+
+**2026-05-07 update**: replaced regex-based settle extraction with structural `settle_state` JSON field (kcode-spec sec 4 anti-fragility). All CP-01..CP-05 migrated; CP-07 unblocked; CP-06 postponed pending FixedJoint integration in `_gen_pick_place_builtin` handler.
 
 ## Source documents
 
