@@ -131,16 +131,23 @@ def test_execute_cite_with_matching_topic():
 
 
 def test_execute_cite_unknown_topic_returns_helpful_miss():
+    """A truly off-topic query (random string with no corpus overlap)
+    should fall through to the cite_miss branch. Production corpus has
+    grown beyond deprecations to include verification advice and other
+    cross-cutting facts, so we use a sentinel string that can't match."""
     from service.isaac_assist_service.chat.slash_commands import execute_slash
     events = []
     def emit(t, p): events.append((t, p))
+    sentinel = "qZ_xyz_no_corpus_match_sentinel_abc123"
     reply = asyncio.run(execute_slash(
-        "cite", "what colour is the sky on Mars",
+        "cite", sentinel,
         history=[], emit_trace=emit,
     ))
-    assert "No cite-fact on file" in reply["reply"]
+    assert "No cite-fact on file" in reply["reply"], (
+        f"unexpected reply for sentinel query: {reply['reply'][:150]}..."
+    )
     # Still emits a trace event so /report can show the user looked
-    assert events[0] == ("cite_miss", {"query": "what colour is the sky on Mars"})
+    assert events[0] == ("cite_miss", {"query": sentinel})
 
 
 def test_execute_help_lists_commands():

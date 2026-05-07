@@ -35,23 +35,28 @@ class TestIntentConstants:
             assert intent in INTENT_SYSTEM, f"Intent '{intent}' not in INTENT_SYSTEM"
 
     def test_examples_cover_key_intents(self):
-        """After 2026-04-19, examples are (message, intent, multi_step) triples
-        and cover a representative sample — not every intent needs an example
-        since vision_inspect/prim_inspect etc are in the system prompt."""
-        covered = {label for _, label, _ in INTENT_EXAMPLES}
+        """After 2026-04-19, examples are 4-tuples (message, intent, multi_step,
+        complexity) and cover a representative sample — not every intent needs
+        an example since vision_inspect/prim_inspect etc are in the system prompt."""
+        covered = {label for _, label, _, _ in INTENT_EXAMPLES}
         # At minimum: the intents the orchestrator branches on.
         required = {"general_query", "patch_request", "scene_diagnose",
                     "navigation", "console_review"}
         missing = required - covered
         assert missing == set(), f"INTENT_EXAMPLES missing: {missing}"
 
-    def test_examples_are_triples_with_multi_step_flag(self):
+    def test_examples_are_quads_with_complexity(self):
+        """As of intent_router 138325d (multi_step) + spec-first work,
+        each example is (message, intent, multi_step, complexity_tier)."""
         for example in INTENT_EXAMPLES:
             assert isinstance(example, tuple)
-            assert len(example) == 3
+            assert len(example) == 4, (
+                f"expected 4-tuple, got {len(example)}: {example}"
+            )
             assert isinstance(example[0], str)
             assert isinstance(example[1], str)
             assert isinstance(example[2], bool)
+            assert isinstance(example[3], str)
 
 
 class TestClassifyIntent:
