@@ -29790,6 +29790,25 @@ for _a in list(vars(builtins).keys()):
         except Exception:
             pass
         break
+
+# Catch-all sweep for legacy / unknown-prefix pp subs (e.g. `_pp_sub_dual`
+# from a removed dual-robot pipeline). These don't match the per-robot
+# prefixes above so the path-validity check can't run; we simply
+# unsubscribe and drop them since they're orphans by definition (no
+# living code in the current codebase recreates them).
+for _a in list(vars(builtins).keys()):
+    if not (_a.startswith("_pp_") or _a.startswith("_pickplace_") or
+            _a.endswith("_pp_sub")):
+        continue
+    # Skip if already handled by the per-robot loop above
+    if any(_a.startswith(_pre) for _pre in _PP_SUB_PREFIXES):
+        continue
+    _s = getattr(builtins, _a, None)
+    if _s:
+        try: _s.unsubscribe()
+        except Exception: pass
+    try: delattr(builtins, _a)
+    except Exception: pass
 _mgr_pre = getattr(builtins, "_scene_reset_manager", None)
 if _mgr_pre is not None:
     # Only unregister this robot's hooks across modes
