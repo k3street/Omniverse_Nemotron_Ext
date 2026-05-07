@@ -156,6 +156,27 @@ async def fix_low_confidence_match():
     }
 
 
+async def fix_cp03_color_routed():
+    """CP-03 builds a color-sorting station (red+blue cubes, two bins,
+    color_routing in setup_pick_place_controller). After build + settle,
+    verify pipeline_ok=true and the controller's generated code includes
+    COLOR_ROUTING dict + _cube_semantic_class + _destination_path_for."""
+    await kit_tools.exec_sync(RESET_CODE, timeout=10)
+    cp03 = _json.loads((REPO_ROOT / "workspace/templates/CP-03.json").read_text())
+    inst = await execute_template_canonical(cp03)
+    if not inst.get("instantiated"):
+        return False, {"reason": "CP-03 instantiate failed", "errors": inst.get("errors", [])[:3]}
+    settle = await settle_after_canonical(cp03)
+    ver = await execute_template_verify(cp03)
+    return bool(ver.get("pipeline_ok")) and len(ver.get("issues", [])) == 0, {
+        "instantiated_ok": f"{inst.get('n_ok')}/{inst.get('n_calls')}",
+        "settled_cubes": settle.get("n_cubes_restored", 0),
+        "settled_conveyors": settle.get("n_conveyors_restored", 0),
+        "pipeline_ok": ver.get("pipeline_ok"),
+        "issues": len(ver.get("issues", [])),
+    }
+
+
 async def fix_cp04_compact_via_settle():
     """CP-04 has cubes near the robot; setup_pick_place_controller fires
     _pause_belt within ~0.25s of physics ticks during install, mutating
@@ -188,6 +209,8 @@ FIXTURES = [
      "expect: NOT confident (small margin) → falls back to few-shot"),
     ("low_confidence_match",       fix_low_confidence_match,
      "expect: NOT confident (low similarity) → falls back to few-shot"),
+    ("cp03_color_routed",          fix_cp03_color_routed,
+     "expect: CP-03 (color-sort, 2 cubes + 2 bins via color_routing) builds + settles + verifies"),
     ("cp04_compact_via_settle",    fix_cp04_compact_via_settle,
      "expect: CP-04 (compact, cubes near robot) builds + settles + verifies"),
 ]
