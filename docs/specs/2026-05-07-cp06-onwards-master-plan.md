@@ -156,7 +156,9 @@ Each shipped canonical:
 | CP-16 | 4-color sorter | ✅ form-gate shipped | Sprint 2 | Scaled CP-03 from 2 to 4 colors. 57/57 build. color_routing dict 4 entries. |
 | CP-17 | 3-class semantic sorter (size labels) | ✅ form-gate shipped | Sprint 2 | Validates Semantics_class routing (not just color). 70/70 build. semantic_type='class' works identically. |
 | CP-18 | Inspect-and-reject station | ✅ form-gate shipped | Sprint 2 | Demonstrates color_routing fall-through to destination_path for unlabeled cubes. 4 good + 1 reject. 58/58 build. |
-| CP-19..CP-38 | TBD | 📋 planned | — | — |
+| CP-19 | Twin-pallet feeder | ✅ form-gate shipped | Sprint 2 | drop_targets fan-out to 2 pallets (3 cubes each). 53/53 build. Validates multi-destination dispatch within single controller. |
+| CP-20 | Brick-layer palletizer (18 cubes 3x3x2) | ✅ form-gate shipped | Sprint 2 | Largest stack canonical. Research-spec brick palletizer with layer_rotation_deg=90. 123/123 build. |
+| CP-21..CP-38 | TBD | 📋 planned | — | — |
 
 **2026-05-07/2026-05-08 progress** — 41+ atomic commits since structural work began. Smoke regression (6 fixtures) green throughout:
 
