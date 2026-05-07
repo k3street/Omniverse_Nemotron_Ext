@@ -47,6 +47,12 @@ def _get_collection():
     _client = chromadb.PersistentClient(path=str(_PERSIST_DIR))
     try:
         _collection = _client.get_collection(_COLLECTION_NAME)
+        if _collection.count() == 0:
+            # Orphan-empty state: persist dir was deleted while collection
+            # metadata survived → get_collection succeeds but returns 0 entries.
+            # _build_index would otherwise never trigger. Rebuild defensively.
+            logger.warning("[ToolRetriever] Collection found but empty — rebuilding index")
+            _build_index()
         logger.info(f"[ToolRetriever] Loaded existing collection ({_collection.count()} tools)")
     except Exception:
         _collection = _client.create_collection(_COLLECTION_NAME)
