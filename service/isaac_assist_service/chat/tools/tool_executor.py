@@ -23248,7 +23248,8 @@ async def _handle_compute_stack_placement(args: Dict) -> Dict:
     spacing = float(spacing) if spacing is not None else cube_size
     anchor = args.get("anchor", "top")
 
-    # Parse pattern → (rows, cols) per layer
+    # Parse pattern → (rows, cols, skip_center) per layer
+    skip_center = False
     if pattern == "column":
         rows, cols = 1, 1
     elif pattern.startswith("grid_") and "x" in pattern[5:]:
@@ -23259,9 +23260,19 @@ async def _handle_compute_stack_placement(args: Dict) -> Dict:
                 return {"type": "error", "error": f"grid dims must be >=1, got {rows}x{cols}"}
         except (ValueError, IndexError):
             return {"type": "error", "error": f"unrecognized grid pattern: {pattern}"}
+    elif pattern.startswith("donut_") and "x" in pattern[6:]:
+        try:
+            r_str, c_str = pattern[6:].split("x", 1)
+            rows, cols = int(r_str), int(c_str)
+            if rows < 3 or cols < 3 or rows % 2 == 0 or cols % 2 == 0:
+                return {"type": "error",
+                        "error": f"donut requires odd RxC >=3, got {rows}x{cols}"}
+            skip_center = True
+        except (ValueError, IndexError):
+            return {"type": "error", "error": f"unrecognized donut pattern: {pattern}"}
     else:
         return {"type": "error",
-                "error": f"unsupported pattern: {pattern!r} (use 'column' or 'grid_RxC')"}
+                "error": f"unsupported pattern: {pattern!r} (use 'column', 'grid_RxC', or 'donut_RxC')"}
 
     if n_items < 1:
         return {"type": "error", "error": f"n_items must be >=1, got {n_items}"}
@@ -23277,6 +23288,7 @@ n_items = {n_items}
 cube_size = {cube_size}
 spacing = {spacing}
 rows, cols = {rows}, {cols}
+skip_center = {skip_center}
 layer_rotation_deg = {layer_rotation_deg}
 anchor = {anchor!r}
 
@@ -23310,7 +23322,16 @@ else:
         else:
             base_z = target_top_z + cube_size * 0.5
 
-        per_layer = rows * cols
+        # Build the per-layer (row, col) sequence. For donut patterns,
+        # skip the geometric center (only valid for odd rows × odd cols).
+        layer_slots = []
+        for r in range(rows):
+            for c in range(cols):
+                if skip_center and r == rows // 2 and c == cols // 2:
+                    continue
+                layer_slots.append((r, c))
+        per_layer = len(layer_slots)
+
         # Center the grid on (cx, cy):
         #   col index 0..cols-1, with center at (cols-1)/2.0
         #   row index 0..rows-1, with center at (rows-1)/2.0
@@ -23318,8 +23339,7 @@ else:
         for i in range(n_items):
             layer = i // per_layer
             slot = i % per_layer
-            row = slot // cols
-            col = slot % cols
+            row, col = layer_slots[slot]
             x = cx + (col - (cols - 1) * 0.5) * spacing
             y = cy + (row - (rows - 1) * 0.5) * spacing
             z = base_z + layer * cube_size

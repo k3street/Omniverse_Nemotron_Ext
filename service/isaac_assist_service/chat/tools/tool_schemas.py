@@ -5845,7 +5845,7 @@ ISAAC_SIM_TOOLS = [
                     "type": "object",
                     "properties": {
                         "target_path": {"type": "string", "description": "USD path of the target prim (pallet, container, zone) — must have world bbox geometry"},
-                        "pattern": {"type": "string", "description": "'column' (1x1 stack) or 'grid_RxC' (RxC items per layer, e.g. 'grid_2x2'). Default 'column'."},
+                        "pattern": {"type": "string", "description": "'column' (1x1 stack), 'grid_RxC' (RxC items per layer, e.g. 'grid_2x2'), or 'donut_RxC' (RxC minus center cell — odd R,C >=3, gives 8 positions for donut_3x3 in pinwheel/ring shape). Default 'column'."},
                         "n_items": {"type": "integer", "description": "Total number of placement positions to compute (>=1). Spans multiple layers if n_items > rows*cols."},
                         "cube_size": {"type": "number", "description": "Edge length of each item in meters (default 0.05)"},
                         "layer_rotation_deg": {"type": "number", "description": "Yaw rotation applied per layer in degrees (default 0; use 90 for brick-pattern alternation)"},
