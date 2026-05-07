@@ -163,7 +163,9 @@ Each shipped canonical:
 | CP-23 | Mirror-orientation cell (-Y face) | ✅ form-gate shipped | Sprint 2 | Robot rotated 180° from CP-01. Validates handler with arbitrary quaternions. 38/38 build. |
 | CP-24 | Narrow-slot insertion | ✅ form-gate shipped | Sprint 2 | 4 cubes into 6cm-wide slot. ±1cm Y-tolerance. 38/38 build. Tests cuRobo precision shaping. |
 | CP-25 | High-density 4x4 palletizer (16 cubes) | ✅ form-gate shipped | Sprint 2 | Tightest packing (0.07m spacing). 111/111 build. 16-entry drop_targets dict. |
-| CP-26..CP-38 | TBD | 📋 planned | — | — |
+| CP-26 | Belt-to-belt handoff | ✅ form-gate shipped | Sprint 2 | Single-robot transfer between Conv1 and Conv2 with bin downstream. 39/39 build. |
+| CP-27 | Tabletop rearrangement (no real conveyor) | ✅ form-gate shipped | Sprint 2 | Cubes pre-placed on WorkSurface, robot rearranges to 2x2 pallet. 39/39 build. |
+| CP-28..CP-38 | TBD | 📋 planned | — | — |
 
 **Final form-gate sweep CP-07..CP-21 (2026-05-08)** — 14/14 PASS, 825 build calls, 91 cubes:
 ```
