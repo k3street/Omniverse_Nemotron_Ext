@@ -238,7 +238,11 @@ _TEST_VECTORS = [
             "target_position": [0.4, 0.0, 0.3],
             "robot_type": "franka",
         },
-        ["RmpFlow", "set_end_effector_target", "apply_action", "add_physics_callback", "update_world", "load_supported_motion_policy_config"],
+        # Default planner is RMPflow (reactive). Generated code uses
+        # load_supported_motion_gen_config (the modern name; the older
+        # load_supported_motion_policy_config no longer exists).
+        ["RmpFlow", "set_end_effector_target", "apply_action",
+         "load_supported_motion_gen_config", "SingleArticulation"],
     ),
     (
         "move_to_pose",
@@ -248,7 +252,9 @@ _TEST_VECTORS = [
             "planner": "lula_rrt",
             "robot_type": "franka",
         },
-        ["LulaRRTMotionPolicy"],
+        # Handler migrated from LulaRRTMotionPolicy to
+        # LulaTaskSpaceTrajectoryGenerator (single-shot global planner)
+        ["LulaTaskSpaceTrajectoryGenerator", "load_supported_lula_rrt_config"],
     ),
     (
         "plan_trajectory",
@@ -260,7 +266,9 @@ _TEST_VECTORS = [
             ],
             "robot_type": "franka",
         },
-        ["LulaRRTMotionPolicy", "set_end_effector_target"],
+        # plan_trajectory uses the same Lula task-space generator and emits
+        # compute_task_space_trajectory_from_points
+        ["LulaTaskSpaceTrajectoryGenerator", "compute_task_space_trajectory_from_points"],
     ),
     (
         "build_scene_from_blueprint",

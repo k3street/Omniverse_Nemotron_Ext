@@ -118,12 +118,19 @@ def test_tool_handler_shape():
 
 
 def test_tool_handler_empty_query_shape():
-    """Empty / no-match query returns a well-formed empty result."""
+    """No-match query returns a well-formed empty result.
+    Uses a sentinel string with no plausible corpus overlap — the older
+    "what colour is the sky on Mars" now fuzzy-matches expanded corpus
+    entries since the cite handler grew beyond pure deprecations."""
     from service.isaac_assist_service.chat.tools.tool_executor import (
         _handle_lookup_api_deprecation,
     )
-    r = asyncio.run(_handle_lookup_api_deprecation({"query": "what colour is the sky on Mars?"}))
-    assert r["count"] == 0
+    sentinel = "qZ_xyz_no_corpus_match_sentinel_abc123"
+    r = asyncio.run(_handle_lookup_api_deprecation({"query": sentinel}))
+    assert r["count"] == 0, (
+        f"expected count=0 for sentinel query, got {r['count']} "
+        f"with results: {[x.get('id') for x in r.get('results', [])]}"
+    )
     assert r["results"] == []
     # Note should explain fallback
     assert "lookup_knowledge" in r["note"] or "No " in r["note"]
