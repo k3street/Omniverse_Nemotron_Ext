@@ -27023,6 +27023,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             planning_obstacles=args.get("planning_obstacles") or [],
             curobo_world_yml=args.get("curobo_world_yml"),
             color_routing=args.get("color_routing"),
+            drop_targets=args.get("drop_targets"),
             require_upright=bool(args.get("require_upright", False)),
             upright_dot_threshold=float(args.get("upright_dot_threshold", 0.85)),
         )
@@ -30193,6 +30194,7 @@ def _gen_pick_place_curobo(robot_path, sensor_path, belt_path,
                            planning_obstacles=None,
                            curobo_world_yml=None,
                            color_routing=None,
+                           drop_targets=None,
                            require_upright=False,
                            upright_dot_threshold=0.85):
     """GPU-accelerated global trajectory optimization via cuRobo MotionPlanner.
@@ -30268,6 +30270,11 @@ PLANNING_OBSTACLES = {_obs}
 # cube's Semantics_color (or Semantics_class) class_name. Falls through
 # to DEST_PATH when no routing entry matches.
 COLOR_ROUTING = {_json.dumps(color_routing or {})}
+# Stack-placement enabler: dict {{cube_path → [x,y,z]}} OR list of [x,y,z]
+# parallel to SOURCE_PATHS. When set, _bin_drop_pos returns this position
+# instead of DROP_TARGET / DEST_PATH for the named cube. Used by CP-08+
+# canonicals where each cube goes to a distinct grid/column position.
+DROP_TARGETS = {_json.dumps(drop_targets) if drop_targets else 'None'}
 
 # Per-robot subscription + scene-reset name. Earlier hardcoded
 # "_curobo_pp_sub" / "curobo_pp" meant a second install (e.g. for a
@@ -30554,6 +30561,20 @@ def _destination_path_for(cube_path):
     return DEST_PATH
 
 def _bin_drop_pos(cube_path=None):
+    # Per-cube explicit drop position takes priority over scalar DROP_TARGET
+    # and DEST_PATH bbox. Supports dict (cube_path → [x,y,z]) or list
+    # parallel to SOURCE_PATHS.
+    if cube_path and DROP_TARGETS is not None:
+        if isinstance(DROP_TARGETS, dict):
+            if cube_path in DROP_TARGETS:
+                return np.array(DROP_TARGETS[cube_path], dtype=np.float32)
+        elif isinstance(DROP_TARGETS, list):
+            try:
+                idx = SOURCE_PATHS.index(cube_path)
+                if 0 <= idx < len(DROP_TARGETS):
+                    return np.array(DROP_TARGETS[idx], dtype=np.float32)
+            except ValueError:
+                pass
     if DROP_TARGET is not None: return np.array(DROP_TARGET, dtype=np.float32)
     # Color-routing: pick destination per cube. Falls back to DEST_PATH.
     dest = _destination_path_for(cube_path) if cube_path else DEST_PATH
@@ -30571,6 +30592,14 @@ def _compute_h1():
     for sp in SOURCE_PATHS:
         wp = _world_pos(sp)
         if wp is not None: zs.append(float(wp[2]))
+    # Multi-target stacking: every drop target's z matters — h1 must clear
+    # the highest one (e.g. column-stacked tower's top cube).
+    if DROP_TARGETS is not None:
+        _vals = (DROP_TARGETS.values() if isinstance(DROP_TARGETS, dict)
+                 else DROP_TARGETS if isinstance(DROP_TARGETS, list) else [])
+        for _v in _vals:
+            if isinstance(_v, (list, tuple)) and len(_v) >= 3:
+                zs.append(float(_v[2]))
     dp = _bin_drop_pos()
     if dp is not None: zs.append(float(dp[2]))
     return (max(zs) + 0.20) if zs else 0.3
