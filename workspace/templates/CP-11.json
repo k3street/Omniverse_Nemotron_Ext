@@ -1,0 +1,58 @@
+{
+  "task_id": "CP-11",
+  "goal": "Build a pinwheel palletizer: 8 cubes arranged around a central gap on a 0.45×0.45m pallet. Demonstrates the donut_3x3 pattern in compute_stack_placement (3x3 minus center → 8 positions in ring/pinwheel shape). Same robot + conveyor setup as CP-10 (3x3 grid) but center cell deliberately empty — useful for designs that need a forbidden zone / pivot column / central pillar.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "compute_stack_placement",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six pinwheel specifics for CP-11 (extends CP-10 — same pallet + conveyor + cuRobo pattern, only difference is donut vs grid):\n1) Pattern 'donut_3x3' yields 8 positions matching grid_3x3 minus the center cell. Center cell at (0, -0.4) is skipped — left empty for forbidden zone or central pillar in real scenarios.\n2) compute_stack_placement(target='/World/Pallet', pattern='donut_3x3', n_items=8, cube_size=0.05, spacing=0.10, anchor='top') returns 8 positions in this order: corners + edges, top-to-bottom + left-to-right WITHIN row.\n3) Slot order: 0=(-0.10, -0.50), 1=(0, -0.50), 2=(0.10, -0.50), 3=(-0.10, -0.40), 4=(0.10, -0.40) [SKIPS (0, -0.40) center], 5=(-0.10, -0.30), 6=(0, -0.30), 7=(0.10, -0.30).\n4) drop_targets dict has 8 entries — Cube_N → slot N. Same per-cube routing pattern as CP-08/CP-10.\n5) Pallet 0.45×0.45m centered at [0, -0.4, 0.775]: bbox xy [-0.225, -0.625] → [0.225, -0.175]. All 8 drop positions within bbox.\n6) Industrial usage: pinwheel palletizing places cubes with a deliberate central gap so a packaging machine arm can drop a frozen-peg / lid / fastener through the hole.",
+  "code": "# DomeLight + parent Xform + table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# 5m conveyor for 8 cubes at 0.30m spacing\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[5.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 8 cubes\nfor i, x in enumerate([-2.4, -2.1, -1.8, -1.5, -1.2, -0.9, -0.6, -0.3]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(8)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(8)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Pallet 0.45x0.45x0.05m (same as CP-10)\ncreate_prim(prim_path=\"/World/Pallet\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.225, 0.225, 0.025])\napply_api_schema(prim_path=\"/World/Pallet\", schema_name=\"PhysicsCollisionAPI\")\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# 8-entry drop_targets dict (donut_3x3 — center cell skipped).\n# Positions computed via:\n#   compute_stack_placement(target='/World/Pallet', pattern='donut_3x3',\n#                            n_items=8, cube_size=0.05, spacing=0.10, anchor='top')\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(8)],\n    destination_path=\"/World/Pallet\",\n    drop_targets={\n        \"/World/Cube_1\": [-0.10, -0.50, 0.825],\n        \"/World/Cube_2\": [ 0.00, -0.50, 0.825],\n        \"/World/Cube_3\": [ 0.10, -0.50, 0.825],\n        \"/World/Cube_4\": [-0.10, -0.40, 0.825],\n        \"/World/Cube_5\": [ 0.10, -0.40, 0.825],\n        \"/World/Cube_6\": [-0.10, -0.30, 0.825],\n        \"/World/Cube_7\": [ 0.00, -0.30, 0.825],\n        \"/World/Cube_8\": [ 0.10, -0.30, 0.825],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Pallet\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [-2.4, 0.4, 0.835],
+      "/World/Cube_2": [-2.1, 0.4, 0.835],
+      "/World/Cube_3": [-1.8, 0.4, 0.835],
+      "/World/Cube_4": [-1.5, 0.4, 0.835],
+      "/World/Cube_5": [-1.2, 0.4, 0.835],
+      "/World/Cube_6": [-0.9, 0.4, 0.835],
+      "/World/Cube_7": [-0.6, 0.4, 0.835],
+      "/World/Cube_8": [-0.3, 0.4, 0.835]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.2, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/Pallet",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Pallet",
+    "duration_s": 160
+  },
+  "extends": "CP-10",
+  "extension_notes": "CP-11 differs from CP-10 only in pattern (donut_3x3 vs grid_3x3) and cube count (8 vs 9). Same pallet, same robot, same controller. Industrial value: pinwheel patterns leave a central gap for fasteners, central pegs, or air-flow channels in palletized goods. Future extensions: donut_5x5 (24-cube ring), multi-layer donut + layer_rotation_deg=45 for offset stacking.",
+  "failure_modes": [
+    "drop_targets dict ordering matters: cube_path → slot mapping is by name, not list-index. If drop_targets keys mismatch source_paths names, cubes go to default DEST_PATH center.",
+    "Donut center (0, -0.4) is empty — if a different cube is placed there (e.g. Cube_9 from copy/paste error), it'll collide with fingers during subsequent drops.",
+    "Spacing 0.10m means donut diameter = 2*spacing = 0.20m + cube_size = 0.25m. Pallet must be ≥0.25m wide. Used 0.45m — safe."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending; function-gate (8 cubes in pinwheel) likely stochastic"
+}
