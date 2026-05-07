@@ -167,7 +167,9 @@ Each shipped canonical:
 | CP-27 | Tabletop rearrangement (no real conveyor) | ✅ form-gate shipped | Sprint 2 | Cubes pre-placed on WorkSurface, robot rearranges to 2x2 pallet. 39/39 build. |
 | CP-28 | Single-cube precision benchmark | ✅ form-gate + measured | Sprint 2 | Minimal benchmark canonical. 5-run measurement: dx mean=-0.023m, dy mean=-0.162m (systematic), dist mean=0.167m. cuRobo precision ~17cm not 5cm. |
 | CP-29 | y-bias compensation experiment (FAILED) | ⚠ documented failure | Sprint 2 | Tested whether -0.16m y-bias is constant offset. Shifted drop_target +0.16m → cube never picked (controller failed at closer-to-base target). Bias is non-linear. |
-| CP-30..CP-38 | TBD | 📋 planned | — | — |
+| CP-30 | Generous-margin palletizer (50cm) | ✅ form-gate shipped | Sprint 2 | Pallet sized at 2× measured precision (17cm × 2 = 50cm). Wider grid spacing (16cm). 39/39 build. |
+| CP-31 | Pick-from-pile (destacking) | ✅ form-gate shipped | Sprint 2 | 3 cubes vertically stacked, robot picks top-down via source_paths order. 32/32 build. |
+| CP-32..CP-38 | TBD | 📋 planned | — | — |
 
 **Empirical drop-precision finding (2026-05-08, 5+3-run benchmarks)**:
 - cuRobo cube-drop precision is **~17cm avg, ±10cm**, NOT the originally-assumed 5cm
