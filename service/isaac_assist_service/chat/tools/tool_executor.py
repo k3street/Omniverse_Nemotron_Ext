@@ -3878,13 +3878,20 @@ import omni.usd, omni.timeline, omni.kit.app, json, time as _t
 from pxr import UsdGeom, Usd
 
 stage = omni.usd.get_context().get_stage()
-cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+
+# Note: UsdGeom.BBoxCache caches per-prim and never invalidates against
+# physics-driven transform updates. Re-using one cache across the play
+# loop returns the AUTHORED (stale) position instead of the live one.
+# Fix 2026-05-07: build a fresh cache per query for the moving cube;
+# only static target bbox can safely use a cached lookup.
 
 def _world_pos(path):
     p = stage.GetPrimAtPath(path)
     if not p or not p.IsValid():
         return None
-    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    # FRESH cache per call — physics-driven xformOps require it.
+    fresh = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    b = fresh.ComputeWorldBound(p).ComputeAlignedRange()
     if not b.IsEmpty():
         c = b.GetMidpoint()
         return [float(c[0]), float(c[1]), float(c[2])]
@@ -3895,11 +3902,13 @@ def _world_pos(path):
     except Exception:
         return None
 
+# Static target bbox is computed ONCE before play — no cache reuse hazard.
 def _world_bbox(path):
     p = stage.GetPrimAtPath(path)
     if not p or not p.IsValid():
         return None
-    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    fresh = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    b = fresh.ComputeWorldBound(p).ComputeAlignedRange()
     if b.IsEmpty():
         return None
     mn = b.GetMin(); mx = b.GetMax()
