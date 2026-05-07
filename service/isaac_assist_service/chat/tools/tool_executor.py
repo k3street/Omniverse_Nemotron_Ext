@@ -4546,6 +4546,14 @@ _RESULT_CAP_DEFAULT_CHARS = int(os.environ.get("RESULT_CAP_DEFAULT", "50000"))
 _RESULT_CAP_EXEMPT = frozenset({
     "capture_viewport",       # image bytes — VLM needs intact data
     "vision_detect_objects",  # detection coordinates — small but every entry matters
+    # Function/form gates emit the informative result as a JSON line at
+    # END of output. Truncating from the beginning loses it. The output
+    # may include long preceding noise (controller reset prints, stale-
+    # sub Tracebacks) but those don't affect parsing as long as the
+    # final JSON line survives. Exempt rather than build a tail-aware
+    # truncator (simpler, lower risk of off-by-one).
+    "simulate_traversal_check",
+    "verify_pickplace_pipeline",
 })
 # Per-tool overrides (in chars). Smaller = aggressive cap.
 _RESULT_CAP_OVERRIDES = {
