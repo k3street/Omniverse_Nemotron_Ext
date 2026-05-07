@@ -153,7 +153,10 @@ Each shipped canonical:
 | CP-13 | 2-cube column stack (cube on cube) | ✅ form-gate shipped | Sprint 2 | Smallest multi-layer stack. 27/27 build, form-gate ✓. PalletBase 15×15cm; Cube_2 lands on Cube_1 at z=0.875. |
 | CP-14 | 2-robot relay-stacker | ✅ form-gate shipped | Sprint 2 | Combines CP-02 multi-robot + CP-13 column. 29/29 build, form-gate ✓. Per-robot source_paths + drop_targets. |
 | CP-15 | Mixed-SKU graduated tower | ✅ form-gate shipped | Sprint 2 | First user of compute_stack_placement v3's `cube_sizes` (cumulative-z column). 3 cubes 10/8/5cm descending. 32/32 build, form-gate ✓. |
-| CP-16..CP-38 | TBD | 📋 planned | — | — |
+| CP-16 | 4-color sorter | ✅ form-gate shipped | Sprint 2 | Scaled CP-03 from 2 to 4 colors. 57/57 build. color_routing dict 4 entries. |
+| CP-17 | 3-class semantic sorter (size labels) | ✅ form-gate shipped | Sprint 2 | Validates Semantics_class routing (not just color). 70/70 build. semantic_type='class' works identically. |
+| CP-18 | Inspect-and-reject station | ✅ form-gate shipped | Sprint 2 | Demonstrates color_routing fall-through to destination_path for unlabeled cubes. 4 good + 1 reject. 58/58 build. |
+| CP-19..CP-38 | TBD | 📋 planned | — | — |
 
 **2026-05-07/2026-05-08 progress** — 41+ atomic commits since structural work began. Smoke regression (6 fixtures) green throughout:
 
