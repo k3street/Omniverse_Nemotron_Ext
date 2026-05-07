@@ -68,6 +68,20 @@ SUITE: List[Tuple[str, str, str, str, int, Dict, bool]] = [
      "workspace/templates/CP-05.json",
      "/World/Cube", "/World/LandingZone", 30,
      {"require_upright": True, "upright_tolerance_dot": 0.95}, False),
+    # CP-08 — 2x2 grid palletizer using compute_stack_placement +
+    # drop_targets dict. Cube_1 → drop_targets["/World/Cube_1"] which
+    # is on /World/Pallet. Verified 2026-05-07 single 90s probe.
+    ("CP-08",
+     "workspace/templates/CP-08.json",
+     "/World/Cube_1", "/World/Pallet", 90, {}, True),
+    # CP-09 — 5-cube column tower stacker. Function-gate is STOCHASTIC:
+    # cuRobo seed variance + small TowerBase (10x10cm) gives narrow
+    # placement margin. Single-run pass-rate ~50% across 2 probes.
+    # Marked as probe (expect_pass=False) until physics tuning OR
+    # multi-run consistency check is in place.
+    ("CP-09 (probe)",
+     "workspace/templates/CP-09.json",
+     "/World/Cube_1", "/World/TowerBase", 90, {}, False),
 ]
 
 
