@@ -3556,11 +3556,15 @@ async def _handle_verify_pickplace_pipeline(args: Dict) -> Dict:
         return {"error": "verify_pickplace_pipeline requires 'stages' (list of {robot_path,pick_path,place_path}) or single robot_path+pick_path+place_path"}
 
     cube_path = args.get("cube_path", "") or ""
+    footprint_bounds = args.get("footprint_bounds")  # optional [[xmin,ymin],[xmax,ymax]]
 
     # Build the Kit script that resolves world positions per stage.
     import json as _j
     stages_json = _j.dumps(stages)
     cube_path_json = _j.dumps(cube_path)
+    # repr() handles Python None correctly; json.dumps() would emit "null"
+    # which is not a valid Python identifier when interpolated into the script.
+    footprint_bounds_repr = repr(footprint_bounds)
     code = f"""\
 import omni.usd, json, builtins as _bi
 from pxr import UsdGeom, Usd, PhysxSchema
@@ -3570,6 +3574,7 @@ cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
 ROBOT_REACH = {_ROBOT_REACH_M!r}
 stages = {stages_json}
 cube_path = {cube_path_json}
+footprint_bounds = {footprint_bounds_repr}
 
 def _world_pos(path):
     \"\"\"Return bbox center as a fallback. Used only for the robot base call below.\"\"\"
@@ -3781,21 +3786,59 @@ if cube_path:
                 issues.append(f'[cube_source_bridged] cube {{cube_path}} at xy=({{cpos[0]:.2f}},{{cpos[1]:.2f}}) is {{dxy:.2f}}m from first pick zone xy=({{first_pick[0]:.2f}},{{first_pick[1]:.2f}}); not at pick zone (within 0.20m) AND not on an active conveyor that bridges into it')
                 cube_source_note = 'cube stranded'
 
+# footprint_within_bounds: when caller supplies footprint_bounds, every
+# user-authored prim under /World must have its xy world bbox inside.
+# Catches CONSTRAINT-01-style "build a 2x2m cell" violations early —
+# without it, reach checks alone pass while the cell sprawls beyond bounds.
+footprint_violations = []
+if footprint_bounds:
+    (fb_xmin, fb_ymin), (fb_xmax, fb_ymax) = footprint_bounds
+    # Skip these — they're system prims with unbounded or negative-z extents
+    _skip_prefixes = ('/World/Render', '/World/persistent', '/World/Look',
+                      '/World/PhysicsScene', '/World/Materials')
+    for prim in stage.Traverse():
+        path = str(prim.GetPath())
+        if not path.startswith('/World/') or path.count('/') < 2:
+            continue
+        if path.startswith(_skip_prefixes):
+            continue
+        # Only top-level user prims — descendants are inside their parent's bbox
+        if path.count('/') > 2:
+            continue
+        bb = _bbox_xy_of(prim)
+        if bb is None:
+            continue
+        (pxmin, pymin), (pxmax, pymax) = bb
+        if pxmin < fb_xmin or pymin < fb_ymin or pxmax > fb_xmax or pymax > fb_ymax:
+            footprint_violations.append({{
+                'path': path,
+                'bbox_xy': [[round(pxmin, 3), round(pymin, 3)],
+                            [round(pxmax, 3), round(pymax, 3)]],
+            }})
+            issues.append(
+                f'[footprint_bounds] {{path}} bbox xy '
+                f'({{pxmin:.2f}},{{pymin:.2f}})->({{pxmax:.2f}},{{pymax:.2f}}) '
+                f'exceeds bounds [{{fb_xmin}},{{fb_ymin}}]->[{{fb_xmax}},{{fb_ymax}}]'
+            )
+
 ok = (all(s.get('reachable', False) for s in results)
       and all(s.get('conveyor_active', True) for s in results)
       and all(s.get('controller_installed', True) for s in results)
       and (cube_source_bridged is None or cube_source_bridged)
+      and not footprint_violations
       and not any('handoff' in i for i in issues)
       and not any(i.startswith('[conveyor_active]') for i in issues)
       and not any(i.startswith('[controller_installed]') for i in issues)
-      and not any(i.startswith('[cube_source_bridged]') for i in issues))
+      and not any(i.startswith('[cube_source_bridged]') for i in issues)
+      and not any(i.startswith('[footprint_bounds]') for i in issues))
 out = {{
     'stages': results,
     'issues': issues,
     'pipeline_ok': ok,
     'cube_source_bridged': cube_source_bridged,
     'cube_source_note': cube_source_note,
-    'rationale': 'Per-stage: reach + controller subscription + handoff conveyor; pipeline-level: cube source at pick zone or on active bridging conveyor.',
+    'footprint_violations': footprint_violations,
+    'rationale': 'Per-stage: reach + controller subscription + handoff conveyor; pipeline-level: cube source at pick zone or on active bridging conveyor; optional: footprint_bounds for CONSTRAINT-01.',
 }}
 print(json.dumps(out))
 """

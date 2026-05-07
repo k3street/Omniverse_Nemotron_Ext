@@ -698,6 +698,12 @@ ISAAC_SIM_TOOLS = [
                     "pick_path": {"type": "string", "description": "Single-stage shorthand: pick target."},
                     "place_path": {"type": "string", "description": "Single-stage shorthand: place target."},
                     "robot_kind": {"type": "string", "description": "Single-stage shorthand: robot kind for reach lookup."},
+                    "cube_path": {"type": "string", "description": "Optional: cube prim path for cube_source_bridged check (cube must be at first pick zone xy within 0.20m OR on an active conveyor that bridges into it)."},
+                    "footprint_bounds": {
+                        "type": "array",
+                        "description": "Optional: bound user prims' xy world bbox. Format [[xmin,ymin],[xmax,ymax]] in meters. Triggers footprint_within_bounds check — every authored prim under /World whose xy bbox extends outside flags an issue. Use for CONSTRAINT-01-style 'build a cell that fits in 2x2m'.",
+                        "items": {"type": "array", "items": {"type": "number"}},
+                    },
                 },
                 "required": [],
             },
