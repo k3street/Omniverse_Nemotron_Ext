@@ -242,6 +242,42 @@ frontier — depends on model + harness work (complexity routing,
 payload mitigation, hard-instantiate ranking quality, and the
 remaining cross-cutting concerns C below).
 
+### Update 2026-05-07 (afternoon) — function-gate fully operational
+
+Two production bugs found and fixed via Kit RPC verification:
+
+**Bug 1: `BBoxCache` stale-read in `simulate_traversal_check`**
+The handler instantiated one `UsdGeom.BBoxCache` at script top and
+reused it for every cube position query in the play loop. The cache
+never invalidates against PhysX-driven xformOp updates, so every
+`_world_pos(cube)` returned the AUTHORED position instead of the
+live one. Function-gate reported `cube_speed=0` for ALL fixtures —
+including ones where the cube provably moved.
+
+Fix (commit 8025170): build a fresh BBoxCache inside `_world_pos()`
+on each call. Static target bbox unchanged.
+
+**Bug 2: stale `_*_pp_sub_*` subscriptions in builtins**
+Prior installs (including audit tests with bad paths) left
+PhysX subscriptions in `builtins` that fired on every physics step,
+each crashing inside `_on_step` with Boost.Python.ArgumentError.
+2700 Tracebacks per 45s sim — invisible noise that doesn't block
+delivery but pollutes diagnostic output.
+
+Fix (commit 755effb + 881d34f): install-time scan unsubs subs whose
+decoded robot path is invalid in current stage, plus catch-all
+sweep for legacy non-prefix-matching attributes (`_pp_sub_dual`).
+
+**Verified**: function_gate_suite reports 5/5 deliver consistently
+across 3 runs (CP-01 + CP-02 + CP-03 red + CP-03 blue + CP-04). CP-05
+(REORIENT) added as a known-failing probe to track the physics-tuning
+gap separately. Hard_instantiate_smoke 6/6, no regressions.
+
+Companion scripts:
+- `scripts/qa/function_gate_suite.py` — single run, 5/5 required +
+  CP-05 probe
+- `scripts/qa/function_gate_consistency.py` — N runs with Wilson CI
+
 ### Update 2026-05-07 — payload mitigation premise revised
 
 Track C 9.2 analyzer (`scripts/qa/analyze_tool_result_sizes.py`)
