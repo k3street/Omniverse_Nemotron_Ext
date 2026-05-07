@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -681,19 +682,72 @@ class ChatOrchestrator:
             logger.warning(f"[{session_id}] Negative pattern retrieval failed: {e}")
 
         # Retrieve workflow templates (pre-generated offline from task specs).
-        # Injected as few-shot patterns to stop the LLM from inventing a fresh
-        # tool chain each turn. Adds to patterns_text (part of system prompt).
+        # Two paths:
+        #   HARD-INSTANTIATE when top match similarity > CANONICAL_THRESHOLD —
+        #     pre-execute the canonical's `code` field as tool calls, then
+        #     instruct LLM to verify+report only. Eliminates iteration, keeps
+        #     conversation history small, deterministic for canonical shapes.
+        #   FEW-SHOT GUIDE otherwise — inject templates as `**Approach**:`
+        #     reference; agent still authors its own tool chain.
+        # Env-gated: CANONICAL_INSTANTIATE=off disables hard-instantiate path.
+        # Two thresholds: top-similarity AND top-vs-second margin. Both
+        # required. Calibration on 2026-05-08 prompts:
+        #   own-goal-text query              → top sim 0.89-0.91, gap 0.39-0.41
+        #   "pick and place cell with Franka" → CP-01 sim 0.49, gap 0.24 (confident)
+        #   CP-02 paraphrase                  → CP-02 sim 0.55, gap 0.21 (confident)
+        #   VR-19 actual prompt               → CP-02 sim 0.51, gap 0.006 (ambiguous —
+        #                                       CP-01 right behind, fall back to iter)
+        # Gap requirement is the key — it stops false positives when two
+        # canonicals are similarly relevant.
+        _canonical_min_sim = 0.45
+        _canonical_min_margin = 0.20
+        _canonical_enabled = (os.environ.get("CANONICAL_INSTANTIATE", "on").lower()
+                              in ("on", "true", "1", "yes"))
         try:
-            from .tools.template_retriever import retrieve_templates, format_for_prompt
-            templates = retrieve_templates(user_message, top_k=3)
-            if templates:
-                tpl_text = format_for_prompt(templates)
-                if patterns_text:
-                    patterns_text = patterns_text + "\n\n" + tpl_text
-                else:
-                    patterns_text = tpl_text
+            from .tools.template_retriever import (
+                retrieve_templates_with_scores, format_for_prompt
+            )
+            scored = retrieve_templates_with_scores(user_message, top_k=3)
+            top_sim = scored[0]["similarity"] if scored else 0.0
+            second_sim = scored[1]["similarity"] if len(scored) > 1 else 0.0
+            margin = top_sim - second_sim
+            confident_match = (
+                _canonical_enabled
+                and scored
+                and top_sim >= _canonical_min_sim
+                and margin >= _canonical_min_margin
+            )
+
+            if confident_match:
+                # HARD-INSTANTIATE PATH
+                from .canonical_instantiator import (
+                    execute_template_canonical, format_instantiation_summary,
+                )
+                top = scored[0]
+                logger.info(
+                    f"[{session_id}] Canonical match {top['task_id']} "
+                    f"sim={top_sim:.2f} margin={margin:.2f} "
+                    f"(threshold sim≥{_canonical_min_sim} margin≥{_canonical_min_margin}) — "
+                    f"hard-instantiating template code"
+                )
+                inst_result = await execute_template_canonical(top["template"])
+                summary_text = format_instantiation_summary(inst_result)
+                if summary_text:
+                    if patterns_text:
+                        patterns_text = patterns_text + "\n\n" + summary_text
+                    else:
+                        patterns_text = summary_text
+            else:
+                # FEW-SHOT GUIDE PATH (existing behavior)
+                templates = [s["template"] for s in scored]
+                if templates:
+                    tpl_text = format_for_prompt(templates)
+                    if patterns_text:
+                        patterns_text = patterns_text + "\n\n" + tpl_text
+                    else:
+                        patterns_text = tpl_text
         except Exception as e:
-            logger.warning(f"[{session_id}] Template retrieval failed: {e}")
+            logger.warning(f"[{session_id}] Template retrieval/instantiation failed: {e}")
 
         # ── 3.5. Strategic-brain Fas 3: spec_generator + gap_analyzer ────────
         # When complexity=="complex", produce a structured execution plan and

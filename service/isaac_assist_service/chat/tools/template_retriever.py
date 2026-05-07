@@ -142,6 +142,50 @@ def format_for_prompt(templates: List[Dict]) -> str:
     return "\n".join(lines)
 
 
+def retrieve_templates_with_scores(query: str, top_k: int = 3) -> List[Dict]:
+    """Like retrieve_templates but each entry includes ChromaDB distance +
+    a normalized similarity score in [0, 1] (1 = perfect match).
+
+    Returns list of dicts: [{template, task_id, distance, similarity}, ...]
+
+    Used by hard-instantiate path to gate on canonical-match confidence.
+    """
+    col = _get_collection()
+    if col is None:
+        return []
+    try:
+        res = col.query(query_texts=[query], n_results=top_k)
+        metas = (res.get("metadatas") or [[]])[0]
+        dists = (res.get("distances") or [[1.0] * len(metas)])[0]
+        out: List[Dict] = []
+        for i, m in enumerate(metas):
+            tid = m.get("task_id")
+            if not tid:
+                continue
+            t = _load_template(tid)
+            if not t:
+                continue
+            d = float(dists[i]) if i < len(dists) else 1.0
+            # Normalize: ChromaDB default L2 distances on sentence-transformers
+            # embeddings are typically in [0, 2]. Map empirically: d=0 → sim=1,
+            # d=0.5 → sim≈0.75 (strong), d=1.0 → sim≈0.5 (medium), d>=1.5 → sim=0.
+            similarity = max(0.0, min(1.0, 1.0 - d / 1.5))
+            out.append({
+                "template": t,
+                "task_id": tid,
+                "distance": d,
+                "similarity": similarity,
+            })
+        logger.info(
+            f"[TemplateRetriever] '{query[:60]}' → "
+            + ", ".join(f"{x['task_id']}({x['similarity']:.2f})" for x in out)
+        )
+        return out
+    except Exception as e:
+        logger.warning(f"[TemplateRetriever] Scored retrieval failed: {e}")
+        return []
+
+
 def rebuild_index() -> None:
     global _collection, _client, _template_cache
     col = _get_collection()
