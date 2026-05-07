@@ -41,23 +41,33 @@ from service.isaac_assist_service.chat.tools.tool_executor import (  # noqa: E40
 )
 from service.isaac_assist_service.chat.tools import kit_tools  # noqa: E402
 
-# (label, template_path, cube_path, target_path, duration_s, extra_args)
-SUITE: List[Tuple[str, str, str, str, int, Dict]] = [
+# (label, template_path, cube_path, target_path, duration_s, extra_args, expect_pass)
+# expect_pass: True = canonical should deliver and we assert success=True;
+#              False = expected to fail (e.g. CP-05 physics-tuning gap),
+#                       reported separately and not counted toward pass-rate.
+SUITE: List[Tuple[str, str, str, str, int, Dict, bool]] = [
     ("CP-01",
      "workspace/templates/CP-01.json",
-     "/World/Cube_1", "/World/Bin", 45, {}),
+     "/World/Cube_1", "/World/Bin", 45, {}, True),
     ("CP-02",
      "workspace/templates/CP-02.json",
-     "/World/Cube_1", "/World/Bin", 45, {}),
+     "/World/Cube_1", "/World/Bin", 45, {}, True),
     ("CP-03 red",
      "workspace/templates/CP-03.json",
-     "/World/Cube_red", "/World/RedBin", 45, {}),
+     "/World/Cube_red", "/World/RedBin", 45, {}, True),
     ("CP-03 blue",
      "workspace/templates/CP-03.json",
-     "/World/Cube_blue", "/World/BlueBin", 45, {}),
+     "/World/Cube_blue", "/World/BlueBin", 45, {}, True),
     ("CP-04",
      "workspace/templates/CP-04.json",
-     "/World/Cube_1", "/World/Bin", 45, {}),
+     "/World/Cube_1", "/World/Bin", 45, {}, True),
+    # CP-05 (REORIENT-01) — passive flip-station. Currently fails the
+    # function-gate (cube doesn't roll into landing zone upright). Tracked
+    # in gap-analysis 2026-05-08. Kept here as physics-tuning probe.
+    ("CP-05 (probe)",
+     "workspace/templates/CP-05.json",
+     "/World/Cube", "/World/LandingZone", 30,
+     {"require_upright": True, "upright_tolerance_dot": 0.95}, False),
 ]
 
 
@@ -127,31 +137,47 @@ async def main() -> int:
             return 2
 
     rows: List[Dict] = []
-    for label, tpath, cube, target, dur, extra in suite:
+    for entry in suite:
+        # Backwards-compat: 6-tuple (no expect_pass) treated as expect_pass=True
+        if len(entry) == 7:
+            label, tpath, cube, target, dur, extra, expect_pass = entry
+        else:
+            label, tpath, cube, target, dur, extra = entry
+            expect_pass = True
         print(f"  running {label}...")
         try:
             r = await run_one(label, tpath, cube, target, duration_s=dur, extra=extra)
         except Exception as e:
             r = {"label": label, "verdict": f"EXC: {str(e)[:80]}"}
+        r["expect_pass"] = expect_pass
         rows.append(r)
 
     # Render summary
     print()
-    print(f"{'label':<13} {'build':<7} {'success':<8} {'final':<32} {'in_xy':<7} {'speed':<6}")
+    print(f"{'label':<14} {'build':<7} {'success':<8} {'final':<32} {'in_xy':<7} {'speed':<6}")
     print("-" * 80)
     n_pass = 0
+    n_required = 0
     for r in rows:
-        if r.get("success") is True:
-            n_pass += 1
-        print(f"{r.get('label', '?'):<13} "
+        ok = r.get("success") is True
+        if r.get("expect_pass", True):
+            n_required += 1
+            if ok:
+                n_pass += 1
+        label = r.get('label', '?')
+        if not r.get("expect_pass", True):
+            label = label + "*"
+        print(f"{label:<15} "
               f"{str(r.get('build', '?')):<7} "
               f"{str(r.get('success', r.get('verdict', '?'))):<8} "
               f"{str(r.get('final', '?')):<32} "
               f"{str(r.get('in_xy', '?')):<7} "
               f"{str(r.get('speed', '?')):<6}")
+    print("\n  * = probe (excluded from pass count, expected to fail under current physics tuning)")
     print()
-    print(f"Result: {n_pass}/{len(rows)} canonicals delivered")
-    return 0 if n_pass == len(rows) else 1
+    print(f"Result: {n_pass}/{n_required} required canonicals delivered "
+          f"({len(rows) - n_required} probes excluded from pass count)")
+    return 0 if n_pass == n_required else 1
 
 
 if __name__ == "__main__":
