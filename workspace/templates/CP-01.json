@@ -62,5 +62,21 @@
       "status": "blocked",
       "reason": "isaaclab not in Kit python. Stub-only (experimental anyway)."
     }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/Bin",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Bin",
+    "duration_s": 60
   }
 }

@@ -85,6 +85,51 @@ _SAFE_BUILTINS = {
 }
 
 
+async def execute_template_verify(template: Dict[str, Any]) -> Dict[str, Any]:
+    """Run the canonical's verify_args (form gate) and parse the result.
+    Called by the orchestrator AFTER execute_template_canonical, BEFORE the
+    LLM call — so the LLM sees the verification outcome as ground truth in
+    the prompt rather than having to call verify itself with maybe-wrong
+    paths derived from the user's natural-language prompt."""
+    from .tools.tool_executor import execute_tool_call
+
+    verify_args = template.get("verify_args")
+    if not verify_args:
+        return {"executed": False, "reason": "template has no verify_args field"}
+
+    try:
+        res = await execute_tool_call("verify_pickplace_pipeline", verify_args)
+    except Exception as e:
+        return {"executed": False, "error": f"{type(e).__name__}: {e}"}
+
+    if res.get("type") == "error":
+        return {"executed": False, "error": res.get("error", "?")}
+
+    out = (res.get("output") or "").strip()
+    parsed = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                import json as _j
+                parsed = _j.loads(line)
+                break
+            except Exception:
+                continue
+
+    if parsed is None:
+        return {"executed": True, "parsed": None, "raw": out[:300]}
+
+    return {
+        "executed": True,
+        "pipeline_ok": bool(parsed.get("pipeline_ok")),
+        "issues": list(parsed.get("issues", [])),
+        "stages": parsed.get("stages", []),
+        "cube_source_bridged": parsed.get("cube_source_bridged"),
+        "cube_source_note": parsed.get("cube_source_note"),
+    }
+
+
 async def execute_template_canonical(template: Dict[str, Any]) -> Dict[str, Any]:
     """Run a canonical template's `code` field as tool-call sequence.
 
@@ -194,6 +239,7 @@ def _extract_prim_paths(template: Dict[str, Any]) -> List[str]:
 def format_instantiation_summary(
     result: Dict[str, Any],
     template: Dict[str, Any] = None,
+    verify_result: Dict[str, Any] = None,
 ) -> str:
     """Strong directive system-prompt addendum — tells the LLM the scene is
     already built, lists FORBIDDEN tools, and enumerates the actual prim
@@ -232,6 +278,60 @@ def format_instantiation_summary(
         "— you literally cannot call them. Only verify/inspect/fix tools are "
         "available."
     )
+
+    # If the orchestrator already pre-executed verify (recommended for
+    # canonicals — eliminates LLM path-naming creativity), surface those
+    # results directly so the LLM doesn't need to call verify itself.
+    if verify_result and verify_result.get("executed"):
+        lines.append("")
+        lines.append("**Form-gate verification (already executed for you):**")
+        if verify_result.get("pipeline_ok") is True:
+            lines.append("  ✓ pipeline_ok = TRUE — all reach + bridge + controller checks passed")
+        elif verify_result.get("pipeline_ok") is False:
+            lines.append("  ✗ pipeline_ok = FALSE")
+            issues = verify_result.get("issues", [])
+            if issues:
+                lines.append(f"  Issues ({len(issues)}):")
+                for issue in issues[:8]:
+                    lines.append(f"    - {issue}")
+        bridged = verify_result.get("cube_source_bridged")
+        if bridged is not None:
+            lines.append(f"  cube_source_bridged: {bridged}"
+                         + (f" — {verify_result.get('cube_source_note', '')}"
+                            if verify_result.get("cube_source_note") else ""))
+        lines.append("")
+        lines.append(
+            "**Your task this turn:** report the form-gate result above to the "
+            "user in plain Swedish/English (whichever they used), then call "
+            "`simulate_traversal_check` (function gate) using the args from "
+            "this template's `simulate_args` field if you want to confirm the "
+            "cube actually arrives. After simulate returns, write the final "
+            "summary. Do NOT call verify_pickplace_pipeline again — it has "
+            "already been called for you. Do NOT use any build tools."
+        )
+
+    # Always show the canonical's prescribed args as literal JSON — this is
+    # the source-of-truth, even when verify is pre-executed (so the LLM has
+    # the exact prim paths to reference + can call simulate verbatim).
+    if template:
+        simulate_args = template.get("simulate_args")
+        verify_args = template.get("verify_args")
+        if verify_args or simulate_args:
+            import json as _j
+            lines.append("")
+            lines.append("**Canonical tool-call args (use these EXACT args, do not invent new paths):**")
+            if verify_args:
+                lines.append("")
+                lines.append("verify_pickplace_pipeline (already called above, shown for path reference):")
+                lines.append("```json")
+                lines.append(_j.dumps(verify_args, indent=2))
+                lines.append("```")
+            if simulate_args:
+                lines.append("")
+                lines.append("simulate_traversal_check (call this if not already verified by simulation):")
+                lines.append("```json")
+                lines.append(_j.dumps(simulate_args, indent=2))
+                lines.append("```")
 
     if err_count:
         lines.append("")

@@ -35,5 +35,27 @@
     "open_known_issues": "test-harness builtins cleanup between repeat runs uses a kit_tools.exec_sync — not part of canonical pattern (agent starts fresh)"
   },
   "extends": "CP-01",
-  "extension_notes": "CP-02 reuses CP-01's pick-place mechanics (cuRobo controller, settling state, mid-waypoints, friction material, sleepThreshold=0) but adds two architectural requirements: (a) per-robot subscription naming so multiple cuRobo controllers coexist, (b) explicit drop_target when destination's bbox center is out of robot's reach. Both landed in the 2026-05-06 commits."
+  "extension_notes": "CP-02 reuses CP-01's pick-place mechanics (cuRobo controller, settling state, mid-waypoints, friction material, sleepThreshold=0) but adds two architectural requirements: (a) per-robot subscription naming so multiple cuRobo controllers coexist, (b) explicit drop_target when destination's bbox center is out of robot's reach. Both landed in the 2026-05-06 commits.",
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka1",
+        "pick_path": "/World/Conv1",
+        "place_path": "/World/Conv2",
+        "robot_kind": "franka_panda"
+      },
+      {
+        "robot_path": "/World/Franka2",
+        "pick_path": "/World/Conv2",
+        "place_path": "/World/Bin",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Bin",
+    "duration_s": 60
+  }
 }

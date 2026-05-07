@@ -734,7 +734,9 @@ class ChatOrchestrator:
             if confident_match:
                 # HARD-INSTANTIATE PATH
                 from .canonical_instantiator import (
-                    execute_template_canonical, format_instantiation_summary,
+                    execute_template_canonical,
+                    execute_template_verify,
+                    format_instantiation_summary,
                 )
                 top = scored[0]
                 logger.info(
@@ -744,7 +746,21 @@ class ChatOrchestrator:
                     f"hard-instantiating template code"
                 )
                 inst_result = await execute_template_canonical(top["template"])
-                summary_text = format_instantiation_summary(inst_result, top["template"])
+                # Also pre-execute verify_pickplace_pipeline using the
+                # canonical's prescribed verify_args. This eliminates the
+                # LLM path-naming creativity issue: the LLM gets verify
+                # results as ground truth and just needs to summarize +
+                # optionally call simulate.
+                verify_result = await execute_template_verify(top["template"])
+                if verify_result.get("executed"):
+                    logger.info(
+                        f"[{session_id}] Pre-executed verify: "
+                        f"pipeline_ok={verify_result.get('pipeline_ok')} "
+                        f"issues={len(verify_result.get('issues', []))}"
+                    )
+                summary_text = format_instantiation_summary(
+                    inst_result, top["template"], verify_result
+                )
                 if summary_text:
                     if patterns_text:
                         patterns_text = patterns_text + "\n\n" + summary_text
