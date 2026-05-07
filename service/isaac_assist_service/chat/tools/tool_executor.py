@@ -5912,6 +5912,21 @@ async def _handle_add_vision_classifier_gate(args: Dict) -> Dict:
             # Non-fatal: continue with current viewport
             pass
 
+    # Force-flush render before capture. Kit RPC's /capture endpoint
+    # otherwise returns axis-only black image when the viewport hasn't
+    # rendered the new scene state yet (KNOWN LIMITATION).
+    flush_code = """
+import omni.kit.app
+app = omni.kit.app.get_app()
+for _ in range(60):
+    app.update()
+print("flushed")
+"""
+    try:
+        await kit_tools.exec_sync(flush_code, timeout=15)
+    except Exception:
+        pass
+
     # Capture viewport
     img, mime = await _get_viewport_bytes()
     if img is None:
