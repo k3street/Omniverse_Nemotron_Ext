@@ -90,6 +90,23 @@ SUITE: List[Tuple[str, str, str, str, int, Dict, bool]] = [
     ("CP-11",
      "workspace/templates/CP-11.json",
      "/World/Cube_1", "/World/Pallet", 90, {}, True),
+    # CP-12 — mixed-SKU palletizer (5/8/10cm). Cube_3 (10cm) likely fails
+    # gripper-width; tracked as probe.
+    ("CP-12 (probe)",
+     "workspace/templates/CP-12.json",
+     "/World/Cube_1", "/World/Pallet", 90, {}, False),
+    # CP-13 — 2-cube column stack.
+    ("CP-13",
+     "workspace/templates/CP-13.json",
+     "/World/Cube_1", "/World/PalletBase", 90, {}, True),
+    # CP-14 — 2-robot relay-stacker.
+    ("CP-14 (probe)",
+     "workspace/templates/CP-14.json",
+     "/World/Cube_1", "/World/PalletBase", 90, {}, False),
+    # CP-15 — mixed-SKU graduated tower (10/8/5cm). Probe due to 10cm gripper limit.
+    ("CP-15 (probe)",
+     "workspace/templates/CP-15.json",
+     "/World/Cube_1", "/World/PalletBase", 120, {}, False),
 ]
 
 
