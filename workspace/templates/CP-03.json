@@ -1,0 +1,44 @@
+{
+  "task_id": "CP-03",
+  "goal": "Build a color-sorting station: one Franka Panda, one conveyor, two bins (one tinted red, one tinted blue), two 5cm cubes (one red, one blue) on the conveyor. The robot picks each cube and routes it to the matching-color bin. Color routing is driven by Semantics_color labels on the cubes, dispatched in setup_pick_place_controller via color_routing arg. Same delivery mechanics as CP-01, with the routing dispatch as the new behavior.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "create_material",
+    "assign_material",
+    "apply_physics_material",
+    "set_semantic_label",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six SORT-01 specifics (extends CP-01: orientation rule, CPU dynamics, sleepThreshold, rubber-on-cube, target_source='curobo', cuRobo per-robot subscription tag — all inherited):\n1) Two visually distinct cubes via create_material (OmniPBR with diffuse_color [1,0,0] for red, [0,0,1] for blue) + assign_material per cube. Visual color matters for human verification.\n2) Each cube also gets a Semantics_color SemanticsAPI label via set_semantic_label(prim_path=cube, class_name='red'|'blue', semantic_type='color'). The class_name (lowercase) is what setup_pick_place_controller's color_routing dict keys on at pick time.\n3) Two bins, each tinted with the corresponding visual material so the human-readable scene matches the routing logic. Tinting is purely cosmetic — the dispatcher reads cube semantic, not bin color.\n4) Single setup_pick_place_controller call with source_paths=[red_cube, blue_cube] and color_routing={'red': '/World/RedBin', 'blue': '/World/BlueBin'}. The kit-side _bin_drop_pos(cube_path) reads the cube's Semantics_color and selects destination per cube.\n5) Bins positioned at distinct xy on opposite sides of the robot so visual routing is unambiguous. RedBin at +x, BlueBin at -x relative to robot.\n6) target_source='curobo' for smoothest motion. Color routing is only implemented in cuRobo controller's _bin_drop_pos for now (other target_source modes ignore color_routing; falls through to destination_path).",
+  "code": "# DomeLight\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\n# Parent Xform\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# Table\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Franka — same orientation as CP-01\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Conveyor\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Two cubes with distinct visual + physics + semantic labels\n# Red cube\ncreate_prim(prim_path=\"/World/Cube_red\", prim_type=\"Cube\", position=[-1.4, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_red\", schema_name=api)\ncreate_material(material_path=\"/World/Materials/RedMat\", shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.0, 0.0])\nassign_material(prim_path=\"/World/Cube_red\", material_path=\"/World/Materials/RedMat\")\nset_semantic_label(prim_path=\"/World/Cube_red\", class_name=\"red\", semantic_type=\"color\")\n\n# Blue cube\ncreate_prim(prim_path=\"/World/Cube_blue\", prim_type=\"Cube\", position=[-1.0, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_blue\", schema_name=api)\ncreate_material(material_path=\"/World/Materials/BlueMat\", shader_type=\"OmniPBR\", diffuse_color=[0.0, 0.0, 1.0])\nassign_material(prim_path=\"/World/Cube_blue\", material_path=\"/World/Materials/BlueMat\")\nset_semantic_label(prim_path=\"/World/Cube_blue\", class_name=\"blue\", semantic_type=\"color\")\n\n# sleepThreshold + rubber on both cubes\nbulk_set_attribute(\n    prim_paths=[\"/World/Cube_red\", \"/World/Cube_blue\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\napply_physics_material(prim_path=\"/World/Cube_red\", material_name=\"rubber\")\napply_physics_material(prim_path=\"/World/Cube_blue\", material_name=\"rubber\")\n\n# Two bins, each tinted with its color (visual aid)\ncreate_bin(prim_path=\"/World/RedBin\", position=[0.4, -0.4, 0.75], size=[0.3, 0.3, 0.15])\nassign_material(prim_path=\"/World/RedBin\", material_path=\"/World/Materials/RedMat\")\ncreate_bin(prim_path=\"/World/BlueBin\", position=[-0.4, -0.4, 0.75], size=[0.3, 0.3, 0.15])\nassign_material(prim_path=\"/World/BlueBin\", material_path=\"/World/Materials/BlueMat\")\n\n# Pick sensor\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# cuRobo controller with color_routing\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_red\", \"/World/Cube_blue\"],\n    destination_path=\"/World/RedBin\",\n    color_routing={\"red\": \"/World/RedBin\", \"blue\": \"/World/BlueBin\"},\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/RedBin\", \"/World/BlueBin\"],\n)",
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/RedBin", "robot_kind": "franka_panda"}
+    ],
+    "cube_path": "/World/Cube_red"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_red",
+    "target_path": "/World/RedBin",
+    "duration_s": 90
+  },
+  "extends": "CP-01",
+  "extension_notes": "CP-03 reuses CP-01's pick-place mechanics (cuRobo controller, settling state, mid-waypoints, friction material, sleepThreshold=0) but adds: (a) per-cube visual + physics + semantic-color labeling, (b) color_routing dispatch in setup_pick_place_controller's cuRobo _bin_drop_pos. Both cubes go through the SAME controller install — the dispatch happens at pick time based on the just-picked cube's Semantics_color class_name.",
+  "failure_modes": [
+    "Forgetting set_semantic_label on cubes — controller falls through to destination_path for all cubes (no routing happens).",
+    "Mismatched class_name between set_semantic_label (e.g., 'Red' capitalized) and color_routing key ('red') — lookup fails, falls through to destination_path. The dispatcher lowercases the cube's class_name before dict lookup.",
+    "Using target_source other than 'curobo' — color_routing arg is silently ignored; only cuRobo's _bin_drop_pos dispatches by color today (other variants planned).",
+    "Both bins at same position — visually identical in viewport; routing is invisible. Place RedBin and BlueBin on different sides of the robot.",
+    "Forgetting create_material+assign_material — cubes look identical (default grey) and the human verification of routing becomes impossible.",
+    "Bins outside Franka's 0.855m reach — verify_pickplace_pipeline catches via reach check. Position bins symmetrically at ~0.4m offset on opposite sides."
+  ],
+  "verified_status": "build-spec-2026-05-08; controller-color-routing-implemented; visual delivery test pending user"
+}

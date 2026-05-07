@@ -26777,6 +26777,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             end_effector_initial_height=args.get("end_effector_initial_height"),
             planning_obstacles=args.get("planning_obstacles") or [],
             curobo_world_yml=args.get("curobo_world_yml"),
+            color_routing=args.get("color_routing"),
         )
     if mode == "diffik":
         return _gen_pick_place_diffik(
@@ -29592,7 +29593,8 @@ def _gen_pick_place_curobo(robot_path, sensor_path, belt_path,
                            drop_target, ee_offset,
                            end_effector_initial_height=None,
                            planning_obstacles=None,
-                           curobo_world_yml=None):
+                           curobo_world_yml=None,
+                           color_routing=None):
     """GPU-accelerated global trajectory optimization via cuRobo MotionPlanner.
 
     **Unlocked 2026-04-21** — four breakthroughs:
@@ -29661,6 +29663,11 @@ DROP_TARGET = {_json.dumps(drop_target) if drop_target else 'None'}
 EE_OFFSET = np.array({_json.dumps(list(ee_offset))}, dtype=np.float32)
 EE_INIT_H_OVERRIDE = {end_effector_initial_height!r}
 PLANNING_OBSTACLES = {_obs}
+# SORT-01 enabler: dict {{semantic class_name → destination prim path}}.
+# When non-empty, _bin_drop_pos selects destination per cube based on the
+# cube's Semantics_color (or Semantics_class) class_name. Falls through
+# to DEST_PATH when no routing entry matches.
+COLOR_ROUTING = {_json.dumps(color_routing or {})}
 
 # Per-robot subscription + scene-reset name. Earlier hardcoded
 # "_curobo_pp_sub" / "curobo_pp" meant a second install (e.g. for a
@@ -29815,10 +29822,45 @@ def _world_pos(path):
     t = UsdGeom.Xformable(p).ComputeLocalToWorldTransform(0).ExtractTranslation()
     return np.array([float(t[0]), float(t[1]), float(t[2])])
 
-def _bin_drop_pos():
+def _cube_semantic_class(prim_path):
+    \"\"\"Return the cube's Semantics class_name for color routing. Looks for
+    Semantics_color, Semantics_colour, or Semantics_class instances applied
+    via set_semantic_label. Returns lowercase string or None.\"\"\"
+    try:
+        from pxr import Semantics
+    except Exception:
+        return None
+    p = stage.GetPrimAtPath(prim_path)
+    if not p or not p.IsValid():
+        return None
+    for sname in ("Semantics_color", "Semantics_colour", "Semantics_class"):
+        try:
+            sem = Semantics.SemanticsAPI.Get(p, sname)
+            if not sem: continue
+            data_attr = sem.GetSemanticDataAttr()
+            if data_attr and data_attr.IsValid():
+                v = data_attr.Get()
+                if v: return str(v).lower()
+        except Exception:
+            continue
+    return None
+
+def _destination_path_for(cube_path):
+    \"\"\"Color-routing dispatch: when COLOR_ROUTING is non-empty, look up
+    cube's semantic class_name and route to matching destination.
+    Falls through to DEST_PATH when no routing entry matches.\"\"\"
+    if COLOR_ROUTING:
+        col = _cube_semantic_class(cube_path)
+        if col and col in COLOR_ROUTING:
+            return COLOR_ROUTING[col]
+    return DEST_PATH
+
+def _bin_drop_pos(cube_path=None):
     if DROP_TARGET is not None: return np.array(DROP_TARGET, dtype=np.float32)
-    if DEST_PATH:
-        p = stage.GetPrimAtPath(DEST_PATH)
+    # Color-routing: pick destination per cube. Falls back to DEST_PATH.
+    dest = _destination_path_for(cube_path) if cube_path else DEST_PATH
+    if dest:
+        p = stage.GetPrimAtPath(dest)
         if p and p.IsValid():
             bb = UsdGeom.Imageable(p).ComputeWorldBound(0, UsdGeom.Tokens.default_).ComputeAlignedRange()
             mn, mx = bb.GetMin(), bb.GetMax()
@@ -30109,7 +30151,8 @@ def _on_step(dt):
             if S["settle_ticks"] > 0: return
             # Now cube is at rest. Read position and plan trajectory.
             picked = S["picked_path"]
-            cp, dp = _world_pos(picked), _bin_drop_pos()
+            # Pass cube_path so COLOR_ROUTING can dispatch destination per cube.
+            cp, dp = _world_pos(picked), _bin_drop_pos(picked)
             if cp is None or dp is None:
                 S["mode"] = "wait_sensor"; S["picked_path"] = None
                 _resume_belt()
