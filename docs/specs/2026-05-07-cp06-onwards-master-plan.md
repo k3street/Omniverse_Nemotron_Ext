@@ -165,7 +165,15 @@ Each shipped canonical:
 | CP-25 | High-density 4x4 palletizer (16 cubes) | ✅ form-gate shipped | Sprint 2 | Tightest packing (0.07m spacing). 111/111 build. 16-entry drop_targets dict. |
 | CP-26 | Belt-to-belt handoff | ✅ form-gate shipped | Sprint 2 | Single-robot transfer between Conv1 and Conv2 with bin downstream. 39/39 build. |
 | CP-27 | Tabletop rearrangement (no real conveyor) | ✅ form-gate shipped | Sprint 2 | Cubes pre-placed on WorkSurface, robot rearranges to 2x2 pallet. 39/39 build. |
-| CP-28..CP-38 | TBD | 📋 planned | — | — |
+| CP-28 | Single-cube precision benchmark | ✅ form-gate + measured | Sprint 2 | Minimal benchmark canonical. 5-run measurement: dx mean=-0.023m, dy mean=-0.162m (systematic), dist mean=0.167m. cuRobo precision ~17cm not 5cm. |
+| CP-29 | y-bias compensation experiment (FAILED) | ⚠ documented failure | Sprint 2 | Tested whether -0.16m y-bias is constant offset. Shifted drop_target +0.16m → cube never picked (controller failed at closer-to-base target). Bias is non-linear. |
+| CP-30..CP-38 | TBD | 📋 planned | — | — |
+
+**Empirical drop-precision finding (2026-05-08, 5+3-run benchmarks)**:
+- cuRobo cube-drop precision is **~17cm avg, ±10cm**, NOT the originally-assumed 5cm
+- y-axis bias is systematic (-0.16m) but NOT a simple constant compensable by drop_target offset
+- Production canonicals need pallet/bin xy >= 30cm × 30cm for reliable delivery
+- CP-08 (30cm pallet) succeeds; CP-09/CP-13/CP-14/CP-15 (15-20cm) all expected partial
 
 **Final form-gate sweep CP-07..CP-21 (2026-05-08)** — 14/14 PASS, 825 build calls, 91 cubes:
 ```
