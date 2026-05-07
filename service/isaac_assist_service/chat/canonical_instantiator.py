@@ -36,6 +36,44 @@ from typing import Any, Dict, List
 logger = logging.getLogger(__name__)
 
 
+#: Tool names allowed to remain in the LLM schema after a hard-instantiate.
+#: These are verify/inspect/fix tools — the agent uses them to confirm the
+#: scaffolded scene works and to make targeted adjustments (teleport, set
+#: gains/attrs) when verify reports issues. Build tools (create_*,
+#: robot_wizard, setup_pick_place_controller, run_usd_script, etc.) are
+#: deliberately excluded — the canonical already executed them.
+ALLOWED_AFTER_INSTANTIATE = frozenset({
+    # Form gate
+    "verify_pickplace_pipeline",
+    # Function gate
+    "simulate_traversal_check",
+    # Targeted fix tools (physics state adjustment without rebuilding)
+    "teleport_prim",
+    "set_attribute",
+    "set_drive_gains",
+    "set_joint_targets",
+    "set_joint_limits",
+    "set_physics_params",
+    "set_physics_scene_config",
+    # Inspection (read-only)
+    "scene_summary",
+    "list_all_prims",
+    "find_prims_by_name",
+    "find_prims_by_schema",
+    "get_bounding_box",
+    "get_articulation_state",
+    "get_world_transform",
+    "get_attribute",
+    "list_attributes",
+    "list_applied_schemas",
+    "get_console_errors",
+    "get_physics_errors",
+    # Knowledge (allows agent to look up corrective recipes)
+    "lookup_knowledge",
+    "explain_error",
+})
+
+
 _SAFE_BUILTINS = {
     "enumerate": enumerate, "range": range, "len": len, "list": list,
     "dict": dict, "tuple": tuple, "set": set, "frozenset": frozenset,
@@ -133,9 +171,33 @@ async def execute_template_canonical(template: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
-def format_instantiation_summary(result: Dict[str, Any]) -> str:
+_PRIM_PATH_RE = __import__("re").compile(
+    r"prim_path=['\"]([^'\"]+)['\"]|dest_path=['\"]([^'\"]+)['\"]|"
+    r"sensor_path=['\"]([^'\"]+)['\"]|robot_path=['\"]([^'\"]+)['\"]"
+)
+
+
+def _extract_prim_paths(template: Dict[str, Any]) -> List[str]:
+    """Pull prim paths from the template's code field so we can tell the
+    LLM exactly which paths were created (no guessing from naming heuristics)."""
+    code = template.get("code") or ""
+    paths: List[str] = []
+    seen: set = set()
+    for m in _PRIM_PATH_RE.finditer(code):
+        for g in m.groups():
+            if g and g.startswith("/") and g not in seen:
+                paths.append(g)
+                seen.add(g)
+    return paths
+
+
+def format_instantiation_summary(
+    result: Dict[str, Any],
+    template: Dict[str, Any] = None,
+) -> str:
     """Strong directive system-prompt addendum — tells the LLM the scene is
-    already built and lists which tools are FORBIDDEN to call again."""
+    already built, lists FORBIDDEN tools, and enumerates the actual prim
+    paths so the agent uses them verbatim instead of guessing."""
     if not result.get("instantiated"):
         return ""
     tid = result.get("task_id", "?")
@@ -147,6 +209,8 @@ def format_instantiation_summary(result: Dict[str, Any]) -> str:
     forbidden = sorted({e["tool"] for e in result.get("executed", [])
                         if e.get("ok")})
 
+    prim_paths = _extract_prim_paths(template) if template else []
+
     lines = [
         "## CRITICAL: Scene already built — do NOT rebuild",
         "",
@@ -154,13 +218,20 @@ def format_instantiation_summary(result: Dict[str, Any]) -> str:
         f"**{tid}**. {n_ok}/{n_total} build tool calls executed successfully"
         + (f"; {err_count} returned errors." if err_count else "."),
         "",
-        "**Your role for this turn is VERIFICATION ONLY.** The build phase is "
-        "complete. You MUST NOT call any of these tools again — they would "
-        "create duplicate prims or tear down the canonical scaffold:",
     ]
-    if forbidden:
-        lines.append("  Forbidden (already executed): "
-                     + ", ".join(f"`{t}`" for t in forbidden))
+
+    if prim_paths:
+        lines.append("**Prims created (use these EXACT paths in your tool calls — do not invent variants):**")
+        for p in prim_paths:
+            lines.append(f"  - `{p}`")
+        lines.append("")
+
+    lines.append(
+        "**Your role for this turn is VERIFICATION ONLY.** The build phase is "
+        "complete. The LLM tool schema has been filtered to remove build tools "
+        "— you literally cannot call them. Only verify/inspect/fix tools are "
+        "available."
+    )
 
     if err_count:
         lines.append("")

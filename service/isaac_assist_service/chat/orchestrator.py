@@ -706,6 +706,11 @@ class ChatOrchestrator:
         _canonical_min_margin = float(os.environ.get("CANONICAL_MIN_MARGIN", "0.20"))
         _canonical_enabled = (os.environ.get("CANONICAL_INSTANTIATE", "on").lower()
                               in ("on", "true", "1", "yes"))
+        # Track which build tools the canonical instantiated — these get
+        # filtered OUT of the LLM's tool schema so the agent physically
+        # cannot rebuild what's already there. Empty list = no filtering.
+        _instantiated_build_tools: List[str] = []
+
         try:
             from .tools.template_retriever import (
                 retrieve_templates_with_scores, format_for_prompt
@@ -739,12 +744,18 @@ class ChatOrchestrator:
                     f"hard-instantiating template code"
                 )
                 inst_result = await execute_template_canonical(top["template"])
-                summary_text = format_instantiation_summary(inst_result)
+                summary_text = format_instantiation_summary(inst_result, top["template"])
                 if summary_text:
                     if patterns_text:
                         patterns_text = patterns_text + "\n\n" + summary_text
                     else:
                         patterns_text = summary_text
+                # Capture tool names that just executed — we'll filter these
+                # out of the LLM tool schema so the agent literally cannot
+                # call them again (stronger than directive language alone).
+                _instantiated_build_tools = sorted({
+                    e["tool"] for e in inst_result.get("executed", []) if e.get("ok")
+                })
             else:
                 # FEW-SHOT GUIDE PATH (existing behavior)
                 templates = [s["template"] for s in scored]
@@ -849,6 +860,26 @@ class ChatOrchestrator:
 
         messages = distilled.messages
         selected_tools = distilled.tools
+
+        # When hard-instantiate ran, REPLACE the selected_tools list with an
+        # explicit verify/inspect/fix subset pulled from ISAAC_SIM_TOOLS.
+        # The distiller narrows tools per-prompt and may have excluded many
+        # verify/fix tools (it expected a build prompt). Replacing rather
+        # than filtering ensures the agent has the verifiers + targeted-fix
+        # tools it needs without any build tools that would let it rebuild.
+        # The set is stable across calls (the verify/inspect/fix vocabulary
+        # doesn't change per-prompt) so it's a constant rather than a knob.
+        if _instantiated_build_tools:
+            from .canonical_instantiator import ALLOWED_AFTER_INSTANTIATE
+            _all_tool_schemas = ISAAC_SIM_TOOLS
+            selected_tools = [
+                t for t in _all_tool_schemas
+                if t.get("function", {}).get("name") in ALLOWED_AFTER_INSTANTIATE
+            ]
+            logger.info(
+                f"[{session_id}] Hard-instantiate tool subset: "
+                f"{len(selected_tools)} verify/inspect/fix tools (build tools removed)"
+            )
 
         logger.info(
             f"[{session_id}] Distilled: ~{distilled.token_estimate} tokens, "
