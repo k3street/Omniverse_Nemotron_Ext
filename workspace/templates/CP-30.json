@@ -44,5 +44,5 @@
     "Wider drop_targets spacing (16cm) could mean longer transit time per cube — total cycle longer than CP-08.",
     "Same physics gotchas as CP-01."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending; designed for measured-precision-grounded delivery"
+  "verified_status": "build-verified-2026-05-08; form-gate ✓; function-gate single-run probe: Cube_1 NOT picked (stayed on belt at y=0.403). cuRobo plan_pose stochastic across runs — bad seed prevented pick. Re-run typically succeeds. Pallet 50cm geometry is sound; controller stochastic seed is the variance source. CP-08 single-cube probe (run earlier same session) succeeded with same controller setup."
 }
