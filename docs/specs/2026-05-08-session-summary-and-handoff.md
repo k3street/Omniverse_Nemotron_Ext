@@ -138,12 +138,18 @@ In rough order:
 1. **Template ranking improvement** (Open question A) — biggest
    leverage. If retrieval ranks confidently, T1 fires more often,
    downstream concerns shrink.
+   ✓ Partially addressed today: embed `goal + thoughts + tools_used`
+   improved VR-19 ranking gap from 0.006 to 0.117 (commit a812a26).
 
 2. **Phase 2 SORT-01** — build CP-03 (color-sort canonical) +
    `verify_args`/`simulate_args` + task spec. Tests T1 on a new
    pattern AND validates the "color routing" design choice
    (controller-arg vs typed-resolver — plan defers to user). Plan
    recommends controller-arg for simplicity.
+   Today: task spec + gap analysis written. Tool gap identified:
+   `setup_pick_place_controller` accepts ONE destination_path. Three
+   options documented in gap-analysis. Recommended: extend with
+   `color_routing` arg (~5h work).
 
 3. **T2 parameterized canonicals** (Open question B) — natural extension
    of T1. Lets one CP-N template serve a parameter family.
@@ -151,14 +157,69 @@ In rough order:
 4. **Gemini 503 mitigation** (Open question C) — pragmatic compression
    strategy. Simplest: truncate tool_result strings older than N turns.
 
-5. **Phase 3 CONSTRAINT-01 / Phase 4 REORIENT-01** — additional
-   canonical patterns. Each needs design discussion (per plan).
+5. **Phase 3 CONSTRAINT-01** — ✓ canonical CP-04 built today
+   (build-verified, visual delivery test pending user). Footprint
+   verifier check added. Task spec written. Ready for user-eval.
+
+6. **Phase 4 REORIENT-01** — orientation check in simulate_traversal_check
+   added today. CP-05 build still pending (~3-5h). Task spec written
+   (passive ramp design recommended).
+
+## Today's progress on cross-cutting work
+
+- ✓ Template ranking: `goal+thoughts+tools_used` embed (a812a26)
+- ✓ verify_pickplace_pipeline: footprint_within_bounds (b93baa4)
+- ✓ simulate_traversal_check: orientation check (2196d4f)
+- ✓ Canonical CP-04 (compact 2x2m): template + script (d0915fe)
+- ✓ canonical_instantiator.settle_after_canonical: stops timeline,
+  restores cube positions + conveyor velocities to template-authored
+  values; needed for compact scenes where controller fires
+  _pause_belt before verify can run cleanly (d0915fe)
+- ✓ hard_instantiate_smoke_tests.py CP-04 fixture (8e2bbb9)
+- ✓ Task specs written: SORT-01, CONSTRAINT-01, REORIENT-01,
+  MULTIMODAL-01 (3036b2e)
+- ✓ Gap analysis doc per task with effort estimates (3036b2e)
+
+## E2E behavior test (2026-05-08)
+
+End-to-end test through `/api/v1/chat/message` with CP-02 own-goal
+prompt, after settle + pre-executed verify additions:
+  - Hard-instantiate fired (sim=0.85, margin=0.52)
+  - Settled 3 cubes + 2 conveyors
+  - Pre-executed verify: pipeline_ok=True, issues=0
+  - Tool subset: 23 verify/inspect/fix tools
+  - Agent called `list_all_prims`, `get_world_transform` × 7 (inspecting
+    canonical prims), `verify_pickplace_pipeline` with **correct
+    canonical paths** (/World/Franka1, /World/Conv1, /World/Cube_1 —
+    NOT the /World/Robot_1, /World/Conveyor_1 hallucinations from
+    earlier runs), `simulate_traversal_check` with correct cube_path
+    + target_path.
+
+This is the cleanest behavioral observation we've had. The combination
+of:
+  - hard-instantiate executing the canonical
+  - settle restoring authored state
+  - pre-executed verify giving form-gate result as ground truth
+  - tool subset removing build tools entirely
+  - directive listing exact prim paths
+
+...yields agent behavior that follows the canonical pattern. Some
+residual quirks (agent tries `set_attribute` on `_curobo_pp_sub_*`
+attribute names — harmless because no such USD attr exists, will
+fail silently) but the core path-naming issue is solved.
 
 ---
 
 ## Commits today (2026-05-07/08, all on `anton/feat/live-progress-ui`)
 
 ```
+8e2bbb9  qa: extend hard-instantiate smoke tests with CP-04 + settle regression
+d0915fe  templates+chat: CP-04 (compact 2x2m pick-place) + settle_after_canonical
+2196d4f  simulate_traversal_check: orientation check (REORIENT-01 enabler)
+b93baa4  verify_pickplace_pipeline: footprint_within_bounds (CONSTRAINT-01 enabler)
+3036b2e  qa+specs: task specs + gap analysis for SORT-01/CONSTRAINT-01/REORIENT-01/MULTIMODAL-01
+a812a26  template_retriever: include thoughts in embedded text for better discrimination
+62384e9  docs: session summary + handoff — 2026-05-07/08 night
 a99cd76  qa: hard_instantiate_smoke_tests.py — regression boundary
 1df9fe2  chat: pre-execute verify_pickplace_pipeline alongside hard-instantiate
 6407178  chat: replace tool schema with explicit verify/fix subset on hard-instantiate
@@ -178,7 +239,7 @@ a080091  qa: scrub_shared_data.py — Phase 0.1 codified scope
 697ea48  qa: persist CP-01/02 deterministic test scripts
 ```
 
-PR #89 untouched. All work on `feat/live-progress-ui`.
+25 commits today. PR #89 untouched. All work on `feat/live-progress-ui`.
 
 Smoke tests:
 - `scripts/qa/run_cp01.py` + `run_cp02.py` — canonical builds
