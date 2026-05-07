@@ -3679,8 +3679,12 @@ def _controller_installed(robot_path, n_robots_in_pipeline):
     spline, diffik, osc) use un-tagged names — those can only be attributed
     to a robot when there's a single robot in the pipeline.\"\"\"
     tag = robot_path.replace('/', '_').strip('_')
+    # Per-robot tagged subs (multi-robot safe)
     if hasattr(_bi, '_curobo_pp_sub_' + tag):
         return ('_curobo_pp_sub_' + tag, 'curobo')
+    if hasattr(_bi, '_builtin_pp_sub_' + tag):
+        return ('_builtin_pp_sub_' + tag, 'builtin')
+    # Un-tagged subs (only safe to attribute when scene has 1 robot)
     if n_robots_in_pipeline == 1:
         for prefix, kind in (('_native_pp_sub', 'native'), ('_spline_pp_sub', 'spline'),
                              ('_diffik_pp_sub', 'diffik'), ('_osc_pp_sub', 'osc')):
@@ -26832,7 +26836,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
         args["target_source"] = resolved
         args["_auto_resolved_from"] = "auto"
         args["_auto_reason"] = reason
-    if mode not in {"cube_tracking", "sensor_gated", "fixed_poses", "ros2_cmd",
+    if mode not in {"cube_tracking", "sensor_gated", "fixed_poses", "ros2_cmd", "builtin",
                      "native", "spline", "curobo", "diffik", "osc"}:
         raise ValueError(f"setup_pick_place_controller: unknown target_source {mode!r}")
 
@@ -26939,6 +26943,20 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             target_topic=args.get("target_topic", "/isaac/robot/target_pose"),
             gripper_topic=args.get("gripper_topic", "/isaac/robot/gripper_cmd"),
             ee_link=ee_link, fj1=fj1, fj2=fj2,
+        )
+    if mode == "builtin":
+        # Robot-agnostic: wraps Isaac Sim's bundled per-robot PickPlaceController
+        # (Franka, UR10, UR10e, CobottaPro900). Each is pre-configured by NVIDIA
+        # with the right gripper class (parallel vs surface) + RMPflow controller.
+        return _gen_pick_place_builtin(
+            robot_path=robot_path,
+            robot_family=args.get("robot_family", "auto"),
+            sensor_path=args.get("sensor_path"),
+            belt_path=args.get("belt_path"),
+            source_paths=args.get("source_paths") or [],
+            destination_path=args.get("destination_path"),
+            drop_target=args.get("drop_target"),
+            ee_offset=args.get("end_effector_offset", [0.0, 0.0, 0.02]),
         )
 
     # Default / legacy: cube_tracking (uses source_paths + destination_path)
@@ -27251,6 +27269,302 @@ print(json.dumps({{
     "urdf": cfg["urdf"],
     "architecture": "python_callback + RmpFlow + ArticulationMotionPolicy",
     "notes": "State machine runs on each physics step. Start the simulation (Play) to see the robot pick cubes into the bin.",
+}}))
+"""
+
+
+def _gen_pick_place_builtin(robot_path, robot_family, sensor_path, belt_path,
+                             source_paths, destination_path, drop_target,
+                             ee_offset):
+    """Robot-agnostic pick-place using Isaac Sim's bundled per-robot controllers.
+
+    Wraps NVIDIA's pre-configured PickPlaceController classes:
+      - franka  → isaacsim.robot.manipulators.examples.franka (parallel gripper)
+      - ur10/ur10e → isaacsim.robot.manipulators.examples.universal_robots (surface gripper)
+      - cobotta_pro_900 → isaacsim.robot.manipulators.examples.cobotta_900 (parallel gripper)
+
+    Each bundled controller has correct RMPflow config + gripper class for its
+    robot. Our wrapper installs a physics-step subscription, reads cube position
+    each tick, calls controller.forward(), advances to next cube on is_done().
+
+    NB: Isaac's bundled robot classes assume their own prim path (e.g. UR10 expects
+    /World/UR10). We pass the user's robot_path explicitly so existing scenes
+    composed via robot_wizard work unchanged.
+
+    robot_family: "auto" | "franka" | "ur10" | "ur10e" | "cobotta_pro_900"
+        "auto" tries to detect from the robot prim's USD reference path.
+    """
+    import json as _json
+    return f"""\
+# ── setup_pick_place_controller (builtin per-robot dispatch) ─────────
+# Uses Isaac Sim's bundled PickPlaceController classes — each pre-tuned
+# for its robot family by NVIDIA. Robot-agnostic at the canonical level;
+# physics-step subscription is the only Kit-specific glue we add.
+import sys
+import omni.usd
+import omni.timeline
+import omni.physx
+import omni.kit.app
+import numpy as np
+import builtins
+import json
+import time
+from pxr import UsdGeom, UsdPhysics, Gf
+
+ROBOT_PATH = {robot_path!r}
+SENSOR_PATH = {sensor_path!r}
+BELT_PATH = {belt_path!r}
+SOURCE_PATHS = {source_paths!r}
+DEST_PATH = {destination_path!r}
+DROP_TARGET = {drop_target!r}
+EE_OFFSET = {ee_offset!r}
+ROBOT_FAMILY = {robot_family!r}
+
+stage = omni.usd.get_context().get_stage()
+
+# Pre-flight prim-existence check (silent-success guard).
+for _ckp, _label in [
+    (ROBOT_PATH, "robot_path"),
+    (BELT_PATH, "belt_path") if BELT_PATH else (ROBOT_PATH, "robot_path"),
+    (DEST_PATH, "destination_path"),
+]:
+    if not stage.GetPrimAtPath(_ckp).IsValid():
+        raise RuntimeError(
+            f"setup_pick_place_controller (builtin): {{_label}}={{_ckp!r}} "
+            f"not found in stage"
+        )
+for _src in SOURCE_PATHS:
+    if not stage.GetPrimAtPath(_src).IsValid():
+        raise RuntimeError(
+            f"setup_pick_place_controller (builtin): source {{_src!r}} not found"
+        )
+
+# Robot-family auto-detect: scan robot prim's USD references for known robot names
+def _detect_family(path):
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid():
+        return None
+    refs_str = ""
+    try:
+        for spec in p.GetPrimStack():
+            for ref in (spec.referenceList.GetAddedOrExplicitItems() or []):
+                refs_str += str(ref.assetPath).lower() + " "
+    except Exception:
+        pass
+    refs_str += str(p.GetPath()).lower() + " "
+    if "ur10e" in refs_str: return "ur10e"
+    if "ur10" in refs_str: return "ur10"
+    if "ur5e" in refs_str: return "ur5e"
+    if "cobotta" in refs_str or "denso" in refs_str: return "cobotta_pro_900"
+    if "franka" in refs_str or "panda" in refs_str: return "franka"
+    return None
+
+if ROBOT_FAMILY == "auto":
+    detected = _detect_family(ROBOT_PATH)
+    if detected is None:
+        raise RuntimeError(
+            f"setup_pick_place_controller (builtin): could not auto-detect "
+            f"robot_family from {{ROBOT_PATH!r}}. Pass robot_family explicitly: "
+            f"'franka', 'ur10', 'ur10e', 'cobotta_pro_900'."
+        )
+    ROBOT_FAMILY = detected
+
+# Per-family imports + factory
+_ROBOT_TAG = ROBOT_PATH.replace("/", "_").strip("_")
+_SUB_ATTR = "_builtin_pp_sub_" + _ROBOT_TAG
+
+# Tear down prior subscription for THIS robot if present
+_old = getattr(builtins, _SUB_ATTR, None)
+if _old is not None:
+    try: _old.unsubscribe()
+    except Exception: pass
+    try: delattr(builtins, _SUB_ATTR)
+    except Exception: pass
+
+# Stale-sub sweep — same pattern as cuRobo handler. Catches subscriptions
+# whose decoded robot path is no longer valid in current stage.
+_pre_stage = stage
+for _a in list(vars(builtins).keys()):
+    if not _a.startswith("_builtin_pp_sub_"):
+        continue
+    _tag = _a[len("_builtin_pp_sub_"):]
+    if not _tag: continue
+    _candidate = "/" + _tag.replace("_", "/").lstrip("/")
+    try:
+        if not _pre_stage.GetPrimAtPath(_candidate).IsValid():
+            _s = getattr(builtins, _a, None)
+            if _s:
+                try: _s.unsubscribe()
+                except Exception: pass
+            delattr(builtins, _a)
+    except Exception: pass
+
+# Ensure timeline plays so physics ticks
+tl = omni.timeline.get_timeline_interface()
+if not tl.is_playing():
+    tl.play()
+_app = omni.kit.app.get_app()
+for _ in range(6): _app.update()
+
+# Initialize physics_sim_view + world for SingleArticulation
+from isaacsim.core.api import World
+try:
+    from isaacsim.core.simulation_manager import SimulationManager
+except Exception:
+    from isaacsim.core.api.simulation_manager import SimulationManager
+try:
+    if SimulationManager.get_physics_sim_view() is None:
+        SimulationManager.initialize_physics()
+except Exception: pass
+
+world = World.instance() or World()
+
+# Per-family: load proper robot wrapper + controller
+if ROBOT_FAMILY == "franka":
+    from isaacsim.robot.manipulators.examples.franka import Franka
+    from isaacsim.robot.manipulators.examples.franka.controllers.pick_place_controller import PickPlaceController
+    _ROBOT_NAME = "builtin_pp_robot_" + _ROBOT_TAG
+    _robot = Franka(prim_path=ROBOT_PATH, name=_ROBOT_NAME)
+elif ROBOT_FAMILY in ("ur10", "ur10e"):
+    from isaacsim.robot.manipulators.examples.universal_robots import UR10
+    from isaacsim.robot.manipulators.examples.universal_robots.controllers.pick_place_controller import PickPlaceController
+    _ROBOT_NAME = "builtin_pp_robot_" + _ROBOT_TAG
+    # UR10 class auto-attaches surface gripper at flange when attach_gripper=True
+    _robot = UR10(prim_path=ROBOT_PATH, name=_ROBOT_NAME, attach_gripper=True)
+elif ROBOT_FAMILY == "cobotta_pro_900":
+    from isaacsim.robot.manipulators.examples.cobotta_900 import CobottaPro900
+    from isaacsim.robot.manipulators.examples.cobotta_900.controllers.pick_place_controller import PickPlaceController
+    _ROBOT_NAME = "builtin_pp_robot_" + _ROBOT_TAG
+    _robot = CobottaPro900(prim_path=ROBOT_PATH, name=_ROBOT_NAME)
+else:
+    raise RuntimeError(
+        f"setup_pick_place_controller (builtin): unsupported robot_family "
+        f"{{ROBOT_FAMILY!r}}. Supported: franka, ur10, ur10e, cobotta_pro_900."
+    )
+
+# Add to world.scene if not already
+try:
+    world.scene.add(_robot)
+except Exception:
+    _existing = world.scene.get_object(_ROBOT_NAME)
+    if _existing is not None:
+        _robot = _existing
+
+# world.reset() is the canonical Isaac flow — initializes physics_sim_view,
+# articulation, and gripper. Without this _robot.gripper may be None and
+# PickPlaceController init crashes with "'NoneType' has no attribute 'link_names'".
+try:
+    world.reset()
+except Exception as _e:
+    print(f"(builtin pp: world.reset soft-fail: {{_e}})")
+# Pump several updates so reset completes before controller wraps gripper
+for _ in range(8): _app.update()
+try:
+    _robot.initialize()
+except Exception as _e:
+    print(f"(builtin pp: robot.initialize soft-fail: {{_e}})")
+try:
+    _robot.post_reset()
+except Exception as _e:
+    print(f"(builtin pp: robot.post_reset soft-fail: {{_e}})")
+
+# Diagnostic: check gripper state before passing to controller
+_grip = getattr(_robot, "gripper", None)
+print(f"(builtin pp: robot.gripper = {{_grip!r}})")
+if _grip is None:
+    raise RuntimeError(
+        f"setup_pick_place_controller (builtin): robot.gripper is None after "
+        f"world.reset() + initialize(). UR10 needs attach_gripper=True at "
+        f"construction; Franka attaches inside __init__. If you see this, the "
+        f"robot wrapper failed to attach its gripper class."
+    )
+
+_controller = PickPlaceController(
+    name="builtin_pp_ctrl_" + _ROBOT_TAG,
+    gripper=_robot.gripper,
+    robot_articulation=_robot,
+)
+_art_ctrl = _robot.get_articulation_controller()
+
+# Per-cube state machine: deliver cubes one at a time
+S = {{"delivered": set(), "current": None}}
+
+def _cube_pos(path):
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid(): return None
+    cache = UsdGeom.BBoxCache(0, [UsdGeom.Tokens.default_])
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty(): return None
+    c = b.GetMidpoint()
+    return np.array([float(c[0]), float(c[1]), float(c[2])])
+
+def _bin_pos():
+    if DROP_TARGET:
+        return np.array(DROP_TARGET, dtype=np.float64)
+    p = stage.GetPrimAtPath(DEST_PATH)
+    if not p or not p.IsValid(): return None
+    cache = UsdGeom.BBoxCache(0, [UsdGeom.Tokens.default_])
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty(): return None
+    c = b.GetMidpoint()
+    return np.array([float(c[0]), float(c[1]), float(c[2])])
+
+def _next_cube():
+    \"\"\"First undelivered cube whose xy is within 0.95m of robot base.\"\"\"
+    base = _cube_pos(ROBOT_PATH)
+    if base is None: return None
+    for sp in SOURCE_PATHS:
+        if sp in S["delivered"]: continue
+        cp = _cube_pos(sp)
+        if cp is None: continue
+        if float(np.linalg.norm(cp[:2] - base[:2])) <= 0.95:
+            return sp
+    return None
+
+def _on_step(dt):
+    try:
+        if S["current"] is None:
+            picked = _next_cube()
+            if picked is None: return
+            S["current"] = picked
+            try: _controller.reset()
+            except Exception: pass
+        cube_pos = _cube_pos(S["current"])
+        bin_pos = _bin_pos()
+        if cube_pos is None or bin_pos is None: return
+        try:
+            jp = _robot.get_joint_positions()
+        except Exception:
+            jp = None
+        if jp is None: return
+        actions = _controller.forward(
+            picking_position=cube_pos,
+            placing_position=bin_pos,
+            current_joint_positions=jp,
+            end_effector_offset=np.array(EE_OFFSET, dtype=np.float64),
+        )
+        if actions is not None:
+            _art_ctrl.apply_action(actions)
+        if _controller.is_done():
+            S["delivered"].add(S["current"])
+            S["current"] = None
+    except Exception as _e:
+        print(f"(builtin pp _on_step: {{type(_e).__name__}}: {{_e}})")
+
+_physx = omni.physx.get_physx_interface()
+if _physx is None:
+    raise RuntimeError("setup_pick_place_controller (builtin): omni.physx unavailable")
+_sub = _physx.subscribe_physics_step_events(_on_step)
+setattr(builtins, _SUB_ATTR, _sub)
+
+print(json.dumps({{
+    "ok": True,
+    "mode": f"builtin (PickPlaceController for {{ROBOT_FAMILY}})",
+    "robot": ROBOT_PATH,
+    "robot_family": ROBOT_FAMILY,
+    "n_cubes": len(SOURCE_PATHS),
+    "destination": DEST_PATH,
+    "subscription": _SUB_ATTR,
 }}))
 """
 
@@ -29865,6 +30179,7 @@ for _a in list(vars(builtins).keys()):
 _PP_SUB_PREFIXES = (
     "_curobo_pp_sub_", "_native_pp_sub_", "_spline_pp_sub_",
     "_diffik_pp_sub_", "_osc_pp_sub_", "_sensor_gated_pp_sub_",
+    "_builtin_pp_sub_",
     "_curobo_pp_tl_",
 )
 _pre_stage = omni.usd.get_context().get_stage()
