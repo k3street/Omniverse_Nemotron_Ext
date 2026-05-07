@@ -28,6 +28,33 @@ _PROVIDER_INCIDENT_LOG = (
 )
 
 
+def _retry_after_wait(backoff_s: float, retry_after_header: Optional[str],
+                      max_wait_s: float = 60.0) -> float:
+    """Combine backoff with provider-supplied retry-after header.
+
+    Provider's retry-after takes precedence when:
+    - it parses as a non-negative number of seconds
+    - it's longer than current backoff (we never shorten waits — that
+      would defeat exponential backoff's job)
+
+    Result is bounded to [backoff_s, max_wait_s] so a malicious or
+    misconfigured retry-after can't stall a request indefinitely.
+
+    HTTP-date form retry-after (RFC 7231) is intentionally NOT parsed —
+    Gemini consistently sends seconds-as-int for 429s and the date form
+    would require timezone-aware parsing for marginal benefit.
+    """
+    if not retry_after_header:
+        return backoff_s
+    try:
+        ra = float(retry_after_header)
+    except (TypeError, ValueError):
+        return backoff_s
+    if ra <= 0:
+        return backoff_s
+    return max(backoff_s, min(ra, max_wait_s))
+
+
 def _persist_provider_incident(
     status: int,
     attempt: int,
@@ -253,11 +280,17 @@ class GeminiProvider:
                         except Exception:
                             pass  # Logging must NEVER break the chat path
                         if response.status in retry_statuses and attempt < max_attempts:
+                            # Honor retry-after header if provider sent one
+                            # (cooperates with rate-limit buckets — see the
+                            # _retry_after_wait helper for parsing rules).
+                            ra = response.headers.get("retry-after")
+                            actual_wait = _retry_after_wait(backoff, ra)
                             logger.warning(
                                 f"Gemini {response.status} (attempt {attempt}/{max_attempts}), "
-                                f"retrying in {backoff:.1f}s"
+                                f"retrying in {actual_wait:.1f}s"
+                                + (f" (retry-after={ra!r})" if ra else "")
                             )
-                            await _asyncio_rt.sleep(backoff)
+                            await _asyncio_rt.sleep(actual_wait)
                             backoff *= 2
                             last_error = error_text
                             continue

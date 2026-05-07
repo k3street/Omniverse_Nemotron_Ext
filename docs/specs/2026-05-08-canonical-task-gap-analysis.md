@@ -242,6 +242,29 @@ frontier — depends on model + harness work (complexity routing,
 payload mitigation, hard-instantiate ranking quality, and the
 remaining cross-cutting concerns C below).
 
+### Update 2026-05-07 — payload mitigation premise revised
+
+Track C 9.2 analyzer (`scripts/qa/analyze_tool_result_sizes.py`)
+replayed 1716 historical sessions / 5645 tool calls. Findings:
+
+- max cumulative tool-result bytes per session: 228.5 KB
+- adding measured tool-schema overhead (321.5 KB full / 17.4 KB
+  distilled): worst-case payload = 542.5 KB
+- 0/1716 sessions exceed 1 MB
+
+**H1 (payload-size → 503) is NOT supported by historical data.** The
+compression mechanism shipped in commit ec07469 still has value as
+token-cost reduction but its 503-mitigation premise is weaker than
+originally framed. Track C 9.1 (`provider_incidents.jsonl` populated
+by `_persist_provider_incident` in `llm_gemini.py`) will provide
+ground-truth at next live 503 to confirm H2 (rate-limit) vs H3
+(provider instability) as alternative root causes.
+
+Decision: **wait for 9.1 data before larger architectural commitment**
+(Kimi fallback, vault, structured-handler refactor). Pure-additive
+defensive work shipped meanwhile (retry-after respect, idempotency
+fix, 76 L0 unit tests covering helpers).
+
 ## Cross-cutting status
 
 - A. **Composite visual + physics material tool** — NOT IMPLEMENTED.
