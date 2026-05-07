@@ -23401,6 +23401,15 @@ async def _handle_compute_stack_placement(args: Dict) -> Dict:
     pattern = args.get("pattern", "column")
     n_items = int(args.get("n_items", 1))
     cube_size = float(args.get("cube_size", 0.05))
+    cube_sizes = args.get("cube_sizes")  # optional per-item override (list)
+    if cube_sizes is not None:
+        if not isinstance(cube_sizes, (list, tuple)) or len(cube_sizes) != n_items:
+            return {"type": "error",
+                    "error": f"cube_sizes must be a list of length n_items={n_items}, got {cube_sizes!r}"}
+        try:
+            cube_sizes = [float(s) for s in cube_sizes]
+        except (ValueError, TypeError):
+            return {"type": "error", "error": f"cube_sizes entries must be numbers: {cube_sizes!r}"}
     layer_rotation_deg = float(args.get("layer_rotation_deg", 0.0))
     spacing = args.get("spacing")
     spacing = float(spacing) if spacing is not None else cube_size
@@ -23444,6 +23453,7 @@ target_path = {target_path!r}
 pattern = {pattern!r}
 n_items = {n_items}
 cube_size = {cube_size}
+cube_sizes = {cube_sizes!r}
 spacing = {spacing}
 rows, cols = {rows}, {cols}
 skip_center = {skip_center}
@@ -23475,10 +23485,13 @@ else:
         target_top_z = float(bmax[2])
         target_bot_z = float(bmin[2])
         target_height = target_top_z - target_bot_z
+        # When cube_sizes provided, base_z's cube_size term is the FIRST item's
+        # size (for first-cube anchor). Subsequent items compute z per their own size.
+        first_cube_size = cube_sizes[0] if cube_sizes else cube_size
         if anchor == 'inside_floor':
-            base_z = target_bot_z + cube_size * 0.5
+            base_z = target_bot_z + first_cube_size * 0.5
         else:
-            base_z = target_top_z + cube_size * 0.5
+            base_z = target_top_z + first_cube_size * 0.5
 
         # Build the per-layer (row, col) sequence. For donut patterns,
         # skip the geometric center (only valid for odd rows × odd cols).
@@ -23500,11 +23513,25 @@ else:
             row, col = layer_slots[slot]
             x = cx + (col - (cols - 1) * 0.5) * spacing
             y = cy + (row - (rows - 1) * 0.5) * spacing
-            z = base_z + layer * cube_size
+            # z depends on this item's own size (mixed-SKU support).
+            # Anchor: first item's z = base_z. Multi-layer: each layer adds
+            # cube_size (or this item's size if cube_sizes provided — single-layer
+            # mixed-SKU is the supported pattern; multi-layer + mixed-SKU gives
+            # uneven heights and is best used with care).
+            this_size = cube_sizes[i] if cube_sizes else cube_size
+            if cube_sizes:
+                # Per-item z anchored at base_z; size affects center height
+                # (z = base_z if first item, else base_z + layer*cube_size adjusted).
+                # For single-layer (per_layer >= n_items), all on base layer:
+                z = (target_bot_z if anchor == 'inside_floor' else target_top_z) + this_size * 0.5
+                z += layer * this_size  # multi-layer assumes uniform within layer
+            else:
+                z = base_z + layer * cube_size
             yaw = (layer * layer_rotation_deg) % 360.0
             positions.append({{
                 'position': [round(x, 6), round(y, 6), round(z, 6)],
                 'rotation_deg': yaw,
+                'size': this_size,
             }})
 
         result['positions'] = positions
