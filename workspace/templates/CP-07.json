@@ -1,0 +1,44 @@
+{
+  "task_id": "CP-07",
+  "goal": "Robo-factory: 4 parallel Franka pick-and-place cells in a single scene, each independently picking cubes from its own conveyor and placing them in its own bin. Demonstrates per-robot subscription scoping (_curobo_pp_sub_<TAG> per Franka prim path) and that multiple cuRobo controllers coexist without interference. Reverse-engineered from /standalone_examples/.../robo_factory/robo_factory.py (which uses StackingController \u00d7 4 with offset cloning).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six specifics for CP-07 (4-Franka parallel factory):\n1) Each robot at world Y offset (i*2 - 3) for i in [0..3] \u2192 Y = -3, -1, 1, 3. 2m spacing avoids cross-robot collision under cuRobo planning.\n2) Each Franka has its own conveyor (Conv_i) + bin (Bin_i) + sensor (Sensor_i) + 4 cubes (Cube_i_j). Total: 4 conveyors, 4 bins, 4 sensors, 16 cubes.\n3) Each setup_pick_place_controller install creates _curobo_pp_sub__World_Franka<i> \u2014 distinct subscription per robot. Verified by stress_dual_robot.py that multi-robot scoping works without cross-install interference.\n4) Controller install order: build all geometry first (Franka<0..3>, Conv<0..3>, Bin<0..3>, Cube<0..3>_<0..3>, Sensor<0..3>), THEN install controllers in parallel.\n5) Long table spans all 4 stations: 2.5x9x0.75m so each Franka has 2x1m of footprint.\n6) Same physics setup as CP-01: CPU dynamics, sleepThreshold=0, rubber on cubes only, DomeLight=1000.",
+  "code": "# DomeLight + ground\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Wide table spanning 4 stations (each station ~2x1m at Y=-3,-1,1,3)\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 4.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# CPU dynamics required for PhysxSurfaceVelocityAPI\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# 4 parallel Franka stations at Y = -3, -1, 1, 3\nfor i in range(4):\n    y_offset = (i * 2) - 3\n    robot_wizard(\n        robot_name=\"franka_panda\",\n        dest_path=f\"/World/Franka{i}\",\n        position=[0, y_offset, 0.75],\n        orientation=[0.7071068, 0, 0, 0.7071068],\n    )\n    create_conveyor(\n        prim_path=f\"/World/Conv{i}\",\n        position=[0.0, y_offset + 0.4, 0.78],\n        size=[3.0, 0.4, 0.05],\n        surface_velocity=[0.2, 0, 0],\n    )\n    for j, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n        path = f\"/World/Cube_{i}_{j+1}\"\n        create_prim(prim_path=path, prim_type=\"Cube\", position=[x, y_offset + 0.4, 0.835], size=0.05)\n        for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n            apply_api_schema(prim_path=path, schema_name=api)\n    bulk_set_attribute(\n        prim_paths=[f\"/World/Cube_{i}_{j+1}\" for j in range(4)],\n        attr=\"physxRigidBody:sleepThreshold\",\n        value=0.0,\n    )\n    for path in [f\"/World/Cube_{i}_{j+1}\" for j in range(4)]:\n        apply_physics_material(prim_path=path, material_name=\"rubber\")\n    create_bin(\n        prim_path=f\"/World/Bin{i}\",\n        position=[0, y_offset - 0.4, 0.75],\n        size=[0.3, 0.3, 0.15],\n    )\n    add_proximity_sensor(\n        sensor_path=f\"/World/Sensor{i}\",\n        position=[0.4, y_offset + 0.4, 0.835],\n        size=[0.06, 0.06, 0.06],\n    )\n\n# Install 4 cuRobo controllers \u2014 each scoped per robot tag\nfor i in range(4):\n    setup_pick_place_controller(\n        robot_path=f\"/World/Franka{i}\",\n        target_source=\"curobo\",\n        sensor_path=f\"/World/Sensor{i}\",\n        belt_path=f\"/World/Conv{i}\",\n        source_paths=[f\"/World/Cube_{i}_{j+1}\" for j in range(4)],\n        destination_path=f\"/World/Bin{i}\",\n        planning_obstacles=[\"/World/Table\", f\"/World/Conv{i}\", f\"/World/Bin{i}\"],\n    )",
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka0",
+        "robot_kind": "franka",
+        "pick_path": "/World/Sensor0",
+        "place_path": "/World/Bin0"
+      }
+    ],
+    "cube_path": "/World/Cube_0_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_0_1",
+    "target_path": "/World/Bin0",
+    "duration_s": 60
+  },
+  "failure_modes": [
+    "Robot offsets too close (<2m apart) \u2192 cross-robot collision under cuRobo planning. Use Y = -3, -1, 1, 3 (2m spacing).",
+    "Single shared table too narrow \u2192 robots fall off. Table scale=[1.0, 4.5, 0.375] gives 9m total Y extent.",
+    "Installing controllers BEFORE all geometry exists \u2192 some controllers can't find their cubes/bins. Build all geometry first, then install controllers.",
+    "Same physics gotchas as CP-01: GPU dynamics disabled, sleepThreshold=0, rubber on cubes."
+  ],
+  "extension_notes": "CP-07 stress-tests multi-robot scoping infrastructure. Each cuRobo install creates _curobo_pp_sub_<robot_tag>; cleanup logic must not kill other robots' subs (verified in commit 755effb stale-sub-cleanup). Future variants: 8\u00d7 parallel for IsaacLab GPU-batched training; mixed robot families (2\u00d7 Franka + 2\u00d7 UR10) for fleet-coexistence test. Form-gate verifies stage 0 only \u2014 other 3 stations replicate the same pattern but verify_pickplace_pipeline treats stages as relay (place_i\u2192pick_{i+1}); independent-station verification mode is a future verifier extension.",
+  "delivery": "All 16 cubes (4 per Franka \u00d7 4) delivered to their respective bins",
+  "cube_path": "/World/Cube_0_1"
+}
