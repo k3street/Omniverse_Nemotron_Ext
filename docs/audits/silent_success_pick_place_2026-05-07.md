@@ -16,12 +16,25 @@ propagated) or `success=True` despite Traceback in output (silent-success bug).
 | `_gen_pick_place_diffik` | ❌ SILENT | Traceback in output but `success=True` |
 | `_gen_pick_place_osc` | ❌ SILENT | Traceback in output but `success=True` |
 
-## Action taken
+## Action taken (initial)
 
 - 4 verified-clean handlers added to `AUDITED_CLEAN` in
   `tests/test_tool_honesty_scan.py`
 - Test now flags exactly the 3 buggy handlers (down from 7) — flags
   are now signal, not noise
+
+## FIX SHIPPED 2026-05-07 (same-day update)
+
+Top-of-handler pre-flight prim-existence check added to all 3 buggy
+handlers. Verified via live Kit RPC: all three now return
+`success=False` on bad inputs (was: `success=True` despite Traceback
+in output).
+
+Verified via `hard_instantiate_smoke_tests.py`: 6/6 fixtures pass —
+CP-03 (which uses cuRobo) builds correctly with valid paths, no
+regression on production canonicals.
+
+All 7 handlers now in AUDITED_CLEAN. Honesty test passes.
 
 ## The bug
 

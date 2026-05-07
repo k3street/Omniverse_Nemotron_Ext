@@ -138,9 +138,12 @@ AUDITED_CLEAN = frozenset({
     "_gen_pick_place_sensor_gated",   # ParallelGripper.initialize() raises on invalid prim path
     "_gen_pick_place_native",         # Boost.Python.ArgumentError on Stage.GetPrimAtPath(None)
     "_gen_pick_place_spline",         # same Stage.GetPrimAtPath crash propagates
-    # NOT added (silent-success bugs confirmed via live Kit RPC 2026-05-07):
-    # _gen_pick_place_curobo, _gen_pick_place_diffik, _gen_pick_place_osc
-    # → see docs/audits/silent_success_pick_place_2026-05-07.md
+    # Fixed 2026-05-07 with top-of-handler prim-existence pre-flight check
+    # + verified via live Kit RPC. Re-tested CP-03 + hard_instantiate
+    # smoke (6/6 fixtures pass — no regression on real builds).
+    "_gen_pick_place_curobo",         # pre-flight raises before subscription
+    "_gen_pick_place_diffik",         # pre-flight raises before subscription
+    "_gen_pick_place_osc",            # pre-flight raises before subscription
 })
 
 

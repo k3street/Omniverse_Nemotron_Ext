@@ -29759,6 +29759,27 @@ if _mgr_pre is not None:
     except Exception: pass
 
 stage = omni.usd.get_context().get_stage()
+# Pre-flight prim-existence check (silent-success fix 2026-05-07).
+# Without this, bad paths slip through to _on_step where the resulting
+# Boost.Python.ArgumentError is captured to stdout but does NOT reach
+# /exec_sync's success flag — handler reports success=True, scene is
+# silently broken. See docs/audits/silent_success_pick_place_2026-05-07.md
+for _ckp, _label in [
+    (ROBOT_PATH, "robot_path"),
+    (BELT_PATH, "belt_path"),
+    (DEST_PATH, "destination_path"),
+]:
+    if not stage.GetPrimAtPath(_ckp).IsValid():
+        raise RuntimeError(
+            f"setup_pick_place_controller (curobo): {{_label}}={{_ckp!r}} "
+            f"does not exist or is invalid in stage"
+        )
+for _src in SOURCE_PATHS:
+    if not stage.GetPrimAtPath(_src).IsValid():
+        raise RuntimeError(
+            f"setup_pick_place_controller (curobo): source path {{_src!r}} "
+            f"not found in stage"
+        )
 tl = omni.timeline.get_timeline_interface()
 if not tl.is_playing(): tl.play()
 _app = omni.kit.app.get_app()
@@ -30410,6 +30431,27 @@ if _mgr_pre is not None:
         except Exception: pass
 
 stage = omni.usd.get_context().get_stage()
+# Pre-flight prim-existence check (silent-success fix 2026-05-07).
+# Without this, bad paths slip through to _on_step where the resulting
+# Boost.Python.ArgumentError is captured to stdout but does NOT reach
+# /exec_sync's success flag — handler reports success=True, scene is
+# silently broken. See docs/audits/silent_success_pick_place_2026-05-07.md
+for _ckp, _label in [
+    (ROBOT_PATH, "robot_path"),
+    (BELT_PATH, "belt_path"),
+    (DEST_PATH, "destination_path"),
+]:
+    if not stage.GetPrimAtPath(_ckp).IsValid():
+        raise RuntimeError(
+            f"setup_pick_place_controller (diffik): {{_label}}={{_ckp!r}} "
+            f"does not exist or is invalid in stage"
+        )
+for _src in SOURCE_PATHS:
+    if not stage.GetPrimAtPath(_src).IsValid():
+        raise RuntimeError(
+            f"setup_pick_place_controller (diffik): source path {{_src!r}} "
+            f"not found in stage"
+        )
 tl = omni.timeline.get_timeline_interface()
 if not tl.is_playing():
     tl.play()
@@ -30890,6 +30932,27 @@ if _mgr_pre is not None:
         except Exception: pass
 
 stage = omni.usd.get_context().get_stage()
+# Pre-flight prim-existence check (silent-success fix 2026-05-07).
+# Without this, bad paths slip through to _on_step where the resulting
+# Boost.Python.ArgumentError is captured to stdout but does NOT reach
+# /exec_sync's success flag — handler reports success=True, scene is
+# silently broken. See docs/audits/silent_success_pick_place_2026-05-07.md
+for _ckp, _label in [
+    (ROBOT_PATH, "robot_path"),
+    (BELT_PATH, "belt_path"),
+    (DEST_PATH, "destination_path"),
+]:
+    if not stage.GetPrimAtPath(_ckp).IsValid():
+        raise RuntimeError(
+            f"setup_pick_place_controller (osc): {{_label}}={{_ckp!r}} "
+            f"does not exist or is invalid in stage"
+        )
+for _src in SOURCE_PATHS:
+    if not stage.GetPrimAtPath(_src).IsValid():
+        raise RuntimeError(
+            f"setup_pick_place_controller (osc): source path {{_src!r}} "
+            f"not found in stage"
+        )
 tl = omni.timeline.get_timeline_interface()
 if not tl.is_playing(): tl.play()
 
