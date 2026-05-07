@@ -2,10 +2,73 @@ import aiohttp
 import logging
 import json
 import os
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
+
+
+# ── Track C 9.1 instrumentation: provider 503 incident logging ──────────────
+# Persist non-200 responses (503, 429, 500, 502, 504) to a rolling JSONL so
+# we can analyze the actual root cause of throttling: payload-size, RPM
+# rate-limit, provider instability, or specific malformed requests. Without
+# this data, "Gemini 503" remains anecdotal and architecture decisions are
+# hypothesis-betting (per docs/specs/2026-05-08-kcode-research-and-vault-spec.md).
+#
+# Headers we keep (subset, no auth tokens):
+_PROVIDER_HEADERS_TO_KEEP = (
+    "retry-after", "x-ratelimit-limit", "x-ratelimit-remaining",
+    "x-ratelimit-reset", "x-request-id", "server-timing",
+    "content-type", "date",
+)
+_PROVIDER_INCIDENT_LOG = (
+    Path(__file__).resolve().parents[3] / "workspace" / "qa_runs" / "provider_incidents.jsonl"
+)
+
+
+def _persist_provider_incident(
+    status: int,
+    attempt: int,
+    payload_bytes: int,
+    messages_count: int,
+    attempt_dt: float,
+    response_excerpt: str,
+    response_headers: Dict,
+    last_success_ts: Optional[float],
+    model: str,
+) -> None:
+    """Append one incident line to provider_incidents.jsonl. Best-effort —
+    swallows all errors so logging never breaks the chat path."""
+    try:
+        _PROVIDER_INCIDENT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        kept_headers = {
+            k.lower(): v for k, v in response_headers.items()
+            if k.lower() in _PROVIDER_HEADERS_TO_KEEP
+        }
+        entry = {
+            "ts": now,
+            "ts_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+            "model": model,
+            "status": status,
+            "attempt": attempt,
+            "payload_bytes": payload_bytes,
+            "messages_count": messages_count,
+            "attempt_dt_s": round(attempt_dt, 3),
+            "since_last_200_s": round(now - last_success_ts, 3) if last_success_ts else None,
+            "response_excerpt": response_excerpt,
+            "response_headers": kept_headers,
+        }
+        with open(_PROVIDER_INCIDENT_LOG, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, default=str) + "\n")
+    except Exception as _e:
+        # Logger.debug because this MUST NOT propagate to the chat path
+        try:
+            logger.debug(f"_persist_provider_incident failed: {_e}")
+        except Exception:
+            pass
 
 # Env-gated: expose Gemini's chain-of-thought (thought-parts) for debugging.
 # Default OFF — thoughts cost 2-4x more tokens and are noise in production.
@@ -127,6 +190,13 @@ class GeminiProvider:
         backoff = 2.0  # seconds; doubles each retry
         last_error = None
 
+        # Track-C 9.1 instrumentation: persist 503/429/etc incidents to a
+        # rolling JSONL log so we can later analyze WHEN they happen, what
+        # payload size, time between incidents, time since last success.
+        # Without this, "Gemini 503" remains anecdotal — we can't separate
+        # rate-limit from payload-size from provider-instability.
+        _last_success_ts = getattr(self.__class__, "_last_gemini_success_ts", None)
+
         # Instrumentation: log payload size + attempt timing so we can
         # tell apart "Gemini is slow" from "we're retrying 503s" from
         # "our prompt grew huge". One log line per attempt + a summary
@@ -159,12 +229,29 @@ class GeminiProvider:
                                 f"attempt_dt={_att_dt:.2f}s total_dt={_total_dt:.2f}s "
                                 f"resp={_resp_bytes}b"
                             )
+                            # Mark success ts on the class so siblings see it
+                            self.__class__._last_gemini_success_ts = _time_rt.time()
                             return self._parse_response(data)
                         error_text = await response.text()
                         logger.warning(
                             f"[GeminiCall] HTTP {response.status} attempt={attempt} "
                             f"attempt_dt={_att_dt:.2f}s err={error_text[:120]}"
                         )
+                        # Track-C 9.1: persist non-200 incident for later analysis
+                        try:
+                            _persist_provider_incident(
+                                status=response.status,
+                                attempt=attempt,
+                                payload_bytes=_payload_bytes,
+                                messages_count=len(messages),
+                                attempt_dt=_att_dt,
+                                response_excerpt=error_text[:500],
+                                response_headers=dict(response.headers),
+                                last_success_ts=_last_success_ts,
+                                model=self.model,
+                            )
+                        except Exception:
+                            pass  # Logging must NEVER break the chat path
                         if response.status in retry_statuses and attempt < max_attempts:
                             logger.warning(
                                 f"Gemini {response.status} (attempt {attempt}/{max_attempts}), "
