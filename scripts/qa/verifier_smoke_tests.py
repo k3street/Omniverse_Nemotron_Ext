@@ -159,22 +159,47 @@ async def _build_cp01(*, install_controller: bool = True) -> None:
         })
 
 
-async def _zero_conveyor_velocity() -> None:
-    """set_attribute can't write GfVec3f directly (type-coerces to VtValue list),
-    so go through Kit RPC with explicit Vec3f construction."""
-    code = """
-import omni.usd
+async def _settle_for_verify(*, conveyor_vel: tuple) -> None:
+    """Make the scene state deterministic before calling verify:
+      1. Force-stop the timeline (setup_pick_place_controller starts it).
+      2. Restore CP-01 cube authored positions (physics may have drifted them
+         while controller was paused-installing).
+      3. Set the conveyor's surface velocity to the design-intent value
+         (the cuRobo controller's _pause_belt may have zeroed it during
+         install; we restore for known_good cases or set explicit 0 for
+         the broken_no_velocity fixture)."""
+    cv = tuple(float(x) for x in conveyor_vel)
+    code = f"""
+import omni.usd, omni.timeline, omni.kit.commands
 from pxr import Gf
+
+try:
+    omni.kit.commands.execute('StopAnimation')
+except Exception:
+    pass
+tl = omni.timeline.get_timeline_interface()
+tl.stop()
+tl.set_current_time(0.0)
+
 stage = omni.usd.get_context().get_stage()
-prim = stage.GetPrimAtPath("/World/ConveyorBelt")
-attr = prim.GetAttribute("physxSurfaceVelocity:surfaceVelocity")
-attr.Set(Gf.Vec3f(0.0, 0.0, 0.0))
-print("zeroed:", attr.Get())
+prim = stage.GetPrimAtPath('/World/ConveyorBelt')
+if prim and prim.IsValid():
+    attr = prim.GetAttribute('physxSurfaceVelocity:surfaceVelocity')
+    if attr and attr.IsValid():
+        attr.Set(Gf.Vec3f({cv[0]}, {cv[1]}, {cv[2]}))
+
+# Restore CP-01 cube authored positions in case physics drifted them
+for i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):
+    cube = stage.GetPrimAtPath(f'/World/Cube_{{i+1}}')
+    if cube and cube.IsValid():
+        attr = cube.GetAttribute('xformOp:translate')
+        if attr and attr.IsValid():
+            attr.Set(Gf.Vec3d(x, 0.4, 0.835))
 """
     res = await kit_tools.exec_sync(code, timeout=10)
     if not res.get("success"):
         raise RuntimeError(
-            f"zero_conveyor_velocity failed: {(res.get('output') or '')[:300]}"
+            f"settle_for_verify failed: {(res.get('output') or '')[:300]}"
         )
 
 
@@ -207,19 +232,21 @@ async def _verify(stages: list, cube_path: str = "/World/Cube_1") -> tuple[bool,
 async def fix_known_good_cp01() -> tuple[bool, list]:
     await _reset_scene()
     await _build_cp01(install_controller=True)
+    await _settle_for_verify(conveyor_vel=(0.2, 0.0, 0.0))
     return await _verify(CP01_STAGES)
 
 
 async def fix_known_broken_no_velocity() -> tuple[bool, list]:
     await _reset_scene()
     await _build_cp01(install_controller=True)
-    await _zero_conveyor_velocity()
+    await _settle_for_verify(conveyor_vel=(0.0, 0.0, 0.0))
     return await _verify(CP01_STAGES)
 
 
 async def fix_known_broken_no_controller() -> tuple[bool, list]:
     await _reset_scene()
     await _build_cp01(install_controller=False)
+    await _settle_for_verify(conveyor_vel=(0.2, 0.0, 0.0))
     return await _verify(CP01_STAGES)
 
 
@@ -256,10 +283,10 @@ async def main() -> int:
         flag = "true " if ok else "false"
         print(f"{name:<{width}}  {flag:<11}  {n_issues}")
     print()
-    print("Note: today's verifier is form-shallow (reach + handoff gap only).")
-    print("Both broken fixtures are EXPECTED to still report pipeline_ok=true.")
-    print("Phase 1.1 will strengthen verify_pickplace_pipeline with three new")
-    print("form checks; once landed, the broken rows should flip to false.")
+    print("Expected (after Phase 1.1 form checks landed):")
+    print("  known_good_cp01            pipeline_ok=true,  issues=0")
+    print("  known_broken_no_velocity   pipeline_ok=false, issues>=1 (cube_source_bridged)")
+    print("  known_broken_no_controller pipeline_ok=false, issues>=1 (controller_installed)")
     return 0
 
 

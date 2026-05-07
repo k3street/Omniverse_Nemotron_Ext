@@ -3555,9 +3555,12 @@ async def _handle_verify_pickplace_pipeline(args: Dict) -> Dict:
     if not stages:
         return {"error": "verify_pickplace_pipeline requires 'stages' (list of {robot_path,pick_path,place_path}) or single robot_path+pick_path+place_path"}
 
+    cube_path = args.get("cube_path", "") or ""
+
     # Build the Kit script that resolves world positions per stage.
     import json as _j
     stages_json = _j.dumps(stages)
+    cube_path_json = _j.dumps(cube_path)
     code = f"""\
 import omni.usd, json, builtins as _bi
 from pxr import UsdGeom, Usd, PhysxSchema
@@ -3566,6 +3569,7 @@ stage = omni.usd.get_context().get_stage()
 cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
 ROBOT_REACH = {_ROBOT_REACH_M!r}
 stages = {stages_json}
+cube_path = {cube_path_json}
 
 def _world_pos(path):
     \"\"\"Return bbox center as a fallback. Used only for the robot base call below.\"\"\"
@@ -3745,17 +3749,53 @@ for i, s in enumerate(stages):
     prev_place = plpos
     results.append(stage_result)
 
+# cube_source_bridged: cube must start at first pick zone xy (within 0.20m)
+# OR be on an active conveyor whose bbox contains both the cube and the pick.
+cube_source_bridged = None
+cube_source_note = ''
+if cube_path:
+    cpos = _world_pos(cube_path)
+    first_pick = results[0].get('pick_pos') if results else None
+    if cpos is None:
+        issues.append(f'[cube_source_bridged] cube prim {{cube_path!r}} not found')
+        cube_source_bridged = False
+    elif first_pick is None:
+        issues.append(f'[cube_source_bridged] no first-stage pick position resolved')
+        cube_source_bridged = False
+    else:
+        dxy = ((cpos[0]-first_pick[0])**2 + (cpos[1]-first_pick[1])**2) ** 0.5
+        if dxy <= 0.20:
+            cube_source_bridged = True
+            cube_source_note = f'cube at first pick zone (dxy={{dxy:.2f}}m)'
+        else:
+            for cpath, cbbox, cspd in _active_conveyors():
+                (xmin, ymin), (xmax, ymax) = cbbox
+                cube_on_it = xmin <= cpos[0] <= xmax and ymin <= cpos[1] <= ymax
+                pick_in_it = xmin <= first_pick[0] <= xmax and ymin <= first_pick[1] <= ymax
+                if cube_on_it and pick_in_it:
+                    cube_source_bridged = True
+                    cube_source_note = f'cube on active conveyor {{cpath}} (speed={{cspd:.3f}}) bridges pick zone'
+                    break
+            if cube_source_bridged is None:
+                cube_source_bridged = False
+                issues.append(f'[cube_source_bridged] cube {{cube_path}} at xy=({{cpos[0]:.2f}},{{cpos[1]:.2f}}) is {{dxy:.2f}}m from first pick zone xy=({{first_pick[0]:.2f}},{{first_pick[1]:.2f}}); not at pick zone (within 0.20m) AND not on an active conveyor that bridges into it')
+                cube_source_note = 'cube stranded'
+
 ok = (all(s.get('reachable', False) for s in results)
       and all(s.get('conveyor_active', True) for s in results)
       and all(s.get('controller_installed', True) for s in results)
+      and (cube_source_bridged is None or cube_source_bridged)
       and not any('handoff' in i for i in issues)
       and not any(i.startswith('[conveyor_active]') for i in issues)
-      and not any(i.startswith('[controller_installed]') for i in issues))
+      and not any(i.startswith('[controller_installed]') for i in issues)
+      and not any(i.startswith('[cube_source_bridged]') for i in issues))
 out = {{
     'stages': results,
     'issues': issues,
     'pipeline_ok': ok,
-    'rationale': 'Per-stage: reach distance vs workspace; controller subscription present in builtins; handoff gaps >0.30m spanned by an active conveyor (PhysxSurfaceVelocityAPI + non-zero velocity).',
+    'cube_source_bridged': cube_source_bridged,
+    'cube_source_note': cube_source_note,
+    'rationale': 'Per-stage: reach + controller subscription + handoff conveyor; pipeline-level: cube source at pick zone or on active bridging conveyor.',
 }}
 print(json.dumps(out))
 """
