@@ -10,11 +10,16 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TREND_LOG = REPO_ROOT / "workspace" / "qa_runs" / "canary_trend.log"
+
+# Wilson helper for honest CI on small-n canaries
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _stats  # type: ignore  # noqa: E402
 
 
 def _parse_gt(gt_path: Path):
@@ -44,7 +49,11 @@ def log_canary(campaign_path: Path, note: str = "") -> None:
     ok, total, fab, tasks = _parse_gt(gt)
     ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     TREND_LOG.parent.mkdir(parents=True, exist_ok=True)
-    line = f"{ts} canary={ok}/{total} fab={fab} tasks={'|'.join(tasks)} note={note or '-'}"
+    # Wilson 95% CI lower/upper bounds, in pct
+    lo, hi = _stats.wilson(ok, total) if total > 0 else (0.0, 1.0)
+    ci_str = f"ci=[{int(100*lo)}%,{int(100*hi)}%]"
+    line = (f"{ts} canary={ok}/{total} {ci_str} fab={fab} "
+            f"tasks={'|'.join(tasks)} note={note or '-'}")
     with TREND_LOG.open("a") as f:
         f.write(line + "\n")
     print(f"logged: {line}")

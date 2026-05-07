@@ -132,3 +132,73 @@ def test_wilson_known_reference_value():
     lo, hi = _stats.wilson(13, 20)
     assert math.isclose(lo, 0.4326, abs_tol=0.01)
     assert math.isclose(hi, 0.8190, abs_tol=0.01)
+
+
+# ── find_wilson_passing tests (mark_verified.py) ──
+# These exercise the verification helper directly. We import the function
+# rather than running the CLI to keep tests pure (no chromadb).
+
+def _build_runs(*per_task_results):
+    """per_task_results: list of (task_id, [pass_or_fail, ...]) tuples.
+    Returns N runs in mark_verified's load_judged dict shape."""
+    n_runs = len(per_task_results[0][1]) if per_task_results else 0
+    runs = []
+    for run_idx in range(n_runs):
+        run = {}
+        for tid, results in per_task_results:
+            ok = results[run_idx]
+            run[tid] = {
+                "real": ok, "scene": ok, "fab": 0 if ok else 1, "turns": 5,
+            }
+        runs.append(run)
+    return runs
+
+
+def test_find_wilson_passing_strict_threshold_rejects_2_of_3():
+    """2/3 successes — Wilson lower at 95% is ~0.21. So threshold ≥ 0.5
+    must reject; threshold ≤ 0.2 must accept."""
+    sys.path.insert(0, str(_REPO_ROOT / "scripts" / "qa"))
+    import mark_verified as mv  # type: ignore  # noqa: E402
+    runs = _build_runs(("T-A", [True, True, False]))
+    # Strict 0.5: not enough evidence from n=3
+    out = mv.find_wilson_passing(runs, threshold=0.5)
+    assert out == [], f"expected empty at threshold 0.5, got {out}"
+    # Lenient 0.2: 2/3 should pass
+    out = mv.find_wilson_passing(runs, threshold=0.2)
+    assert len(out) == 1
+    tid, passes, n, lo = out[0]
+    assert tid == "T-A" and passes == 2 and n == 3
+    assert 0.20 < lo < 0.25, f"expected lo near 0.21, got {lo}"
+
+
+def test_find_wilson_passing_three_perfect_passes_at_low_threshold():
+    """3/3 — Wilson lower at 95% is ~0.44. Threshold ≤ 0.4 should accept,
+    ≥ 0.5 should reject."""
+    sys.path.insert(0, str(_REPO_ROOT / "scripts" / "qa"))
+    import mark_verified as mv  # type: ignore  # noqa: E402
+    runs = _build_runs(("T-PERFECT", [True, True, True]))
+    out = mv.find_wilson_passing(runs, threshold=0.4)
+    assert len(out) == 1, "3/3 should pass at threshold 0.4"
+    out = mv.find_wilson_passing(runs, threshold=0.5)
+    assert out == [], "3/3 too small for threshold 0.5"
+
+
+def test_find_wilson_passing_intersects_runs():
+    """Tasks present in only some runs are excluded (same as triple-perfect)."""
+    sys.path.insert(0, str(_REPO_ROOT / "scripts" / "qa"))
+    import mark_verified as mv  # type: ignore  # noqa: E402
+    runs = [
+        {"T-COMMON": {"real": True, "scene": True, "fab": 0},
+         "T-ONLY-1": {"real": True, "scene": True, "fab": 0}},
+        {"T-COMMON": {"real": True, "scene": True, "fab": 0}},
+    ]
+    out = mv.find_wilson_passing(runs, threshold=0.1)
+    ids = [t[0] for t in out]
+    assert "T-COMMON" in ids
+    assert "T-ONLY-1" not in ids, "task missing from one run must be excluded"
+
+
+def test_find_wilson_passing_empty_runs_returns_empty():
+    sys.path.insert(0, str(_REPO_ROOT / "scripts" / "qa"))
+    import mark_verified as mv  # type: ignore  # noqa: E402
+    assert mv.find_wilson_passing([], threshold=0.5) == []
