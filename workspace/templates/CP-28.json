@@ -1,0 +1,45 @@
+{
+  "task_id": "CP-28",
+  "goal": "Build a single-cube precision drop benchmark: 1 cube on conveyor, 1 small target zone (10x10cm marker), robot picks and drops at exact target. Minimal scene for measuring cuRobo drop precision (run multiple times → distribution of cube_final - target).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six precision-benchmark specifics for CP-28 (extends CP-13 — single cube, smaller target):\n1) 1 cube on conveyor at x=-1.4 — same starting position as CP-01.\n2) Target zone = a flat 10×10×0.05m marker at [0, -0.4, 0.775]. Top z=0.80.\n3) Drop target [0, -0.4, 0.825] — exact center xy. Each run measures (cube_final - drop_target).\n4) For statistical drop-precision measurement, run this canonical N times (e.g. via function_gate_consistency) and analyze distribution.\n5) Minimal scene avoids confounders (cube-cube collision, multi-cube scheduling). Pure controller precision test.\n6) Industrial use: precision benchmark for QA / acceptance testing of new controllers / new robots / new physics tunings.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 1 cube\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-1.4, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\n\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\n\n# Small target zone marker (10x10x0.05cm)\ncreate_prim(prim_path=\"/World/TargetZone\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.05, 0.05, 0.025])\napply_api_schema(prim_path=\"/World/TargetZone\", schema_name=\"PhysicsCollisionAPI\")\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Single drop_target — exact center of TargetZone top\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/TargetZone\",\n    drop_target=[0.0, -0.4, 0.825],\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/TargetZone\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [-1.4, 0.4, 0.835]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.2, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/TargetZone", "robot_kind": "franka_panda"}
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/TargetZone",
+    "duration_s": 60
+  },
+  "extends": "CP-13",
+  "extension_notes": "CP-28 is the precision-benchmark canonical. Run N times, measure (cube_final - drop_target) distribution for empirical drop-precision characterization. Useful for: acceptance testing new controllers, comparing target_source modes (curobo vs spline vs sensor_gated), tuning physics params, validating robot calibration after maintenance.",
+  "failure_modes": [
+    "Single-cube → no precision drift across iterations. Each run is independent.",
+    "Target zone tiny (10x10cm) → many runs will land outside (cuRobo precision ~5cm). Acceptable — characterizing the distribution IS the point.",
+    "Same physics gotchas as CP-01."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending; meant to run N times for precision distribution"
+}
