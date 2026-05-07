@@ -149,7 +149,8 @@ Each shipped canonical:
 | CP-09 | Graduated tower (5-cube column) | ⚠️ probe | Sprint 2 | Column-stack vertical motion. 43/43 build, form-gate ✓, function-gate stochastic (cuRobo seed × narrow placement margin). |
 | CP-10 | 3x3 grid palletizer (9 cubes) | ✅ form-gate shipped | Sprint 2 | Scales CP-08 pattern; 9-entry drop_targets dict, 67/67 build, form-gate ✓. |
 | CP-11 | Pinwheel palletizer (donut_3x3) | ✅ form-gate shipped | Sprint 2 | First user of compute_stack_placement v2's `donut_RxC` (8 cubes + center gap). 61/61 build, form-gate ✓. |
-| CP-12..CP-38 | TBD | 📋 planned | — | — |
+| CP-12 | Mixed-SKU palletizer (3 cubes, 5/8/10cm) | ✅ form-gate shipped | Sprint 2 | Per-cube drop-z based on cube size. 33/33 build, form-gate ✓. Function-gate likely fails on 10cm cube (gripper width limit). |
+| CP-13..CP-38 | TBD | 📋 planned | — | — |
 
 **2026-05-07/2026-05-08 progress** — 26+ atomic commits since structural work began. Smoke regression (6 fixtures) green throughout:
 
