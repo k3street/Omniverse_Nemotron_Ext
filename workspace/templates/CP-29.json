@@ -1,0 +1,45 @@
+{
+  "task_id": "CP-29",
+  "goal": "CP-28 variant with y-bias compensation: drop_target shifted +0.16m in y to compensate for the systematic dy=-0.16m bias measured in CP-28's 5-run precision benchmark. Tests whether the bias is constant (predictable, can be compensated) or seed-dependent (random).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six bias-compensation specifics for CP-29 (extends CP-28):\n1) drop_target = [0, -0.24, 0.825] (vs CP-28's [0, -0.4, 0.825]) — y shifted +0.16m to compensate measured bias.\n2) TargetZone moved with drop_target → position [0, -0.24, 0.775]. Robot drops at intended y; if bias is constant, cube lands at ACTUAL y = -0.24 - 0.16 = -0.40 (the original target).\n3) If 5-run benchmark on CP-29 shows mean dy ≈ 0 (vs CP-28's -0.16) → bias is constant, predictable, compensable. Production canonicals could use this offset.\n4) If 5-run still shows mean dy ≈ -0.16 → bias depends on world-coord y, not relative position. Different fix needed (e.g. EE_OFFSET tuning).\n5) Cube source position unchanged (conveyor at y=0.4). Only drop target moves.\n6) Same conveyor, sensor, robot, cube setup as CP-28 — minimal scene difference.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-1.4, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\n\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\n\n# TargetZone shifted +0.16m in y (was -0.4 in CP-28)\ncreate_prim(prim_path=\"/World/TargetZone\", prim_type=\"Cube\", position=[0, -0.24, 0.775], scale=[0.05, 0.05, 0.025])\napply_api_schema(prim_path=\"/World/TargetZone\", schema_name=\"PhysicsCollisionAPI\")\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# drop_target shifted +0.16m in y. If bias is constant, actual cube landing should be near (0, -0.4).\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/TargetZone\",\n    drop_target=[0.0, -0.24, 0.825],\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/TargetZone\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [-1.4, 0.4, 0.835]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.2, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/TargetZone", "robot_kind": "franka_panda"}
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/TargetZone",
+    "duration_s": 45
+  },
+  "extends": "CP-28",
+  "extension_notes": "CP-29 is a controlled experiment to test whether CP-28's measured -0.16m y-bias is CONSTANT (compensable) or VARIABLE. Run precision_benchmark.py on CP-29 — if mean dy ≈ 0, bias is constant. If still -0.16, bias is something else (relative to robot pose, not drop_target).",
+  "failure_modes": [
+    "Compensation overshoots — cube lands at y > -0.4. Then bias was less than measured (or different mechanism).",
+    "TargetZone now at -0.24 — within robot reach (sqrt(0+0.24^2)=0.24m, well within 0.85m).",
+    "Belt timing unchanged — same as CP-28."
+  ],
+  "verified_status": "build-verified-2026-05-08; form-gate ✓; PRECISION EXPERIMENT RESULT: y-bias compensation FAILED. With drop_target.y shifted +0.16m to -0.24, cube was NEVER PICKED — stayed on conveyor at y=0.4 (dy=+0.642 across 3 runs). cuRobo controller likely failed planning to the closer drop position (TargetZone too close to robot base, OR planning_obstacles placement clash). Conclusion: CP-28's measured -0.16m y-bias is NOT a simple constant offset compensable by drop_target shift. Bias likely depends on robot pose / EE-orientation / cube-init-position relationship in ways not yet characterized. Real fix needs deeper investigation."
+}
