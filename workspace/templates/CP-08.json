@@ -52,6 +52,6 @@
     "Manually computed drop_targets z forgetting cube_size/2 offset — cube spawns at pallet top z, gets pushed up by physics. Use anchor='top' which adds cube_size/2 automatically.",
     "drop_targets passed to non-curobo target_source — currently only cuRobo handler supports DROP_TARGETS branch. Spline/native ignore it (silent fall-through to destination_path)."
   ],
-  "verified_status": "build-verified-2026-05-08; form-gate ✓; function-gate ✓ (Cube_1 → Pallet, single 90s probe pre and post Ground addition: cube_final=[-0.083, -0.492, 0.825] in_target_xy=True, at_rest=True, upright=True). Multi-cube 4-slot precision delivery still pending — drop drift accumulates to ~6cm xy.",
+  "verified_status": "build-verified-2026-05-08; form-gate ✓; function-gate ✓ for Cube_1 (single-cube probe in_target_xy + at_rest + upright). Multi-cube 360s sim: 3/4 cubes on pallet (Cube_1, Cube_3, Cube_4), 1/4 off (Cube_2 slid off edge to z=0.525). 75% delivery rate. Drop drift + cube-cube collision the main precision losses. Acceptable for canonical demo; production would need spacing tuning.",
   "compute_stack_placement_verified_2026_05_07": "Tool returned 4 positions matching the hardcoded drop_targets above. Computed via grid_2x2 anchor=top spacing=0.08."
 }
