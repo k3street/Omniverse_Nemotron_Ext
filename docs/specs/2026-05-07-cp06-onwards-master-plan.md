@@ -158,7 +158,27 @@ Each shipped canonical:
 | CP-18 | Inspect-and-reject station | ✅ form-gate shipped | Sprint 2 | Demonstrates color_routing fall-through to destination_path for unlabeled cubes. 4 good + 1 reject. 58/58 build. |
 | CP-19 | Twin-pallet feeder | ✅ form-gate shipped | Sprint 2 | drop_targets fan-out to 2 pallets (3 cubes each). 53/53 build. Validates multi-destination dispatch within single controller. |
 | CP-20 | Brick-layer palletizer (18 cubes 3x3x2) | ✅ form-gate shipped | Sprint 2 | Largest stack canonical. Research-spec brick palletizer with layer_rotation_deg=90. 123/123 build. |
-| CP-21..CP-38 | TBD | 📋 planned | — | — |
+| CP-21 | Gravity-feed station | ✅ form-gate shipped | Sprint 2 | Cubes spawn 17cm above belt, fall, then picked. Tests cube-with-velocity handling. 38/38 build. |
+| CP-22..CP-38 | TBD | 📋 planned | — | — |
+
+**Final form-gate sweep CP-07..CP-21 (2026-05-08)** — 14/14 PASS, 825 build calls, 91 cubes:
+```
+CP-07: 127/127  cubes=16   PASS
+CP-08:  39/39   cubes=4    PASS
+CP-09:  45/45   cubes=5    PASS
+CP-10:  69/69   cubes=9    PASS
+CP-11:  63/63   cubes=8    PASS
+CP-12:  33/33   cubes=3    PASS
+CP-13:  27/27   cubes=2    PASS
+CP-14:  29/29   cubes=2    PASS
+CP-15:  32/32   cubes=3    PASS
+CP-16:  57/57   cubes=4    PASS
+CP-17:  70/70   cubes=6    PASS
+CP-18:  58/58   cubes=5    PASS
+CP-19:  53/53   cubes=6    PASS
+CP-20: 123/123  cubes=18   PASS
+CP-21:  38/38   cubes=4    PASS  (added post-sweep)
+```
 
 **2026-05-07/2026-05-08 progress** — 41+ atomic commits since structural work began. Smoke regression (6 fixtures) green throughout:
 
