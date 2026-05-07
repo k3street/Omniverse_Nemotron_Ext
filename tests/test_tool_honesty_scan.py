@@ -133,6 +133,14 @@ AUDITED_CLEAN = frozenset({
     "_gen_create_omnigraph",          # fails loudly via Kit API mismatch
     "_gen_clone_envs",                # GridCloner raises 'Source prim does not exist'
     "_gen_create_conveyor",           # fails loudly (though confusing error)
+    # Verified via live Kit RPC 2026-05-07 (bad-input → success=False):
+    "_gen_setup_pick_place_ros2_bridge", # ROS2 RMW load fails loudly when AMENT_PREFIX_PATH unset
+    "_gen_pick_place_sensor_gated",   # ParallelGripper.initialize() raises on invalid prim path
+    "_gen_pick_place_native",         # Boost.Python.ArgumentError on Stage.GetPrimAtPath(None)
+    "_gen_pick_place_spline",         # same Stage.GetPrimAtPath crash propagates
+    # NOT added (silent-success bugs confirmed via live Kit RPC 2026-05-07):
+    # _gen_pick_place_curobo, _gen_pick_place_diffik, _gen_pick_place_osc
+    # → see docs/audits/silent_success_pick_place_2026-05-07.md
 })
 
 
