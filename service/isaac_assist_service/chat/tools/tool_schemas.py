@@ -1398,6 +1398,37 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_vision_classifier_gate",
+            "description": "Tier A tool — build a class-routing dict by VLM vision classification of cubes in the scene. Captures viewport (optionally setting it to a specific camera first), runs vision_detect_objects with the provided class_labels, then matches detected labels to cube_paths by left-to-right ordering (sorted by world x for cubes vs image x for detections). Returns {cube_path: detected_label} mapping for use as setup_pick_place_controller's color_routing argument. v1 simplification: pairing is by ordering, not full 2D-position projection — best for 2-4 visually-separable cubes. Used by CP-N parcel singulation, vision quality gate, color sorter, postal cross-belt sorter (6 scenarios in the 33-canonical roadmap).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cube_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "USD paths of cubes to classify",
+                    },
+                    "class_labels": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Expected class labels for vision detection (e.g. ['red cube', 'blue cube', 'green cube'])",
+                    },
+                    "camera_path": {
+                        "type": "string",
+                        "description": "Optional: USD path of camera to set viewport to before capture. If omitted, current viewport is used.",
+                    },
+                    "destination_map": {
+                        "type": "object",
+                        "description": "Optional: dict mapping class_label → destination_prim_path (e.g. {'red': '/World/RedBin'}). When provided, returned cube_to_destination is shaped for setup_pick_place_controller's color_routing arg.",
+                    },
+                },
+                "required": ["cube_paths", "class_labels"],
+            },
+        },
+    },
 
     # ─── Nucleus Browse & Download ─────────────────────────────────────────────
     {

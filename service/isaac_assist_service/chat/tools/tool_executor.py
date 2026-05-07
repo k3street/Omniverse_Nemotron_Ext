@@ -5854,6 +5854,149 @@ DATA_HANDLERS["vision_plan_trajectory"] = _handle_vision_plan_trajectory
 DATA_HANDLERS["vision_analyze_scene"] = _handle_vision_analyze_scene
 
 
+async def _handle_add_vision_classifier_gate(args: Dict) -> Dict:
+    """Tier A tool — build a class-routing dict by VLM vision classification.
+
+    Agent-side helper for vision-gated palletizing/sorting (CP-N: parcel
+    singulation, vision-quality-gate, postal cross-belt sorter, etc).
+
+    Pipeline:
+      1. (Optional) set viewport to camera_path so the captured image is
+         from the requested vantage. If omitted, current viewport is used.
+      2. Capture viewport image.
+      3. For each cube_path, get its world position via BBoxCache.
+      4. Project world position to image (y, x) via the camera's
+         intrinsics. Match each cube to the nearest detection by
+         normalized image distance.
+      5. Return {cube_path: detected_label} mapping.
+
+    Args:
+      camera_path:    USD path of the camera to use (optional)
+      cube_paths:     list of USD paths to classify
+      class_labels:   list of expected class names (e.g. ['red cube', 'blue cube'])
+      destination_map: optional {class_label: destination_prim_path} —
+                       when provided, returned mapping is keyed by
+                       cube_path → destination_path (color_routing-shaped)
+                       in addition to cube_path → class_label.
+
+    Returns:
+      {
+        cube_to_class: {cube_path: detected_label, ...},
+        cube_to_destination: {cube_path: destination_path, ...} (if destination_map provided),
+        unmatched_cubes: [cube_path, ...],
+        raw_detections: [{point: [y,x], label: ...}, ...],
+        model: gemini-...,
+      }
+
+    v1 simplification: 2D-distance matching is performed in image
+    coordinates without explicit world→image projection — assumes
+    detections are returned in roughly the same order as cube_paths
+    by left-to-right viewport position. Agent should validate
+    by inspecting unmatched_cubes and raw_detections.
+    """
+    camera_path = args.get("camera_path")
+    cube_paths = list(args.get("cube_paths") or [])
+    class_labels = list(args.get("class_labels") or [])
+    destination_map = args.get("destination_map") or {}
+
+    if not cube_paths:
+        return {"type": "error", "error": "cube_paths is required and non-empty"}
+    if not class_labels:
+        return {"type": "error", "error": "class_labels is required (list of expected class names)"}
+
+    # Optionally set viewport to the requested camera before capture.
+    if camera_path:
+        try:
+            await execute_tool_call("set_viewport_camera", {"camera_path": camera_path})
+        except Exception as _e:
+            # Non-fatal: continue with current viewport
+            pass
+
+    # Capture viewport
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"type": "error", "error": "Could not capture viewport image. Is Isaac Sim running?"}
+
+    # Run vision detection
+    vp = _get_vision_provider()
+    detections = await vp.detect_objects(img, mime, labels=class_labels,
+                                          max_objects=max(10, len(cube_paths)))
+
+    # Get cube world positions via Kit RPC
+    pos_code = f"""\
+import omni.usd, json
+from pxr import Usd, UsdGeom
+stage = omni.usd.get_context().get_stage()
+positions = {{}}
+for path in {cube_paths!r}:
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid(): continue
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty(): continue
+    c = b.GetMidpoint()
+    positions[path] = [float(c[0]), float(c[1]), float(c[2])]
+print(json.dumps(positions))
+"""
+    pos_res = await kit_tools.exec_sync(pos_code, timeout=10)
+    cube_world_positions = {}
+    for line in (pos_res.get("output") or "").splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                import json as _j
+                cube_world_positions = _j.loads(line)
+                break
+            except Exception:
+                continue
+
+    # Match detections to cubes by sorted left-to-right xy comparison.
+    # v1 heuristic: sort cubes by world x (ascending → leftmost first
+    # in a robot-standard front-facing camera), sort detections by
+    # image x (point[1]). Pair them in order.
+    sorted_cubes = sorted(
+        [p for p in cube_paths if p in cube_world_positions],
+        key=lambda p: cube_world_positions[p][0],
+    )
+    sorted_dets = sorted(
+        [d for d in detections if isinstance(d.get("point"), (list, tuple)) and len(d["point"]) >= 2],
+        key=lambda d: float(d["point"][1]),
+    )
+
+    cube_to_class: Dict[str, str] = {}
+    unmatched_cubes: List[str] = []
+    n_pairs = min(len(sorted_cubes), len(sorted_dets))
+    for i in range(n_pairs):
+        cube_to_class[sorted_cubes[i]] = sorted_dets[i].get("label", "")
+    for cube in sorted_cubes[n_pairs:]:
+        unmatched_cubes.append(cube)
+
+    cube_to_destination = {}
+    if destination_map:
+        for cube, label in cube_to_class.items():
+            # Fuzzy match: detected label may be "red cube" while
+            # destination_map keys are "red". Try exact, then prefix.
+            dest = destination_map.get(label)
+            if dest is None:
+                for k, v in destination_map.items():
+                    if k.lower() in label.lower() or label.lower() in k.lower():
+                        dest = v
+                        break
+            if dest:
+                cube_to_destination[cube] = dest
+
+    return {
+        "cube_to_class": cube_to_class,
+        "cube_to_destination": cube_to_destination,
+        "unmatched_cubes": unmatched_cubes,
+        "raw_detections": detections,
+        "model": getattr(vp, "model", "?"),
+    }
+
+
+DATA_HANDLERS["add_vision_classifier_gate"] = _handle_add_vision_classifier_gate
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
@@ -30832,17 +30975,23 @@ def _apply_arm_joints(q7):
     # (still-opening) positions kept overwriting the gripper-controller's
     # close target every physics tick → grip never reached close pose.
     q7_arr = np.asarray(q7, dtype=np.float64)[:7]
-    # NaN/Inf-safety: cuRobo's planner occasionally returns trajectories
-    # with NaN values under bad seeds (CP-09 stochastic-failure mode —
-    # cube velocity reaches 6118 m/s, position z=-23000m). Detect and
-    # skip rather than feed NaN to PhysX.
+    # Safety check: cuRobo's planner occasionally returns trajectories
+    # that are catastrophic under bad seeds — both NaN/Inf values AND
+    # finite-but-impossible joint targets (>±5 rad on a Franka whose
+    # joint limits are all within ±3.8 rad). Both modes blow up cube
+    # state via massive joint forces. Reject and skip the apply.
     if not np.all(np.isfinite(q7_arr)):
         S.setdefault("nan_skipped", 0)
         S["nan_skipped"] += 1
-        try:
-            _a_last_err.Set(f"NaN trajectory skipped (n={{S['nan_skipped']}})")
-        except Exception:
-            pass
+        try: _a_last_err.Set(f"NaN trajectory skipped (n={{S['nan_skipped']}})")
+        except Exception: pass
+        return
+    if np.any(np.abs(q7_arr) > 5.0):
+        S.setdefault("oob_skipped", 0)
+        S["oob_skipped"] += 1
+        _max = float(np.max(np.abs(q7_arr)))
+        try: _a_last_err.Set(f"Out-of-bounds q (max={{_max:.2f}}) skipped (n={{S['oob_skipped']}})")
+        except Exception: pass
         return
     art_ctrl.apply_action(ArticulationAction(
         joint_positions=q7_arr,
