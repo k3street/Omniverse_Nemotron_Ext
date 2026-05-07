@@ -41,5 +41,5 @@
     "Target zone tiny (10x10cm) → many runs will land outside (cuRobo precision ~5cm). Acceptable — characterizing the distribution IS the point.",
     "Same physics gotchas as CP-01."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending; meant to run N times for precision distribution"
+  "verified_status": "build-verified-2026-05-08; form-gate ✓; PRECISION DATA (3-run benchmark): cube_final drift from target = (run1: 0.21m, run2: 0.20m, run3: 0.33m). Mean ~24cm. y-axis drift dominates (~0.20-0.28m); x-axis smaller (~0.08-0.16m). All runs cube ended at z=0.525 (table top) — fell off the 10cm TargetZone. Implies cuRobo drop precision is closer to 20-30cm than the assumed 5cm. CP-08 (30cm pallet) succeeds because of generous margin, not precision."
 }
