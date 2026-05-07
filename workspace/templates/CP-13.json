@@ -1,0 +1,52 @@
+{
+  "task_id": "CP-13",
+  "goal": "Build a 2-cube column stack (cube-on-cube). Robot picks 2 cubes from a conveyor and stacks them vertically: Cube_1 lands on a 15×15cm pallet base at z=0.825, Cube_2 lands ON TOP of Cube_1 at z=0.875. Smallest possible multi-layer stack — tests whether placement on an already-placed object works in practice with drop_targets dispatch.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six 2-cube-column specifics for CP-13 (extends CP-09's column pattern but simpler — only 2 layers):\n1) Pallet base 0.15×0.15×0.05m at [0, -0.4, 0.775] — bigger than CP-09's 10×10cm to give Cube_1 a stable landing area.\n2) Cube_1 drops at z=0.825 (pallet top + cube_size/2). Cube_2 drops at z=0.875 (Cube_1 top + cube_size/2). Both at xy=(0, -0.4).\n3) Order matters: Cube_1 MUST be placed before Cube_2. Controller picks closest-to-sensor first; with x=-1.4 vs -1.0, Cube_1 (left) gets to sensor zone first via belt motion, picked first. Drop_targets dict ensures right destination regardless of pick order.\n4) Robot needs to descend onto Cube_1 to place Cube_2 — gripper opens at z=0.875+EE_offset. Cube_2's bottom face just clears Cube_1's top.\n5) Settle pause after Cube_1 placement is critical — Cube_1 may shift before Cube_2 lands. cuRobo handler doesn't currently pause between cubes; relies on RmpFlow's natural cycle.\n6) Function-gate measures Cube_1 reaches pallet (delivered to xy bbox). Stack-stability of Cube_2 atop Cube_1 is a function-gate stretch goal.",
+  "code": "# DomeLight + Ground + parent Xform + table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 2 cubes spaced 0.40m on conveyor — wider than CP-08 to avoid collision\nfor i, x in enumerate([-1.4, -1.0]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(2)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(2)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Pallet base — 0.15x0.15x0.05m (larger than CP-09's 10x10cm for stability)\ncreate_prim(prim_path=\"/World/PalletBase\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.075, 0.075, 0.025])\napply_api_schema(prim_path=\"/World/PalletBase\", schema_name=\"PhysicsCollisionAPI\")\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# drop_targets — Cube_1 on PalletBase, Cube_2 on top of Cube_1 (column stack).\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\", \"/World/Cube_2\"],\n    destination_path=\"/World/PalletBase\",\n    drop_targets={\n        \"/World/Cube_1\": [0.0, -0.4, 0.825],\n        \"/World/Cube_2\": [0.0, -0.4, 0.875],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/PalletBase\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [-1.4, 0.4, 0.835],
+      "/World/Cube_2": [-1.0, 0.4, 0.835]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.2, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/PalletBase",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/PalletBase",
+    "duration_s": 90
+  },
+  "extends": "CP-09",
+  "extension_notes": "CP-13 simplifies CP-09 from 5-cube tower to 2-cube — meaningful as the smallest stack. Validates that the drop_targets dict pattern works with z increasing per cube layer. PalletBase 15×15cm wider than CP-09's 10×10cm to give Cube_1 stable landing area before Cube_2 lands on it. Future variant: scale to N cubes via compute_stack_placement(column, n_items=N).",
+  "failure_modes": [
+    "Cube_2 misses Cube_1 — drop xy precision off by >2.5cm pushes Cube_2 off Cube_1's top face. PalletBase 15cm gives margin for ground-level miss but Cube_1 itself is only 5cm wide.",
+    "Cube_1 shifted by Cube_2 placement impulse — Cube_2 lands with downward velocity, knocks Cube_1 sideways. Settle pause between cubes would help.",
+    "Robot can't descend low enough for Cube_1 (z=0.825) without colliding with PalletBase (top z=0.80). Margin is 25mm — within EE_INITIAL_HEIGHT auto-clearance.",
+    "Robot can't reach Cube_2 drop z=0.875 — well within Franka's vertical reach 0.85m above base."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+}
