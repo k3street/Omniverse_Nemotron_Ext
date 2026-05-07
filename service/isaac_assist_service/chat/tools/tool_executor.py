@@ -4528,6 +4528,87 @@ except ImportError:
 
 # ── Main dispatch ────────────────────────────────────────────────────────────
 
+# ── P1: per-tool result-size cap (kcode-spec sec 6.2) ──────────────────
+# Bounds the size of any single tool_result before it enters the
+# orchestrator's messages history. Justified by Track C 9.4 measurement:
+# chars/token ratio is 2.25 (vs. chars/4 heuristic), so token cost is 2x
+# what we naively estimate. Capping single tool outputs at 50KB ensures
+# no single call burns ~22k tokens of context budget.
+#
+# Config: per-tool overrides for tools that need MORE headroom, plus
+# tools that should NEVER be capped (capture_viewport's image data).
+# Env flag RESULT_CAP=off disables capping entirely.
+
+# Default cap in bytes of json-stringified result. Tools above this
+# threshold get their `output` field truncated with a marker.
+_RESULT_CAP_DEFAULT_CHARS = int(os.environ.get("RESULT_CAP_DEFAULT", "50000"))
+# Tools that should never be capped (semantic loss > token saving)
+_RESULT_CAP_EXEMPT = frozenset({
+    "capture_viewport",       # image bytes — VLM needs intact data
+    "vision_detect_objects",  # detection coordinates — small but every entry matters
+})
+# Per-tool overrides (in chars). Smaller = aggressive cap.
+_RESULT_CAP_OVERRIDES = {
+    "run_usd_script": 12000,           # 9.2 max 205KB — tail outputs blow the budget
+    "setup_pick_place_controller": 18000,  # 9.2 max 44KB — controller code is heavy
+    "scene_summary": 8000,             # path-heavy, tokenizes 2.0 chars/token
+    "list_all_prims": 6000,
+    "find_prims_by_schema": 6000,
+    "preflight_check": 16000,
+}
+
+
+def _apply_result_cap(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """Truncate large tool_result content. Returns either the original
+    result (if under cap or capping disabled) or a copy with truncated
+    fields and a `_truncated` marker.
+
+    Truncation strategy:
+    1. If `output` field exists and is large, truncate it first.
+    2. If still over cap and `code` field exists, drop the `code` field
+       (LLM rarely needs to re-read it; reduces noise on repeated calls).
+    3. Add `_truncated` marker dict so the LLM sees the cap fired.
+
+    Idempotent: re-capping an already-capped result is a no-op.
+    """
+    if os.environ.get("RESULT_CAP", "on").lower() in ("off", "0", "false"):
+        return result
+    if not isinstance(result, dict):
+        return result
+    if tool_name in _RESULT_CAP_EXEMPT:
+        return result
+    # Already capped — don't recap (prevents marker doubling)
+    if "_truncated" in result:
+        return result
+
+    cap = _RESULT_CAP_OVERRIDES.get(tool_name, _RESULT_CAP_DEFAULT_CHARS)
+    blob_size = len(json.dumps(result, default=str))
+    if blob_size <= cap:
+        return result
+
+    out = dict(result)
+    original_chars = blob_size
+    # Step 1: truncate `output` field
+    if "output" in out and isinstance(out["output"], str) and len(out["output"]) > 500:
+        keep_chars = max(500, cap - 2000)  # leave room for other fields
+        out["output"] = (
+            out["output"][:keep_chars]
+            + f"...[output truncated; original {len(out['output'])} chars]"
+        )
+    # Step 2: drop `code` field if still over
+    new_size = len(json.dumps(out, default=str))
+    if new_size > cap and "code" in out:
+        out["code"] = "<dropped: code field — see prior tool_result for source>"
+        new_size = len(json.dumps(out, default=str))
+    out["_truncated"] = {
+        "tool": tool_name,
+        "original_chars": original_chars,
+        "kept_chars": new_size,
+        "cap": cap,
+    }
+    return out
+
+
 async def execute_tool_call(
     tool_name: str,
     arguments: Dict[str, Any],
@@ -4539,10 +4620,13 @@ async def execute_tool_call(
         {"type": "code_patch", "code": ..., "description": ...}  for code-gen tools
         {"type": "data", ...}                                      for data-lookup tools
         {"type": "error", "error": ...}                            on failure
+
+    All returns flow through `_apply_result_cap` (P1 from kcode-spec sec 6.2)
+    which truncates oversized result payloads to bound LLM token cost.
     """
     logger.info(f"[ToolExecutor] Executing tool: {tool_name}({json.dumps(arguments)[:200]})")
 
-    try:
+    async def _inner() -> Dict[str, Any]:
         # 1. Data handlers — return result directly
         if tool_name in DATA_HANDLERS:
             handler = DATA_HANDLERS[tool_name]
@@ -4610,9 +4694,14 @@ async def execute_tool_call(
 
         return {"type": "error", "error": f"Unknown tool: {tool_name}"}
 
+    try:
+        result = await _inner()
     except Exception as e:
         logger.error(f"[ToolExecutor] {tool_name} failed: {e}")
-        return {"type": "error", "error": str(e)}
+        result = {"type": "error", "error": str(e)}
+
+    return _apply_result_cap(tool_name, result)
+
 
 
 def _gen_add_sensor(args: Dict) -> str:
