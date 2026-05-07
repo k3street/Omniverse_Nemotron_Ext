@@ -1,0 +1,61 @@
+{
+  "task_id": "CP-10",
+  "goal": "Build a 3×3 grid palletizer: a Franka Panda picks 9 cubes from a conveyor and stacks them in a 3×3 grid on top of a 0.45×0.45m pallet behind the robot. Scales the CP-08 pattern (compute_stack_placement + drop_targets dict) from 4 to 9 cubes. Stress-tests cuRobo's planning at the edge of reach (0.51m to corner cubes).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "compute_stack_placement",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six 3x3-palletizer specifics for CP-10 (extends CP-08 — orientation rule, cuRobo, drop_targets dict pattern, settle_state all inherited):\n1) Pallet 0.45x0.45x0.05m at [0, -0.4, 0.775] (vs CP-08's 0.30x0.30) — accommodates 3x3 grid with 0.10m spacing for 5cm cubes.\n2) compute_stack_placement(target='/World/Pallet', pattern='grid_3x3', n_items=9, cube_size=0.05, spacing=0.10, anchor='top') yields 9 positions: xy={-0.10,0,0.10}×{-0.5,-0.4,-0.3}, all at z=0.825.\n3) Reach check: furthest corner cube at (0.1, -0.5) → sqrt(0.01+0.25)=0.51m from robot base — well within Franka's 0.85m reach.\n4) Spacing 0.10m (vs 0.08m in CP-08) for 5cm cubes — gives 0.05m gap. Larger gap accommodates 8 cubes worth of cumulative drop-precision drift.\n5) 9 cubes on 6m conveyor at x ∈ [-2.7..-0.3] in 0.30m increments. First few start outside robot reach (|x|>0.7), later ones inside. Sequential pickup either way.\n6) drop_targets dict has 9 entries — Cube_N → grid slot N. _bin_drop_pos(cube_path) lookup is O(1).",
+  "code": "# DomeLight + parent Xform + table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Franka — same pose as CP-01\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Wider conveyor (6m) for 9 cubes at 0.30m spacing\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[6.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 9 cubes spaced 0.30m\nfor i, x in enumerate([-2.7, -2.4, -2.1, -1.8, -1.5, -1.2, -0.9, -0.6, -0.3]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(9)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(9)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Pallet 0.45x0.45x0.05m\n# Cube primitive default size=2; scale=[0.225, 0.225, 0.025] → 0.45x0.45x0.05m\ncreate_prim(prim_path=\"/World/Pallet\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.225, 0.225, 0.025])\napply_api_schema(prim_path=\"/World/Pallet\", schema_name=\"PhysicsCollisionAPI\")\n\n# Pick sensor\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# cuRobo controller with 9-entry drop_targets dict.\n# Positions computed via:\n#   compute_stack_placement(target='/World/Pallet', pattern='grid_3x3',\n#                            n_items=9, cube_size=0.05, spacing=0.10, anchor='top')\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(9)],\n    destination_path=\"/World/Pallet\",\n    drop_targets={\n        \"/World/Cube_1\": [-0.10, -0.50, 0.825],\n        \"/World/Cube_2\": [ 0.00, -0.50, 0.825],\n        \"/World/Cube_3\": [ 0.10, -0.50, 0.825],\n        \"/World/Cube_4\": [-0.10, -0.40, 0.825],\n        \"/World/Cube_5\": [ 0.00, -0.40, 0.825],\n        \"/World/Cube_6\": [ 0.10, -0.40, 0.825],\n        \"/World/Cube_7\": [-0.10, -0.30, 0.825],\n        \"/World/Cube_8\": [ 0.00, -0.30, 0.825],\n        \"/World/Cube_9\": [ 0.10, -0.30, 0.825],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Pallet\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [-2.7, 0.4, 0.835],
+      "/World/Cube_2": [-2.4, 0.4, 0.835],
+      "/World/Cube_3": [-2.1, 0.4, 0.835],
+      "/World/Cube_4": [-1.8, 0.4, 0.835],
+      "/World/Cube_5": [-1.5, 0.4, 0.835],
+      "/World/Cube_6": [-1.2, 0.4, 0.835],
+      "/World/Cube_7": [-0.9, 0.4, 0.835],
+      "/World/Cube_8": [-0.6, 0.4, 0.835],
+      "/World/Cube_9": [-0.3, 0.4, 0.835]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.2, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/Pallet",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Pallet",
+    "duration_s": 180
+  },
+  "extends": "CP-08",
+  "extension_notes": "CP-10 scales CP-08's 4-cube grid_2x2 to 9-cube grid_3x3. Same code pattern. Validates compute_stack_placement at scale and drop_targets dict with 9 entries. Function-gate timing: 9 cubes × ~10s/cube ≈ 90-180s. Stack stability not asserted (cubes are loose 5cm rubber on flat pallet — may settle into staggered positions if drop precision drifts).",
+  "failure_modes": [
+    "Cubes_7..9 start within Franka reach immediately — controller picks them out of conveyor order. Verifier still passes if Cube_1 reaches pallet eventually.",
+    "Cumulative drop precision drift — 9 sequential drops at 1-2cm-each-error compounds. Last cube may drift outside its grid slot. Spacing 0.10m gives 5cm margin — should hold.",
+    "Pallet too small for 3x3 + spacing — verify pallet xy ≥ 3*spacing + cube_size = 0.35m. Used 0.45m for safety.",
+    "drop_targets dict missing some cube — falls through to DEST_PATH (pallet bbox center), all unmapped cubes pile up at center.",
+    "Conveyor not wide enough — Cube_1 starts at x=-2.7, conveyor [-3, +3] = 6m. Within bound."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending; function-gate (9 cubes delivered to grid slots) probably stochastic given CP-09 experience; long sim (180s) needed"
+}
