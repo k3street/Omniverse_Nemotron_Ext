@@ -155,21 +155,34 @@ Each shipped canonical:
 | CP-15 | Mixed-SKU graduated tower | ✅ form-gate shipped | Sprint 2 | First user of compute_stack_placement v3's `cube_sizes` (cumulative-z column). 3 cubes 10/8/5cm descending. 32/32 build, form-gate ✓. |
 | CP-16..CP-38 | TBD | 📋 planned | — | — |
 
-**2026-05-07/2026-05-08 progress** — 39+ atomic commits since structural work began. Smoke regression (6 fixtures) green throughout:
+**2026-05-07/2026-05-08 progress** — 41+ atomic commits since structural work began. Smoke regression (6 fixtures) green throughout:
 
 - **Phase A (settle_state)** — 9 commits. Replaced regex-based settle extraction with structural `settle_state` JSON field (kcode-spec sec 4 anti-fragility). CP-01..CP-05 migrated; CP-07 unblocked; CP-06 postponed.
-- **Phase B (Tier A tool + canonicals + reliability)** — 17+ commits:
-  - **`compute_stack_placement` v1+v2** — pure-data placement computer. Patterns: `column`, `grid_RxC`, `donut_RxC` (RxC minus center). Tier A — 7 scenarios depend.
+- **Phase B (Tier A tools + canonicals + reliability)** — 32+ commits:
+  - **`compute_stack_placement` v1+v2+v3** — pure-data placement computer. Patterns: `column`, `grid_RxC`, `donut_RxC` (RxC minus center). v3 adds per-cube `cube_sizes` list with cumulative-z column stacking. Tier A — 7 scenarios depend.
   - **`drop_targets` dict in cuRobo handler** — per-cube drop position dispatch. Falls through to drop_target → DEST_PATH bbox center for unmapped cubes. `_compute_h1` extended to clear all targets.
-  - **4 new canonicals**: CP-08, CP-09, CP-10, CP-11 — all form-gate-verified.
-  - **function_gate_suite** extended with CP-08 (expect_pass=True) and CP-09 (probe).
+  - **8 new canonicals**: CP-08 (2x2), CP-09 (column tower), CP-10 (3x3), CP-11 (pinwheel donut), CP-12 (mixed-SKU diagonal), CP-13 (2-cube column), CP-14 (2-robot relay), CP-15 (graduated descending tower) — all form-gate-verified.
+  - **function_gate_suite** extended with CP-08 (pass), CP-09/CP-12/CP-14/CP-15 (probe), CP-10/CP-11/CP-13 (pass) — 11 fixtures total.
   - **NaN/OOB-safety in cuRobo controller** — defensive guard against bad-seed trajectories. Skips apply_action when q7 contains NaN/Inf or values > ±5 rad.
-  - **Ground plane fix** — added /World/Ground to CP-08..CP-11. Was the actual root cause of CP-09 "stochastic blowup" (cube fell off conveyor end into infinite void). Now cubes land at_rest at z=0 floor.
-  - **`add_vision_classifier_gate` v1** (Tier A #2) — wraps vision_detect_objects with cube↔class matching. Infrastructure-complete; production usage requires populated scene + render-wait (Gemini detection failed on minimal synthetic scenes).
+  - **Ground plane fix** — added /World/Ground to CP-08..CP-15. Was the actual root cause of "stochastic blowup" (cube fell off conveyor end into infinite void). Now cubes land at_rest at z=0 floor.
+  - **`add_vision_classifier_gate` v1** (Tier A #2) — wraps vision_detect_objects with cube↔class matching by left-to-right ordering. **Infrastructure-complete; KNOWN LIMITATION**: viewport capture in Kit RPC returns black-with-axes image; production usage needs Replicator-based capture or render-flush scaffolding TBD.
 
-**Reliability observation post-Ground-fix**: CP-09 single-cube probe now lands cube near (but outside) 10×10cm TowerBase target → at_rest, no numerical blowup. Precision/target-size issue, not scene-broken issue.
+**Final form-gate sweep CP-07..CP-15 (2026-05-08)**:
+```
+CP-07: 127/127 build, 16 cubes  PASS
+CP-08:  39/39  build, 4 cubes   PASS
+CP-09:  45/45  build, 5 cubes   PASS
+CP-10:  69/69  build, 9 cubes   PASS
+CP-11:  63/63  build, 8 cubes   PASS
+CP-12:  33/33  build, 3 cubes   PASS
+CP-13:  27/27  build, 2 cubes   PASS
+CP-14:  29/29  build, 2 cubes   PASS
+CP-15:  32/32  build, 3 cubes   PASS
+```
 
-**Postponed (Sprint 3)**: CP-06 builtin handler (FixedJoint integration), full vision-gate canonicals (need viewport-render-wait scaffolding), per-cube cube_size for mixed-SKU palletizers, set_gripper_rotation (Tier B).
+**Reliability post-Ground-fix**: cubes that miss target now land at_rest on Ground (z=0) instead of free-falling to z=-thousands. Stochastic-blowup mode eliminated; remaining function-gate gaps are precision/seed/gripper-width issues, manageable with multi-run N-of-M acceptance + scene tuning.
+
+**Postponed (Sprint 3)**: CP-06 builtin handler (FixedJoint integration), full vision-gate canonicals (need Replicator capture), `set_gripper_rotation` (Tier B), `setup_robot_claim_mutex` (Tier A multi-robot).
 
 ## Source documents
 
