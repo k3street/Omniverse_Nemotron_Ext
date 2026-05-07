@@ -274,10 +274,131 @@ async def fix_known_broken_no_controller() -> tuple[bool, list]:
     return await _verify(CP01_STAGES)
 
 
+async def fix_known_broken_cubes_off_conveyor() -> tuple[bool, list]:
+    """Cubes positioned at y=2.0 — far OUTSIDE conveyor's xy bbox
+    (conveyor at y=0.4 ± 0.2). Cubes fall onto table, never reach
+    conveyor or pick zone. Form-gate should flag via cube_source_bridged
+    (cube xy not on active conveyor)."""
+    await _reset_scene()
+    cube_paths = [f"/World/Cube_{i+1}" for i in range(4)]
+    await _call("create_prim", {"prim_path": "/World/DomeLight", "prim_type": "DomeLight"})
+    await _call("create_prim", {"prim_path": "/World/Table", "prim_type": "Cube",
+                                 "position": [0, 0, 0.375], "scale": [1.0, 0.5, 0.375]})
+    await _call("apply_api_schema", {"prim_path": "/World/Table",
+                                      "schema_name": "PhysicsCollisionAPI"})
+    await _call("robot_wizard", {
+        "robot_name": "franka_panda", "dest_path": "/World/Franka",
+        "position": [0, 0, 0.75], "orientation": [0.7071068, 0, 0, 0.7071068],
+    })
+    await _call("create_conveyor", {
+        "prim_path": "/World/ConveyorBelt",
+        "position": [0.0, 0.4, 0.78], "size": [3.0, 0.4, 0.05],
+        "surface_velocity": [0.2, 0, 0],
+    })
+    # Cubes at y=2.0 — WAY off conveyor (conveyor y range [0.2, 0.6])
+    for i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):
+        await _call("create_prim", {
+            "prim_path": cube_paths[i], "prim_type": "Cube",
+            "position": [x, 2.0, 0.835],  # OFF-CONVEYOR in y
+            "size": 0.05,
+        })
+        for api in ("PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"):
+            await _call("apply_api_schema",
+                        {"prim_path": cube_paths[i], "schema_name": api})
+    await _call("create_bin", {
+        "prim_path": "/World/Bin",
+        "position": [0, -0.4, 0.75], "size": [0.3, 0.3, 0.15],
+    })
+    await _call("add_proximity_sensor", {
+        "sensor_path": "/World/PickSensor",
+        "position": [0.4, 0.4, 0.835], "size": [0.06, 0.06, 0.06],
+    })
+    await _call("setup_pick_place_controller", {
+        "robot_path": "/World/Franka", "target_source": "curobo",
+        "sensor_path": "/World/PickSensor", "belt_path": "/World/ConveyorBelt",
+        "source_paths": cube_paths, "destination_path": "/World/Bin",
+    })
+    await _settle_for_verify(conveyor_vel=(0.2, 0.0, 0.0))
+    return await _verify(CP01_STAGES)
+
+
+async def fix_known_broken_unreachable_bin() -> tuple[bool, list]:
+    """Bin placed 1.5m from Franka base (Franka reach ≈ 0.85m). Form-gate
+    should flag via reach check — bin position outside robot's workspace."""
+    await _reset_scene()
+    await _build_cp01(install_controller=False)  # build everything except the controller
+    # Move bin out of reach (1.5m away)
+    bin_far_code = """
+import omni.usd
+from pxr import UsdGeom, Gf
+stage = omni.usd.get_context().get_stage()
+bin_prim = stage.GetPrimAtPath('/World/Bin')
+if bin_prim:
+    xf = UsdGeom.Xformable(bin_prim)
+    for op in xf.GetOrderedXformOps():
+        if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+            op.Set(Gf.Vec3d(1.5, 0.0, 0.75))
+            break
+"""
+    res = await kit_tools.exec_sync(bin_far_code, timeout=10)
+    if not res.get("success"):
+        raise RuntimeError(f"bin reposition failed: {res.get('output')}")
+    # Now install controller (will succeed but verify should flag reach)
+    await _call("setup_pick_place_controller", {
+        "robot_path": "/World/Franka", "target_source": "curobo",
+        "sensor_path": "/World/PickSensor", "belt_path": "/World/ConveyorBelt",
+        "source_paths": [f"/World/Cube_{i+1}" for i in range(4)],
+        "destination_path": "/World/Bin",
+    })
+    await _settle_for_verify(conveyor_vel=(0.2, 0.0, 0.0))
+    return await _verify(CP01_STAGES)
+
+
+async def fix_known_broken_missing_pick_zone() -> tuple[bool, list]:
+    """Setup but no proximity sensor — controller has no pick trigger.
+    cube_source_bridged check would still pass (cube is on conveyor),
+    but a pipeline lacking the sensor breaks the controller_installed
+    invariant since sensor_path arg can't anchor a subscription."""
+    await _reset_scene()
+    cube_paths = [f"/World/Cube_{i+1}" for i in range(4)]
+    await _call("create_prim", {"prim_path": "/World/DomeLight", "prim_type": "DomeLight"})
+    await _call("create_prim", {"prim_path": "/World/Table", "prim_type": "Cube",
+                                 "position": [0, 0, 0.375], "scale": [1.0, 0.5, 0.375]})
+    await _call("apply_api_schema", {"prim_path": "/World/Table",
+                                      "schema_name": "PhysicsCollisionAPI"})
+    await _call("robot_wizard", {
+        "robot_name": "franka_panda", "dest_path": "/World/Franka",
+        "position": [0, 0, 0.75], "orientation": [0.7071068, 0, 0, 0.7071068],
+    })
+    await _call("create_conveyor", {
+        "prim_path": "/World/ConveyorBelt",
+        "position": [0.0, 0.4, 0.78], "size": [3.0, 0.4, 0.05],
+        "surface_velocity": [0.2, 0, 0],
+    })
+    for i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):
+        await _call("create_prim", {
+            "prim_path": cube_paths[i], "prim_type": "Cube",
+            "position": [x, 0.4, 0.835], "size": 0.05,
+        })
+        for api in ("PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"):
+            await _call("apply_api_schema",
+                        {"prim_path": cube_paths[i], "schema_name": api})
+    await _call("create_bin", {
+        "prim_path": "/World/Bin",
+        "position": [0, -0.4, 0.75], "size": [0.3, 0.3, 0.15],
+    })
+    # NOTE: no add_proximity_sensor → no pick trigger → cubes drift past
+    await _settle_for_verify(conveyor_vel=(0.2, 0.0, 0.0))
+    return await _verify(CP01_STAGES)
+
+
 FIXTURES = [
-    ("known_good_cp01",            fix_known_good_cp01),
-    ("known_broken_no_velocity",   fix_known_broken_no_velocity),
-    ("known_broken_no_controller", fix_known_broken_no_controller),
+    ("known_good_cp01",                fix_known_good_cp01),
+    ("known_broken_no_velocity",       fix_known_broken_no_velocity),
+    ("known_broken_no_controller",     fix_known_broken_no_controller),
+    ("known_broken_cubes_off_conveyor",fix_known_broken_cubes_off_conveyor),
+    ("known_broken_unreachable_bin",   fix_known_broken_unreachable_bin),
+    ("known_broken_missing_pick_zone", fix_known_broken_missing_pick_zone),
 ]
 
 
