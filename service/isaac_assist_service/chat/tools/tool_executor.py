@@ -23210,6 +23210,140 @@ DATA_HANDLERS["compute_volume"] = _handle_compute_volume
 DATA_HANDLERS["compute_surface_area"] = _handle_compute_surface_area
 CODE_GEN_HANDLERS["compute_convex_hull"] = _gen_compute_convex_hull
 
+
+async def _handle_compute_stack_placement(args: Dict) -> Dict:
+    """Compute placement positions for stacking N items on top of a target prim.
+
+    Reads target's world-axis-aligned bbox, then computes positions purely in
+    Python — no stage mutation. Returned positions are world coords intended
+    for use as drop_target / placing_position values in a pick-place flow.
+
+    Args:
+      target_path:        USD path of the target (pallet, container, zone)
+      pattern:            'column' | 'grid_RxC' (e.g. 'grid_2x2', 'grid_3x3')
+      n_items:            total positions to compute
+      cube_size:          edge length of each item (default 0.05)
+      layer_rotation_deg: yaw rotation applied per layer (e.g. 90 for brick)
+      spacing:            optional explicit center-to-center spacing
+                          (default = cube_size, i.e. flush packing)
+      anchor:             'top' (place on top of target, default) |
+                          'inside_floor' (place on target's interior floor —
+                          for bins/containers; uses target_top_z - target_height)
+
+    Returns:
+      {
+        positions: [{position: [x,y,z], rotation_deg: float}, ...],
+        n_items: <int>,
+        target_path: <str>,
+        pattern: <str>,
+        spacing: <float>,
+      }
+    """
+    target_path = args["target_path"]
+    pattern = args.get("pattern", "column")
+    n_items = int(args.get("n_items", 1))
+    cube_size = float(args.get("cube_size", 0.05))
+    layer_rotation_deg = float(args.get("layer_rotation_deg", 0.0))
+    spacing = args.get("spacing")
+    spacing = float(spacing) if spacing is not None else cube_size
+    anchor = args.get("anchor", "top")
+
+    # Parse pattern → (rows, cols) per layer
+    if pattern == "column":
+        rows, cols = 1, 1
+    elif pattern.startswith("grid_") and "x" in pattern[5:]:
+        try:
+            r_str, c_str = pattern[5:].split("x", 1)
+            rows, cols = int(r_str), int(c_str)
+            if rows < 1 or cols < 1:
+                return {"type": "error", "error": f"grid dims must be >=1, got {rows}x{cols}"}
+        except (ValueError, IndexError):
+            return {"type": "error", "error": f"unrecognized grid pattern: {pattern}"}
+    else:
+        return {"type": "error",
+                "error": f"unsupported pattern: {pattern!r} (use 'column' or 'grid_RxC')"}
+
+    if n_items < 1:
+        return {"type": "error", "error": f"n_items must be >=1, got {n_items}"}
+
+    code = f"""\
+import json
+import omni.usd
+from pxr import Usd, UsdGeom
+
+target_path = {target_path!r}
+pattern = {pattern!r}
+n_items = {n_items}
+cube_size = {cube_size}
+spacing = {spacing}
+rows, cols = {rows}, {cols}
+layer_rotation_deg = {layer_rotation_deg}
+anchor = {anchor!r}
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath(target_path)
+result = {{
+    'target_path': target_path,
+    'pattern': pattern,
+    'n_items': n_items,
+    'spacing': spacing,
+    'positions': [],
+}}
+
+if not prim or not prim.IsValid():
+    result['error'] = f'target prim not found: {{target_path}}'
+else:
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    bbox = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+    if bbox.IsEmpty():
+        result['error'] = f'target bbox empty (no geometry?): {{target_path}}'
+    else:
+        bmin = bbox.GetMin()
+        bmax = bbox.GetMax()
+        cx = 0.5 * (bmin[0] + bmax[0])
+        cy = 0.5 * (bmin[1] + bmax[1])
+        target_top_z = float(bmax[2])
+        target_bot_z = float(bmin[2])
+        target_height = target_top_z - target_bot_z
+        if anchor == 'inside_floor':
+            base_z = target_bot_z + cube_size * 0.5
+        else:
+            base_z = target_top_z + cube_size * 0.5
+
+        per_layer = rows * cols
+        # Center the grid on (cx, cy):
+        #   col index 0..cols-1, with center at (cols-1)/2.0
+        #   row index 0..rows-1, with center at (rows-1)/2.0
+        positions = []
+        for i in range(n_items):
+            layer = i // per_layer
+            slot = i % per_layer
+            row = slot // cols
+            col = slot % cols
+            x = cx + (col - (cols - 1) * 0.5) * spacing
+            y = cy + (row - (rows - 1) * 0.5) * spacing
+            z = base_z + layer * cube_size
+            yaw = (layer * layer_rotation_deg) % 360.0
+            positions.append({{
+                'position': [round(x, 6), round(y, 6), round(z, 6)],
+                'rotation_deg': yaw,
+            }})
+
+        result['positions'] = positions
+        result['target_bbox_min'] = [round(float(bmin[i]), 6) for i in range(3)]
+        result['target_bbox_max'] = [round(float(bmax[i]), 6) for i in range(3)]
+        result['anchor'] = anchor
+        result['base_z'] = round(base_z, 6)
+
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(
+        code, f"compute_stack_placement {target_path} {pattern} n={n_items}"
+    )
+
+
+DATA_HANDLERS["compute_stack_placement"] = _handle_compute_stack_placement
+
 # ══════ From feat/atomic-tier5-omnigraph ══════
 def _gen_add_node(args: Dict) -> str:
     """Add a single node to an existing OmniGraph via og.Controller.edit()."""

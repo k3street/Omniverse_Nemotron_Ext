@@ -5835,6 +5835,26 @@ ISAAC_SIM_TOOLS = [
                 },
             },
         },
+    {
+            "type": "function",
+            "function": {
+                "name": "compute_stack_placement",
+                "description": "Compute placement positions for stacking N items on top of (or inside) a target prim. Pure-data tool: reads target's world bbox once, computes positions in Python, returns list of {position, rotation_deg} per item in placement order (bottom layer first, row-major within a layer). Use the returned positions as drop_target / placing_position values in pick-place flows. Patterns: 'column' (single 1x1 stack) or 'grid_RxC' (e.g. 'grid_2x2', 'grid_3x3'). For brick-pattern palletizing, set layer_rotation_deg=90 to alternate orientation per layer. Anchor: 'top' (default — items sit on target top face) or 'inside_floor' (items rest on target's interior bottom — for bins/containers). Tier A — used by CP-08 Nested-Box, CP-09 Graduated Tower, CP-14 Pinwheel, CP-20 Brick-Layer, CP-27/CP-33 Cortex stacking.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "target_path": {"type": "string", "description": "USD path of the target prim (pallet, container, zone) — must have world bbox geometry"},
+                        "pattern": {"type": "string", "description": "'column' (1x1 stack) or 'grid_RxC' (RxC items per layer, e.g. 'grid_2x2'). Default 'column'."},
+                        "n_items": {"type": "integer", "description": "Total number of placement positions to compute (>=1). Spans multiple layers if n_items > rows*cols."},
+                        "cube_size": {"type": "number", "description": "Edge length of each item in meters (default 0.05)"},
+                        "layer_rotation_deg": {"type": "number", "description": "Yaw rotation applied per layer in degrees (default 0; use 90 for brick-pattern alternation)"},
+                        "spacing": {"type": "number", "description": "Optional center-to-center spacing override; default = cube_size (flush packing). Use larger for gaps between items."},
+                        "anchor": {"type": "string", "description": "'top' (default — place above target's top face) or 'inside_floor' (place on target's interior floor — for bins/containers)"},
+                    },
+                    "required": ["target_path", "n_items"],
+                },
+            },
+        },
 
     # ── From feat/atomic-tier5-omnigraph ─────────────────────────────────
     {
