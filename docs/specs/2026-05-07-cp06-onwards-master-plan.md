@@ -159,7 +159,11 @@ Each shipped canonical:
 | CP-19 | Twin-pallet feeder | ✅ form-gate shipped | Sprint 2 | drop_targets fan-out to 2 pallets (3 cubes each). 53/53 build. Validates multi-destination dispatch within single controller. |
 | CP-20 | Brick-layer palletizer (18 cubes 3x3x2) | ✅ form-gate shipped | Sprint 2 | Largest stack canonical. Research-spec brick palletizer with layer_rotation_deg=90. 123/123 build. |
 | CP-21 | Gravity-feed station | ✅ form-gate shipped | Sprint 2 | Cubes spawn 17cm above belt, fall, then picked. Tests cube-with-velocity handling. 38/38 build. |
-| CP-22..CP-38 | TBD | 📋 planned | — | — |
+| CP-22 | High-speed belt stress (0.5 m/s) | ✅ form-gate shipped | Sprint 2 | 2.5× faster belt than CP-01. 38/38 build. Function-gate expected lower delivery rate. |
+| CP-23 | Mirror-orientation cell (-Y face) | ✅ form-gate shipped | Sprint 2 | Robot rotated 180° from CP-01. Validates handler with arbitrary quaternions. 38/38 build. |
+| CP-24 | Narrow-slot insertion | ✅ form-gate shipped | Sprint 2 | 4 cubes into 6cm-wide slot. ±1cm Y-tolerance. 38/38 build. Tests cuRobo precision shaping. |
+| CP-25 | High-density 4x4 palletizer (16 cubes) | ✅ form-gate shipped | Sprint 2 | Tightest packing (0.07m spacing). 111/111 build. 16-entry drop_targets dict. |
+| CP-26..CP-38 | TBD | 📋 planned | — | — |
 
 **Final form-gate sweep CP-07..CP-21 (2026-05-08)** — 14/14 PASS, 825 build calls, 91 cubes:
 ```
