@@ -173,17 +173,28 @@ async def settle_after_canonical(template: Dict[str, Any]) -> Dict[str, Any]:
       2. Restores cube positions to their template-authored translate
       3. Restores surface velocities on conveyors to template-authored values
 
-    Reads template's code field to extract authored values via regex.
+    Source of truth (preferred): template["settle_state"] explicit dict
+    with shape {"cubes": {path: [x,y,z], ...}, "conveyors": {path: [vx,vy,vz], ...}}.
+    Fall-back: regex extraction from template["code"] (works for simple
+    create_prim/create_conveyor calls but breaks on f-string-templated
+    paths like f"/World/Conv{i}" used in multi-station factories).
+
     Idempotent — running on a clean scene is a no-op.
     """
     from .tools import kit_tools
 
-    code = template.get("code") or ""
-    if not code:
-        return {"settled": False, "reason": "template has no code field"}
-
-    cube_pos = _extract_cube_positions_from_code(code)
-    conv_vel = _extract_conveyor_velocities_from_code(code)
+    settle_state = template.get("settle_state") or {}
+    if settle_state and isinstance(settle_state, dict):
+        cube_pos = dict(settle_state.get("cubes") or {})
+        conv_vel = dict(settle_state.get("conveyors") or {})
+        source = "settle_state"
+    else:
+        code = template.get("code") or ""
+        if not code:
+            return {"settled": False, "reason": "template has no code field nor settle_state"}
+        cube_pos = _extract_cube_positions_from_code(code)
+        conv_vel = _extract_conveyor_velocities_from_code(code)
+        source = "regex"
 
     # Build the kit-side script: stop, restore translate + velocity
     import json as _j
@@ -233,6 +244,7 @@ print(json.dumps({{
                 continue
     return {
         "settled": True,
+        "source": source,
         "n_cubes_restored": len((parsed or {}).get("restored_cubes", [])),
         "n_conveyors_restored": len((parsed or {}).get("restored_conveyors", [])),
     }
