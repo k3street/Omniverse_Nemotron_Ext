@@ -1,0 +1,48 @@
+{
+  "task_id": "CP-74",
+  "goal": "Build a UR10 native (PickPlaceController) pick-place canonical — same scene as CP-69 but with target_source='native' instead of 'curobo'. Native handler routes to the universal_robots PickPlaceController + RMPFlowController + SurfaceGripper, which is the exact stack the Isaac Sim ur10_pick_up.py standalone example uses. Goal: provide a working UR10 delivery path while cuRobo grasp-wiring is being investigated (task #36).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "import_robot",
+    "teleport_prim",
+    "create_conveyor",
+    "create_bin",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six UR10-native specifics for CP-74:\n1) Same scene as CP-69 (UR10 + conveyor + 1 cube + bin) — only the controller architecture differs.\n2) target_source='native' routes to _gen_pick_place_native, which for ROBOT_FAMILY='ur10' instantiates UR10(attach_gripper=True) + universal_robots.PickPlaceController.\n3) The native flow runs world.reset() before initialize() — sidesteps the 'Failed to get rigid body velocities' init error that blocks UR10 in the cuRobo handler.\n4) PickPlaceController's events_dt and end_effector_offset are tuned for UR10's suction reach. Cube needs to be within UR10's 1.3m reach; conveyor at x=-1.0 is OK.\n5) Provides a concrete reference: while cuRobo+UR10 still ships motion-only (CP-69..CP-73), CP-74 demonstrates UR10 actually transporting cubes.\n6) Future cuRobo wire-up (task #36) can validate against CP-74's behavior — same scene, expected same outcome, only the motion-stack differs.",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# UR10 from asset library\nimport_robot(file_path=\"UR10\", format=\"asset_library\", dest_path=\"/World/UR10\")\nteleport_prim(prim_path=\"/World/UR10\", position=[0, 0, 0.75])\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[-0.5, 0.4, 0.78],\n    size=[2.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-1.0, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0.5, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# UR10 NATIVE controller — PickPlaceController + RMPFlowController + SurfaceGripper.\n# This is the canonical Isaac Sim ur10_pick_up.py stack.\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    robot_family=\"ur10\",\n    target_source=\"builtin\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    end_effector_offset=[0.0, 0.0, 0.02],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [-1.0, 0.4, 0.835]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.2, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/UR10", "pick_path": "/World/ConveyorBelt", "place_path": "/World/Bin", "robot_kind": "ur10e"}
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Bin",
+    "duration_s": 90
+  },
+  "extends": "CP-69",
+  "extension_notes": "CP-74 is CP-69 with target_source swapped from 'curobo' to 'native'. The native handler for ROBOT_FAMILY='ur10' uses UR10(attach_gripper=True) + universal_robots.PickPlaceController, which IS the working stack from ur10_pick_up.py. end_effector_offset=[0,0,0.02] matches that example. Provides a working delivery reference for UR10 while cuRobo grasp wiring (task #36) is investigated.",
+  "failure_modes": [
+    "Native PickPlaceController is RmpFlow-based — slower cycles than cuRobo (1/4 baseline delivery rate on Franka, similar expected on UR10). Acceptable trade-off for getting actual delivery.",
+    "events_dt tuned for UR10's specific suction reach + RmpFlow gain profile — if delivery rate is poor, knob to tune.",
+    "UR10 attach_gripper=True path was reported earlier as failing init with 'Failed to get rigid body velocities' — but native handler does world.reset() between scene.add and initialize, which is the recipe ur10_pick_up.py uses. If this fails, the canonical exposes the gap.",
+    "Same UR10 reach + asset-path drift caveats as CP-69."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending; function-gate goal: cube delivered (this is the proof that UR10 + Isaac Sim 5.x suction stack works end-to-end on this install)"
+}

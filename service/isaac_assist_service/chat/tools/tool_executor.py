@@ -29179,7 +29179,7 @@ import numpy as np
 import builtins
 import json
 import time
-from pxr import UsdGeom, UsdPhysics, Gf
+from pxr import UsdGeom, UsdPhysics, Gf, Sdf
 
 ROBOT_PATH = {robot_path!r}
 SENSOR_PATH = {sensor_path!r}
@@ -29296,11 +29296,36 @@ if ROBOT_FAMILY == "franka":
     _ROBOT_NAME = "builtin_pp_robot_" + _ROBOT_TAG
     _robot = Franka(prim_path=ROBOT_PATH, name=_ROBOT_NAME)
 elif ROBOT_FAMILY in ("ur10", "ur10e"):
-    from isaacsim.robot.manipulators.examples.universal_robots import UR10
+    # The standalone ur10_pick_up.py example uses SingleManipulator with an
+    # external SurfaceGripper, NOT UR10(attach_gripper=True). The latter
+    # raises "Failed to get rigid body velocities from backend" inside its
+    # initialize() because SingleRigidPrim is constructed before the
+    # variant's rigid sub-prim has registered with PhysicsView. The
+    # external-gripper pattern is the documented working recipe.
+    from isaacsim.robot.manipulators import SingleManipulator
     from isaacsim.robot.manipulators.examples.universal_robots.controllers.pick_place_controller import PickPlaceController
+    from isaacsim.robot.manipulators.grippers import SurfaceGripper
     _ROBOT_NAME = "builtin_pp_robot_" + _ROBOT_TAG
-    # UR10 class auto-attaches surface gripper at flange when attach_gripper=True
-    _robot = UR10(prim_path=ROBOT_PATH, name=_ROBOT_NAME, attach_gripper=True)
+    # Set the Short_Suction variant on the robot prim — this authors the
+    # IsaacSurfaceGripper schema + suction joint under ee_link.
+    _robot_prim = stage.GetPrimAtPath(ROBOT_PATH)
+    try:
+        _vs = _robot_prim.GetVariantSet("Gripper")
+        if "Short_Suction" in list(_vs.GetVariantNames()):
+            _vs.SetVariantSelection("Short_Suction")
+    except Exception as _ve: print(f"(builtin pp: UR10 variant set soft-fail: {{_ve}})")
+    _ee_path = ROBOT_PATH + "/ee_link"
+    _sg_path = _ee_path + "/SurfaceGripper"
+    _gripper = SurfaceGripper(end_effector_prim_path=_ee_path, surface_gripper_path=_sg_path)
+    _robot = SingleManipulator(prim_path=ROBOT_PATH, name=_ROBOT_NAME,
+                               end_effector_prim_path=_ee_path, gripper=_gripper)
+    # UR10 home pose from the standalone example
+    try:
+        _robot.set_joints_default_state(positions=np.array(
+            [-np.pi/2, -np.pi/2, -np.pi/2, -np.pi/2, np.pi/2, 0], dtype=np.float32))
+    except Exception as _hp: print(f"(builtin pp: UR10 home pose soft-fail: {{_hp}})")
+    try: _gripper.set_default_state(opened=True)
+    except Exception: pass
 elif ROBOT_FAMILY == "cobotta_pro_900":
     from isaacsim.robot.manipulators.examples.cobotta_900 import CobottaPro900
     from isaacsim.robot.manipulators.examples.cobotta_900.controllers.pick_place_controller import PickPlaceController
@@ -29356,6 +29381,21 @@ _controller = PickPlaceController(
 )
 _art_ctrl = _robot.get_articulation_controller()
 
+# Belt pause/resume — cube needs to be stationary for the PickPlaceController
+# to catch it; otherwise the controller keeps re-targeting a moving picking_position
+# and the cube exits the reach window before the IK chain converges.
+# Cache the surfaceVelocity attribute at install time. The cuRobo handler does
+# the same and pauses cleanly; fresh-lookup-per-call interacts badly with the
+# in-callback Set propagation.
+_belt_prim = stage.GetPrimAtPath(BELT_PATH) if BELT_PATH else None
+_belt_sv = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocity") if (_belt_prim and _belt_prim.IsValid()) else None
+_captured_belt = tuple(_belt_sv.Get()) if (_belt_sv and _belt_sv.IsDefined() and _belt_sv.Get()) else None
+_nominal_belt = _captured_belt if (_captured_belt and sum(abs(v) for v in _captured_belt) > 1e-6) else (0.2, 0.0, 0.0)
+def _pause_belt():
+    if _belt_sv: _belt_sv.Set(Gf.Vec3f(0.0, 0.0, 0.0))
+def _resume_belt():
+    if _belt_sv: _belt_sv.Set(Gf.Vec3f(*_nominal_belt))
+
 # Per-cube state machine: deliver cubes one at a time
 S = {{"delivered": set(), "current": None}}
 
@@ -29379,24 +29419,55 @@ def _bin_pos():
     c = b.GetMidpoint()
     return np.array([float(c[0]), float(c[1]), float(c[2])])
 
+def _robot_base_xy():
+    # Use the robot prim's world TRANSFORM (root xform), NOT its bounding-box
+    # midpoint. The bbox midpoint of an articulation drifts wildly with arm
+    # pose — for UR10 in default extended pose the bbox midpoint sat at
+    # (0.571, 0.171), 60cm off the actual base, making the reach-check
+    # reject every cube that was actually within reach.
+    p = stage.GetPrimAtPath(ROBOT_PATH)
+    if not p or not p.IsValid(): return None
+    m = UsdGeom.Xformable(p).ComputeLocalToWorldTransform(0)
+    t = m.ExtractTranslation()
+    return np.array([float(t[0]), float(t[1])])
+
 def _next_cube():
-    \"\"\"First undelivered cube whose xy is within 0.95m of robot base.\"\"\"
-    base = _cube_pos(ROBOT_PATH)
+    \"\"\"First undelivered cube whose xy is within reach of robot base.\"\"\"
+    # Reach varies per family: Franka 0.85m, Cobotta 0.95m, UR10 1.3m.
+    _REACH_M = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.95
+    base = _robot_base_xy()
     if base is None: return None
     for sp in SOURCE_PATHS:
         if sp in S["delivered"]: continue
         cp = _cube_pos(sp)
         if cp is None: continue
-        if float(np.linalg.norm(cp[:2] - base[:2])) <= 0.95:
+        if float(np.linalg.norm(cp[:2] - base)) <= _REACH_M:
             return sp
     return None
 
+_DBG_TICKS = [0]
+# Write debug state to a custom attr on the robot prim so external probes
+# (and the form-gate verifier) can observe controller progress.
+_dbg_attr = stage.GetPrimAtPath(ROBOT_PATH).CreateAttribute(
+    "builtin_pp:tick_count", Sdf.ValueTypeNames.Int) if stage.GetPrimAtPath(ROBOT_PATH).IsValid() else None
+_dbg_phase_attr = stage.GetPrimAtPath(ROBOT_PATH).CreateAttribute(
+    "builtin_pp:phase", Sdf.ValueTypeNames.String) if stage.GetPrimAtPath(ROBOT_PATH).IsValid() else None
+_dbg_picked_attr = stage.GetPrimAtPath(ROBOT_PATH).CreateAttribute(
+    "builtin_pp:picked", Sdf.ValueTypeNames.String) if stage.GetPrimAtPath(ROBOT_PATH).IsValid() else None
+
 def _on_step(dt):
     try:
+        _DBG_TICKS[0] += 1
+        if _dbg_attr: _dbg_attr.Set(_DBG_TICKS[0])
         if S["current"] is None:
+            if _dbg_phase_attr: _dbg_phase_attr.Set("seek_cube")
             picked = _next_cube()
-            if picked is None: return
+            if picked is None:
+                _resume_belt()
+                return
             S["current"] = picked
+            if _dbg_picked_attr: _dbg_picked_attr.Set(picked)
+            _pause_belt()
             try: _controller.reset()
             except Exception: pass
         cube_pos = _cube_pos(S["current"])
@@ -29415,10 +29486,14 @@ def _on_step(dt):
         )
         if actions is not None:
             _art_ctrl.apply_action(actions)
+            if _dbg_phase_attr: _dbg_phase_attr.Set("executing")
         if _controller.is_done():
             S["delivered"].add(S["current"])
             S["current"] = None
+            if _dbg_phase_attr: _dbg_phase_attr.Set("delivered")
+            _resume_belt()  # next cube can flow in
     except Exception as _e:
+        if _dbg_phase_attr: _dbg_phase_attr.Set(f"error:{{type(_e).__name__}}:{{str(_e)[:80]}}")
         print(f"(builtin pp _on_step: {{type(_e).__name__}}: {{_e}})")
 
 _physx = omni.physx.get_physx_interface()
