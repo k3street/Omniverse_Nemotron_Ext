@@ -28814,6 +28814,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             robot_family=args.get("robot_family", "franka"),
             require_upright=bool(args.get("require_upright", False)),
             upright_dot_threshold=float(args.get("upright_dot_threshold", 0.85)),
+            mutex_path=args.get("mutex_path"),
         )
     if mode == "diffik":
         return _gen_pick_place_diffik(
@@ -32145,8 +32146,28 @@ def _on_step(dt):
         _a_phase.Set(S["mode"])
 
         if S["mode"] == "wait_sensor":
+            # Multi-robot mutex: only claim cube if mutex is free or already
+            # held by us. If held by another robot, wait this tick.
+            if MUTEX_PATH:
+                try:
+                    _mp = stage.GetPrimAtPath(MUTEX_PATH)
+                    if _mp and _mp.IsValid():
+                        _claimed = _mp.GetAttribute("mutex:claimed_by").Get() or ""
+                        if _claimed and _claimed != ROBOT_PATH:
+                            return  # other robot holds mutex; wait
+                except Exception: pass
             picked = _cube_to_pick()
             if picked:
+                # Acquire mutex before claiming cube
+                if MUTEX_PATH:
+                    try:
+                        _mp = stage.GetPrimAtPath(MUTEX_PATH)
+                        if _mp and _mp.IsValid():
+                            _mp.GetAttribute("mutex:claimed_by").Set(ROBOT_PATH)
+                            _cc = _mp.GetAttribute("mutex:claim_count")
+                            if _cc and _cc.IsDefined():
+                                _cc.Set(int(_cc.Get() or 0) + 1)
+                    except Exception: pass
                 S["picked_path"] = picked
                 _a_picked.Set(picked)
                 _pause_belt()
@@ -32231,6 +32252,15 @@ def _on_step(dt):
                     S["delivered"].add(S["picked_path"])
                 S["picked_path"] = None; _a_picked.Set("")
                 S["plan"] = None; S["traj_fn"] = None; S["start_t"] = None
+                # Release mutex so other robots can claim
+                if MUTEX_PATH:
+                    try:
+                        _mp = stage.GetPrimAtPath(MUTEX_PATH)
+                        if _mp and _mp.IsValid():
+                            _attr = _mp.GetAttribute("mutex:claimed_by")
+                            if _attr and (_attr.Get() or "") == ROBOT_PATH:
+                                _attr.Set("")
+                    except Exception: pass
                 S["mode"] = "wait_sensor"
                 # Keep belt PAUSED between cycles — cube positions stay
                 # frozen so later cycles don't miss cubes that drift past
@@ -32312,7 +32342,8 @@ def _gen_pick_place_curobo(robot_path, sensor_path, belt_path,
                            gripper_rotation=None,
                            robot_family="franka",
                            require_upright=False,
-                           upright_dot_threshold=0.85):
+                           upright_dot_threshold=0.85,
+                           mutex_path=None):
     """GPU-accelerated global trajectory optimization via cuRobo MotionPlanner.
 
     **Unlocked 2026-04-21** — four breakthroughs:
@@ -32400,6 +32431,7 @@ BELT_PATH = {belt_path!r}
 SOURCE_PATHS = {_json.dumps(list(source_paths))}
 DEST_PATH = {destination_path!r}
 DROP_TARGET = {_json.dumps(drop_target) if drop_target else 'None'}
+MUTEX_PATH = {mutex_path!r}  # Multi-robot coordination — when set, robot must claim mutex before pickup
 EE_OFFSET = np.array({_json.dumps(list(ee_offset))}, dtype=np.float32)
 EE_INIT_H_OVERRIDE = {end_effector_initial_height!r}
 PLANNING_OBSTACLES = {_obs}
