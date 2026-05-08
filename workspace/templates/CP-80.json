@@ -1,6 +1,6 @@
 {
   "task_id": "CP-80",
-  "goal": "UR10 builtin pick-place with an ELEVATED conveyor (z=0.95) to test whether CP-78's success pattern (cube ≥15cm above robot base) extends to conveyor-fed scenarios. Conveyor mounted on a fixed stand 20cm above table top puts cube at z=0.985 — within UR10's reachable workspace AND on a moving belt for industrial realism.",
+  "goal": "UR10 builtin pick-place with an ELEVATED conveyor (z=0.95) to test whether CP-78's success pattern (cube \u226515cm above robot base) extends to conveyor-fed scenarios. Conveyor mounted on a fixed stand 20cm above table top puts cube at z=0.985 \u2014 within UR10's reachable workspace AND on a moving belt for industrial realism.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -15,19 +15,32 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six elevated-conveyor specifics for CP-80 (combines CP-78's geometry with CP-69's belt motion):\n1) UR10 base on table at (0, 0, 0.75) — same as CP-69/74/78.\n2) Conveyor stand: a fixed 20cm-tall pedestal at (-0.5, 0.4, 0.85) (table_top + 10cm). Stand top at z=0.95.\n3) Conveyor mounted on stand: position [-0.5, 0.4, 0.96], size 1.0×0.3×0.05m. Belt surface at z=0.985.\n4) Cube starts at (-1.0, 0.4, 1.01) — flows on belt toward UR10 reach window.\n5) Bin at world (0.5, -0.4, 0.75) — same as CP-69/74. Drop point at z=0.825.\n6) Cube center now 26cm above robot base (vs 8.5cm in CP-69) — well within UR10's comfortable reach band. If FixedJoint workaround forms a clean pickup at this height, transit to bin should clear table edges.",
-  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# UR10 base on table\ncreate_prim(prim_path=\"/World/UR10\", prim_type=\"Xform\")\nadd_reference(prim_path=\"/World/UR10\", reference_path=\"/mnt/shared_data/isaac-sim-assets-complete-5.0.0/Assets/Isaac/5.0/Collected_Robots/ur10.usd\")\nteleport_prim(prim_path=\"/World/UR10\", position=[0, 0, 0.75])\n\n# Conveyor stand — 20cm pedestal beneath the elevated conveyor\ncreate_prim(prim_path=\"/World/ConveyorStand\", prim_type=\"Cube\", position=[-0.5, 0.4, 0.85], scale=[0.5, 0.15, 0.10])\napply_api_schema(prim_path=\"/World/ConveyorStand\", schema_name=\"PhysicsCollisionAPI\")\n\n# Elevated conveyor — top surface at z=0.985 (stand top 0.95 + conveyor body 0.025 + half cube 0.025)\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[-0.5, 0.4, 0.96],\n    size=[1.0, 0.3, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Cube on belt — z=1.01 = belt_top + half_cube\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-0.85, 0.4, 1.01], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\n\n# Bin on table\ncreate_bin(prim_path=\"/World/Bin\", position=[0.5, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\n# Pick sensor at conveyor pick zone\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[-0.4, 0.4, 1.01], size=[0.06, 0.06, 0.06])\n\n# UR10 builtin PickPlaceController (FixedJoint workaround for IsaacSurfaceGripper bug)\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    robot_family=\"ur10\",\n    target_source=\"builtin\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    end_effector_offset=[0.0, 0.0, 0.02],\n)",
+  "thoughts": "Six elevated-conveyor specifics for CP-80 (combines CP-78's geometry with CP-69's belt motion):\n1) UR10 base on table at (0, 0, 0.75) \u2014 same as CP-69/74/78.\n2) Conveyor stand: a fixed 20cm-tall pedestal at (-0.5, 0.4, 0.85) (table_top + 10cm). Stand top at z=0.95.\n3) Conveyor mounted on stand: position [-0.5, 0.4, 0.96], size 1.0\u00d70.3\u00d70.05m. Belt surface at z=0.985.\n4) Cube starts at (-1.0, 0.4, 1.01) \u2014 flows on belt toward UR10 reach window.\n5) Bin at world (0.5, -0.4, 0.75) \u2014 same as CP-69/74. Drop point at z=0.825.\n6) Cube center now 26cm above robot base (vs 8.5cm in CP-69) \u2014 well within UR10's comfortable reach band. If FixedJoint workaround forms a clean pickup at this height, transit to bin should clear table edges.",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# UR10 base on table\ncreate_prim(prim_path=\"/World/UR10\", prim_type=\"Xform\")\nadd_reference(prim_path=\"/World/UR10\", reference_path=\"/mnt/shared_data/isaac-sim-assets-complete-5.0.0/Assets/Isaac/5.0/Collected_Robots/ur10.usd\")\nteleport_prim(prim_path=\"/World/UR10\", position=[0, 0, 0.75])\n\n# Conveyor stand \u2014 20cm pedestal beneath the elevated conveyor\ncreate_prim(prim_path=\"/World/ConveyorStand\", prim_type=\"Cube\", position=[-0.5, 0.4, 0.85], scale=[0.5, 0.15, 0.10])\napply_api_schema(prim_path=\"/World/ConveyorStand\", schema_name=\"PhysicsCollisionAPI\")\n\n# Elevated conveyor \u2014 top surface at z=0.985 (stand top 0.95 + conveyor body 0.025 + half cube 0.025)\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[-0.5, 0.4, 0.96],\n    size=[1.0, 0.3, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Cube on belt \u2014 z=1.01 = belt_top + half_cube\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-0.85, 0.4, 1.01], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\n\n# Bin on table\ncreate_bin(prim_path=\"/World/Bin\", position=[0.5, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\n# Pick sensor at conveyor pick zone\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[-0.4, 0.4, 1.01], size=[0.06, 0.06, 0.06])\n\n# UR10 builtin PickPlaceController (FixedJoint workaround for IsaacSurfaceGripper bug)\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    robot_family=\"ur10\",\n    target_source=\"builtin\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    end_effector_offset=[0.0, 0.0, 0.02],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_1": [-0.85, 0.4, 1.01]
+      "/World/Cube_1": [
+        -0.85,
+        0.4,
+        1.01
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/UR10", "pick_path": "/World/ConveyorBelt", "place_path": "/World/Bin", "robot_kind": "ur10e"}
+      {
+        "robot_path": "/World/UR10",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/Bin",
+        "robot_kind": "ur10e"
+      }
     ],
     "cube_path": "/World/Cube_1"
   },
@@ -37,12 +50,12 @@
     "duration_s": 90
   },
   "extends": "CP-78",
-  "extension_notes": "CP-80 combines CP-78's elevated-cube geometry (≥22cm above robot base) with CP-69's conveyor pattern. Tests whether the FixedJoint workaround scales from static-cube delivery to belt-fed scenes. If function-gate passes, the elevated-conveyor pattern is the canonical UR10 + belt template; CP-69..CP-74 should be retro-fitted with a similar stand to unlock function-gate.",
+  "extension_notes": "CP-80 combines CP-78's elevated-cube geometry (\u226522cm above robot base) with CP-69's conveyor pattern. Tests whether the FixedJoint workaround scales from static-cube delivery to belt-fed scenes. If function-gate passes, the elevated-conveyor pattern is the canonical UR10 + belt template; CP-69..CP-74 should be retro-fitted with a similar stand to unlock function-gate.",
   "failure_modes": [
-    "Belt pause: builtin handler's _on_step pauses belt when claiming a cube. The pause needs to actually take effect (CP-74 had belt-pause-from-callback issues — verify in this elevated config).",
+    "Belt pause: builtin handler's _on_step pauses belt when claiming a cube. The pause needs to actually take effect (CP-74 had belt-pause-from-callback issues \u2014 verify in this elevated config).",
     "Bin reach: bin at z=0.75 is 23cm BELOW belt at z=0.985. Drop phase requires UR10 to descend that far while holding cube. RmpFlow may struggle if descent is too aggressive.",
-    "Conveyor stand collision: UR10 transit path passes near the stand at +X; planning_obstacles not configured — Sprint 4+ to add scene obstacles to RmpFlow.",
-    "Same UR10 init quirks as CP-78 — articulation re-init fallback, mirror home pose."
+    "Conveyor stand collision: UR10 transit path passes near the stand at +X; planning_obstacles not configured \u2014 Sprint 4+ to add scene obstacles to RmpFlow.",
+    "Same UR10 init quirks as CP-78 \u2014 articulation re-init fallback, mirror home pose."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate ✓; function-gate fails — belt-pause race + RmpFlow stuck at event 4 lift after cube falls off conveyor end. Trace: cube fell from z=1.01 to z=0.78 between t=4s and t=5s (belt didn't pause when controller claimed cube), EE chased falling cube, formed FixedJoint at (0.05, 0.25, 0.80), then RmpFlow refused to lift (likely self-collision with conveyor stand). Hypothesis disproved: elevated conveyor alone isn't enough — belt-pause-from-callback bug also needs fixing OR scene needs explicit obstacle awareness in RmpFlow config."
+  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2717 (belt-pause-from-callback bug \u2014 verified that surfaceVelocityEnabled toggle ALSO doesn't propagate from inside _on_step. PhysX-level integrator caches independently of USD attribute layer)"
 }

@@ -32429,6 +32429,9 @@ for _ckp, _label in [
     (BELT_PATH, "belt_path"),
     (DEST_PATH, "destination_path"),
 ]:
+    # Skip optional paths that are None — sensor-less / belt-less canonicals
+    # (e.g. CP-83's two-cube static pedestal) pass belt_path=None.
+    if _ckp is None: continue
     if not stage.GetPrimAtPath(_ckp).IsValid():
         raise RuntimeError(
             f"setup_pick_place_controller (curobo): {{_label}}={{_ckp!r}} "
