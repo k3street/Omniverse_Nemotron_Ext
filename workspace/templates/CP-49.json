@@ -14,36 +14,61 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six kitting specifics for CP-49 (extends CP-08 — pallet replaced with kit tray):\n1) create_kit_tray creates /World/KitTray with 4 slots (slot_1..slot_4) at fixed positions. Each slot has kit:slot_index, kit:slot_size, kit:occupied attrs.\n2) Tray 0.30×0.30×0.05m at [0, -0.4, 0.775]. slot_layout='grid_2x2', slot_size=0.05m, slot_spacing=0.10m.\n3) Slot positions (auto-computed by tool):\n   slot_1: (-0.05, -0.45, 0.825)\n   slot_2: ( 0.05, -0.45, 0.825)\n   slot_3: (-0.05, -0.35, 0.825)\n   slot_4: ( 0.05, -0.35, 0.825)\n4) drop_targets dispatches Cube_N → slot_N's center (computed at canonical-author time from create_kit_tray's known output).\n5) After completion, agent can call track_slot_occupancy(tray_path, cube_paths) to verify all 4 slots filled.\n6) Industrial use: assembly line where each pos has a designated component (PCB + screw + housing + label).",
-  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Kit tray with 4 slots (2x2 grid). Tool creates tray prim + slot Xforms.\ncreate_kit_tray(\n    tray_path=\"/World/KitTray\",\n    position=[0, -0.4, 0.775],\n    tray_size=[0.30, 0.30, 0.05],\n    slot_layout=\"grid_2x2\",\n    slot_size=0.05,\n    slot_spacing=0.10,\n)\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# drop_targets — Cube_N → slot_N center. Slot positions known from create_kit_tray's grid_2x2 layout.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/KitTray\",\n    drop_targets={\n        \"/World/Cube_1\": [-0.05, -0.45, 0.825],\n        \"/World/Cube_2\": [ 0.05, -0.45, 0.825],\n        \"/World/Cube_3\": [-0.05, -0.35, 0.825],\n        \"/World/Cube_4\": [ 0.05, -0.35, 0.825],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/KitTray\"],\n)",
+  "thoughts": "Six kitting specifics for CP-49 (extends CP-08 \u2014 pallet replaced with kit tray):\n1) create_kit_tray creates /World/KitTray with 4 slots (slot_1..slot_4) at fixed positions. Each slot has kit:slot_index, kit:slot_size, kit:occupied attrs.\n2) Tray 0.30\u00d70.30\u00d70.05m at [0, -0.4, 0.775]. slot_layout='grid_2x2', slot_size=0.05m, slot_spacing=0.10m.\n3) Slot positions (auto-computed by tool):\n   slot_1: (-0.05, -0.45, 0.825)\n   slot_2: ( 0.05, -0.45, 0.825)\n   slot_3: (-0.05, -0.35, 0.825)\n   slot_4: ( 0.05, -0.35, 0.825)\n4) drop_targets dispatches Cube_N \u2192 slot_N's center (computed at canonical-author time from create_kit_tray's known output).\n5) After completion, agent can call track_slot_occupancy(tray_path, cube_paths) to verify all 4 slots filled.\n6) Industrial use: assembly line where each pos has a designated component (PCB + screw + housing + label).",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Kit tray with 4 slots (2x2 grid). Tool creates tray prim + slot Xforms.\ncreate_kit_tray(\n    tray_path=\"/World/KitTray\",\n    position=[0, -0.4, 0.775],\n    tray_size=[0.30, 0.30, 0.05],\n    slot_layout=\"grid_2x2\",\n    slot_size=0.05,\n    slot_spacing=0.10,\n)\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# drop_targets \u2014 Cube_N \u2192 slot_N center. Slot positions known from create_kit_tray's grid_2x2 layout.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/KitTray\",\n    drop_targets={\n        \"/World/Cube_1\": [-0.05, -0.45, 0.825],\n        \"/World/Cube_2\": [ 0.05, -0.45, 0.825],\n        \"/World/Cube_3\": [-0.05, -0.35, 0.825],\n        \"/World/Cube_4\": [ 0.05, -0.35, 0.825],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/KitTray\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_1": [-1.4,  0.4, 0.835],
-      "/World/Cube_2": [-1.15, 0.4, 0.835],
-      "/World/Cube_3": [-0.9,  0.4, 0.835],
-      "/World/Cube_4": [-0.65, 0.4, 0.835]
+      "/World/Cube_1": [
+        -1.4,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_2": [
+        -1.15,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_3": [
+        -0.9,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_4": [
+        -0.65,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/KitTray", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/KitTray",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_1"
   },
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/KitTray",
-    "duration_s": 90
+    "duration_s": 180
   },
   "extends": "CP-08",
   "extension_notes": "CP-49 realizes research scenario #5 (Kitting multi-source to tray). create_kit_tray defines structured slots; drop_targets routes each cube to its slot. After completion, track_slot_occupancy(tray_path, cube_paths) returns {slot: cube_or_None} for kit-completion verification.",
   "failure_modes": [
-    "Slot positions hardcoded must match create_kit_tray's auto-computed layout — for grid_2x2 with slot_size=0.05 + slot_spacing=0.10, slots at (-0.05/+0.05, -0.45/-0.35).",
-    "Slot prims under tray are Xforms — not physical colliders. Cubes land on tray top, not 'in' slots geometrically. Logical slot via track_slot_occupancy.",
+    "Slot positions hardcoded must match create_kit_tray's auto-computed layout \u2014 for grid_2x2 with slot_size=0.05 + slot_spacing=0.10, slots at (-0.05/+0.05, -0.45/-0.35).",
+    "Slot prims under tray are Xforms \u2014 not physical colliders. Cubes land on tray top, not 'in' slots geometrically. Logical slot via track_slot_occupancy.",
     "Same physics gotchas as CP-08."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 3/4 cubes delivered to KitTray via mutex coordination)"
 }
