@@ -785,6 +785,55 @@ document.querySelectorAll('nav a').forEach(a => {{
 """
 
 
+def render_page(selected: str | None) -> str:
+    canonicals = list_canonicals()
+    if not canonicals:
+        return PAGE_HEAD + f"<body><h1>No canonicals in {esc(str(TEMPLATES_DIR))}</h1></body>"
+    if selected not in canonicals:
+        selected = canonicals[0]
+    audit = load_func_gate_audit()
+    func_audit_passes = sum(1 for v in audit.values() if v.get("success"))
+
+    # Compute a global summary
+    summaries = [latest_run_summary(c, audit) for c in canonicals]
+    total_runs = sum(s["runs"] for s in summaries)
+    func_passes = sum(s["func_passes"] for s in summaries)
+    func_total = sum(s["func_total"] for s in summaries)
+
+    head_stats = (
+        f'<span class="stats">'
+        f'{len(canonicals)} canonicals · '
+        f'audit {func_audit_passes}/{len(audit)} func ✓ · '
+        f'logged runs {func_passes}/{func_total} func ✓ ({total_runs} total)'
+        f'</span>'
+    )
+
+    return (
+        PAGE_HEAD
+        + f'<body><header><h1>Canonical Review</h1>{head_stats}'
+        + '<span class="spacer"></span>'
+        + '<a href="/summary" style="color:var(--link);font-size:12px">summary ↗</a>'
+        + '<span class="kbd-hints">'
+        + '<kbd>/</kbd> search · <kbd>j</kbd>/<kbd>k</kbd> next/prev · '
+        + '<kbd>b</kbd>/<kbd>v</kbd>/<kbd>f</kbd> build/verify/full'
+        + '</span></header>'
+        + '<div class="layout">'
+        + '<nav>'
+        + '<div class="search-row">'
+        + '<input id="search" class="search" placeholder="Filter (e.g. CP-08, ur10)" />'
+        + '<div class="filter-row">'
+        + '<span class="filter" data-status="func-ok">func ✓</span>'
+        + '<span class="filter" data-status="form-ok">form ✓</span>'
+        + '<span class="filter" data-status="build-fail">build ✗</span>'
+        + '<span class="filter" data-status="untested">untested</span>'
+        + '</div></div>'
+        + f'<div class="list">{render_nav_items(canonicals, audit, selected)}</div>'
+        + '</nav>'
+        + render_main(selected, audit)
+        + "</div></body>"
+    )
+
+
 def build_report() -> dict:
     """Aggregate every canonical + audit + runs + feedback into one JSON
     blob. Useful for offline analysis (export to CSV, plot trends, etc.).
