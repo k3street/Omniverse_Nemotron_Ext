@@ -1401,6 +1401,42 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "create_gravity_dispenser",
+            "description": "Tier C tool — creates a gravity-fed dispenser. N items pre-spawned stacked vertically below dispenser; fall under gravity onto target surface. Used by #25 UR10BinFilling.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dispenser_path": {"type": "string"},
+                    "target_xy": {"type": "array", "items": {"type": "number"}},
+                    "drop_height": {"type": "number"},
+                    "n_items": {"type": "integer"},
+                    "item_size": {"type": "number"},
+                },
+                "required": ["dispenser_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_heap_zone",
+            "description": "Tier C tool — creates a heap of N items in a circular spread (golden-angle deterministic). Items pile via physics. Used by #8 Parcel Singulation + Sort.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "heap_path": {"type": "string"},
+                    "center": {"type": "array", "items": {"type": "number"}},
+                    "radius": {"type": "number"},
+                    "n_items": {"type": "integer"},
+                    "item_size": {"type": "number"},
+                },
+                "required": ["heap_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "register_moving_obstacle",
             "description": "Tier B tool — registers a dynamic obstacle on a robot for runtime collision avoidance. cuRobo's planning_obstacles is normally static at install time; this adds a moving obstacle path to robot's runtime list (curobo:moving_obstacles attr). Runtime polling requires controller integration. Used by #7 Robot-to-Robot Handoff (avoid other arm), #28 FrankaCortexBlockStacking (track moving cubes).",
             "parameters": {

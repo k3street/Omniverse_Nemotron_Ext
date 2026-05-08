@@ -6803,6 +6803,119 @@ print(json.dumps({{"robot": {robot_path!r}, "obstacle": {obstacle_path!r}, "tota
 DATA_HANDLERS["register_moving_obstacle"] = _handle_register_moving_obstacle
 
 
+async def _handle_create_gravity_dispenser(args: Dict) -> Dict:
+    """Tier C tool — creates a gravity-fed dispenser hopper that pre-spawns
+    items at a given height so they fall onto a target surface (conveyor/bin).
+
+    Composite: places N cubes at a stacked height above target_path. Items
+    fall under gravity onto the target.
+
+    Args:
+      dispenser_path: USD path of dispenser parent prim
+      target_xy:    [x, y] xy of dispenser center
+      drop_height:  z-height items spawn at (default target+0.30m)
+      n_items:      how many to dispense
+      item_size:    cube edge length (default 0.05)
+
+    Returns: {dispenser_path, items: [paths], n_items}
+    """
+    dispenser_path = args["dispenser_path"]
+    target_xy = args.get("target_xy", [0, 0.4])
+    drop_height = float(args.get("drop_height", 1.1))
+    n_items = int(args.get("n_items", 4))
+    item_size = float(args.get("item_size", 0.05))
+
+    # Create marker prim for dispenser (visual)
+    await execute_tool_call("create_prim", {
+        "prim_path": dispenser_path,
+        "prim_type": "Cube",
+        "position": [target_xy[0], target_xy[1], drop_height + 0.05],
+        "scale": [item_size * 1.5, item_size * 1.5, 0.025],
+    })
+    await execute_tool_call("apply_api_schema", {
+        "prim_path": dispenser_path, "schema_name": "PhysicsCollisionAPI",
+    })
+
+    # Spawn N items stacked vertically below dispenser
+    item_paths = []
+    for i in range(n_items):
+        z = drop_height - i * (item_size + 0.005)
+        path = f"{dispenser_path}/Item_{i+1}"
+        await execute_tool_call("create_prim", {
+            "prim_path": path, "prim_type": "Cube",
+            "position": [target_xy[0], target_xy[1], z], "size": item_size,
+        })
+        for api in ("PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"):
+            await execute_tool_call("apply_api_schema",
+                                      {"prim_path": path, "schema_name": api})
+        item_paths.append(path)
+
+    return {
+        "dispenser_path": dispenser_path,
+        "items": item_paths,
+        "n_items": n_items,
+        "drop_height": drop_height,
+    }
+
+
+async def _handle_create_heap_zone(args: Dict) -> Dict:
+    """Tier C tool — creates a 'heap' zone where N items pile randomly.
+
+    Used for parcel-singulation scenarios (#8). Items spawn at slightly-
+    randomized xy + same z, creating a small pile after physics settles.
+
+    Args:
+      heap_path:   USD path of heap parent prim
+      center:      [x, y, z] center of heap
+      radius:      xy radius of heap zone (default 0.10)
+      n_items:     how many to create
+      item_size:   cube edge length (default 0.05)
+
+    Returns: {heap_path, items: [paths], n_items}
+    """
+    heap_path = args["heap_path"]
+    center = args.get("center", [0, 0.4, 0.85])
+    radius = float(args.get("radius", 0.10))
+    n_items = int(args.get("n_items", 5))
+    item_size = float(args.get("item_size", 0.05))
+
+    # Marker prim
+    await execute_tool_call("create_prim", {
+        "prim_path": heap_path, "prim_type": "Xform",
+    })
+
+    # Spawn items in a quasi-random spread (deterministic via index)
+    import math as _m
+    item_paths = []
+    for i in range(n_items):
+        # deterministic spread: golden angle radial
+        theta = i * 2.39996  # golden angle in radians
+        r = radius * (i / max(1, n_items - 1)) ** 0.5
+        x = center[0] + r * _m.cos(theta)
+        y = center[1] + r * _m.sin(theta)
+        z = center[2] + item_size * 0.5  # spawn slightly above
+        path = f"{heap_path}/Item_{i+1}"
+        await execute_tool_call("create_prim", {
+            "prim_path": path, "prim_type": "Cube",
+            "position": [x, y, z], "size": item_size,
+        })
+        for api in ("PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"):
+            await execute_tool_call("apply_api_schema",
+                                      {"prim_path": path, "schema_name": api})
+        item_paths.append(path)
+
+    return {
+        "heap_path": heap_path,
+        "items": item_paths,
+        "n_items": n_items,
+        "center": center,
+    }
+
+
+DATA_HANDLERS["create_gravity_dispenser"] = _handle_create_gravity_dispenser
+DATA_HANDLERS["create_heap_zone"] = _handle_create_heap_zone
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
