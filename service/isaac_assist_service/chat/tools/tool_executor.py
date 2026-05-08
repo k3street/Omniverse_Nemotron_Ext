@@ -6351,6 +6351,62 @@ print(json.dumps({{"created": str(prim.GetPath()), "state": "idle"}}))
 DATA_HANDLERS["setup_robot_handoff_signal"] = _handle_setup_robot_handoff_signal
 
 
+async def _handle_setup_robot_claim_mutex(args: Dict) -> Dict:
+    """Tier A tool — creates a mutex marker prim for shared-resource arbitration
+    between multiple robots.
+
+    A claim mutex coordinates access to a shared pickup zone, conveyor segment,
+    or station. Only one robot can claim the mutex at a time; others wait or
+    skip.
+
+    Creates a marker prim with attributes:
+      - mutex:claimed_by (robot path, or empty if free)
+      - mutex:claim_count (total claims granted)
+      - mutex:robots (list of authorized robot paths)
+      - mutex:resource_path (USD path of shared resource being protected)
+
+    Runtime claim/release requires controller hooks. Canonical-time tool
+    creates the marker prim so scene defines the mutex location.
+
+    Args:
+      mutex_path:    USD path of the mutex marker
+      resource_path: USD path of resource being mutually-excluded
+      robots:        list of robot paths that share access
+
+    Returns: {mutex_path, resource_path, robots, state}
+    """
+    mutex_path = args["mutex_path"]
+    resource_path = args.get("resource_path", "")
+    robots = list(args.get("robots") or [])
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Sdf
+stage = omni.usd.get_context().get_stage()
+pp = Sdf.Path({mutex_path!r})
+prim = stage.GetPrimAtPath(pp)
+if not prim or not prim.IsValid():
+    prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
+prim.CreateAttribute("mutex:claimed_by",   Sdf.ValueTypeNames.String).Set("")
+prim.CreateAttribute("mutex:claim_count",  Sdf.ValueTypeNames.Int).Set(0)
+robots = {robots!r}
+prim.CreateAttribute("mutex:robots",       Sdf.ValueTypeNames.StringArray).Set(robots)
+prim.CreateAttribute("mutex:resource_path",Sdf.ValueTypeNames.String).Set({resource_path!r})
+print(json.dumps({{"created": str(prim.GetPath()), "robots": robots, "resource": {resource_path!r}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "mutex_path": mutex_path,
+        "resource_path": resource_path,
+        "robots": robots,
+        "state": "free",
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+DATA_HANDLERS["setup_robot_claim_mutex"] = _handle_setup_robot_claim_mutex
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),

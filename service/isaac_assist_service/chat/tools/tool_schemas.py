@@ -1401,6 +1401,22 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "setup_robot_claim_mutex",
+            "description": "Tier A tool — creates a mutex marker prim for shared-resource arbitration between multiple robots. Coordinates access to shared pickup zones, conveyor segments, or stations. Marker has mutex:claimed_by, mutex:claim_count, mutex:robots, mutex:resource_path attrs. Runtime claim/release requires controller hooks; canonical-time tool creates the marker. Unlocks #10 Parallel Picking Duo, #12 Producer/Consumer Bounded Buffer, #13 Leader/Follower Rotary Station, #14 Vision-Gated Bin Picking Duo.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mutex_path": {"type": "string", "description": "USD path of the mutex marker"},
+                    "resource_path": {"type": "string", "description": "USD path of shared resource being protected"},
+                    "robots": {"type": "array", "items": {"type": "string"}, "description": "List of robot paths sharing access"},
+                },
+                "required": ["mutex_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "setup_robot_handoff_signal",
             "description": "Tier B tool — creates a handoff marker prim with state attributes for coordinating two robots in a handoff sequence. Robot A places at handoff, robot B picks. Marker has handoff:state, handoff:current_cube, handoff:position, handoff:robot_a, handoff:robot_b attrs. Runtime usage requires controller integration; canonical-time tool just creates the marker prim. Unlocks #6 Two-Cell Kit-Tray Relay, #7 Robot-to-Robot Handoff, #11 Fixed-Point Robot-to-Robot Handoff.",
             "parameters": {
