@@ -326,6 +326,34 @@ CP-15:  32/32  build, 3 cubes   PASS
 
 **Postponed (Sprint 3)**: CP-06 builtin handler (FixedJoint integration), full vision-gate canonicals (need Replicator capture), `set_gripper_rotation` (Tier B), `setup_robot_claim_mutex` (Tier A multi-robot).
 
+## simulate_traversal_check duration_s discovery (2026-05-08 evening)
+
+Dozens of canonicals were marked function-gate-failing because their
+template's `simulate_args.duration_s` was set to 45-90s — too short for a
+cuRobo + multi-cube delivery cycle (~30-60s per cube + planning latency).
+At 180s, **20/36 sampled false-failing Franka cuRobo canonicals recover**
+to ✓:
+
+  Phase 1 (8 sampled): ✓ CP-01, 02, 08, 45, 54  ✗ CP-22, 29, 43
+  Phase 2 (29 sampled): ✓ CP-03, 04, 07, 13, 21, 23, 31, 32, 33, 34, 39,
+                          41, 42, 44, 56  ✗ CP-12, 14, 24, 26, 27, 28,
+                          30, 36, 37, 46, 49, 52, 62
+
+**Real failures clusters (180s ALSO ✗):**
+- High-speed belt: CP-22 (0.5 m/s — belt-pause race)
+- Stack/precision benchmarks: CP-27, 28, 36, 37, 46
+- Multi-cube special: CP-12 (10cm cube too big for fingers)
+- Cortex-driven: CP-49, 52, 62
+- Conveyor edge cases: CP-29, 43, 24, 26, 30
+- Drop precision: CP-81/82/84 (cuRobo + multi-cube → cube short of bin)
+
+**function_gate_suite.py bumped CP-01..CP-04 from 45s → 180s** to align
+with reality.
+
+**cuRobo `_cube_to_pick` reach fix (commit 8212d06):** family-aware
+reach (UR10 1.20m vs Franka 0.70m). Earlier hardcoded 0.70m silently
+skipped UR10 cubes farther than 0.70m. Three sites in tool_executor.py.
+
 ## Source documents
 
 - `docs/research/2026-05-07/agents/asset_inventory.md` — 94 robots + props catalog
