@@ -1401,6 +1401,23 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "setup_robot_handoff_signal",
+            "description": "Tier B tool — creates a handoff marker prim with state attributes for coordinating two robots in a handoff sequence. Robot A places at handoff, robot B picks. Marker has handoff:state, handoff:current_cube, handoff:position, handoff:robot_a, handoff:robot_b attrs. Runtime usage requires controller integration; canonical-time tool just creates the marker prim. Unlocks #6 Two-Cell Kit-Tray Relay, #7 Robot-to-Robot Handoff, #11 Fixed-Point Robot-to-Robot Handoff.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "handoff_path": {"type": "string", "description": "USD path of the handoff marker"},
+                    "position": {"type": "array", "items": {"type": "number"}, "description": "[x,y,z] world position of handoff station"},
+                    "robot_a": {"type": "string", "description": "USD path of placing robot"},
+                    "robot_b": {"type": "string", "description": "USD path of picking robot"},
+                },
+                "required": ["handoff_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "create_kit_tray",
             "description": "Tier A tool — creates a kitting tray with N labeled slots at fixed positions. Used by kitting canonicals (recipe-based assembly, multi-source-to-tray, two-cell relay). Each slot is a child Xform under tray_path with kit:slot_index, kit:slot_size, kit:occupied attrs. Slot centers are returned for use as drop_targets in setup_pick_place_controller.",
             "parameters": {

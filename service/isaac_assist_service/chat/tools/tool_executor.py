@@ -6291,6 +6291,66 @@ DATA_HANDLERS["create_kit_tray"] = _handle_create_kit_tray
 DATA_HANDLERS["track_slot_occupancy"] = _handle_track_slot_occupancy
 
 
+async def _handle_setup_robot_handoff_signal(args: Dict) -> Dict:
+    """Tier B tool — creates a 'handoff signal' marker prim used to coordinate
+    two robots in a handoff sequence (robot A places at handoff, robot B picks
+    from handoff).
+
+    Creates a marker prim with attributes:
+      - handoff:state ('idle', 'placed', 'picked')
+      - handoff:current_cube (path of cube currently at handoff, or '')
+      - handoff:position (xyz of handoff station)
+      - handoff:robot_a (path of placing robot)
+      - handoff:robot_b (path of picking robot)
+
+    For runtime use, robots' controllers would read/write these attrs.
+    Without controller integration, this tool just creates the marker prim
+    so canonicals can reference it as a known handoff station.
+
+    Args:
+      handoff_path: USD path of the handoff marker
+      position:     [x, y, z] world position of the handoff station
+      robot_a:      USD path of robot that PLACES at handoff
+      robot_b:      USD path of robot that PICKS from handoff
+
+    Returns: {handoff_path, position, attrs_set}
+    """
+    handoff_path = args["handoff_path"]
+    position = args.get("position", [0, 0, 0.85])
+    robot_a = args.get("robot_a", "")
+    robot_b = args.get("robot_b", "")
+
+    code = f"""\
+import omni.usd
+from pxr import UsdGeom, Sdf, Gf
+import json
+stage = omni.usd.get_context().get_stage()
+pp = Sdf.Path({handoff_path!r})
+prim = stage.GetPrimAtPath(pp)
+if not prim or not prim.IsValid():
+    prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
+UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d({position[0]}, {position[1]}, {position[2]}))
+prim.CreateAttribute("handoff:state",        Sdf.ValueTypeNames.String).Set("idle")
+prim.CreateAttribute("handoff:current_cube", Sdf.ValueTypeNames.String).Set("")
+prim.CreateAttribute("handoff:position",     Sdf.ValueTypeNames.Float3).Set(({position[0]}, {position[1]}, {position[2]}))
+prim.CreateAttribute("handoff:robot_a",      Sdf.ValueTypeNames.String).Set({robot_a!r})
+prim.CreateAttribute("handoff:robot_b",      Sdf.ValueTypeNames.String).Set({robot_b!r})
+print(json.dumps({{"created": str(prim.GetPath()), "state": "idle"}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "handoff_path": handoff_path,
+        "position": position,
+        "robot_a": robot_a,
+        "robot_b": robot_b,
+        "state": "idle",
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+DATA_HANDLERS["setup_robot_handoff_signal"] = _handle_setup_robot_handoff_signal
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
