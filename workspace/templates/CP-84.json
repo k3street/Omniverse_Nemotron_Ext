@@ -48,5 +48,5 @@
     "Drop precision: cube might land off-center on BaseCube and topple.",
     "Same raycast dependencies as CP-78."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2717 (drop precision \u2014 cube lands at z=0.775 table top, ~0.2m short of BaseCube target). RmpFlow descent may not reach precise drop_target; transit-end-stuck pattern. cuRobo with planning_obstacles=[BaseCube] would be the proper fix."
 }

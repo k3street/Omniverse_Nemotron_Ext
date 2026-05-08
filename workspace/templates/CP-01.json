@@ -108,7 +108,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 60
+    "duration_s": 180
   },
-  "verified_status": "pre-2026-05-07; form-gate \u2713; function-gate verified earlier per master plan"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (with 180s sim \u2014 duration_s=60 was too short for cuRobo + 4-cube conveyor cycle. cube_final=(-0.004, -0.46, 0.835) inside Bin)"
 }
