@@ -1401,6 +1401,23 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "setup_cortex_behavior",
+            "description": "Tier B tool — installs Isaac Sim Cortex framework wrapper (CortexWorld + CortexFranka/CortexUr10), registers obstacles, attempts to load a behavior_module's make_decider_network. Used by #27 UR10BinStacking, #28 FrankaCortexBlockStacking, #33 demo_ur10_conveyor. Cortex is reactive behavior-tree-based, alternative to cuRobo motion planning. Does NOT play with cuRobo controller — use one or the other per robot.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "robot_kind": {"type": "string", "enum": ["franka", "ur10", "ur10e"]},
+                    "behavior_module": {"type": "string", "description": "Python module path with make_decider_network (e.g. 'isaacsim.cortex.behaviors.franka.peck_demo')"},
+                    "obstacles": {"type": "array", "items": {"type": "string"}, "description": "USD paths to register as obstacles for RmpFlow"},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "create_gravity_dispenser",
             "description": "Tier C tool — creates a gravity-fed dispenser. N items pre-spawned stacked vertically below dispenser; fall under gravity onto target surface. Used by #25 UR10BinFilling.",
             "parameters": {

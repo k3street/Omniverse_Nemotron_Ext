@@ -6916,6 +6916,118 @@ DATA_HANDLERS["create_gravity_dispenser"] = _handle_create_gravity_dispenser
 DATA_HANDLERS["create_heap_zone"] = _handle_create_heap_zone
 
 
+async def _handle_setup_cortex_behavior(args: Dict) -> Dict:
+    """Tier B tool — installs Isaac Sim Cortex framework wrapper around a robot
+    + registers obstacles, then attaches a behavior_module DfNetwork.
+
+    Wraps add_franka_to_stage / add_ur10_to_stage + CortexWorld + behavior
+    tree mounting. Behavior trees are Python files exporting `make_decider_network`
+    function returning a DfNetwork.
+
+    For canonical-time, this tool creates the CortexWorld + robot wrapper.
+    Behavior tree loading runs at install time. Limited to behaviors built
+    into isaacsim.cortex.behaviors module.
+
+    Args:
+      robot_path:        USD path of the robot to wrap
+      robot_kind:        'franka' or 'ur10'
+      behavior_module:   Python module path with make_decider_network
+                          (e.g. 'isaacsim.cortex.behaviors.franka.peck_demo')
+      obstacles:         list of USD paths to register as obstacles
+
+    Returns: {robot_path, behavior_module, obstacles_registered, world_class}
+
+    KNOWN LIMITATIONS:
+    - Cortex framework imports may not be available in all Kit builds.
+      Tool fails gracefully with import error if framework absent.
+    - Behavior tree loading is deferred to runtime (when CortexWorld.run starts).
+    - Conflicts with cuRobo controller (different motion architectures).
+      Use Cortex OR cuRobo, not both on same robot.
+    """
+    robot_path = args["robot_path"]
+    robot_kind = args.get("robot_kind", "franka").lower()
+    behavior_module = args.get("behavior_module", "")
+    obstacles = list(args.get("obstacles") or [])
+
+    if robot_kind not in ("franka", "ur10", "ur10e"):
+        return {"type": "error", "error": f"unsupported robot_kind: {robot_kind}"}
+
+    code = f"""\
+import omni.usd, json
+import sys
+stage = omni.usd.get_context().get_stage()
+robot_path = {robot_path!r}
+behavior_module = {behavior_module!r}
+obstacles = {obstacles!r}
+
+result = {{"robot_path": robot_path, "behavior_module": behavior_module, "obstacles": obstacles}}
+
+try:
+    from isaacsim.cortex.framework.cortex_world import CortexWorld
+    if {robot_kind!r} == "franka":
+        from isaacsim.cortex.framework.robot import add_franka_to_stage as add_robot
+    else:
+        from isaacsim.cortex.framework.robot import add_ur10_to_stage as add_robot
+
+    # Reuse existing World instance or create CortexWorld
+    world = CortexWorld.instance()
+    if world is None:
+        world = CortexWorld()
+    result["world_class"] = type(world).__name__
+
+    # Robot wrapper (assumes prim already exists; wraps it)
+    cortex_robot = add_robot(name=f"cortex_{{robot_path.replace('/', '_').strip('_')}}", prim_path=robot_path)
+    world.add_robot(cortex_robot)
+    result["robot_wrapped"] = True
+
+    # Register obstacles
+    for obs_path in obstacles:
+        prim = stage.GetPrimAtPath(obs_path)
+        if prim and prim.IsValid():
+            try:
+                from isaacsim.core.api.objects import DynamicCuboid
+                # Wrap as obstacle (DynamicCuboid wrapper around existing prim)
+                obs = DynamicCuboid(prim_path=obs_path, name=f"obs_{{obs_path.split('/')[-1]}}")
+                cortex_robot.register_obstacle(obs)
+            except Exception as _oe:
+                result.setdefault("obstacle_errors", []).append(f"{{obs_path}}: {{type(_oe).__name__}}")
+
+    # Behavior module loading (deferred — actual mount is at world.run())
+    if behavior_module:
+        try:
+            import importlib
+            mod = importlib.import_module(behavior_module)
+            result["behavior_module_loaded"] = True
+            if hasattr(mod, "make_decider_network"):
+                result["behavior_has_make_decider_network"] = True
+            else:
+                result["behavior_has_make_decider_network"] = False
+        except Exception as _be:
+            result["behavior_load_error"] = f"{{type(_be).__name__}}: {{str(_be)[:100]}}"
+except ImportError as _ie:
+    result["error"] = f"Cortex framework unavailable: {{type(_ie).__name__}}: {{str(_ie)[:200]}}"
+except Exception as _e:
+    result["error"] = f"{{type(_e).__name__}}: {{str(_e)[:200]}}"
+
+print(json.dumps(result))
+"""
+    res = await kit_tools.exec_sync(code, timeout=20)
+    out = (res.get("output") or "").strip()
+    parsed = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                parsed = json.loads(line)
+                break
+            except Exception:
+                continue
+    return parsed or {"error": "could not parse cortex setup output", "raw": out[-300:]}
+
+
+DATA_HANDLERS["setup_cortex_behavior"] = _handle_setup_cortex_behavior
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
