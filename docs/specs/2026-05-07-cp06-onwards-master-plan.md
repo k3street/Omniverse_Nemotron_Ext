@@ -180,8 +180,10 @@ Each shipped canonical:
 | CP-40 | Spline controller variant | ✅ form-gate shipped | Sprint 2 | CP-01 with target_source='spline'. CPU-only deterministic. 37/38 build. |
 | CP-41 | Mass-varying cubes (0.1-2.0 kg) | ✅ form-gate shipped | Sprint 2 | physics:density per cube. 42/42 build. Function-gate likely fails on heavy cubes (gripper limit). |
 | CP-42 | Rectangular brick palletizer | ✅ form-gate shipped | Sprint 2 | 4 bricks (10×5×5cm) — non-cube geometry. 39/39 build. Tests gripper on rectangular items. |
+| CP-43 | Sphere-pick station | ✅ form-gate shipped | Sprint 2 | 4 spheres (5cm dia). 38/38 build. Round-geometry handler test. |
+| CP-44 | Mixed-geometry (cubes + spheres) | ✅ form-gate shipped | Sprint 2 | Heterogeneous source_paths. 38/38 build. Handler agnostic to object type. |
 
-**🎉 SPRINT 2 COMPLETE 🎉**: 36 canonicals (CP-07..CP-42, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 92+ atomic commits since structural work began.
+**🎉 SPRINT 2 COMPLETE 🎉**: 38 canonicals (CP-07..CP-44, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 97+ atomic commits since structural work began.
 
 **Empirical drop-precision finding (2026-05-08, 5+3-run benchmarks)**:
 - cuRobo cube-drop precision is **~17cm avg, ±10cm**, NOT the originally-assumed 5cm
