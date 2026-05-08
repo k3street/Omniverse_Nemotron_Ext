@@ -1,0 +1,36 @@
+{
+  "task_id": "CP-64",
+  "goal": "Build a mobile robot with Nav2 navigation config: a Carter wheeled robot wrapped via setup_nav_robot. Realizes #31 RoboParty (mixed fleet) infrastructure for the mobile-robot leg.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "setup_nav_robot"
+  ],
+  "thoughts": "Six nav-robot specifics for CP-64:\n1) Carter wheeled robot at [0, 0, 0.10] (small wheel-base AMR).\n2) setup_nav_robot wraps with Nav2 config: goal_topic=/goal_pose, odom_topic=/odom.\n3) NO occupancy_map for canonical demo — runtime would set this from a real map.\n4) NO arm — pure mobile robot scenario.\n5) Realizes #31 RoboParty mobile leg. Full scenario also has manipulator + ROS2 bridge + Nav2.\n6) Runtime nav stack execution requires Nav2 + ROS2 bridge active.",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Carter (NVIDIA AMR) wheeled robot\nrobot_wizard(\n    robot_name=\"carter\",\n    dest_path=\"/World/Carter\",\n    position=[0, 0, 0.10],\n    orientation=[1, 0, 0, 0],\n)\n\nsetup_nav_robot(\n    robot_path=\"/World/Carter\",\n    occupancy_map=\"\",\n    nav_topic=\"/goal_pose\",\n    odom_topic=\"/odom\",\n)",
+  "settle_state": {
+    "cubes": {}
+  },
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/Carter", "pick_path": "/World/Carter", "place_path": "/World/Carter", "robot_kind": "wheeled"}
+    ],
+    "cube_path": "/World/Carter"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Carter",
+    "target_path": "/World/Carter",
+    "duration_s": 30
+  },
+  "extends": "CP-01",
+  "extension_notes": "CP-64 realizes #31 RoboParty mobile-robot leg. Carter (NVIDIA AMR) wrapped with Nav2 config. Full RoboParty scenario adds manipulator partner + ROS2 bridge for Nav2 communication.",
+  "failure_modes": [
+    "Carter robot must be in robot_wizard registry — alias 'carter' → 'nova_carter' per code.",
+    "No occupancy map specified — runtime nav would need actual map data.",
+    "Verify_args is loose (mobile robots aren't pick-place); form-gate skip."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification skipped; build-only"
+}
