@@ -3859,17 +3859,30 @@ async def _handle_simulate_traversal_check(args: Dict) -> Dict:
     target_bbox, in_target_xy, above_floor, at_rest, sim_duration}.
 
     Args:
-      cube_path: prim path of the cube to track (required)
+      cube_path: prim path of the cube to track (required for single-cube mode)
+      cube_paths: list of prim paths to track in MULTI-CUBE mode — success if
+                  ANY of them reaches target_path's bbox. Useful for Cortex
+                  behavior trees and multi-cube canonicals where simulate_
+                  traversal_check shouldn't be limited to Cube_1. cube_paths
+                  takes precedence over cube_path when both provided.
       target_path: prim path of the destination (its world bbox is the target)
       duration_s: sim duration in seconds (default 60)
       xy_tolerance: xy bbox tolerance in meters (default 0.0 — strict)
       floor_tolerance: z below target floor allowed in meters (default 0.10)
       rest_speed_threshold: max speed (m/s) to consider "at rest" (default 0.05)
     """
+    cube_paths = args.get("cube_paths") or []
+    if isinstance(cube_paths, str):
+        cube_paths = [cube_paths]
+    cube_paths = [str(p).strip() for p in cube_paths if str(p).strip()]
     cube_path = (args.get("cube_path") or "").strip()
     target_path = (args.get("target_path") or "").strip()
-    if not cube_path or not target_path:
-        return {"error": "simulate_traversal_check requires cube_path and target_path"}
+    if not (cube_path or cube_paths) or not target_path:
+        return {"error": "simulate_traversal_check requires cube_path or cube_paths, plus target_path"}
+    # Multi-cube mode: cube_paths takes precedence. Single-cube mode: cube_path
+    # is the only target. The generated code handles both via cube_paths list.
+    if not cube_paths:
+        cube_paths = [cube_path]
     duration_s = float(args.get("duration_s", 60))
     xy_tolerance = float(args.get("xy_tolerance", 0.0))
     floor_tolerance = float(args.get("floor_tolerance", 0.10))
@@ -3921,7 +3934,8 @@ def _world_bbox(path):
         'max': [float(mx[0]), float(mx[1]), float(mx[2])],
     }}
 
-cube_path = {cube_path!r}
+cube_paths = {cube_paths!r}
+cube_path = cube_paths[0] if cube_paths else ""  # primary cube for legacy fields
 target_path = {target_path!r}
 duration_s = {duration_s}
 xy_tol = {xy_tolerance}
@@ -3961,6 +3975,8 @@ tl.set_end_time(max(tl.get_end_time(), duration_s + 5.0))
 
 p_init = _world_pos(cube_path)
 target_bbox = _world_bbox(target_path)
+# Multi-cube: track all cube_paths, succeed if any reaches bin
+cube_inits = {{cp: _world_pos(cp) for cp in cube_paths}}
 if p_init is None or target_bbox is None:
     print(json.dumps({{
         'success': False,
@@ -3969,6 +3985,7 @@ if p_init is None or target_bbox is None:
 else:
     tl.play()
     p_pre = list(p_init)
+    pre_pos_per_cube = {{cp: list(cube_inits[cp]) if cube_inits[cp] else None for cp in cube_paths}}
     real_start = _t.time()
     last_t = 0.0
     while True:
@@ -3978,6 +3995,9 @@ else:
         if cur_t >= duration_s - 0.15 and last_t < duration_s - 0.15:
             _pre = _world_pos(cube_path)
             if _pre is not None: p_pre = _pre
+            for cp in cube_paths:
+                _pp = _world_pos(cp)
+                if _pp is not None: pre_pos_per_cube[cp] = _pp
         if cur_t >= duration_s:
             break
         if _t.time() - real_start > duration_s + 60:
@@ -3985,6 +4005,7 @@ else:
         last_t = cur_t
 
     p_final = _world_pos(cube_path)
+    final_pos_per_cube = {{cp: _world_pos(cp) for cp in cube_paths}}
     cur_t = float(tl.get_current_time())
     tl.stop()
 
@@ -3996,6 +4017,30 @@ else:
         speed = (velocity[0]**2 + velocity[1]**2 + velocity[2]**2) ** 0.5
 
     bb = target_bbox
+    # Per-cube success flags. A cube is delivered if its final pos is in bin's
+    # xy bbox, above the floor tolerance, and at rest.
+    delivered_cubes = []
+    per_cube_status = {{}}
+    for cp in cube_paths:
+        cp_final = final_pos_per_cube.get(cp)
+        cp_pre   = pre_pos_per_cube.get(cp)
+        if cp_final is None: continue
+        cp_in_xy = (bb['min'][0] - xy_tol <= cp_final[0] <= bb['max'][0] + xy_tol
+                    and bb['min'][1] - xy_tol <= cp_final[1] <= bb['max'][1] + xy_tol)
+        cp_above = cp_final[2] >= bb['min'][2] - floor_tol
+        if cp_pre is not None:
+            cp_v = [(cp_final[i] - cp_pre[i]) / dt for i in range(3)]
+            cp_speed = (cp_v[0]**2 + cp_v[1]**2 + cp_v[2]**2) ** 0.5
+        else:
+            cp_speed = speed  # fallback
+        cp_at_rest = cp_speed < rest_speed
+        cp_delivered = bool(cp_in_xy and cp_above and cp_at_rest)
+        per_cube_status[cp] = {{
+            'final': cp_final, 'in_xy': cp_in_xy, 'above_floor': cp_above,
+            'speed': cp_speed, 'delivered': cp_delivered,
+        }}
+        if cp_delivered: delivered_cubes.append(cp)
+
     in_xy = (p_final is not None
              and bb['min'][0] - xy_tol <= p_final[0] <= bb['max'][0] + xy_tol
              and bb['min'][1] - xy_tol <= p_final[1] <= bb['max'][1] + xy_tol)
@@ -4009,7 +4054,12 @@ else:
     upright_dot = _world_up_dot(cube_path)
     upright_ok = (not require_upright) or (upright_dot is not None and upright_dot >= upright_tol)
 
-    success = bool(in_xy and above_floor and at_rest and upright_ok)
+    # Multi-cube success: ANY cube in cube_paths delivered. Falls back to
+    # legacy single-cube criterion if only one cube_path was provided.
+    if len(cube_paths) > 1:
+        success = bool(delivered_cubes) and upright_ok
+    else:
+        success = bool(in_xy and above_floor and at_rest and upright_ok)
 
     print(json.dumps({{
         'success': success,
@@ -4030,6 +4080,9 @@ else:
         'rest_speed_threshold': rest_speed,
         'floor_tolerance': floor_tol,
         'upright_tolerance_dot': upright_tol,
+        'cube_paths': cube_paths,
+        'delivered_cubes': delivered_cubes,
+        'per_cube_status': per_cube_status,
     }}))
 """
     return await kit_tools.queue_exec_patch(code, "simulate_traversal_check")
@@ -29444,16 +29497,55 @@ _belt_sv = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocity") if (_
 _belt_en = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocityEnabled") if (_belt_prim and _belt_prim.IsValid()) else None
 _captured_belt = tuple(_belt_sv.Get()) if (_belt_sv and _belt_sv.IsDefined() and _belt_sv.Get()) else None
 _nominal_belt = _captured_belt if (_captured_belt and sum(abs(v) for v in _captured_belt) > 1e-6) else (0.2, 0.0, 0.0)
+
+# BELT-PAUSE-FROM-CALLBACK FIX (2026-05-08):
+# Direct USD writes from inside _on_step (subscribed to physics_step_events)
+# get restored by PhysX integrator next tick. Verified surfaceVelocity AND
+# surfaceVelocityEnabled both fail. Workaround: defer writes to AFTER physics
+# integration completes, via a flag-and-replay pattern. _on_step sets
+# _belt_pause_request flag; a separate post-update listener applies the write
+# from outside the physics step.
+_belt_pause_request = [None]  # None=no-op, True=pause, False=resume
+def _apply_belt_pause_outside_callback():
+    \"\"\"Called from omni.kit.app post-update event stream — fires AFTER
+    physics integration so writes here actually propagate.\"\"\"
+    req = _belt_pause_request[0]
+    if req is None: return
+    if req is True:
+        if _belt_en and _belt_en.IsDefined(): _belt_en.Set(False)
+        if _belt_sv: _belt_sv.Set((0, 0, 0))
+    else:  # resume
+        if _belt_en and _belt_en.IsDefined(): _belt_en.Set(True)
+        if _belt_sv: _belt_sv.Set(_nominal_belt)
+    _belt_pause_request[0] = None  # consume
 def _pause_belt():
-    # Toggle the Enabled BOOL in addition to zeroing velocity. The integrator
-    # uses Enabled to gate friction-application entirely; turning it off
-    # propagates differently (carb event) than vector-Set, which avoids the
-    # in-callback restoration race.
+    # In-callback: also write directly (cheap if it works) AND queue for
+    # post-update to retry from outside. The post-update write is the actual
+    # workaround; the direct write is best-effort for handlers where it
+    # propagates (e.g. cuRobo's wait_sensor → planning transition).
     if _belt_en and _belt_en.IsDefined(): _belt_en.Set(False)
     if _belt_sv: _belt_sv.Set((0, 0, 0))
+    _belt_pause_request[0] = True
 def _resume_belt():
     if _belt_en and _belt_en.IsDefined(): _belt_en.Set(True)
     if _belt_sv: _belt_sv.Set(_nominal_belt)
+    _belt_pause_request[0] = False
+# Subscribe to post-update event stream — fires after each kit frame, AFTER
+# physics integration has completed for that step.
+try:
+    _BELT_POST_SUB_ATTR = "_belt_post_sub_" + _ROBOT_TAG
+    _old_post = getattr(builtins, _BELT_POST_SUB_ATTR, None)
+    if _old_post is not None:
+        try: _old_post.unsubscribe()
+        except Exception: pass
+    _post_stream = omni.kit.app.get_app().get_post_update_event_stream()
+    _belt_post_sub = _post_stream.create_subscription_to_pop(
+        lambda _e: _apply_belt_pause_outside_callback(),
+        name="builtin_pp_belt_pause_post_update_" + _ROBOT_TAG,
+    )
+    setattr(builtins, _BELT_POST_SUB_ATTR, _belt_post_sub)
+except Exception as _bpe:
+    print(f"(builtin pp: post-update belt-pause subscription failed: {{_bpe}})")
 
 # Per-cube state machine: deliver cubes one at a time
 S = {{"delivered": set(), "current": None, "fixed_joint": None}}
@@ -29660,12 +29752,27 @@ def _on_step(dt):
                                 if _dbg_phase_attr: _dbg_phase_attr.Set(f"event={{_ev}} fj_snapped:{{_picked}}")
                 except Exception as _fje: print(f"(builtin pp UR10 fj snap fail: {{_fje}})")
             elif _ev >= 7 and S.get("fixed_joint"):
-                # Past gripper open — remove FixedJoint
+                # Past gripper open — remove FixedJoint, but ONLY if cube xy is
+                # close to drop target. Else hold FJ — controller may have
+                # advanced past event 7 prematurely (timing-gated, not
+                # position-gated). Releasing too early lets cube fall on table.
                 try:
-                    fjp = S["fixed_joint"]
-                    if stage.GetPrimAtPath(fjp).IsValid():
-                        stage.RemovePrim(fjp)
-                    S["fixed_joint"] = None
+                    _bin = _bin_pos()
+                    _cubp = _cube_pos(S["current"]) if S.get("current") else None
+                    _drop_close = True  # default to release if positions unknown
+                    if _bin is not None and _cubp is not None:
+                        _xyd = float(np.linalg.norm(_cubp[:2] - _bin[:2]))
+                        # 0.10m xy tolerance — bin is typically 0.30m wide so
+                        # 0.10m means cube is well within bin xy bbox.
+                        _drop_close = _xyd < 0.10
+                    if _drop_close:
+                        fjp = S["fixed_joint"]
+                        if stage.GetPrimAtPath(fjp).IsValid():
+                            stage.RemovePrim(fjp)
+                        S["fixed_joint"] = None
+                        if _dbg_phase_attr: _dbg_phase_attr.Set(f"event={{_ev}} fj_released_at_drop")
+                    else:
+                        if _dbg_phase_attr: _dbg_phase_attr.Set(f"event={{_ev}} fj_held xyd={{_xyd:.3f}}")
                 except Exception as _rfe: print(f"(builtin pp UR10 fj remove fail: {{_rfe}})")
         if _controller.is_done():
             S["delivered"].add(S["current"])
@@ -31888,6 +31995,8 @@ def _plan_pick_place(cube_pos, drop_pos, current_joints=None):
         "grip_close_t": grip_close_t,
         "grip_open_t": grip_open_t,
         "total_t": float(t_arr[-1]) + 0.5,  # settle 0.5s at retreat
+        "cube_pos": [float(x) for x in cube_pos],
+        "drop_pos": [float(x) for x in drop_pos],
     }}
 
 def _make_trajectory(plan):
@@ -32088,13 +32197,27 @@ def _on_step(dt):
                 if _jp: S["grasp_joint"] = _jp
                 S["grip_closed_done"] = True
 
-            # Gripper event: open (release)
+            # Gripper event: open (release) — gate on cube xy proximity to
+            # drop target. cuRobo trajectory time may advance past grip_open_t
+            # while EE hasn't physically converged to drop pose; releasing
+            # then drops cube on table. Hold release until cube is close.
             if not S["grip_opened_done"] and elapsed >= plan["grip_open_t"]:
-                if S["grasp_joint"]:
-                    _detach_cube(S["grasp_joint"])
-                    S["grasp_joint"] = None
-                _grip_open()
-                S["grip_opened_done"] = True
+                _drop_xy_close = True
+                if ROBOT_FAMILY in ("ur10", "ur10e") and S.get("picked_path"):
+                    try:
+                        _cubp = _world_pos(S["picked_path"])
+                        _dropp = plan.get("drop_pos")
+                        if _cubp is not None and _dropp is not None:
+                            _xyd = float(np.linalg.norm(np.array(_cubp[:2]) - np.array(_dropp[:2])))
+                            _drop_xy_close = _xyd < 0.10  # 0.10m bin xy tolerance
+                    except Exception: pass
+                if _drop_xy_close:
+                    if S["grasp_joint"]:
+                        _detach_cube(S["grasp_joint"])
+                        S["grasp_joint"] = None
+                    _grip_open()
+                    S["grip_opened_done"] = True
+                # else: keep grip_opened_done False, retry next tick once EE arrives
 
             # Sample trajectory
             q_target = S["traj_fn"](elapsed)
