@@ -7028,6 +7028,84 @@ print(json.dumps(result))
 DATA_HANDLERS["setup_cortex_behavior"] = _handle_setup_cortex_behavior
 
 
+async def _handle_setup_zone_partition(args: Dict) -> Dict:
+    """Tier C tool — partitions a conveyor into N zones, each assigned to
+    a specific robot. Used by Parallel Picking Duo (#10) for spatial
+    coordination.
+
+    Creates N marker prims under conveyor_path, each tagged with
+    zone:robot_path attr. Zones are equal-width segments along conveyor's
+    longest axis (typically X).
+
+    Args:
+      conveyor_path: USD path of conveyor to partition
+      n_zones:       number of zones (typically = n_robots)
+      robots:        list of robot paths (one per zone)
+      base_path:     parent path for zone markers (default: conveyor_path)
+
+    Returns: {zones: [{path, robot, x_range}, ...]}
+    """
+    conveyor_path = args["conveyor_path"]
+    n_zones = int(args.get("n_zones", 2))
+    robots = list(args.get("robots") or [])
+    base_path = args.get("base_path") or conveyor_path
+
+    if len(robots) != n_zones:
+        return {"type": "error",
+                "error": f"robots length ({len(robots)}) must match n_zones ({n_zones})"}
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Sdf, Usd, Gf
+stage = omni.usd.get_context().get_stage()
+conv = stage.GetPrimAtPath({conveyor_path!r})
+if not conv or not conv.IsValid():
+    print(json.dumps({{"error": f"conveyor not found: {conveyor_path!r}"}})); raise SystemExit
+
+cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+bbox = cache.ComputeWorldBound(conv).ComputeAlignedRange()
+xmin, xmax = float(bbox.GetMin()[0]), float(bbox.GetMax()[0])
+y_center = 0.5 * (float(bbox.GetMin()[1]) + float(bbox.GetMax()[1]))
+z_top = float(bbox.GetMax()[2])
+
+n_zones = {n_zones}
+robots = {robots!r}
+zone_width = (xmax - xmin) / n_zones
+zones = []
+for i in range(n_zones):
+    z_start = xmin + i * zone_width
+    z_end = z_start + zone_width
+    zone_path = f"{base_path!r}/Zone_{{i+1}}"
+    pp = Sdf.Path(zone_path)
+    prim = stage.GetPrimAtPath(pp)
+    if not prim or not prim.IsValid():
+        prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
+    UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d(0.5*(z_start+z_end), y_center, z_top))
+    prim.CreateAttribute("zone:robot_path", Sdf.ValueTypeNames.String).Set(robots[i])
+    prim.CreateAttribute("zone:x_min", Sdf.ValueTypeNames.Float).Set(z_start)
+    prim.CreateAttribute("zone:x_max", Sdf.ValueTypeNames.Float).Set(z_end)
+    prim.CreateAttribute("zone:index", Sdf.ValueTypeNames.Int).Set(i)
+    zones.append({{"path": zone_path, "robot": robots[i], "x_range": [z_start, z_end]}})
+
+print(json.dumps({{"zones": zones, "conveyor_x_range": [xmin, xmax]}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    out = (res.get("output") or "").strip()
+    parsed = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                parsed = json.loads(line)
+                break
+            except Exception:
+                continue
+    return parsed or {"error": "could not parse zone_partition output"}
+
+
+DATA_HANDLERS["setup_zone_partition"] = _handle_setup_zone_partition
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),

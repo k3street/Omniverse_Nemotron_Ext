@@ -1401,6 +1401,23 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "setup_zone_partition",
+            "description": "Tier C tool — partitions a conveyor into N equal-width zones, each assigned to a specific robot. Used by #10 Parallel Picking Duo for spatial coordination. Creates marker prims under conveyor with zone:robot_path, zone:x_min, zone:x_max attrs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "conveyor_path": {"type": "string"},
+                    "n_zones": {"type": "integer"},
+                    "robots": {"type": "array", "items": {"type": "string"}},
+                    "base_path": {"type": "string"},
+                },
+                "required": ["conveyor_path", "n_zones", "robots"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "setup_cortex_behavior",
             "description": "Tier B tool — installs Isaac Sim Cortex framework wrapper (CortexWorld + CortexFranka/CortexUr10), registers obstacles, attempts to load a behavior_module's make_decider_network. Used by #27 UR10BinStacking, #28 FrankaCortexBlockStacking, #33 demo_ur10_conveyor. Cortex is reactive behavior-tree-based, alternative to cuRobo motion planning. Does NOT play with cuRobo controller — use one or the other per robot.",
             "parameters": {
