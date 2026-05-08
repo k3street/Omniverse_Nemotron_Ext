@@ -203,7 +203,13 @@ Each shipped canonical:
 
 **Tier B tools built**: `set_gripper_rotation`, `setup_robot_handoff_signal`, `drop_targets` extension
 
-**Research scenarios fully delivered (10 of 33)**: #4, #5, #10, #11, #15, #16, #19 (partial), #20, #23, #24
+**Research scenarios fully delivered (12 of 33)**: #4, #5, #10, #11, #12, #15, #16, #19 (partial), #20, #23, #24, #25/27/29/33 (partial — surface_gripper infra in CP-54)
+
+**Tools shipped this session**:
+- Tier A (4/4): compute_stack_placement, add_vision_classifier_gate, create_kit_tray+track_slot_occupancy, setup_robot_claim_mutex
+- Tier B (3): set_gripper_rotation, setup_robot_handoff_signal, surface_gripper
+- Composite: setup_pick_place_with_vision (real runtime vision)
+- Extension: drop_targets dict/list in cuRobo handler
 
 Plus 5 migrated baseline canonicals (CP-01..CP-05) = **45 canonicals total in production-ready state**.
 
