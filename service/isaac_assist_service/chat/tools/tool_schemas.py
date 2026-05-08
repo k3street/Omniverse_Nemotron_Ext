@@ -1401,6 +1401,57 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "load_rl_policy",
+            "description": "Tier C — registers a trained RL policy on a robot. Sets metadata attrs. Used by #30 FrankaDrawerOpen.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "policy_path": {"type": "string"},
+                    "observation_keys": {"type": "array", "items": {"type": "string"}},
+                    "action_dim": {"type": "integer"},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_grasp_pose_sampler",
+            "description": "Tier C — sets up grasp-pose sampler config for SDG (#32 GraspingWorkflow SDG).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sampler_path": {"type": "string"},
+                    "target_path": {"type": "string"},
+                    "n_samples": {"type": "integer"},
+                    "sampling_mode": {"type": "string", "enum": ["antipodal", "top_down", "parallel_jaw"]},
+                },
+                "required": ["sampler_path", "target_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_nav_robot",
+            "description": "Tier C — wraps wheeled robot with Nav2-compatible navigation config. Used by #31 RoboParty.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "occupancy_map": {"type": "string"},
+                    "nav_topic": {"type": "string"},
+                    "odom_topic": {"type": "string"},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "create_recirculation_loop",
             "description": "Tier C — closed-loop conveyor (rectangular path) for recirculation sortation (#17 Postal Cross-Belt Sorter). 4 conveyor segments arranged as rectangle.",
             "parameters": {

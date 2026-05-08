@@ -7358,6 +7358,145 @@ DATA_HANDLERS["create_linear_axis_robot"] = _handle_create_linear_axis_robot
 DATA_HANDLERS["nir_material_sensor"] = _handle_nir_material_sensor
 
 
+async def _handle_load_rl_policy(args: Dict) -> Dict:
+    """Tier C — registers a trained RL policy for runtime control. Used by
+    #30 FrankaDrawerOpen + similar manipulation-via-RL scenarios.
+
+    For canonical-time, sets metadata attrs on robot for policy reference.
+    Runtime policy execution requires controller integration.
+
+    Args:
+      robot_path:    USD path of the robot
+      policy_path:   path to .pt or .onnx checkpoint
+      observation_keys: list of observation names policy expects
+      action_dim:    action space dimensionality
+
+    Returns: {robot_path, policy_path, observation_keys, action_dim}
+    """
+    robot_path = args["robot_path"]
+    policy_path = args.get("policy_path", "")
+    observation_keys = list(args.get("observation_keys") or ["joint_positions"])
+    action_dim = int(args.get("action_dim", 7))
+
+    code = f"""\
+import omni.usd, json
+from pxr import Sdf, Vt
+stage = omni.usd.get_context().get_stage()
+robot = stage.GetPrimAtPath({robot_path!r})
+if not robot or not robot.IsValid():
+    print(json.dumps({{"error": f"robot not found: {robot_path!r}"}})); raise SystemExit
+robot.CreateAttribute("rl:policy_path",       Sdf.ValueTypeNames.String).Set({policy_path!r})
+robot.CreateAttribute("rl:observation_keys",  Sdf.ValueTypeNames.StringArray).Set(Vt.StringArray({observation_keys!r}))
+robot.CreateAttribute("rl:action_dim",        Sdf.ValueTypeNames.Int).Set({action_dim})
+robot.CreateAttribute("rl:policy_loaded",     Sdf.ValueTypeNames.Bool).Set(False)
+print(json.dumps({{"robot": {robot_path!r}, "policy": {policy_path!r}, "obs_keys": {observation_keys!r}, "action_dim": {action_dim}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "robot_path": robot_path,
+        "policy_path": policy_path,
+        "observation_keys": observation_keys,
+        "action_dim": action_dim,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+async def _handle_setup_grasp_pose_sampler(args: Dict) -> Dict:
+    """Tier C — sets up an Isaac Replicator grasp-pose sampler for SDG
+    scenarios (#32 GraspingWorkflow SDG).
+
+    Stores config attrs on a marker prim. Actual SDG execution at runtime
+    requires Replicator pipeline.
+
+    Args:
+      sampler_path: USD path of the sampler
+      target_path:  USD path of object to sample grasps for
+      n_samples:    number of grasp poses (default 100)
+      sampling_mode: 'antipodal' | 'top_down' | 'parallel_jaw' (default 'antipodal')
+
+    Returns: {sampler_path, target_path, n_samples, sampling_mode}
+    """
+    sampler_path = args["sampler_path"]
+    target_path = args["target_path"]
+    n_samples = int(args.get("n_samples", 100))
+    sampling_mode = args.get("sampling_mode", "antipodal")
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Sdf
+stage = omni.usd.get_context().get_stage()
+target = stage.GetPrimAtPath({target_path!r})
+if not target or not target.IsValid():
+    print(json.dumps({{"error": f"target not found: {target_path!r}"}})); raise SystemExit
+sp = Sdf.Path({sampler_path!r})
+prim = stage.GetPrimAtPath(sp)
+if not prim or not prim.IsValid():
+    prim = UsdGeom.Xform.Define(stage, sp).GetPrim()
+prim.CreateAttribute("grasp:target",         Sdf.ValueTypeNames.String).Set({target_path!r})
+prim.CreateAttribute("grasp:n_samples",      Sdf.ValueTypeNames.Int).Set({n_samples})
+prim.CreateAttribute("grasp:sampling_mode",  Sdf.ValueTypeNames.String).Set({sampling_mode!r})
+prim.CreateAttribute("grasp:samples_generated", Sdf.ValueTypeNames.Int).Set(0)
+print(json.dumps({{"sampler": str(prim.GetPath()), "target": {target_path!r}, "n_samples": {n_samples}, "mode": {sampling_mode!r}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "sampler_path": sampler_path,
+        "target_path": target_path,
+        "n_samples": n_samples,
+        "sampling_mode": sampling_mode,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+async def _handle_setup_nav_robot(args: Dict) -> Dict:
+    """Tier C — wraps a wheeled robot with navigation stack (Nav2-compatible).
+    Used by #31 RoboParty (mixed fleet with mobile robots).
+
+    For canonical-time, stores nav config on robot. Runtime nav execution
+    requires Nav2 + ROS2 bridge integration.
+
+    Args:
+      robot_path:    USD path of mobile robot
+      occupancy_map: path to .pgm/.yaml occupancy map (optional)
+      nav_topic:     ROS2 topic for nav goals (default '/goal_pose')
+      odom_topic:    ROS2 topic for odometry (default '/odom')
+
+    Returns: {robot_path, nav_topic, odom_topic, occupancy_map}
+    """
+    robot_path = args["robot_path"]
+    occupancy_map = args.get("occupancy_map", "")
+    nav_topic = args.get("nav_topic", "/goal_pose")
+    odom_topic = args.get("odom_topic", "/odom")
+
+    code = f"""\
+import omni.usd, json
+from pxr import Sdf
+stage = omni.usd.get_context().get_stage()
+robot = stage.GetPrimAtPath({robot_path!r})
+if not robot or not robot.IsValid():
+    print(json.dumps({{"error": f"robot not found: {robot_path!r}"}})); raise SystemExit
+robot.CreateAttribute("nav:occupancy_map", Sdf.ValueTypeNames.String).Set({occupancy_map!r})
+robot.CreateAttribute("nav:goal_topic",    Sdf.ValueTypeNames.String).Set({nav_topic!r})
+robot.CreateAttribute("nav:odom_topic",    Sdf.ValueTypeNames.String).Set({odom_topic!r})
+robot.CreateAttribute("nav:current_goal",  Sdf.ValueTypeNames.Float3).Set((0,0,0))
+robot.CreateAttribute("nav:reached",       Sdf.ValueTypeNames.Bool).Set(True)
+print(json.dumps({{"robot": {robot_path!r}, "nav_topic": {nav_topic!r}, "odom_topic": {odom_topic!r}, "map": {occupancy_map!r}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "robot_path": robot_path,
+        "nav_topic": nav_topic,
+        "odom_topic": odom_topic,
+        "occupancy_map": occupancy_map,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+DATA_HANDLERS["load_rl_policy"] = _handle_load_rl_policy
+DATA_HANDLERS["setup_grasp_pose_sampler"] = _handle_setup_grasp_pose_sampler
+DATA_HANDLERS["setup_nav_robot"] = _handle_setup_nav_robot
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
