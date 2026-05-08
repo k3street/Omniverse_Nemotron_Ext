@@ -1401,6 +1401,21 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "register_moving_obstacle",
+            "description": "Tier B tool — registers a dynamic obstacle on a robot for runtime collision avoidance. cuRobo's planning_obstacles is normally static at install time; this adds a moving obstacle path to robot's runtime list (curobo:moving_obstacles attr). Runtime polling requires controller integration. Used by #7 Robot-to-Robot Handoff (avoid other arm), #28 FrankaCortexBlockStacking (track moving cubes).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "obstacle_path": {"type": "string"},
+                },
+                "required": ["robot_path", "obstacle_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "barcode_reader_sensor",
             "description": "Tier B sensor — creates a barcode-reader prim at a fixed scan position. Reads cube identity via Semantics_class lookup when cube enters scan zone. Output published as USD attrs (barcode:last_read, barcode:last_class, barcode:read_count). Used by #17 Postal Cross-Belt Sorter, #18 Recycling Multi-Sensor.",
             "parameters": {

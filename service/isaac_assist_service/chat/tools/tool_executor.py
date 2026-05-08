@@ -6751,6 +6751,58 @@ else:
 DATA_HANDLERS["create_rotary_table"] = _handle_create_rotary_table
 
 
+async def _handle_register_moving_obstacle(args: Dict) -> Dict:
+    """Tier B tool — registers a dynamic obstacle on a robot for runtime
+    collision avoidance. cuRobo's planning_obstacles is normally static at
+    install time. This tool adds an obstacle path to a robot's runtime list,
+    so the controller can re-query its position each tick.
+
+    For canonical-time, sets a USD attribute on the robot prim:
+      curobo:moving_obstacles (StringArray) — list of obstacle paths
+
+    Runtime usage requires controller integration that reads this attr each
+    tick and updates plan_pose's obstacle list (Sprint 3+).
+
+    Args:
+      robot_path:    USD path of the robot
+      obstacle_path: USD path of the moving obstacle (e.g. another robot's hand)
+
+    Returns: {robot_path, obstacle_path, total_registered}
+    """
+    robot_path = args["robot_path"]
+    obstacle_path = args["obstacle_path"]
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdPhysics, Sdf, Vt
+stage = omni.usd.get_context().get_stage()
+robot = stage.GetPrimAtPath({robot_path!r})
+obstacle = stage.GetPrimAtPath({obstacle_path!r})
+if not robot or not robot.IsValid():
+    print(json.dumps({{"error": f"robot not found: {robot_path!r}"}})); raise SystemExit
+if not obstacle or not obstacle.IsValid():
+    print(json.dumps({{"error": f"obstacle not found: {obstacle_path!r}"}})); raise SystemExit
+
+attr = robot.GetAttribute("curobo:moving_obstacles")
+if not attr or not attr.IsValid():
+    attr = robot.CreateAttribute("curobo:moving_obstacles", Sdf.ValueTypeNames.StringArray)
+existing = list(attr.Get() or [])
+if {obstacle_path!r} not in existing:
+    existing.append({obstacle_path!r})
+attr.Set(Vt.StringArray(existing))
+print(json.dumps({{"robot": {robot_path!r}, "obstacle": {obstacle_path!r}, "total_registered": len(existing)}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "robot_path": robot_path,
+        "obstacle_path": obstacle_path,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+DATA_HANDLERS["register_moving_obstacle"] = _handle_register_moving_obstacle
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
