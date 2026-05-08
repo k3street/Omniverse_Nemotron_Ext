@@ -32702,7 +32702,14 @@ def _build_segments(cube_pos, drop_pos, current_q):
     # joint-space optimizer can choose curved paths that brush the cube
     # body (no scene-collision available with Warp 1.8.2).
     h1 = EE_INITIAL_HEIGHT
-    FL = 0.105  # finger length
+    # Tool-tip Z offset relative to the planner's tool_frame origin.
+    # Franka panda_hand → finger tips: +0.105m straight along local +Z.
+    # UR10 tool0 → suction_cup tip: +0.158m in local +X (NOT +Z); during a
+    # top-down grasp this becomes a lateral world-XY offset, not vertical.
+    # The 0.158 here is wrong-but-trying — proper UR10 grasp wiring needs
+    # the GoalToolPose offset transformed by the planner's solved EE quat,
+    # which the current pipeline doesn't compute. Tracked for follow-up.
+    FL = 0.105 if ROBOT_FAMILY == "franka" else 0.0
     pz = float(cube_pos[2]) + FL + float(EE_OFFSET[2])
     h_mid_pick = float(cube_pos[2]) + 0.18  # 18cm above cube
     h_mid_drop = float(drop_pos[2]) + 0.18  # 18cm above drop pose
