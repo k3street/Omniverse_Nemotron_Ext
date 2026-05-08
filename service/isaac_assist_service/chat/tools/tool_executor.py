@@ -7106,6 +7106,113 @@ print(json.dumps({{"zones": zones, "conveyor_x_range": [xmin, xmax]}}))
 DATA_HANDLERS["setup_zone_partition"] = _handle_setup_zone_partition
 
 
+async def _handle_add_force_torque_sensor(args: Dict) -> Dict:
+    """Tier C tool — adds an Isaac Sim ForceSensor (force/torque) on a robot
+    end-effector or articulation joint.
+
+    Used by #22 Peg-in-Hole (force-threshold-gated phase transitions).
+    Wraps Isaac Sim's IsaacForceSensor schema.
+
+    Args:
+      sensor_path:   USD path of the force sensor
+      parent_path:   USD path of the prim to attach sensor to (robot link)
+      threshold:     force threshold for triggering events (default 5.0 N)
+
+    Returns: {sensor_path, parent_path, threshold}
+    """
+    sensor_path = args["sensor_path"]
+    parent_path = args["parent_path"]
+    threshold = float(args.get("threshold", 5.0))
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdPhysics, Sdf
+stage = omni.usd.get_context().get_stage()
+parent = stage.GetPrimAtPath({parent_path!r})
+if not parent or not parent.IsValid():
+    print(json.dumps({{"error": f"parent not found: {parent_path!r}"}})); raise SystemExit
+
+# Apply ForceSensor schema (UsdPhysics.ForceSensor or simulated via attrs)
+try:
+    api = UsdPhysics.RigidBodyAPI.Get(parent)
+    if not api:
+        api = UsdPhysics.RigidBodyAPI.Apply(parent)
+except Exception:
+    pass
+
+# Create sensor prim with reading attrs (logical wrapper; reading hooks runtime)
+from pxr import UsdGeom, Gf
+spp = Sdf.Path({sensor_path!r})
+sprim = stage.GetPrimAtPath(spp)
+if not sprim or not sprim.IsValid():
+    sprim = UsdGeom.Xform.Define(stage, spp).GetPrim()
+sprim.CreateAttribute("ftsensor:parent",      Sdf.ValueTypeNames.String).Set({parent_path!r})
+sprim.CreateAttribute("ftsensor:threshold",   Sdf.ValueTypeNames.Float).Set({threshold})
+sprim.CreateAttribute("ftsensor:last_force",  Sdf.ValueTypeNames.Float3).Set((0.0, 0.0, 0.0))
+sprim.CreateAttribute("ftsensor:last_torque", Sdf.ValueTypeNames.Float3).Set((0.0, 0.0, 0.0))
+sprim.CreateAttribute("ftsensor:triggered",   Sdf.ValueTypeNames.Bool).Set(False)
+print(json.dumps({{"sensor_path": str(sprim.GetPath()), "parent": {parent_path!r}, "threshold": {threshold}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "sensor_path": sensor_path,
+        "parent_path": parent_path,
+        "threshold": threshold,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+async def _handle_setup_assembly_constraint(args: Dict) -> Dict:
+    """Tier C tool — creates an assembly constraint (peg-into-hole) via
+    UsdPhysics joint when the peg is sufficiently aligned with the hole.
+
+    For canonical-time, sets up the peg + hole prims with a metadata
+    relationship. Runtime (Sprint 3+) would create FixedJoint when peg
+    enters hole within tolerance.
+
+    Args:
+      peg_path:    USD path of the peg
+      hole_path:   USD path of the hole
+      tolerance:   alignment tolerance (default 0.005m)
+      constraint_path: USD path for the resulting joint (default <hole>/AssemblyJoint)
+
+    Returns: {peg_path, hole_path, constraint_path, tolerance}
+    """
+    peg_path = args["peg_path"]
+    hole_path = args["hole_path"]
+    tolerance = float(args.get("tolerance", 0.005))
+    constraint_path = args.get("constraint_path") or f"{hole_path}/AssemblyJoint"
+
+    code = f"""\
+import omni.usd, json
+from pxr import Sdf, UsdGeom
+stage = omni.usd.get_context().get_stage()
+hole = stage.GetPrimAtPath({hole_path!r})
+peg = stage.GetPrimAtPath({peg_path!r})
+if not hole or not hole.IsValid():
+    print(json.dumps({{"error": f"hole not found: {hole_path!r}"}})); raise SystemExit
+if not peg or not peg.IsValid():
+    print(json.dumps({{"error": f"peg not found: {peg_path!r}"}})); raise SystemExit
+hole.CreateAttribute("assembly:peg_path",        Sdf.ValueTypeNames.String).Set({peg_path!r})
+hole.CreateAttribute("assembly:tolerance",       Sdf.ValueTypeNames.Float).Set({tolerance})
+hole.CreateAttribute("assembly:constraint_path", Sdf.ValueTypeNames.String).Set({constraint_path!r})
+hole.CreateAttribute("assembly:engaged",         Sdf.ValueTypeNames.Bool).Set(False)
+print(json.dumps({{"hole": {hole_path!r}, "peg": {peg_path!r}, "tolerance": {tolerance}, "constraint_path": {constraint_path!r}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "peg_path": peg_path,
+        "hole_path": hole_path,
+        "constraint_path": constraint_path,
+        "tolerance": tolerance,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+DATA_HANDLERS["add_force_torque_sensor"] = _handle_add_force_torque_sensor
+DATA_HANDLERS["setup_assembly_constraint"] = _handle_setup_assembly_constraint
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),

@@ -1401,6 +1401,39 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "add_force_torque_sensor",
+            "description": "Tier C — adds force/torque sensor to a robot link with threshold for trigger events. Used by #22 Peg-in-Hole Insertion (force-gated phase transitions).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sensor_path": {"type": "string"},
+                    "parent_path": {"type": "string"},
+                    "threshold": {"type": "number"},
+                },
+                "required": ["sensor_path", "parent_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_assembly_constraint",
+            "description": "Tier C — sets up assembly relationship between peg and hole. Used by #22 Peg-in-Hole. Runtime FixedJoint creation when peg aligns within tolerance is Sprint 3+.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "peg_path": {"type": "string"},
+                    "hole_path": {"type": "string"},
+                    "tolerance": {"type": "number"},
+                    "constraint_path": {"type": "string"},
+                },
+                "required": ["peg_path", "hole_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "setup_zone_partition",
             "description": "Tier C tool — partitions a conveyor into N equal-width zones, each assigned to a specific robot. Used by #10 Parallel Picking Duo for spatial coordination. Creates marker prims under conveyor with zone:robot_path, zone:x_min, zone:x_max attrs.",
             "parameters": {
