@@ -1,0 +1,43 @@
+{
+  "task_id": "CP-84",
+  "goal": "UR10 builtin stacking pick-place: pick cube from pedestal, stack ON TOP OF a stationary base cube. Validates raycast workaround composes with stacking destinations (drop on prim instead of into bin).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "add_reference",
+    "teleport_prim",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "place_on_top_of",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Stacking instead of bin-drop:\n1) UR10 base + table + pedestal (with cube) same as CP-78.\n2) BaseCube at world (0.5, -0.4, 0.775) — sits on table top. UR10 stacks Cube_1 on top.\n3) destination_path = '/World/BaseCube' instead of '/World/Bin'.\n4) builtin handler picks any prim as destination; bin-detection is for drop-test only.\n5) drop_targets: use place_on_top_of helper to compute drop coords above BaseCube.\n6) Test goal: cube_1 ends up at z=0.825 (BaseCube top + half cube) — on top of base.",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/UR10\", prim_type=\"Xform\")\nadd_reference(prim_path=\"/World/UR10\", reference_path=\"/mnt/shared_data/isaac-sim-assets-complete-5.0.0/Assets/Isaac/5.0/Collected_Robots/ur10.usd\")\nteleport_prim(prim_path=\"/World/UR10\", position=[0, 0, 0.75])\n\ncreate_prim(prim_path=\"/World/Pedestal\", prim_type=\"Cube\", position=[-0.5, 0.4, 0.875], scale=[0.06, 0.06, 0.075])\napply_api_schema(prim_path=\"/World/Pedestal\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-0.5, 0.4, 0.975], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\n\n# Static base cube on table for stacking\ncreate_prim(prim_path=\"/World/BaseCube\", prim_type=\"Cube\", position=[0.5, -0.4, 0.775], size=0.05)\napply_api_schema(prim_path=\"/World/BaseCube\", schema_name=\"PhysicsCollisionAPI\")\n\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    robot_family=\"ur10\",\n    target_source=\"builtin\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/BaseCube\",\n    drop_targets=[[0.5, -0.4, 0.825]],\n    end_effector_offset=[0.0, 0.0, 0.02],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [-0.5, 0.4, 0.975]
+    },
+    "conveyors": {}
+  },
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/UR10", "pick_path": "/World/Cube_1", "place_path": "/World/BaseCube", "robot_kind": "ur10e"}
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/BaseCube",
+    "duration_s": 90
+  },
+  "extends": "CP-78",
+  "extension_notes": "CP-84 = CP-78 with destination as a static cube prim instead of a bin. Drop coordinates computed manually as 0.825 (BaseCube top 0.80 + half source cube 0.025).",
+  "failure_modes": [
+    "BaseCube has no RigidBody — pure collider. Should hold static.",
+    "Drop precision: cube might land off-center on BaseCube and topple.",
+    "Same raycast dependencies as CP-78."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+}

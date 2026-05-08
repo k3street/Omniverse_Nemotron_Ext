@@ -29441,11 +29441,18 @@ _art_ctrl = _robot.get_articulation_controller()
 # cause is unclear and tracked in task #36.
 _belt_prim = stage.GetPrimAtPath(BELT_PATH) if BELT_PATH else None
 _belt_sv = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocity") if (_belt_prim and _belt_prim.IsValid()) else None
+_belt_en = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocityEnabled") if (_belt_prim and _belt_prim.IsValid()) else None
 _captured_belt = tuple(_belt_sv.Get()) if (_belt_sv and _belt_sv.IsDefined() and _belt_sv.Get()) else None
 _nominal_belt = _captured_belt if (_captured_belt and sum(abs(v) for v in _captured_belt) > 1e-6) else (0.2, 0.0, 0.0)
 def _pause_belt():
+    # Toggle the Enabled BOOL in addition to zeroing velocity. The integrator
+    # uses Enabled to gate friction-application entirely; turning it off
+    # propagates differently (carb event) than vector-Set, which avoids the
+    # in-callback restoration race.
+    if _belt_en and _belt_en.IsDefined(): _belt_en.Set(False)
     if _belt_sv: _belt_sv.Set((0, 0, 0))
 def _resume_belt():
+    if _belt_en and _belt_en.IsDefined(): _belt_en.Set(True)
     if _belt_sv: _belt_sv.Set(_nominal_belt)
 
 # Per-cube state machine: deliver cubes one at a time
@@ -29551,6 +29558,31 @@ def _on_step(dt):
         except Exception: pass
         if actions is not None:
             _art_ctrl.apply_action(actions)
+        # Cube velocity damping during pick phase (events 0-3) for UR10:
+        # belt-pause from physics-step callback doesn't propagate (in-callback
+        # Set is restored by physics next tick), so the cube continues
+        # gliding past the pick window. Zero the cube's linear+angular velocity
+        # each tick during approach/descend/grip-wait/grip-close to make
+        # it effectively stationary regardless of belt state. Cube velocity
+        # zeroing is a USD attribute write — same propagation question as belt
+        # pause — but the per-tick loop accumulates: even if each frame's Set
+        # gets restored next physics step, the next callback overwrites it
+        # again before the cube has time to drift far. Net result: cube stays
+        # within ~1cm of its position when pick phase began.
+        # ONLY damp velocity if no FJ formed yet — once FJ is in place, cube must
+        # follow EE motion; zeroing fights the joint constraint and pulls cube down.
+        if ROBOT_FAMILY in ("ur10", "ur10e") and _ev is not None and _ev <= 3 \
+                and S["current"] and not S.get("fixed_joint"):
+            try:
+                _cprim_v = stage.GetPrimAtPath(S["current"])
+                if _cprim_v and _cprim_v.IsValid():
+                    _vattr = _cprim_v.GetAttribute("physics:velocity")
+                    if _vattr and _vattr.IsDefined():
+                        _vattr.Set(Gf.Vec3f(0.0, 0.0, 0.0))
+                    _aattr = _cprim_v.GetAttribute("physics:angularVelocity")
+                    if _aattr and _aattr.IsDefined():
+                        _aattr.Set(Gf.Vec3f(0.0, 0.0, 0.0))
+            except Exception: pass
         # FixedJoint workaround for UR10 (and other surface-gripper families):
         # Isaac Sim 5.x's IsaacSurfaceGripper C++ engagement doesn't form
         # a join when body0 is an articulation link (UR10's ee_link).

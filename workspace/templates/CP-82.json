@@ -1,0 +1,47 @@
+{
+  "task_id": "CP-82",
+  "goal": "UR10 builtin TWO-cube color-routing pick-place: Cube_1 (red) → Bin_red, Cube_2 (blue) → Bin_blue. Validates that COLOR_ROUTING / drop_targets dispatch works with the raycast workaround on UR10 builtin handler.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "add_reference",
+    "teleport_prim",
+    "create_bin",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "set_semantic_label",
+    "create_material",
+    "assign_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Color-routing on UR10 pedestal scene:\n1) UR10 base + table + pedestals same as CP-81.\n2) Cube_1 = red, Cube_2 = blue. Set semantic_label color and visual material via create_material + assign_material.\n3) Two bins: /World/Bin_red at (0.5, -0.4, 0.75) and /World/Bin_blue at (0.5, -0.55, 0.75) — different y to keep separate.\n4) drop_targets dict: {'red': '/World/Bin_red', 'blue': '/World/Bin_blue'}.\n5) Validates raycast workaround integrates with color-routing dispatch — cube finds correct bin per its semantic label.\n6) simulate_traversal_check measures Cube_1 → Bin_red only.",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.7, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/UR10\", prim_type=\"Xform\")\nadd_reference(prim_path=\"/World/UR10\", reference_path=\"/mnt/shared_data/isaac-sim-assets-complete-5.0.0/Assets/Isaac/5.0/Collected_Robots/ur10.usd\")\nteleport_prim(prim_path=\"/World/UR10\", position=[0, 0, 0.75])\n\ncreate_prim(prim_path=\"/World/Pedestal_1\", prim_type=\"Cube\", position=[-0.5, 0.55, 0.875], scale=[0.06, 0.06, 0.075])\napply_api_schema(prim_path=\"/World/Pedestal_1\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Pedestal_2\", prim_type=\"Cube\", position=[-0.5, 0.25, 0.875], scale=[0.06, 0.06, 0.075])\napply_api_schema(prim_path=\"/World/Pedestal_2\", schema_name=\"PhysicsCollisionAPI\")\n\n# Red cube\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-0.5, 0.55, 0.975], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\nset_semantic_label(prim_path=\"/World/Cube_1\", category=\"color\", label=\"red\")\n\n# Blue cube\ncreate_prim(prim_path=\"/World/Cube_2\", prim_type=\"Cube\", position=[-0.5, 0.25, 0.975], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_2\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_2\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_2\", material_name=\"rubber\")\nset_semantic_label(prim_path=\"/World/Cube_2\", category=\"color\", label=\"blue\")\n\ncreate_bin(prim_path=\"/World/Bin_red\", position=[0.5, -0.30, 0.75], size=[0.20, 0.20, 0.15])\ncreate_bin(prim_path=\"/World/Bin_blue\", position=[0.5, -0.55, 0.75], size=[0.20, 0.20, 0.15])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    robot_family=\"ur10\",\n    target_source=\"builtin\",\n    source_paths=[\"/World/Cube_1\", \"/World/Cube_2\"],\n    destination_path=\"/World/Bin_red\",\n    color_routing={\"red\": \"/World/Bin_red\", \"blue\": \"/World/Bin_blue\"},\n    end_effector_offset=[0.0, 0.0, 0.02],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [-0.5, 0.55, 0.975],
+      "/World/Cube_2": [-0.5, 0.25, 0.975]
+    },
+    "conveyors": {}
+  },
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/UR10", "pick_path": "/World/Cube_1", "place_path": "/World/Bin_red", "robot_kind": "ur10e"}
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Bin_red",
+    "duration_s": 90
+  },
+  "extends": "CP-81",
+  "extension_notes": "CP-82 = CP-81 + color routing. Red cube to red bin, blue cube to blue bin. Color-routing already exists in builtin handler — this validates the raycast workaround composes with COLOR_ROUTING dispatch.",
+  "failure_modes": [
+    "set_semantic_label / Semantics_color attribute may need specific schema names — handler reads Semantics_color, Semantics_colour, Semantics_class.",
+    "Bin proximity (10cm gap between bins) may cause cube-to-wrong-bin if drop accuracy is poor.",
+    "Same raycast dependencies as CP-78."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+}
