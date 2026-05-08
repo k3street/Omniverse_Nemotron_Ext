@@ -29319,10 +29319,15 @@ elif ROBOT_FAMILY in ("ur10", "ur10e"):
     _gripper = SurfaceGripper(end_effector_prim_path=_ee_path, surface_gripper_path=_sg_path)
     _robot = SingleManipulator(prim_path=ROBOT_PATH, name=_ROBOT_NAME,
                                end_effector_prim_path=_ee_path, gripper=_gripper)
-    # UR10 home pose from the standalone example
+    # UR10 home pose. Standalone example uses [-π/2]^4 + [π/2, 0] which
+    # puts EE at relative (+1.05, -0.74, +0.21) — i.e. arm extending into
+    # +X, -Y. Our canonicals put conveyors on -X and bins on +X, so the
+    # mirror pose [π/2, -π/2, +π/2, -π/2, -π/2, 0] puts EE at (-0.16, +0.69,
+    # +0.65), better-positioned to reach -X picks and +X drops.
+    _UR10_HOME = np.array([np.pi/2, -np.pi/2, np.pi/2, -np.pi/2, -np.pi/2, 0], dtype=np.float32)
     try:
-        _robot.set_joints_default_state(positions=np.array(
-            [-np.pi/2, -np.pi/2, -np.pi/2, -np.pi/2, np.pi/2, 0], dtype=np.float32))
+        _robot.set_joints_default_state(positions=_UR10_HOME)
+        print(f"(builtin pp: UR10 default state set to {{_UR10_HOME.tolist()}})")
     except Exception as _hp: print(f"(builtin pp: UR10 home pose soft-fail: {{_hp}})")
     try: _gripper.set_default_state(opened=True)
     except Exception: pass
@@ -29352,6 +29357,13 @@ try:
     world.reset()
 except Exception as _e:
     print(f"(builtin pp: world.reset soft-fail: {{_e}})")
+# For UR10: re-assert the home pose AFTER world.reset (set_joints_default_state
+# alone may not apply if default state was set before scene registration).
+if ROBOT_FAMILY in ("ur10", "ur10e"):
+    try:
+        _robot.set_joint_positions(_UR10_HOME)
+        print(f"(builtin pp: UR10 joints forced to home after reset)")
+    except Exception as _fe: print(f"(builtin pp: UR10 force-home soft-fail: {{_fe}})")
 # Pump several updates so reset completes before controller wraps gripper
 for _ in range(8): _app.update()
 try:
@@ -29382,11 +29394,13 @@ _controller = PickPlaceController(
 _art_ctrl = _robot.get_articulation_controller()
 
 # Belt pause/resume — cube needs to be stationary for the PickPlaceController
-# to catch it; otherwise the controller keeps re-targeting a moving picking_position
-# and the cube exits the reach window before the IK chain converges.
-# Cache the surfaceVelocity attribute at install time. The cuRobo handler does
-# the same and pauses cleanly; fresh-lookup-per-call interacts badly with the
-# in-callback Set propagation.
+# to catch it; otherwise the controller keeps re-targeting a moving
+# picking_position and the cube exits the reach window before the IK chain
+# converges. Function-gate on CP-74 still fails because the in-callback Set
+# doesn't propagate (verified in /tmp/cp74_belt2.py: external Set persists,
+# Set from inside physics-step callback returns OK but value is restored
+# next tick). cuRobo handler's identical pause call DOES propagate; root
+# cause is unclear and tracked in task #36.
 _belt_prim = stage.GetPrimAtPath(BELT_PATH) if BELT_PATH else None
 _belt_sv = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocity") if (_belt_prim and _belt_prim.IsValid()) else None
 _captured_belt = tuple(_belt_sv.Get()) if (_belt_sv and _belt_sv.IsDefined() and _belt_sv.Get()) else None
