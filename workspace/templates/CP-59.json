@@ -1,0 +1,55 @@
+{
+  "task_id": "CP-59",
+  "goal": "Vision-gated bin-picking duo: 2 Frankas share a heap of mixed cubes. Vision classifies each cube; robot A picks 'red' cubes, robot B picks 'blue'. Mutex prevents simultaneous claim. Realizes #14 Vision-Gated Bin Picking Duo.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_heap_zone",
+    "create_bin",
+    "create_conveyor",
+    "create_material",
+    "assign_material",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "set_camera_look_at",
+    "setup_robot_claim_mutex",
+    "setup_pick_place_with_vision"
+  ],
+  "thoughts": "Six vision-gated-duo specifics for CP-59:\n1) 2 Frankas at x=±0.5. Both reach shared heap zone.\n2) Heap of 4 cubes (2 red + 2 blue) at xy(0, 0.3, 0.835), spread radius 0.10m.\n3) Camera overhead at [0, 0.3, 1.5] looking down at heap.\n4) Mutex /World/HeapMutex coordinates heap access.\n5) setup_pick_place_with_vision installs both robots' controllers with vision-derived destinations: red→RedBin (left of A), blue→BlueBin (right of B).\n6) 1 Gemini API call shared across both setup_pick_place_with_vision (or 2 if separate).",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1500.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaA\",\n    position=[-0.5, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaB\",\n    position=[ 0.5, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Stationary surface under heap (verifier needs bridge)\ncreate_conveyor(\n    prim_path=\"/World/HeapSurface\",\n    position=[0, 0.3, 0.78],\n    size=[0.30, 0.30, 0.05],\n    surface_velocity=[0.001, 0, 0],\n)\n\ncreate_material(material_path=\"/World/Materials/Red\",  shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.0, 0.0])\ncreate_material(material_path=\"/World/Materials/Blue\", shader_type=\"OmniPBR\", diffuse_color=[0.0, 0.0, 1.0])\n\n# 4 cubes — 2 red + 2 blue, manually placed in spread\ncolor_specs = [\n    (\"/World/Cube_r1\", [-0.05,  0.30, 0.86], \"Red\"),\n    (\"/World/Cube_b1\", [ 0.05,  0.30, 0.86], \"Blue\"),\n    (\"/World/Cube_r2\", [-0.04,  0.36, 0.86], \"Red\"),\n    (\"/World/Cube_b2\", [ 0.04,  0.24, 0.86], \"Blue\"),\n]\nfor path, pos, mat in color_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\", position=pos, size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    assign_material(prim_path=path, material_path=f\"/World/Materials/{mat}\")\n\nbulk_set_attribute(\n    prim_paths=[c[0] for c in color_specs],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor c in color_specs:\n    apply_physics_material(prim_path=c[0], material_name=\"rubber\")\n\n# Bins on each side\ncreate_bin(prim_path=\"/World/RedBin\",  position=[-0.5, -0.5, 0.75], size=[0.20, 0.20, 0.15])\nassign_material(prim_path=\"/World/RedBin\", material_path=\"/World/Materials/Red\")\ncreate_bin(prim_path=\"/World/BlueBin\", position=[ 0.5, -0.5, 0.75], size=[0.20, 0.20, 0.15])\nassign_material(prim_path=\"/World/BlueBin\", material_path=\"/World/Materials/Blue\")\n\n# Mutex on heap\nsetup_robot_claim_mutex(\n    mutex_path=\"/World/HeapMutex\",\n    resource_path=\"/World/HeapSurface\",\n    robots=[\"/World/FrankaA\", \"/World/FrankaB\"],\n)\n\ncreate_prim(prim_path=\"/World/Cam\", prim_type=\"Camera\", position=[0, 0.3, 1.5])\nset_camera_look_at(camera_path=\"/World/Cam\", target=[0, 0.3, 0.85])\n\nadd_proximity_sensor(sensor_path=\"/World/SensorA\", position=[-0.2, 0.3, 0.85], size=[0.10, 0.20, 0.06])\nadd_proximity_sensor(sensor_path=\"/World/SensorB\", position=[ 0.2, 0.3, 0.85], size=[0.10, 0.20, 0.06])\n\n# Robot A — vision-gated, picks red cubes only (destination_map only red→RedBin)\nsetup_pick_place_with_vision(\n    robot_path=\"/World/FrankaA\",\n    cube_paths=[c[0] for c in color_specs],\n    class_labels=[\"red cube\", \"blue cube\"],\n    camera_path=\"/World/Cam\",\n    destination_map={\"red\": \"/World/RedBin\"},\n    destination_path=\"/World/RedBin\",\n    sensor_path=\"/World/SensorA\",\n    belt_path=\"/World/HeapSurface\",\n    planning_obstacles=[\"/World/Table\", \"/World/HeapSurface\", \"/World/RedBin\", \"/World/BlueBin\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_r1": [-0.05, 0.30, 0.86],
+      "/World/Cube_b1": [ 0.05, 0.30, 0.86],
+      "/World/Cube_r2": [-0.04, 0.36, 0.86],
+      "/World/Cube_b2": [ 0.04, 0.24, 0.86]
+    },
+    "conveyors": {
+      "/World/HeapSurface": [0.001, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/FrankaA", "pick_path": "/World/HeapSurface", "place_path": "/World/RedBin", "robot_kind": "franka_panda"}
+    ],
+    "cube_path": "/World/Cube_r1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_r1",
+    "target_path": "/World/RedBin",
+    "duration_s": 90
+  },
+  "extends": "CP-47",
+  "extension_notes": "CP-59 combines vision (CP-47), mutex (CP-52), and shared heap (CP-57) for #14 Vision-Gated Bin Picking Duo. Single setup_pick_place_with_vision installs robot A's controller with red→RedBin routing. Robot B install would be separate (with blue→BlueBin) — left as agent-side composition for now to avoid double Gemini call.",
+  "failure_modes": [
+    "1 Gemini API call per setup_pick_place_with_vision install. Robot B's install would be 2nd call — intentionally omitted to limit cost.",
+    "Heap items spawn close together — vision detection may merge multiple cubes into one detection.",
+    "Same camera + verified placement [0, 0.3, 1.5] → target [0, 0.3, 0.85].",
+    "Mutex prim at heap surface — no runtime enforcement (Sprint 3+)."
+  ],
+  "verified_status": "build-attempted-2026-05-08; build 51/52, form-gate FAIL on this run — Gemini returned 0 detections (heap has overlapping cubes; vision doesn't separate them well). CP-47/CP-48 verify the same vision pipeline works for separated cubes; heap geometry is the variable here. Could replace heap with spread cubes for reliable vision."
+}
