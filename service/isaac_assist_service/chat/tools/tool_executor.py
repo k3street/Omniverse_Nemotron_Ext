@@ -28716,6 +28716,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             color_routing=args.get("color_routing"),
             drop_targets=args.get("drop_targets"),
             gripper_rotation=args.get("gripper_rotation"),
+            robot_family=args.get("robot_family", "franka"),
             require_upright=bool(args.get("require_upright", False)),
             upright_dot_threshold=float(args.get("upright_dot_threshold", 0.85)),
         )
@@ -31888,6 +31889,7 @@ def _gen_pick_place_curobo(robot_path, sensor_path, belt_path,
                            color_routing=None,
                            drop_targets=None,
                            gripper_rotation=None,
+                           robot_family="franka",
                            require_upright=False,
                            upright_dot_threshold=0.85):
     """GPU-accelerated global trajectory optimization via cuRobo MotionPlanner.
@@ -31946,8 +31948,27 @@ from curobo.types import JointState, GoalToolPose
 
 from isaacsim.core.api import World
 from isaacsim.core.simulation_manager import SimulationManager
-from isaacsim.robot.manipulators.examples.franka import Franka
 from isaacsim.core.utils.types import ArticulationAction
+
+# Robot-family branching: Franka uses 7-DOF + ParallelGripper, UR10 uses 6-DOF
+# without built-in gripper (suction via separate surface_gripper tool).
+ROBOT_FAMILY = {robot_family!r}
+if ROBOT_FAMILY == "franka":
+    from isaacsim.robot.manipulators.examples.franka import Franka as _RobotWrapper
+    _ARM_DOF = 7
+    _CUROBO_ROBOT_CFG = "franka.yml"
+    _TOOL_FRAME = "panda_hand"
+    _GRIPPER_LINK = "panda_hand"
+    _FINGER_JOINTS = ("panda_finger_joint1", "panda_finger_joint2")
+elif ROBOT_FAMILY in ("ur10", "ur10e"):
+    from isaacsim.robot.manipulators.examples.universal_robots import UR10 as _RobotWrapper
+    _ARM_DOF = 6
+    _CUROBO_ROBOT_CFG = "ur10e.yml"
+    _TOOL_FRAME = "tool0"
+    _GRIPPER_LINK = "wrist_3_link"
+    _FINGER_JOINTS = ()  # UR10 has no built-in gripper; use surface_gripper separately
+else:
+    raise RuntimeError(f"Unsupported robot_family: {{ROBOT_FAMILY!r}}")
 
 ROBOT_PATH = {robot_path!r}
 SENSOR_PATH = {sensor_path!r}
@@ -32129,17 +32150,17 @@ except Exception: pass
 _physics_sim_view = SimulationManager.get_physics_sim_view()
 
 world = World.instance() or World()
-_FRANKA_NAME = "curobo_pp_franka_" + _ROBOT_TAG
-franka = Franka(prim_path=ROBOT_PATH, name=_FRANKA_NAME)
+_ROBOT_NAME = f"curobo_pp_{{ROBOT_FAMILY}}_" + _ROBOT_TAG
+franka = _RobotWrapper(prim_path=ROBOT_PATH, name=_ROBOT_NAME)
 try: world.scene.add(franka)
 except Exception:
-    _existing = world.scene.get_object(_FRANKA_NAME)
+    _existing = world.scene.get_object(_ROBOT_NAME)
     if _existing is not None: franka = _existing
 
 try:
     franka.initialize(_physics_sim_view); franka.post_reset()
 except Exception as _e:
-    print(json.dumps({{"ok": False, "error": f"franka init failed: {{_e}}"}})); raise
+    print(json.dumps({{"ok": False, "error": f"{{ROBOT_FAMILY}} init failed: {{_e}}"}})); raise
 
 for _ in range(20): _app.update()
 
@@ -32157,7 +32178,10 @@ try:
         franka.set_world_pose(position=_usd_pos, orientation=_usd_quat)
 except Exception: _usd_pos, _usd_quat = np.zeros(3), np.array([1,0,0,0])
 
-_HOME_Q = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.04, 0.04], dtype=np.float32)
+if ROBOT_FAMILY == "franka":
+    _HOME_Q = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.04, 0.04], dtype=np.float32)
+else:  # ur10/ur10e — 6-DOF home pose
+    _HOME_Q = np.array([0.0, -1.571, 1.571, -1.571, -1.571, 0.0], dtype=np.float32)
 try:
     _n_dof = len(franka.dof_names) if franka.dof_names else len(_HOME_Q)
     franka.set_joint_positions(_HOME_Q[:_n_dof])
@@ -32169,10 +32193,10 @@ except Exception: pass
 
 art_ctrl = franka.get_articulation_controller()
 
-# Boost finger gains for friction grip
+# Boost finger gains for friction grip (Franka only — UR10 has no built-in fingers)
 try:
-    for _fj in ("panda_finger_joint1", "panda_finger_joint2"):
-        _jp = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/panda_hand/{{_fj}}")
+    for _fj in _FINGER_JOINTS:
+        _jp = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/{{_GRIPPER_LINK}}/{{_fj}}")
         if _jp.IsValid():
             _drv = UsdPhysics.DriveAPI.Get(_jp, "linear")
             if _drv:
@@ -32200,7 +32224,7 @@ if _planner is None:
     # 4 IK × 1 trajopt is enough for tabletop picks and produces consistent
     # trajectories.
     _pcfg = MotionPlannerCfg.create(
-        robot="franka.yml",
+        robot=_CUROBO_ROBOT_CFG,
         use_cuda_graph=True,
         num_ik_seeds=4,
         num_trajopt_seeds=1,
@@ -32432,8 +32456,8 @@ def _plan_to_world_point(point_world, current_q7, exclude_obs=None, yaw_deg=0.0)
     pos_t = torch.tensor([[[[[float(p_base[0]), float(p_base[1]), float(p_base[2])]]]]],
                          dtype=torch.float32, device='cuda')
     quat_base = _rotated_down_quat_base(yaw_deg) if yaw_deg else _DOWN_Q_BASE
-    goal = GoalToolPose(tool_frames=['panda_hand'], position=pos_t, quaternion=quat_base)
-    q = torch.tensor([[float(x) for x in current_q7[:7]]], dtype=torch.float32, device='cuda')
+    goal = GoalToolPose(tool_frames=[_TOOL_FRAME], position=pos_t, quaternion=quat_base)
+    q = torch.tensor([[float(x) for x in current_q7[:_ARM_DOF]]], dtype=torch.float32, device='cuda')
     start = JointState.from_position(q, joint_names=_PLANNER_JOINT_NAMES)
     try:
         # update_world disabled — Warp 1.8.2 lacks CuboidDataWarp registration
@@ -32464,14 +32488,17 @@ if _belt_sv and sum(abs(v) for v in (_belt_sv.Get() or (0,0,0))) < 1e-6:
     _resume_belt()
 
 def _grip_open():
+    # Franka's ParallelGripper; UR10 has no built-in gripper (use surface_gripper).
     try:
-        a = franka.gripper.forward("open")
-        if a: art_ctrl.apply_action(a)
+        if hasattr(franka, "gripper") and franka.gripper is not None:
+            a = franka.gripper.forward("open")
+            if a: art_ctrl.apply_action(a)
     except Exception: pass
 def _grip_close():
     try:
-        a = franka.gripper.forward("close")
-        if a: art_ctrl.apply_action(a)
+        if hasattr(franka, "gripper") and franka.gripper is not None:
+            a = franka.gripper.forward("close")
+            if a: art_ctrl.apply_action(a)
     except Exception: pass
 
 _sensor = stage.GetPrimAtPath(SENSOR_PATH) if SENSOR_PATH else None
@@ -32544,11 +32571,11 @@ def _record_err(e):
     except Exception: pass
 
 def _apply_arm_joints(q7):
-    # Apply ONLY the 7 arm joints. Earlier impl read get_joint_positions()
-    # and wrote it back as full 9-DOF target — the finger joints' current
-    # (still-opening) positions kept overwriting the gripper-controller's
-    # close target every physics tick → grip never reached close pose.
-    q7_arr = np.asarray(q7, dtype=np.float64)[:7]
+    # Apply ONLY the arm joints (Franka 7, UR10 6). Earlier impl read
+    # get_joint_positions() and wrote it back as full DOF target — the
+    # finger joints' current (still-opening) positions kept overwriting
+    # the gripper-controller's close target → grip never reached close pose.
+    q7_arr = np.asarray(q7, dtype=np.float64)[:_ARM_DOF]
     # Safety check: cuRobo's planner occasionally returns trajectories
     # that are catastrophic under bad seeds — both NaN/Inf values AND
     # finite-but-impossible joint targets (>±5 rad on a Franka whose
@@ -32637,8 +32664,8 @@ def _on_step(dt):
                 # Set home_returned flag so we don't loop on it.
                 _grip_open()
                 art_ctrl.apply_action(ArticulationAction(
-                    joint_positions=_HOME_Q[:7].astype(np.float64),
-                    joint_indices=np.arange(7),
+                    joint_positions=_HOME_Q[:_ARM_DOF].astype(np.float64),
+                    joint_indices=np.arange(_ARM_DOF),
                 ))
                 S["home_returned"] = True
             return
@@ -32656,7 +32683,7 @@ def _on_step(dt):
                 return
             jp = franka.get_joint_positions()
             if jp is None: return
-            segs = _build_segments(cp, dp, jp[:7])
+            segs = _build_segments(cp, dp, jp[:_ARM_DOF])
             if segs is None:
                 _record_err(RuntimeError("planning failed"))
                 S["mode"] = "wait_sensor"; S["picked_path"] = None
