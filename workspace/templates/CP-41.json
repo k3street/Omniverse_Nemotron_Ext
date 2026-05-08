@@ -14,37 +14,62 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six mass-variation specifics for CP-41 (extends CP-01 — adds per-cube mass):\n1) 4 cubes: Cube_1 (0.1 kg, light), Cube_2 (0.5 kg), Cube_3 (1.0 kg, normal), Cube_4 (2.0 kg, heavy).\n2) Heavier cubes need higher friction to grip — rubber material on cubes + default fingers gives ~0.75 effective friction. For 2kg cube + gravity, gripper close-force may not hold. Test exposes this.\n3) Cube physics: physxRigidBody:density attr set per cube via set_attribute (computed from desired mass / volume). Cube_size=0.05m, volume=125e-6 m³. Density = mass / volume. For 2kg: density=16000 kg/m³ (denser than steel; demo only).\n4) Belt motion same — friction-driven so heavier cubes still move at same velocity (~1× stick-slip multiplier vs lighter ~3×).\n5) Same scene as CP-01 otherwise. Industrial use: e.g., warehouse with mixed-weight items.\n6) Function-gate may fail on heavy cubes if grip slips. Demo of handler limits.",
-  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 4 cubes with varying masses\n# Density to achieve desired mass: density = mass / volume = mass / 125e-6\n# Cube_1: 0.1kg → 800 kg/m³\n# Cube_2: 0.5kg → 4000 kg/m³\n# Cube_3: 1.0kg → 8000 kg/m³ (steel-like)\n# Cube_4: 2.0kg → 16000 kg/m³ (denser than steel; demo)\nfor i, (x, mass) in enumerate([(-1.4, 0.1), (-1.15, 0.5), (-0.9, 1.0), (-0.65, 2.0)]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    # Mass set via density\n    density = mass / 125e-6\n    set_attribute(prim_path=path, attr_name=\"physics:density\", value=density)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Bin\"],\n)",
+  "thoughts": "Six mass-variation specifics for CP-41 (extends CP-01 \u2014 adds per-cube mass):\n1) 4 cubes: Cube_1 (0.1 kg, light), Cube_2 (0.5 kg), Cube_3 (1.0 kg, normal), Cube_4 (2.0 kg, heavy).\n2) Heavier cubes need higher friction to grip \u2014 rubber material on cubes + default fingers gives ~0.75 effective friction. For 2kg cube + gravity, gripper close-force may not hold. Test exposes this.\n3) Cube physics: physxRigidBody:density attr set per cube via set_attribute (computed from desired mass / volume). Cube_size=0.05m, volume=125e-6 m\u00b3. Density = mass / volume. For 2kg: density=16000 kg/m\u00b3 (denser than steel; demo only).\n4) Belt motion same \u2014 friction-driven so heavier cubes still move at same velocity (~1\u00d7 stick-slip multiplier vs lighter ~3\u00d7).\n5) Same scene as CP-01 otherwise. Industrial use: e.g., warehouse with mixed-weight items.\n6) Function-gate may fail on heavy cubes if grip slips. Demo of handler limits.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 4 cubes with varying masses\n# Density to achieve desired mass: density = mass / volume = mass / 125e-6\n# Cube_1: 0.1kg \u2192 800 kg/m\u00b3\n# Cube_2: 0.5kg \u2192 4000 kg/m\u00b3\n# Cube_3: 1.0kg \u2192 8000 kg/m\u00b3 (steel-like)\n# Cube_4: 2.0kg \u2192 16000 kg/m\u00b3 (denser than steel; demo)\nfor i, (x, mass) in enumerate([(-1.4, 0.1), (-1.15, 0.5), (-0.9, 1.0), (-0.65, 2.0)]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    # Mass set via density\n    density = mass / 125e-6\n    set_attribute(prim_path=path, attr_name=\"physics:density\", value=density)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Bin\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_1": [-1.4,  0.4, 0.835],
-      "/World/Cube_2": [-1.15, 0.4, 0.835],
-      "/World/Cube_3": [-0.9,  0.4, 0.835],
-      "/World/Cube_4": [-0.65, 0.4, 0.835]
+      "/World/Cube_1": [
+        -1.4,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_2": [
+        -1.15,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_3": [
+        -0.9,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_4": [
+        -0.65,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/Bin", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/Bin",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_1"
   },
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 60
+    "duration_s": 180
   },
   "extends": "CP-01",
-  "extension_notes": "CP-41 tests handler with mass-varying cubes. 0.1kg → 2.0kg range. Heavier cubes stress gripper grip + planner momentum compensation. Industrial use: parts of varying weight on same line.",
+  "extension_notes": "CP-41 tests handler with mass-varying cubes. 0.1kg \u2192 2.0kg range. Heavier cubes stress gripper grip + planner momentum compensation. Industrial use: parts of varying weight on same line.",
   "failure_modes": [
-    "Cube_4 (2kg) too heavy for default ParallelGripper close-force → slips during transport. Function-gate may fail.",
-    "physics:density attr requires PhysxRigidBodyAPI applied — handled in apply_api_schema loop.",
+    "Cube_4 (2kg) too heavy for default ParallelGripper close-force \u2192 slips during transport. Function-gate may fail.",
+    "physics:density attr requires PhysxRigidBodyAPI applied \u2014 handled in apply_api_schema loop.",
     "Belt friction-drive: heavier cubes move slower (more friction needed). Belt may not carry 2kg cube smoothly.",
     "Same physics gotchas as CP-01."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 60s. cube_final=(-0.00, -0.40, 0.785) in Bin)"
 }

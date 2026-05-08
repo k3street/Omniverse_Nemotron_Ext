@@ -60,7 +60,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_red",
     "target_path": "/World/RedBin",
-    "duration_s": 90
+    "duration_s": 180
   },
   "extends": "CP-33",
   "extension_notes": "CP-34 scales CP-33 from 2 to 3 cubes. Tests Gemini detection accuracy on 3 colors and v1 left-right pairing reliability. Industrial value: 3-bin sortation (RGB).",
@@ -69,5 +69,5 @@
     "Same color routing rules as CP-03/CP-16.",
     "v1 vision-gate left-right pairing assumes camera image-x ~ world-x. From [0, 1.5, 1.5] looking at origin, image-x partially aligns with world-x (slight rotation OK)."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 90s. cube_final=(-0.42, -0.40, 0.785) in Bin)"
 }

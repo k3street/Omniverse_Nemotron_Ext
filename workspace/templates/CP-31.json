@@ -1,6 +1,6 @@
 {
   "task_id": "CP-31",
-  "goal": "Build a pick-from-pile station: 3 cubes pre-stacked vertically at one xy position. Robot picks topmost cube first, then middle, then bottom — destacking. Tests handler picking cubes at varying z heights from a static pile.",
+  "goal": "Build a pick-from-pile station: 3 cubes pre-stacked vertically at one xy position. Robot picks topmost cube first, then middle, then bottom \u2014 destacking. Tests handler picking cubes at varying z heights from a static pile.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -14,36 +14,57 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six pick-from-pile specifics for CP-31 (extends CP-27 — non-conveyor source, but vertically stacked):\n1) Cubes pre-stacked at xy=(0.4, 0.3): Cube_1 at z=0.835 (bottom), Cube_2 at z=0.885 (middle), Cube_3 at z=0.935 (top).\n2) WorkSurface (stationary belt, surface_velocity=[0.001,0,0]) under the pile — handler-required belt_path. Pile sits on it.\n3) Robot picks closest-z-by-reach. _next_cube selects cubes within 0.95m horizontal AND base_z-0.30 < cube_z < base_z+0.50. All 3 cubes within range (z=0.83-0.94 vs robot base z=0.75 → +0.085 to +0.185).\n4) cuRobo's planner descends to cube z. For top cube z=0.935 → fingers contact at z=0.935-0.025-0.105-0.005 = 0.80. EE at h_mid_pick=0.935+0.18=1.115m before descent. Within reach.\n5) Drop into bin behind robot.\n6) Order: controller picks WHICHEVER CUBE'S xy is closest to sensor first. All 3 at same xy → controller picks first one in source_paths order = Cube_1. But Cube_1 is BOTTOM — picking it would destabilize Cube_2/3 above. Real test of handler's cube-selection: with all at same xy, source_paths order matters.",
-  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Stationary work surface under pile\ncreate_conveyor(\n    prim_path=\"/World/WorkSurface\",\n    position=[0.4, 0.3, 0.78],\n    size=[0.30, 0.30, 0.05],\n    surface_velocity=[0.001, 0, 0],\n)\n\n# 3 cubes stacked vertically at (0.4, 0.3): bottom Cube_1 at z=0.835, middle Cube_2 at z=0.885, top Cube_3 at z=0.935\n# Note: source_paths order is Cube_3 (top) first → handler picks top first, then middle, then bottom\nfor i, z in enumerate([0.835, 0.885, 0.935]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[0.4, 0.3, z], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(3)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(3)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.3, 0.835], size=[0.06, 0.06, 0.06])\n\n# source_paths order matters — pick top cube first to avoid destabilizing pile\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/WorkSurface\",\n    source_paths=[\"/World/Cube_3\", \"/World/Cube_2\", \"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/WorkSurface\", \"/World/Bin\"],\n)",
+  "thoughts": "Six pick-from-pile specifics for CP-31 (extends CP-27 \u2014 non-conveyor source, but vertically stacked):\n1) Cubes pre-stacked at xy=(0.4, 0.3): Cube_1 at z=0.835 (bottom), Cube_2 at z=0.885 (middle), Cube_3 at z=0.935 (top).\n2) WorkSurface (stationary belt, surface_velocity=[0.001,0,0]) under the pile \u2014 handler-required belt_path. Pile sits on it.\n3) Robot picks closest-z-by-reach. _next_cube selects cubes within 0.95m horizontal AND base_z-0.30 < cube_z < base_z+0.50. All 3 cubes within range (z=0.83-0.94 vs robot base z=0.75 \u2192 +0.085 to +0.185).\n4) cuRobo's planner descends to cube z. For top cube z=0.935 \u2192 fingers contact at z=0.935-0.025-0.105-0.005 = 0.80. EE at h_mid_pick=0.935+0.18=1.115m before descent. Within reach.\n5) Drop into bin behind robot.\n6) Order: controller picks WHICHEVER CUBE'S xy is closest to sensor first. All 3 at same xy \u2192 controller picks first one in source_paths order = Cube_1. But Cube_1 is BOTTOM \u2014 picking it would destabilize Cube_2/3 above. Real test of handler's cube-selection: with all at same xy, source_paths order matters.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Stationary work surface under pile\ncreate_conveyor(\n    prim_path=\"/World/WorkSurface\",\n    position=[0.4, 0.3, 0.78],\n    size=[0.30, 0.30, 0.05],\n    surface_velocity=[0.001, 0, 0],\n)\n\n# 3 cubes stacked vertically at (0.4, 0.3): bottom Cube_1 at z=0.835, middle Cube_2 at z=0.885, top Cube_3 at z=0.935\n# Note: source_paths order is Cube_3 (top) first \u2192 handler picks top first, then middle, then bottom\nfor i, z in enumerate([0.835, 0.885, 0.935]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[0.4, 0.3, z], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(3)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(3)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.3, 0.835], size=[0.06, 0.06, 0.06])\n\n# source_paths order matters \u2014 pick top cube first to avoid destabilizing pile\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/WorkSurface\",\n    source_paths=[\"/World/Cube_3\", \"/World/Cube_2\", \"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/WorkSurface\", \"/World/Bin\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_1": [0.4, 0.3, 0.835],
-      "/World/Cube_2": [0.4, 0.3, 0.885],
-      "/World/Cube_3": [0.4, 0.3, 0.935]
+      "/World/Cube_1": [
+        0.4,
+        0.3,
+        0.835
+      ],
+      "/World/Cube_2": [
+        0.4,
+        0.3,
+        0.885
+      ],
+      "/World/Cube_3": [
+        0.4,
+        0.3,
+        0.935
+      ]
     },
     "conveyors": {
-      "/World/WorkSurface": [0.001, 0, 0]
+      "/World/WorkSurface": [
+        0.001,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/WorkSurface", "place_path": "/World/Bin", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/WorkSurface",
+        "place_path": "/World/Bin",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_3"
   },
   "simulate_args": {
     "cube_path": "/World/Cube_3",
     "target_path": "/World/Bin",
-    "duration_s": 90
+    "duration_s": 180
   },
   "extends": "CP-27",
-  "extension_notes": "CP-31 demonstrates destacking — picking from a vertical pile, top-down. source_paths order [Cube_3, Cube_2, Cube_1] tells handler to pick top first. Tests cube-selection logic when multiple cubes share xy. Industrial use: bin-picking from a heap, palette destacking.",
+  "extension_notes": "CP-31 demonstrates destacking \u2014 picking from a vertical pile, top-down. source_paths order [Cube_3, Cube_2, Cube_1] tells handler to pick top first. Tests cube-selection logic when multiple cubes share xy. Industrial use: bin-picking from a heap, palette destacking.",
   "failure_modes": [
-    "Bottom cube picked first → destabilizes pile, top cubes fall. Solution: source_paths order = top-first.",
-    "Cube_2/Cube_3 unstable on Cube_1 (cube-on-cube precision). Cubes are 5cm cubes flush stacked — should hold under gravity.",
-    "Robot can't reach z=0.935 vertical lift — within Franka's 0.85m reach (0.935-0.75=0.185m vertical, 0.4m horizontal, sqrt=0.44m total). Within reach.",
-    "Sensor at (0.4, 0.3, 0.835) — covers bottom cube xy. Top cube z=0.935 above sensor. Sensor still triggers when any cube within bbox xy. Adequate."
+    "Bottom cube picked first \u2192 destabilizes pile, top cubes fall. Solution: source_paths order = top-first.",
+    "Cube_2/Cube_3 unstable on Cube_1 (cube-on-cube precision). Cubes are 5cm cubes flush stacked \u2014 should hold under gravity.",
+    "Robot can't reach z=0.935 vertical lift \u2014 within Franka's 0.85m reach (0.935-0.75=0.185m vertical, 0.4m horizontal, sqrt=0.44m total). Within reach.",
+    "Sensor at (0.4, 0.3, 0.835) \u2014 covers bottom cube xy. Top cube z=0.935 above sensor. Sensor still triggers when any cube within bbox xy. Adequate."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 90s. cube_final=(-0.02, -0.40, 0.785) in Bin)"
 }
