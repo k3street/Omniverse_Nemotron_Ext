@@ -6407,6 +6407,96 @@ print(json.dumps({{"created": str(prim.GetPath()), "robots": robots, "resource":
 DATA_HANDLERS["setup_robot_claim_mutex"] = _handle_setup_robot_claim_mutex
 
 
+async def _handle_surface_gripper(args: Dict) -> Dict:
+    """Tier B tool — adds suction/vacuum gripper to a robot via Isaac Sim's
+    OgnSurfaceGripper OmniGraph node.
+
+    Wraps the existing OmniGraph OgnSurfaceGripper setup in a single call.
+    The surface gripper attaches an end-effector to objects via FixedJoint
+    when 'close' is signaled (suction on); detaches on 'open' (suction off).
+    Force-limit and torque-limit configurable.
+
+    Args:
+      robot_path:    USD path of the robot
+      ee_link:       USD path of the end-effector link to attach gripper to
+      grip_threshold: distance threshold for object pickup (default 0.01)
+      force_limit:   max force the suction can sustain (default 100.0)
+      torque_limit:  max torque (default 100.0)
+      graph_path:    OmniGraph path (default /World/<robot_name>/SuctionGraph)
+
+    Returns: {gripper_node_path, graph_path, force_limit, torque_limit}
+    """
+    robot_path = args["robot_path"]
+    ee_link = args.get("ee_link", f"{robot_path}/panda_hand")
+    grip_threshold = float(args.get("grip_threshold", 0.01))
+    force_limit = float(args.get("force_limit", 100.0))
+    torque_limit = float(args.get("torque_limit", 100.0))
+    graph_path = args.get("graph_path") or f"{robot_path}/SuctionGraph"
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Sdf
+import omni.graph.core as og
+
+stage = omni.usd.get_context().get_stage()
+graph_path = {graph_path!r}
+art_path = {ee_link!r}
+robot_path = {robot_path!r}
+
+# Validate prims exist
+if not stage.GetPrimAtPath(robot_path).IsValid():
+    print(json.dumps({{"error": f"robot not found: {{robot_path}}"}})); raise SystemExit
+if not stage.GetPrimAtPath(art_path).IsValid():
+    print(json.dumps({{"error": f"ee_link not found: {{art_path}}"}})); raise SystemExit
+
+# Create OmniGraph for suction
+keys = og.Controller.Keys
+og.Controller.edit(
+    {{"graph_path": graph_path, "evaluator_name": "execution"}},
+    {{
+        keys.CREATE_NODES: [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("SurfaceGripper", "isaacsim.robot.surface_gripper.OgnSurfaceGripper"),
+        ],
+        keys.CONNECT: [
+            ("OnPlaybackTick.outputs:tick", "SurfaceGripper.inputs:execIn"),
+        ],
+        keys.SET_VALUES: [
+            ("SurfaceGripper.inputs:parentPath", art_path),
+            ("SurfaceGripper.inputs:enabled", True),
+            ("SurfaceGripper.inputs:gripThreshold", {grip_threshold}),
+            ("SurfaceGripper.inputs:forceLimit", {force_limit}),
+            ("SurfaceGripper.inputs:torqueLimit", {torque_limit}),
+        ],
+    }}
+)
+
+# Verify graph created
+gp = stage.GetPrimAtPath(graph_path)
+gn_path = f"{{graph_path}}/SurfaceGripper"
+gn = stage.GetPrimAtPath(gn_path)
+print(json.dumps({{
+    "graph_path": graph_path,
+    "gripper_node_path": gn_path,
+    "ee_link": art_path,
+    "graph_exists": bool(gp and gp.IsValid()),
+    "gripper_node_exists": bool(gn and gn.IsValid()),
+}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=15)
+    return {
+        "graph_path": graph_path,
+        "gripper_node_path": f"{graph_path}/SurfaceGripper",
+        "ee_link": ee_link,
+        "force_limit": force_limit,
+        "torque_limit": torque_limit,
+        "raw": (res.get("output") or "")[-300:],
+    }
+
+
+DATA_HANDLERS["surface_gripper"] = _handle_surface_gripper
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),

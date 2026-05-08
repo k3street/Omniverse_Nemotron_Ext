@@ -1401,6 +1401,25 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "surface_gripper",
+            "description": "Tier B tool — adds suction/vacuum gripper to a robot via Isaac Sim's OgnSurfaceGripper OmniGraph node. End-effector attaches to nearby objects via FixedJoint when 'close' signal active; detaches on 'open'. Used for pick-and-place of items not gripped by parallel-finger gripper (e.g. flat plates, irregular boxes). Unlocks #25 UR10BinFilling, #27 UR10BinStacking, #29 SurfaceGripperGantry, #33 UR10ConveyorCortex.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path of the robot"},
+                    "ee_link": {"type": "string", "description": "USD path of end-effector link (default: <robot>/panda_hand)"},
+                    "grip_threshold": {"type": "number", "description": "Distance threshold for object pickup (default 0.01m)"},
+                    "force_limit": {"type": "number", "description": "Max sustainable suction force (default 100.0)"},
+                    "torque_limit": {"type": "number", "description": "Max torque (default 100.0)"},
+                    "graph_path": {"type": "string", "description": "OmniGraph path (default <robot>/SuctionGraph)"},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "setup_robot_claim_mutex",
             "description": "Tier A tool — creates a mutex marker prim for shared-resource arbitration between multiple robots. Coordinates access to shared pickup zones, conveyor segments, or stations. Marker has mutex:claimed_by, mutex:claim_count, mutex:robots, mutex:resource_path attrs. Runtime claim/release requires controller hooks; canonical-time tool creates the marker. Unlocks #10 Parallel Picking Duo, #12 Producer/Consumer Bounded Buffer, #13 Leader/Follower Rotary Station, #14 Vision-Gated Bin Picking Duo.",
             "parameters": {
