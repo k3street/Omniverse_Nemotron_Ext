@@ -204,9 +204,11 @@ Each shipped canonical:
 - `create_kit_tray` + `track_slot_occupancy` — 3 scenarios
 - `setup_robot_claim_mutex` — 4 scenarios
 
-**Tier B tools built (5)**: `set_gripper_rotation`, `setup_robot_handoff_signal`, `surface_gripper`, `create_articulated_joint`, `register_moving_obstacle`, plus `drop_targets` extension
+**Tier B tools built (6/8 listed in research)**: `set_gripper_rotation`, `setup_robot_handoff_signal`, `surface_gripper`, `create_articulated_joint`, `register_moving_obstacle`, `setup_cortex_behavior`, plus `drop_targets` extension
 
 **Tier C tools built (4)**: `barcode_reader_sensor`, `create_rotary_table`, `create_gravity_dispenser`, `create_heap_zone`
+
+**Total: 16 production tools shipped** (4 Tier A + 6 Tier B + 4 Tier C + 1 composite + 1 extension)
 
 **Research scenarios fully delivered (12 of 33)**: #4, #5, #10, #11, #12, #15, #16, #19 (partial), #20, #23, #24, #25/27/29/33 (partial — surface_gripper infra in CP-54)
 
