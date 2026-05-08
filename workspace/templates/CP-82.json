@@ -47,7 +47,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin_red",
-    "duration_s": 90
+    "duration_s": 180
   },
   "extends": "CP-81",
   "extension_notes": "CP-82 = CP-81 + color routing. Red cube to red bin, blue cube to blue bin. Color-routing already exists in builtin handler \u2014 this validates the raycast workaround composes with COLOR_ROUTING dispatch.",
