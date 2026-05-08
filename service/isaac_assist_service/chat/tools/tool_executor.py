@@ -29386,11 +29386,49 @@ if _grip is None:
         f"robot wrapper failed to attach its gripper class."
     )
 
-_controller = PickPlaceController(
-    name="builtin_pp_ctrl_" + _ROBOT_TAG,
-    gripper=_robot.gripper,
-    robot_articulation=_robot,
-)
+# Auto-compute end_effector_initial_height: max(source_z, drop_z) + 0.20m.
+# PickPlaceController's default 0.3m is ABSOLUTE world z — when the robot
+# sits on a 0.75m table, EE target z=0.30 is below the table surface and
+# RmpFlow can't reach it. We need world z = max(working zone) + clearance.
+# Inline-compute since _cube_pos / _bin_pos helpers are defined later.
+def _world_pos_inline(path):
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid(): return None
+    cache = UsdGeom.BBoxCache(0, [UsdGeom.Tokens.default_])
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty(): return None
+    c = b.GetMidpoint()
+    return [float(c[0]), float(c[1]), float(c[2])]
+_h1_zs = []
+for _sp in SOURCE_PATHS:
+    _wp = _world_pos_inline(_sp)
+    if _wp is not None: _h1_zs.append(_wp[2])
+if DROP_TARGET:
+    _h1_zs.append(float(DROP_TARGET[2]))
+elif DEST_PATH:
+    _wp_dest = _world_pos_inline(DEST_PATH)
+    if _wp_dest is not None: _h1_zs.append(_wp_dest[2])
+_h1 = (max(_h1_zs) + 0.20) if _h1_zs else 0.30
+print(f"(builtin pp: end_effector_initial_height={{_h1:.3f}}m)")
+
+# universal_robots' PickPlaceController.__init__ doesn't accept
+# end_effector_initial_height; only Franka's does. Try with the kwarg
+# first; fall back to constructing without and setting via reset().
+try:
+    _controller = PickPlaceController(
+        name="builtin_pp_ctrl_" + _ROBOT_TAG,
+        gripper=_robot.gripper,
+        robot_articulation=_robot,
+        end_effector_initial_height=_h1,
+    )
+except TypeError:
+    _controller = PickPlaceController(
+        name="builtin_pp_ctrl_" + _ROBOT_TAG,
+        gripper=_robot.gripper,
+        robot_articulation=_robot,
+    )
+    try: _controller.reset(end_effector_initial_height=_h1)
+    except Exception as _re: print(f"(builtin pp: reset(h1) soft-fail: {{_re}})")
 _art_ctrl = _robot.get_articulation_controller()
 
 # Belt pause/resume — cube needs to be stationary for the PickPlaceController
