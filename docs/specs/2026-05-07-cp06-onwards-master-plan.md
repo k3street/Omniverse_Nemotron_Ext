@@ -171,7 +171,9 @@ Each shipped canonical:
 | CP-31 | Pick-from-pile (destacking) | ✅ form-gate shipped | Sprint 2 | 3 cubes vertically stacked, robot picks top-down via source_paths order. 32/32 build. |
 | CP-32 | 2-color sorter w/ overhead camera | ✅ form-gate shipped | Sprint 2 | 36/36 build. Camera at z=2.5 — too far for cube detection; CP-33 supersedes. |
 | CP-33 | Vision-driven 2-color sorter | ✅✅ vision-gate VERIFIED | Sprint 2 | **First production-verified vision-driven canonical**. Camera [0,1.5,1.5]→[0,0,0.8]. add_vision_classifier_gate maps Cube_red→RedBin, Cube_blue→BlueBin correctly. |
-| CP-34..CP-38 | TBD | 📋 planned | — | — |
+| CP-34 | Vision-driven 3-color sorter | ✅ form-gate shipped | Sprint 2 | Scales CP-33 to 3 colors. 48/48 build. Vision-gate verification skipped (Gemini API credit). |
+| CP-35 | Industrial sortation cell (4-color + reject) | ✅ form-gate shipped | Sprint 2 | 10 cubes → 5 bins via color_routing + fall-through. 106/106 build. |
+| CP-36..CP-38 | TBD | 📋 planned | — | — |
 
 **Empirical drop-precision finding (2026-05-08, 5+3-run benchmarks)**:
 - cuRobo cube-drop precision is **~17cm avg, ±10cm**, NOT the originally-assumed 5cm
