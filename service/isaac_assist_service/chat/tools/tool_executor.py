@@ -29392,9 +29392,9 @@ _belt_sv = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocity") if (_
 _captured_belt = tuple(_belt_sv.Get()) if (_belt_sv and _belt_sv.IsDefined() and _belt_sv.Get()) else None
 _nominal_belt = _captured_belt if (_captured_belt and sum(abs(v) for v in _captured_belt) > 1e-6) else (0.2, 0.0, 0.0)
 def _pause_belt():
-    if _belt_sv: _belt_sv.Set(Gf.Vec3f(0.0, 0.0, 0.0))
+    if _belt_sv: _belt_sv.Set((0, 0, 0))
 def _resume_belt():
-    if _belt_sv: _belt_sv.Set(Gf.Vec3f(*_nominal_belt))
+    if _belt_sv: _belt_sv.Set(_nominal_belt)
 
 # Per-cube state machine: deliver cubes one at a time
 S = {{"delivered": set(), "current": None}}
