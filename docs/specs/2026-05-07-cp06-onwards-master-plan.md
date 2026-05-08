@@ -193,6 +193,8 @@ Each shipped canonical:
 | CP-53 | Producer/consumer bounded buffer | ✅ form-gate shipped | Sprint 2 | 3-slot staging rack between 2 robots + mutex. 38/38 build. Realizes #12. |
 | CP-54 | Surface-gripper (suction) canonical | ✅ form-gate shipped | Sprint 2 | First user of `surface_gripper` tool. 39/39 build. Pattern for #25/27/29/33. |
 | CP-55 | Drawer-open station (prismatic joint) | ✅ build-only | Sprint 2 | First user of `create_articulated_joint`. Cabinet + drawer + 15cm prismatic. 17/17 build. Realizes #30 infrastructure. |
+| CP-56 | Rotary-table demo | ✅ build-only | Sprint 2 | First user of `create_rotary_table`. 4 cubes on rotating disc. 38/38 build. Realizes #13 infrastructure. |
+| CP-57 | Parcel-singulation-from-heap | ✅ form-gate shipped | Sprint 2 | First user of `create_heap_zone`. 5 cubes in golden-angle pile. 20/20 build. Realizes #8 infrastructure. |
 
 **🎉 SPRINT 2 + 3 COMPLETE 🎉**: 46 canonicals (CP-07..CP-52, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 120+ atomic commits since structural work began.
 
@@ -202,7 +204,9 @@ Each shipped canonical:
 - `create_kit_tray` + `track_slot_occupancy` — 3 scenarios
 - `setup_robot_claim_mutex` — 4 scenarios
 
-**Tier B tools built**: `set_gripper_rotation`, `setup_robot_handoff_signal`, `surface_gripper`, `create_articulated_joint`, `drop_targets` extension
+**Tier B tools built (5)**: `set_gripper_rotation`, `setup_robot_handoff_signal`, `surface_gripper`, `create_articulated_joint`, `register_moving_obstacle`, plus `drop_targets` extension
+
+**Tier C tools built (4)**: `barcode_reader_sensor`, `create_rotary_table`, `create_gravity_dispenser`, `create_heap_zone`
 
 **Research scenarios fully delivered (12 of 33)**: #4, #5, #10, #11, #12, #15, #16, #19 (partial), #20, #23, #24, #25/27/29/33 (partial — surface_gripper infra in CP-54)
 
