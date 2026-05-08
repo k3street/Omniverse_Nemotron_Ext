@@ -1401,6 +1401,27 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "create_articulated_joint",
+            "description": "Tier B tool — creates a USD physics joint (revolute/prismatic/fixed/spherical) between two prims for articulated mechanisms (drawers, doors, hinges, levers, rotary tables). Supports axis specification + joint limits + optional drive. Unlocks #13 Leader/Follower Rotary Station + #30 FrankaDrawerOpen.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "joint_path": {"type": "string", "description": "USD path of the joint to create"},
+                    "body0_path": {"type": "string", "description": "USD path of first body (parent/static; optional for grounded joints)"},
+                    "body1_path": {"type": "string", "description": "USD path of second body (child/moving)"},
+                    "joint_type": {"type": "string", "enum": ["revolute", "prismatic", "fixed", "spherical"], "description": "Joint type (default 'revolute')"},
+                    "axis": {"type": "array", "items": {"type": "number"}, "description": "[x,y,z] axis of rotation/translation"},
+                    "limit_lower": {"type": "number", "description": "Lower joint limit (degrees for revolute, meters for prismatic)"},
+                    "limit_upper": {"type": "number", "description": "Upper joint limit"},
+                    "drive_type": {"type": "string", "enum": ["force", "acceleration"], "description": "Optional drive type"},
+                },
+                "required": ["joint_path", "body1_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "surface_gripper",
             "description": "Tier B tool — adds suction/vacuum gripper to a robot via Isaac Sim's OgnSurfaceGripper OmniGraph node. End-effector attaches to nearby objects via FixedJoint when 'close' signal active; detaches on 'open'. Used for pick-and-place of items not gripped by parallel-finger gripper (e.g. flat plates, irregular boxes). Unlocks #25 UR10BinFilling, #27 UR10BinStacking, #29 SurfaceGripperGantry, #33 UR10ConveyorCortex.",
             "parameters": {

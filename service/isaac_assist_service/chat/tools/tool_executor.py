@@ -6497,6 +6497,119 @@ print(json.dumps({{
 DATA_HANDLERS["surface_gripper"] = _handle_surface_gripper
 
 
+async def _handle_create_articulated_joint(args: Dict) -> Dict:
+    """Tier B tool — creates a USD physics joint between two prims for
+    articulated mechanisms (drawers, doors, hinges, sliders).
+
+    Wraps UsdPhysics joint creation for drawer-pull, door-open, lever-actuate,
+    rotary-table scenarios. Joint types: 'revolute' (rotation about axis),
+    'prismatic' (linear sliding), 'fixed' (rigid attachment), 'spherical'
+    (ball joint).
+
+    Args:
+      joint_path:    USD path of the joint to create
+      body0_path:    USD path of first body (parent / static frame)
+      body1_path:    USD path of second body (child / moving frame)
+      joint_type:    'revolute' | 'prismatic' | 'fixed' | 'spherical' (default 'revolute')
+      axis:          [x, y, z] axis of rotation/translation (default [0, 0, 1])
+      limit_lower:   joint limit (degrees for revolute, meters for prismatic)
+      limit_upper:   joint limit (default open: -inf to +inf)
+      drive_type:    'force' | 'acceleration' | None (default None = passive)
+
+    Returns: {joint_path, joint_type, body0, body1, axis}
+    """
+    joint_path = args["joint_path"]
+    body0_path = args.get("body0_path", "")
+    body1_path = args["body1_path"]
+    joint_type = args.get("joint_type", "revolute")
+    axis = args.get("axis", [0, 0, 1])
+    limit_lower = args.get("limit_lower")
+    limit_upper = args.get("limit_upper")
+    drive_type = args.get("drive_type")
+
+    if joint_type not in ("revolute", "prismatic", "fixed", "spherical"):
+        return {"type": "error", "error": f"unsupported joint_type: {joint_type!r}"}
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdPhysics, Sdf, Gf
+stage = omni.usd.get_context().get_stage()
+
+joint_path = {joint_path!r}
+body0_path = {body0_path!r}
+body1_path = {body1_path!r}
+joint_type = {joint_type!r}
+axis = {axis!r}
+
+# Validate bodies exist
+if body0_path and not stage.GetPrimAtPath(body0_path).IsValid():
+    print(json.dumps({{"error": f"body0 not found: {{body0_path}}"}})); raise SystemExit
+if not stage.GetPrimAtPath(body1_path).IsValid():
+    print(json.dumps({{"error": f"body1 not found: {{body1_path}}"}})); raise SystemExit
+
+# Create joint per type
+if joint_type == "revolute":
+    joint = UsdPhysics.RevoluteJoint.Define(stage, Sdf.Path(joint_path))
+elif joint_type == "prismatic":
+    joint = UsdPhysics.PrismaticJoint.Define(stage, Sdf.Path(joint_path))
+elif joint_type == "fixed":
+    joint = UsdPhysics.FixedJoint.Define(stage, Sdf.Path(joint_path))
+elif joint_type == "spherical":
+    joint = UsdPhysics.SphericalJoint.Define(stage, Sdf.Path(joint_path))
+
+if body0_path:
+    joint.CreateBody0Rel().SetTargets([Sdf.Path(body0_path)])
+joint.CreateBody1Rel().SetTargets([Sdf.Path(body1_path)])
+
+# Axis (revolute/prismatic): UsdPhysics convention is 'X', 'Y', 'Z' string — pick max-mag axis
+if joint_type in ("revolute", "prismatic"):
+    abs_axis = [abs(axis[0]), abs(axis[1]), abs(axis[2])]
+    idx = abs_axis.index(max(abs_axis))
+    joint.CreateAxisAttr().Set(["X", "Y", "Z"][idx])
+
+# Limits
+limit_lower = {limit_lower!r}
+limit_upper = {limit_upper!r}
+if limit_lower is not None or limit_upper is not None:
+    if joint_type in ("revolute", "prismatic"):
+        if limit_lower is not None:
+            joint.CreateLowerLimitAttr().Set(float(limit_lower))
+        if limit_upper is not None:
+            joint.CreateUpperLimitAttr().Set(float(limit_upper))
+
+# Drive (optional)
+drive_type = {drive_type!r}
+if drive_type and joint_type in ("revolute", "prismatic"):
+    drive_api_token = "angular" if joint_type == "revolute" else "linear"
+    drive = UsdPhysics.DriveAPI.Apply(joint.GetPrim(), drive_api_token)
+    drive.CreateTypeAttr().Set(drive_type)
+    drive.CreateMaxForceAttr().Set(1e6)
+    drive.CreateDampingAttr().Set(1e3)
+    drive.CreateStiffnessAttr().Set(1e4)
+
+print(json.dumps({{
+    "joint_path": joint_path,
+    "joint_type": joint_type,
+    "body0": body0_path,
+    "body1": body1_path,
+    "axis": axis,
+    "drive": drive_type,
+}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=15)
+    return {
+        "joint_path": joint_path,
+        "joint_type": joint_type,
+        "body0": body0_path,
+        "body1": body1_path,
+        "axis": axis,
+        "raw": (res.get("output") or "")[-300:],
+    }
+
+
+DATA_HANDLERS["create_articulated_joint"] = _handle_create_articulated_joint
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
