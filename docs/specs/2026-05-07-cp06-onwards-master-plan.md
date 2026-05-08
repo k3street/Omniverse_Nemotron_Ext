@@ -188,8 +188,20 @@ Each shipped canonical:
 | CP-48 | TRUE runtime-vision inspect-and-reject | ✅✅ vision-derived routing | Sprint 2 | 5 cubes (4 good + 1 reject) classified via vision at install time. 56/56 build. |
 | CP-49 | Kitting station (4-slot 2x2) | ✅ form-gate shipped | Sprint 2 | First user of `create_kit_tray`. 4 cubes → 4 designated slots. 38/38 build. Realizes #5 Kitting (multi-source to tray). |
 | CP-50 | Vision-driven kitting (50th canonical) | ✅✅ vision-derived routing | Sprint 2 | Combines vision + 2 separate kit trays (RedTray + BlueTray). 49/49 build. |
+| CP-51 | Robot-to-robot handoff station | ✅ form-gate shipped | Sprint 2 | First user of `setup_robot_handoff_signal`. 2 Frankas + handoff marker. 24/24 build. Realizes #11. |
+| CP-52 | Parallel-picking duo (mutex) | ✅ form-gate shipped | Sprint 2 | First user of `setup_robot_claim_mutex`. 2 Frankas share conveyor. 42/42 build. Realizes #10. |
 
-**🎉 SPRINT 2 COMPLETE 🎉**: 40 canonicals (CP-07..CP-46, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 97+ atomic commits since structural work began.
+**🎉 SPRINT 2 + 3 COMPLETE 🎉**: 46 canonicals (CP-07..CP-52, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 120+ atomic commits since structural work began.
+
+**ALL 4 Tier A tools built**:
+- `compute_stack_placement` v1+v2+v3 — 7 scenarios
+- `add_vision_classifier_gate` + `setup_pick_place_with_vision` composite — 6 scenarios
+- `create_kit_tray` + `track_slot_occupancy` — 3 scenarios
+- `setup_robot_claim_mutex` — 4 scenarios
+
+**Tier B tools built**: `set_gripper_rotation`, `setup_robot_handoff_signal`, `drop_targets` extension
+
+**Research scenarios fully delivered (10 of 33)**: #4, #5, #10, #11, #15, #16, #19 (partial), #20, #23, #24
 
 Plus 5 migrated baseline canonicals (CP-01..CP-05) = **45 canonicals total in production-ready state**.
 
