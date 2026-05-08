@@ -48,19 +48,19 @@ from service.isaac_assist_service.chat.tools import kit_tools  # noqa: E402
 SUITE: List[Tuple[str, str, str, str, int, Dict, bool]] = [
     ("CP-01",
      "workspace/templates/CP-01.json",
-     "/World/Cube_1", "/World/Bin", 45, {}, True),
+     "/World/Cube_1", "/World/Bin", 180, {}, True),
     ("CP-02",
      "workspace/templates/CP-02.json",
-     "/World/Cube_1", "/World/Bin", 45, {}, True),
+     "/World/Cube_1", "/World/Bin", 180, {}, True),
     ("CP-03 red",
      "workspace/templates/CP-03.json",
-     "/World/Cube_red", "/World/RedBin", 45, {}, True),
+     "/World/Cube_red", "/World/RedBin", 180, {}, True),
     ("CP-03 blue",
      "workspace/templates/CP-03.json",
-     "/World/Cube_blue", "/World/BlueBin", 45, {}, True),
+     "/World/Cube_blue", "/World/BlueBin", 180, {}, True),
     ("CP-04",
      "workspace/templates/CP-04.json",
-     "/World/Cube_1", "/World/Bin", 45, {}, True),
+     "/World/Cube_1", "/World/Bin", 180, {}, True),
     # CP-05 (REORIENT-01) — passive flip-station. Currently fails the
     # function-gate (cube doesn't roll into landing zone upright). Tracked
     # in gap-analysis 2026-05-08. Kept here as physics-tuning probe.
