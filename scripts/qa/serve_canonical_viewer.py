@@ -333,7 +333,8 @@ nav a {
 nav a:hover { background: var(--panel2); }
 nav a.sel { border-left-color: var(--accent); background: #18283a; color: #fff; }
 nav a .label { flex: 1; }
-nav a .badge { font-size: 10px; opacity: 0.8; }
+nav a .badge { font-size: 10px; opacity: 0.8; margin-left: 0.3rem; }
+nav a .badge.nbg { color: var(--fg-dim); margin-right: 0.2rem; }
 .ok { color: var(--ok); }
 .fail { color: var(--fail); }
 .warn { color: var(--warn); }
@@ -456,7 +457,7 @@ def render_nav_items(canonicals: list[str], audit: dict[str, dict],
         cls = "sel" if label == selected else ""
         runs = load_runs(label)
         latest = runs[-1] if runs else None
-        f = audit.get(label) or (latest if latest else None)
+        a = audit.get(label)
         # Status decisions: prefer most recent run, fall back to audit
         if latest and latest.get("func_ok") is True:
             status = "func-ok"
@@ -467,15 +468,19 @@ def render_nav_items(canonicals: list[str], audit: dict[str, dict],
         elif latest and latest.get("instantiated") is False:
             status = "build-fail"
             badge = '<span class="badge fail">✗</span>'
-        elif f and f.get("success"):
+        elif a and a.get("success"):
             status = "func-ok"
             badge = '<span class="badge ok">●</span>'
-        elif f and f.get("success") is False:
+        elif a and a.get("success") is False:
             status = "form-ok"  # audit ran, gate failed but build worked
             badge = '<span class="badge fail">○</span>'
         else:
             status = "untested"
             badge = '<span class="badge muted">·</span>'
+        # Feedback count adornment
+        fb_count = len(load_feedback(label))
+        if fb_count:
+            badge = f'<span class="badge nbg">📝{fb_count}</span>' + badge
         items.append(
             f'<a class="{cls}" href="/?id={label}" data-status="{status}" data-id="{label}">'
             f'<span class="label">{label}</span>{badge}</a>'
@@ -759,12 +764,133 @@ document.querySelectorAll('nav .filter').forEach(f => {{
 }});
 const sb = document.getElementById('search');
 if (sb) sb.addEventListener('input', applyFilter);
+
+// Auto-scroll the nav so the selected canonical is visible (when navigating
+// from the URL or via j/k).
+const sel = document.querySelector('nav a.sel');
+if (sel) sel.scrollIntoView({{ block: 'nearest' }});
+
+// Browser-side prefetch on hover — clicking a different canonical loads
+// faster because the page is already in the HTTP cache.
+document.querySelectorAll('nav a').forEach(a => {{
+  a.addEventListener('mouseenter', () => {{
+    const link = document.createElement('link');
+    link.rel = 'prefetch';
+    link.href = a.href;
+    document.head.appendChild(link);
+  }}, {{ once: true }});
+}});
 </script>
 </main>
 """
 
 
-def render_page(selected: str | None) -> str:
+def build_report() -> dict:
+    """Aggregate every canonical + audit + runs + feedback into one JSON
+    blob. Useful for offline analysis (export to CSV, plot trends, etc.).
+    """
+    audit = load_func_gate_audit()
+    out = {"generated": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+           "templates_dir": str(TEMPLATES_DIR), "canonicals": []}
+    for label in list_canonicals():
+        tmpl = load_template(label) or {}
+        runs = load_runs(label)
+        fb = load_feedback(label)
+        s = latest_run_summary(label, audit)
+        out["canonicals"].append({
+            "id": label,
+            "goal": (tmpl.get("goal") or "")[:300],
+            "extends": tmpl.get("extends"),
+            "verified_status": tmpl.get("verified_status"),
+            "tools_used": tmpl.get("tools_used") or [],
+            "n_tools": len(tmpl.get("tools_used") or []),
+            "n_failure_modes": len(tmpl.get("failure_modes") or []),
+            "form_passes": s["form_passes"],
+            "form_total": s["form_total"],
+            "form_wilson": [wilson_lower(s["form_passes"], s["form_total"]),
+                            wilson_upper(s["form_passes"], s["form_total"])] if s["form_total"] else None,
+            "func_passes": s["func_passes"],
+            "func_total": s["func_total"],
+            "func_wilson": [wilson_lower(s["func_passes"], s["func_total"]),
+                            wilson_upper(s["func_passes"], s["func_total"])] if s["func_total"] else None,
+            "audit_func_ok": s["audit"].get("success") if s["audit"] else None,
+            "n_runs": len(runs),
+            "n_feedback": len(fb),
+        })
+    return out
+
+
+def render_summary() -> str:
+    audit = load_func_gate_audit()
+    canonicals = list_canonicals()
+    rows = []
+    counters = {"func-ok": 0, "form-ok": 0, "build-fail": 0, "untested": 0}
+    for label in canonicals:
+        runs = load_runs(label)
+        latest = runs[-1] if runs else None
+        a = audit.get(label)
+        if latest and latest.get("func_ok") is True:
+            cls, status = "ok", "func ✓"
+        elif latest and latest.get("form_ok") is True:
+            cls, status = "warn", "form ✓"
+        elif latest and latest.get("instantiated") is False:
+            cls, status = "fail", "build ✗"
+        elif a and a.get("success"):
+            cls, status = "ok", "func ✓"
+        elif a:
+            cls, status = "fail", "func ✗"
+        else:
+            cls, status = "muted", "untested"
+        if cls == "ok": counters["func-ok"] += 1
+        elif cls == "warn": counters["form-ok"] += 1
+        elif cls == "fail": counters["build-fail"] += 1
+        else: counters["untested"] += 1
+        s = latest_run_summary(label, audit)
+        n_fb = len(load_feedback(label))
+        n_runs = s["runs"]
+        wilson_str = ""
+        if s["func_total"] >= 1:
+            lo = wilson_lower(s["func_passes"], s["func_total"]) * 100
+            hi = wilson_upper(s["func_passes"], s["func_total"]) * 100
+            wilson_str = f'[{lo:.0f}%, {hi:.0f}%]'
+        rows.append(
+            f'<tr><td><a href="/?id={label}">{label}</a></td>'
+            f'<td><span class="cell-{cls}">{status}</span></td>'
+            f'<td class="muted">{n_runs}</td>'
+            f'<td class="muted">{n_fb}</td>'
+            f'<td class="muted">{wilson_str}</td>'
+            f'<td>{esc(((load_template(label) or {{}}).get("goal") or "")[:90])}</td></tr>'
+        )
+    counter_html = (f'<span class="ok">● {counters["func-ok"]} func-ok</span>'
+                    f' · <span class="warn">○ {counters["form-ok"]} form-ok</span>'
+                    f' · <span class="fail">✗ {counters["build-fail"]} build-fail</span>'
+                    f' · <span class="muted">· {counters["untested"]} untested</span>')
+    return PAGE_HEAD + f"""<body>
+<header><h1>Canonical Summary</h1>
+<span class="stats">{len(canonicals)} canonicals · {counter_html}</span>
+<span class="spacer"></span>
+<a style="color:var(--link)" href="/">← back to review</a>
+</header>
+<style>
+  table {{ border-collapse: collapse; width: 100%; font-size: 12px; }}
+  th, td {{ padding: 0.3rem 0.6rem; border-bottom: 1px solid var(--border);
+            text-align: left; }}
+  th {{ color: var(--fg-dim); font-weight: 600; text-transform: uppercase;
+        font-size: 10.5px; letter-spacing: 0.05em; background: var(--panel); }}
+  .cell-ok {{ color: var(--ok); }}
+  .cell-warn {{ color: var(--warn); }}
+  .cell-fail {{ color: var(--fail); }}
+  .cell-muted {{ color: var(--fg-muted); }}
+  td a {{ color: var(--link); text-decoration: none; }}
+  td a:hover {{ text-decoration: underline; }}
+</style>
+<main style="padding:0">
+<table>
+<thead><tr><th>ID</th><th>Status</th><th># runs</th><th># notes</th>
+  <th>Wilson 95% (func)</th><th>Goal</th></tr></thead>
+<tbody>{"".join(rows)}</tbody></table>
+</main></body>
+"""
     canonicals = list_canonicals()
     if not canonicals:
         return PAGE_HEAD + f"<body><h1>No canonicals in {esc(str(TEMPLATES_DIR))}</h1></body>"
@@ -791,6 +917,7 @@ def render_page(selected: str | None) -> str:
         PAGE_HEAD
         + f'<body><header><h1>Canonical Review</h1>{head_stats}'
         + '<span class="spacer"></span>'
+        + '<a href="/summary" style="color:var(--link);font-size:12px">summary ↗</a>'
         + '<span class="kbd-hints">'
         + '<kbd>/</kbd> search · <kbd>j</kbd>/<kbd>k</kbd> next/prev · '
         + '<kbd>b</kbd>/<kbd>v</kbd>/<kbd>f</kbd> build/verify/full'
@@ -845,6 +972,9 @@ class Handler(BaseHTTPRequestHandler):
             selected = (qs.get("id") or [None])[0]
             self._send_html(render_page(selected))
             return
+        if u.path == "/summary":
+            self._send_html(render_summary())
+            return
         if u.path == "/api/list":
             self._send_json({"canonicals": list_canonicals()})
             return
@@ -858,6 +988,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if u.path == "/api/audit":
             self._send_json({"audit": load_func_gate_audit()})
+            return
+        if u.path == "/api/report":
+            self._send_json(build_report())
             return
         self._send_html("<h1>404</h1>", 404)
 
