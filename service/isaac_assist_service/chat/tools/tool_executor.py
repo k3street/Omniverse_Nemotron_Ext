@@ -32245,7 +32245,20 @@ def _on_step(dt):
             _apply_joint_target(q_target)
 
             if elapsed >= plan["total_t"]:
-                # Delivered (or at least trajectory finished)
+                # Delivered (or at least trajectory finished). Force-release
+                # any held UR10 FixedJoint — even if cube is far from drop
+                # (drop-precision-fix held it, but cycle is ending so EE must
+                # be freed for next cube). Cube falls wherever it is.
+                if S.get("grasp_joint"):
+                    try: _detach_cube(S["grasp_joint"])
+                    except Exception: pass
+                    S["grasp_joint"] = None
+                if _UR10_FJ_PATH[0]:
+                    try:
+                        if stage.GetPrimAtPath(_UR10_FJ_PATH[0]).IsValid():
+                            stage.RemovePrim(_UR10_FJ_PATH[0])
+                    except Exception: pass
+                    _UR10_FJ_PATH[0] = None
                 S["cubes"] += 1
                 _a_cubes.Set(S["cubes"])
                 if S["picked_path"]:
