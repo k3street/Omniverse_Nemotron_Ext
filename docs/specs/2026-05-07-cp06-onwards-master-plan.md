@@ -192,6 +192,7 @@ Each shipped canonical:
 | CP-52 | Parallel-picking duo (mutex) | ✅ form-gate shipped | Sprint 2 | First user of `setup_robot_claim_mutex`. 2 Frankas share conveyor. 42/42 build. Realizes #10. |
 | CP-53 | Producer/consumer bounded buffer | ✅ form-gate shipped | Sprint 2 | 3-slot staging rack between 2 robots + mutex. 38/38 build. Realizes #12. |
 | CP-54 | Surface-gripper (suction) canonical | ✅ form-gate shipped | Sprint 2 | First user of `surface_gripper` tool. 39/39 build. Pattern for #25/27/29/33. |
+| CP-55 | Drawer-open station (prismatic joint) | ✅ build-only | Sprint 2 | First user of `create_articulated_joint`. Cabinet + drawer + 15cm prismatic. 17/17 build. Realizes #30 infrastructure. |
 
 **🎉 SPRINT 2 + 3 COMPLETE 🎉**: 46 canonicals (CP-07..CP-52, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 120+ atomic commits since structural work began.
 
@@ -201,7 +202,7 @@ Each shipped canonical:
 - `create_kit_tray` + `track_slot_occupancy` — 3 scenarios
 - `setup_robot_claim_mutex` — 4 scenarios
 
-**Tier B tools built**: `set_gripper_rotation`, `setup_robot_handoff_signal`, `drop_targets` extension
+**Tier B tools built**: `set_gripper_rotation`, `setup_robot_handoff_signal`, `surface_gripper`, `create_articulated_joint`, `drop_targets` extension
 
 **Research scenarios fully delivered (12 of 33)**: #4, #5, #10, #11, #12, #15, #16, #19 (partial), #20, #23, #24, #25/27/29/33 (partial — surface_gripper infra in CP-54)
 
