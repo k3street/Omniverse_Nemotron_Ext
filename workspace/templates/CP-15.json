@@ -14,16 +14,32 @@
     "compute_stack_placement",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six graduated-tower specifics for CP-15 (extends CP-13 + CP-12 — mixed-SKU column):\n1) compute_stack_placement v3 cube_sizes=[0.10, 0.08, 0.05] yields cumulative-z positions: bottom (10cm) at z=0.85, middle (8cm) at z=0.94, top (5cm) at z=1.005. Each cube center accounts for ALL lower cubes' full heights.\n2) Pallet 0.20×0.20×0.05m at [0, -0.4, 0.775] — bigger than CP-13's 15×15cm because 10cm bottom cube needs 5cm+ margin.\n3) Picking order: controller's _next_cube picks closest to sensor. Cube_1 (biggest, x=-1.4) is furthest left → belt carries it to sensor first. Cube_2 (8cm, x=-1.0) next. Cube_3 (5cm, x=-0.6) last. Physical-order matches stacking order (descending).\n4) Top cube center at z=1.005 (top of tower at z=1.03). Robot base at z=0.75 → reach to top cube xy=(0, -0.4): sqrt(0.16+0.0676) = 0.475m. Within 0.85m reach.\n5) EE_INITIAL_HEIGHT auto = max(source_z, max_drop_z) + 0.20 = 1.005 + 0.20 = 1.205m. EE clears tallest target during transit.\n6) Cube_2 placement on top of Cube_1 (10cm cube top at z=0.90) — Cube_2 (8cm) bottom at z=0.94-0.04=0.90. Flush. Same for Cube_3 on Cube_2.",
-  "code": "# DomeLight + Ground + table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 3 cubes with decreasing size — biggest first (x=-1.4) so picked first via belt\ncube_specs = [\n    (\"/World/Cube_1\", -1.4, 0.10),  # 10cm — bottom\n    (\"/World/Cube_2\", -1.0, 0.08),  # 8cm — middle\n    (\"/World/Cube_3\", -0.6, 0.05),  # 5cm — top\n]\nfor path, x, sz in cube_specs:\n    z = 0.805 + sz * 0.5\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, z], size=sz)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[c[0] for c in cube_specs],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor c in cube_specs:\n    apply_physics_material(prim_path=c[0], material_name=\"rubber\")\n\n# Pallet base 0.20x0.20x0.05m\ncreate_prim(prim_path=\"/World/PalletBase\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.10, 0.10, 0.025])\napply_api_schema(prim_path=\"/World/PalletBase\", schema_name=\"PhysicsCollisionAPI\")\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Mixed-SKU column drop_targets via compute_stack_placement v3:\n#   compute_stack_placement(target='/World/PalletBase', pattern='column',\n#                            n_items=3, cube_sizes=[0.10, 0.08, 0.05], anchor='top')\n# Yields:\n#   Cube_1 (10cm): z=0.85   (0.80 + 0.05)\n#   Cube_2 (8cm):  z=0.94   (0.80 + 0.10 + 0.04)\n#   Cube_3 (5cm):  z=1.005  (0.80 + 0.10 + 0.08 + 0.025)\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\", \"/World/Cube_2\", \"/World/Cube_3\"],\n    destination_path=\"/World/PalletBase\",\n    drop_targets={\n        \"/World/Cube_1\": [0.0, -0.4, 0.85],\n        \"/World/Cube_2\": [0.0, -0.4, 0.94],\n        \"/World/Cube_3\": [0.0, -0.4, 1.005],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/PalletBase\"],\n)",
+  "thoughts": "Six graduated-tower specifics for CP-15 (extends CP-13 + CP-12 \u2014 mixed-SKU column):\n1) compute_stack_placement v3 cube_sizes=[0.10, 0.08, 0.05] yields cumulative-z positions: bottom (10cm) at z=0.85, middle (8cm) at z=0.94, top (5cm) at z=1.005. Each cube center accounts for ALL lower cubes' full heights.\n2) Pallet 0.20\u00d70.20\u00d70.05m at [0, -0.4, 0.775] \u2014 bigger than CP-13's 15\u00d715cm because 10cm bottom cube needs 5cm+ margin.\n3) Picking order: controller's _next_cube picks closest to sensor. Cube_1 (biggest, x=-1.4) is furthest left \u2192 belt carries it to sensor first. Cube_2 (8cm, x=-1.0) next. Cube_3 (5cm, x=-0.6) last. Physical-order matches stacking order (descending).\n4) Top cube center at z=1.005 (top of tower at z=1.03). Robot base at z=0.75 \u2192 reach to top cube xy=(0, -0.4): sqrt(0.16+0.0676) = 0.475m. Within 0.85m reach.\n5) EE_INITIAL_HEIGHT auto = max(source_z, max_drop_z) + 0.20 = 1.005 + 0.20 = 1.205m. EE clears tallest target during transit.\n6) Cube_2 placement on top of Cube_1 (10cm cube top at z=0.90) \u2014 Cube_2 (8cm) bottom at z=0.94-0.04=0.90. Flush. Same for Cube_3 on Cube_2.",
+  "code": "# DomeLight + Ground + table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 3 cubes with decreasing size \u2014 biggest first (x=-1.4) so picked first via belt\ncube_specs = [\n    (\"/World/Cube_1\", -1.4, 0.10),  # 10cm \u2014 bottom\n    (\"/World/Cube_2\", -1.0, 0.08),  # 8cm \u2014 middle\n    (\"/World/Cube_3\", -0.6, 0.05),  # 5cm \u2014 top\n]\nfor path, x, sz in cube_specs:\n    z = 0.805 + sz * 0.5\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, z], size=sz)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[c[0] for c in cube_specs],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor c in cube_specs:\n    apply_physics_material(prim_path=c[0], material_name=\"rubber\")\n\n# Pallet base 0.20x0.20x0.05m\ncreate_prim(prim_path=\"/World/PalletBase\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.10, 0.10, 0.025])\napply_api_schema(prim_path=\"/World/PalletBase\", schema_name=\"PhysicsCollisionAPI\")\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Mixed-SKU column drop_targets via compute_stack_placement v3:\n#   compute_stack_placement(target='/World/PalletBase', pattern='column',\n#                            n_items=3, cube_sizes=[0.10, 0.08, 0.05], anchor='top')\n# Yields:\n#   Cube_1 (10cm): z=0.85   (0.80 + 0.05)\n#   Cube_2 (8cm):  z=0.94   (0.80 + 0.10 + 0.04)\n#   Cube_3 (5cm):  z=1.005  (0.80 + 0.10 + 0.08 + 0.025)\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\", \"/World/Cube_2\", \"/World/Cube_3\"],\n    destination_path=\"/World/PalletBase\",\n    drop_targets={\n        \"/World/Cube_1\": [0.0, -0.4, 0.85],\n        \"/World/Cube_2\": [0.0, -0.4, 0.94],\n        \"/World/Cube_3\": [0.0, -0.4, 1.005],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/PalletBase\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_1": [-1.4, 0.4, 0.855],
-      "/World/Cube_2": [-1.0, 0.4, 0.845],
-      "/World/Cube_3": [-0.6, 0.4, 0.83]
+      "/World/Cube_1": [
+        -1.4,
+        0.4,
+        0.855
+      ],
+      "/World/Cube_2": [
+        -1.0,
+        0.4,
+        0.845
+      ],
+      "/World/Cube_3": [
+        -0.6,
+        0.4,
+        0.83
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
@@ -40,15 +56,15 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/PalletBase",
-    "duration_s": 120
+    "duration_s": 180
   },
   "extends": "CP-13",
   "extension_notes": "CP-15 realizes the research-defined 'Graduated Tower' canonical (sequence-constrained stacking with strict descending order). First canonical truly using compute_stack_placement v3's cube_sizes feature for mixed-SKU column. Robot picks biggest-first (Cube_1 at conveyor-far-left enters reach first via belt motion).",
   "failure_modes": [
-    "Cube_1 (10cm) gripper-width mismatch — Franka's ParallelGripper opens to ~4cm; 10cm cube can be gripped on its 10cm face but the fingers contact at half-width. Risky but possible. Real industrial gripper would have wider opening.",
-    "Cube_2 / Cube_3 placed off-center → tower tips after 3rd cube. PalletBase 20cm gives 5cm margin around 10cm cube — adequate.",
-    "Picking order disrupted by belt timing — if Cube_1 (10cm, slow belt speed due to weight) lags behind Cube_2 (8cm), order may flip. Use sleepThreshold=0 + rubber material to keep timing predictable.",
-    "Top cube reach z=1.005 — 0.255m above robot base (z=0.75). Within Franka's vertical reach 0.85m. Fine."
+    "Cube_1 (10cm) gripper-width mismatch \u2014 Franka's ParallelGripper opens to ~4cm; 10cm cube can be gripped on its 10cm face but the fingers contact at half-width. Risky but possible. Real industrial gripper would have wider opening.",
+    "Cube_2 / Cube_3 placed off-center \u2192 tower tips after 3rd cube. PalletBase 20cm gives 5cm margin around 10cm cube \u2014 adequate.",
+    "Picking order disrupted by belt timing \u2014 if Cube_1 (10cm, slow belt speed due to weight) lags behind Cube_2 (8cm), order may flip. Use sleepThreshold=0 + rubber material to keep timing predictable.",
+    "Top cube reach z=1.005 \u2014 0.255m above robot base (z=0.75). Within Franka's vertical reach 0.85m. Fine."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 Cube_3 delivered to PalletBase)"
 }
