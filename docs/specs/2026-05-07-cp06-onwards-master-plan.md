@@ -199,6 +199,11 @@ Each shipped canonical:
 | CP-59 | Vision-gated bin-picking duo (#14) | ⚠ build 51/52 | Sprint 2 | Combines vision + mutex + heap. Vision returned 0 (heap overlap confused Gemini). Pattern shape valid. |
 | CP-60 | Recirculation-loop demo (#17) | ✅ build-only | Sprint 2 | First user of `create_recirculation_loop`. 4-segment closed loop. 13/13 build. |
 | CP-61 | Cortex-Franka block-stacking (#28) | ✅ build-only | Sprint 2 | First user of `setup_cortex_behavior` + `register_moving_obstacle`. 34/34 build. Form-gate skip (Cortex ≠ pick-place). |
+| CP-62 | Surface-gripper gantry (#29) | ✅ form-gate shipped | Sprint 2 | First user of `create_linear_axis_robot`. 40/40 build. |
+| CP-63 | SDG grasp-pose-sampler (#32) | ✅ build-only | Sprint 2 | `setup_grasp_pose_sampler` config. 17/17 build. |
+| CP-64 | Nav-robot RoboParty (#31) | ✅ build-only | Sprint 2 | Carter AMR + `setup_nav_robot`. 7/7 build. |
+| CP-65 | Two-cell kit-tray relay (#6) | ✅ form-gate shipped | Sprint 2 | 2 Frankas + kit tray + handoff. 44/44 build. |
+| CP-66 | Recycling multi-sensor (#18) | ✅ form-gate shipped | Sprint 2 | 4-material sortation via barcode_reader + nir_material_sensor. 59/59 build. |
 
 **🎉 SPRINT 2 + 3 COMPLETE 🎉**: 46 canonicals (CP-07..CP-52, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 120+ atomic commits since structural work began.
 
