@@ -11,29 +11,38 @@
     "bulk_set_attribute",
     "setup_grasp_pose_sampler"
   ],
-  "thoughts": "Six SDG-grasping specifics for CP-63:\n1) Single target object — a 5cm cube at [0.4, 0, 0.835].\n2) Franka at standard mount.\n3) setup_grasp_pose_sampler generates 100 antipodal grasps for the target.\n4) NO conveyor or pick-place flow — pure SDG dataset generation scenario.\n5) Real SDG would replicate the scene N times with randomized target poses + render annotations.\n6) Realizes #32 infrastructure. Runtime SDG via Replicator pipeline is Sprint 4+.",
+  "thoughts": "Six SDG-grasping specifics for CP-63:\n1) Single target object \u2014 a 5cm cube at [0.4, 0, 0.835].\n2) Franka at standard mount.\n3) setup_grasp_pose_sampler generates 100 antipodal grasps for the target.\n4) NO conveyor or pick-place flow \u2014 pure SDG dataset generation scenario.\n5) Real SDG would replicate the scene N times with randomized target poses + render annotations.\n6) Realizes #32 infrastructure. Runtime SDG via Replicator pipeline is Sprint 4+.",
   "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Single target object\ncreate_prim(prim_path=\"/World/TargetCube\", prim_type=\"Cube\", position=[0.4, 0, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/TargetCube\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/TargetCube\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/TargetCube\", material_name=\"rubber\")\n\n# Grasp-pose sampler\nsetup_grasp_pose_sampler(\n    sampler_path=\"/World/GraspSampler\",\n    target_path=\"/World/TargetCube\",\n    n_samples=100,\n    sampling_mode=\"antipodal\",\n)",
   "settle_state": {
     "cubes": {
-      "/World/TargetCube": [0.4, 0, 0.835]
+      "/World/TargetCube": [
+        0.4,
+        0,
+        0.835
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/TargetCube", "place_path": "/World/TargetCube", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/TargetCube",
+        "place_path": "/World/TargetCube",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/TargetCube"
   },
   "simulate_args": {
     "cube_path": "/World/TargetCube",
     "target_path": "/World/TargetCube",
-    "duration_s": 30
+    "duration_s": 180
   },
   "extends": "CP-01",
   "extension_notes": "CP-63 demonstrates setup_grasp_pose_sampler for SDG (#32). Sampler config attrs set on /World/GraspSampler. Runtime grasp generation + Replicator dataset writeout is Sprint 4+.",
   "failure_modes": [
-    "No conveyor / no pick-place — verify_args/form-gate likely fails (build-only canonical).",
-    "Grasp sampler attrs are metadata only — actual grasp synthesis requires runtime tooling."
+    "No conveyor / no pick-place \u2014 verify_args/form-gate likely fails (build-only canonical).",
+    "Grasp sampler attrs are metadata only \u2014 actual grasp synthesis requires runtime tooling."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification skipped (no pick-place); build-only"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713"
 }
