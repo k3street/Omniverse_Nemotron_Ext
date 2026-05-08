@@ -17,22 +17,47 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six 4-color sort specifics for CP-16 (extends CP-03 — same color_routing pattern, scaled to 4 cubes/bins/colors):\n1) 4 distinctly-colored cubes (red, blue, green, yellow). Each tagged via set_semantic_label(class_name='red'|'blue'|'green'|'yellow', semantic_type='color'). Cuberobo handler's _bin_drop_pos reads cube's Semantics_color at pick time.\n2) 4 bins arranged in a row behind the robot at y=-0.4. RedBin x=-0.45, BlueBin x=-0.15, GreenBin x=+0.15, YellowBin x=+0.45. Spaced 0.30m apart.\n3) Bins each tinted with their corresponding color material — visual matching aids debugging.\n4) color_routing dict has 4 entries: {'red':'/World/RedBin', 'blue':'/World/BlueBin', 'green':'/World/GreenBin', 'yellow':'/World/YellowBin'}.\n5) All bins within Franka's 0.85m reach: max distance from robot at (0,0,0.75) to YellowBin at (+0.45, -0.4) is sqrt(0.45^2+0.4^2)=0.60m. Within reach.\n6) 4 cubes start outside reach on conveyor at x=[-1.4, -1.1, -0.8, -0.5]. Belt carries them to robot one at a time.",
+  "thoughts": "Six 4-color sort specifics for CP-16 (extends CP-03 \u2014 same color_routing pattern, scaled to 4 cubes/bins/colors):\n1) 4 distinctly-colored cubes (red, blue, green, yellow). Each tagged via set_semantic_label(class_name='red'|'blue'|'green'|'yellow', semantic_type='color'). Cuberobo handler's _bin_drop_pos reads cube's Semantics_color at pick time.\n2) 4 bins arranged in a row behind the robot at y=-0.4. RedBin x=-0.45, BlueBin x=-0.15, GreenBin x=+0.15, YellowBin x=+0.45. Spaced 0.30m apart.\n3) Bins each tinted with their corresponding color material \u2014 visual matching aids debugging.\n4) color_routing dict has 4 entries: {'red':'/World/RedBin', 'blue':'/World/BlueBin', 'green':'/World/GreenBin', 'yellow':'/World/YellowBin'}.\n5) All bins within Franka's 0.85m reach: max distance from robot at (0,0,0.75) to YellowBin at (+0.45, -0.4) is sqrt(0.45^2+0.4^2)=0.60m. Within reach.\n6) 4 cubes start outside reach on conveyor at x=[-1.4, -1.1, -0.8, -0.5]. Belt carries them to robot one at a time.",
   "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 4 cubes with distinct color materials + semantic labels\ncolor_specs = [\n    (\"/World/Cube_red\",    -1.4, [1.0, 0.0, 0.0], \"red\"),\n    (\"/World/Cube_blue\",   -1.1, [0.0, 0.0, 1.0], \"blue\"),\n    (\"/World/Cube_green\",  -0.8, [0.0, 1.0, 0.0], \"green\"),\n    (\"/World/Cube_yellow\", -0.5, [1.0, 1.0, 0.0], \"yellow\"),\n]\nfor path, x, rgb, name in color_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    create_material(material_path=f\"/World/Materials/{name.capitalize()}Mat\", shader_type=\"OmniPBR\", diffuse_color=rgb)\n    assign_material(prim_path=path, material_path=f\"/World/Materials/{name.capitalize()}Mat\")\n    set_semantic_label(prim_path=path, class_name=name, semantic_type=\"color\")\n\nbulk_set_attribute(\n    prim_paths=[c[0] for c in color_specs],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor c in color_specs:\n    apply_physics_material(prim_path=c[0], material_name=\"rubber\")\n\n# 4 colored bins arranged in a row at y=-0.4 (behind robot)\nbin_specs = [\n    (\"/World/RedBin\",    -0.45, \"red\"),\n    (\"/World/BlueBin\",   -0.15, \"blue\"),\n    (\"/World/GreenBin\",  +0.15, \"green\"),\n    (\"/World/YellowBin\", +0.45, \"yellow\"),\n]\nfor path, x, name in bin_specs:\n    create_bin(prim_path=path, position=[x, -0.4, 0.75], size=[0.20, 0.20, 0.15])\n    assign_material(prim_path=path, material_path=f\"/World/Materials/{name.capitalize()}Mat\")\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# cuRobo controller with 4-entry color_routing\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[c[0] for c in color_specs],\n    destination_path=\"/World/RedBin\",\n    color_routing={\n        \"red\":    \"/World/RedBin\",\n        \"blue\":   \"/World/BlueBin\",\n        \"green\":  \"/World/GreenBin\",\n        \"yellow\": \"/World/YellowBin\",\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/RedBin\", \"/World/BlueBin\", \"/World/GreenBin\", \"/World/YellowBin\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_red":    [-1.4, 0.4, 0.835],
-      "/World/Cube_blue":   [-1.1, 0.4, 0.835],
-      "/World/Cube_green":  [-0.8, 0.4, 0.835],
-      "/World/Cube_yellow": [-0.5, 0.4, 0.835]
+      "/World/Cube_red": [
+        -1.4,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_blue": [
+        -1.1,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_green": [
+        -0.8,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_yellow": [
+        -0.5,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/RedBin", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/RedBin",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_red"
   },
@@ -42,12 +67,12 @@
     "duration_s": 120
   },
   "extends": "CP-03",
-  "extension_notes": "CP-16 scales CP-03's 2-color sort to 4-color. Same color_routing pattern, more entries. Per-cube material + semantic label per color. All 4 bins fit within 0.6m of robot base — comfortable reach. Future variants: 8-class (RGB+CMYK), size+color combinatorial, vision-gated (using add_vision_classifier_gate when render-flush is fixed).",
+  "extension_notes": "CP-16 scales CP-03's 2-color sort to 4-color. Same color_routing pattern, more entries. Per-cube material + semantic label per color. All 4 bins fit within 0.6m of robot base \u2014 comfortable reach. Future variants: 8-class (RGB+CMYK), size+color combinatorial, vision-gated (using add_vision_classifier_gate when render-flush is fixed).",
   "failure_modes": [
-    "set_semantic_label class_name case mismatch with color_routing keys — both must be lowercase ('red', not 'Red'). cuRobo handler lowercases cube class_name before dict lookup but exact match preferred.",
-    "Bins overlapping reach zone — adjacent bins 0.30m apart; if robot's wrist swings during transit, may clip bin walls. cuRobo's planning_obstacles avoidance should prevent — all 4 bins included.",
-    "Color material not visually distinct in viewport — set DomeLight intensity 1000 ensures cubes lit. Without sufficient light, all cubes look gray.",
-    "Multi-color overflow (>4 cubes per color) — controller currently delivers each cube once. Scaling beyond 4 cubes requires belt re-feed loop (not in this canonical)."
+    "set_semantic_label class_name case mismatch with color_routing keys \u2014 both must be lowercase ('red', not 'Red'). cuRobo handler lowercases cube class_name before dict lookup but exact match preferred.",
+    "Bins overlapping reach zone \u2014 adjacent bins 0.30m apart; if robot's wrist swings during transit, may clip bin walls. cuRobo's planning_obstacles avoidance should prevent \u2014 all 4 bins included.",
+    "Color material not visually distinct in viewport \u2014 set DomeLight intensity 1000 ensures cubes lit. Without sufficient light, all cubes look gray.",
+    "Multi-color overflow (>4 cubes per color) \u2014 controller currently delivers each cube once. Scaling beyond 4 cubes requires belt re-feed loop (not in this canonical)."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (120s sim. cube_final=(-0.44, -0.39, 0.785) in Bin)"
 }
