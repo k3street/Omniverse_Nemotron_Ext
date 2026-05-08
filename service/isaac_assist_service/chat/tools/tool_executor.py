@@ -32896,12 +32896,16 @@ def _cube_to_pick():
     base_z = float(_usd_pos[2])
     sxy = _sensor_xy_v if _sensor_xy_v is not None else base_xy
     cands = []
+    # Reach varies per family: Franka 0.70m, Cobotta 0.95m, UR10/UR10e 1.20m.
+    # Earlier hard-coded 0.70m matched only Franka — UR10 cubes farther than
+    # 0.70m from base were silently skipped (e.g. CP-81 Cube_1 at 0.74m).
+    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.70
     for sp in SOURCE_PATHS:
         if sp in S["delivered"] or sp in S.get("failed", set()) or _is_in_bin(sp): continue
         cp = _world_pos(sp)
         if cp is None: continue
         if cp[2] < base_z - 0.30 or cp[2] > base_z + 0.50: continue
-        if float(np.linalg.norm(cp[:2] - base_xy)) > 0.70: continue
+        if float(np.linalg.norm(cp[:2] - base_xy)) > _reach_m: continue
         # REORIENT-01 require_upright filter: skip cubes whose +Z axis
         # isn't aligned with world up. Lets cube ride past pick zone on
         # its side, hit a passive flip-wall, become upright, then pick.
@@ -33509,12 +33513,16 @@ def _cube_to_pick():
     base_z = float(_usd_pos[2])
     sxy = _sensor_xy_v if _sensor_xy_v is not None else base_xy
     cands = []
+    # Reach varies per family: Franka 0.70m, Cobotta 0.95m, UR10/UR10e 1.20m.
+    # Earlier hard-coded 0.70m matched only Franka — UR10 cubes farther than
+    # 0.70m from base were silently skipped (e.g. CP-81 Cube_1 at 0.74m).
+    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.70
     for sp in SOURCE_PATHS:
         if sp in S["delivered"] or sp in S.get("failed", set()) or _is_in_bin(sp): continue
         cp = _world_pos(sp)
         if cp is None: continue
         if cp[2] < base_z - 0.30 or cp[2] > base_z + 0.50: continue
-        if float(np.linalg.norm(cp[:2] - base_xy)) > 0.70: continue
+        if float(np.linalg.norm(cp[:2] - base_xy)) > _reach_m: continue
         cands.append((float(np.linalg.norm(cp[:2] - sxy)), sp))
     if not cands: return None
     cands.sort(); return cands[0][1]
@@ -34025,12 +34033,16 @@ def _cube_to_pick():
     base_z = float(_usd_pos[2])
     sxy = _sensor_xy_v if _sensor_xy_v is not None else base_xy
     cands = []
+    # Reach varies per family: Franka 0.70m, Cobotta 0.95m, UR10/UR10e 1.20m.
+    # Earlier hard-coded 0.70m matched only Franka — UR10 cubes farther than
+    # 0.70m from base were silently skipped (e.g. CP-81 Cube_1 at 0.74m).
+    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.70
     for sp in SOURCE_PATHS:
         if sp in S["delivered"] or sp in S.get("failed", set()) or _is_in_bin(sp): continue
         cp = _world_pos(sp)
         if cp is None: continue
         if cp[2] < base_z - 0.30 or cp[2] > base_z + 0.50: continue
-        if float(np.linalg.norm(cp[:2] - base_xy)) > 0.70: continue
+        if float(np.linalg.norm(cp[:2] - base_xy)) > _reach_m: continue
         cands.append((float(np.linalg.norm(cp[:2] - sxy)), sp))
     if not cands: return None
     cands.sort(); return cands[0][1]
