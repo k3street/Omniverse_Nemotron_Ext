@@ -190,6 +190,8 @@ Each shipped canonical:
 | CP-50 | Vision-driven kitting (50th canonical) | ✅✅ vision-derived routing | Sprint 2 | Combines vision + 2 separate kit trays (RedTray + BlueTray). 49/49 build. |
 | CP-51 | Robot-to-robot handoff station | ✅ form-gate shipped | Sprint 2 | First user of `setup_robot_handoff_signal`. 2 Frankas + handoff marker. 24/24 build. Realizes #11. |
 | CP-52 | Parallel-picking duo (mutex) | ✅ form-gate shipped | Sprint 2 | First user of `setup_robot_claim_mutex`. 2 Frankas share conveyor. 42/42 build. Realizes #10. |
+| CP-53 | Producer/consumer bounded buffer | ✅ form-gate shipped | Sprint 2 | 3-slot staging rack between 2 robots + mutex. 38/38 build. Realizes #12. |
+| CP-54 | Surface-gripper (suction) canonical | ✅ form-gate shipped | Sprint 2 | First user of `surface_gripper` tool. 39/39 build. Pattern for #25/27/29/33. |
 
 **🎉 SPRINT 2 + 3 COMPLETE 🎉**: 46 canonicals (CP-07..CP-52, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 120+ atomic commits since structural work began.
 
