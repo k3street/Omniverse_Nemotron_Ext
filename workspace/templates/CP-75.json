@@ -1,0 +1,44 @@
+{
+  "task_id": "CP-75",
+  "goal": "Build a UR10 builtin static-cube pick-place canonical: UR10 picks one statically-placed cube from a tabletop and drops it in a bin. No conveyor — sidesteps the belt-pause-from-callback quirk that blocks CP-74 function-gate, and provides a clean baseline that validates the universal_robots PickPlaceController works end-to-end on this Isaac Sim install.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "add_reference",
+    "teleport_prim",
+    "create_bin",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six static-pickup specifics for CP-75 (extends CP-74 by removing the conveyor):\n1) UR10 base on table (0, 0, 0.75) — same layout as CP-74. Mirror home pose [π/2, -π/2, π/2, -π/2, -π/2, 0] from the builtin handler points EE toward -X / +Y where the cube sits.\n2) NO conveyor. Cube is placed statically on the table top at (-0.5, 0.4, 0.825) — within UR10's 1.3m reach (dist from base ≈ 0.64m).\n3) Bin at (0.5, -0.4, 0.75) — opposite quadrant, dist ≈ 0.64m. UR10 needs to swing the base across XY plane between pick and drop; RmpFlow handles this if Cube is reachable.\n4) target_source='builtin' + robot_family='ur10' — exercises the universal_robots PickPlaceController + RMPFlow + SurfaceGripper stack from ur10_pick_up.py.\n5) No belt-pause needed. PickPlaceController's events_dt cadence drives all phases without external interaction.\n6) Function-gate goal: cube ends in /World/Bin's xy bbox. If THIS passes, the pickup stack works on this install — the CP-74 failure is purely the belt-pause quirk, not a fundamental UR10 stack issue.",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# UR10 base on table\ncreate_prim(prim_path=\"/World/UR10\", prim_type=\"Xform\")\nadd_reference(prim_path=\"/World/UR10\", reference_path=\"/mnt/shared_data/isaac-sim-assets-complete-5.0.0/Assets/Isaac/5.0/Collected_Robots/ur10.usd\")\nteleport_prim(prim_path=\"/World/UR10\", position=[0, 0, 0.75])\n\n# Static cube on table — within UR10 reach\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-0.5, 0.4, 0.825], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\n\n# Output bin\ncreate_bin(prim_path=\"/World/Bin\", position=[0.5, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\n# UR10 builtin PickPlaceController — no sensor / no belt\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    robot_family=\"ur10\",\n    target_source=\"builtin\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    end_effector_offset=[0.0, 0.0, 0.02],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [-0.5, 0.4, 0.825]
+    },
+    "conveyors": {}
+  },
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/UR10", "pick_path": "/World/Cube_1", "place_path": "/World/Bin", "robot_kind": "ur10e"}
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Bin",
+    "duration_s": 60
+  },
+  "extends": "CP-74",
+  "extension_notes": "CP-75 strips CP-74 down to static-cube pickup — no conveyor, no belt, no sensor. Validates the canonical Isaac Sim 5.x UR10 stack (Short_Suction variant + SingleManipulator + universal_robots.PickPlaceController) works end-to-end on this install. If function-gate passes here, CP-74's failure is isolated to the belt-pause-from-callback quirk and not a fundamental UR10 issue.",
+  "failure_modes": [
+    "verify_pickplace_pipeline expects pick_path to be a conveyor with surface velocity. CP-75 uses the cube prim directly; the verifier may flag 'pick zone bridged' as missing. Form-gate fail here is the verifier's shape limit, not a build issue.",
+    "RmpFlow's swing across XY (pick at -X+Y, drop at +X-Y) is wide; events_dt cadence needs to be slow enough for the wrist to settle between phases. If function-gate fails, increase events_dt[5] (transit phase).",
+    "Default PickPlaceController orientation assumes a downward grasp with suction below ee_link. UR10's suction_cup is at +Y in ee_link's local frame; the controller's euler [0, π/2, 0] orientation should rotate the gripper face downward. If grip misses, the orientation needs canonical-specific tuning.",
+    "Same UR10 init quirks as CP-69 — SingleManipulator path, no built-in attach_gripper."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending; function-gate goal: validate the UR10 builtin stack works on a static pick"
+}

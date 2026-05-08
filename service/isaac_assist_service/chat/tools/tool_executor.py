@@ -29498,9 +29498,12 @@ def _on_step(dt):
             current_joint_positions=jp,
             end_effector_offset=np.array(EE_OFFSET, dtype=np.float64),
         )
+        try:
+            _ev = _controller.get_current_event() if hasattr(_controller, 'get_current_event') else None
+            if _dbg_phase_attr: _dbg_phase_attr.Set(f"event={{_ev}}")
+        except Exception: pass
         if actions is not None:
             _art_ctrl.apply_action(actions)
-            if _dbg_phase_attr: _dbg_phase_attr.Set("executing")
         if _controller.is_done():
             S["delivered"].add(S["current"])
             S["current"] = None
