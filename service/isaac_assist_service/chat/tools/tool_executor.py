@@ -7213,6 +7213,151 @@ DATA_HANDLERS["add_force_torque_sensor"] = _handle_add_force_torque_sensor
 DATA_HANDLERS["setup_assembly_constraint"] = _handle_setup_assembly_constraint
 
 
+async def _handle_create_recirculation_loop(args: Dict) -> Dict:
+    """Tier C — creates a closed-loop conveyor (rectangular path) for recirculation
+    sortation scenarios (#17 Postal Cross-Belt Sorter). Composed of 4 conveyor
+    segments arranged in a rectangle.
+
+    Args:
+      loop_path:  USD path of loop parent
+      center:     [x, y, z] center
+      length:     longest dimension of rectangle
+      width:      shorter dimension
+      velocity:   conveyor surface velocity magnitude (default 0.2)
+
+    Returns: {loop_path, segments: [...], length, width}
+    """
+    loop_path = args["loop_path"]
+    center = args.get("center", [0, 0, 0.78])
+    length = float(args.get("length", 2.0))
+    width = float(args.get("width", 0.6))
+    velocity = float(args.get("velocity", 0.2))
+
+    # Create parent Xform
+    await execute_tool_call("create_prim", {
+        "prim_path": loop_path, "prim_type": "Xform",
+    })
+
+    # 4 segments: top (+y, moves +x), right (+x, moves -y), bottom (-y, moves -x), left (-x, moves +y)
+    segments = [
+        ("Top",    [center[0], center[1] + width / 2, center[2]], [length, 0.10, 0.05], [+velocity, 0, 0]),
+        ("Right",  [center[0] + length / 2, center[1], center[2]], [0.10, width, 0.05], [0, -velocity, 0]),
+        ("Bottom", [center[0], center[1] - width / 2, center[2]], [length, 0.10, 0.05], [-velocity, 0, 0]),
+        ("Left",   [center[0] - length / 2, center[1], center[2]], [0.10, width, 0.05], [0, +velocity, 0]),
+    ]
+    seg_paths = []
+    for name, pos, size, vel in segments:
+        seg_path = f"{loop_path}/{name}"
+        await execute_tool_call("create_conveyor", {
+            "prim_path": seg_path, "position": pos, "size": size, "surface_velocity": list(vel),
+        })
+        seg_paths.append({"path": seg_path, "name": name, "velocity": list(vel)})
+
+    return {
+        "loop_path": loop_path,
+        "segments": seg_paths,
+        "length": length,
+        "width": width,
+    }
+
+
+async def _handle_create_linear_axis_robot(args: Dict) -> Dict:
+    """Tier C — creates a linear-axis (gantry) wrapping for a manipulator.
+    The base of the manipulator is mounted on a prismatic-jointed slider
+    that moves along world X (or specified axis).
+
+    Args:
+      robot_path:    USD path of the manipulator (already imported)
+      slider_path:   USD path for the slider (default: <robot>_Slider)
+      axis:          [x, y, z] direction of slider motion (default world X)
+      limit_lower:   slider position min (m)
+      limit_upper:   slider position max (m)
+
+    Returns: {robot_path, slider_path, joint_path, axis}
+    """
+    robot_path = args["robot_path"]
+    slider_path = args.get("slider_path") or f"{robot_path}_Slider"
+    axis = args.get("axis", [1, 0, 0])
+    limit_lower = args.get("limit_lower", -1.0)
+    limit_upper = args.get("limit_upper", 1.0)
+
+    # Create slider parent prim (small base block under robot)
+    await execute_tool_call("create_prim", {
+        "prim_path": slider_path,
+        "prim_type": "Cube",
+        "position": [0, 0, 0.05],
+        "scale": [0.05, 0.10, 0.025],
+    })
+    for api in ("PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"):
+        await execute_tool_call("apply_api_schema",
+                                  {"prim_path": slider_path, "schema_name": api})
+
+    # Prismatic joint between slider and world
+    joint_path = f"{slider_path}/SliderJoint"
+    await execute_tool_call("create_articulated_joint", {
+        "joint_path": joint_path,
+        "body0_path": "",  # empty = grounded
+        "body1_path": slider_path,
+        "joint_type": "prismatic",
+        "axis": axis,
+        "limit_lower": limit_lower,
+        "limit_upper": limit_upper,
+        "drive_type": "force",
+    })
+
+    return {
+        "robot_path": robot_path,
+        "slider_path": slider_path,
+        "joint_path": joint_path,
+        "axis": axis,
+        "limit_range": [limit_lower, limit_upper],
+    }
+
+
+async def _handle_nir_material_sensor(args: Dict) -> Dict:
+    """Tier C — Near-IR material classification sensor for recycling scenarios
+    (#18). Reads cube's material:type attr (set by user pre-canonical) within
+    sensor proximity.
+
+    Args:
+      sensor_path:  USD path of the sensor
+      position:     [x,y,z] of sensor center
+      scan_radius:  detection radius
+
+    Returns: {sensor_path, position, scan_radius}
+    """
+    sensor_path = args["sensor_path"]
+    position = args.get("position", [0.4, 0.4, 0.85])
+    scan_radius = float(args.get("scan_radius", 0.05))
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Sdf, Gf
+stage = omni.usd.get_context().get_stage()
+pp = Sdf.Path({sensor_path!r})
+prim = stage.GetPrimAtPath(pp)
+if not prim or not prim.IsValid():
+    prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
+UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d({position[0]}, {position[1]}, {position[2]}))
+prim.CreateAttribute("nir:scan_radius",  Sdf.ValueTypeNames.Float).Set({scan_radius})
+prim.CreateAttribute("nir:last_material",Sdf.ValueTypeNames.String).Set("")
+prim.CreateAttribute("nir:read_count",   Sdf.ValueTypeNames.Int).Set(0)
+print(json.dumps({{"created": str(prim.GetPath()), "position": {position!r}, "scan_radius": {scan_radius}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "sensor_path": sensor_path,
+        "position": position,
+        "scan_radius": scan_radius,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+DATA_HANDLERS["create_recirculation_loop"] = _handle_create_recirculation_loop
+DATA_HANDLERS["create_linear_axis_robot"] = _handle_create_linear_axis_robot
+DATA_HANDLERS["nir_material_sensor"] = _handle_nir_material_sensor
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),

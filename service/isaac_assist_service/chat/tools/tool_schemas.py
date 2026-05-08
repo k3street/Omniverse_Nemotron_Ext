@@ -1401,6 +1401,58 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "create_recirculation_loop",
+            "description": "Tier C — closed-loop conveyor (rectangular path) for recirculation sortation (#17 Postal Cross-Belt Sorter). 4 conveyor segments arranged as rectangle.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "loop_path": {"type": "string"},
+                    "center": {"type": "array", "items": {"type": "number"}},
+                    "length": {"type": "number"},
+                    "width": {"type": "number"},
+                    "velocity": {"type": "number"},
+                },
+                "required": ["loop_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_linear_axis_robot",
+            "description": "Tier C — wraps a manipulator on a prismatic-jointed slider (gantry). Used by #29 SurfaceGripperGantry.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "slider_path": {"type": "string"},
+                    "axis": {"type": "array", "items": {"type": "number"}},
+                    "limit_lower": {"type": "number"},
+                    "limit_upper": {"type": "number"},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nir_material_sensor",
+            "description": "Tier C — Near-IR material classification sensor (#18 Recycling Multi-Sensor). Reads cube's material:type attr within proximity.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sensor_path": {"type": "string"},
+                    "position": {"type": "array", "items": {"type": "number"}},
+                    "scan_radius": {"type": "number"},
+                },
+                "required": ["sensor_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "add_force_torque_sensor",
             "description": "Tier C — adds force/torque sensor to a robot link with threshold for trigger events. Used by #22 Peg-in-Hole Insertion (force-gated phase transitions).",
             "parameters": {
