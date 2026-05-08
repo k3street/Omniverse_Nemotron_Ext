@@ -44,5 +44,5 @@
     "Conveyor stand collision: UR10 transit path passes near the stand at +X; planning_obstacles not configured — Sprint 4+ to add scene obstacles to RmpFlow.",
     "Same UR10 init quirks as CP-78 — articulation re-init fallback, mirror home pose."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-05-08; form-gate ✓; function-gate fails — belt-pause race + RmpFlow stuck at event 4 lift after cube falls off conveyor end. Trace: cube fell from z=1.01 to z=0.78 between t=4s and t=5s (belt didn't pause when controller claimed cube), EE chased falling cube, formed FixedJoint at (0.05, 0.25, 0.80), then RmpFlow refused to lift (likely self-collision with conveyor stand). Hypothesis disproved: elevated conveyor alone isn't enough — belt-pause-from-callback bug also needs fixing OR scene needs explicit obstacle awareness in RmpFlow config."
 }
