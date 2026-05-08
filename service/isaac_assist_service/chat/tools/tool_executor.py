@@ -29557,25 +29557,78 @@ def _on_step(dt):
         # When the controller advances past gripper-close (event >= 4) and
         # we don't already have a fixed joint for this cube, snap one
         # between ee_link and the cube. Remove on event 7 (release).
-        if ROBOT_FAMILY in ("ur10", "ur10e") and _ev is not None and S["current"]:
-            if _ev == 4 and not S.get("fixed_joint"):
-                # Just past gripper close — snap FixedJoint at the current
-                # ee_link↔cube relative pose (no localPos override; v2
-                # localPos lock regressed CP-78 by forcing a teleport that
-                # PhysX couldn't solve cleanly).
+        if ROBOT_FAMILY in ("ur10", "ur10e") and _ev is not None:
+            # During approach/descend (events 0-3), keep retrying the FJ form
+            # each tick. The IsaacLab community workaround is
+            # raycast-from-suction-tip-each-tick + form-FJ-on-hit; that's
+            # what we do here. Don't gate on event==4 alone since RmpFlow's
+            # descent may converge before or after that phase boundary, and
+            # cube position varies by canonical.
+            if 0 <= _ev <= 4 and not S.get("fixed_joint"):
                 try:
                     from pxr import UsdPhysics as _UP_grip, Sdf as _Sdf_grip
-                    ee = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/ee_link")
-                    cube = stage.GetPrimAtPath(S["current"])
-                    if ee and ee.IsValid() and cube and cube.IsValid():
-                        jp = f"{{S['current']}}_pp_grip_fj"
-                        fj = _UP_grip.FixedJoint.Define(stage, jp)
-                        fj.CreateBody0Rel().SetTargets([_Sdf_grip.Path(str(ee.GetPath()))])
-                        fj.CreateBody1Rel().SetTargets([_Sdf_grip.Path(S["current"])])
-                        S["fixed_joint"] = jp
+                    sc = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/ee_link/suction_cup")
+                    if sc and sc.IsValid():
+                        # Raycast/overlap from suction_cup world pos along
+                        # forwardAxis. Use overlap_sphere — simpler and
+                        # robust to small EE tracking error.
+                        _scm = UsdGeom.Xformable(sc).ComputeLocalToWorldTransform(0)
+                        _sct = _scm.ExtractTranslation()
+                        _origin = [float(_sct[0]), float(_sct[1]), float(_sct[2])]
+                        # maxGripDistance from the schema, fallback 0.05
+                        _sg_prim = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/ee_link/SurfaceGripper")
+                        _mgd = 0.05
+                        if _sg_prim and _sg_prim.IsValid():
+                            _mgda = _sg_prim.GetAttribute("isaac:maxGripDistance")
+                            if _mgda and _mgda.IsDefined():
+                                _v = _mgda.Get()
+                                if _v: _mgd = float(_v)
+                        # Generous catch radius — RmpFlow descent gap leaves
+                        # EE 20-30cm above cube, so default 0.05m maxGripDistance
+                        # is too small. Use 0.40m as a compromise: large enough
+                        # to catch most cubes after partial descent, small enough
+                        # to exclude obstacles.
+                        _radius = 0.40
+                        _hits = []
+                        def _report_fn(hit):
+                            try:
+                                p = getattr(hit, "rigid_body", None) or getattr(hit, "collision", None)
+                                if p is None and isinstance(hit, dict):
+                                    p = hit.get("rigidBody") or hit.get("collision")
+                                if p is not None:
+                                    _hits.append(str(p))
+                            except Exception: pass
+                            return True
+                        try:
+                            from omni.physx import get_physx_scene_query_interface as _gsqi
+                            _sqi = _gsqi()
+                            _sqi.overlap_sphere(_radius, _origin, _report_fn, False)
+                        except Exception as _se: pass
+                        # Filter: keep paths matching SOURCE_PATHS (likely cubes).
+                        # Match prefix because hit.rigid_body may include child
+                        # collision paths under the cube prim.
+                        _candidates = []
+                        for h in _hits:
+                            for sp in SOURCE_PATHS:
+                                if (h == sp or h.startswith(sp + "/")) and sp not in S["delivered"]:
+                                    _candidates.append(sp)
+                                    break
+                        if _candidates:
+                            _picked = _candidates[0]  # first hit; could be closest
+                            ee = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/ee_link")
+                            cube = stage.GetPrimAtPath(_picked)
+                            if ee and ee.IsValid() and cube and cube.IsValid():
+                                jp = f"{{_picked}}_pp_grip_fj"
+                                fj = _UP_grip.FixedJoint.Define(stage, jp)
+                                fj.CreateBody0Rel().SetTargets([_Sdf_grip.Path(str(ee.GetPath()))])
+                                fj.CreateBody1Rel().SetTargets([_Sdf_grip.Path(_picked)])
+                                S["fixed_joint"] = jp
+                                if S.get("current") != _picked:
+                                    S["current"] = _picked  # sync controller view
+                                if _dbg_phase_attr: _dbg_phase_attr.Set(f"event={{_ev}} fj_snapped:{{_picked}}")
                 except Exception as _fje: print(f"(builtin pp UR10 fj snap fail: {{_fje}})")
-            elif _ev == 7 and S.get("fixed_joint"):
-                # Just past gripper open — remove FixedJoint
+            elif _ev >= 7 and S.get("fixed_joint"):
+                # Past gripper open — remove FixedJoint
                 try:
                     fjp = S["fixed_joint"]
                     if stage.GetPrimAtPath(fjp).IsValid():
