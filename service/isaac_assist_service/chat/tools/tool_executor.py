@@ -29491,6 +29491,15 @@ def _on_step(dt):
             jp = _robot.get_joint_positions()
         except Exception:
             jp = None
+        # Articulation tensor view goes stale across simulate_traversal_check's
+        # tl.stop()+tl.play() cycle. Re-initialize on first None and retry.
+        if jp is None:
+            try:
+                from isaacsim.core.simulation_manager import SimulationManager as _SM
+                _sv = _SM.get_physics_sim_view()
+                _robot.initialize(physics_sim_view=_sv)
+                jp = _robot.get_joint_positions()
+            except Exception: pass
         if jp is None: return
         actions = _controller.forward(
             picking_position=cube_pos,
