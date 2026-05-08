@@ -177,23 +177,33 @@ Each shipped canonical:
 - Production canonicals need pallet/bin xy >= 30cm × 30cm for reliable delivery
 - CP-08 (30cm pallet) succeeds; CP-09/CP-13/CP-14/CP-15 (15-20cm) all expected partial
 
-**Final form-gate sweep CP-07..CP-21 (2026-05-08)** — 14/14 PASS, 825 build calls, 91 cubes:
+**FINAL form-gate sweep CP-07..CP-31 (2026-05-08)** — **25/25 PASS, 1279 build calls, 140 cubes**:
 ```
-CP-07: 127/127  cubes=16   PASS
-CP-08:  39/39   cubes=4    PASS
-CP-09:  45/45   cubes=5    PASS
-CP-10:  69/69   cubes=9    PASS
-CP-11:  63/63   cubes=8    PASS
-CP-12:  33/33   cubes=3    PASS
-CP-13:  27/27   cubes=2    PASS
-CP-14:  29/29   cubes=2    PASS
-CP-15:  32/32   cubes=3    PASS
-CP-16:  57/57   cubes=4    PASS
-CP-17:  70/70   cubes=6    PASS
-CP-18:  58/58   cubes=5    PASS
-CP-19:  53/53   cubes=6    PASS
-CP-20: 123/123  cubes=18   PASS
-CP-21:  38/38   cubes=4    PASS  (added post-sweep)
+✓ CP-07: 127/127  cubes=16
+✓ CP-08:  39/39   cubes=4
+✓ CP-09:  45/45   cubes=5
+✓ CP-10:  69/69   cubes=9
+✓ CP-11:  63/63   cubes=8
+✓ CP-12:  33/33   cubes=3
+✓ CP-13:  27/27   cubes=2
+✓ CP-14:  29/29   cubes=2
+✓ CP-15:  32/32   cubes=3
+✓ CP-16:  57/57   cubes=4
+✓ CP-17:  70/70   cubes=6
+✓ CP-18:  58/58   cubes=5
+✓ CP-19:  53/53   cubes=6
+✓ CP-20: 123/123  cubes=18
+✓ CP-21:  38/38   cubes=4
+✓ CP-22:  38/38   cubes=4
+✓ CP-23:  38/38   cubes=4
+✓ CP-24:  38/38   cubes=4
+✓ CP-25: 111/111  cubes=16
+✓ CP-26:  39/39   cubes=4
+✓ CP-27:  39/39   cubes=4
+✓ CP-28:  21/21   cubes=1
+✓ CP-29:  21/21   cubes=1
+✓ CP-30:  39/39   cubes=4
+✓ CP-31:  32/32   cubes=3
 ```
 
 **2026-05-07/2026-05-08 progress** — 41+ atomic commits since structural work began. Smoke regression (6 fixtures) green throughout:
