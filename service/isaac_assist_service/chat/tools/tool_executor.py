@@ -27230,6 +27230,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             curobo_world_yml=args.get("curobo_world_yml"),
             color_routing=args.get("color_routing"),
             drop_targets=args.get("drop_targets"),
+            gripper_rotation=args.get("gripper_rotation"),
             require_upright=bool(args.get("require_upright", False)),
             upright_dot_threshold=float(args.get("upright_dot_threshold", 0.85)),
         )
@@ -30401,6 +30402,7 @@ def _gen_pick_place_curobo(robot_path, sensor_path, belt_path,
                            curobo_world_yml=None,
                            color_routing=None,
                            drop_targets=None,
+                           gripper_rotation=None,
                            require_upright=False,
                            upright_dot_threshold=0.85):
     """GPU-accelerated global trajectory optimization via cuRobo MotionPlanner.
@@ -30481,6 +30483,9 @@ COLOR_ROUTING = {_json.dumps(color_routing or {})}
 # instead of DROP_TARGET / DEST_PATH for the named cube. Used by CP-08+
 # canonicals where each cube goes to a distinct grid/column position.
 DROP_TARGETS = {_json.dumps(drop_targets) if drop_targets else 'None'}
+# Per-cube yaw rotation (deg) at drop. Dict {{cube_path: yaw_deg}} or scalar.
+# When set, the drop pose's gripper orientation rotates around world Z by yaw_deg.
+GRIPPER_ROTATION = {_json.dumps(gripper_rotation) if gripper_rotation is not None else 'None'}
 
 # Per-robot subscription + scene-reset name. Earlier hardcoded
 # "_curobo_pp_sub" / "curobo_pp" meant a second install (e.g. for a
@@ -30844,6 +30849,46 @@ _dx = _iw*_world_down_x + _ix*_world_down_w + _iy*_world_down_z - _iz*_world_dow
 _dy = _iw*_world_down_y - _ix*_world_down_z + _iy*_world_down_w + _iz*_world_down_x
 _dz = _iw*_world_down_z + _ix*_world_down_y - _iy*_world_down_x + _iz*_world_down_w
 _DOWN_Q_BASE = torch.tensor([[[[[_dw, _dx, _dy, _dz]]]]], dtype=torch.float32, device='cuda')
+
+# Per-yaw quaternion in base frame: yaw_world * down_world expressed in base frame.
+# yaw is rotation around world +Z axis (vertical). Used by drop-pose planning when
+# gripper_rotation is set (CP-N brick-pattern, mixed-SKU palletizers).
+import math as _gm
+def _rotated_down_quat_base(yaw_deg):
+    a = _gm.radians(float(yaw_deg)) * 0.5
+    qyw, qyz = _gm.cos(a), _gm.sin(a)
+    # World-frame combined: q_yaw_world * down_world  (down_world = (0, 0, 1, 0))
+    # Quaternion mult formula expanded for q_yaw=(qyw,0,0,qyz) * (0,0,1,0):
+    cwo = -qyz * 0.0          # = 0  (qyw*0 - 0*0 - 0*1 - qyz*0)... actually let me recompute carefully
+    # (w1,x1,y1,z1) * (w2,x2,y2,z2) where (w1,x1,y1,z1)=(qyw,0,0,qyz), (w2,x2,y2,z2)=(0,0,1,0)
+    cw_world = qyw*0 - 0*0 - 0*1 - qyz*0
+    cx_world = qyw*0 + 0*0 + 0*1 - qyz*1
+    cy_world = qyw*1 - 0*0 + 0*0 + qyz*0
+    cz_world = qyw*0 + 0*1 - 0*0 + qyz*0
+    # cw_world = 0, cx_world = -qyz, cy_world = qyw, cz_world = 0
+    # Now express in BASE frame: q_base = inv(base_quat) * q_world
+    # Using existing _iw, _ix, _iy, _iz (inverse base quat conjugate)
+    iw, ix, iy, iz = _iw, _ix, _iy, _iz
+    bw = iw*cw_world - ix*cx_world - iy*cy_world - iz*cz_world
+    bx = iw*cx_world + ix*cw_world + iy*cz_world - iz*cy_world
+    by = iw*cy_world - ix*cz_world + iy*cw_world + iz*cx_world
+    bz = iw*cz_world + ix*cy_world - iy*cx_world + iz*cw_world
+    return torch.tensor([[[[[bw, bx, by, bz]]]]], dtype=torch.float32, device='cuda')
+
+def _yaw_for_cube(cube_path):
+    if GRIPPER_ROTATION is None:
+        return 0.0
+    if isinstance(GRIPPER_ROTATION, (int, float)):
+        return float(GRIPPER_ROTATION)
+    if isinstance(GRIPPER_ROTATION, dict):
+        return float(GRIPPER_ROTATION.get(cube_path, 0.0))
+    if isinstance(GRIPPER_ROTATION, list):
+        try:
+            idx = SOURCE_PATHS.index(cube_path)
+            if 0 <= idx < len(GRIPPER_ROTATION):
+                return float(GRIPPER_ROTATION[idx])
+        except ValueError: pass
+    return 0.0
 print(f"(curobo: down-quat in base frame = ({{_dw:.3f}}, {{_dx:.3f}}, {{_dy:.3f}}, {{_dz:.3f}}))")
 
 # Override h1 with high lift to avoid arm sweep over belt (no scene-coll)
@@ -30896,12 +30941,13 @@ def _build_scene_cfg(exclude_path=None):
             continue
     return _CuroboSceneCfg.create({{"cuboid": cuboids}})
 
-def _plan_to_world_point(point_world, current_q7, exclude_obs=None):
+def _plan_to_world_point(point_world, current_q7, exclude_obs=None, yaw_deg=0.0):
     # Convert world target to base frame, plan via cuRobo
     p_base = _world_to_base(point_world)
     pos_t = torch.tensor([[[[[float(p_base[0]), float(p_base[1]), float(p_base[2])]]]]],
                          dtype=torch.float32, device='cuda')
-    goal = GoalToolPose(tool_frames=['panda_hand'], position=pos_t, quaternion=_DOWN_Q_BASE)
+    quat_base = _rotated_down_quat_base(yaw_deg) if yaw_deg else _DOWN_Q_BASE
+    goal = GoalToolPose(tool_frames=['panda_hand'], position=pos_t, quaternion=quat_base)
     q = torch.tensor([[float(x) for x in current_q7[:7]]], dtype=torch.float32, device='cuda')
     start = JointState.from_position(q, joint_names=_PLANNER_JOINT_NAMES)
     try:
@@ -31052,20 +31098,23 @@ def _build_segments(cube_pos, drop_pos, current_q):
     pz = float(cube_pos[2]) + FL + float(EE_OFFSET[2])
     h_mid_pick = float(cube_pos[2]) + 0.18  # 18cm above cube
     h_mid_drop = float(drop_pos[2]) + 0.18  # 18cm above drop pose
+    drop_yaw = _yaw_for_cube(S.get("picked_path") or "")
+    # Yaw applied to drop-side segments (S4, S4.5, S5). Pick-side segments
+    # use yaw=0 — gripper picks straight-down regardless of drop rotation.
     goals = [
-        (np.array([cube_pos[0], cube_pos[1], h1]),       None),         # S1 above cube
-        (np.array([cube_pos[0], cube_pos[1], h_mid_pick]), None),       # S1.5 mid-height directly over cube
-        (np.array([cube_pos[0], cube_pos[1], pz]),       "close"),      # S2 descend, then close
-        (np.array([cube_pos[0], cube_pos[1], h1]),       None),         # S3 lift
-        (np.array([drop_pos[0], drop_pos[1], h1]),       None),         # S4 transit
-        (np.array([drop_pos[0], drop_pos[1], h_mid_drop]), None),       # S4.5 mid-height directly over drop
-        (np.array([drop_pos[0], drop_pos[1], drop_pos[2]]), "open"),   # S5 descend, then open
+        (np.array([cube_pos[0], cube_pos[1], h1]),         None,    0.0),       # S1 above cube
+        (np.array([cube_pos[0], cube_pos[1], h_mid_pick]), None,    0.0),       # S1.5 mid-height
+        (np.array([cube_pos[0], cube_pos[1], pz]),         "close", 0.0),       # S2 descend + close
+        (np.array([cube_pos[0], cube_pos[1], h1]),         None,    0.0),       # S3 lift
+        (np.array([drop_pos[0], drop_pos[1], h1]),         None,    drop_yaw),  # S4 transit (rotated)
+        (np.array([drop_pos[0], drop_pos[1], h_mid_drop]), None,    drop_yaw),  # S4.5 mid
+        (np.array([drop_pos[0], drop_pos[1], drop_pos[2]]),"open",  drop_yaw),  # S5 descend + open
     ]
     segs = []
     q = np.asarray(current_q, dtype=np.float32)
-    for goal_world, action_after in goals:
+    for goal_world, action_after, yaw_deg in goals:
         # Exclude the cube being picked from obstacle list (we're grabbing it)
-        res = _plan_to_world_point(goal_world, q, exclude_obs=S["picked_path"])
+        res = _plan_to_world_point(goal_world, q, exclude_obs=S["picked_path"], yaw_deg=yaw_deg)
         if res is None:
             print(f"(curobo: plan failed for goal {{goal_world.tolist()}})")
             return None
