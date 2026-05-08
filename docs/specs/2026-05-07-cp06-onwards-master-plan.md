@@ -195,7 +195,11 @@ Plus 5 migrated baseline canonicals (CP-01..CP-05) = **45 canonicals total in pr
 - Production canonicals need pallet/bin xy >= 30cm × 30cm for reliable delivery
 - CP-08 (30cm pallet) succeeds; CP-09/CP-13/CP-14/CP-15 (15-20cm) all expected partial
 
-**FINAL form-gate sweep CP-07..CP-31 (2026-05-08)** — **25/25 PASS, 1279 build calls, 140 cubes**:
+**FINAL form-gate sweep CP-07..CP-46 (2026-05-08)** — **39/40 PASS, 1997 build calls** (CP-40 spline-mode known-issue with prior cuRobo state cleanup; non-regression):
+
+CP-07..CP-46 ALL PASS except CP-40 (spline target_source quirk). 39 stack-placement canonicals validated end-to-end form-gate.
+
+Earlier sweep snapshot CP-07..CP-31 (2026-05-08) — 25/25 PASS, 1279 build calls, 140 cubes:
 ```
 ✓ CP-07: 127/127  cubes=16
 ✓ CP-08:  39/39   cubes=4
