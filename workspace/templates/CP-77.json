@@ -1,6 +1,6 @@
 {
   "task_id": "CP-77",
-  "goal": "Build a nested-box packer canonical: 4 cubes filled into a container in 2x2 layout (FILLING phase), then a flat 'lid' Cube placed flush on top (SEALING phase). Two-phase state machine via ordered source_paths + per-cube drop_targets dict — first 4 entries land in the bin grid, 5th (lid) lands centered on top. Realizes Industrial Set 4 #2 Nested-Box Packer.",
+  "goal": "Build a nested-box packer canonical: 4 cubes filled into a container in 2x2 layout (FILLING phase), then a flat 'lid' Cube placed flush on top (SEALING phase). Two-phase state machine via ordered source_paths + per-cube drop_targets dict \u2014 first 4 entries land in the bin grid, 5th (lid) lands centered on top. Realizes Industrial Set 4 #2 Nested-Box Packer.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -14,23 +14,52 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six nested-box-packer specifics for CP-77:\n1) Single Franka at (0, 0, 0.75). Conveyor on +Y feeds 5 items: Cube_1..Cube_4 (the 'contents') + Cube_lid (a flatter, wider cube acting as a closing lid).\n2) Container: 25x25x10 cm bin centered at (0.45, -0.4, 0.75). Bin-floor at z=0.755, top opening at z=0.85.\n3) drop_targets dict places Cube_1..4 in 2x2 grid on bin floor (z=0.78 = bin_floor + half_cube). Each grid cell ~10cm spacing.\n4) Cube_lid is wider+flatter (20x20x2 cm). drop_target for lid is z=0.92 (top of bin opening + half_lid_height = 0.85 + 0.01 + 5cm cube top). Effectively seals the bin once 4 cubes are in.\n5) source_paths order: Cube_1, Cube_2, Cube_3, Cube_4, Cube_lid. Controller iterates in order — strict FILLING (cubes 1-4) before SEALING (lid). The state machine is implicit in source_paths ordering.\n6) Realizes Industrial Set 4 #2. The 'recipe success' criterion is verified post-sim: all 4 cubes inside bin xy-bounds + lid resting on top at z>=0.91.",
-  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Cube_1..Cube_4 (the 'contents')\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\n# Cube_lid — flat wider cube acting as the sealing lid\ncreate_prim(prim_path=\"/World/Cube_lid\", prim_type=\"Cube\", position=[-0.4, 0.4, 0.84], scale=[0.10, 0.10, 0.01])\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_lid\", schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)] + [\"/World/Cube_lid\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)] + [\"/World/Cube_lid\"]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Container bin — 25x25x10cm, top opening at z=0.85\ncreate_bin(prim_path=\"/World/Container\", position=[0.45, -0.4, 0.75], size=[0.25, 0.25, 0.10])\n\n# Pick sensor at conveyor pick zone\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# cuRobo controller with 5-entry drop_targets dict.\n# FILLING phase: Cube_1..4 → 2x2 grid at z=0.78 (bin floor + cube/2)\n# SEALING phase: Cube_lid → centered on top at z=0.92\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\", \"/World/Cube_2\", \"/World/Cube_3\", \"/World/Cube_4\", \"/World/Cube_lid\"],\n    destination_path=\"/World/Container\",\n    drop_targets={\n        \"/World/Cube_1\": [0.39, -0.46, 0.78],\n        \"/World/Cube_2\": [0.51, -0.46, 0.78],\n        \"/World/Cube_3\": [0.39, -0.34, 0.78],\n        \"/World/Cube_4\": [0.51, -0.34, 0.78],\n        \"/World/Cube_lid\": [0.45, -0.40, 0.92],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Container\"],\n)",
+  "thoughts": "Six nested-box-packer specifics for CP-77:\n1) Single Franka at (0, 0, 0.75). Conveyor on +Y feeds 5 items: Cube_1..Cube_4 (the 'contents') + Cube_lid (a flatter, wider cube acting as a closing lid).\n2) Container: 25x25x10 cm bin centered at (0.45, -0.4, 0.75). Bin-floor at z=0.755, top opening at z=0.85.\n3) drop_targets dict places Cube_1..4 in 2x2 grid on bin floor (z=0.78 = bin_floor + half_cube). Each grid cell ~10cm spacing.\n4) Cube_lid is wider+flatter (20x20x2 cm). drop_target for lid is z=0.92 (top of bin opening + half_lid_height = 0.85 + 0.01 + 5cm cube top). Effectively seals the bin once 4 cubes are in.\n5) source_paths order: Cube_1, Cube_2, Cube_3, Cube_4, Cube_lid. Controller iterates in order \u2014 strict FILLING (cubes 1-4) before SEALING (lid). The state machine is implicit in source_paths ordering.\n6) Realizes Industrial Set 4 #2. The 'recipe success' criterion is verified post-sim: all 4 cubes inside bin xy-bounds + lid resting on top at z>=0.91.",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Cube_1..Cube_4 (the 'contents')\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\n# Cube_lid \u2014 flat wider cube acting as the sealing lid\ncreate_prim(prim_path=\"/World/Cube_lid\", prim_type=\"Cube\", position=[-0.4, 0.4, 0.84], scale=[0.10, 0.10, 0.01])\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_lid\", schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)] + [\"/World/Cube_lid\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)] + [\"/World/Cube_lid\"]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Container bin \u2014 25x25x10cm, top opening at z=0.85\ncreate_bin(prim_path=\"/World/Container\", position=[0.45, -0.4, 0.75], size=[0.25, 0.25, 0.10])\n\n# Pick sensor at conveyor pick zone\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# cuRobo controller with 5-entry drop_targets dict.\n# FILLING phase: Cube_1..4 \u2192 2x2 grid at z=0.78 (bin floor + cube/2)\n# SEALING phase: Cube_lid \u2192 centered on top at z=0.92\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\", \"/World/Cube_2\", \"/World/Cube_3\", \"/World/Cube_4\", \"/World/Cube_lid\"],\n    destination_path=\"/World/Container\",\n    drop_targets={\n        \"/World/Cube_1\": [0.39, -0.46, 0.78],\n        \"/World/Cube_2\": [0.51, -0.46, 0.78],\n        \"/World/Cube_3\": [0.39, -0.34, 0.78],\n        \"/World/Cube_4\": [0.51, -0.34, 0.78],\n        \"/World/Cube_lid\": [0.45, -0.40, 0.92],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Container\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_1": [-1.4, 0.4, 0.835],
-      "/World/Cube_2": [-1.15, 0.4, 0.835],
-      "/World/Cube_3": [-0.9, 0.4, 0.835],
-      "/World/Cube_4": [-0.65, 0.4, 0.835],
-      "/World/Cube_lid": [-0.4, 0.4, 0.84]
+      "/World/Cube_1": [
+        -1.4,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_2": [
+        -1.15,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_3": [
+        -0.9,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_4": [
+        -0.65,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_lid": [
+        -0.4,
+        0.4,
+        0.84
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/Container", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/Container",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_1"
   },
@@ -40,13 +69,13 @@
     "duration_s": 240
   },
   "extends": "CP-08",
-  "extension_notes": "CP-77 extends CP-08's 2x2 palletizer with a 5th item (the lid) treated as just another source_path. The 'two-phase state machine' (FILLING vs SEALING) is an EMERGENT property of the source_paths order + per-item drop_target — no special phase logic in the controller. Cube_lid's wider scale makes it cover the bin opening when placed at z=0.92. Realizes Industrial Set 4 #2 Nested-Box Packer in build-spec form.",
+  "extension_notes": "CP-77 extends CP-08's 2x2 palletizer with a 5th item (the lid) treated as just another source_path. The 'two-phase state machine' (FILLING vs SEALING) is an EMERGENT property of the source_paths order + per-item drop_target \u2014 no special phase logic in the controller. Cube_lid's wider scale makes it cover the bin opening when placed at z=0.92. Realizes Industrial Set 4 #2 Nested-Box Packer in build-spec form.",
   "failure_modes": [
     "Lid alignment: cuRobo's ~17cm drop precision means lid may land 10-15cm off center, sliding off the bin top. Function-gate likely needs sensor_gated or guided placement for lid phase.",
-    "Lid pick: Cube_lid is flat (1cm tall vs 5cm wide). Franka's parallel gripper needs to grip across the 10cm width — exceeds the 8cm gripper open width. May need a different gripper config or a thinner/narrower lid.",
+    "Lid pick: Cube_lid is flat (1cm tall vs 5cm wide). Franka's parallel gripper needs to grip across the 10cm width \u2014 exceeds the 8cm gripper open width. May need a different gripper config or a thinner/narrower lid.",
     "Drop_targets dict-only routing: 5-entry routing tested in CP-65 (4 cubes 2x2). 5-th entry should follow same pattern. If precision drift compounds, lid lands offset.",
-    "Bin size 0.25m x 0.25m, lid 0.10m x 0.10m — lid is smaller than bin opening. Should rest inside the rim, not seal flush. Realistic 'seal' needs lid_xy >= bin_xy.",
-    "Same Franka cuRobo precision caveats as CP-08 — function-gate is form ✓, runtime stochastic."
+    "Bin size 0.25m x 0.25m, lid 0.10m x 0.10m \u2014 lid is smaller than bin opening. Should rest inside the rim, not seal flush. Realistic 'seal' needs lid_xy >= bin_xy.",
+    "Same Franka cuRobo precision caveats as CP-08 \u2014 function-gate is form \u2713, runtime stochastic."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 3/5 cubes delivered to Container)"
 }
