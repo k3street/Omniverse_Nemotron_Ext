@@ -195,6 +195,10 @@ Each shipped canonical:
 | CP-55 | Drawer-open station (prismatic joint) | ✅ build-only | Sprint 2 | First user of `create_articulated_joint`. Cabinet + drawer + 15cm prismatic. 17/17 build. Realizes #30 infrastructure. |
 | CP-56 | Rotary-table demo | ✅ build-only | Sprint 2 | First user of `create_rotary_table`. 4 cubes on rotating disc. 38/38 build. Realizes #13 infrastructure. |
 | CP-57 | Parcel-singulation-from-heap | ✅ form-gate shipped | Sprint 2 | First user of `create_heap_zone`. 5 cubes in golden-angle pile. 20/20 build. Realizes #8 infrastructure. |
+| CP-58 | Peg-in-hole insertion array (#22) | ✅ form-gate shipped | Sprint 2 | First user of `add_force_torque_sensor` + `setup_assembly_constraint`. 4 pegs + 4 holes. 48/48 build. |
+| CP-59 | Vision-gated bin-picking duo (#14) | ⚠ build 51/52 | Sprint 2 | Combines vision + mutex + heap. Vision returned 0 (heap overlap confused Gemini). Pattern shape valid. |
+| CP-60 | Recirculation-loop demo (#17) | ✅ build-only | Sprint 2 | First user of `create_recirculation_loop`. 4-segment closed loop. 13/13 build. |
+| CP-61 | Cortex-Franka block-stacking (#28) | ✅ build-only | Sprint 2 | First user of `setup_cortex_behavior` + `register_moving_obstacle`. 34/34 build. Form-gate skip (Cortex ≠ pick-place). |
 
 **🎉 SPRINT 2 + 3 COMPLETE 🎉**: 46 canonicals (CP-07..CP-52, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 120+ atomic commits since structural work began.
 
