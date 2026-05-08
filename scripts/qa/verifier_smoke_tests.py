@@ -73,6 +73,24 @@ if mgr is not None:
         except Exception:
             pass
 
+# Clear the World singleton + its scene registry. Without this, robot
+# wrappers from prior canonicals (curobo_pp_franka_World_Franka etc.)
+# remain registered in world.scene and the next canonical's
+# world.scene.add(franka) takes the soft-fail branch — falls through to
+# a stale wrapper that crashes on initialize/post_reset. This was the
+# root cause of CP-01/CP-03/CP-08 flaking in batch sweeps while passing
+# alone (2026-05-08 sweep finding).
+try:
+    from isaacsim.core.api import World as _World_for_reset
+    _w = _World_for_reset.instance()
+    if _w is not None:
+        try: _w.scene.clear()
+        except Exception: pass
+        try: _World_for_reset.clear_instance()
+        except Exception: pass
+except Exception:
+    pass
+
 omni.usd.get_context().new_stage()
 """
 
