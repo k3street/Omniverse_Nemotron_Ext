@@ -1,0 +1,51 @@
+{
+  "task_id": "CP-32",
+  "goal": "Build a vision-driven 2-color sorter: 2 cubes (red, blue) on conveyor + overhead camera. add_vision_classifier_gate determines routing at runtime via VLM; cubes sorted into matching color bins. v1 vision-gate is reliable for 2 cubes (left-right ordering disambiguates regardless of camera axis flip).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "create_material",
+    "assign_material",
+    "apply_physics_material",
+    "set_semantic_label",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six 2-color-vision-sort specifics for CP-32 (extends CP-03 — 2-color sort, but adds camera + overhead viewing angle):\n1) 2 cubes: Cube_red (x=-1.0) + Cube_blue (x=-0.6). Spaced 0.4m on conveyor.\n2) Camera mounted overhead at [0, 0, 2.5] looking down at [0, 0, 0.8]. Top-down view shows cubes left-to-right matching world x-axis.\n3) With camera looking straight down + canonical orientation, image x-axis aligns with world x-axis. v1 pairing (sort by world x, sort by image x) maps correctly: leftmost world cube → leftmost image detection.\n4) For RUNTIME use: agent calls add_vision_classifier_gate(camera_path='/World/OverheadCam', cube_paths=[Cube_red, Cube_blue], class_labels=['red cube', 'blue cube']) BEFORE setup_pick_place_controller. Returns cube_to_destination mapping ready as color_routing arg.\n5) The CANONICAL ITSELF can't call vision-gate at build time (canonical executor's two-phase capture). Hardcoded color_routing dict mirrors what vision-gate would produce.\n6) RedBin at x=-0.4, BlueBin at x=+0.4. Both within reach.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1500.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Red cube (left in world x)\ncreate_prim(prim_path=\"/World/Cube_red\", prim_type=\"Cube\", position=[-1.0, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_red\", schema_name=api)\ncreate_material(material_path=\"/World/Materials/Red\", shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.0, 0.0])\nassign_material(prim_path=\"/World/Cube_red\", material_path=\"/World/Materials/Red\")\nset_semantic_label(prim_path=\"/World/Cube_red\", class_name=\"red\", semantic_type=\"color\")\n\n# Blue cube (right in world x)\ncreate_prim(prim_path=\"/World/Cube_blue\", prim_type=\"Cube\", position=[-0.6, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_blue\", schema_name=api)\ncreate_material(material_path=\"/World/Materials/Blue\", shader_type=\"OmniPBR\", diffuse_color=[0.0, 0.0, 1.0])\nassign_material(prim_path=\"/World/Cube_blue\", material_path=\"/World/Materials/Blue\")\nset_semantic_label(prim_path=\"/World/Cube_blue\", class_name=\"blue\", semantic_type=\"color\")\n\nbulk_set_attribute(\n    prim_paths=[\"/World/Cube_red\", \"/World/Cube_blue\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\napply_physics_material(prim_path=\"/World/Cube_red\", material_name=\"rubber\")\napply_physics_material(prim_path=\"/World/Cube_blue\", material_name=\"rubber\")\n\n# Color-tinted bins\ncreate_bin(prim_path=\"/World/RedBin\",  position=[-0.4, -0.4, 0.75], size=[0.20, 0.20, 0.15])\nassign_material(prim_path=\"/World/RedBin\", material_path=\"/World/Materials/Red\")\ncreate_bin(prim_path=\"/World/BlueBin\", position=[ 0.4, -0.4, 0.75], size=[0.20, 0.20, 0.15])\nassign_material(prim_path=\"/World/BlueBin\", material_path=\"/World/Materials/Blue\")\n\n# Overhead camera — top-down view aligns image x with world x\ncreate_prim(prim_path=\"/World/OverheadCam\", prim_type=\"Camera\", position=[0, 0, 2.5])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# color_routing matches what add_vision_classifier_gate would produce.\n# Agent at task time: vision-gate → routing dict → setup_pick_place_controller.\n# Canonical bakes it for deterministic reference.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_red\", \"/World/Cube_blue\"],\n    destination_path=\"/World/RedBin\",\n    color_routing={\n        \"red\":  \"/World/RedBin\",\n        \"blue\": \"/World/BlueBin\",\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/RedBin\", \"/World/BlueBin\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_red":  [-1.0, 0.4, 0.835],
+      "/World/Cube_blue": [-0.6, 0.4, 0.835]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.2, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/RedBin", "robot_kind": "franka_panda"}
+    ],
+    "cube_path": "/World/Cube_red"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_red",
+    "target_path": "/World/RedBin",
+    "duration_s": 90
+  },
+  "extends": "CP-03",
+  "extension_notes": "CP-32 is the vision-gate-friendly 2-color sorter. Overhead camera's image-x-axis aligns with world-x-axis → v1 pairing heuristic works correctly. For RUNTIME vision-gate use: agent should call add_vision_classifier_gate before setup_pick_place_controller. CP-32's hardcoded color_routing serves as deterministic baseline.",
+  "failure_modes": [
+    "Camera angle off-axis → image x misaligned with world x → v1 pairing maps cubes to wrong colors. CP-32 uses straight-down camera at [0, 0, 2.5] for axis alignment.",
+    "Same-color cubes adjacent → v1 can't distinguish. CP-32 has visually distinct red vs blue.",
+    "Cube_blue starts within reach (x=-0.6, |x|<0.7) → controller may pick it before belt motion shows it well. Acceptable.",
+    "Same physics rules as CP-01."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending; designed for v1 vision-gate"
+}
