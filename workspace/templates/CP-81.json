@@ -53,5 +53,5 @@
     "_next_cube() picks nearest-to-base; with cubes at +Y 0.55 and 0.25, order may matter for FJ propagation.",
     "Bin overflow if both cubes land at same XY \u2014 no per-cube drop_target offset configured."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2717 (cuRobo + UR10 + 2 cubes; reach fix unblocks pickup but cube drops short at z=0.775; same drop-precision issue as CP-83 single-cube needed 180s+seed luck)"
 }
