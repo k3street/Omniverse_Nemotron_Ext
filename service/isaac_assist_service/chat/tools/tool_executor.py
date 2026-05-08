@@ -29559,9 +29559,16 @@ def _on_step(dt):
         # between ee_link and the cube. Remove on event 7 (release).
         if ROBOT_FAMILY in ("ur10", "ur10e") and _ev is not None and S["current"]:
             if _ev == 4 and not S.get("fixed_joint"):
-                # Just past gripper close — snap FixedJoint
+                # Just past gripper close — snap FixedJoint locking the cube
+                # to the suction position in ee_link's frame. Without
+                # localPos0=(0.158, 0, 0), the joint forms at the current
+                # ee_link↔cube offset, and physics tries to maintain that
+                # offset which often swings the cube into the table during
+                # transit. With localPos0 set, physics teleports the cube
+                # to the suction position when the joint forms — same
+                # behavior as a real vacuum cup grabbing the part.
                 try:
-                    from pxr import UsdPhysics as _UP_grip, Sdf as _Sdf_grip
+                    from pxr import UsdPhysics as _UP_grip, Sdf as _Sdf_grip, Gf as _Gf_grip
                     ee = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/ee_link")
                     cube = stage.GetPrimAtPath(S["current"])
                     if ee and ee.IsValid() and cube and cube.IsValid():
@@ -29569,6 +29576,12 @@ def _on_step(dt):
                         fj = _UP_grip.FixedJoint.Define(stage, jp)
                         fj.CreateBody0Rel().SetTargets([_Sdf_grip.Path(str(ee.GetPath()))])
                         fj.CreateBody1Rel().SetTargets([_Sdf_grip.Path(S["current"])])
+                        # Lock cube at suction position in ee_link's local frame.
+                        # UR10 USD: suction_cup is at local (0, 0.158, 0) in ee_link.
+                        try: fj.CreateLocalPos0Attr(_Gf_grip.Vec3f(0.0, 0.158, 0.0))
+                        except Exception: pass
+                        try: fj.CreateLocalPos1Attr(_Gf_grip.Vec3f(0.0, 0.0, 0.0))
+                        except Exception: pass
                         S["fixed_joint"] = jp
                 except Exception as _fje: print(f"(builtin pp UR10 fj snap fail: {{_fje}})")
             elif _ev == 7 and S.get("fixed_joint"):
@@ -32774,8 +32787,9 @@ def _grip_close():
             _surface_gripper.close()
     except Exception: pass
     # UR10 fallback: schema-level suction doesn't engage with articulation-link
-    # body0. Snap a UsdPhysics.FixedJoint between ee_link and S["picked_path"]
-    # if set. Released on _grip_open().
+    # body0. Snap a UsdPhysics.FixedJoint between ee_link and S["picked_path"],
+    # locking the cube AT the suction position via localPos0. Released on
+    # _grip_open().
     if ROBOT_FAMILY in ("ur10", "ur10e") and S.get("picked_path") and not _UR10_FJ_PATH[0]:
         try:
             from pxr import UsdPhysics as _UP_grip
@@ -32786,6 +32800,12 @@ def _grip_close():
                 fj = _UP_grip.FixedJoint.Define(stage, jp)
                 fj.CreateBody0Rel().SetTargets([Sdf.Path(str(ee.GetPath()))])
                 fj.CreateBody1Rel().SetTargets([Sdf.Path(S["picked_path"])])
+                # Lock cube to suction position in ee_link's local frame
+                # (UR10 USD: suction_cup at (0, 0.158, 0) in ee_link local).
+                try: fj.CreateLocalPos0Attr(Gf.Vec3f(0.0, 0.158, 0.0))
+                except Exception: pass
+                try: fj.CreateLocalPos1Attr(Gf.Vec3f(0.0, 0.0, 0.0))
+                except Exception: pass
                 _UR10_FJ_PATH[0] = jp
         except Exception as _fje: print(f"(curobo UR10 fj snap fail: {{_fje}})")
 
