@@ -184,6 +184,8 @@ Each shipped canonical:
 | CP-44 | Mixed-geometry (cubes + spheres) | ✅ form-gate shipped | Sprint 2 | Heterogeneous source_paths. 38/38 build. Handler agnostic to object type. |
 | CP-45 | Side-mounted robot (offset xy) | ✅ form-gate shipped | Sprint 2 | Robot at [0.7, 0, 0.75] (offset). Scene shifted. 38/38 build. Validates cuRobo offset handling. |
 | CP-46 | Production-reference 6-cube grid_3x2 | ✅ form-gate shipped | Sprint 2 | Synthesizes lessons from CP-08..CP-45. Empirically-grounded geometry. 51/51 build. |
+| CP-47 | TRUE runtime-vision sorter (2-color) | ✅✅ vision-derived routing | Sprint 2 | First canonical with **real runtime vision** — setup_pick_place_with_vision composite tool. 35/35 build. |
+| CP-48 | TRUE runtime-vision inspect-and-reject | ✅✅ vision-derived routing | Sprint 2 | 5 cubes (4 good + 1 reject) classified via vision at install time. 56/56 build. |
 
 **🎉 SPRINT 2 COMPLETE 🎉**: 40 canonicals (CP-07..CP-46, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 97+ atomic commits since structural work began.
 
