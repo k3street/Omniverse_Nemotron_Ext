@@ -212,6 +212,7 @@ Each shipped canonical:
 | CP-72 | UR10 Cortex bin stacking (#27) | ✅ form-gate shipped | Sprint 2 | UR10 + setup_cortex_behavior + 1x1x4 vertical stack via drop_targets. 40/40 build. |
 | CP-73 | UR10 Cortex conveyor demo (#33) | ✅ form-gate shipped | Sprint 2 | UR10 + Cortex + active 0.2 m/s belt — Isaac Sim demo_ur10_conveyor canonical. 40/40 build. |
 | CP-74 | UR10 builtin (PickPlaceController) reference | ✅ form-gate shipped | Sprint 2 | Same scene as CP-69 with target_source='builtin'. Validates the canonical Isaac Sim 5.x UR10 stack: Short_Suction variant + external SurfaceGripper + SingleManipulator + universal_robots.PickPlaceController. 21/21 build. Function-gate still open (belt-pause-from-callback doesn't propagate; tracked in task #36). |
+| CP-75 | UR10 builtin static-pickup reference | ✅ form-gate shipped | Sprint 2 | CP-74 stripped of conveyor — single static cube + bin. 20/20 build. Function-gate progress: controller now progresses through phases 0→1→2 (was stuck at event=0 due to get_joint_positions returning None across timeline stop/play; fixed via re-initialize fallback). Cube moves 0.4m but doesn't reach bin — suction attach still doesn't fire. |
 
 **Robot-family expansion (2026-05-08)**: cuRobo handler now accepts `robot_family={franka,ur10,ur10e}`. Refactored generated code emits runtime branching: 7-DOF Franka with ParallelGripper at panda_hand vs 6-DOF UR10 (SingleArticulation, no built-in gripper) at tool0, with ur10e.yml cuRobo config.
 
