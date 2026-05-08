@@ -179,7 +179,7 @@ Each shipped canonical:
 | CP-39 | drop_targets LIST form (vs dict) | ✅ form-gate shipped | Sprint 2 | Same as CP-08 but list shape. Validates list-form code path. 39/39 build. |
 | CP-40 | Spline controller variant | ✅ form-gate shipped | Sprint 2 | CP-01 with target_source='spline'. CPU-only deterministic. 37/38 build. |
 
-**🎉 SPRINT 2 COMPLETE 🎉**: 34 canonicals (CP-07..CP-40, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 99+ atomic commits since structural work began.
+**🎉 SPRINT 2 COMPLETE 🎉**: 34 canonicals (CP-07..CP-40, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 85+ atomic commits since structural work began.
 
 **Empirical drop-precision finding (2026-05-08, 5+3-run benchmarks)**:
 - cuRobo cube-drop precision is **~17cm avg, ±10cm**, NOT the originally-assumed 5cm
