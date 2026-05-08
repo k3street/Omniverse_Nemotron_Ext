@@ -53,5 +53,5 @@
     "Raycast workaround for cuRobo uses S['picked_path'] which is sensor-driven; for sensor-less canonicals, _cube_to_pick() falls back to base proximity.",
     "Same UR10 init quirks as CP-69."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2713 (UR10 cuRobo two-cube pedestal \u2014 Cube_1 delivered to bin via raycast workaround)"
 }
