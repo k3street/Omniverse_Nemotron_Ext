@@ -365,3 +365,32 @@ skipped UR10 cubes farther than 0.70m. Three sites in tool_executor.py.
 - `docs/research/2026-05-07/sonnet_industrial_scenarios.md` — 21 industrial scenarios
 - `docs/research/2026-05-07/sonnet_isaac_sim_scenes.md` — 12 Isaac Sim scenes
 - `docs/research/PRIVATE/robot_lab_inspection.md` — gitignored, internal IP
+
+## Session-final scoreboard (2026-05-09 ~01:40)
+
+After 4 research agents + 70+ commits + multi-cube simulate fix + drop-precision/belt-pause/multi-robot fix attempts:
+
+**CP-* function-gate: 45 ✓ / 41 ✗ / 0 untested (86 total)**
+
+Up from ~5 ✓ at session start (~9× improvement).
+
+**Failure clusters (41 ✗):**
+- 15 stack-precision palletizers — drop_targets dict apply or IK convergence
+- 10 specialized (multi-robot handoff, vision-gated, heap, CortexFranka, gantry)
+- 4 drop-precision UR10/cuRobo (CP-81/82/84/85)
+- 3 belt-pause-from-callback (CP-43/74/80)
+- 3 multi-robot mutex partial (CP-52/67/68)
+- 2 specialized-eval probes (CP-05 REORIENT, CP-29 precision-bench)
+- 1 each: CP-22 high-speed-belt, CP-73 dispenser-cortex, CP-06 physics-blowup, CP-35 build-fail
+
+**Outstanding root causes for 100%:**
+1. Stack-precision Franka cuRobo — drop_targets dict propagation through cuRobo handler
+2. Belt-pause integrator-level — PhysX caches velocity below USD layer; need direct C++ hook
+3. Drop precision — Franka equivalent of UR10 position-gate
+4. Multi-robot mutex — needs cuRobo planning_obstacles for other robot's links
+
+**Next-iteration plan (per yrkesroll/strategic agents):**
+- 6 unlocking functions: metrics_emit, ros2_control_compat, force_aware_assemble, articulated_open_close, bimanual_coordinate, opcua_bridge
+- Multimodal session runs in parallel on LayoutSpec IR + UI (other branch, see 2026-05-09-multi-session-coordination.md)
+- Library shrink 86→70 + add 5 (per quality-audit recommendation)
+
