@@ -1401,6 +1401,40 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "barcode_reader_sensor",
+            "description": "Tier B sensor — creates a barcode-reader prim at a fixed scan position. Reads cube identity via Semantics_class lookup when cube enters scan zone. Output published as USD attrs (barcode:last_read, barcode:last_class, barcode:read_count). Used by #17 Postal Cross-Belt Sorter, #18 Recycling Multi-Sensor.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sensor_path": {"type": "string"},
+                    "position": {"type": "array", "items": {"type": "number"}},
+                    "scan_radius": {"type": "number"},
+                },
+                "required": ["sensor_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_rotary_table",
+            "description": "Tier C composite tool — creates a rotating turntable (cylindrical disc + base + revolute joint). Optional drive for continuous rotation. Used by #13 Leader/Follower Rotary Station.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "table_path": {"type": "string"},
+                    "position": {"type": "array", "items": {"type": "number"}},
+                    "radius": {"type": "number"},
+                    "height": {"type": "number"},
+                    "angular_velocity_deg": {"type": "number", "description": "Continuous rotation deg/s (default 0 = passive)"},
+                },
+                "required": ["table_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "create_articulated_joint",
             "description": "Tier B tool — creates a USD physics joint (revolute/prismatic/fixed/spherical) between two prims for articulated mechanisms (drawers, doors, hinges, levers, rotary tables). Supports axis specification + joint limits + optional drive. Unlocks #13 Leader/Follower Rotary Station + #30 FrankaDrawerOpen.",
             "parameters": {

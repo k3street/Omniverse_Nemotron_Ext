@@ -6610,6 +6610,147 @@ print(json.dumps({{
 DATA_HANDLERS["create_articulated_joint"] = _handle_create_articulated_joint
 
 
+async def _handle_barcode_reader_sensor(args: Dict) -> Dict:
+    """Tier B tool — creates a barcode-reader sensor at a fixed scan position.
+
+    Reads cube identity via Semantics_class lookup when a cube enters the
+    sensor's xy zone. Output published as USD attribute on the sensor prim:
+      barcode:last_read (cube path)
+      barcode:last_class (semantic class read)
+      barcode:read_count
+
+    For canonical-time, creates the sensor prim with attrs. Runtime barcode
+    reading would be a per-tick callback (controller-side, Sprint 3+).
+
+    Args:
+      sensor_path:  USD path of the barcode-reader prim
+      position:     [x, y, z] of scan zone
+      scan_radius:  radius of scan zone (default 0.05m)
+
+    Returns: {sensor_path, position, scan_radius}
+    """
+    sensor_path = args["sensor_path"]
+    position = args.get("position", [0.4, 0.4, 0.835])
+    scan_radius = float(args.get("scan_radius", 0.05))
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Sdf, Gf
+stage = omni.usd.get_context().get_stage()
+pp = Sdf.Path({sensor_path!r})
+prim = stage.GetPrimAtPath(pp)
+if not prim or not prim.IsValid():
+    prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
+UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d({position[0]}, {position[1]}, {position[2]}))
+prim.CreateAttribute("barcode:scan_radius", Sdf.ValueTypeNames.Float).Set({scan_radius})
+prim.CreateAttribute("barcode:last_read",   Sdf.ValueTypeNames.String).Set("")
+prim.CreateAttribute("barcode:last_class",  Sdf.ValueTypeNames.String).Set("")
+prim.CreateAttribute("barcode:read_count",  Sdf.ValueTypeNames.Int).Set(0)
+print(json.dumps({{"created": str(prim.GetPath()), "position": {position!r}, "scan_radius": {scan_radius}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "sensor_path": sensor_path,
+        "position": position,
+        "scan_radius": scan_radius,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+DATA_HANDLERS["barcode_reader_sensor"] = _handle_barcode_reader_sensor
+
+
+async def _handle_create_rotary_table(args: Dict) -> Dict:
+    """Tier B tool — creates a rotating turntable (revolute joint with drive).
+
+    Composite: creates a static base + rotating disc + revolute joint between.
+    Optional drive applies continuous angular velocity.
+
+    Args:
+      table_path:   USD path of the rotary table (parent prim)
+      position:     [x, y, z] of table base
+      radius:       table radius (default 0.20m)
+      height:       table thickness (default 0.05m)
+      angular_velocity_deg: continuous rotation speed (deg/s, default 0 = passive)
+
+    Returns: {table_path, base_path, disc_path, joint_path}
+    """
+    table_path = args["table_path"]
+    position = args.get("position", [0, 0, 0.78])
+    radius = float(args.get("radius", 0.20))
+    height = float(args.get("height", 0.05))
+    angular_velocity_deg = float(args.get("angular_velocity_deg", 0.0))
+
+    base_path = f"{table_path}/Base"
+    disc_path = f"{table_path}/Disc"
+    joint_path = f"{table_path}/Joint"
+
+    # Base (static) — slightly below disc
+    await execute_tool_call("create_prim", {
+        "prim_path": base_path,
+        "prim_type": "Cube",
+        "position": [position[0], position[1], position[2] - height * 0.5 - 0.025],
+        "scale": [radius, radius, 0.025],
+    })
+    await execute_tool_call("apply_api_schema", {
+        "prim_path": base_path, "schema_name": "PhysicsCollisionAPI",
+    })
+
+    # Disc (rigid, rotating) — Cylinder for round shape
+    await execute_tool_call("create_prim", {
+        "prim_path": disc_path,
+        "prim_type": "Cylinder",
+        "position": position,
+        "radius": radius,
+        "height": height,
+    })
+    for api in ("PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"):
+        await execute_tool_call("apply_api_schema",
+                                  {"prim_path": disc_path, "schema_name": api})
+
+    # Revolute joint — disc rotates around world Z relative to base
+    await execute_tool_call("create_articulated_joint", {
+        "joint_path": joint_path,
+        "body0_path": base_path,
+        "body1_path": disc_path,
+        "joint_type": "revolute",
+        "axis": [0, 0, 1],
+        "drive_type": "acceleration" if angular_velocity_deg else None,
+    })
+
+    # Set continuous angular velocity if requested
+    if angular_velocity_deg:
+        vel_code = f"""\
+import omni.usd, json
+from pxr import UsdPhysics
+stage = omni.usd.get_context().get_stage()
+joint = UsdPhysics.RevoluteJoint.Get(stage, {joint_path!r})
+if joint:
+    drive = UsdPhysics.DriveAPI.Get(joint.GetPrim(), "angular")
+    if drive:
+        drive.CreateTargetVelocityAttr().Set({angular_velocity_deg})
+        print(json.dumps({{"target_velocity_deg_s": {angular_velocity_deg}}}))
+    else:
+        print(json.dumps({{"error": "no drive on joint"}}))
+else:
+    print(json.dumps({{"error": "joint not found"}}))
+"""
+        await kit_tools.exec_sync(vel_code, timeout=10)
+
+    return {
+        "table_path": table_path,
+        "base_path": base_path,
+        "disc_path": disc_path,
+        "joint_path": joint_path,
+        "radius": radius,
+        "height": height,
+        "angular_velocity_deg": angular_velocity_deg,
+    }
+
+
+DATA_HANDLERS["create_rotary_table"] = _handle_create_rotary_table
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
