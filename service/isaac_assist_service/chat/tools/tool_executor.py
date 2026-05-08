@@ -32738,11 +32738,13 @@ def _resume_belt():
 if _belt_sv and sum(abs(v) for v in (_belt_sv.Get() or (0,0,0))) < 1e-6:
     _resume_belt()
 
+_UR10_FJ_PATH = [None]  # cuRobo's UR10 FixedJoint workaround (same pattern as builtin handler)
 def _grip_open():
     # Three-tier fallback:
     #   1. franka.gripper (Franka's ParallelGripper) — articulation joint command
     #   2. _surface_gripper (UR10 / suction) — C++ interface releases FixedJoint
-    #   3. silent no-op (robot has no recognized gripper)
+    #   3. UR10 FixedJoint workaround — IsaacSurfaceGripper engagement is broken
+    #      for articulation-link body0; remove our manual joint here.
     try:
         if hasattr(franka, "gripper") and franka.gripper is not None:
             a = franka.gripper.forward("open")
@@ -32753,6 +32755,13 @@ def _grip_open():
         if _surface_gripper is not None:
             _surface_gripper.open()
     except Exception: pass
+    # UR10 fallback: remove the FixedJoint we may have authored on close.
+    if ROBOT_FAMILY in ("ur10", "ur10e") and _UR10_FJ_PATH[0]:
+        try:
+            if stage.GetPrimAtPath(_UR10_FJ_PATH[0]).IsValid():
+                stage.RemovePrim(_UR10_FJ_PATH[0])
+        except Exception as _re: print(f"(curobo UR10 fj remove fail: {{_re}})")
+        _UR10_FJ_PATH[0] = None
 def _grip_close():
     try:
         if hasattr(franka, "gripper") and franka.gripper is not None:
@@ -32764,6 +32773,21 @@ def _grip_close():
         if _surface_gripper is not None:
             _surface_gripper.close()
     except Exception: pass
+    # UR10 fallback: schema-level suction doesn't engage with articulation-link
+    # body0. Snap a UsdPhysics.FixedJoint between ee_link and S["picked_path"]
+    # if set. Released on _grip_open().
+    if ROBOT_FAMILY in ("ur10", "ur10e") and S.get("picked_path") and not _UR10_FJ_PATH[0]:
+        try:
+            from pxr import UsdPhysics as _UP_grip
+            ee = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/ee_link")
+            cube = stage.GetPrimAtPath(S["picked_path"])
+            if ee and ee.IsValid() and cube and cube.IsValid():
+                jp = f"{{S['picked_path']}}_curobo_ur10_fj"
+                fj = _UP_grip.FixedJoint.Define(stage, jp)
+                fj.CreateBody0Rel().SetTargets([Sdf.Path(str(ee.GetPath()))])
+                fj.CreateBody1Rel().SetTargets([Sdf.Path(S["picked_path"])])
+                _UR10_FJ_PATH[0] = jp
+        except Exception as _fje: print(f"(curobo UR10 fj snap fail: {{_fje}})")
 
 _sensor = stage.GetPrimAtPath(SENSOR_PATH) if SENSOR_PATH else None
 def _sensor_xy():
