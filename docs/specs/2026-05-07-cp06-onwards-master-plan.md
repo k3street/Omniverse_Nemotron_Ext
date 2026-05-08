@@ -204,6 +204,8 @@ Each shipped canonical:
 | CP-64 | Nav-robot RoboParty (#31) | ✅ build-only | Sprint 2 | Carter AMR + `setup_nav_robot`. 7/7 build. |
 | CP-65 | Two-cell kit-tray relay (#6) | ✅ form-gate shipped | Sprint 2 | 2 Frankas + kit tray + handoff. 44/44 build. |
 | CP-66 | Recycling multi-sensor (#18) | ✅ form-gate shipped | Sprint 2 | 4-material sortation via barcode_reader + nir_material_sensor. 59/59 build. |
+| CP-67 | Leader/follower rotary station (#13) | ✅ build-only | Sprint 2 | Rotary table + 2 robots + mutex. 43/43 build. Form-gate skip (rotary disc bridge). |
+| CP-68 | Robot-to-robot handoff w/ moving obstacles (#7) | ✅ form-gate shipped | Sprint 2 | CP-51 + register_moving_obstacle. 26/26 build. |
 
 **🎉 SPRINT 2 + 3 COMPLETE 🎉**: 46 canonicals (CP-07..CP-52, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 120+ atomic commits since structural work began.
 
