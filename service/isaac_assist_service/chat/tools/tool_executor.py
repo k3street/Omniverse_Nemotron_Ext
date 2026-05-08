@@ -6434,12 +6434,10 @@ async def _handle_surface_gripper(args: Dict) -> Dict:
     graph_path = args.get("graph_path") or f"{robot_path}/SuctionGraph"
 
     code = f"""\
-import omni.usd, json
+import omni.usd, omni.kit.commands, json, traceback
 from pxr import UsdGeom, Sdf
-import omni.graph.core as og
 
 stage = omni.usd.get_context().get_stage()
-graph_path = {graph_path!r}
 art_path = {ee_link!r}
 robot_path = {robot_path!r}
 
@@ -6449,49 +6447,93 @@ if not stage.GetPrimAtPath(robot_path).IsValid():
 if not stage.GetPrimAtPath(art_path).IsValid():
     print(json.dumps({{"error": f"ee_link not found: {{art_path}}"}})); raise SystemExit
 
-# Create OmniGraph for suction
-keys = og.Controller.Keys
-og.Controller.edit(
-    {{"graph_path": graph_path, "evaluator_name": "execution"}},
-    {{
-        keys.CREATE_NODES: [
-            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
-            ("SurfaceGripper", "isaacsim.robot.surface_gripper.OgnSurfaceGripper"),
-        ],
-        keys.CONNECT: [
-            ("OnPlaybackTick.outputs:tick", "SurfaceGripper.inputs:execIn"),
-        ],
-        keys.SET_VALUES: [
-            ("SurfaceGripper.inputs:parentPath", art_path),
-            ("SurfaceGripper.inputs:enabled", True),
-            ("SurfaceGripper.inputs:gripThreshold", {grip_threshold}),
-            ("SurfaceGripper.inputs:forceLimit", {force_limit}),
-            ("SurfaceGripper.inputs:torqueLimit", {torque_limit}),
-        ],
-    }}
-)
+# Isaac Sim 5.x SurfaceGripper schema: an IsaacSurfaceGripper prim authored
+# under the ee_link. UR10 (and other suction-capable robot USDs from the
+# 5.x asset library) ship a `Gripper` variant with `Short_Suction` /
+# `Long_Suction` selections that create the schema prim for free —
+# preferred path because the variant also wires the right physics joints.
+# Falls back to omni.kit.commands "CreateSurfaceGripper" when no variant
+# exists.
 
-# Verify graph created
-gp = stage.GetPrimAtPath(graph_path)
-gn_path = f"{{graph_path}}/SurfaceGripper"
-gn = stage.GetPrimAtPath(gn_path)
+robot_prim = stage.GetPrimAtPath(robot_path)
+sg_path = art_path + "/SurfaceGripper"
+sg_via = "unknown"
+
+variant_set = robot_prim.GetVariantSet("Gripper") if robot_prim.HasVariantSets() else None
+variant_names = list(variant_set.GetVariantNames()) if variant_set else []
+if "Short_Suction" in variant_names:
+    variant_set.SetVariantSelection("Short_Suction")
+    sg_via = "variant:Short_Suction"
+elif "Long_Suction" in variant_names:
+    variant_set.SetVariantSelection("Long_Suction")
+    sg_via = "variant:Long_Suction"
+
+# After variant set, the schema prim should exist. If not, fall back to
+# the Kit command that creates a fresh IsaacSurfaceGripper schema prim.
+if not stage.GetPrimAtPath(sg_path).IsValid():
+    try:
+        ok, prim = omni.kit.commands.execute("CreateSurfaceGripper", prim_path=art_path)
+        if ok and prim:
+            sg_path = str(prim.GetPath())
+            sg_via = "command:CreateSurfaceGripper"
+    except Exception as _e:
+        print(f"(surface_gripper: CreateSurfaceGripper command soft-fail: {{_e}})")
+        traceback.print_exc()
+
+sg_prim = stage.GetPrimAtPath(sg_path)
+if sg_prim and sg_prim.IsValid():
+    # Set scalar properties; relationship setup (attachment_points) needs
+    # joints that exist after world.reset() — left for runtime wiring.
+    for _name, _val in (
+        ("isaac:maxGripDistance", {grip_threshold}),
+        ("isaac:coaxialForceLimit", {force_limit}),
+        ("isaac:shearForceLimit", {force_limit}),
+        ("isaac:retryInterval", 1.0),
+    ):
+        _attr = sg_prim.GetAttribute(_name)
+        if _attr and _attr.IsDefined():
+            try: _attr.Set(_val)
+            except Exception: pass
+
+# Mark the SurfaceGripper path on the robot prim so the cuRobo handler can
+# find it at install time (no scene-traversal needed).
+try:
+    _marker = robot_prim.GetAttribute("isaac_assist:surface_gripper_path")
+    if not _marker or not _marker.IsDefined():
+        _marker = robot_prim.CreateAttribute("isaac_assist:surface_gripper_path", Sdf.ValueTypeNames.String)
+    _marker.Set(sg_path)
+except Exception: pass
+
 print(json.dumps({{
-    "graph_path": graph_path,
-    "gripper_node_path": gn_path,
+    "robot_path": robot_path,
+    "surface_gripper_path": sg_path,
     "ee_link": art_path,
-    "graph_exists": bool(gp and gp.IsValid()),
-    "gripper_node_exists": bool(gn and gn.IsValid()),
+    "schema_prim_exists": bool(sg_prim and sg_prim.IsValid()),
+    "schema_prim_type": str(sg_prim.GetTypeName()) if (sg_prim and sg_prim.IsValid()) else None,
+    "created_via": sg_via,
 }}))
 """
     res = await kit_tools.exec_sync(code, timeout=15)
-    return {
-        "graph_path": graph_path,
-        "gripper_node_path": f"{graph_path}/SurfaceGripper",
+    out = (res.get("output") or "").strip()
+    parsed = None
+    for line in reversed(out.splitlines()):
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                parsed = json.loads(line)
+                break
+            except Exception:
+                continue
+    summary = {
+        "robot_path": robot_path,
         "ee_link": ee_link,
         "force_limit": force_limit,
         "torque_limit": torque_limit,
-        "raw": (res.get("output") or "")[-300:],
+        "raw": out[-300:],
     }
+    if parsed:
+        summary.update(parsed)
+    return summary
 
 
 DATA_HANDLERS["surface_gripper"] = _handle_surface_gripper
@@ -32179,6 +32221,30 @@ try:
 except Exception as _e:
     print(f"(curobo: {{ROBOT_FAMILY}} post_reset soft-fail: {{_e}})")
 
+# Surface-gripper integration (UR10 + any robot with the IsaacSurfaceGripper
+# schema authored under the EE link). The surface_gripper tool drops a
+# marker attribute `isaac_assist:surface_gripper_path` on the robot prim
+# when it installs; we read it here and instantiate the Python wrapper.
+# The wrapper's open()/close() drive the C++ surface_gripper_interface,
+# which is what _grip_open/_grip_close need to release/attach cubes.
+_surface_gripper = None
+try:
+    _sg_attr = stage.GetPrimAtPath(ROBOT_PATH).GetAttribute("isaac_assist:surface_gripper_path")
+    _sg_path = _sg_attr.Get() if (_sg_attr and _sg_attr.IsDefined()) else None
+    if _sg_path and stage.GetPrimAtPath(_sg_path).IsValid():
+        from isaacsim.robot.manipulators.grippers.surface_gripper import SurfaceGripper as _SG
+        _ee_path = "/".join(_sg_path.split("/")[:-1])
+        _surface_gripper = _SG(end_effector_prim_path=_ee_path, surface_gripper_path=_sg_path)
+        try:
+            _surface_gripper.initialize(physics_sim_view=_physics_sim_view, articulation_num_dofs=_ARM_DOF)
+            print(f"(curobo: SurfaceGripper wired at {{_sg_path}})")
+        except Exception as _sge:
+            print(f"(curobo: SurfaceGripper init soft-fail: {{_sge}})")
+            _surface_gripper = None
+except Exception as _sge:
+    print(f"(curobo: SurfaceGripper detection soft-fail: {{_sge}})")
+    _surface_gripper = None
+
 for _ in range(20): _app.update()
 
 # Sync USD pose
@@ -32505,17 +32571,30 @@ if _belt_sv and sum(abs(v) for v in (_belt_sv.Get() or (0,0,0))) < 1e-6:
     _resume_belt()
 
 def _grip_open():
-    # Franka's ParallelGripper; UR10 has no built-in gripper (use surface_gripper).
+    # Three-tier fallback:
+    #   1. franka.gripper (Franka's ParallelGripper) — articulation joint command
+    #   2. _surface_gripper (UR10 / suction) — C++ interface releases FixedJoint
+    #   3. silent no-op (robot has no recognized gripper)
     try:
         if hasattr(franka, "gripper") and franka.gripper is not None:
             a = franka.gripper.forward("open")
             if a: art_ctrl.apply_action(a)
+            return
+    except Exception: pass
+    try:
+        if _surface_gripper is not None:
+            _surface_gripper.open()
     except Exception: pass
 def _grip_close():
     try:
         if hasattr(franka, "gripper") and franka.gripper is not None:
             a = franka.gripper.forward("close")
             if a: art_ctrl.apply_action(a)
+            return
+    except Exception: pass
+    try:
+        if _surface_gripper is not None:
+            _surface_gripper.close()
     except Exception: pass
 
 _sensor = stage.GetPrimAtPath(SENSOR_PATH) if SENSOR_PATH else None
@@ -32613,7 +32692,7 @@ def _apply_arm_joints(q7):
         return
     art_ctrl.apply_action(ArticulationAction(
         joint_positions=q7_arr,
-        joint_indices=np.arange(7),
+        joint_indices=np.arange(_ARM_DOF),
     ))
 
 def _build_segments(cube_pos, drop_pos, current_q):
