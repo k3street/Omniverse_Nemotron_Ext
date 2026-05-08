@@ -29551,6 +29551,23 @@ def _on_step(dt):
         except Exception: pass
         if actions is not None:
             _art_ctrl.apply_action(actions)
+        # Cube velocity damping during pick phase (events 0-3) for UR10:
+        # belt-pause from physics-step callback doesn't propagate (in-callback
+        # Set is restored by physics next tick), so the cube continues
+        # gliding past the pick window. Zero the cube's linear velocity
+        # each tick during approach/descend/grip-wait/grip-close to make
+        # it effectively stationary regardless of belt state.
+        if ROBOT_FAMILY in ("ur10", "ur10e") and _ev is not None and _ev <= 3 and S["current"]:
+            try:
+                _cprim = stage.GetPrimAtPath(S["current"])
+                if _cprim and _cprim.IsValid():
+                    _vattr = _cprim.GetAttribute("physics:velocity")
+                    if _vattr and _vattr.IsDefined():
+                        _vattr.Set(Gf.Vec3f(0.0, 0.0, 0.0))
+                    _aattr = _cprim.GetAttribute("physics:angularVelocity")
+                    if _aattr and _aattr.IsDefined():
+                        _aattr.Set(Gf.Vec3f(0.0, 0.0, 0.0))
+            except Exception: pass
         # FixedJoint workaround for UR10 (and other surface-gripper families):
         # Isaac Sim 5.x's IsaacSurfaceGripper C++ engagement doesn't form
         # a join when body0 is an articulation link (UR10's ee_link).
