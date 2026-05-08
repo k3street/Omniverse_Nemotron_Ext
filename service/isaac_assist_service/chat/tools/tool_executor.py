@@ -6012,6 +6012,119 @@ print(json.dumps(positions))
 DATA_HANDLERS["add_vision_classifier_gate"] = _handle_add_vision_classifier_gate
 
 
+async def _handle_setup_pick_place_with_vision(args: Dict) -> Dict:
+    """Composite tool — runs vision classification THEN setup_pick_place_controller.
+
+    For canonical-time integration of real runtime vision-driven sorting.
+    Workflow:
+      1. Calls add_vision_classifier_gate(cube_paths, class_labels, camera_path)
+         to detect cubes in viewport and map cube_path → detected_label.
+      2. Sets Semantics_color on each cube via Kit RPC (the detected label
+         becomes the cube's semantic class).
+      3. Calls setup_pick_place_controller(target_source='curobo',
+         color_routing=destination_map) to install the standard cuRobo
+         controller with vision-derived routing.
+
+    This makes the FULL pipeline truly vision-driven: classification runs
+    at controller-install-time, semantic labels reflect actual visual
+    content, and standard color_routing dispatches accordingly.
+
+    NOTE: each call to this tool consumes 1 Gemini API call (the vision
+    classification). Be cost-conscious in production deployments.
+
+    Args (forwards to underlying tools):
+      robot_path, source_paths (cube_paths), destination_path,
+      camera_path, class_labels, destination_map (class → bin_path),
+      sensor_path, belt_path, planning_obstacles
+      [+ any setup_pick_place_controller args]
+
+    Returns: combined dict with vision result + controller install result.
+    """
+    cube_paths = list(args.get("cube_paths") or args.get("source_paths") or [])
+    class_labels = list(args.get("class_labels") or [])
+    camera_path = args.get("camera_path")
+    destination_map = args.get("destination_map") or {}
+
+    if not cube_paths:
+        return {"type": "error", "error": "cube_paths/source_paths required"}
+    if not class_labels:
+        return {"type": "error", "error": "class_labels required"}
+    if not destination_map:
+        return {"type": "error", "error": "destination_map required (class→bin path)"}
+
+    # Step 1: vision classification
+    vision_res = await execute_tool_call("add_vision_classifier_gate", {
+        "cube_paths": cube_paths,
+        "class_labels": class_labels,
+        "camera_path": camera_path,
+        "destination_map": destination_map,
+    })
+    if vision_res.get("type") == "error":
+        return vision_res
+
+    cube_to_class = vision_res.get("cube_to_class") or {}
+    if not cube_to_class:
+        return {"type": "error",
+                "error": f"Vision returned 0 detections — check camera placement and scene visibility. raw_detections: {vision_res.get('raw_detections')}"}
+
+    # Step 2: Set Semantics_color on each cube via Kit-side script.
+    # Strip the " cube" suffix from labels (e.g., "red cube" → "red") to match
+    # color_routing dict's keys.
+    cube_to_short_class = {}
+    for cube, label in cube_to_class.items():
+        short = label.lower().replace(" cube", "").strip()
+        cube_to_short_class[cube] = short
+
+    label_code = f"""\
+import omni.usd
+from pxr import Usd, Sdf, Semantics
+
+stage = omni.usd.get_context().get_stage()
+mapping = {cube_to_short_class!r}
+applied = []
+for path, cls in mapping.items():
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid(): continue
+    sem = Semantics.SemanticsAPI.Apply(p, "Semantics_color")
+    if sem.GetSemanticTypeAttr() and sem.GetSemanticTypeAttr().IsValid():
+        pass
+    else:
+        sem.CreateSemanticTypeAttr().Set("color")
+    sem.CreateSemanticDataAttr().Set(cls)
+    applied.append(path)
+import json
+print(json.dumps({{"applied": applied}}))
+"""
+    label_res = await kit_tools.exec_sync(label_code, timeout=15)
+
+    # Step 3: Build color_routing dict from destination_map (already keyed by class)
+    color_routing = dict(destination_map)
+
+    # Step 4: install cuRobo controller with vision-derived color_routing
+    controller_args = dict(args)  # forward all args
+    controller_args["target_source"] = "curobo"
+    controller_args["color_routing"] = color_routing
+    # Drop vision-specific args before passing to setup_pick_place_controller
+    for k in ("class_labels", "destination_map", "camera_path", "cube_paths"):
+        controller_args.pop(k, None)
+    # source_paths might be missing if caller used cube_paths
+    if not controller_args.get("source_paths"):
+        controller_args["source_paths"] = cube_paths
+
+    install_res = await execute_tool_call("setup_pick_place_controller", controller_args)
+
+    return {
+        "vision_classification": cube_to_class,
+        "semantic_labels_applied": (label_res.get("output") or "")[-200:],
+        "color_routing": color_routing,
+        "controller_install": (install_res.get("output") or "")[-300:] if isinstance(install_res, dict) else str(install_res)[:300],
+        "raw_detections": vision_res.get("raw_detections", []),
+    }
+
+
+DATA_HANDLERS["setup_pick_place_with_vision"] = _handle_setup_pick_place_with_vision
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),

@@ -1401,6 +1401,29 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "setup_pick_place_with_vision",
+            "description": "Composite tool — runs RUNTIME vision classification of cubes in the scene, then installs cuRobo pick-place controller with vision-derived color_routing. The full pipeline is truly vision-driven: detection happens at install time, semantic labels are set dynamically based on detected colors, and standard color_routing dispatches cubes to matching destinations. Use INSTEAD of separate add_vision_classifier_gate + setup_pick_place_controller calls when the canonical's `code` block needs both in one step. Each call consumes 1 Gemini API call. Args same as add_vision_classifier_gate (cube_paths, class_labels, camera_path, destination_map) PLUS setup_pick_place_controller (robot_path, sensor_path, belt_path, planning_obstacles, etc).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "cube_paths": {"type": "array", "items": {"type": "string"}, "description": "Cubes to classify + pick (also used as source_paths for controller)"},
+                    "source_paths": {"type": "array", "items": {"type": "string"}, "description": "Alias for cube_paths (controller-side naming)"},
+                    "class_labels": {"type": "array", "items": {"type": "string"}, "description": "Expected class labels for vision (e.g. ['red cube', 'blue cube'])"},
+                    "camera_path": {"type": "string", "description": "USD path of camera for vision capture"},
+                    "destination_map": {"type": "object", "description": "{class_short_name: bin_path} (e.g. {'red': '/World/RedBin'}). Used as color_routing after vision classification."},
+                    "destination_path": {"type": "string", "description": "Fallback bin for unclassified cubes"},
+                    "sensor_path": {"type": "string"},
+                    "belt_path": {"type": "string"},
+                    "planning_obstacles": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["robot_path", "cube_paths", "class_labels", "camera_path", "destination_map"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "add_vision_classifier_gate",
             "description": "Tier A tool — build a class-routing dict by VLM vision classification of cubes in the scene. Captures viewport (with 60-frame render flush), runs vision_detect_objects with the provided class_labels, then matches detected labels to cube_paths by left-to-right ordering (sorted by world x for cubes vs image x for detections). Returns {cube_path: detected_label} mapping for use as setup_pick_place_controller's color_routing argument. **v1 KNOWN LIMITATIONS**: (a) pairing assumes camera world-x axis aligns with image x — fails for arbitrary camera angles (CP-16 end-to-end probe 2026-05-08: detections correct in image but mapped to wrong cubes due to camera-vs-world axis misalignment). (b) Gemini may not detect all cubes (CP-16 probe: 3/4 detected — red missed). (c) Minimal synthetic scenes (no robot/context) → 0 detections. Production v2 needs world→image projection for robust matching. For now, suitable for: 2-cube simple sorts where left-right ordering is reliable, debugging/scaffolding, agent-orchestrated workflows where the agent validates the mapping. Used by CP-N parcel singulation, vision quality gate, color sorter, postal cross-belt sorter.",
             "parameters": {
