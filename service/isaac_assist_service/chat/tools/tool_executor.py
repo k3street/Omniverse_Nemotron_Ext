@@ -29449,7 +29449,7 @@ def _resume_belt():
     if _belt_sv: _belt_sv.Set(_nominal_belt)
 
 # Per-cube state machine: deliver cubes one at a time
-S = {{"delivered": set(), "current": None}}
+S = {{"delivered": set(), "current": None, "fixed_joint": None}}
 
 def _cube_pos(path):
     p = stage.GetPrimAtPath(path)
@@ -29551,9 +29551,38 @@ def _on_step(dt):
         except Exception: pass
         if actions is not None:
             _art_ctrl.apply_action(actions)
+        # FixedJoint workaround for UR10 (and other surface-gripper families):
+        # Isaac Sim 5.x's IsaacSurfaceGripper C++ engagement doesn't form
+        # a join when body0 is an articulation link (UR10's ee_link).
+        # When the controller advances past gripper-close (event >= 4) and
+        # we don't already have a fixed joint for this cube, snap one
+        # between ee_link and the cube. Remove on event 7 (release).
+        if ROBOT_FAMILY in ("ur10", "ur10e") and _ev is not None and S["current"]:
+            if _ev == 4 and not S.get("fixed_joint"):
+                # Just past gripper close — snap FixedJoint
+                try:
+                    from pxr import UsdPhysics as _UP_grip, Sdf as _Sdf_grip
+                    ee = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/ee_link")
+                    cube = stage.GetPrimAtPath(S["current"])
+                    if ee and ee.IsValid() and cube and cube.IsValid():
+                        jp = f"{{S['current']}}_pp_grip_fj"
+                        fj = _UP_grip.FixedJoint.Define(stage, jp)
+                        fj.CreateBody0Rel().SetTargets([_Sdf_grip.Path(str(ee.GetPath()))])
+                        fj.CreateBody1Rel().SetTargets([_Sdf_grip.Path(S["current"])])
+                        S["fixed_joint"] = jp
+                except Exception as _fje: print(f"(builtin pp UR10 fj snap fail: {{_fje}})")
+            elif _ev == 7 and S.get("fixed_joint"):
+                # Just past gripper open — remove FixedJoint
+                try:
+                    fjp = S["fixed_joint"]
+                    if stage.GetPrimAtPath(fjp).IsValid():
+                        stage.RemovePrim(fjp)
+                    S["fixed_joint"] = None
+                except Exception as _rfe: print(f"(builtin pp UR10 fj remove fail: {{_rfe}})")
         if _controller.is_done():
             S["delivered"].add(S["current"])
             S["current"] = None
+            S["fixed_joint"] = None
             if _dbg_phase_attr: _dbg_phase_attr.Set("delivered")
             _resume_belt()  # next cube can flow in
     except Exception as _e:
