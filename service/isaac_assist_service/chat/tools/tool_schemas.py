@@ -1401,6 +1401,40 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "create_kit_tray",
+            "description": "Tier A tool — creates a kitting tray with N labeled slots at fixed positions. Used by kitting canonicals (recipe-based assembly, multi-source-to-tray, two-cell relay). Each slot is a child Xform under tray_path with kit:slot_index, kit:slot_size, kit:occupied attrs. Slot centers are returned for use as drop_targets in setup_pick_place_controller.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tray_path": {"type": "string", "description": "USD path of the tray to create"},
+                    "position": {"type": "array", "items": {"type": "number"}, "description": "[x,y,z] world position of tray center"},
+                    "tray_size": {"type": "array", "items": {"type": "number"}, "description": "[w,d,h] tray dimensions in meters"},
+                    "slot_layout": {"type": "string", "description": "'grid_RxC' (e.g. 'grid_2x2') or 'row_N' (e.g. 'row_4')"},
+                    "slot_size": {"type": "number", "description": "Edge length of each slot's expected item (default 0.05)"},
+                    "slot_spacing": {"type": "number", "description": "Center-to-center slot spacing"},
+                },
+                "required": ["tray_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "track_slot_occupancy",
+            "description": "Tier A companion to create_kit_tray. Returns occupancy mapping {slot_path: cube_path or None} by checking proximity of cubes to slot centers. Use after pick-place to verify kit completion.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tray_path": {"type": "string", "description": "USD path of the kit tray"},
+                    "cube_paths": {"type": "array", "items": {"type": "string"}, "description": "USD paths of items to check for in slots"},
+                },
+                "required": ["tray_path", "cube_paths"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "setup_pick_place_with_vision",
             "description": "Composite tool — runs RUNTIME vision classification of cubes in the scene, then installs cuRobo pick-place controller with vision-derived color_routing. The full pipeline is truly vision-driven: detection happens at install time, semantic labels are set dynamically based on detected colors, and standard color_routing dispatches cubes to matching destinations. Use INSTEAD of separate add_vision_classifier_gate + setup_pick_place_controller calls when the canonical's `code` block needs both in one step. Each call consumes 1 Gemini API call. Args same as add_vision_classifier_gate (cube_paths, class_labels, camera_path, destination_map) PLUS setup_pick_place_controller (robot_path, sensor_path, belt_path, planning_obstacles, etc).",
             "parameters": {

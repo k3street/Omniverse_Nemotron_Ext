@@ -6125,6 +6125,172 @@ print(json.dumps({{"applied": applied}}))
 DATA_HANDLERS["setup_pick_place_with_vision"] = _handle_setup_pick_place_with_vision
 
 
+async def _handle_create_kit_tray(args: Dict) -> Dict:
+    """Tier A tool — creates a tray with N labeled slots for kitting workflows.
+
+    A kit tray is a flat platform with multiple discrete positions (slots)
+    where specific items belong. Each slot is a child Xform under the tray
+    prim, named slot_<n> with a fixed local position. Slots are queryable
+    via track_slot_occupancy at runtime.
+
+    Args:
+      tray_path:    USD path of the tray to create (parent prim)
+      position:     [x, y, z] world position of tray center
+      tray_size:    [w, d, h] tray dimensions
+      slot_layout:  pattern_name e.g. 'grid_2x2', 'grid_3x3', 'row_4'
+      slot_size:    width of each slot (default 0.05 = 5cm cube slot)
+      slot_spacing: center-to-center spacing (default = slot_size + 0.02)
+
+    Returns:
+      {tray_path, slot_paths: [path1, path2, ...], slot_centers: [[x,y,z], ...]}
+    """
+    tray_path = args["tray_path"]
+    position = args.get("position", [0, 0, 0.75])
+    tray_size = args.get("tray_size", [0.30, 0.30, 0.05])
+    slot_layout = args.get("slot_layout", "grid_2x2")
+    slot_size = float(args.get("slot_size", 0.05))
+    slot_spacing = float(args.get("slot_spacing", slot_size + 0.02))
+
+    # Parse slot_layout
+    if slot_layout.startswith("grid_") and "x" in slot_layout[5:]:
+        rows, cols = (int(x) for x in slot_layout[5:].split("x"))
+        n_slots = rows * cols
+    elif slot_layout.startswith("row_"):
+        rows, cols = 1, int(slot_layout[4:])
+        n_slots = cols
+    else:
+        return {"type": "error", "error": f"unsupported slot_layout: {slot_layout!r}"}
+
+    # Build the tray prim
+    await execute_tool_call("create_prim", {
+        "prim_path": tray_path,
+        "prim_type": "Cube",
+        "position": position,
+        "scale": [tray_size[0] / 2, tray_size[1] / 2, tray_size[2] / 2],
+    })
+    await execute_tool_call("apply_api_schema", {
+        "prim_path": tray_path,
+        "schema_name": "PhysicsCollisionAPI",
+    })
+
+    # Compute slot positions
+    cx, cy = position[0], position[1]
+    tray_top_z = position[2] + tray_size[2] / 2
+    slot_paths = []
+    slot_centers = []
+    for r in range(rows):
+        for c in range(cols):
+            x = cx + (c - (cols - 1) * 0.5) * slot_spacing
+            y = cy + (r - (rows - 1) * 0.5) * slot_spacing
+            z = tray_top_z + slot_size * 0.5
+            slot_idx = r * cols + c
+            slot_path = f"{tray_path}/slot_{slot_idx + 1}"
+            slot_paths.append(slot_path)
+            slot_centers.append([round(x, 6), round(y, 6), round(z, 6)])
+
+    # Create empty Xform prims for slot tracking (each slot is a marker prim)
+    slot_init_code = f"""\
+import omni.usd
+from pxr import UsdGeom, Gf, Sdf
+stage = omni.usd.get_context().get_stage()
+slot_paths = {slot_paths!r}
+slot_centers = {slot_centers!r}
+created = []
+for path, center in zip(slot_paths, slot_centers):
+    pp = Sdf.Path(path)
+    if not stage.GetPrimAtPath(pp).IsValid():
+        prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
+        UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d(center[0], center[1], center[2]))
+        # Mark as kit_slot for track_slot_occupancy
+        prim.CreateAttribute("kit:slot_index", Sdf.ValueTypeNames.Int).Set(slot_paths.index(path))
+        prim.CreateAttribute("kit:slot_size", Sdf.ValueTypeNames.Float).Set({slot_size})
+        prim.CreateAttribute("kit:occupied", Sdf.ValueTypeNames.Bool).Set(False)
+        created.append(path)
+import json
+print(json.dumps({{"created": created}}))
+"""
+    res = await kit_tools.exec_sync(slot_init_code, timeout=15)
+
+    return {
+        "tray_path": tray_path,
+        "slot_paths": slot_paths,
+        "slot_centers": slot_centers,
+        "n_slots": n_slots,
+    }
+
+
+async def _handle_track_slot_occupancy(args: Dict) -> Dict:
+    """Tier A companion — check which kit-tray slots are currently occupied.
+
+    Reads slot_paths under tray, checks if any cube is within slot_size/2
+    of each slot's xy center. Returns occupancy mapping.
+
+    Args:
+      tray_path:    USD path of the kit tray (created via create_kit_tray)
+      cube_paths:   USD paths of items to check
+
+    Returns:
+      {slot_occupancy: {slot_path: cube_path or None, ...}}
+    """
+    tray_path = args["tray_path"]
+    cube_paths = list(args.get("cube_paths") or [])
+
+    code = f"""\
+import omni.usd, json
+from pxr import Usd, UsdGeom, Sdf
+stage = omni.usd.get_context().get_stage()
+tray = stage.GetPrimAtPath({tray_path!r})
+result = {{"slot_occupancy": {{}}, "filled_count": 0}}
+if not tray or not tray.IsValid():
+    result["error"] = f"tray prim not found: {tray_path!r}"
+else:
+    cube_paths = {cube_paths!r}
+    cube_centers = {{}}
+    for cp in cube_paths:
+        prim = stage.GetPrimAtPath(cp)
+        if prim and prim.IsValid():
+            cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+            b = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+            if not b.IsEmpty():
+                m = b.GetMidpoint()
+                cube_centers[cp] = [float(m[0]), float(m[1]), float(m[2])]
+    # For each slot, find nearest cube within slot_size/2
+    for child in tray.GetChildren():
+        if not child.GetName().startswith("slot_"): continue
+        size_attr = child.GetAttribute("kit:slot_size")
+        size = float(size_attr.Get()) if size_attr and size_attr.IsValid() else 0.05
+        x_t = UsdGeom.Xformable(child).ComputeLocalToWorldTransform(0).ExtractTranslation()
+        slot_xy = [float(x_t[0]), float(x_t[1])]
+        slot_path = str(child.GetPath())
+        nearest_cube = None
+        nearest_dist = float("inf")
+        for cp, c in cube_centers.items():
+            d = ((c[0] - slot_xy[0])**2 + (c[1] - slot_xy[1])**2) ** 0.5
+            if d < size * 0.6 and d < nearest_dist:  # 60% of slot size = "in slot"
+                nearest_cube = cp
+                nearest_dist = d
+        result["slot_occupancy"][slot_path] = nearest_cube
+        if nearest_cube: result["filled_count"] += 1
+print(json.dumps(result))
+"""
+    res = await kit_tools.exec_sync(code, timeout=15)
+    out = (res.get("output") or "").strip()
+    parsed = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                parsed = json.loads(line)
+                break
+            except Exception:
+                continue
+    return parsed or {"error": "could not parse track_slot_occupancy output"}
+
+
+DATA_HANDLERS["create_kit_tray"] = _handle_create_kit_tray
+DATA_HANDLERS["track_slot_occupancy"] = _handle_track_slot_occupancy
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
