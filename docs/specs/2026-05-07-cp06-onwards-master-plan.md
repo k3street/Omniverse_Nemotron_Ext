@@ -213,6 +213,10 @@ Each shipped canonical:
 | CP-73 | UR10 Cortex conveyor demo (#33) | ✅ form-gate shipped | Sprint 2 | UR10 + Cortex + active 0.2 m/s belt — Isaac Sim demo_ur10_conveyor canonical. 40/40 build. |
 | CP-74 | UR10 builtin (PickPlaceController) reference | ✅ form-gate shipped | Sprint 2 | Same scene as CP-69 with target_source='builtin'. Validates the canonical Isaac Sim 5.x UR10 stack: Short_Suction variant + external SurfaceGripper + SingleManipulator + universal_robots.PickPlaceController. 21/21 build. Function-gate still open (belt-pause-from-callback doesn't propagate; tracked in task #36). |
 | CP-75 | UR10 builtin static-pickup reference | ✅ form-gate shipped | Sprint 2 | CP-74 stripped of conveyor — single static cube + bin. 20/20 build. Function-gate progress: controller now progresses through phases 0→1→2 (was stuck at event=0 due to get_joint_positions returning None across timeline stop/play; fixed via re-initialize fallback). Cube moves 0.4m but doesn't reach bin — suction attach still doesn't fire. |
+| CP-76 | Dual-Robot Dynamic Fixture Hold | ✅ form-gate shipped | Sprint 2 | Industrial Set 1 #4. R1 places workpiece on HoldPedestal, R2 stacks mating part on top. register_moving_obstacle for R2-aware-of-R1. 32/32 build. Function-gate stochastic — cuRobo precision + dual-robot timing. |
+| CP-77 | Nested-Box Packer | ✅ form-gate shipped | Sprint 2 | Industrial Set 4 #2. 4 cubes filled into bin (FILLING) + flat lid placed on top (SEALING) via 5-entry source_paths + drop_targets dict. 44/44 build. Function-gate stochastic — lid alignment requires sub-cm precision. |
+
+**Research roadmap closure (2026-05-08)**: 32/33 scenarios form-gate ✓. Only gap is Isaac Sim Scene 9 (CobottaPro900PickPlace) — `cobotta_900` manipulator example module not shipped on this install.
 
 **Robot-family expansion (2026-05-08)**: cuRobo handler now accepts `robot_family={franka,ur10,ur10e}`. Refactored generated code emits runtime branching: 7-DOF Franka with ParallelGripper at panda_hand vs 6-DOF UR10 (SingleArticulation, no built-in gripper) at tool0, with ur10e.yml cuRobo config.
 
