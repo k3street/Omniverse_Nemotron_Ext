@@ -1,13 +1,12 @@
 {
   "task_id": "CP-76",
-  "goal": "Build a dual-robot dynamic fixture hold canonical: R1 holds a workpiece (Cube_workpiece) mid-air at a fixed transfer pose while R2 picks a mating part (Cube_mating) and stacks it onto the held workpiece. The hardest collision-avoidance case in the research set — both robots simultaneously occupy the central workspace, and R2 must treat R1's hand as a moving obstacle. Realizes Industrial Set 1 #4 Dual-Robot Dynamic Fixture Hold.",
+  "goal": "Build a dual-robot dynamic fixture hold canonical: R1 holds a workpiece (Cube_workpiece) mid-air at a fixed transfer pose while R2 picks a mating part (Cube_mating) and stacks it onto the held workpiece. The hardest collision-avoidance case in the research set \u2014 both robots simultaneously occupy the central workspace, and R2 must treat R1's hand as a moving obstacle. Realizes Industrial Set 1 #4 Dual-Robot Dynamic Fixture Hold.",
   "tools_used": [
     "create_prim",
     "set_attribute",
     "apply_api_schema",
     "robot_wizard",
     "create_conveyor",
-    "create_bin",
     "add_proximity_sensor",
     "set_physics_scene_config",
     "apply_physics_material",
@@ -15,22 +14,48 @@
     "register_moving_obstacle",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six dual-robot fixture-hold specifics for CP-76:\n1) Two Frankas: R1 (FixtureHolder) on -Y side at (0, -0.5, 0.75), R2 (Inserter) on +Y side at (0, 0.5, 0.75) — face-to-face across the central work zone.\n2) Cube_workpiece spawned on R1's feeder conveyor; R1 picks and holds it static at the central transfer pose [0, 0, 0.95] (mid-air, 20cm above table).\n3) Cube_mating spawned on R2's feeder conveyor; R2 picks and stacks on top of the held workpiece — drop_target = transfer pose + cube height = [0, 0, 1.00].\n4) FixtureHold extension: drop_target IS the held position. Once R1 places at [0, 0, 0.95] there's nothing physically supporting the cube — it would fall. Mitigation: solid pedestal at the transfer pose (small Cube prim with collision) catches the workpiece for R1's hand to 'hold against'.\n5) R2 uses register_moving_obstacle to track R1's panda_hand as a runtime obstacle so cuRobo plans around the holding arm. Runtime polling is Sprint 4+, but the registration metadata is set at canonical-time.\n6) The two robots run independently — R1 cycles workpiece → pedestal (acts as 'hold'), R2 cycles mating → on top. Realizes #4 dual-robot dynamic fixture hold in build form.",
-  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.8, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# R1 (FixtureHolder) on -Y side\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FixtureHolder\",\n    position=[0, -0.5, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n# R2 (Inserter) on +Y side, facing R1\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Inserter\",\n    position=[0, 0.5, 0.75],\n    orientation=[0.7071068, 0, 0, -0.7071068],\n)\n\n# R1's feeder conveyor — workpiece flows in from -X\ncreate_conveyor(\n    prim_path=\"/World/HolderConveyor\",\n    position=[-0.6, -0.4, 0.78],\n    size=[1.5, 0.3, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# R2's feeder conveyor — mating part flows in from +X\ncreate_conveyor(\n    prim_path=\"/World/InserterConveyor\",\n    position=[0.6, 0.4, 0.78],\n    size=[1.5, 0.3, 0.05],\n    surface_velocity=[-0.2, 0, 0],\n)\n\n# Workpiece (R1's cube)\ncreate_prim(prim_path=\"/World/Cube_workpiece\", prim_type=\"Cube\", position=[-1.0, -0.4, 0.835], size=0.06)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_workpiece\", schema_name=api)\n\n# Mating part (R2's cube)\ncreate_prim(prim_path=\"/World/Cube_mating\", prim_type=\"Cube\", position=[1.0, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_mating\", schema_name=api)\n\nbulk_set_attribute(prim_paths=[\"/World/Cube_workpiece\", \"/World/Cube_mating\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_workpiece\", material_name=\"rubber\")\napply_physics_material(prim_path=\"/World/Cube_mating\", material_name=\"rubber\")\n\n# Hold pedestal — small cube at transfer pose; R1 places workpiece on top\ncreate_prim(prim_path=\"/World/HoldPedestal\", prim_type=\"Cube\", position=[0, 0, 0.85], scale=[0.04, 0.04, 0.05])\napply_api_schema(prim_path=\"/World/HoldPedestal\", schema_name=\"PhysicsCollisionAPI\")\n\n# Pick sensors\nadd_proximity_sensor(sensor_path=\"/World/HolderSensor\", position=[-0.2, -0.4, 0.835], size=[0.06, 0.06, 0.06])\nadd_proximity_sensor(sensor_path=\"/World/InserterSensor\", position=[0.2, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Register R1's panda_hand as moving obstacle for R2's cuRobo planner.\n# Runtime obstacle polling is Sprint 4+; canonical-time call sets the\n# curobo:moving_obstacles attr on /World/Inserter.\nregister_moving_obstacle(\n    robot_path=\"/World/Inserter\",\n    obstacle_path=\"/World/FixtureHolder/panda_hand\",\n)\n\n# R1 controller — picks workpiece, places on HoldPedestal\nsetup_pick_place_controller(\n    robot_path=\"/World/FixtureHolder\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/HolderSensor\",\n    belt_path=\"/World/HolderConveyor\",\n    source_paths=[\"/World/Cube_workpiece\"],\n    destination_path=\"/World/HoldPedestal\",\n    drop_target=[0, 0, 0.92],\n    planning_obstacles=[\"/World/Table\", \"/World/HolderConveyor\", \"/World/InserterConveyor\", \"/World/HoldPedestal\"],\n)\n\n# R2 controller — picks mating part, stacks on top of workpiece on pedestal\nsetup_pick_place_controller(\n    robot_path=\"/World/Inserter\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/InserterSensor\",\n    belt_path=\"/World/InserterConveyor\",\n    source_paths=[\"/World/Cube_mating\"],\n    destination_path=\"/World/HoldPedestal\",\n    drop_target=[0, 0, 0.99],\n    planning_obstacles=[\"/World/Table\", \"/World/HolderConveyor\", \"/World/InserterConveyor\", \"/World/HoldPedestal\"],\n)",
+  "thoughts": "Six dual-robot fixture-hold specifics for CP-76:\n1) Two Frankas: R1 (FixtureHolder) on -Y side at (0, -0.5, 0.75), R2 (Inserter) on +Y side at (0, 0.5, 0.75) \u2014 face-to-face across the central work zone.\n2) Cube_workpiece spawned on R1's feeder conveyor; R1 picks and holds it static at the central transfer pose [0, 0, 0.95] (mid-air, 20cm above table).\n3) Cube_mating spawned on R2's feeder conveyor; R2 picks and stacks on top of the held workpiece \u2014 drop_target = transfer pose + cube height = [0, 0, 1.00].\n4) FixtureHold extension: drop_target IS the held position. Once R1 places at [0, 0, 0.95] there's nothing physically supporting the cube \u2014 it would fall. Mitigation: solid pedestal at the transfer pose (small Cube prim with collision) catches the workpiece for R1's hand to 'hold against'.\n5) R2 uses register_moving_obstacle to track R1's panda_hand as a runtime obstacle so cuRobo plans around the holding arm. Runtime polling is Sprint 4+, but the registration metadata is set at canonical-time.\n6) The two robots run independently \u2014 R1 cycles workpiece \u2192 pedestal (acts as 'hold'), R2 cycles mating \u2192 on top. Realizes #4 dual-robot dynamic fixture hold in build form.",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.8, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# R1 (FixtureHolder) on -Y side\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FixtureHolder\",\n    position=[0, -0.5, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n# R2 (Inserter) on +Y side, facing R1\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Inserter\",\n    position=[0, 0.5, 0.75],\n    orientation=[0.7071068, 0, 0, -0.7071068],\n)\n\n# R1's feeder conveyor \u2014 workpiece flows in from -X\ncreate_conveyor(\n    prim_path=\"/World/HolderConveyor\",\n    position=[-0.6, -0.4, 0.78],\n    size=[1.5, 0.3, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# R2's feeder conveyor \u2014 mating part flows in from +X\ncreate_conveyor(\n    prim_path=\"/World/InserterConveyor\",\n    position=[0.6, 0.4, 0.78],\n    size=[1.5, 0.3, 0.05],\n    surface_velocity=[-0.2, 0, 0],\n)\n\n# Workpiece (R1's cube)\ncreate_prim(prim_path=\"/World/Cube_workpiece\", prim_type=\"Cube\", position=[-1.0, -0.4, 0.835], size=0.06)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_workpiece\", schema_name=api)\n\n# Mating part (R2's cube)\ncreate_prim(prim_path=\"/World/Cube_mating\", prim_type=\"Cube\", position=[1.0, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_mating\", schema_name=api)\n\nbulk_set_attribute(prim_paths=[\"/World/Cube_workpiece\", \"/World/Cube_mating\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_workpiece\", material_name=\"rubber\")\napply_physics_material(prim_path=\"/World/Cube_mating\", material_name=\"rubber\")\n\n# Hold pedestal \u2014 small cube at transfer pose; R1 places workpiece on top\ncreate_prim(prim_path=\"/World/HoldPedestal\", prim_type=\"Cube\", position=[0, 0, 0.85], scale=[0.04, 0.04, 0.05])\napply_api_schema(prim_path=\"/World/HoldPedestal\", schema_name=\"PhysicsCollisionAPI\")\n\n# Pick sensors\nadd_proximity_sensor(sensor_path=\"/World/HolderSensor\", position=[-0.2, -0.4, 0.835], size=[0.06, 0.06, 0.06])\nadd_proximity_sensor(sensor_path=\"/World/InserterSensor\", position=[0.2, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Register R1's panda_hand as moving obstacle for R2's cuRobo planner.\n# Runtime obstacle polling is Sprint 4+; canonical-time call sets the\n# curobo:moving_obstacles attr on /World/Inserter.\nregister_moving_obstacle(\n    robot_path=\"/World/Inserter\",\n    obstacle_path=\"/World/FixtureHolder/panda_hand\",\n)\n\n# R1 controller \u2014 picks workpiece, places on HoldPedestal\nsetup_pick_place_controller(\n    robot_path=\"/World/FixtureHolder\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/HolderSensor\",\n    belt_path=\"/World/HolderConveyor\",\n    source_paths=[\"/World/Cube_workpiece\"],\n    destination_path=\"/World/HoldPedestal\",\n    drop_target=[0, 0, 0.92],\n    planning_obstacles=[\"/World/Table\", \"/World/HolderConveyor\", \"/World/InserterConveyor\", \"/World/HoldPedestal\"],\n)\n\n# R2 controller \u2014 picks mating part, stacks on top of workpiece on pedestal\nsetup_pick_place_controller(\n    robot_path=\"/World/Inserter\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/InserterSensor\",\n    belt_path=\"/World/InserterConveyor\",\n    source_paths=[\"/World/Cube_mating\"],\n    destination_path=\"/World/HoldPedestal\",\n    drop_target=[0, 0, 0.99],\n    planning_obstacles=[\"/World/Table\", \"/World/HolderConveyor\", \"/World/InserterConveyor\", \"/World/HoldPedestal\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_workpiece": [-1.0, -0.4, 0.835],
-      "/World/Cube_mating": [1.0, 0.4, 0.835]
+      "/World/Cube_workpiece": [
+        -1.0,
+        -0.4,
+        0.835
+      ],
+      "/World/Cube_mating": [
+        1.0,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/HolderConveyor": [0.2, 0, 0],
-      "/World/InserterConveyor": [-0.2, 0, 0]
+      "/World/HolderConveyor": [
+        0.2,
+        0,
+        0
+      ],
+      "/World/InserterConveyor": [
+        -0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/FixtureHolder", "pick_path": "/World/HolderConveyor", "place_path": "/World/HoldPedestal", "robot_kind": "franka_panda"},
-      {"robot_path": "/World/Inserter", "pick_path": "/World/InserterConveyor", "place_path": "/World/HoldPedestal", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/FixtureHolder",
+        "pick_path": "/World/HolderConveyor",
+        "place_path": "/World/HoldPedestal",
+        "robot_kind": "franka_panda"
+      },
+      {
+        "robot_path": "/World/Inserter",
+        "pick_path": "/World/InserterConveyor",
+        "place_path": "/World/HoldPedestal",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_workpiece"
   },
@@ -40,13 +65,13 @@
     "duration_s": 180
   },
   "extends": "CP-68",
-  "extension_notes": "CP-76 extends CP-68's robot-to-robot handoff with moving obstacle pattern. Both robots place AT the same destination (HoldPedestal) — R1 first, R2 stacks on top. The pedestal substitutes for actual mid-air holding (which would need runtime FixedJoint between R1 hand and workpiece). Realizes Industrial Set 1 #4 in build-spec form. Runtime mid-air-hold + collision-aware coordination is Sprint 4+ work.",
+  "extension_notes": "CP-76 extends CP-68's robot-to-robot handoff with moving obstacle pattern. Both robots place AT the same destination (HoldPedestal) \u2014 R1 first, R2 stacks on top. The pedestal substitutes for actual mid-air holding (which would need runtime FixedJoint between R1 hand and workpiece). Realizes Industrial Set 1 #4 in build-spec form. Runtime mid-air-hold + collision-aware coordination is Sprint 4+ work.",
   "failure_modes": [
-    "Both robots try to access HoldPedestal simultaneously — no mutex. Sprint 4+ needs setup_robot_claim_mutex on the pedestal prim.",
+    "Both robots try to access HoldPedestal simultaneously \u2014 no mutex. Sprint 4+ needs setup_robot_claim_mutex on the pedestal prim.",
     "drop_target precision: cuRobo's ~17cm drop precision means R2 may miss R1's workpiece by 5-10cm even with correct logic. Realistic stacking needs sensor_gated controller or visual servoing.",
-    "register_moving_obstacle is metadata-only at canonical time — cuRobo handler doesn't yet poll the obstacle list each tick. Runtime moving-obstacle integration is the next Sprint.",
-    "Same multi-robot Kit RPC limit as CP-51/CP-65 — single-tenant, can't run two parallel direct_eval against the same scene.",
-    "HoldPedestal collision via PhysicsCollisionAPI alone (no RigidBody) — static, won't move. Workpiece falls to it via gravity if drop is approximate."
+    "register_moving_obstacle is metadata-only at canonical time \u2014 cuRobo handler doesn't yet poll the obstacle list each tick. Runtime moving-obstacle integration is the next Sprint.",
+    "Same multi-robot Kit RPC limit as CP-51/CP-65 \u2014 single-tenant, can't run two parallel direct_eval against the same scene.",
+    "HoldPedestal collision via PhysicsCollisionAPI alone (no RigidBody) \u2014 static, won't move. Workpiece falls to it via gravity if drop is approximate."
   ],
   "verified_status": "build-spec-2026-05-08; form-gate verification pending"
 }
