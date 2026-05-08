@@ -183,8 +183,11 @@ Each shipped canonical:
 | CP-43 | Sphere-pick station | ✅ form-gate shipped | Sprint 2 | 4 spheres (5cm dia). 38/38 build. Round-geometry handler test. |
 | CP-44 | Mixed-geometry (cubes + spheres) | ✅ form-gate shipped | Sprint 2 | Heterogeneous source_paths. 38/38 build. Handler agnostic to object type. |
 | CP-45 | Side-mounted robot (offset xy) | ✅ form-gate shipped | Sprint 2 | Robot at [0.7, 0, 0.75] (offset). Scene shifted. 38/38 build. Validates cuRobo offset handling. |
+| CP-46 | Production-reference 6-cube grid_3x2 | ✅ form-gate shipped | Sprint 2 | Synthesizes lessons from CP-08..CP-45. Empirically-grounded geometry. 51/51 build. |
 
-**🎉 SPRINT 2 COMPLETE 🎉**: 39 canonicals (CP-07..CP-45, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 94+ atomic commits since structural work began.
+**🎉 SPRINT 2 COMPLETE 🎉**: 40 canonicals (CP-07..CP-46, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 97+ atomic commits since structural work began.
+
+Plus 5 migrated baseline canonicals (CP-01..CP-05) = **45 canonicals total in production-ready state**.
 
 **Empirical drop-precision finding (2026-05-08, 5+3-run benchmarks)**:
 - cuRobo cube-drop precision is **~17cm avg, ±10cm**, NOT the originally-assumed 5cm
