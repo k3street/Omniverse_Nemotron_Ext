@@ -206,8 +206,15 @@ Each shipped canonical:
 | CP-66 | Recycling multi-sensor (#18) | ✅ form-gate shipped | Sprint 2 | 4-material sortation via barcode_reader + nir_material_sensor. 59/59 build. |
 | CP-67 | Leader/follower rotary station (#13) | ✅ build-only | Sprint 2 | Rotary table + 2 robots + mutex. 43/43 build. Form-gate skip (rotary disc bridge). |
 | CP-68 | Robot-to-robot handoff w/ moving obstacles (#7) | ✅ form-gate shipped | Sprint 2 | CP-51 + register_moving_obstacle. 26/26 build. |
+| CP-69 | UR10 cuRobo single-cube pick-place (#2/#3 base) | ✅ form-gate shipped | Sprint 2 | First UR10 canonical. 21/21 build. Validates `robot_family='ur10'` branch in cuRobo handler. Deferred: function-gate (no gripper wired). |
+| CP-70 | UR10 + surface_gripper (suction) | ✅ form-gate shipped | Sprint 2 | OgnSurfaceGripper at ee_link. 22/22 build. Cobotta variant deferred (no cobotta_900 module in this Isaac Sim install). |
+| CP-71 | UR10 bin filling (#25) | ✅ form-gate shipped | Sprint 2 | UR10 + create_gravity_dispenser + 4-cube drop_targets 2x2. 20/20 build. |
+| CP-72 | UR10 Cortex bin stacking (#27) | ✅ form-gate shipped | Sprint 2 | UR10 + setup_cortex_behavior + 1x1x4 vertical stack via drop_targets. 40/40 build. |
+| CP-73 | UR10 Cortex conveyor demo (#33) | ✅ form-gate shipped | Sprint 2 | UR10 + Cortex + active 0.2 m/s belt — Isaac Sim demo_ur10_conveyor canonical. 40/40 build. |
 
-**🎉 SPRINT 2 + 3 COMPLETE 🎉**: 46 canonicals (CP-07..CP-52, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 120+ atomic commits since structural work began.
+**Robot-family expansion (2026-05-08)**: cuRobo handler now accepts `robot_family={franka,ur10,ur10e}`. Refactored generated code emits runtime branching: 7-DOF Franka with ParallelGripper at panda_hand vs 6-DOF UR10 (SingleArticulation, no built-in gripper) at tool0, with ur10e.yml cuRobo config.
+
+**🎉 SPRINT 2 + 3 COMPLETE 🎉**: 51 canonicals (CP-07..CP-73, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 125+ atomic commits since structural work began.
 
 **ALL 4 Tier A tools built**:
 - `compute_stack_placement` v1+v2+v3 — 7 scenarios
