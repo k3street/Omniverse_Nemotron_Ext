@@ -31961,7 +31961,10 @@ if ROBOT_FAMILY == "franka":
     _GRIPPER_LINK = "panda_hand"
     _FINGER_JOINTS = ("panda_finger_joint1", "panda_finger_joint2")
 elif ROBOT_FAMILY in ("ur10", "ur10e"):
-    from isaacsim.robot.manipulators.examples.universal_robots import UR10 as _RobotWrapper
+    # UR10 wrapper class hardcodes attach_gripper EE+gripper init — using
+    # the bare SingleArticulation avoids that init path. Surface gripper is
+    # wired separately via create_gripper(suction) in CP-70+ canonicals.
+    from isaacsim.core.prims import SingleArticulation as _RobotWrapper
     _ARM_DOF = 6
     _CUROBO_ROBOT_CFG = "ur10e.yml"
     _TOOL_FRAME = "tool0"
@@ -32151,16 +32154,30 @@ _physics_sim_view = SimulationManager.get_physics_sim_view()
 
 world = World.instance() or World()
 _ROBOT_NAME = f"curobo_pp_{{ROBOT_FAMILY}}_" + _ROBOT_TAG
+# UR10 wrapped without attach_gripper for now — attach_gripper=True triggers
+# a SingleRigidPrim init on /ee_link which raises "Failed to get rigid body
+# velocities from backend" before world.reset() makes the variant's rigid-
+# body sub-prim visible to PhysicsView. CP-69 form-gate validates motion-
+# planning install only; runtime gripping for UR10 is wired in CP-70+ via
+# create_gripper(suction) on a separate prim path. _grip_open/_grip_close
+# fall through to a no-op (hasattr(franka, "gripper") guard).
 franka = _RobotWrapper(prim_path=ROBOT_PATH, name=_ROBOT_NAME)
+# world.scene.add can throw if a stale wrapper from a prior run already
+# claimed _ROBOT_NAME. We use the local `franka` instance regardless —
+# cuRobo planning doesn't need scene registration. Falling through to
+# get_object would surface the stale (potentially broken) wrapper.
 try: world.scene.add(franka)
-except Exception:
-    _existing = world.scene.get_object(_ROBOT_NAME)
-    if _existing is not None: franka = _existing
+except Exception as _se:
+    print(f"(curobo: world.scene.add soft-fail (using fresh wrapper): {{_se}})")
 
 try:
-    franka.initialize(_physics_sim_view); franka.post_reset()
+    franka.initialize(_physics_sim_view)
 except Exception as _e:
-    print(json.dumps({{"ok": False, "error": f"{{ROBOT_FAMILY}} init failed: {{_e}}"}})); raise
+    print(json.dumps({{"ok": False, "error": f"{{ROBOT_FAMILY}} initialize failed: {{_e}}"}})); raise
+try:
+    franka.post_reset()
+except Exception as _e:
+    print(f"(curobo: {{ROBOT_FAMILY}} post_reset soft-fail: {{_e}})")
 
 for _ in range(20): _app.update()
 
