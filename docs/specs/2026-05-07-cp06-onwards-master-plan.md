@@ -182,8 +182,9 @@ Each shipped canonical:
 | CP-42 | Rectangular brick palletizer | ✅ form-gate shipped | Sprint 2 | 4 bricks (10×5×5cm) — non-cube geometry. 39/39 build. Tests gripper on rectangular items. |
 | CP-43 | Sphere-pick station | ✅ form-gate shipped | Sprint 2 | 4 spheres (5cm dia). 38/38 build. Round-geometry handler test. |
 | CP-44 | Mixed-geometry (cubes + spheres) | ✅ form-gate shipped | Sprint 2 | Heterogeneous source_paths. 38/38 build. Handler agnostic to object type. |
+| CP-45 | Side-mounted robot (offset xy) | ✅ form-gate shipped | Sprint 2 | Robot at [0.7, 0, 0.75] (offset). Scene shifted. 38/38 build. Validates cuRobo offset handling. |
 
-**🎉 SPRINT 2 COMPLETE 🎉**: 38 canonicals (CP-07..CP-44, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 97+ atomic commits since structural work began.
+**🎉 SPRINT 2 COMPLETE 🎉**: 39 canonicals (CP-07..CP-45, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 94+ atomic commits since structural work began.
 
 **Empirical drop-precision finding (2026-05-08, 5+3-run benchmarks)**:
 - cuRobo cube-drop precision is **~17cm avg, ±10cm**, NOT the originally-assumed 5cm
