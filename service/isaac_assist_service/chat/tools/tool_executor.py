@@ -4407,7 +4407,10 @@ else:
         out['success'] = (n_ok * 2 >= n_runs)
     print(json.dumps(out))
 """
-    return await kit_tools.queue_exec_patch(code, "simulate_traversal_check")
+    # Phase 0.7: scale timeout with n_runs × duration_s; default 600s
+    # was insufficient for n_runs=5 × duration_s=90 (CP-35 NO_RESULT incident).
+    _scaled_timeout = max(900, int(n_runs * (duration_s + 30) * 1.5 + 60))
+    return await kit_tools.queue_exec_patch(code, "simulate_traversal_check", timeout=_scaled_timeout)
 
 
 async def _handle_resolve_skill_composition(args: Dict) -> Dict:

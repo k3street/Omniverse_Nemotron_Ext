@@ -57,7 +57,7 @@ async def get_viewport_image(max_dim: int = 1280) -> Dict[str, Any]:
     return await _get("/capture", params={"max_dim": str(max_dim)})
 
 
-async def queue_exec_patch(code: str, description: str = "") -> Dict[str, Any]:
+async def queue_exec_patch(code: str, description: str = "", timeout: float = 600) -> Dict[str, Any]:
     """
     Send Python patch code to Kit's approval queue.
     The extension UI will show a confirmation dialog before executing.
@@ -67,7 +67,7 @@ async def queue_exec_patch(code: str, description: str = "") -> Dict[str, Any]:
     """
     import os
     if os.environ.get("AUTO_APPROVE", "false").lower() == "true":
-        result = await exec_sync(code)
+        result = await exec_sync(code, timeout=timeout)
         success = result.get("success", False)
         output = result.get("output", "")
         out: Dict[str, Any] = {
