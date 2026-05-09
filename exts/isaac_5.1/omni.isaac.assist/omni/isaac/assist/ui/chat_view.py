@@ -1079,8 +1079,106 @@ class ChatViewWindow(ui.Window):
                 self._on_undo_failed(payload)
             elif evt_type == "chat_cleared":
                 pass  # UI handled it locally — server confirmation only
+            # ── Multimodal canvas events (Block 1A.2 wiring) ──────────
+            # Per spec §11.4.4. The CanvasMirrorWindow is constructed lazily
+            # on first canvas event, then refreshed via show_with_preview.
+            elif evt_type == "canvas_proposed":
+                self._on_canvas_proposed(payload)
+            elif evt_type == "canvas_committed":
+                self._on_canvas_committed(payload)
+            elif evt_type == "canvas_preview_updated":
+                self._on_canvas_preview_updated(payload)
+            elif evt_type == "canvas_build_progress":
+                self._on_canvas_build_progress(payload)
+            elif evt_type == "canvas_build_completed":
+                self._on_canvas_build_completed(payload)
         except Exception as e:
             logger.exception(f"SSE handler failed for {evt_type}: {e}")
+
+    # ── Canvas-mirror SSE handlers (Block 1A.2) ─────────────────────────
+    # The mirror panel is lazily constructed on first canvas event so the
+    # extension's startup path doesn't pay the panel cost when no modality
+    # is in use this session.
+
+    def _ensure_mirror(self):
+        """Lazy-init the canvas-mirror panel."""
+        if getattr(self, "_canvas_mirror", None) is not None:
+            return self._canvas_mirror
+        try:
+            from .canvas_mirror import CanvasMirrorWindow
+        except Exception as e:
+            logger.warning(f"[CanvasMirror] import failed: {e}")
+            return None
+        try:
+            session_id = getattr(self.service, "session_id", "default_session")
+            self._canvas_mirror = CanvasMirrorWindow(session_id=session_id)
+            return self._canvas_mirror
+        except Exception as e:
+            logger.warning(f"[CanvasMirror] construction failed: {e}")
+            return None
+
+    def _on_canvas_proposed(self, payload):
+        """Modality emitted a LayoutSpec — auto-show mirror in proposed state."""
+        m = self._ensure_mirror()
+        if m is None:
+            return
+        from pathlib import Path
+        path = payload.get("path")
+        m.show_with_preview(
+            preview_path=Path(path) if path else None,
+            state="proposed",
+            revision=payload.get("revision", 0),
+        )
+
+    def _on_canvas_committed(self, payload):
+        """User accepted; ghost transitions toward solid pending build."""
+        m = self._ensure_mirror()
+        if m is None:
+            return
+        # Stay in proposed state visually until build completes; commit
+        # alone is just the user-accept signal.
+        m._state_label_revision = payload.get("revision", 0)
+
+    def _on_canvas_preview_updated(self, payload):
+        """Server rendered new PNG — refresh the mirror image."""
+        m = self._ensure_mirror()
+        if m is None:
+            return
+        from pathlib import Path
+        path = payload.get("path")
+        if path:
+            m.show_with_preview(
+                preview_path=Path(path),
+                state=m._state if m._state != "hidden" else "proposed",
+                revision=payload.get("revision", 0),
+            )
+
+    def _on_canvas_build_progress(self, payload):
+        """Surface per-tool progress on the live strip status indicator."""
+        if hasattr(self, "live_header_lbl"):
+            try:
+                tool = payload.get("tool", "")
+                idx = payload.get("index")
+                total = payload.get("total")
+                if idx is not None and total is not None:
+                    self.live_header_lbl.text = (
+                        f"Building ({idx}/{total}) · {tool}"
+                    )
+                else:
+                    self.live_header_lbl.text = f"Building · {tool}"
+            except Exception:
+                pass
+
+    def _on_canvas_build_completed(self, payload):
+        """Build done — mirror transitions to live state, scene is in 3D."""
+        m = self._ensure_mirror()
+        if m is None:
+            return
+        m.show_with_preview(
+            preview_path=None,  # keep current source
+            state="live",
+            revision=payload.get("revision", 0),
+        )
 
     def _on_cancel_ack(self, payload):
         """Server confirmed it has stopped issuing tool calls. Show a
