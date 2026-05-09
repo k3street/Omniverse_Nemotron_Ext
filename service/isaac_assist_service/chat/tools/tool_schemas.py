@@ -799,9 +799,6 @@ ISAAC_SIM_TOOLS = [
     },
     {
         "type": "function",
-        "function": 
-    {
-        "type": "function",
         "function": {
             "name": "setup_ros2_control_compat",
             "description": (
@@ -869,6 +866,8 @@ ISAAC_SIM_TOOLS = [
         },
     },
     {
+        "type": "function",
+        "function": {
             "name": "resolve_skill_composition",
             "description": (
                 "Map a skill-composition name ('pick-and-place', 'calibration', 'ros2', "
