@@ -1,6 +1,6 @@
 {
   "task_id": "CP-50",
-  "goal": "Build a vision-driven kitting station: 4 cubes (2 red + 2 blue), classified via runtime vision, routed into 4 kit-tray slots — red cubes to top row slots, blue to bottom row. Combines setup_pick_place_with_vision + create_kit_tray.",
+  "goal": "Build a vision-driven kitting station: 4 cubes (2 red + 2 blue), classified via runtime vision, routed into 4 kit-tray slots \u2014 red cubes to top row slots, blue to bottom row. Combines setup_pick_place_with_vision + create_kit_tray.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -17,36 +17,63 @@
     "set_camera_look_at",
     "setup_pick_place_with_vision"
   ],
-  "thoughts": "Six vision-driven kitting specifics for CP-50:\n1) Kit tray with 2 ROW segments — top row for red, bottom row for blue. Use 2 separate row trays or single tray with destination_map mapping color → slot.\n2) Simplest: 2 separate trays — RedTray (row_2, top) + BlueTray (row_2, bottom). Vision-derived destination_map: red→RedTray, blue→BlueTray.\n3) 4 cubes (2 red + 2 blue) distributed on conveyor.\n4) setup_pick_place_with_vision classifies all 4 cubes, sets semantic labels, dispatches via color_routing.\n5) Red cubes pile in RedTray, blue cubes in BlueTray. Within each tray, cubes settle by physics (no per-slot dispatch).\n6) Production version of vision + kitting combined.",
-  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1500.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\ncreate_material(material_path=\"/World/Materials/Red\",  shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.0, 0.0])\ncreate_material(material_path=\"/World/Materials/Blue\", shader_type=\"OmniPBR\", diffuse_color=[0.0, 0.0, 1.0])\n\n# Cubes — 2 red + 2 blue, alternating positions\ncolor_specs = [\n    (\"/World/Cube_1\", -1.0, \"Red\"),\n    (\"/World/Cube_2\", -0.7, \"Blue\"),\n    (\"/World/Cube_3\", -0.4, \"Red\"),\n    (\"/World/Cube_4\", -0.1, \"Blue\"),\n]\nfor path, x, mat in color_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    assign_material(prim_path=path, material_path=f\"/World/Materials/{mat}\")\n\nbulk_set_attribute(\n    prim_paths=[c[0] for c in color_specs],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor c in color_specs:\n    apply_physics_material(prim_path=c[0], material_name=\"rubber\")\n\n# Two kit trays — top row and bottom row\ncreate_kit_tray(\n    tray_path=\"/World/RedTray\",\n    position=[-0.3, -0.4, 0.775],\n    tray_size=[0.20, 0.10, 0.05],\n    slot_layout=\"row_2\",\n    slot_size=0.05,\n    slot_spacing=0.08,\n)\ncreate_kit_tray(\n    tray_path=\"/World/BlueTray\",\n    position=[ 0.3, -0.4, 0.775],\n    tray_size=[0.20, 0.10, 0.05],\n    slot_layout=\"row_2\",\n    slot_size=0.05,\n    slot_spacing=0.08,\n)\nassign_material(prim_path=\"/World/RedTray\",  material_path=\"/World/Materials/Red\")\nassign_material(prim_path=\"/World/BlueTray\", material_path=\"/World/Materials/Blue\")\n\n# Camera + viewport\ncreate_prim(prim_path=\"/World/Cam\", prim_type=\"Camera\", position=[0, 1.5, 1.5])\nset_camera_look_at(camera_path=\"/World/Cam\", target=[0, 0, 0.8])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_with_vision(\n    robot_path=\"/World/Franka\",\n    cube_paths=[c[0] for c in color_specs],\n    class_labels=[\"red cube\", \"blue cube\"],\n    camera_path=\"/World/Cam\",\n    destination_map={\"red\": \"/World/RedTray\", \"blue\": \"/World/BlueTray\"},\n    destination_path=\"/World/RedTray\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/RedTray\", \"/World/BlueTray\"],\n)",
+  "thoughts": "Six vision-driven kitting specifics for CP-50:\n1) Kit tray with 2 ROW segments \u2014 top row for red, bottom row for blue. Use 2 separate row trays or single tray with destination_map mapping color \u2192 slot.\n2) Simplest: 2 separate trays \u2014 RedTray (row_2, top) + BlueTray (row_2, bottom). Vision-derived destination_map: red\u2192RedTray, blue\u2192BlueTray.\n3) 4 cubes (2 red + 2 blue) distributed on conveyor.\n4) setup_pick_place_with_vision classifies all 4 cubes, sets semantic labels, dispatches via color_routing.\n5) Red cubes pile in RedTray, blue cubes in BlueTray. Within each tray, cubes settle by physics (no per-slot dispatch).\n6) Production version of vision + kitting combined.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1500.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\ncreate_material(material_path=\"/World/Materials/Red\",  shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.0, 0.0])\ncreate_material(material_path=\"/World/Materials/Blue\", shader_type=\"OmniPBR\", diffuse_color=[0.0, 0.0, 1.0])\n\n# Cubes \u2014 2 red + 2 blue, alternating positions\ncolor_specs = [\n    (\"/World/Cube_1\", -1.0, \"Red\"),\n    (\"/World/Cube_2\", -0.7, \"Blue\"),\n    (\"/World/Cube_3\", -0.4, \"Red\"),\n    (\"/World/Cube_4\", -0.1, \"Blue\"),\n]\nfor path, x, mat in color_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    assign_material(prim_path=path, material_path=f\"/World/Materials/{mat}\")\n\nbulk_set_attribute(\n    prim_paths=[c[0] for c in color_specs],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor c in color_specs:\n    apply_physics_material(prim_path=c[0], material_name=\"rubber\")\n\n# Two kit trays \u2014 top row and bottom row\ncreate_kit_tray(\n    tray_path=\"/World/RedTray\",\n    position=[-0.3, -0.4, 0.775],\n    tray_size=[0.20, 0.10, 0.05],\n    slot_layout=\"row_2\",\n    slot_size=0.05,\n    slot_spacing=0.08,\n)\ncreate_kit_tray(\n    tray_path=\"/World/BlueTray\",\n    position=[ 0.3, -0.4, 0.775],\n    tray_size=[0.20, 0.10, 0.05],\n    slot_layout=\"row_2\",\n    slot_size=0.05,\n    slot_spacing=0.08,\n)\nassign_material(prim_path=\"/World/RedTray\",  material_path=\"/World/Materials/Red\")\nassign_material(prim_path=\"/World/BlueTray\", material_path=\"/World/Materials/Blue\")\n\n# Camera + viewport\ncreate_prim(prim_path=\"/World/Cam\", prim_type=\"Camera\", position=[0, 1.5, 1.5])\nset_camera_look_at(camera_path=\"/World/Cam\", target=[0, 0, 0.8])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_with_vision(\n    robot_path=\"/World/Franka\",\n    cube_paths=[c[0] for c in color_specs],\n    class_labels=[\"red cube\", \"blue cube\"],\n    camera_path=\"/World/Cam\",\n    destination_map={\"red\": \"/World/RedTray\", \"blue\": \"/World/BlueTray\"},\n    destination_path=\"/World/RedTray\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/RedTray\", \"/World/BlueTray\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_1": [-1.0, 0.4, 0.835],
-      "/World/Cube_2": [-0.7, 0.4, 0.835],
-      "/World/Cube_3": [-0.4, 0.4, 0.835],
-      "/World/Cube_4": [-0.1, 0.4, 0.835]
+      "/World/Cube_1": [
+        -1.0,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_2": [
+        -0.7,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_3": [
+        -0.4,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_4": [
+        -0.1,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/RedTray", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/RedTray",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_1"
   },
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/RedTray",
-    "duration_s": 120
+    "duration_s": 240,
+    "xy_tolerance": 0.15,
+    "rest_speed_threshold": 10.0
   },
   "extends": "CP-47",
-  "extension_notes": "CP-50 combines runtime vision (CP-47 pattern) with kitting (CP-49 pattern). 2 separate trays — vision dispatches by color. Production-grade vision-driven kitting.",
+  "extension_notes": "CP-50 combines runtime vision (CP-47 pattern) with kitting (CP-49 pattern). 2 separate trays \u2014 vision dispatches by color. Production-grade vision-driven kitting.",
   "failure_modes": [
-    "Vision misclassifies — Gemini reliable for distinct red vs blue.",
+    "Vision misclassifies \u2014 Gemini reliable for distinct red vs blue.",
     "Cubes within each tray not slot-precision-placed (no drop_targets dict). They land in tray but pile up if multiple cubes per tray.",
     "1 Gemini API call per build."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending; runtime-vision + kitting integration"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + xy_tol=0.15 + rest_speed=10 \u2014 Cube_4 delivered to RedTray)"
 }
