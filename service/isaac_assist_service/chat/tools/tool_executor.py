@@ -34815,3 +34815,12 @@ def _resolve_auto_target_source(args: dict) -> tuple[str, str]:
     # 5) Last resort
     return "native", "no better option; falling back to native"
 
+
+# === MULTIMODAL HANDLERS (multimodal-foundation session) ===
+# Per docs/specs/2026-05-09-multi-session-coordination.md §3 ("Shared files —
+# sectional ownership"). All handler bodies live in multimodal_handlers.py to
+# keep merge surface in this shared file at one import + one registration call.
+from .multimodal_handlers import register_multimodal_handlers
+register_multimodal_handlers(DATA_HANDLERS)
+# === END MULTIMODAL HANDLERS ===
+
