@@ -4249,11 +4249,18 @@ if p_init is None or target_bbox is None:
         'n_runs': n_runs, 'seed': seed_base,
     }}))
 else:
-    # Snapshot pre-play state — used for reset between runs (n_runs > 1).
-    snap_cubes = _snapshot_cubes()
-    snap_ctrl = _snapshot_ctrl_attrs()
-    snap_joints = _snapshot_articulation_joints()
-    snap_fj = _snapshot_fj_set()
+    # Snapshot pre-play state — only needed for reset between runs (n_runs > 1).
+    # Calling Articulation.initialize() pre-play in a stopped timeline can
+    # corrupt the SimulationView and cause cube free-fall through the floor;
+    # we therefore skip the snapshot entirely on the n_runs=1 fast path.
+    if n_runs > 1:
+        snap_cubes = _snapshot_cubes()
+        snap_ctrl = _snapshot_ctrl_attrs()
+        snap_joints = _snapshot_articulation_joints()
+        snap_fj = _snapshot_fj_set()
+    else:
+        snap_cubes = snap_ctrl = snap_joints = None
+        snap_fj = set()
 
     runs = []
     for ri in range(n_runs):
@@ -35393,4 +35400,14 @@ def _resolve_auto_target_source(args: dict) -> tuple[str, str]:
 from .multimodal_handlers import register_multimodal_handlers
 register_multimodal_handlers(DATA_HANDLERS)
 # === END MULTIMODAL HANDLERS ===
+
+
+# === DIAGNOSE FEASIBILITY (controller-logic session) ===
+# Pre-flight constraint validator per docs/specs/2026-05-09-diagnose-scene-
+# feasibility.md (Master Plan Phase 1). Handler body lives in
+# service/isaac_assist_service/diagnose/tool.py to keep this shared file at
+# one import + one registration call.
+from ...diagnose.tool import register_diagnose_handlers
+register_diagnose_handlers(DATA_HANDLERS)
+# === END DIAGNOSE FEASIBILITY ===
 
