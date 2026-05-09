@@ -215,3 +215,257 @@ def rebuild_index() -> None:
     _collection = _client.create_collection(_COLLECTION_NAME)
     _template_cache = {}
     _build_index()
+
+
+# ---------------------------------------------------------------------------
+# Structural-filter-first retrieval — multimodal-foundation extension
+# ---------------------------------------------------------------------------
+# Spec §8.1: retrieval becomes structurally-gated and similarity-tiebroken.
+# Stage 1 — hard structural filter on intent (pattern_hint match,
+# structural_features compatible, counts within tolerance). Stage 2 —
+# embedding similarity over canonical structural fingerprint. Stage 3 —
+# tier classification (existing thresholds).
+#
+# Block 1A.1 scope: this is an EXTENSION. The existing retrieve_templates /
+# retrieve_templates_with_scores paths are unchanged — they remain the
+# fallback for legacy templates that don't have an `intent` field.
+# Templates gain `intent` fields when Block 1B's role-based refactor
+# lands; until then, this function gracefully degrades by skipping
+# Stage 1 filtering when no template declares intent.
+
+def canonical_structural_fingerprint(intent: Dict) -> str:
+    """Produce a deterministic canonical serialization of an Intent dict for
+    embedding similarity. Spec §8.2.
+
+    The fingerprint is "facts about the spec," not English — sorted +
+    normalized so semantically-equivalent intents always produce the same
+    string. The embedding model does similarity over facts, never over
+    natural-language synthesis.
+
+    Accepts either a Pydantic Intent.model_dump() dict or a hand-built dict
+    with the same shape; tolerant of missing fields (defaults to no-op).
+    """
+    pattern_hint = intent.get("pattern_hint", "")
+    counts = intent.get("counts", {}) or {}
+    features = intent.get("structural_features", {}) or {}
+    tags = sorted(intent.get("structural_tags", []) or [])
+
+    # Counts: only emit non-zero entries to keep fingerprints stable across
+    # additive count-field bumps.
+    count_parts = [
+        f"{k}:{v}" for k, v in sorted(counts.items()) if v
+    ]
+
+    # Features: emit booleans that are True + non-null numerics. Avoids
+    # noise from default-False fields drowning out signal.
+    feature_parts = []
+    for k in sorted(features.keys()):
+        v = features[k]
+        if isinstance(v, bool):
+            if v:
+                feature_parts.append(f"{k}=true")
+        elif v is None:
+            continue
+        elif isinstance(v, (int, float)):
+            feature_parts.append(f"{k}={v}")
+        elif isinstance(v, (list, tuple)):
+            if v:
+                feature_parts.append(f"{k}=[{','.join(str(x) for x in v)}]")
+        elif isinstance(v, str):
+            if v:
+                feature_parts.append(f"{k}={v}")
+
+    parts = [f"pattern_hint={pattern_hint}"]
+    if count_parts:
+        parts.append("counts=" + ",".join(count_parts))
+    if feature_parts:
+        parts.append("features=" + ",".join(feature_parts))
+    if tags:
+        parts.append("tags=" + ",".join(tags))
+    return "; ".join(parts)
+
+
+def _features_compatible(
+    spec_features: Dict, template_features: Dict,
+    strict: bool = False,
+) -> bool:
+    """Stage-1 filter helper: do template's structural_features satisfy the
+    spec's requirements?
+
+    Compatibility rules (per spec §8.1, conservative semantics):
+    - Boolean flags: spec requires X=True ⇒ template must have X=True. Spec
+      doesn't require X (X=False or absent) ⇒ template can have either.
+    - Numeric features: if spec sets a value, template must match. If spec
+      leaves null, template can have any value.
+    - Strict mode: also requires template-set features to be matched by spec.
+      Default off — we want broad-to-narrow matches.
+    """
+    for key, spec_v in spec_features.items():
+        if isinstance(spec_v, bool):
+            if spec_v and not template_features.get(key, False):
+                return False
+        elif spec_v is None:
+            continue  # spec doesn't constrain this field
+        else:
+            template_v = template_features.get(key)
+            if template_v is None:
+                # Template doesn't declare; can't violate
+                continue
+            if template_v != spec_v:
+                return False
+    return True
+
+
+def _counts_compatible(
+    spec_counts: Dict, template_counts: Dict, tolerance: int = 0,
+) -> bool:
+    """Stage-1 filter helper: do template's counts match the spec's within
+    tolerance?
+
+    Default tolerance=0 means exact-match. Higher tolerance accepts
+    near-matches — e.g., "robots=1, conveyors=1, bins=1" matches a template
+    with "robots=1, conveyors=2, bins=1" if tolerance >= 1.
+    """
+    for key in {"robots", "conveyors", "bins", "cubes", "sensors", "humans"}:
+        s = spec_counts.get(key, 0)
+        t = template_counts.get(key, 0)
+        if abs(s - t) > tolerance:
+            return False
+    return True
+
+
+def filter_templates_by_intent(
+    spec_intent: Dict,
+    count_tolerance: int = 0,
+) -> List[Dict]:
+    """Stage 1 — hard structural filter.
+
+    Returns the list of templates whose `intent` field is compatible with
+    the spec's intent (pattern_hint match + features compatible + counts
+    within tolerance). Templates without `intent` field are EXCLUDED from
+    structural-filter results — they participate only via the legacy
+    embedding-only retrieval path.
+
+    Args:
+        spec_intent: dict shape matching multimodal.types.Intent.model_dump()
+        count_tolerance: relax exact count-match by ±N per entity class
+    """
+    # Lazily ensure the index/cache is built
+    _get_collection()
+
+    spec_pattern = spec_intent.get("pattern_hint")
+    spec_features = spec_intent.get("structural_features") or {}
+    spec_counts = spec_intent.get("counts") or {}
+
+    candidates: List[Dict] = []
+    for tid, template in _template_cache.items():
+        t_intent = template.get("intent")
+        if not t_intent:
+            continue  # legacy template — handled by fallback path
+        if t_intent.get("pattern_hint") != spec_pattern:
+            continue
+        if not _features_compatible(
+            spec_features, t_intent.get("structural_features") or {}
+        ):
+            continue
+        if not _counts_compatible(
+            spec_counts, t_intent.get("counts") or {},
+            tolerance=count_tolerance,
+        ):
+            continue
+        candidates.append(template)
+    return candidates
+
+
+def retrieve_with_intent_filter(
+    spec_intent: Dict,
+    top_k: int = 3,
+    count_tolerance: int = 0,
+    fallback_to_embedding_only: bool = True,
+) -> List[Dict]:
+    """Structural-filter-first retrieval per spec §8.1.
+
+    Stage 1: hard structural filter via `filter_templates_by_intent`.
+    Stage 2: embedding similarity over canonical structural fingerprint
+        among Stage-1 candidates only.
+    Stage 3: returns same shape as `retrieve_templates_with_scores`
+        ({template, task_id, distance, similarity}) for downstream
+        tier-classification compatibility.
+
+    If Stage 1 returns no candidates (e.g., no templates have intent fields
+    yet — Block 1B not landed), and `fallback_to_embedding_only=True`
+    (default), the function falls back to embedding-similarity over the
+    fingerprint without structural filtering. This makes the function
+    useful immediately and progressively stricter as templates add intent.
+
+    Returns: list of {template, task_id, distance, similarity} dicts,
+    most-similar first.
+    """
+    candidates = filter_templates_by_intent(spec_intent, count_tolerance)
+
+    fingerprint = canonical_structural_fingerprint(spec_intent)
+
+    if not candidates:
+        if not fallback_to_embedding_only:
+            return []
+        # Fallback: embedding-only over the fingerprint, against the full
+        # template set (legacy mode, pre-Block-1B). Same return shape.
+        logger.info(
+            "[TemplateRetriever] structural-filter found no candidates; "
+            "falling back to embedding-only retrieval over full set"
+        )
+        return retrieve_templates_with_scores(fingerprint, top_k=top_k)
+
+    # Stage 2: embed similarity over candidates only.
+    # We restrict the ChromaDB query to the candidate IDs via the `where`
+    # filter (chromadb supports `$in`). The query text is the structural
+    # fingerprint — embedding similarity over facts about the spec, not
+    # natural-language prose.
+    col = _get_collection()
+    if col is None:
+        # Without ChromaDB, return all candidates in arbitrary order
+        return [
+            {"template": t, "task_id": t.get("task_id", "?"),
+             "distance": 0.0, "similarity": 1.0}
+            for t in candidates[:top_k]
+        ]
+
+    candidate_ids = [t.get("task_id") for t in candidates if t.get("task_id")]
+    try:
+        res = col.query(
+            query_texts=[fingerprint],
+            n_results=min(top_k, len(candidate_ids)),
+            where={"task_id": {"$in": candidate_ids}} if candidate_ids else None,
+        )
+        metas = (res.get("metadatas") or [[]])[0]
+        dists = (res.get("distances") or [[1.0] * len(metas)])[0]
+        out: List[Dict] = []
+        for i, m in enumerate(metas):
+            tid = m.get("task_id")
+            if not tid:
+                continue
+            t = _load_template(tid)
+            if not t:
+                continue
+            d = float(dists[i]) if i < len(dists) else 1.0
+            similarity = max(0.0, min(1.0, 1.0 - d / 1.5))
+            out.append({
+                "template": t,
+                "task_id": tid,
+                "distance": d,
+                "similarity": similarity,
+            })
+        logger.info(
+            f"[TemplateRetriever] structural-filter retrieved "
+            f"{len(out)}/{len(candidates)} of {len(candidate_ids)} candidates: "
+            + ", ".join(f"{x['task_id']}({x['similarity']:.2f})" for x in out)
+        )
+        return out
+    except Exception as e:
+        logger.warning(f"[TemplateRetriever] Stage-2 query failed: {e}")
+        # Conservative fallback: return all candidates in arbitrary order
+        return [
+            {"template": t, "task_id": t.get("task_id", "?"),
+             "distance": 0.0, "similarity": 1.0}
+            for t in candidates[:top_k]
+        ]
