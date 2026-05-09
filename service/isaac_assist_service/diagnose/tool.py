@@ -189,7 +189,7 @@ def _build_alternative(violation: Violation) -> Optional[Alternative]:
 
 async def _handle_diagnose_scene_feasibility(args: Dict[str, Any]) -> Dict[str, Any]:
     """Implements the tool. Args:
-      robot_path: USD path of the robot prim (required)
+      robot_path: USD path of the robot prim (required, single-robot mode)
       pick_pose: world [x,y,z] OR cube_paths to auto-pick first reachable
       drop_pose: world [x,y,z] OR destination_path to use bbox center
       obstacles: list of USD paths for collision context (optional)
@@ -198,14 +198,24 @@ async def _handle_diagnose_scene_feasibility(args: Dict[str, Any]) -> Dict[str, 
       cube_paths: list of cube paths in scene (optional, for sensor-zone)
       mutex_corridors: optional dict for multi-robot mutex check
                        {"robot_a_corridor": {min,max}, "robot_b_corridor": {min,max}, "has_mutex": bool}
+      cycles: list of {"robot_path", "pick_pose", "drop_pose", "ee_offset"?,
+              "robot_base"?, "max_reach"?} for multi-robot/multi-stage mode.
+              Returns per_cycle[] and aggregate{worst_severity, worst_axis,
+              mutex_conflicts: []}. (Opus §E option 2.)
       seed: int (default 42)
       use_cache: bool (default True)
       lang: "sv" | "en" (default "sv")
     """
     t0 = time.time()
+
+    # Multi-robot mode: cycles list takes precedence
+    cycles = args.get("cycles")
+    if cycles and isinstance(cycles, list):
+        return await _handle_multi_robot(cycles, args, t0)
+
     robot_path = (args.get("robot_path") or "").strip()
     if not robot_path:
-        return {"error": "diagnose_scene_feasibility requires robot_path"}
+        return {"error": "diagnose_scene_feasibility requires robot_path (or cycles[] for multi-robot mode)"}
 
     pick_pose = args.get("pick_pose")
     drop_pose = args.get("drop_pose")
@@ -426,6 +436,110 @@ async def _handle_diagnose_scene_feasibility(args: Dict[str, Any]) -> Dict[str, 
         dcache.put(cache_key, payload)
 
     return payload
+
+
+async def _handle_multi_robot(cycles: List[Dict[str, Any]],
+                              top_args: Dict[str, Any],
+                              t_start: float) -> Dict[str, Any]:
+    """Multi-robot / multi-stage diagnose. Per Opus §E option 2.
+
+    Loops over each cycle, calls the single-robot handler, aggregates
+    per-cycle results + a top-level aggregate { worst_severity, worst_axis,
+    mutex_conflicts[] }.
+    """
+    seed = int(top_args.get("seed", 42))
+    lang = top_args.get("lang", "sv")
+    use_cache = bool(top_args.get("use_cache", True))
+
+    per_cycle: List[Dict[str, Any]] = []
+    severity_rank = {"INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
+    worst_severity = "INFO"
+    worst_axis: Optional[str] = None
+
+    for ci, cycle in enumerate(cycles):
+        cycle_args = dict(cycle)
+        cycle_args.setdefault("seed", seed)
+        cycle_args.setdefault("use_cache", use_cache)
+        cycle_args.setdefault("lang", lang)
+        # carry top-level shared fields if not overridden
+        for k in ("obstacles", "sensor_path", "cube_paths", "cube_xys",
+                  "sensor_xy", "sensor_radius", "path_n_samples"):
+            if k in top_args and k not in cycle_args:
+                cycle_args[k] = top_args[k]
+
+        rep = await _handle_diagnose_scene_feasibility(cycle_args)
+        rep["cycle_index"] = ci
+        per_cycle.append(rep)
+
+        for v in rep.get("violations", []):
+            sv = v.get("severity", "INFO")
+            if severity_rank.get(sv, 0) > severity_rank.get(worst_severity, 0):
+                worst_severity = sv
+                worst_axis = v.get("axis")
+
+    # Cross-cycle: detect mutex conflict if 2+ cycles target same workspace
+    mutex_conflicts: List[Dict[str, Any]] = []
+    has_mutex = bool(top_args.get("has_mutex"))
+    for i in range(len(cycles)):
+        for j in range(i + 1, len(cycles)):
+            ci_args = cycles[i]
+            cj_args = cycles[j]
+            # Build axis-aligned corridor as bbox between pick and drop
+            def _corridor(c):
+                pp = c.get("pick_pose")
+                dp = c.get("drop_pose")
+                if not pp or not dp:
+                    return None
+                return {
+                    "min": [min(pp[k], dp[k]) for k in range(3)],
+                    "max": [max(pp[k], dp[k]) for k in range(3)],
+                }
+            a = _corridor(ci_args)
+            b = _corridor(cj_args)
+            if not a or not b:
+                continue
+            v, sev = metrics.metric_mutex_conflict(
+                robot_a_corridor=a,
+                robot_b_corridor=b,
+                has_mutex=has_mutex,
+            )
+            if v and sev:
+                mutex_conflicts.append({
+                    "cycle_a": i, "cycle_b": j,
+                    "robot_a": ci_args.get("robot_path"),
+                    "robot_b": cj_args.get("robot_path"),
+                    "severity": sev.value,
+                })
+                if severity_rank.get(sev.value, 0) > severity_rank.get(worst_severity, 0):
+                    worst_severity = sev.value
+                    worst_axis = "mutex_conflict"
+
+    # Aggregate verdict from worst-severity
+    if worst_severity == "CRITICAL":
+        agg_verdict = "infeasible"
+    elif worst_severity == "ERROR":
+        agg_verdict = "overconstrained"
+    elif worst_severity == "WARNING":
+        agg_verdict = "tightly_feasible"
+    else:
+        agg_verdict = "feasible"
+
+    return {
+        "verdict": agg_verdict,
+        "per_cycle": per_cycle,
+        "aggregate": {
+            "worst_severity": worst_severity,
+            "worst_axis": worst_axis,
+            "mutex_conflicts": mutex_conflicts,
+            "n_cycles": len(per_cycle),
+        },
+        "metrics": {},
+        "violations": [],
+        "alternatives": [],
+        "seed_used": seed,
+        "cache_hit": False,
+        "elapsed_ms": int((time.time() - t_start) * 1000),
+    }
 
 
 def register_diagnose_handlers(handlers: Dict[str, Any]) -> None:

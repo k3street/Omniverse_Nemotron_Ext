@@ -290,6 +290,93 @@ async def test_singular_config_warning():
 
 
 @pytest.mark.asyncio
+async def test_multi_robot_cycles_aggregate_critical():
+    """T-MULTI-1: 2-cycle scene where second cycle has no IK at drop.
+    aggregate.worst_severity = CRITICAL, per_cycle[1].verdict = infeasible."""
+    fake = _build_router({
+        # cycle 0: pick OK, drop OK
+        # cycle 1: pick OK, drop OUT-OF-REACH (no IK)
+        "solve_ik": [
+            _ok_solve_ik([0]*7),       # cycle 0 pick
+            _ok_solve_ik([1]*7),       # cycle 0 drop
+            _ok_solve_ik([0]*7),       # cycle 1 pick
+            _fail_solve_ik(),          # cycle 1 drop
+        ],
+        "check_singularity": [_singularity_ok()] * 4,
+        "get_bounding_box": [],
+        "check_path_clearance": [_path_clearance(20, 20)],  # cycle 0 path
+    })
+    with patch.object(dtool, "_execute_tool_call", side_effect=fake):
+        report = await dtool._handle_diagnose_scene_feasibility({
+            "cycles": [
+                {"robot_path": "/World/FrankaA", "pick_pose": [0.4, 0.0, 0.5],
+                 "drop_pose": [0.4, 0.3, 0.3], "robot_base": [0, 0, 0], "max_reach": 0.855},
+                {"robot_path": "/World/FrankaB", "pick_pose": [0.5, 0.0, 0.5],
+                 "drop_pose": [10.0, 10.0, 0.5], "robot_base": [0, 0, 0], "max_reach": 0.855},
+            ],
+            "use_cache": False,
+        })
+    assert report["verdict"] == "infeasible"
+    assert "per_cycle" in report
+    assert len(report["per_cycle"]) == 2
+    agg = report["aggregate"]
+    assert agg["worst_severity"] == "CRITICAL"
+    assert agg["n_cycles"] == 2
+
+
+@pytest.mark.asyncio
+async def test_multi_robot_mutex_conflict_detected():
+    """Two cycles with overlapping corridors + has_mutex=False → mutex_conflict."""
+    fake = _build_router({
+        "solve_ik": [_ok_solve_ik([0]*7)] * 4,
+        "check_singularity": [_singularity_ok()] * 4,
+        "get_bounding_box": [],
+        "check_path_clearance": [_path_clearance(20, 20)] * 2,
+    })
+    with patch.object(dtool, "_execute_tool_call", side_effect=fake):
+        report = await dtool._handle_diagnose_scene_feasibility({
+            "cycles": [
+                {"robot_path": "/World/A", "pick_pose": [0.0, 0.0, 0.5],
+                 "drop_pose": [0.5, 0.0, 0.5], "robot_base": [0, 0, 0], "max_reach": 1.0},
+                # Overlapping corridor
+                {"robot_path": "/World/B", "pick_pose": [0.3, 0.0, 0.5],
+                 "drop_pose": [0.7, 0.0, 0.5], "robot_base": [0, 0, 0], "max_reach": 1.0},
+            ],
+            "has_mutex": False,
+            "use_cache": False,
+        })
+    agg = report["aggregate"]
+    assert len(agg["mutex_conflicts"]) == 1
+    conflict = agg["mutex_conflicts"][0]
+    assert conflict["cycle_a"] == 0 and conflict["cycle_b"] == 1
+    assert conflict["severity"] == "ERROR"
+
+
+@pytest.mark.asyncio
+async def test_multi_robot_with_mutex_no_conflict():
+    """Same overlapping geometry but has_mutex=True → no conflict flagged."""
+    fake = _build_router({
+        "solve_ik": [_ok_solve_ik([0]*7)] * 4,
+        "check_singularity": [_singularity_ok()] * 4,
+        "get_bounding_box": [],
+        "check_path_clearance": [_path_clearance(20, 20)] * 2,
+    })
+    with patch.object(dtool, "_execute_tool_call", side_effect=fake):
+        report = await dtool._handle_diagnose_scene_feasibility({
+            "cycles": [
+                {"robot_path": "/World/A", "pick_pose": [0.0, 0.0, 0.5],
+                 "drop_pose": [0.5, 0.0, 0.5], "robot_base": [0, 0, 0], "max_reach": 1.0},
+                {"robot_path": "/World/B", "pick_pose": [0.3, 0.0, 0.5],
+                 "drop_pose": [0.7, 0.0, 0.5], "robot_base": [0, 0, 0], "max_reach": 1.0},
+            ],
+            "has_mutex": True,
+            "use_cache": False,
+        })
+    agg = report["aggregate"]
+    assert agg["mutex_conflicts"] == []
+
+
+@pytest.mark.asyncio
 async def test_cache_disabled_skips_lookup():
     """use_cache=False should bypass cache entirely — both calls miss."""
     fake_call_count = {"n": 0}
