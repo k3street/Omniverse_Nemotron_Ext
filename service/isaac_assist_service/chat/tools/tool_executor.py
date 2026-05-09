@@ -29531,22 +29531,25 @@ def _resume_belt():
     if _belt_en and _belt_en.IsDefined(): _belt_en.Set(True)
     if _belt_sv: _belt_sv.Set(_nominal_belt)
     _belt_pause_request[0] = False
-# Subscribe to post-update event stream — fires after each kit frame, AFTER
-# physics integration has completed for that step.
+# Subscribe to PRE-STEP physics events — fires BEFORE PxScene::simulate(),
+# so velocity-Set lands before integrator's contact-modify cache is loaded.
+# Replaces post_update subscription which fires AFTER physics integration
+# (too late — PhysX has already cached old velocity for next step).
+# Reference: NVIDIA's PhysxInterfaceSimulationEvents.py uses this pattern.
 try:
-    _BELT_POST_SUB_ATTR = "_belt_post_sub_" + _ROBOT_TAG
-    _old_post = getattr(builtins, _BELT_POST_SUB_ATTR, None)
-    if _old_post is not None:
-        try: _old_post.unsubscribe()
+    _BELT_PRESTEP_SUB_ATTR = "_belt_prestep_sub_" + _ROBOT_TAG
+    _old_pre = getattr(builtins, _BELT_PRESTEP_SUB_ATTR, None)
+    if _old_pre is not None:
+        try: _old_pre.unsubscribe()
         except Exception: pass
-    _post_stream = omni.kit.app.get_app().get_post_update_event_stream()
-    _belt_post_sub = _post_stream.create_subscription_to_pop(
-        lambda _e: _apply_belt_pause_outside_callback(),
-        name="builtin_pp_belt_pause_post_update_" + _ROBOT_TAG,
+    _belt_prestep_sub = omni.physx.get_physx_interface().subscribe_physics_on_step_events(
+        lambda _dt: _apply_belt_pause_outside_callback(),
+        True,   # pre_step=True → before simulate(), before contact-modify cache loaded
+        0,      # order=0 → highest priority
     )
-    setattr(builtins, _BELT_POST_SUB_ATTR, _belt_post_sub)
+    setattr(builtins, _BELT_PRESTEP_SUB_ATTR, _belt_prestep_sub)
 except Exception as _bpe:
-    print(f"(builtin pp: post-update belt-pause subscription failed: {{_bpe}})")
+    print(f"(builtin pp: pre-step belt-pause subscription failed: {{_bpe}})")
 
 # Per-cube state machine: deliver cubes one at a time
 S = {{"delivered": set(), "current": None, "fixed_joint": None}}
@@ -32108,6 +32111,20 @@ def _record_err(e):
     try:
         _a_err.Set(S["errors"])
         _a_last_err.Set(f"{{type(e).__name__}}: {{str(e)[:150]}}")
+        print(f"(curobo pp ERR ticks={{S['ticks']}}: {{type(e).__name__}}: {{str(e)[:200]}})", flush=True)
+    except Exception: pass
+
+# Diagnostic — log mode transitions + claim details, write last ~10 to USD attr
+_MODE_LOG = []  # (tick, mode, info)
+def _log_event(info=""):
+    try:
+        _MODE_LOG.append((S["ticks"], S["mode"], str(info)[:80]))
+        if len(_MODE_LOG) > 50: _MODE_LOG.pop(0)
+        # Write tail (last 8 events) to USD attr — readable from outside
+        tail = _MODE_LOG[-8:]
+        log_str = " || ".join([f"t{{m[0]}}:{{m[1]}}={{m[2]}}" for m in tail])
+        _attr = stage.GetPrimAtPath(ROBOT_PATH).CreateAttribute("curobo_mode_log", Sdf.ValueTypeNames.String)
+        _attr.Set(log_str[:800])
     except Exception: pass
 
 def _bin_bounds():
@@ -32172,6 +32189,7 @@ def _on_step(dt):
                 _a_picked.Set(picked)
                 _pause_belt()
                 S["mode"] = "planning"
+                _log_event(f"claim:{{picked}}")
             return
 
         if S["mode"] == "planning":
@@ -32179,6 +32197,7 @@ def _on_step(dt):
             # Pass cube_path so COLOR_ROUTING can dispatch per cube
             drop_pos = _bin_drop_pos(S["picked_path"])
             if cube_pos is None or drop_pos is None:
+                _log_event(f"plan_miss_pos cube={{cube_pos}} drop={{drop_pos}}")
                 _record_err(RuntimeError("planning: missing cube or drop position"))
                 S["mode"] = "wait_sensor"; S["picked_path"] = None
                 # Don't resume belt on planning failure — undelivered cubes
@@ -32190,9 +32209,12 @@ def _on_step(dt):
                 # retreat pose, which can land the IK solver in a different
                 # redundancy branch each cycle → wrist-snap between picks.
                 # Home-seeded chain gives consistent branch across cubes.
+                _log_event(f"plan_call cube=({{cube_pos[0]:.2f}},{{cube_pos[1]:.2f}},{{cube_pos[2]:.2f}}) drop=({{drop_pos[0]:.2f}},{{drop_pos[1]:.2f}},{{drop_pos[2]:.2f}})")
                 plan = _plan_pick_place(cube_pos, drop_pos,
                                          current_joints=_HOME_Q[:7])
+                _log_event(f"plan_ok total_t={{plan.get('total_t',0):.1f}}")
             except Exception as _pe:
+                _log_event(f"plan_FAIL: {{type(_pe).__name__}}:{{str(_pe)[:60]}}")
                 _record_err(_pe)
                 S["mode"] = "wait_sensor"; S["picked_path"] = None
                 return
@@ -32217,6 +32239,7 @@ def _on_step(dt):
                 _jp = _attach_cube(S["picked_path"])
                 if _jp: S["grasp_joint"] = _jp
                 S["grip_closed_done"] = True
+                _log_event(f"grip_close jp={{bool(_jp)}} elapsed={{elapsed:.1f}}")
 
             # Gripper event: open (release) — gate on cube xy proximity to
             # drop target. cuRobo trajectory time may advance past grip_open_t
@@ -32245,6 +32268,17 @@ def _on_step(dt):
             _apply_joint_target(q_target)
 
             if elapsed >= plan["total_t"]:
+                # Log final cube position vs drop target to understand delivery success
+                try:
+                    _final_cubp = _world_pos(S["picked_path"]) if S["picked_path"] else None
+                    _drop = plan.get("drop_pos") if plan else None
+                    if _final_cubp and _drop:
+                        _xy_err = ((_final_cubp[0]-_drop[0])**2 + (_final_cubp[1]-_drop[1])**2)**0.5
+                        _z_err = abs(_final_cubp[2]-_drop[2])
+                        _log_event(f"cycle_end xy_err={{_xy_err:.3f}} z_err={{_z_err:.3f}}")
+                    else:
+                        _log_event(f"cycle_end no_pos cubp={{_final_cubp is not None}} drop={{_drop is not None}}")
+                except Exception: pass
                 # Delivered (or at least trajectory finished). Force-release
                 # any held UR10 FixedJoint — even if cube is far from drop
                 # (drop-precision-fix held it, but cycle is ending so EE must
@@ -32715,29 +32749,31 @@ try:
 except Exception: pass
 
 # ── Planner (cached across installs) ────────────────────────────────
-# v3 cache: collision_cache pre-allocated for obstacles (fix I-37)
-_PLANNER_ATTR = "_curobo_pp_planner_v4"
+# v5 cache: increased IK seeds (16) for higher first-attempt success rate
+# on stochastic CUDA IK. Earlier 4 seeds caused stuck-controller pattern
+# in CP-10/11/26-style canonicals — IK failed transiently, controller
+# retried infinitely on same cube (Mode A controller-stuck bug fix 2026-05-09).
+_PLANNER_ATTR = "_curobo_pp_planner_v5"
 _planner = getattr(builtins, _PLANNER_ATTR, None)
 if _planner is None:
     # Evict prior versions
-    for _old in ("_curobo_pp_planner", "_curobo_pp_planner_v2", "_curobo_pp_planner_v3"):
+    for _old in ("_curobo_pp_planner", "_curobo_pp_planner_v2", "_curobo_pp_planner_v3", "_curobo_pp_planner_v4"):
         try: delattr(builtins, _old)
         except Exception: pass
-    print("(curobo: building MotionPlanner v4 — no scene-collision)")
+    print("(curobo: building MotionPlanner v5 — 16 IK seeds for IK robustness)")
     # Scene-collision via update_world(SceneCfg) crashes Warp 1.8.2 with
     # 'Couldn\\'t find function overload for is_obs_enabled' (cuRobo's
     # CuboidDataWarp type isn't registered in Warp 1.8 kernel namespace).
     # Workaround: skip scene obstacles entirely. Self-collision still active.
-    # Lower seed counts for determinism. Earlier 16 IK × 2 trajopt seeds
-    # gave high success rate per plan but path varied between runs (each
-    # call picked best among randomized seeds, so the "best" wasn't stable).
-    # 4 IK × 1 trajopt is enough for tabletop picks and produces consistent
-    # trajectories.
+    # 16 IK × 2 trajopt seeds: chosen for IK robustness (vs deterministic
+    # path stability). Empirically Mode-A controller-stuck pattern (CP-10
+    # etc) dominated by transient IK failures with 4 seeds — extra seeds
+    # cost ~4× CUDA compute per plan but reduce stuck-cycle infinite loop.
     _pcfg = MotionPlannerCfg.create(
         robot=_CUROBO_ROBOT_CFG,
         use_cuda_graph=True,
-        num_ik_seeds=4,
-        num_trajopt_seeds=1,
+        num_ik_seeds=16,
+        num_trajopt_seeds=2,
         self_collision_check=True,
         position_tolerance=0.003,
         orientation_tolerance=0.05,
@@ -32746,7 +32782,7 @@ if _planner is None:
     setattr(builtins, _PLANNER_ATTR, _planner)
     print(f"(curobo: planner cached in builtins.{{_PLANNER_ATTR}})")
 else:
-    print("(curobo: reusing cached planner v3)")
+    print("(curobo: reusing cached planner v5)")
 
 _PLANNER_JOINT_NAMES = list(_planner.joint_names)
 
@@ -33191,8 +33227,11 @@ def _build_segments(cube_pos, drop_pos, current_q):
         traj, mt = res
         # Last joint config becomes next segment's start
         q = traj[-1]
+        # Attach drop_pos to "open" segment so drop-precision fix can gate release
         segs.append({{"traj": traj, "motion_time": mt, "action_after": action_after,
-                      "grip_done": False}})
+                      "grip_done": False,
+                      "drop_pos": [float(drop_pos[0]), float(drop_pos[1]), float(drop_pos[2])]
+                                  if action_after == "open" else None}})
     return segs
 
 def _on_step(dt):
@@ -33241,9 +33280,21 @@ def _on_step(dt):
                 return
             jp = franka.get_joint_positions()
             if jp is None: return
-            segs = _build_segments(cp, dp, jp[:_ARM_DOF])
+            # Fix 2: seed from home config first (consistent IK branch);
+            # fallback to current state if home-seeded planning fails.
+            _seed_q = _HOME_Q[:_ARM_DOF]
+            segs = _build_segments(cp, dp, _seed_q)
             if segs is None:
-                _record_err(RuntimeError("planning failed"))
+                segs = _build_segments(cp, dp, jp[:_ARM_DOF])
+            if segs is None:
+                # Fix 1: 3-strike counter — mark cube permanently failed after
+                # 3 consecutive plan failures so wait_sensor moves to next cube.
+                _record_err(RuntimeError(f"planning failed for {{picked}}"))
+                S.setdefault("plan_fail_count", {{}})
+                S["plan_fail_count"][picked] = S["plan_fail_count"].get(picked, 0) + 1
+                if S["plan_fail_count"][picked] >= 3:
+                    S["failed"].add(picked)
+                    print(f"(curobo: {{picked}} permanently failed after 3 plan failures)", flush=True)
                 S["mode"] = "wait_sensor"; S["picked_path"] = None
                 _resume_belt()
                 return
@@ -33307,8 +33358,49 @@ def _on_step(dt):
                 if not cur_seg["grip_done"] and elapsed >= mt + pre_grip_settle:
                     if cur_seg["action_after"] == "close":
                         _grip_close()
+                        # Mode B fix: cuRobo handler relied on friction-only grip.
+                        # When elbow swept past during S3 lift, the cube was
+                        # knocked off belt edge. Form a UsdPhysics.FixedJoint
+                        # between gripper link and cube to ENSURE cube follows
+                        # gripper through transit (mirrors spline handler).
+                        try:
+                            from pxr import UsdPhysics as _UP_grip, Sdf as _Sdf_grip
+                            cube = stage.GetPrimAtPath(S["picked_path"]) if S.get("picked_path") else None
+                            ee = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/{{_GRIPPER_LINK}}")
+                            if ee and ee.IsValid() and cube and cube.IsValid() and not S.get("grasp_joint"):
+                                jp = f"{{S['picked_path']}}_curobo_grasp_fj"
+                                fj = _UP_grip.FixedJoint.Define(stage, jp)
+                                fj.CreateBody0Rel().SetTargets([_Sdf_grip.Path(str(ee.GetPath()))])
+                                fj.CreateBody1Rel().SetTargets([_Sdf_grip.Path(S["picked_path"])])
+                                S["grasp_joint"] = jp
+                        except Exception as _fje: print(f"(curobo grasp FJ fail: {{_fje}})")
                     elif cur_seg["action_after"] == "open":
-                        _grip_open()
+                        # Drop-precision Fix B: only release if cube is close
+                        # to drop_pos. cuRobo trajectory may end before EE
+                        # converges due to PD drive lag — releasing then
+                        # drops cube short of bin. Hold release until close.
+                        _drop_close = True
+                        try:
+                            _cubp = _world_pos(S["picked_path"]) if S.get("picked_path") else None
+                            _drop = cur_seg.get("drop_pos") or (S.get("plan") or {{}}).get("drop_pos")
+                            if _cubp is not None and _drop is not None:
+                                _xy_err = ((_cubp[0]-_drop[0])**2 + (_cubp[1]-_drop[1])**2) ** 0.5
+                                _drop_close = _xy_err < 0.08
+                        except Exception: pass
+                        # Cap hold at +4s past mt to prevent infinite hold
+                        _hold_cap = elapsed > mt + pre_grip_settle + 4.0
+                        if _drop_close or _hold_cap:
+                            _grip_open()
+                            # Remove the grasp FJ at release
+                            if S.get("grasp_joint"):
+                                try:
+                                    if stage.GetPrimAtPath(S["grasp_joint"]).IsValid():
+                                        stage.RemovePrim(S["grasp_joint"])
+                                except Exception: pass
+                                S["grasp_joint"] = None
+                            cur_seg["grip_done"] = True
+                        # else: keep grip_done=False, retry next tick
+                        return  # don't advance to post_grip dwell yet
                     cur_seg["grip_done"] = True
                 # Post-grip dwell so finger drives reach final position
                 # (close: 2.5s for cube clamp; open: 1.0s for release)

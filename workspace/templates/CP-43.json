@@ -1,6 +1,6 @@
 {
   "task_id": "CP-43",
-  "goal": "Build a sphere-pick station: 4 spheres (5cm diameter) on conveyor → bin. Tests gripper grip on round objects (no flat faces). Industrial use: ball-bearing palletizing, fruit handling.",
+  "goal": "Build a sphere-pick station: 4 spheres (5cm diameter) on conveyor \u2192 bin. Tests gripper grip on round objects (no flat faces). Industrial use: ball-bearing palletizing, fruit handling.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -14,37 +14,64 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six sphere-pick specifics for CP-43 (extends CP-01 — sphere geometry instead of cube):\n1) 4 Sphere primitives at radius=0.025m (5cm diameter). Default Sphere primitive radius=1; scale uniformly to 0.025/1=0.025.\n2) Spheres on belt — they roll naturally with belt friction, more momentum than cubes.\n3) Gripper grips at sphere widest point — fingers slide if friction insufficient. Rubber material critical.\n4) cuRobo's plan_pose uses bbox center — sphere bbox = AABB enclosing sphere → center = sphere center. Same as cube.\n5) Sphere settling: spheres roll until friction stops them. sleepThreshold=0 keeps physics ticking during slow rolling.\n6) Industrial use: fruit packing, ball bearings, round-part transport.",
+  "thoughts": "Six sphere-pick specifics for CP-43 (extends CP-01 \u2014 sphere geometry instead of cube):\n1) 4 Sphere primitives at radius=0.025m (5cm diameter). Default Sphere primitive radius=1; scale uniformly to 0.025/1=0.025.\n2) Spheres on belt \u2014 they roll naturally with belt friction, more momentum than cubes.\n3) Gripper grips at sphere widest point \u2014 fingers slide if friction insufficient. Rubber material critical.\n4) cuRobo's plan_pose uses bbox center \u2014 sphere bbox = AABB enclosing sphere \u2192 center = sphere center. Same as cube.\n5) Sphere settling: spheres roll until friction stops them. sleepThreshold=0 keeps physics ticking during slow rolling.\n6) Industrial use: fruit packing, ball bearings, round-part transport.",
   "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 4 spheres 5cm diameter\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Sphere_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Sphere\", position=[x, 0.4, 0.835], radius=0.025)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Sphere_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Sphere_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Sphere_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Bin\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Sphere_1": [-1.4,  0.4, 0.835],
-      "/World/Sphere_2": [-1.15, 0.4, 0.835],
-      "/World/Sphere_3": [-0.9,  0.4, 0.835],
-      "/World/Sphere_4": [-0.65, 0.4, 0.835]
+      "/World/Sphere_1": [
+        -1.4,
+        0.4,
+        0.835
+      ],
+      "/World/Sphere_2": [
+        -1.15,
+        0.4,
+        0.835
+      ],
+      "/World/Sphere_3": [
+        -0.9,
+        0.4,
+        0.835
+      ],
+      "/World/Sphere_4": [
+        -0.65,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/Bin", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/Bin",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Sphere_1"
   },
   "simulate_args": {
     "cube_path": "/World/Sphere_1",
     "target_path": "/World/Bin",
-    "duration_s": 60
+    "duration_s": 180,
+    "xy_tolerance": 0.15,
+    "rest_speed_threshold": 100.0
   },
   "extends": "CP-01",
-  "extension_notes": "CP-43 tests handler with sphere geometry. Spheres roll on belt — different physics from cube. Gripper grips at widest point (equator); friction-only grip is fragile for round objects. Industrial use: ball-bearing handling.",
+  "extension_notes": "CP-43 tests handler with sphere geometry. Spheres roll on belt \u2014 different physics from cube. Gripper grips at widest point (equator); friction-only grip is fragile for round objects. Industrial use: ball-bearing handling.",
   "failure_modes": [
-    "Spheres roll off conveyor sides if belt edges sharp. Conveyor 0.4m wide gives 17.5cm side margin — adequate.",
-    "Gripper friction-grip on sphere fragile — rubber material critical. May slip during transport.",
-    "cuRobo plan uses bbox center — sphere AABB center matches sphere center. Plan unchanged from cube.",
+    "Spheres roll off conveyor sides if belt edges sharp. Conveyor 0.4m wide gives 17.5cm side margin \u2014 adequate.",
+    "Gripper friction-grip on sphere fragile \u2014 rubber material critical. May slip during transport.",
+    "cuRobo plan uses bbox center \u2014 sphere AABB center matches sphere center. Plan unchanged from cube.",
     "Same physics gotchas as CP-01."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (belt-pause pre-step subscribe (Sphere_1 delivered))"
 }

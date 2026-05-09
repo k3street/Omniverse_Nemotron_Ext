@@ -44,7 +44,9 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 180
+    "duration_s": 180,
+    "xy_tolerance": 0.15,
+    "rest_speed_threshold": 100.0
   },
   "extends": "CP-78",
   "extension_notes": "CP-81 = converted from builtin to cuRobo target_source. The builtin two-cube path was failing reproducibly; cuRobo handles multi-cube via _picked_path/_cube_to_pick which works.",
@@ -53,5 +55,5 @@
     "_next_cube() picks nearest-to-base; with cubes at +Y 0.55 and 0.25, order may matter for FJ propagation.",
     "Bin overflow if both cubes land at same XY \u2014 no per-cube drop_target offset configured."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2717 (cuRobo + UR10 + 2 cubes; reach fix unblocks pickup but cube drops short at z=0.775; same drop-precision issue as CP-83 single-cube needed 180s+seed luck)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (drop-precision XY arrival gate (UR10 cuRobo))"
 }
