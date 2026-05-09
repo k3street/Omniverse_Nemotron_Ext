@@ -63,5 +63,14 @@
     "Cubes need rubber + sleepThreshold=0 (CP-01 pattern).",
     "Without surface_velocity attr on disc, the verifier's bridge check might fail. May need to add stationary surfaceVelocity for verifier."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 90s. cube_final=(-0.08, -0.46, 0.789) in Bin)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 90s. cube_final=(-0.08, -0.46, 0.789) in Bin)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

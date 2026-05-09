@@ -71,5 +71,14 @@
     "Bin at +Y \u2014 drop transit goes through robot's base footprint area. Default planning_obstacles include ConveyorBelt + Bin to avoid bin-rim collisions.",
     "Same physics rules: CPU dynamics, sleepThreshold=0, rubber on cubes, DomeLight=1000."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 60s. cube_final=(-0.02, 0.46, 0.835) in Bin)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 60s. cube_final=(-0.02, 0.46, 0.835) in Bin)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

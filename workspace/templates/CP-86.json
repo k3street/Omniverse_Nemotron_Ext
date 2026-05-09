@@ -47,5 +47,11 @@
   "failure_modes": [
     "Same as CP-78."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate \u2713 23/23; function-gate \u2713 (identical cube_final to CP-78 \u2014 proves builtin handler safely ignores color_routing arg)"
+  "verified_status": "build-spec-2026-05-08; form-gate \u2713 23/23; function-gate \u2713 (identical cube_final to CP-78 \u2014 proves builtin handler safely ignores color_routing arg)",
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "obstacles": [
+      "/World/Pedestal"
+    ]
+  }
 }

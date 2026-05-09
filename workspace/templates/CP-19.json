@@ -88,5 +88,18 @@
     "PalletB at x=+0.35, distance from robot (0,0): sqrt(0.35^2+0.4^2) = 0.53m. Within reach.",
     "Verify_args has 2 stages but they're independent (same robot, different bin) \u2014 verify_pickplace_pipeline checks each stage's reach + bridge separately."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + Mode A 3-strike fix)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + Mode A 3-strike fix)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/PalletA",
+      "/World/PalletB"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

@@ -57,5 +57,9 @@
     "Surface gripper proximity: cube must contact the ee_link suction surface within tolerance; cuRobo's plan must descend close enough. Default approach height (max(source_z, drop_z) + 0.2m) tested for Franka, may need ee_offset tweak for UR10.",
     "Reach: UR10 1.3m vs Franka 0.85m \u2014 extra reach is forgiving for the conveyor at x=-1.0, but pose singularities differ between robots; cuRobo plan may take more IK seeds to converge."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2713 (UR10 cuRobo+conveyor delivers via raycast\u2192FixedJoint workaround for IsaacSurfaceGripper bug)"
+  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2713 (UR10 cuRobo+conveyor delivers via raycast\u2192FixedJoint workaround for IsaacSurfaceGripper bug)",
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "sensor_path": "/World/PickSensor"
+  }
 }

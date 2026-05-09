@@ -66,5 +66,14 @@
     "Robot can't reach z=0.935 vertical lift \u2014 within Franka's 0.85m reach (0.935-0.75=0.185m vertical, 0.4m horizontal, sqrt=0.44m total). Within reach.",
     "Sensor at (0.4, 0.3, 0.835) \u2014 covers bottom cube xy. Top cube z=0.935 above sensor. Sensor still triggers when any cube within bbox xy. Adequate."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 90s. cube_final=(-0.02, -0.40, 0.785) in Bin)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 90s. cube_final=(-0.02, -0.40, 0.785) in Bin)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

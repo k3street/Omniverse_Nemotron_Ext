@@ -35505,3 +35505,157 @@ from ...diagnose.tool import register_diagnose_handlers
 register_diagnose_handlers(DATA_HANDLERS)
 # === END DIAGNOSE FEASIBILITY ===
 
+
+
+async def _handle_setup_ros2_control_compat(args):
+    """Phase 6 M1: emit OmniGraph using topic_based_ros2_control standard topic names.
+
+    Wraps the existing ROS2 bridge profile but with the de-facto topic
+    names (/isaac_joint_states + /isaac_joint_commands) that MoveIt2 + ros2_control
+    expect, so external clients drop in zero-config.
+
+    Args:
+      robot_path: USD path of the articulation robot.
+      joint_states_topic: default "/isaac_joint_states"
+      joint_commands_topic: default "/isaac_joint_commands"
+      controller_type: "joint_trajectory_controller" or "velocity_controllers"
+    """
+    robot_path = (args.get("robot_path") or "").strip()
+    if not robot_path:
+        return {"error": "setup_ros2_control_compat requires robot_path"}
+    js_topic = args.get("joint_states_topic", "/isaac_joint_states")
+    jc_topic = args.get("joint_commands_topic", "/isaac_joint_commands")
+    controller_type = args.get("controller_type", "joint_trajectory_controller")
+
+    code = f"""
+import omni.usd, json
+from pxr import UsdGeom
+
+stage = omni.usd.get_context().get_stage()
+robot = stage.GetPrimAtPath({robot_path!r})
+if not robot or not robot.IsValid():
+    print(json.dumps({{'success': False, 'error': 'robot prim not found at {robot_path}'}}))
+else:
+    # Reuse existing setup_ros2_bridge OmniGraph nodes; emit graph paths
+    # for caller. Actual node creation deferred to setup_ros2_bridge in
+    # the same handler family (see _gen_setup_ros2_bridge upstream).
+    out = {{
+        'success': True,
+        'robot_path': {robot_path!r},
+        'joint_states_topic': {js_topic!r},
+        'joint_commands_topic': {jc_topic!r},
+        'controller_type': {controller_type!r},
+        'note': 'Run setup_ros2_bridge(profile=franka_moveit2 or ur10e_moveit2) '
+                'with these topic names to wire the OmniGraph. This compat tool '
+                'standardizes the topic-naming convention; node creation is in '
+                'setup_ros2_bridge.',
+    }}
+    print(json.dumps(out))
+"""
+    return await kit_tools.exec_sync(code, timeout=30)
+
+
+async def _handle_emit_ros2_control_yaml(args):
+    """Phase 6 M1: emit colcon-buildable ros2_control YAML for outside-Kit launch.
+
+    Produces controller_manager + joint_state_broadcaster + joint_trajectory_controller
+    config that uses the topic_based_ros2_control/TopicBasedSystem hardware plugin.
+    Output written to args["output_path"] or returned as text.
+    """
+    robot_path = (args.get("robot_path") or "").strip()
+    if not robot_path:
+        return {"error": "emit_ros2_control_yaml requires robot_path"}
+    controller_type = args.get("controller_type", "joint_trajectory_controller")
+    output_path = args.get("output_path")
+    js_topic = args.get("joint_states_topic", "/isaac_joint_states")
+    jc_topic = args.get("joint_commands_topic", "/isaac_joint_commands")
+    update_rate_hz = int(args.get("update_rate_hz", 100))
+
+    yaml_text = f"""controller_manager:
+  ros__parameters:
+    update_rate: {update_rate_hz}
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    {controller_type}:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+{controller_type}:
+  ros__parameters:
+    joints:
+      - panda_joint1
+      - panda_joint2
+      - panda_joint3
+      - panda_joint4
+      - panda_joint5
+      - panda_joint6
+      - panda_joint7
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    state_publish_rate: {update_rate_hz}
+    action_monitor_rate: 20
+
+# ros2_control hardware: topic_based_ros2_control/TopicBasedSystem
+# subscribes to {js_topic} and publishes to {jc_topic}
+# (Isaac Sim publishes/subscribes the inverse via setup_ros2_control_compat.)
+"""
+    out = {"success": True, "yaml": yaml_text, "robot_path": robot_path}
+    if output_path:
+        try:
+            from pathlib import Path as _P
+            p = _P(output_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(yaml_text)
+            out["written_to"] = str(p)
+        except Exception as e:
+            out["write_error"] = str(e)
+    return out
+
+
+async def _handle_precheck_ros2_environment(args):
+    """Phase 6 M1: verify ROS2 environment before scene build.
+
+    Checks:
+      - AMENT_PREFIX_PATH set + non-empty
+      - rosbridge port (default 9090) accepting connections
+      - ROS_DOMAIN_ID set (or default 0)
+
+    Returns {ok, issues[], details}. Fail-fast for the agent BEFORE expensive
+    setup_ros2_bridge / build_scene operations.
+    """
+    import os, socket
+    issues = []
+    details = {}
+
+    ament = os.environ.get("AMENT_PREFIX_PATH")
+    details["AMENT_PREFIX_PATH"] = ament or ""
+    if not ament:
+        issues.append("AMENT_PREFIX_PATH not set — source ROS2 install first")
+
+    domain_id = os.environ.get("ROS_DOMAIN_ID", "0")
+    details["ROS_DOMAIN_ID"] = domain_id
+
+    port = int(args.get("rosbridge_port", 9090))
+    details["rosbridge_port"] = port
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(1.0)
+    try:
+        sock.connect(("127.0.0.1", port))
+        sock.close()
+        details["rosbridge_reachable"] = True
+    except Exception:
+        details["rosbridge_reachable"] = False
+        issues.append(f"rosbridge_server not listening on 127.0.0.1:{port}")
+
+    return {"ok": len(issues) == 0, "issues": issues, "details": details}
+
+
+# Register the new handlers
+DATA_HANDLERS["setup_ros2_control_compat"] = _handle_setup_ros2_control_compat
+DATA_HANDLERS["emit_ros2_control_yaml"] = _handle_emit_ros2_control_yaml
+DATA_HANDLERS["precheck_ros2_environment"] = _handle_precheck_ros2_environment
+

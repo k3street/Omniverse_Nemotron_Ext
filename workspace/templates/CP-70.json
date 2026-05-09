@@ -59,5 +59,9 @@
     "Same UR10 init quirks as CP-69 \u2014 SingleArticulation wrapper, no built-in gripper attr.",
     "Verifier doesn't validate suction graph existence \u2014 only checks pickplace pipeline shape. Runtime suction integration is an integration spec milestone."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2713 (UR10 cuRobo+surface_gripper delivers via raycast workaround)"
+  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2713 (UR10 cuRobo+surface_gripper delivers via raycast workaround)",
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "sensor_path": "/World/PickSensor"
+  }
 }

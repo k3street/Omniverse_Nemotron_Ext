@@ -76,5 +76,14 @@
     "5 items in 0.10m radius \u2014 overlap. Goldenrod-angle spread minimizes; but tight packing may stack on top of each other.",
     "Sensor zone covers most heap (radius 0.05, heap radius 0.10) \u2014 only items within sensor xy will trigger. Smaller sensor + per-cube reach selection picks any in range."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

@@ -78,5 +78,14 @@
     "Bin too far downstream \u2014 cube falls off Conv2 end (x=+1.5) before reaching Bin (x=+1.7). 0.2m gap; cube falls 5cm onto Ground. Acceptable.",
     "Sensor on Conv1 only \u2014 no pick decision needed for Conv2 (cube just rides). Standard CP-01 sensor pattern."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (postal sorter \u2014 Mode A 3-strike + cuRobo pre-step belt-pause)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (postal sorter \u2014 Mode A 3-strike + cuRobo pre-step belt-pause)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

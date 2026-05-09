@@ -799,7 +799,76 @@ ISAAC_SIM_TOOLS = [
     },
     {
         "type": "function",
+        "function": 
+    {
+        "type": "function",
         "function": {
+            "name": "setup_ros2_control_compat",
+            "description": (
+                "PHASE 6 M1: configure Isaac Sim's ROS2 bridge to use the standard "
+                "topic_based_ros2_control topic names (/isaac_joint_states + "
+                "/isaac_joint_commands). MoveIt2 / ros2_control external clients "
+                "expect these names by default. Use BEFORE setup_ros2_bridge so the "
+                "OmniGraph is wired with the matching topics. Pair with "
+                "emit_ros2_control_yaml to generate the user-side launch config."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "joint_states_topic": {"type": "string", "default": "/isaac_joint_states"},
+                    "joint_commands_topic": {"type": "string", "default": "/isaac_joint_commands"},
+                    "controller_type": {"type": "string", "default": "joint_trajectory_controller"},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "emit_ros2_control_yaml",
+            "description": (
+                "PHASE 6 M1: generate colcon-buildable ros2_control YAML for outside-"
+                "Kit launch. Caller passes robot_path + controller_type + optional "
+                "output_path. Returns the YAML as text + writes to output_path if "
+                "provided. Pair with setup_ros2_control_compat in the canonical."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "controller_type": {"type": "string", "default": "joint_trajectory_controller"},
+                    "output_path": {"type": "string", "description": "Optional file path to write YAML."},
+                    "joint_states_topic": {"type": "string", "default": "/isaac_joint_states"},
+                    "joint_commands_topic": {"type": "string", "default": "/isaac_joint_commands"},
+                    "update_rate_hz": {"type": "integer", "default": 100},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "precheck_ros2_environment",
+            "description": (
+                "PHASE 6 M1: verify ROS2 environment is ready BEFORE scene build. "
+                "Checks AMENT_PREFIX_PATH set, rosbridge port (default 9090) "
+                "accepting connections, ROS_DOMAIN_ID consistency. Returns "
+                "{ok, issues[], details}. Fail-fast: if ok=false, surface issues "
+                "and don't proceed to build."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rosbridge_port": {"type": "integer", "default": 9090},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
             "name": "resolve_skill_composition",
             "description": (
                 "Map a skill-composition name ('pick-and-place', 'calibration', 'ros2', "

@@ -73,5 +73,9 @@
     "Same UR10 gripper limitation as CP-69/71 \u2014 function-gate (delivery) deferred until surface gripper wires in.",
     "Verifier may not validate Cortex install \u2014 only checks pickplace pipeline shape."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 3/4 cubes delivered via UR10 Cortex)"
+  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 3/4 cubes delivered via UR10 Cortex)",
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "sensor_path": "/World/PickSensor"
+  }
 }

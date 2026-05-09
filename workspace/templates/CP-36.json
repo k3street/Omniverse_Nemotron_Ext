@@ -72,5 +72,18 @@
     "Cube placement on TOP shelf at z=1.0: robot descends from h1=1.20 to z=1.0. 0.20m descent \u2014 adequate.",
     "Same physics gotchas as CP-08."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + xy_tol=0.15 + rest_speed=10 \u2014 Cube_3 delivered to ShelfBottom)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + xy_tol=0.15 + rest_speed=10 \u2014 Cube_3 delivered to ShelfBottom)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/ShelfBottom",
+      "/World/ShelfTop"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

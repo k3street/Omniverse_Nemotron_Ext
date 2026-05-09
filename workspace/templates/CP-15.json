@@ -66,5 +66,17 @@
     "Picking order disrupted by belt timing \u2014 if Cube_1 (10cm, slow belt speed due to weight) lags behind Cube_2 (8cm), order may flip. Use sleepThreshold=0 + rubber material to keep timing predictable.",
     "Top cube reach z=1.005 \u2014 0.255m above robot base (z=0.75). Within Franka's vertical reach 0.85m. Fine."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 Cube_3 delivered to PalletBase)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 Cube_3 delivered to PalletBase)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/PalletBase"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

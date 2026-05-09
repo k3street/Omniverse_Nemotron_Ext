@@ -58,5 +58,12 @@
     "Bin proximity (10cm gap between bins) may cause cube-to-wrong-bin if drop accuracy is poor.",
     "Same raycast dependencies as CP-78."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (drop-precision XY arrival gate (UR10 cuRobo))"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (drop-precision XY arrival gate (UR10 cuRobo))",
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "obstacles": [
+      "/World/Pedestal_1",
+      "/World/Pedestal_2"
+    ]
+  }
 }

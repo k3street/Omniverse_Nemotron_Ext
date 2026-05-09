@@ -104,5 +104,14 @@
     "Defective cube color (grey) matches no semantic class \u2192 fall-through to RejectBin (destination_path). Tested in CP-18.",
     "Function-gate would take ~10 cubes \u00d7 7s/cycle = 70+ seconds to fully process all cubes. Long sim."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

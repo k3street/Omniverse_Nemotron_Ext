@@ -73,5 +73,17 @@
     "drop_targets passed to non-curobo target_source \u2014 currently only cuRobo handler supports DROP_TARGETS branch. Spline/native ignore it (silent fall-through to destination_path)."
   ],
   "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + 16 IK seeds \u2014 3/4 cubes delivered to Pallet)",
-  "compute_stack_placement_verified_2026_05_07": "Tool returned 4 positions matching the hardcoded drop_targets above. Computed via grid_2x2 anchor=top spacing=0.08."
+  "compute_stack_placement_verified_2026_05_07": "Tool returned 4 positions matching the hardcoded drop_targets above. Computed via grid_2x2 anchor=top spacing=0.08.",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Pallet"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

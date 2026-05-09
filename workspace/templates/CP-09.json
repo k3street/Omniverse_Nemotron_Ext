@@ -78,5 +78,17 @@
     "Robot can't reach z=1.025m from base at z=0.75 \u2014 Franka's reach is ~0.85m sphere; 1.025-0.75=0.275m vertical at xy=(0,-0.4) \u2192 0.49m total radius which is well within 0.85m. Should reach. If reach fails: lower TowerBase or scale tower height.",
     "drop_targets list-form (instead of dict) \u2014 cube i goes to drop_targets[i] BY ORDER in source_paths, NOT by cube_path. Use dict form for robustness against source_paths reordering."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + xy_tolerance=0.10 stack-precision slack)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + xy_tolerance=0.10 stack-precision slack)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/TowerBase"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

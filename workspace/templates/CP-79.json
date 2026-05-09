@@ -48,5 +48,11 @@
     "If function-gate fails here too, then the stack itself can't deliver from any geometry \u2014 strongly suggests the suction_cup never enters maxGripDistance regardless of pose.",
     "Same UR10 init quirks as CP-75/CP-78."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2713 (UR10 +X+Y pedestal \u2014 confirms raycast workaround works regardless of approach direction)"
+  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2713 (UR10 +X+Y pedestal \u2014 confirms raycast workaround works regardless of approach direction)",
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "obstacles": [
+      "/World/Pedestal"
+    ]
+  }
 }

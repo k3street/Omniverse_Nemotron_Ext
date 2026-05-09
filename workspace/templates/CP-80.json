@@ -57,5 +57,9 @@
     "Conveyor stand collision: UR10 transit path passes near the stand at +X; planning_obstacles not configured \u2014 Sprint 4+ to add scene obstacles to RmpFlow.",
     "Same UR10 init quirks as CP-78 \u2014 articulation re-init fallback, mirror home pose."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2717 (belt-pause-from-callback bug \u2014 verified that surfaceVelocityEnabled toggle ALSO doesn't propagate from inside _on_step. PhysX-level integrator caches independently of USD attribute layer)"
+  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2717 (belt-pause-from-callback bug \u2014 verified that surfaceVelocityEnabled toggle ALSO doesn't propagate from inside _on_step. PhysX-level integrator caches independently of USD attribute layer)",
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "sensor_path": "/World/PickSensor"
+  }
 }

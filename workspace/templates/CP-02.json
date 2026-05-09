@@ -79,5 +79,32 @@
     "target_path": "/World/Bin",
     "duration_s": 180
   },
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (with 180s sim \u2014 orig 60s too short. cube_final=(1.00, 0.39, 0.785) in Bin)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (with 180s sim \u2014 orig 60s too short. cube_final=(1.00, 0.39, 0.785) in Bin)",
+  "diagnose_args": {
+    "cycles": [
+      {
+        "robot_path": "/World/Franka1",
+        "drop_pose": [
+          -1.0,
+          -0.4,
+          0.94
+        ],
+        "robot_base": [
+          -1.0,
+          0.0,
+          0.75
+        ]
+      },
+      {
+        "robot_path": "/World/Franka2",
+        "robot_base": [
+          1.0,
+          0.0,
+          0.75
+        ]
+      }
+    ],
+    "obstacles": [],
+    "has_mutex": false
+  }
 }

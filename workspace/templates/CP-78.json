@@ -49,5 +49,11 @@
     "Pedestal collision: UR10 may path through pedestal during transit phase. RmpFlow has no scene obstacle awareness in this config.",
     "Same UR10 init quirks as CP-75 \u2014 articulation re-init fallback, mirror home pose."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2713 (UR10 builtin pedestal \u2014 first reproducible UR10 delivery via raycast workaround)"
+  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2713 (UR10 builtin pedestal \u2014 first reproducible UR10 delivery via raycast workaround)",
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "obstacles": [
+      "/World/Pedestal"
+    ]
+  }
 }

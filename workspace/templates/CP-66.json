@@ -75,5 +75,14 @@
     "4 bins arranged tightly \u2014 0.30m spacing; planning_obstacles avoids each.",
     "Same physics gotchas as CP-17."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (120s sim. cube_final=(-0.49, -0.46, 0.824) in Bin)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (120s sim. cube_final=(-0.49, -0.46, 0.824) in Bin)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

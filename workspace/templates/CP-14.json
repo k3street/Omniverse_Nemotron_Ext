@@ -68,5 +68,29 @@
     "Both controllers race for same _curobo_pp_sub_ name \u2014 fixed in CP-02 era: per-robot scoping by robot path tag.",
     "Pallet too small \u2014 15x15cm gives ~5cm margin around 5cm cubes. Robot drop precision typically 5cm; cubes may drop just outside. Future: enlarge to 20-30cm."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + Mode A 3-strike fix)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + Mode A 3-strike fix)",
+  "diagnose_args": {
+    "cycles": [
+      {
+        "robot_path": "/World/FrankaA",
+        "robot_base": [
+          -0.6,
+          0.0,
+          0.75
+        ]
+      },
+      {
+        "robot_path": "/World/FrankaB",
+        "robot_base": [
+          0.6,
+          0.0,
+          0.75
+        ]
+      }
+    ],
+    "obstacles": [
+      "/World/PalletBase"
+    ],
+    "has_mutex": false
+  }
 }

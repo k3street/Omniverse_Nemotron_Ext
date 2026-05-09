@@ -80,5 +80,17 @@
     "Cubes 4-6 start within reach (|x|<0.7) \u2014 picked first by reach selection. drop_targets dict correctly routes regardless of pick order.",
     "Same physics gotchas as CP-01."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending; reference baseline canonical"
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending; reference baseline canonical",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Pallet"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

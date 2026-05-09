@@ -70,5 +70,14 @@
     "Slot prims under tray are Xforms \u2014 not physical colliders. Cubes land on tray top, not 'in' slots geometrically. Logical slot via track_slot_occupancy.",
     "Same physics gotchas as CP-08."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 3/4 cubes delivered to KitTray via mutex coordination)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 3/4 cubes delivered to KitTray via mutex coordination)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

@@ -58,5 +58,9 @@
     "drop_targets must land within bin xy footprint; 0.30x0.30 with 0.16m grid spacing leaves 0.07m margin.",
     "Same UR10 init quirks as CP-69 \u2014 SingleArticulation wrapper, no built-in gripper, _grip_open/_grip_close fall through."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths Item_* \u2014 3/4 dispenser items delivered to OutBin)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths Item_* \u2014 3/4 dispenser items delivered to OutBin)",
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "sensor_path": "/World/PickSensor"
+  }
 }
