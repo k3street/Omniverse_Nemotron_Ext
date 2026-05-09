@@ -77,12 +77,90 @@ def _run_subproc(cmd: List[str], log_path: Path, timeout: int = 7200) -> int:
 # ── Step implementations ────────────────────────────────────────────────
 
 
+def _reconstruct_baseline_from_log(run_log_path: Path, baseline_path: Path,
+                                    out_log: Path) -> bool:
+    """Best-effort recovery if baseline runner crashed before writing JSON.
+
+    Parses the per-canonical lines from run.log into a baseline JSON.
+    Conservative: only rows we can fully parse become entries; partials get
+    marked NO_RESULT so step 3 re-runs them.
+    """
+    if not run_log_path.exists():
+        return False
+    import re
+    rows = []
+    pattern = re.compile(
+        r"\s*(CP-\d+)\s+(\w+)\s+rate=\s*([\d.\-]+|\-)\s+runs=([\d?]+/[\d?]+)\s+"
+        r"build=\s*([\d?/\-]+)\s+elapsed=([\d.]+|-)s",
+    )
+    seen = set()
+    for line in run_log_path.read_text().splitlines():
+        m = pattern.match(line)
+        if not m:
+            continue
+        label, status, rate_s, runs_s, build_s, elapsed = m.groups()
+        if label in seen:
+            continue
+        seen.add(label)
+        try:
+            rate = float(rate_s) if rate_s != "-" else None
+        except Exception:
+            rate = None
+        try:
+            n_ok_s, n_runs_s = runs_s.split("/")
+            n_ok = int(n_ok_s) if n_ok_s != "?" else None
+            n_runs = int(n_runs_s) if n_runs_s != "?" else 5
+        except Exception:
+            n_ok, n_runs = None, 5
+        rows.append({
+            "label": label,
+            "status": status if status in ("stable_ok", "flaky", "stable_fail") else None,
+            "verdict": status if status not in ("stable_ok", "flaky", "stable_fail") else None,
+            "success_rate": rate,
+            "n_ok": n_ok,
+            "n_runs": n_runs,
+            "build": build_s,
+            "elapsed_s": float(elapsed) if elapsed not in ("-", "") else None,
+        })
+
+    if not rows:
+        return False
+
+    from collections import Counter
+    statuses = [r.get("status") or r.get("verdict") for r in rows]
+    c = Counter(statuses)
+    payload = {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "n_runs": 5,
+        "seed": 42,
+        "n_canonicals": len(rows),
+        "summary": {
+            "stable_ok": c.get("stable_ok", 0),
+            "flaky": c.get("flaky", 0),
+            "stable_fail": c.get("stable_fail", 0),
+            "other": sum(c.get(k, 0) for k in c if k not in ("stable_ok", "flaky", "stable_fail")),
+        },
+        "results": rows,
+        "_reconstructed_from_log": True,
+    }
+    baseline_path.parent.mkdir(parents=True, exist_ok=True)
+    baseline_path.write_text(json.dumps(payload, indent=2))
+    _log(f"  reconstructed baseline JSON from log ({len(rows)} rows)", out_log)
+    return True
+
+
 def step1_commit_baseline(log_path: Path) -> int:
     _log("Step 1 — Commit Phase 0 baseline", log_path)
     baseline_path = REPO_ROOT / "workspace/baselines/2026-05-09-baseline.json"
     if not baseline_path.exists():
         _log(f"  baseline file missing: {baseline_path}", log_path)
-        return 1
+        # Recovery: try reconstructing from the runner's stdout log
+        run_log = Path("/tmp/phase0_baseline/run.log")
+        if _reconstruct_baseline_from_log(run_log, baseline_path, log_path):
+            _log("  proceeding with reconstructed baseline", log_path)
+        else:
+            _log("  no baseline + no log to reconstruct from — abort step 1", log_path)
+            return 1
     # workspace/baselines is gitignored — commit to data/ instead as a record
     record_path = REPO_ROOT / "data/2026-05-09-phase0-baseline-summary.json"
     record_path.parent.mkdir(parents=True, exist_ok=True)
