@@ -17,6 +17,7 @@ import logging
 import os
 import json
 import time
+import webbrowser
 from typing import Optional, Dict, List, Tuple
 
 try:
@@ -568,6 +569,145 @@ class ChatViewWindow(ui.Window):
             logger.warning(f"[ModelSwitch] dispatch failed: {e}")
 
     # ═══════════════════════════════════════════════════════════════════════
+    # `👁 Modes` popover — multimodal input launcher
+    # ═══════════════════════════════════════════════════════════════════════
+    # Per docs/specs/2026-05-08-multimodal-foundation-spec.md §11.4.2.
+    # Five modalities ordered most-transformative first; the existing
+    # Kimate-introduced viewport-vision-toggle is preserved verbatim as the
+    # last item (`Analyze current viewport`).
+
+    _MODE_ITEMS = [
+        # (glyph, label, secondary, action_method_name)
+        ("🎨", "Open canvas editor",
+         "2D layout in browser tab",
+         "_modes_open_canvas"),
+        ("📎", "Upload sketch or photo",
+         "Image → layout (deferred until VLM viable)",
+         "_modes_upload_sketch"),
+        ("🎤", "Voice input",
+         "Push-to-talk via LiveKit STT",
+         "_modes_voice_input"),
+        ("↻", "Extract layout from current scene",
+         "Save current viewport state as LayoutSpec",
+         "_modes_extract_from_scene"),
+        ("🔍", "Analyze current viewport",
+         "Computer vision (existing Vision-tools toggle)",
+         "_modes_analyze_viewport"),
+    ]
+
+    def _open_modes_popup(self):
+        """Floating popup listing the 5 input modalities. Mirrors the
+        `_open_model_popup` pattern."""
+        if getattr(self, "_modes_popup", None) is not None:
+            try:
+                self._modes_popup.visible = not self._modes_popup.visible
+                return
+            except Exception:
+                self._modes_popup = None
+        self._modes_popup = ui.Window(
+            "Input modes",
+            width=320,
+            height=24 + 56 * len(self._MODE_ITEMS) + 16,
+            flags=ui.WINDOW_FLAGS_NO_RESIZE | ui.WINDOW_FLAGS_NO_SCROLLBAR,
+        )
+        with self._modes_popup.frame:
+            with ui.VStack(spacing=2):
+                ui.Spacer(height=4)
+                for glyph, label, secondary, action_name in self._MODE_ITEMS:
+                    with ui.HStack(height=52, spacing=8):
+                        ui.Spacer(width=4)
+                        with ui.VStack(width=24):
+                            ui.Spacer()
+                            ui.Label(
+                                glyph,
+                                width=24, height=24,
+                                style={"font_size": self._sz(20)},
+                            )
+                            ui.Spacer()
+                        with ui.VStack(spacing=2):
+                            ui.Spacer(height=4)
+                            ui.Button(
+                                label,
+                                height=22,
+                                clicked_fn=lambda fn=action_name: self._modes_dispatch(fn),
+                                style={
+                                    "font_size": self._sz(12),
+                                    "color": COL_TEXT,
+                                    "background_color": 0xFF22262B,
+                                },
+                            )
+                            ui.Label(
+                                secondary,
+                                height=12,
+                                style={
+                                    "font_size": self._sz(10),
+                                    "color": COL_TEXT_DIM,
+                                },
+                            )
+                ui.Spacer(height=4)
+
+    def _modes_dispatch(self, method_name: str):
+        """Close popup, dispatch to the named action method."""
+        if getattr(self, "_modes_popup", None) is not None:
+            try:
+                self._modes_popup.visible = False
+            except Exception:
+                pass
+        fn = getattr(self, method_name, None)
+        if fn is None:
+            logger.warning(f"[Modes] action {method_name!r} not implemented")
+            return
+        try:
+            fn()
+        except Exception as e:
+            logger.warning(f"[Modes] action {method_name!r} failed: {e}")
+
+    # ── Mode action implementations ──────────────────────────────────────
+
+    def _modes_open_canvas(self):
+        """Launch the browser-tab canvas editor."""
+        session_id = getattr(self.service, "session_id", "default_session")
+        url = f"http://localhost:8000/floorplan?session={session_id}"
+        try:
+            webbrowser.open(url)
+            logger.info(f"[Modes] opened canvas at {url}")
+        except Exception as e:
+            logger.warning(f"[Modes] webbrowser.open failed: {e}")
+
+    def _modes_upload_sketch(self):
+        """Sketch/photo upload — deferred until VLM viability is confirmed
+        per spec §10.1. Stub for now."""
+        logger.info(
+            "[Modes] sketch upload — not yet wired (VLM viability pending)"
+        )
+
+    def _modes_voice_input(self):
+        """Voice → text-prompt path via existing LiveKit STT chain.
+        Wiring TBD; stub for now."""
+        logger.info(
+            "[Modes] voice input — not yet wired (LiveKit STT chain TBD)"
+        )
+
+    def _modes_extract_from_scene(self):
+        """Read current 3D stage state, produce LayoutSpec via Kit RPC,
+        open canvas editor with that as starting state.
+
+        Implementation: POST to /api/v1/canvas/{session_id}/sync_from_stage
+        when that endpoint lands; for now opens a blank canvas as fallback.
+        """
+        # Defer to canvas-open behavior until extract endpoint lands
+        logger.info(
+            "[Modes] extract-from-scene — not yet wired; falling back to "
+            "blank canvas"
+        )
+        self._modes_open_canvas()
+
+    def _modes_analyze_viewport(self):
+        """Existing LiveKit vision-tools toggle — preserved verbatim per
+        spec §11.4.2 item 5."""
+        self._toggle_livekit()
+
+    # ═══════════════════════════════════════════════════════════════════════
     # UI construction
     # ═══════════════════════════════════════════════════════════════════════
     def _build_ui(self):
@@ -621,13 +761,23 @@ class ChatViewWindow(ui.Window):
                 style={"font_size": 11},
                 tooltip="Clear chat history (keeps stage and undo). Confirm required.",
             )
-            self.btn_livekit = ui.Button(
-                "Vision",
-                width=54,
+            # `👁 Modes` launcher — replaces the prior `Vision` toggle.
+            # Opens a popover with 5 input modalities (open canvas, upload
+            # sketch, voice, extract from scene, analyze viewport). The
+            # existing LiveKit-vision toggle behavior is preserved as one
+            # popover item ("Analyze current viewport").
+            # Per docs/specs/2026-05-08-multimodal-foundation-spec.md §11.4.
+            self.btn_modes = ui.Button(
+                "👁 Modes",
+                width=72,
                 height=22,
-                clicked_fn=self._toggle_livekit,
+                clicked_fn=self._open_modes_popup,
                 style={"font_size": 11},
+                tooltip="Input modes — canvas, sketch, voice, scene, vision",
             )
+            # Backward-compat alias for any existing references that still
+            # name btn_livekit (e.g., _toggle_livekit which mutates .text).
+            self.btn_livekit = self.btn_modes
             self.btn_model = ui.Button(
                 "M",
                 width=24,
@@ -670,28 +820,116 @@ class ChatViewWindow(ui.Window):
                 ui.Spacer(height=4)
 
     def _build_chips(self):
-        """Empty-state suggestion chips. Visible until first message ever
-        sent; clicking a chip fills the input field. Disappears after
-        first send and stays hidden for the window's lifetime."""
-        self.chips_container = ui.HStack(height=22, spacing=4)
+        """Quick-prompts row — horizontally scrolling, auto-sourced from
+        canonical templates (CP-N goal field).
+
+        Per spec §11.4.3. Replaces the previous fixed 3-button empty-state
+        chip row. Persistent across the window's lifetime (not hidden after
+        first message); each click inserts the prompt into the input field
+        without auto-sending.
+
+        Order: A-tier verified canonicals first, then by canonical_id;
+        plus a small fixed set of meta-prompts ("Inspect the stage" etc)
+        that don't depend on canonical-coverage.
+        """
+        self.chips_container = ui.ScrollingFrame(
+            height=24,
+            horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_AS_NEEDED,
+            vertical_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_OFF,
+        )
         self._chips_shown = True
         with self.chips_container:
+            self.chips_row = ui.HStack(spacing=6)
+            self._refresh_quick_prompts()
+
+    def _refresh_quick_prompts(self):
+        """Re-load quick-prompts from `workspace/templates/CP-*.json`. Called
+        on first build and can be called again after canonical additions."""
+        prompts: List[Tuple[str, str]] = []  # (short_label, full_text)
+        templates_dir = self._templates_dir()
+
+        if templates_dir and templates_dir.exists():
+            for tf in sorted(templates_dir.glob("CP-*.json")):
+                try:
+                    t = json.loads(tf.read_text())
+                except Exception:
+                    continue
+                tid = t.get("task_id", tf.stem)
+                goal = t.get("goal") or ""
+                if not goal:
+                    continue
+                short = self._derive_short_label(tid, goal)
+                # Use the goal as the input-field text (full-fidelity prompt
+                # the agent gets) but display the short label on the button.
+                prompts.append((short, goal))
+
+        # Always include meta-prompts independent of canonical coverage
+        meta_prompts = [
+            ("Inspect the stage", "Inspect the stage"),
+            ("Add a Franka arm", "Add a Franka arm"),
+        ]
+        prompts.extend(meta_prompts)
+
+        # Build buttons. clear_children() before re-adding so successive
+        # _refresh_quick_prompts calls don't double up.
+        try:
+            self.chips_row.clear()
+        except Exception:
+            pass
+        with self.chips_row:
             ui.Spacer(width=2)
-            for label in (
-                "Build a pick-and-place scene",
-                "Add a Franka arm",
-                "Inspect the stage",
-            ):
+            for short, full in prompts:
                 ui.Button(
-                    label,
+                    short,
                     height=20,
-                    clicked_fn=lambda t=label: self._on_chip(t),
+                    clicked_fn=lambda t=full: self._on_chip(t),
                     style={
                         "font_size": 10,
                         "background_color": 0xFF2A2E33,
                         "color": COL_TEXT_DIM,
                     },
+                    tooltip=full,
                 )
+
+    @staticmethod
+    def _derive_short_label(task_id: str, goal: str) -> str:
+        """Produce a button-friendly label from a CP-N goal string.
+
+        Heuristic: take the first ~26 chars before a colon/comma/period,
+        ellipsis if longer. CP-01..CP-05 get hand-picked overrides for
+        clarity; new templates fall through to the heuristic.
+        """
+        overrides = {
+            "CP-01": "Build pick-and-place",
+            "CP-02": "Multi-robot assembly line",
+            "CP-03": "Color-routed sorting",
+            "CP-04": "Compact 2×2m cell",
+            "CP-05": "Reorient & deliver",
+        }
+        if task_id in overrides:
+            return overrides[task_id]
+        # Heuristic fallback for CP-06+
+        # Take first sentence, capped at 26 chars + ellipsis
+        head = goal.split(":", 1)[0].split(".", 1)[0].split(",", 1)[0].strip()
+        if len(head) <= 26:
+            return head
+        return head[:23].rstrip() + "…"
+
+    def _templates_dir(self):
+        """Resolve the canonical-templates directory. Returns None if
+        not present (extension may run in environments without it)."""
+        try:
+            from pathlib import Path
+            # Extension is at exts/isaac_X.Y/omni.isaac.assist/...
+            # Workspace is at <repo_root>/workspace/templates/
+            here = Path(__file__).resolve()
+            for ancestor in here.parents:
+                cand = ancestor / "workspace" / "templates"
+                if cand.exists():
+                    return cand
+            return None
+        except Exception:
+            return None
 
     def _build_input(self):
         with ui.HStack(height=28, spacing=4):
@@ -783,10 +1021,12 @@ class ChatViewWindow(ui.Window):
         self.input_field.model.set_value(text)
 
     def _hide_chips(self):
-        if self._chips_shown:
-            self.chips_container.visible = False
-            self.chips_container.height = ui.Pixel(0)
-            self._chips_shown = False
+        # Persistent quick-prompts row per spec §11.4.3 — replaces the
+        # prior empty-state-only chip behavior. Calls preserved for
+        # backward-compatible signaling; visibility is no longer hidden.
+        # The row stays visible across the window's lifetime so users
+        # always have one-click access to canonical-derived prompts.
+        return
 
     async def _handle_service_request(self, text: str):
         try:
