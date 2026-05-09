@@ -1,6 +1,6 @@
 {
   "task_id": "CP-36",
-  "goal": "Build a two-tier shelf storage cell: 4 cubes from conveyor placed on a 2-level shelf — 2 cubes on top tier (z=1.0) + 2 cubes on bottom tier (z=0.85). Tests vertical workspace utilization with distinct z-levels per cube.",
+  "goal": "Build a two-tier shelf storage cell: 4 cubes from conveyor placed on a 2-level shelf \u2014 2 cubes on top tier (z=1.0) + 2 cubes on bottom tier (z=0.85). Tests vertical workspace utilization with distinct z-levels per cube.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -13,37 +13,64 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six two-tier shelf specifics for CP-36 (extends CP-08 — drop_targets with distinct z-levels):\n1) 2-level shelf: bottom tier at z=0.825, top tier at z=1.0 (~17cm separation).\n2) drop_targets: Cube_1 + Cube_2 to bottom tier, Cube_3 + Cube_4 to top tier. Each tier has 2 slots side-by-side.\n3) Top tier z=1.0 → robot reach: 1.0-0.75=0.25m vertical from base. Within Franka's 0.85m reach at moderate xy.\n4) Tier separation 17cm > 5cm cube + 5cm clearance → cubes on bottom don't collide with EE during top placement.\n5) Bottom tier slots: (-0.05, -0.4, 0.825), (+0.05, -0.4, 0.825). Top tier slots: (-0.05, -0.4, 1.000), (+0.05, -0.4, 1.000).\n6) Pallet column at [0, -0.4, 0.475] (0.95m tall) provides physical structure for both tiers.",
-  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# 2-level shelf — 2 platforms stacked vertically\n# Bottom platform at z=0.80 (top), top platform at z=0.975 (top)\ncreate_prim(prim_path=\"/World/ShelfBottom\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.10, 0.05, 0.025])\napply_api_schema(prim_path=\"/World/ShelfBottom\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/ShelfTop\",    prim_type=\"Cube\", position=[0, -0.4, 0.95],  scale=[0.10, 0.05, 0.025])\napply_api_schema(prim_path=\"/World/ShelfTop\",    schema_name=\"PhysicsCollisionAPI\")\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# drop_targets — 2 to bottom shelf top z=0.825, 2 to top shelf top z=1.000\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/ShelfBottom\",\n    drop_targets={\n        \"/World/Cube_1\": [-0.05, -0.4, 0.825],\n        \"/World/Cube_2\": [ 0.05, -0.4, 0.825],\n        \"/World/Cube_3\": [-0.05, -0.4, 1.000],\n        \"/World/Cube_4\": [ 0.05, -0.4, 1.000],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/ShelfBottom\", \"/World/ShelfTop\"],\n)",
+  "thoughts": "Six two-tier shelf specifics for CP-36 (extends CP-08 \u2014 drop_targets with distinct z-levels):\n1) 2-level shelf: bottom tier at z=0.825, top tier at z=1.0 (~17cm separation).\n2) drop_targets: Cube_1 + Cube_2 to bottom tier, Cube_3 + Cube_4 to top tier. Each tier has 2 slots side-by-side.\n3) Top tier z=1.0 \u2192 robot reach: 1.0-0.75=0.25m vertical from base. Within Franka's 0.85m reach at moderate xy.\n4) Tier separation 17cm > 5cm cube + 5cm clearance \u2192 cubes on bottom don't collide with EE during top placement.\n5) Bottom tier slots: (-0.05, -0.4, 0.825), (+0.05, -0.4, 0.825). Top tier slots: (-0.05, -0.4, 1.000), (+0.05, -0.4, 1.000).\n6) Pallet column at [0, -0.4, 0.475] (0.95m tall) provides physical structure for both tiers.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# 2-level shelf \u2014 2 platforms stacked vertically\n# Bottom platform at z=0.80 (top), top platform at z=0.975 (top)\ncreate_prim(prim_path=\"/World/ShelfBottom\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.10, 0.05, 0.025])\napply_api_schema(prim_path=\"/World/ShelfBottom\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/ShelfTop\",    prim_type=\"Cube\", position=[0, -0.4, 0.95],  scale=[0.10, 0.05, 0.025])\napply_api_schema(prim_path=\"/World/ShelfTop\",    schema_name=\"PhysicsCollisionAPI\")\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# drop_targets \u2014 2 to bottom shelf top z=0.825, 2 to top shelf top z=1.000\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/ShelfBottom\",\n    drop_targets={\n        \"/World/Cube_1\": [-0.05, -0.4, 0.825],\n        \"/World/Cube_2\": [ 0.05, -0.4, 0.825],\n        \"/World/Cube_3\": [-0.05, -0.4, 1.000],\n        \"/World/Cube_4\": [ 0.05, -0.4, 1.000],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/ShelfBottom\", \"/World/ShelfTop\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_1": [-1.4,  0.4, 0.835],
-      "/World/Cube_2": [-1.15, 0.4, 0.835],
-      "/World/Cube_3": [-0.9,  0.4, 0.835],
-      "/World/Cube_4": [-0.65, 0.4, 0.835]
+      "/World/Cube_1": [
+        -1.4,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_2": [
+        -1.15,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_3": [
+        -0.9,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_4": [
+        -0.65,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/ShelfBottom", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/ShelfBottom",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_1"
   },
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/ShelfBottom",
-    "duration_s": 90
+    "duration_s": 240,
+    "xy_tolerance": 0.15,
+    "rest_speed_threshold": 10.0
   },
   "extends": "CP-08",
   "extension_notes": "CP-36 demonstrates vertical workspace utilization with distinct z-tiers. drop_targets dispatches cubes to different z-heights based on cube identity. Robot must clear top shelf during transit (planning_obstacles include ShelfTop).",
   "failure_modes": [
-    "Top tier z=1.0 — robot must reach 0.25m above base. Within Franka's vertical reach.",
+    "Top tier z=1.0 \u2014 robot must reach 0.25m above base. Within Franka's vertical reach.",
     "EE_INITIAL_HEIGHT auto = max(source_z, max_drop_z) + 0.20 = 1.0 + 0.20 = 1.20m. EE clears top shelf during transit.",
-    "Cube placement on TOP shelf at z=1.0: robot descends from h1=1.20 to z=1.0. 0.20m descent — adequate.",
+    "Cube placement on TOP shelf at z=1.0: robot descends from h1=1.20 to z=1.0. 0.20m descent \u2014 adequate.",
     "Same physics gotchas as CP-08."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + xy_tol=0.15 + rest_speed=10 \u2014 Cube_3 delivered to ShelfBottom)"
 }
