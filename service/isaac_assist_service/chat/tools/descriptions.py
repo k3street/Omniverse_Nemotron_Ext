@@ -24,7 +24,9 @@ _GENERATED: Dict[str, str] = {}
 # ── Hand overrides (these win) ──────────────────────────────────────────
 # Add entries here as you spot bad generated descriptions in the UI.
 # These are preserved verbatim by the regenerator.
-_OVERRIDES: Dict[str, str] = {}
+_OVERRIDES: Dict[str, str] = {
+    "diagnose_scene_feasibility": "Pre-flight: predict if pick-place will work without running 60s sim",
+}
 
 
 def describe(tool_name: str) -> str:

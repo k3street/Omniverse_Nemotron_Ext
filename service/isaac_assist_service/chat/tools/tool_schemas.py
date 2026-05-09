@@ -739,8 +739,56 @@ ISAAC_SIM_TOOLS = [
                     "rest_speed_threshold": {"type": "number", "description": "Max speed in m/s to consider the cube at rest. Default 0.05.", "default": 0.05},
                     "require_upright": {"type": "boolean", "description": "REORIENT-01: when true, success requires cube's local +Z dotted with world +Z >= upright_tolerance_dot at sim end (cube finishes upright, not on its side). Default false.", "default": False},
                     "upright_tolerance_dot": {"type": "number", "description": "Min dot product of cube up vs world up (default 0.95 ≈ within 18° of vertical). Only used when require_upright=true.", "default": 0.95},
+                    "seed": {"type": "integer", "description": "Base random seed for RNGs (random/numpy/torch). Default 42. Run i uses seed+i for variety with reproducibility.", "default": 42},
+                    "n_runs": {"type": "integer", "description": "Number of repeated runs against the same built scene. Default 1. Multi-run reset: snapshots cube xforms + ctrl:* attrs + articulation joint state before run 0, restores between subsequent runs, deletes transient FixedJoint prims. Use n_runs=5 to detect flaky vs stable canonicals (stable_ok ≥4/5, flaky 1-3/5, stable_fail 0/5).", "default": 1, "minimum": 1, "maximum": 50},
                 },
                 "required": ["cube_path", "target_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_scene_feasibility",
+            "description": (
+                "PRE-FLIGHT CONSTRAINT VALIDATOR — runs deterministic geometric "
+                "checks on a built scene to predict whether simulate_traversal_check "
+                "would succeed, BEFORE running expensive 60-180s sim. Use cases: "
+                "(1) canonical authoring pre-commit gate (filter infeasible/over"
+                "constrained); (2) novel-task pre-flight (cuts agent feedback time "
+                "from 90s sim to <2s analysis); (3) auto-tune trigger for "
+                "tightly_feasible verdicts. Computes: ik_feasible at pick + drop, "
+                "manipulability (singularity check), reach_utilization (% of robot "
+                "max reach), inside_obstacle_bbox (drop pose inside Bin/Pillar), "
+                "clearance_pct (path-clearance from N=20 straight-line samples in "
+                "joint space), cube_in_sensor_zone_at_settle (controller will claim?). "
+                "Returns: {verdict, metrics, violations[], alternatives[], seed_used, "
+                "cache_hit, elapsed_ms}. Verdict ∈ {feasible, tightly_feasible "
+                "(WARNINGs but no ERROR/CRITICAL), overconstrained (≥1 ERROR), "
+                "infeasible (≥1 CRITICAL)}. Cached 60s by scene-graph hash."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path of the robot prim (e.g. /World/Franka)."},
+                    "pick_pose": {"type": "array", "description": "World [x, y, z] of the pick target.", "items": {"type": "number"}},
+                    "drop_pose": {"type": "array", "description": "World [x, y, z] of the drop target.", "items": {"type": "number"}},
+                    "obstacles": {"type": "array", "description": "List of USD paths for collision context (Bin, Pillar, etc).", "items": {"type": "string"}, "default": []},
+                    "ee_offset": {"type": "array", "description": "Tool-tip offset [x,y,z] relative to ee_link. Optional.", "items": {"type": "number"}},
+                    "robot_base": {"type": "array", "description": "World [x,y,z] of robot base. Default [0,0,0].", "items": {"type": "number"}, "default": [0.0, 0.0, 0.0]},
+                    "max_reach": {"type": "number", "description": "Robot max reach in meters. Default 0.855 (Franka).", "default": 0.855},
+                    "sensor_path": {"type": "string", "description": "Optional sensor prim path for sensor-zone metric."},
+                    "cube_paths": {"type": "array", "description": "Optional list of cube paths in scene for sensor-zone metric.", "items": {"type": "string"}},
+                    "cube_xys": {"type": "array", "description": "Optional cube xy positions [[x,y],...] for sensor-zone metric.", "items": {"type": "array", "items": {"type": "number"}}},
+                    "sensor_xy": {"type": "array", "description": "Sensor world xy [x,y] for sensor-zone metric.", "items": {"type": "number"}},
+                    "sensor_radius": {"type": "number", "description": "Sensor zone radius in meters. Default 0.1.", "default": 0.1},
+                    "mutex_corridors": {"type": "object", "description": "Multi-robot mutex check: {robot_a_corridor:{min,max}, robot_b_corridor:{min,max}, has_mutex:bool}."},
+                    "path_n_samples": {"type": "integer", "description": "N samples for path-clearance metric. Default 20.", "default": 20},
+                    "seed": {"type": "integer", "description": "Random seed for IK + sampling. Default 42.", "default": 42},
+                    "use_cache": {"type": "boolean", "description": "Use 60s scene-graph-hash cache. Default true. Set false for baseline/CI runs.", "default": True},
+                    "lang": {"type": "string", "description": "Message language: 'sv' (Swedish, default) or 'en'.", "default": "sv", "enum": ["sv", "en"]},
+                },
+                "required": ["robot_path"],
             },
         },
     },
