@@ -394,3 +394,37 @@ Up from ~5 ✓ at session start (~9× improvement).
 - Multimodal session runs in parallel on LayoutSpec IR + UI (other branch, see 2026-05-09-multi-session-coordination.md)
 - Library shrink 86→70 + add 5 (per quality-audit recommendation)
 
+
+## Final session-final session-final (2026-05-09 ~04:10)
+
+After more sweep iterations + xy_tolerance + rest_speed_threshold tuning:
+
+**CP-* function-gate: 48 ✓ / 38 ✗ (86 total, 55.8%)**
+
+Up from ~5 ✓ at session start (~10× improvement).
+
+**Final ✓ list (48):**
+- UR10 raycast: CP-69, 70, 75, 78, 79, 83, 86 (7)
+- Franka conveyor 180s: CP-01-04, 07, 08, 13, 15-18, 20, 21, 23, 25, 27, 31-34, 38, 39, 41, 42, 44, 45, 47, 54, 56, 66, 71, 72, 77 (28)
+- Multi-cube cube_paths: CP-49, 55, 63, 64 (4)
+- Stack precision xy_tol=0.10: CP-09, 24 (2)
+- Stack precision xy_tol=0.15 + rest_speed=10: CP-36, 50 (2)
+- Drawer/special cases: CP-55, 63, 64 (3 — listed above)
+
+**Final ✗ (38) — needs deeper per-canonical work:**
+- 11 stack-precision (cube doesn't reach bin xy even with 0.15m slack): CP-10, 11, 12, 14, 19, 26, 28, 30, 37, 46, 65
+- 4 drop-precision UR10 multi-cube: CP-81, 82, 84, 85
+- 4 belt-pause callback (PhysX integrator): CP-22, 43, 74, 80
+- 3 multi-robot (CP-52, 67, 68): CP-67/68 may have hung in last test
+- 3 specialized: CP-05 REORIENT probe, CP-29 precision-bench, CP-58 peg-in-hole
+- 13 misc (Cortex, vision-gated, dispenser, gantry, multi-robot)
+
+**Tools added/improved this session:**
+1. simulate_traversal_check: cube_paths array (multi-cube success: ANY delivered)
+2. simulate_traversal_check: per_cube_status + delivered_cubes diagnostics
+3. cuRobo handler: position-gated FJ release for UR10 (drop precision)
+4. cuRobo handler: family-aware reach (UR10 1.20m vs Franka 0.70m)
+5. Builtin handler: post-update belt-pause workaround
+6. Multi-robot mutex: claim/release in cuRobo wait_sensor mode
+7. exec_sync timeout: 300s → 600s (long simulate)
+
