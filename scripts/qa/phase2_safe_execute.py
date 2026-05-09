@@ -190,7 +190,11 @@ def _apply_fix_2d(label: str, plan: Dict[str, Any]) -> Optional[str]:
 async def _verify_cp(label: str, n_runs: int = 5, seed: int = 42,
                      timeout_s: int = 1200) -> Optional[Dict[str, Any]]:
     """Build + run simulate_traversal_check N=5. Returns dict with status,
-    success_rate, n_ok or None on failure to get a result."""
+    success_rate, n_ok or None on failure to get a result.
+
+    Honors PHASE2_N_RUNS env var as override (e.g. PHASE2_N_RUNS=3 for
+    GPU-tight conditions like overnight TTS contention)."""
+    n_runs = int(os.environ.get("PHASE2_N_RUNS", n_runs))
     from service.isaac_assist_service.chat.canonical_instantiator import (
         execute_template_canonical, settle_after_canonical,
     )
