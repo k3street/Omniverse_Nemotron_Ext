@@ -103,6 +103,46 @@ def _parse_transcript(path: Path) -> Dict[str, Any]:
 
 # ── Heuristic verdict (no LLM) ─────────────────────────────────────────────
 
+_SCENE_FEASIBILITY_SCORES = {
+    "feasible":          5,
+    "tightly_feasible":  3,
+    "overconstrained":   1,
+    "infeasible":        0,
+}
+
+
+def _score_scene_feasibility(tool_calls: List[Dict[str, Any]]) -> tuple:
+    """Scan tool_calls for diagnose_scene_feasibility output.
+
+    Returns (score, verdict_or_none). Score 3 (neutral) if tool was not called
+    — preserves backward compat per spec §I (Opus review of
+    diagnose_scene_feasibility).
+    """
+    import json
+    for tc in tool_calls:
+        if tc.get("tool") != "diagnose_scene_feasibility":
+            continue
+        out = tc.get("output") or tc.get("result") or {}
+        if isinstance(out, str):
+            try:
+                out = json.loads(out)
+            except Exception:
+                # Try last JSON line
+                for line in out.splitlines()[::-1]:
+                    line = line.strip()
+                    if line.startswith("{"):
+                        try:
+                            out = json.loads(line)
+                            break
+                        except Exception:
+                            continue
+        if isinstance(out, dict):
+            v = out.get("verdict")
+            if v in _SCENE_FEASIBILITY_SCORES:
+                return _SCENE_FEASIBILITY_SCORES[v], v
+    return 3, None
+
+
 def heuristic_verdict(tx: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
     """Fast, deterministic rubric. No LLM.
 
@@ -112,6 +152,9 @@ def heuristic_verdict(tx: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any
       - expected_tool_overlap: actual tools match expected
       - hallucination_flags: persona didn't call out hallucination
       - response_discipline: assistant didn't pad action requests
+      - scene_feasibility: did agent pre-flight-check via diagnose_scene_feasibility?
+                           (5 if feasible, 3 tightly, 1 overconstrained, 0 infeasible,
+                            3 neutral if not called — backward compat per Opus §I)
     """
     turns = tx.get("turns", 0)
     tool_calls = tx.get("tool_calls", [])
@@ -126,18 +169,21 @@ def heuristic_verdict(tx: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any
     halluc_keywords = ["halluc", "making it up", "made that up", "made up", "hallucin", "didn't read what i wrote"]
     halluc_flags = sum(1 for kw in halluc_keywords if kw in persona_text)
 
+    feas_score, feas_verdict = _score_scene_feasibility(tool_calls)
+
     scores = {
         "engagement":            5 if turns >= 3 and end_reason != "persona_gave_up" else (3 if turns >= 2 else 1),
         "tool_execution":        min(5, n_ok) if n_ok > 0 else (1 if n_fail else 0),
         "expected_tool_overlap": round(5 * len(expected & actual) / max(len(expected), 1)) if expected else 3,
         "hallucination_flags":   5 if halluc_flags == 0 else max(0, 5 - halluc_flags * 2),
         "response_discipline":   3,  # heuristic can't judge this; neutral
+        "scene_feasibility":     feas_score,
     }
     total = sum(scores.values())
     return {
         "scores": scores,
         "total": total,
-        "max": 25,
+        "max": 30,
         "tools_ok": n_ok,
         "tools_fail": n_fail,
         "expected_tools": sorted(expected),
@@ -146,6 +192,7 @@ def heuristic_verdict(tx: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any
         "missing_expected": sorted(expected - actual),
         "extra_actual": sorted(actual - expected),
         "hallucination_flags": halluc_flags,
+        "scene_feasibility_verdict": feas_verdict,
         "end_reason": end_reason,
         "method": "heuristic",
     }
