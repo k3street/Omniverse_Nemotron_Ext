@@ -210,3 +210,107 @@ async def test_register_handlers_adds_to_dict():
     handlers: Dict[str, Any] = {}
     dtool.register_diagnose_handlers(handlers)
     assert "diagnose_scene_feasibility" in handlers
+
+
+@pytest.mark.asyncio
+async def test_determinism_same_seed_byte_identical():
+    """T-DETERM-1: same scene + same seed → byte-identical metrics dict.
+
+    Cache disabled to force re-computation. Mock returns identical responses
+    for both calls (real solve_ik with same seed should also be deterministic).
+    """
+    fake = _build_router({
+        "solve_ik": [_ok_solve_ik([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])],
+        "check_singularity": [_singularity_ok()],
+        "get_bounding_box": [],
+    })
+    args = {
+        "robot_path": "/World/Franka",
+        "pick_pose": [0.4, 0.0, 0.5],
+        "robot_base": [0.0, 0.0, 0.0],
+        "max_reach": 0.855,
+        "use_cache": False,
+        "seed": 42,
+    }
+    with patch.object(dtool, "_execute_tool_call", side_effect=fake):
+        r1 = await dtool._handle_diagnose_scene_feasibility(args)
+    with patch.object(dtool, "_execute_tool_call", side_effect=fake):
+        r2 = await dtool._handle_diagnose_scene_feasibility(args)
+    # Strip elapsed_ms (timing-dependent) before compare
+    r1_norm = {k: v for k, v in r1.items() if k != "elapsed_ms"}
+    r2_norm = {k: v for k, v in r2.items() if k != "elapsed_ms"}
+    assert r1_norm == r2_norm
+    assert r1["seed_used"] == 42 == r2["seed_used"]
+
+
+@pytest.mark.asyncio
+async def test_path_clear_no_violation():
+    """T-PATH-2: clearance_pct = 100% → no violation."""
+    fake = _build_router({
+        "solve_ik": [_ok_solve_ik([0]*7), _ok_solve_ik([1]*7)],
+        "check_singularity": [_singularity_ok(), _singularity_ok()],
+        "check_path_clearance": [_path_clearance(clear=20, total=20)],  # all clear
+        "get_bounding_box": [],
+    })
+    with patch.object(dtool, "_execute_tool_call", side_effect=fake):
+        report = await dtool._handle_diagnose_scene_feasibility({
+            "robot_path": "/World/Franka",
+            "pick_pose": [0.4, 0.0, 0.5],
+            "drop_pose": [-0.4, 0.0, 0.3],
+            "robot_base": [0.0, 0.0, 0.0],
+            "max_reach": 0.855,
+            "use_cache": False,
+        })
+    assert report["verdict"] == "feasible"
+    axes = [v["axis"] for v in report["violations"]]
+    assert "clearance_pct" not in axes
+    assert report["metrics"]["clearance_pct"] == 100.0
+
+
+@pytest.mark.asyncio
+async def test_singular_config_warning():
+    """Manipulability warning flips verdict to tightly_feasible without
+    blocking other axes."""
+    fake = _build_router({
+        "solve_ik": [_ok_solve_ik([0]*7)],
+        "check_singularity": [_singularity_singular()],  # 0.02 → WARNING
+        "get_bounding_box": [],
+    })
+    with patch.object(dtool, "_execute_tool_call", side_effect=fake):
+        report = await dtool._handle_diagnose_scene_feasibility({
+            "robot_path": "/World/Franka",
+            "pick_pose": [0.4, 0.0, 0.5],
+            "robot_base": [0.0, 0.0, 0.0],
+            "max_reach": 0.855,
+            "use_cache": False,
+        })
+    assert report["verdict"] == "tightly_feasible"
+    axes = [v["axis"] for v in report["violations"]]
+    assert "manipulability" in axes
+
+
+@pytest.mark.asyncio
+async def test_cache_disabled_skips_lookup():
+    """use_cache=False should bypass cache entirely — both calls miss."""
+    fake_call_count = {"n": 0}
+
+    async def fake(name, args):
+        fake_call_count["n"] += 1
+        return _ok_solve_ik() if name == "solve_ik" else {"output": ""}
+
+    args = {
+        "robot_path": "/World/Franka",
+        "pick_pose": [0.4, 0.0, 0.5],
+        "robot_base": [0.0, 0.0, 0.0],
+        "max_reach": 0.855,
+        "use_cache": False,
+    }
+    with patch.object(dtool, "_execute_tool_call", side_effect=fake):
+        r1 = await dtool._handle_diagnose_scene_feasibility(args)
+        n_after_first = fake_call_count["n"]
+        r2 = await dtool._handle_diagnose_scene_feasibility(args)
+        n_after_second = fake_call_count["n"]
+    assert r1["cache_hit"] is False
+    assert r2["cache_hit"] is False
+    # Each call should re-invoke physics queries
+    assert n_after_second > n_after_first
