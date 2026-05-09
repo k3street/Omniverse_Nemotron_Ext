@@ -1,8 +1,14 @@
 # Master Execution Plan — Multimodal × Controller-Logic × Diagnostic
 
 **Date:** 2026-05-09
-**Status:** active
+**Status:** active — Phase 0 in progress, Phase 1 modules pre-built (await baseline lock)
 **Purpose:** authoritative ordering, testing, evaluation, and diagnostic strategy across all in-flight specs. Single source of truth for "what comes next, why, and how we know it worked".
+
+**Live status (2026-05-09 evening):**
+- Phase 0 — `simulate_traversal_check` got `seed`+`n_runs` parameters with snapshot/restore reset between runs (commit `2a50c0a`). `multi_run_regression.py`, `baseline_compare.py`, `determinism_check.py` shipped (commits `2a50c0a`, `a223605`). Baseline N=5 against patched-set running.
+- Phase 1 prep — diagnose_scene_feasibility orchestrator + 4 supporting modules + 92 unit tests committed (`8c328ec`, `11d2202`). MCP tool_schemas + UI description added (`8b7c616`). auto_judge `scene_feasibility` axis (Opus §I) added (`a433485`). NOT YET wired into tool_executor.py — deferred until Phase 0 baseline lock.
+- Phase 2 prep — `phase2_triage.py` cross-products feasibility × function-gate (`041de50`).
+- Industrial-expansion Phases 6/8/9/10 spec'd via `2026-05-09-industrial-expansion-spec.md`. No code yet.
 
 ---
 
