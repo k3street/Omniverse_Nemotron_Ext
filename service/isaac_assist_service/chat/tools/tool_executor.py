@@ -3543,6 +3543,15 @@ async def _handle_verify_pickplace_pipeline(args: Dict) -> Dict:
       stages: list of {"robot_path": str, "pick_path": str, "place_path": str,
                        optional "robot_kind": str, "reach_m": float}
       OR pairwise: robot_path, pick_path, place_path for a single stage
+
+    Optional flags:
+      feasibility: bool (default False). When True, after form-gate runs,
+                   delegate each stage to diagnose_scene_feasibility (Phase 1)
+                   to add geometric pre-flight checks. Verdicts of
+                   `infeasible`/`overconstrained` propagate as `issues[]` so
+                   the form-gate flips to NOT-OK before expensive sim.
+                   Per Opus §F. Default off preserves current contract;
+                   canonical_instantiator turns it on for hard-instantiate.
     """
     stages = args.get("stages")
     if not stages:
@@ -3846,7 +3855,89 @@ out = {{
 }}
 print(json.dumps(out))
 """
-    return await kit_tools.queue_exec_patch(code, "verify_pickplace_pipeline")
+    result = await kit_tools.queue_exec_patch(code, "verify_pickplace_pipeline")
+    feasibility = bool(args.get("feasibility", False))
+    if feasibility:
+        result = await _augment_verify_with_feasibility(result, stages)
+    return result
+
+
+async def _augment_verify_with_feasibility(verify_result: Dict, stages: list) -> Dict:
+    """Phase 1.5 — Opus §F. Run diagnose_scene_feasibility for each stage's
+    pick+drop pose, merge any infeasible/overconstrained violations into the
+    verify_result['issues'] list. Sets pipeline_ok=False if any CRITICAL
+    violations found.
+
+    Reads stage pick_pos / place_pos from verify_result['results']
+    (already computed by the kit-side script) — avoids second Kit RPC trip
+    to compute them.
+    """
+    import json as _j
+    out_text = (verify_result.get("output") or "").strip()
+    parsed = None
+    for line in out_text.splitlines()[::-1]:
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                parsed = _j.loads(line); break
+            except Exception:
+                continue
+    if not parsed:
+        return verify_result  # non-parseable; leave alone
+
+    stage_results = parsed.get("results") or []
+    issues = list(parsed.get("issues") or [])
+    pipeline_ok = bool(parsed.get("pipeline_ok"))
+    feasibility_reports = []
+
+    for i, sr in enumerate(stage_results):
+        rp = sr.get("robot_path")
+        pick_pos = sr.get("pick_pos")
+        place_pos = sr.get("place_pos")
+        if not rp or not pick_pos or not place_pos:
+            continue
+        try:
+            diag_res = await execute_tool_call("diagnose_scene_feasibility", {
+                "robot_path": rp,
+                "pick_pose": pick_pos,
+                "drop_pose": place_pos,
+                "robot_base": sr.get("robot_pos") or [0, 0, 0],
+                "max_reach": sr.get("reach_m") or 0.855,
+                "use_cache": True,
+            })
+        except Exception as e:
+            issues.append(f"[feasibility] stage {i}: diagnose call failed: {type(e).__name__}: {str(e)[:80]}")
+            continue
+        if isinstance(diag_res, dict) and "verdict" in diag_res:
+            d = diag_res
+        else:
+            d = None
+            for line in (diag_res.get("output") or "").splitlines()[::-1]:
+                line = line.strip()
+                if line.startswith("{"):
+                    try:
+                        d = _j.loads(line); break
+                    except Exception:
+                        continue
+        if not d:
+            continue
+        feasibility_reports.append({"stage_index": i, "verdict": d.get("verdict"),
+                                     "n_violations": len(d.get("violations") or [])})
+        verdict = d.get("verdict")
+        if verdict in ("infeasible", "overconstrained"):
+            for v in (d.get("violations") or []):
+                if v.get("severity") in ("ERROR", "CRITICAL"):
+                    issues.append(f"[feasibility] stage {i}: {v.get('message')}")
+            if verdict == "infeasible":
+                pipeline_ok = False
+
+    parsed["issues"] = issues
+    parsed["pipeline_ok"] = pipeline_ok
+    parsed["feasibility_reports"] = feasibility_reports
+
+    # Re-serialize the augmented payload onto the result for the caller
+    new_output = _j.dumps(parsed)
+    return {**verify_result, "output": new_output}
 
 
 async def _handle_simulate_traversal_check(args: Dict) -> Dict:

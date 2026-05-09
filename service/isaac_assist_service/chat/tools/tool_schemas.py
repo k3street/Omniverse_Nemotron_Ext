@@ -704,6 +704,11 @@ ISAAC_SIM_TOOLS = [
                         "description": "Optional: bound user prims' xy world bbox. Format [[xmin,ymin],[xmax,ymax]] in meters. Triggers footprint_within_bounds check — every authored prim under /World whose xy bbox extends outside flags an issue. Use for CONSTRAINT-01-style 'build a cell that fits in 2x2m'.",
                         "items": {"type": "array", "items": {"type": "number"}},
                     },
+                    "feasibility": {
+                        "type": "boolean",
+                        "description": "Phase 1.5 / Opus §F: when true, also runs diagnose_scene_feasibility per stage and merges geometric pre-flight violations into issues[]. infeasible verdicts flip pipeline_ok=false BEFORE expensive simulate_traversal_check runs. Default off (preserves current contract).",
+                        "default": False,
+                    },
                 },
                 "required": [],
             },
