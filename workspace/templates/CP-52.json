@@ -15,23 +15,53 @@
     "setup_robot_claim_mutex",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six parallel-pick specifics for CP-52 (extends CP-07's multi-robot scoping):\n1) 2 Frankas at x=±0.5 (close enough that both reach same conveyor pickup zone).\n2) Single conveyor at y=0.4 between them. Cubes flow from -X to +X.\n3) Mutex marker /World/PickMutex protects the pickup zone /World/PickZone (a virtual prim at conveyor center).\n4) Both robots' source_paths includes ALL cubes. Both have own controller install. Without mutex enforcement (Sprint 3+ work), they may race; mutex prim is canonical scaffolding.\n5) Both drop to /World/SharedBin at y=-0.4. Bin within both robots' reach.\n6) Industrial pattern: increase throughput via 2 robots on same belt — scenario #10.",
-  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaA\",\n    position=[-0.5, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaB\",\n    position=[ 0.5, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Shared bin behind both robots\ncreate_bin(prim_path=\"/World/SharedBin\", position=[0, -0.5, 0.75], size=[0.3, 0.3, 0.15])\n\n# Mutex protecting the pickup zone (virtual — both robots authorized)\nsetup_robot_claim_mutex(\n    mutex_path=\"/World/PickMutex\",\n    resource_path=\"/World/ConveyorBelt\",\n    robots=[\"/World/FrankaA\", \"/World/FrankaB\"],\n)\n\n# Per-robot sensors at OFFSET pick zones (A picks earlier, B picks later)\nadd_proximity_sensor(sensor_path=\"/World/SensorA\", position=[-0.2, 0.4, 0.835], size=[0.06, 0.06, 0.06])\nadd_proximity_sensor(sensor_path=\"/World/SensorB\", position=[ 0.2, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Robot A picks first half + drops. Robot B picks second half + drops.\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaA\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/SensorA\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\", \"/World/Cube_2\"],\n    destination_path=\"/World/SharedBin\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/SharedBin\"],\n)\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaB\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/SensorB\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_3\", \"/World/Cube_4\"],\n    destination_path=\"/World/SharedBin\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/SharedBin\"],\n)",
+  "thoughts": "Six parallel-pick specifics for CP-52 (extends CP-07's multi-robot scoping):\n1) 2 Frankas at x=\u00b10.5 (close enough that both reach same conveyor pickup zone).\n2) Single conveyor at y=0.4 between them. Cubes flow from -X to +X.\n3) Mutex marker /World/PickMutex protects the pickup zone /World/PickZone (a virtual prim at conveyor center).\n4) Both robots' source_paths includes ALL cubes. Both have own controller install. Without mutex enforcement (Sprint 3+ work), they may race; mutex prim is canonical scaffolding.\n5) Both drop to /World/SharedBin at y=-0.4. Bin within both robots' reach.\n6) Industrial pattern: increase throughput via 2 robots on same belt \u2014 scenario #10.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaA\",\n    position=[-0.5, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaB\",\n    position=[ 0.5, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Shared bin behind both robots\ncreate_bin(prim_path=\"/World/SharedBin\", position=[0, -0.5, 0.75], size=[0.3, 0.3, 0.15])\n\n# Mutex protecting the pickup zone (virtual \u2014 both robots authorized)\nsetup_robot_claim_mutex(\n    mutex_path=\"/World/PickMutex\",\n    resource_path=\"/World/ConveyorBelt\",\n    robots=[\"/World/FrankaA\", \"/World/FrankaB\"],\n)\n\n# Per-robot sensors at OFFSET pick zones (A picks earlier, B picks later)\nadd_proximity_sensor(sensor_path=\"/World/SensorA\", position=[-0.2, 0.4, 0.835], size=[0.06, 0.06, 0.06])\nadd_proximity_sensor(sensor_path=\"/World/SensorB\", position=[ 0.2, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Robot A picks first half + drops. Robot B picks second half + drops.\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaA\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/SensorA\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\", \"/World/Cube_2\"],\n    destination_path=\"/World/SharedBin\",\n    mutex_path=\"/World/PickMutex\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/SharedBin\"],\n)\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaB\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/SensorB\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_3\", \"/World/Cube_4\"],\n    destination_path=\"/World/SharedBin\",\n    mutex_path=\"/World/PickMutex\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/SharedBin\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_1": [-1.4,  0.4, 0.835],
-      "/World/Cube_2": [-1.15, 0.4, 0.835],
-      "/World/Cube_3": [-0.9,  0.4, 0.835],
-      "/World/Cube_4": [-0.65, 0.4, 0.835]
+      "/World/Cube_1": [
+        -1.4,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_2": [
+        -1.15,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_3": [
+        -0.9,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_4": [
+        -0.65,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/FrankaA", "pick_path": "/World/ConveyorBelt", "place_path": "/World/SharedBin", "robot_kind": "franka_panda"},
-      {"robot_path": "/World/FrankaB", "pick_path": "/World/ConveyorBelt", "place_path": "/World/SharedBin", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/FrankaA",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/SharedBin",
+        "robot_kind": "franka_panda"
+      },
+      {
+        "robot_path": "/World/FrankaB",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/SharedBin",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_1"
   },
@@ -43,9 +73,9 @@
   "extends": "CP-07",
   "extension_notes": "CP-52 demonstrates parallel-picking duo via source_paths split (A handles Cube_1-2, B handles Cube_3-4). Mutex prim defines shared resource scaffolding; runtime coordination via mutex attrs is Sprint 3+ work. Realizes scenario #10.",
   "failure_modes": [
-    "Cubes 3-4 belt-flow past sensor A first → A may grab them out of source_paths scope. Mitigated: A's source_paths=[Cube_1, Cube_2] — controller's _next_cube only considers its own list.",
-    "Both robots try to use same cuRobo planner — _curobo_pp_sub_<TAG> scoping handles this (CP-07 verified pattern).",
-    "Sensor B at x=+0.2 — cubes belt-flow past A's sensor at -0.2 first. B picks AFTER A.",
+    "Cubes 3-4 belt-flow past sensor A first \u2192 A may grab them out of source_paths scope. Mitigated: A's source_paths=[Cube_1, Cube_2] \u2014 controller's _next_cube only considers its own list.",
+    "Both robots try to use same cuRobo planner \u2014 _curobo_pp_sub_<TAG> scoping handles this (CP-07 verified pattern).",
+    "Sensor B at x=+0.2 \u2014 cubes belt-flow past A's sensor at -0.2 first. B picks AFTER A.",
     "Same physics gotchas as CP-07."
   ],
   "verified_status": "build-spec-2026-05-08; form-gate verification pending"

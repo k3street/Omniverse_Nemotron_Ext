@@ -60,7 +60,12 @@
     "cube_path": "/World/Peg_1"
   },
   "simulate_args": {
-    "cube_path": "/World/Peg_1",
+    "cube_paths": [
+      "/World/Peg_1",
+      "/World/Peg_2",
+      "/World/Peg_3",
+      "/World/Peg_4"
+    ],
     "target_path": "/World/HolePanel",
     "duration_s": 120
   },

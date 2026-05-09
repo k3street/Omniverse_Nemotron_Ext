@@ -14,35 +14,60 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six spline-mode specifics for CP-40 (extends CP-01 — different target_source):\n1) target_source='spline' — uses scipy.CubicSpline-interpolated 6-waypoint Cartesian trajectory. CPU-only, deterministic.\n2) Same scene as CP-01: Franka + 4 cubes on conveyor + bin behind. Tests that handler dispatches correctly for non-curobo modes.\n3) Spline mode doesn't support drop_targets (yet) — uses single drop_target or destination_path bbox center. CP-40 uses default (no drop_target arg).\n4) spline_waypoint_dt default 1.5s × 6 segments = 9s cycle (vs cuRobo's ~3-5s). Slower but always works.\n5) Per CP-01's verified_metrics: spline gets 3/4 cubes_in_bin_mean. So function-gate may fail on Cube_4. Acceptable for demo.\n6) Industrial use: CPU-only deployments (no GPU available), reproducible cycle-time validation, sim2real demos.",
-  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Spline controller — CPU-only, deterministic\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"spline\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Bin\",\n)",
+  "thoughts": "Six spline-mode specifics for CP-40 (extends CP-01 \u2014 different target_source):\n1) target_source='spline' \u2014 uses scipy.CubicSpline-interpolated 6-waypoint Cartesian trajectory. CPU-only, deterministic.\n2) Same scene as CP-01: Franka + 4 cubes on conveyor + bin behind. Tests that handler dispatches correctly for non-curobo modes.\n3) Spline mode doesn't support drop_targets (yet) \u2014 uses single drop_target or destination_path bbox center. CP-40 uses default (no drop_target arg).\n4) spline_waypoint_dt default 1.5s \u00d7 6 segments = 9s cycle (vs cuRobo's ~3-5s). Slower but always works.\n5) Per CP-01's verified_metrics: spline gets 3/4 cubes_in_bin_mean. So function-gate may fail on Cube_4. Acceptable for demo.\n6) Industrial use: CPU-only deployments (no GPU available), reproducible cycle-time validation, sim2real demos.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Spline controller \u2014 CPU-only, deterministic\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"spline\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Bin\",\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_1": [-1.4,  0.4, 0.835],
-      "/World/Cube_2": [-1.15, 0.4, 0.835],
-      "/World/Cube_3": [-0.9,  0.4, 0.835],
-      "/World/Cube_4": [-0.65, 0.4, 0.835]
+      "/World/Cube_1": [
+        -1.4,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_2": [
+        -1.15,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_3": [
+        -0.9,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_4": [
+        -0.65,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/Bin", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/Bin",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_1"
   },
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 60
+    "duration_s": 180
   },
   "extends": "CP-01",
-  "extension_notes": "CP-40 uses target_source='spline' — CPU-only deterministic alternative to cuRobo. Per CP-01's benchmark_vs_alternatives, spline gets 3/4 cubes_in_bin_mean (vs cuRobo's 4/4). Cycle ~9s/cube (vs cuRobo ~5s). Trade-off: deterministic + CPU but slower + lower delivery.",
+  "extension_notes": "CP-40 uses target_source='spline' \u2014 CPU-only deterministic alternative to cuRobo. Per CP-01's benchmark_vs_alternatives, spline gets 3/4 cubes_in_bin_mean (vs cuRobo's 4/4). Cycle ~9s/cube (vs cuRobo ~5s). Trade-off: deterministic + CPU but slower + lower delivery.",
   "failure_modes": [
-    "Spline doesn't support drop_targets (yet) — drops at single destination_path bbox center.",
-    "scipy.CubicSpline interpolation can produce trajectories that brush table — without scene-collision check (cuRobo has it, spline doesn't).",
+    "Spline doesn't support drop_targets (yet) \u2014 drops at single destination_path bbox center.",
+    "scipy.CubicSpline interpolation can produce trajectories that brush table \u2014 without scene-collision check (cuRobo has it, spline doesn't).",
     "Slower cycle means cubes pile up on conveyor if input rate exceeds robot's pick rate.",
     "Same physics gotchas as CP-01."
   ],

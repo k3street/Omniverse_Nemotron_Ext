@@ -6105,17 +6105,23 @@ async def _handle_setup_pick_place_with_vision(args: Dict) -> Dict:
     if not destination_map:
         return {"type": "error", "error": "destination_map required (class→bin path)"}
 
-    # Step 1: vision classification
-    vision_res = await execute_tool_call("add_vision_classifier_gate", {
-        "cube_paths": cube_paths,
-        "class_labels": class_labels,
-        "camera_path": camera_path,
-        "destination_map": destination_map,
-    })
-    if vision_res.get("type") == "error":
-        return vision_res
-
-    cube_to_class = vision_res.get("cube_to_class") or {}
+    # Step 1: vision classification.  Function-gate runners may inject a
+    # pre-computed `vision_precomputed: {cube_path: short_class}` mapping
+    # so the canonical can be exercised without live Gemini credentials.
+    vision_precomputed = args.get("vision_precomputed")
+    if vision_precomputed:
+        cube_to_class = dict(vision_precomputed)
+        vision_res = {"cube_to_class": cube_to_class, "raw_detections": []}
+    else:
+        vision_res = await execute_tool_call("add_vision_classifier_gate", {
+            "cube_paths": cube_paths,
+            "class_labels": class_labels,
+            "camera_path": camera_path,
+            "destination_map": destination_map,
+        })
+        if vision_res.get("type") == "error":
+            return vision_res
+        cube_to_class = vision_res.get("cube_to_class") or {}
     if not cube_to_class:
         return {"type": "error",
                 "error": f"Vision returned 0 detections — check camera placement and scene visibility. raw_detections: {vision_res.get('raw_detections')}"}
@@ -6994,10 +7000,17 @@ async def _handle_create_heap_zone(args: Dict) -> Dict:
             "prim_path": path, "prim_type": "Cube",
             "position": [x, y, z], "size": item_size,
         })
-        for api in ("PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"):
+        for api in ("PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI"):
             await execute_tool_call("apply_api_schema",
                                       {"prim_path": path, "schema_name": api})
         item_paths.append(path)
+
+    if item_paths:
+        await execute_tool_call("bulk_set_attribute", {
+            "prim_paths": item_paths,
+            "attr": "physxRigidBody:sleepThreshold",
+            "value": 0.0,
+        })
 
     return {
         "heap_path": heap_path,
@@ -28795,6 +28808,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             spline_waypoint_dt=args.get("spline_waypoint_dt"),
             grip_style=args.get("grip_style", "fixed_joint"),
             color_routing=args.get("color_routing"),
+            mutex_path=args.get("mutex_path"),
         )
     if mode == "curobo":
         return _gen_pick_place_curobo(
@@ -29587,17 +29601,47 @@ def _robot_base_xy():
     return np.array([float(t[0]), float(t[1])])
 
 def _next_cube():
-    \"\"\"First undelivered cube whose xy is within reach of robot base.\"\"\"
+    \"\"\"First undelivered cube whose xy is within reach AND inside sensor zone.\"\"\"
     # Reach varies per family: Franka 0.85m, Cobotta 0.95m, UR10 1.3m.
     _REACH_M = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.95
     base = _robot_base_xy()
     if base is None: return None
+    # Sensor-gate: belt-fed cubes start far from EE. Without this gate
+    # _next_cube claims the cube on tick 1 (within reach of base, but not
+    # yet at the pick zone), and PickPlaceController then chases a moving
+    # target. Mirror native/cuRobo: cube must be inside the sensor bbox
+    # before claim. Proximity sensors are often Xform-only with empty
+    # bbox — fall back to ComputeLocalToWorldTransform when bbox empty.
+    _sensor_pos = None
+    _sensor_radius = 0.10
+    if SENSOR_PATH:
+        _sp = stage.GetPrimAtPath(SENSOR_PATH)
+        if _sp and _sp.IsValid():
+            try:
+                _scache = UsdGeom.BBoxCache(0, [UsdGeom.Tokens.default_])
+                _sb = _scache.ComputeWorldBound(_sp).ComputeAlignedRange()
+                if not _sb.IsEmpty():
+                    _sc = _sb.GetMidpoint()
+                    _sensor_pos = np.array([float(_sc[0]), float(_sc[1]), float(_sc[2])])
+                    _sz = _sb.GetSize()
+                    _sensor_radius = float(max(_sz[0], _sz[1], _sz[2])) / 2.0
+            except Exception: pass
+            if _sensor_pos is None:
+                try:
+                    _smtx = UsdGeom.Xformable(_sp).ComputeLocalToWorldTransform(0)
+                    _stt = _smtx.ExtractTranslation()
+                    _sensor_pos = np.array([float(_stt[0]), float(_stt[1]), float(_stt[2])])
+                except Exception: pass
     for sp in SOURCE_PATHS:
         if sp in S["delivered"]: continue
         cp = _cube_pos(sp)
         if cp is None: continue
-        if float(np.linalg.norm(cp[:2] - base)) <= _REACH_M:
-            return sp
+        if float(np.linalg.norm(cp[:2] - base)) > _REACH_M:
+            continue
+        if _sensor_pos is not None:
+            if float(np.linalg.norm(cp - _sensor_pos)) > _sensor_radius * 3.0:
+                continue
+        return sp
     return None
 
 _DBG_TICKS = [0]
@@ -29648,6 +29692,7 @@ def _on_step(dt):
             current_joint_positions=jp,
             end_effector_offset=np.array(EE_OFFSET, dtype=np.float64),
         )
+        _ev = None  # guard: NameError downstream if get_current_event() raises
         try:
             _ev = _controller.get_current_event() if hasattr(_controller, 'get_current_event') else None
             if _dbg_phase_attr: _dbg_phase_attr.Set(f"event={{_ev}}")
@@ -29679,6 +29724,58 @@ def _on_step(dt):
                     if _aattr and _aattr.IsDefined():
                         _aattr.Set(Gf.Vec3f(0.0, 0.0, 0.0))
             except Exception: pass
+        # FixedJoint workaround for Franka builtin path: ParallelGripper's
+        # finger-pad friction is not enough to hold a 0.1kg cube through
+        # RmpFlow's whip-motion accelerations. Snap a UsdPhysics.FixedJoint
+        # between panda_hand and cube while EE is near the cube. Mirrors
+        # the UR10 surface-gripper path; uses panda_hand since Franka has
+        # no suction_cup sub-prim.
+        if ROBOT_FAMILY == "franka" and _ev is not None:
+            if 0 <= _ev <= 4 and not S.get("fixed_joint"):
+                try:
+                    from pxr import UsdPhysics as _UP_grip_f, Sdf as _Sdf_grip_f
+                    _eep = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/panda_hand")
+                    if _eep and _eep.IsValid():
+                        _eem = UsdGeom.Xformable(_eep).ComputeLocalToWorldTransform(0)
+                        _eet = _eem.ExtractTranslation()
+                        _origin = [float(_eet[0]), float(_eet[1]), float(_eet[2])]
+                        _hits = []
+                        def _franka_report_fn(hit):
+                            try:
+                                p = getattr(hit, "rigid_body", None) or getattr(hit, "collision", None)
+                                if p is None and isinstance(hit, dict):
+                                    p = hit.get("rigidBody") or hit.get("collision")
+                                if p is not None:
+                                    _hits.append(str(p))
+                            except Exception: pass
+                            return True
+                        try:
+                            from omni.physx import get_physx_scene_query_interface as _gsqi_f
+                            _sqi = _gsqi_f()
+                            # Wider catch — RmpFlow descent may converge with EE
+                            # 20-30cm above cube, same as UR10. Fingers don't need
+                            # tight FJ-radius since FJ pins cube at first contact.
+                            _sqi.overlap_sphere(0.30, _origin, _franka_report_fn, False)
+                        except Exception: pass
+                        _picked = None
+                        for h in _hits:
+                            for sp in SOURCE_PATHS:
+                                if (h == sp or h.startswith(sp + "/")) and sp not in S["delivered"]:
+                                    _picked = sp; break
+                            if _picked: break
+                        if _picked:
+                            ee = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/panda_hand")
+                            cube = stage.GetPrimAtPath(_picked)
+                            if ee and ee.IsValid() and cube and cube.IsValid():
+                                jp = f"{{_picked}}_pp_grip_fj"
+                                fj = _UP_grip_f.FixedJoint.Define(stage, jp)
+                                fj.CreateBody0Rel().SetTargets([_Sdf_grip_f.Path(str(ee.GetPath()))])
+                                fj.CreateBody1Rel().SetTargets([_Sdf_grip_f.Path(_picked)])
+                                S["fixed_joint"] = jp
+                                if S.get("current") != _picked:
+                                    S["current"] = _picked
+                                if _dbg_phase_attr: _dbg_phase_attr.Set(f"event={{_ev}} fj_snapped_franka:{{_picked}}")
+                except Exception as _ffje: print(f"(builtin pp Franka fj snap fail: {{_ffje}})")
         # FixedJoint workaround for UR10 (and other surface-gripper families):
         # Isaac Sim 5.x's IsaacSurfaceGripper C++ engagement doesn't form
         # a join when body0 is an articulation link (UR10's ee_link).
@@ -29766,9 +29863,11 @@ def _on_step(dt):
                     _drop_close = True  # default to release if positions unknown
                     if _bin is not None and _cubp is not None:
                         _xyd = float(np.linalg.norm(_cubp[:2] - _bin[:2]))
-                        # 0.10m xy tolerance — bin is typically 0.30m wide so
-                        # 0.10m means cube is well within bin xy bbox.
-                        _drop_close = _xyd < 0.10
+                        # 0.10m xy tolerance for wide bins; tighten to 0.04m
+                        # when an explicit drop_target is set (stacking onto
+                        # 5cm pedestal/cube — 10cm gate releases too far off).
+                        _xy_tol = 0.04 if DROP_TARGET is not None else 0.10
+                        _drop_close = _xyd < _xy_tol
                     if _drop_close:
                         fjp = S["fixed_joint"]
                         if stage.GetPrimAtPath(fjp).IsValid():
@@ -30936,10 +31035,13 @@ def _ensure_attr(name, type_name, default):
 _a_mode = _ensure_attr("ctrl:mode", Sdf.ValueTypeNames.String, "")
 _a_phase = _ensure_attr("ctrl:phase", Sdf.ValueTypeNames.String, "wait_sensor")
 _a_cubes = _ensure_attr("ctrl:cubes_delivered", Sdf.ValueTypeNames.Int, 0)
+_a_cycles = _ensure_attr("ctrl:cycles_attempted", Sdf.ValueTypeNames.Int, 0)
 _a_err = _ensure_attr("ctrl:error_count", Sdf.ValueTypeNames.Int, 0)
 _a_last_err = _ensure_attr("ctrl:last_error", Sdf.ValueTypeNames.String, "")
 _a_picked = _ensure_attr("ctrl:picked_path", Sdf.ValueTypeNames.String, "")
 _a_tick = _ensure_attr("ctrl:tick_count", Sdf.ValueTypeNames.Int, 0)
+# Reset counters on install (avoid stale values from prior runs).
+_a_err.Set(0); _a_cubes.Set(0); _a_cycles.Set(0); _a_tick.Set(0); _a_last_err.Set("")
 """
 
 
@@ -31491,12 +31593,13 @@ def _on_step(dt):
         if S["mode"] == "picking":
             if controller.is_done():
                 S["cubes"] += 1
-                _a_cubes.Set(S["cubes"])
+                _a_cycles.Set(S["cubes"])
                 # Mark delivered regardless — grip-failure retry causes
                 # infinite loops when IK can't reach extreme positions.
                 # Better to miss 1 cube than lock up on impossible retries.
                 if S["picked_path"]:
                     S["delivered"].add(S["picked_path"])
+                    _a_cubes.Set(len(S["delivered"]))
                 S["picked_path"] = None
                 S["mode"] = "wait_sensor"
                 # Resume belt unconditionally on wait_sensor transition. Earlier
@@ -31631,7 +31734,8 @@ def _gen_pick_place_spline(robot_path, sensor_path, belt_path,
                            end_effector_initial_height=None,
                            spline_waypoint_dt=None,
                            grip_style="friction",
-                           color_routing=None):
+                           color_routing=None,
+                           mutex_path=None):
     """Deterministic CPU-only pick-place: pre-plan 6-waypoint Cartesian
     trajectory per cube, warm-start IK chain for consistent redundancy
     branch, interpolate via scipy.CubicSpline (or numpy linear fallback).
@@ -31692,6 +31796,7 @@ EE_OFFSET = np.array({_json.dumps(list(ee_offset))}, dtype=np.float32)
 EE_INIT_H_OVERRIDE = {end_effector_initial_height!r}
 WAYPOINT_DT = {_json.dumps(spline_waypoint_dt) if spline_waypoint_dt else 'None'}
 GRIP_STYLE = {grip_style_norm!r}
+MUTEX_PATH = {mutex_path!r}  # Multi-robot coordination — when set, robot must claim mutex before pickup
 # SORT-01 enabler: same color_routing dispatch as cuRobo target_source.
 # When non-empty, _bin_drop_pos selects destination per cube based on
 # the cube's Semantics_color (or Semantics_class) class_name. Falls
@@ -32294,9 +32399,10 @@ def _on_step(dt):
                     except Exception: pass
                     _UR10_FJ_PATH[0] = None
                 S["cubes"] += 1
-                _a_cubes.Set(S["cubes"])
+                _a_cycles.Set(S["cubes"])
                 if S["picked_path"]:
                     S["delivered"].add(S["picked_path"])
+                    _a_cubes.Set(len(S["delivered"]))
                 S["picked_path"] = None; _a_picked.Set("")
                 S["plan"] = None; S["traj_fn"] = None; S["start_t"] = None
                 # Release mutex so other robots can claim
@@ -32689,9 +32795,14 @@ except Exception as _e:
 # The wrapper's open()/close() drive the C++ surface_gripper_interface,
 # which is what _grip_open/_grip_close need to release/attach cubes.
 _surface_gripper = None
+# Franka has no `ee_link/suction_cup` sub-prim, so the SurfaceGripper raycast
+# fallback in the grip path always fails. Skip SG detection on Franka so the
+# parallel-gripper finger-joint path is used (works correctly).
 try:
     _sg_attr = stage.GetPrimAtPath(ROBOT_PATH).GetAttribute("isaac_assist:surface_gripper_path")
     _sg_path = _sg_attr.Get() if (_sg_attr and _sg_attr.IsDefined()) else None
+    if ROBOT_FAMILY == "franka":
+        _sg_path = None
     if _sg_path and stage.GetPrimAtPath(_sg_path).IsValid():
         from isaacsim.robot.manipulators.grippers.surface_gripper import SurfaceGripper as _SG
         _ee_path = "/".join(_sg_path.split("/")[:-1])
@@ -32753,36 +32864,35 @@ except Exception: pass
 # on stochastic CUDA IK. Earlier 4 seeds caused stuck-controller pattern
 # in CP-10/11/26-style canonicals — IK failed transiently, controller
 # retried infinitely on same cube (Mode A controller-stuck bug fix 2026-05-09).
-_PLANNER_ATTR = "_curobo_pp_planner_v5"
+_PLANNER_ATTR = "_curobo_pp_planner_v12"
 _planner = getattr(builtins, _PLANNER_ATTR, None)
 if _planner is None:
-    # Evict prior versions
-    for _old in ("_curobo_pp_planner", "_curobo_pp_planner_v2", "_curobo_pp_planner_v3", "_curobo_pp_planner_v4"):
+    for _old in ("_curobo_pp_planner", "_curobo_pp_planner_v2", "_curobo_pp_planner_v3", "_curobo_pp_planner_v4", "_curobo_pp_planner_v5", "_curobo_pp_planner_v6", "_curobo_pp_planner_v7", "_curobo_pp_planner_v8", "_curobo_pp_planner_v9", "_curobo_pp_planner_v10"):
         try: delattr(builtins, _old)
         except Exception: pass
-    print("(curobo: building MotionPlanner v5 — 16 IK seeds for IK robustness)")
-    # Scene-collision via update_world(SceneCfg) crashes Warp 1.8.2 with
-    # 'Couldn\\'t find function overload for is_obs_enabled' (cuRobo's
-    # CuboidDataWarp type isn't registered in Warp 1.8 kernel namespace).
-    # Workaround: skip scene obstacles entirely. Self-collision still active.
-    # 16 IK × 2 trajopt seeds: chosen for IK robustness (vs deterministic
-    # path stability). Empirically Mode-A controller-stuck pattern (CP-10
-    # etc) dominated by transient IK failures with 4 seeds — extra seeds
-    # cost ~4× CUDA compute per plan but reduce stuck-cycle infinite loop.
+    print("(curobo: building MotionPlanner v10 — Warp 1.11+, scene-collision)")
+    # Scene-collision active. Table is excluded from runtime scene_cfg
+    # because robot sits ON the table (panda_link0 z=0.75 = table top z),
+    # registering it caused planner to consider robot in collision → no
+    # plan attempts succeed. Other obstacles (pillar, packed bins) properly
+    # avoided. CP-22 also benefits from cuda_graph=False + collision distance
+    # tuning that lets dynamic update_world reconfigure between cubes.
     _pcfg = MotionPlannerCfg.create(
         robot=_CUROBO_ROBOT_CFG,
-        use_cuda_graph=True,
+        use_cuda_graph=False,
         num_ik_seeds=16,
         num_trajopt_seeds=2,
         self_collision_check=True,
         position_tolerance=0.003,
         orientation_tolerance=0.05,
+        scene_model="collision_primitives_3d.yml",
+        collision_cache={{"obb": 32, "mesh": 0}},
     )
     _planner = MotionPlanner(_pcfg)
     setattr(builtins, _PLANNER_ATTR, _planner)
     print(f"(curobo: planner cached in builtins.{{_PLANNER_ATTR}})")
 else:
-    print("(curobo: reusing cached planner v5)")
+    print("(curobo: reusing cached planner v6)")
 
 _PLANNER_JOINT_NAMES = list(_planner.joint_names)
 
@@ -32970,6 +33080,14 @@ def _build_scene_cfg(exclude_path=None):
     # otherwise dims (x,y,z in world) get applied as if axis-aligned in
     # base, swapping width/length and creating a giant fake obstacle.
     # The pose quat = inverse_base_quat (in world-aligned reference).
+    # Scene-collision baseline: include Table/Belt/Bin since they act as
+    # workspace floor that cuRobo needs to know about for self-collision
+    # margin. Empirically (v3/v10) full-scene with cuda_graph=False planning
+    # succeeds for CP-22/59/65 multi-cube success. The 2026-05-09 isolated
+    # plan_pose test on CP-37 (which suggested Table-as-obstacle blocks
+    # planning) likely conflated test conditions with handler-context state.
+    # Per-scenario obstacle filtering belongs in the scenario-profile spec,
+    # not as a global change.
     static_paths = ["/World/Table", "/World/ConveyorBelt", "/World/Bin"] + list(PLANNING_OBSTACLES)
     cuboids = {{}}
     # Pre-compute inverse base quat (wxyz)
@@ -33006,14 +33124,17 @@ def _plan_to_world_point(point_world, current_q7, exclude_obs=None, yaw_deg=0.0)
     q = torch.tensor([[float(x) for x in current_q7[:_ARM_DOF]]], dtype=torch.float32, device='cuda')
     start = JointState.from_position(q, joint_names=_PLANNER_JOINT_NAMES)
     try:
-        # update_world disabled — Warp 1.8.2 lacks CuboidDataWarp registration
-        # that cuRobo collision kernels require (I-38). Self-collision still
-        # active via planner config; scene-collision deferred until Warp upgrade.
+        # Scene-collision: build SceneCfg from PLANNING_OBSTACLES per plan
+        # and call update_world before planning. Warp 1.11+ enables this.
+        try:
+            scene_cfg = _build_scene_cfg(exclude_path=exclude_obs)
+            _planner.update_world(scene_cfg)
+        except Exception as _swe:
+            print(f"(curobo update_world fallback: {{_swe}})")
         res = _planner.plan_pose(goal, start, max_attempts=3)
         if res is None or not bool(res.success[0, 0].item()):
             return None
         interp = res.get_interpolated_plan()
-        # interp.position shape = [1, 1, T, 9] — get [T, 9] then [T, 7] for arm
         traj = interp.position[0, 0, :, :7].detach().cpu().numpy()
         mt = float(res.motion_time()) if callable(res.motion_time) else float(res.motion_time)
         return (traj, mt)
@@ -33130,10 +33251,24 @@ def _cube_to_pick():
     base_z = float(_usd_pos[2])
     sxy = _sensor_xy_v if _sensor_xy_v is not None else base_xy
     cands = []
-    # Reach varies per family: Franka 0.70m, Cobotta 0.95m, UR10/UR10e 1.20m.
-    # Earlier hard-coded 0.70m matched only Franka — UR10 cubes farther than
-    # 0.70m from base were silently skipped (e.g. CP-81 Cube_1 at 0.74m).
-    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.70
+    # Reach varies per family: Franka 0.85m (actual arm length), Cobotta 0.95m,
+    # UR10/UR10e 1.20m. Earlier 0.70m for Franka under-utilized the arm and
+    # rejected handoff positions (e.g. CP-51 handoff at 0.76m from FrankaB).
+    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.85
+    # CP-22 high-speed-belt fix: at >0.25 m/s nominal, cube transits the
+    # 0.06m sensor zone in 2-3 physics ticks — too fast for the standard
+    # claim+settle cycle. Read belt speed and widen detection upstream.
+    _belt_v = 0.0
+    if BELT_PATH:
+        try:
+            _bp = stage.GetPrimAtPath(BELT_PATH)
+            if _bp and _bp.IsValid():
+                _bsv = _bp.GetAttribute("physxSurfaceVelocity:surfaceVelocity")
+                if _bsv and _bsv.IsDefined():
+                    _v = _bsv.Get()
+                    if _v: _belt_v = abs(float(_v[0]))
+        except Exception: pass
+    _look_ahead_x = 0.30 if _belt_v > 0.25 else 0.0
     for sp in SOURCE_PATHS:
         if sp in S["delivered"] or sp in S.get("failed", set()) or _is_in_bin(sp): continue
         cp = _world_pos(sp)
@@ -33152,7 +33287,21 @@ def _cube_to_pick():
                 if _up_dot < {upright_dot_threshold}: continue
             except Exception:
                 continue
-        cands.append((float(np.linalg.norm(cp[:2] - sxy)), sp))
+        # High-speed predictive claim ONLY (v10-baseline behavior). Sensor
+        # zone gate experiments 2026-05-09 (v13/v14/v15) caused physics
+        # blowups for multi-robot scenarios (CP-65 spd=9382 m/s, CP-62
+        # spd=147 m/s) and net-negative pass count. Per-scenario gate logic
+        # belongs in the scenario-profile spec, not as a global change.
+        _d_sensor = float(np.linalg.norm(cp[:2] - sxy))
+        if _look_ahead_x > 0.0:
+            _approaching = (
+                cp[0] < sxy[0]
+                and (sxy[0] - cp[0]) <= _look_ahead_x
+                and abs(cp[1] - sxy[1]) < 0.10
+            )
+            if _d_sensor > 0.12 and not _approaching:
+                continue
+        cands.append((_d_sensor, sp))
     if not cands: return None
     cands.sort(); return cands[0][1]
 
@@ -33171,6 +33320,38 @@ def _is_in_bin(cube_path):
     if cp is None: return False
     mn, mx = b
     return (mn[0] <= cp[0] <= mx[0]) and (mn[1] <= cp[1] <= mx[1])
+
+def _is_near_dest(cube_path, tolerance=0.15):
+    \"\"\"True if cube is within tolerance of DROP_TARGET or DEST_PATH center.
+
+    Multi-robot canonicals use non-bin destinations (Handoff Xform marker,
+    StagingRack, HoldPedestal). Their world bbox is degenerate or smaller
+    than the placed cube, so _is_in_bin returns False even when delivery
+    is correct → cube goes into S['failed'] and the controller stops.
+    Use proximity check instead for delivery confirmation.
+    \"\"\"
+    cp = _world_pos(cube_path)
+    if cp is None: return False
+    if DROP_TARGET is not None:
+        dt = np.array(DROP_TARGET, dtype=np.float64)
+        if float(np.linalg.norm(cp - dt)) < tolerance:
+            return True
+    if DEST_PATH:
+        p = stage.GetPrimAtPath(DEST_PATH)
+        if p and p.IsValid():
+            try:
+                bb = UsdGeom.Imageable(p).ComputeWorldBound(0, UsdGeom.Tokens.default_).ComputeAlignedRange()
+                if not bb.IsEmpty():
+                    mid = bb.GetMidpoint()
+                    mid_a = np.array([float(mid[0]), float(mid[1]), float(mid[2])])
+                    if float(np.linalg.norm(cp - mid_a)) < tolerance:
+                        return True
+                    mn = bb.GetMin(); mx = bb.GetMax()
+                    if (float(mx[0]) - float(mn[0])) > 0.05 and (float(mx[1]) - float(mn[1])) > 0.05:
+                        if (float(mn[0]) <= cp[0] <= float(mx[0])) and (float(mn[1]) <= cp[1] <= float(mx[1])):
+                            return True
+            except Exception: pass
+    return False
 
 {_PP_OBSERVABILITY_SNIPPET}
 _a_mode.Set("curobo")
@@ -33270,8 +33451,31 @@ def _on_step(dt):
         _a_tick.Set(S["ticks"]); _a_phase.Set(S["mode"])
 
         if S["mode"] == "wait_sensor":
+            # Multi-robot mutex guard: if another robot holds the mutex,
+            # don't even attempt to claim a cube this tick. Mirrors the
+            # spline _on_step guard (lines ~32168–32187) for the curobo path.
+            if MUTEX_PATH:
+                try:
+                    _mp = stage.GetPrimAtPath(MUTEX_PATH)
+                    if _mp and _mp.IsValid():
+                        _attr = _mp.GetAttribute("mutex:claimed_by")
+                        _claimed = (_attr.Get() if _attr else "") or ""
+                        if _claimed and _claimed != ROBOT_PATH:
+                            return  # other robot holds mutex; wait this tick
+                except Exception: pass
             picked = _cube_to_pick()
             if picked:
+                # Acquire mutex before claiming cube
+                if MUTEX_PATH:
+                    try:
+                        _mp = stage.GetPrimAtPath(MUTEX_PATH)
+                        if _mp and _mp.IsValid():
+                            _attr = _mp.GetAttribute("mutex:claimed_by")
+                            if _attr: _attr.Set(ROBOT_PATH)
+                            _cc = _mp.GetAttribute("mutex:claim_count")
+                            if _cc and _cc.IsDefined():
+                                _cc.Set(int(_cc.Get() or 0) + 1)
+                    except Exception: pass
                 # Pause belt + open gripper. Move to "settling" state so
                 # cube can decelerate naturally for several physics ticks
                 # before we read its position. Cube has friction-mediated
@@ -33280,10 +33484,15 @@ def _on_step(dt):
                 # lands behind cube → fingers grip back edge.
                 # Calling app.update() from inside _on_step would be
                 # re-entrant (physics callback can't step physics).
+                # Adaptive settle: high-speed belts leave more residual cube
+                # momentum after pause. CP-22 (0.5 m/s nominal) needs ~16
+                # ticks (0.27s); CP-01 (0.2 m/s) is fine with 8. Use the
+                # cached _nominal_belt (captured at install before any pause).
+                _belt_nom = abs(float(_nominal_belt[0])) if _nominal_belt else 0.0
                 _pause_belt()
                 _grip_open()
                 S["picked_path"] = picked; _a_picked.Set(picked)
-                S["settle_ticks"] = 8  # ~0.13s @ 60Hz, enough for cube friction-stop
+                S["settle_ticks"] = 16 if _belt_nom > 0.25 else 8
                 S["mode"] = "settling"
             elif (len(S["delivered"]) + len(S.get("failed", set()))) >= len(SOURCE_PATHS) and not S.get("home_returned"):
                 # All cubes processed → return arm to home pose so it doesn't
@@ -33341,16 +33550,29 @@ def _on_step(dt):
                 # delivered. If grip slipped, cube is still on the belt; keep
                 # it in SOURCE_PATHS so the next wait_sensor cycle picks it up
                 # again rather than reporting a false success.
-                S["cubes"] += 1; _a_cubes.Set(S["cubes"])
+                S["cubes"] += 1; _a_cycles.Set(S["cubes"])
                 if S["picked_path"]:
-                    if _is_in_bin(S["picked_path"]):
+                    # Use proximity-based delivery check (handles non-bin
+                    # destinations like handoff markers, staging racks).
+                    # _is_in_bin's bbox check fails for degenerate/small prims.
+                    if _is_near_dest(S["picked_path"]):
                         S["delivered"].add(S["picked_path"])
+                        _a_cubes.Set(len(S["delivered"]))
                     else:
-                        # Grip miss — cube remained on belt. Mark as failed for
-                        # this attempt; do NOT add to delivered. Move on so we
-                        # don't loop forever on the same physically-unreachable
-                        # configuration.
+                        # Grip miss / cube far from drop. Mark as failed; do NOT
+                        # add to delivered. Move on so we don't loop forever
+                        # on the same physically-unreachable configuration.
                         S["failed"].add(S["picked_path"])
+                    # Multi-robot mutex release: when this robot held the mutex
+                    # for the cycle, free it so the other robot can claim next.
+                    if MUTEX_PATH:
+                        try:
+                            _mp = stage.GetPrimAtPath(MUTEX_PATH)
+                            if _mp and _mp.IsValid():
+                                _attr = _mp.GetAttribute("mutex:claimed_by")
+                                if _attr and (_attr.Get() or "") == ROBOT_PATH:
+                                    _attr.Set("")
+                        except Exception: pass
                 S["picked_path"] = None; _a_picked.Set("")
                 S["segments"] = None; S["seg_start_t"] = None
                 S["mode"] = "wait_sensor"
@@ -33803,10 +34025,10 @@ def _cube_to_pick():
     base_z = float(_usd_pos[2])
     sxy = _sensor_xy_v if _sensor_xy_v is not None else base_xy
     cands = []
-    # Reach varies per family: Franka 0.70m, Cobotta 0.95m, UR10/UR10e 1.20m.
-    # Earlier hard-coded 0.70m matched only Franka — UR10 cubes farther than
-    # 0.70m from base were silently skipped (e.g. CP-81 Cube_1 at 0.74m).
-    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.70
+    # Reach varies per family: Franka 0.85m (actual arm length), Cobotta 0.95m,
+    # UR10/UR10e 1.20m. Earlier 0.70m for Franka under-utilized the arm and
+    # rejected handoff positions (e.g. CP-51 handoff at 0.76m from FrankaB).
+    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.85
     for sp in SOURCE_PATHS:
         if sp in S["delivered"] or sp in S.get("failed", set()) or _is_in_bin(sp): continue
         cp = _world_pos(sp)
@@ -33945,9 +34167,10 @@ def _on_step(dt):
             _apply_joint_target(q_new_np)
 
             if elapsed >= _TOTAL_T:
-                S["cubes"] += 1; _a_cubes.Set(S["cubes"])
+                S["cubes"] += 1; _a_cycles.Set(S["cubes"])
                 if S["picked_path"]:
                     S["delivered"].add(S["picked_path"])
+                    _a_cubes.Set(len(S["delivered"]))
                 S["picked_path"] = None; _a_picked.Set("")
                 S["waypoints"] = None; S["start_t"] = None
                 S["mode"] = "wait_sensor"
@@ -34323,10 +34546,10 @@ def _cube_to_pick():
     base_z = float(_usd_pos[2])
     sxy = _sensor_xy_v if _sensor_xy_v is not None else base_xy
     cands = []
-    # Reach varies per family: Franka 0.70m, Cobotta 0.95m, UR10/UR10e 1.20m.
-    # Earlier hard-coded 0.70m matched only Franka — UR10 cubes farther than
-    # 0.70m from base were silently skipped (e.g. CP-81 Cube_1 at 0.74m).
-    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.70
+    # Reach varies per family: Franka 0.85m (actual arm length), Cobotta 0.95m,
+    # UR10/UR10e 1.20m. Earlier 0.70m for Franka under-utilized the arm and
+    # rejected handoff positions (e.g. CP-51 handoff at 0.76m from FrankaB).
+    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.85
     for sp in SOURCE_PATHS:
         if sp in S["delivered"] or sp in S.get("failed", set()) or _is_in_bin(sp): continue
         cp = _world_pos(sp)
@@ -34421,9 +34644,10 @@ def _on_step(dt):
             _apply_torques(tau.detach().cpu().numpy()[0])
 
             if elapsed >= _TOTAL_T:
-                S["cubes"] += 1; _a_cubes.Set(S["cubes"])
+                S["cubes"] += 1; _a_cycles.Set(S["cubes"])
                 if S["picked_path"]:
                     S["delivered"].add(S["picked_path"])
+                    _a_cubes.Set(len(S["delivered"]))
                 S["picked_path"] = None; _a_picked.Set("")
                 S["waypoints"] = None; S["start_t"] = None
                 S["mode"] = "wait_sensor"

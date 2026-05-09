@@ -17,28 +17,77 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six industrial-sort specifics for CP-35 (combines CP-16 + CP-18):\n1) 10 cubes total: 2× red + 2× blue + 2× green + 2× yellow + 2× defective. Defectives have NO semantic label.\n2) 5 destination bins: RedBin, BlueBin, GreenBin, YellowBin, RejectBin. RejectBin gets unmarked cubes via destination_path fall-through.\n3) color_routing dict has 4 entries (one per color). Defectives match no key → fall through to destination_path = RejectBin.\n4) Bins arranged in row at y=-0.5, x=[-0.6, -0.3, 0.0, +0.3, +0.6]. RejectBin at far left x=-0.6.\n5) 10 cubes on conveyor at 0.20m spacing, x=[-1.6 to +0.2]. Mixed order to demonstrate runtime routing.\n6) Industrial use: production-line quality sorter — pass/fail + multiple SKU classes.",
-  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1500.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[4.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Materials for 4 colors + grey for defectives\ncreate_material(material_path=\"/World/Materials/Red\",    shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.0, 0.0])\ncreate_material(material_path=\"/World/Materials/Blue\",   shader_type=\"OmniPBR\", diffuse_color=[0.0, 0.0, 1.0])\ncreate_material(material_path=\"/World/Materials/Green\",  shader_type=\"OmniPBR\", diffuse_color=[0.0, 1.0, 0.0])\ncreate_material(material_path=\"/World/Materials/Yellow\", shader_type=\"OmniPBR\", diffuse_color=[1.0, 1.0, 0.0])\ncreate_material(material_path=\"/World/Materials/Grey\",   shader_type=\"OmniPBR\", diffuse_color=[0.5, 0.5, 0.5])\n\n# 8 cubes — 2 per color\ncolor_specs = [\n    (\"/World/Cube_r1\", -1.6, \"red\"),\n    (\"/World/Cube_b1\", -1.4, \"blue\"),\n    (\"/World/Cube_d1\", -1.2, None),  # defective — no label\n    (\"/World/Cube_g1\", -1.0, \"green\"),\n    (\"/World/Cube_y1\", -0.8, \"yellow\"),\n    (\"/World/Cube_r2\", -0.6, \"red\"),\n    (\"/World/Cube_b2\", -0.4, \"blue\"),\n    (\"/World/Cube_d2\", -0.2, None),  # defective\n    (\"/World/Cube_g2\",  0.0, \"green\"),\n    (\"/World/Cube_y2\",  0.2, \"yellow\"),\n]\nfor path, x, name in color_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    if name:\n        assign_material(prim_path=path, material_path=f\"/World/Materials/{name.capitalize()}\")\n        set_semantic_label(prim_path=path, class_name=name, semantic_type=\"color\")\n    else:\n        assign_material(prim_path=path, material_path=\"/World/Materials/Grey\")\n\nbulk_set_attribute(\n    prim_paths=[c[0] for c in color_specs],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor c in color_specs:\n    apply_physics_material(prim_path=c[0], material_name=\"rubber\")\n\n# 5 destination bins arranged in row\nbin_specs = [\n    (\"/World/RejectBin\", -0.6, \"Grey\"),\n    (\"/World/RedBin\",    -0.3, \"Red\"),\n    (\"/World/GreenBin\",   0.0, \"Green\"),\n    (\"/World/BlueBin\",    0.3, \"Blue\"),\n    (\"/World/YellowBin\",  0.6, \"Yellow\"),\n]\nfor path, x, mat in bin_specs:\n    create_bin(prim_path=path, position=[x, -0.5, 0.75], size=[0.18, 0.18, 0.15])\n    assign_material(prim_path=path, material_path=f\"/World/Materials/{mat}\")\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[c[0] for c in color_specs],\n    destination_path=\"/World/RejectBin\",\n    color_routing={\n        \"red\":    \"/World/RedBin\",\n        \"blue\":   \"/World/BlueBin\",\n        \"green\":  \"/World/GreenBin\",\n        \"yellow\": \"/World/YellowBin\",\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/RedBin\", \"/World/BlueBin\", \"/World/GreenBin\", \"/World/YellowBin\", \"/World/RejectBin\"],\n)",
+  "thoughts": "Six industrial-sort specifics for CP-35 (combines CP-16 + CP-18):\n1) 10 cubes total: 2\u00d7 red + 2\u00d7 blue + 2\u00d7 green + 2\u00d7 yellow + 2\u00d7 defective. Defectives have NO semantic label.\n2) 5 destination bins: RedBin, BlueBin, GreenBin, YellowBin, RejectBin. RejectBin gets unmarked cubes via destination_path fall-through.\n3) color_routing dict has 4 entries (one per color). Defectives match no key \u2192 fall through to destination_path = RejectBin.\n4) Bins arranged in row at y=-0.5, x=[-0.6, -0.3, 0.0, +0.3, +0.6]. RejectBin at far left x=-0.6.\n5) 10 cubes on conveyor at 0.20m spacing, x=[-1.6 to +0.2]. Mixed order to demonstrate runtime routing.\n6) Industrial use: production-line quality sorter \u2014 pass/fail + multiple SKU classes.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1500.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[4.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Materials for 4 colors + grey for defectives\ncreate_material(material_path=\"/World/Materials/Red\",    shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.0, 0.0])\ncreate_material(material_path=\"/World/Materials/Blue\",   shader_type=\"OmniPBR\", diffuse_color=[0.0, 0.0, 1.0])\ncreate_material(material_path=\"/World/Materials/Green\",  shader_type=\"OmniPBR\", diffuse_color=[0.0, 1.0, 0.0])\ncreate_material(material_path=\"/World/Materials/Yellow\", shader_type=\"OmniPBR\", diffuse_color=[1.0, 1.0, 0.0])\ncreate_material(material_path=\"/World/Materials/Grey\",   shader_type=\"OmniPBR\", diffuse_color=[0.5, 0.5, 0.5])\n\n# 8 cubes \u2014 2 per color\ncolor_specs = [\n    (\"/World/Cube_r1\", -1.6, \"red\"),\n    (\"/World/Cube_b1\", -1.4, \"blue\"),\n    (\"/World/Cube_d1\", -1.2, None),  # defective \u2014 no label\n    (\"/World/Cube_g1\", -1.0, \"green\"),\n    (\"/World/Cube_y1\", -0.8, \"yellow\"),\n    (\"/World/Cube_r2\", -0.6, \"red\"),\n    (\"/World/Cube_b2\", -0.4, \"blue\"),\n    (\"/World/Cube_d2\", -0.2, None),  # defective\n    (\"/World/Cube_g2\",  0.0, \"green\"),\n    (\"/World/Cube_y2\",  0.2, \"yellow\"),\n]\nfor path, x, name in color_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    if name:\n        assign_material(prim_path=path, material_path=f\"/World/Materials/{name.capitalize()}\")\n        set_semantic_label(prim_path=path, class_name=name, semantic_type=\"color\")\n    else:\n        assign_material(prim_path=path, material_path=\"/World/Materials/Grey\")\n\nbulk_set_attribute(\n    prim_paths=[c[0] for c in color_specs],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor c in color_specs:\n    apply_physics_material(prim_path=c[0], material_name=\"rubber\")\n\n# 5 destination bins arranged in row\nbin_specs = [\n    (\"/World/RejectBin\", -0.6, \"Grey\"),\n    (\"/World/RedBin\",    -0.3, \"Red\"),\n    (\"/World/GreenBin\",   0.0, \"Green\"),\n    (\"/World/BlueBin\",    0.3, \"Blue\"),\n    (\"/World/YellowBin\",  0.6, \"Yellow\"),\n]\nfor path, x, mat in bin_specs:\n    create_bin(prim_path=path, position=[x, -0.5, 0.75], size=[0.18, 0.18, 0.15])\n    assign_material(prim_path=path, material_path=f\"/World/Materials/{mat}\")\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[c[0] for c in color_specs],\n    destination_path=\"/World/RejectBin\",\n    color_routing={\n        \"red\":    \"/World/RedBin\",\n        \"blue\":   \"/World/BlueBin\",\n        \"green\":  \"/World/GreenBin\",\n        \"yellow\": \"/World/YellowBin\",\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/RedBin\", \"/World/BlueBin\", \"/World/GreenBin\", \"/World/YellowBin\", \"/World/RejectBin\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_r1": [-1.6, 0.4, 0.835],
-      "/World/Cube_b1": [-1.4, 0.4, 0.835],
-      "/World/Cube_d1": [-1.2, 0.4, 0.835],
-      "/World/Cube_g1": [-1.0, 0.4, 0.835],
-      "/World/Cube_y1": [-0.8, 0.4, 0.835],
-      "/World/Cube_r2": [-0.6, 0.4, 0.835],
-      "/World/Cube_b2": [-0.4, 0.4, 0.835],
-      "/World/Cube_d2": [-0.2, 0.4, 0.835],
-      "/World/Cube_g2": [ 0.0, 0.4, 0.835],
-      "/World/Cube_y2": [ 0.2, 0.4, 0.835]
+      "/World/Cube_r1": [
+        -1.6,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_b1": [
+        -1.4,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_d1": [
+        -1.2,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_g1": [
+        -1.0,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_y1": [
+        -0.8,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_r2": [
+        -0.6,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_b2": [
+        -0.4,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_d2": [
+        -0.2,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_g2": [
+        0.0,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_y2": [
+        0.2,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/RedBin", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/RedBin",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_r1"
   },
@@ -48,12 +97,12 @@
     "duration_s": 240
   },
   "extends": "CP-16",
-  "extension_notes": "CP-35 combines CP-16's 4-color sortation with CP-18's reject fall-through. 10 cubes (8 colored + 2 defective) → 5 bins via color_routing + destination_path fall-through. Production-grade sorter pattern.",
+  "extension_notes": "CP-35 combines CP-16's 4-color sortation with CP-18's reject fall-through. 10 cubes (8 colored + 2 defective) \u2192 5 bins via color_routing + destination_path fall-through. Production-grade sorter pattern.",
   "failure_modes": [
-    "Cubes_y2 starts at x=+0.2 (within reach) — picked first by reach selection. Doesn't matter; routing by color works regardless.",
-    "5 bins arranged tightly (0.30m spacing) — robot transit between bins must avoid each. planning_obstacles include all 5.",
-    "Defective cube color (grey) matches no semantic class → fall-through to RejectBin (destination_path). Tested in CP-18.",
-    "Function-gate would take ~10 cubes × 7s/cycle = 70+ seconds to fully process all cubes. Long sim."
+    "Cubes_y2 starts at x=+0.2 (within reach) \u2014 picked first by reach selection. Doesn't matter; routing by color works regardless.",
+    "5 bins arranged tightly (0.30m spacing) \u2014 robot transit between bins must avoid each. planning_obstacles include all 5.",
+    "Defective cube color (grey) matches no semantic class \u2192 fall-through to RejectBin (destination_path). Tested in CP-18.",
+    "Function-gate would take ~10 cubes \u00d7 7s/cycle = 70+ seconds to fully process all cubes. Long sim."
   ],
   "verified_status": "build-spec-2026-05-08; form-gate verification pending"
 }
