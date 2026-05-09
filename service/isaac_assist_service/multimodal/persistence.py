@@ -26,7 +26,7 @@ import logging
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
@@ -405,7 +405,7 @@ class MultimodalStore:
                 "tool": tool,
                 "args_summary": args_summary,
                 "status": status,
-                "ts": datetime.utcnow().isoformat() + "Z",
+                "ts": datetime.now(timezone.utc).isoformat(),
             }
             if error is not None:
                 entry["error"] = error

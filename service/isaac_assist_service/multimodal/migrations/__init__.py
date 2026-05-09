@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, Tuple
 
@@ -86,7 +86,7 @@ def quarantine_broken_file(path: Path) -> Path:
     """
     if not path.exists():
         raise FileNotFoundError(path)
-    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     quarantine = path.with_suffix(f"{path.suffix}.broken-{ts}")
     shutil.copy(path, quarantine)
     return quarantine
