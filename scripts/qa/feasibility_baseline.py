@@ -68,13 +68,26 @@ async def _reset_scene() -> None:
 def _extract_diagnose_args(template: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Build args for diagnose_scene_feasibility from a canonical template.
 
-    Templates today don't carry an explicit `diagnose_args`; we synthesize
-    from existing fields. Falls back gracefully when fields are absent.
+    Resolution order:
+    1. Explicit `diagnose_args` field on template (recommended for multi-robot CPs)
+    2. Synthesize from `setup_args` fields (legacy single-robot path)
+    3. Return None — caller marks NO_DIAGNOSE_ARGS in summary
+
+    To diagnose multi-robot CPs (CP-51/53/65/68/76), add an explicit
+    `diagnose_args` field to the template with `cycles: [...]`.
     """
+    # 1. Explicit diagnose_args on template
+    explicit = template.get("diagnose_args")
+    if explicit and isinstance(explicit, dict):
+        args = dict(explicit)
+        args.setdefault("seed", 42)
+        args.setdefault("use_cache", False)
+        return args
+
+    # 2. Synthesize from setup_args (single-robot)
     sim_args = template.get("simulate_args") or {}
     setup_args = template.get("setup_args") or {}
 
-    # robot_path: prefer explicit, else the first Franka/UR-prefixed prim
     robot_path = setup_args.get("robot_path")
     if not robot_path:
         # heuristic: scan setup_args for path-like field
@@ -87,16 +100,16 @@ def _extract_diagnose_args(template: Dict[str, Any]) -> Optional[Dict[str, Any]]
     drop_pose = setup_args.get("drop_target") or setup_args.get("drop_pose")
     obstacles = setup_args.get("planning_obstacles") or []
     sensor_path = setup_args.get("sensor_path")
-    cube_paths = sim_args.get("cube_paths") or [sim_args.get("cube_path")] if sim_args.get("cube_path") else []
+    cube_paths = sim_args.get("cube_paths") or ([sim_args.get("cube_path")] if sim_args.get("cube_path") else [])
     cube_paths = [c for c in cube_paths if c]
 
     if not robot_path:
-        return None  # cannot diagnose without robot_path
+        return None
     args: Dict[str, Any] = {
         "robot_path": robot_path,
         "obstacles": obstacles,
         "seed": 42,
-        "use_cache": False,  # baseline runs are authoritative; bypass cache
+        "use_cache": False,
     }
     if pick_pose:
         args["pick_pose"] = pick_pose
