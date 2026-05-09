@@ -358,6 +358,96 @@ def step7_phase2_safe_execute(log_path: Path) -> int:
     return rc
 
 
+def step9_morning_iterations(log_path: Path) -> int:
+    """Iterative morning continuation. After steps 1-7 lock the baseline +
+    apply 2a/2b template fixes, this step runs MORE rounds:
+      - re-run feasibility (some CPs may have changed verdict after fixes)
+      - re-run triage (newly-feasible vs newly-failing classification)
+      - safe_execute with classes 2a,2b,2c (broader sweep)
+    Bound by wall-clock cap (default 4h budget = ~12:00 if chain hits 08:00).
+    Each round does another pass; stops when no new candidates or budget out.
+    """
+    _log("Step 9 — Morning iterations (re-feasibility + re-triage + extended safe_execute)",
+         log_path)
+    iter_budget = int(os.environ.get("MORNING_ITER_BUDGET_S", "14400"))  # 4h
+    max_rounds = int(os.environ.get("MORNING_MAX_ROUNDS", "3"))
+    iter_start = time.time()
+
+    for round_i in range(1, max_rounds + 1):
+        if time.time() - iter_start > iter_budget:
+            _log(f"  budget exhausted after {round_i-1} rounds", log_path)
+            break
+        _log(f"  --- Morning round {round_i}/{max_rounds} ---", log_path)
+
+        # 9a: re-run feasibility (only changed canonicals — full would be expensive)
+        _log(f"  round {round_i}: re-running feasibility (--update mode)", log_path)
+        rc = _run_subproc([
+            sys.executable, "-u",
+            "scripts/qa/feasibility_baseline.py",
+            "--update",
+            "--per-cp-timeout", "120",
+        ], log_path, timeout=4800)
+
+        # 9b: re-triage
+        _log(f"  round {round_i}: re-triage", log_path)
+        _run_subproc([sys.executable, "-u", "scripts/qa/phase2_triage.py"], log_path, timeout=300)
+        _run_subproc([sys.executable, "-u", "scripts/qa/phase2_action_plan.py"], log_path, timeout=300)
+
+        # 9c: safe_execute with broader class set (include 2c this round)
+        _log(f"  round {round_i}: safe_execute --classes 2a,2b,2c", log_path)
+        rc = _run_subproc([
+            sys.executable, "-u",
+            "scripts/qa/phase2_safe_execute.py",
+            "--classes", "2a,2b,2c",
+            "--max-attempts", "15",
+            "--total-budget", "5400",  # 1.5h per round
+        ], log_path, timeout=6000)
+
+    # 9d: commit any incremental changes
+    _run_subproc(["git", "add", "-A"], log_path)
+    _run_subproc(["git", "commit", "-m",
+                   "Phase 2 morning iterations — additional fixes + re-feasibility passes"],
+                  log_path, capture=True)
+    _run_subproc(["git", "push", "anton", "feat/multimodal-foundation"], log_path)
+    return 0
+
+
+def step10_continuous_telemetry_2d(log_path: Path) -> int:
+    """Step 10: probe each currently-failing CP with probe_ctrl_telemetry to
+    capture runtime diagnostic data for morning review. Does NOT apply 2d fixes
+    (keeps user-review safety) but generates the data needed to make 2d
+    decisions after wake-up.
+
+    Output: workspace/baselines/feasibility/_2d_telemetry_<cp>.json per
+    failing CP.
+    """
+    _log("Step 10 — 2d telemetry probe (data-only, no autonomous fixes)", log_path)
+    bl_path = REPO_ROOT / "workspace/baselines/2026-05-09-baseline.json"
+    if not bl_path.exists():
+        _log("  baseline missing — skipping", log_path)
+        return 0
+    bl = json.loads(bl_path.read_text())
+    failing = [r["label"] for r in (bl.get("results") or [])
+                if r.get("status") in ("stable_fail", "flaky")]
+    _log(f"  probing {len(failing)} failing CPs", log_path)
+
+    out_dir = REPO_ROOT / "workspace/baselines/feasibility"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    probe_start = time.time()
+    for label in failing:
+        if time.time() - probe_start > 3600:  # 1h cap
+            _log(f"  probe budget exhausted, stopping", log_path)
+            break
+        _log(f"  probe {label}", log_path)
+        rc = _run_subproc([
+            sys.executable, "-u",
+            "scripts/qa/probe_ctrl_telemetry.py",
+            label, "--duration", "30", "--json",
+        ], log_path, timeout=180)
+    return 0
+
+
 def step8_final_report(log_path: Path) -> int:
     _log("Step 8 — Final summary report", log_path)
     report_path = REPO_ROOT / "data/2026-05-09-overnight-chain-report.md"
@@ -430,6 +520,8 @@ STEPS = [
     ("triage", step5_triage),
     ("m1_ros2", step6_m1_ros2),
     ("phase2_safe_execute", step7_phase2_safe_execute),
+    ("morning_iterations", step9_morning_iterations),
+    ("telemetry_2d", step10_continuous_telemetry_2d),
     ("final_report", step8_final_report),
 ]
 
