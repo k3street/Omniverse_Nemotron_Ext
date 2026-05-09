@@ -49,3 +49,22 @@ These ✗ are legitimate controller-level issues, not measurement bugs (after my
 
 **Realistic path to 100%**: ~15-20 hours of focused per-canonical debug work. Out of scope for current iteration.
 
+
+## Per-canonical diagnostic table (final)
+
+| CP | Cubes | Final state | Root cause |
+|----|-------|-------------|------------|
+| CP-10 | 9 | All 9 on belt at z=0.830, sensor zone has Cube_9 at +0.357 | Controller stuck — claims cube but never delivers |
+| CP-11 | 8 | All 8 on belt at z=0.830, sensor zone has Cube_8 at +0.318 | Controller stuck — same as CP-10 |
+| CP-26 | 1 | Cube_1 at sensor (+0.55, +0.41, +0.83), at rest | Controller never advances past planning. Target far at x=1.7 — cuRobo IK might fail. |
+| CP-30 | 4 | Cube_1 at (+0.59, +0.59, +0.525) — FELL OFF table | Controller knocked cube off / collision |
+| CP-37 | 1 | (n=1 from regex; Cube_1 ended at +0.59 +0.59 z=0.525) — FELL OFF | Same pattern as CP-30 |
+
+## Observation: Two distinct failure modes
+
+**Mode A — controller-stuck (CP-10/11/26):** Cube reaches sensor zone, claims OK, but no delivery. Controller's planning/execution doesn't complete the cycle. Need print-debug in cuRobo `_on_step` to see where stuck.
+
+**Mode B — cube-knocked-off (CP-30/37):** Cube falls to floor (z=0.525) instead of target. Controller picks but drops cube during transit (collision with another cube on belt or scene obstacle).
+
+Both modes need controller-level fix. Template-side adjustments (xy_tol, rest_speed, duration) won't unblock them.
+
