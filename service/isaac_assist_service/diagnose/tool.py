@@ -75,12 +75,13 @@ async def _get_world_bbox(prim_path: str) -> Optional[Dict[str, List[float]]]:
     return None
 
 
-async def _solve_ik(robot_path: str, pose: List[float], seed: int) -> Dict[str, Any]:
+async def _solve_ik(robot_path: str, pose: List[float], seed: int,
+                     robot_type: str = "franka") -> Dict[str, Any]:
     """Wrap solve_ik. Returns parsed dict with at least {'success': bool}."""
     res = await _execute_tool_call("solve_ik", {
-        "robot_path": robot_path,
+        "articulation_path": robot_path,
         "target_position": pose,
-        "seed": seed,
+        "robot_type": robot_type,
     })
     out = (res.get("output") or "").strip()
     import json
