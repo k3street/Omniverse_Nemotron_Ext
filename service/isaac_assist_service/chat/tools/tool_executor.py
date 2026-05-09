@@ -33026,10 +33026,40 @@ _belt_prim = stage.GetPrimAtPath(BELT_PATH) if BELT_PATH else None
 _belt_sv = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocity") if (_belt_prim and _belt_prim.IsValid()) else None
 _captured = tuple(_belt_sv.Get()) if (_belt_sv and _belt_sv.IsDefined() and _belt_sv.Get()) else None
 _nominal_belt = _captured if (_captured and sum(abs(v) for v in _captured) > 1e-6) else (0.2, 0.0, 0.0)
+
+# Belt-pause-from-callback fix (cuRobo handler) — direct USD writes from
+# physics-step callback get restored by PhysX integrator next tick. Use
+# pre-step subscription to write velocity BEFORE PxScene::simulate() reads
+# its cache. Same pattern as builtin handler (commit 7ef31a1).
+_belt_pause_request_curobo = [None]
+def _apply_belt_pause_curobo():
+    req = _belt_pause_request_curobo[0]
+    if req is None: return
+    if req is True:
+        if _belt_sv: _belt_sv.Set((0, 0, 0))
+    else:
+        if _belt_sv: _belt_sv.Set(_nominal_belt)
+    _belt_pause_request_curobo[0] = None
 def _pause_belt():
     if _belt_sv: _belt_sv.Set((0, 0, 0))
+    _belt_pause_request_curobo[0] = True
 def _resume_belt():
     if _belt_sv: _belt_sv.Set(_nominal_belt)
+    _belt_pause_request_curobo[0] = False
+try:
+    _BELT_PRESTEP_CUROBO_ATTR = "_belt_prestep_curobo_" + _ROBOT_TAG
+    _old_pre_c = getattr(builtins, _BELT_PRESTEP_CUROBO_ATTR, None)
+    if _old_pre_c is not None:
+        try: _old_pre_c.unsubscribe()
+        except Exception: pass
+    _belt_prestep_sub_c = omni.physx.get_physx_interface().subscribe_physics_on_step_events(
+        lambda _dt: _apply_belt_pause_curobo(),
+        True, 0,
+    )
+    setattr(builtins, _BELT_PRESTEP_CUROBO_ATTR, _belt_prestep_sub_c)
+except Exception as _bpe:
+    print(f"(curobo: pre-step belt-pause subscription failed: {{_bpe}})")
+
 if _belt_sv and sum(abs(v) for v in (_belt_sv.Get() or (0,0,0))) < 1e-6:
     _resume_belt()
 

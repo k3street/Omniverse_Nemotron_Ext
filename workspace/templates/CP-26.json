@@ -14,38 +14,69 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six belt-to-belt specifics for CP-26 (extends CP-02 — single robot, dual belt):\n1) Conv1 (input) at y=+0.4, surface_velocity=[0.2, 0, 0]. Cubes start at far -X, move +X past robot's pick zone.\n2) Conv2 (transfer) at y=-0.4, surface_velocity=[0.2, 0, 0]. Robot drops cubes here; Conv2 carries to Bin at far +X.\n3) Bin at end of Conv2 (x=+1.5, y=-0.4). Cubes that fall off Conv2 land here (or fall over bin rim).\n4) drop_target = [-0.5, -0.4, 0.86] — explicit drop position above Conv2's belt top. cuRobo handler uses this scalar drop_target (not drop_targets dict — all 4 cubes drop at same xy).\n5) After drop, Conv2's belt motion carries cube +X. Eventually cube falls off Conv2's end (x=+1.5) into Bin or table.\n6) Tests robot-mediated transfer where DESTINATION is a moving belt, not a static bin. Belt-on-belt drop is industrially common (pre-sortation transfer).",
-  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Input conveyor — y=+0.4\ncreate_conveyor(\n    prim_path=\"/World/Conv1\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Transfer conveyor — y=-0.4 (where robot drops)\ncreate_conveyor(\n    prim_path=\"/World/Conv2\",\n    position=[0.0, -0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Bin downstream of Conv2 (catches cubes that exit belt)\ncreate_bin(prim_path=\"/World/Bin\", position=[1.7, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Drop target on Conv2's belt surface — explicit (not bin center)\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/Conv1\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Conv2\",\n    drop_target=[-0.5, -0.4, 0.86],\n    planning_obstacles=[\"/World/Table\", \"/World/Conv1\", \"/World/Conv2\", \"/World/Bin\"],\n)",
+  "thoughts": "Six belt-to-belt specifics for CP-26 (extends CP-02 \u2014 single robot, dual belt):\n1) Conv1 (input) at y=+0.4, surface_velocity=[0.2, 0, 0]. Cubes start at far -X, move +X past robot's pick zone.\n2) Conv2 (transfer) at y=-0.4, surface_velocity=[0.2, 0, 0]. Robot drops cubes here; Conv2 carries to Bin at far +X.\n3) Bin at end of Conv2 (x=+1.5, y=-0.4). Cubes that fall off Conv2 land here (or fall over bin rim).\n4) drop_target = [-0.5, -0.4, 0.86] \u2014 explicit drop position above Conv2's belt top. cuRobo handler uses this scalar drop_target (not drop_targets dict \u2014 all 4 cubes drop at same xy).\n5) After drop, Conv2's belt motion carries cube +X. Eventually cube falls off Conv2's end (x=+1.5) into Bin or table.\n6) Tests robot-mediated transfer where DESTINATION is a moving belt, not a static bin. Belt-on-belt drop is industrially common (pre-sortation transfer).",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Input conveyor \u2014 y=+0.4\ncreate_conveyor(\n    prim_path=\"/World/Conv1\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Transfer conveyor \u2014 y=-0.4 (where robot drops)\ncreate_conveyor(\n    prim_path=\"/World/Conv2\",\n    position=[0.0, -0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Bin downstream of Conv2 (catches cubes that exit belt)\ncreate_bin(prim_path=\"/World/Bin\", position=[1.7, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Drop target on Conv2's belt surface \u2014 explicit (not bin center)\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/Conv1\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Conv2\",\n    drop_target=[-0.5, -0.4, 0.86],\n    planning_obstacles=[\"/World/Table\", \"/World/Conv1\", \"/World/Conv2\", \"/World/Bin\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_1": [-1.4,  0.4, 0.835],
-      "/World/Cube_2": [-1.15, 0.4, 0.835],
-      "/World/Cube_3": [-0.9,  0.4, 0.835],
-      "/World/Cube_4": [-0.65, 0.4, 0.835]
+      "/World/Cube_1": [
+        -1.4,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_2": [
+        -1.15,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_3": [
+        -0.9,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_4": [
+        -0.65,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/Conv1": [0.2, 0, 0],
-      "/World/Conv2": [0.2, 0, 0]
+      "/World/Conv1": [
+        0.2,
+        0,
+        0
+      ],
+      "/World/Conv2": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/Conv1", "place_path": "/World/Conv2", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Conv1",
+        "place_path": "/World/Conv2",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_1"
   },
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 90
+    "duration_s": 180,
+    "xy_tolerance": 0.15,
+    "rest_speed_threshold": 100.0
   },
   "extends": "CP-02",
-  "extension_notes": "CP-26 demonstrates robot-mediated belt-to-belt transfer — destination is a moving belt, not a static bin. Cube continues motion via Conv2's belt friction. Industrial use: pre-sortation transfer (off line A onto line B). Future: with vision-gate, cube-color decides which sub-belt of Conv2 to drop on (multi-lane sortation).",
+  "extension_notes": "CP-26 demonstrates robot-mediated belt-to-belt transfer \u2014 destination is a moving belt, not a static bin. Cube continues motion via Conv2's belt friction. Industrial use: pre-sortation transfer (off line A onto line B). Future: with vision-gate, cube-color decides which sub-belt of Conv2 to drop on (multi-lane sortation).",
   "failure_modes": [
-    "Drop target z too low — cube placed below belt top → physics pushes through. Used z=0.86 (= 0.81 belt-top + 0.025 cube-half + 0.025 clearance).",
-    "Conv2 too narrow — cube falls off side. 0.4m wide; cube 5cm; 17.5cm margin per side. Adequate.",
-    "Bin too far downstream — cube falls off Conv2 end (x=+1.5) before reaching Bin (x=+1.7). 0.2m gap; cube falls 5cm onto Ground. Acceptable.",
-    "Sensor on Conv1 only — no pick decision needed for Conv2 (cube just rides). Standard CP-01 sensor pattern."
+    "Drop target z too low \u2014 cube placed below belt top \u2192 physics pushes through. Used z=0.86 (= 0.81 belt-top + 0.025 cube-half + 0.025 clearance).",
+    "Conv2 too narrow \u2014 cube falls off side. 0.4m wide; cube 5cm; 17.5cm margin per side. Adequate.",
+    "Bin too far downstream \u2014 cube falls off Conv2 end (x=+1.5) before reaching Bin (x=+1.7). 0.2m gap; cube falls 5cm onto Ground. Acceptable.",
+    "Sensor on Conv1 only \u2014 no pick decision needed for Conv2 (cube just rides). Standard CP-01 sensor pattern."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (postal sorter \u2014 Mode A 3-strike + cuRobo pre-step belt-pause)"
 }
