@@ -1,6 +1,7 @@
 # ROS2 / OpenPLC integration — strategic assessment
 
 **Date:** 2026-05-09
+**Status:** translated to spec → `docs/specs/2026-05-09-industrial-expansion-spec.md` (Phases 6, 8, 9, 10 of master plan).
 **Question (paraphrased):** Should we deepen ROS2 / OpenPLC support in Isaac Assist, or are the current Python controllers (cuRobo / RmpFlow / native PickPlaceController / spline / OSC / DiffIK) "interchangeable enough" that industrial users can self-bridge?
 
 **TL;DR:** ROS2 support is already substantial — far further along than memory or the user expected. **Industry uses Isaac Sim mostly through ROS2-bridge + topic_based_ros2_control + an external MoveIt2/cuMotion stack, NOT through our in-Kit Python controllers.** OpenPLC specifically is a hobby/teaching tool — the wedge an industrial customer cares about is **OPC-UA / Modbus-TCP / Sparkplug-MQTT** to a *real* PLC (Siemens TIA, Beckhoff TwinCAT, Rockwell Studio 5000) for **virtual commissioning**. The right move is not "add OpenPLC" — it is to (a) consolidate the existing-but-fragmented ROS2 surface into a *first-class direct-eval target*, (b) add a thin **Modbus-TCP I/O brick** that handles 80% of PLC integration cases, and (c) add an **OPC-UA bridge primitive** that mirrors the F-02 hand-rolled pattern. Build OpenPLC support only as a free byproduct of Modbus-TCP — not as a goal.

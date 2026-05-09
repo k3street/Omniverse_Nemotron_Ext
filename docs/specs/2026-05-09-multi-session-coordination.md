@@ -50,7 +50,8 @@ this doc captures the result.
 - New CP-templates `workspace/templates/CP-06.json` and onward.
 - ROS2-bridge handlers in `tool_executor.py` (its existing section).
 - Manufacturing-metrics handlers in `tool_executor.py` (its existing section).
-- `requirements.txt` / dependency-shrink.
+- **Industrial-expansion track** (per `docs/specs/2026-05-09-industrial-expansion-spec.md`): all bridge primitives (`modbus_tcp_bridge_attach`, `opcua_bridge_attach`, `mqtt_sparkplug_bridge_attach`, `openplc_runtime_attach`), `setup_ros2_control_compat`, `emit_ros2_control_yaml`, `precheck_ros2_environment`, `setup_isaac_ros_cumotion_moveit`, plus their `diagnose_*_bridge` honesty pairs. New canonicals CP-87 + 24 CP-NEW from yrkesroll Top-20.
+- `requirements.txt` / dependency-shrink (pymodbus, asyncua, paho-mqtt + tahu added during industrial-expansion phases 8-10).
 
 ### Shared files — sectional ownership
 
@@ -70,7 +71,14 @@ register_multimodal_handlers(DATA_HANDLERS)
 # === END PICK-PLACE CONTROLLERS ===
 
 # === ROS2 BRIDGE (controller-logic session) ===
+# Industrial-expansion: setup_ros2_control_compat, emit_ros2_control_yaml,
+# precheck_ros2_environment, setup_isaac_ros_cumotion_moveit (Phases 6 + 9)
 # === END ROS2 BRIDGE ===
+
+# === INDUSTRIAL BRIDGES (controller-logic session) ===
+# Industrial-expansion Phase 8 + 10: modbus/opcua/mqtt/openplc bridge
+# primitives. Each is a supervised subprocess via dispatch_async_task.
+# === END INDUSTRIAL BRIDGES ===
 
 # === MANUFACTURING METRICS (controller-logic session) ===
 # === END MANUFACTURING METRICS ===
@@ -218,3 +226,4 @@ ownership shifts, sync points fire, or unexpected coordination needs arise.
 | Date | Author | Change |
 |---|---|---|
 | 2026-05-09 | multimodal session | Initial authoring after three-round negotiation |
+| 2026-05-09 | controller-logic session | Added industrial-expansion-spec ownership: ROS2-control compat tools (Phase 6), bridge primitives (Phase 8 + 10), cuMotion-MoveIt (Phase 9). New `INDUSTRIAL BRIDGES` section in `tool_executor.py`. CP-87 + 24 CP-NEW assigned to controller-logic. Multimodal scope unchanged. |

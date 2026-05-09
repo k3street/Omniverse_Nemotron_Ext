@@ -1,6 +1,7 @@
 # Yrkesroll-driven canonical expansion — research & roadmap input
 
 **Date:** 2026-05-09
+**Status:** translated to spec → `docs/specs/2026-05-09-industrial-expansion-spec.md` (Top-5 → Phase 8, Top 6-15 → Phase 9, Top 16-20 → Phase 10).
 **Scope:** Identify gaps in the canonical template library (currently 86 CPs + 197 other-prefix templates) when measured against the real workflows of eight professional-role personas using Isaac Sim today. This is research input to a roadmap, not a roadmap itself.
 
 ## Library audit — what already covers which role?

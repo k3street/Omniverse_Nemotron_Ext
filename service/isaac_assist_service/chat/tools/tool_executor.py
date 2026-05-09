@@ -3870,6 +3870,13 @@ async def _handle_simulate_traversal_check(args: Dict) -> Dict:
       xy_tolerance: xy bbox tolerance in meters (default 0.0 — strict)
       floor_tolerance: z below target floor allowed in meters (default 0.10)
       rest_speed_threshold: max speed (m/s) to consider "at rest" (default 0.05)
+      seed: int seed for RNGs (random/numpy/torch). Default 42.
+            Run i uses seed + i to vary while staying reproducible.
+      n_runs: number of repeated runs against the same built scene. Default 1.
+              Captures initial cube xform + robot joint state + ctrl:* attrs
+              before run 0, restores them before each subsequent run, deletes
+              FJ prims created during run. Returns success_rate + per_run.
+              Run-classification: stable_ok=>=4/5, flaky=1-3/5, stable_fail=0.
     """
     cube_paths = args.get("cube_paths") or []
     if isinstance(cube_paths, str):
@@ -3889,10 +3896,13 @@ async def _handle_simulate_traversal_check(args: Dict) -> Dict:
     rest_speed = float(args.get("rest_speed_threshold", 0.05))
     require_upright = bool(args.get("require_upright", False))
     upright_tol = float(args.get("upright_tolerance_dot", 0.95))
+    seed = int(args.get("seed", 42))
+    n_runs = max(1, min(int(args.get("n_runs", 1)), 50))
 
     code = f"""\
 import omni.usd, omni.timeline, omni.kit.app, json, time as _t
-from pxr import UsdGeom, Usd
+import random as _rand
+from pxr import UsdGeom, Usd, Sdf, Gf
 
 stage = omni.usd.get_context().get_stage()
 
@@ -3943,6 +3953,8 @@ floor_tol = {floor_tolerance}
 rest_speed = {rest_speed}
 require_upright = {require_upright}
 upright_tol = {upright_tol}
+seed_base = {seed}
+n_runs = {n_runs}
 
 def _world_up_dot(path):
     \"\"\"Read prim's world rotation, return cube_up_vector · world_up.
@@ -3966,42 +3978,191 @@ def _world_up_dot(path):
     except Exception:
         return None
 
-tl = omni.timeline.get_timeline_interface()
-app = omni.kit.app.get_app()
+# ---- Phase 0 multi-run support: snapshot + restore between runs ----
 
-tl.stop()
-tl.set_current_time(0.0)
-tl.set_end_time(max(tl.get_end_time(), duration_s + 5.0))
+def _seed_all(s):
+    \"\"\"Pin random/numpy/torch seeds. cuRobo trajopt uses torch RNGs;
+    pinning before each run makes IK initial-guesses deterministic
+    given (seed, run_idx).\"\"\"
+    _rand.seed(s)
+    try:
+        import numpy as _np
+        _np.random.seed(s)
+    except Exception:
+        pass
+    try:
+        import torch as _t_mod
+        _t_mod.manual_seed(s)
+        if _t_mod.cuda.is_available():
+            _t_mod.cuda.manual_seed_all(s)
+    except Exception:
+        pass
 
-p_init = _world_pos(cube_path)
-target_bbox = _world_bbox(target_path)
-# Multi-cube: track all cube_paths, succeed if any reaches bin
-cube_inits = {{cp: _world_pos(cp) for cp in cube_paths}}
-if p_init is None or target_bbox is None:
-    print(json.dumps({{
-        'success': False,
-        'error': f'cube_path or target_path not found: cube={{p_init is not None}}, target={{target_bbox is not None}}',
-    }}))
-else:
+def _ensure_translate_op(prim):
+    \"\"\"Get-or-create a Translate xform op. Used for cube reset.\"\"\"
+    xf = UsdGeom.Xformable(prim)
+    for op in xf.GetOrderedXformOps():
+        if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+            return op
+    return xf.AddTranslateOp()
+
+def _snapshot_cubes():
+    \"\"\"Read cube xform translates (USD-authoritative initial state)
+    plus PhysX velocities if rigid-body API present.\"\"\"
+    snap = {{}}
+    for cp in cube_paths:
+        prim = stage.GetPrimAtPath(cp)
+        if not prim or not prim.IsValid():
+            continue
+        wp = _world_pos(cp)
+        # Local translate op value (write-back target)
+        local_t = None
+        try:
+            xf = UsdGeom.Xformable(prim)
+            for op in xf.GetOrderedXformOps():
+                if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+                    v = op.Get()
+                    if v is not None:
+                        local_t = (float(v[0]), float(v[1]), float(v[2]))
+                    break
+        except Exception:
+            pass
+        snap[cp] = {{'world': wp, 'local_t': local_t}}
+    return snap
+
+def _restore_cubes(snap):
+    \"\"\"Restore cube xform translates AND zero PhysX velocity attrs.\"\"\"
+    for cp, s in snap.items():
+        prim = stage.GetPrimAtPath(cp)
+        if not prim or not prim.IsValid():
+            continue
+        if s.get('local_t') is not None:
+            try:
+                op = _ensure_translate_op(prim)
+                op.Set(Gf.Vec3d(*s['local_t']))
+            except Exception:
+                pass
+        # Zero velocities — PhysX caches them on the rigid-body API
+        for vname in ('physics:velocity', 'physics:angularVelocity'):
+            a = prim.GetAttribute(vname)
+            if a and a.IsValid():
+                try: a.Set(Gf.Vec3f(0, 0, 0))
+                except Exception:
+                    try: a.Set(Gf.Vec3d(0, 0, 0))
+                    except Exception: pass
+
+def _snapshot_ctrl_attrs():
+    \"\"\"Walk stage, find prims with any ctrl:* attr, snapshot all values.\"\"\"
+    snap = {{}}
+    for prim in stage.Traverse():
+        ctrl_vals = {{}}
+        for a in prim.GetAttributes():
+            n = a.GetName()
+            if n.startswith('ctrl:') or n.startswith('builtin_pp:') or n.startswith('cortex:'):
+                v = a.Get()
+                if v is not None:
+                    ctrl_vals[n] = v
+        if ctrl_vals:
+            snap[str(prim.GetPath())] = ctrl_vals
+    return snap
+
+def _restore_ctrl_attrs(snap):
+    for path, vals in snap.items():
+        prim = stage.GetPrimAtPath(path)
+        if not prim or not prim.IsValid():
+            continue
+        for n, v in vals.items():
+            a = prim.GetAttribute(n)
+            if a and a.IsValid():
+                try: a.Set(v)
+                except Exception: pass
+
+def _snapshot_articulation_joints():
+    \"\"\"Capture joint positions for every articulation root via Articulation
+    Cache if the helper is loaded; fall back to UsdPhysics joint-pos attrs.\"\"\"
+    snap = {{}}
+    try:
+        from omni.isaac.core.articulations import Articulation
+    except Exception:
+        Articulation = None
+    if Articulation is None:
+        return snap
+    # Find articulation roots via PhysxSchema.PhysxArticulationAPI
+    try:
+        from pxr import PhysxSchema
+    except Exception:
+        return snap
+    for prim in stage.Traverse():
+        if prim.HasAPI(PhysxSchema.PhysxArticulationAPI):
+            try:
+                art = Articulation(str(prim.GetPath()))
+                art.initialize()
+                jp = art.get_joint_positions()
+                if jp is not None:
+                    snap[str(prim.GetPath())] = [float(x) for x in jp]
+            except Exception:
+                pass
+    return snap
+
+def _restore_articulation_joints(snap):
+    if not snap: return
+    try:
+        from omni.isaac.core.articulations import Articulation
+    except Exception:
+        return
+    for path, jp in snap.items():
+        try:
+            art = Articulation(path)
+            art.initialize()
+            art.set_joint_positions(jp)
+        except Exception:
+            pass
+
+def _snapshot_fj_set():
+    \"\"\"Set of FixedJoint prim paths existing now. Diff after run = transient FJs to delete.\"\"\"
+    out = set()
+    try:
+        from pxr import UsdPhysics
+    except Exception:
+        return out
+    for prim in stage.Traverse():
+        try:
+            if prim.IsA(UsdPhysics.FixedJoint) or prim.GetTypeName() == 'PhysicsFixedJoint':
+                out.add(str(prim.GetPath()))
+        except Exception:
+            pass
+    return out
+
+def _delete_fj_diff(initial_set):
+    \"\"\"Delete FJ prims that appeared since snapshot.\"\"\"
+    current = _snapshot_fj_set()
+    new_paths = current - initial_set
+    for path in new_paths:
+        try: stage.RemovePrim(path)
+        except Exception: pass
+
+def _do_one_run(run_idx, target_bbox):
+    \"\"\"Single play→sample cycle. Caller is responsible for reset BEFORE call.\"\"\"
+    _seed_all(seed_base + run_idx)
+    tl.set_current_time(0.0)
     tl.play()
-    p_pre = list(p_init)
-    pre_pos_per_cube = {{cp: list(cube_inits[cp]) if cube_inits[cp] else None for cp in cube_paths}}
+    p_pre = _world_pos(cube_path) or [0,0,0]
+    pre_pos_per_cube = {{cp: (_world_pos(cp) or [0,0,0]) for cp in cube_paths}}
     real_start = _t.time()
     last_t = 0.0
     while True:
         app.update()
         cur_t = float(tl.get_current_time())
-        # Pre-end sample for velocity (capture ~0.1s before duration_s)
         if cur_t >= duration_s - 0.15 and last_t < duration_s - 0.15:
-            _pre = _world_pos(cube_path)
-            if _pre is not None: p_pre = _pre
+            _p = _world_pos(cube_path)
+            if _p is not None: p_pre = _p
             for cp in cube_paths:
                 _pp = _world_pos(cp)
                 if _pp is not None: pre_pos_per_cube[cp] = _pp
         if cur_t >= duration_s:
             break
         if _t.time() - real_start > duration_s + 60:
-            break  # safety: 60s real-time slack
+            break
         last_t = cur_t
 
     p_final = _world_pos(cube_path)
@@ -4017,10 +4178,8 @@ else:
         speed = (velocity[0]**2 + velocity[1]**2 + velocity[2]**2) ** 0.5
 
     bb = target_bbox
-    # Per-cube success flags. A cube is delivered if its final pos is in bin's
-    # xy bbox, above the floor tolerance, and at rest.
-    delivered_cubes = []
-    per_cube_status = {{}}
+    delivered = []
+    per_cube = {{}}
     for cp in cube_paths:
         cp_final = final_pos_per_cube.get(cp)
         cp_pre   = pre_pos_per_cube.get(cp)
@@ -4032,14 +4191,12 @@ else:
             cp_v = [(cp_final[i] - cp_pre[i]) / dt for i in range(3)]
             cp_speed = (cp_v[0]**2 + cp_v[1]**2 + cp_v[2]**2) ** 0.5
         else:
-            cp_speed = speed  # fallback
+            cp_speed = speed
         cp_at_rest = cp_speed < rest_speed
         cp_delivered = bool(cp_in_xy and cp_above and cp_at_rest)
-        per_cube_status[cp] = {{
-            'final': cp_final, 'in_xy': cp_in_xy, 'above_floor': cp_above,
-            'speed': cp_speed, 'delivered': cp_delivered,
-        }}
-        if cp_delivered: delivered_cubes.append(cp)
+        per_cube[cp] = {{'final': cp_final, 'in_xy': cp_in_xy, 'above_floor': cp_above,
+                        'speed': cp_speed, 'delivered': cp_delivered}}
+        if cp_delivered: delivered.append(cp)
 
     in_xy = (p_final is not None
              and bb['min'][0] - xy_tol <= p_final[0] <= bb['max'][0] + xy_tol
@@ -4048,42 +4205,109 @@ else:
                    and p_final[2] >= bb['min'][2] - floor_tol)
     at_rest = speed < rest_speed
 
-    # Orientation check (REORIENT-01): cube's local +Z dotted with world +Z.
-    # 1.0 = perfectly upright; require_upright=True flips success to False
-    # if the dot < upright_tol (default 0.95 → within ~18° of vertical).
     upright_dot = _world_up_dot(cube_path)
     upright_ok = (not require_upright) or (upright_dot is not None and upright_dot >= upright_tol)
 
-    # Multi-cube success: ANY cube in cube_paths delivered. Falls back to
-    # legacy single-cube criterion if only one cube_path was provided.
     if len(cube_paths) > 1:
-        success = bool(delivered_cubes) and upright_ok
+        success = bool(delivered) and upright_ok
     else:
         success = bool(in_xy and above_floor and at_rest and upright_ok)
 
-    print(json.dumps({{
+    return {{
         'success': success,
-        'cube_initial': p_init,
         'cube_final': p_final,
         'cube_velocity': velocity,
         'cube_speed': speed,
-        'target_path': target_path,
-        'target_bbox': target_bbox,
         'in_target_xy': in_xy,
         'above_floor': above_floor,
         'at_rest': at_rest,
         'cube_upright_dot': upright_dot,
         'upright_ok': upright_ok,
-        'require_upright': require_upright,
         'sim_t_reached': cur_t,
+        'delivered_cubes': delivered,
+        'per_cube_status': per_cube,
+        'seed': seed_base + run_idx,
+    }}
+
+# ---- Main ----
+
+tl = omni.timeline.get_timeline_interface()
+app = omni.kit.app.get_app()
+
+tl.stop()
+tl.set_current_time(0.0)
+tl.set_end_time(max(tl.get_end_time(), duration_s + 5.0))
+
+p_init = _world_pos(cube_path)
+target_bbox = _world_bbox(target_path)
+cube_inits = {{cp: _world_pos(cp) for cp in cube_paths}}
+
+if p_init is None or target_bbox is None:
+    print(json.dumps({{
+        'success': False,
+        'error': f'cube_path or target_path not found: cube={{p_init is not None}}, target={{target_bbox is not None}}',
+        'n_runs': n_runs, 'seed': seed_base,
+    }}))
+else:
+    # Snapshot pre-play state — used for reset between runs (n_runs > 1).
+    snap_cubes = _snapshot_cubes()
+    snap_ctrl = _snapshot_ctrl_attrs()
+    snap_joints = _snapshot_articulation_joints()
+    snap_fj = _snapshot_fj_set()
+
+    runs = []
+    for ri in range(n_runs):
+        if ri > 0:
+            # Reset BEFORE run i (for i>=1). Run 0 uses scene as-is (live state from build+settle).
+            tl.stop()
+            _delete_fj_diff(snap_fj)
+            _restore_cubes(snap_cubes)
+            _restore_ctrl_attrs(snap_ctrl)
+            _restore_articulation_joints(snap_joints)
+            for _ in range(3): app.update()  # commit USD edits
+        try:
+            r = _do_one_run(ri, target_bbox)
+        except Exception as _e:
+            r = {{'success': False, 'error': f'run_exception: {{type(_e).__name__}}: {{str(_e)[:200]}}',
+                  'seed': seed_base + ri}}
+        runs.append(r)
+
+    # Aggregate
+    n_ok = sum(1 for r in runs if r.get('success'))
+    success_rate = n_ok / float(n_runs)
+    if n_runs >= 5:
+        if n_ok >= 4: status = 'stable_ok'
+        elif n_ok == 0: status = 'stable_fail'
+        else: status = 'flaky'
+    else:
+        if n_ok == n_runs: status = 'stable_ok'
+        elif n_ok == 0: status = 'stable_fail'
+        else: status = 'flaky'
+
+    # Primary result for legacy single-run callers: run 0's fields, hoisted
+    primary = runs[0] if runs else {{}}
+    out = dict(primary)
+    out.update({{
+        'cube_initial': p_init,
+        'target_path': target_path,
+        'target_bbox': target_bbox,
         'duration_s_requested': duration_s,
         'rest_speed_threshold': rest_speed,
         'floor_tolerance': floor_tol,
         'upright_tolerance_dot': upright_tol,
+        'require_upright': require_upright,
         'cube_paths': cube_paths,
-        'delivered_cubes': delivered_cubes,
-        'per_cube_status': per_cube_status,
-    }}))
+        'n_runs': n_runs,
+        'seed_base': seed_base,
+        'n_ok': n_ok,
+        'success_rate': success_rate,
+        'status': status,
+        'runs': runs,
+    }})
+    # Multi-run: success reflects MAJORITY (≥ ceil(n/2)). Single-run: run 0.
+    if n_runs > 1:
+        out['success'] = (n_ok * 2 >= n_runs)
+    print(json.dumps(out))
 """
     return await kit_tools.queue_exec_patch(code, "simulate_traversal_check")
 

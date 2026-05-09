@@ -13,6 +13,7 @@
 - `docs/specs/2026-05-09-multi-session-coordination.md` — file ownership split
 - `docs/specs/2026-05-09-scenario-profile-controller-config.md` — branched controller config
 - `docs/specs/2026-05-09-diagnose-scene-feasibility.md` — pre-flight validator
+- `docs/specs/2026-05-09-industrial-expansion-spec.md` — ROS2/OPC-UA bridges + yrkesroll canonicals (Phases 6, 8, 9, 10 below)
 - `data/regression_post_patches_regression_post_patches.json` — current baseline (49 ✓ stable / 25 patched-set)
 
 ---
@@ -148,17 +149,116 @@
 
 **Exit criterion:** ≥80/86 stable ✓ OR explicit `expect_pass=False` for the ≤6 outside-scope.
 
----
-
-### Phase 6 — Multimodal Block 2 + 3 (multimodal session)
-
-Text-prompt + sketch/photo modalities. Use `diagnose_scene_feasibility` as agent pre-flight. Coordination via `multi-session-coordination.md`.
+**Why it gates next:** Phase 6 (M1 ROS2 production parity) introduces the first new canonical (CP-87) that depends on the in-Kit controllers we just stabilized. With existing 86 still flaky, no baseline to attribute new-CP failures against.
 
 ---
 
-### Phase 7 — Block 4 (canvas wiring) + Block 5 (hardening)
+### Phase 6 — M1: ROS2 production parity (1-2 sessions)
 
-Final integration phases. Canvas SPA wired through canonical pipeline.
+**Spec:** `docs/specs/2026-05-09-industrial-expansion-spec.md` § Phase 6.
+
+**Goal:** elevate ROS2 from "documented possible" to "scored as first-class architecture in direct_eval." Mostly repackaging — zero greenfield code.
+
+**Tasks:**
+- `setup_ros2_control_compat(robot_path, joint_states_topic, joint_commands_topic, controller_type)` — standard `topic_based_ros2_control` topic names.
+- `emit_ros2_control_yaml(robot_path, controller_type, output_path)` — `colcon`-buildable YAML with `controller_manager` + `joint_state_broadcaster` + `joint_trajectory_controller`.
+- `precheck_ros2_environment()` — verify AMENT_PREFIX_PATH, rosbridge port (default 9090), ROS_DOMAIN_ID consistency.
+- New canonical: `CP-87-ros2-moveit2-franka-pickplace`.
+- Update `PLAN.md` 4B + 8F + 9E to reflect new compat shipped.
+
+**Tests:**
+- Unit: tools emit standard topic names + valid YAML. Precheck reports correct status under (AMENT unset / port unbound / all good).
+- Direct-eval: CP-87 scores ≥ 4/5 against live `ros2 launch` test rig.
+- Regression: existing 86 CPs maintain Phase 5 success rate.
+
+**Exit criterion:** 3 new tools shipped + CP-87 ships with non-zero direct-eval. PLAN.md updated. Library: 86 → 87.
+
+**Why it gates next:** without M1's compat layer, multimodal session (Phase 7) cannot demonstrate the agent picking ROS2 modes correctly, and Phase 8 bridge work (M2-M3) lacks the scaffolding to combine bridge + ROS2-control in CP-NEW-plc-conveyor.
+
+---
+
+### Phase 7 — Multimodal Block 2 + 3 (multimodal session, parallel)
+
+**Owner:** multimodal session. Per `multi-session-coordination.md`.
+
+**Tasks:** text-prompt + sketch/photo modalities. Use `diagnose_scene_feasibility` as agent pre-flight. (Was Phase 6 in the pre-industrial-expansion plan.)
+
+**Coordination:** runs parallel to Phase 6 (M1) since the multimodal session and controller-logic session edit disjoint files. No blocking dependency between them.
+
+**Exit criterion:** Block 2 + 3 complete; multimodal demos show text → scene + sketch → scene flows working.
+
+---
+
+### Phase 8 — M2-M3 bridges + Top-5 yrkesroll-canonicals (5-7 sessions)
+
+**Spec:** `docs/specs/2026-05-09-industrial-expansion-spec.md` § Phase 8.
+
+**Goal:** ship two protocol bridges (Modbus + OPC-UA) + 5 yrkesroll-canonicals each unlocking a different role. Library: 87 → 93+.
+
+**Tasks (controller-logic):**
+- `modbus_tcp_bridge_attach(host, port, register_map, mode, rate_hz)` — pymodbus, supervised subprocess via `dispatch_async_task`.
+- `opcua_bridge_attach(server_url, tag_to_attribute_map, rate_hz)` — asyncua, same supervised pattern.
+- `diagnose_modbus_bridge` + `diagnose_opcua_bridge` — honesty-tier counterparts.
+- 7 new canonicals:
+  - CP-NEW-plc-conveyor (M2)
+  - F-02-promoted (M3)
+  - CP-NEW-g1-bimanual-tabletop (Top-5 ML/RL)
+  - CP-NEW-rl-clone-env (Top-5 ML/RL)
+  - CP-NEW-amr-pickup-handoff (Top-5 logistics)
+  - CP-NEW-drawer-open (Top-5 robotics R&D)
+  - CP-NEW-peg-in-hole (Top-5 robotics R&D, contact-rich)
+
+**Tests:**
+- Unit: each bridge tool launches subprocess, tears down cleanly on Kit shutdown.
+- Integration: M2 conveyor pauses ≤100ms after Modbus coil flip, resumes ≤100ms after clear (timestamped state log).
+- Direct-eval: each new canonical scores ≥ 4/5.
+- Regression: existing 87 CPs maintain Phase 6 success rate.
+
+**Exit criterion:** 4 new tools + 7 new canonicals shipped. Library: 87 → 94. Bridge subprocess lifecycle verified zombie-free.
+
+**Why it gates next:** Phase 9's controller-shootout needs the same tool/canonical surface to compare against. Without Top-5 + bridges, controller-shootout has nothing to score.
+
+---
+
+### Phase 9 — M4 cuMotion-MoveIt + Top 6-15 yrkesroll (4-6 sessions)
+
+**Spec:** `docs/specs/2026-05-09-industrial-expansion-spec.md` § Phase 9.
+
+**Goal:** ship `setup_isaac_ros_cumotion_moveit` + 10 more yrkesroll-canonicals + the controller-shootout artefact (`controller_shootout_ros2.json`) covering 9 in-Kit modes + 1 external (`ros2_cmd + cumotion`).
+
+**Tasks (controller-logic):**
+- `setup_isaac_ros_cumotion_moveit(robot_path, planner_topic="/move_group/plan")` — wires NVIDIA `isaac_ros_cumotion_moveit` package.
+- Re-run S-01, S-02, S-09, S-11 in `ros2_cmd + cumotion` mode for shootout artefact.
+- 10 new canonicals (Top 6-15 from yrkesroll spec): 3-station OEE, inspect-reject, defect-SDG, Y-merge, DR-curriculum, multi-cam triangulation, controller-shootout, PLC-fixture, sim2real-gap, cross-belt sorter.
+
+**Tests:**
+- Controller-shootout artefact: `workspace/scenario_results/controller_shootout_ros2.json` with non-empty rows for 10 modes × scenarios. Missing combinations flagged with reason.
+- Direct-eval: each new canonical scores ≥ 4/5.
+
+**Exit criterion:** 1 new tool + 10 new canonicals (94 → 104). Controller-shootout artefact published.
+
+**Why it gates next:** Phase 10 wraps the long tail; M5 is opportunistic. Without M4's shootout + Top 6-15, Phase 10's M5 add-ons have nothing strategic to bolt onto.
+
+---
+
+### Phase 10 — M5 + Top 16-20 yrkesroll + Multimodal Block 4-5 (3-5 sessions)
+
+**Spec:** `docs/specs/2026-05-09-industrial-expansion-spec.md` § Phase 10.
+
+**Goal:** finish industrial-track tail + multimodal foundation. Library: 104 → 110+.
+
+**Tasks (controller-logic):**
+- `openplc_runtime_attach` (M5, P3, opportunistic) — convenience wrapper over Modbus-TCP bridge. ~50 LOC + 1 CP.
+- `mqtt_sparkplug_bridge_attach` (M5, P2, opportunistic) — Sparkplug B; warehouse-twin pattern. ~250 LOC + 1 CP.
+- 5 new canonicals (Top 16-20): multi-AMR corridor, CAD revision-drift, operator ergonomics, tactile insertion (TacEx), brick-stacking baseplate.
+
+**Tasks (multimodal session, parallel):**
+- Block 4 (canvas wiring) — conditional per multimodal-foundation-spec §22.
+- Block 5 (hardening) — final integration. Canvas SPA wired through canonical pipeline.
+
+**Tests + exit criterion:** 2 new tools + 7 new canonicals (5 from Top 16-20 + 2 from M5). Library: 104 → 111. Multimodal canvas demo runnable. All direct-eval baselines refreshed.
+
+**Why it's last:** opportunistic adds + role-coverage tail; nothing downstream depends on it. Yrkesroll Top 16-20 are explicitly cuttable if running short (drop tactile + brick-stacking first; keep multi-AMR + CAD-drift + operator-ergonomics).
 
 ---
 
@@ -192,21 +292,27 @@ Update `multi-session-coordination.md` AT EACH PHASE BOUNDARY. The doc is short 
 
 ## Realistic time estimate
 
-| Phase | Sessions | Calendar |
+| Phase | Sessions | Notes |
 |---|---|---|
-| 0 | 1-2 | 1 day |
-| 1 | 2-3 | 2-3 days |
-| 2 | 3-5 | 4-7 days |
-| 3 | (multimodal session) | parallel |
-| 4 | 2 | 2 days |
-| 5 | 2-3 | 2-3 days |
-| 6+7 | (multimodal session) | parallel |
+| 0 — Stabilize baseline | 1-2 | seed/n_runs + baseline_compare |
+| 1 — diagnose_scene_feasibility | 2-3 | classify all 86 |
+| 2 — Per-class triage | 3-5 | 49 → ≥65 stable ✓ |
+| 3 — Multimodal Block 1B | (multimodal track) | parallel |
+| 4 — Scenario-profile config | 2 | per-profile branching |
+| 5 — 100% function-gate drive | 2-3 | ≥80/86 stable ✓ on existing 86 |
+| **6 — M1 ROS2 production parity** | **1-2** | **3 tools + CP-87** |
+| 7 — Multimodal Block 2 + 3 | (multimodal track) | parallel to 6 |
+| **8 — M2-M3 bridges + Top-5 yrkesroll** | **5-7** | **4 tools + 7 canonicals (94 total)** |
+| **9 — M4 cuMotion-MoveIt + Top 6-15** | **4-6** | **1 tool + 10 canonicals (104 total)** |
+| **10 — M5 + Top 16-20 + Multimodal Block 4-5** | **3-5** | **2 tools + 7 canonicals (111 total)** |
 
 Plus integration: ~2 sessions for handoff/QA between phases.
 
-**Total controller-logic track:** 12-15 sessions / ~15-20 calendar days.
+**Total controller-logic track:** 23-31 sessions (was 12-15 before industrial-expansion).
 **Total multimodal track (parallel):** Block 1B-5 ≈ 10-15 sessions.
-**Critical path:** Phase 0 → Phase 1 → Phase 2 → Phase 4 → Phase 5 (this is sequential per controller-logic ownership; can't parallelize within track).
+**Critical path:** Phase 0 → 1 → 2 → 4 → 5 → 6 → 8 → 9 → 10 (sequential within controller-logic). Phases 3 + 7 + part of 10 run parallel on multimodal track.
+
+**Library size growth:** 86 → 111 canonicals (+29%) by end of Phase 10. New tools added: ~9 industrial-bridge primitives + ~1300 LOC.
 
 ## Risk register
 
@@ -218,9 +324,21 @@ Plus integration: ~2 sessions for handoff/QA between phases.
 
 ## Definition of done (whole project)
 
+**Controller-logic correctness (Phase 0-5):**
 - 86/86 stable ✓ on canonical function-gate (or ≤6 explicit `expect_pass=False`)
 - `diagnose_scene_feasibility` returns verdict <2s per scene, used in agent pre-flight + canonical CI
 - Scenario-profile branches selected automatically; per-profile fixture canonicals exist
-- Multimodal Block 5 complete (Block 4 conditional — depends on canvas-strategic decision per spec §22)
+
+**Industrial-expansion (Phase 6, 8, 9, 10):**
+- ROS2 a first-class direct-eval target (CP-87 + per-shootout coverage in artefact)
+- Modbus-TCP + OPC-UA bridge primitives ship; subprocess lifecycle zombie-free
+- Library: 86 → 111 canonicals across 8 yrkesroller (Top-20 from yrkesroll spec)
+- Controller-shootout artefact (`workspace/scenario_results/controller_shootout_ros2.json`) covers 10 modes
+- `PLAN.md` 4B + 8F + 9E updated to reflect ROS2/bridge surface
+
+**Multimodal:**
+- Block 5 complete (Block 4 conditional — depends on canvas-strategic decision per multimodal-foundation-spec §22)
+
+**Coordination:**
 - Coordination doc reflects post-merge state with no open ownership conflicts
 
