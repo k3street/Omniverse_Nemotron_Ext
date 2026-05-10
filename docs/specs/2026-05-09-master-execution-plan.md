@@ -47,6 +47,32 @@
 
 **Industrial-expansion: 5 of 5 milestones done** (was 0 of 5 at session start).
 
+**Phase 10 OpenPLC tool ✓ DONE 2026-05-10** (commit `cb395d6`):
+- openplc_runtime_attach — Modbus convenience wrapper for OpenPLC Runtime
+- 16/16 l0 tests green (was 14)
+- MCP schema added (commit `27a8ddb`)
+
+**Phase 8 yrkesroll Top-5 templates ✓ DRAFTED** (5 of 5):
+- CP-NEW-drawer-open, peg-in-hole-single, g1-bimanual-tabletop,
+  amr-pickup-handoff, rl-clone-env
+
+**Phase 9 yrkesroll Top 6-15 templates ✓ DRAFTED** (10 of 10):
+- 3station-oee, inspect-reject, defect-sdg, y-merge-singulation,
+  dr-curriculum, multi-cam-triangulation, controller-shootout-cp,
+  plc-fixture, sim2real-gap, cross-belt-sorter
+
+**Phase 10 yrkesroll Top 16-20 templates ✓ DRAFTED** (5 of 5):
+- multi-amr-corridor, cad-revision-drift, operator-ergonomics,
+  tactile-insertion, brick-stacking
+
+**Library count** (templates only, not all stable_ok):
+- 87 base CPs (CP-01..CP-87, including CP-87 ROS2)
+- 20 yrkesroll-canonicals (Top-5 + Top 6-15 + Top 16-20)
+- 2 plumbing-only canonicals (CP-NEW-plc-conveyor, CP-NEW-opcua-12conveyors)
+- **Total: 109 templates** (master plan target: 111)
+- Remaining 2 templates: multimodal Block 4-5 (parallel session, not in
+  controller-logic track).
+
 **Phase 5 drive 2026-05-10 (post-N=5 verify):** added 4 more unlocks via
 multi-cube simulate_args + template-tweak fixes:
 - CP-57 (heap singulation, cube_paths)
