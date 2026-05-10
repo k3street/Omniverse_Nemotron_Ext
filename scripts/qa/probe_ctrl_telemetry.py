@@ -310,6 +310,26 @@ def _diagnose_stuck(summary: Dict[str, Any], cube_traj: Optional[List[Dict]] = N
             f"drop precision issue? Mode B FJ never created?"
         )
 
+    # Multi-robot handoff phantom-success detection.
+    # Pattern: one robot incremented cubes_delivered (handed off to handoff station)
+    # but another robot is stuck in wait_sensor → relay never picked up cube.
+    last_phase = summary.get("last_phase") or {}
+    delivered = summary.get("cubes_delivered_final", 0) or 0
+    n_robots = len(last_phase) if isinstance(last_phase, dict) else 0
+    if n_robots >= 2 and delivered >= 1:
+        wait_sensor_count = sum(
+            1 for v in last_phase.values()
+            if isinstance(v, str) and "wait_sensor" in v
+        )
+        # ≥1 cube counted but >50% of robots still waiting on sensor → handoff stalled
+        if wait_sensor_count > n_robots // 2:
+            diagnoses.append(
+                f"phantom_handoff: {delivered} cube(s) delivered upstream but "
+                f"{wait_sensor_count}/{n_robots} robots still in wait_sensor — "
+                f"handoff sensor likely never triggered for downstream robot. "
+                f"Check sensor placement at handoff station."
+            )
+
     last_errors = summary.get("last_errors", [])
     for e in last_errors[:3]:
         diagnoses.append(f"runtime error: {e[:120]}")
