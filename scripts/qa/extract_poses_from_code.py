@@ -164,10 +164,18 @@ def _extract_poses(template: Dict[str, Any]) -> Dict[str, Any]:
                 if path not in obstacles:
                     obstacles.append(path)
 
+    # Approach-pose offset: real picks/drops happen ABOVE the cube/bin
+    # center, not at the geometric center (would be inside the object).
+    # Extracted positions are object centers; add +5cm in z for realistic
+    # IK feasibility checks.
+    APPROACH_Z_OFFSET = 0.05
+
     out: Dict[str, Any] = {}
     if robot_path: out["robot_path"] = robot_path
-    if pick_pose: out["pick_pose"] = pick_pose
-    if drop_pose: out["drop_pose"] = drop_pose
+    if pick_pose:
+        out["pick_pose"] = [pick_pose[0], pick_pose[1], pick_pose[2] + APPROACH_Z_OFFSET]
+    if drop_pose:
+        out["drop_pose"] = [drop_pose[0], drop_pose[1], drop_pose[2] + APPROACH_Z_OFFSET]
     if obstacles: out["obstacles"] = obstacles
     if sensor_path: out["sensor_path"] = sensor_path
     if robot_base: out["robot_base"] = robot_base
