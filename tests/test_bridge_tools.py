@@ -36,6 +36,8 @@ from service.isaac_assist_service.chat.tools.bridge_tools import (
     _handle_mqtt_sparkplug_bridge_detach,
     _handle_diagnose_mqtt_sparkplug_bridge,
     _handle_openplc_runtime_attach,
+    _handle_bridge_pause,
+    _handle_bridge_resume,
 )
 
 
@@ -188,6 +190,24 @@ async def test_register_handlers_dispatch():
 async def test_openplc_attach_missing_io_maps():
     res = await _handle_openplc_runtime_attach({"host": "127.0.0.1"})
     assert "error" in res and ("input_map" in res["error"].lower() or "output_map" in res["error"].lower())
+
+
+@pytest.mark.asyncio
+async def test_bridge_pause_missing_id():
+    res = await _handle_bridge_pause({})
+    assert "error" in res
+
+
+@pytest.mark.asyncio
+async def test_bridge_resume_missing_id():
+    res = await _handle_bridge_resume({})
+    assert "error" in res
+
+
+@pytest.mark.asyncio
+async def test_bridge_pause_nonexistent():
+    res = await _handle_bridge_pause({"bridge_id": "nonexistent_xyz"})
+    assert "error" in res
 
 
 @pytest.mark.asyncio

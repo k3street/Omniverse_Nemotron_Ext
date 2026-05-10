@@ -243,6 +243,52 @@ async def _handle_diagnose_modbus_bridge(args: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
+async def _handle_bridge_pause(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Pause a running bridge subprocess by sending SIGSTOP. The subprocess
+    stops emitting attribute updates but stays alive. Use _handle_bridge_resume
+    to restart it.
+
+    Args:
+      bridge_id: id returned by attach handler
+
+    Returns: {ok, pid, paused: True}
+    """
+    bridge_id = args.get("bridge_id")
+    if not bridge_id:
+        return {"error": "bridge_pause requires bridge_id"}
+    pid_path = _bridge_path(bridge_id, "pid")
+    if not pid_path.exists():
+        return {"error": "no such bridge_id"}
+    try:
+        pid = int(pid_path.read_text().strip())
+        os.kill(pid, signal.SIGSTOP)
+    except (ProcessLookupError, ValueError, OSError) as e:
+        return {"error": f"pause failed: {type(e).__name__}: {e}"}
+    return {"ok": True, "pid": pid, "paused": True}
+
+
+async def _handle_bridge_resume(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Resume a paused bridge subprocess by sending SIGCONT.
+
+    Args:
+      bridge_id: id returned by attach handler
+
+    Returns: {ok, pid, paused: False}
+    """
+    bridge_id = args.get("bridge_id")
+    if not bridge_id:
+        return {"error": "bridge_resume requires bridge_id"}
+    pid_path = _bridge_path(bridge_id, "pid")
+    if not pid_path.exists():
+        return {"error": "no such bridge_id"}
+    try:
+        pid = int(pid_path.read_text().strip())
+        os.kill(pid, signal.SIGCONT)
+    except (ProcessLookupError, ValueError, OSError) as e:
+        return {"error": f"resume failed: {type(e).__name__}: {e}"}
+    return {"ok": True, "pid": pid, "paused": False}
+
+
 async def _handle_modbus_tcp_bridge_detach(args: Dict[str, Any]) -> Dict[str, Any]:
     """Stop a previously-attached Modbus bridge cleanly. Sends SIGTERM,
     waits up to 5s, then SIGKILL if still alive."""
@@ -628,3 +674,5 @@ def register_bridge_handlers(handlers: Dict[str, Any]) -> None:
     handlers["mqtt_sparkplug_bridge_detach"] = _handle_mqtt_sparkplug_bridge_detach
     handlers["diagnose_mqtt_sparkplug_bridge"] = _handle_diagnose_mqtt_sparkplug_bridge
     handlers["openplc_runtime_attach"] = _handle_openplc_runtime_attach
+    handlers["bridge_pause"] = _handle_bridge_pause
+    handlers["bridge_resume"] = _handle_bridge_resume
