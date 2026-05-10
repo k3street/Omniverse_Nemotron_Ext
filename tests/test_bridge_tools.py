@@ -1,0 +1,172 @@
+"""Unit tests for bridge_tools.py — Phase 6 M2 Modbus bridge primitive.
+
+Tests (l0):
+- attach with bad args → returns error
+- attach + diagnose against mock pymodbus server → alive, polling
+- detach → SIGTERM clean
+- diagnose for nonexistent bridge_id → error
+- subprocess survives + emits JSON updates
+"""
+from __future__ import annotations
+
+import asyncio
+import os
+import socket
+import subprocess
+import sys
+import time
+from contextlib import closing
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.l0
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from service.isaac_assist_service.chat.tools.bridge_tools import (
+    _handle_modbus_tcp_bridge_attach,
+    _handle_modbus_tcp_bridge_detach,
+    _handle_diagnose_modbus_bridge,
+)
+
+
+def _free_port() -> int:
+    """Find an unused TCP port for the mock server."""
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture
+def mock_modbus_server():
+    """Spin up a pymodbus 3.11 server in a subprocess. Yields its port."""
+    port = _free_port()
+    code = f"""
+from pymodbus.server import StartTcpServer
+from pymodbus.datastore import ModbusServerContext, ModbusDeviceContext, ModbusSequentialDataBlock
+device = ModbusDeviceContext(hr=ModbusSequentialDataBlock(0, [11, 22, 33, 44, 55, 66, 77, 88]))
+context = ModbusServerContext(devices=device, single=True)
+StartTcpServer(context=context, address=('127.0.0.1', {port}))
+"""
+    proc = subprocess.Popen([sys.executable, "-c", code],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                             start_new_session=True)
+    # Wait for port to listen (up to 3s)
+    for _ in range(30):
+        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+            try:
+                s.connect(("127.0.0.1", port))
+                break
+            except Exception:
+                time.sleep(0.1)
+    yield port
+    try:
+        os.killpg(os.getpgid(proc.pid), 15)
+    except Exception:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_attach_missing_host():
+    res = await _handle_modbus_tcp_bridge_attach({"register_map": {"/x": 0}})
+    assert "error" in res
+    assert "host" in res["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_attach_empty_register_map():
+    res = await _handle_modbus_tcp_bridge_attach({"host": "127.0.0.1", "register_map": {}})
+    assert "error" in res
+    assert "register_map" in res["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_diagnose_missing_bridge_id():
+    res = await _handle_diagnose_modbus_bridge({})
+    assert "error" in res
+
+
+@pytest.mark.asyncio
+async def test_detach_missing_bridge_id():
+    res = await _handle_modbus_tcp_bridge_detach({})
+    assert "error" in res
+
+
+@pytest.mark.asyncio
+async def test_detach_nonexistent_bridge():
+    res = await _handle_modbus_tcp_bridge_detach({"bridge_id": "nonexistent_xyz"})
+    assert "error" in res
+
+
+@pytest.mark.asyncio
+async def test_attach_diagnose_detach_cycle(mock_modbus_server):
+    port = mock_modbus_server
+    res = await _handle_modbus_tcp_bridge_attach({
+        "host": "127.0.0.1", "port": port,
+        "register_map": {"/World/Belt/speed": 0, "/World/Light/intensity": 1, "/World/Cube/exists": 2},
+        "rate_hz": 10.0,
+    })
+    assert res.get("ok"), res
+    assert "bridge_id" in res
+    assert res["pid"] > 0
+    assert res["n_registers"] == 3
+
+    bid = res["bridge_id"]
+
+    # Wait for some polling
+    await asyncio.sleep(1.5)
+
+    diag = await _handle_diagnose_modbus_bridge({"bridge_id": bid})
+    assert diag.get("alive") is True, diag
+    assert diag["n_register_updates"] >= 5  # 10Hz × 1.5s = ~15
+
+    # Verify log contains attr-update lines
+    log_tail = diag.get("log_tail") or []
+    assert any("attrs" in line for line in log_tail)
+
+    # Detach
+    det = await _handle_modbus_tcp_bridge_detach({"bridge_id": bid})
+    assert det.get("ok"), det
+    assert det.get("method") in ("SIGTERM", "SIGKILL")
+
+    # Verify dead after detach. Subprocess may take a moment to reap;
+    # poll up to 3s for alive=False.
+    for _ in range(30):
+        await asyncio.sleep(0.1)
+        diag2 = await _handle_diagnose_modbus_bridge({"bridge_id": bid})
+        if not diag2["alive"]:
+            break
+    assert diag2["alive"] is False
+
+
+@pytest.mark.asyncio
+async def test_attach_to_nonexistent_server():
+    """Bridge attaches but worker exits when can't connect → diagnose alive=False."""
+    res = await _handle_modbus_tcp_bridge_attach({
+        "host": "127.0.0.1",
+        "port": 1,  # unprivileged + likely closed
+        "register_map": {"/x": 0},
+        "rate_hz": 1.0,
+    })
+    assert res.get("ok"), res  # attach itself succeeds (subprocess spawned)
+    bid = res["bridge_id"]
+    await asyncio.sleep(1.0)
+
+    diag = await _handle_diagnose_modbus_bridge({"bridge_id": bid})
+    # Worker should have exited because connect failed
+    assert diag["alive"] is False
+    log = " ".join(diag.get("log_tail") or [])
+    assert "connect_failed" in log or "Connection" in log
+
+
+@pytest.mark.asyncio
+async def test_register_handlers_dispatch():
+    """register_bridge_handlers wires 3 handlers into a dict."""
+    from service.isaac_assist_service.chat.tools.bridge_tools import register_bridge_handlers
+    handlers: dict = {}
+    register_bridge_handlers(handlers)
+    assert "modbus_tcp_bridge_attach" in handlers
+    assert "modbus_tcp_bridge_detach" in handlers
+    assert "diagnose_modbus_bridge" in handlers

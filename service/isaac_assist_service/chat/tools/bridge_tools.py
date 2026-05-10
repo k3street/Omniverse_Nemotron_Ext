@@ -202,7 +202,17 @@ async def _handle_diagnose_modbus_bridge(args: Dict[str, Any]) -> Dict[str, Any]
         try:
             pid = int(pid_path.read_text().strip())
             os.kill(pid, 0)  # signal 0 = check existence
-            alive = True
+            # Check if zombie (process exists but is dead, awaiting reap).
+            # /proc/<pid>/status State field is 'Z' for zombies.
+            try:
+                status = Path(f"/proc/{pid}/status").read_text()
+                state_line = next((l for l in status.splitlines() if l.startswith("State:")), "")
+                if "Z" in state_line:
+                    alive = False
+                else:
+                    alive = True
+            except Exception:
+                alive = True  # fallback: trust os.kill
         except (ProcessLookupError, ValueError):
             alive = False
         except PermissionError:
