@@ -75,5 +75,13 @@
     "Cubes within each tray not slot-precision-placed (no drop_targets dict). They land in tray but pile up if multiple cubes per tray.",
     "1 Gemini API call per build."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + xy_tol=0.15 + rest_speed=10 \u2014 Cube_4 delivered to RedTray)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + xy_tol=0.15 + rest_speed=10 \u2014 Cube_4 delivered to RedTray)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "robot_base": [
+      0,
+      0,
+      0.75
+    ]
+  }
 }

@@ -91,6 +91,13 @@
     "obstacles": [
       "/World/PalletBase"
     ],
-    "has_mutex": false
+    "has_mutex": false,
+    "robot_path": "/World/FrankaA",
+    "sensor_path": "/World/SensorA",
+    "robot_base": [
+      -0.6,
+      0,
+      0.75
+    ]
   }
 }

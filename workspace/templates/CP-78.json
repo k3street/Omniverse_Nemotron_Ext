@@ -54,6 +54,16 @@
     "robot_path": "/World/UR10",
     "obstacles": [
       "/World/Pedestal"
+    ],
+    "pick_pose": [
+      -0.5,
+      0.4,
+      0.975
+    ],
+    "drop_pose": [
+      0.5,
+      -0.4,
+      0.75
     ]
   }
 }

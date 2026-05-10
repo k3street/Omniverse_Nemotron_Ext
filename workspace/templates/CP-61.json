@@ -14,21 +14,42 @@
     "setup_cortex_behavior",
     "register_moving_obstacle"
   ],
-  "thoughts": "Six Cortex-Franka specifics for CP-61:\n1) Franka at standard position. Wrapped via setup_cortex_behavior(robot_kind='franka').\n2) 3 cubes on conveyor (potential moving obstacles for stacking).\n3) register_moving_obstacle adds each cube to robot's runtime obstacle list.\n4) StackBin behind robot for block-stacking output.\n5) NO setup_pick_place_controller — Cortex uses RmpFlowCortex internally (different controller).\n6) Realizes #28 infrastructure. Full scenario also needs custom DfDecider tree (Sprint 4+).",
+  "thoughts": "Six Cortex-Franka specifics for CP-61:\n1) Franka at standard position. Wrapped via setup_cortex_behavior(robot_kind='franka').\n2) 3 cubes on conveyor (potential moving obstacles for stacking).\n3) register_moving_obstacle adds each cube to robot's runtime obstacle list.\n4) StackBin behind robot for block-stacking output.\n5) NO setup_pick_place_controller \u2014 Cortex uses RmpFlowCortex internally (different controller).\n6) Realizes #28 infrastructure. Full scenario also needs custom DfDecider tree (Sprint 4+).",
   "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\nfor i, x in enumerate([-1.4, -1.15, -0.9]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(prim_paths=[f\"/World/Cube_{i+1}\" for i in range(3)], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(3)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_bin(prim_path=\"/World/StackBin\", position=[0, -0.4, 0.75], size=[0.2, 0.2, 0.15])\n\n# Cortex framework wrapper\nsetup_cortex_behavior(\n    robot_path=\"/World/Franka\",\n    robot_kind=\"franka\",\n    behavior_module=\"isaacsim.cortex.behaviors.franka.peck_demo\",\n    obstacles=[\"/World/Table\", \"/World/StackBin\"],\n)\n\n# Register cubes as dynamic obstacles for runtime collision avoidance\nfor i in range(3):\n    register_moving_obstacle(\n        robot_path=\"/World/Franka\",\n        obstacle_path=f\"/World/Cube_{i+1}\",\n    )",
   "settle_state": {
     "cubes": {
-      "/World/Cube_1": [-1.4,  0.4, 0.835],
-      "/World/Cube_2": [-1.15, 0.4, 0.835],
-      "/World/Cube_3": [-0.9,  0.4, 0.835]
+      "/World/Cube_1": [
+        -1.4,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_2": [
+        -1.15,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_3": [
+        -0.9,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/StackBin", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/StackBin",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_1"
   },
@@ -38,11 +59,24 @@
     "duration_s": 60
   },
   "extends": "CP-01",
-  "extension_notes": "CP-61 realizes #28 FrankaCortexBlockStacking infrastructure. Cortex framework wrapper installed; cubes registered as moving obstacles. Form-gate fails (no setup_pick_place_controller — Cortex uses different controller). Full scenario requires DfDecider tree at runtime.",
+  "extension_notes": "CP-61 realizes #28 FrankaCortexBlockStacking infrastructure. Cortex framework wrapper installed; cubes registered as moving obstacles. Form-gate fails (no setup_pick_place_controller \u2014 Cortex uses different controller). Full scenario requires DfDecider tree at runtime.",
   "failure_modes": [
-    "Cortex framework may not be available in stripped Kit builds — setup_cortex_behavior errors gracefully.",
-    "register_moving_obstacle just sets metadata attr — runtime polling needs controller integration.",
+    "Cortex framework may not be available in stripped Kit builds \u2014 setup_cortex_behavior errors gracefully.",
+    "register_moving_obstacle just sets metadata attr \u2014 runtime polling needs controller integration.",
     "form-gate verifier expects pick-place controller subscription; Cortex doesn't install one. Form-gate FAILS expectedly."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate expected to fail (Cortex doesn't install pick-place controller); build-only verification"
+  "verified_status": "build-spec-2026-05-08; form-gate expected to fail (Cortex doesn't install pick-place controller); build-only verification",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "drop_pose": [
+      0,
+      -0.4,
+      0.75
+    ],
+    "robot_base": [
+      0,
+      0,
+      0.75
+    ]
+  }
 }

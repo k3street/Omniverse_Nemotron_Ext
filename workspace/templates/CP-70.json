@@ -62,6 +62,16 @@
   "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2713 (UR10 cuRobo+surface_gripper delivers via raycast workaround)",
   "diagnose_args": {
     "robot_path": "/World/UR10",
-    "sensor_path": "/World/PickSensor"
+    "sensor_path": "/World/PickSensor",
+    "pick_pose": [
+      -0.5,
+      0.4,
+      0.835
+    ],
+    "drop_pose": [
+      0.5,
+      -0.3,
+      0.75
+    ]
   }
 }

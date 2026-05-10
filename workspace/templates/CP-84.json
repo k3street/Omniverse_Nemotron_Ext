@@ -59,6 +59,11 @@
     "obstacles": [
       "/World/Pedestal",
       "/World/BaseCube"
+    ],
+    "pick_pose": [
+      -0.5,
+      0.4,
+      0.975
     ]
   }
 }

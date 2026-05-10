@@ -75,5 +75,18 @@
     "Same camera + verified placement [0, 0.3, 1.5] \u2192 target [0, 0.3, 0.85].",
     "Mutex prim at heap surface \u2014 no runtime enforcement (Sprint 3+)."
   ],
-  "verified_status": "build-attempted-2026-05-08; build 51/52, form-gate FAIL on this run \u2014 Gemini returned 0 detections (heap has overlapping cubes; vision doesn't separate them well). CP-47/CP-48 verify the same vision pipeline works for separated cubes; heap geometry is the variable here. Could replace heap with spread cubes for reliable vision."
+  "verified_status": "build-attempted-2026-05-08; build 51/52, form-gate FAIL on this run \u2014 Gemini returned 0 detections (heap has overlapping cubes; vision doesn't separate them well). CP-47/CP-48 verify the same vision pipeline works for separated cubes; heap geometry is the variable here. Could replace heap with spread cubes for reliable vision.",
+  "diagnose_args": {
+    "robot_path": "/World/FrankaA",
+    "drop_pose": [
+      -0.5,
+      -0.5,
+      0.75
+    ],
+    "robot_base": [
+      -0.5,
+      0,
+      0.75
+    ]
+  }
 }

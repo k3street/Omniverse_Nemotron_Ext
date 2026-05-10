@@ -60,6 +60,16 @@
   "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2717 (belt-pause-from-callback bug \u2014 verified that surfaceVelocityEnabled toggle ALSO doesn't propagate from inside _on_step. PhysX-level integrator caches independently of USD attribute layer)",
   "diagnose_args": {
     "robot_path": "/World/UR10",
-    "sensor_path": "/World/PickSensor"
+    "sensor_path": "/World/PickSensor",
+    "pick_pose": [
+      -0.85,
+      0.4,
+      1.01
+    ],
+    "drop_pose": [
+      0.5,
+      -0.4,
+      0.75
+    ]
   }
 }

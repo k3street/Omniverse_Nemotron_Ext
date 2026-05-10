@@ -64,5 +64,23 @@
     "1 Gemini API call per canonical run \u2014 be aware of cost.",
     "Same physics gotchas as CP-33."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 Cube_red delivered to RedBin)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 Cube_red delivered to RedBin)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "pick_pose": [
+      -0.6,
+      0.4,
+      0.835
+    ],
+    "drop_pose": [
+      -0.4,
+      -0.4,
+      0.75
+    ],
+    "robot_base": [
+      0,
+      0,
+      0.75
+    ]
+  }
 }

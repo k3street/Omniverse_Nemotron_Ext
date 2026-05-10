@@ -105,6 +105,23 @@
       }
     ],
     "obstacles": [],
-    "has_mutex": false
+    "has_mutex": false,
+    "robot_path": "/World/Franka1",
+    "pick_pose": [
+      -2.5,
+      0.4,
+      0.835
+    ],
+    "drop_pose": [
+      1.0,
+      0.4,
+      0.75
+    ],
+    "sensor_path": "/World/Sensor1",
+    "robot_base": [
+      -1.0,
+      0,
+      0.75
+    ]
   }
 }
