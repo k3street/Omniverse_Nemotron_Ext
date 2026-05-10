@@ -413,6 +413,164 @@ async def _handle_opcua_bridge_detach(args: Dict[str, Any]) -> Dict[str, Any]:
     return await _handle_modbus_tcp_bridge_detach(args)
 
 
+# --- MQTT-Sparkplug subprocess worker (M5) -------------------------------
+
+_MQTT_WORKER_TEMPLATE = '''#!/usr/bin/env python3
+"""mqtt_bridge_worker — runs as subprocess, subscribes to MQTT topics."""
+from __future__ import annotations
+import json, sys, time, signal
+import paho.mqtt.client as mqtt
+
+CONFIG = json.loads(sys.stdin.read())
+HOST = CONFIG["host"]
+PORT = int(CONFIG.get("port", 1883))
+TOPIC_MAP = CONFIG["topic_map"]   # {usd_attr_path: mqtt_topic}
+USERNAME = CONFIG.get("username")
+PASSWORD = CONFIG.get("password")
+KEEPALIVE = int(CONFIG.get("keepalive", 30))
+
+_running = True
+def _on_shutdown(signum, frame):
+    global _running
+    print(json.dumps({"ts": time.time(), "event": "shutdown_signal"}), flush=True)
+    _running = False
+
+signal.signal(signal.SIGTERM, _on_shutdown)
+signal.signal(signal.SIGINT, _on_shutdown)
+
+
+# Topic → list of usd_paths (multiple attrs can subscribe to same topic)
+_topic_to_usd = {}
+for usd_path, topic in TOPIC_MAP.items():
+    _topic_to_usd.setdefault(topic, []).append(usd_path)
+
+
+def on_connect(client, userdata, flags, rc, properties=None):
+    print(json.dumps({"ts": time.time(), "event": "connected", "rc": int(rc),
+                      "host": HOST, "port": PORT}), flush=True)
+    for topic in _topic_to_usd:
+        client.subscribe(topic, qos=1)
+
+
+def on_message(client, userdata, msg):
+    payload = msg.payload
+    try:
+        # Try JSON first
+        v = json.loads(payload.decode())
+    except Exception:
+        # Fallback: try numeric, otherwise raw string
+        try:
+            v = float(payload.decode())
+        except Exception:
+            v = payload.decode(errors="replace")
+    attrs = {}
+    for usd_path in _topic_to_usd.get(msg.topic, []):
+        attrs[usd_path] = v
+    if attrs:
+        out = {"ts": time.time(), "topic": msg.topic, "attrs": attrs}
+        print(json.dumps(out, default=str), flush=True)
+
+
+def on_disconnect(client, userdata, rc, properties=None):
+    print(json.dumps({"ts": time.time(), "event": "disconnected", "rc": int(rc)}), flush=True)
+
+
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+client.on_connect = on_connect
+client.on_message = on_message
+client.on_disconnect = on_disconnect
+if USERNAME:
+    client.username_pw_set(USERNAME, PASSWORD or "")
+
+try:
+    client.connect(HOST, PORT, keepalive=KEEPALIVE)
+except Exception as e:
+    print(json.dumps({"ts": time.time(), "event": "connect_failed",
+                      "err": type(e).__name__ + ": " + str(e)[:200]}), flush=True)
+    sys.exit(1)
+
+client.loop_start()
+while _running:
+    time.sleep(0.1)
+client.loop_stop()
+client.disconnect()
+'''
+
+
+def _spawn_mqtt_subprocess(host: str, port: int, topic_map: Dict[str, str],
+                             username: Optional[str], password: Optional[str]) -> Dict[str, Any]:
+    bridge_id = _make_id()
+    worker_path = _bridge_path(bridge_id, "py")
+    pid_path = _bridge_path(bridge_id, "pid")
+    log_path = _bridge_path(bridge_id, "log")
+
+    worker_path.write_text(_MQTT_WORKER_TEMPLATE)
+    config = json.dumps({
+        "host": host, "port": port, "topic_map": topic_map,
+        "username": username, "password": password,
+    })
+    proc = subprocess.Popen(
+        [sys.executable, str(worker_path)],
+        stdin=subprocess.PIPE,
+        stdout=open(log_path, "ab"),
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    proc.stdin.write(config.encode())
+    proc.stdin.close()
+    pid_path.write_text(str(proc.pid))
+    time.sleep(1)
+    return {
+        "bridge_id": bridge_id, "pid": proc.pid,
+        "log_path": str(log_path), "worker_path": str(worker_path),
+    }
+
+
+async def _handle_mqtt_sparkplug_bridge_attach(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Phase 6 M5: spawn supervised paho-mqtt subprocess that subscribes
+    to MQTT topics (Sparkplug-compatible) and emits attribute updates.
+
+    Args:
+      host: MQTT broker host
+      port: broker port (default 1883)
+      topic_map: {usd_attr_path: mqtt_topic}
+      username/password: optional broker auth
+
+    Returns: {bridge_id, pid, log_path, ...}
+    """
+    host = (args.get("host") or "").strip()
+    port = int(args.get("port", 1883))
+    topic_map = args.get("topic_map") or {}
+    username = args.get("username")
+    password = args.get("password")
+
+    if not host:
+        return {"error": "mqtt_sparkplug_bridge_attach requires host"}
+    if not topic_map:
+        return {"error": "mqtt_sparkplug_bridge_attach requires non-empty topic_map"}
+
+    try:
+        out = _spawn_mqtt_subprocess(host, port, topic_map, username, password)
+    except Exception as e:
+        return {"error": f"spawn_failed: {type(e).__name__}: {str(e)[:200]}"}
+
+    return {
+        "ok": True, **out,
+        "host": host, "port": port,
+        "n_topics": len(topic_map),
+    }
+
+
+async def _handle_diagnose_mqtt_sparkplug_bridge(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Phase 6 M5 honesty pair (reuses modbus diagnose code path)."""
+    return await _handle_diagnose_modbus_bridge(args)
+
+
+async def _handle_mqtt_sparkplug_bridge_detach(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Reuses modbus detach (PID file shape is identical)."""
+    return await _handle_modbus_tcp_bridge_detach(args)
+
+
 def register_bridge_handlers(handlers: Dict[str, Any]) -> None:
     """Hook used by tool_executor.py to register industrial-bridge handlers."""
     handlers["modbus_tcp_bridge_attach"] = _handle_modbus_tcp_bridge_attach
@@ -421,3 +579,6 @@ def register_bridge_handlers(handlers: Dict[str, Any]) -> None:
     handlers["opcua_bridge_attach"] = _handle_opcua_bridge_attach
     handlers["opcua_bridge_detach"] = _handle_opcua_bridge_detach
     handlers["diagnose_opcua_bridge"] = _handle_diagnose_opcua_bridge
+    handlers["mqtt_sparkplug_bridge_attach"] = _handle_mqtt_sparkplug_bridge_attach
+    handlers["mqtt_sparkplug_bridge_detach"] = _handle_mqtt_sparkplug_bridge_detach
+    handlers["diagnose_mqtt_sparkplug_bridge"] = _handle_diagnose_mqtt_sparkplug_bridge

@@ -32,6 +32,9 @@ from service.isaac_assist_service.chat.tools.bridge_tools import (
     _handle_opcua_bridge_attach,
     _handle_opcua_bridge_detach,
     _handle_diagnose_opcua_bridge,
+    _handle_mqtt_sparkplug_bridge_attach,
+    _handle_mqtt_sparkplug_bridge_detach,
+    _handle_diagnose_mqtt_sparkplug_bridge,
 )
 
 
@@ -166,16 +169,17 @@ async def test_attach_to_nonexistent_server():
 
 @pytest.mark.asyncio
 async def test_register_handlers_dispatch():
-    """register_bridge_handlers wires 6 handlers into a dict (M2+M3)."""
+    """register_bridge_handlers wires 9 handlers into a dict (M2+M3+M5)."""
     from service.isaac_assist_service.chat.tools.bridge_tools import register_bridge_handlers
     handlers: dict = {}
     register_bridge_handlers(handlers)
-    assert "modbus_tcp_bridge_attach" in handlers
-    assert "modbus_tcp_bridge_detach" in handlers
-    assert "diagnose_modbus_bridge" in handlers
-    assert "opcua_bridge_attach" in handlers
-    assert "opcua_bridge_detach" in handlers
-    assert "diagnose_opcua_bridge" in handlers
+    for name in [
+        "modbus_tcp_bridge_attach", "modbus_tcp_bridge_detach", "diagnose_modbus_bridge",
+        "opcua_bridge_attach", "opcua_bridge_detach", "diagnose_opcua_bridge",
+        "mqtt_sparkplug_bridge_attach", "mqtt_sparkplug_bridge_detach",
+        "diagnose_mqtt_sparkplug_bridge",
+    ]:
+        assert name in handlers, name
 
 
 # --- M3 OPC-UA tests ----------------------------------------------------
@@ -267,3 +271,79 @@ async def test_opcua_attach_diagnose_detach_cycle(mock_opcua_server):
         if not diag2["alive"]:
             break
     assert diag2["alive"] is False
+
+
+# --- M5 MQTT-Sparkplug tests --------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_mqtt_attach_missing_host():
+    res = await _handle_mqtt_sparkplug_bridge_attach({"topic_map": {"/x": "test/topic"}})
+    assert "error" in res and "host" in res["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_mqtt_attach_empty_topic_map():
+    res = await _handle_mqtt_sparkplug_bridge_attach({"host": "127.0.0.1", "topic_map": {}})
+    assert "error" in res and "topic_map" in res["error"].lower()
+
+
+@pytest.fixture
+def mock_mqtt_broker():
+    """Spin up a minimal MQTT broker via paho-mqtt's loopback or use external.
+    Falls back to an in-process Hbmqtt-style broker if available; else skips.
+    Simplest: use python-mqtt-broker package or a tiny test broker."""
+    # paho-mqtt is client only; spin up a lightweight broker via 'amqtt' if available.
+    # For simplicity we run a tiny embedded broker using the 'amqtt' library OR skip
+    # if no broker is available locally.
+    try:
+        import asyncio as _asyncio
+        from amqtt.broker import Broker
+    except ImportError:
+        pytest.skip("amqtt broker library not available; skipping live MQTT cycle test")
+        return
+    port = _free_port()
+    config = {
+        "listeners": {"default": {"type": "tcp", "bind": f"127.0.0.1:{port}"}},
+        "auth": {"allow-anonymous": True},
+    }
+    code = f"""
+import asyncio
+from amqtt.broker import Broker
+b = Broker({config!r})
+async def run():
+    await b.start()
+    await asyncio.sleep(60)
+asyncio.run(run())
+"""
+    proc = subprocess.Popen([sys.executable, "-c", code],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                             start_new_session=True)
+    for _ in range(50):
+        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+            try:
+                s.connect(("127.0.0.1", port)); break
+            except Exception:
+                time.sleep(0.1)
+    yield port
+    try:
+        os.killpg(os.getpgid(proc.pid), 15)
+    except Exception:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_mqtt_attach_to_nonexistent_broker():
+    """Bridge spawns but worker exits; diagnose alive=False."""
+    res = await _handle_mqtt_sparkplug_bridge_attach({
+        "host": "127.0.0.1", "port": 1,
+        "topic_map": {"/x": "test/topic"},
+    })
+    assert res.get("ok"), res
+    bid = res["bridge_id"]
+    await asyncio.sleep(1.5)
+    diag = await _handle_diagnose_mqtt_sparkplug_bridge({"bridge_id": bid})
+    # Worker should fail to connect (port 1 closed)
+    assert diag["alive"] is False, diag
+    log = " ".join(diag.get("log_tail") or [])
+    assert "connect_failed" in log or "Connection" in log or "ConnectionRefused" in log
