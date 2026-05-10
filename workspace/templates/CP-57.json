@@ -65,7 +65,13 @@
     "cube_path": "/World/CubeHeap/Item_1"
   },
   "simulate_args": {
-    "cube_path": "/World/CubeHeap/Item_1",
+    "cube_paths": [
+      "/World/CubeHeap/Item_1",
+      "/World/CubeHeap/Item_2",
+      "/World/CubeHeap/Item_3",
+      "/World/CubeHeap/Item_4",
+      "/World/CubeHeap/Item_5"
+    ],
     "target_path": "/World/Bin",
     "duration_s": 120
   },
