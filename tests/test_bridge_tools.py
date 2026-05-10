@@ -38,6 +38,7 @@ from service.isaac_assist_service.chat.tools.bridge_tools import (
     _handle_openplc_runtime_attach,
     _handle_bridge_pause,
     _handle_bridge_resume,
+    _handle_list_bridges,
 )
 
 
@@ -208,6 +209,23 @@ async def test_bridge_resume_missing_id():
 async def test_bridge_pause_nonexistent():
     res = await _handle_bridge_pause({"bridge_id": "nonexistent_xyz"})
     assert "error" in res
+
+
+@pytest.mark.asyncio
+async def test_list_bridges_returns_dict():
+    """list_bridges always returns dict with 'bridges' and 'n' keys."""
+    res = await _handle_list_bridges({})
+    assert "bridges" in res
+    assert "n" in res
+    assert isinstance(res["bridges"], list)
+    assert res["n"] == len(res["bridges"])
+    if res["n"] > 0:
+        # Each bridge should have these fields
+        for b in res["bridges"]:
+            assert "bridge_id" in b
+            assert "pid" in b
+            assert "alive" in b
+            assert "kind" in b
 
 
 @pytest.mark.asyncio

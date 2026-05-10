@@ -1013,6 +1013,18 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "list_bridges",
+            "description": (
+                "PHASE 6 utility: enumerate all known bridges (alive + dead) "
+                "by scanning /tmp/bridges/. Returns each bridge_id, pid, alive "
+                "status, log path, and inferred kind (modbus / opcua / mqtt_sparkplug)."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "bridge_pause",
             "description": (
                 "PHASE 6 utility: pause a running bridge subprocess via SIGSTOP. "
