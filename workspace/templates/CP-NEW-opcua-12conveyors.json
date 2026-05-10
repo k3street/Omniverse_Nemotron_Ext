@@ -12,10 +12,10 @@
     "verify_pickplace_pipeline"
   ],
   "thoughts": [
-    "F-02 promoted: the honesty template said 'no turnkey OPC-UA → USD extension exists; the bridge is your code'. M3 ships that bridge as opcua_bridge_attach. This canonical proves the pattern at the spec scale (12 tags @ 1 Hz).",
-    "Layout: 12 conveyors in 4×3 grid, each at z=0.78 with surfaceVelocity=[0.2,0,0]. Tag map: ns=2;i=2..13 → /World/Conveyors/CV_01..CV_12 run_command attribute. (asyncua server fixture in tests/test_bridge_tools.py defines ns=2;i=2..4; for 12 nodes, the mock server allocates 12 vars sequentially.)",
+    "F-02 promoted: the honesty template said 'no turnkey OPC-UA \u2192 USD extension exists; the bridge is your code'. M3 ships that bridge as opcua_bridge_attach. This canonical proves the pattern at the spec scale (12 tags @ 1 Hz).",
+    "Layout: 12 conveyors in 4\u00d73 grid, each at z=0.78 with surfaceVelocity=[0.2,0,0]. Tag map: ns=2;i=2..13 \u2192 /World/Conveyors/CV_01..CV_12 run_command attribute. (asyncua server fixture in tests/test_bridge_tools.py defines ns=2;i=2..4; for 12 nodes, the mock server allocates 12 vars sequentially.)",
     "Rate: 1 Hz per F-02 spec. Higher rates (10 Hz) would also work but are unnecessary for run/stop visual state.",
-    "Note: function-gate via simulate_traversal_check is N/A — canonical tests bridge plumbing, not cube delivery. Custom validation via diagnose_opcua_bridge n_register_updates ≥ 1 within 2s. Same pattern as CP-NEW-plc-conveyor."
+    "Note: function-gate via simulate_traversal_check is N/A \u2014 canonical tests bridge plumbing, not cube delivery. Custom validation via diagnose_opcua_bridge n_register_updates \u2265 1 within 2s. Same pattern as CP-NEW-plc-conveyor."
   ],
   "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\nfor i in range(1, 13):\n    row = (i - 1) // 4\n    col = (i - 1) % 4\n    create_conveyor(prim_path=f\"/World/Conveyors/CV_{i:02d}\", position=[col*1.5 - 2.25, row*0.6 - 0.6, 0.78], size=[1.2, 0.4, 0.05], surface_velocity=[0.2, 0, 0])\nopcua_bridge_attach(url=\"opc.tcp://127.0.0.1:4840\", node_map={f\"/World/Conveyors/CV_{i:02d}/run_command\": f\"ns=2;i={i+1}\" for i in range(1, 13)}, rate_hz=1.0)",
   "verify_args": null,
@@ -24,10 +24,10 @@
   "extends": "phase6-m3",
   "extension_notes": "F-02 promotion: honesty-pattern template made runnable. 12-tag OPC-UA bridge pattern from F-02 'thoughts' field implemented end-to-end via opcua_bridge_attach. Tests asyncua subprocess against 12-node mock server.",
   "failure_modes": [
-    "asyncua mock server not running on opc.tcp://127.0.0.1:4840 → bridge attach succeeds but diagnose shows alive=false + client_error in log",
-    "asyncua not installed → bridge worker fails to start; diagnose log_tail shows ImportError",
-    "Wrong node_map (e.g. ns=2;i=99) → bridge alive but errors logged per-node",
-    "Mock server doesn't define 12 nodes → some attrs missing in attrs map"
+    "asyncua mock server not running on opc.tcp://127.0.0.1:4840 \u2192 bridge attach succeeds but diagnose shows alive=false + client_error in log",
+    "asyncua not installed \u2192 bridge worker fails to start; diagnose log_tail shows ImportError",
+    "Wrong node_map (e.g. ns=2;i=99) \u2192 bridge alive but errors logged per-node",
+    "Mock server doesn't define 12 nodes \u2192 some attrs missing in attrs map"
   ],
-  "verified_status": "draft (M3 plumbing test; F-02 promotion; no function-gate)"
+  "verified_status": "build-spec-2026-05-10; BUILD_OK; plumbing-only (no cube delivery, no simulate_args)"
 }

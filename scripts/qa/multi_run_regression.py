@@ -64,8 +64,22 @@ async def _run_one(label: str, n_runs: int, seed: int) -> Dict:
         return {"label": label, "verdict": "TEMPLATE_NOT_FOUND"}
     template = json.loads(template_path.read_text())
     sim_args = dict(template.get("simulate_args") or {})
-    if not sim_args:
-        return {"label": label, "verdict": "NO_SIMULATE_ARGS"}
+    # If no simulate_args, still build and report build status (plumbing canonicals).
+    build_only = not sim_args
+    if build_only:
+        try:
+            await _reset_scene()
+            build_res = await execute_template_canonical(template)
+        except Exception as e:
+            return {"label": label, "verdict": "BUILD_EXC", "err": str(e)[:120]}
+        n_ok = build_res.get("n_ok")
+        n_calls = build_res.get("n_calls")
+        verdict = "BUILD_OK" if build_res.get("instantiated") else "BUILD_FAILED"
+        return {
+            "label": label, "verdict": verdict,
+            "build": f"{n_ok}/{n_calls}",
+            "errs": (build_res.get("errors") or [])[:2],
+        }
 
     # Inject Phase 0 multi-run params
     sim_args["n_runs"] = n_runs

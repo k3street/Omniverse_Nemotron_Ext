@@ -14,7 +14,7 @@
   ],
   "thoughts": [
     "Real PLC-in-the-loop pattern: external mock Modbus server controls fixture state via holding register HR0 (0=open, 1=clamped).",
-    "Fixture is a virtual 'clamp' — PhysicsFixedJoint applied/removed based on HR0. Robot inserts part during clamp window.",
+    "Fixture is a virtual 'clamp' \u2014 PhysicsFixedJoint applied/removed based on HR0. Robot inserts part during clamp window.",
     "M2 modbus_tcp_bridge polls HR0 at 10Hz. /World/Fixture/clamped attribute updated.",
     "For canonical-build: just verify bridge attach + clamp prim creation. Runtime control is via external mock server (test rig).",
     "Builds on CP-NEW-plc-conveyor (M2 plumbing) but adds part-insertion task."
@@ -24,11 +24,11 @@
   "simulate_args": null,
   "diagnose_args": null,
   "extends": "phase9-yrkesroll-#13",
-  "extension_notes": "Industrial-integration canonical. PLC fixture pattern requires external mock Modbus server (pymodbus.server) with HR0/HR1 prepopulated. Function-gate N/A — tests bridge plumbing + part-insertion sequence.",
+  "extension_notes": "Industrial-integration canonical. PLC fixture pattern requires external mock Modbus server (pymodbus.server) with HR0/HR1 prepopulated. Function-gate N/A \u2014 tests bridge plumbing + part-insertion sequence.",
   "failure_modes": [
-    "Modbus mock server on 127.0.0.1:5022 not running — bridge alive=False",
-    "Robot inserts part before clamp_force reaches threshold — part may slide off fixture",
+    "Modbus mock server on 127.0.0.1:5022 not running \u2014 bridge alive=False",
+    "Robot inserts part before clamp_force reaches threshold \u2014 part may slide off fixture",
     "Bridge polling at 10Hz means up to 100ms latency between PLC clamp and Robot release"
   ],
-  "verified_status": "draft (Phase 9 #13; needs Modbus mock server)"
+  "verified_status": "build-spec-2026-05-10; BUILD_OK; plumbing-only (no cube delivery, no simulate_args)"
 }
