@@ -1013,6 +1013,35 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "bridge_pause",
+            "description": (
+                "PHASE 6 utility: pause a running bridge subprocess via SIGSTOP. "
+                "Subprocess stops emitting attribute updates but keeps state. "
+                "Use bridge_resume to restart. Useful for PLC-fixture clamp windows "
+                "or coordinated multi-bridge orchestration."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"bridge_id": {"type": "string"}},
+                "required": ["bridge_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bridge_resume",
+            "description": "PHASE 6 utility: resume a paused bridge subprocess via SIGCONT.",
+            "parameters": {
+                "type": "object",
+                "properties": {"bridge_id": {"type": "string"}},
+                "required": ["bridge_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "openplc_runtime_attach",
             "description": (
                 "PHASE 10 M5 P3: convenience wrapper over modbus_tcp_bridge_attach "
