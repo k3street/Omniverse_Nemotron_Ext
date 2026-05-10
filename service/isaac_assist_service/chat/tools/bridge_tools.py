@@ -571,6 +571,51 @@ async def _handle_mqtt_sparkplug_bridge_detach(args: Dict[str, Any]) -> Dict[str
     return await _handle_modbus_tcp_bridge_detach(args)
 
 
+async def _handle_openplc_runtime_attach(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Phase 10 M5 P3: convenience wrapper around modbus_tcp_bridge_attach
+    for OpenPLC Runtime connections.
+
+    OpenPLC Runtime exposes its I/O via standard Modbus-TCP holding registers
+    on default port 502. This wrapper just rewrites a more PLC-friendly
+    interface (input_address, output_address, coil_address) into the
+    register_map format used by modbus_tcp_bridge_attach.
+
+    Args:
+      host: OpenPLC Runtime host (default 127.0.0.1)
+      port: Modbus TCP port (default 502)
+      input_map: {usd_attr_path: input_register_addr}
+      output_map: {usd_attr_path: output_register_addr}
+      rate_hz: poll rate (default 10.0 — typical PLC scan rate)
+
+    Returns: same shape as modbus_tcp_bridge_attach. ~50 LOC convenience.
+    """
+    host = (args.get("host") or "127.0.0.1").strip()
+    port = int(args.get("port", 502))
+    input_map = args.get("input_map") or {}
+    output_map = args.get("output_map") or {}
+    rate_hz = float(args.get("rate_hz", 10.0))
+
+    if not input_map and not output_map:
+        return {"error": "openplc_runtime_attach requires input_map or output_map"}
+
+    # Merge into single register_map for the underlying Modbus bridge.
+    register_map = {}
+    register_map.update(input_map)
+    # Output addresses get prefixed offset 1000 to disambiguate from inputs in
+    # the bridge's holding-register read; OpenPLC Runtime maps QX0.0=1000+.
+    for usd_path, addr in output_map.items():
+        register_map[usd_path] = int(addr) + 1000
+
+    if not register_map:
+        return {"error": "openplc_runtime_attach merged register_map empty"}
+
+    return await _handle_modbus_tcp_bridge_attach({
+        "host": host, "port": port,
+        "register_map": register_map,
+        "rate_hz": rate_hz, "mode": "client",
+    })
+
+
 def register_bridge_handlers(handlers: Dict[str, Any]) -> None:
     """Hook used by tool_executor.py to register industrial-bridge handlers."""
     handlers["modbus_tcp_bridge_attach"] = _handle_modbus_tcp_bridge_attach
@@ -582,3 +627,4 @@ def register_bridge_handlers(handlers: Dict[str, Any]) -> None:
     handlers["mqtt_sparkplug_bridge_attach"] = _handle_mqtt_sparkplug_bridge_attach
     handlers["mqtt_sparkplug_bridge_detach"] = _handle_mqtt_sparkplug_bridge_detach
     handlers["diagnose_mqtt_sparkplug_bridge"] = _handle_diagnose_mqtt_sparkplug_bridge
+    handlers["openplc_runtime_attach"] = _handle_openplc_runtime_attach

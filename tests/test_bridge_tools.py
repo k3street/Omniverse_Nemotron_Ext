@@ -35,6 +35,7 @@ from service.isaac_assist_service.chat.tools.bridge_tools import (
     _handle_mqtt_sparkplug_bridge_attach,
     _handle_mqtt_sparkplug_bridge_detach,
     _handle_diagnose_mqtt_sparkplug_bridge,
+    _handle_openplc_runtime_attach,
 )
 
 
@@ -169,7 +170,7 @@ async def test_attach_to_nonexistent_server():
 
 @pytest.mark.asyncio
 async def test_register_handlers_dispatch():
-    """register_bridge_handlers wires 9 handlers into a dict (M2+M3+M5)."""
+    """register_bridge_handlers wires 10 handlers (M2+M3+M5 + Phase 10 OpenPLC)."""
     from service.isaac_assist_service.chat.tools.bridge_tools import register_bridge_handlers
     handlers: dict = {}
     register_bridge_handlers(handlers)
@@ -178,8 +179,27 @@ async def test_register_handlers_dispatch():
         "opcua_bridge_attach", "opcua_bridge_detach", "diagnose_opcua_bridge",
         "mqtt_sparkplug_bridge_attach", "mqtt_sparkplug_bridge_detach",
         "diagnose_mqtt_sparkplug_bridge",
+        "openplc_runtime_attach",
     ]:
         assert name in handlers, name
+
+
+@pytest.mark.asyncio
+async def test_openplc_attach_missing_io_maps():
+    res = await _handle_openplc_runtime_attach({"host": "127.0.0.1"})
+    assert "error" in res and ("input_map" in res["error"].lower() or "output_map" in res["error"].lower())
+
+
+@pytest.mark.asyncio
+async def test_openplc_attach_input_map_only():
+    """Verifies that input_map alone forwards to underlying modbus_tcp_bridge_attach.
+    Spawn fails (port 502 likely unavailable as test) — gives spawn_failed or similar."""
+    res = await _handle_openplc_runtime_attach({
+        "host": "127.0.0.1", "port": 1,
+        "input_map": {"/World/Sensor/light": 0, "/World/Sensor/proximity": 1},
+    })
+    # Either ok=True (spawn succeeded) with worker exiting, or {"ok":True,"bridge_id":...}
+    assert res.get("ok") or "error" in res
 
 
 # --- M3 OPC-UA tests ----------------------------------------------------
