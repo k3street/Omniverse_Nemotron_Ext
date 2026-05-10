@@ -7672,11 +7672,16 @@ async def _handle_create_recirculation_loop(args: Dict) -> Dict:
     })
 
     # 4 segments: top (+y, moves +x), right (+x, moves -y), bottom (-y, moves -x), left (-x, moves +y)
+    # Each segment extended by ext_overlap on both ends so corners overlap
+    # (prevents cubes from falling through segment-segment gaps).
+    ext_overlap = 0.10
+    seg_length = length + 2 * ext_overlap
+    seg_width  = width  + 2 * ext_overlap
     segments = [
-        ("Top",    [center[0], center[1] + width / 2, center[2]], [length, 0.10, 0.05], [+velocity, 0, 0]),
-        ("Right",  [center[0] + length / 2, center[1], center[2]], [0.10, width, 0.05], [0, -velocity, 0]),
-        ("Bottom", [center[0], center[1] - width / 2, center[2]], [length, 0.10, 0.05], [-velocity, 0, 0]),
-        ("Left",   [center[0] - length / 2, center[1], center[2]], [0.10, width, 0.05], [0, +velocity, 0]),
+        ("Top",    [center[0], center[1] + width / 2, center[2]], [seg_length, 0.10, 0.05], [+velocity, 0, 0]),
+        ("Right",  [center[0] + length / 2, center[1], center[2]], [0.10, seg_width, 0.05], [0, -velocity, 0]),
+        ("Bottom", [center[0], center[1] - width / 2, center[2]], [seg_length, 0.10, 0.05], [-velocity, 0, 0]),
+        ("Left",   [center[0] - length / 2, center[1], center[2]], [0.10, seg_width, 0.05], [0, +velocity, 0]),
     ]
     seg_paths = []
     for name, pos, size, vel in segments:
@@ -7686,33 +7691,14 @@ async def _handle_create_recirculation_loop(args: Dict) -> Dict:
         })
         seg_paths.append({"path": seg_path, "name": name, "velocity": list(vel)})
 
-    # Corner bridge platforms — static (not moving) — to prevent cubes from
-    # falling through gaps between perpendicular segments. Each corner is a
-    # small static cube at the segment intersection.
-    corners = [
-        ("CornerTopRight",    [center[0] + length / 2, center[1] + width / 2, center[2]]),
-        ("CornerTopLeft",     [center[0] - length / 2, center[1] + width / 2, center[2]]),
-        ("CornerBottomRight", [center[0] + length / 2, center[1] - width / 2, center[2]]),
-        ("CornerBottomLeft",  [center[0] - length / 2, center[1] - width / 2, center[2]]),
-    ]
-    corner_paths = []
-    for cname, cpos in corners:
-        cpath = f"{loop_path}/{cname}"
-        await execute_tool_call("create_prim", {
-            "prim_path": cpath, "prim_type": "Cube",
-            "position": cpos, "scale": [0.10, 0.10, 0.05],
-        })
-        await execute_tool_call("apply_api_schema", {
-            "prim_path": cpath, "schema_name": "PhysicsCollisionAPI",
-        })
-        corner_paths.append(cpath)
+    # Corners no longer needed — segment overlap by ext_overlap covers gaps.
 
     return {
         "loop_path": loop_path,
         "segments": seg_paths,
-        "corners": corner_paths,
         "length": length,
         "width": width,
+        "ext_overlap": ext_overlap,
     }
 
 
