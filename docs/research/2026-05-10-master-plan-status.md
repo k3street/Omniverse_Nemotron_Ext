@@ -77,6 +77,21 @@ operator-ergonomics (Avatar SimReady missing).
 **Total today (Phase 4 + 5 + 8 + 9 + 10):** 9 patched-set + 14 new
 templates = **23 stable_ok or BUILD_OK verified live**.
 
+### Late-session unlocks (multi-Franka drop_target pattern)
+
+Pattern: auto-computed drop_target placed cubes 2-5mm off bin xy edge.
+Adding explicit `drop_target=[x, y, z]` to setup_pick_place_controller +
+removing destination_path from planning_obstacles unlocks pickup chain.
+
+- **CP-51** (single-cube handoff): N=5 5/5 ✓ (265s suite)
+- **CP-68** (handoff + register_moving_obstacle): N=5 5/5 ✓ (251s)
+- **CP-52** (parallel shared-bin pickers): N=5 5/5 ✓ (262s)
+
+**Net stable_ok N=5-verified today: 12 in patched-set** (was 2 at start).
+CP-67 (rotary table) and CP-76 (multi-robot mating) tested with same
+pattern but still fail — different root cause (coordination, not drop
+precision).
+
 **Partial progress (engagement unblocked, residual physics):**
 - CP-51, CP-68 (handoff): FrankaB moved closer to handoff; cube falls
   off bin edge; bin drop-precision issue remaining
