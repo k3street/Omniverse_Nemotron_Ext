@@ -47,7 +47,12 @@
 
 **Industrial-expansion: 5 of 5 milestones done** (was 0 of 5 at session start).
 
-**Net stable_ok count post-2026-05-10:** 4 in patched-set (CP-22, CP-37, CP-53, CP-59, CP-65) — up from 2 in Phase 0 baseline.
+**Net stable_ok count post-2026-05-10 (N=5 VERIFIED):** 5/5 in patched-set —
+CP-22, CP-37, CP-53, CP-59, CP-65 all stable_ok at 5/5 success rate.
+Up from 2 in Phase 0 baseline. **0 regressions** vs Phase 0 baseline.
+
+Suite time 60min (3610s). baseline file:
+`workspace/baselines/p1-final-n5-baseline.json` (gitignored; verify locally).
 
 ---
 

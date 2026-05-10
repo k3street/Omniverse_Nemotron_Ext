@@ -4,17 +4,24 @@ Branch: `feat/multimodal-foundation` (anton remote, controlled by user)
 
 ## Net deliverables
 
-### Function-gate unlocks (Phase 4 partial)
+### Function-gate unlocks (Phase 4 partial — N=5 VERIFIED)
 
-| CP | Status before | Status after | Mechanism |
-|---|---|---|---|
-| CP-22 | stable_ok | stable_ok | unchanged baseline |
-| CP-37 | stable_fail (NO_RESULT) | **stable_ok** | 3D-aware reach check |
-| CP-53 | stable_fail | **stable_ok** | cube_paths simulate_args |
-| CP-59 | flaky | flaky→ok (verify pending) | unchanged |
-| CP-65 | stable_ok→regressed | **restored** | cube_paths simulate_args |
+| CP | Status before | Status after | Mechanism | N=5 result |
+|---|---|---|---|---|
+| CP-22 | stable_ok | stable_ok | unchanged baseline | **5/5** |
+| CP-37 | stable_fail (NO_RESULT) | **stable_ok** | 3D-aware reach check | **5/5** |
+| CP-53 | stable_fail | **stable_ok** | cube_paths simulate_args | **5/5** |
+| CP-59 | flaky | **stable_ok** | unchanged (now stable) | **5/5** |
+| CP-65 | stable_ok→regressed | **restored** | cube_paths simulate_args | **5/5** |
 
-**Patched-set stable_ok: 2 → 5** (pending N=5 verify confirmation).
+**Patched-set stable_ok: 2 → 5 ✅ CONFIRMED** (suite time 60min, 0 regressions).
+
+`baseline_compare` vs Phase 0 baseline:
+```
++ 3 IMPROVED: CP-37 (fail→ok), CP-53 (fail→ok), CP-59 (flaky→ok)
++ 2 UNCHANGED: CP-22, CP-65 (both stable_ok at 1.00 rate)
++ 0 REGRESSIONS
+```
 
 ### Phase 4 P1 — 3D-aware reach check (commit `7c0ad42`)
 
