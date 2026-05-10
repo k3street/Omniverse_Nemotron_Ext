@@ -43,6 +43,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 _PROBE_CODE = r"""
 import omni.usd, omni.timeline, omni.kit.app, json, time as _t
+from pxr import UsdGeom, Usd
 stage = omni.usd.get_context().get_stage()
 tl = omni.timeline.get_timeline_interface()
 app = omni.kit.app.get_app()
@@ -55,6 +56,15 @@ target_attrs = ["ctrl:phase", "ctrl:phase_duration", "ctrl:cubes_delivered",
                 "ctrl:last_error",
                 "builtin_pp:phase", "builtin_pp:tick_count", "builtin_pp:cubes_delivered"]
 
+def _wp(path):
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid(): return None
+    fresh = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    b = fresh.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty(): return None
+    c = b.GetMidpoint()
+    return [round(float(c[0]), 3), round(float(c[1]), 3), round(float(c[2]), 3)]
+
 def _find_robots():
     out = []
     for prim in stage.Traverse():
@@ -64,7 +74,17 @@ def _find_robots():
                 break
     return out
 
+def _find_cubes():
+    out = []
+    for prim in stage.Traverse():
+        n = str(prim.GetPath())
+        tail = n.rsplit("/", 1)[-1].lower()
+        if tail == "cube" or tail.startswith("cube_") or tail.startswith("cube "):
+            out.append(n)
+    return out[:8]  # cap at 8 cubes
+
 robots = _find_robots()
+cube_paths = _find_cubes()
 if not robots:
     print(json.dumps({{"error": "no robots with ctrl:* attrs found",
                        "samples": [], "summary": {{}}}}))
@@ -75,6 +95,7 @@ else:
     tl.play()
 
     samples = []
+    cube_traj = []
     real_start = _t.time()
     last_sample = -1.0
     while True:
@@ -94,6 +115,10 @@ else:
                 if vals:
                     snap[rpath] = vals
             samples.append({{"sim_t": cur_t, "vals": snap}})
+            cube_snap = {{"sim_t": round(cur_t, 1)}}
+            for cp in cube_paths:
+                cube_snap[cp] = _wp(cp)
+            cube_traj.append(cube_snap)
             last_sample = cur_t
         if cur_t >= duration_s:
             break
@@ -133,6 +158,7 @@ else:
         "duration_s": duration_s,
         "sample_dt_s": sample_dt_s,
         "robots": [str(r.GetPath()) for r in robots],
+        "cube_paths": cube_paths,
         "phase_histogram": [
             {{"robot": k[0], "phase": k[1], "seconds": v}}
             for k, v in sorted(phase_time.items(), key=lambda kv: -kv[1])
@@ -145,7 +171,7 @@ else:
         "cycles_attempted_final": cycles_final,
         "last_errors": last_errors[:5],
     }}
-    print(json.dumps({{"samples": samples, "summary": summary}}))
+    print(json.dumps({{"samples": samples, "cube_trajectories": cube_traj, "summary": summary}}))
 """
 
 
@@ -192,11 +218,47 @@ async def _probe(label: str, duration_s: int = 60, sample_dt_s: float = 1.0) -> 
     return {"error": "no_json_output", "tail": out[-300:]}
 
 
-def _diagnose_stuck(summary: Dict[str, Any]) -> List[str]:
+def _diagnose_stuck(summary: Dict[str, Any], cube_traj: Optional[List[Dict]] = None) -> List[str]:
     """Heuristic interpretation of summary → human-readable diagnoses."""
     diagnoses: List[str] = []
     duration = summary.get("duration_s", 0) or 1
     plan_fail_rate = summary.get("plan_fail_rate")
+
+    # Cube-trajectory analysis — detect cubes-stuck or cubes-fallen-off-belt
+    if cube_traj and len(cube_traj) >= 3:
+        cube_paths = summary.get("cube_paths") or []
+        for cp in cube_paths:
+            positions = [s.get(cp) for s in cube_traj if s.get(cp) is not None]
+            if len(positions) < 3:
+                continue
+            initial = positions[0]
+            final = positions[-1]
+            mid = positions[len(positions) // 2]
+
+            dx = final[0] - initial[0]
+            dy = final[1] - initial[1]
+            dz = final[2] - initial[2]
+            dist = (dx**2 + dy**2 + dz**2) ** 0.5
+
+            # Stuck: total displacement < 5cm
+            if dist < 0.05:
+                diagnoses.append(
+                    f"{cp}: stuck (Δ<5cm). spawn={initial} final={final} — "
+                    f"belt may be inactive or cube blocked."
+                )
+            # Fallen below table (typical table z = 0.75)
+            if final[2] < 0.5:
+                diagnoses.append(
+                    f"{cp}: fell below z=0.5 (current z={final[2]:.2f}) — "
+                    f"likely fell off belt edge or through floor."
+                )
+            # Movement past sensor without trigger (heuristic: x movement >0.5m
+            # but cube ends far past initial)
+            if abs(dx) > 1.0 and dist > 1.0 and summary.get("plan_calls", 0) == 0:
+                diagnoses.append(
+                    f"{cp}: travelled {dx:+.2f}m in x but controller never planned — "
+                    f"sensor may not have triggered."
+                )
 
     # Check for stuck phases (>30% of time in one phase)
     histogram = summary.get("phase_histogram") or []
@@ -265,6 +327,7 @@ async def main() -> int:
         return 1
 
     summary = res.get("summary") or {}
+    cube_traj = res.get("cube_trajectories") or []
     print(f"=== probe_ctrl_telemetry({args.canonical}) ===")
     print(f"duration_s={summary.get('duration_s')}  samples={summary.get('n_samples')}  "
           f"robots={len(summary.get('robots') or [])}")
@@ -278,9 +341,21 @@ async def main() -> int:
     for row in (summary.get("phase_histogram") or [])[:10]:
         pct = (row["seconds"] / max(summary.get("duration_s", 1), 1)) * 100
         print(f"  {row['robot']:20s} {row['phase']:25s} {row['seconds']:5.1f}s  ({pct:.0f}%)")
+    if cube_traj:
+        print()
+        print(f"Cube trajectories ({len(cube_traj)} samples):")
+        cube_paths = summary.get("cube_paths") or []
+        for cp in cube_paths[:4]:
+            positions = [s.get(cp) for s in cube_traj if s.get(cp) is not None]
+            if not positions:
+                continue
+            init = positions[0]
+            final = positions[-1]
+            print(f"  {cp.split('/')[-1]}: {init} → {final}  "
+                  f"(Δ={(final[0]-init[0]):+.2f},{(final[1]-init[1]):+.2f},{(final[2]-init[2]):+.2f})")
     print()
     print("Diagnoses:")
-    for d in _diagnose_stuck(summary):
+    for d in _diagnose_stuck(summary, cube_traj):
         print(f"  • {d}")
     return 0
 

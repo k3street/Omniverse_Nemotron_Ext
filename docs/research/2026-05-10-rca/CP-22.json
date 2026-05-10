@@ -1,0 +1,393 @@
+{
+  "samples": [
+    {
+      "sim_t": 0.016666666666666666,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 1.016666666666668,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 61,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 2.033333333333331,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 122,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 3.049999999999994,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 183,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 4.0666666666666575,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 244,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 5.083333333333321,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 305,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 6.099999999999984,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 366,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 7.116666666666647,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 427,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 8.11666666666665,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 487,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 9.1166666666667,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 547,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 10.116666666666749,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 607,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 11.116666666666799,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 667,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 12.116666666666848,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 727,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 13.116666666666898,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 787,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 14.116666666666948,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 847,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 15.116666666666998,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 907,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 16.116666666667033,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 967,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 17.133333333333642,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1028,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 18.15000000000025,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1089,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 19.16666666666686,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1150,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 20.18333333333347,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1211,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 21.200000000000077,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1272,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 22.216666666666686,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1333,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 23.233333333333295,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1394,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 24.249999999999904,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1455,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 25.266666666666513,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1516,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 26.283333333333122,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1577,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 27.29999999999973,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1638,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 28.31666666666634,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1699,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 29.33333333333295,
+      "vals": {
+        "/World/Franka": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1760,
+          "ctrl:last_error": ""
+        }
+      }
+    }
+  ],
+  "summary": {
+    "n_samples": 30,
+    "duration_s": 30,
+    "sample_dt_s": 1.0,
+    "robots": [
+      "/World/Franka"
+    ],
+    "phase_histogram": [
+      {
+        "robot": "/World/Franka",
+        "phase": "executing",
+        "seconds": 29.0
+      },
+      {
+        "robot": "/World/Franka",
+        "phase": "wait_sensor",
+        "seconds": 1.0
+      }
+    ],
+    "last_phase": {
+      "/World/Franka": "executing"
+    },
+    "plan_calls": 0,
+    "plan_fails": 0,
+    "plan_fail_rate": null,
+    "cubes_delivered_final": 0,
+    "cycles_attempted_final": 1,
+    "last_errors": []
+  }
+}
