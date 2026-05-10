@@ -1,0 +1,850 @@
+[ToolExecutor] ros-mcp not installed — ROS2 live tools disabled (pip install ros-mcp)
+{
+  "samples": [
+    {
+      "sim_t": 0.016666666666666666,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1,
+          "ctrl:last_error": ""
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1,
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 1.016666666666668,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 61,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "settling",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 61,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 2.033333333333331,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 122,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 122,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 3.049999999999994,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 183,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 183,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 4.0666666666666575,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 244,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 244,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 5.083333333333321,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 305,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 305,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 6.099999999999984,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 366,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 366,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 7.116666666666647,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 427,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 427,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 8.11666666666665,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 487,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 487,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 9.1166666666667,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 547,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 547,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 10.116666666666749,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 607,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 607,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 11.116666666666799,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 667,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 667,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 12.116666666666848,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 727,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 727,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 13.116666666666898,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 787,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 787,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 14.116666666666948,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 847,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 847,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 15.116666666666998,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 907,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 907,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 16.116666666667033,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 967,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 967,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 17.133333333333642,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1028,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1028,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 18.15000000000025,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1089,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1089,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 19.16666666666686,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1150,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1150,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 20.18333333333347,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1211,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1211,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 21.200000000000077,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1272,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1272,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 22.216666666666686,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1333,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1333,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 23.233333333333295,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1394,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1394,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    },
+    {
+      "sim_t": 24.249999999999904,
+      "vals": {
+        "/World/FixtureHolder": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1455,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_workpiece"
+        },
+        "/World/Inserter": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1455,
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_mating"
+        }
+      }
+    }
+  ],
+  "cube_trajectories": [
+    {
+      "sim_t": 0.0,
+      "/World/Cube_workpiece": [
+        -0.992,
+        -0.4,
+        0.835
+      ],
+      "/World/Cube_mating": [
+        1.0,
+        0.4,
+        0.83
+      ]
+    },
+    {
+      "sim_t": 1.0,
+      "/World/Cube_workpiece": [
+        -0.732,
+        -0.4,
+        0.835
+      ],
+      "/World/Cube_mating": [
+        0.827,
+        0.4,
+        0.83
+      ]
+    },
+    {
+      "sim_t": 2.0,
+      "/World/Cube_workpiece": [
+        -0.427,
+        -0.4,
+        0.835
+      ],
+      "/World/Cube_mating": [
+        0.529,
+        0.4,
+        0.83
+      ]
+    },
+    {
+      "sim_t": 3.0,
+      "/World/Cube_workpiece": [
+        -0.122,
+        -0.4,
+        0.835
+      ],
+      "/World/Cube_mating": [
+        0.224,
+        0.4,
+        0.83
+      ]
+    },
+    {
+      "sim_t": 4.1,
+      "/World/Cube_workpiece": [
+        0.192,
+        -0.4,
+        0.824
+      ],
+      "/World/Cube_mating": [
+        -0.081,
+        0.4,
+        0.83
+      ]
+    },
+    {
+      "sim_t": 5.1,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 6.1,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 7.1,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 8.1,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 9.1,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 10.1,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 11.1,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 12.1,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 13.1,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 14.1,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 15.1,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 16.1,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 17.1,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 18.2,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 19.2,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 20.2,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 21.2,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 22.2,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 23.2,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 24.2,
+      "/World/Cube_workpiece": [
+        0.257,
+        -0.401,
+        0.78
+      ],
+      "/World/Cube_mating": [
+        -0.248,
+        0.401,
+        0.775
+      ]
+    }
+  ],
+  "summary": {
+    "n_samples": 25,
+    "duration_s": 25,
+    "sample_dt_s": 1.0,
+    "robots": [
+      "/World/FixtureHolder",
+      "/World/Inserter"
+    ],
+    "cube_paths": [
+      "/World/Cube_workpiece",
+      "/World/Cube_mating"
+    ],
+    "phase_histogram": [
+      {
+        "robot": "/World/FixtureHolder",
+        "phase": "wait_sensor",
+        "seconds": 25.0
+      },
+      {
+        "robot": "/World/Inserter",
+        "phase": "wait_sensor",
+        "seconds": 24.0
+      },
+      {
+        "robot": "/World/Inserter",
+        "phase": "settling",
+        "seconds": 1.0
+      }
+    ],
+    "last_phase": {
+      "/World/FixtureHolder": "wait_sensor",
+      "/World/Inserter": "wait_sensor"
+    },
+    "plan_calls": 0,
+    "plan_fails": 0,
+    "plan_fail_rate": null,
+    "cubes_delivered_final": 0,
+    "cycles_attempted_final": 0,
+    "last_errors": [
+      "RuntimeError: planning failed for /World/Cube_workpiece",
+      "RuntimeError: planning failed for /World/Cube_mating"
+    ]
+  }
+}
