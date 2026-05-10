@@ -407,7 +407,7 @@ def step9_morning_iterations(log_path: Path) -> int:
     _run_subproc(["git", "add", "-A"], log_path)
     _run_subproc(["git", "commit", "-m",
                    "Phase 2 morning iterations — additional fixes + re-feasibility passes"],
-                  log_path, capture=True)
+                  log_path)
     _run_subproc(["git", "push", "anton", "feat/multimodal-foundation"], log_path)
     return 0
 
