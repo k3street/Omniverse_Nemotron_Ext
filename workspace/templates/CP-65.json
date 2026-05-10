@@ -72,9 +72,14 @@
     "cube_path": "/World/Cube_1"
   },
   "simulate_args": {
-    "cube_path": "/World/Cube_1",
     "target_path": "/World/OutBin",
-    "duration_s": 180
+    "duration_s": 180,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4"
+    ]
   },
   "extends": "CP-53",
   "extension_notes": "CP-65 realizes #6 Two-Cell Kit-Tray Relay. CP-53 was producer/consumer with row-of-3 staging rack; CP-65 has 2x2 kit tray as relay station. Both use HandoffBridge stationary conveyor for verifier compatibility.",

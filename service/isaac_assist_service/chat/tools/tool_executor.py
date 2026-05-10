@@ -33219,7 +33219,7 @@ except Exception: pass
 # on stochastic CUDA IK. Earlier 4 seeds caused stuck-controller pattern
 # in CP-10/11/26-style canonicals — IK failed transiently, controller
 # retried infinitely on same cube (Mode A controller-stuck bug fix 2026-05-09).
-_PLANNER_ATTR = "_curobo_pp_planner_v18"
+_PLANNER_ATTR = "_curobo_pp_planner_v21"
 _planner = getattr(builtins, _PLANNER_ATTR, None)
 if _planner is None:
     for _old in ("_curobo_pp_planner", "_curobo_pp_planner_v2", "_curobo_pp_planner_v3", "_curobo_pp_planner_v4", "_curobo_pp_planner_v5", "_curobo_pp_planner_v6", "_curobo_pp_planner_v7", "_curobo_pp_planner_v8", "_curobo_pp_planner_v9", "_curobo_pp_planner_v10", "_curobo_pp_planner_v11", "_curobo_pp_planner_v16", "_curobo_pp_planner_v13"):
@@ -33669,9 +33669,13 @@ def _cube_to_pick():
         if cp[2] < base_z - 0.30 or cp[2] > base_z + 0.50: continue
         _xy_dist = float(np.linalg.norm(cp[:2] - base_xy))
         if _xy_dist > _reach_m: continue
-        # 3D-aware: reject if EE goal at h1 above cube would exceed reach
+        # 3D-aware: reject if EE goal at h1 above cube would exceed reach.
+        # Use _reach_m_raw (no safety margin) for 3D check — the 5cm safety
+        # is already applied to xy. Doubling it for 3D rejected too many
+        # cubes, regressing CP-65 (multi-robot relay where handoff happens
+        # at h1-base_z ≈ 0.5m + xy ≈ 0.6m → 3D 0.78 was rejected at 0.80).
         _3d_dist = (_xy_dist**2 + _h1_offset**2) ** 0.5
-        if _3d_dist > _reach_m: continue
+        if _3d_dist > _reach_m: continue  # tight 3D matches 2D safety margin
         # REORIENT-01 require_upright filter: skip cubes whose +Z axis
         # isn't aligned with world up. Lets cube ride past pick zone on
         # its side, hit a passive flip-wall, become upright, then pick.

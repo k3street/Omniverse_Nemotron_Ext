@@ -66,9 +66,14 @@
     "cube_path": "/World/Cube_1"
   },
   "simulate_args": {
-    "cube_path": "/World/Cube_1",
     "target_path": "/World/SharedBin",
-    "duration_s": 90
+    "duration_s": 90,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4"
+    ]
   },
   "extends": "CP-07",
   "extension_notes": "CP-52 demonstrates parallel-picking duo via source_paths split (A handles Cube_1-2, B handles Cube_3-4). Mutex prim defines shared resource scaffolding; runtime coordination via mutex attrs is Sprint 3+ work. Realizes scenario #10.",

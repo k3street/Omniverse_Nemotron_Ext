@@ -67,9 +67,13 @@
     "cube_path": "/World/Cube_1"
   },
   "simulate_args": {
-    "cube_path": "/World/Cube_1",
     "target_path": "/World/OutBin",
-    "duration_s": 180
+    "duration_s": 180,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3"
+    ]
   },
   "extends": "CP-51",
   "extension_notes": "CP-53 realizes research scenario #12 (Producer/Consumer Bounded Buffer). 3-slot staging rack acts as the buffer. CP-51 used single handoff station; CP-53 has multi-slot buffer with mutex for access. Runtime mutex enforcement is Sprint 3+ work.",
