@@ -1,5 +1,25 @@
 # Failure Modes Classification — 2026-05-10
 
+> **NOTE (afternoon update):** This is a snapshot from morning probe runs.
+> Post-snapshot fixes applied:
+> - CP-37 → stable_ok (via 3D reach check)
+> - CP-53 → stable_ok (via cube_paths simulate_args)
+> - CP-65 → restored from regression (via cube_paths)
+> - CP-67/CP-76 also got cube_paths fix (still failing, sequence-bound)
+>
+> **Z-OTHER bucket re-analysis:**
+> - CP-51, CP-68 — phantom_handoff (Robot A delivered to handoff but
+>   Robot B sensor never triggered). New diagnostic detects this.
+> - CP-57, CP-58 — probe found 0 cubes because `_find_cubes` only
+>   matched `cube*` prefix. Probe now seeds from simulate_args.
+> - CP-48, CP-46, CP-35 — controllers running with low plan_fail_rate
+>   (0–16%) but 0 cubes delivered. Investigation parked.
+>
+> **D-NO_PLAN_NO_PICK bucket re-analysis:**
+> - CP-40 (spline), CP-80/CP-84/CP-85 (UR10 builtin) — these don't
+>   write `ctrl:plan_calls` because they're not cuRobo. Probe instrumentation
+>   gap, not a real failure pattern.
+
 Probed 22 failing canonicals (post 3D reach + plan_calls counters).
 
 ## Distribution
