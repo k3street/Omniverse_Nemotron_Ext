@@ -47,12 +47,25 @@
 
 **Industrial-expansion: 5 of 5 milestones done** (was 0 of 5 at session start).
 
-**Net stable_ok count post-2026-05-10 (N=5 VERIFIED):** 5/5 in patched-set —
-CP-22, CP-37, CP-53, CP-59, CP-65 all stable_ok at 5/5 success rate.
-Up from 2 in Phase 0 baseline. **0 regressions** vs Phase 0 baseline.
+**Phase 5 drive 2026-05-10 (post-N=5 verify):** added 4 more unlocks via
+multi-cube simulate_args + template-tweak fixes:
+- CP-57 (heap singulation, cube_paths)
+- CP-58 (peg-in-hole array, widened HolePanel)
+- CP-46 (6-cube palletize, cube_paths)
+- CP-48 (vision-routed 4 green, cube_paths)
 
-Suite time 60min (3610s). baseline file:
-`workspace/baselines/p1-final-n5-baseline.json` (gitignored; verify locally).
+**Net stable_ok count post-2026-05-10:** 9/9 in patched-set verified —
+CP-22, CP-37, CP-53, CP-57, CP-58, CP-59, CP-46, CP-48, CP-65 — all
+stable_ok. Up from 2 in Phase 0 baseline. **0 regressions** vs baseline.
+
+Suite times: N=5 verify 60min (5/5 ok), N=1 sweep 22min (9/9 ok).
+baseline files: `workspace/baselines/p1-final-n5-baseline.json` +
+`p5-multicube-sweep-baseline.json` (gitignored).
+
+**Partial progress** (engagement confirmed, residual physics-side issues):
+- CP-51, CP-68 (handoff): FrankaB moved closer, now picks from handoff;
+  cube falls 2-5mm off bin edge / through bin floor. Bin drop-precision
+  is the remaining gap.
 
 ---
 

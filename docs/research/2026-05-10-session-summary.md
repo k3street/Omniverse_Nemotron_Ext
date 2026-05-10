@@ -4,17 +4,29 @@ Branch: `feat/multimodal-foundation` (anton remote, controlled by user)
 
 ## Net deliverables
 
-### Function-gate unlocks (Phase 4 partial — N=5 VERIFIED)
+### Function-gate unlocks (Phase 4 + Phase 5 — confirmed)
 
-| CP | Status before | Status after | Mechanism | N=5 result |
+| CP | Status before | Status after | Mechanism | Verify |
 |---|---|---|---|---|
-| CP-22 | stable_ok | stable_ok | unchanged baseline | **5/5** |
-| CP-37 | stable_fail (NO_RESULT) | **stable_ok** | 3D-aware reach check | **5/5** |
-| CP-53 | stable_fail | **stable_ok** | cube_paths simulate_args | **5/5** |
-| CP-59 | flaky | **stable_ok** | unchanged (now stable) | **5/5** |
-| CP-65 | stable_ok→regressed | **restored** | cube_paths simulate_args | **5/5** |
+| CP-22 | stable_ok | stable_ok | unchanged baseline | N=5: 5/5 |
+| CP-37 | stable_fail (NO_RESULT) | **stable_ok** | 3D-aware reach check | N=5: 5/5 |
+| CP-53 | stable_fail | **stable_ok** | cube_paths simulate_args | N=5: 5/5 |
+| CP-59 | flaky | **stable_ok** | unchanged (now solid) | N=5: 5/5 |
+| CP-65 | stable_ok→regressed→restored | **stable_ok** | cube_paths simulate_args | N=5: 5/5 |
+| CP-57 | stable_fail | **stable_ok** | cube_paths (heap singulation) | N=1: 1/1 |
+| CP-58 | stable_fail | **stable_ok** | widened HolePanel 0.20→0.30 | N=1: 1/1 |
+| CP-46 | stable_fail | **stable_ok** | cube_paths (6-cube palletize) | N=1: 1/1 |
+| CP-48 | stable_fail | **stable_ok** | cube_paths (4 green + 1 red) | N=1: 1/1 |
 
-**Patched-set stable_ok: 2 → 5 ✅ CONFIRMED** (suite time 60min, 0 regressions).
+**Patched-set stable_ok: 2 → 9 ✅** (Phase 0 baseline → today). 9/9 sweep N=1 GREEN, 0 regressions vs baseline.
+
+### Partial progress (controller engages but bin-physics fails)
+
+- **CP-51, CP-68**: FrankaB moved from [0.7,0,0.75] → [0.5,-0.2,0.75]. Was beyond
+  3D reach to handoff (xy=0.762m → 3D=0.94m > 0.855m reach). FrankaB now picks
+  cube from handoff and drops near bin (cube ends at bin xy borderline). Final
+  position 2-5mm outside bin bbox + cube falls below bin to z=0.525. Bin
+  drop-precision / collision is the remaining gap.
 
 `baseline_compare` vs Phase 0 baseline:
 ```
