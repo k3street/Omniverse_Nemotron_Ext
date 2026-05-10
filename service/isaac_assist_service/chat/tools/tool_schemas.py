@@ -848,6 +848,73 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "modbus_tcp_bridge_attach",
+            "description": (
+                "PHASE 6 M2: spawn supervised pymodbus subprocess that polls "
+                "Modbus-TCP holding registers and emits USD attribute updates. "
+                "Maps Modbus registers to USD attr paths (e.g. belt-speed, "
+                "light-emissive). Subprocess pattern avoids in-Kit threading "
+                "lifecycle issues. Returns {bridge_id, pid, log_path} for "
+                "caller to track + diagnose. Use diagnose_modbus_bridge to "
+                "check status, modbus_tcp_bridge_detach to stop cleanly."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "Modbus server IP/hostname."},
+                    "port": {"type": "integer", "default": 502},
+                    "register_map": {
+                        "type": "object",
+                        "description": "Map of {usd_attr_path: holding_register_addr} (int).",
+                    },
+                    "rate_hz": {"type": "number", "default": 1.0, "description": "Poll rate in Hz."},
+                    "mode": {"type": "string", "enum": ["client", "server"], "default": "client"},
+                },
+                "required": ["host", "register_map"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "modbus_tcp_bridge_detach",
+            "description": (
+                "PHASE 6 M2: stop a previously-attached Modbus bridge. SIGTERM "
+                "first, SIGKILL after 5s if needed. Idempotent — safe to call "
+                "even if bridge already exited."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bridge_id": {"type": "string", "description": "Returned by modbus_tcp_bridge_attach."},
+                },
+                "required": ["bridge_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_modbus_bridge",
+            "description": (
+                "PHASE 6 M2 honesty pair: query a Modbus bridge's status. "
+                "Returns {alive, pid, n_register_updates, last_errors, log_tail}. "
+                "Detects: dead subprocess, connect failures, register-read errors. "
+                "Tells the agent whether the bridge is functioning before claims "
+                "of a working PLC connection."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bridge_id": {"type": "string"},
+                },
+                "required": ["bridge_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "precheck_ros2_environment",
             "description": (
                 "PHASE 6 M1: verify ROS2 environment is ready BEFORE scene build. "

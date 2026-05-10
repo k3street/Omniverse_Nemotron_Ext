@@ -35577,6 +35577,16 @@ register_diagnose_handlers(DATA_HANDLERS)
 # === END DIAGNOSE FEASIBILITY ===
 
 
+# === INDUSTRIAL BRIDGES (controller-logic session) ===
+# Phase 6 M2: modbus_tcp_bridge_attach + diagnose_modbus_bridge + detach.
+# Per docs/specs/2026-05-09-industrial-expansion-spec.md Phase 8.
+# Subprocess-supervised pymodbus client; reads holding registers, pushes
+# USD attr updates. Future: opcua (M3), mqtt-sparkplug (M5), openplc (M5).
+from .bridge_tools import register_bridge_handlers
+register_bridge_handlers(DATA_HANDLERS)
+# === END INDUSTRIAL BRIDGES ===
+
+
 
 async def _handle_setup_ros2_control_compat(args):
     """Phase 6 M1: emit OmniGraph using topic_based_ros2_control standard topic names.
