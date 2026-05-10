@@ -29154,6 +29154,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             require_upright=bool(args.get("require_upright", False)),
             upright_dot_threshold=float(args.get("upright_dot_threshold", 0.85)),
             mutex_path=args.get("mutex_path"),
+            scenario_profile=args.get("scenario_profile"),
         )
     if mode == "diffik":
         return _gen_pick_place_diffik(
@@ -32821,7 +32822,22 @@ def _gen_pick_place_curobo(robot_path, sensor_path, belt_path,
                            robot_family="franka",
                            require_upright=False,
                            upright_dot_threshold=0.85,
-                           mutex_path=None):
+                           mutex_path=None,
+                           scenario_profile=None):
+    """Phase 4 POC: scenario_profile arg routes scene_cfg construction.
+
+    scenario_profile:
+      None or "single_belt_pick" (default):
+        Include Table/ConveyorBelt/Bin in scene_cfg + PLANNING_OBSTACLES.
+        Works for CP-22/59/65 multi-cube belt scenarios.
+      "obstacle_rich":
+        EXCLUDE Table/ConveyorBelt/Bin from scene_cfg. Use only
+        PLANNING_OBSTACLES (Pillar, packed pedestals, etc). Robot's
+        home pose at z=0.75 is on table top — including table makes
+        cuRobo flag robot as in-collision → 24/24 plan_pose fails.
+        For CP-37/46/48 etc with explicit obstacle list, this lets
+        plan_pose succeed.
+    """
     """GPU-accelerated global trajectory optimization via cuRobo MotionPlanner.
 
     **Unlocked 2026-04-21** — four breakthroughs:
@@ -32913,6 +32929,7 @@ MUTEX_PATH = {mutex_path!r}  # Multi-robot coordination — when set, robot must
 EE_OFFSET = np.array({_json.dumps(list(ee_offset))}, dtype=np.float32)
 EE_INIT_H_OVERRIDE = {end_effector_initial_height!r}
 PLANNING_OBSTACLES = {_obs}
+SCENARIO_PROFILE = {scenario_profile!r}  # Phase 4 POC — None/single_belt_pick include scene-floor; obstacle_rich excludes
 # SORT-01 enabler: dict {{semantic class_name → destination prim path}}.
 # When non-empty, _bin_drop_pos selects destination per cube based on the
 # cube's Semantics_color (or Semantics_class) class_name. Falls through
@@ -33189,10 +33206,10 @@ except Exception: pass
 # on stochastic CUDA IK. Earlier 4 seeds caused stuck-controller pattern
 # in CP-10/11/26-style canonicals — IK failed transiently, controller
 # retried infinitely on same cube (Mode A controller-stuck bug fix 2026-05-09).
-_PLANNER_ATTR = "_curobo_pp_planner_v12"
+_PLANNER_ATTR = "_curobo_pp_planner_v14"
 _planner = getattr(builtins, _PLANNER_ATTR, None)
 if _planner is None:
-    for _old in ("_curobo_pp_planner", "_curobo_pp_planner_v2", "_curobo_pp_planner_v3", "_curobo_pp_planner_v4", "_curobo_pp_planner_v5", "_curobo_pp_planner_v6", "_curobo_pp_planner_v7", "_curobo_pp_planner_v8", "_curobo_pp_planner_v9", "_curobo_pp_planner_v10"):
+    for _old in ("_curobo_pp_planner", "_curobo_pp_planner_v2", "_curobo_pp_planner_v3", "_curobo_pp_planner_v4", "_curobo_pp_planner_v5", "_curobo_pp_planner_v6", "_curobo_pp_planner_v7", "_curobo_pp_planner_v8", "_curobo_pp_planner_v9", "_curobo_pp_planner_v10", "_curobo_pp_planner_v11", "_curobo_pp_planner_v12", "_curobo_pp_planner_v13"):
         try: delattr(builtins, _old)
         except Exception: pass
     print("(curobo: building MotionPlanner v10 — Warp 1.11+, scene-collision)")
@@ -33405,15 +33422,25 @@ def _build_scene_cfg(exclude_path=None):
     # otherwise dims (x,y,z in world) get applied as if axis-aligned in
     # base, swapping width/length and creating a giant fake obstacle.
     # The pose quat = inverse_base_quat (in world-aligned reference).
-    # Scene-collision baseline: include Table/Belt/Bin since they act as
-    # workspace floor that cuRobo needs to know about for self-collision
-    # margin. Empirically (v3/v10) full-scene with cuda_graph=False planning
-    # succeeds for CP-22/59/65 multi-cube success. The 2026-05-09 isolated
-    # plan_pose test on CP-37 (which suggested Table-as-obstacle blocks
-    # planning) likely conflated test conditions with handler-context state.
-    # Per-scenario obstacle filtering belongs in the scenario-profile spec,
-    # not as a global change.
-    static_paths = ["/World/Table", "/World/ConveyorBelt", "/World/Bin"] + list(PLANNING_OBSTACLES)
+    # Phase 4 POC (2026-05-10): SCENARIO_PROFILE controls scene-floor
+    # inclusion. "obstacle_rich" excludes Table/Belt/Bin (robot home
+    # pose sits on table → cuRobo flags as in-collision, all plans fail).
+    # Default ("single_belt_pick" / None): include scene-floor (works
+    # empirically for CP-22/59/65 multi-cube belt success per v3/v10
+    # planner cache).
+    # Filter scene-floor paths (Table / Belt / Bin / Conveyor / Ground) from
+    # the obstacle list. These act as workspace floor that the robot expects
+    # to interact with; including them in scene_cfg flags robot home pose
+    # as in-collision → all plan_pose attempts fail (24/24 per RCA 2026-05-10).
+    _SCENE_FLOOR_KEYWORDS = ("table", "belt", "conveyor", "bin", "ground", "floor")
+    def _is_scene_floor(path):
+        tail = path.strip("/").rsplit("/", 1)[-1].lower()
+        return any(kw in tail for kw in _SCENE_FLOOR_KEYWORDS)
+
+    if SCENARIO_PROFILE == "obstacle_rich":
+        static_paths = [p for p in PLANNING_OBSTACLES if not _is_scene_floor(p)]
+    else:
+        static_paths = ["/World/Table", "/World/ConveyorBelt", "/World/Bin"] + list(PLANNING_OBSTACLES)
     cuboids = {{}}
     # Pre-compute inverse base quat (wxyz)
     _iqw = float(_usd_quat[0]); _iqx = -float(_usd_quat[1])
