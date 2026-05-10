@@ -1,0 +1,34 @@
+{
+  "task_id": "CP-NEW-plc-fixture",
+  "goal": "Build a PLC-controlled assembly fixture: Modbus signal triggers fixture clamp/unclamp, Franka inserts part during clamp window. Realizes Phase 9 yrkesroll #13 (industrial integration / PLC engineer persona). Uses M2 modbus_tcp_bridge_attach.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "modbus_tcp_bridge_attach",
+    "diagnose_modbus_bridge",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": [
+    "Real PLC-in-the-loop pattern: external mock Modbus server controls fixture state via holding register HR0 (0=open, 1=clamped).",
+    "Fixture is a virtual 'clamp' — PhysicsFixedJoint applied/removed based on HR0. Robot inserts part during clamp window.",
+    "M2 modbus_tcp_bridge polls HR0 at 10Hz. /World/Fixture/clamped attribute updated.",
+    "For canonical-build: just verify bridge attach + clamp prim creation. Runtime control is via external mock server (test rig).",
+    "Builds on CP-NEW-plc-conveyor (M2 plumbing) but adds part-insertion task."
+  ],
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[1.5, 0.3, 0.05],\n    surface_velocity=[0.15, 0, 0],\n)\n\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-0.5, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\n\ncreate_prim(prim_path=\"/World/Fixture\", prim_type=\"Cube\", position=[0, -0.4, 0.78], scale=[0.20, 0.10, 0.05])\napply_api_schema(prim_path=\"/World/Fixture\", schema_name=\"PhysicsCollisionAPI\")\n\nset_attribute(prim_path=\"/World/Fixture\", attr_name=\"clamped\", value=0)\nset_attribute(prim_path=\"/World/Fixture\", attr_name=\"clamp_force\", value=0.0)\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\nmodbus_tcp_bridge_attach(\n    host=\"127.0.0.1\",\n    port=5022,\n    register_map={\n        \"/World/Fixture/clamped\": 0,\n        \"/World/Fixture/clamp_force\": 1,\n    },\n    rate_hz=10.0,\n    mode=\"client\",\n)\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Fixture\",\n    drop_target=[0, -0.4, 0.83],\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Fixture\"],\n)",
+  "verify_args": null,
+  "simulate_args": null,
+  "diagnose_args": null,
+  "extends": "phase9-yrkesroll-#13",
+  "extension_notes": "Industrial-integration canonical. PLC fixture pattern requires external mock Modbus server (pymodbus.server) with HR0/HR1 prepopulated. Function-gate N/A — tests bridge plumbing + part-insertion sequence.",
+  "failure_modes": [
+    "Modbus mock server on 127.0.0.1:5022 not running — bridge alive=False",
+    "Robot inserts part before clamp_force reaches threshold — part may slide off fixture",
+    "Bridge polling at 10Hz means up to 100ms latency between PLC clamp and Robot release"
+  ],
+  "verified_status": "draft (Phase 9 #13; needs Modbus mock server)"
+}
