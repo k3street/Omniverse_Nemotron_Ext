@@ -4,11 +4,35 @@
 **Status:** active — Phase 0 in progress, Phase 1 modules pre-built (await baseline lock)
 **Purpose:** authoritative ordering, testing, evaluation, and diagnostic strategy across all in-flight specs. Single source of truth for "what comes next, why, and how we know it worked".
 
-**Live status (2026-05-09 evening):**
-- Phase 0 — `simulate_traversal_check` got `seed`+`n_runs` parameters with snapshot/restore reset between runs (commit `2a50c0a`). `multi_run_regression.py`, `baseline_compare.py`, `determinism_check.py` shipped (commits `2a50c0a`, `a223605`). Baseline N=5 against patched-set running.
-- Phase 1 prep — diagnose_scene_feasibility orchestrator + 4 supporting modules + 92 unit tests committed (`8c328ec`, `11d2202`). MCP tool_schemas + UI description added (`8b7c616`). auto_judge `scene_feasibility` axis (Opus §I) added (`a433485`). NOT YET wired into tool_executor.py — deferred until Phase 0 baseline lock.
-- Phase 2 prep — `phase2_triage.py` cross-products feasibility × function-gate (`041de50`).
-- Industrial-expansion Phases 6/8/9/10 spec'd via `2026-05-09-industrial-expansion-spec.md`. No code yet.
+**Live status (2026-05-10 afternoon — UPDATED):**
+
+**Phase 0 ✓ DONE** — baseline frozen (1 stable_ok CP-22 + 1 flaky CP-59 + 22 stable_fail), N=5 timeout fix (Phase 0.7) restored CP-65 from NO_RESULT, total stable post-restoration: 2.
+
+**Phase 1 ✓ DONE** — diagnose_scene_feasibility infrastructure live (1100 LOC + 96 unit tests), wired (`bfce6a8`), MCP schemas + auto_judge axis. 64 templates got AST-extracted diagnose_args. Tool accuracy 68% vs baseline (acceptable hint, not authoritative).
+
+**Phase 2 prep ✓ DONE** — phase2_triage + phase2_action_plan + phase2_safe_execute (revert-safety) committed.
+
+**Phase 4 PARTIAL — 3 unlocks delivered 2026-05-10:**
+- 3D-aware reach check in cuRobo's `_cube_to_pick` (commit `7c0ad42`):
+  EE travel distance is `sqrt(xy_dist² + h1_offset²)` not just xy. CP-37 with
+  `EE_INITIAL_HEIGHT=1.30` had cubes at xy=0.797m → 3D=0.97m beyond 0.855m
+  reach. **CP-37: stable_fail → stable_ok** (5/5 verified).
+- Multi-cube simulate_args fix: `cube_path` (single) → `cube_paths` (any cube
+  delivered counts). Applied to CP-65, CP-52, CP-53, CP-67, CP-76. **CP-65
+  restored, CP-53 unlocked.**
+- ctrl:plan_calls / plan_fails / last_fail_goal counters added (commit `e72946f`).
+
+**Phase 6 M1 ✓ DONE** — ROS2 production parity tools + CP-87 template (`bfce6a8` + recovery `0a510e6`).
+
+**Phase 6 M2 ✓ DONE 2026-05-10** — Modbus-TCP bridge primitive (commit `0763ff8`):
+- modbus_tcp_bridge_attach + diagnose_modbus_bridge + detach handlers
+- pymodbus 3.11 supervised subprocess (zombie-aware diagnose)
+- 8 unit tests green, end-to-end smoke against mock server
+- CP-NEW-plc-conveyor template (first plumbing-only canonical)
+
+**Industrial-expansion Phase 8/9/10 still spec-only** — 2 of M1-M5 milestones now done.
+
+**Net stable_ok count post-2026-05-10:** 4 in patched-set (CP-22, CP-37, CP-53, CP-59, CP-65) — up from 2 in Phase 0 baseline.
 
 ---
 
