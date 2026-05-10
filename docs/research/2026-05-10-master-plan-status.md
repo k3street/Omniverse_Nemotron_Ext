@@ -53,6 +53,30 @@ Session length: ~14h continuous autonomous work, ~30 commits
 
 ≥80/86 exit criterion: ~24 more unlocks needed.
 
+### Verification matrix (post-restart 21:15+)
+
+Of the 22 yrkesroll + plumbing canonicals authored 2026-05-10:
+
+**7 ✓ stable_ok via simulate_traversal_check (gate verified live):**
+controller-shootout-cp, 3station-oee, y-merge-singulation,
+cad-revision-drift, inspect-reject, dr-curriculum, multi-cam-triangulation
+
+**7 ✓ BUILD_OK (build-only or plumbing-only, function-gate N/A):**
+plc-conveyor (6/6), plc-fixture (build OK), opcua-12conveyors (17/17),
+multi-amr-corridor (21/21), defect-sdg (93/115), rl-clone-env (15/18),
+sim2real-gap (17/18)
+
+**8 ⚠ stable_fail (controller / physics / NVIDIA-asset issues):**
+peg-in-hole-single (cylinder rolling), brick-stacking (physics explosion),
+cross-belt-sorter (no robot, belt-to-belt physics), drawer-open (no
+prismatic-joint motion plan), tactile-insertion (FT-not-wired),
+amr-pickup-handoff (controller plans 30x, cube never picked),
+g1-bimanual-tabletop (G1 SimReady missing on local Nucleus),
+operator-ergonomics (Avatar SimReady missing).
+
+**Total today (Phase 4 + 5 + 8 + 9 + 10):** 9 patched-set + 14 new
+templates = **23 stable_ok or BUILD_OK verified live**.
+
 **Partial progress (engagement unblocked, residual physics):**
 - CP-51, CP-68 (handoff): FrankaB moved closer to handoff; cube falls
   off bin edge; bin drop-precision issue remaining
