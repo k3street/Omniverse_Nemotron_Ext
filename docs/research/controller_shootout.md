@@ -5,13 +5,13 @@ available baseline runs from `workspace/baselines/`.
 
 ## Summary
 
-| controller / family | n_canonicals | n_runs | stable_ok | stable_fail | flaky | mean cycle (s) | plan_fail rate |
-|---|---|---|---|---|---|---|---|
-| curobo/franka_panda | 18 | 93 | 18 | 72 | 1 | — | — |
-| builtin/ur10 | 4 | 8 | 0 | 8 | 0 | — | — |
-| spline/franka_panda | 1 | 3 | 0 | 3 | 0 | — | — |
-| curobo/ur10 | 1 | 3 | 0 | 3 | 0 | — | — |
-| builtin/franka | 1 | 2 | 0 | 2 | 0 | — | — |
+| controller / family | n_canonicals | n_runs | stable_ok | stable_fail | flaky | above_floor% | at_rest% | mean speed |
+|---|---|---|---|---|---|---|---|---|
+| curobo/franka_panda | 18 | 93 | 18 | 72 | 1 | 47% | 92% | 4.683 |
+| builtin/ur10 | 4 | 8 | 0 | 8 | 0 | 100% | 100% | 0.000 |
+| spline/franka_panda | 1 | 3 | 0 | 3 | 0 | 0% | 100% | 0.000 |
+| curobo/ur10 | 1 | 3 | 0 | 3 | 0 | 100% | 100% | 0.000 |
+| builtin/franka | 1 | 2 | 0 | 2 | 0 | 33% | 33% | 3187.424 |
 
 ## Per-bucket canonical lists
 

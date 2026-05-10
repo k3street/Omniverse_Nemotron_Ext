@@ -79,8 +79,9 @@ def _aggregate(baselines: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     by_bucket: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
         "canonicals": set(),
         "verdicts": [],
-        "cycle_times": [],
-        "plan_fails": [],
+        "above_floor": [],   # 1.0 if cube above floor at end, else 0.0
+        "at_rest": [],       # 1.0 if cube at rest, else 0.0
+        "speeds": [],        # cube final speed (m/s)
         "n_runs": 0,
     })
 
@@ -94,10 +95,13 @@ def _aggregate(baselines: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
             verdict = r.get("verdict") or r.get("status")
             if verdict in ("stable_ok", "stable_fail", "flaky", "no_result"):
                 b["verdicts"].append(verdict)
-            ct = r.get("mean_cycle_time")
-            if ct is not None: b["cycle_times"].append(float(ct))
-            pf = r.get("plan_fail_rate")
-            if pf is not None: b["plan_fails"].append(float(pf))
+            for pr in r.get("per_run", []) or []:
+                if pr.get("above_floor") is not None:
+                    b["above_floor"].append(1.0 if pr["above_floor"] else 0.0)
+                if pr.get("at_rest") is not None:
+                    b["at_rest"].append(1.0 if pr["at_rest"] else 0.0)
+                if pr.get("speed") is not None:
+                    b["speeds"].append(float(pr["speed"]))
             b["n_runs"] += 1
 
     return by_bucket
@@ -120,8 +124,8 @@ def _render(by_bucket: Dict[str, Dict[str, Any]], output: Path) -> None:
 
     lines.append("## Summary")
     lines.append("")
-    lines.append("| controller / family | n_canonicals | n_runs | stable_ok | stable_fail | flaky | mean cycle (s) | plan_fail rate |")
-    lines.append("|---|---|---|---|---|---|---|---|")
+    lines.append("| controller / family | n_canonicals | n_runs | stable_ok | stable_fail | flaky | above_floor% | at_rest% | mean speed |")
+    lines.append("|---|---|---|---|---|---|---|---|---|")
 
     for key, b in sorted_buckets:
         n_cps = len(b["canonicals"])
@@ -130,13 +134,10 @@ def _render(by_bucket: Dict[str, Dict[str, Any]], output: Path) -> None:
         ok = verdicts.count("stable_ok")
         fail = verdicts.count("stable_fail")
         flaky = verdicts.count("flaky")
-        ct_str = "—"
-        if b["cycle_times"]:
-            ct_str = f"{mean(b['cycle_times']):.2f}"
-            if len(b["cycle_times"]) > 1:
-                ct_str += f"±{stdev(b['cycle_times']):.2f}"
-        pf_str = f"{mean(b['plan_fails']):.2f}" if b["plan_fails"] else "—"
-        lines.append(f"| {key} | {n_cps} | {n_runs} | {ok} | {fail} | {flaky} | {ct_str} | {pf_str} |")
+        af_str = f"{mean(b['above_floor'])*100:.0f}%" if b["above_floor"] else "—"
+        ar_str = f"{mean(b['at_rest'])*100:.0f}%" if b["at_rest"] else "—"
+        sp_str = f"{mean(b['speeds']):.3f}" if b["speeds"] else "—"
+        lines.append(f"| {key} | {n_cps} | {n_runs} | {ok} | {fail} | {flaky} | {af_str} | {ar_str} | {sp_str} |")
 
     lines.append("")
     lines.append("## Per-bucket canonical lists")
