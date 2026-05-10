@@ -29,6 +29,9 @@ from service.isaac_assist_service.chat.tools.bridge_tools import (
     _handle_modbus_tcp_bridge_attach,
     _handle_modbus_tcp_bridge_detach,
     _handle_diagnose_modbus_bridge,
+    _handle_opcua_bridge_attach,
+    _handle_opcua_bridge_detach,
+    _handle_diagnose_opcua_bridge,
 )
 
 
@@ -163,10 +166,104 @@ async def test_attach_to_nonexistent_server():
 
 @pytest.mark.asyncio
 async def test_register_handlers_dispatch():
-    """register_bridge_handlers wires 3 handlers into a dict."""
+    """register_bridge_handlers wires 6 handlers into a dict (M2+M3)."""
     from service.isaac_assist_service.chat.tools.bridge_tools import register_bridge_handlers
     handlers: dict = {}
     register_bridge_handlers(handlers)
     assert "modbus_tcp_bridge_attach" in handlers
     assert "modbus_tcp_bridge_detach" in handlers
     assert "diagnose_modbus_bridge" in handlers
+    assert "opcua_bridge_attach" in handlers
+    assert "opcua_bridge_detach" in handlers
+    assert "diagnose_opcua_bridge" in handlers
+
+
+# --- M3 OPC-UA tests ----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_opcua_attach_missing_url():
+    res = await _handle_opcua_bridge_attach({"node_map": {"/x": "ns=2;i=2"}})
+    assert "error" in res and "url" in res["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_opcua_attach_empty_node_map():
+    res = await _handle_opcua_bridge_attach({"url": "opc.tcp://127.0.0.1:4840", "node_map": {}})
+    assert "error" in res and "node_map" in res["error"].lower()
+
+
+@pytest.fixture
+def mock_opcua_server():
+    """Spin up an asyncua server in a subprocess. Yields its port."""
+    port = _free_port()
+    code = f"""
+import asyncio
+from asyncua import Server
+async def run():
+    server = Server()
+    await server.init()
+    server.set_endpoint("opc.tcp://127.0.0.1:{port}")
+    ns = await server.register_namespace("test")
+    obj = await server.nodes.objects.add_object(ns, "TestObj")
+    v1 = await obj.add_variable(ns, "Speed", 7)
+    v2 = await obj.add_variable(ns, "Status", 1)
+    v3 = await obj.add_variable(ns, "Count", 42)
+    async with server:
+        await asyncio.sleep(60)
+asyncio.run(run())
+"""
+    proc = subprocess.Popen([sys.executable, "-c", code],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                             start_new_session=True)
+    # Wait for port (asyncua takes ~1s to start)
+    for _ in range(50):
+        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+            try:
+                s.connect(("127.0.0.1", port))
+                break
+            except Exception:
+                time.sleep(0.1)
+    yield port
+    try:
+        os.killpg(os.getpgid(proc.pid), 15)
+    except Exception:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_opcua_attach_diagnose_detach_cycle(mock_opcua_server):
+    port = mock_opcua_server
+    url = f"opc.tcp://127.0.0.1:{port}"
+    # asyncua default node id: ns=2;i=2 is first var added under namespace 2
+    res = await _handle_opcua_bridge_attach({
+        "url": url,
+        "node_map": {"/World/Belt/speed": "ns=2;i=2",
+                     "/World/Light/intensity": "ns=2;i=3",
+                     "/World/Cube/exists": "ns=2;i=4"},
+        "rate_hz": 5.0,
+    })
+    assert res.get("ok"), res
+    assert "bridge_id" in res
+    assert res["n_nodes"] == 3
+    bid = res["bridge_id"]
+
+    # Wait for some polling — asyncua client + server takes longer than modbus
+    await asyncio.sleep(2.5)
+
+    diag = await _handle_diagnose_opcua_bridge({"bridge_id": bid})
+    assert diag.get("alive") is True, diag
+    # Should have at least 3 polls at 5 Hz × 2.5 s = ~12 (allow lower for startup)
+    assert diag["n_register_updates"] >= 2, diag
+
+    # Detach
+    det = await _handle_opcua_bridge_detach({"bridge_id": bid})
+    assert det.get("ok"), det
+
+    # Verify dead
+    for _ in range(30):
+        await asyncio.sleep(0.1)
+        diag2 = await _handle_diagnose_opcua_bridge({"bridge_id": bid})
+        if not diag2["alive"]:
+            break
+    assert diag2["alive"] is False

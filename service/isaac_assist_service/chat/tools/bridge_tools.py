@@ -275,8 +275,149 @@ async def _handle_modbus_tcp_bridge_detach(args: Dict[str, Any]) -> Dict[str, An
     return {"ok": True, "pid": pid, "method": "SIGKILL"}
 
 
+# --- OPC-UA subprocess worker (M3) ---------------------------------------
+
+_OPCUA_WORKER_TEMPLATE = '''#!/usr/bin/env python3
+"""opcua_bridge_worker — runs as subprocess, polls OPC-UA nodes via asyncua."""
+from __future__ import annotations
+import asyncio, json, sys, time, signal
+from asyncua import Client
+
+CONFIG = json.loads(sys.stdin.read())
+URL = CONFIG["url"]
+RATE_HZ = float(CONFIG.get("rate_hz", 1.0))
+NODE_MAP = CONFIG["node_map"]   # {usd_attr_path: "ns=2;i=2" or browse path}
+
+_running = True
+
+def _on_shutdown(signum, frame):
+    global _running
+    print(json.dumps({"ts": time.time(), "event": "shutdown_signal"}), flush=True)
+    _running = False
+
+signal.signal(signal.SIGTERM, _on_shutdown)
+signal.signal(signal.SIGINT, _on_shutdown)
+
+
+async def _run():
+    global _running
+    period = 1.0 / RATE_HZ
+    try:
+        async with Client(url=URL) as client:
+            print(json.dumps({"ts": time.time(), "event": "connected", "url": URL}), flush=True)
+            # Resolve nodes once
+            nodes = {}
+            for usd_path, node_id in NODE_MAP.items():
+                try:
+                    nodes[usd_path] = client.get_node(node_id)
+                except Exception as e:
+                    print(json.dumps({"ts": time.time(), "event": "resolve_failed",
+                                      "node_id": node_id, "err": str(e)[:200]}), flush=True)
+            last_t = 0.0
+            while _running:
+                now = time.time()
+                if now - last_t < period:
+                    await asyncio.sleep(period / 5)
+                    continue
+                last_t = now
+                attrs = {}
+                errors = []
+                for usd_path, node in nodes.items():
+                    try:
+                        v = await node.read_value()
+                        attrs[usd_path] = v
+                    except Exception as e:
+                        errors.append(usd_path + ": " + type(e).__name__ + ": " + str(e)[:120])
+                out = {"ts": now, "attrs": attrs}
+                if errors: out["errors"] = errors
+                print(json.dumps(out, default=str), flush=True)
+    except Exception as e:
+        print(json.dumps({"ts": time.time(), "event": "client_error",
+                          "err": type(e).__name__ + ": " + str(e)[:200]}), flush=True)
+        sys.exit(1)
+
+
+asyncio.run(_run())
+'''
+
+
+def _spawn_opcua_subprocess(url: str, node_map: Dict[str, str], rate_hz: float) -> Dict[str, Any]:
+    bridge_id = _make_id()
+    worker_path = _bridge_path(bridge_id, "py")
+    pid_path = _bridge_path(bridge_id, "pid")
+    log_path = _bridge_path(bridge_id, "log")
+
+    worker_path.write_text(_OPCUA_WORKER_TEMPLATE)
+    config = json.dumps({"url": url, "rate_hz": rate_hz, "node_map": node_map})
+    proc = subprocess.Popen(
+        [sys.executable, str(worker_path)],
+        stdin=subprocess.PIPE,
+        stdout=open(log_path, "ab"),
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    proc.stdin.write(config.encode())
+    proc.stdin.close()
+    pid_path.write_text(str(proc.pid))
+    time.sleep(1)
+    return {
+        "bridge_id": bridge_id,
+        "pid": proc.pid,
+        "log_path": str(log_path),
+        "worker_path": str(worker_path),
+    }
+
+
+async def _handle_opcua_bridge_attach(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Phase 6 M3: spawn supervised asyncua subprocess that polls OPC-UA
+    nodes and emits attribute updates.
+
+    Args:
+      url: opc.tcp://host:4840
+      node_map: {usd_attr_path: "ns=2;i=2"} — string node identifiers
+      rate_hz: poll rate (default 1.0)
+
+    Returns: {bridge_id, pid, log_path, ...}
+    """
+    url = (args.get("url") or "").strip()
+    node_map = args.get("node_map") or {}
+    rate_hz = float(args.get("rate_hz", 1.0))
+
+    if not url:
+        return {"error": "opcua_bridge_attach requires url"}
+    if not node_map:
+        return {"error": "opcua_bridge_attach requires non-empty node_map"}
+
+    try:
+        out = _spawn_opcua_subprocess(url, node_map, rate_hz)
+    except Exception as e:
+        return {"error": f"spawn_failed: {type(e).__name__}: {str(e)[:200]}"}
+
+    return {
+        "ok": True,
+        **out,
+        "url": url,
+        "rate_hz": rate_hz,
+        "n_nodes": len(node_map),
+    }
+
+
+async def _handle_diagnose_opcua_bridge(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Phase 6 M3 honesty pair — same shape as diagnose_modbus_bridge."""
+    # Reuse the modbus-diagnose code path; identical log + pid file format.
+    return await _handle_diagnose_modbus_bridge(args)
+
+
+async def _handle_opcua_bridge_detach(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Reuses modbus detach (PID file shape is identical)."""
+    return await _handle_modbus_tcp_bridge_detach(args)
+
+
 def register_bridge_handlers(handlers: Dict[str, Any]) -> None:
     """Hook used by tool_executor.py to register industrial-bridge handlers."""
     handlers["modbus_tcp_bridge_attach"] = _handle_modbus_tcp_bridge_attach
     handlers["modbus_tcp_bridge_detach"] = _handle_modbus_tcp_bridge_detach
     handlers["diagnose_modbus_bridge"] = _handle_diagnose_modbus_bridge
+    handlers["opcua_bridge_attach"] = _handle_opcua_bridge_attach
+    handlers["opcua_bridge_detach"] = _handle_opcua_bridge_detach
+    handlers["diagnose_opcua_bridge"] = _handle_diagnose_opcua_bridge
