@@ -33219,7 +33219,7 @@ except Exception: pass
 # on stochastic CUDA IK. Earlier 4 seeds caused stuck-controller pattern
 # in CP-10/11/26-style canonicals — IK failed transiently, controller
 # retried infinitely on same cube (Mode A controller-stuck bug fix 2026-05-09).
-_PLANNER_ATTR = "_curobo_pp_planner_v14"
+_PLANNER_ATTR = "_curobo_pp_planner_v17"
 _planner = getattr(builtins, _PLANNER_ATTR, None)
 if _planner is None:
     for _old in ("_curobo_pp_planner", "_curobo_pp_planner_v2", "_curobo_pp_planner_v3", "_curobo_pp_planner_v4", "_curobo_pp_planner_v5", "_curobo_pp_planner_v6", "_curobo_pp_planner_v7", "_curobo_pp_planner_v8", "_curobo_pp_planner_v9", "_curobo_pp_planner_v10", "_curobo_pp_planner_v11", "_curobo_pp_planner_v16", "_curobo_pp_planner_v13"):
@@ -33632,7 +33632,13 @@ def _cube_to_pick():
     # Reach varies per family: Franka 0.85m (actual arm length), Cobotta 0.95m,
     # UR10/UR10e 1.20m. Earlier 0.70m for Franka under-utilized the arm and
     # rejected handoff positions (e.g. CP-51 handoff at 0.76m from FrankaB).
-    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.85
+    # Phase 4 P0 (2026-05-10): apply 5cm safety margin per Opus research —
+    # cuRobo's IK + collision avoid have ~10% failure rate in the last cm
+    # of workspace boundary. Safety margin reduces wasted plan_pose calls
+    # on borderline-reachable cubes (RCA: CP-37 24/24 fail = reach-bound).
+    _reach_m_raw = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.85
+    _reach_safety = 0.05
+    _reach_m = _reach_m_raw - _reach_safety
     # CP-22 high-speed-belt fix: at >0.25 m/s nominal, cube transits the
     # 0.06m sensor zone in 2-3 physics ticks — too fast for the standard
     # claim+settle cycle. Read belt speed and widen detection upstream.
@@ -34406,7 +34412,13 @@ def _cube_to_pick():
     # Reach varies per family: Franka 0.85m (actual arm length), Cobotta 0.95m,
     # UR10/UR10e 1.20m. Earlier 0.70m for Franka under-utilized the arm and
     # rejected handoff positions (e.g. CP-51 handoff at 0.76m from FrankaB).
-    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.85
+    # Phase 4 P0 (2026-05-10): apply 5cm safety margin per Opus research —
+    # cuRobo's IK + collision avoid have ~10% failure rate in the last cm
+    # of workspace boundary. Safety margin reduces wasted plan_pose calls
+    # on borderline-reachable cubes (RCA: CP-37 24/24 fail = reach-bound).
+    _reach_m_raw = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.85
+    _reach_safety = 0.05
+    _reach_m = _reach_m_raw - _reach_safety
     for sp in SOURCE_PATHS:
         if sp in S["delivered"] or sp in S.get("failed", set()) or _is_in_bin(sp): continue
         cp = _world_pos(sp)
@@ -34927,7 +34939,13 @@ def _cube_to_pick():
     # Reach varies per family: Franka 0.85m (actual arm length), Cobotta 0.95m,
     # UR10/UR10e 1.20m. Earlier 0.70m for Franka under-utilized the arm and
     # rejected handoff positions (e.g. CP-51 handoff at 0.76m from FrankaB).
-    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.85
+    # Phase 4 P0 (2026-05-10): apply 5cm safety margin per Opus research —
+    # cuRobo's IK + collision avoid have ~10% failure rate in the last cm
+    # of workspace boundary. Safety margin reduces wasted plan_pose calls
+    # on borderline-reachable cubes (RCA: CP-37 24/24 fail = reach-bound).
+    _reach_m_raw = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.85
+    _reach_safety = 0.05
+    _reach_m = _reach_m_raw - _reach_safety
     for sp in SOURCE_PATHS:
         if sp in S["delivered"] or sp in S.get("failed", set()) or _is_in_bin(sp): continue
         cp = _world_pos(sp)
