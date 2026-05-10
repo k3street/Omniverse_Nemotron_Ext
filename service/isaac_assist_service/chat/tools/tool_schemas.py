@@ -1013,6 +1013,28 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "openplc_runtime_attach",
+            "description": (
+                "PHASE 10 M5 P3: convenience wrapper over modbus_tcp_bridge_attach "
+                "for OpenPLC Runtime. Maps input_map / output_map (separately) to "
+                "Modbus holding registers (output offset +1000). Default port 502, "
+                "10Hz scan rate. Returns same shape as modbus_tcp_bridge_attach."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "default": "127.0.0.1"},
+                    "port": {"type": "integer", "default": 502},
+                    "input_map": {"type": "object", "description": "{usd_attr: input_addr}"},
+                    "output_map": {"type": "object", "description": "{usd_attr: output_addr}"},
+                    "rate_hz": {"type": "number", "default": 10.0},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "setup_isaac_ros_cumotion_moveit",
             "description": (
                 "PHASE 6 M4: emit MoveIt2 planning_pipeline YAML configured for "
