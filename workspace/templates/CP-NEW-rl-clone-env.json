@@ -29,7 +29,7 @@
     "clone_envs caps below 64 if VRAM exhausted",
     "create_isaaclab_env may not exist or expects different signature",
     "launch_training requires rsl_rl pip-installed; falls back if missing",
-    "GPU dynamics + 64 instances exceed RTX 5070 12GB VRAM — pre-flight via check_vram_headroom recommended"
+    "GPU dynamics + 64 instances exceed RTX 5070 12GB VRAM \u2014 pre-flight via check_vram_headroom recommended"
   ],
-  "verified_status": "draft (Phase 8 #2; needs rsl_rl/rl-games installed + VRAM check)"
+  "verified_status": "build-spec-2026-05-10; BUILD_OK 15/18; 3 errors on clone_envs/launch_training (need rsl_rl)"
 }

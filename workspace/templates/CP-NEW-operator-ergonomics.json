@@ -27,11 +27,11 @@
   },
   "diagnose_args": null,
   "extends": "phase10-yrkesroll-#18",
-  "extension_notes": "HFE canonical. Avatar is a moving obstacle for the robot. Real ergonomics analysis would compute REBA/RULA scores from operator's joint angles — not part of canonical itself.",
+  "extension_notes": "HFE canonical. Avatar is a moving obstacle for the robot. Real ergonomics analysis would compute REBA/RULA scores from operator's joint angles \u2014 not part of canonical itself.",
   "failure_modes": [
-    "OperatorAvatar SimReady asset may not exist — fallback to Cube placeholder",
+    "OperatorAvatar SimReady asset may not exist \u2014 fallback to Cube placeholder",
     "play_animation requires reach_and_grab animation pre-baked into asset",
-    "Operator marked as planning_obstacle — cuRobo may take longer to find collision-free path"
+    "Operator marked as planning_obstacle \u2014 cuRobo may take longer to find collision-free path"
   ],
-  "verified_status": "draft (Phase 10 #18; needs Avatar SimReady)"
+  "verified_status": "build-spec-2026-05-10; build 16/19 (OperatorAvatar SimReady missing); gate stable_fail"
 }
