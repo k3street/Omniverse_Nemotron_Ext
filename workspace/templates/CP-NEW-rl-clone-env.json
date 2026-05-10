@@ -1,0 +1,35 @@
+{
+  "task_id": "CP-NEW-rl-clone-env",
+  "goal": "Build an RL training scaffold: 64 parallel Franka-reach envs cloned via clone_envs. Launch RL-Games or RSL-RL. Realizes Phase 8 yrkesroll #2 (ML/RL persona). Sanity check: reward curve emitted after 60s.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "clone_envs",
+    "create_isaaclab_env",
+    "launch_training",
+    "create_bin"
+  ],
+  "thoughts": [
+    "clone_envs creates a 64-instance grid of identical sub-stages. Each is a Franka + cube + bin.",
+    "create_isaaclab_env wraps the parallel envs into a Gym-compatible env spec.",
+    "launch_training kicks off PPO via RL-Games or RSL-RL backend.",
+    "Function-gate: training process logs reward; canonical SUCCESS = reward curve trends upward (mean reward delta > 0 over 60s).",
+    "Simplification: 64 envs may saturate GPU if asset isn't lightweight; fall back to 16 if needed.",
+    "Direct port from Isaac Lab Franka.Reach environment (RSL-RL recipe)."
+  ],
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": True, \"broadphase_type\": \"GPU\"})\n\ncreate_prim(prim_path=\"/World/EnvTemplate\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/EnvTemplate/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/EnvTemplate/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/EnvTemplate/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_prim(prim_path=\"/World/EnvTemplate/Cube\", prim_type=\"Cube\", position=[0.4, 0, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/EnvTemplate/Cube\", schema_name=api)\n\ncreate_bin(prim_path=\"/World/EnvTemplate/Bin\", position=[-0.4, 0, 0.75], size=[0.20, 0.20, 0.10])\n\nclone_envs(\n    template_path=\"/World/EnvTemplate\",\n    n_envs=64,\n    spacing=2.0,\n    grid_layout=\"square\",\n)\n\ncreate_isaaclab_env(\n    env_name=\"FrankaReach-v0\",\n    template_path=\"/World/EnvTemplate\",\n    n_envs=64,\n    obs_keys=[\"joint_pos\", \"joint_vel\", \"target_pos\"],\n    action_keys=[\"joint_targets\"],\n    reward_func=\"distance_to_target\",\n)\n\nlaunch_training(\n    env_name=\"FrankaReach-v0\",\n    backend=\"rsl_rl\",\n    algo=\"PPO\",\n    max_iterations=100,\n    log_dir=\"/tmp/rl_clone_env_run\",\n)",
+  "verify_args": null,
+  "simulate_args": null,
+  "diagnose_args": null,
+  "extends": "phase8-yrkesroll-#2",
+  "extension_notes": "ML/RL canonical. clone_envs + create_isaaclab_env are heavy-lift handlers; their functioning is what this canonical tests. Function-gate via simulate_traversal_check N/A (no single cube to deliver); custom validation via training-log reward trend.",
+  "failure_modes": [
+    "clone_envs caps below 64 if VRAM exhausted",
+    "create_isaaclab_env may not exist or expects different signature",
+    "launch_training requires rsl_rl pip-installed; falls back if missing",
+    "GPU dynamics + 64 instances exceed RTX 5070 12GB VRAM — pre-flight via check_vram_headroom recommended"
+  ],
+  "verified_status": "draft (Phase 8 #2; needs rsl_rl/rl-games installed + VRAM check)"
+}

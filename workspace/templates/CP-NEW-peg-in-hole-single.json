@@ -1,0 +1,39 @@
+{
+  "task_id": "CP-NEW-peg-in-hole-single",
+  "goal": "Build a single-peg insertion task: 1 cylindrical peg (5mm clearance), 1 hole, robot picks peg from feeder and inserts. Force-threshold-gated insertion (APPROACH→ALIGN→INSERT). Realizes Phase 8 yrkesroll #5 (contact-rich Isaac Lab Factory PegInsert pattern, simplified to single-peg).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "add_force_torque_sensor",
+    "add_proximity_sensor",
+    "setup_assembly_constraint",
+    "create_bin",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": [
+    "Single peg simplifies CP-58's array case. Forces multi-cube fix not needed — gate evaluates one peg.",
+    "Peg = cylinder, hole = xform marker on panel surface. Tolerance 0.005m (5mm clearance per Factory).",
+    "Force-torque sensor on panda_hand at threshold=5.0N detects contact. APPROACH (free-air to xy of hole, h=0.10m above) → ALIGN (descend until z near hole_z) → INSERT (final 5mm).",
+    "Without contact-aware planner, this canonical tests: (1) controller picks peg and reaches hole xy, (2) peg ends at hole xy ± tolerance + z_floor + above_floor.",
+    "Phase 9 Top 6-15 would add: tactile sensor, soft fixture, defect detection on insertion failure."
+  ],
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Peg feeder belt\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[1.5, 0.3, 0.05],\n    surface_velocity=[0.15, 0, 0],\n)\n\n# Single peg\ncreate_prim(prim_path=\"/World/Peg_1\", prim_type=\"Cylinder\", position=[-0.5, 0.4, 0.835], radius=0.018, height=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Peg_1\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Peg_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Peg_1\", material_name=\"rubber\")\n\n# Hole panel (wider than CP-58 — single peg, no array crowding)\ncreate_prim(prim_path=\"/World/HolePanel\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.20, 0.15, 0.025])\napply_api_schema(prim_path=\"/World/HolePanel\", schema_name=\"PhysicsCollisionAPI\")\n\n# Single hole at panel center\ncreate_prim(prim_path=\"/World/Hole_1\", prim_type=\"Xform\", position=[0, -0.4, 0.825])\nsetup_assembly_constraint(\n    peg_path=\"/World/Peg_1\",\n    hole_path=\"/World/Hole_1\",\n    tolerance=0.005,\n)\n\n# Force/torque sensor — Factory PegInsert pattern: 5N threshold for contact detection\nadd_force_torque_sensor(\n    sensor_path=\"/World/Franka/FtSensor\",\n    parent_path=\"/World/Franka/panda_hand\",\n    threshold=5.0,\n)\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Drop precisely at hole xy + above hole z\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Peg_1\"],\n    destination_path=\"/World/HolePanel\",\n    drop_target=[0, -0.4, 0.825],\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/HolePanel\"],\n)",
+  "verify_args": null,
+  "simulate_args": {
+    "cube_path": "/World/Peg_1",
+    "target_path": "/World/HolePanel",
+    "duration_s": 90
+  },
+  "diagnose_args": null,
+  "extends": "phase8-yrkesroll-#5",
+  "extension_notes": "Single-peg variant of CP-58. CP-58 was 4-peg array; this isolates the insertion physics for testing tolerance+force-gate without inter-peg interference. Direct port of Isaac Lab Factory PegInsert (single instance).",
+  "failure_modes": [
+    "Peg slides off panel edge during release — same risk as CP-58. HolePanel is 0.30x0.30 (15cm half-extent each side), hole at center, plenty of margin.",
+    "Force-torque threshold doesn't gate insertion — controller doesn't yet read FT sensor. Insertion happens by trajectory, not force.",
+    "Peg orientation: cylindrical, no need for orientation-gating. Multi-peg array (CP-58) would need orientation per hole."
+  ],
+  "verified_status": "draft (Phase 8 #5; needs Kit smoke-test)"
+}
