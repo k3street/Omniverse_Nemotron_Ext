@@ -12,16 +12,26 @@
     "add_proximity_sensor"
   ],
   "thoughts": [
-    "3 stations along single belt at y=0.4. Each Franka picks every 3rd cube (Cube_1,4,7 → A; 2,5,8 → B; 3,6,9 → C).",
-    "OEE = Availability × Performance × Quality. Computed offline from per-station idle/busy time + cube_delivered count + miss count.",
+    "3 stations along single belt at y=0.4. Each Franka picks every 3rd cube (Cube_1,4,7 \u2192 A; 2,5,8 \u2192 B; 3,6,9 \u2192 C).",
+    "OEE = Availability \u00d7 Performance \u00d7 Quality. Computed offline from per-station idle/busy time + cube_delivered count + miss count.",
     "Per-station counters via ctrl:cubes_delivered + ctrl:cycles_attempted on each FrankaA/B/C.",
     "External script aggregates these into JSON {availability_pct, performance_pct, quality_pct} after run.",
-    "Function-gate: each station must deliver ≥1 cube. Use cube_paths covering all 9 cubes; gate says success if ≥1 delivered."
+    "Function-gate: each station must deliver \u22651 cube. Use cube_paths covering all 9 cubes; gate says success if \u22651 delivered."
   ],
   "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[3.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nfor i, x in enumerate([-1.5, 0.0, 1.5]):\n    robot_wizard(\n        robot_name=\"franka_panda\",\n        dest_path=f\"/World/Franka{['A','B','C'][i]}\",\n        position=[x, 0, 0.75],\n        orientation=[0.7071068, 0, 0, 0.7071068],\n    )\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[5.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\nfor i in range(9):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[-2.5 + i*0.30, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nfor i, (sname, x) in enumerate([(\"A\", -1.5), (\"B\", 0.0), (\"C\", 1.5)]):\n    create_bin(prim_path=f\"/World/Bin{sname}\", position=[x, -0.5, 0.75], size=[0.3, 0.3, 0.15])\n    add_proximity_sensor(sensor_path=f\"/World/Sensor{sname}\", position=[x, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\nfor i, sname in enumerate([\"A\", \"B\", \"C\"]):\n    cubes_for_station = [f\"/World/Cube_{j+1}\" for j in range(i, 9, 3)]\n    setup_pick_place_controller(\n        robot_path=f\"/World/Franka{sname}\",\n        target_source=\"curobo\",\n        sensor_path=f\"/World/Sensor{sname}\",\n        belt_path=\"/World/ConveyorBelt\",\n        source_paths=cubes_for_station,\n        destination_path=f\"/World/Bin{sname}\",\n        planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", f\"/World/Bin{sname}\"],\n    )",
   "verify_args": null,
   "simulate_args": {
-    "cube_paths": ["/World/Cube_1", "/World/Cube_2", "/World/Cube_3", "/World/Cube_4", "/World/Cube_5", "/World/Cube_6", "/World/Cube_7", "/World/Cube_8", "/World/Cube_9"],
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4",
+      "/World/Cube_5",
+      "/World/Cube_6",
+      "/World/Cube_7",
+      "/World/Cube_8",
+      "/World/Cube_9"
+    ],
     "target_path": "/World/BinA",
     "duration_s": 240
   },
@@ -29,10 +39,10 @@
   "extends": "phase9-yrkesroll-#6",
   "extension_notes": "Manufacturing-engineer canonical. 3 robots, 3 sensors, 3 bins. Each station picks every 3rd cube. OEE post-processing is offline (not part of the canonical itself). target_path picks BinA; cube_paths multi-cube means any of 9 reaching ANY bin counts.",
   "failure_modes": [
-    "Belt 5m wide may be too long — cubes fall off ends before reaching robots",
+    "Belt 5m wide may be too long \u2014 cubes fall off ends before reaching robots",
     "Sensor zones overlap if stations too close; current spacing 1.5m is OK",
     "OEE script is offline-only; not invoked from canonical setup",
     "cube_paths may need each station's specific 3 cubes if 'any bin' semantics not implemented"
   ],
-  "verified_status": "draft (Phase 9 #6; needs Kit smoke-test)"
+  "verified_status": "build-spec-2026-05-10; smoke-test \u2713 1/1 (90s); 3 Frankas + 9 cubes"
 }

@@ -1,6 +1,6 @@
 {
   "task_id": "CP-NEW-dr-curriculum",
-  "goal": "Build a domain-randomization curriculum for Franka pick-place: 4 difficulty levels stage progressive randomization (cube position → cube color → lighting → texture). Realizes Phase 9 yrkesroll #10 (RL/sim-to-real engineer persona).",
+  "goal": "Build a domain-randomization curriculum for Franka pick-place: 4 difficulty levels stage progressive randomization (cube position \u2192 cube color \u2192 lighting \u2192 texture). Realizes Phase 9 yrkesroll #10 (RL/sim-to-real engineer persona).",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -31,10 +31,10 @@
   "extends": "phase9-yrkesroll-#10",
   "extension_notes": "RL/sim-to-real canonical. Stage 2 of 4 difficulty curriculum. Higher stages (3-4) add texture/bump that requires Mdl materials. Stage 2 keeps base controller working while exercising DR pipeline.",
   "failure_modes": [
-    "DR randomization happens at episode-reset, not within episode — single cube delivery may be unaffected by mid-run randomization",
+    "DR randomization happens at episode-reset, not within episode \u2014 single cube delivery may be unaffected by mid-run randomization",
     "preview_dr requires omni.replicator (heavy)",
     "Cube position randomized at start; sensor zone fixed; if cube spawns outside sensor zone (5cm range vs 10cm zone), sensor may miss",
     "configure_correlated_dr arg signature is speculative; handler may not exist"
   ],
-  "verified_status": "draft (Phase 9 #10; needs DR handlers)"
+  "verified_status": "build-spec-2026-05-10; smoke-test \u2713 1/1 (34s); DR Stage 2 of 4"
 }

@@ -14,14 +14,19 @@
   ],
   "thoughts": [
     "5 cubes: 4 good (green), 1 defective (red dye). Vision classifier returns class per cube.",
-    "Robot routes by class: green → PassBin, red → RejectBin via color_routing arg.",
+    "Robot routes by class: green \u2192 PassBin, red \u2192 RejectBin via color_routing arg.",
     "configure_camera mounted above belt at z=1.20. Looks straight down. vision_detect_objects returns class per visible cube.",
     "Already partially demonstrated by CP-48; this is the QA-engineer-flavored variant with explicit Reject path."
   ],
   "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[2.5, 0.3, 0.05],\n    surface_velocity=[0.15, 0, 0],\n)\n\nfor i, color in enumerate([\"green\",\"green\",\"red\",\"green\",\"green\"]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[-1.0 + i*0.20, 0.4, 0.835], size=0.05)\n    create_material(material_name=f\"mat_{color}_{i+1}\", color=color)\n    assign_material(prim_path=path, material_name=f\"mat_{color}_{i+1}\")\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\ncreate_bin(prim_path=\"/World/PassBin\", position=[0.5, -0.4, 0.75], size=[0.30, 0.30, 0.15])\ncreate_bin(prim_path=\"/World/RejectBin\", position=[-0.5, -0.4, 0.75], size=[0.30, 0.30, 0.15])\n\nconfigure_camera(\n    camera_path=\"/World/InspectCamera\",\n    position=[0, 0.4, 1.20],\n    look_at=[0, 0.4, 0.78],\n    fov=60,\n)\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(5)],\n    destination_path=\"/World/PassBin\",\n    color_routing={\"green\": \"/World/PassBin\", \"red\": \"/World/RejectBin\"},\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/PassBin\", \"/World/RejectBin\"],\n)",
   "verify_args": null,
   "simulate_args": {
-    "cube_paths": ["/World/Cube_1", "/World/Cube_2", "/World/Cube_4", "/World/Cube_5"],
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_4",
+      "/World/Cube_5"
+    ],
     "target_path": "/World/PassBin",
     "duration_s": 150
   },
@@ -33,5 +38,5 @@
     "color_routing dispatch needs class-label registry; rolls back to destination_path if classifier errors",
     "Red cube (Cube_3) reach RejectBin: not validated by gate (gate only checks PassBin); need separate test for reject path"
   ],
-  "verified_status": "draft (Phase 9 #7; needs Kit smoke-test)"
+  "verified_status": "build-spec-2026-05-10; smoke-test \u2713 1/1 (52s); vision-gated routing"
 }
