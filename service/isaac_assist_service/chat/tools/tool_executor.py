@@ -31339,6 +31339,13 @@ _PP_CTRL_ATTRS = [
     ("ctrl:last_error",      "Sdf.ValueTypeNames.String", '""'),
     ("ctrl:picked_path",     "Sdf.ValueTypeNames.String", '""'),
     ("ctrl:tick_count",      "Sdf.ValueTypeNames.Int",    "0"),
+    # Phase 4 diagnostic counters (added 2026-05-10): incremented in
+    # cuRobo handler around _planner.plan_pose() calls. Lets probes
+    # distinguish "controller never planned" (plan_calls=0) from
+    # "controller tried but planner failed" (plan_calls>0, plan_fails>0).
+    ("ctrl:plan_calls",      "Sdf.ValueTypeNames.Int",    "0"),
+    ("ctrl:plan_fails",      "Sdf.ValueTypeNames.Int",    "0"),
+    ("ctrl:last_fail_goal",  "Sdf.ValueTypeNames.String", '""'),
 ]
 
 
@@ -31366,8 +31373,14 @@ _a_err = _ensure_attr("ctrl:error_count", Sdf.ValueTypeNames.Int, 0)
 _a_last_err = _ensure_attr("ctrl:last_error", Sdf.ValueTypeNames.String, "")
 _a_picked = _ensure_attr("ctrl:picked_path", Sdf.ValueTypeNames.String, "")
 _a_tick = _ensure_attr("ctrl:tick_count", Sdf.ValueTypeNames.Int, 0)
+# Phase 4 diagnostic counters (2026-05-10): plan_calls/plan_fails counts
+# cuRobo plan_pose attempts, last_fail_goal records the last failed pose.
+_a_plan_calls = _ensure_attr("ctrl:plan_calls", Sdf.ValueTypeNames.Int, 0)
+_a_plan_fails = _ensure_attr("ctrl:plan_fails", Sdf.ValueTypeNames.Int, 0)
+_a_last_fail_goal = _ensure_attr("ctrl:last_fail_goal", Sdf.ValueTypeNames.String, "")
 # Reset counters on install (avoid stale values from prior runs).
 _a_err.Set(0); _a_cubes.Set(0); _a_cycles.Set(0); _a_tick.Set(0); _a_last_err.Set("")
+_a_plan_calls.Set(0); _a_plan_fails.Set(0); _a_last_fail_goal.Set("")
 """
 
 
@@ -33209,7 +33222,7 @@ except Exception: pass
 _PLANNER_ATTR = "_curobo_pp_planner_v14"
 _planner = getattr(builtins, _PLANNER_ATTR, None)
 if _planner is None:
-    for _old in ("_curobo_pp_planner", "_curobo_pp_planner_v2", "_curobo_pp_planner_v3", "_curobo_pp_planner_v4", "_curobo_pp_planner_v5", "_curobo_pp_planner_v6", "_curobo_pp_planner_v7", "_curobo_pp_planner_v8", "_curobo_pp_planner_v9", "_curobo_pp_planner_v10", "_curobo_pp_planner_v11", "_curobo_pp_planner_v12", "_curobo_pp_planner_v13"):
+    for _old in ("_curobo_pp_planner", "_curobo_pp_planner_v2", "_curobo_pp_planner_v3", "_curobo_pp_planner_v4", "_curobo_pp_planner_v5", "_curobo_pp_planner_v6", "_curobo_pp_planner_v7", "_curobo_pp_planner_v8", "_curobo_pp_planner_v9", "_curobo_pp_planner_v10", "_curobo_pp_planner_v11", "_curobo_pp_planner_v16", "_curobo_pp_planner_v13"):
         try: delattr(builtins, _old)
         except Exception: pass
     print("(curobo: building MotionPlanner v10 — Warp 1.11+, scene-collision)")
@@ -33483,14 +33496,27 @@ def _plan_to_world_point(point_world, current_q7, exclude_obs=None, yaw_deg=0.0)
             _planner.update_world(scene_cfg)
         except Exception as _swe:
             print(f"(curobo update_world fallback: {{_swe}})")
+        # Phase 4 diag (2026-05-10): increment plan_calls before each attempt;
+        # on failure, increment plan_fails + record goal pose. Lets probes
+        # quantify cuRobo planning success rate per CP.
+        try: _a_plan_calls.Set(int(_a_plan_calls.Get() or 0) + 1)
+        except Exception: pass
         res = _planner.plan_pose(goal, start, max_attempts=3)
         if res is None or not bool(res.success[0, 0].item()):
+            try:
+                _a_plan_fails.Set(int(_a_plan_fails.Get() or 0) + 1)
+                _a_last_fail_goal.Set(f"world={{point_world}}")
+            except Exception: pass
             return None
         interp = res.get_interpolated_plan()
         traj = interp.position[0, 0, :, :7].detach().cpu().numpy()
         mt = float(res.motion_time()) if callable(res.motion_time) else float(res.motion_time)
         return (traj, mt)
     except Exception as _pe:
+        try:
+            _a_plan_fails.Set(int(_a_plan_fails.Get() or 0) + 1)
+            _a_last_fail_goal.Set(f"world={{point_world}} err={{type(_pe).__name__}}")
+        except Exception: pass
         print(f"(curobo plan fail: {{_pe}})")
         return None
 
