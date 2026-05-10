@@ -229,6 +229,69 @@ async def test_list_bridges_returns_dict():
 
 
 @pytest.mark.asyncio
+async def test_bridge_pause_resume_lifecycle(mock_modbus_server):
+    """attach → pause → resume → detach: full lifecycle."""
+    port = mock_modbus_server
+    res = await _handle_modbus_tcp_bridge_attach({
+        "host": "127.0.0.1", "port": port,
+        "register_map": {"/World/Test": 0},
+        "rate_hz": 5.0,
+    })
+    assert res.get("ok"), res
+    bid = res["bridge_id"]
+
+    # Pause
+    await asyncio.sleep(0.5)
+    paused = await _handle_bridge_pause({"bridge_id": bid})
+    assert paused.get("ok"), paused
+    assert paused["paused"] is True
+
+    # Wait — paused process shouldn't emit new updates
+    diag1 = await _handle_diagnose_modbus_bridge({"bridge_id": bid})
+    n1 = diag1["n_register_updates"]
+    await asyncio.sleep(0.6)
+    diag2 = await _handle_diagnose_modbus_bridge({"bridge_id": bid})
+    n2 = diag2["n_register_updates"]
+    # Paused, count should not significantly grow (allow small tolerance for
+    # in-flight writes already in stdout buffer)
+    assert n2 - n1 < 3, f"paused but updates grew from {n1} to {n2}"
+
+    # Resume
+    resumed = await _handle_bridge_resume({"bridge_id": bid})
+    assert resumed.get("ok"), resumed
+    assert resumed["paused"] is False
+
+    # After resume, count should grow again
+    await asyncio.sleep(0.6)
+    diag3 = await _handle_diagnose_modbus_bridge({"bridge_id": bid})
+    n3 = diag3["n_register_updates"]
+    assert n3 > n2, f"resumed but updates didn't grow: {n2} -> {n3}"
+
+    # Cleanup
+    await _handle_modbus_tcp_bridge_detach({"bridge_id": bid})
+
+
+@pytest.mark.asyncio
+async def test_list_bridges_after_attach(mock_modbus_server):
+    """list_bridges shows the just-attached bridge."""
+    port = mock_modbus_server
+    res = await _handle_modbus_tcp_bridge_attach({
+        "host": "127.0.0.1", "port": port,
+        "register_map": {"/World/X": 0},
+        "rate_hz": 5.0,
+    })
+    bid = res["bridge_id"]
+
+    listing = await _handle_list_bridges({})
+    found = [b for b in listing["bridges"] if b["bridge_id"] == bid]
+    assert len(found) == 1
+    assert found[0]["alive"] is True
+    assert found[0]["kind"] == "modbus"
+
+    await _handle_modbus_tcp_bridge_detach({"bridge_id": bid})
+
+
+@pytest.mark.asyncio
 async def test_openplc_attach_input_map_only():
     """Verifies that input_map alone forwards to underlying modbus_tcp_bridge_attach.
     Spawn fails (port 502 likely unavailable as test) — gives spawn_failed or similar."""
