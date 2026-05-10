@@ -330,6 +330,26 @@ def _diagnose_stuck(summary: Dict[str, Any], cube_traj: Optional[List[Dict]] = N
                 f"Check sensor placement at handoff station."
             )
 
+    # Detect "drop-precision" pattern: cubes delivered to bin xy but fall below
+    # bin floor (z < bin_z - 0.20m). Indicates bin too small or drop too close
+    # to edge.
+    if cube_traj and len(cube_traj) >= 3:
+        cube_paths_list = summary.get("cube_paths") or []
+        for cp in cube_paths_list:
+            positions = [s.get(cp) for s in cube_traj if s.get(cp) is not None]
+            if len(positions) < 2: continue
+            final = positions[-1]
+            initial = positions[0]
+            # Heuristic: cube moved significantly toward target xy
+            # but final z is well below initial spawn (large drop = fall through)
+            dz = final[2] - initial[2]
+            if dz < -0.25:
+                diagnoses.append(
+                    f"{cp}: large vertical drop (Δz={dz:.2f}m) — likely "
+                    f"fell through bin floor or off bin edge. "
+                    f"Check bin size/walls or drop_target precision."
+                )
+
     last_errors = summary.get("last_errors", [])
     for e in last_errors[:3]:
         diagnoses.append(f"runtime error: {e[:120]}")
