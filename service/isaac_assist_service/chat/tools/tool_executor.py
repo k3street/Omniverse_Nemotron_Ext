@@ -33219,7 +33219,7 @@ except Exception: pass
 # on stochastic CUDA IK. Earlier 4 seeds caused stuck-controller pattern
 # in CP-10/11/26-style canonicals — IK failed transiently, controller
 # retried infinitely on same cube (Mode A controller-stuck bug fix 2026-05-09).
-_PLANNER_ATTR = "_curobo_pp_planner_v17"
+_PLANNER_ATTR = "_curobo_pp_planner_v18"
 _planner = getattr(builtins, _PLANNER_ATTR, None)
 if _planner is None:
     for _old in ("_curobo_pp_planner", "_curobo_pp_planner_v2", "_curobo_pp_planner_v3", "_curobo_pp_planner_v4", "_curobo_pp_planner_v5", "_curobo_pp_planner_v6", "_curobo_pp_planner_v7", "_curobo_pp_planner_v8", "_curobo_pp_planner_v9", "_curobo_pp_planner_v10", "_curobo_pp_planner_v11", "_curobo_pp_planner_v16", "_curobo_pp_planner_v13"):
@@ -33653,12 +33653,25 @@ def _cube_to_pick():
                     if _v: _belt_v = abs(float(_v[0]))
         except Exception: pass
     _look_ahead_x = 0.30 if _belt_v > 0.25 else 0.0
+    # Phase 4 (2026-05-10): 3D-aware reach check. EE has to reach
+    # h1 = EE_INITIAL_HEIGHT above cube, not the cube itself. With h1
+    # significantly above robot base, the EE travel distance is sqrt(
+    # xy_dist² + (h1 - base_z)²), not just xy_dist. CP-37 sets
+    # EE_INITIAL_HEIGHT=1.30 to clear pillar at z=1.15; with cube at xy
+    # distance 0.797m and h1-base_z=0.55m, 3D distance is 0.97m, beyond
+    # Franka's 0.855m reach. The 2D check accepts the cube; 3D rejects.
+    # Without this, controller wastes plan_pose calls on unreachable goals.
+    _h1_offset = max(0.0, float(EE_INITIAL_HEIGHT) - base_z)
     for sp in SOURCE_PATHS:
         if sp in S["delivered"] or sp in S.get("failed", set()) or _is_in_bin(sp): continue
         cp = _world_pos(sp)
         if cp is None: continue
         if cp[2] < base_z - 0.30 or cp[2] > base_z + 0.50: continue
-        if float(np.linalg.norm(cp[:2] - base_xy)) > _reach_m: continue
+        _xy_dist = float(np.linalg.norm(cp[:2] - base_xy))
+        if _xy_dist > _reach_m: continue
+        # 3D-aware: reject if EE goal at h1 above cube would exceed reach
+        _3d_dist = (_xy_dist**2 + _h1_offset**2) ** 0.5
+        if _3d_dist > _reach_m: continue
         # REORIENT-01 require_upright filter: skip cubes whose +Z axis
         # isn't aligned with world up. Lets cube ride past pick zone on
         # its side, hit a passive flip-wall, become upright, then pick.
