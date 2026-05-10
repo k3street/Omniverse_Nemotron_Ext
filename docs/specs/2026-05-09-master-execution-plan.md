@@ -30,7 +30,22 @@
 - 8 unit tests green, end-to-end smoke against mock server
 - CP-NEW-plc-conveyor template (first plumbing-only canonical)
 
-**Industrial-expansion Phase 8/9/10 still spec-only** — 2 of M1-M5 milestones now done.
+**Phase 6 M3 ✓ DONE 2026-05-10** — OPC-UA bridge + F-02 promotion (commit `38e1b93`):
+- opcua_bridge_attach via asyncua 1.1.8 — same subprocess pattern as M2
+- diagnose/detach reuse modbus PID/log shape
+- 11 unit tests green; mock asyncua server fixture
+- CP-NEW-opcua-12conveyors template (F-02 promoted to runnable)
+
+**Phase 6 M4 ✓ DONE 2026-05-10** — cuMotion-as-MoveIt + shootout (commit `913bf7b`):
+- setup_isaac_ros_cumotion_moveit emits planning_pipeline.yaml
+- controller_shootout_report.py aggregates baselines into (target_source ×
+  robot_family) table
+
+**Phase 6 M5 ✓ DONE 2026-05-10** — MQTT-Sparkplug bridge (commit `aa31d2f`):
+- paho-mqtt 2.1 (CallbackAPIVersion.VERSION2)
+- 14 unit tests green
+
+**Industrial-expansion: 5 of 5 milestones done** (was 0 of 5 at session start).
 
 **Net stable_ok count post-2026-05-10:** 4 in patched-set (CP-22, CP-37, CP-53, CP-59, CP-65) — up from 2 in Phase 0 baseline.
 
