@@ -73,6 +73,18 @@ def _find_robots():
             if a.GetName() in target_attrs:
                 out.append(prim)
                 break
+    # Fallback: if no robots with ctrl:* attrs found, scan for articulation
+    # roots (prim has any articulationroot api) — these are probable robots
+    # whose controller-setup failed silently.
+    if not out:
+        for prim in stage.Traverse():
+            try:
+                schemas = prim.GetAppliedSchemas()
+                if any("ArticulationRoot" in s or "articulation" in s.lower() for s in schemas):
+                    out.append(prim)
+                    if len(out) >= 4: break  # cap fallback
+            except Exception:
+                continue
     return out
 
 def _find_cubes():
