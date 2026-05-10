@@ -98,26 +98,56 @@ visual states at 1 Hz.
 | M1 — ROS2 production parity | ✓ Done |
 | M2 — Modbus-TCP bridge | ✓ Done |
 | M3 — OPC-UA bridge + F-02 promotion | ✓ Done |
-| M4 — cuMotion-as-MoveIt + controller shootout | Not started |
-| M5 — OpenPLC + MQTT-Sparkplug | Blocked on paho-mqtt install |
+| M4 — cuMotion-as-MoveIt + controller shootout | ✓ Done |
+| M5 — MQTT-Sparkplug bridge | ✓ Done |
 
-3 of 5 milestones live. M5 unblocks with `pip install paho-mqtt`.
+**5 of 5 milestones live.** All bridge handlers also have MCP schemas
+(commit `4f0cfee`) — tools are now MCP-discoverable with parameter
+validation.
 
 ## Files of interest
 
-- `service/isaac_assist_service/chat/tools/tool_executor.py` — 3D reach @ ~33665
-- `service/isaac_assist_service/chat/tools/bridge_tools.py` — M2 + M3 bridges
-- `tests/test_bridge_tools.py` — 11 unit tests (l0)
-- `scripts/qa/probe_ctrl_telemetry.py` — probe + 6 diagnose patterns
+- `service/isaac_assist_service/chat/tools/tool_executor.py` — 3D reach @ ~33665, M1+M4 handlers
+- `service/isaac_assist_service/chat/tools/bridge_tools.py` — M2 + M3 + M5 bridges (9 handlers)
+- `service/isaac_assist_service/chat/tools/tool_schemas.py` — schemas for all bridge tools (412 total)
+- `tests/test_bridge_tools.py` — 14 unit tests (l0)
+- `scripts/qa/probe_ctrl_telemetry.py` — probe + 7 diagnose patterns
+- `scripts/qa/controller_shootout_report.py` — M4 deliverable
 - `workspace/templates/CP-NEW-plc-conveyor.json` — M2 plumbing canonical
 - `workspace/templates/CP-NEW-opcua-12conveyors.json` — F-02 promoted
+- `docs/research/controller_shootout.md` — controller comparison snapshot
 - `docs/specs/2026-05-09-master-execution-plan.md` — live status section
 
 ## Next session entry points
 
-1. **If verify is green (≥4/5 each):** commit final stable_ok delta and
-   either start M4 (controller shootout) or attack remaining gaps.
+1. **If verify is green (≥4/5 each):** commit final stable_ok delta + start
+   Phase 8 Top-5 yrkesroll-canonicals (drawer-open is most accessible without
+   external assets).
 2. **If verify shows stochasticity:** investigate per-CP variance, possibly
    tighten N=5 thresholds.
-3. **If user wants live M5:** `pip install paho-mqtt` then build worker
-   template by analogy with M2/M3.
+3. **Pre-existing test failures** (none introduced by this session):
+   - `test_tool_schemas.py::test_all_data_handlers_have_schema` — fails on
+     `read_layout_spec` (handler exists, schema doesn't)
+   - `test_tool_honesty_scan.py::test_no_new_try_except_print_without_raise` —
+     fails on `_handle_surface_gripper`
+   These are tech-debt items unrelated to bridges/Phase 4.
+
+## Commits today (chronological)
+
+```
+b5cfa4b Master plan — 2026-05-10 status: Phase 4 partial (+3 unlocks), Phase 6 M2 done
+00589c1 Probe — seed _find_cubes from simulate_args.cube_path/cube_paths
+38e1b93 Phase 6 M3 — opcua_bridge_attach + diagnose + detach (asyncua 1.1.8)
+db8955f Phase 6 M3 — CP-NEW-opcua-12conveyors (F-02 promotion)
+865c229 Probe — detect phantom_handoff (CP-51/68 multi-robot relay pattern)
+201fa2c Doc — 2026-05-10 session summary
+aa31d2f Phase 6 M5 — mqtt_sparkplug_bridge_attach + diagnose + detach (paho-mqtt 2.1)
+913bf7b Phase 6 M4 — setup_isaac_ros_cumotion_moveit + controller-shootout report
+5fe6b4d Master plan — all 5 industrial-expansion milestones done (M1-M5)
+0107cf0 Shootout — add above_floor%, at_rest%, mean speed columns from per_run
+5bd05bf Failure-mode investigation artefacts (probes + classifier + Opus research)
+4f0cfee Phase 6 M3+M4+M5 — MCP schemas for new bridge handlers
+895a44c Failure-modes synthesis — afternoon update note
+```
+
+(Plus earlier work: 7c0ad42 3D reach, 0763ff8 M2, e72946f plan_calls, etc.)
