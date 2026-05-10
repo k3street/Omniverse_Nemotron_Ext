@@ -40,17 +40,28 @@ for cp in "${TARGETS[@]}"; do
         continue
     fi
 
-    # Try multi-cube fix if probe shows multi-cube scene
-    NCUBES=$(grep -oE '"cube_paths":[[:space:]]*\[[^]]*\]' "/tmp/phase5_${cp}_probe.json" 2>/dev/null \
-             | grep -oE '"/World/[^"]+"' | wc -l)
-    DELIVERED=$(grep -oE '"cubes_delivered_final":[[:space:]]*[0-9]+' "/tmp/phase5_${cp}_probe.json" 2>/dev/null \
-                | grep -oE '[0-9]+' | head -1)
-    PLANS=$(grep -oE '"plan_calls":[[:space:]]*[0-9]+' "/tmp/phase5_${cp}_probe.json" 2>/dev/null \
-            | grep -oE '[0-9]+' | head -1)
-
+    # Parse probe JSON via Python (more reliable than regex grep)
+    eval $(python -c "
+import json, sys
+text = open('/tmp/phase5_${cp}_probe.json').read()
+ji = text.find('{')
+if ji < 0:
+    print('NCUBES=0; DELIVERED=0; PLANS=0')
+    sys.exit(0)
+try:
+    d = json.loads(text[ji:])
+except:
+    print('NCUBES=0; DELIVERED=0; PLANS=0')
+    sys.exit(0)
+s = d.get('summary',{}) or {}
+cps = s.get('cube_paths',[]) or []
+print(f'NCUBES={len(cps)}')
+print(f'DELIVERED={s.get(\"cubes_delivered_final\",0) or 0}')
+print(f'PLANS={s.get(\"plan_calls\",0) or 0}')
+" 2>/dev/null)
+    NCUBES=${NCUBES:-0}
     DELIVERED=${DELIVERED:-0}
     PLANS=${PLANS:-0}
-    NCUBES=${NCUBES:-0}
 
     echo "[$NOW] $cp probe: ncubes=$NCUBES delivered=$DELIVERED plan_calls=$PLANS"
 
