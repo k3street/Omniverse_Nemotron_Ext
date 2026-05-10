@@ -7686,9 +7686,31 @@ async def _handle_create_recirculation_loop(args: Dict) -> Dict:
         })
         seg_paths.append({"path": seg_path, "name": name, "velocity": list(vel)})
 
+    # Corner bridge platforms — static (not moving) — to prevent cubes from
+    # falling through gaps between perpendicular segments. Each corner is a
+    # small static cube at the segment intersection.
+    corners = [
+        ("CornerTopRight",    [center[0] + length / 2, center[1] + width / 2, center[2]]),
+        ("CornerTopLeft",     [center[0] - length / 2, center[1] + width / 2, center[2]]),
+        ("CornerBottomRight", [center[0] + length / 2, center[1] - width / 2, center[2]]),
+        ("CornerBottomLeft",  [center[0] - length / 2, center[1] - width / 2, center[2]]),
+    ]
+    corner_paths = []
+    for cname, cpos in corners:
+        cpath = f"{loop_path}/{cname}"
+        await execute_tool_call("create_prim", {
+            "prim_path": cpath, "prim_type": "Cube",
+            "position": cpos, "scale": [0.10, 0.10, 0.05],
+        })
+        await execute_tool_call("apply_api_schema", {
+            "prim_path": cpath, "schema_name": "PhysicsCollisionAPI",
+        })
+        corner_paths.append(cpath)
+
     return {
         "loop_path": loop_path,
         "segments": seg_paths,
+        "corners": corner_paths,
         "length": length,
         "width": width,
     }
