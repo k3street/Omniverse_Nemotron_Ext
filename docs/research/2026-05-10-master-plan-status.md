@@ -33,7 +33,7 @@ Session length: ~14h continuous autonomous work, ~30 commits
   it's a red herring vs 3D reach)
 
 ### Phase 5 — 100% function-gate drive ~PARTIAL
-**Confirmed stable_ok today (verified):**
+**Patched-set today, verified-stable:**
 - CP-22 (N=5 5/5)
 - CP-37 (N=5 5/5) — UNLOCKED
 - CP-53 (N=5 5/5) — UNLOCKED
@@ -44,9 +44,14 @@ Session length: ~14h continuous autonomous work, ~30 commits
 - CP-46 (N=1 1/1) — UNLOCKED
 - CP-48 (N=1 1/1) — UNLOCKED
 
-= **9 verified stable_ok in patched-set** (was 2 in Phase 0 baseline).
-~62 of base CP-01..CP-86 presumed stable_ok historically (not re-verified
-in this session's patched-set).
+= **9 verified stable_ok in 25-CP patched-set** (was 2 in Phase 0 baseline).
+
+**Estimated total stable_ok across all 86:**
+- 2026-05-09 session-end memo: 49 stable_ok / 86 (then-baseline)
+- 2026-05-10 unlocks: +7 NEW (CP-37/53/57/58/46/48 + CP-59 flaky→ok)
+- = ~56 of 86 stable_ok ≈ **65%** (full N=10 sweep would confirm)
+
+≥80/86 exit criterion: ~24 more unlocks needed.
 
 **Partial progress (engagement unblocked, residual physics):**
 - CP-51, CP-68 (handoff): FrankaB moved closer to handoff; cube falls
