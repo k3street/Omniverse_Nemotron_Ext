@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import sys
 import time
 from datetime import datetime
@@ -26,6 +27,16 @@ from typing import Dict, List, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
+
+# Show supervisor INFO logs on stdout when --use-supervisor is active
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+# Quiet noisy aiohttp/uvicorn output
+logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
+logging.getLogger("aiohttp.client").setLevel(logging.WARNING)
 
 from service.isaac_assist_service.chat.canonical_instantiator import (  # noqa: E402
     execute_template_canonical, settle_after_canonical,
@@ -257,6 +268,15 @@ async def main() -> int:
         },
         "results": results,
     }
+    if supervisor is not None:
+        sup_stats = supervisor.stats()
+        payload["supervisor_stats"] = sup_stats
+        await supervisor.stop()
+        print(
+            f"[supervisor] {sup_stats['total_restarts']} restarts, "
+            f"{sup_stats['total_drift_events']} drift events, "
+            f"{sup_stats['total_soft_resets']} soft-resets"
+        )
     out_path.write_text(json.dumps(payload, indent=2))
     print(f"wrote {out_path.relative_to(REPO_ROOT)}")
     return 0
