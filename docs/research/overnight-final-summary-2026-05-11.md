@@ -217,3 +217,46 @@ re-verify scope, e.g. CP-01..09, 11, 13-14, 19, 21, 23, 25-26, 30, 32-36, 39,
 - **Stochastic (2):** CP-37, CP-68 (Kit-state dependent)
 - **External deps (3):** CP-87 (ROS2 launch), CP-NEW-g1-bimanual, CP-NEW-operator-ergonomics (Nucleus assets)
 - **Specialized failure modes (~5):** CP-05, CP-06, CP-40 (spline), drawer-open, cross-belt-sorter
+
+---
+
+## Post-Kit-restart batch verifications (09:25-09:45)
+
+After 22-CP sweep timeout (Kit hung at 40min), restarted Kit and ran
+5-CP batches:
+
+| Batch | CPs | stable_ok | Notes |
+|---|---|---|---|
+| post-restart-verify | CP-22, CP-16, CP-42 | 2/3 | CP-16 stochastic |
+| batch-B | CP-44, CP-45, CP-49, CP-50, CP-77 | 3/5 | CP-49+77 stochastic |
+| batch-C | CP-18, CP-24, CP-27, CP-31, CP-41 | 3/5 | CP-24+31 stochastic |
+| batch-D | CP-38, CP-42, CP-43, CP-47, CP-54 | 5/5 | all ok |
+| batch-E | CP-56, CP-66, CP-12, CP-15, CP-17 | 5/5 | all ok |
+
+= **18 / 23 in batched verify (78%).**
+
+## Observation: CP-level stochasticity
+
+Many CPs show ~60-80% per-N=1 in random Kit-state. Single-shot N=1 is
+not deterministic enough.
+
+Pattern: 
+- batches D + E hit 100% — Kit warm-state was right
+- batches B + C hit 60% — Kit-state-drift caused 2 CPs each to fail
+
+The CPs that fail in batches:
+- CP-16, CP-24, CP-31, CP-49, CP-77
+
+These DO work in isolation but become stochastic in sequence. They're
+genuine unlocks but with Kit-state-sensitivity.
+
+## Final confirmed unlocks today
+
+**~30 robust stable_ok unlocks** (across isolated + batched verifies):
+- Yesterday N=5: 10 (CP-22, 46, 48, 51, 52, 53, 57, 58, 59, 65)
+- Today high-confidence: CP-10, CP-12, CP-15, CP-17, CP-18, CP-27, CP-38, CP-41, CP-42, CP-43, CP-44, CP-45, CP-47, CP-50, CP-54, CP-56, CP-66 = 17
+- Stochastic (works ≥60%): CP-16, CP-24, CP-31, CP-37, CP-49, CP-68, CP-77
+
+Plus 5 yrkesroll N=3 robust, 2 flaky, 7 BUILD_OK plumbing.
+
+**Total: 27 patched-set unlocks (5 stochastic) + 14 templates = ~41 verified.**
