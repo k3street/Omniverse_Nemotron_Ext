@@ -427,13 +427,46 @@ class RestartManager:
         mm = MemoryMonitor()
         return mm.find_kit_pid(self.config.kit_port)
 
-    def _kill(self, pid: int) -> None:
+    def _kill(self, pid: int, graceful_timeout_s: float = 8.0) -> None:
+        """Graceful shutdown: SIGTERM, wait for process to exit, then
+        SIGKILL fallback.
+
+        Why graceful: SIGKILL doesn't let Kit release GPU resources
+        cleanly. If we then immediately launch a new Kit, GPU memory is
+        contended → X11/Wayland surface lock-up briefly. SIGTERM lets
+        Kit run shutdown handlers (release GPU contexts, close USD
+        stages) which avoids the surface freeze.
+        """
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except Exception as e:
+            logger.warning(f"SIGTERM {pid} failed: {e}")
+            # Fall through to SIGKILL
+
+        # Poll for process exit
+        deadline = time.monotonic() + graceful_timeout_s
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)  # signal 0 = test if alive
+            except ProcessLookupError:
+                return  # exited gracefully
+            except Exception:
+                pass
+            time.sleep(0.5)
+
+        # Graceful timeout — force kill
+        logger.info(
+            f"[supervisor] graceful shutdown timed out after "
+            f"{graceful_timeout_s}s; SIGKILL"
+        )
         try:
             os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
         except Exception as e:
-            logger.warning(f"kill {pid} failed: {e}")
+            logger.warning(f"SIGKILL {pid} failed: {e}")
 
     def _launch(self) -> Optional[int]:
         if not self.config.launch_script.exists():
@@ -464,15 +497,22 @@ class RestartManager:
         return False
 
     async def restart(self, probe: HealthProbe) -> bool:
-        """Kill Kit and relaunch; wait for /health to return ok.
+        """Graceful kill Kit, settle GPU, then relaunch; wait for /health.
 
         Returns True on success.
+
+        GPU-settle period (default 5s) between kill and relaunch prevents
+        the screen flicker / Wayland surface lock that happens when the
+        old Kit's GPU context overlaps with the new one's allocation.
         """
         pid = self._find_kit_pid()
         if pid is not None:
-            logger.info(f"[supervisor] killing Kit pid={pid}")
+            logger.info(f"[supervisor] graceful-shutdown Kit pid={pid}")
             self._kill(pid)
-            await asyncio.sleep(3.0)
+            # GPU-settle: let CUDA contexts release fully before new Kit
+            # claims the device. Empirically 5s is enough on RTX 5070;
+            # less causes brief X11/Wayland surface freeze.
+            await asyncio.sleep(5.0)
         else:
             logger.warning("[supervisor] no Kit pid found; launching fresh")
 
