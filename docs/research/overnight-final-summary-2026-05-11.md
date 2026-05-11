@@ -88,3 +88,59 @@ CP-52   stable_ok  1/1  51.0s
 
 ## Commits today: 82 on feat/multimodal-foundation @ anton
 
+
+---
+
+## Morning extension (07:10+)
+
+After sweep showed Kit-state-drift on ~44 E_OFF_TARGET_XY CPs, ran
+fresh-Kit batches:
+
+### Additional unlocks confirmed (fresh Kit, single-CP isolation)
+
+| CP | Status | Note |
+|---|---|---|
+| CP-16 | stable_ok | duration_s 120 → 180 |
+| CP-17 | stable_ok | Kit-state-drift in sweep |
+| CP-18 | stable_ok | Kit-state-drift |
+| CP-24 | stable_ok | Kit-state-drift |
+| CP-31 | stable_ok | Kit-state-drift |
+| CP-41 | stable_ok | Kit-state-drift |
+| CP-47 | stable_ok | Kit-state-drift |
+| CP-54 | stable_ok | Kit-state-drift |
+| CP-66 | stable_ok | Kit-state-drift |
+| CP-77 | stable_ok | Kit-state-drift |
+
+= **10 additional confirmed unlocks** beyond yesterday's 10.
+
+### Still stable_fail (genuine in fresh Kit)
+
+CP-12, CP-15, CP-27, CP-28, CP-29 (C_FELL_OFF_BELT)
+CP-38, CP-56, CP-62, CP-72 (E_OFF_TARGET_XY genuine)
+CP-69, CP-70, CP-75, CP-79 (UR10 issues)
+CP-37, CP-68 (stochastic — Kit-state dependent)
+
+### Web-research note (07:15)
+
+Searched NVIDIA forums + GitHub. Confirmed: Kit memory leak (~200MB per
+SimulationApp cycle) + cuRobo cache stale-state are documented community
+issues:
+- github.com/isaac-sim/IsaacSim#51
+- NVIDIA forum SimulationApp memory leak thread
+- cuRobo issue #603 (update_world cache)
+
+My "Kit needs restart every ~30 CPs" observation is consistent with these.
+
+### Updated verified count
+
+- **21 patched-set stable_ok in fresh Kit** (was 10 yesterday, +11 today)
+  - CP-22, CP-46, CP-48, CP-51, CP-52, CP-53, CP-57, CP-58, CP-59, CP-65 (yesterday)
+  - +CP-16, CP-17, CP-18, CP-24, CP-31, CP-41, CP-47, CP-54, CP-66, CP-77 (today)
+  - +CP-16 template fix (duration_s 120→180)
+- **5 yrkesroll N=3 robust** (controller-shootout-cp, cad-revision-drift,
+  inspect-reject, dr-curriculum, multi-cam-triangulation)
+- **2 yrkesroll N=3 flaky** (3station-oee 2/3, y-merge-singulation 1/3)
+- **7 BUILD_OK plumbing** (plc-conveyor, plc-fixture, opcua-12conveyors,
+  multi-amr-corridor, defect-sdg, rl-clone-env, sim2real-gap)
+
+= **35 confirmed templates** in fresh-Kit conditions.
