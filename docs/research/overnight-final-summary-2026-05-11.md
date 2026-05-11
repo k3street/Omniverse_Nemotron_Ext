@@ -73,3 +73,18 @@
 2. Implement Kit-restart hooks in multi_run_regression.py (every 30 CPs)
 3. Re-run full sweep with the new restart logic
 4. Investigate CP-67 rotary table movement (cube should rotate with disc)
+
+---
+
+## Final sanity check 02:42
+
+```
+CP-22   stable_ok  1/1  46.5s
+CP-51   stable_ok  1/1  50.9s
+CP-52   stable_ok  1/1  51.0s
+```
+
+3/3 robust patched-set unlocks confirmed end of overnight session.
+
+## Commits today: 82 on feat/multimodal-foundation @ anton
+
