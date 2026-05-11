@@ -61,7 +61,17 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 180
+    "duration_s": 180,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4",
+      "/World/Cube_5",
+      "/World/Cube_6",
+      "/World/Cube_7",
+      "/World/Cube_8"
+    ]
   },
   "extends": "CP-01",
   "extension_notes": "CP-41 tests handler with mass-varying cubes. 0.1kg \u2192 2.0kg range. Heavier cubes stress gripper grip + planner momentum compensation. Industrial use: parts of varying weight on same line.",

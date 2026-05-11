@@ -62,7 +62,13 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 180
+    "duration_s": 180,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4"
+    ]
   },
   "extends": "CP-01",
   "extension_notes": "CP-54 demonstrates surface_gripper tool installation. The OgnSurfaceGripper OmniGraph node attaches to panda_hand and provides parallel-grip-mechanism alongside the default ParallelGripper. Realizes infrastructure for #25 UR10BinFilling, #27 UR10BinStacking, #29 SurfaceGripperGantry, #33 UR10ConveyorCortex.",

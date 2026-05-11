@@ -48,7 +48,13 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 180
+    "duration_s": 180,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4"
+    ]
   },
   "failure_modes": [
     "Skipping world.reset() before PickPlaceController init \u2192 robot.gripper is None \u2192 'NoneType has no attribute link_names' crash. Builtin handler does world.reset() automatically.",

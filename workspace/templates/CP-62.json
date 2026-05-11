@@ -63,7 +63,13 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 180
+    "duration_s": 180,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4"
+    ]
   },
   "extends": "CP-54",
   "extension_notes": "CP-62 combines surface_gripper (CP-54) + linear_axis_robot (gantry). Realizes #29 SurfaceGripperGantry infrastructure. Runtime gantry slide control + suction-on-pickup logic is Sprint 4+.",
