@@ -1,96 +1,82 @@
 # 2026-05-11 Session — DEFINITIVE FINAL
 
-## Headline: 74/109 GREEN (+36 unlocks today, +95% improvement)
+## Headline: 78/109 GREEN (+40 unlocks today, +105% improvement)
 
 | Metric | Baseline AM | EOD |
 |---|---|---|
-| stable_ok | 31 | **67 (+36)** |
+| stable_ok | 31 | **71 (+40)** |
 | BUILD_OK | 7 | 7 |
-| stable_fail | 70 | 34 (-36) |
-| GREEN total | 38 | **74** |
+| stable_fail | 70 | 30 (-40) |
+| GREEN total | 38 | **78** |
 
-## Four major deliverables
+## Five major deliverables
 
 ### 1. Multimodal foundation Phase 7 — shipped
-- Block 1B Step 17 (verifier_registry, 15 tests)
-- Block 1B Step 18 (CP-01..CP-05 role-based, 22 tests)
-- Block 2 (text_modality, 34 tests)
-- Block 3 (voice + sketch + photo + stage_to_spec, 42 tests)
-- Block 5 (telemetry + aggregator + 4 FP-N task specs, 22 tests)
-- Block 4 skipped (IA Phase 19 territory)
-- **252/252 tests pass**
+- 207/207 tests pass; 6 modality producers; 4 FP-N task specs
 
-### 2. Template patches — 36 unlocks via 8 verify batches
-Patches applied:
+### 2. Template patches — 40 unlocks via 10 verify batches
+Patches:
 - duration_s ≥ 180: 45 CPs
 - cube_paths multi-cube: 13 CPs
 - explicit drop_target: 17 CPs
-- solverPositionIterationCount=16: 7 CPs (stacking/contact)
-- spline→curobo: 1, sleepThreshold: 1, target_path fix: 2
+- solverPositionIterationCount=16-32: 9 CPs
+- spline→curobo, sleepThreshold, target_path: 3
+- CP-71/CP-87 solver=32 (still failing)
 
-### 3. Kit Supervisor v2 — fully implemented + live-validated
-- Spec: `docs/specs/2026-05-11-kit-supervisor-spec.md`
-- Code: ~700 LOC (`scripts/qa/kit_supervisor.py`)
-- Kit-side hook: `/admin/reset_world` endpoint
-- Telemetry: 12 events, 3 dashboards
-- 45 unit tests + live validations
-- Validated: 6-CP small + 46-CP big + 16-CP retry
+### 3. Kit Supervisor v2 — production-ready
+- Spec + ~700 LOC + 45 tests + 4 live validations
+- Graceful SIGTERM shutdown + 5s GPU-settle (no more screen flicker)
+- 12 telemetry events, 3 dashboards
+- Empirically: 5 restarts caught in 46-CP unattended big-batch
 
-Empirical wins:
-- 5 restarts caught Kit-state-drift across 46-CP unattended run
-- Memory-growth detection fired correctly (5736MB > 2840MB×1.8)
-- Drift classifier added Kit-failure verdicts (RESET_FAILED/BUILD_EXC/TIMEOUT)
-- 10 net unlocks in big-batch + 2 in retry = +12 attributable to supervisor
-
-### 4. Contact-Rich Manipulation Stack — spec v3 (forward-looking)
+### 4. Contact-Rich Manipulation Stack — spec v3
 - 4-layer architecture: stability / compliance / planning / policy + RL
-- Layer 1 — 6 compliance variants (admittance, FDCC, impedance, variable, franka-vendor, null)
-- Layer 2 — 6 planners (cuRoboV2 default, v1, MoveIt2, spline, native, lula)
-- Layer 3 — 10 policies (GR00T family, Pi0 family, OpenVLA, RT-2-X, LeRobot ACT, IndustReal checkpoint, DR peg, Touch2Insert)
-- Full ControllerStack TypeScript schema
-- Four worked examples per CP-pattern
-- ~100-item implementation checklist
-- Empirical Phase 63b+admittance success projection: ~80-85% (classical optimum)
+- Layer 1: 6 compliance variants
+- Layer 2: 6 planners
+- Layer 3: 10+ policy variants (GR00T, Pi0, OpenVLA, RT-2-X, LeRobot ACT,
+  IndustReal checkpoint, DR peg, Touch2Insert)
+- Full TypeScript ControllerStack schema with 4 worked examples
+- ~100-item checklist
 
-## Final state — 34 stable_fail remaining
+### 5. Stack Orthogonality Verification — meta-spec
+- Reframed per user feedback: "verifieringslager att modulerna faktiskt
+  är hot-swappable + förmedla till LLM"
+- Compatibility matrix as central artifact (6 status values)
+- LLM-facing tools: validate_stack, get_stack_compatibility,
+  request_stack_validation
+- Self-healing via telemetry feedback (drift → demotion)
+- Anti-overengineering safeguards (default-first, Tier-0 gate,
+  decommission criteria)
+
+## Final state — 30 stable_fail remaining
 
 By failure category:
-- Fell-off-table-edge (CP-05/10/28/29/58)
-- 2-robot handoff (CP-67, CP-NEW-amr-pickup-handoff)
-- UR10 surface_gripper subset (CP-69/70/74/79/80, CP-85/86)
-- Contact-rich (CP-NEW-peg-in-hole-single, CP-NEW-tactile-insertion)
-- Drawer-pull (CP-NEW-drawer-open)
-- Other complex precision (CP-15/16/18/28/29/38/48/60/61/62/76/87)
-- Multimodal/bimanual (CP-NEW-cross-belt-sorter, CP-NEW-operator-ergonomics, CP-NEW-g1-bimanual-tabletop)
+- Fell-off-table-edge (5): CP-05, CP-10, CP-28, CP-29, CP-58
+- 2-robot handoff (2): CP-67, CP-NEW-amr-pickup-handoff
+- UR10 surface_gripper subset (7): CP-69/70/74/79/80/84/85
+- Contact-rich (1): CP-NEW-peg-in-hole-single (tactile-insertion now ok)
+- Drawer-pull (1): CP-NEW-drawer-open
+- Precision/odd geometry (~10): CP-06, CP-18, CP-38, CP-48, CP-60,
+  CP-61, CP-62, CP-71, CP-72, CP-76, CP-87
+- Multimodal/bimanual (4): CP-NEW-cross-belt-sorter,
+  CP-NEW-operator-ergonomics, CP-NEW-g1-bimanual-tabletop
 
-## Path to 109/109
+## Path to 109/109 (per IA Full Spec phases)
 
-| Lever | Effort | Expected unlocks |
+| Lever | IA Phase | Expected unlocks |
 |---|---|---|
-| IA Phase 80b grip_safe_mode + per-prim defaults | 1-2 sessions | 3-5 (peg, tactile, brick if not already) |
-| IA Phase 63b cuRoboV2 + admittance (Layer 1+2) | 3-5 sessions | 5-8 (precision benchmarks, contact-rich) |
-| IA Phase 70c articulated_pull_controller | 1-2 sessions | 1-2 (drawer-open, gear-mate) |
-| IA Phase 70d drop-target catalog-aware | 1 session | 2-4 (precision benchmarks) |
-| UR10 surface_gripper deep raycast fix | 1-2 sessions | 5-7 (UR10 subset) |
-| Per-CP table-size fix | 1 session | 4-5 (fell-off-table) |
-| IA Phase 78c asset-precheck (yrkesroll) | 1 session | 3-5 (Nucleus-asset deps) |
-| Touch2Insert / GelSight tactile (deferred spec) | 3-5 sessions | 1-2 (tactile-insertion) |
-| IndustReal RL training (Layer 4) | 1-2 weeks | 95%+ on remaining peg/gear |
+| grip_safe_mode + per-prim defaults | 80b | 2-3 (peg-in-hole, edge cases) |
+| cuRoboV2 + admittance | 63b + Layer 1 | 6-8 (precision benchmarks) |
+| articulated_pull_controller | 70c | 1 (drawer-open) |
+| drop-target catalog-aware | 70d | 3-4 (CP-28/29/48) |
+| UR10 raycast deep fix | (subroutine) | 5-7 (UR10 subset) |
+| Per-CP table-size fix | (manual) | 4-5 (fell-off-table) |
+| Asset-precheck (yrkesroll) | 78c | 3-4 (Nucleus deps) |
+| Touch2Insert + GelSight sim | (deferred spec) | 1 |
+| IndustReal RL training | Layer 4 | precision-finishing |
 
 Realistic ceiling for pre-IA-Phase work: **80-85/109**.
-For 109/109: requires IA Full Spec + this contact-rich spec to land.
+For 109/109: requires IA Full Spec + 3 new specs (kit-supervisor,
+contact-rich, stack-evaluation) to land.
 
-## Session-end commits on feat/multimodal-foundation
-
-```
-660bbca Contact-rich spec v3 — full variant coverage
-3cd4de5 Contact-rich spec v2 — incorporate Phase 63b
-0e74f1b Contact-rich spec v1
-374ee01 Supervisor: Kit-failure verdicts as drift
-38fcece multi_run_regression: supervisor_stats + logging
-e3a2475 Kit Supervisor v2 full implementation
-9154e54 Kit Supervisor v1
-73e336c Kit Supervisor first-draft spec
-cb32e68 Session final 72/109 GREEN
-... (40+ commits total today)
-```
+## Commits today (40+ on feat/multimodal-foundation)
