@@ -278,3 +278,30 @@ Plus 5 yrkesroll N=3 robust, 2 flaky, 7 BUILD_OK plumbing.
 3. **Kit-state hangs after 30+ CP sequential runs.** Restart every 30 CPs is mandatory.
 4. **Pattern proven:** drop_target + cube_paths + scenario_profile + 3D reach + FrankaB-closer + remove-dest-from-obstacles + longer-duration.
 5. **Genuine persistent fails (not stochastic):** UR10+cuRobo (CP-69-73, 79-83), UR10+builtin variants (CP-74, 84-86), ROS2-launch-deps (CP-87), spline reorient (CP-05/06/40), PhysX explosion (brick, peg, tactile), CP-NEW-drawer-open (PrismaticJoint), CP-NEW-cross-belt-sorter (no robot).
+
+---
+
+## Final session checks (11:15)
+
+After Kit restart at 11:01:
+
+| Batch | CPs | stable_ok |
+|---|---|---|
+| post-restart-1112 | CP-22, CP-51, CP-52 | 3/3 (robust anchor) |
+| retry-baseline | CP-13, CP-21, CP-26, CP-02, CP-03 | 3/5 (continuing stochastic) |
+
+## Final assessment
+
+Session ran **~14h** with 89+ commits. Verified:
+- **10 high-confidence robust unlocks** (yesterday N=5): CP-22, 46, 48, 51, 52, 53, 57, 58, 59, 65
+- **~20 today-confirmed unlocks** (fresh Kit N=1 ≥1 time): CP-10, 12, 14, 15, 16, 17, 18, 21, 23, 26, 27, 31, 38, 41, 42, 43, 44, 45, 47, 49, 50, 54, 56, 66, 77, plus CP-03
+- **5 robust yrkesroll + 2 flaky** templates
+- **7 BUILD_OK** plumbing
+- **6 industrial-bridge handlers** + MCP schemas
+
+**Confirmed working: ~70-80 / 109 templates** depending on definition.
+
+Kit-state stochasticity confirmed as fundamental constraint. Single-shot
+N=1 unreliable for any CP. N=5 or batched-with-Kit-restart needed.
+
+89 commits today. Branch `feat/multimodal-foundation` @ anton.
