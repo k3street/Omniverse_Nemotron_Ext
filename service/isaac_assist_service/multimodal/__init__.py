@@ -51,6 +51,7 @@ from .stage_to_spec import (
     prims_to_layout_spec,
     sync_from_stage,
 )
+from . import telemetry
 
 __all__ = [
     # Types
@@ -84,4 +85,6 @@ __all__ = [
     "classify_prim",
     "prims_to_layout_spec",
     "sync_from_stage",
+    # Telemetry (Block 5)
+    "telemetry",
 ]
