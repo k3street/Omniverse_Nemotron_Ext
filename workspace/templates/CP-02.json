@@ -16,6 +16,128 @@
   ],
   "thoughts": "Six multi-robot specifics for CP-02 (extends CP-01: CPU dynamics, sleepThreshold, rubber-on-cube-only, orientation rule are inherited):\n1) Two robots coexist because cuRobo handler scopes its physics-step subscription by robot path (e.g. _curobo_pp_sub_World_Franka1). A second setup_pick_place_controller install does NOT tear down the first.\n2) Same cube listed in BOTH robots' source_paths. Each robot has its own delivered-set keyed by its own destination_path bbox \u2014 don't try to share state.\n3) Robot 1 destination_path='/World/Conv2'. Pass drop_target EXPLICITLY ([-1.0, -0.4, 0.94]) because Conv2's bbox center (0, -0.4) is 1.08m from Robot 1 base \u2014 out of 0.70m reach. Without explicit drop_target the planner fails forever.\n4) Drop z = belt_top + ~10mm clearance (industrial sweet spot 5-15mm; less risks finger-sweep contact, more risks bounce).\n5) Two-robot orientations mirror around the +X-pick rule: Robot 1 [0.7071, 0, 0, 0.7071] (picks from world +Y), Robot 2 [0.7071, 0, 0, -0.7071] (picks from world -Y).\n6) Layout: parallel conveyors at y=\u00b10.4 both +X. Robots at x=\u00b11 (2m apart, no reach overlap). Robot 1 picks (-1, +0.4) drops (-1, -0.4); Robot 2 picks (+1, -0.4) drops (+1, +0.4).",
   "code": "# Light + Ground (foundational scene)\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Wide table covering both robot stations\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# CPU dynamics required for PhysxSurfaceVelocityAPI\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Robot 1 \u2014 picks from Conv1 (y=+0.4), drops on Conv2 (y=-0.4)\n# Orientation 90\u00b0 around Z so Conv1 at world +Y is robot's base +X\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka1\",\n    position=[-1.0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Robot 2 \u2014 picks from Conv2 (y=-0.4), drops in Bin (y=+0.4)\n# Orientation -90\u00b0 around Z so Conv2 at world -Y is robot's base +X\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka2\",\n    position=[+1.0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, -0.7071068],\n)\n\n# Conv1 \u2014 input belt, carries cube +X to Robot 1's pick zone at x=-1\ncreate_conveyor(\n    prim_path=\"/World/Conv1\",\n    position=[-1.5, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Conv2 \u2014 transfer belt, carries cube +X from Robot 1's drop to Robot 2's pick at x=+1\ncreate_conveyor(\n    prim_path=\"/World/Conv2\",\n    position=[0.0, -0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# One cube starts at far left of Conv1\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-2.5, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\n\n# sleepThreshold=0 so cube is never deactivated by PhysX while belt is paused\nbulk_set_attribute(\n    prim_paths=[\"/World/Cube_1\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\n# Rubber friction material on cube only (combined-friction with default fingers)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\n\n# Bin near Robot 2 (drops here at end of pipeline)\ncreate_bin(prim_path=\"/World/Bin\", position=[1.0, 0.4, 0.75], size=[0.3, 0.3, 0.15])\n\n# Sensors at each robot's pick zone\nadd_proximity_sensor(sensor_path=\"/World/Sensor1\", position=[-1.0, 0.4, 0.835], size=[0.06, 0.06, 0.06])\nadd_proximity_sensor(sensor_path=\"/World/Sensor2\", position=[1.0, -0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Robot 1 controller \u2014 destination_path=Conv2 (so _is_in_bin succeeds when cube on Conv2)\n# drop_target explicit because Conv2's bbox center is out of Robot 1's reach.\n# Drop z=0.94: hand at 0.94, fingertips at 0.835, cube center released ~1cm above belt top.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka1\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/Sensor1\",\n    belt_path=\"/World/Conv1\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Conv2\",\n    drop_target=[-1.0, -0.4, 0.94],\n    planning_obstacles=[\"/World/Table\", \"/World/Conv1\", \"/World/Conv2\", \"/World/Bin\"],\n)\n\n# Robot 2 controller \u2014 picks Cube_1 from Conv2, drops in Bin\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka2\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/Sensor2\",\n    belt_path=\"/World/Conv2\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/Conv1\", \"/World/Conv2\", \"/World/Bin\"],\n)",
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 2,
+      "n_handoffs": 1,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.linear_pipeline"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "smaller_x_first"
+    },
+    "secondary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "larger_x_first"
+    },
+    "input_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "smaller_x_first"
+    },
+    "transfer_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "larger_x_first"
+    },
+    "primary_destination": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 1,
+      "max": 4,
+      "param_name": "n_cubes",
+      "unordered": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka1",
+      "class": "franka_panda",
+      "position": [-1.0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "secondary_robot": {
+      "path": "/World/Franka2",
+      "class": "franka_panda",
+      "position": [1.0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, -0.7071068]
+    },
+    "input_conveyor": {
+      "path": "/World/Conv1",
+      "position": [-1.5, 0.4, 0.78],
+      "size": [3.0, 0.4, 0.05],
+      "surface_velocity": [0.2, 0, 0]
+    },
+    "transfer_conveyor": {
+      "path": "/World/Conv2",
+      "position": [0.0, -0.4, 0.78],
+      "size": [3.0, 0.4, 0.05],
+      "surface_velocity": [0.2, 0, 0]
+    },
+    "primary_destination": {
+      "path": "/World/Bin",
+      "position": [1.0, 0.4, 0.75],
+      "size": [0.3, 0.3, 0.15]
+    },
+    "primary_sensor": {
+      "path": "/World/Sensor1",
+      "position": [-1.0, 0.4, 0.835],
+      "size": [0.06, 0.06, 0.06]
+    },
+    "secondary_sensor": {
+      "path": "/World/Sensor2",
+      "position": [1.0, -0.4, 0.835],
+      "size": [0.06, 0.06, 0.06]
+    },
+    "primary_handoff_drop": {
+      "position": [-1.0, -0.4, 0.94]
+    },
+    "workpieces": [
+      {"path": "/World/Cube_1", "position": [-2.5, 0.4, 0.835]}
+    ]
+  },
+  "code_template": "# Light + Ground\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Wide table covering both robot stations\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Primary robot\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\n# Secondary robot\nrobot_wizard(\n    robot_name={{secondary_robot.class}},\n    dest_path={{secondary_robot.path}},\n    position={{secondary_robot.position}},\n    orientation={{secondary_robot.orientation}},\n)\n\n# Input conveyor\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\n# Transfer conveyor\ncreate_conveyor(\n    prim_path={{transfer_conveyor.path}},\n    position={{transfer_conveyor.position}},\n    size={{transfer_conveyor.size}},\n    surface_velocity={{transfer_conveyor.surface_velocity}},\n)\n\n# Workpiece\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[{{workpieces[0].path}}],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\napply_physics_material(prim_path={{workpieces[0].path}}, material_name=\"rubber\")\n\n# Destination bin\ncreate_bin(prim_path={{primary_destination.path}}, position={{primary_destination.position}}, size={{primary_destination.size}})\n\n# Sensors\nadd_proximity_sensor(sensor_path={{primary_sensor.path}}, position={{primary_sensor.position}}, size={{primary_sensor.size}})\nadd_proximity_sensor(sensor_path={{secondary_sensor.path}}, position={{secondary_sensor.position}}, size={{secondary_sensor.size}})\n\n# Primary robot controller \u2014 drops on transfer_conveyor\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{primary_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=[{{workpieces[0].path}}],\n    destination_path={{transfer_conveyor.path}},\n    drop_target={{primary_handoff_drop.position}},\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{transfer_conveyor.path}}, {{primary_destination.path}}],\n)\n\n# Secondary robot controller \u2014 drops in bin\nsetup_pick_place_controller(\n    robot_path={{secondary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{secondary_sensor.path}},\n    belt_path={{transfer_conveyor.path}},\n    source_paths=[{{workpieces[0].path}}],\n    destination_path={{primary_destination.path}},\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{transfer_conveyor.path}}, {{primary_destination.path}}],\n)",
+  "verify_args_template": {
+    "stages": [
+      {
+        "robot_path": "{{primary_robot.path}}",
+        "pick_path": "{{input_conveyor.path}}",
+        "place_path": "{{transfer_conveyor.path}}",
+        "robot_kind": "{{primary_robot.class}}"
+      },
+      {
+        "robot_path": "{{secondary_robot.path}}",
+        "pick_path": "{{transfer_conveyor.path}}",
+        "place_path": "{{primary_destination.path}}",
+        "robot_kind": "{{secondary_robot.class}}"
+      }
+    ],
+    "cube_path": "{{workpieces[0].path}}"
+  },
+  "simulate_args_template": {
+    "cube_path": "{{workpieces[0].path}}",
+    "target_path": "{{primary_destination.path}}",
+    "duration_s": 180
+  },
   "settle_state": {
     "cubes": {
       "/World/Cube_1": [

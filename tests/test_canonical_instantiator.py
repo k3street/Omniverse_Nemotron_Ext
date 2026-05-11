@@ -357,3 +357,129 @@ def test_extract_cubes_position_with_negative_floats():
     code = 'create_prim(prim_path="/World/Q", prim_type="Cube", position=[-1.5, -0.4, -0.1])'
     out = fn(code)
     assert out == {"/World/Q": [-1.5, -0.4, -0.1]}
+
+
+# ── Block 1B Step 18: substitute_role_placeholders ─────────────────────────
+
+
+def _imp_roles():
+    from service.isaac_assist_service.chat.canonical_instantiator import (
+        substitute_role_placeholders,
+        instantiate_role_based_code,
+        _format_for_code,
+    )
+    return substitute_role_placeholders, instantiate_role_based_code, _format_for_code
+
+
+def test_role_substitute_dotted_string():
+    sub, _, _ = _imp_roles()
+    out = sub("dest_path={{primary_robot.path}}", {"primary_robot": {"path": "/World/Franka"}})
+    assert out == "dest_path='/World/Franka'"
+
+
+def test_role_substitute_dotted_position_list():
+    sub, _, _ = _imp_roles()
+    defaults = {"primary_robot": {"position": [0, 0, 0.75]}}
+    out = sub("position={{primary_robot.position}}", defaults)
+    assert out == "position=[0, 0, 0.75]"
+
+
+def test_role_substitute_indexed_path():
+    sub, _, _ = _imp_roles()
+    defaults = {"workpieces": [{"path": "/World/Cube_1"}, {"path": "/World/Cube_2"}]}
+    out = sub("[{{workpieces[0].path}}, {{workpieces[1].path}}]", defaults)
+    assert out == "['/World/Cube_1', '/World/Cube_2']"
+
+
+def test_role_substitute_indexed_position():
+    sub, _, _ = _imp_roles()
+    defaults = {"workpieces": [
+        {"path": "/W/C1", "position": [-1.4, 0.4, 0.835]},
+        {"path": "/W/C2", "position": [-1.15, 0.4, 0.835]},
+    ]}
+    out = sub(
+        "create_prim(prim_path={{workpieces[0].path}}, position={{workpieces[0].position}})",
+        defaults,
+    )
+    assert out == "create_prim(prim_path='/W/C1', position=[-1.4, 0.4, 0.835])"
+
+
+def test_role_substitute_unknown_role_passes_through():
+    sub, _, _ = _imp_roles()
+    out = sub("x = {{nonexistent.field}}", {"other": {"field": 1}})
+    assert out == "x = {{nonexistent.field}}"
+
+
+def test_role_substitute_unknown_field_passes_through():
+    sub, _, _ = _imp_roles()
+    out = sub("x = {{role.missing}}", {"role": {"path": "/x"}})
+    assert out == "x = {{role.missing}}"
+
+
+def test_role_substitute_index_out_of_range_passes_through():
+    sub, _, _ = _imp_roles()
+    defaults = {"workpieces": [{"path": "/W/C1"}]}
+    out = sub("{{workpieces[5].path}}", defaults)
+    assert out == "{{workpieces[5].path}}"
+
+
+def test_role_substitute_handles_empty_inputs():
+    sub, _, _ = _imp_roles()
+    assert sub("", {"role": {"path": "/x"}}) == ""
+    assert sub("hello {{x.y}}", {}) == "hello {{x.y}}"
+    assert sub("hello", None) == "hello"
+
+
+def test_format_for_code_string_quotes():
+    _, _, fmt = _imp_roles()
+    assert fmt("/World/Franka") == "'/World/Franka'"
+
+
+def test_format_for_code_nested_list():
+    _, _, fmt = _imp_roles()
+    assert fmt([1, "a", [2, 3]]) == "[1, 'a', [2, 3]]"
+
+
+def test_format_for_code_dict():
+    _, _, fmt = _imp_roles()
+    assert fmt({"red": "/W/RedBin"}) == "{'red': '/W/RedBin'}"
+
+
+def test_format_for_code_bool_none():
+    _, _, fmt = _imp_roles()
+    assert fmt(True) == "True"
+    assert fmt(False) == "False"
+    assert fmt(None) == "None"
+
+
+def test_instantiate_role_based_code_uses_template_defaults():
+    _, inst, _ = _imp_roles()
+    template = {
+        "code_template": "robot_wizard(dest_path={{primary_robot.path}})",
+        "role_defaults": {"primary_robot": {"path": "/World/Franka"}},
+    }
+    assert inst(template) == "robot_wizard(dest_path='/World/Franka')"
+
+
+def test_instantiate_role_based_code_falls_back_to_legacy_code():
+    _, inst, _ = _imp_roles()
+    template = {"code": "legacy_code()"}
+    assert inst(template) == "legacy_code()"
+
+
+def test_instantiate_role_based_code_prefers_bindings_over_defaults():
+    _, inst, _ = _imp_roles()
+    template = {
+        "code_template": "dest_path={{primary_robot.path}}",
+        "role_defaults": {"primary_robot": {"path": "/World/Default"}},
+    }
+    bindings = {"primary_robot": {"path": "/World/Override"}}
+    assert inst(template, bindings) == "dest_path='/World/Override'"
+
+
+def test_role_substitute_with_orientation_vec():
+    """Quaternions are 4-element lists; smoke test as a stand-in for any size."""
+    sub, _, _ = _imp_roles()
+    defaults = {"r": {"orientation": [0.7071068, 0, 0, 0.7071068]}}
+    out = sub("ori={{r.orientation}}", defaults)
+    assert out == "ori=[0.7071068, 0, 0, 0.7071068]"
