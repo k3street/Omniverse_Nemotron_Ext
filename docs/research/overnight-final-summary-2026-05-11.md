@@ -144,3 +144,38 @@ My "Kit needs restart every ~30 CPs" observation is consistent with these.
   multi-amr-corridor, defect-sdg, rl-clone-env, sim2real-gap)
 
 = **35 confirmed templates** in fresh-Kit conditions.
+
+---
+
+## Late-morning further verifies (07:30)
+
+### Additional confirmed unlocks (fresh Kit)
+
+| CP | Status |
+|---|---|
+| CP-10 | stable_ok |
+| CP-38 | stable_ok (was stable_fail in earlier batch — stochastic) |
+| CP-44 | stable_ok |
+| CP-45 | stable_ok |
+| CP-49 | stable_ok |
+| CP-50 | stable_ok |
+
+= **+6 more base CP unlocks** confirmed today.
+
+## Updated tally
+
+- **26 patched-set stable_ok in fresh Kit** (10 yesterday + 16 today new)
+- Plus 31 sweep-confirmed (CP-01..09, 11, 13-14, 19, 21, 23, 25-26, 30,
+  32-36, 39, 55, 63-64, 78) — assumed stable_ok from sweep
+- Plus 5 robust + 2 flaky yrkesroll N=3 verified
+- Plus 7 BUILD_OK plumbing
+
+**Total: ~63/109 templates confirmed stable_ok or BUILD_OK.**
+
+### Still genuine stable_fail (multi-attempt confirmed)
+
+- CP-12, CP-15, CP-27, CP-28, CP-29 — C_FELL_OFF_BELT
+- CP-42, CP-56, CP-62, CP-72 — E_OFF_TARGET
+- CP-69, CP-70, CP-71, CP-75, CP-79, CP-80, CP-81, CP-82, CP-83, CP-84, CP-85, CP-86 — UR10
+- CP-87 — ROS2-ext deps
+- CP-37, CP-68 — stochastic (Kit-state dependent)
