@@ -41,6 +41,16 @@ from .text_modality import (
     extract_intent_llm,
     produce_layout_spec_from_text,
 )
+from .voice_modality import produce_layout_spec_from_voice
+from .vlm_modality import (
+    produce_layout_spec_from_sketch,
+    produce_layout_spec_from_photo,
+)
+from .stage_to_spec import (
+    classify_prim,
+    prims_to_layout_spec,
+    sync_from_stage,
+)
 
 __all__ = [
     # Types
@@ -65,4 +75,13 @@ __all__ = [
     "extract_intent_rules",
     "extract_intent_llm",
     "produce_layout_spec_from_text",
+    # Voice modality (Block 3)
+    "produce_layout_spec_from_voice",
+    # VLM modalities — sketch + photo (Block 3)
+    "produce_layout_spec_from_sketch",
+    "produce_layout_spec_from_photo",
+    # Viewport / sync-from-stage (Block 3 + IA Phase 22)
+    "classify_prim",
+    "prims_to_layout_spec",
+    "sync_from_stage",
 ]
