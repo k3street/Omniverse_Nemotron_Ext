@@ -58,9 +58,14 @@
     "cube_path": "/World/Brick_1"
   },
   "simulate_args": {
-    "cube_path": "/World/Brick_1",
     "target_path": "/World/Pallet",
-    "duration_s": 180
+    "duration_s": 180,
+    "cube_paths": [
+      "/World/Brick_1",
+      "/World/Brick_2",
+      "/World/Brick_3",
+      "/World/Brick_4"
+    ]
   },
   "extends": "CP-08",
   "extension_notes": "CP-42 demonstrates handler with non-cube geometry (10\u00d75\u00d75cm rectangular bricks). Gripper grips narrow 5cm Y-face. cuRobo's plan_pose uses bbox center, agnostic to cube vs brick shape. Industrial use: brick palletizing, tile stacking, extruded-part transport.",

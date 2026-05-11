@@ -52,9 +52,14 @@
     "cube_path": "/World/Cube_1"
   },
   "simulate_args": {
-    "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 180
+    "duration_s": 180,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4"
+    ]
   },
   "extends": "CP-01",
   "extension_notes": "CP-56 uses create_rotary_table \u2014 first user. Cubes ride disc as it rotates; robot picks when they enter reach. Realizes infrastructure for #13 Leader/Follower Rotary Station. Full scenario also needs setup_robot_claim_mutex coordination (already built).",
