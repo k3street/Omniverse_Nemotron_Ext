@@ -35,24 +35,25 @@ for cp in "${TARGETS[@]}"; do
     cp "workspace/templates/${cp}.json" "/tmp/${cp}.json.dropdriver-bak"
 
     # Use python to apply the pattern
+    LABEL="${cp}"
     python << PYEOF
-import json, re, sys
-p = 'workspace/templates/${cp}.json'
+import json, re, sys, os
+label = os.environ.get('LABEL', 'UNKNOWN')
+p = f'workspace/templates/{label}.json'
 d = json.loads(open(p).read())
 code = d.get('code','')
 
 # Find destination_path
 m = re.search(r'destination_path="([^"]+)"', code)
 if not m:
-    print(f"{cp}: no destination_path, skip")
+    print(f"{label}: no destination_path, skip")
     sys.exit(1)
 dest = m.group(1)
 
 # Find bin position (if destination is a bin/cube)
-# Look for create_bin(prim_path="dest", position=[x,y,z], size=...) or create_prim
 m2 = re.search(rf'create_(?:bin|prim)\(prim_path="{re.escape(dest)}", *(?:prim_type="[^"]+", *)?position=\[([^\]]+)\](?:, *(?:scale|size)=\[([^\]]+)\])?', code)
 if not m2:
-    print(f"{cp}: no bin/prim definition for {dest}, skip")
+    print(f"{label}: no bin/prim definition for {dest}, skip")
     sys.exit(1)
 pos = [float(x.strip()) for x in m2.group(1).split(',')]
 size_str = m2.group(2)
@@ -62,14 +63,13 @@ if size_str:
 else:
     bin_z_top = pos[2] + 0.10
 
-drop_z = bin_z_top + 0.05  # Above bin
+drop_z = bin_z_top + 0.05
 drop_target = [pos[0], pos[1], drop_z]
-
-print(f"{cp}: dest={dest} pos={pos} drop_target={drop_target}")
+print(f"{label}: dest={dest} pos={pos} drop_target={drop_target}")
 
 # Check if drop_target already explicit
 if re.search(r'drop_target=\[', code):
-    print(f"{cp}: already has drop_target, skip")
+    print(f"{label}: already has drop_target, skip")
     sys.exit(1)
 
 # Pattern: add drop_target before planning_obstacles
@@ -85,12 +85,12 @@ def repl(m):
 new_code = re.sub(pattern, repl, code, count=1)
 
 if new_code == code:
-    print(f"{cp}: pattern didn't match (no planning_obstacles?), skip")
+    print(f"{label}: pattern didn't match (no planning_obstacles?), skip")
     sys.exit(1)
 
 d['code'] = new_code
 open(p, 'w').write(json.dumps(d, indent=2))
-print(f"{cp}: applied drop_target={drop_target}")
+print(f"{label}: applied drop_target={drop_target}")
 PYEOF
 
     PYRC=$?
