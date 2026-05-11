@@ -260,3 +260,21 @@ genuine unlocks but with Kit-state-sensitivity.
 Plus 5 yrkesroll N=3 robust, 2 flaky, 7 BUILD_OK plumbing.
 
 **Total: 27 patched-set unlocks (5 stochastic) + 14 templates = ~41 verified.**
+
+---
+
+## End-of-session checks (09:50)
+
+| Batch | CPs | stable_ok | Notes |
+|---|---|---|---|
+| yrkesroll-batch | 3station-oee, y-merge, inspect-reject | 3/3 | All flaky-no-more in fresh Kit |
+| retry-stochastic | CP-67, CP-37, CP-68, CP-76 | 1/4 | CP-68 ok, rest fail |
+| sweep-baseline-revalidate | CP-01, 04, 19, 25, 30 | 4/5 | CP-19 stochastic |
+
+## Final updated take-aways
+
+1. **Today's net unlocks (high confidence):** ~25-30 patched-set + 5-7 yrkesroll + 7 BUILD_OK = ~40
+2. **Many CPs are inherently ~70-80% stochastic per N=1.** True stability needs N=3-5.
+3. **Kit-state hangs after 30+ CP sequential runs.** Restart every 30 CPs is mandatory.
+4. **Pattern proven:** drop_target + cube_paths + scenario_profile + 3D reach + FrankaB-closer + remove-dest-from-obstacles + longer-duration.
+5. **Genuine persistent fails (not stochastic):** UR10+cuRobo (CP-69-73, 79-83), UR10+builtin variants (CP-74, 84-86), ROS2-launch-deps (CP-87), spline reorient (CP-05/06/40), PhysX explosion (brick, peg, tactile), CP-NEW-drawer-open (PrismaticJoint), CP-NEW-cross-belt-sorter (no robot).
