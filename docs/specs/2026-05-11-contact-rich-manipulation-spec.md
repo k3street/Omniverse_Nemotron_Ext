@@ -5,17 +5,26 @@
 **Owner:** TBD
 **Estimated LOC:** ~2500-3500 (across 3 layers, infra + integrations + tests)
 
-**Dependencies:** IA Full Spec Phase 80b (grip-stability defaults) must land first.
+**Dependencies:**
+- IA Full Spec Phase 80b (grip-stability defaults) — Layer 0 stability
+- IA Full Spec Phase 63b (cuRoboV2 backend + constrained planning) — Layer 2 planning
+
+This spec adds Layer 1 (compliance) and Layer 3 (VLA inference) as new
+infrastructure, and defines the **handoff contract** between Phase 63b's
+constrained-trajectory output and Layer 1's admittance controller.
+Layer 4 (RL training) is opt-in, deferred.
 
 ---
 
 ## 0. Reading Guide
 
 §1: Problem (what Phase 80b alone doesn't solve)
-§2: Architecture — three orthogonal layers
+§2: Architecture — four orthogonal layers
+§2.1: Phase 63b coupling — why cuRoboV2 constrained planning is the
+      classical approach-phase partner to Layer 1 compliance
 §3: Layer 1 — Compliance (admittance/impedance via ros2_control)
-§4: Layer 2 — Foundation-model policy inference (Pi0, GR00T, OpenVLA)
-§5: Layer 3 — RL training pipeline (IndustReal) — opt-in, later phase
+§4: Layer 3 — Foundation-model policy inference (Pi0, GR00T, OpenVLA)
+§5: Layer 4 — RL training pipeline (IndustReal) — opt-in, later phase
 §6: Integration with Isaac Assist
 §7: Tool/API surface
 §8: State machine for contact-rich pick-place lifecycle
@@ -71,10 +80,25 @@ that can be picked up independently:
 3. **RL training pipeline layer** (Layer 3, §5): IndustReal-style trainer
    for last-mile sim2real (opt-in, deferred)
 
-After all three land, contact-rich CPs (peg-in-hole, tactile-insertion,
+After all four land (Layer 2 cuRoboV2 already covered in IA Full Spec
+Phase 63b), contact-rich CPs (peg-in-hole, tactile-insertion,
 drawer-pull, gear-mate, etc.) become **achievable with documented
-trade-offs**: classical 50%, classical+admittance 70%, VLA+admittance 75%,
-RL+admittance 95%.
+trade-offs**:
+
+| Stack | Approach | Contact | Expected insertion success |
+|---|---|---|---|
+| cuRobo v1 + rigid + Phase 80b | unconstrained | rigid | ~50% |
+| cuRobo v1 + admittance + Phase 80b | unconstrained | compliant | ~65% |
+| cuRoboV2 (constrained) + rigid + Phase 80b | axis-locked | rigid | ~70% |
+| **cuRoboV2 (constrained) + admittance + Phase 80b** | **axis-locked** | **compliant** | **~80-85%** ← classical optimum |
+| VLA (GR00T/Pi0) + rigid + Phase 80b | learned | rigid | ~60% |
+| VLA + admittance + Phase 80b | learned | compliant | ~75% |
+| IndustReal RL + admittance + Phase 80b | trained | compliant | ~95% (full sim2real) |
+
+The CLASSICAL optimum (cuRoboV2 constrained + admittance) is what this
+spec primarily targets — it requires no model downloads, no training,
+runs on existing GPU memory budgets, and gives strong success without
+the operational complexity of VLA inference.
 
 ---
 
@@ -90,13 +114,25 @@ RL+admittance 95%.
 └─────────────────────────────┬──────────────────────────────────────┘
                               ▼
 ┌────────────────────────────────────────────────────────────────────┐
-│  POLICY LAYER (Layer 2)                                            │
-│   ├─ cuRobo (classical, free-space)                                │
+│  POLICY LAYER (Layer 3)                                            │
+│   ├─ cuRoboV2 + constrained planning (classical, IA Full Phase 63b)│
+│   ├─ cuRobo v1 (legacy free-space, default today)                  │
 │   ├─ GR00T N1.7-DROID (VLA, zero-shot, ~30Hz)                     │
 │   ├─ Pi0-FAST DROID (VLA, zero-shot, ~50Hz)                       │
-│   └─ IndustReal RL (Layer 3, trained, ~60Hz)                      │
+│   └─ IndustReal RL (Layer 4, trained, ~60Hz)                      │
 └─────────────────────────────┬──────────────────────────────────────┘
                               │  joint targets or EE pose, 30-60 Hz
+                              ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  PLANNING LAYER (Layer 2 — IA Full Spec Phase 63b)                 │
+│   ├─ plan_constrained_trajectory (pose_cost_metric + axis lock)    │
+│   ├─ Depth-fused TSDF (99% collision recall, 10× v1)               │
+│   ├─ B-spline torque-limit-aware optimisation                      │
+│   └─ Topology-aware kinematics (48-DoF humanoid support)           │
+│                                                                    │
+│   APPROACH phase: orientation-locked descent toward contact target │
+└─────────────────────────────┬──────────────────────────────────────┘
+                              │  trajectory waypoints (pose + dpose)
                               ▼
 ┌────────────────────────────────────────────────────────────────────┐
 │  COMPLIANCE LAYER (Layer 1)                                        │
@@ -105,29 +141,120 @@ RL+admittance 95%.
 │   └─ cartesian_impedance_controller (matthias-mayr, torque-domain) │
 │                                                                    │
 │   F = K·(x_des - x_actual) - D·v_actual + F_ext_feedback           │
+│   CONTACT phase: yields to contact forces during insertion         │
 └─────────────────────────────┬──────────────────────────────────────┘
                               │  joint torques OR position w/ feedback
                               ▼
 ┌────────────────────────────────────────────────────────────────────┐
-│  STABILITY LAYER (already in IA Full Spec Phase 80b)               │
+│  STABILITY LAYER (Layer 0 — already in IA Full Spec Phase 80b)     │
 │   PhysX 5.x + per-prim defaults + CCD + maxContactImpulse +        │
 │   velocity-sanity guard rail                                       │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-**Layers are orthogonal.** A canonical template's `controller_stack` field
-declares which layer-implementation combination to use:
+**Four orthogonal layers. The KEY INSIGHT:** for peg-in-hole and similar
+contact-rich tasks, the optimal flow combines Layer 2 (cuRoboV2
+constrained planning) for the orientation-locked APPROACH phase, then
+hands off to Layer 1 (compliance) at CONTACT phase. Layer 3 (policy)
+chooses which planner drives it; Layer 0 keeps physics stable underneath.
+
+Classical 4-layer stack (no VLA, no RL): cuRoboV2 + admittance +
+Phase 80b — empirically 80%+ on peg-in-hole per Phase 63b literature.
+
+VLA-only stacks (Layer 3 = VLA, no Layer 2): GR00T/Pi0 outputs EE deltas
+directly without constrained planning. Lower success (60-70%) unless
+paired with admittance.
+
+A canonical template's `controller_stack` field declares the chosen
+combination:
 
 ```jsonc
 {
   "task_id": "CP-NEW-peg-in-hole-single",
   "controller_stack": {
-    "policy": "groot_n17_droid",
+    "policy": "curobov2",
+    "planning_features": ["constrained_axis_lock", "depth_fused_tsdf"],
     "compliance": "cartesian_admittance",
     "stability": "phase_80b_defaults"
   }
 }
 ```
+
+For VLA-based variants:
+
+```jsonc
+{
+  "task_id": "CP-NEW-peg-in-hole-single-vla",
+  "controller_stack": {
+    "policy": "groot_n17_droid",
+    "planning_features": [],          // VLA outputs targets directly
+    "compliance": "cartesian_admittance",
+    "stability": "phase_80b_defaults"
+  }
+}
+```
+
+### 2.1 Phase 63b coupling — why constrained planning is the natural partner
+
+This spec **delegates Layer 2 implementation entirely to IA Full Spec
+Phase 63b**. We do not re-spec cuRoboV2; we declare the contract under
+which Phase 63b's `plan_constrained_trajectory` tool feeds into our
+Layer 1 compliance controller.
+
+**Contract (Phase 63b → Layer 1 handoff):**
+
+```python
+# Phase 63b produces:
+trajectory = await plan_constrained_trajectory(
+    robot="/World/Franka",
+    pre_grasp_pose=hole_pose + Pose(z=+0.10),   # 10cm above hole
+    grasp_pose=hole_pose,                       # at hole entry
+    axis="z",                                   # lock z-axis orientation
+    offset_m=0.10,
+    lock_orientation_from=0.5,                  # lock from 50% into traj
+)
+
+# Layer 1 consumes via chained controller:
+# - Approach phase (t=0 to t=0.5): rigid joint targets from trajectory
+# - Contact phase (t=0.5 to t=1.0): admittance controller takes over;
+#   trajectory targets become "desired" but compliance yields to F/T
+
+await follow_trajectory_with_compliance(
+    trajectory=trajectory,
+    compliance_handoff_at=0.5,                  # match lock_orientation_from
+    compliance_params=admittance_default,
+)
+```
+
+**Why this combination wins:**
+
+1. **Constrained planning prevents wrist roll** during descent.
+   Without `pose_cost_metric`, even a perfect free-space planner picks
+   different orientations along the descent — gripper enters hole at
+   wrong angle, peg jams. Phase 63b locks orientation as a planning
+   constraint, not a control constraint, so the trajectory IS feasible.
+
+2. **Depth-fused TSDF resolves "near-hole" geometry** that voxel grids
+   miss (1-2mm features). cuRoboV2 reports 99% collision recall on
+   benchmark tasks; cuRobo v1 closer to 70%.
+
+3. **Compliance handoff at t=0.5** matches Phase 63b's
+   `lock_orientation_from=0.5` — same threshold means seamless
+   transition. Rigid control above the contact line, compliant below.
+
+4. **No VLA needed** for tasks where geometry is known and approach is
+   well-defined. The classical stack is empirically 80%+ which exceeds
+   most VLA zero-shot rates on the same tasks.
+
+**When VLA still adds value:**
+
+- Novel objects with unseen geometry (no CAD model for cuRobo)
+- Tasks where instruction-conditioning matters ("insert the RED peg")
+- Multi-step skills where the policy needs to reason about ordering
+
+For our 2 CPs (peg-in-hole-single, tactile-insertion), CAD is known
+and approach is deterministic → cuRoboV2+admittance is the right
+default. VLA path is opt-in for future templates with non-CAD targets.
 
 The supervisor (Kit Supervisor spec) wraps the whole stack for restart
 recovery. The verifier (multimodal verifier_registry §6) classifies
@@ -445,7 +572,8 @@ For comparing policy/compliance combinations on the same CP.
 
 ## 7. Tool registry additions
 
-12 new tools across the three layers:
+13 new tools across the four layers (Layer 2 owned by Phase 63b, not
+re-implemented here):
 
 | Tool | Layer | New file |
 |---|---|---|
@@ -454,16 +582,45 @@ For comparing policy/compliance combinations on the same CP.
 | `attach_ft_sensor` | 1 | `chat/tools/sensor_handlers.py` (extend) |
 | `set_compliance_params` | 1 | `chat/tools/compliance_handlers.py` |
 | `release_compliance` | 1 | same |
-| `execute_vla_policy` | 2 | `chat/tools/vla_handlers.py` |
-| `list_vla_models` | 2 | same |
-| `download_vla_model` | 2 | same |
-| `cancel_vla_inference` | 2 | same |
-| `vla_inference_diagnostics` | 2 | same |
-| `train_industreal_policy` | 3 | `chat/tools/rl_handlers.py` |
-| `deploy_industreal_policy` | 3 | same |
+| **`follow_trajectory_with_compliance`** | **1↔2 bridge** | `chat/tools/compliance_handlers.py` |
+| `execute_vla_policy` | 3 | `chat/tools/vla_handlers.py` |
+| `list_vla_models` | 3 | same |
+| `download_vla_model` | 3 | same |
+| `cancel_vla_inference` | 3 | same |
+| `vla_inference_diagnostics` | 3 | same |
+| `train_industreal_policy` | 4 | `chat/tools/rl_handlers.py` |
+| `deploy_industreal_policy` | 4 | same |
 
-All registered into `DATA_HANDLERS` or `CODE_GEN_HANDLERS` per existing
-pattern. Each gets `tools_used` declaration in templates that use them.
+The `follow_trajectory_with_compliance` tool is the **Phase 63b → Layer 1
+handoff**: takes a constrained trajectory from `plan_constrained_trajectory`
+(Phase 63b) and executes it with a configurable compliance-handoff point.
+
+```python
+async def follow_trajectory_with_compliance(
+    trajectory: list[dict],              # waypoints from Phase 63b
+    robot_path: str = "/World/Franka",
+    compliance_handoff_at: float = 0.5,  # 0..1 fraction of trajectory
+    compliance_controller: str = "admittance",  # must be installed
+    timeout_s: float = 30.0,
+    velocity_scaling: float = 1.0,
+) -> dict:
+    """Execute a constrained trajectory with rigid-to-compliant handoff.
+
+    From t=0 to t=compliance_handoff_at: rigid joint targets follow
+    trajectory exactly.
+    From t=compliance_handoff_at to t=1: admittance/impedance controller
+    receives trajectory targets as "desired pose" but yields to contact
+    F/T feedback.
+
+    Returns:
+        { ok, t_handoff_observed, contact_detected_at,
+          final_pose, ft_at_handoff, telemetry_session_id }
+    """
+```
+
+All tools registered into `DATA_HANDLERS` or `CODE_GEN_HANDLERS` per
+existing pattern. Each gets `tools_used` declaration in templates that
+use them.
 
 ---
 
@@ -476,28 +633,38 @@ IDLE
 INSTANTIATE_SCENE (build phase, unchanged from today)
   │ scene_built
   ▼
-INSTALL_STABILITY (Phase 80b defaults applied)
+INSTALL_STABILITY (Layer 0 — Phase 80b defaults applied)
   │ stability_ok
   ▼
 INSTALL_COMPLIANCE (Layer 1, optional per controller_stack)
   │ compliance_ok
   ▼
-LOAD_POLICY (Layer 2 or 3)
+LOAD_POLICY (Layer 3 or 4 — if not pure-classical stack)
   │ policy_loaded
   ▼
-APPROACH (free-space; policy commands joint targets)
-  │ near_contact_threshold (e.g., 5cm)
+PLAN (Layer 2 — Phase 63b plan_constrained_trajectory)
+  │ trajectory_with_axis_lock_obtained
   ▼
-CONTACT (compliance now driving; F/T feedback active)
+APPROACH (rigid joint targets follow trajectory; t < handoff_at)
+  │ t >= handoff_at (50% by default)
+  ▼
+CONTACT (compliance driving; F/T feedback active; trajectory becomes
+         "desired pose" for admittance)
   │ insertion_complete OR timeout
   ├─ inserted ────────────────────► RELEASE
-  └─ timeout ────────────────────► RECOVERY (back to APPROACH or abort)
+  └─ timeout ────────────────────► RECOVERY (back to PLAN or abort)
   ▼
 RELEASE (gripper open, retract)
   │ retracted
   ▼
 DONE → emit telemetry, classify via verifier_registry
 ```
+
+The PLAN→APPROACH→CONTACT transition is the **key innovation** beyond
+today's path: Phase 63b's `lock_orientation_from` parameter and Layer 1's
+`compliance_handoff_at` must MATCH so the orientation-lock and the
+compliance-handoff happen at the same trajectory fraction. The
+`follow_trajectory_with_compliance` tool enforces this contract.
 
 State transitions emit telemetry events per §9. Each phase has a watchdog
 timer; on timeout, the supervisor (Kit Supervisor spec) may restart Kit
@@ -611,11 +778,27 @@ parallel.
 - A.2: `setup_admittance_controller` tool + tests
 - A.3: F/T sensor model + `attach_ft_sensor` tool
 - A.4: `setup_impedance_controller` tool (Cartesian impedance variant)
-- A.5: Direct-eval `--compliance-override` flag
+- A.5: `follow_trajectory_with_compliance` tool (Phase 63b ↔ Layer 1 bridge)
+- A.6: Direct-eval `--compliance-override` flag
 
 **Exit criterion:** existing CP-01 runs identically (no behavior change)
 with admittance installed. CP-NEW-peg-in-hole-single shows reduced
-PhysX velocity spikes under contact (telemetry).
+PhysX velocity spikes under contact (telemetry). A cuRoboV2-trajectory
+ending mid-air can be executed via `follow_trajectory_with_compliance`
+without it picking up where rigid would slam.
+
+### Phase A2 — Classical optimum validation
+- A2.1: Apply `controller_stack: cuRoboV2 + admittance + Phase 80b`
+  to CP-NEW-peg-in-hole-single
+- A2.2: Run 20-trial benchmark; compare against rigid baseline
+- A2.3: Telemetry capture: contact-phase F/T traces
+
+**Exit criterion:** insertion success ≥75% in 20-trial benchmark
+(Phase 63b literature claims ~80-85%; we validate empirically).
+
+**Why a dedicated phase:** the classical 4-layer stack is the
+empirically-strongest path that requires NO model downloads, NO training.
+We prove value here BEFORE adding Layer 3/4 complexity.
 
 ### Phase B — VLA inference layer (Layer 2)
 - B.1: `vla_inference_service` sidecar w/ HuggingFace pull
@@ -728,9 +911,17 @@ documented but not auto-run in CI.
 - [TacEx GelSight in Isaac Sim](https://www.researchgate.net/publication/385629897_TacEx_GelSight_Tactile_Simulation_in_Isaac_Sim)
 
 ### Prerequisites in IA Full Spec
+- **IA Full Spec Phase 63b — cuRoboV2 backend + constrained planning**
+  ([cuRoboV2 paper arXiv 2603.05493, 2026]) — owns Layer 2 entirely;
+  this spec only declares the handoff contract to Layer 1
 - IA Full Spec Phase 80b — grip_safe_mode + per-prim physics defaults
-- IA Full Spec Phase 70c — articulated pull controller (drawer/door)
-- IA Full Spec Phase 70d — drop-target catalog-aware
+  (Layer 0; the stability baseline)
+- IA Full Spec Phase 70c — articulated pull controller (drawer/door;
+  uses cuRoboV2 + compliance for drawer-pull CPs)
+- IA Full Spec Phase 70d — drop-target catalog-aware (pairs with
+  Phase 63b constrained planning for precision placement)
+- IA Full Spec Phase 81 — multi-rate physics (TSDF source feeds
+  cuRoboV2's depth-fused distance field)
 
 ### This repo's prior specs
 - `docs/specs/2026-05-08-multimodal-foundation-spec.md` — LayoutSpec + telemetry
@@ -741,6 +932,10 @@ documented but not auto-run in CI.
 
 ## 15. Implementation checklist
 
+### Layer 0 (Stability — owned by IA Full Spec Phase 80b)
+- Tracked in IA Full Spec; this spec depends on its delivery but does
+  not re-implement.
+
 ### Layer 1 (Compliance)
 - [ ] `service/isaac_assist_service/chat/tools/compliance_handlers.py`
 - [ ] `setup_admittance_controller` tool registered in DATA_HANDLERS
@@ -748,12 +943,20 @@ documented but not auto-run in CI.
 - [ ] `attach_ft_sensor` tool extending sensor_handlers
 - [ ] `set_compliance_params` runtime mutation tool
 - [ ] `release_compliance` cleanup tool
+- [ ] **`follow_trajectory_with_compliance` tool (Phase 63b ↔ Layer 1
+      handoff)**
 - [ ] ROS2-bridge wiring in `exts/.../assist/extension.py`
 - [ ] `config/admittance_controller_defaults.yaml`
 - [ ] `tests/test_admittance_handlers.py` (≥20 L0)
+- [ ] `tests/test_trajectory_compliance_handoff.py` (≥10 L0)
 - [ ] `tests/test_compliance_e2e.py` (Kit-required, L1)
 
-### Layer 2 (VLA Inference)
+### Layer 2 (Planning — owned by IA Full Spec Phase 63b)
+- Tracked in IA Full Spec Phase 63b; this spec consumes its
+  `plan_constrained_trajectory` output via the `follow_trajectory_
+  with_compliance` bridge tool above.
+
+### Layer 3 (VLA Inference)
 - [ ] `service/isaac_assist_service/vla/__init__.py`
 - [ ] `service/isaac_assist_service/vla/types.py` (Action, Observation, ModelSpec)
 - [ ] `service/isaac_assist_service/vla/groot_inference_server.py`
@@ -765,7 +968,7 @@ documented but not auto-run in CI.
 - [ ] `tests/test_vla_action_normalization.py` (≥15 L0)
 - [ ] `tests/test_vla_inference_e2e.py` (-m vla, opt-in)
 
-### Layer 3 (RL Training)
+### Layer 4 (RL Training)
 - [ ] `service/isaac_assist_service/rl/__init__.py`
 - [ ] `service/isaac_assist_service/rl/industreal_runner.py`
 - [ ] `config/industreal_tasks.yaml`
