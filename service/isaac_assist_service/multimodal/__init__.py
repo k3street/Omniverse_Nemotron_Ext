@@ -36,6 +36,11 @@ from .validate import (
     validate_layout_spec,
     LayoutSpecValidationError,
 )
+from .text_modality import (
+    extract_intent_rules,
+    extract_intent_llm,
+    produce_layout_spec_from_text,
+)
 
 __all__ = [
     # Types
@@ -56,4 +61,8 @@ __all__ = [
     # Validation
     "validate_layout_spec",
     "LayoutSpecValidationError",
+    # Text modality (Block 2)
+    "extract_intent_rules",
+    "extract_intent_llm",
+    "produce_layout_spec_from_text",
 ]
