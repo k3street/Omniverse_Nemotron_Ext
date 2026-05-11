@@ -148,6 +148,124 @@ def proposal_acceptance(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+# ── Kit Supervisor dashboards (spec 2026-05-11 v2 §9.3) ───────────────────
+
+
+def supervisor_health_summary(events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Drift events, restart count, CPs per restart, abort rate."""
+    drift_events = sum(1 for e in events if e["event_type"] == "supervisor_drift_detected")
+    restart_completed = sum(
+        1 for e in events if e["event_type"] == "supervisor_restart_completed"
+    )
+    restart_failed = sum(
+        1 for e in events if e["event_type"] == "supervisor_restart_failed"
+    )
+    aborts = sum(1 for e in events if e["event_type"] == "supervisor_abort")
+    soft_resets = sum(1 for e in events if e["event_type"] == "supervisor_soft_reset")
+    total_classifications = sum(
+        1 for e in events if e["event_type"] == "supervisor_drift_classification"
+    )
+
+    cps_per_restart = (
+        total_classifications / max(restart_completed, 1)
+        if restart_completed > 0
+        else None
+    )
+
+    return {
+        "total_classifications": total_classifications,
+        "drift_events": drift_events,
+        "restart_completed": restart_completed,
+        "restart_failed": restart_failed,
+        "aborts": aborts,
+        "soft_resets": soft_resets,
+        "cps_per_restart": round(cps_per_restart, 1) if cps_per_restart else None,
+        "abort_rate": round(aborts / max(restart_completed + aborts, 1), 3),
+    }
+
+
+def supervisor_drift_precision(events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """% of drift detections that resulted in a successful retry on fresh Kit.
+
+    A "precise" drift detection is one where:
+    1. supervisor_drift_detected fires for CP-X
+    2. supervisor_restart_completed fires next
+    3. supervisor_drift_classification fires for CP-X with level=ok or warn
+       (i.e. the retry succeeded)
+
+    Strict per-CP pairing via event_id order.
+    """
+    ordered = sorted(events, key=lambda e: e.get("event_id", 0))
+    # cp -> list of (drift_idx, retry_outcome) pairs
+    drift_by_cp: Dict[str, list] = defaultdict(list)
+    last_drift_for_cp: Dict[str, int] = {}
+
+    for i, e in enumerate(ordered):
+        cp = (e["payload"] or {}).get("cp")
+        if not cp:
+            continue
+        if e["event_type"] == "supervisor_drift_detected":
+            last_drift_for_cp[cp] = i
+            drift_by_cp[cp].append({"drift_idx": i, "retry_outcome": None})
+        elif e["event_type"] == "supervisor_drift_classification":
+            # Retry classification: cp matches AND comes after a drift
+            if e["payload"].get("retry") is True:
+                pending = drift_by_cp.get(cp, [])
+                if pending and pending[-1]["retry_outcome"] is None:
+                    pending[-1]["retry_outcome"] = e["payload"].get("level")
+
+    n_drifts = sum(len(p) for p in drift_by_cp.values())
+    n_recovered = sum(
+        1
+        for plist in drift_by_cp.values()
+        for p in plist
+        if p["retry_outcome"] in ("ok", "warn")
+    )
+    return {
+        "drift_events": n_drifts,
+        "recovered_on_retry": n_recovered,
+        "precision": round(n_recovered / n_drifts, 3) if n_drifts else 0.0,
+        "by_cp": {cp: len(plist) for cp, plist in drift_by_cp.items()},
+    }
+
+
+def supervisor_per_cp_baselines(events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Per-CP elapsed_s distributions for calibration.
+
+    Walks supervisor_drift_classification events with level=ok, groups by cp,
+    returns {cp: {n, min, max, p50, p95}}.
+    """
+    by_cp: Dict[str, list] = defaultdict(list)
+    for e in events:
+        if e["event_type"] != "supervisor_drift_classification":
+            continue
+        p = e["payload"] or {}
+        if p.get("level") not in ("ok", "warn"):
+            continue
+        cp = p.get("cp")
+        elapsed = p.get("elapsed_s")
+        if cp and isinstance(elapsed, (int, float)):
+            by_cp[cp].append(float(elapsed))
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for cp, samples in by_cp.items():
+        if not samples:
+            continue
+        srt = sorted(samples)
+        n = len(srt)
+        p50 = srt[n // 2]
+        p95_idx = min(int(n * 0.95), n - 1)
+        p95 = srt[p95_idx]
+        out[cp] = {
+            "n": n,
+            "min": round(srt[0], 3),
+            "max": round(srt[-1], 3),
+            "p50": round(p50, 3),
+            "p95": round(p95, 3),
+        }
+    return out
+
+
 def aggregate(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Run all aggregations and return one report dict."""
     return {
@@ -158,6 +276,10 @@ def aggregate(events: List[Dict[str, Any]]) -> Dict[str, Any]:
         "build_failure_modes": build_failure_modes(events),
         "verifier_check_pass_rate": verifier_check_pass_rate(events),
         "proposal_acceptance": proposal_acceptance(events),
+        # Kit Supervisor dashboards (spec 2026-05-11 v2 §9.3)
+        "supervisor_health": supervisor_health_summary(events),
+        "supervisor_drift_precision": supervisor_drift_precision(events),
+        "supervisor_per_cp_baselines": supervisor_per_cp_baselines(events),
     }
 
 

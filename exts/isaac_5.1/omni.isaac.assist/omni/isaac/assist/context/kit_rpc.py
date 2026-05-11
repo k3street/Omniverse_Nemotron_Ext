@@ -144,6 +144,8 @@ class KitRPCServer:
         app.router.add_post("/sim_control", self._handle_sim_control)
         app.router.add_post("/set_viewport_camera", self._handle_set_viewport_camera)
         app.router.add_get("/list_prims", self._handle_list_prims)
+        # Kit Supervisor soft-reset endpoint (spec 2026-05-11 v2 §5)
+        app.router.add_post("/admin/reset_world", self._handle_reset_world)
 
         self._runner = web.AppRunner(app)
         await self._runner.setup()
@@ -343,3 +345,82 @@ class KitRPCServer:
             return web.json_response({"prims": prims, "count": len(prims)})
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_reset_world(self, request) -> "web.Response":
+        """Kit Supervisor soft-reset (spec 2026-05-11 v2 §5).
+
+        Body (JSON):
+            flush_curobo: bool (default True) — clear cuRobo planner cache
+            new_stage:    bool (default True) — create fresh USD stage
+            gc_collect:   bool (default True) — run python gc.collect()
+            timeout_s:    float (default 30) — guard band; logged only
+
+        Response:
+            { ok: bool, duration_ms: float,
+              actions_performed: list[str], errors: list[str] }
+        """
+        from aiohttp import web
+        import time as _time
+
+        t0 = _time.monotonic()
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        flush_curobo = bool(body.get("flush_curobo", True))
+        new_stage = bool(body.get("new_stage", True))
+        gc_collect = bool(body.get("gc_collect", True))
+
+        actions: list = []
+        errors: list = []
+
+        # 1) cuRobo cache flush — best-effort; handler stores cache on a
+        # module-level/builtins attribute named `_PLANNER_ATTR`.
+        if flush_curobo:
+            try:
+                import builtins as _b
+                pa = getattr(_b, "_PLANNER_ATTR", None)
+                if pa is not None:
+                    cache = getattr(pa, "_curobo_motion_gen_cache", None)
+                    if isinstance(cache, dict):
+                        n = len(cache)
+                        cache.clear()
+                        actions.append(f"curobo_cache_flushed:{n}")
+                    else:
+                        actions.append("curobo_cache_missing")
+                else:
+                    actions.append("planner_attr_missing")
+            except Exception as e:
+                errors.append(f"curobo_flush:{type(e).__name__}:{e}")
+
+        # 2) new stage — preferred for state cleanup
+        if new_stage:
+            try:
+                import omni.usd
+                from pxr import UsdGeom, UsdPhysics
+                ctx = omni.usd.get_context()
+                ctx.new_stage()
+                stage = ctx.get_stage()
+                UsdGeom.Xform.Define(stage, "/World")
+                UsdPhysics.Scene.Define(stage, "/World/PhysicsScene")
+                actions.append("stage_reset")
+            except Exception as e:
+                errors.append(f"new_stage:{type(e).__name__}:{e}")
+
+        # 3) gc — clears python heap fragmentation
+        if gc_collect:
+            try:
+                import gc
+                collected = gc.collect()
+                actions.append(f"gc_collected:{collected}")
+            except Exception as e:
+                errors.append(f"gc_collect:{type(e).__name__}:{e}")
+
+        duration_ms = (_time.monotonic() - t0) * 1000.0
+        return web.json_response({
+            "ok": len(errors) == 0,
+            "duration_ms": round(duration_ms, 1),
+            "actions_performed": actions,
+            "errors": errors,
+        })

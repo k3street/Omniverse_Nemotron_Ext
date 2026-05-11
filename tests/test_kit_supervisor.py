@@ -277,3 +277,219 @@ async def test_supervisor_record_baseline_on_success():
     await sup.run_with_supervision("CP-01", runner)
     assert "CP-01" in sup.detector._elapsed_baseline
     assert sup.detector._elapsed_baseline["CP-01"] > 0
+
+
+# ── Soft-reset cadence ─────────────────────────────────────────────────────
+
+
+def test_should_soft_reset_off_when_disabled():
+    cfg = SupervisorConfig(enable_soft_reset=False, soft_reset_every_n=5)
+    sup = KitSupervisor(cfg)
+    sup.state.cp_count_since_restart = 5
+    assert sup.should_soft_reset() is False
+
+
+def test_should_soft_reset_at_boundary():
+    cfg = SupervisorConfig(enable_soft_reset=True, soft_reset_every_n=5)
+    sup = KitSupervisor(cfg)
+    sup.state.cp_count_since_restart = 5
+    assert sup.should_soft_reset() is True
+
+
+def test_should_soft_reset_off_at_zero():
+    """Just-restarted state (count=0) should NOT soft-reset."""
+    cfg = SupervisorConfig(enable_soft_reset=True, soft_reset_every_n=5)
+    sup = KitSupervisor(cfg)
+    sup.state.cp_count_since_restart = 0
+    assert sup.should_soft_reset() is False
+
+
+def test_should_soft_reset_off_between_boundaries():
+    cfg = SupervisorConfig(enable_soft_reset=True, soft_reset_every_n=10)
+    sup = KitSupervisor(cfg)
+    sup.state.cp_count_since_restart = 7
+    assert sup.should_soft_reset() is False
+
+
+# ── Restart failure escalation ─────────────────────────────────────────────
+
+
+class _FailingRestartManager:
+    def __init__(self, fail_count: int):
+        self.fail_count = fail_count
+        self.calls = 0
+
+    async def restart(self, probe) -> bool:
+        self.calls += 1
+        if self.calls <= self.fail_count:
+            return False
+        return True
+
+
+@pytest.mark.asyncio
+async def test_supervisor_retries_restart_once_on_failure():
+    """One failed restart triggers exactly one retry."""
+    sup = _make_supervisor()
+    sup.manager = _FailingRestartManager(fail_count=1)  # fails first, succeeds
+    await sup._do_hard_restart()
+    assert sup.manager.calls == 2
+    assert sup.state.consecutive_restart_failures == 0  # reset on success
+
+
+@pytest.mark.asyncio
+async def test_supervisor_aborts_after_consecutive_failures():
+    """Two consecutive failures → SupervisorAbortError."""
+    from scripts.qa.kit_supervisor import SupervisorAbortError
+
+    cfg = SupervisorConfig(abort_after_failed_restarts=2)
+    sup = KitSupervisor(cfg)
+    sup.probe = _StubProbe()
+    sup.manager = _FailingRestartManager(fail_count=10)  # always fails
+
+    with pytest.raises(SupervisorAbortError) as exc:
+        await sup._do_hard_restart()
+    assert "unrecoverable" in str(exc.value)
+
+
+# ── Telemetry emission ────────────────────────────────────────────────────
+
+
+class _StubStore:
+    def __init__(self):
+        self.events: list = []
+
+    def append_event(self, session_id, event_type, payload):
+        self.events.append((session_id, event_type, payload))
+        return len(self.events)
+
+
+@pytest.mark.asyncio
+async def test_supervisor_emits_drift_classification():
+    cfg = SupervisorConfig(telemetry_emit=True)
+    store = _StubStore()
+    sup = KitSupervisor(cfg, store=store)
+    sup.probe = _StubProbe()
+    sup.manager = _StubRestartManager()
+
+    normal = {"per_run": [{"cube_final": [0.5, 0.0, 0.5], "speed": 0.0}]}
+    async def runner():
+        return normal
+    await sup.run_with_supervision("CP-01", runner)
+
+    types = [e[1] for e in store.events]
+    assert "supervisor_drift_classification" in types
+
+
+@pytest.mark.asyncio
+async def test_supervisor_emits_drift_detected_on_explosion():
+    cfg = SupervisorConfig(telemetry_emit=True)
+    store = _StubStore()
+    sup = KitSupervisor(cfg, store=store)
+    sup.probe = _StubProbe()
+    sup.manager = _StubRestartManager()
+
+    explode = {"per_run": [{"cube_final": [1e8, 1e7, 1e9], "speed": 1e7}]}
+    clean = {"per_run": [{"cube_final": [0.5, 0.0, 0.5], "speed": 0.0}]}
+    calls = [0]
+    async def runner():
+        calls[0] += 1
+        return explode if calls[0] == 1 else clean
+    await sup.run_with_supervision("CP-01", runner)
+
+    types = [e[1] for e in store.events]
+    assert "supervisor_drift_detected" in types
+    assert "supervisor_restart_started" in types
+    assert "supervisor_restart_completed" in types
+
+
+@pytest.mark.asyncio
+async def test_supervisor_telemetry_disabled_no_emit():
+    cfg = SupervisorConfig(telemetry_emit=False)
+    store = _StubStore()
+    sup = KitSupervisor(cfg, store=store)
+    sup.probe = _StubProbe()
+    sup.manager = _StubRestartManager()
+
+    async def runner():
+        return {"per_run": [{"cube_final": [0.0, 0.0, 0.5], "speed": 0.0}]}
+    await sup.run_with_supervision("CP-01", runner)
+    assert len(store.events) == 0
+
+
+# ── Config env-overrides ──────────────────────────────────────────────────
+
+
+def test_config_from_env_int(monkeypatch):
+    monkeypatch.setenv("SUPERVISOR_RESTART_EVERY_N", "42")
+    c = SupervisorConfig.from_env()
+    assert c.restart_every_n == 42
+
+
+def test_config_from_env_bool(monkeypatch):
+    monkeypatch.setenv("SUPERVISOR_ENABLE_SOFT_RESET", "false")
+    c = SupervisorConfig.from_env()
+    assert c.enable_soft_reset is False
+
+
+def test_config_from_env_float(monkeypatch):
+    monkeypatch.setenv("SUPERVISOR_ELAPSED_DRIFT_X", "3.5")
+    c = SupervisorConfig.from_env()
+    assert c.elapsed_drift_x == 3.5
+
+
+def test_config_from_env_overrides_yield_to_kwargs(monkeypatch):
+    monkeypatch.setenv("SUPERVISOR_RESTART_EVERY_N", "42")
+    c = SupervisorConfig.from_env(restart_every_n=99)
+    assert c.restart_every_n == 99
+
+
+# ── Health URLs ────────────────────────────────────────────────────────────
+
+
+def test_config_reset_url_derives_from_host_port():
+    c = SupervisorConfig(kit_host="myhost", kit_port=9001)
+    assert c.reset_url == "http://myhost:9001/admin/reset_world"
+
+
+# ── DriftDetector with negative speed (defensive) ──────────────────────────
+
+
+def test_drift_ignores_negative_speed():
+    """Negative speed shouldn't trigger absurd-speed (only |speed| matters)."""
+    d = DriftDetector()
+    result = {"per_run": [{"cube_final": [0, 0, 0.5], "speed": -10}]}
+    s = d.classify("CP-X", result, 70.0)
+    assert s.level == "ok"
+
+
+def test_drift_signal_evidence_is_serializable():
+    """DriftSignal.evidence must be JSON-serializable for telemetry."""
+    import json
+    d = DriftDetector()
+    result = {"per_run": [{"cube_final": [1e8, 1e7, 1e9], "speed": 0.0}]}
+    s = d.classify("CP-X", result, 70.0)
+    # Should not raise
+    json.dumps({"level": s.level, "reason": s.reason, "evidence": s.evidence})
+
+
+# ── Stop + stats integration ──────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_supervisor_stop_emits_summary():
+    cfg = SupervisorConfig(telemetry_emit=True)
+    store = _StubStore()
+    sup = KitSupervisor(cfg, store=store)
+
+    stats = await sup.stop()
+    types = [e[1] for e in store.events]
+    assert "supervisor_stopped" in types
+    assert "total_restarts" in stats
+
+
+def test_supervisor_stats_includes_consecutive_failures():
+    sup = _make_supervisor()
+    sup.state.consecutive_restart_failures = 1
+    s = sup.stats()
+    assert s["consecutive_restart_failures"] == 1
+    assert "total_cp_count" in s

@@ -211,5 +211,80 @@ def test_aggregator_full(store):
 
 def test_all_event_types_named():
     """Every constant has a named emitter or is at least listed."""
-    # Sanity: ALL_EVENT_TYPES is exactly the 13 per spec §17.1
-    assert len(tel.ALL_EVENT_TYPES) == 13
+    # Spec §17.1 defines 13 multimodal events; supervisor spec §9.1 adds 12.
+    assert len(tel.ALL_EVENT_TYPES) == 25
+
+
+# ── Kit Supervisor aggregator dashboards (spec v2 §9.3) ────────────────────
+
+
+def _seed_supervisor_corpus(store):
+    """Seed events emulating one supervisor session with drift + recovery."""
+    tel.emit(store, "sup-1", tel.EVENT_SUPERVISOR_STARTED,
+             baseline_rss_mb=1000, baseline_gpu_mb=4000, kit_pid=1234)
+    # 3 normal CPs
+    for i, cp in enumerate(("CP-01", "CP-02", "CP-03"), 1):
+        tel.emit(store, "sup-1", tel.EVENT_SUPERVISOR_DRIFT_CLASSIFICATION,
+                 cp=cp, level="ok", reason="", elapsed_s=70.0 + i,
+                 baseline_elapsed_s=70.0)
+    # 1 drift event for CP-04 with retry recovery
+    tel.emit(store, "sup-1", tel.EVENT_SUPERVISOR_DRIFT_CLASSIFICATION,
+             cp="CP-04", level="drift", reason="cube_position_absurd",
+             elapsed_s=80.0, baseline_elapsed_s=None)
+    tel.emit(store, "sup-1", tel.EVENT_SUPERVISOR_DRIFT_DETECTED,
+             cp="CP-04", reason="cube_position_absurd", evidence={"cube": [1e8]})
+    tel.emit(store, "sup-1", tel.EVENT_SUPERVISOR_RESTART_STARTED,
+             cp="CP-04", kind="hard")
+    tel.emit(store, "sup-1", tel.EVENT_SUPERVISOR_RESTART_COMPLETED,
+             duration_ms=45000, new_baseline_rss_mb=1100,
+             new_baseline_gpu_mb=4100)
+    tel.emit(store, "sup-1", tel.EVENT_SUPERVISOR_DRIFT_CLASSIFICATION,
+             cp="CP-04", level="ok", reason="", elapsed_s=72.0, retry=True)
+    # 1 soft-reset
+    tel.emit(store, "sup-1", tel.EVENT_SUPERVISOR_SOFT_RESET,
+             cp="CP-05", actions=["stage_reset"], duration_ms=2000, errors=[])
+    tel.emit(store, "sup-1", tel.EVENT_SUPERVISOR_STOPPED,
+             total_restarts=1, total_drift_events=1)
+
+
+def test_supervisor_health_summary(store):
+    _seed_supervisor_corpus(store)
+    events = store.list_events(limit=1000)
+    from scripts.qa.analyze_multimodal_usage import supervisor_health_summary
+    h = supervisor_health_summary(events)
+    assert h["drift_events"] == 1
+    assert h["restart_completed"] == 1
+    assert h["soft_resets"] == 1
+    assert h["total_classifications"] >= 4
+    assert h["abort_rate"] == 0.0
+
+
+def test_supervisor_drift_precision_recovery_counted(store):
+    _seed_supervisor_corpus(store)
+    events = store.list_events(limit=1000)
+    from scripts.qa.analyze_multimodal_usage import supervisor_drift_precision
+    p = supervisor_drift_precision(events)
+    assert p["drift_events"] == 1
+    assert p["recovered_on_retry"] == 1
+    assert p["precision"] == 1.0
+
+
+def test_supervisor_per_cp_baselines(store):
+    _seed_supervisor_corpus(store)
+    events = store.list_events(limit=1000)
+    from scripts.qa.analyze_multimodal_usage import supervisor_per_cp_baselines
+    b = supervisor_per_cp_baselines(events)
+    # CP-01..CP-03 have one ok sample each
+    assert "CP-01" in b
+    assert b["CP-01"]["n"] == 1
+    assert b["CP-01"]["p50"] == 71.0
+
+
+def test_supervisor_aggregate_includes_supervisor_dashboards(store):
+    _seed_supervisor_corpus(store)
+    events = store.list_events(limit=1000)
+    from scripts.qa.analyze_multimodal_usage import aggregate
+    a = aggregate(events)
+    assert "supervisor_health" in a
+    assert "supervisor_drift_precision" in a
+    assert "supervisor_per_cp_baselines" in a

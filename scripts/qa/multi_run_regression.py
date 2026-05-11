@@ -158,6 +158,11 @@ async def main() -> int:
                    help="Filename tag override (replaces timestamp portion).")
     p.add_argument("--per-cp-timeout", type=int, default=900,
                    help="Per-canonical timeout in seconds (default 900 = 15 min for n_runs=5).")
+    p.add_argument("--use-supervisor", action="store_true",
+                   help="Enable Kit Supervisor (auto-restart on drift) per "
+                        "docs/specs/2026-05-11-kit-supervisor-spec.md.")
+    p.add_argument("--restart-every-n", type=int, default=25,
+                   help="With --use-supervisor: restart Kit every N CPs.")
     args = p.parse_args()
 
     if not await kit_tools.is_kit_rpc_alive():
@@ -175,12 +180,32 @@ async def main() -> int:
     print(f"target list: {', '.join(targets)}")
     print("-" * 78)
 
+    # Optional supervisor for unattended long batches (drift auto-recovery)
+    supervisor = None
+    if args.use_supervisor:
+        from kit_supervisor import KitSupervisor, SupervisorConfig
+        supervisor = KitSupervisor(SupervisorConfig(
+            restart_every_n=args.restart_every_n,
+        ))
+        ok = await supervisor.start()
+        if not ok:
+            print("[FAIL] supervisor.start() — Kit not healthy")
+            return 3
+        print(f"[supervisor] active: restart_every_n={args.restart_every_n}")
+
     results: List[Dict] = []
     suite_start = time.time()
     for label in targets:
+        async def _do_run(_label=label):
+            return await asyncio.wait_for(
+                _run_one(_label, args.n_runs, args.seed),
+                timeout=args.per_cp_timeout,
+            )
         try:
-            r = await asyncio.wait_for(_run_one(label, args.n_runs, args.seed),
-                                       timeout=args.per_cp_timeout)
+            if supervisor is not None:
+                r = await supervisor.run_with_supervision(label, _do_run)
+            else:
+                r = await _do_run()
         except asyncio.TimeoutError:
             r = {"label": label, "verdict": f"TIMEOUT_{args.per_cp_timeout}"}
         except Exception as e:
@@ -189,9 +214,17 @@ async def main() -> int:
         st = r.get("status") or r.get("verdict", "?")
         sr = r.get("success_rate")
         sr_s = f"{sr:.2f}" if sr is not None else "-"
+        drift_marker = ""
+        if isinstance(r, dict):
+            sup_meta = r.get("_supervisor") or {}
+            if sup_meta.get("drift_level") == "drift":
+                drift_marker = " [DRIFT-RECOVERED]"
+            elif sup_meta.get("drift_level") == "warn":
+                drift_marker = " [WARN]"
         print(f"  {label:7s} {st:14s} rate={sr_s:>5s}  "
               f"runs={r.get('n_ok','?')}/{r.get('n_runs','?')}  "
-              f"build={r.get('build','-'):>6s}  elapsed={r.get('elapsed_s','-')}s")
+              f"build={r.get('build','-'):>6s}  elapsed={r.get('elapsed_s','-')}s"
+              f"{drift_marker}")
 
     print("-" * 78)
     total = time.time() - suite_start
