@@ -59,11 +59,16 @@
     "cube_path": "/World/Sphere_1"
   },
   "simulate_args": {
-    "cube_path": "/World/Sphere_1",
     "target_path": "/World/Bin",
     "duration_s": 180,
     "xy_tolerance": 0.15,
-    "rest_speed_threshold": 100.0
+    "rest_speed_threshold": 100.0,
+    "cube_paths": [
+      "/World/Sphere_1",
+      "/World/Sphere_2",
+      "/World/Sphere_3",
+      "/World/Sphere_4"
+    ]
   },
   "extends": "CP-01",
   "extension_notes": "CP-43 tests handler with sphere geometry. Spheres roll on belt \u2014 different physics from cube. Gripper grips at widest point (equator); friction-only grip is fragile for round objects. Industrial use: ball-bearing handling.",
