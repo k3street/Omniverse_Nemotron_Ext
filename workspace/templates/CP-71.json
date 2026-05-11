@@ -48,7 +48,13 @@
   "simulate_args": {
     "cube_path": "/World/Dispenser/Item_1",
     "target_path": "/World/OutBin",
-    "duration_s": 180
+    "duration_s": 180,
+    "cube_paths": [
+      "/World/Dispenser/Item_1",
+      "/World/Dispenser/Item_2",
+      "/World/Dispenser/Item_3",
+      "/World/Dispenser/Item_4"
+    ]
   },
   "extends": "CP-69",
   "extension_notes": "CP-71 extends CP-69 (UR10 single-cube) with create_gravity_dispenser + 4-cube drop_targets dict. Validates UR10 cuRobo handler against multi-cube routing pattern. Realizes #25 UR10BinFilling build spec; runtime delivery deferred until UR10 surface gripper wires through cuRobo handler's _grip_open/_grip_close.",
