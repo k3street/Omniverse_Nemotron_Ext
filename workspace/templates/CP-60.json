@@ -56,7 +56,7 @@
   },
   "simulate_args": {
     "cube_path": "/World/Cube_1",
-    "target_path": "/World/Loop/Right",
+    "target_path": "/World/Loop",
     "duration_s": 180
   },
   "extends": "CP-26",
