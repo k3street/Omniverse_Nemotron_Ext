@@ -66,7 +66,14 @@
   "simulate_args": {
     "cube_path": "/World/Cube_lid",
     "target_path": "/World/Container",
-    "duration_s": 240
+    "duration_s": 240,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4",
+      "/World/Cube_lid"
+    ]
   },
   "extends": "CP-08",
   "extension_notes": "CP-77 extends CP-08's 2x2 palletizer with a 5th item (the lid) treated as just another source_path. The 'two-phase state machine' (FILLING vs SEALING) is an EMERGENT property of the source_paths order + per-item drop_target \u2014 no special phase logic in the controller. Cube_lid's wider scale makes it cover the bin opening when placed at z=0.92. Realizes Industrial Set 4 #2 Nested-Box Packer in build-spec form.",

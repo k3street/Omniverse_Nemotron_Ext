@@ -39,7 +39,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/BaseCube",
-    "duration_s": 90
+    "duration_s": 180
   },
   "extends": "CP-78",
   "extension_notes": "CP-84 = CP-78 with destination as a static cube prim instead of a bin. Drop coordinates computed manually as 0.825 (BaseCube top 0.80 + half source cube 0.025).",

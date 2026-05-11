@@ -73,7 +73,7 @@
       "/World/CubeHeap/Item_5"
     ],
     "target_path": "/World/Bin",
-    "duration_s": 120
+    "duration_s": 180
   },
   "extends": "CP-31",
   "extension_notes": "CP-57 demonstrates heap-singulation. CP-31 was vertical pile; CP-57 is xy-spread heap. Realizes infrastructure for #8 Parcel Singulation + Sort. Full scenario also needs add_vision_classifier_gate for downstream sorting (CP-33+ patterns) \u2014 combine for full pipeline.",

@@ -48,7 +48,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 90
+    "duration_s": 180
   },
   "extends": "CP-69",
   "extension_notes": "CP-70 extends CP-69 with surface_gripper (OgnSurfaceGripper OmniGraph node) attached to UR10's ee_link. Form-gate validates that the suction graph attaches without breaking the cuRobo install. The cuRobo handler's _grip_open/_grip_close still no-ops (UR10 routed through SingleArticulation, no .gripper attr) \u2014 wiring those to drive the suction signal is the next milestone before function-gate becomes attainable. Cobotta variant (originally planned here) deferred: this Isaac Sim install lacks the cobotta_900 manipulator example module.",

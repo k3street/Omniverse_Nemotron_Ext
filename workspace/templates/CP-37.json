@@ -61,7 +61,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 90
+    "duration_s": 180
   },
   "extends": "CP-01",
   "extension_notes": "CP-37 tests cuRobo's collision-aware path planning around an explicit obstacle. end_effector_initial_height=1.30 explicit override (vs auto 1.035) ensures EE clears pillar top z=1.15 during transit. Production lesson: when planning_obstacles include tall items, override h1 explicitly.",

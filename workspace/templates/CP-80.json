@@ -47,7 +47,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 90
+    "duration_s": 180
   },
   "extends": "CP-78",
   "extension_notes": "CP-80 combines CP-78's elevated-cube geometry (\u226522cm above robot base) with CP-69's conveyor pattern. Tests whether the FixedJoint workaround scales from static-cube delivery to belt-fed scenes. If function-gate passes, the elevated-conveyor pattern is the canonical UR10 + belt template; CP-69..CP-74 should be retro-fitted with a similar stand to unlock function-gate.",

@@ -69,9 +69,16 @@
     "cube_path": "/World/Cube_1"
   },
   "simulate_args": {
-    "cube_paths": ["/World/Cube_1", "/World/Cube_2", "/World/Cube_3", "/World/Cube_4", "/World/Cube_5", "/World/Cube_6"],
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4",
+      "/World/Cube_5",
+      "/World/Cube_6"
+    ],
     "target_path": "/World/Pallet",
-    "duration_s": 90
+    "duration_s": 180
   },
   "extends": "CP-30",
   "extension_notes": "CP-46 is the empirically-grounded production reference for grid palletizing. 50cm pallet absorbs measured 17cm drift; 13cm spacing accommodates per-cube precision drift. compute_stack_placement v3 generates the drop_targets layout. Synthesizes all reliability lessons from CP-08..CP-45.",

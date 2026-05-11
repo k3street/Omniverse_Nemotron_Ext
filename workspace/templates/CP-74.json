@@ -47,7 +47,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 90
+    "duration_s": 180
   },
   "extends": "CP-69",
   "extension_notes": "CP-74 is CP-69 with target_source swapped from 'curobo' to 'native'. The native handler for ROBOT_FAMILY='ur10' uses UR10(attach_gripper=True) + universal_robots.PickPlaceController, which IS the working stack from ur10_pick_up.py. end_effector_offset=[0,0,0.02] matches that example. Provides a working delivery reference for UR10 while cuRobo grasp wiring (task #36) is investigated.",

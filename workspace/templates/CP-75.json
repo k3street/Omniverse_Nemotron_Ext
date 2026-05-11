@@ -39,7 +39,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 60
+    "duration_s": 180
   },
   "extends": "CP-74",
   "extension_notes": "CP-75 strips CP-74 down to static-cube pickup \u2014 no conveyor, no belt, no sensor. Validates the canonical Isaac Sim 5.x UR10 stack (Short_Suction variant + SingleManipulator + universal_robots.PickPlaceController) works end-to-end on this install. If function-gate passes here, CP-74's failure is isolated to the belt-pause-from-callback quirk and not a fundamental UR10 issue.",

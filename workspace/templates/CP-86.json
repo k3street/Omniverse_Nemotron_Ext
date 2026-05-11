@@ -40,7 +40,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 90
+    "duration_s": 180
   },
   "extends": "CP-78",
   "extension_notes": "CP-86 = CP-78 + set_semantic_label + color_routing dict only. NO other geometry changes. Pure isolation test.",

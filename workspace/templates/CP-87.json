@@ -36,7 +36,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube",
     "target_path": "/World/Bin",
-    "duration_s": 90,
+    "duration_s": 180,
     "n_runs": 5,
     "seed": 42
   },

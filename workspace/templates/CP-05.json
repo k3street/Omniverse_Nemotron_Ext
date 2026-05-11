@@ -34,23 +34,34 @@
   },
   "roles": {
     "primary_robot": {
-      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "constraints": [
+        "franka_panda",
+        "ur5e",
+        "kinova_gen3"
+      ],
       "expected_count": 1,
       "required": true,
       "disambiguator": "smaller_x_first"
     },
     "input_conveyor": {
-      "constraints": ["conveyor"],
+      "constraints": [
+        "conveyor"
+      ],
       "expected_count": 1,
       "required": true
     },
     "primary_destination": {
-      "constraints": ["bin"],
+      "constraints": [
+        "bin"
+      ],
       "expected_count": 1,
       "required": true
     },
     "workpieces": {
-      "constraints": ["cylinder", "cube"],
+      "constraints": [
+        "cylinder",
+        "cube"
+      ],
       "min": 1,
       "max": 1,
       "param_name": "n_workpieces",
@@ -61,43 +72,104 @@
     "primary_robot": {
       "path": "/World/Franka",
       "class": "franka_panda",
-      "position": [1.0, 0, 0.75],
-      "orientation": [0.7071068, 0, 0, 0.7071068]
+      "position": [
+        1.0,
+        0,
+        0.75
+      ],
+      "orientation": [
+        0.7071068,
+        0,
+        0,
+        0.7071068
+      ]
     },
     "input_conveyor": {
       "path": "/World/Conveyor",
-      "position": [0.0, 0.4, 0.78],
-      "size": [2.0, 0.3, 0.05],
-      "surface_velocity": [0.8, 0, 0]
+      "position": [
+        0.0,
+        0.4,
+        0.78
+      ],
+      "size": [
+        2.0,
+        0.3,
+        0.05
+      ],
+      "surface_velocity": [
+        0.8,
+        0,
+        0
+      ]
     },
     "primary_destination": {
       "path": "/World/Bin",
-      "position": [1.0, -0.4, 0.75],
-      "size": [0.3, 0.3, 0.15]
+      "position": [
+        1.0,
+        -0.4,
+        0.75
+      ],
+      "size": [
+        0.3,
+        0.3,
+        0.15
+      ]
     },
     "pick_sensor": {
       "path": "/World/PickSensor",
-      "position": [0.7, 0.4, 0.86],
-      "size": [0.08, 0.08, 0.08]
+      "position": [
+        0.7,
+        0.4,
+        0.86
+      ],
+      "size": [
+        0.08,
+        0.08,
+        0.08
+      ]
     },
     "flip_wall": {
       "path": "/World/FlipWall",
-      "position": [0.5, 0.4, 0.847],
-      "scale": [0.005, 0.15, 0.018]
+      "position": [
+        0.5,
+        0.4,
+        0.847
+      ],
+      "scale": [
+        0.005,
+        0.15,
+        0.018
+      ]
     },
     "landing_zone": {
       "path": "/World/LandingZone",
-      "position": [0.7, 0.4, 0.81],
-      "scale": [0.05, 0.05, 0.001]
+      "position": [
+        0.7,
+        0.4,
+        0.81
+      ],
+      "scale": [
+        0.05,
+        0.05,
+        0.001
+      ]
     },
     "workpieces": [
       {
         "path": "/World/Cube",
-        "position": [-0.9, 0.4, 0.81],
+        "position": [
+          -0.9,
+          0.4,
+          0.81
+        ],
         "shape": "Cylinder",
         "radius": 0.025,
-        "height": 0.10,
-        "rotation_euler": [90.0, 0.0, 0.0]
+        "height": 0.1,
+        "rotation_euler": [
+          90.0,
+          0.0,
+          0.0
+        ]
       }
     ]
   },
@@ -149,7 +221,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube",
     "target_path": "/World/Bin",
-    "duration_s": 90,
+    "duration_s": 180,
     "require_upright": true,
     "upright_tolerance_dot": 0.95
   },

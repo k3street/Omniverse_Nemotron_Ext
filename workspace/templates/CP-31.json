@@ -56,7 +56,12 @@
   "simulate_args": {
     "cube_path": "/World/Cube_3",
     "target_path": "/World/Bin",
-    "duration_s": 180
+    "duration_s": 180,
+    "cube_paths": [
+      "/World/Cube_3",
+      "/World/Cube_2",
+      "/World/Cube_1"
+    ]
   },
   "extends": "CP-27",
   "extension_notes": "CP-31 demonstrates destacking \u2014 picking from a vertical pile, top-down. source_paths order [Cube_3, Cube_2, Cube_1] tells handler to pick top first. Tests cube-selection logic when multiple cubes share xy. Industrial use: bin-picking from a heap, palette destacking.",

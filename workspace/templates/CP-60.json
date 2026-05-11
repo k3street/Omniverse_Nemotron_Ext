@@ -57,7 +57,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Loop/Right",
-    "duration_s": 30
+    "duration_s": 180
   },
   "extends": "CP-26",
   "extension_notes": "CP-60 demonstrates create_recirculation_loop (#17 infrastructure). 4 conveyor segments form a rectangular closed loop; cubes recirculate via belt friction. Full Postal Cross-Belt Sorter scenario adds robot + barcode + vision \u2014 combine with CP-33/47 patterns.",

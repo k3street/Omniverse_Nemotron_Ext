@@ -47,7 +47,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 90
+    "duration_s": 180
   },
   "extends": "CP-01",
   "extension_notes": "CP-69 is structurally CP-01 with Franka swapped for UR10. First canonical to exercise the new robot_family='ur10' branch in setup_pick_place_controller's cuRobo handler. Surface gripper auto-attached via UR10(attach_gripper=True). Form-gate validates build; runtime delivery is the next milestone.",

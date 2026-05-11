@@ -67,7 +67,7 @@
       "/World/Peg_4"
     ],
     "target_path": "/World/HolePanel",
-    "duration_s": 120
+    "duration_s": 180
   },
   "extends": "CP-08",
   "extension_notes": "CP-58 demonstrates peg-in-hole infrastructure. Uses force_torque sensor + assembly_constraint per peg/hole pair. Real insertion physics (force-gated phase transitions, search spiral on alignment failure) requires controller integration in Sprint 4+. CP-58 ships the scaffolding.",

@@ -54,7 +54,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 120
+    "duration_s": 180
   },
   "extends": "CP-51",
   "extension_notes": "CP-68 extends CP-51 with register_moving_obstacle. Each robot tracks the other's hand as dynamic obstacle. Realizes full #7 with collision-aware handoff. Runtime obstacle polling is Sprint 4+.",

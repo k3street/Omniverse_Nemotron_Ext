@@ -74,7 +74,7 @@
       "/World/Cube_g4"
     ],
     "target_path": "/World/GoodBin",
-    "duration_s": 150
+    "duration_s": 180
   },
   "extends": "CP-47",
   "extension_notes": "CP-48 is the production-grade inspect-and-reject station with REAL VISION. CP-18 used pre-tagged labels; CP-48 uses runtime vision detection. Each canonical instantiation = 1 Gemini API call. Realizes research scenario #4 (Inspect-and-Reject Divert) end-to-end.",

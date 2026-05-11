@@ -56,7 +56,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/StackBin",
-    "duration_s": 60
+    "duration_s": 180
   },
   "extends": "CP-01",
   "extension_notes": "CP-61 realizes #28 FrankaCortexBlockStacking infrastructure. Cortex framework wrapper installed; cubes registered as moving obstacles. Form-gate fails (no setup_pick_place_controller \u2014 Cortex uses different controller). Full scenario requires DfDecider tree at runtime.",

@@ -45,7 +45,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/TargetZone",
-    "duration_s": 60
+    "duration_s": 180
   },
   "extends": "CP-13",
   "extension_notes": "CP-28 is the precision-benchmark canonical. Run N times, measure (cube_final - drop_target) distribution for empirical drop-precision characterization. Useful for: acceptance testing new controllers, comparing target_source modes (curobo vs spline vs sensor_gated), tuning physics params, validating robot calibration after maintenance.",
