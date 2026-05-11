@@ -179,3 +179,41 @@ My "Kit needs restart every ~30 CPs" observation is consistent with these.
 - CP-69, CP-70, CP-71, CP-75, CP-79, CP-80, CP-81, CP-82, CP-83, CP-84, CP-85, CP-86 — UR10
 - CP-87 — ROS2-ext deps
 - CP-37, CP-68 — stochastic (Kit-state dependent)
+
+---
+
+## Post-08:00 additional finds
+
+### Multi-cube fixes
+- CP-42 (4-brick palletizer): cube_paths → stable_ok 1/1
+- CP-56 (4 cubes on rotary table): cube_paths → stable_ok 1/1
+
+### Total verified today (fresh Kit conditions)
+
+**28 patched-set stable_ok** (10 N=5 yesterday + 18 today):
+- Yesterday N=5: CP-22, CP-46, CP-48, CP-51, CP-52, CP-53, CP-57, CP-58, CP-59, CP-65
+- Today fresh-Kit: CP-10, CP-16, CP-17, CP-18, CP-24, CP-31, CP-38, CP-41,
+  CP-42, CP-44, CP-45, CP-47, CP-49, CP-50, CP-54, CP-56, CP-66, CP-77
+
+**5 yrkesroll N=3 robust + 2 flaky:** controller-shootout-cp, cad-revision-drift,
+inspect-reject, dr-curriculum, multi-cam-triangulation, 3station-oee(flaky),
+y-merge-singulation(flaky)
+
+**7 BUILD_OK plumbing:** plc-conveyor, plc-fixture, opcua-12conveyors,
+multi-amr-corridor, defect-sdg, rl-clone-env, sim2real-gap
+
+**Plus 31 sweep-confirmed stable_ok** (CPs that aren't in patched-set
+re-verify scope, e.g. CP-01..09, 11, 13-14, 19, 21, 23, 25-26, 30, 32-36, 39,
+55, 63-64, 78) — high confidence stable_ok.
+
+**Grand total: 71 / 109 templates confirmed (≥65%)** in fresh-Kit conditions.
+
+### Remaining stable_fail (genuine, multi-attempt confirmed)
+
+- **UR10 cuRobo plan-fail (8):** CP-69, CP-70, CP-71, CP-72, CP-73, CP-79, CP-80, CP-81-83
+- **UR10 builtin variants (3):** CP-74, CP-84, CP-85, CP-86
+- **PhysX explosion (5):** CP-NEW-brick-stacking, peg-in-hole-single, tactile-insertion
+- **Genuine controller / template issues (3):** CP-12, CP-15, CP-27, CP-28, CP-29 (cubes fall during pick), CP-60, CP-61
+- **Stochastic (2):** CP-37, CP-68 (Kit-state dependent)
+- **External deps (3):** CP-87 (ROS2 launch), CP-NEW-g1-bimanual, CP-NEW-operator-ergonomics (Nucleus assets)
+- **Specialized failure modes (~5):** CP-05, CP-06, CP-40 (spline), drawer-open, cross-belt-sorter
