@@ -1,8 +1,9 @@
-# Stack Evaluation & Selection — Meta-Spec
+# Stack Orthogonality Verification & LLM Communication — Meta-Spec
 
 **Date:** 2026-05-11
-**Status:** first draft — applies *after* IA Full Spec and Contact-Rich
-Manipulation Spec (2026-05-11) have landed.
+**Status:** first draft v2 — reframed per orthogonality-verification angle.
+Applies *after* IA Full Spec and Contact-Rich Manipulation Spec
+(2026-05-11) have landed.
 **Owner:** TBD
 **Estimated LOC:** ~1500-2500 (harness + selection-engine + tests + dashboards)
 
@@ -17,10 +18,31 @@ Manipulation Spec (2026-05-11) have landed.
 
 ## 0. Reading Guide & TL;DR
 
-**The short version:** Layers are designed to be hot-swappable modules.
-80% of CPs use **one default stack** and never touch this spec. The
-other 20% (edge cases — novel contact-rich, multi-robot oddities,
-embodiment-specific quirks) trigger the framework in this spec.
+**The sharper framing (per user 2026-05-11):** the Contact-Rich Spec
+*claims* layers are hot-swappable orthogonal modules. This spec is the
+**verification layer for that claim** + the **LLM-communication layer**
+that surfaces the empirical reality (which combinations actually work,
+which silently fail, which are untested) to the agent invoking the
+stack-selection tool.
+
+Three concrete purposes:
+
+1. **Verify orthogonality empirically** — cheap pairwise + small-cell
+   tests that confirm the layers actually compose. The claim is a
+   hypothesis until measured.
+2. **Maintain a compatibility matrix** — catalog of known-good,
+   known-bad, and untested combinations across the variant space.
+   Updated continuously by telemetry.
+3. **Surface the matrix to the LLM** — the `recommend_stack` and
+   `validate_stack` tools tell the agent BEFORE execution whether
+   a proposed `controller_stack` is validated / experimental /
+   known-incompatible. The agent can then make informed trade-offs
+   instead of trusting unverified composition.
+
+**80% of CPs use one default stack** and never touch this spec's
+machinery. The other 20% (edge cases — novel contact-rich, multi-robot
+oddities, embodiment-specific quirks) trigger discovery + matrix
+consultation.
 
 **Default stack** (applied automatically to any new CP without an
 explicit `controller_stack`):
@@ -46,6 +68,7 @@ the variant catalog (Contact-Rich Spec §6.1).
 §3: CP-family clustering — main mechanism for stack reuse
 §4: Tiered evaluation strategy (canary → family → production)
 §5: Stack-selection heuristics + decision tree
+§5.5: **Compatibility matrix — the orthogonality-verification artifact + LLM API**
 §6: Auto-fallback adaptation from telemetry
 §7: Stack-discovery harness for new CPs
 §8: Cost-aware selection (GPU/VRAM-conscious)
@@ -56,16 +79,48 @@ the variant catalog (Contact-Rich Spec §6.1).
 
 ---
 
-## 1. Problem statement — when defaults aren't enough
+## 1. Problem statement — orthogonality is a hypothesis
 
-**The base case is trivial:** layers are independent modules. Pick one
-of each, plug in, done. For ~80% of canonicals this is the whole story
-— the default stack from §0 works.
+The Contact-Rich Spec designed 4 layers to be ortogonal modules. That's
+an architectural claim. In practice:
 
-**This spec is about the other 20%.** The catalog from Contact-Rich
-Spec is large (1 728 theoretical combinations). Naively trying all of
-them per CP is intractable. We need a discovery + selection strategy
-for the edge cases without trying everything.
+- Some compliance variants require specific planners (e.g.,
+  `cartesian_impedance` needs torque-mode robot; FDCC needs explicit
+  wrench target; admittance is universal)
+- Some VLA policies output action-spaces that don't map to all
+  compliance controllers (e.g., Pi0 chunked-actions vs single-step
+  admittance update)
+- Some embodiments only support certain stability profiles (Franka FCI
+  + cartesian_impedance is fine; UR10e + cartesian_impedance assumes
+  torque-mode that UR10e doesn't expose by default)
+
+These are **silent compatibility failures**. The stack appears to
+build, the controller appears to install, the simulation runs — but
+joint torques come out wrong, the gripper doesn't engage, or contact
+forces are misreported. The CP fails for non-obvious reasons.
+
+**The base case is trivial when orthogonality holds:** layers are
+independent modules. Pick one of each, plug in, done. For ~80% of
+canonicals this is the whole story — the default stack from §0 works.
+
+**This spec is about:**
+
+1. **Detecting when orthogonality DOESN'T hold** — empirically, by
+   testing pairwise + small-cell combinations
+2. **Cataloging the result** in a compatibility matrix accessible to
+   the LLM agent
+3. **Discovering working stacks for hard CPs** — the other 20% where
+   default doesn't work and the agent needs to pick from the catalog
+4. **Communicating uncertainty** — distinguishing "validated", "known
+   bad", "untested" so the agent makes informed choices
+
+The catalog from Contact-Rich Spec is large (1 728 theoretical
+combinations). Naively trying all of them per CP is intractable. We
+need a discovery + selection strategy that:
+
+- Avoids combinatorial explosion (§4 tiered eval)
+- Builds confidence incrementally (§6 telemetry feedback)
+- Tells the LLM what's safe vs experimental (§5.5 below)
 
 After Contact-Rich Manipulation Spec lands, every canonical template can
 declare a `controller_stack` from a combinatorial space:
@@ -329,6 +384,166 @@ The decision tree is implemented in
 
 ---
 
+## 5.5 Compatibility matrix — the orthogonality-verification artifact
+
+The **central deliverable** of this spec: a maintained
+`compatibility_matrix.yaml` catalog that records, for each
+(layer_combination), one of:
+
+| Status | Meaning | Source |
+|---|---|---|
+| `validated` | Combination tested ≥3 CPs, ≥80% success | Tier-1 + telemetry |
+| `default` | Combination IS the recommended default (§0) | Manual; reviewed |
+| `experimental` | Tested but inconsistent (50-80% success) | Tier-1 telemetry |
+| `incompatible` | Tested, fails ≥3 times consistently OR raises | Catalog-author + telemetry |
+| `untested` | Never run end-to-end | Auto-inferred from telemetry |
+| `deprecated` | Was validated, now failing (regression) | Tier-4 sweep |
+
+Example entries:
+
+```yaml
+# workspace/recommendations/compatibility_matrix.yaml
+- stack:
+    compliance: admittance
+    planning:   curobov2
+    policy:     curobov2
+    stability:  phase_80b_grip_safe
+  status: default
+  notes: "Universal classical optimum. ≥80% success on contact-rich CPs."
+  last_validated: 2026-05-11
+  test_coverage: ["CP-01", "CP-NEW-peg-in-hole-single", "CP-NEW-tactile-insertion"]
+
+- stack:
+    compliance: cartesian_impedance
+    planning:   curobov2
+    policy:     curobov2
+    stability:  phase_80b_grip_safe
+  status: incompatible
+  notes: "UR10e doesn't expose torque-mode by default; cartesian_impedance
+    requires torque-mode. Use admittance instead."
+  embodiment_constraint: "robot_class not in [franka_panda]"
+  reproducer: "any UR10e CP with this stack — install warning + zero torque output"
+
+- stack:
+    compliance: variable_impedance
+    planning:   curobov2
+    policy:     pi0_fast_droid
+    stability:  phase_80b_grip_safe
+  status: experimental
+  notes: "Two-phase K schedule mostly works but transitions cause occasional jolt."
+  observed_success_rate: 0.62
+  test_coverage: ["CP-NEW-peg-in-hole-single"]
+  last_validated: 2026-05-09
+
+- stack:
+    compliance: null
+    planning:   curobov2
+    policy:     groot_n17_droid
+    stability:  phase_80b_grip_safe
+  status: experimental
+  notes: "VLA without compliance — works for pick-place but fails on insertion."
+  observed_success_rate: 0.45
+```
+
+### 5.5.1 LLM-facing API
+
+```python
+async def get_stack_compatibility(
+    stack: ControllerStack,
+) -> dict:
+    """Look up a proposed stack in the compatibility matrix.
+
+    Returns:
+        {
+            "status": "validated" | "default" | "experimental" |
+                     "incompatible" | "untested" | "deprecated",
+            "notes": str,                # human-readable
+            "observed_success_rate": float | None,
+            "last_validated": date | None,
+            "test_coverage": list[str],  # CPs where this was tested
+            "warnings": list[str],       # embodiment/license/cost concerns
+            "suggested_alternative": ControllerStack | None,
+        }
+    """
+```
+
+```python
+async def validate_stack(
+    stack: ControllerStack,
+    layout_spec: LayoutSpec | None = None,
+) -> dict:
+    """Pre-build sanity check: does this stack make sense for this CP?
+
+    Returns:
+        {
+            "ok": bool,
+            "violations": list[str],
+            "warnings": list[str],
+            "compatibility_status": "validated"|"experimental"|...,
+        }
+    """
+```
+
+The agent calls `validate_stack` BEFORE invoking `execute_template_
+canonical`. If `ok: False`, the agent reports back to the user with
+violations + suggested alternative.
+
+### 5.5.2 Matrix update sources
+
+The matrix is updated by FOUR channels:
+
+1. **Catalog author** — manual entries when adding a new variant
+   (e.g., when GR00T N1.8 ships, author marks all combos with it as
+   `untested` initially).
+2. **Tier-1 evaluation runs** — overnight discovery batches promote
+   `untested` → `validated` / `experimental` / `incompatible`.
+3. **Telemetry feedback** — supervisor's
+   `EVENT_SUPERVISOR_DRIFT_DETECTED` events for a stack-CP pair feed a
+   demotion counter; 3 consecutive failures demote
+   `validated` → `experimental`; 10 → `deprecated`.
+4. **User correction** — explicit
+   `mark_stack_incompatible(stack, reason)` tool when user observes
+   silent failures.
+
+### 5.5.3 Matrix consumption
+
+```python
+async def recommend_stack(layout_spec, constraints=None) -> ControllerStack:
+    """Updated to consult matrix:
+
+    1. Compute family_id (§3.2)
+    2. If recommendations table has family_winner:
+        a. Check matrix: is winner validated for THIS embodiment?
+        b. If incompatible: fall to next-best validated
+        c. Return validated winner
+    3. Else: heuristic decision tree (§5)
+    4. Apply user constraints (VRAM, license)
+    5. Final validate_stack() before returning
+    """
+```
+
+### 5.5.4 Self-healing behavior
+
+The agent doesn't just *consume* compatibility status — it can
+*request* validation. New API:
+
+```python
+async def request_stack_validation(
+    stack: ControllerStack,
+    canonical_id: str,
+    n_runs: int = 3,
+) -> dict:
+    """User-triggered: 'I want to use this experimental combo. Run it
+    3 times to validate.' If success ≥80%, the matrix is auto-updated
+    to mark it `validated` for this CP."""
+```
+
+This closes the loop: experimental → validated through user-initiated
+small evaluations. No agent-side hidden trial-and-error; user gets to
+see the validation effort.
+
+---
+
 ## 6. Auto-fallback adaptation from telemetry
 
 The Contact-Rich Spec §6 introduced `fallback_chain` on
@@ -585,6 +800,18 @@ updated by Tier-1/2 evaluation runs.
 - [ ] `service/.../chat/tools/recommend_stack_handler.py`
 - [ ] `workspace/recommendations/family_stacks.yaml` — Tier-1 results
 - [ ] `tests/test_recommendation_engine.py` — ≥15 family→stack tests
+
+### Compatibility matrix (§5.5 — central deliverable)
+- [ ] `workspace/recommendations/compatibility_matrix.yaml` — seeded
+      with default stack + known-bad combos
+- [ ] `service/.../stack_recommender/compatibility.py` — matrix
+      lookup + update
+- [ ] `service/.../chat/tools/compatibility_handlers.py` — exposes
+      `get_stack_compatibility`, `validate_stack`,
+      `request_stack_validation`, `mark_stack_incompatible`
+- [ ] Telemetry hook: drift_detected event → matrix demotion counter
+- [ ] `tests/test_compatibility_matrix.py` — ≥20 status-resolution tests
+- [ ] `tests/test_validate_stack.py` — ≥15 violation-detection tests
 
 ### Telemetry + dashboards
 - [ ] New event types: `stack_evaluation_completed`,
