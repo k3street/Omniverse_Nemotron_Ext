@@ -31,7 +31,7 @@
       "/World/Cube_8"
     ],
     "target_path": "/World/Chute_1",
-    "duration_s": 120
+    "duration_s": 180
   },
   "diagnose_args": null,
   "extends": "phase9-yrkesroll-#15",

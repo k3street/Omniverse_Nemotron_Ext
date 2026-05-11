@@ -23,7 +23,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 60
+    "duration_s": 240
   },
   "diagnose_args": null,
   "extends": "phase9-yrkesroll-#11",

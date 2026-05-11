@@ -21,7 +21,7 @@
   "simulate_args": {
     "cube_path": "/World/Cabinet/Drawer",
     "target_path": "/World/Cabinet/Drawer",
-    "duration_s": 60
+    "duration_s": 240
   },
   "diagnose_args": null,
   "extends": "phase8-yrkesroll-#4",
