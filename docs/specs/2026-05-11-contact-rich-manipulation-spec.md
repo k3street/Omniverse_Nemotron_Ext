@@ -272,15 +272,25 @@ first-class tools. They install compliant-control under any existing
 robot, replacing the rigid `set_joint_targets` path with a spring-damper
 behavior at the joint or task-space level.
 
-### 3.2 Why ros2_control mainline?
+### 3.2 Compliance variant matrix
 
-[ros2_control admittance_controller](https://control.ros.org/rolling/doc/ros2_controllers/admittance_controller/doc/userdoc.html)
-is the **official** controller in ros2_controllers. It implements
-`ChainedControllerInterface`, so it stacks in front of position
-controllers without rewiring. Mainline = long-term-supported = our
-default. fzi's `cartesian_compliance_controller` is the heavier hybrid
-motion+force variant (FDCC); we ship it as opt-in for tasks needing
-explicit wrench tracking.
+All listed variants are first-class — selectable via `controller_stack.
+compliance`:
+
+| Variant | Source | Domain | Robot requirement | Use case |
+|---|---|---|---|---|
+| **admittance_controller** | [ros2_controllers mainline](https://control.ros.org/rolling/doc/ros2_controllers/admittance_controller/doc/userdoc.html) | force→motion | Position-mode + external F/T sensor | DEFAULT for any robot |
+| **cartesian_compliance_controller** | [fzi cartesian_controllers (FDCC)](https://github.com/fzi-forschungszentrum-informatik/cartesian_controllers) | hybrid motion+force | Position-mode | Tasks needing explicit wrench tracking (assembly with target force profile) |
+| **cartesian_impedance_controller** | [matthias-mayr Cartesian-Impedance-Controller](https://github.com/matthias-mayr/Cartesian-Impedance-Controller) | motion→torque | Torque-mode (Franka FCI) | Lowest-latency compliance, real-Franka deployment |
+| **variable_impedance_controller** | [paper-derived; in-house impl](https://www.sciencedirect.com/science/article/pii/S0736584524001832) | K varies w/ phase | Any | K_low during search, K_high during insertion settle |
+| **franka_cartesian_impedance** | [frankaemika/franka_ros2 PR #51](https://github.com/frankaemika/franka_ros2/pull/51) | torque (vendor-tuned) | Franka FCI | Best fit when deploying to real Franka |
+| **null** | n/a | rigid passthrough | Any | Baseline / rigid mode for A/B comparison |
+
+ros2_controllers mainline is the DEFAULT because it implements
+`ChainedControllerInterface` so it stacks in front of position controllers
+without rewiring. Mainline = long-term-supported = safe choice. The other
+variants are opt-in for specific scenarios (FDCC for wrench-tracking
+assembly, torque-mode impedance when Franka FCI is available, etc.).
 
 ### 3.3 Tool API surface
 
@@ -380,14 +390,38 @@ this lands, any canonical can opt into VLA control by declaring
 
 ### 4.2 Supported models (initial set)
 
-| Model | Source | Embodiment | Zero-shot success (DROID) |
-|---|---|---|---|
-| **GR00T N1.7-DROID** | [nvidia/GR00T-N1.7-DROID](https://huggingface.co/nvidia/GR00T-N1.7-DROID) | Franka (3B params) | 60-80% on related tasks |
-| **Pi0-FAST DROID** | [Pi0 LeRobot docs](https://huggingface.co/docs/lerobot/pi0) | Franka + 7 others | 80-95% trained, 40-60% zero-shot |
-| **OpenVLA-7B** | [openvla/openvla-7b](https://huggingface.co/openvla/openvla-7b) | WidowX zero-shot, Franka requires fine-tune | n/a for Franka zero-shot |
+Full matrix — all listed must be supported via the same `execute_vla_policy`
+API surface; per-model embodiment / fit / cost differs:
 
-OpenVLA is shipped behind a flag because Franka requires fine-tune; we
-support it for completeness and future fine-tuning work.
+| Model | Source | Embodiment | Zero-shot success (DROID-like) | Notes |
+|---|---|---|---|---|
+| **GR00T N1.7** | [nvidia/GR00T-N1.7](https://huggingface.co/nvidia/GR00T-N1.7) | Humanoid+generalist (3B params) | n/a (base) | base model |
+| **GR00T N1.7-DROID** | [nvidia/GR00T-N1.7-DROID](https://huggingface.co/nvidia/GR00T-N1.7-DROID) | Franka (3B params) | 60-80% on related tasks | NVIDIA Isaac-integrated |
+| **Pi0** | [pi0 base on LeRobot](https://huggingface.co/docs/lerobot/pi0) | 8 platforms inc. Franka | 80-95% trained, 40-60% zero-shot | Physical Intelligence base |
+| **Pi0-FAST DROID** | [pi0-fast variant](https://huggingface.co/docs/lerobot/pi0) | Franka-tuned DROID | 50-70% zero-shot peg-insert | Faster inference path |
+| **OpenVLA-7B** | [openvla/openvla-7b](https://huggingface.co/openvla/openvla-7b) | WidowX zero-shot; Franka via fine-tune | n/a for Franka zero-shot | open baseline; 7× smaller than RT-2-X |
+| **RT-2-X** | [RT-2 Open X-Embodiment](https://robotics-transformer-x.github.io/) | 55B params, generalist | Below OpenVLA per benchmarks | included for completeness; heavy VRAM |
+| **LeRobot ACT (Aloha-Insertion)** | [lerobot/act_aloha_sim_insertion_human](https://huggingface.co/lerobot/act_aloha_sim_insertion_human) | ALOHA bimanual | Pre-trained on Aloha-sim insertion | not Franka — useful for bimanual CPs |
+| **IsaacLab IndustReal gear-checkpoint** | NVIDIA Nucleus | UR10e + 2F-140 | 95%+ (trained) | pre-trained, drop-in for gear assembly |
+| **DR-peg-in-hole policy** | [arxiv 2504.04148, no open weights yet](https://arxiv.org/html/2504.04148v1) | Franka | 80-90% reported | placeholder; load when weights public |
+| **Touch2Insert** (tactile alt) | [arxiv 2603.03627](https://arxiv.org/abs/2603.03627) | Franka + GelSight | 70-85% zero-shot peg | tactile-based; needs tactile sim (deferred §13.7) |
+
+**Selection guidance per CP type:**
+
+| CP pattern | Recommended primary | Recommended fallback |
+|---|---|---|
+| Franka peg-insertion-single | cuRoboV2+admittance (no model) | GR00T N1.7-DROID |
+| Franka tactile-insertion | Touch2Insert (tactile path) | GR00T N1.7-DROID |
+| UR10e gear assembly | IndustReal gear-checkpoint | cuRoboV2+admittance |
+| Bimanual Aloha-style | LeRobot ACT | Pi0 (multi-embodiment) |
+| Multi-task instruction-following | Pi0-FAST DROID | GR00T N1.7-DROID |
+| Novel object, no CAD | Pi0 zero-shot | GR00T N1.7-DROID |
+| Last-mile sim2real precision | IndustReal RL (Layer 4) | DR-peg-in-hole when published |
+
+The `controller_stack.policy` field accepts any model id from this table.
+Templates may declare a `fallback_chain` that walks through alternatives
+when the primary is unavailable (model not downloaded, VRAM exhausted,
+embodiment mismatch detected at runtime).
 
 ### 4.3 Tool API surface
 
@@ -530,27 +564,167 @@ async def train_industreal_policy(
 
 ### 6.1 New template field `controller_stack`
 
-Templates declare their preferred stack:
+Templates declare their preferred stack. The schema accepts ALL listed
+variants from §3.2 (compliance), §4.2 (VLA models), and the Layer 2
+planner table:
+
+```typescript
+interface ControllerStack {
+  // Layer 3 — policy / decision-making
+  policy:
+    | "curobov2"                       // classical, Phase 63b
+    | "curobo_v1"                      // legacy
+    | "moveit2_cumotion"               // ROS2-native
+    | "spline"                         // legacy joint-space
+    | "native_rmpflow"                 // legacy fallback
+    | "groot_n17"                      // VLA base
+    | "groot_n17_droid"                // VLA Franka-tuned
+    | "pi0"                            // VLA Physical Intelligence base
+    | "pi0_fast_droid"                 // VLA Pi0-FAST Franka variant
+    | "openvla_7b"                     // VLA open baseline
+    | "rt2x"                           // VLA 55B generalist
+    | "lerobot_act_aloha"              // ACT bimanual
+    | "industreal_gear_checkpoint"     // pre-trained UR10e gear
+    | "industreal_trained"             // Layer 4 — RL-trained on our CP
+    | "touch2insert"                   // tactile zero-shot
+    | "dr_peg_in_hole";                // when public
+
+  // Layer 2 — planner features (used when policy is classical OR when
+  // VLA wants planner-assisted approach phase)
+  planning_features?: Array<
+    | "constrained_axis_lock"          // Phase 63b pose_cost_metric
+    | "depth_fused_tsdf"               // Phase 63b TSDF
+    | "b_spline_torque_limited"        // Phase 63b B-spline
+    | "topology_aware_kinematics"      // Phase 63b 48-DoF support
+  >;
+
+  // Layer 1 — compliance
+  compliance:
+    | "admittance"                     // ros2_controllers mainline
+    | "cartesian_compliance_fdcc"      // fzi FDCC
+    | "cartesian_impedance"            // matthias-mayr
+    | "variable_impedance"             // K varies dynamically
+    | "franka_cartesian_impedance"     // Franka FCI vendor
+    | null;                            // rigid baseline
+
+  // Compliance handoff fraction; must match policy's lock_orientation_from
+  compliance_handoff_at?: number;      // 0..1, default 0.5
+
+  // Compliance parameters (override defaults)
+  compliance_params?: {
+    stiffness_xyz?: [number, number, number];
+    stiffness_rot?: [number, number, number];
+    damping_xyz?: [number, number, number];
+    damping_rot?: [number, number, number];
+    mass_xyz?: [number, number, number];
+  };
+
+  // Layer 0 — stability profile
+  stability:
+    | "phase_80b_defaults"             // IA Full Spec defaults
+    | "phase_80b_grip_safe"            // grip_safe_mode=True
+    | "legacy"                         // pre-Phase-80b behavior
+    | null;                            // PhysX defaults
+
+  // F/T sensor declaration (required when compliance != null)
+  ft_sensor?: {
+    link: string;                      // e.g. "tool0"
+    noise_std?: number;                // simulated noise (default 0.0)
+    range_n?: number;                  // max force range
+  };
+
+  // Fallback chain — walked when primary stack unavailable
+  fallback_chain?: ControllerStack[];
+
+  // RL-only: pre-trained checkpoint path (when policy is industreal_*)
+  policy_checkpoint?: string;          // local path or HuggingFace id
+
+  // VLA-only: text instruction template
+  vla_instruction?: string;            // "insert the peg into the hole"
+}
+```
+
+**Example: full classical stack (cuRoboV2 + admittance + Phase 80b):**
 
 ```jsonc
 {
   "task_id": "CP-NEW-peg-in-hole-single",
   "controller_stack": {
+    "policy": "curobov2",
+    "planning_features": ["constrained_axis_lock", "depth_fused_tsdf"],
+    "compliance": "admittance",
+    "compliance_handoff_at": 0.5,
+    "compliance_params": {
+      "stiffness_xyz": [400, 400, 200],
+      "stiffness_rot": [40, 40, 40]
+    },
+    "stability": "phase_80b_grip_safe",
+    "ft_sensor": {"link": "tool0", "noise_std": 0.1}
+  }
+}
+```
+
+**Example: VLA stack with fallback chain:**
+
+```jsonc
+{
+  "task_id": "CP-NEW-peg-in-hole-single-vla",
+  "controller_stack": {
     "policy": "groot_n17_droid",
-    "compliance": "cartesian_admittance",
-    "stability": "phase_80b_defaults",
+    "vla_instruction": "insert the round peg into the hole",
+    "compliance": "admittance",
+    "stability": "phase_80b_grip_safe",
+    "ft_sensor": {"link": "tool0"},
     "fallback_chain": [
-      {"policy": "pi0_fast_droid"},
-      {"policy": "curobo", "compliance": "cartesian_admittance"},
-      {"policy": "curobo", "compliance": null}
+      {"policy": "pi0_fast_droid", "compliance": "admittance",
+       "stability": "phase_80b_grip_safe",
+       "vla_instruction": "insert peg into hole"},
+      {"policy": "curobov2",
+       "planning_features": ["constrained_axis_lock"],
+       "compliance": "admittance",
+       "stability": "phase_80b_grip_safe"},
+      {"policy": "curobo_v1", "compliance": null, "stability": "legacy"}
     ]
   }
 }
 ```
 
-The canonical instantiator reads this field; if a controller in the chain
-is unavailable (model not downloaded, hardware mismatch), it falls back
-to the next.
+**Example: Touch2Insert tactile stack:**
+
+```jsonc
+{
+  "task_id": "CP-NEW-tactile-insertion",
+  "controller_stack": {
+    "policy": "touch2insert",
+    "compliance": "cartesian_impedance",
+    "compliance_params": {
+      "stiffness_xyz": [200, 200, 100],   // softer for tactile search
+      "stiffness_rot": [20, 20, 20]
+    },
+    "stability": "phase_80b_grip_safe",
+    "ft_sensor": {"link": "tool0"}
+  }
+}
+```
+
+**Example: UR10e gear-assembly with pre-trained checkpoint:**
+
+```jsonc
+{
+  "task_id": "CP-NEW-gear-assembly-ur10",
+  "controller_stack": {
+    "policy": "industreal_gear_checkpoint",
+    "policy_checkpoint": "nucleus://Assets/Isaac/4.0/Samples/OmniIsaacGymEnvs/Checkpoints/model_gripper_140.pt",
+    "compliance": "admittance",
+    "stability": "phase_80b_defaults",
+    "ft_sensor": {"link": "tool0"}
+  }
+}
+```
+
+The canonical instantiator reads this field, walks the fallback chain
+when primary unavailable (model not downloaded, hardware mismatch
+detected at runtime, VRAM exhausted, etc.).
 
 ### 6.2 Backward compatibility
 
@@ -877,10 +1051,40 @@ documented but not auto-run in CI.
    - ros2_control mainline supports Humble + Jazzy + Rolling. We pin
      against IsaacLab's choice (currently Humble per Isaac ROS 3.x).
 
-7. **Tactile feedback for Touch2Insert-style methods**
-   - Isaac Sim has contact-sensor support; GelSight-style tactile
-     simulation requires soft-body + camera-image rendering. Out of
-     scope for v1; reserved for tactile-modality work.
+### 13.7 Tactile-modality readiness
+
+Touch2Insert is listed as a first-class policy in §4.2 and the
+`controller_stack.policy` enum in §6.1 — the wrapper service receives
+tactile-image observations and emits joint deltas. But the **tactile
+simulation source** is currently a stub.
+
+Isaac Sim has built-in **contact-sensor** support (force/torque per
+contact), which suffices for "binary contact" signals. GelSight-style
+tactile-IMAGE simulation requires soft-body + camera-image rendering
+([TacEx](https://www.researchgate.net/publication/385629897_TacEx_GelSight_Tactile_Simulation_in_Isaac_Sim)
+combines them). TacEx integration is out of scope for v1; without it
+Touch2Insert falls back to contact-sensor binary signals which give
+roughly 50-60% success vs the paper's 70-85% (the gap is the tactile
+image vs binary force).
+
+**Stub today, full simulation in a future tactile-modality spec.**
+The `controller_stack.policy = "touch2insert"` slot is present so
+templates can already declare the intent and benefit when TacEx lands.
+
+### 13.8 Other open questions
+
+- **Variable-impedance K schedule**: simple two-phase (low during search,
+  high after first contact)? Or learned schedule? Initial impl: two-phase
+  with thresholds in `compliance_params.variable_schedule`.
+- **Pi0 Local-vs-cloud inference**: Pi0 is small enough to run locally
+  (8GB VRAM); we default to local. If cloud variant proves stronger,
+  add `inference_endpoint` config.
+- **MoveIt 2 + cuMotion latency**: ROS2 hop adds ~10ms vs cuRoboV2 in-Kit.
+  Acceptable for trajectory planning (not real-time control), but
+  measure-then-decide.
+- **RL training data provenance**: when user runs `train_industreal_policy`,
+  do we record env config + reward seed for reproducibility? Yes; emit
+  `rl_training_run` event with full config hash.
 
 ---
 
@@ -906,9 +1110,14 @@ documented but not auto-run in CI.
 - [Isaac Lab Gear-Assembly Sim2Real](https://isaac-sim.github.io/IsaacLab/main/source/policy_deployment/02_gear_assembly/gear_assembly_policy.html)
 - [DR peg-in-hole policy paper 2504.04148](https://arxiv.org/html/2504.04148v1)
 
-### Tactile alternatives (deferred to later spec)
-- [Touch2Insert zero-shot tactile](https://arxiv.org/abs/2603.03627)
-- [TacEx GelSight in Isaac Sim](https://www.researchgate.net/publication/385629897_TacEx_GelSight_Tactile_Simulation_in_Isaac_Sim)
+### Tactile path (Touch2Insert + GelSight simulation)
+- [Touch2Insert zero-shot tactile](https://arxiv.org/abs/2603.03627) —
+  reconstructs hole geometry from tactile-image after first contact
+- [TacEx GelSight in Isaac Sim](https://www.researchgate.net/publication/385629897_TacEx_GelSight_Tactile_Simulation_in_Isaac_Sim) —
+  combines soft-body + visuotactile rendering for GelSight sensor sim
+- Spec stub in §13.7; full implementation deferred to dedicated tactile
+  spec but Touch2Insert IS listed as a first-class policy variant in
+  §4.2 and §6.1 schema
 
 ### Prerequisites in IA Full Spec
 - **IA Full Spec Phase 63b — cuRoboV2 backend + constrained planning**
@@ -936,18 +1145,29 @@ documented but not auto-run in CI.
 - Tracked in IA Full Spec; this spec depends on its delivery but does
   not re-implement.
 
-### Layer 1 (Compliance)
+### Layer 1 (Compliance — all variants in §3.2)
 - [ ] `service/isaac_assist_service/chat/tools/compliance_handlers.py`
-- [ ] `setup_admittance_controller` tool registered in DATA_HANDLERS
-- [ ] `setup_impedance_controller` tool registered
+- [ ] **admittance_controller** (default) registered as
+      `setup_admittance_controller`
+- [ ] **cartesian_compliance_controller (FDCC)** as
+      `setup_cartesian_compliance_controller`
+- [ ] **cartesian_impedance_controller (matthias-mayr)** as
+      `setup_cartesian_impedance_controller`
+- [ ] **variable_impedance_controller** (two-phase K schedule) as
+      `setup_variable_impedance_controller`
+- [ ] **franka_cartesian_impedance** (vendor-tuned) as
+      `setup_franka_cartesian_impedance`
 - [ ] `attach_ft_sensor` tool extending sensor_handlers
 - [ ] `set_compliance_params` runtime mutation tool
 - [ ] `release_compliance` cleanup tool
-- [ ] **`follow_trajectory_with_compliance` tool (Phase 63b ↔ Layer 1
-      handoff)**
+- [ ] **`follow_trajectory_with_compliance`** tool (Phase 63b ↔ Layer 1
+      handoff)
 - [ ] ROS2-bridge wiring in `exts/.../assist/extension.py`
 - [ ] `config/admittance_controller_defaults.yaml`
+- [ ] `config/impedance_controller_defaults.yaml`
 - [ ] `tests/test_admittance_handlers.py` (≥20 L0)
+- [ ] `tests/test_impedance_handlers.py` (≥15 L0)
+- [ ] `tests/test_variable_impedance.py` (≥10 L0, K-schedule transitions)
 - [ ] `tests/test_trajectory_compliance_handoff.py` (≥10 L0)
 - [ ] `tests/test_compliance_e2e.py` (Kit-required, L1)
 
@@ -956,16 +1176,50 @@ documented but not auto-run in CI.
   `plan_constrained_trajectory` output via the `follow_trajectory_
   with_compliance` bridge tool above.
 
-### Layer 3 (VLA Inference)
+**Layer 2 planner matrix** (selectable via `controller_stack.policy`
+when it's a classical planner, OR `controller_stack.planning_features`
+when it's just the trajectory-generation flavor for a higher-level
+policy):
+
+| Planner | Source | Notes |
+|---|---|---|
+| **cuRoboV2** | IA Full Spec Phase 63b | DEFAULT; constrained planning + depth-fused TSDF |
+| **cuRobo v1** | legacy backend | fallback for non-V2 robot families during transition |
+| **MoveIt 2 + cuMotion** | [Isaac ROS cuMotion-bridge](https://nvidia-isaac-ros.github.io/reference_workflows/isaac_for_manipulation/tutorials/sim_to_real/tutorial_gear_assembly.html) | external; needed for ROS2-native deployment |
+| **spline (joint-space)** | Isaac native | jerky; kept for backward-compat on legacy CPs |
+| **native RmpFlow PickPlace** | Isaac native | older fallback; rejected for new templates |
+| **lula_csptg** | Isaac Lula | c-space spline; specific legacy code paths |
+
+### Layer 3 (VLA + pre-trained-checkpoint inference — all variants in §4.2)
 - [ ] `service/isaac_assist_service/vla/__init__.py`
 - [ ] `service/isaac_assist_service/vla/types.py` (Action, Observation, ModelSpec)
-- [ ] `service/isaac_assist_service/vla/groot_inference_server.py`
-- [ ] `service/isaac_assist_service/vla/pi0_inference_server.py`
-- [ ] `service/isaac_assist_service/vla/checkpoint_manager.py`
-- [ ] `config/vla_models.yaml`
+- [ ] **GR00T N1.7 + GR00T N1.7-DROID** wrapper:
+      `service/isaac_assist_service/vla/groot_inference_server.py`
+- [ ] **Pi0 + Pi0-FAST DROID** wrapper:
+      `service/isaac_assist_service/vla/pi0_inference_server.py`
+- [ ] **OpenVLA-7B** wrapper:
+      `service/isaac_assist_service/vla/openvla_inference_server.py`
+- [ ] **RT-2-X** wrapper (heavy, opt-in via flag):
+      `service/isaac_assist_service/vla/rt2x_inference_server.py`
+- [ ] **LeRobot ACT (Aloha)** wrapper:
+      `service/isaac_assist_service/vla/lerobot_act_inference_server.py`
+- [ ] **IndustReal gear-checkpoint** loader (pre-trained, no inference
+      server — direct model load):
+      `service/isaac_assist_service/vla/industreal_checkpoint_loader.py`
+- [ ] **Touch2Insert** wrapper (tactile path, §13.7 stub for sim source):
+      `service/isaac_assist_service/vla/touch2insert_inference_server.py`
+- [ ] **DR-peg-in-hole** loader (placeholder; activates when weights
+      public): `service/isaac_assist_service/vla/dr_peg_in_hole_loader.py`
+- [ ] Common checkpoint manager: `vla/checkpoint_manager.py`
+- [ ] HuggingFace cache + Nucleus pull paths in
+      `config/vla_models.yaml`
 - [ ] `service/isaac_assist_service/chat/tools/vla_handlers.py`
-- [ ] `execute_vla_policy` + 4 supporting tools
+- [ ] `execute_vla_policy` dispatch tool (routes to per-model wrapper)
+- [ ] `list_vla_models` / `download_vla_model` / `cancel_vla_inference`
+      / `vla_inference_diagnostics` tools
 - [ ] `tests/test_vla_action_normalization.py` (≥15 L0)
+- [ ] `tests/test_vla_model_loaders.py` (each wrapper's loader
+      independently, ≥1 per model)
 - [ ] `tests/test_vla_inference_e2e.py` (-m vla, opt-in)
 
 ### Layer 4 (RL Training)
