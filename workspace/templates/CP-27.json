@@ -58,9 +58,14 @@
     "cube_path": "/World/Cube_1"
   },
   "simulate_args": {
-    "cube_path": "/World/Cube_1",
     "target_path": "/World/Pallet",
-    "duration_s": 180
+    "duration_s": 180,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4"
+    ]
   },
   "extends": "CP-08",
   "extension_notes": "CP-27 demonstrates pure pick-place without conveyor. Cubes pre-placed on table; robot rearranges to pallet grid. Useful for assembly/disassembly canonicals where input is a static workspace. Without belt_path, handler skips belt-pause logic \u2014 no PhysxSurfaceVelocityAPI needed.",

@@ -53,11 +53,15 @@
     "cube_path": "/World/Cube_1"
   },
   "simulate_args": {
-    "cube_path": "/World/Cube_1",
     "target_path": "/World/Pallet",
     "duration_s": 180,
     "xy_tolerance": 0.15,
-    "rest_speed_threshold": 100.0
+    "rest_speed_threshold": 100.0,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3"
+    ]
   },
   "extends": "CP-08",
   "extension_notes": "CP-12 demonstrates per-cube drop-z customization for non-uniform item sizes \u2014 an important variant for real palletizing of mixed SKUs. Future extensions: (a) compute_stack_placement v3 with cube_sizes as list (compute slot positions accounting for footprint variance); (b) per-cube spacing tuning; (c) SKU-class-specific pallets.",
