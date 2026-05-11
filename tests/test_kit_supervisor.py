@@ -472,6 +472,43 @@ def test_drift_signal_evidence_is_serializable():
     json.dumps({"level": s.level, "reason": s.reason, "evidence": s.evidence})
 
 
+# ── Kit-failure verdicts trigger drift ─────────────────────────────────────
+
+
+def test_drift_reset_failed_treated_as_drift():
+    """RESET_FAILED verdict from runner → drift (Kit unresponsive)."""
+    d = DriftDetector()
+    result = {"verdict": "RESET_FAILED", "err": "exec_sync timeout"}
+    s = d.classify("CP-49", result, elapsed_s=20.0)
+    assert s.level == "drift"
+    assert "kit_failure_verdict" in s.reason
+    assert "RESET_FAILED" in s.reason
+
+
+def test_drift_build_exc_treated_as_drift():
+    d = DriftDetector()
+    result = {"verdict": "BUILD_EXC", "err": "kit_rpc 500"}
+    s = d.classify("CP-X", result, elapsed_s=5.0)
+    assert s.level == "drift"
+
+
+def test_drift_timeout_treated_as_drift():
+    d = DriftDetector()
+    result = {"verdict": "TIMEOUT_240"}
+    s = d.classify("CP-X", result, elapsed_s=245.0)
+    assert s.level == "drift"
+
+
+def test_drift_normal_verdicts_not_drift():
+    """stable_ok / stable_fail are not Kit failures."""
+    d = DriftDetector()
+    for v in ("stable_ok", "stable_fail", "flaky", "BUILD_OK"):
+        # Note: "status" or "verdict" key
+        result = {"verdict": v}
+        s = d.classify("CP-X", result, elapsed_s=70.0)
+        assert s.level == "ok", f"verdict {v} should not be drift"
+
+
 # ── Stop + stats integration ──────────────────────────────────────────────
 
 

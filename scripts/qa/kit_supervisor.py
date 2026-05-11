@@ -166,8 +166,27 @@ class DriftDetector:
         else:
             self._elapsed_baseline[cp] = elapsed_s
 
+    #: Verdict values from runners that indicate Kit-side failure (not
+    #: scene / controller failure). Treated as drift so supervisor restarts.
+    KIT_FAILURE_VERDICTS = frozenset({
+        "RESET_FAILED",
+        "BUILD_EXC",
+        "EXC",
+        "TIMEOUT_240",
+        "NO_RESULT",
+    })
+
     def classify(self, cp: str, result: Dict[str, Any], elapsed_s: float) -> DriftSignal:
         """Classify a result. cp is the canonical id; elapsed_s the wall time."""
+        # 0) Kit-failure verdict (RESET_FAILED, BUILD_EXC, etc.) → drift
+        verdict = result.get("verdict")
+        if verdict in self.KIT_FAILURE_VERDICTS:
+            return DriftSignal(
+                "drift",
+                f"kit_failure_verdict:{verdict}",
+                {"verdict": verdict, "err": (result.get("err") or "")[:200]},
+            )
+
         # 1) Explosion check: absurd cube position / speed
         pr_list = result.get("per_run") or []
         if pr_list:
