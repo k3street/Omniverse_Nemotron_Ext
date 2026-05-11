@@ -1,0 +1,13 @@
+{
+  "task_id": "R-09",
+  "goal": "Pick a real starter template for dual-arm pick-and-place, load it, add second Franka if needed.",
+  "tools_used": ["list_scene_templates", "load_scene_template", "add_reference"],
+  "thoughts": "Never invent template names. list_scene_templates first. If a true dual-arm template exists use it; otherwise load tabletop_manipulation and add a second Franka via add_reference at a mirrored pose. Self-collision between arms is a separate filter step \u2014 do not claim it is automatic.",
+  "code": "list_scene_templates()\n\n# Pick the best real match from that list\nload_scene_template(template_name=\"<DUAL_ARM_OR_TABLETOP_MANIPULATION>\")\n\n# If single-arm template: mirror a second Franka\nadd_reference(\n    prim_path=\"<SECOND_ARM_PRIM_PATH>\",         # /World/Franka_02\n    reference_path=\"<FRANKA_USD_ASSET>\"\n)\nset_attribute(\n    prim_path=\"<SECOND_ARM_PRIM_PATH>\",\n    attr_name=\"xformOp:translate\",\n    value=[<X_MIRROR>, 0.0, 0.0]\n)\n\n# Self-collision filter is NOT automatic \u2014 use configure_self_collision if asked",
+  "failure_modes": [
+    "Inventing a 'dual_franka_handover' template that does not exist",
+    "Recommending UR10 swap as trivial \u2014 gripper + asset path differ",
+    "Assuming arms will auto-avoid collision \u2014 needs policy or planner",
+    "Overlapping base prim paths when adding the second arm"
+  ]
+}

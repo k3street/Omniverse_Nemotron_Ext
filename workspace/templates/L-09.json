@@ -1,0 +1,12 @@
+{
+  "task_id": "L-09",
+  "goal": "Determine whether a 0.3mm clearance is real signal or sim numerical noise before flagging design change.",
+  "tools_used": ["check_path_clearance", "check_collisions", "measure_distance", "get_bounding_box", "teleport_prim"],
+  "thoughts": "Be honest: there is no single 'sim accurate to X mm' number -- it depends on mesh tessellation, collision approximation, float precision, pose rounding. The answer is a sensitivity test: perturb pose by +/-0.1mm and watch whether the clearance moves by 0.1mm (real) or 0.5mm+ (noise). Also re-run with exact mesh vs convex approximation to bound the noise floor.",
+  "code": "baseline = check_path_clearance(\n    prim_path=\"/World/EOAT\", waypoints=[\"<TIGHT_POSE>\"],\n    others=[\"/World/Fixture\"], units=\"mm\", mesh_fidelity=\"exact\"\n)\nresults = [baseline.min_distance_mm]\nfor dx in [-0.1, 0.0, 0.1]:\n    teleport_prim(\n        prim_path=\"/World/EOAT\",\n        translate=(\"<X>+dx\", \"<Y>\", \"<Z>\"),\n        units=\"mm\"\n    )\n    r = check_path_clearance(\n        prim_path=\"/World/EOAT\", waypoints=[\"<TIGHT_POSE>\"],\n        others=[\"/World/Fixture\"], units=\"mm\"\n    )\n    results.append(r.min_distance_mm)\nspread = max(results) - min(results)\n# If spread ~ 0.2mm -> signal is real; spread ~ 0.6mm -> within noise\nalt = check_collisions(\n    subjects=[\"/World/EOAT\"], targets=[\"/World/Fixture\"],\n    approximation=\"convex_decomposition\"\n)",
+  "failure_modes": [
+    "Giving her a single 'sim accurate to X mm' number that does not apply to her mesh",
+    "Re-running with finer tessellation and promising reliability without a sensitivity test",
+    "Dismissing SolidWorks Motion result as wrong when both are models with different assumptions"
+  ]
+}

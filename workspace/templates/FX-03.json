@@ -1,0 +1,13 @@
+{
+  "task_id": "FX-03",
+  "goal": "Set visibility='invisible' on all 10 helper Xform prims under /World/Helpers/ in a single batch_set_attributes call (not 10 individual set_attribute calls). Verify via get_attribute samples.",
+  "tools_used": ["count_prims_under_path", "batch_set_attributes", "get_attribute"],
+  "thoughts": "Bulk ops are cheaper over Kit RPC — batch_set_attributes is the single-call primitive for this. USD visibility is an attribute with token values 'invisible' / 'inherited', NOT a bool. Confirm the count first, then set, then sample a few to verify.",
+  "code": "# 1. Confirm count\ncount_prims_under_path(parent_path=\"/World/Helpers\", type_filter=\"Xform\")\n\n# 2. Single bulk call (note: 'invisible' is a token, not a bool)\npaths = [f\"/World/Helpers/Helper_{i}\" for i in range(10)]\nbatch_set_attributes(\n    prim_paths=paths,\n    attr_name=\"visibility\",\n    value=\"invisible\"\n)\n\n# 3. Sample-verify\nget_attribute(prim_path=\"/World/Helpers/Helper_0\", attr_name=\"visibility\")\nget_attribute(prim_path=\"/World/Helpers/Helper_9\", attr_name=\"visibility\")",
+  "failure_modes": [
+    "Looping set_attribute 10 times — works but is 10x slower over RPC and violates the 'use the batch tool' principle.",
+    "Setting visibility=false or 0 — USD visibility is a token, not a bool; the write silently does nothing or errors.",
+    "Deleting the prims instead of hiding them — visibility=invisible preserves the prims for re-enabling later.",
+    "Forgetting to verify — batch_set_attributes may partially fail on some paths; sample-verify catches it."
+  ]
+}

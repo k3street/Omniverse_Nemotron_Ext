@@ -1,0 +1,13 @@
+{
+  "task_id": "M-03",
+  "goal": "Find which Allegro hand link has zero mass causing intermittent PxScene::simulate crashes at env reset, without grep-diving 23 URDF links.",
+  "tools_used": ["diagnose_physics_error", "run_stage_analysis", "list_all_prims", "run_usd_script", "lookup_knowledge"],
+  "thoughts": "PxScene zero-mass usually means a rigid-body link inherited no PhysicsMassAPI, or unit scale mismatch made 0.05kg read as ~0 after metersPerUnit scaling. Push back against the blanket 'mass=1.0' fix — it destroys inertia for contact-rich manipulation. Enumerate links programmatically: zero-volume collision or missing MassAPI are the two real culprits.",
+  "code": "# 1. Structured diagnosis on the captured PhysX error\ndiagnose_physics_error(error_text=\"PxScene::simulate(): Actor has zero mass\")\n\n# 2. Scope a stage analysis to the articulation\nrun_stage_analysis(scope=\"<ROBOT_PRIM_PATH>\")  # e.g. /World/envs/env_0/Robot\n\n# 3. Enumerate rigid bodies and dump mass/density — zeros surface immediately\nlist_all_prims(root=\"<ROBOT_PRIM_PATH>\", schema_filter=\"PhysicsRigidBodyAPI\")\nrun_usd_script(script=\"\"\"\nfrom pxr import Usd, UsdPhysics\nstage = omni.usd.get_context().get_stage()\nfor p in stage.Traverse():\n    if p.HasAPI(UsdPhysics.RigidBodyAPI):\n        mass_api = UsdPhysics.MassAPI(p) if p.HasAPI(UsdPhysics.MassAPI) else None\n        mass = mass_api.GetMassAttr().Get() if mass_api else None\n        density = mass_api.GetDensityAttr().Get() if mass_api else None\n        if not mass or mass == 0:\n            print('ZERO-MASS', p.GetPath(), 'density=', density, 'hasMassAPI=', mass_api is not None)\n\"\"\")\n\n# 4. metersPerUnit pitfall — resolve authored mass under stage scale\nlookup_knowledge(query=\"USD metersPerUnit URDF mass scale PhysicsMassAPI Isaac Sim 5\")",
+  "failure_modes": [
+    "Blanket mass=1.0 hides the bug but destroys contact dynamics for manipulation",
+    "URDF importer in 5.x still drops mass when <inertial> is absent — confirm per link, do not guess",
+    "metersPerUnit=0.01 with URDF authored in meters silently scales mass, reads as ~0",
+    "Zero-volume collision mesh also triggers zero mass under density-based path"
+  ]
+}

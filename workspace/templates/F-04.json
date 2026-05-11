@@ -1,0 +1,13 @@
+{
+  "task_id": "F-04",
+  "goal": "Place 64 AMRs along the south wall at their charging docks and generate a 2D occupancy map (PNG + YAML, ROS-style) for fleet-manager path-planning validation.",
+  "tools_used": ["add_reference", "clone_envs", "generate_occupancy_map", "capture_viewport"],
+  "thoughts": "64 AMRs × 2.5 m = 160 m fits in 180 m, confirm out loud. clone_envs handles the bulk layout; if mixed spacing (52 @ 2.3 m + 12 @ 2.8 m), run two clone_envs with different pitches. generate_occupancy_map at 5–10 cm resolution for a 180×290 m floor — 1 cm means 240k×240k pixels, which is nonsense; push back. Check whether the tool emits ROS YAML directly or she post-processes.",
+  "code": "# Arithmetic out loud: 64 x 2.5 m = 160 m fits in 180 m.\n\n# 1. Template AMR reference\nadd_reference(\n    prim_path=\"/World/AMRs/Template\",\n    reference_path=\"omniverse://ov-prod/Library/Robots/amr_mir250.usd\"\n)\n\n# 2. Mixed-spacing clones (52 production + 12 heavy-lift, per her correction)\nclone_envs(\n    source_prim=\"/World/AMRs/Template\",\n    count=<52>,\n    spacing=(<2.30>, 0.0, 0.0),\n    origin=(<X_START_PROD>, <1.0>, 0.0),\n    destination_root=\"/World/AMRs/Prod\"\n)\nclone_envs(\n    source_prim=\"/World/AMRs/Template\",\n    count=<12>,\n    spacing=(<2.80>, 0.0, 0.0),\n    origin=(<X_START_HEAVY>, <1.0>, 0.0),\n    destination_root=\"/World/AMRs/Heavy\"\n)\n\n# 3. Occupancy map — resolution SANITY CHECK\n# 180 x 290 m, 5 cm res = 3600 x 5800 px (~21 MP) — fine\n# 180 x 290 m, 1 cm res = 18000 x 29000 px (~522 MP) — nonsense, refuse\ngenerate_occupancy_map(\n    stage_path=\"<DC_STAGE>\",\n    resolution_m_per_px=<0.05>,           # 5 cm for MiR250-class nav\n    output_png=\"<OUT_DIR>/dc_occupancy.png\",\n    output_yaml=\"<OUT_DIR>/dc_occupancy.yaml\",\n    ros_style_yaml=True\n)\n\n# 4. Handoff screenshot\ncapture_viewport(output_path=\"<OUT_DIR>/dc_south_wall_amrs.png\")\n\n# Note: this occupancy map is for 2D nav sanity — it is NOT a full path planner.\n# If generate_occupancy_map doesn't emit ROS YAML directly, post-process by\n# writing image, resolution, origin, negate, occupied_thresh, free_thresh.",
+  "failure_modes": [
+    "Accepting '1 cm resolution for a 180 x 290 m floor' (240k x 240k pixels — nonsense)",
+    "Ignoring her mixed-spacing correction (52 prod @ 2.3 m + 12 heavy @ 2.8 m)",
+    "Claiming the occupancy map is a path planner instead of a 2D nav sanity artifact",
+    "Producing PNG without the accompanying ROS-style YAML (image, resolution, origin)"
+  ]
+}

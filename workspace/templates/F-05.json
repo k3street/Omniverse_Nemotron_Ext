@@ -1,0 +1,13 @@
+{
+  "task_id": "F-05",
+  "goal": "Reference a rack family from ov-lib Nucleus server into a DC stage on ov-prod, without copying the asset, and honestly name the reliability tradeoff.",
+  "tools_used": ["add_reference", "run_stage_analysis", "lookup_knowledge"],
+  "thoughts": "USD cross-server references work as long as both servers resolve at load. Use the full omniverse://ov-lib/... URL in add_reference. Honest risk: if ov-lib is down at auto-reload time, prod twin fails to resolve. Offer payload vs reference as a real tradeoff (payloads can be unloaded gracefully). Do NOT suggest download-and-reupload unless she explicitly wants offline durability — that duplicates a shared library asset, defeating the point.",
+  "code": "# Cross-server references work. Reliability is your choice.\n\n# 1. Reference the ov-lib asset with its full omniverse:// URL\nadd_reference(\n    prim_path=\"/World/Racks/DeepReach\",\n    reference_path=\"omniverse://ov-lib/Logistics/racks/deep_reach_rack/v3/rack.usd\",\n    kind=\"reference\"          # switch to \"payload\" for unloadable dependency\n)\n\n# 2. Confirm the reference resolves\nrun_stage_analysis(stage_path=\"<PROD_STAGE>\")\n\n# 3. If she asks reference vs payload — retrieve, do not paraphrase\nlookup_knowledge(query=\"USD reference vs payload unload deferred loading Omniverse composition\")\n\n# Tell Fatima:\n#   - Cross-server reference works. No copy.\n#   - If ov-lib is down at auto-reload (3 AM): the prim loads with an\n#     unresolved-reference marker; the rest of the stage opens. Any child prims\n#     under that reference are invisible. Your auto-reload job may warn or\n#     hard-fail depending on how it handles composition errors.\n#   - Payload (vs reference) can be explicitly unloaded and reloaded — useful\n#     if you want ov-lib outages to produce a graceful 'empty slot' instead of\n#     a missing prim.\n#   - Textures referenced by relative path inside rack.usd resolve against\n#     ov-lib (the asset's own home), not ov-prod. That's the correct behavior.\n# Download-and-reupload is only worth it if you want offline durability, and\n# then you've forked the shared library — ask her before suggesting that.",
+  "failure_modes": [
+    "Suggesting download-and-reupload without asking — defeats the shared-library point",
+    "Claiming textures fail to resolve across servers — relative paths resolve against the asset's home server, not the referring stage",
+    "Hiding the ov-lib outage risk because it's awkward",
+    "Conflating reference and payload (payload is unloadable on demand)"
+  ]
+}

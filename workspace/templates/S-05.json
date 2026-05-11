@@ -1,0 +1,13 @@
+{
+  "task_id": "S-05",
+  "goal": "Tune physics materials + wheel contact to reproduce ~8% gravel slip seen in field telemetry.",
+  "tools_used": ["check_physics_health", "list_all_prims", "set_attribute", "apply_physics_material", "lookup_knowledge", "suggest_physics_settings"],
+  "thoughts": "Low sim slip on factory-defaults = dynamic friction too high plus flat plane can't produce the rolling micro-slip real gravel causes. Dump current friction, drop dynamicFriction toward realistic 0.3-0.5 for loose gravel, set frictionCombineMode='min', consider TGS iteration count. A heightfield with procedural roughness gives the last percent but isn't always needed. Never recommend disabling CCD to 'make contacts stickier' — that's wrong direction and breaks wheel contacts.",
+  "code": "# 1. Dump current friction setup on both sides of the contact\nhealth = check_physics_health(focus=\"friction\")\nwheel_mats = list_all_prims(type_filter=\"PhysicsMaterial\", path_contains=\"<ROBOT_PRIM>\")\nground_mat = list_all_prims(type_filter=\"PhysicsMaterial\", name_contains=\"gravel\")[0]\n\n# 2. Tune for realistic gravel slip (field telemetry shows ~8%)\nfor mat in [ground_mat] + wheel_mats:\n    set_attribute(prim_path=mat.path, attribute=\"dynamicFriction\", value=<GRAVEL_DYN_FRIC>)\n    set_attribute(prim_path=mat.path, attribute=\"staticFriction\", value=<GRAVEL_STAT_FRIC>)\n    set_attribute(prim_path=mat.path, attribute=\"frictionCombineMode\", value=\"min\")\n\n# 3. If slip is still too low, bump solver honesty\nsuggest_physics_settings(scenario=\"wheeled_robot_loose_terrain\")\n# Apply TGS iteration bump per suggestion\n\n# 4. Left/right asymmetry (bearing drag) -> per-wheel damping\n# Model asymmetry as different joint damping on each wheel drive, not via material\nlookup_knowledge(query=\"nova carter wheel joint damping bearing drag model\")",
+  "failure_modes": [
+    "assistant fixes this in the ROS bridge with Gaussian noise on /odom",
+    "assistant disables CCD on wheels",
+    "assistant doesn't mention heightfield limitation of flat-plane gravel",
+    "assistant sets frictionCombineMode to 'max' and makes problem worse"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "task_id": "P-01",
+  "goal": "Generate 10k COCO apple-detection images where annotation IDs stay stable across randomization steps.",
+  "tools_used": ["configure_sdg", "create_sdg_pipeline", "configure_coco_yolo_writer", "preview_sdg", "lookup_knowledge"],
+  "thoughts": "Replicator assigns category IDs per-step from the current semantic label set, so a class seen only in some steps gets a different ID. Stable IDs come from a writer that enforces a pre-declared class_name->category_id map, OR a post-run remap pass. Stay in CV vocabulary — Priya doesn't care about USD prims. The RTX speedup answer is path-tracing vs real-time profile, not disabling ray tracing.",
+  "code": "# 1. Configure COCO writer with a pinned class->id map\nconfigure_coco_yolo_writer(\n    output_dir=\"<DEST_PATH>/apples_coco\",\n    format=\"coco\",\n    class_id_map={\"apple\": 1, \"leaf\": 2, \"branch\": 3},  # stable across all steps\n    include_instance_seg=True,\n    include_semantic_seg=True,\n)\n\n# 2. Wire into the randomization pipeline\npipe = create_sdg_pipeline(\n    name=\"apples_10k\",\n    randomizers=[\"lighting\", \"camera_pose\"],\n    writer=\"coco_pinned\",\n    num_frames=10000,\n    seed=<SEED>,\n)\n\n# 3. Preview 8 frames to confirm IDs don't drift\npreview = preview_sdg(pipeline=pipe.id, frame_count=8)\n# Parent should eyeball the _annotations.coco.json category ids are [1,2,3] in every file\n\n# 4. If built-in writer lacks pinning, fall back to remap pass\nlookup_knowledge(query=\"omni replicator custom BasicWriter subclass class_id_map stable coco\")",
+  "failure_modes": [
+    "assistant invents replicator.coco_writer.set_stable_ids()",
+    "assistant lectures about USD semantic API instead of writer fix",
+    "assistant proposes disabling RTX entirely instead of profile swap",
+    "assistant ignores the instance vs semantic mask distinction when explaining leaf holes"
+  ]
+}

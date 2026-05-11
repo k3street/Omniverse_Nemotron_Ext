@@ -1,0 +1,13 @@
+{
+  "task_id": "T-06",
+  "goal": "Produce a preliminary hazard list for a simulated dual-arm handover suitable for a HAZOP / ISO 12100 risk assessment, clearly distinguishing hazards sim can detect from hazards it cannot.",
+  "tools_used": ["check_singularity", "check_path_clearance", "scene_summary", "lookup_knowledge"],
+  "thoughts": "Never quote ISO 10218-2 clause numbers from memory. check_singularity + check_path_clearance probe sim-observable hazards; scene_summary enumerates modeled prims (any fixture not in the stage is invisible to sim). lookup_knowledge retrieves the actual ISO 10218-2 hazard taxonomy. Refuse to score severity × probability — that is the integrator's formal role, not the assistant's.",
+  "code": "# PHL is a list. Severity scoring is NOT our job.\n\n# 1. Sim-observable hazards\ncheck_singularity(\n    robot_prim=\"<ARM_A>\",\n    trajectory=\"<SCRIPTED_PATH_A>\"\n)\ncheck_singularity(\n    robot_prim=\"<ARM_B>\",\n    trajectory=\"<SCRIPTED_PATH_B>\"\n)\ncheck_path_clearance(\n    stage_path=\"<CELL_USD>\",\n    path_prim=\"<HANDOVER_ZONE>\",\n    window_t_start=3.8,\n    window_t_end=4.6\n)\n\n# 2. Enumerate modeled prims — anything unmodeled is invisible to sim\nscene_summary(stage_path=\"<CELL_USD>\")\n\n# 3. Pull the actual ISO 10218-2 hazard taxonomy (do not cite clauses from memory)\nlookup_knowledge(query=\"ISO 10218-2 hazard classes crushing shearing ejection dual-arm collaborative\")\n\n# Produce a PHL table — 2 columns:\n#   SIM-OBSERVABLE         : crushing between arms, shear in handover zone,\n#                            trajectory deviation, singularity spikes,\n#                            part drop (rigid-body), visual clearance < threshold.\n#   NOT SIM-OBSERVABLE     : controller firmware faults, electrical faults,\n#                            sensor miscalibration, human-in-the-loop errors,\n#                            EMI, power loss behavior, unexpected restart.\n# Cite clauses from the lookup_knowledge result — not from memory.\n# Do NOT assign severity / probability numbers; state explicitly that\n# HAZOP scoring belongs with the integrator + OEM + safety engineer at a\n# formal review.",
+  "failure_modes": [
+    "Scoring severity × probability (not our role — belongs to the integrator)",
+    "Claiming sim 'covers' the hazard analysis because no collision was detected",
+    "Citing ISO 10218-2 clause numbers from memory without lookup_knowledge",
+    "Omitting the 'not sim-observable' column — hides blind spots"
+  ]
+}

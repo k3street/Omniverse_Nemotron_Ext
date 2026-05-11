@@ -1,0 +1,13 @@
+{
+  "task_id": "A-11",
+  "goal": "Tell Alex how to record a 10-second mp4 of his arm moving using Isaac Sim's built-in Movie Capture, under 5 minutes, with OBS as a fallback.",
+  "tools_used": ["lookup_knowledge", "render_video"],
+  "thoughts": "Movie Capture is the built-in way. lookup_knowledge confirms the current menu path (menus move). render_video is the programmatic fallback if Alex wants it scripted, but the menu is faster. Warn that Path Tracing takes forever — RTX Interactive is fine for a social clip. OBS is fine as fallback; don't be precious about it.",
+  "code": "# Fastest path to a Twitter-ready clip.\n\n# 1. Current menu path (menus moved in 5.x)\nlookup_knowledge(query=\"Isaac Sim 5 Movie Capture extension Window Rendering output path\")\n\n# Tell Alex:\n#   Window > Rendering > Movie Capture (or the current equivalent from retrieval).\n#   Set time range (0.0 to 10.0), output path, format mp4, hit Capture.\n#   Use RTX Interactive — Path Tracing will take ages for a social clip.\n\n# If the menu is different in his build, or he wants a scripted record:\nrender_video(\n    stage_path=\"<CURRENT_STAGE>\",\n    output_path=\"<HOME>/myarm_clip.mp4\",\n    duration_seconds=10,\n    fps=30,\n    render_preset=\"RTX Interactive\"\n)\n\n# If export hangs: check write permission on output path, drop resolution to 1080p.\n# OBS is totally fine too — no shame in that.",
+  "failure_modes": [
+    "Suggesting Path Tracing for a 10-second social clip (renders forever)",
+    "Writing a Python capture pipeline when Movie Capture is a menu click",
+    "Explaining render passes / OmniGraph materials — Alex uses OBS and leaves",
+    "Missing the 'check write permission' tip when export hangs"
+  ]
+}

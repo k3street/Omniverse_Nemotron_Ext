@@ -1,0 +1,12 @@
+{
+  "task_id": "L-03",
+  "goal": "Give a face-to-point or point-to-point distance in mm between fixture top face and EOAT tip.",
+  "tools_used": ["list_all_prims", "measure_distance", "get_bounding_box"],
+  "thoughts": "measure_distance is usually point-to-point in Isaac Sim; for face-to-point, grab the face representative point from get_bounding_box (top-face center = bbox top-center). Return mm to 2 decimals, honest about sim resolution (mesh tessellation + float noise ~0.05-0.1mm).",
+  "code": "prims = list_all_prims(path_prefix=\"/World/Fixture\")\nfixture_bbox = get_bounding_box(prim_path=\"/World/Fixture/top_face\", units=\"mm\")\ntop_center = (\n    (fixture_bbox.min[0] + fixture_bbox.max[0]) / 2,\n    (fixture_bbox.min[1] + fixture_bbox.max[1]) / 2,\n    fixture_bbox.max[2]  # top face z\n)\ndist = measure_distance(\n    point_a=top_center,\n    prim_b=\"/World/EOAT/tip\",\n    units=\"mm\"\n)\n# Report: f\"{dist.value_mm:.2f} mm (+/- <TOL> mm sim resolution)\"",
+  "failure_modes": [
+    "Handing her a Python script when measure_distance covers the case",
+    "Returning 6-decimal float precision and implying mm-scale accuracy",
+    "Using point-to-point when she asked face-to-face without explaining the workaround"
+  ]
+}

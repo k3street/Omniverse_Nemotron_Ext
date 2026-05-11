@@ -1,0 +1,12 @@
+{
+  "task_id": "Y-03",
+  "goal": "Lock a reusable 50mm-equivalent hero camera prim aimed at the end-effector with shallow DoF.",
+  "tools_used": ["create_prim", "configure_camera", "set_camera_params", "set_camera_look_at", "capture_viewport"],
+  "thoughts": "Full-frame 50mm translates to ~50mm focal length when the sensor is 36mm wide -- configure_camera with explicit focal_length + aperture avoids crop-factor confusion. Named prim so capture is reproducible across renders. Shallow f-stop for end-effector sharp / base just-soft.",
+  "code": "cam_path = \"/World/Cameras/Hero_Beauty\"\ncreate_prim(path=cam_path, type_name=\"Camera\")\nconfigure_camera(\n    prim_path=cam_path,\n    focal_length_mm=50.0,\n    horizontal_aperture_mm=36.0,\n    vertical_aperture_mm=24.0\n)\nset_camera_params(\n    prim_path=cam_path,\n    f_stop=\"<FSTOP>\",\n    focus_distance=\"<METERS>\",\n    clipping_range=(0.01, 10000.0)\n)\nset_camera_look_at(\n    camera_path=cam_path,\n    target_path=\"/World/Hero/EndEffector\",\n    up=(0, 0, 1)\n)\ncapture_viewport(path=\"<OUT_PNG>\", camera_path=cam_path, width=1920, height=1080)",
+  "failure_modes": [
+    "Handing her a Python USD snippet when configure_camera covers the case",
+    "Forgetting focus_distance so DoF falls on the wrong plane",
+    "Using world up (0,1,0) in a Z-up Isaac Sim stage"
+  ]
+}

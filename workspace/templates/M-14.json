@@ -1,0 +1,12 @@
+{
+  "task_id": "M-14",
+  "goal": "Apply DriveAPI to /World/Arm/Joint0 and set angular stiffness=400, damping=40. Snapshot should show attrs.drive:angular:physics:stiffness=400, damping=40 after the tool runs.",
+  "tools_used": ["list_applied_schemas", "apply_api_schema", "set_drive_gains", "get_drive_gains"],
+  "thoughts": "Stage-measurable HARD that exercises the new joint-drive attr visibility added 2026-04-19. Agent must identify angular drive_type (revolute joint), apply the API if missing, then tune gains via the registered tool.",
+  "code": "apply_api_schema(prim_path='/World/Arm/Joint0', schema_name='PhysicsDriveAPI')\nset_drive_gains(joint_path='/World/Arm/Joint0', drive_type='angular', stiffness=400.0, damping=40.0)\nget_drive_gains(joint_path='/World/Arm/Joint0')\n# Correct reply: 'Applied PhysicsDriveAPI to /World/Arm/Joint0 (angular), stiffness=400, damping=40 — verified round-trip.'",
+  "failure_modes": [
+    "Using run_usd_script to hand-author gains when set_drive_gains exists.",
+    "Setting linear:*:stiffness instead of angular (wrong drive_type for revolute joint).",
+    "Making up different gain values without flagging the deviation."
+  ]
+}

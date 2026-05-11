@@ -1,0 +1,13 @@
+{
+  "task_id": "P-10",
+  "goal": "Emit depth as float32 EXR meters (or 16-bit mm), not 16-bit normalized-to-scene-bounds PNG.",
+  "tools_used": ["configure_sdg", "create_sdg_pipeline", "preview_sdg", "lookup_knowledge"],
+  "thoughts": "Two separate annotators with identical-sounding names: distance_to_camera = 3D Euclidean distance from camera origin to hit point; distance_to_image_plane = Z-depth along the camera's view axis. Most ML depth models (MiDaS, DPT, metric-depth) expect Z-depth. PNG normalization is a writer choice — swap to EXR float32 writer OR 16-bit mm custom writer. Sky pixels: write as +inf in EXR (MiDaS friendly) or clamp to a sentinel like 65535 mm in 16-bit. Never round-trip through normalized PNG.",
+  "code": "# 1. Replace annotator with z-depth (image-plane), not Euclidean\nconfigure_sdg(\n    stage=\"annotators\",\n    annotators=[\n        {\"name\": \"rgb\", \"type\": \"rgb\"},\n        {\"name\": \"depth\", \"type\": \"distance_to_image_plane\"},\n    ],\n)\n\n# 2. Writer: float32 EXR preserves raw meters\nconfigure_sdg(\n    stage=\"writer\",\n    writer=\"BasicWriter\",\n    params={\n        \"output_dir\": \"<DEST_PATH>/apples_depth_exr\",\n        \"depth_format\": \"exr_float32_meters\",\n        \"sky_value\": \"inf\",                # or <CLAMP_M> for clamped sentinel\n    },\n)\n\n# 3. Alternative: 16-bit mm if EXR is not in Priya's loader\nconfigure_sdg(stage=\"writer\", params={\"depth_format\": \"png16_millimeters\", \"clamp_m\": 65.5})\n\n# 4. Verify one frame\npreview_sdg(pipeline=\"<PIPE_ID>\", frame_count=1)\nlookup_knowledge(query=\"replicator distance_to_image_plane vs distance_to_camera exr float32\")",
+  "failure_modes": [
+    "assistant picks distance_to_camera when Z-depth is needed",
+    "assistant recommends post-processing normalized PNG back to meters",
+    "assistant leaves sky as 0 (confuses near-field pixels)",
+    "assistant promises disparity from depth without providing baseline"
+  ]
+}

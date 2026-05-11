@@ -1,0 +1,12 @@
+{
+  "task_id": "Y-07",
+  "goal": "Match the render to a brand plate: rotate HDRI for key direction, dial tonemap/exposure/contrast to match.",
+  "tools_used": ["create_hdri_skydome", "set_attribute", "enable_post_process", "capture_viewport"],
+  "thoughts": "HDRI rotation via its rotation attribute is faster than reloading the skydome. Tonemap/exposure/bloom/vignette stages named explicitly -- never 'make it look better'. If compositor has Resolve/Nuke downstream, render linear EXR and grade there rather than baking grade into beauty. A/B against the plate via capture_viewport.",
+  "code": "create_hdri_skydome(\n    path=\"/World/Lighting/SkyDome\",\n    texture_path=\"<HDRI_EXR>\",\n    intensity=\"<FLOAT>\",\n    rotation=\"<DEGREES_TO_MATCH_KEY>\"\n)\n# or rotate existing dome:\nset_attribute(\n    prim_path=\"/World/Lighting/SkyDome\",\n    attribute_name=\"xformOp:rotateY\",\n    value=\"<DEGREES>\"\n)\nenable_post_process(\n    tonemap=\"ACES\",\n    exposure=\"<EV>\",\n    contrast=\"<FLOAT>\",\n    bloom_enabled=True,\n    bloom_intensity=\"<FLOAT>\",\n    vignette_enabled=False\n)\ncapture_viewport(path=\"<AB_PNG>\", width=1920, height=1080)",
+  "failure_modes": [
+    "Color-grading in the renderer when Resolve/Nuke is downstream",
+    "Vague 'tweak tonemap' without naming exposure/contrast/bloom explicitly",
+    "Rotating the dome but not confirming which axis matches Z-up Isaac Sim"
+  ]
+}

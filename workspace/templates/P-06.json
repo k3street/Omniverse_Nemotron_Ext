@@ -1,0 +1,13 @@
+{
+  "task_id": "P-06",
+  "goal": "Swap Replicator writer from COCO JSON to YOLO txt format with correct normalization and folder layout.",
+  "tools_used": ["configure_coco_yolo_writer", "export_dataset", "lookup_knowledge"],
+  "thoughts": "Use the unified coco_yolo writer with format='yolo'. YOLO expects normalized cx,cy,w,h (fractions of image dims) — not pixels. Folder layout: images/{train,val}/, labels/{train,val}/, classes.txt at root. class indexing is whatever integer you assign — YOLOv8 doesn't require alphabetical, but documenting classes.txt order is required. YOLO bbox format loses polygon segmentation; if Priya wants seg, needs YOLOv8-seg polygon format (also available in writer). Don't run COCO then convert — direct writer exists.",
+  "code": "# 1. Swap writer to YOLO — use the built-in format='yolo'\nconfigure_coco_yolo_writer(\n    output_dir=\"<DEST_PATH>/apples_yolo\",\n    format=\"yolo\",\n    class_id_map={\"apple\": 0, \"leaf\": 1, \"branch\": 2},  # YOLO is 0-indexed\n    folder_layout=\"yolov8\",   # images/train, labels/train, classes.txt\n    include_segmentation_polygons=<SEG_FLAG>,  # True for yolov8-seg\n)\n\n# 2. Re-run export with existing pipeline\nexport_dataset(\n    pipeline=\"<PRIYA_PIPELINE_ID>\",\n    format=\"yolo\",\n    split={\"train\": 0.9, \"val\": 0.1},\n)\n\n# 3. Sanity: labels must be normalized to [0,1]\n# Each <img>.txt line: class cx cy w h  (all in [0,1], not pixels)\n\n# 4. If YOLO writer isn't built-in in this Isaac Sim version\nlookup_knowledge(query=\"omni replicator BasicWriter subclass yolo bbox normalization classes.txt\")",
+  "failure_modes": [
+    "assistant writes pixel coords instead of normalized fractions",
+    "assistant runs COCO then writes a separate conversion script",
+    "assistant forgets classes.txt",
+    "assistant promises polygon segmentation for base YOLO (not seg variant)"
+  ]
+}

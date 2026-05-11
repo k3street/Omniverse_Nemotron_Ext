@@ -1,0 +1,13 @@
+{
+  "task_id": "T-04",
+  "goal": "Inspect the simulated Category-0 stop trajectory of a UR10e and decide whether the simulated overshoot is admissible evidence for protective separation distance per ISO 13855.",
+  "tools_used": ["lookup_product_spec", "check_path_clearance", "lookup_knowledge"],
+  "thoughts": "Never cite ISO 13855 separation-distance formula or UR datasheet stop times from memory. Isaac Sim models kinematics only — it does not model brake + controller latency (T1). T1 comes from the UR datasheet matrix (category × payload × joint config) via lookup_product_spec. check_path_clearance measures simulated overshoot. lookup_knowledge retrieves the actual ISO 13855 clause. Refuse to certify separation distance from sim alone.",
+  "code": "# Sim gives T2-ish kinematic overshoot. T1 is a hardware number. Do not blend them.\n\n# 1. Retrieve UR10e stop-time matrix from vendor docs (category, payload, pose dependent)\nlookup_product_spec(\n    product=\"Universal Robots UR10e\",\n    field=\"stop_time_category_0\",\n    context={\"payload_kg\": <PAYLOAD>, \"joint_configuration\": \"<POSE>\"}\n)\n\n# 2. Measure simulated overshoot in the scene\ncheck_path_clearance(\n    stage_path=\"<SCENE_USD>\",\n    path_prim=\"<TRAJECTORY_PRIM>\",\n    window_t_start=1.0,\n    window_t_end=3.0\n)\n\n# 3. Pull the ACTUAL ISO 13855 formula — do not retype from memory\nlookup_knowledge(query=\"ISO 13855 protective separation distance formula T1 T2 K C Zs Zr\")\n\n# What to tell Thomas:\n#   - Isaac Sim overshoot is optimistic vs real hardware.\n#   - Do NOT use sim distance as the authoritative S value.\n#   - S = K*(T1+T2) + C + Zs + Zr.  T1 must come from UR datasheet\n#     for the specific payload + joint configuration, not sim, not memory.\n#   - Sim is acceptable for estimating T2 (process reaction time).\n# If the datasheet row for this payload/pose isn't retrievable, tell Thomas\n# explicitly — don't pick a 'typical' value.",
+  "failure_modes": [
+    "Using sim overshoot as the full separation-distance evidence (ignores T1 brake + controller latency)",
+    "Picking a single UR10e stop time when the datasheet is a matrix",
+    "Fabricating the ISO 13855 formula coefficients from memory",
+    "Certifying separation distance without measured hardware stop-time data"
+  ]
+}

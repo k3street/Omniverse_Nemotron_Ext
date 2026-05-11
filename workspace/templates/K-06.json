@@ -1,0 +1,13 @@
+{
+  "task_id": "K-06",
+  "goal": "Import a 142 MB customer STEP fixture using the real Isaac Sim CAD importer, check polycount/bounds, generate a separate simplified collision mesh.",
+  "tools_used": ["lookup_knowledge", "import_robot", "scene_summary", "run_stage_analysis", "simplify_collision"],
+  "thoughts": "Real extension: omni.kit.asset_importer / CAD Importer. STEP goes through tesselation — result is meshes, NOT parametric CAD features. A 142 MB STEP at default tesselation can yield millions of triangles; scene_summary + bbox check before trusting. Collision mesh MUST be separate from render mesh (convex decomp or simplified geometry) — a 2M-face collision crashes PhysX. Don't suggest rebuilding from primitives — unrealistic for customer CAD.",
+  "code": "# 1. Confirm CAD importer shipping / extension name\nlookup_knowledge(query=\"omni.kit.asset_importer Isaac Sim CAD importer STEP tesselation 5.0\")\n\n# 2. Import the STEP (GUI: File > Import > STEP, or scripted path below)\nimport_robot(\n    urdf_path=\"<ABSOLUTE_STEP_PATH>\",     # /home/kenji/cad/fixture_v7.step\n    dest_path=\"/World/Cell/Fixture\",\n    fix_base=True,\n    merge_fixed_joints=True\n)\n\n# 3. Sanity check polycount + bounds BEFORE trusting the result\nscene_summary(stage_path=\"<STAGE>\")\nrun_stage_analysis(scope=\"/World/Cell/Fixture\")\n\n# 4. Generate a simplified collision mesh separately from the render mesh\nsimplify_collision(\n    prim_path=\"/World/Cell/Fixture\",\n    method=\"convex_decomposition\",\n    max_hulls=\"<N_HULLS>\",\n    voxel_resolution=\"<VOX>\"\n)\n\n# Honest notes for Kenji:\n#  - STEP import = tesselated meshes, not parametric features. Fillets survive as tris.\n#  - Weekly customer updates: set up a scripted watch-folder re-import pipeline; not OOTB.\n#  - Isaac Sim does not read STEP natively like VC. USD render path needs meshes.\n#  - Collision mesh != render mesh. The CAD-beautiful render mesh would crash PhysX.",
+  "failure_modes": [
+    "Using the render-mesh polycount as collision — 2M tris crashes PhysX simulate",
+    "Importing at mm without unit conversion — fixture appears 1000x oversized",
+    "Promising a native STEP reader without tesselation — it does not exist",
+    "No polycount sanity check — 142 MB STEP silently becomes multi-million-triangle stage"
+  ]
+}

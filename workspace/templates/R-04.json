@@ -1,0 +1,13 @@
+{
+  "task_id": "R-04",
+  "goal": "Kick off an overnight Isaac Lab RL training run on a single RTX 4090, cube-pick task.",
+  "tools_used": ["create_isaaclab_env", "launch_training", "get_training_status"],
+  "thoughts": "4090 has 24GB VRAM \u2014 2048 envs fits, 4096 is the ceiling for cube-lift, 16384 OOMs. Headless flag is non-negotiable for overnight. Name the TB log path so Raj can check from his phone. First useful checkpoint at ~45 min to 2 h depending on task.",
+  "code": "create_isaaclab_env(\n    task=\"<ISAAC_LAB_TASK>\",        # Isaac-Lift-Cube-Franka-v0\n    num_envs=<NUM_ENVS>,              # 2048 safe, 4096 ceiling on 4090\n    scene_path=\"<CLIENT_SCENE_USD>\"\n)\n\nlaunch_training(\n    task=\"<ISAAC_LAB_TASK>\",\n    num_envs=<NUM_ENVS>,\n    headless=True,\n    log_dir=\"<ABS_LOG_DIR>\",          # e.g. /home/raj/runs/client_cubepick\n    max_iterations=<MAX_ITERS>\n)\n\n# Monitor without babysitting:\n# tensorboard --logdir <ABS_LOG_DIR> --port 6006 --bind_all\nget_training_status(run_id=\"<RUN_ID>\")\n\n# tmux/nohup the launch so SSH disconnect does not kill it.",
+  "failure_modes": [
+    "num_envs>=8192 OOMs on 4090 mid-run, not at start",
+    "Not running headless \u2014 viewport eats 30% throughput",
+    "Log dir on NFS \u2014 I/O stalls crash training after hours",
+    "Forgot tmux/nohup \u2014 laptop sleep kills the run"
+  ]
+}

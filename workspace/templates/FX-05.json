@@ -1,0 +1,12 @@
+{
+  "task_id": "FX-05",
+  "goal": "Find every prim in the stage with PhysicsRigidBodyAPI applied using find_prims_by_schema — a single tool call, no manual traversal.",
+  "tools_used": ["find_prims_by_schema"],
+  "thoughts": "The tool accepts either the applied-schema token ('PhysicsRigidBodyAPI') or the Python class name ('RigidBodyAPI') — it strips the conventional 'Physics' prefix and looks up in UsdPhysics. Don't drop to run_usd_script for what's a single-call registered tool.",
+  "code": "find_prims_by_schema(schema_name=\"PhysicsRigidBodyAPI\")",
+  "failure_modes": [
+    "Writing run_usd_script with prim.HasAPI(UsdPhysics.RigidBodyAPI) — works but bypasses the registered tool.",
+    "Passing 'RigidBodyAPI' only — also works (prefix-strip handles it), but the applied-schema token is the canonical input.",
+    "Looping PrimRange in a shell tool — wrong tier, find_prims_by_schema IS the purpose-built primitive."
+  ]
+}

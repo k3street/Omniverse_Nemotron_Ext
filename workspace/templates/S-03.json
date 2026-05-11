@@ -1,0 +1,13 @@
+{
+  "task_id": "S-03",
+  "goal": "Generate a Nav2-compatible 2D occupancy grid from an outdoor yard USD at 0.05 m/cell.",
+  "tools_used": ["scene_summary", "generate_occupancy_map", "export_nav2_map", "lookup_knowledge"],
+  "thoughts": "Outdoor maps need a higher Z-slice than default indoor 0.1 m — gravel and tall grass otherwise fill the grid with phantom obstacles. Typical outdoor slice 0.3-0.5 m picks up buildings/trailers but skips ground clutter. Must ceiling-clip above tallest expected vehicle silhouette (forklift mast 5.2 m > trailer 4 m means Sarah needs ceiling >= 5.5 m). Never offer the 'tele-op and record' workaround — the generator runs offline from the static USD.",
+  "code": "# 1. Scene extents and Z-ranges\nsummary = scene_summary(include_bounds=True)\n# Expect ~80m x 60m footprint; note tallest object for ceiling choice\n\n# 2. Generate with outdoor-tuned Z slab\nocc = generate_occupancy_map(\n    origin=[0, 0, 0],\n    size=[<YARD_X_M>, <YARD_Y_M>],\n    cell_size=0.05,                   # match Nav2 yaml_filename resolution\n    z_min=0.30,                       # above gravel/grass\n    z_max=<CEILING_M>,                # above forklift mast\n    output_path=\"<DEST_PATH>/map\",\n)\n\n# 3. Emit Nav2-ready .pgm + .yaml pair\nexport_nav2_map(\n    occupancy_path=occ.path,\n    yaml_path=\"<DEST_PATH>/map.yaml\",\n    resolution=0.05,\n    origin=[0, 0, 0],\n    use_sim_time=True,\n)\n# Nav2: map_server.yaml_filename=<DEST_PATH>/map.yaml, use_sim_time: true",
+  "failure_modes": [
+    "assistant uses default indoor Z-slice and maps trailers as missing",
+    "assistant invents generate_3d_costmap for Nav2 static layer",
+    "assistant forgets to pass resolution=0.05 to match customer config",
+    "assistant recommends hand-driving to build the map"
+  ]
+}

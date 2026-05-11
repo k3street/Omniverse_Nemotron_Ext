@@ -1,0 +1,12 @@
+{
+  "task_id": "L-02",
+  "goal": "For 6 pick targets on a fixture, report reachability, joint-limit margin, and fixture clearance for a UR10e+EOAT.",
+  "tools_used": ["list_all_prims", "solve_ik", "get_joint_limits", "check_collisions", "sweep_sphere", "measure_distance", "get_world_transform"],
+  "thoughts": "solve_ik returns ONE iterative solution -- be explicit that the wrist-3 branch can pick a near-limit pose when a free-of-limit solution exists. Always pair reachability with a clearance check; 'reachable' without collision verification is a common L-level fail. Output a table keyed on target index.",
+  "code": "targets = [\"<T1>\", \"<T2>\", \"<T3>\", \"<T4>\", \"<T5>\", \"<T6>\"]\njoint_limits = get_joint_limits(articulation_path=\"/World/UR10e\")\nreport = []\nfor idx, tgt in enumerate(targets):\n    ik = solve_ik(\n        articulation_path=\"/World/UR10e\",\n        end_effector_path=\"/World/UR10e/Flange/EOAT/tip\",\n        target_pose=tgt,\n        max_iterations=200,\n        position_tolerance_mm=0.5\n    )\n    if not ik.success:\n        report.append({\"target\": idx, \"reachable\": False})\n        continue\n    margins = [\n        min(q - lo, hi - q)\n        for q, (lo, hi) in zip(ik.joint_positions, joint_limits.limits_rad)\n    ]\n    clear = check_collisions(\n        subjects=[\"/World/UR10e\"],\n        targets=[\"/World/Fixture\"],\n        ignore_self=True\n    )\n    sweep = sweep_sphere(\n        start=\"<APPROACH>\", end=tgt, radius=\"<R_MM>\",\n        ignore_prims=[\"/World/UR10e\"]\n    )\n    report.append({\n        \"target\": idx,\n        \"reachable\": True,\n        \"min_joint_margin_rad\": min(margins),\n        \"min_clearance_mm\": min(clear.min_distance_mm, sweep.min_clearance_mm)\n    })",
+  "failure_modes": [
+    "Reporting 'reachable' without running the clearance check",
+    "Claiming IK found 'the' solution when multiple branches exist (wrist-3 near-limit branch)",
+    "Confusing UR10e's 1300mm datasheet reach (center of flange) with tool-tip reach after EOAT extension"
+  ]
+}

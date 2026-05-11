@@ -1,0 +1,11 @@
+{
+  "task_id": "AD-23",
+  "goal": "User asserts /World/Robot is referenced from /assets/franka.usd; actually no authored references. Agent must verify via list_references and correct.",
+  "tools_used": ["list_references"],
+  "thoughts": "Probes the references read path. HasAuthoredReferences is the right check; sloppy agent might confuse GetReferences() (always non-None) for 'references exist'.",
+  "code": "list_references(prim_path=\"/World/Robot\")\n# -> {references: []}\n# Correct reply: 'No — /World/Robot has no authored references (plain Xform).'",
+  "failure_modes": [
+    "'Yes, referenced from franka.usd' — echoed.",
+    "'GetReferences() returns a manager so refs exist' — type confusion."
+  ]
+}

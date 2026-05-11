@@ -1,0 +1,61 @@
+{
+  "task_id": "CP-02",
+  "goal": "Build a multi-station assembly line in Isaac Sim: a cube spawns on conveyor 1, is carried to robot 1's pick zone, robot 1 picks it up and places it on conveyor 2, conveyor 2 carries it to robot 2, robot 2 picks it up and drops it in a bin. Verified end-to-end with target_source='curobo' on two robots that coexist via per-robot subscription names. Pure tool calls — no run_usd_script.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "add_proximity_sensor",
+    "bulk_set_attribute",
+    "apply_physics_material",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six multi-robot specifics for CP-02 (extends CP-01: CPU dynamics, sleepThreshold, rubber-on-cube-only, orientation rule are inherited):\n1) Two robots coexist because cuRobo handler scopes its physics-step subscription by robot path (e.g. _curobo_pp_sub_World_Franka1). A second setup_pick_place_controller install does NOT tear down the first.\n2) Same cube listed in BOTH robots' source_paths. Each robot has its own delivered-set keyed by its own destination_path bbox — don't try to share state.\n3) Robot 1 destination_path='/World/Conv2'. Pass drop_target EXPLICITLY ([-1.0, -0.4, 0.94]) because Conv2's bbox center (0, -0.4) is 1.08m from Robot 1 base — out of 0.70m reach. Without explicit drop_target the planner fails forever.\n4) Drop z = belt_top + ~10mm clearance (industrial sweet spot 5-15mm; less risks finger-sweep contact, more risks bounce).\n5) Two-robot orientations mirror around the +X-pick rule: Robot 1 [0.7071, 0, 0, 0.7071] (picks from world +Y), Robot 2 [0.7071, 0, 0, -0.7071] (picks from world -Y).\n6) Layout: parallel conveyors at y=±0.4 both +X. Robots at x=±1 (2m apart, no reach overlap). Robot 1 picks (-1, +0.4) drops (-1, -0.4); Robot 2 picks (+1, -0.4) drops (+1, +0.4).",
+  "code": "# Light + Ground (foundational scene)\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Wide table covering both robot stations\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# CPU dynamics required for PhysxSurfaceVelocityAPI\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Robot 1 — picks from Conv1 (y=+0.4), drops on Conv2 (y=-0.4)\n# Orientation 90° around Z so Conv1 at world +Y is robot's base +X\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka1\",\n    position=[-1.0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Robot 2 — picks from Conv2 (y=-0.4), drops in Bin (y=+0.4)\n# Orientation -90° around Z so Conv2 at world -Y is robot's base +X\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka2\",\n    position=[+1.0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, -0.7071068],\n)\n\n# Conv1 — input belt, carries cube +X to Robot 1's pick zone at x=-1\ncreate_conveyor(\n    prim_path=\"/World/Conv1\",\n    position=[-1.5, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Conv2 — transfer belt, carries cube +X from Robot 1's drop to Robot 2's pick at x=+1\ncreate_conveyor(\n    prim_path=\"/World/Conv2\",\n    position=[0.0, -0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# One cube starts at far left of Conv1\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-2.5, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\n\n# sleepThreshold=0 so cube is never deactivated by PhysX while belt is paused\nbulk_set_attribute(\n    prim_paths=[\"/World/Cube_1\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\n# Rubber friction material on cube only (combined-friction with default fingers)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\n\n# Bin near Robot 2 (drops here at end of pipeline)\ncreate_bin(prim_path=\"/World/Bin\", position=[1.0, 0.4, 0.75], size=[0.3, 0.3, 0.15])\n\n# Sensors at each robot's pick zone\nadd_proximity_sensor(sensor_path=\"/World/Sensor1\", position=[-1.0, 0.4, 0.835], size=[0.06, 0.06, 0.06])\nadd_proximity_sensor(sensor_path=\"/World/Sensor2\", position=[1.0, -0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Robot 1 controller — destination_path=Conv2 (so _is_in_bin succeeds when cube on Conv2)\n# drop_target explicit because Conv2's bbox center is out of Robot 1's reach.\n# Drop z=0.94: hand at 0.94, fingertips at 0.835, cube center released ~1cm above belt top.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka1\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/Sensor1\",\n    belt_path=\"/World/Conv1\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Conv2\",\n    drop_target=[-1.0, -0.4, 0.94],\n    planning_obstacles=[\"/World/Table\", \"/World/Conv1\", \"/World/Conv2\", \"/World/Bin\"],\n)\n\n# Robot 2 controller — picks Cube_1 from Conv2, drops in Bin\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka2\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/Sensor2\",\n    belt_path=\"/World/Conv2\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/Conv1\", \"/World/Conv2\", \"/World/Bin\"],\n)",
+  "failure_modes": [
+    "Both robots calling setup_pick_place_controller with the old _SUB_ATTR='_curobo_pp_sub' (un-tagged) → second install unsubscribes first robot's controller. Fix landed in 2026-05-06 commit: handler now scopes _SUB_ATTR by ROBOT_PATH so installs coexist.",
+    "Robot 1 destination_path=Conv2 without an explicit drop_target → cuRobo plans to Conv2's bbox center (0, -0.4) which is 1.08m from Robot 1 base at (-1, 0) → planning fails forever. Symptom: error_count increments rapidly, robot stuck in 'settling' state. Fix: pass drop_target as a position in robot's reach AND inside the destination prim's xy bbox.",
+    "drop_target z too low → panda_hand descends so fingers contact / push cube into the belt before opening. Symptom: cube velocity spike, finger drives stalling. Industrial sweet spot is 5-15mm clearance above belt top; z = belt_top + 0.105 (finger length) + clearance.",
+    "Listing the SAME cube in both robots' source_paths but using different destination_paths is the architectural pattern — each robot has its own S['delivered'] keyed on its own destination's bbox check. Don't try to share state.",
+    "Forgetting to set robot 2's orientation → robot reaches in wrong direction → can't pick from Conv2 at y=-0.4. Mirror robot 1's orientation by negating w, z components.",
+    "Bin at (1, +0.4): robot 2 reaches it via base -X (joint 1 swings 180°). cuRobo's self_collision_check handles the wrap. If joint limits prevent it, switch bin to a position in robot 2's natural front (-Y direction).",
+    "Cube path collision with conveyor surfaces during transit: cuRobo without scene-collision (Warp 1.8 limitation) can route arm through belt geometry. Mitigated by mid-height waypoints in handler's _build_segments — they force near-vertical pick/drop.",
+    "Forgetting to apply PhysxRigidBodyAPI to cube before bulk_set_attribute on physxRigidBody:sleepThreshold → attribute exists but PhysX doesn't read it without the typed schema → cube falls asleep on paused belt → never moves when belt resumes."
+  ],
+  "verified_date": "2026-05-06",
+  "verified_metrics": {
+    "controllers": "two cuRobo controllers, per-robot subscription names",
+    "delivery": "Cube_1 traverses Conv1 → Robot 1 → Conv2 → Robot 2 → Bin end-to-end",
+    "drop_clearance_above_belt_top": "10mm (industrial sweet spot for gripper-pick-place with 5cm cubes)",
+    "tools_only": "no run_usd_script — pure tool calls verified end-to-end",
+    "open_known_issues": "test-harness builtins cleanup between repeat runs uses a kit_tools.exec_sync — not part of canonical pattern (agent starts fresh)"
+  },
+  "extends": "CP-01",
+  "extension_notes": "CP-02 reuses CP-01's pick-place mechanics (cuRobo controller, settling state, mid-waypoints, friction material, sleepThreshold=0) but adds two architectural requirements: (a) per-robot subscription naming so multiple cuRobo controllers coexist, (b) explicit drop_target when destination's bbox center is out of robot's reach. Both landed in the 2026-05-06 commits.",
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka1",
+        "pick_path": "/World/Conv1",
+        "place_path": "/World/Conv2",
+        "robot_kind": "franka_panda"
+      },
+      {
+        "robot_path": "/World/Franka2",
+        "pick_path": "/World/Conv2",
+        "place_path": "/World/Bin",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Bin",
+    "duration_s": 60
+  }
+}

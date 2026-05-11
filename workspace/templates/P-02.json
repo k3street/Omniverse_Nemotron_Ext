@@ -1,0 +1,12 @@
+{
+  "task_id": "P-02",
+  "goal": "Dry-run 20 frames of the existing Replicator pipeline before committing to overnight 50k job.",
+  "tools_used": ["preview_sdg", "export_dataset", "lookup_knowledge"],
+  "thoughts": "preview_sdg runs the SAME writer and randomizer graph — so any broken writer or miswired annotator shows up in 2 minutes, not 8 hours. Output lands in the same dir structure as the full run. Stay in CV terms (masks, bboxes). 2px bbox offset is usually the annotator-vs-render-resolution mismatch from P-04. Don't suggest just running full 50k.",
+  "code": "# 1. 20-frame preview reusing the authored graph\npreview = preview_sdg(\n    pipeline=\"<PRIYA_PIPELINE_ID>\",\n    frame_count=20,\n    output_dir=\"<DEST_PATH>/preview_<TIMESTAMP>\",\n)\n\n# 2. Tell Priya exactly where to look\n# - RGB:           <DEST>/preview_<TS>/rgb/\n# - masks:         <DEST>/preview_<TS>/instance_segmentation/\n# - annotations:   <DEST>/preview_<TS>/_annotations.coco.json\n\n# 3. Eyeball checklist\n# (a) annotation json parses (python -m json.tool)\n# (b) every image has >=1 bbox for 'apple'\n# (c) mask PNGs aren't all-black\n\n# 4. If RTX profile is the slow suspect\nlookup_knowledge(query=\"replicator preview rtx-realtime vs path-traced speedup\")",
+  "failure_modes": [
+    "assistant tells Priya to 'just run full 50k and check'",
+    "assistant points her at the Stage tree instead of the dataset dir",
+    "assistant uses USD subscription vocabulary in a CV conversation"
+  ]
+}

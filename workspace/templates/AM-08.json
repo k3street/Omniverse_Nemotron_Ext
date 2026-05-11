@@ -1,0 +1,12 @@
+{
+  "task_id": "AM-08",
+  "goal": "Point him at built-in Isaac Sim robot library (Franka, UR10e, Nova Carter, Jetbot) instead of sketchy GitHub URDFs.",
+  "tools_used": ["list_scene_templates", "lookup_knowledge", "import_robot", "load_scene_template", "create_prim", "add_reference"],
+  "thoughts": "Isaac Sim 5.x ships a curated robot library in the assets browser -- no need to scrape GitHub. List canonical starters. list_scene_templates gives one-click scenes with robots already placed. URDF import is 'for later', not the starting path.",
+  "code": "templates = list_scene_templates(category=\"robots\")\nkb = lookup_knowledge(\n    query=\"Isaac Sim 5.x built-in robot asset library Franka UR10e Nova Carter Jetbot\"\n)\n# Option A: drop a robot into empty scene\ncreate_prim(path=\"/World/Robot\", type_name=\"Xform\")\nadd_reference(\n    prim_path=\"/World/Robot\",\n    reference_path=\"<FRANKA_USD_FROM_ASSET_LIB>\"\n)\n# Option B: full scene with robot placed + physics\nload_scene_template(template_name=\"<FRANKA_STARTER>\")\n# Advanced (later): import_robot(source_path=\"<URDF>\", ...)",
+  "failure_modes": [
+    "Sending him to random GitHub URDF repos for quality-unknown assets",
+    "Telling him to model a robot in Blender",
+    "Starting with URDF import when he just wants a working arm on screen"
+  ]
+}

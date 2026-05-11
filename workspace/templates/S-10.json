@@ -1,0 +1,13 @@
+{
+  "task_id": "S-10",
+  "goal": "Record a 2-minute rosbag of the Carter autonomous run with a minimal, correct command.",
+  "tools_used": ["ros2_list_topics", "lookup_knowledge"],
+  "thoughts": "Use ros2 bag record, not a custom Python script. Must pass --use-sim-time so bag timestamps match sim clock — otherwise replay with Nav2 time-triggered behaviors drifts. Disk budget: 10 Hz point cloud at 2 min ~ hundreds of MB, warn Sarah. Sim clock and ROS clock are NOT identical by default — sim-time must be explicitly propagated. Answer stays terse.",
+  "code": "# 1. Confirm topics are live before hitting record\ntopics = ros2_list_topics()\n# Expect: /tf, /chassis/odom, /front_3d_lidar/point_cloud, /front_stereo_camera/left/image_raw\n\n# 2. One-shot record command (host shell, NOT a tool)\n# ros2 bag record \\\n#   --use-sim-time \\\n#   -o <DEST_PATH>/carter_regression_<DATE> \\\n#   /tf /tf_static /chassis/odom \\\n#   /front_3d_lidar/point_cloud \\\n#   /front_stereo_camera/left/image_raw \\\n#   /front_stereo_camera/left/camera_info\n\n# 3. Disk budget note:\n# point cloud ~5 MB/frame * 10 Hz * 120 s ~ 6 GB; stereo raw ~3 MB/frame * 30 Hz ~ 10 GB.\n# Sarah should target >20 GB free.\n\n# 4. Subsampling every 5th lidar scan: use --topic-qos-profile-overrides or rosbag2 filter\nlookup_knowledge(query=\"rosbag2 topic downsample keyframe-interval sim-time\")",
+  "failure_modes": [
+    "assistant writes custom Python bag recorder when ros2 bag suffices",
+    "assistant omits --use-sim-time",
+    "assistant claims ROS and sim clock are identical",
+    "assistant gives 3-paragraph rosbag2 history"
+  ]
+}

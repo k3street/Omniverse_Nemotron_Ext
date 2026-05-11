@@ -1,0 +1,13 @@
+{
+  "task_id": "D-10",
+  "goal": "Geometric LOS check: for 3 gateway positions vs forklift points at z=1.5, raycast through warehouse USD; NOT RF propagation.",
+  "tools_used": ["run_stage_analysis", "raycast", "run_usd_script"],
+  "thoughts": "Be scrupulously honest: this is line-of-sight only, NOT path-loss / multipath / Fresnel-zone modeling. For that client needs Wireless InSite or Remcom. The raycast API gives per-pair occluded/clear. Sample a grid of tracker positions at z=1.5 to produce a coverage heatmap per gateway. Good enough for siting, not for regulatory submission.",
+  "code": "run_stage_analysis()                              # confirm geometry bounds\n\n# Scripted raycast sweep\nrun_usd_script(\n    description=\"LOS sweep: each gateway vs grid of forklift positions\",\n    code=\"\"\"\nimport itertools\ngateways = [(10,5,6), (20,12,6), (30,5,6)]\ntrackers = [(x, y, 1.5) for x in range(0, 40, 2) for y in range(0, 25, 2)]\nreport = {}\nfor g in gateways:\n    for t in trackers:\n        hit = raycast(origin=g, direction=[t[0]-g[0], t[1]-g[1], t[2]-g[2]], max_distance=50.0)\n        report[(g,t)] = 'BLOCKED' if hit.hit_prim else 'CLEAR'\nprint(report)\n\"\"\"\n)\n\n# Output: for each gateway, count clear vs blocked; suggest 4th gateway at worst aisle.\n# Explicit disclaimer: LOS != RF coverage. Metal-shelf attenuation requires RF tool.",
+  "failure_modes": [
+    "Claiming raycast output equates to RF signal strength",
+    "Ignoring roof/ceiling occlusion from ceiling-mounted gateways",
+    "Sampling trackers only at aisle centers \u2014 misses worst-case shelf-blocked poses",
+    "Treating metal shelves same as wood \u2014 no material dependence in raycast"
+  ]
+}

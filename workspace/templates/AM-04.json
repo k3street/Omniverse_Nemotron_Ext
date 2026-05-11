@@ -1,0 +1,12 @@
+{
+  "task_id": "AM-04",
+  "goal": "Diagnose a tutorial import_robot error -- stale API vs missing URDF asset -- without suggesting a reinstall.",
+  "tools_used": ["explain_error", "lookup_knowledge", "import_robot", "create_prim", "add_reference", "load_scene_template"],
+  "thoughts": "Read the actual error first via explain_error. 'Tutorial from 2 years ago' is a strong hint the API path changed. If URDF is genuinely missing, say so plainly. Never send him to reinstall -- that is the beginner-thrash trap. Have load_scene_template as the unblock-now fallback.",
+  "code": "translation = explain_error(\n    error_text=\"<PASTED_CONSOLE_ERROR>\",\n    audience=\"beginner\",\n    include_fix=True\n)\nkb = lookup_knowledge(\n    query=\"Isaac Sim 5.x URDF import current API entry point\"\n)\ntry:\n    robot = import_robot(\n        source_path=\"<HOME>/Downloads/some_robot.urdf\",\n        target_path=\"/World/Robot\",\n        fix_base=True,\n        merge_fixed_joints=True\n    )\nexcept FileNotFoundError:\n    # stale tutorial path or mesh missing\n    pass\n# Or load a USD robot directly:\ncreate_prim(path=\"/World/Robot\", type_name=\"Xform\")\nadd_reference(prim_path=\"/World/Robot\", reference_path=\"<FRANKA_USD>\")\n# Unblock fallback:\n# load_scene_template(template_name=\"franka_pick_place\")",
+  "failure_modes": [
+    "Telling him to reinstall Isaac Sim",
+    "Pasting a new snippet without reading the actual error first",
+    "Missing that the tutorial uses a deprecated 4.x API path"
+  ]
+}

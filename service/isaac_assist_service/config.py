@@ -17,7 +17,8 @@ class Config:
                         line = line.strip()
                         if line and not line.startswith("#") and "=" in line:
                             key, val = line.split("=", 1)
-                            os.environ[key] = val  # later files override earlier ones
+                            # Do NOT clobber env vars set by the caller (tests rely on this).
+                            os.environ.setdefault(key, val)
 
         # ── LLM routing ─────────────────────────────────────────────────────
         self.llm_mode = os.environ.get("LLM_MODE", "local")
@@ -42,6 +43,7 @@ class Config:
         self.api_key_anthropic = os.environ.get("ANTHROPIC_API_KEY", "")
         self.api_key_openai    = os.environ.get("OPENAI_API_KEY", "")
         self.api_key_grok      = os.environ.get("GROK_API_KEY") or os.environ.get("XAI_API_KEY", "")
+        self.api_key_moonshot  = os.environ.get("MOONSHOT_API_KEY", "")
 
         # ── LiveKit ──────────────────────────────────────────────────────────
         self.livekit_url        = os.environ.get("LIVEKIT_URL", "")

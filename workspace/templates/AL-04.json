@@ -1,0 +1,13 @@
+{
+  "task_id": "AL-04",
+  "goal": "Size a GPU cluster for 2000-env IsaacLab Franka training within $400k capex or cloud equivalent.",
+  "tools_used": ["lookup_product_spec", "lookup_knowledge", "launch_training", "profile_training_throughput", "check_vram_headroom", "cloud_estimate_cost"],
+  "thoughts": "Envs-per-GPU is workload-dependent — give a defensible range (100-500 for Franka pick/place on H100/L40S) but ALWAYS qualify as 'measure your workload'. High-res camera observations shift bottleneck from compute to VRAM bandwidth — L40S (48 GB) may beat L4 (24 GB) for camera-heavy workloads. NVLink/NVSwitch matters for PPO with large critic syncs; for embarrassingly-parallel IsaacLab, per-GPU independence is fine. Compare capex vs cloud honestly. Never quote exact cloud prices (stale).",
+  "code": "# 1. GPU class candidates\nlookup_product_spec(product=\"NVIDIA L40S\")\nlookup_product_spec(product=\"NVIDIA H100 SXM\")\nlookup_product_spec(product=\"NVIDIA RTX 6000 Ada\")\nlookup_knowledge(query=\"isaaclab franka pick place envs per gpu h100 l40s benchmark\")\n\n# 2. Small measurement run — 64 envs, 1 GPU, 10-min profile\nrun_small = launch_training(\n    env=\"Isaac-Franka-PickPlace\",\n    num_envs=64,\n    steps=10000,\n    gpu=\"<GPU_SKU>\",\n    dry_run=False,\n    profile=True,\n)\nthru = profile_training_throughput(run_id=run_small.id)\nvram = check_vram_headroom(run_id=run_small.id)\n\n# 3. Extrapolate to 2000 envs with measured envs/GPU\n# n_gpus = ceil(2000 / envs_per_gpu_measured)\n# round up to node size (8 x L40S per server typical)\n\n# 4. Compare capex vs cloud\ncloud_estimate_cost(\n    workload=\"isaaclab_franka_2000env\",\n    steps_per_env=500000,\n    gpu_class=\"<GPU_SKU>\",\n    # DO NOT hardcode $/hr numbers — tool pulls current rates\n)\n\n# 5. Interconnect decision\nlookup_knowledge(query=\"isaaclab ppo critic sync nvlink nvswitch embarrassingly parallel\")",
+  "failure_modes": [
+    "assistant quotes envs/GPU number without qualifying as 'measure yours'",
+    "assistant ignores VRAM headroom for camera-heavy variant",
+    "assistant hardcodes stale cloud $/hr",
+    "assistant says 'just use L4' without checking VRAM"
+  ]
+}

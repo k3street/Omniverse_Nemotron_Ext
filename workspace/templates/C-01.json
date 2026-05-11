@@ -1,0 +1,13 @@
+{
+  "task_id": "C-01",
+  "goal": "Build a physics drop-test scene under /World/Drop: static ground plate + 3 rigid-body cubes stacked at z=1,2,3m, each with RigidBodyAPI+CollisionAPI+1kg mass. Ground has only CollisionAPI.",
+  "tools_used": ["create_prim", "apply_api_schema", "set_attribute", "bulk_apply_schema"],
+  "thoughts": "Compose the scene in one pass: parent Xform → ground (size=1, scale=[5,5,0.1], only CollisionAPI) → 3 cubes (size=0.2, positioned on z, both APIs + mass). Use bulk_apply_schema to batch identical schemas across the 3 cubes. Static collider is NOT a rigid body — that distinction matters for PhysX.",
+  "code": "# Scene parent\ncreate_prim(prim_path=\"/World/Drop\", prim_type=\"Xform\")\n\n# Static ground\ncreate_prim(\n    prim_path=\"/World/Drop/Ground\",\n    prim_type=\"Cube\",\n    size=1.0,\n    position=[0, 0, 0],\n    scale=[5, 5, 0.1],\n)\napply_api_schema(prim_path=\"/World/Drop/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Three dynamic cubes at z=1,2,3\nfor i, z in enumerate([1.0, 2.0, 3.0]):\n    create_prim(\n        prim_path=f\"/World/Drop/Cube_{i}\",\n        prim_type=\"Cube\",\n        size=0.2,\n        position=[0, 0, z],\n    )\n\nbulk_apply_schema(\n    prim_paths=[f\"/World/Drop/Cube_{i}\" for i in range(3)],\n    api_schema=\"PhysicsRigidBodyAPI\",\n)\nbulk_apply_schema(\n    prim_paths=[f\"/World/Drop/Cube_{i}\" for i in range(3)],\n    api_schema=\"PhysicsCollisionAPI\",\n)\nbulk_apply_schema(\n    prim_paths=[f\"/World/Drop/Cube_{i}\" for i in range(3)],\n    api_schema=\"PhysicsMassAPI\",\n)\nfor i in range(3):\n    set_attribute(prim_path=f\"/World/Drop/Cube_{i}\", attr_name=\"physics:mass\", value=1.0)",
+  "failure_modes": [
+    "Giving the ground a RigidBodyAPI — it becomes dynamic and falls.",
+    "Using scale=[0.2,0.2,0.2] without passing size=0.2 or size=1.0 — USD Cube default size=2 → effective 0.4 m, not 0.2.",
+    "Forgetting PhysicsMassAPI — gravity still applies but the cube uses default computed mass, not the requested 1 kg.",
+    "Calling apply_api_schema 9 times in a loop instead of bulk_apply_schema 3 times — correct but 3x the RPC cost."
+  ]
+}

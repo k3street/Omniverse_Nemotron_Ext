@@ -1,0 +1,42 @@
+{
+  "task_id": "CP-04",
+  "goal": "Build a compact pick-and-place cell that fits within a 2×2 m footprint (xy bounded by [-1, 1] × [-1, 1]). Single Franka Panda on a 1x1x0.75m table picks 5cm cubes from a 1.6m conveyor and drops them in a 0.3x0.3m bin behind the robot. The CONSTRAINT-01 task uses this canonical: same delivery mechanics as CP-01, smaller dimensions, footprint-bounded.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six compact-layout specifics for CP-04 (extends CP-01 — orientation rule, CPU dynamics, sleepThreshold, rubber-on-cube, target_source='curobo' all inherited):\n1) Table scale=[0.5, 0.5, 0.375] gives 1×1×0.75 m table (vs CP-01's 2×1×0.75). Bbox xy: [-0.5, -0.25]→[0.5, 0.25]. Fits in [-1, 1].\n2) Conveyor size=[1.6, 0.3, 0.05] at position=[0, 0.4, 0.78]. Bbox xy: [-0.8, 0.25]→[0.8, 0.55]. Half the length of CP-01's conveyor — keeps within bound while still letting cubes drift visibly.\n3) Cubes at x=[-0.75, -0.6, -0.45, -0.3], y=0.4. Start outside Franka's 0.70m reach (|x|>0.575 when y=0.4) so belt has visible work; cubes 1-4 are in increasing reach. Bbox xy stays within [-0.775, 0.375]→[-0.275, 0.425]. Fits.\n4) Bin at position=[0, -0.4, 0.75], size=[0.3, 0.3, 0.15]. Bbox xy: [-0.15, -0.55]→[0.15, -0.25]. Fits.\n5) Robot orientation [0.7071068, 0, 0, 0.7071068] (90° around Z) — same rule as CP-01: cube/belt at world +Y is in robot's natural +X base direction.\n6) verify_pickplace_pipeline accepts footprint_bounds=[[-1,-1],[1,1]] — every authored prim's xy world bbox must fit. Catches layouts that drift outside the constraint without changing the build pattern.",
+  "code": "# DomeLight — without this the viewport renders black after new_stage()\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\n# Parent Xform\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# Table — 1x1x0.75m (half the CP-01 footprint)\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# CPU dynamics for PhysxSurfaceVelocityAPI\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Franka centered, oriented for cube pickup at +Y direction\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Compact conveyor — 1.6m wide (vs CP-01's 3m) — bbox xy stays in [-1, 1]\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[1.6, 0.3, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Cubes start outside reach, closer-spaced than CP-01\nfor i, x in enumerate([-0.75, -0.6, -0.45, -0.3]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\n# sleepThreshold=0\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\n# Rubber on cubes only (CP-01 pattern)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Bin behind robot — same dimensions as CP-01\ncreate_bin(prim_path=\"/World/Bin\", position=[0, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\n# Sensor inside reach\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# cuRobo controller\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Bin\"],\n)",
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/Bin", "robot_kind": "franka_panda"}
+    ],
+    "cube_path": "/World/Cube_1",
+    "footprint_bounds": [[-1.0, -1.0], [1.0, 1.0]]
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Bin",
+    "duration_s": 90
+  },
+  "extends": "CP-01",
+  "extension_notes": "CP-04 reuses CP-01's pick-place mechanics (cuRobo controller, settling state, mid-waypoints, friction material, sleepThreshold=0) but compacts the geometry to fit a 2×2 m footprint constraint. Verify with footprint_bounds=[[-1,-1],[1,1]] catches any layout that drifts outside.",
+  "failure_modes": [
+    "Conveyor size too long — exceeds [-1, 1] x bound. Use 1.6m max.",
+    "Cubes spaced too tight — controller picks them too quickly to see belt motion. Keep ~0.15m spacing.",
+    "Closest cube starts within Franka's 0.70m reach → controller pauses belt immediately on tick 1, never resumes between picks. Keep first cube at |x| > 0.575 when y=0.4.",
+    "Bin pushed too far in -y — exceeds [-1, 1] y bound. Position [0, -0.4, 0.75] is already at edge; don't push further.",
+    "Skipping footprint_bounds in verify_args — verifier won't catch out-of-bound prims and the constraint is silently violated.",
+    "Inheriting CP-01's verify_args verbatim (footprint_bounds=null) negates the whole point of CP-04 vs CP-01."
+  ],
+  "verified_status": "build-verified-2026-05-08; delivery-pending-user-visual-test"
+}

@@ -100,7 +100,7 @@ class MockLLMProvider:
     """Controllable mock LLM provider.
 
     Set `.responses` to a list of _FakeLLMResponse objects; each call to
-    complete() pops the first one.
+    `complete()` pops the first one.
     """
 
     def __init__(self):
@@ -129,7 +129,7 @@ def fake_llm_response():
 
 
 # ---------------------------------------------------------------------------
-# Mock Kit RPC -- patches kit_tools so no running Kit server is required.
+# Mock Kit RPC (patches aiohttp calls to Kit at port 8001)
 # ---------------------------------------------------------------------------
 
 @pytest.fixture()

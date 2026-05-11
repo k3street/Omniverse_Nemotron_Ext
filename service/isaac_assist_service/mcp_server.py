@@ -21,10 +21,44 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
+import time
+import traceback
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
+
+
+# ── QA session logging ────────────────────────────────────────────────────
+# Every MCP tool call (name, args, result, duration, errors) is written to
+# a per-session log file for Phase 12 QA analysis. Location is overridable
+# via QA_LOG_DIR env; otherwise defaults to workspace/qa_logs/.
+_QA_LOG_DIR = Path(os.environ.get(
+    "QA_LOG_DIR",
+    str(Path(__file__).resolve().parents[2] / "workspace" / "qa_logs"),
+))
+_QA_LOG_DIR.mkdir(parents=True, exist_ok=True)
+_QA_SESSION_ID = datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{os.getpid()}"
+_QA_LOG_FILE = _QA_LOG_DIR / f"mcp_{_QA_SESSION_ID}.log"
+
+_qa_file_handler = logging.FileHandler(_QA_LOG_FILE)
+_qa_file_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+))
+# Attach to root so every module's logger writes to the session file.
+logging.getLogger().addHandler(_qa_file_handler)
+logging.getLogger().setLevel(logging.DEBUG)
+logger.info("QA session log: %s", _QA_LOG_FILE)
+
+
+def _truncate(s: str, n: int = 4000) -> str:
+    """Keep log entries readable for huge args/results."""
+    if not isinstance(s, str):
+        s = json.dumps(s, default=str)
+    return s if len(s) <= n else s[:n] + f" ...[+{len(s)-n} chars]"
 
 # ---------------------------------------------------------------------------
 # MCP protocol primitives (no external dependency required)
@@ -49,6 +83,16 @@ class MCPServer:
         self._openai_tools = ISAAC_SIM_TOOLS
         self._executor = execute_tool_call
         self._settings = SettingsManager()
+
+        # Apply rich descriptions for LLM tool selection accuracy (Phase 12 prep)
+        try:
+            from .chat.tools.tool_descriptions_polish import apply_polish
+            count = apply_polish(self._openai_tools)
+            import logging
+            logging.getLogger(__name__).info(f"Applied polished descriptions to {count} tools")
+        except ImportError:
+            pass  # polish file optional
+
         self._mcp_tools = self._convert_tools()
 
     # ── Tool conversion ─────────────────────────────────────────────────
@@ -174,14 +218,24 @@ class MCPServer:
         # Format code patches and data results into MCP content blocks
         content = []
         if result.get("type") == "code_patch":
-            content.append({
-                "type": "text",
-                "text": f"Generated code for `{tool_name}`:\n```python\n{result.get('code', '')}\n```\n\n{result.get('description', '')}",
-            })
+            parts = [
+                f"Generated code for `{tool_name}`:\n```python\n{result.get('code', '')}\n```\n\n{result.get('description', '')}"
+            ]
+            # Surface execution output when AUTO_APPROVE bypassed the queue.
+            if result.get("executed"):
+                success = result.get("success")
+                output = result.get("output", "") or "(no output)"
+                status = "succeeded" if success else ("failed" if success is False else "ran")
+                parts.append(f"\n\nExecution {status}:\n```\n{output}\n```")
+            content.append({"type": "text", "text": "".join(parts)})
         elif result.get("type") == "data":
+            # Handlers spread their fields directly into result — strip "type"
+            # and return everything else as JSON (older code looked at result["data"]
+            # which handlers never populate).
+            payload = {k: v for k, v in result.items() if k != "type"}
             content.append({
                 "type": "text",
-                "text": json.dumps(result.get("data", {}), indent=2),
+                "text": json.dumps(payload, indent=2, default=str),
             })
         else:
             content.append({"type": "text", "text": json.dumps(result, indent=2)})

@@ -1,0 +1,13 @@
+{
+  "task_id": "D-09",
+  "goal": "One-call table: every expected ROS2 topic with measured rate, frame_id, status, and per-row fix.",
+  "tools_used": ["ros2_list_topics", "ros2_get_topic_type", "ros2_publish", "check_tf_health"],
+  "thoughts": "rate sampling needs \u22652 s to be trustworthy \u2014 anything shorter is noise. Check QoS for Nav2-sensitive topics (sensor_data vs reliable). TF at 1 Hz usually means static publisher wiring via wrong bridge node \u2014 check_tf_health catches it. Table rows: topic | type | measured hz | expected hz | frame_id | QoS | status.",
+  "code": "topics = ros2_list_topics(include_rates=True, sample_duration_sec=2.0)\n\nfor t in topics:\n    ros2_get_topic_type(topic=t.name)\n\ncheck_tf_health()                                   # catches static-TF misconfigs\n\n# Table output:\n# | topic                       | type                    | hz | expected | frame_id                        | QoS         | status |\n# | /scan                       | sensor_msgs/LaserScan   | 10 | 10       | laser                           | sensor_data | OK     |\n# | /camera/color/image_raw     | sensor_msgs/Image       | 30 | 30       | camera_color_optical_frame      | sensor_data | OK     |\n# | /odom                       | nav_msgs/Odometry       | 50 | 50       | odom                            | reliable    | OK     |\n# | /tf                         | tf2_msgs/TFMessage      | 1  | \u226550     | \u2014                               | reliable    | LOW HZ |\n\n# Fix low /tf: re-wire robot_state_publisher via bridge node at 50 Hz.\nros2_publish(sensor_prim_path=\"<ROBOT_TF_SOURCE>\", topic=\"/tf\", msg_type=\"tf2_msgs/TFMessage\", rate_hz=50)",
+  "failure_modes": [
+    "Reporting rates from <1 s sample \u2014 noisy false positives",
+    "Ignoring QoS \u2014 Nav2 needs sensor_data for /scan, reliable for /tf",
+    "Skipping frame_id column \u2014 the actual bug category in 80% of bridge issues",
+    "Missing /tf_static vs /tf distinction \u2014 both matter but have different rates"
+  ]
+}

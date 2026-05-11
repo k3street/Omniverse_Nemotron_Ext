@@ -1,0 +1,13 @@
+{
+  "task_id": "F-01",
+  "goal": "Stand up a first-pass 52,000 m² DC twin — 18 rack aisles, 6 conveyor loops, 4 dock doors — from existing Nucleus USD references, inside 30 minutes, with headroom for 64 AMRs later.",
+  "tools_used": ["nucleus_browse", "add_reference", "clone_envs", "check_vram_headroom", "run_stage_analysis"],
+  "thoughts": "Fatima is a DT architect — she references and clones facility assets, she does NOT import URDFs for racks. add_reference per asset family (rack, conveyor loop, dock door), then clone_envs for the 18-aisle grid on 2.8 m pitch. Flag prim-count budget UP FRONT so she can plan for the 64 AMRs + 200 conveyor segments. Confirm '18 x 3-bay' explicitly, don't guess.",
+  "code": "# 18 aisles, 6 loops, 4 docks. Confirm counts before cloning.\n\n# 1. Browse the library (confirm the exact asset paths)\nnucleus_browse(root=\"omniverse://ov-prod/Library/Logistics/\")\n\n# 2. Add one of each asset family as a template\nadd_reference(\n    prim_path=\"/World/Racks/Template\",\n    reference_path=\"omniverse://ov-prod/Library/Logistics/pallet_rack_3bay.usd\"\n)\nadd_reference(\n    prim_path=\"/World/Conveyors/Template\",\n    reference_path=\"omniverse://ov-prod/Library/Logistics/conveyor_loop_30m.usd\"\n)\nadd_reference(\n    prim_path=\"/World/Docks/Template\",\n    reference_path=\"omniverse://ov-prod/Library/Logistics/dock_door.usd\"\n)\n\n# 3. Clone to the 18-aisle grid (aisle pitch = 2.8 m on X; confirm before running)\nclone_envs(\n    source_prim=\"/World/Racks/Template\",\n    count=<18>,\n    spacing=(<2.80>, 0.0, 0.0),           # X-pitch — correct to 2.85 if she says so\n    destination_root=\"/World/Racks\"\n)\nclone_envs(source_prim=\"/World/Conveyors/Template\", count=6,  spacing=(<DX>,<DY>,0), destination_root=\"/World/Conveyors\")\nclone_envs(source_prim=\"/World/Docks/Template\",     count=4,  spacing=(<DX>,0,0),    destination_root=\"/World/Docks\")\n\n# 4. Scale budget BEFORE she wires telemetry\ncheck_vram_headroom(stage_path=\"<CURRENT_STAGE>\")\nrun_stage_analysis(stage_path=\"<CURRENT_STAGE>\")\n\n# Tell Fatima: current prim count + projected count after 64 AMRs + 200 conveyor\n# segments. If headroom is thin, flag it now — cheaper than discovering at AMR load.",
+  "failure_modes": [
+    "Silently cloning 200 racks because she said 'a lot' without confirming 18 x 3-bay",
+    "Proposing URDF import for facility assets (racks are references, not robots)",
+    "Skipping check_vram_headroom and not flagging the 64-AMR scale budget up front",
+    "Hardcoding 2.8 m pitch and not accepting her correction to 2.85 m"
+  ]
+}

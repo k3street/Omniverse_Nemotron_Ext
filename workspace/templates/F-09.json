@@ -1,0 +1,13 @@
+{
+  "task_id": "F-09",
+  "goal": "Give Fatima a one-shot post-merge sanity read on a DC stage after a colleague's rack-layout sublayer landed: prim count, layer stack, broken references.",
+  "tools_used": ["run_stage_analysis", "list_layers", "list_all_prims"],
+  "thoughts": "She asked for a check, not a refactor. run_stage_analysis + list_layers covers prim count + layer stack + broken references in one pass. If a reference shows as '?' in the stage window, that's unresolved-composition state — surface the specific prim path and which sublayer introduced it. +11,000 prims for a rack sublayer IS plausible for a DC-scale layout (18 aisles * many components); reassure without hand-wave.",
+  "code": "# One pass. Report, don't refactor.\n\n# 1. Stage-wide sanity read\nrun_stage_analysis(stage_path=\"<DC_STAGE>\")\n\n# 2. Layer stack — confirm his sublayer is in the expected position\nlist_layers(stage_path=\"<DC_STAGE>\")\n\n# 3. If anything flagged — drill into the specific prim path\nlist_all_prims(\n    stage_path=\"<DC_STAGE>\",\n    filter_has_broken_reference=True\n)\n\n# Report Fatima needs:\n#   - Total prims: <N>\n#   - Delta vs pre-merge: +<DELTA>\n#   - Layer stack: <root>, <his_sublayer>, <yours>, ...\n#   - Unresolved references: <list of prim paths + which sublayer authored the ref>\n#   - Broken references: <list of prim paths + the unresolved URL>\n#\n# Answer her two likely follow-ups:\n#   - '?' marker in stage window = unresolved composition (reference target\n#     didn't resolve). Either the Nucleus URL is wrong, the server is down,\n#     or the referenced prim path inside the asset was renamed.\n#   - +11,000 prims for a rack sublayer is plausible for a DC layout\n#     (18 aisles x dozens of rack components + shelves + signage per aisle).\n#     Flag only if it breaks the VRAM headroom budget.",
+  "failure_modes": [
+    "Over-engineering — she asked for a check, not a refactor plan",
+    "Missing the '?' marker explanation (unresolved composition, not an error state)",
+    "Alarming her about +11k prims when that's normal for a rack sublayer at DC scale",
+    "Reporting counts without attributing broken references to their source sublayer"
+  ]
+}

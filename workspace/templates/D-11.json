@@ -1,0 +1,13 @@
+{
+  "task_id": "D-11",
+  "goal": "Configure the sim IMU at /World/amr/base_link/imu_link to match Bosch BMI088 noise/bias and publish /imu/data at 200 Hz.",
+  "tools_used": ["lookup_product_spec", "add_sensor_to_prim", "ros2_publish", "inspect_camera"],
+  "thoughts": "BMI088 datasheet: gyro noise density 0.014 \u00b0/s/\u221aHz (convert to rad/s for Isaac: *\u03c0/180 \u2248 2.44e-4 rad/s/\u221aHz), bias stability ~2 \u00b0/hr (\u2248 9.7e-6 rad/s). Accel: 175 \u00b5g/\u221aHz (*9.81e-6 \u2248 1.72e-3 m/s\u00b2/\u221aHz), bias 20 \u00b5g (\u2248 1.96e-4 m/s\u00b2). 200 Hz matches EKF \u2014 higher wastes. Isaac Sim IMU is Gaussian white + random walk, no temperature drift.",
+  "code": "spec = lookup_product_spec(product=\"Bosch BMI088\")\n\n# Units: Isaac Sim IMU expects rad/s and m/s^2. CONVERT.\n#   gyro_noise_density = 0.014 deg/s/sqrt(Hz) * pi/180 \u2248 2.44e-4 rad/s/sqrt(Hz)\n#   gyro_bias_stability = 2 deg/hr \u2248 9.7e-6 rad/s\n#   accel_noise_density = 175e-6 g/sqrt(Hz) * 9.81 \u2248 1.72e-3 m/s^2/sqrt(Hz)\n#   accel_bias_stability = 20e-6 g * 9.81 \u2248 1.96e-4 m/s^2\n\nadd_sensor_to_prim(\n    parent_prim_path=\"/World/amr/base_link/imu_link\",\n    sensor_type=\"imu\",\n    rate_hz=200,\n    gyro_noise_density=2.44e-4,\n    gyro_bias_stability=9.7e-6,\n    accel_noise_density=1.72e-3,\n    accel_bias_stability=1.96e-4,\n    frame_id=\"imu_link\"\n)\n\nros2_publish(\n    sensor_prim_path=\"/World/amr/base_link/imu_link\",\n    topic=\"/imu/data\",\n    msg_type=\"sensor_msgs/Imu\",\n    rate_hz=200,\n    frame_id=\"imu_link\"\n)\n\ninspect_camera(prim_path=\"/World/amr/base_link/imu_link\")  # verify fields applied\n\n# Honest limits: Isaac IMU is Gaussian white + bias random walk.\n# No BMI088 temperature drift, no g-sensitive gyro error. sim-to-real gap.",
+  "failure_modes": [
+    "Leaving bias_stability=0 \u2014 sim EKF trusts IMU too much vs real",
+    "Reporting noise in deg/s and mg \u2014 Isaac wants rad/s and m/s^2",
+    "Running 400 Hz IMU when EKF subscribes at 200 \u2014 pure waste + dropped samples",
+    "Omitting frame_id=imu_link \u2014 robot_localization EKF drops /imu/data"
+  ]
+}

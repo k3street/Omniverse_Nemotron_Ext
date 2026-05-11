@@ -1,0 +1,12 @@
+{
+  "task_id": "Y-08",
+  "goal": "Give the floor a wet-concrete look (visual) and disambiguate from PhysX 'physics material' (friction/restitution).",
+  "tools_used": ["create_material", "assign_material", "lookup_material", "apply_physics_material"],
+  "thoughts": "Director's 'physics material' is a terminology collision. What he means is a PBR visual material with high spec / low value / subtle puddle break-up. apply_physics_material is a DIFFERENT thing for friction/restitution -- only matters if the robot touches the floor. Offer it as a separate follow-up, don't conflate.",
+  "code": "wet_concrete = create_material(\n    path=\"/World/Looks/WetConcrete\",\n    shader=\"MDL\",\n    mdl_source=\"<MDL_MODULE>\",\n    params={\n        \"base_color\": \"<DARK_RGB>\",\n        \"roughness\": \"<LOW_FLOAT>\",\n        \"metallic\": 0.0,\n        \"specular\": \"<HIGH_FLOAT>\",\n        \"normal_map\": \"<PUDDLE_NORMAL>\",\n        \"roughness_map\": \"<PUDDLE_ROUGHNESS>\"\n    }\n)\nassign_material(prim_path=\"/World/Floor\", material_path=wet_concrete.path)\n# Only if he later needs real footfall interaction:\n# phys = lookup_material(name=\"concrete\")\n# apply_physics_material(prim_path=\"/World/Floor\", material_path=phys.path)",
+  "failure_modes": [
+    "Conflating visual MDL material with PhysX material and applying both when only the look is needed",
+    "Flat base color without roughness variation so there are no puddles",
+    "Modeling puddle geometry when a roughness/normal map gets the look for free"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "task_id": "AM-03",
+  "goal": "Fix a 'stuck shoulder hinge' (unpowered revolute joint) without correcting his vocabulary.",
+  "tools_used": ["list_all_prims", "diagnose_physics_error", "explain_error", "lookup_knowledge", "set_joint_targets", "set_drive_gains"],
+  "thoughts": "Translate silently: hinge = revolute joint, skeleton = articulation. Most likely cause: joint drive not enabled so the joint is passive. Offer the fix in his terms ('turn on the motor') alongside the real API name. Never make him feel dumb for the vocabulary.",
+  "code": "joints = list_all_prims(type_filter=\"Joint\", path_prefix=\"/World\")\ndiag = diagnose_physics_error(\n    scope_path=\"/World\",\n    checks=[\"joint_drive_enabled\", \"articulation_root\", \"joint_limits\", \"mass_zero\"]\n)\nfor f in diag.findings:\n    explain_error(error_text=f.message, audience=\"beginner\", include_fix=True)\nkb = lookup_knowledge(\n    query=\"Isaac Sim 5.x enable joint drive revolute articulation\"\n)\n# Apply fix: enable drive + gains + target\nset_drive_gains(\n    joint_path=\"<SHOULDER_JOINT>\",\n    stiffness=\"<K>\",\n    damping=\"<D>\",\n    drive_type=\"position\"\n)\nset_joint_targets(\n    articulation_path=\"/World/Robot\",\n    joint_names=[\"shoulder\"],\n    targets=[\"<TARGET_RAD>\"]\n)",
+  "failure_modes": [
+    "Correcting his vocabulary in a way that stings",
+    "Dumping the USD joint-drive schema spec",
+    "Pointing at Blender-style keyframe animation as the fix (it's physics, not rig)"
+  ]
+}

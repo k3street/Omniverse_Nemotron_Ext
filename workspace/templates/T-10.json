@@ -1,0 +1,13 @@
+{
+  "task_id": "T-10",
+  "goal": "For a programmed UR10e linear TCP trajectory, identify whether the path passes through or near a kinematic singularity, quantify proximity via manipulability index, and cite the ISO 10218-1 clause.",
+  "tools_used": ["check_singularity", "check_path_clearance", "scene_summary", "lookup_knowledge"],
+  "thoughts": "Never give a rubber-stamp 'looks good'. check_singularity returns the minimum manipulability along the path and the singularity type (wrist/shoulder/elbow). Produce the actual number, not a yes/no. lookup_knowledge retrieves ISO 10218-1 clause 5.6 text — do not quote from memory. Threshold 0.01 is a common conservative choice but document it as chosen, not universal.",
+  "code": "# Numbers, not vibes.\n\n# 1. Confirm the correct UR10e and TCP are being analyzed\nscene_summary(stage_path=\"<SCENE_USD>\")\n\n# 2. Sweep the scripted trajectory for manipulability\ncheck_singularity(\n    robot_prim=\"<UR10E_PRIM>\",\n    trajectory_start=(0.4, -0.3, 0.5),\n    trajectory_end=(0.4, 0.3, 0.5),\n    orientation_fixed=True,\n    payload_kg=2.0,\n    sample_count=100\n)\n\n# 3. Also check clearance — singularities often co-locate with reach-limit paths\ncheck_path_clearance(\n    stage_path=\"<SCENE_USD>\",\n    path_prim=\"<TRAJECTORY_PRIM>\"\n)\n\n# 4. Cite ISO 10218-1 clause 5.6 — from retrieval, not memory\nlookup_knowledge(query=\"ISO 10218-1 clause 5.6 unexpected motion singularity high-speed joint\")\n\n# Report — return actual numbers:\n#   minimum manipulability observed: <FROM_TOOL>\n#   location on path:                <s=...>\n#   singularity type:                <wrist | shoulder | elbow>\n#   threshold applied:               0.01 (conservative, documented)\n#   verdict:                         ABOVE / BELOW threshold\n# If below 0.01: mitigation options — reroute, reorient wrist, reduce speed,\n# add joint-speed limiter. State each with a concrete next step.\n# Emit a CSV artifact (joint_speed + manipulability vs time) attachable to the hazard log.",
+  "failure_modes": [
+    "Giving 'no singularity' as a yes/no without the actual minimum manipulability number",
+    "Quoting ISO 10218-1 clause 5.6 from memory instead of lookup_knowledge",
+    "Rubber-stamping manipulability 0.008 as 'fine' when the threshold is 0.01",
+    "Missing the singularity type label (wrist vs shoulder vs elbow)"
+  ]
+}

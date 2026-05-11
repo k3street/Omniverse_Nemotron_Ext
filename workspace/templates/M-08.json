@@ -1,0 +1,13 @@
+{
+  "task_id": "M-08",
+  "goal": "Build a new IsaacLab task from scratch: Allegro hand above a table with cube/cylinder/sphere targets, scene authored as an InteractiveSceneCfg subclass, no GUI.",
+  "tools_used": ["nucleus_browse", "lookup_knowledge", "catalog_search", "run_usd_script"],
+  "thoughts": "Maya wants real IsaacLab 2.x cfg classes: ArticulationCfg for the hand, RigidObjectCfg for dynamic targets, AssetBaseCfg + GroundPlaneCfg for the static table. Dynamic targets need RigidObjectCfg not AssetBaseCfg — otherwise PhysX will not integrate them. replicate_physics=True is what gives per-env PhysX, not a manual for-loop. gym.make registration is non-optional for eval scripts.",
+  "code": "# 1. Confirm Allegro USD path in Nucleus\nnucleus_browse(path=\"omniverse://localhost/NVIDIA/Assets/Isaac/5.0/Isaac/Robots/AllegroHand/\")\n\n# 2. Anchor in real IsaacLab 2.x scene cfg patterns\nlookup_knowledge(query=\"IsaacLab 2.x InteractiveSceneCfg ArticulationCfg RigidObjectCfg replicate_physics\")\n\n# 3. Confirm primitive spawn configs exist in shipped catalog\ncatalog_search(query=\"CuboidCfg SphereCfg CylinderCfg spawn primitives IsaacLab\")\n\n# 4. Sketch the scene cfg — Maya wires this herself, but verify path semantics\nrun_usd_script(script=\"\"\"\n# Reference structure authored in allegro_multi_object_env_cfg.py (NOT at runtime):\n# @configclass\n# class AllegroMultiObjSceneCfg(InteractiveSceneCfg):\n#     num_envs=<N>; env_spacing=<S>; replicate_physics=True\n#     ground = AssetBaseCfg(prim_path='/World/ground', spawn=GroundPlaneCfg())\n#     robot  = ArticulationCfg(prim_path='{ENV_REGEX_NS}/Robot',\n#                              spawn=UsdFileCfg(usd_path='<ALLEGRO_USD>'))\n#     cube   = RigidObjectCfg(prim_path='{ENV_REGEX_NS}/Cube',\n#                              spawn=CuboidCfg(size=(<SX>,<SY>,<SZ>), rigid_props=..., collision_props=...))\n#     sphere = RigidObjectCfg(prim_path='{ENV_REGEX_NS}/Sphere', spawn=SphereCfg(...))\n#     cyl    = RigidObjectCfg(prim_path='{ENV_REGEX_NS}/Cyl',    spawn=CylinderCfg(...))\nprint('cfg skeleton authored to <PKG>/allegro_multi_object_env_cfg.py')\n\"\"\")",
+  "failure_modes": [
+    "AssetBaseCfg for dynamic targets — no RigidBodyAPI applied, they stay frozen",
+    "Skipping gym.register in __init__.py breaks eval scripts that import by task id",
+    "replicate_physics=False with 4096 envs serializes per-env PhysX authoring — minutes per startup",
+    "Absolute prim paths instead of {ENV_REGEX_NS} — all envs share one instance, RL breaks"
+  ]
+}

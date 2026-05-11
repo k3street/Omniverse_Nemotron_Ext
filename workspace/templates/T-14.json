@@ -1,0 +1,12 @@
+{
+  "task_id": "T-14",
+  "goal": "Constrain /World/Cobot/joint_elbow to [-90°, +90°] via set_joint_limits. USD stores revolute joint limits in DEGREES — lower=-90, upper=90. Snapshot verifies attrs.physics:lowerLimit/upperLimit.",
+  "tools_used": ["get_joint_limits", "set_joint_limits"],
+  "thoughts": "Units trap: USD PhysicsRevoluteJoint physics:lowerLimit is DEGREES (not radians). Passing π/2 would yield a 1.57° window — effectively locked. Agent must use degrees.",
+  "code": "get_joint_limits(joint_path='/World/Cobot/joint_elbow')\nset_joint_limits(joint_path='/World/Cobot/joint_elbow', lower=-90, upper=90)\nget_joint_limits(joint_path='/World/Cobot/joint_elbow')\n# Correct reply: 'Joint elbow constrained to ±90° (USD stores as degrees). Required for safety case.'",
+  "failure_modes": [
+    "Passing radians (π/2≈1.5708) when USD expects degrees — effective lock-up.",
+    "Deleting the joint instead of constraining.",
+    "Saying 'done' without stating the authored values or safety-case rationale."
+  ]
+}

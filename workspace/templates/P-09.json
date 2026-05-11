@@ -1,0 +1,13 @@
+{
+  "task_id": "P-09",
+  "goal": "Produce a compact label->prim-count report so Priya can verify semantic labels before the big SDG run.",
+  "tools_used": ["list_semantic_classes", "find_prims_by_schema", "validate_semantic_labels", "scene_summary"],
+  "thoughts": "Goal is a greppable one-liner per class, not a 500-line prim dump. list_semantic_classes gives the class inventory, then count prims per class via find_prims_by_schema. Flag suspicious counts ('apple': 432 when ~30 expected) inline. Multi-label is supported — one prim can carry apple AND fruit via multiple SemanticsAPI instances. Instance seg and semantic seg read the same label source (Semantics API) but different channels. Don't send her into the Property panel.",
+  "code": "# 1. Class inventory and per-class counts\nclasses = list_semantic_classes(scene=\"current\")\nreport = []\nfor cls in classes:\n    prims = find_prims_by_schema(schema=\"SemanticsAPI\", filter={\"class\": cls.name})\n    report.append((cls.name, len(prims)))\n\n# 2. Compact greppable output — one line per class\n# <class> <count> <suspicious_flag>\nEXPECTED = {\"apple\": <N_APPLES>, \"leaf\": <N_LEAVES>, \"branch\": <N_BRANCHES>, \"trunk\": <N_TRUNKS>, \"ground\": 1, \"sky\": 1}\nfor name, cnt in sorted(report):\n    exp = EXPECTED.get(name, None)\n    flag = \"SUSPICIOUS\" if exp and abs(cnt - exp) > max(2, 0.2 * exp) else \"ok\"\n    print(f\"{name}\\t{cnt}\\t{flag}\")\n\n# 3. Full validation pass catches broken Semantics API applications\nvalidate_semantic_labels(scene=\"current\")\n\n# 4. Scene summary as sanity context\nscene_summary(include_semantic_counts=True)",
+  "failure_modes": [
+    "assistant dumps 500 prim paths",
+    "assistant recommends Property panel manual check",
+    "assistant conflates old class-attribute style with new Semantics API",
+    "assistant claims instance and semantic seg use different label sources"
+  ]
+}

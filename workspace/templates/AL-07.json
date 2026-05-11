@@ -1,0 +1,13 @@
+{
+  "task_id": "AL-07",
+  "goal": "Give Alessandro a 5-minute headless smoke-test command + failure-class triage for a new Isaac Sim server.",
+  "tools_used": ["open_stage", "sim_control", "scene_summary", "check_physics_health", "get_console_errors", "hardware_compatibility_check"],
+  "thoughts": "One headless invocation: Python app template, window disabled, load a ship-included sample, step N physics frames, exit(0) on success. Alessandro is SSH-only — never propose GUI bootstrap. Failure triage matters: 'cannot initialize RTX' is driver/Vulkan; 'license server unreachable' maps to named socket timeout; 'cannot load stage' is Nucleus mount or asset path. Safe to cron weekly. Terse answer — he's doing 12 this month.",
+  "code": "# Headless smoke-test script (called by shell wrapper below)\n# smoke_test.py — runs inside isaac-sim.sh --no-window --exec smoke_test.py\n\nhw = hardware_compatibility_check(profile=\"isaac_sim_5x_minimum\")\nif not hw.ok:\n    raise SystemExit(f\"HW fail: {hw.issues}\")\n\nopen_stage(path=\"<SAMPLE_STAGE>\")  # e.g. bundled Warehouse sample\nsummary = scene_summary()\nassert summary.prim_count > 0, \"stage did not load\"\n\nsim_control(action=\"play\")\nfor _ in range(<N_PHYSICS_STEPS>):\n    sim_control(action=\"step\")\n\nhealth = check_physics_health(window_frames=<N_PHYSICS_STEPS>)\nerrs = get_console_errors(since=\"start\")\nif errs.error_count == 0 and health.ok:\n    # write success marker\n    open(\"<DEST_PATH>/.smoke_ok\", \"w\").write(\"ok\")\n    raise SystemExit(0)\nraise SystemExit(2)\n\n# Shell wrapper (cronnable):\n# /opt/nvidia/isaac-sim/isaac-sim.sh --no-window --exec /opt/smoke_test.py \\\n#   > /var/log/isaac-smoke.log 2>&1\n# Exit codes: 0=ok, 1=hw, 2=runtime\n\n# Failure-class map for the log:\n#  'cannot initialize RTX'       -> driver / Vulkan (check nvidia-smi + vulkaninfo)\n#  'license server unreachable'  -> NGC license server DNS/firewall\n#  'cannot resolve omniverse://' -> Nucleus mount not configured\n#  'EGL display'                 -> headless GPU + no virtual display",
+  "failure_modes": [
+    "assistant proposes opening GUI once to bootstrap",
+    "assistant forgets to set --no-window",
+    "assistant doesn't distinguish driver failure from license failure",
+    "assistant writes a script that returns 0 even on physics failure"
+  ]
+}

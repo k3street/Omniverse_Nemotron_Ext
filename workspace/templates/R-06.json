@@ -1,0 +1,13 @@
+{
+  "task_id": "R-06",
+  "goal": "Root-cause the cuSolver IllegalAddress crash at step 12000 and relaunch training before Raj goes to bed.",
+  "tools_used": ["explain_error", "diagnose_physics_error", "launch_training"],
+  "thoughts": "cudaErrorIllegalAddress in contact reduction at ~12k steps is almost always contact-buffer overflow from too many simultaneous contacts \u2014 direct consequence of num_envs=4096. Drop to 2048 first (cheapest fix), then bump gpu_max_rigid_contact_count and gpu_max_particle_contacts if needed. Not a driver bug.",
+  "code": "explain_error(error_text=\"CUDA error in cuSolverContactReduction: cudaErrorIllegalAddress\")\n\ndiagnose_physics_error(log_tail=\"<LAST_200_LINES>\")\n\n# Fix: halve num_envs AND raise contact buffers\nset_physics_params(\n    scene_path=\"/physicsScene\",\n    gpu_max_rigid_contact_count=<1048576>,        # default 524288\n    gpu_max_num_partitions=<8>,\n    gpu_collision_stack_size=<67108864>\n)\n\nlaunch_training(\n    task=\"<ISAAC_LAB_TASK>\",\n    num_envs=<2048>,                                # was 4096\n    headless=True,\n    log_dir=\"<ABS_LOG_DIR>\",\n    resume=True,                                    # keep progress\n    checkpoint=\"<LATEST_CHECKPOINT>\"\n)\n\n# Fallback if it recurs: disable GPU pipeline for this task \u2014 CPU contacts, slower but stable.",
+  "failure_modes": [
+    "Blaming driver/CUDA install without evidence",
+    "Catching the exception and continuing \u2014 PhysX state is already corrupt",
+    "Raising contact buffers without lowering num_envs \u2014 still OOMs",
+    "Resuming from a checkpoint captured post-corruption"
+  ]
+}

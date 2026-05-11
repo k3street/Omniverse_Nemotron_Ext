@@ -1,0 +1,12 @@
+{
+  "task_id": "Y-04",
+  "goal": "Queue 6 cameras x 1 frame 4K path-traced with AOVs for comp, rendered overnight headless.",
+  "tools_used": ["set_render_resolution", "set_render_mode", "set_render_config", "capture_viewport", "lookup_knowledge"],
+  "thoughts": "Path-traced 4K x 6 frames demands the kit headless batch runner, not GUI capture. Denoiser stays ON for beauty only; OFF for normals/Z/diffuse/specular/cryptomatte because a temporally denoised utility pass breaks comp. Be honest: RTX Interactive's cryptomatte emission is limited -- verify the real AOV list before promising channel names.",
+  "code": "set_render_resolution(width=3840, height=2160)\nset_render_mode(mode=\"RTXInteractivePathTraced\")\navailable = lookup_knowledge(query=\"Isaac Sim 5.x RTX renderer AOV inventory cryptomatte\")\nset_render_config(\n    samples_per_pixel=\"<SPP>\",\n    max_bounces=\"<INT>\",\n    denoiser=\"optix\",\n    denoise_aovs=False,\n    aovs=[\"beauty\", \"diffuse\", \"specular\", \"normal\", \"depth\", \"object_id\"]\n)\nfor cam in [\"cam_01\", \"cam_02\", \"cam_03\", \"cam_04\", \"cam_05\", \"cam_06\"]:\n    capture_viewport(\n        path=f\"<OUT_DIR>/{cam}.exr\",\n        camera_path=f\"/World/Cameras/{cam}\",\n        width=3840, height=2160,\n        file_format=\"exr_multilayer\"\n    )\n# Wrap above in kit headless script: isaac-sim.headless.sh --exec render_batch.py",
+  "failure_modes": [
+    "Fabricating cryptomatte AOV support without checking the actual renderer",
+    "Leaving denoiser on for normals/Z so compositor gets unusable passes",
+    "Suggesting GUI 'press capture 6 times' instead of headless kit runner"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "task_id": "P-12",
+  "goal": "30 apples sharing one material must end up with 30 distinct material instances — one per apple, rebound. Semantic 'apple' class preserved.",
+  "tools_used": ["find_prims_by_name", "list_relationships", "run_usd_script"],
+  "thoughts": "Natural follow-on to P-07 (material-param DR advisory). P-07 establishes the WHY of per-instance, P-12 tests executing the instancing. Snapshot check samples relationships on a few apples to confirm distinct bindings.",
+  "code": "find_prims_by_name(name_pattern='apple_*')\nrun_usd_script(code='for i in range(30): copy mat → /World/Looks/apple_mat_{i}, rebind /World/Apples/apple_{i}')\nlist_relationships(prim_path='/World/Apples/apple_0')\n# Correct reply: '30 per-apple material instances created + rebound. Heads-up: 30 mats × N orchards = real VRAM.'",
+  "failure_modes": [
+    "Proposing rep.modify.material_instancing — doesn't exist.",
+    "Creating 30 materials but not rebinding.",
+    "Losing the semantic 'apple' label on some apples during rebind."
+  ]
+}

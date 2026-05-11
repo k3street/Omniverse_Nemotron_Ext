@@ -1,0 +1,13 @@
+{
+  "task_id": "G-03",
+  "goal": "Place four 0.3m cubes in a 2x2 grid on the XY plane with 1m spacing between centers, grid centered at origin. Centers at (±0.5, ±0.5, 0.15). Verify with get_world_transform and count_prims_under_path.",
+  "tools_used": ["create_prim", "get_world_transform", "count_prims_under_path"],
+  "thoughts": "Centered grid: if spacing=1 and count=2 per axis, centers are at [-spacing/2, +spacing/2] = [-0.5, +0.5]. Cube Z = size/2 = 0.15 so the bottom face sits on the ground. Verify count=4 with count_prims_under_path and sample 2 corners with get_world_transform to catch grid offset bugs.",
+  "code": "size = 0.3\nspacing = 1.0\nz = size / 2    # bottom face on ground\npositions = []\nfor ix, sx in enumerate([-spacing/2, spacing/2]):\n    for iy, sy in enumerate([-spacing/2, spacing/2]):\n        idx = ix * 2 + iy\n        positions.append((idx, sx, sy))\n        create_prim(\n            prim_path=f\"/World/Cube_{idx}\",\n            prim_type=\"Cube\",\n            translate=[sx, sy, z],\n            attributes={\"size\": size}\n        )\n\n# Verify: count should be 4, and 2 opposite corners should match\ncount_prims_under_path(parent_path=\"/World\", type_filter=\"Cube\")\nget_world_transform(prim_path=\"/World/Cube_0\")\nget_world_transform(prim_path=\"/World/Cube_3\")",
+  "failure_modes": [
+    "Non-centered grid at (0,0),(1,0),(0,1),(1,1) — off by spacing/2 on both axes.",
+    "Forgetting z = size/2 — cubes half-sunk into the ground or floating above it.",
+    "count_prims_under_path may include non-Cube siblings if type_filter is omitted on a non-empty stage — harmless here since stage is empty.",
+    "Using xformOps that collide with the Cube primitive's inherited xformOpOrder — only a risk when the path already exists, not for fresh create_prim."
+  ]
+}

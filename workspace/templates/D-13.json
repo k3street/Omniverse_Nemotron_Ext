@@ -1,0 +1,12 @@
+{
+  "task_id": "D-13",
+  "goal": "Configure /World/PhysicsScene for deterministic replay via enable_deterministic_mode. Snapshot should show attrs.physxScene:solverType='TGS' and/or timeStepsPerSecond authored after the tool runs. Agent must not hand-author via run_usd_script.",
+  "tools_used": ["get_physics_scene_config", "enable_deterministic_mode"],
+  "thoughts": "First stage-measurable HARD that exercises the 2026-04-19 snapshot-attr extension (PhysicsScene named attrs now surface in the judge summary). Before the fix, every PhysicsScene looked identical in snapshot diff regardless of what the tool authored.",
+  "code": "get_physics_scene_config(scene_path=\"/World/PhysicsScene\")\nenable_deterministic_mode(seed=42)\n# Correct reply: 'Deterministic mode enabled — TGS solver, fixed 60Hz timestep, CPU dynamics. Caveat: PhysX determinism is still hardware-dependent for float ordering; pin CI runner hardware.'",
+  "failure_modes": [
+    "Using run_usd_script to hand-author settings when enable_deterministic_mode exists.",
+    "Claiming 'fully deterministic' without the hardware caveat.",
+    "Not authoring the required attributes on PhysicsScene."
+  ]
+}

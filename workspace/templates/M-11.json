@@ -1,0 +1,13 @@
+{
+  "task_id": "M-11",
+  "goal": "Export a trained rsl_rl PPO Allegro policy to ONNX/TorchScript for Jetson Orin deployment, with obs normalizer and action scaling preserved end-to-end.",
+  "tools_used": ["lookup_knowledge", "export_policy", "run_usd_script"],
+  "thoughts": "Use the real IsaacLab export utility in isaaclab.utils, not a hand-rolled torch.onnx.export — the utility wraps the obs normalizer (running mean/std) alongside the actor. Action scaling/clipping lives OUTSIDE the policy and MUST be replicated in the real-robot bridge or actions blow up 10x. Opset 17+ for TensorRT 10. Do a fixed-obs sanity check: load ONNX, feed a recorded obs, compare to PyTorch actor output to machine epsilon.",
+  "code": "# 1. Confirm the export utility location (isaaclab.utils, not rsl_rl.runners)\nlookup_knowledge(query=\"IsaacLab export_policy_as_onnx export_policy_as_jit utils rsl_rl checkpoint\")\n\n# 2. Export ONNX + JIT with normalizer embedded, opset 17 for TRT 10\nexport_policy(\n    checkpoint_path=\"<LOG_DIR>/model_4999.pt\",\n    format=\"onnx\",\n    output_path=\"<EXPORT_DIR>/policy.onnx\",\n    opset=17,\n    include_normalizer=True,\n    actor_only=True\n)\nexport_policy(\n    checkpoint_path=\"<LOG_DIR>/model_4999.pt\",\n    format=\"torchscript\",\n    output_path=\"<EXPORT_DIR>/policy.pt\",\n    include_normalizer=True,\n    actor_only=True\n)\n\n# 3. Sanity: same obs through torch actor and onnxruntime must match\nrun_usd_script(script=\"\"\"\nimport torch, onnxruntime as ort, numpy as np\nobs = torch.load('<RECORDED_OBS_PT>')  # (1, obs_dim)\nactor = torch.load('<CHECKPOINT>')['actor']\nref = actor(obs).detach().cpu().numpy()\nsess = ort.InferenceSession('<EXPORT_DIR>/policy.onnx')\nout = sess.run(None, {'obs': obs.cpu().numpy()})[0]\nassert np.allclose(ref, out, atol=1e-5), 'ONNX drift vs torch'\nprint('ONNX parity OK')\n\"\"\")\n\n# 4. On Orin: replicate action scaling exactly:\n#    act = np.clip(onnx_out, <ACT_LO>, <ACT_HI>) * <ACTION_SCALE> + <ACTION_OFFSET>\n#    sim used cfg.actions.<term>.scale / clip_actions — mirror them 1:1.",
+  "failure_modes": [
+    "Hand-rolled torch.onnx.export strips the obs normalizer — policy sees raw obs on robot",
+    "Action scaling applied only in sim cfg, omitted on Orin — 10x action magnitude",
+    "Opset 13 for TRT 10 — conversion silently drops ops or crashes at trtexec",
+    "Missing ONNX parity check — drift only shows up on the real robot"
+  ]
+}

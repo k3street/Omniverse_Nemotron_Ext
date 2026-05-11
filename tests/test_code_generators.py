@@ -4,19 +4,6 @@ Each test:
   1. Passes valid arguments
   2. Verifies the returned code compiles (compile())
   3. Checks for expected imports / API calls
-
-Test vectors include handlers from this branch only — vectors for handlers
-introduced in later phases are filtered out at module load so this file
-stays runnable as new addenda are merged into master one branch at a time.
-L0 tests for the tier-11 SDG-annotation CODE_GEN handlers.
-
-Each test:
-  1. Calls the handler with valid arguments
-  2. Verifies the returned code compiles (compile())
-  3. Checks for expected USD / Semantics API calls
-
-Skipif guards keep the file runnable on every other tier branch — the
-suite stays green when these handlers haven't been merged yet.
 """
 import pytest
 
@@ -39,11 +26,10 @@ def _assert_valid_python(code: str, handler_name: str):
 
 # ---------------------------------------------------------------------------
 # Test vectors — one dict per CODE_GEN_HANDLER
-# Test vectors — exactly the tier-11 CODE_GEN handlers.
 # Each entry: (handler_name, args_dict, expected_substrings)
 # ---------------------------------------------------------------------------
 
-_RAW_TEST_VECTORS = [
+_TEST_VECTORS = [
     (
         "create_prim",
         {"prim_path": "/World/Cube", "prim_type": "Cube"},
@@ -174,11 +160,6 @@ _RAW_TEST_VECTORS = [
     (
         "set_physics_params",
         {"gravity_magnitude": 9.81, "gravity_direction": [0, 0, -1]},
-        ["set_current_time(0)"],
-    ),
-    (
-        "set_physics_params",
-        {"gravity_direction": [0, 0, -1], "gravity_magnitude": 9.81},
         ["UsdPhysics.Scene", "GravityMagnitude"],
     ),
     (
@@ -194,11 +175,6 @@ _RAW_TEST_VECTORS = [
     (
         "set_joint_targets",
         {"articulation_path": "/World/Robot", "joint_name": "panda_joint1", "target_position": 0.5},
-        ["_safe_set_translate"],
-    ),
-    (
-        "set_joint_targets",
-        {"articulation_path": "/World/Franka", "joint_name": "panda_joint1", "target_position": 0.5},
         ["DriveAPI", "TargetPosition"],
     ),
     (
@@ -215,8 +191,6 @@ _RAW_TEST_VECTORS = [
         "anchor_robot",
         {"robot_path": "/World/Franka"},
         ["fixedBase", "RemovePrim", "rootJoint"],
-        {"file_path": "/assets/franka.usd", "format": "usd", "dest_path": "/World/Franka"},
-        ["AddReference", "franka.usd"],
     ),
     (
         "anchor_robot",
@@ -264,8 +238,11 @@ _RAW_TEST_VECTORS = [
             "target_position": [0.4, 0.0, 0.3],
             "robot_type": "franka",
         },
-        ["RmpFlow", "set_end_effector_target", "apply_action", "add_physics_callback", "update_world", "load_supported_motion_policy_config"],
-        ["RmpFlow", "set_end_effector_target", "apply_action"],
+        # Default planner is RMPflow (reactive). Generated code uses
+        # load_supported_motion_gen_config (the modern name; the older
+        # load_supported_motion_policy_config no longer exists).
+        ["RmpFlow", "set_end_effector_target", "apply_action",
+         "load_supported_motion_gen_config", "SingleArticulation"],
     ),
     (
         "move_to_pose",
@@ -275,8 +252,9 @@ _RAW_TEST_VECTORS = [
             "planner": "lula_rrt",
             "robot_type": "franka",
         },
-        ["LulaRRTMotionPolicy"],
-        ["LulaTaskSpaceTrajectoryGenerator"],
+        # Handler migrated from LulaRRTMotionPolicy to
+        # LulaTaskSpaceTrajectoryGenerator (single-shot global planner)
+        ["LulaTaskSpaceTrajectoryGenerator", "load_supported_lula_rrt_config"],
     ),
     (
         "plan_trajectory",
@@ -288,8 +266,9 @@ _RAW_TEST_VECTORS = [
             ],
             "robot_type": "franka",
         },
-        ["LulaRRTMotionPolicy", "set_end_effector_target"],
-        ["LulaTaskSpaceTrajectoryGenerator", "compute_task_space_trajectory"],
+        # plan_trajectory uses the same Lula task-space generator and emits
+        # compute_task_space_trajectory_from_points
+        ["LulaTaskSpaceTrajectoryGenerator", "compute_task_space_trajectory_from_points"],
     ),
     (
         "build_scene_from_blueprint",
@@ -2354,9 +2333,6 @@ _RAW_TEST_VECTORS = [
 ]
 
 
-# Filter out vectors whose handlers do not exist on this branch.
-# Keeps the file runnable as new addenda are merged into master in any order.
-_TEST_VECTORS = [v for v in _RAW_TEST_VECTORS if v[0] in CODE_GEN_HANDLERS]
 
 
 class TestCodeGenerators:
@@ -3779,17 +3755,11 @@ class TestAllCodeGenHandlersCovered:
     def test_all_handlers_tested(self):
         tested = {v[0] for v in _TEST_VECTORS}
         untested = set(CODE_GEN_HANDLERS.keys()) - tested
-    # Pre-existing master generators known to emit invalid Python (out of
-    # scope for this addendum to fix). Keep them on the allowlist so a
-    # missing test vector here doesn't mask coverage gaps elsewhere.
-    _KNOWN_BAD = {"launch_training"}
-
-    def test_all_handlers_tested(self):
-        tested = {v[0] for v in _TEST_VECTORS}
-        untested = set(CODE_GEN_HANDLERS.keys()) - tested - self._KNOWN_BAD
         assert untested == set(), (
             f"CODE_GEN_HANDLERS not covered by test vectors: {untested}"
         )
+
+
 class TestTier11CodeGenEdgeCases:
     """Edge cases for tier-11 CODE_GEN tools — guard with skipif so the file
     stays runnable on branches where tier 11 isn't merged yet."""

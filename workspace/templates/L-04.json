@@ -1,0 +1,12 @@
+{
+  "task_id": "L-04",
+  "goal": "Render the UR10e+EOAT swept workspace envelope and return XYZ extents in mm for a 200mm-offset light-curtain guard.",
+  "tools_used": ["show_workspace", "visualize_clearance", "get_bounding_box", "capture_viewport"],
+  "thoughts": "Swept volume (reachable set expanded by EOAT geometry) differs from pure IK-reachable point cloud -- confirm which show_workspace produces. EOAT must be included; add its 180mm extension on top. Give extents mm-precise so she can site the curtain. Top-down capture helps eyeball against her floor plan.",
+  "code": "ws = show_workspace(\n    articulation_path=\"/World/UR10e\",\n    include_end_effector=True,\n    mode=\"swept_volume\",\n    resolution_mm=10\n)\n# or:\nvisualize_clearance(\n    subject=\"/World/UR10e\",\n    others=[\"/World/Cell/Guard\"],\n    envelope_offset_mm=200\n)\nbbox = get_bounding_box(prim_path=ws.prim_path, units=\"mm\")\nextents_mm = {\n    \"x_min\": bbox.min[0], \"x_max\": bbox.max[0],\n    \"y_min\": bbox.min[1], \"y_max\": bbox.max[1],\n    \"z_min\": bbox.min[2], \"z_max\": bbox.max[2]\n}\ncapture_viewport(\n    path=\"<TOPDOWN_PNG>\",\n    camera_path=\"/World/Cameras/TopDown\",\n    width=2048, height=2048\n)",
+  "failure_modes": [
+    "Confusing reachable point cloud with swept volume (differs by EOAT extent)",
+    "Forgetting to include EOAT so the guard sits 180mm inside the real envelope",
+    "Claiming STEP export of the envelope works without checking supported export formats"
+  ]
+}

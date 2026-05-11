@@ -1,0 +1,13 @@
+{
+  "task_id": "S-11",
+  "goal": "Diagnose /cmd_vel arriving at sim but robot not moving — action-graph subscriber/controller wiring.",
+  "tools_used": ["list_all_prims", "run_stage_analysis", "inspect_graph", "set_attribute", "ros2_list_topics", "diagnose_ros2"],
+  "thoughts": "Symptom (direct ros2 topic pub works, joystick path doesn't) narrows to namespace OR QoS mismatch between teleop_twist_joy and the sim subscriber — NOT wheel joints. Check the ROS2SubscribeTwist node's topicName and namespace variables, confirm they match what teleop_twist_joy publishes. Secondary causes: enabled=false on subscriber, maxLinearSpeed=0 on DifferentialController node. Don't blame joystick driver first. WireGuard latency concern is valid but secondary — get it working locally first.",
+  "code": "# 1. Inventory the bridge graph nodes\nnodes = list_all_prims(type_filter=\"OmniGraphNode\", path_contains=\"ROS_ActionGraph\")\ngraph = inspect_graph(graph_path=\"/World/Carter_01/ROS_ActionGraph\")\n\n# 2. Check subscriber config vs publisher\nsub = [n for n in graph.nodes if \"SubscribeTwist\" in n.type][0]\n# Confirm topicName matches teleop_twist_joy output (default /cmd_vel)\nros2_list_topics()\ndiagnose_ros2(focus=\"qos_mismatch\", topic=\"/cmd_vel\")\n\n# 3. Likely fixes — in priority order\nset_attribute(prim_path=sub.path, attribute=\"inputs:topicName\", value=\"/cmd_vel\")\nset_attribute(prim_path=sub.path, attribute=\"inputs:nodeNamespace\", value=\"<NAMESPACE>\")\n\nctrl = [n for n in graph.nodes if \"DifferentialController\" in n.type][0]\nset_attribute(prim_path=ctrl.path, attribute=\"inputs:maxLinearSpeed\", value=<MAX_LIN>)\nset_attribute(prim_path=ctrl.path, attribute=\"inputs:maxAngularSpeed\", value=<MAX_ANG>)\n\n# 4. Verify via known twist (not joystick yet)\n# ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.2}}'",
+  "failure_modes": [
+    "assistant blames joystick driver before checking subscriber config",
+    "assistant rebuilds the action graph instead of fixing attributes",
+    "assistant misses QoS profile mismatch between reliable publisher and best-effort subscriber",
+    "assistant escalates to WireGuard tuning before local /cmd_vel works"
+  ]
+}

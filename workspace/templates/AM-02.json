@@ -1,0 +1,12 @@
+{
+  "task_id": "AM-02",
+  "goal": "Explain why Play does not animate a freshly-loaded robot and get something moving without deep lectures.",
+  "tools_used": ["get_timeline_state", "sim_control", "diagnose_physics_error", "explain_error", "load_scene_template"],
+  "thoughts": "Confirm sim is actually running (timeline advancing), then check the usual suspects: no joint drives, articulation not instantiated, physics disabled. Plain English: Play only advances the clock; the robot needs a reason to move. Offer a template where the robot DOES move on Play -- that is the fastest unblock for a Tuesday demo.",
+  "code": "state = get_timeline_state()\n# If state.is_playing is False: sim_control(action=\"play\")\nissues = diagnose_physics_error(\n    scope_path=\"/World\",\n    checks=[\"articulation_root\", \"joint_drives\", \"physics_scene\", \"mass_properties\"]\n)\nfor iss in issues.findings:\n    explain_error(\n        error_text=iss.message,\n        audience=\"beginner\",\n        include_fix=True\n    )\n# Fastest unblock:\nload_scene_template(\n    template_name=\"<MOVING_ROBOT_PRESET>\",\n    target_path=\"/World\"\n)",
+  "failure_modes": [
+    "Dropping him into USD articulation schema docs",
+    "Telling him to write a controller script on day one",
+    "Missing that the robot has no joint drives so Play cannot animate it"
+  ]
+}

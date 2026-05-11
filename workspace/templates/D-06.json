@@ -1,0 +1,13 @@
+{
+  "task_id": "D-06",
+  "goal": "One-shot generate map.pgm + map.yaml at 0.05 m/px for Nav2, static obstacles only, origin at scene origin.",
+  "tools_used": ["run_stage_analysis", "generate_occupancy_map", "export_nav2_map"],
+  "thoughts": "generate_occupancy_map is the direct path \u2014 no SLAM needed. Key: filter out dynamic prims (forklifts with RigidBodyAPI) so they do not bake into the map. Slice height matters: 0.2-0.3 m catches wall bases but misses the under-shelf gap \u2014 configurable. Nav2 YAML uses lower-left origin, not center; convention mismatch bakes a 20m offset.",
+  "code": "# 1. Identify static vs dynamic \u2014 exclude dynamic from map\nrun_stage_analysis()\n# Dynamic prims have PhysicsRigidBodyAPI + non-kinematic flag; exclude them.\n\n# 2. One-shot occupancy generation\ngenerate_occupancy_map(\n    stage_path=\"<WAREHOUSE_USD>\",\n    resolution_m_per_px=0.05,\n    bounds=[[<X_MIN>, <Y_MIN>], [<X_MAX>, <Y_MAX>]],   # ~40x25 m\n    slice_z_m=<0.20>,                                   # laser plane height\n    exclude_dynamic=True,\n    output_format=\"nav2\"                                # PGM + YAML\n)\n\n# 3. Export with Nav2 conventions (lower-left origin, free/occupied thresholds)\nexport_nav2_map(\n    output_dir=\"<MAP_OUTPUT_DIR>\",\n    map_name=\"warehouse\",\n    origin_convention=\"lower_left\",                     # NOT center\n    free_thresh=0.196,\n    occupied_thresh=0.65\n)\n\n# Validate: PGM pixel dims == (x_max-x_min)/res x (y_max-y_min)/res.",
+  "failure_modes": [
+    "Baking dynamic forklifts into the static map",
+    "Slice height at 0.0 m \u2014 ground plane shows as occupied everywhere",
+    "Origin at scene center instead of lower-left \u2014 Nav2 plans offset by 20 m",
+    "Resolution 0.025 requested but scene is 40 m \u2014 memory for 1600x1000 grid huge"
+  ]
+}

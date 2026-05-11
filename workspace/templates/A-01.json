@@ -1,0 +1,13 @@
+{
+  "task_id": "A-01",
+  "goal": "Get Alex's hobby 4-DOF URDF loaded into Isaac Sim and moving a joint within 30 minutes, without overwhelming him.",
+  "tools_used": ["import_robot", "set_drive_gains", "sim_control"],
+  "thoughts": "Alex skims. Keep the answer short, give a copy-paste path, never mention USD/IsaacLab/OmniGraph/RL. import_robot is the Isaac Sim 5.x URDF pipeline (NOT the deprecated 4.x omni.isaac.urdf). Hobby URDFs need fix_base=True almost always, and default drive gains to prevent the joint wiggle from A-08. Finish with sim_control play so Alex sees motion.",
+  "code": "# 3 steps. Hit Play at the end.\n\n# 1. Import the URDF (Isaac Sim 5.x path — do not use old omni.isaac.urdf)\nimport_robot(\n    urdf_path=\"<ABSOLUTE_PATH_TO_MYARM_URDF>\",   # e.g. /home/alex/projects/myarm/myarm.urdf\n    dest_path=\"/World/MyArm\",\n    fix_base=True,            # hobby URDFs almost always need this, otherwise it falls\n    merge_fixed_joints=True\n)\n\n# 2. Give every joint a sane default drive (stops the wiggle)\nset_drive_gains(\n    articulation_prim=\"/World/MyArm\",\n    stiffness=10000,\n    damping=1000\n)\n\n# 3. Hit Play\nsim_control(action=\"play\")\n\n# If it falls through the floor: Create > Physics > Ground Plane.\n# If it wiggles: damping too low — bump to 2000.",
+  "failure_modes": [
+    "Answer over 8 lines — Alex bails",
+    "Mentioning IsaacLab / OmniGraph / RL / USD philosophy — tab closed",
+    "Forgetting fix_base=True — robot falls through the floor on Play",
+    "Using the deprecated 4.x omni.isaac.urdf importer — fails silently"
+  ]
+}

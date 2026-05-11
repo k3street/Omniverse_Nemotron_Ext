@@ -1,0 +1,13 @@
+{
+  "task_id": "F-06",
+  "goal": "Run a belt-speed what-if on CV_04 (0.8 → 1.2 m/s), spawn boxes at a periodic cadence, and honestly frame Isaac Sim as visual validation, not FlexSim.",
+  "tools_used": ["list_all_prims", "create_conveyor", "run_usd_script", "run_stage_analysis"],
+  "thoughts": "This is kinematic + rigid-body, not RL — never reach for launch_training. create_conveyor exposes the real belt-speed attribute; modify it. Periodic box spawn is plain Python on the update-event stream, no fake queue-sim tool. Honest about Isaac Sim vs FlexSim: Isaac gives visual + collision sanity, FlexSim gives distributional throughput. Parameterize for 1.0, 1.2, 1.4 m/s trials.",
+  "code": "# Kinematic what-if, not a discrete-event sim.\n\n# 1. Find CV_04 and the belt-speed attribute name\nlist_all_prims(stage_path=\"<DC_STAGE>\", name_filter=\"CV_04\")\n\n# 2. Edit belt speed (parameterized for sweep)\nfor speed in [<0.8>, <1.0>, <1.2>, <1.4>]:\n    create_conveyor(\n        prim_path=\"/World/Conveyors/CV_04\",\n        belt_speed=speed,\n        update_in_place=True\n    )\n    # record approx clear-time per speed (see spawner below)\n\n# 3. Periodic box spawn (plain Python, no fake queue-sim extension)\nrun_usd_script(script=\"\"\"\nimport omni.kit.app\nfrom pxr import UsdGeom, Gf, Sdf\nimport omni.usd\nstage = omni.usd.get_context().get_stage()\n\nSPAWN_EVERY_S = <1.5>\nPALLET_REF    = \"<PALLET_USD_PATH>\"\nSPAWN_POS     = (<X>, <Y>, <Z>)\n\nt = [0.0]; i = [0]\ndef on_update(e):\n    t[0] += e.payload[\"dt\"]\n    if t[0] >= SPAWN_EVERY_S:\n        t[0] = 0.0\n        p = f\"/World/SpawnedBoxes/box_{i[0]:04d}\"; i[0] += 1\n        stage.DefinePrim(p, \"Xform\").GetReferences().AddReference(PALLET_REF)\n        UsdGeom.XformCommonAPI(stage.GetPrimAtPath(p)).SetTranslate(SPAWN_POS)\n_sub = omni.kit.app.get_app().get_update_event_stream().create_subscription_to_pop(on_update)\n\"\"\")\n\n# 4. Post-run diagnose\nrun_stage_analysis(stage_path=\"<DC_STAGE>\")\n\n# Tell Fatima:\n#   - Rough boxes/hour you can read off visual clearance time: \"fuzzy\",\n#     +/- 20%. If you need 2-decimal throughput, FlexSim/AnyLogic is the\n#     better tool. Isaac Sim is for visual + collision sanity + the demo.\n#   - Yes, FlexSim would do the pure-throughput question better.\n#   - The sweep is parameterized (0.8, 1.0, 1.2, 1.4) — swap the list.",
+  "failure_modes": [
+    "Reaching for launch_training / RL for a kinematic problem",
+    "Pretending Isaac Sim gives FlexSim-grade throughput numbers",
+    "Inventing a queue-sim extension instead of a plain Python spawner",
+    "Hardcoding one speed instead of parameterizing for the sweep"
+  ]
+}

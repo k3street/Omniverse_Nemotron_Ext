@@ -1,0 +1,12 @@
+{
+  "task_id": "L-11",
+  "goal": "Apply PhysicsCollisionAPI + convexHull approximation to 5 fixture cubes. Snapshot verifies CollisionAPI + MeshCollisionAPI present on each.",
+  "tools_used": ["find_prims_by_name", "bulk_apply_schema", "simplify_collision"],
+  "thoughts": "Stage-measurable HARD stressing the bulk-apply path and the snapshot's apis visibility. Convex hull is the right approximation for static fixtures — convexDecomposition would be overkill.",
+  "code": "find_prims_by_name(name_pattern='fixture_*')\nbulk_apply_schema(prim_paths=[...], schema_name='PhysicsCollisionAPI')\nfor p in paths: simplify_collision(prim_path=p, approximation='convexHull')\n# Correct reply: 'Collision + convexHull on 5 fixtures.'",
+  "failure_modes": [
+    "Per-prim run_usd_script loop instead of bulk path.",
+    "Wrong approximation (convexDecomposition / meshSimplification).",
+    "Missing the approximation Set() — just applying CollisionAPI without MeshCollisionAPI."
+  ]
+}

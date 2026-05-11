@@ -1,0 +1,12 @@
+{
+  "task_id": "Y-05",
+  "goal": "Kill the temporal shimmer on animated metallic panels without losing chrome fidelity.",
+  "tools_used": ["list_all_prims", "create_material", "assign_material", "set_render_config", "capture_viewport"],
+  "thoughts": "Denoiser shimmer on chrome is a known path-tracing tradeoff -- temporally-unstable caustics on near-zero roughness. Real diagnostic order: roughness floor first (cheapest test), denoiser temporal stability second, samples last. Never outright disable the denoiser -- that trades shimmer for grain. Acknowledge art direction may veto roughness bump; have a Plan B.",
+  "code": "mats = list_all_prims(type_filter=\"Material\", path_prefix=\"/World/Hero\")\n# Test 1: raise roughness floor 0.05-0.10 on metallic panels\nmat = create_material(\n    path=\"/World/Looks/Chrome_RoughFloor\",\n    shader=\"MDL\",\n    mdl_source=\"<MDL_MODULE>\",\n    params={\"metallic\": 1.0, \"roughness\": \"<ROUGHNESS+0.05>\"}\n)\nassign_material(prim_path=\"/World/Hero/Body\", material_path=mat.path)\ncapture_viewport(path=\"<TEST_PNG>\", width=1920, height=1080)\n# Test 2: denoiser temporal / sample tweaks if roughness vetoed\nset_render_config(\n    samples_per_pixel=\"<HIGHER_SPP>\",\n    denoiser=\"optix\",\n    denoiser_temporal_stability=\"<FLOAT>\",\n    firefly_clamp=\"<FLOAT>\"\n)",
+  "failure_modes": [
+    "Disabling the denoiser entirely and handing her grain instead of shimmer",
+    "Pushing samples first without testing the cheap roughness fix",
+    "Treating path-traced animation shimmer as a tool bug rather than a documented tradeoff"
+  ]
+}

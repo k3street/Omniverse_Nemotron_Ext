@@ -1,0 +1,13 @@
+{
+  "task_id": "J-08",
+  "goal": "Build a pinned midterm scene every student loads identically \u2014 no physics drift, single distributable file.",
+  "tools_used": ["load_scene_template", "add_reference", "set_physics_scene_config", "export_scene_package", "run_stage_analysis"],
+  "thoughts": "Pedagogy: reproducibility IS the lesson. Past exams broke because default physics timestep can differ by Kit version. Pin dt, substeps, gravity, gpu_pipeline flags in the USD. Export as self-contained package. Ship a sanity-check script that prints a hash of the post-10-step state \u2014 grader compares to expected.",
+  "code": "# 1. Base scene\nload_scene_template(template_name=\"<SIMPLE_FRANKA_TABLE_STARTER>\")\n\n# 2. Add exam cube at EXACT pose\nadd_reference(prim_path=\"/World/ExamCube\", reference_path=\"<CUBE_USD>\")\nset_attribute(prim_path=\"/World/ExamCube\", attr_name=\"xformOp:translate\",\n              value=[<X>, <Y>, <Z>])\n\n# 3. PIN physics \u2014 this is what past exams missed\nset_physics_scene_config(\n    scene_path=\"/physicsScene\",\n    time_steps_per_second=<60>,\n    gravity=[0, 0, -9.81],\n    gpu_enabled=<True>,\n    solver_type=\"<TGS>\",\n    substeps=<1>\n)\n\n# 4. Self-contained package (no student-specific paths)\nexport_scene_package(\n    stage_path=\"<EXAM_USD>\",\n    output_path=\"<MIDTERM_DELIVERABLE_ZIP>\",\n    format=\"zip\",\n    rewrite_refs_relative=True,\n    include_textures=True,\n    isaac_sim_version=\"<5.1.0>\"\n)\n\n# 5. Sanity check \u2014 students paste output, grader compares\nrun_stage_analysis()\n# Expected: N prims, M articulations, physics dt=0.01667",
+  "failure_modes": [
+    "Relying on default physics \u2014 drifts across Kit versions",
+    "External reference to asset on Jordan's Nucleus \u2014 students cannot load",
+    "Cube pose via GUI drag \u2014 not exactly reproducible",
+    "No sanity hash \u2014 grader cannot prove student started from identical state"
+  ]
+}

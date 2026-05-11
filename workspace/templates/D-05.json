@@ -1,0 +1,13 @@
+{
+  "task_id": "D-05",
+  "goal": "Publish the RTX LIDAR on ROS2 /scan at 10 Hz with frame_id=laser so Nav2's costmap consumes it.",
+  "tools_used": ["setup_ros2_bridge", "ros2_publish", "ros2_list_topics", "configure_ros2_bridge"],
+  "thoughts": "32-beam LIDAR natively yields PointCloud2. Nav2's /scan wants sensor_msgs/LaserScan \u2014 that requires slicing a single horizontal ring (elevation=0\u00b0) from the cloud. Missing frame_id silently drops scans in the TF tree. Observed 7 Hz vs 10 Hz is usually publish-on-tick-after-data \u2014 check sim dt alignment.",
+  "code": "setup_ros2_bridge(domain_id=<ROS_DOMAIN_ID>)\n\nconfigure_ros2_bridge(qos_profile=\"sensor_data\")  # Nav2-friendly default\n\n# Option A \u2014 PointCloud2 (native 32-beam output)\nros2_publish(\n    sensor_prim_path=\"/World/amr/base_link/lidar_mount/lidar\",\n    topic=\"/scan_cloud\",\n    msg_type=\"sensor_msgs/PointCloud2\",\n    rate_hz=10,\n    frame_id=\"laser\"\n)\n\n# Option B \u2014 LaserScan (single-ring slice for Nav2 /scan)\nros2_publish(\n    sensor_prim_path=\"/World/amr/base_link/lidar_mount/lidar\",\n    topic=\"/scan\",\n    msg_type=\"sensor_msgs/LaserScan\",\n    rate_hz=10,\n    frame_id=\"laser\",\n    slice_elevation_deg=0.0                       # horizontal ring only\n)\n\nros2_list_topics()   # confirm /scan present, hz reports 10\n\n# If hz=7: sim dt mismatch. Align sim TPS to publish rate (e.g. 60 TPS / 6 = 10 Hz).",
+  "failure_modes": [
+    "Publishing LaserScan without elevation slice \u2014 garbage ranges",
+    "Missing frame_id \u2014 Nav2 silently drops scans at TF resolution",
+    "Bridge auto-wires nothing \u2014 need explicit ros2_publish per sensor",
+    "Sim dt not aligned to 10 Hz \u2014 actual rate jitters at 7-13 Hz"
+  ]
+}

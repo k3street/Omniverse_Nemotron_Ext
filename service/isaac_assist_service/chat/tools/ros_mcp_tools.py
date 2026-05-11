@@ -26,6 +26,13 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
+# Verify ros_mcp is installed at import time so the parent registration
+# (try/except ImportError in tool_executor.py) can register these handlers
+# as None and the audit/runtime can SKIP them with a clear "not installed"
+# signal — instead of every handler call hitting a lazy ModuleNotFoundError.
+import importlib
+importlib.import_module("ros_mcp.utils.websocket")
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------

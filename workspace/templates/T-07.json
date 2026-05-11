@@ -1,0 +1,13 @@
+{
+  "task_id": "T-07",
+  "goal": "Audit the current VR-teleop configuration against ISO 10218-1 clause 5.7 (manual control mode) and separate sim-testable items from hardware-only items.",
+  "tools_used": ["teleop_safety_config", "check_teleop_hardware", "lookup_knowledge"],
+  "thoughts": "Never cite ISO 10218-1 clause 5.7 subclauses from memory. teleop_safety_config inspects the current reduced-speed / enabling-device bindings in the scene. check_teleop_hardware inventories connected input devices. lookup_knowledge retrieves the actual clause text. The VR trigger is NOT a three-position enabling device — that specific topology (center=enable, released OR fully-pressed=stop) must live on the pendant hardware. Refuse to certify the teleop as safety-compliant.",
+  "code": "# Clause 5.7 audit. Row-by-row.\n\n# 1. What safety parameters does the teleop bridge currently enforce?\nteleop_safety_config(\n    session_prim=\"<TELEOP_SESSION_PRIM>\"\n)\n\n# 2. What input hardware is actually connected?\ncheck_teleop_hardware(\n    session_prim=\"<TELEOP_SESSION_PRIM>\"\n)\n\n# 3. Pull ISO 10218-1 clause 5.7.1..5.7.5 — do NOT retype from memory\nlookup_knowledge(query=\"ISO 10218-1 clause 5.7 manual control mode reduced speed enabling device three-position\")\n\n# Produce a checklist — one row per subclause:\n#   Clause 5.7.1 ... | Testable in sim? | Current status | Action\n#   Clause 5.7.2 ... | ...              | ...            | ...\n#   Clause 5.7.3 (enabling device)   | HARDWARE ONLY  | MISSING        | install 3-pos device on pendant\n#   Clause 5.7.4 (reduced speed)     | SIM TESTABLE   | NOT ENFORCED   | set TCP limit <=250 mm/s in teleop_safety_config\n#   Clause 5.7.5 ... | ...              | ...            | ...\n# What to tell Thomas:\n#   - The VR trigger is NOT a three-position enabling device. Topology matters:\n#     center=enable, released OR fully-pressed=stop. Must live on the pendant.\n#   - Software-only speed limit is not a rated safety function under ISO 13849.\n#   - This configuration is NOT safety-compliant and I will not say it is.",
+  "failure_modes": [
+    "Accepting the VR trigger as an enabling device (wrong topology)",
+    "Treating software-only speed limit as a rated safety function",
+    "Citing clause 5.7 subclause numbers from memory instead of lookup_knowledge",
+    "Certifying the teleop setup as safety-compliant"
+  ]
+}

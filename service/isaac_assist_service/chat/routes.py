@@ -1,4 +1,7 @@
+import asyncio
+import json
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -6,6 +9,8 @@ import uuid
 import logging
 from .orchestrator import ChatOrchestrator
 from .pipeline import PipelinePlanner
+from . import session_trace
+from . import cancel_registry
 from ..governance.audit_log import AuditLogger
 from ..governance.models import AuditEntry
 from ..knowledge.knowledge_base import KnowledgeBase
@@ -90,6 +95,132 @@ async def send_message(req: ChatMessageRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Live progress: SSE stream + cancel endpoint ─────────────────────────────
+# Events the UI cares about. The session_trace module emits ~20 types; the
+# rest are diagnostic noise. Filtering server-side keeps the wire small.
+_USER_VISIBLE_EVENTS = {
+    "turn_started",
+    "tool_call_started",
+    "tool_call_finished",
+    "patch_executed",
+    "retry_spam_halt",
+    "cancel_acknowledged",
+    "turn_diff_computed",
+    "agent_reply",
+    "error",
+    # Phase 6 — undo & clear chat
+    "undo_started",
+    "undo_applied",
+    "undo_failed",
+    "chat_cleared",
+}
+
+
+@router.get("/stream/{session_id}")
+async def stream_session(session_id: str):
+    """Server-Sent Events stream of live trace events for a session.
+
+    Client subscribes once at window open and keeps the connection open
+    for the window's lifetime. On reconnect there is no event replay —
+    callers rely on the POST /message blob for canonical state.
+    """
+    q = session_trace.subscribe(session_id)
+
+    async def gen():
+        try:
+            yield "event: connected\ndata: {}\n\n"
+            while True:
+                try:
+                    evt = await asyncio.wait_for(q.get(), timeout=15.0)
+                    if evt["type"] in _USER_VISIBLE_EVENTS:
+                        yield (
+                            f"event: {evt['type']}\n"
+                            f"data: {json.dumps(evt, default=str)}\n\n"
+                        )
+                except asyncio.TimeoutError:
+                    # Keepalive — prevents idle-connection killers from
+                    # silently dropping the stream.
+                    yield ": keepalive\n\n"
+        finally:
+            session_trace.unsubscribe(session_id, q)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+class CancelRequest(BaseModel):
+    session_id: str = "default_session"
+
+
+@router.post("/cancel")
+async def cancel_turn(req: CancelRequest):
+    """Request cancellation of the in-flight turn for this session.
+
+    Sets a flag; orchestrator polls it between rounds and between tools
+    within a round. The currently-executing tool (if any) completes;
+    subsequent tools are skipped and a canned reply is returned.
+    """
+    cancel_registry.request_cancel(req.session_id)
+    return {"status": "cancel_requested"}
+
+
+class UndoRequest(BaseModel):
+    session_id: str = "default_session"
+    steps: int = 1
+
+
+@router.post("/undo")
+async def undo_chat_turn(req: UndoRequest):
+    """Revert N most-recent stage-mutating turns by re-importing the
+    saved root layer. Snapshot stack is implicit on disk in
+    workspace/turn_snapshots/{sid}/ — turn_snapshot.restore() removes
+    consumed snapshots, so successive undo calls naturally chain
+    backwards through history.
+    """
+    from . import turn_snapshot
+
+    session_trace.emit(req.session_id, "undo_started", {"steps": req.steps})
+    available = turn_snapshot.snapshot_count(req.session_id)
+    if available == 0:
+        session_trace.emit(req.session_id, "undo_failed", {"error": "no snapshots"})
+        return {"ok": False, "error": "No undo history for this session."}
+    # Silently cap rather than 4xx — caller intent is "undo as much as I can".
+    steps = min(req.steps, available)
+    result = await turn_snapshot.restore(req.session_id, steps=steps)
+    if result.get("ok"):
+        session_trace.emit(req.session_id, "undo_applied", {
+            "steps": steps,
+            "remaining_snapshots": result.get("remaining_snapshots", 0),
+        })
+    else:
+        session_trace.emit(req.session_id, "undo_failed", {
+            "steps": steps,
+            "error": result.get("error", "unknown"),
+        })
+    return result
+
+
+class ClearChatRequest(BaseModel):
+    session_id: str = "default_session"
+
+
+@router.post("/clear_chat")
+async def clear_chat(req: ClearChatRequest):
+    """Wipe in-memory conversation history WITHOUT touching the stage
+    or the snapshot stack — undo still works on prior turns. Distinct
+    from /reset which also opens a fresh stage.
+    """
+    orchestrator.reset_session(req.session_id)
+    session_trace.emit(req.session_id, "chat_cleared", {})
+    return {"status": "cleared"}
 
 
 class LogExecutionRequest(BaseModel):

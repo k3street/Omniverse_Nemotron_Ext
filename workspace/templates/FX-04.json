@@ -1,0 +1,12 @@
+{
+  "task_id": "FX-04",
+  "goal": "Apply PhysicsCollisionAPI to 5 pre-seeded cube meshes at /World/Box_0..4 in a single bulk_apply_schema call. Verify one via list_applied_schemas.",
+  "tools_used": ["bulk_apply_schema", "list_applied_schemas"],
+  "thoughts": "bulk_apply_schema is the atomic batch primitive — one RPC round-trip vs five. The schema id must be the fully qualified PhysicsCollisionAPI (without 'Physics' prefix it's a silent no-op). CollisionAPI is meaningful on Mesh/primitive-shape prims; Xform parents get the schema but do nothing useful.",
+  "code": "# Single bulk call\npaths = [f\"/World/Box_{i}\" for i in range(5)]\nbulk_apply_schema(\n    prim_paths=paths,\n    api_schema=\"PhysicsCollisionAPI\"\n)\n\n# Spot-verify one\nlist_applied_schemas(prim_path=\"/World/Box_0\")",
+  "failure_modes": [
+    "Looping apply_api_schema five times — correct but violates the batch-tool principle and is 5x the RPC cost.",
+    "Passing api_schema='CollisionAPI' without the Physics prefix — silent no-op on wrong schema name.",
+    "Applying to an Xform parent thinking it propagates — schemas don't propagate to descendants."
+  ]
+}

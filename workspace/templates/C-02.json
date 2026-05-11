@@ -1,0 +1,12 @@
+{
+  "task_id": "C-02",
+  "goal": "Create /World/Bubble (sphere r=0.3 at (1,1,1)), verify it exists, delete it, verify it's gone. Reply must cite both verify steps.",
+  "tools_used": ["create_prim", "prim_exists", "delete_prim"],
+  "thoughts": "Verify-before-claim pattern explicit: the task forces the agent to not just do-then-describe but do-verify-do-verify. The two prim_exists calls produce concrete evidence the reply can cite.",
+  "code": "create_prim(prim_path=\"/World/Bubble\", prim_type=\"Sphere\", radius=0.3, position=[1, 1, 1])\nprim_exists(prim_path=\"/World/Bubble\")  # should return {\"exists\": true}\ndelete_prim(prim_path=\"/World/Bubble\")\nprim_exists(prim_path=\"/World/Bubble\")  # should return {\"exists\": false}",
+  "failure_modes": [
+    "Skipping the second prim_exists — the reply 'then deleted' is an unverified claim; verify-contract should flag it.",
+    "Describing the deletion before running it — fabrication.",
+    "Calling prim_exists ONCE at the end — loses the 'exists=True before deletion' half of the proof."
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "task_id": "J-01",
+  "goal": "First-lecture 5-minute 'hello robot' demo that 20 undergrads can reproduce on mixed laptops.",
+  "tools_used": ["scene_aware_starter_prompts", "list_scene_templates", "quick_demo", "hardware_compatibility_check"],
+  "thoughts": "Pedagogy: one demo, numbered steps, 'step does X because Y'. Hardware check first \u2014 integrated GPUs fail silently on RT-heavy templates. Franka-cube is the canonical hello-world: small, state-based, forgiving. Cloud fallback for weakest machines. Reproducibility beats flash.",
+  "code": "# Step 0: hardware gate \u2014 names who needs cloud fallback\nhardware_compatibility_check()\n\n# Step 1: show students what starter scenes exist (pedagogic catalog)\nscene_aware_starter_prompts()\nlist_scene_templates()\n\n# Step 2: the simplest viable demo \u2014 Franka + cube, state-based, no cameras\nquick_demo(demo_name=\"<FRANKA_CUBE_STARTER>\")\n\n# Step 3: pedagogic narration\n# \"We loaded <TEMPLATE>. The Franka is a 7-DOF arm \u2014 step Play (space) to\n#  see gravity; the cube falls. Step 2 because PhysX needs one tick to apply mass.\"\n\n# Integrated-GPU fallback: same demo on cloud session \u2014 identical prim paths,\n# so students' notes still work.",
+  "failure_modes": [
+    "Picking a camera-heavy demo \u2014 OOMs integrated GPUs",
+    "No hardware gate \u2014 half the class freezes on launch",
+    "Improvisation during live demo \u2014 students cannot reproduce at home",
+    "Skipping the 'press space to play' step \u2014 scene looks dead"
+  ]
+}

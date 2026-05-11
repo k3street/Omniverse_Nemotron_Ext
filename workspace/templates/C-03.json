@@ -1,0 +1,13 @@
+{
+  "task_id": "C-03",
+  "goal": "Pre-seeded broken articulation (zero-mass root, missing CollisionAPI on Link0, infinite joint limits). Diagnose with check_physics_health, fix each, verify clean.",
+  "tools_used": ["check_physics_health", "set_attribute", "apply_api_schema"],
+  "thoughts": "Diagnosis-then-fix loop: check_physics_health returns a structured issue list (prim path + severity + fix). For each issue, apply the suggested fix via apply_api_schema or set_attribute. Re-run check_physics_health to confirm. The reply must name issues specifically — generic 'fixed everything' is a red flag the agent didn't actually enumerate.",
+  "code": "# Step 1: diagnose\ncheck_physics_health()\n# Returns issues like:\n#   {'prim': '/World/Arm', 'severity': 'critical', 'issue': 'Invalid mass: 0.0'}\n#   {'prim': '/World/Arm/Link0', 'severity': 'error', 'issue': 'Mesh has RigidBodyAPI but no CollisionAPI'}\n#   {'prim': '/World/Arm/Joint0', 'severity': 'warning', 'issue': 'Joint limits effectively infinite'}\n\n# Step 2: fix each\nset_attribute(prim_path=\"/World/Arm\", attr_name=\"physics:mass\", value=1.0)\napply_api_schema(prim_path=\"/World/Arm/Link0\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/Arm/Joint0\", attr_name=\"physics:lowerLimit\", value=-180.0)\nset_attribute(prim_path=\"/World/Arm/Joint0\", attr_name=\"physics:upperLimit\", value=180.0)\n\n# Step 3: verify clean\ncheck_physics_health()",
+  "failure_modes": [
+    "Running check_physics_health, seeing issues, but only fixing ONE of them and declaring 'fixed'.",
+    "Claiming 'fixed everything' without the re-check — verify-contract doesn't catch this directly but the judge's criteria-misses will.",
+    "Trying to fix via run_usd_script instead of the purpose-built tools — works but bypasses the measurable tool-chain contract.",
+    "Applying CollisionAPI to /World/Arm instead of /World/Arm/Link0 — wrong target."
+  ]
+}

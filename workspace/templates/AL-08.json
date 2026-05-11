@@ -1,0 +1,13 @@
+{
+  "task_id": "AL-08",
+  "goal": "Design Isaac Sim's integration into a Teamcenter + CATIA + Simulink PLM toolchain without disrupting it.",
+  "tools_used": ["lookup_knowledge", "lookup_product_spec", "import_robot", "export_scene_package", "nucleus_browse"],
+  "thoughts": "Authority stays in PLM: CATIA owns geometry, Teamcenter owns BOM, Simulink owns control. Isaac Sim is a downstream physics consumer. Interchange: STEP/JT -> USD -> Nucleus. Simulink: FMU co-sim if supported, else ROS2 bridge via Simulink ROS toolbox. Round-trip back into CATIA is NOT shipped — flag it. 1 kHz co-sim feasible but Simulink boundary overhead is the real limiter. Never invent a 'Teamcenter connector'.",
+  "code": "# Advisory — the flow and real integration points.\n# 1. Ground the interchange layer (no Teamcenter connector exists)\nlookup_knowledge(query=\"omniverse step jt importer assembly structure preservation\")\nlookup_knowledge(query=\"isaac sim fmu co-simulation support kit version\")\nlookup_product_spec(product=\"Omniverse Connectors\")\n\n# 2. Forward flow: Teamcenter --STEP/JT--> file share --STEP importer--> USD --> Nucleus\n# Preserve hierarchy + stamp BOM metadata into USD attrs (bom:partNumber, bom:revision)\nimport_robot(\n    source=\"<STEP_OR_JT_PATH>\",\n    dest_prim=\"/World/Assembly_<REV>\",\n    preserve_hierarchy=True,\n    metadata_attrs={\"bom:partNumber\": \"<PN>\", \"bom:revision\": \"<REV>\"},\n)\n\n# 3. Control-side co-sim\n# Option A: FMU import (Simulink exports controller as FMU; Isaac Sim steps at boundary)\n# Option B: ROS2 bridge via Simulink ROS Toolbox (looser coupling, higher latency)\n\n# 4. Return leg — sim results back to PLM as metadata (NOT geometry round-trip)\nexport_scene_package(\n    source_scene=\"<SIM_RESULT_SCENE>\",\n    dest=\"<PLM_INBOX>/sim_report_<RUN_ID>.usdz\",\n    include_metadata_sidecar=True,\n)\n\n# 5. Honest limit — 1 kHz co-sim is boundary-overhead bound, not PhysX bound\nlookup_knowledge(query=\"isaac sim physx substep 1khz co-sim real-time latency\")",
+  "failure_modes": [
+    "assistant invents a 'Teamcenter Connector' extension",
+    "assistant promises round-trip edits back into CATIA",
+    "assistant claims 1 kHz co-sim without caveats",
+    "assistant skips the authority-statement (Isaac Sim is consumer, not source)"
+  ]
+}

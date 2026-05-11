@@ -1,0 +1,12 @@
+{
+  "task_id": "Y-09",
+  "goal": "Render a seamless 8-second 360-degree turntable of the robot at 1080p with consistent lighting.",
+  "tools_used": ["create_prim", "configure_camera", "set_camera_look_at", "set_keyframe", "set_timeline_range", "record_demo_video"],
+  "thoughts": "Keyframe the camera orbit with explicit start==end angles so the loop seams. Drop the last frame on capture (N frames, 0 to 360*(N-1)/N) to avoid a duplicate frame. Robot stands still -- no sim_control play. RTX Interactive for quality, not path-traced (8 seconds x 24-30fps would be overnight).",
+  "code": "cam = \"/World/Cameras/Turntable\"\ncreate_prim(path=cam, type_name=\"Camera\")\nconfigure_camera(prim_path=cam, focal_length_mm=50.0, horizontal_aperture_mm=36.0)\nset_timeline_range(start=0, end=240, fps=30)\nN = 240  # 8s * 30fps\nfor i in range(N):\n    angle_deg = 360.0 * i / N  # drops the duplicate at frame N\n    set_keyframe(\n        prim_path=cam,\n        attribute_name=\"xformOp:rotateZ\",\n        time=i,\n        value=angle_deg\n    )\nset_camera_look_at(camera_path=cam, target_path=\"/World/Hero\", up=(0, 0, 1))\nrecord_demo_video(\n    output_path=\"<OUT_MP4>\",\n    duration_seconds=8,\n    camera_path=cam,\n    fps=30\n)",
+  "failure_modes": [
+    "Including frame N (duplicating frame 0) so the loop pops on wrap",
+    "Running sim_control play so the robot drifts during the turntable",
+    "Path-traced render pushing turntable bake to overnight when RTX Interactive suffices"
+  ]
+}

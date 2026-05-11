@@ -1,0 +1,12 @@
+{
+  "task_id": "AM-10",
+  "goal": "Record a 45-second 1080p clip of the running demo via Isaac Sim's built-in capture, not OS screen-record.",
+  "tools_used": ["sim_control", "get_timeline_state", "record_demo_video", "capture_viewport"],
+  "thoughts": "record_demo_video gives him clean viewport-only output -- no Dock, no Slack notifications, no browser tab. Set 1080p, 45s. Confirm sim is in Play state before starting. If capture fails for whatever reason, stills via capture_viewport are a valid fallback. No OBS / ffmpeg rabbit-hole for a 45-second clip.",
+  "code": "state = get_timeline_state()\nif not state.is_playing:\n    sim_control(action=\"play\")\nrecord_demo_video(\n    output_path=\"<OUT_MP4>\",\n    duration_seconds=45,\n    camera_path=\"<CAMERA_PRIM_OR_NONE_FOR_ACTIVE>\",\n    fps=30,\n    width=1920, height=1080,\n    include_ui=False\n)\n# Fallback if record_demo_video fails:\n# capture_viewport(path=\"<OUT_DIR>/frame_%04d.png\", width=1920, height=1080)",
+  "failure_modes": [
+    "Sending him to install OBS or ffmpeg for a 45-second viewport clip",
+    "Recording with include_ui=True so the play button and Slack notifications are in frame",
+    "Starting capture before sim Play so the robot is frozen in the video"
+  ]
+}
