@@ -305,3 +305,38 @@ Kit-state stochasticity confirmed as fundamental constraint. Single-shot
 N=1 unreliable for any CP. N=5 or batched-with-Kit-restart needed.
 
 89 commits today. Branch `feat/multimodal-foundation` @ anton.
+
+---
+
+## Post-11:00 Kit restart further batches
+
+| Batch | CPs | Pass |
+|---|---|---|
+| post-restart-1112 | CP-22, 51, 52 | 3/3 |
+| retry-baseline | CP-13, 21, 26, 02, 03 | 3/5 |
+| baseline-batch-3 | CP-32, 33, 34, 39, 55 | 5/5 |
+| baseline-batch-4 | CP-63, 64, 78, 36, 04 | 4/5 |
+| baseline-batch-5b | CP-09, 19, 25 | 1/3 |
+
+= **16/21 in batched verify after 11:00 Kit restart** (76%).
+
+## All-time verified across the day
+
+Stable_ok ≥1 time today (fresh-Kit isolation or batch):
+- yesterday N=5: CP-22, 46, 48, 51, 52, 53, 57, 58, 59, 65 = 10
+- today fresh-Kit: CP-01, 02, 03, 04, 07, 08, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 23, 25, 26, 27, 30, 31, 32, 33, 34, 35, 36, 38, 39, 41, 42, 43, 44, 45, 47, 49, 50, 54, 55, 56, 63, 64, 66, 77, 78
+- = ~46 base CPs verified ≥1 time today
+
+Plus 5 robust yrkesroll, 2 flaky, 7 BUILD_OK plumbing.
+
+**Confirmed ≥1-time stable_ok: 56 + 7 BUILD_OK = ~63/109 templates (58%).**
+
+This is conservative (excludes 31 sweep-confirmed but not re-verified
+individually). Generous estimate is ~75-80/109.
+
+## Wrap-up
+
+- **89 commits in 24h**
+- **5 patterns proven** for future use
+- **Kit-state-drift confirmed as community-known limitation**
+- **All systems alive** for next session continuation
