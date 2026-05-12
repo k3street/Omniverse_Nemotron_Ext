@@ -17,271 +17,6 @@ import re as _re
 from typing import Any, Awaitable, Callable, Dict
 
 
-# ---------------------------------------------------------------------------
-# Module-level constants (co-located with their handlers)
-
-_SIZE_BUCKET_ALIASES = {
-    "tiny": "tiny", "very small": "tiny", "minuscule": "tiny", "miniature": "tiny",
-    "pyttig": "tiny", "pyttigt": "tiny", "pytteliten": "tiny",
-    "small": "small", "little": "small", "compact": "small",
-    "liten": "small", "litet": "small", "lilla": "small",
-    "medium": "medium", "moderate": "medium", "mid-sized": "medium", "mid sized": "medium", "average": "medium",
-    "mellan": "medium", "mellanstor": "medium", "lagom": "medium", "normalstor": "medium",
-    "large": "large", "big": "large", "sizable": "large", "substantial": "large",
-    "stor": "large", "stort": "large", "stora": "large",
-    "huge": "huge", "very large": "huge", "massive": "huge", "enormous": "huge", "giant": "huge",
-    "väldig": "huge", "väldigt stor": "huge", "enorm": "huge", "jätte": "huge", "jättestor": "huge",
-}
-
-# Per-object-class size buckets in meters. The "default" row handles
-# unknown classes with sensible cube-like defaults. Tuned to match
-# common Isaac Sim / industrial-robotics conventions: small cubes are
-# 5cm (manipulation benchmark size), tables are 1.2m (workbench).
-_SIZE_BUCKETS = {
-    "cube":     {"tiny": 0.02, "small": 0.05, "medium": 0.15, "large": 0.5,  "huge": 1.5},
-    "box":      {"tiny": 0.05, "small": 0.10, "medium": 0.30, "large": 0.70, "huge": 1.5},
-    "sphere":   {"tiny": 0.02, "small": 0.05, "medium": 0.15, "large": 0.5,  "huge": 1.5},
-    "ball":     {"tiny": 0.02, "small": 0.05, "medium": 0.15, "large": 0.5,  "huge": 1.5},
-    "cylinder": {"tiny": 0.02, "small": 0.05, "medium": 0.15, "large": 0.5,  "huge": 1.5},
-    "bin":      {"tiny": 0.10, "small": 0.20, "medium": 0.30, "large": 0.6,  "huge": 1.0},
-    "tray":     {"tiny": 0.10, "small": 0.20, "medium": 0.40, "large": 0.7,  "huge": 1.2},
-    "table":    {"tiny": 0.50, "small": 0.80, "medium": 1.20, "large": 2.0,  "huge": 4.0},
-    "desk":     {"tiny": 0.50, "small": 0.80, "medium": 1.20, "large": 2.0,  "huge": 4.0},
-    "conveyor": {"tiny": 0.50, "small": 1.00, "medium": 1.60, "large": 3.0,  "huge": 5.0},
-    "wall":     {"tiny": 1.00, "small": 2.00, "medium": 3.00, "large": 5.0,  "huge": 10.0},
-    "room":     {"tiny": 2.00, "small": 4.00, "medium": 6.00, "large": 10.0, "huge": 20.0},
-    "warehouse":{"tiny": 5.00, "small": 10.0, "medium": 20.0, "large": 40.0, "huge": 80.0},
-    # Robots — "size" here means full standing/wingspan height in meters.
-    # The buckets are tighter than for objects because real robot models
-    # cluster around fixed dimensions; sizing across buckets typically
-    # implies SELECTING a different model, not rescaling the asset.
-    # Without those bucket values the default cube-scale was applied,
-    # producing 0.1m "small humanoids" — agents would then scale H1
-    # (1.8m natively) by 18× to match.
-    "humanoid":   {"tiny": 1.10, "small": 1.50, "medium": 1.70, "large": 1.85, "huge": 2.00},
-    "manipulator":{"tiny": 0.50, "small": 0.70, "medium": 0.85, "large": 1.10, "huge": 1.40},
-    "robot":      {"tiny": 0.50, "small": 0.85, "medium": 1.10, "large": 1.50, "huge": 1.85},
-    "quadruped":  {"tiny": 0.40, "small": 0.55, "medium": 0.70, "large": 0.90, "huge": 1.20},
-    "mobile":     {"tiny": 0.30, "small": 0.45, "medium": 0.65, "large": 0.85, "huge": 1.20},
-    # Default fallback when class is unknown.
-    "default":  {"tiny": 0.05, "small": 0.10, "medium": 0.30, "large": 0.70, "huge": 1.50},
-}
-
-
-_COUNT_BUCKETS = {
-    "one": 1, "single": 1, "a": 1, "an": 1, "ett": 1, "en": 1,
-    "two": 2, "pair": 2, "couple": 2, "two of them": 2, "ett par": 2, "två": 2,
-    "few": 3, "a few": 3, "några": 3, "några få": 3,
-    "several": 5, "some": 4, "handful": 5, "flera": 5,
-    "many": 10, "lots": 10, "lots of": 10, "a lot": 10, "många": 10, "en massa": 10,
-    "dozens": 24, "dozen": 12, "twenty": 20, "tjugo": 20, "ett dussin": 12, "dussintals": 24,
-    "hundreds": 100, "a hundred": 100, "hundra": 100, "hundratals": 100,
-}
-
-
-# robot-class → registry key. Anchors generic class language ('a manipulator',
-# 'a humanoid', 'a wheeled robot') to the same name resolution that
-# robot_wizard / import_robot already understand. Avoids the agent inventing
-# random asset paths when it should be selecting a known-good default.
-_ROBOT_CLASS_DEFAULTS = {
-    # Manipulator arms
-    "manipulator": "franka_panda",
-    "arm": "franka_panda",
-    "robotic arm": "franka_panda",
-    "robotarm": "franka_panda",
-    # Wheeled / mobile bases
-    "wheeled": "nova_carter",
-    "wheeled robot": "nova_carter",
-    "mobile": "nova_carter",
-    "mobile robot": "nova_carter",
-    "amr": "nova_carter",
-    "agv": "nova_carter",
-    "carter": "nova_carter",
-    "nova carter": "nova_carter",
-    # Humanoids
-    "humanoid": "h1",
-    "biped": "h1",
-    "human-shaped": "h1",
-    "h1": "h1",
-    "g1": "g1",
-    "unitree humanoid": "h1",
-    # Quadrupeds
-    "quadruped": "anymal_c",
-    "dog": "spot",
-    "spot": "spot",
-    "anymal": "anymal_c",
-    # Hands / grippers
-    "hand": "allegro",
-    "gripper": "allegro",
-    "allegro": "allegro",
-}
-
-_MATERIAL_PROPERTIES = {
-    # term: {density (kg/m^3), static_friction, dynamic_friction, restitution, body_type}
-    "metal":     {"density": 7800, "static_friction": 0.6, "dynamic_friction": 0.4, "restitution": 0.3, "body_type": "rigid"},
-    "steel":     {"density": 7850, "static_friction": 0.6, "dynamic_friction": 0.4, "restitution": 0.3, "body_type": "rigid"},
-    "aluminum":  {"density": 2700, "static_friction": 0.5, "dynamic_friction": 0.3, "restitution": 0.3, "body_type": "rigid"},
-    "wood":      {"density": 700,  "static_friction": 0.5, "dynamic_friction": 0.4, "restitution": 0.4, "body_type": "rigid"},
-    "plastic":   {"density": 950,  "static_friction": 0.4, "dynamic_friction": 0.3, "restitution": 0.5, "body_type": "rigid"},
-    "rubber":    {"density": 1200, "static_friction": 0.9, "dynamic_friction": 0.8, "restitution": 0.8, "body_type": "rigid"},
-    "glass":     {"density": 2500, "static_friction": 0.4, "dynamic_friction": 0.3, "restitution": 0.2, "body_type": "rigid"},
-    "concrete":  {"density": 2400, "static_friction": 0.7, "dynamic_friction": 0.6, "restitution": 0.2, "body_type": "rigid"},
-    "rigid":     {"density": 1000, "static_friction": 0.5, "dynamic_friction": 0.4, "restitution": 0.3, "body_type": "rigid"},
-    "soft":      {"density": 100,  "static_friction": 0.5, "dynamic_friction": 0.4, "restitution": 0.1, "body_type": "deformable"},
-    "deformable":{"density": 100,  "static_friction": 0.5, "dynamic_friction": 0.4, "restitution": 0.1, "body_type": "deformable"},
-    "fabric":    {"density": 100,  "static_friction": 0.6, "dynamic_friction": 0.5, "restitution": 0.0, "body_type": "deformable"},
-    # Swedish aliases
-    "metall":   "metal", "trä": "wood", "gummi": "rubber", "glas": "glass",
-    "betong": "concrete", "stål": "steel", "plast": "plastic",
-}
-
-_CONSTRAINT_RE_NUMERIC = _re.compile(
-    r"(?P<value>-?\d+(?:\.\d+)?)\s*(?P<unit>mm|cm|m|meters?|metre|millimet(?:re|er)|centimet(?:re|er)|kg|kilo(?:gram)?|g|gram|s|sec|second|min|hr|hour|°|deg|rad)?",
-    _re.IGNORECASE,
-)
-_UNIT_TO_SI = {
-    "mm": ("meters", 0.001), "millimeter": ("meters", 0.001), "millimetre": ("meters", 0.001),
-    "cm": ("meters", 0.01), "centimeter": ("meters", 0.01), "centimetre": ("meters", 0.01),
-    "m": ("meters", 1.0), "meter": ("meters", 1.0), "meters": ("meters", 1.0), "metre": ("meters", 1.0),
-    "kg": ("kilograms", 1.0), "kilo": ("kilograms", 1.0), "kilogram": ("kilograms", 1.0),
-    "g": ("kilograms", 0.001), "gram": ("kilograms", 0.001),
-    "s": ("seconds", 1.0), "sec": ("seconds", 1.0), "second": ("seconds", 1.0),
-    "min": ("seconds", 60.0), "hr": ("seconds", 3600.0), "hour": ("seconds", 3600.0),
-    "°": ("degrees", 1.0), "deg": ("degrees", 1.0), "rad": ("radians", 1.0),
-}
-
-_SKILL_RECIPES = {
-    "assembly_line": {
-        "description": "Multi-station pick-place pipeline transporting an item from start bin through N stations to a final bin via robots and conveyors.",
-        "tool_chain": [
-            {"tool": "create_bin", "args_template": {"prim_path": "<INPUT_BIN>"}},
-            {"tool": "create_conveyor", "args_template": {"prim_path": "<CONVEYOR_1>"}},
-            {"tool": "robot_wizard", "args_template": {"robot_name": "<ROBOT>", "dest_path": "<ROBOT_PATH>"}},
-            {"tool": "create_bin", "args_template": {"prim_path": "<OUTPUT_BIN>"}},
-        ],
-        "verify_step": {
-            "tool": "verify_pickplace_pipeline",
-            "args_template": {"stages": [{"robot_path": "<ROBOT_PATH>", "pick_path": "<PICK>", "place_path": "<PLACE>"}]},
-            "rationale": "MANDATORY for multi-station builds. Confirms each robot can reach its pick AND place targets. Without this you might claim 'done' on a layout where robots can't physically perform the pipeline (caught VR-18 / VR-19).",
-        },
-        "success_condition": {
-            "intent": "object_traversal",
-            "start_state": "<ITEM> located at <INPUT_BIN>",
-            "end_state": "<ITEM> located at <OUTPUT_BIN>",
-        },
-    },
-    "pick_and_place": {
-        "description": "Pick an object from one surface and place it on another using PickPlaceController.",
-        "tool_chain": [
-            {"tool": "setup_pick_place_controller", "args_template": {"robot_path": "<ROBOT>", "target_prim_path": "<OBJECT>", "destination": "<BIN>"}},
-        ],
-        "verify_step": {
-            "tool": "verify_pickplace_pipeline",
-            "args_template": {"stages": [{"robot_path": "<ROBOT>", "pick_path": "<OBJECT>", "place_path": "<BIN>"}]},
-            "rationale": "Confirm the robot can reach both the pick and place targets before claiming the cell works.",
-        },
-        "success_condition": {
-            "intent": "object_traversal",
-            "start_state": "<OBJECT> located at <PICK_SURFACE>",
-            "end_state": "<OBJECT> located at <PLACE_SURFACE>",
-        },
-    },
-    "calibrate_camera": {
-        "description": "Place a calibration board + camera and run the calibration routine.",
-        "tool_chain": [
-            {"tool": "create_calibration_experiment", "args_template": {"camera_path": "<CAMERA>"}},
-            {"tool": "quick_calibrate", "args_template": {"camera_path": "<CAMERA>"}},
-        ],
-    },
-    "rl_training_env": {
-        "description": "Spin up an Isaac Lab env scaffold for RL training.",
-        "tool_chain": [
-            {"tool": "create_isaaclab_env", "args_template": {"task_type": "manipulation", "task_name": "<NAME>", "robot_path": "<ROBOT>"}},
-        ],
-    },
-    "ros2_bridge": {
-        "description": "Set up a ROS2 OmniGraph bridge for an articulation.",
-        "tool_chain": [
-            {"tool": "configure_ros2_bridge", "args_template": {"robot_path": "<ROBOT>"}},
-        ],
-    },
-    "teleop_demo": {
-        "description": "Set up teleop mapping + start a recording session.",
-        "tool_chain": [
-            {"tool": "configure_teleop_mapping", "args_template": {"robot_path": "<ROBOT>"}},
-            {"tool": "start_teleop_session", "args_template": {}},
-        ],
-    },
-    # English aliases
-    "pick-and-place": "pick_and_place", "pickplace": "pick_and_place",
-    "pick and place": "pick_and_place", "manipulation": "pick_and_place",
-    "assembly line": "assembly_line", "assembly-line": "assembly_line",
-    "production line": "assembly_line", "manufacturing line": "assembly_line",
-    "multi-station": "assembly_line", "pipeline": "assembly_line",
-    "calibration": "calibrate_camera", "camera calibration": "calibrate_camera",
-    "rl env": "rl_training_env", "rl": "rl_training_env",
-    "training env": "rl_training_env", "training environment": "rl_training_env",
-    "ros2": "ros2_bridge", "ros": "ros2_bridge", "bridge": "ros2_bridge",
-    "teleop": "teleop_demo", "teleoperation": "teleop_demo",
-}
-
-
-# Default reach radius (meters) per robot type. Used by
-# verify_pickplace_pipeline when no explicit reach is supplied.
-# These are conservative envelope estimates from the manufacturer specs;
-# actual cuRobo / Lula IK can refine but the envelope is what matters
-# for pipeline-feasibility-without-running-IK.
-_ROBOT_REACH_M = {
-    "franka_panda": 0.855,  # Franka Panda — 855mm reach
-    "ur5e":         0.850,
-    "ur10":         1.300,
-    "ur10e":        1.300,
-    "kinova":       0.902,
-    "h1":           0.580,  # H1 humanoid arm reach (one arm)
-    "g1":           0.450,
-    "default":      0.800,
-}
-
-
-_SUCCESS_CONDITION_TEMPLATES = {
-    # intent_kind: {fields it needs, structured form}
-    "object_traversal": {
-        "fields": ["object", "start_location", "end_location"],
-        "verify_with": "verify_pickplace_pipeline",
-        "rationale": "Object moves from start_location to end_location. Verifier checks reach + handoffs.",
-    },
-    "static_layout": {
-        "fields": ["components"],
-        "verify_with": None,  # snapshot diff is enough
-        "rationale": "Specific components present at specific positions. Verifier optional — scene_summary suffices.",
-    },
-    "controller_setup": {
-        "fields": ["robot", "controller_type"],
-        "verify_with": None,
-        "rationale": "A controller is configured on a robot. Verifier should test the controller responds.",
-    },
-    "data_pipeline": {
-        "fields": ["source", "sink", "throughput"],
-        "verify_with": None,
-        "rationale": "Data flows from source to sink. Verifier should sample N frames and check format.",
-    },
-}
-
-
-_COORD_LANDMARKS = {
-    # Named anchor points — return position relative to a reference prim
-    # (or world origin when no reference). Ordered most-specific first.
-    "origin": "world",
-    "world origin": "world",
-    "center of stage": "world",
-    "stage center": "world",
-}
-
-_RELATIONAL_PATTERN_RE = _re.compile(
-    r"(?P<factor>\d+(?:\.\d+)?)\s*[xX×]?\s*(?P<rel>times|x|×|the size of|larger than|smaller than|bigger than)?",
-    _re.IGNORECASE,
-)
-
 
 # ---------------------------------------------------------------------------
 # Phase 7 wave 1 — resolve data-handlers (12 functions)
@@ -299,6 +34,8 @@ async def _handle_resolve_count_vagueness(args: Dict) -> Dict:
     Returns alternatives so the agent can pick a different count if the
     user pushes back ('not THAT many, more like a couple').
     """
+    from ..tool_executor import _COUNT_BUCKETS
+
     term_raw = (args.get("term") or "").strip().lower()
     if not term_raw:
         return {"error": "resolve_count_vagueness requires a term ('few', 'many', etc)"}
@@ -342,7 +79,7 @@ async def _handle_resolve_robot_class(args: Dict) -> Dict:
     the URL for import_robot. Includes alternatives the agent can pivot
     to if the user pushes back ('not Franka, give me a UR10').
     """
-    from ..tool_executor import _ROBOT_WIZARD_REGISTRY, _resolve_robot_asset
+    from ..tool_executor import _ROBOT_CLASS_DEFAULTS, _ROBOT_WIZARD_REGISTRY, _resolve_robot_asset
     class_raw = (args.get("robot_class") or args.get("class") or "").strip().lower()
     if not class_raw:
         return {"error": "resolve_robot_class requires a robot_class (e.g. 'manipulator', 'humanoid')"}
@@ -394,6 +131,8 @@ async def _handle_resolve_material_properties(args: Dict) -> Dict:
     canonical defaults the user can refine. Body_type signals to the agent
     whether to reach for RigidBodyAPI or PhysxDeformableBodyAPI.
     """
+    from ..tool_executor import _MATERIAL_PROPERTIES
+
     term = (args.get("material") or args.get("term") or "").strip().lower()
     if not term:
         return {"error": "resolve_material_properties requires a material term"}
@@ -421,6 +160,8 @@ async def _handle_resolve_constraint_phrase(args: Dict) -> Dict:
     constraint kind heuristically classified from keyword presence
     (clearance / mass / time / distance / angular / collision-avoidance).
     """
+    from ..tool_executor import _CONSTRAINT_RE_NUMERIC, _UNIT_TO_SI
+
     phrase = (args.get("phrase") or args.get("constraint") or "").strip().lower()
     if not phrase:
         return {"error": "resolve_constraint_phrase requires a phrase"}
@@ -751,6 +492,8 @@ async def _handle_resolve_success_condition(args: Dict) -> Dict:
     Returns: {kind, success_condition: {start_state, end_state}, verify_with, rationale}.
     Agent uses this to know what verifier to call before declaring done.
     """
+    from ..tool_executor import _SUCCESS_CONDITION_TEMPLATES
+
     kind = (args.get("intent_kind") or "").strip().lower()
     if not kind:
         return {"error": "resolve_success_condition requires intent_kind",
@@ -810,6 +553,8 @@ async def _handle_resolve_skill_composition(args: Dict) -> Dict:
     Args_template fields like '<ROBOT>' tell the agent it needs to fill
     that in (typically by calling resolve_prim_reference first).
     """
+    from ..tool_executor import _SKILL_RECIPES
+
     name = (args.get("skill") or args.get("name") or "").strip().lower()
     if not name:
         return {"error": "resolve_skill_composition requires a skill name"}
@@ -852,6 +597,8 @@ async def _handle_resolve_size_adjective(args: Dict) -> Dict:
         a small sphere" become the same bucket → comparable sizes).
       - Future canary tests can pin specific values for regression checks.
     """
+    from ..tool_executor import _SIZE_BUCKET_ALIASES, _SIZE_BUCKETS
+
     adjective_raw = (args.get("adjective") or "").strip().lower()
     object_class_raw = (args.get("object_class") or "").strip().lower()
     if not adjective_raw:
