@@ -2911,6 +2911,971 @@ print(json.dumps({"selected_paths": paths, "count": len(paths), "primary": prima
 
 
 # ---------------------------------------------------------------------------
+# Phase 7 wave 4 — scene-authoring data-handlers (lists + queries)
+
+
+async def _handle_scene_summary(args: Dict) -> Dict:
+    from .. import kit_tools
+    ctx = await kit_tools.get_stage_context(full=False)
+    if "error" in ctx:
+        return ctx
+    text = kit_tools.format_stage_context_for_llm(ctx)
+    return {"summary": text}
+
+
+async def _handle_run_stage_analysis(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Run all (or selected) validator packs against the live stage."""
+    from .. import kit_tools
+    from ...analysis.orchestrator import AnalysisOrchestrator
+
+    # 1. Fetch full stage context from Kit
+    if not await kit_tools.is_kit_rpc_alive():
+        return {"error": "Kit RPC is not reachable — cannot analyse the stage."}
+
+    try:
+        stage_data = await kit_tools.get_stage_context(full=True)
+    except Exception as e:
+        return {"error": f"Failed to fetch stage context: {e}"}
+
+    # 2. Build analyser with requested packs (or all)
+    enabled_packs = args.get("packs") or None
+    analyzer = AnalysisOrchestrator(enabled_packs=enabled_packs)
+
+    # 3. Run analysis
+    result = analyzer.run_analysis(stage_data)
+
+    # 4. Serialize
+    results = []
+    for f in result.findings:
+        entry = {
+            "rule": f.rule_id,
+            "severity": f.severity,
+            "prim": f.prim_path,
+            "message": f.message,
+        }
+        if f.fix_suggestion:
+            entry["fix_hint"] = f.fix_suggestion.description
+        results.append(entry)
+
+    summary = {}
+    for r in results:
+        summary[r["severity"]] = summary.get(r["severity"], 0) + 1
+
+    return {
+        "total_findings": len(results),
+        "summary": summary,
+        "findings": results[:50],  # cap to avoid huge payloads
+        "truncated": len(results) > 50,
+    }
+
+
+async def _handle_scene_diff(args: Dict) -> Dict:
+    """Compute a structured scene diff via Kit RPC.
+
+    Supports three modes:
+    - since="last_save"     → diff dirty layers against on-disk version
+    - since="last_snapshot" → diff current vs. most recent snapshot
+    - snapshot_a + snapshot_b → explicit comparison
+    """
+    from .. import kit_tools
+    from ..tool_executor import _parse_unified_diff_to_changes, _summarize_changes
+
+    since = args.get("since")
+    snap_a = args.get("snapshot_a")
+    snap_b = args.get("snapshot_b")
+
+    if since == "last_save":
+        # Use Kit RPC to diff dirty layers against their on-disk copies
+        code = """\
+import omni.usd
+import difflib
+import json
+
+ctx = omni.usd.get_context()
+stage = ctx.get_stage()
+dirty = ctx.get_dirty_layers() if hasattr(ctx, 'get_dirty_layers') else []
+all_diff = []
+for layer_id in dirty:
+    from pxr import Sdf
+    layer = Sdf.Layer.Find(layer_id)
+    if layer is None:
+        continue
+    current_text = layer.ExportToString()
+    # Try to get the on-disk version
+    disk_layer = None
+    if layer.realPath:
+        try:
+            disk_layer = Sdf.Layer.OpenAsAnonymous(layer.realPath)
+        except Exception:
+            pass
+    disk_text = disk_layer.ExportToString() if disk_layer else ""
+    diff_lines = list(difflib.unified_diff(
+        disk_text.splitlines(), current_text.splitlines(), lineterm=""
+    ))
+    all_diff.extend(diff_lines)
+# Fallback: if no dirty layers found, diff root layer against empty
+if not dirty:
+    root = stage.GetRootLayer()
+    current_text = root.ExportToString()
+    all_diff = list(difflib.unified_diff(
+        [], current_text.splitlines(), lineterm=""
+    ))
+print(json.dumps({"diff_lines": all_diff, "dirty_layer_count": len(dirty)}))
+"""
+        result = await kit_tools.queue_exec_patch(code, "scene_diff(since=last_save)")
+        if result.get("error"):
+            return {"error": result["error"]}
+        # Parse Kit output
+        output = result.get("output", "")
+        diff_data: Dict = {}
+        for line in reversed(output.splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    diff_data = json.loads(line)
+                    break
+                except json.JSONDecodeError:
+                    pass
+        raw_diff = diff_data.get("diff_lines", [])
+        changes = _parse_unified_diff_to_changes(raw_diff)
+        summary = _summarize_changes(changes)
+        return {
+            "changes": changes,
+            "change_count": len(changes),
+            "summary": summary,
+            "mode": "last_save",
+            "dirty_layer_count": diff_data.get("dirty_layer_count", 0),
+        }
+
+    elif since == "last_snapshot":
+        # Compare current stage text against the most recent snapshot
+        code = """\
+import omni.usd
+import difflib
+import json
+import os
+
+stage = omni.usd.get_context().get_stage()
+current_text = stage.GetRootLayer().ExportToString()
+
+# Find most recent snapshot file
+snap_dir = os.path.join(os.getcwd(), "workspace", "snapshots")
+snapshots = []
+if os.path.isdir(snap_dir):
+    snapshots = sorted(
+        [f for f in os.listdir(snap_dir) if f.endswith(('.usda', '.usd'))],
+        key=lambda f: os.path.getmtime(os.path.join(snap_dir, f)),
+        reverse=True,
+    )
+if not snapshots:
+    print(json.dumps({"diff_lines": [], "error": "No snapshots found"}))
+else:
+    from pxr import Sdf
+    snap_path = os.path.join(snap_dir, snapshots[0])
+    snap_layer = Sdf.Layer.OpenAsAnonymous(snap_path)
+    snap_text = snap_layer.ExportToString() if snap_layer else ""
+    diff_lines = list(difflib.unified_diff(
+        snap_text.splitlines(), current_text.splitlines(), lineterm=""
+    ))
+    print(json.dumps({"diff_lines": diff_lines, "snapshot_file": snapshots[0]}))
+"""
+        result = await kit_tools.queue_exec_patch(code, "scene_diff(since=last_snapshot)")
+        if result.get("error"):
+            return {"error": result["error"]}
+        output = result.get("output", "")
+        diff_data = {}
+        for line in reversed(output.splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    diff_data = json.loads(line)
+                    break
+                except json.JSONDecodeError:
+                    pass
+        if diff_data.get("error"):
+            return {"error": diff_data["error"]}
+        raw_diff = diff_data.get("diff_lines", [])
+        changes = _parse_unified_diff_to_changes(raw_diff)
+        summary = _summarize_changes(changes)
+        return {
+            "changes": changes,
+            "change_count": len(changes),
+            "summary": summary,
+            "mode": "last_snapshot",
+            "snapshot_file": diff_data.get("snapshot_file"),
+        }
+
+    elif snap_a and snap_b:
+        # Explicit comparison between two named snapshots
+        # Sanitize snapshot names — only allow alphanumeric, underscore, hyphen, dot
+        import re as _re
+        if not _re.match(r'^[a-zA-Z0-9_.-]+$', snap_a):
+            return {"error": f"Invalid snapshot_a name: {snap_a}"}
+        if not _re.match(r'^[a-zA-Z0-9_.-]+$', snap_b):
+            return {"error": f"Invalid snapshot_b name: {snap_b}"}
+
+        code = f"""\
+import os
+import difflib
+import json
+from pxr import Sdf
+
+snap_dir = os.path.join(os.getcwd(), "workspace", "snapshots")
+path_a = os.path.join(snap_dir, "{snap_a}")
+path_b = os.path.join(snap_dir, "{snap_b}")
+
+# Try with common extensions if not found
+for ext in ("", ".usda", ".usd"):
+    if os.path.exists(path_a + ext):
+        path_a = path_a + ext
+        break
+for ext in ("", ".usda", ".usd"):
+    if os.path.exists(path_b + ext):
+        path_b = path_b + ext
+        break
+
+if not os.path.exists(path_a):
+    print(json.dumps({{"error": "Snapshot not found: {snap_a}"}}))
+elif not os.path.exists(path_b):
+    print(json.dumps({{"error": "Snapshot not found: {snap_b}"}}))
+else:
+    layer_a = Sdf.Layer.OpenAsAnonymous(path_a)
+    layer_b = Sdf.Layer.OpenAsAnonymous(path_b)
+    text_a = layer_a.ExportToString() if layer_a else ""
+    text_b = layer_b.ExportToString() if layer_b else ""
+    diff_lines = list(difflib.unified_diff(
+        text_a.splitlines(), text_b.splitlines(), lineterm=""
+    ))
+    print(json.dumps({{"diff_lines": diff_lines, "snapshot_a": "{snap_a}", "snapshot_b": "{snap_b}"}}))
+"""
+        result = await kit_tools.queue_exec_patch(code, f"scene_diff({snap_a} vs {snap_b})")
+        if result.get("error"):
+            return {"error": result["error"]}
+        output = result.get("output", "")
+        diff_data = {}
+        for line in reversed(output.splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    diff_data = json.loads(line)
+                    break
+                except json.JSONDecodeError:
+                    pass
+        if diff_data.get("error"):
+            return {"error": diff_data["error"]}
+        raw_diff = diff_data.get("diff_lines", [])
+        changes = _parse_unified_diff_to_changes(raw_diff)
+        summary = _summarize_changes(changes)
+        return {
+            "changes": changes,
+            "change_count": len(changes),
+            "summary": summary,
+            "mode": "explicit",
+            "snapshot_a": snap_a,
+            "snapshot_b": snap_b,
+        }
+
+    return {"error": "Provide either 'since' (last_save|last_snapshot) or both 'snapshot_a' and 'snapshot_b'."}
+
+
+async def _handle_build_stage_index(args: Dict) -> Dict:
+    """Build the metadata index and populate the module-level cache."""
+    from .. import kit_tools
+    from ..tool_executor import _STAGE_INDEX, _STAGE_INDEX_META, _gen_build_stage_index
+
+    prim_scope = args.get("prim_scope") or "/World"
+    max_prims = int(args.get("max_prims", 50000))
+    code = _gen_build_stage_index({"prim_scope": prim_scope, "max_prims": max_prims})
+    queued = await kit_tools.queue_exec_patch(code, f"Build stage index under {prim_scope}")
+    # Even when Kit is offline we still reset the local cache so repeated
+    # builds don't accumulate stale data.
+    _STAGE_INDEX.clear()
+    _STAGE_INDEX_META["prim_scope"] = prim_scope
+    _STAGE_INDEX_META["prim_count"] = 0
+    _STAGE_INDEX_META["max_prims"] = max_prims
+    return {
+        "prim_scope": prim_scope,
+        "max_prims": max_prims,
+        "queued": bool(queued.get("queued", False)) if isinstance(queued, dict) else False,
+        "note": "Kit will populate the index asynchronously via the queued patch.",
+    }
+
+
+async def _handle_query_stage_index(args: Dict) -> Dict:
+    """Return prims relevant to the keywords plus neighbours of selected_prim."""
+    from ..tool_executor import (
+        _STAGE_INDEX,
+        _score_prim_for_query,
+        _neighbour_paths,
+    )
+
+    keywords = args.get("keywords") or []
+    if isinstance(keywords, str):
+        keywords = [keywords]
+    selected_prim = args.get("selected_prim") or ""
+    max_results = int(args.get("max_results", 100))
+
+    if not _STAGE_INDEX:
+        return {
+            "results": [],
+            "total_indexed": 0,
+            "note": "Stage index is empty — call build_stage_index first.",
+        }
+
+    scored: List[Dict[str, Any]] = []
+    for path, meta in _STAGE_INDEX.items():
+        score = _score_prim_for_query(path, meta, keywords)
+        if score > 0:
+            scored.append({"path": path, "score": score, **meta})
+    scored.sort(key=lambda r: (-r["score"], r["path"]))
+
+    # Always include the selected prim + its neighbours so the LLM has local
+    # context even when keywords don't match nearby paths.
+    included_paths = {r["path"] for r in scored}
+    context_paths: List[str] = []
+    if selected_prim and selected_prim in _STAGE_INDEX and selected_prim not in included_paths:
+        context_paths.append(selected_prim)
+    for n in _neighbour_paths(selected_prim):
+        if n not in included_paths and n not in context_paths:
+            context_paths.append(n)
+
+    context_records = [
+        {"path": p, "score": 0, **_STAGE_INDEX[p]}
+        for p in context_paths if p in _STAGE_INDEX
+    ]
+
+    combined = (scored + context_records)[:max_results]
+    return {
+        "results": combined,
+        "total_indexed": len(_STAGE_INDEX),
+        "match_count": len(scored),
+        "context_count": len(context_records),
+        "keywords": keywords,
+        "selected_prim": selected_prim,
+    }
+
+
+async def _handle_count_prims_under_path(args: Dict) -> Dict:
+    """Count direct or recursive children under a parent prim path, optionally
+    filtered by type_name. Used to verify 'I cloned N robots' claims."""
+    from .. import kit_tools
+
+    parent_path = args["parent_path"]
+    type_filter = args.get("type_filter")  # e.g. "Xform", "Mesh" — optional
+    recursive = bool(args.get("recursive", False))
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd
+
+stage = omni.usd.get_context().get_stage()
+parent = stage.GetPrimAtPath({parent_path!r})
+result = {{'parent_path': {parent_path!r}, 'type_filter': {type_filter!r}, 'recursive': {recursive!r}}}
+if not parent or not parent.IsValid():
+    result['error'] = 'parent_path not found'
+    result['count'] = 0
+    result['paths'] = []
+else:
+    if {recursive!r}:
+        prims = [p for p in Usd.PrimRange(parent) if str(p.GetPath()) != str(parent.GetPath())]
+    else:
+        prims = list(parent.GetChildren())
+    if {type_filter!r}:
+        prims = [p for p in prims if str(p.GetTypeName()) == {type_filter!r}]
+    result['count'] = len(prims)
+    result['paths'] = [str(p.GetPath()) for p in prims[:200]]
+    result['truncated'] = len(prims) > 200
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"count_prims {parent_path}")
+
+
+async def _handle_list_relationships(args: Dict) -> Dict:
+    """List all relationships on a prim via prim.GetRelationships()."""
+    from .. import kit_tools
+
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+import json
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+else:
+    rels = []
+    for rel in prim.GetRelationships():
+        try:
+            targets = [str(t) for t in rel.GetTargets()]
+        except Exception as exc:
+            targets = []
+            rel_error = str(exc)
+        else:
+            rel_error = None
+        entry = {{
+            'name': rel.GetName(),
+            'targets': targets,
+            'target_count': len(targets),
+            'custom': bool(rel.IsCustom()),
+        }}
+        if rel_error:
+            entry['error'] = rel_error
+        rels.append(entry)
+    result['relationship_count'] = len(rels)
+    result['relationships'] = rels
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"list_relationships {prim_path}")
+
+
+async def _handle_list_layers(args: Dict) -> Dict:
+    """Walk the current stage's layer stack and return identifiers + edit target.
+
+    Generates a small introspection script and queues it via Kit RPC. Kit prints
+    JSON with one entry per layer plus the active edit target; when Kit is
+    unreachable we still return a structured stub so the LLM gets a predictable
+    shape.
+    """
+    from .. import kit_tools
+
+    code = """\
+import json
+try:
+    import omni.usd
+    stage = omni.usd.get_context().get_stage()
+    if stage is None:
+        print(json.dumps({'error': 'no stage open'}))
+    else:
+        edit_target = stage.GetEditTarget().GetLayer()
+        edit_target_id = edit_target.identifier if edit_target is not None else None
+        root = stage.GetRootLayer()
+        layers = []
+        seen = set()
+        # depth-first walk of the layer stack so 'depth' reflects sublayer nesting
+        def _walk(layer, depth):
+            if layer is None or layer.identifier in seen:
+                return
+            seen.add(layer.identifier)
+            layers.append({
+                'identifier': layer.identifier,
+                'display_name': getattr(layer, 'GetDisplayName', lambda: layer.identifier)(),
+                'anonymous': bool(layer.anonymous),
+                'dirty': bool(layer.dirty),
+                'depth': depth,
+                'is_edit_target': layer.identifier == edit_target_id,
+            })
+            try:
+                from pxr import Sdf
+                for sub_path in layer.subLayerPaths:
+                    sub = Sdf.Layer.FindOrOpen(sub_path)
+                    _walk(sub, depth + 1)
+            except Exception:
+                pass
+        _walk(root, 0)
+        print(json.dumps({
+            'root_layer': root.identifier if root is not None else None,
+            'edit_target': edit_target_id,
+            'layers': layers,
+            'count': len(layers),
+        }))
+except Exception as e:
+    print(json.dumps({'error': str(e)}))
+"""
+    result = await kit_tools.queue_exec_patch(code, "List USD layer stack and edit target")
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "note": (
+            "Layer stack introspection queued. Kit will print a JSON dict with keys: "
+            "root_layer, edit_target, layers (list of {identifier, display_name, "
+            "anonymous, dirty, depth, is_edit_target}), count."
+        ),
+    }
+
+
+async def _handle_list_variant_sets(args: Dict) -> Dict:
+    """Read every variant set declared on a prim and the current selection on each."""
+    from .. import kit_tools
+
+    prim_path = args["prim_path"]
+    prim_path_repr = repr(prim_path)
+    code = (
+        "import json\n"
+        "try:\n"
+        "    import omni.usd\n"
+        "    stage = omni.usd.get_context().get_stage()\n"
+        "    if stage is None:\n"
+        "        print(json.dumps({'error': 'no stage open'}))\n"
+        "    else:\n"
+        f"        prim_path = {prim_path_repr}\n"
+        "        prim = stage.GetPrimAtPath(prim_path)\n"
+        "        if not prim or not prim.IsValid():\n"
+        "            print(json.dumps({'error': f'prim not found: {prim_path}'}))\n"
+        "        else:\n"
+        "            vsets = prim.GetVariantSets()\n"
+        "            names = list(vsets.GetNames())\n"
+        "            entries = []\n"
+        "            for name in names:\n"
+        "                vs = vsets.GetVariantSet(name)\n"
+        "                entries.append({\n"
+        "                    'name': name,\n"
+        "                    'current': vs.GetVariantSelection(),\n"
+        "                    'count': len(vs.GetVariantNames()),\n"
+        "                })\n"
+        "            print(json.dumps({\n"
+        "                'prim_path': prim_path,\n"
+        "                'variant_sets': entries,\n"
+        "                'count': len(entries),\n"
+        "            }))\n"
+        "except Exception as e:\n"
+        "    print(json.dumps({'error': str(e)}))\n"
+    )
+    result = await kit_tools.queue_exec_patch(code, f"List variant sets on {prim_path}")
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "prim_path": prim_path,
+        "note": (
+            "Variant-set introspection queued. Kit will print a JSON dict with keys: "
+            "prim_path, variant_sets (list of {name, current, count}), count."
+        ),
+    }
+
+
+async def _handle_list_variants(args: Dict) -> Dict:
+    """List every named variant choice inside a specific variant set on a prim."""
+    from .. import kit_tools
+
+    prim_path = args["prim_path"]
+    variant_set = args["variant_set"]
+    prim_path_repr = repr(prim_path)
+    variant_set_repr = repr(variant_set)
+    code = (
+        "import json\n"
+        "try:\n"
+        "    import omni.usd\n"
+        "    stage = omni.usd.get_context().get_stage()\n"
+        "    if stage is None:\n"
+        "        print(json.dumps({'error': 'no stage open'}))\n"
+        "    else:\n"
+        f"        prim_path = {prim_path_repr}\n"
+        f"        variant_set_name = {variant_set_repr}\n"
+        "        prim = stage.GetPrimAtPath(prim_path)\n"
+        "        if not prim or not prim.IsValid():\n"
+        "            print(json.dumps({'error': f'prim not found: {prim_path}'}))\n"
+        "        else:\n"
+        "            vsets = prim.GetVariantSets()\n"
+        "            if not vsets.HasVariantSet(variant_set_name):\n"
+        "                print(json.dumps({\n"
+        "                    'error': f'variant set not found: {variant_set_name}',\n"
+        "                    'available': list(vsets.GetNames()),\n"
+        "                }))\n"
+        "            else:\n"
+        "                vs = vsets.GetVariantSet(variant_set_name)\n"
+        "                names = list(vs.GetVariantNames())\n"
+        "                print(json.dumps({\n"
+        "                    'prim_path': prim_path,\n"
+        "                    'variant_set': variant_set_name,\n"
+        "                    'variants': names,\n"
+        "                    'current': vs.GetVariantSelection(),\n"
+        "                    'count': len(names),\n"
+        "                }))\n"
+        "except Exception as e:\n"
+        "    print(json.dumps({'error': str(e)}))\n"
+    )
+    result = await kit_tools.queue_exec_patch(
+        code, f"List variants in {variant_set} on {prim_path}"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "prim_path": prim_path,
+        "variant_set": variant_set,
+        "note": (
+            "Variant introspection queued. Kit will print a JSON dict with keys: "
+            "prim_path, variant_set, variants (list of names), current, count."
+        ),
+    }
+
+
+async def _handle_list_semantic_classes(args: Dict) -> Dict:
+    """Walk the stage, collect every Semantics.SemanticsAPI label, return unique classes."""
+    from .. import kit_tools
+
+    code = """\
+import json
+try:
+    import omni.usd
+    from pxr import Usd, Semantics
+    stage = omni.usd.get_context().get_stage()
+    if stage is None:
+        print(json.dumps({'error': 'no stage open'}))
+    else:
+        classes = {}  # class_name -> {'count': int, 'sample_prims': [str, ...]}
+        labeled = 0
+        for prim in stage.Traverse():
+            try:
+                if not Semantics.SemanticsAPI.HasAPI(prim):
+                    # Some Kit builds expose only the multi-apply variant — fall back to
+                    # GetAll which returns an empty list when nothing is applied.
+                    instances = Semantics.SemanticsAPI.GetAll(prim) if hasattr(
+                        Semantics.SemanticsAPI, 'GetAll'
+                    ) else []
+                else:
+                    instances = Semantics.SemanticsAPI.GetAll(prim) if hasattr(
+                        Semantics.SemanticsAPI, 'GetAll'
+                    ) else [Semantics.SemanticsAPI(prim, 'Semantics_class')]
+            except Exception:
+                instances = []
+            if not instances:
+                continue
+            labeled += 1
+            for sem in instances:
+                try:
+                    data_attr = sem.GetSemanticDataAttr()
+                    cls = data_attr.Get() if data_attr and data_attr.IsValid() else None
+                except Exception:
+                    cls = None
+                if cls is None or cls == '':
+                    continue
+                cls = str(cls)
+                bucket = classes.setdefault(cls, {'count': 0, 'sample_prims': []})
+                bucket['count'] += 1
+                if len(bucket['sample_prims']) < 5:
+                    bucket['sample_prims'].append(str(prim.GetPath()))
+        out_classes = [
+            {'name': name, 'count': info['count'], 'sample_prims': info['sample_prims']}
+            for name, info in sorted(classes.items())
+        ]
+        print(json.dumps({
+            'classes': out_classes,
+            'total_classes': len(out_classes),
+            'total_labeled_prims': labeled,
+        }))
+except Exception as e:
+    print(json.dumps({'error': str(e)}))
+"""
+    result = await kit_tools.queue_exec_patch(
+        code, "List unique semantic classes used on the current stage"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "note": (
+            "Semantic-class enumeration queued. Kit will print a JSON dict with keys: "
+            "classes (list of {name, count, sample_prims}), total_classes, "
+            "total_labeled_prims. count=1 for a class often signals a typo against the "
+            "intended bulk label."
+        ),
+    }
+
+
+async def _handle_list_references(args: Dict) -> Dict:
+    """Enumerate USD reference arcs composed onto a prim."""
+    from .. import kit_tools
+    from ..tool_executor import _TIER12_HELPERS
+
+    prim_path = args["prim_path"]
+    prim_path_repr = repr(prim_path)
+    code = (
+        "import json\n"
+        "try:\n"
+        "    import omni.usd\n"
+        "    from pxr import Usd, Sdf, Pcp\n"
+        "    stage = omni.usd.get_context().get_stage()\n"
+        "    if stage is None:\n"
+        "        print(json.dumps({'error': 'no stage open'}))\n"
+        "    else:\n"
+        f"        prim_path = {prim_path_repr}\n"
+        "        prim = stage.GetPrimAtPath(prim_path)\n"
+        "        if not prim or not prim.IsValid():\n"
+        "            print(json.dumps({'error': f'prim not found: {prim_path}'}))\n"
+        "        else:\n"
+        + _TIER12_HELPERS
+        + "            references = []\n"
+        "            # Local opinions via prim.GetReferences().GetAllReferences() —\n"
+        "            # available on most Kit builds. Fall back to PrimCompositionQuery\n"
+        "            # when the simple API is missing.\n"
+        "            try:\n"
+        "                refs_api = prim.GetReferences()\n"
+        "                local_refs = refs_api.GetAllReferences() if hasattr(\n"
+        "                    refs_api, 'GetAllReferences'\n"
+        "                ) else []\n"
+        "            except Exception:\n"
+        "                local_refs = []\n"
+        "            for r in local_refs:\n"
+        "                try:\n"
+        "                    references.append({\n"
+        "                        'asset_path': str(r.assetPath) if hasattr(r, 'assetPath') else '',\n"
+        "                        'prim_path': str(r.primPath) if hasattr(r, 'primPath') else '',\n"
+        "                        'layer_offset': _layer_offset_dict(getattr(r, 'layerOffset', None)),\n"
+        "                        'introducing_layer': '<local>',\n"
+        "                        'list_position': 'explicit',\n"
+        "                    })\n"
+        "                except Exception:\n"
+        "                    continue\n"
+        "            # Composed arcs (sublayered / inherited reference arcs) via PrimCompositionQuery.\n"
+        "            try:\n"
+        "                query = Usd.PrimCompositionQuery.GetDirectReferences(prim)\n"
+        "                for arc in query.GetCompositionArcs():\n"
+        "                    try:\n"
+        "                        intro_layer = arc.GetIntroducingLayer()\n"
+        "                        intro = intro_layer.identifier if intro_layer else ''\n"
+        "                        if intro == '<local>' or any(\n"
+        "                            ref.get('introducing_layer') == intro for ref in references\n"
+        "                        ):\n"
+        "                            continue\n"
+        "                        target = arc.GetTargetNode()\n"
+        "                        asset = ''\n"
+        "                        target_path = ''\n"
+        "                        if target is not None:\n"
+        "                            try:\n"
+        "                                site = target.path\n"
+        "                                target_path = str(site)\n"
+        "                            except Exception:\n"
+        "                                target_path = ''\n"
+        "                            try:\n"
+        "                                asset_layer = target.layerStack.identifier.rootLayer\n"
+        "                                asset = asset_layer.identifier\n"
+        "                            except Exception:\n"
+        "                                asset = ''\n"
+        "                        references.append({\n"
+        "                            'asset_path': asset,\n"
+        "                            'prim_path': target_path,\n"
+        "                            'layer_offset': {'offset': 0.0, 'scale': 1.0},\n"
+        "                            'introducing_layer': intro,\n"
+        "                            'list_position': 'explicit',\n"
+        "                        })\n"
+        "                    except Exception:\n"
+        "                        continue\n"
+        "            except Exception:\n"
+        "                pass\n"
+        "            print(json.dumps({\n"
+        "                'prim_path': prim_path,\n"
+        "                'has_references': bool(references),\n"
+        "                'references': references,\n"
+        "                'count': len(references),\n"
+        "            }))\n"
+        "except Exception as e:\n"
+        "    print(json.dumps({'error': str(e)}))\n"
+    )
+    result = await kit_tools.queue_exec_patch(
+        code, f"List USD references composed onto {prim_path}"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "prim_path": prim_path,
+        "note": (
+            "Reference enumeration queued. Kit will print a JSON dict with keys: "
+            "prim_path, has_references, references (list of {asset_path, prim_path, "
+            "layer_offset, introducing_layer, list_position}), count. "
+            "has_references=false means the prim has no references — that is a normal "
+            "state, not an error. References are ALWAYS loaded — use list_payloads "
+            "for the deferred-load equivalent."
+        ),
+    }
+
+
+async def _handle_list_payloads(args: Dict) -> Dict:
+    """Enumerate USD payload arcs (deferred-load) on a prim."""
+    from .. import kit_tools
+    from ..tool_executor import _TIER12_HELPERS
+
+    prim_path = args["prim_path"]
+    prim_path_repr = repr(prim_path)
+    code = (
+        "import json\n"
+        "try:\n"
+        "    import omni.usd\n"
+        "    from pxr import Usd, Sdf, Pcp\n"
+        "    stage = omni.usd.get_context().get_stage()\n"
+        "    if stage is None:\n"
+        "        print(json.dumps({'error': 'no stage open'}))\n"
+        "    else:\n"
+        f"        prim_path = {prim_path_repr}\n"
+        "        prim = stage.GetPrimAtPath(prim_path)\n"
+        "        if not prim or not prim.IsValid():\n"
+        "            print(json.dumps({'error': f'prim not found: {prim_path}'}))\n"
+        "        else:\n"
+        + _TIER12_HELPERS
+        + "            payloads = []\n"
+        "            try:\n"
+        "                pl_api = prim.GetPayloads()\n"
+        "                local_pls = pl_api.GetAllPayloads() if hasattr(\n"
+        "                    pl_api, 'GetAllPayloads'\n"
+        "                ) else []\n"
+        "            except Exception:\n"
+        "                local_pls = []\n"
+        "            # Current load-set membership tells us which prims have their\n"
+        "            # payloads activated right now.\n"
+        "            try:\n"
+        "                load_set = stage.GetLoadSet()\n"
+        "                prim_is_loaded = bool(prim.GetPath() in load_set)\n"
+        "            except Exception:\n"
+        "                prim_is_loaded = True  # default: loaded\n"
+        "            for p in local_pls:\n"
+        "                try:\n"
+        "                    payloads.append({\n"
+        "                        'asset_path': str(p.assetPath) if hasattr(p, 'assetPath') else '',\n"
+        "                        'prim_path': str(p.primPath) if hasattr(p, 'primPath') else '',\n"
+        "                        'layer_offset': _layer_offset_dict(getattr(p, 'layerOffset', None)),\n"
+        "                        'introducing_layer': '<local>',\n"
+        "                        'is_loaded': prim_is_loaded,\n"
+        "                        'list_position': 'explicit',\n"
+        "                    })\n"
+        "                except Exception:\n"
+        "                    continue\n"
+        "            # Composed arcs via PrimCompositionQuery.\n"
+        "            try:\n"
+        "                query = Usd.PrimCompositionQuery.GetDirectInherits(prim)  # placeholder; real call below\n"
+        "                query = Usd.PrimCompositionQuery(prim)\n"
+        "                filt = Usd.CompositionArcFilter() if hasattr(Usd, 'CompositionArcFilter') else None\n"
+        "                for arc in query.GetCompositionArcs():\n"
+        "                    try:\n"
+        "                        if str(arc.GetArcType()).lower().find('payload') < 0:\n"
+        "                            continue\n"
+        "                        intro_layer = arc.GetIntroducingLayer()\n"
+        "                        intro = intro_layer.identifier if intro_layer else ''\n"
+        "                        if intro == '<local>':\n"
+        "                            continue\n"
+        "                        target = arc.GetTargetNode()\n"
+        "                        asset = ''\n"
+        "                        target_path = ''\n"
+        "                        if target is not None:\n"
+        "                            try:\n"
+        "                                target_path = str(target.path)\n"
+        "                            except Exception:\n"
+        "                                target_path = ''\n"
+        "                            try:\n"
+        "                                asset = target.layerStack.identifier.rootLayer.identifier\n"
+        "                            except Exception:\n"
+        "                                asset = ''\n"
+        "                        payloads.append({\n"
+        "                            'asset_path': asset,\n"
+        "                            'prim_path': target_path,\n"
+        "                            'layer_offset': {'offset': 0.0, 'scale': 1.0},\n"
+        "                            'introducing_layer': intro,\n"
+        "                            'is_loaded': prim_is_loaded,\n"
+        "                            'list_position': 'explicit',\n"
+        "                        })\n"
+        "                    except Exception:\n"
+        "                        continue\n"
+        "            except Exception:\n"
+        "                pass\n"
+        "            print(json.dumps({\n"
+        "                'prim_path': prim_path,\n"
+        "                'has_payloads': bool(payloads),\n"
+        "                'payloads': payloads,\n"
+        "                'count': len(payloads),\n"
+        "                'prim_is_loaded': prim_is_loaded,\n"
+        "            }))\n"
+        "except Exception as e:\n"
+        "    print(json.dumps({'error': str(e)}))\n"
+    )
+    result = await kit_tools.queue_exec_patch(
+        code, f"List USD payloads (deferred-load) on {prim_path}"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "prim_path": prim_path,
+        "note": (
+            "Payload enumeration queued. Kit will print a JSON dict with keys: "
+            "prim_path, has_payloads, payloads (list of {asset_path, prim_path, "
+            "layer_offset, introducing_layer, is_loaded, list_position}), count, "
+            "prim_is_loaded. has_payloads=false (no payload arcs on this prim) is a "
+            "normal state, not an error. is_loaded reflects the CURRENT load-set "
+            "membership and can be flipped via load_payload."
+        ),
+    }
+
+
+async def _handle_select_by_criteria(args: Dict) -> Dict:
+    """T14.3 — query USD stage for prims matching a criteria dict.
+
+    Runs inside Kit via queue_exec_patch; the injected code prints a JSON
+    payload on stdout that the LLM can read from the patch result.
+    """
+    from .. import kit_tools
+    from ..tool_executor import _build_select_by_criteria_code
+
+    criteria = args.get("criteria", {})
+    if not isinstance(criteria, dict):
+        return {"error": "criteria must be a dict", "matches": [], "count": 0}
+
+    code = _build_select_by_criteria_code(criteria)
+    result = await kit_tools.queue_exec_patch(
+        code,
+        f"select_by_criteria({', '.join(f'{k}={v!r}' for k, v in list(criteria.items())[:3])})",
+    )
+    # queue_exec_patch returns a dict with queued/patch_id — the actual matches
+    # are produced when the patch executes. Surface both so the caller can
+    # either poll for the patch result or read matches from the Kit log.
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "criteria": criteria,
+        "query_code": code,
+        "note": (
+            "Matches are produced when the queued patch executes on Kit. "
+            "Read the resulting JSON payload from the patch output. "
+            "Schema: {matches: [str], count: int, criteria: {...}}."
+        ),
+    }
+
+
+async def _handle_list_opened_stages(args: Dict) -> Dict:
+    """List all UsdContexts and the stage URL each holds."""
+    from .. import kit_tools
+
+    code = """\
+import json
+import omni.usd
+
+ctx_names = []
+try:
+    ctx_names = list(omni.usd.get_context_names())
+except Exception:
+    ctx_names = [""]
+if not ctx_names:
+    ctx_names = [""]
+
+stages = []
+active_ctx = ""
+for name in ctx_names:
+    try:
+        c = omni.usd.get_context(name)
+        if c is None:
+            continue
+        url = c.get_stage_url() or None
+        stage = c.get_stage()
+        prim_count = 0
+        if stage is not None:
+            prim_count = sum(1 for _ in stage.Traverse())
+        is_dirty = False
+        try:
+            is_dirty = bool(c.has_pending_edit())
+        except Exception:
+            is_dirty = False
+        stages.append({
+            "context_name": name,
+            "stage_url": url,
+            "prim_count": prim_count,
+            "is_dirty": is_dirty,
+        })
+        if not active_ctx:
+            active_ctx = name
+    except Exception:
+        continue
+print(json.dumps({"stages": stages, "active_context": active_ctx}))
+"""
+    return await kit_tools.queue_exec_patch(code, "List opened USD stages")
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
