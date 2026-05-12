@@ -1655,6 +1655,10 @@ from .handlers.scene_authoring import (  # noqa: E402
     _gen_set_attribute,
     _gen_teleport_prim,
 )
+from .handlers.physics import (  # noqa: E402
+    _gen_set_joint_targets,
+    _gen_set_physics_params,
+)
 
 
 # _gen_add_reference moved to handlers/scene_authoring.py (Phase 3 wave 2).
@@ -1902,49 +1906,9 @@ for _ in range({count}):
     return f"# Unknown sim action: {action}"
 
 
-def _gen_set_physics_params(args: Dict) -> str:
-    lines = [
-        "import omni.usd",
-        "from pxr import UsdPhysics, Gf",
-        "stage = omni.usd.get_context().get_stage()",
-        "scene = UsdPhysics.Scene.Get(stage, '/PhysicsScene') or UsdPhysics.Scene.Define(stage, '/PhysicsScene')",
-    ]
-    if "gravity_direction" in args and "gravity_magnitude" in args:
-        d = args["gravity_direction"]
-        m = args["gravity_magnitude"]
-        lines.append(f"scene.GetGravityDirectionAttr().Set(Gf.Vec3f({d[0]}, {d[1]}, {d[2]}))")
-        lines.append(f"scene.GetGravityMagnitudeAttr().Set({m})")
-    elif "gravity_magnitude" in args:
-        lines.append(f"scene.GetGravityMagnitudeAttr().Set({args['gravity_magnitude']})")
-    if "time_step" in args:
-        lines.append(f"# Note: Physics time step is set via settings")
-        lines.append(f"import carb.settings")
-        lines.append(f"carb.settings.get_settings().set('/persistent/physics/updateToUsd', True)")
-        lines.append(f"carb.settings.get_settings().set('/persistent/physics/timeStepsPerSecond', int(1.0/{args['time_step']}))")
-    return "\n".join(lines)
-
-
+# _gen_set_physics_params moved to handlers/physics.py (Phase 5 wave 1).
 # _gen_teleport_prim moved to handlers/scene_authoring.py (Phase 3 wave 2).
-
-
-def _gen_set_joint_targets(args: Dict) -> str:
-    art_path = args["articulation_path"]
-    joint = args.get("joint_name", "")
-    pos = args.get("target_position")
-    vel = args.get("target_velocity")
-    lines = [
-        "import omni.usd",
-        "from pxr import UsdPhysics",
-        "stage = omni.usd.get_context().get_stage()",
-    ]
-    if joint:
-        lines.append(f"joint_prim = stage.GetPrimAtPath('{art_path}/{joint}')")
-        lines.append("drive = UsdPhysics.DriveAPI.Get(joint_prim, 'angular')")
-        if pos is not None:
-            lines.append(f"drive.GetTargetPositionAttr().Set({pos})")
-        if vel is not None:
-            lines.append(f"drive.GetTargetVelocityAttr().Set({vel})")
-    return "\n".join(lines)
+# _gen_set_joint_targets moved to handlers/physics.py (Phase 5 wave 1).
 
 
 def _gen_import_robot(args: Dict) -> str:
