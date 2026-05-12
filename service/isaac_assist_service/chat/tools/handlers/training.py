@@ -630,6 +630,777 @@ if __name__ == "__main__":
 
 
 # ---------------------------------------------------------------------------
+# Phase 7 wave 5 — training data-handlers (analyze + eureka + finetune + env + reward)
+
+
+async def _handle_create_isaaclab_env(args: Dict) -> Dict:
+    """Generate an IsaacLab env scaffold — returns config as data for the LLM to refine."""
+    from ..tool_executor import _RL_TASK_TEMPLATES, _generate_isaaclab_env_code
+    task_name = args["task_name"]
+    robot_path = args["robot_path"]
+    task_type = args.get("task_type", "manipulation")
+    num_envs = args.get("num_envs", 64)
+    env_spacing = args.get("env_spacing", 2.0)
+    reward_terms = args.get("reward_terms")
+
+    template = _RL_TASK_TEMPLATES.get(task_type, _RL_TASK_TEMPLATES["custom"])
+    if reward_terms:
+        template = {**template, "rewards": reward_terms}
+
+    env_config = {
+        "task_name": task_name,
+        "robot_path": robot_path,
+        "task_type": task_type,
+        "num_envs": num_envs,
+        "env_spacing": env_spacing,
+        "observation_space": template["obs"],
+        "action_space": template["actions"],
+        "reward_terms": template["rewards"],
+        "episode_length": 500,
+        "decimation": 2,
+        "physics_dt": 1.0 / 120.0,
+    }
+
+    # Generate the Python env class code
+    env_code = _generate_isaaclab_env_code(env_config)
+
+    return {
+        "type": "isaaclab_env",
+        "task_name": task_name,
+        "config": env_config,
+        "generated_code": env_code,
+        "instructions": (
+            f"IsaacLab env '{task_name}' scaffolded with {num_envs} parallel envs. "
+            f"Observations: {template['obs']}. Actions: {template['actions']}. "
+            f"Rewards: {template['rewards']}. "
+            "You can now call launch_training to start training, or refine the config."
+        ),
+    }
+
+
+async def _handle_generate_reward(args: Dict) -> Dict:
+    """Generate Eureka reward configuration and initial prompt for a DirectRLEnv."""
+    from pathlib import Path
+    task_description = args["task_description"]
+    env_source_path = args["env_source_path"]
+    num_candidates = args.get("num_candidates", 4)
+    num_iterations = args.get("num_iterations", 5)
+
+    # Read environment source code
+    env_path = Path(env_source_path)
+    if env_path.exists():
+        env_source = env_path.read_text()
+    else:
+        env_source = f"# [File not found: {env_source_path}]\n# Provide the DirectRLEnv source code manually."
+
+    # Validate it's a DirectRLEnv (not ManagerBasedRLEnv)
+    if "ManagerBasedRLEnv" in env_source:
+        return {
+            "error": "Eureka reward generation only works with DirectRLEnv, not ManagerBasedRLEnv. "
+                     "DirectRLEnv exposes compute_reward() which Eureka can override.",
+        }
+
+    # Build the initial reward generation prompt
+    initial_prompt = f"""You are a reward function engineer for reinforcement learning.
+
+Task description: {task_description}
+
+Environment source code:
+```python
+{env_source}
+```
+
+Generate {num_candidates} diverse reward function candidates.
+Each candidate must:
+1. Be a standalone Python function: def compute_reward(self) -> torch.Tensor
+2. Use only tensors available in self (observations, actions, targets, etc.)
+3. Return a scalar reward tensor of shape (num_envs,)
+4. Include per-component breakdown as a dict for analysis
+5. Avoid sparse rewards — use dense, shaped rewards
+
+Return each candidate as a separate code block.
+"""
+
+    eureka_config = {
+        "task_description": task_description,
+        "env_source_path": env_source_path,
+        "num_candidates": num_candidates,
+        "num_iterations": num_iterations,
+        "env_type": "DirectRLEnv",
+        "initial_prompt": initial_prompt,
+        "env_source_included": env_path.exists(),
+    }
+
+    return eureka_config
+
+
+async def _handle_iterate_reward(args: Dict) -> Dict:
+    """Generate a mutation prompt for the next Eureka iteration."""
+    from ..tool_executor import _build_mutation_prompt
+    prev_reward_code = args["prev_reward_code"]
+    metrics = args["metrics"]
+    user_feedback = args.get("user_feedback")
+
+    mutation_prompt = _build_mutation_prompt(prev_reward_code, metrics, user_feedback)
+
+    return {
+        "mutation_prompt": mutation_prompt,
+        "prev_fitness": metrics.get("fitness", "N/A"),
+        "prev_success_rate": metrics.get("task_success_rate", "N/A"),
+        "components_analyzed": list(metrics.get("components", {}).keys()),
+        "has_user_feedback": user_feedback is not None,
+    }
+
+
+async def _handle_eureka_status(args: Dict) -> Dict:
+    """Return current status of a Eureka optimization run."""
+    from ..tool_executor import _eureka_runs
+    run_id = args["run_id"]
+
+    if run_id in _eureka_runs:
+        run = _eureka_runs[run_id]
+        return {
+            "run_id": run_id,
+            "status": run.get("status", "unknown"),
+            "current_iteration": run.get("current_iteration", 0),
+            "total_iterations": run.get("total_iterations", 0),
+            "candidates_evaluated": run.get("candidates_evaluated", 0),
+            "best_fitness": run.get("best_fitness", 0.0),
+            "best_reward_code": run.get("best_reward_code"),
+        }
+
+    return {
+        "run_id": run_id,
+        "status": "not_found",
+        "message": f"No Eureka run found with ID '{run_id}'. Start one with generate_reward first.",
+    }
+
+
+async def _handle_load_groot_policy(args: Dict) -> Dict:
+    """Return download/launch commands for GR00T N1 policy server."""
+    from ..tool_executor import _GROOT_EMBODIMENTS
+    model_id = args.get("model_id", "nvidia/GR00T-N1.6-3B")
+    robot_path = args["robot_path"]
+    embodiment_key = args.get("embodiment", "custom")
+
+    embodiment = _GROOT_EMBODIMENTS.get(embodiment_key, _GROOT_EMBODIMENTS["custom"])
+
+    # VRAM check — estimate based on model size
+    estimated_vram = embodiment.get("vram_gb", 24)
+
+    return {
+        "model_id": model_id,
+        "robot_path": robot_path,
+        "embodiment": embodiment_key,
+        "embodiment_config": embodiment,
+        "download_command": (
+            f"from huggingface_hub import snapshot_download; "
+            f"snapshot_download('{model_id}', local_dir='workspace/groot_models/{model_id.split('/')[-1]}')"
+        ),
+        "launch_command": (
+            f"python -m gr00t.deploy.policy_server "
+            f"--model-path workspace/groot_models/{model_id.split('/')[-1]} "
+            f"--embodiment {embodiment_key} "
+            f"--port 50051"
+        ),
+        "vram_required_gb": estimated_vram,
+        "vram_check": "ok" if estimated_vram <= 24 else "insufficient",
+        "error": (
+            f"Insufficient VRAM: GR00T N1 requires >= 24 GB VRAM. "
+            f"Consider using NVIDIA Cloud (brev.dev/nvidia) or a multi-GPU setup."
+        ) if estimated_vram > 24 else None,
+        "instructions": (
+            f"1. Download model: {model_id}\n"
+            f"2. Launch policy server on port 50051\n"
+            f"3. Robot at {robot_path} will connect via gRPC\n"
+            f"4. Embodiment: {embodiment_key} ({embodiment['description']})"
+        ),
+    }
+
+
+async def _handle_compare_policies(args: Dict) -> Dict:
+    """Format a comparison table from multiple GR00T policy evaluation results."""
+    results = args.get("results", [])
+
+    if not results:
+        return {
+            "comparison_table": "No results to compare.",
+            "entries": [],
+            "count": 0,
+        }
+
+    # Determine all metric columns
+    metric_cols = set()
+    for r in results:
+        tm = r.get("task_metrics", {})
+        metric_cols.update(tm.keys())
+    metric_cols = sorted(metric_cols)
+
+    # Build comparison entries
+    entries = []
+    for r in results:
+        entry = {
+            "policy_name": r.get("policy_name", "unnamed"),
+            "model_id": r.get("model_id", "N/A"),
+            "success_rate": r.get("success_rate", 0.0),
+            "training_data_size": r.get("training_data_size", "N/A"),
+            "observation_type": r.get("observation_type", "N/A"),
+        }
+        for col in metric_cols:
+            entry[col] = r.get("task_metrics", {}).get(col, "N/A")
+        entries.append(entry)
+
+    # Sort by success_rate descending
+    entries.sort(key=lambda e: -e["success_rate"])
+
+    # Build formatted table
+    header_cols = ["Policy", "Model", "Success Rate", "Train Data", "Obs Type"]
+    header_cols.extend(metric_cols)
+
+    rows = []
+    for e in entries:
+        row = [
+            e["policy_name"],
+            e["model_id"],
+            f"{e['success_rate']:.1%}",
+            e["training_data_size"],
+            e["observation_type"],
+        ]
+        for col in metric_cols:
+            val = e.get(col, "N/A")
+            if isinstance(val, float):
+                row.append(f"{val:.3f}")
+            else:
+                row.append(str(val))
+        rows.append(row)
+
+    # Calculate column widths
+    col_widths = [len(h) for h in header_cols]
+    for row in rows:
+        for i, val in enumerate(row):
+            col_widths[i] = max(col_widths[i], len(val))
+
+    # Format table
+    sep = "+-" + "-+-".join("-" * w for w in col_widths) + "-+"
+    header_line = "| " + " | ".join(h.ljust(w) for h, w in zip(header_cols, col_widths)) + " |"
+    table_lines = [sep, header_line, sep]
+    for row in rows:
+        table_lines.append("| " + " | ".join(v.ljust(w) for v, w in zip(row, col_widths)) + " |")
+    table_lines.append(sep)
+
+    return {
+        "comparison_table": "\n".join(table_lines),
+        "entries": entries,
+        "count": len(entries),
+        "metric_columns": metric_cols,
+        "dimensions": [
+            "zero-shot generalization (success_rate without task-specific training)",
+            "single-task performance (success_rate with fine-tuning)",
+            "training data needed (training_data_size)",
+            "observation type (observation_type: rgb, rgb+proprio, proprio)",
+        ],
+    }
+
+
+async def _handle_export_finetune_data(args: Dict) -> Dict:
+    """Export recorded turns to a provider-specific fine-tuning format."""
+    from ..tool_executor import _turn_recorder
+    fmt = args["format"]
+    min_quality = args.get("min_quality", "approved_successful")
+    output_path = args.get("output_path")
+    return _turn_recorder.export(
+        fmt=fmt,
+        min_quality=min_quality,
+        output_path=output_path,
+    )
+
+
+async def _handle_finetune_stats(args: Dict) -> Dict:
+    """Return aggregate statistics about recorded fine-tuning data."""
+    from ..tool_executor import _turn_recorder
+    return _turn_recorder.get_stats()
+
+
+async def _handle_analyze_randomization(args: Dict) -> Dict:
+    """Analyze domain randomization parameter distributions from an SDG run.
+
+    Returns per-parameter statistics and flags near-constant or collapsed
+    distributions that indicate DR misconfiguration.
+    """
+    from .. import kit_tools
+    num_samples = args.get("num_samples", 50)
+
+    code = f"""\
+import json, os, glob, random
+import numpy as np
+
+output_dirs = glob.glob('/tmp/sdg_output*') + glob.glob('workspace/sdg_output*')
+if not output_dirs:
+    print(json.dumps({{"error": "No SDG output directories found"}}))
+else:
+    out_dir = sorted(output_dirs)[-1]
+
+    # Look for DR log / randomization parameter files
+    dr_files = glob.glob(os.path.join(out_dir, '**', '*random*'), recursive=True)
+    dr_files += glob.glob(os.path.join(out_dir, '**', '*param*'), recursive=True)
+    dr_files += glob.glob(os.path.join(out_dir, '**', '*.json'), recursive=True)
+    dr_files = list(set(dr_files))
+    samples = dr_files[:{num_samples}] if len(dr_files) <= {num_samples} else random.sample(dr_files, {num_samples})
+
+    param_values = {{}}  # param_name -> list of values
+
+    for f in samples:
+        try:
+            data = json.loads(open(f).read())
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        params = data.get('randomization_params') or data.get('params') or data.get('dr_params') or {{}}
+        if isinstance(params, dict):
+            for k, v in params.items():
+                if isinstance(v, (int, float)):
+                    param_values.setdefault(k, []).append(v)
+                elif isinstance(v, list) and all(isinstance(x, (int, float)) for x in v):
+                    for i, x in enumerate(v):
+                        param_values.setdefault(f"{{k}}[{{i}}]", []).append(x)
+
+    stats = {{}}
+    warnings = []
+    for pname, vals in param_values.items():
+        arr = np.array(vals, dtype=float)
+        s = {{
+            "min": float(arr.min()),
+            "max": float(arr.max()),
+            "mean": float(arr.mean()),
+            "std": float(arr.std()),
+            "count": len(vals),
+        }}
+        stats[pname] = s
+
+        # Flag near-constant distributions
+        if s["std"] < 1e-6 and s["count"] > 5:
+            warnings.append({{
+                "param": pname,
+                "warning": "near_constant",
+                "detail": f"{{s['count']}} samples all ~{{s['mean']:.4f}} — DR may be misconfigured",
+            }})
+        # Flag extremely narrow range
+        range_val = s["max"] - s["min"]
+        if range_val > 0 and s["std"] / range_val < 0.01 and s["count"] > 10:
+            warnings.append({{
+                "param": pname,
+                "warning": "narrow_range",
+                "detail": f"std/range = {{s['std']/range_val:.4f}} — 99%+ values are the same angle/position",
+            }})
+
+    print(json.dumps({{
+        "samples_analyzed": len(samples),
+        "parameters": stats,
+        "warnings": warnings,
+        "total_params": len(stats),
+    }}))
+"""
+    result = await kit_tools.queue_exec_patch(code, f"Analyze DR randomization ({num_samples} samples)")
+    return {"type": "data", "queued": result.get("queued", False)}
+
+
+async def _handle_apply_dr_preset(args: Dict) -> Dict:
+    """Look up a DR preset by name."""
+    from ..tool_executor import _DR_PRESETS
+    preset = (args.get("preset") or "").strip().lower()
+    if not preset:
+        return {"error": "preset is required", "available": sorted(_DR_PRESETS.keys())}
+    if preset not in _DR_PRESETS:
+        return {
+            "error": f"unknown preset '{preset}'",
+            "available": sorted(_DR_PRESETS.keys()),
+        }
+    cfg = _DR_PRESETS[preset]
+    return {
+        "preset": preset,
+        "description": cfg.get("description", ""),
+        "parameters": {k: v for k, v in cfg.items() if k != "description"},
+        "message": f"Loaded DR preset '{preset}' — feed `parameters` into configure_correlated_dr or your IsaacLab EventManager.",
+    }
+
+
+async def _handle_detect_ood(args: Dict) -> Dict:
+    """Detect OOD via action variance/autocorrelation (Tier 1) or higher tiers."""
+    tier = args.get("tier", 1)
+
+    if tier == 1:
+        action_seq = args.get("action_sequence", [])
+        if not action_seq or len(action_seq) < 2:
+            return {"error": "Tier 1 requires action_sequence with >= 2 entries"}
+
+        n_dims = len(action_seq[0]) if isinstance(action_seq[0], (list, tuple)) else 1
+        variances = []
+        autocorrs = []
+        for j in range(n_dims):
+            values = [step[j] if isinstance(step, (list, tuple)) else step for step in action_seq]
+            mean = sum(values) / len(values)
+            var = sum((v - mean) ** 2 for v in values) / len(values)
+            variances.append(var)
+            if len(values) >= 3:
+                v0, v1 = values[:-1], values[1:]
+                m0, m1 = sum(v0) / len(v0), sum(v1) / len(v1)
+                num = sum((a - m0) * (b - m1) for a, b in zip(v0, v1))
+                den0 = sum((a - m0) ** 2 for a in v0) ** 0.5
+                den1 = sum((b - m1) ** 2 for b in v1) ** 0.5
+                autocorrs.append(num / max(den0 * den1, 1e-10))
+            else:
+                autocorrs.append(0.0)
+
+        max_var = max(variances)
+        min_autocorr = min(autocorrs) if autocorrs else 1.0
+        is_ood = max_var > 1.0 or min_autocorr < 0.3
+        return {
+            "tier": 1,
+            "is_ood": is_ood,
+            "max_action_variance": round(max_var, 4),
+            "min_autocorrelation": round(min_autocorr, 4),
+            "thresholds": {"variance": 1.0, "autocorr": 0.3},
+            "warning": "Action instability detected — policy may be extrapolating" if is_ood else None,
+        }
+    elif tier == 2:
+        return {
+            "tier": 2,
+            "method": "4-sample DiT variance",
+            "overhead_ms": 15,
+            "instructions": "Run 4 forward passes with dropout, compute action variance",
+            "checkpoint_needed": args.get("checkpoint_path"),
+        }
+    elif tier == 3:
+        return {
+            "tier": 3,
+            "method": "Mahalanobis distance on 12th-layer embeddings",
+            "instructions": "Pre-compute mean+covariance over training data; inference distance > threshold = OOD",
+            "calibration_path": args.get("calibration_path"),
+        }
+    else:
+        return {"error": f"Invalid tier {tier} — must be 1, 2, or 3"}
+
+
+async def _handle_analyze_checkpoint(args: Dict) -> Dict:
+    """Analyze GR00T checkpoint: embodiment, drift, action stats, risk."""
+    from pathlib import Path
+    checkpoint_path = args.get("checkpoint_path", "")
+    base_path = args.get("base_model_path")
+
+    if not Path(checkpoint_path).exists():
+        return {"error": f"Checkpoint not found: {checkpoint_path}"}
+
+    analysis = {
+        "checkpoint_path": checkpoint_path,
+        "instructions": [
+            "1. Load checkpoint with torch.load(weights_only=False)",
+            "2. Read metadata: embodiment, training_steps from checkpoint['config']",
+            "3. If base_model provided, compute per-layer Frobenius norm",
+            "4. Aggregate action statistics from training logs",
+        ],
+        "expected_structure": {
+            "embodiment": "UNITREE_G1 / LIBERO_PANDA / OXE_WIDOWX / CUSTOM",
+            "training_steps": "int",
+            "layer_drift": {
+                "vision_encoder": "low (<0.05) = frozen, good",
+                "dit_layers": "high (>0.3) = well-targeted",
+                "adapter_mlps": "high (>0.3) = expected",
+                "language_model": "near-zero (<0.01) = frozen, good",
+            },
+            "action_statistics": {
+                "mean_per_joint": "[float, ...]",
+                "std_per_joint": "[float, ...]",
+            },
+        },
+    }
+    if base_path:
+        analysis["compare_against"] = base_path
+    return analysis
+
+
+async def _handle_get_training_status(args: Dict) -> Dict:
+    """Read TensorBoard event files + subprocess state for an RL run."""
+    import os
+    from pathlib import Path
+    from ..tool_executor import _WORKSPACE
+
+    run_id = args["run_id"]
+    log_dir = args.get("log_dir") or str(_WORKSPACE / "rl_checkpoints" / run_id)
+
+    log_path = Path(log_dir)
+    result: Dict[str, Any] = {
+        "run_id": run_id,
+        "log_dir": str(log_path),
+        "state": "unknown",
+        "step": None,
+        "total_steps": None,
+        "latest_reward": None,
+        "events_found": 0,
+    }
+
+    if not log_path.exists():
+        result["state"] = "missing"
+        result["error"] = f"log dir does not exist: {log_path}"
+        return result
+
+    # Look for TensorBoard event files (events.out.tfevents.*)
+    event_files = sorted(log_path.glob("**/events.out.tfevents.*"))
+    result["events_found"] = len(event_files)
+
+    if not event_files:
+        result["state"] = "starting"
+        return result
+
+    # Try to parse the latest event file. tensorboard isn't a hard dep, so we
+    # fall back gracefully on import failure.
+    latest = event_files[-1]
+    try:
+        from tensorboard.backend.event_processing.event_accumulator import EventAccumulator  # type: ignore
+        acc = EventAccumulator(str(latest), size_guidance={"scalars": 0})
+        acc.Reload()
+        scalars = acc.Tags().get("scalars", [])
+        # Prefer common reward / step tag names
+        for tag in ("reward", "Train/reward", "train/reward",
+                    "rollout/ep_rew_mean", "Episode_Reward/Mean"):
+            if tag in scalars:
+                events = acc.Scalars(tag)
+                if events:
+                    result["latest_reward"] = events[-1].value
+                    result["step"] = events[-1].step
+                    break
+        if result["step"] is None and scalars:
+            events = acc.Scalars(scalars[0])
+            if events:
+                result["step"] = events[-1].step
+    except ImportError:
+        result["note"] = "tensorboard not installed — install with `pip install tensorboard`"
+    except Exception as exc:
+        result["error"] = f"failed to parse event file: {exc}"
+
+    # Subprocess state via the launcher's pid file (if launch_training wrote one)
+    pid_file = log_path / "launcher.pid"
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text().strip())
+            # Cheap liveness check: send signal 0
+            try:
+                os.kill(pid, 0)
+                result["state"] = "running"
+                result["pid"] = pid
+            except ProcessLookupError:
+                result["state"] = "finished"
+                result["pid"] = pid
+            except PermissionError:
+                # Process exists but owned by another user — still treat as running
+                result["state"] = "running"
+                result["pid"] = pid
+        except Exception as exc:
+            result["state"] = "unknown"
+            result["error"] = f"could not read launcher.pid: {exc}"
+    elif result["events_found"] > 0:
+        result["state"] = "running"
+
+    return result
+
+
+async def _handle_get_env_observations(args: Dict) -> Dict:
+    """Read the observation tensor for one env in a running IsaacLab worker."""
+    import time
+    from ..tool_executor import _resolve_run_id, _validate_env_id, _query_run_ipc
+    t0 = time.perf_counter()
+    env_id = args.get("env_id")
+    run_id_arg = args.get("run_id")
+
+    run_id, entry = _resolve_run_id(run_id_arg)
+    if entry is None:
+        return {
+            "error": (
+                "No active training run found. Launch one with launch_training first, "
+                "or pass an explicit run_id."
+            ),
+            "requested_run_id": run_id_arg,
+        }
+
+    err = _validate_env_id(env_id, entry.get("num_envs", 0))
+    if err:
+        return {"error": err, "run_id": run_id, "num_envs": entry.get("num_envs")}
+
+    try:
+        ipc_result = await _query_run_ipc(entry, {"op": "get_observations", "env_id": env_id})
+    except Exception as e:
+        return {"error": f"IPC query failed: {e}", "run_id": run_id, "env_id": env_id}
+
+    return {
+        "run_id": run_id,
+        "env_id": env_id,
+        "step": ipc_result.get("step", entry.get("last_known_step", 0)),
+        "episode_step": ipc_result.get("episode_step", 0),
+        "observations": ipc_result.get("observations", {}),
+        "dtype": ipc_result.get("dtype", "float32"),
+        "shape": ipc_result.get("shape", []),
+        "wall_time_ms": (time.perf_counter() - t0) * 1000.0,
+    }
+
+
+async def _handle_get_env_rewards(args: Dict) -> Dict:
+    """Read per-term reward breakdown for one env at the current step."""
+    import time
+    from ..tool_executor import _resolve_run_id, _validate_env_id, _query_run_ipc
+    t0 = time.perf_counter()
+    env_id = args.get("env_id")
+    run_id_arg = args.get("run_id")
+
+    run_id, entry = _resolve_run_id(run_id_arg)
+    if entry is None:
+        return {
+            "error": (
+                "No active training run found. Launch one with launch_training first, "
+                "or pass an explicit run_id."
+            ),
+            "requested_run_id": run_id_arg,
+        }
+
+    err = _validate_env_id(env_id, entry.get("num_envs", 0))
+    if err:
+        return {"error": err, "run_id": run_id, "num_envs": entry.get("num_envs")}
+
+    try:
+        ipc_result = await _query_run_ipc(entry, {"op": "get_rewards", "env_id": env_id})
+    except Exception as e:
+        return {"error": f"IPC query failed: {e}", "run_id": run_id, "env_id": env_id}
+
+    terms = ipc_result.get("terms", [])
+    total = ipc_result.get("total_reward")
+    if total is None:
+        total = sum(t.get("weighted", 0.0) for t in terms)
+
+    return {
+        "run_id": run_id,
+        "env_id": env_id,
+        "step": ipc_result.get("step", entry.get("last_known_step", 0)),
+        "total_reward": total,
+        "terms": terms,
+        "episode_return": ipc_result.get("episode_return", 0.0),
+        "wall_time_ms": (time.perf_counter() - t0) * 1000.0,
+    }
+
+
+async def _handle_get_env_termination_state(args: Dict) -> Dict:
+    """Report termination flags (success / timeout / crashed / done) for one env."""
+    import time
+    from ..tool_executor import _resolve_run_id, _validate_env_id, _query_run_ipc
+    t0 = time.perf_counter()
+    env_id = args.get("env_id")
+    run_id_arg = args.get("run_id")
+
+    run_id, entry = _resolve_run_id(run_id_arg)
+    if entry is None:
+        return {
+            "error": (
+                "No active training run found. Launch one with launch_training first, "
+                "or pass an explicit run_id."
+            ),
+            "requested_run_id": run_id_arg,
+        }
+
+    err = _validate_env_id(env_id, entry.get("num_envs", 0))
+    if err:
+        return {"error": err, "run_id": run_id, "num_envs": entry.get("num_envs")}
+
+    try:
+        ipc_result = await _query_run_ipc(entry, {"op": "get_termination", "env_id": env_id})
+    except Exception as e:
+        return {"error": f"IPC query failed: {e}", "run_id": run_id, "env_id": env_id}
+
+    term_terms = ipc_result.get("termination_terms", {}) or {}
+    success = bool(ipc_result.get("success", term_terms.get("success", False)))
+    timeout = bool(ipc_result.get("timeout", term_terms.get("time_out", False)))
+    crashed = bool(ipc_result.get("crashed", any(
+        v for k, v in term_terms.items()
+        if k not in ("success", "time_out") and isinstance(v, bool) and v
+    )))
+    done = bool(ipc_result.get("done", success or timeout or crashed))
+
+    return {
+        "run_id": run_id,
+        "env_id": env_id,
+        "done": done,
+        "success": success,
+        "timeout": timeout,
+        "crashed": crashed,
+        "termination_terms": term_terms,
+        "episode_step": ipc_result.get("episode_step", 0),
+        "max_episode_steps": ipc_result.get("max_episode_steps", entry.get("max_episode_steps", 0)),
+        "last_reset_step": ipc_result.get("last_reset_step", 0),
+        "wall_time_ms": (time.perf_counter() - t0) * 1000.0,
+    }
+
+
+async def _handle_checkpoint_training(args: Dict) -> Dict:
+    """Trigger an out-of-band checkpoint save on a running training subprocess."""
+    import time
+    from ..tool_executor import _resolve_run_id, _query_run_ipc
+    t0 = time.perf_counter()
+    run_id_arg = args.get("run_id")
+    include_replay = bool(args.get("include_replay_buffer", False))
+    tag = args.get("tag", "manual") or "manual"
+
+    run_id, entry = _resolve_run_id(run_id_arg)
+    if entry is None:
+        return {
+            "error": (
+                "No active training run found. Launch one with launch_training first, "
+                "or pass an explicit run_id."
+            ),
+            "requested_run_id": run_id_arg,
+        }
+
+    state = entry.get("state", "unknown")
+    if state not in ("running", "paused"):
+        return {
+            "error": f"Cannot checkpoint run in state '{state}'. Run must be running or paused.",
+            "run_id": run_id,
+            "state": state,
+        }
+
+    try:
+        ipc_result = await _query_run_ipc(entry, {
+            "op": "checkpoint",
+            "include_replay_buffer": include_replay,
+            "tag": tag,
+        })
+    except Exception as e:
+        return {"error": f"IPC query failed: {e}", "run_id": run_id}
+
+    # Without a concrete checkpoint_path the IPC ack can't be trusted as a
+    # real save — training subprocesses sometimes ack the op but fail to
+    # write the file (disk full, permission denied, policy-state race).
+    # Return an explicit error rather than success with checkpoint_path=""
+    # so the agent doesn't narrate "saved to '' ".
+    ckpt_path = ipc_result.get("checkpoint_path") or ""
+    if not ckpt_path:
+        return {
+            "error": (
+                "IPC ack did not include a checkpoint_path — training "
+                "subprocess may have failed to write the file (disk full, "
+                "permission denied, or policy-state race)."
+            ),
+            "run_id": run_id,
+            "ipc_result": ipc_result,
+        }
+    return {
+        "run_id": run_id,
+        "checkpoint_path": ckpt_path,
+        "step": ipc_result.get("step", entry.get("last_known_step", 0)),
+        "iteration": ipc_result.get("iteration", entry.get("last_known_iteration", 0)),
+        "size_bytes": ipc_result.get("size_bytes", 0),
+        "includes_replay_buffer": bool(ipc_result.get("includes_replay_buffer", include_replay)),
+        "save_duration_ms": ipc_result.get("save_duration_ms", 0.0),
+        "tag": tag,
+        "wall_time_ms": (time.perf_counter() - t0) * 1000.0,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
