@@ -2146,10 +2146,7 @@ CODE_GEN_HANDLERS = {
 
 # ── Spec / data lookup handlers (no code gen, just return data) ──────────────
 
-async def _handle_lookup_product_spec(args: Dict) -> Dict:
-    # _handle_lookup_product_spec moved to handlers/scene_blueprints.py (Phase 7 wave 13).
-    from .handlers.scene_blueprints import _handle_lookup_product_spec as _h
-    return await _h(args)
+# _handle_lookup_product_spec moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 
 # _handle_scene_summary moved to handlers/scene_authoring.py (Phase 7 wave 4).
@@ -2157,10 +2154,7 @@ async def _handle_lookup_product_spec(args: Dict) -> Dict:
 # _handle_capture_viewport moved to handlers/vision.py (Phase 7 wave 11).
 
 
-async def _handle_get_console_errors(args: Dict) -> Dict:
-    # _handle_get_console_errors moved to handlers/diagnostics.py (Phase 7 wave 10).
-    from .handlers.diagnostics import _handle_get_console_errors as _h
-    return await _h(args)
+# _handle_get_console_errors moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 
 # _handle_get_articulation_state moved to handlers/physics.py (Phase 7 wave 2).
@@ -3482,22 +3476,13 @@ print(json.dumps({{'prim_a': {prim_a!r}, 'prim_b': {prim_b!r}, 'distance_m': dis
     return await kit_tools.queue_exec_patch(code, f"Measure distance {prim_a} ↔ {prim_b}")
 
 
-async def _handle_get_debug_info(args: Dict) -> Dict:
-    # _handle_get_debug_info moved to handlers/diagnostics.py (Phase 7 wave 10).
-    from .handlers.diagnostics import _handle_get_debug_info as _h
-    return await _h(args)
+# _handle_get_debug_info moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 
-async def _handle_lookup_api_deprecation(args: Dict) -> Dict:
-    # _handle_lookup_api_deprecation moved to handlers/scene_blueprints.py (Phase 7 wave 13).
-    from .handlers.scene_blueprints import _handle_lookup_api_deprecation as _h
-    return await _h(args)
+# _handle_lookup_api_deprecation moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 
-async def _handle_lookup_knowledge(args: Dict) -> Dict:
-    # _handle_lookup_knowledge moved to handlers/scene_blueprints.py (Phase 7 wave 13).
-    from .handlers.scene_blueprints import _handle_lookup_knowledge as _h
-    return await _h(args)
+# _handle_lookup_knowledge moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 
 # Data-only handlers (no code gen → return data directly to LLM)
@@ -3930,10 +3915,7 @@ def _build_asset_index() -> List[Dict]:
     return _asset_index
 
 
-async def _handle_catalog_search(args: Dict) -> Dict:
-    # _handle_catalog_search moved to handlers/scene_blueprints.py (Phase 7 wave 13).
-    from .handlers.scene_blueprints import _handle_catalog_search as _h
-    return await _h(args)
+# _handle_catalog_search moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 
 DATA_HANDLERS["catalog_search"] = _handle_catalog_search
@@ -3973,10 +3955,7 @@ _LIST_LOCAL_ALLOWED_EXTS = {
 }
 
 
-async def _handle_list_local_files(args: Dict) -> Dict:
-    # _handle_list_local_files moved to handlers/scene_blueprints.py (Phase 7 wave 13).
-    from .handlers.scene_blueprints import _handle_list_local_files as _h
-    return await _h(args)
+# _handle_list_local_files moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 
 DATA_HANDLERS["list_local_files"] = _handle_list_local_files
@@ -3996,10 +3975,7 @@ DATA_HANDLERS["download_asset"] = _handle_download_asset
 # _gen_build_scene_from_blueprint moved to handlers/scene_blueprints.py (Phase 6 wave 11).
 
 
-async def _handle_generate_scene_blueprint(args: Dict) -> Dict:
-    # _handle_generate_scene_blueprint moved to handlers/scene_blueprints.py (Phase 7 wave 13).
-    from .handlers.scene_blueprints import _handle_generate_scene_blueprint as _h
-    return await _h(args)
+# _handle_generate_scene_blueprint moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 
 DATA_HANDLERS["generate_scene_blueprint"] = _handle_generate_scene_blueprint
@@ -4288,10 +4264,7 @@ DATA_HANDLERS["setup_nav_robot"] = _handle_setup_nav_robot
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
 # README.md, and a ros2_topics.yaml listing detected topics.
 
-async def _handle_export_scene_package(args: Dict) -> Dict:
-    # _handle_export_scene_package moved to handlers/scene_blueprints.py (Phase 7 wave 13).
-    from .handlers.scene_blueprints import _handle_export_scene_package as _h
-    return await _h(args)
+# _handle_export_scene_package moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 
 DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
@@ -4306,10 +4279,7 @@ DATA_HANDLERS["run_stage_analysis"] = _handle_run_stage_analysis
 
 # ══════ From feat/tools-and-bugfixes ══════
 # _handle_get_physics_errors moved to handlers/physics.py (Phase 7 wave 2).
-async def _handle_check_collisions(args: Dict) -> Dict:
-    # _handle_check_collisions moved to handlers/diagnostics.py (Phase 7 wave 10).
-    from .handlers.diagnostics import _handle_check_collisions as _h
-    return await _h(args)
+# _handle_check_collisions moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 def _handle_fix_error(args: Dict) -> str:
     """Generate a fix code patch for a known physics/USD error pattern."""
@@ -4505,15 +4475,9 @@ for i in issues[:10]:
 
     return code
 
-async def _handle_list_scene_templates(args: Dict) -> Dict:
-    # _handle_list_scene_templates moved to handlers/scene_blueprints.py (Phase 7 wave 13).
-    from .handlers.scene_blueprints import _handle_list_scene_templates as _h
-    return await _h(args)
+# _handle_list_scene_templates moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-async def _handle_load_scene_template(args: Dict) -> Dict:
-    # _handle_load_scene_template moved to handlers/scene_blueprints.py (Phase 7 wave 13).
-    from .handlers.scene_blueprints import _handle_load_scene_template as _h
-    return await _h(args)
+# _handle_load_scene_template moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 # _gen_batch_apply_operation moved to handlers/scene_authoring.py (Phase 6 wave 14).
 
@@ -5107,10 +5071,7 @@ CODE_GEN_HANDLERS["publish_robot_description"] = _gen_publish_robot_description
 CODE_GEN_HANDLERS["configure_ros2_bridge"] = _gen_configure_ros2_bridge
 
 # ══════ From feat/9-finetune-flywheel ══════
-async def _handle_record_feedback(args: Dict) -> Dict:
-    # _handle_record_feedback moved to handlers/workflow.py (Phase 7 wave 12).
-    from .handlers.workflow import _handle_record_feedback as _h
-    return await _h(args)
+# _handle_record_feedback moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 # _handle_export_finetune_data moved to handlers/training.py (Phase 7 wave 5).
 # _handle_finetune_stats moved to handlers/training.py (Phase 7 wave 5).
@@ -5122,10 +5083,7 @@ DATA_HANDLERS["finetune_stats"] = _handle_finetune_stats
 DATA_HANDLERS["redact_finetune_data"] = _handle_redact_finetune_data
 
 # ══════ From feat/addendum-phase2-smart-debugging ══════
-async def _handle_diagnose_physics_error(args: Dict) -> Dict:
-    # _handle_diagnose_physics_error moved to handlers/diagnostics.py (Phase 7 wave 10).
-    from .handlers.diagnostics import _handle_diagnose_physics_error as _h
-    return await _h(args)
+# _handle_diagnose_physics_error moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 async def _handle_trace_config(args: Dict) -> Dict:
     """Parse IsaacLab @configclass files to trace parameter resolution chain."""
@@ -5350,10 +5308,7 @@ else:
 
 # _handle_analyze_randomization moved to handlers/training.py (Phase 7 wave 5).
 
-async def _handle_diagnose_domain_gap(args: Dict) -> Dict:
-    # _handle_diagnose_domain_gap moved to handlers/diagnostics.py (Phase 7 wave 10).
-    from .handlers.diagnostics import _handle_diagnose_domain_gap as _h
-    return await _h(args)
+# _handle_diagnose_domain_gap moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 DATA_HANDLERS["validate_annotations"] = _handle_validate_annotations
 DATA_HANDLERS["analyze_randomization"] = _handle_analyze_randomization
@@ -5450,10 +5405,7 @@ def _analyze_performance(stats: Dict, timing: Dict, mem: Dict) -> List[Dict]:
 
     return issues
 
-async def _handle_diagnose_performance(args: Dict) -> Dict:
-    # _handle_diagnose_performance moved to handlers/diagnostics.py (Phase 7 wave 10).
-    from .handlers.diagnostics import _handle_diagnose_performance as _h
-    return await _h(args)
+# _handle_diagnose_performance moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 async def _handle_find_heavy_prims(args: Dict) -> Dict:
     """Traverse the stage and find meshes above a triangle-count threshold."""
@@ -5735,10 +5687,7 @@ def _summarize_changes(changes: List[Dict]) -> str:
     return "\n".join(parts)
 
 # _handle_scene_diff moved to handlers/scene_authoring.py (Phase 7 wave 4).
-async def _handle_watch_changes(args: Dict) -> Dict:
-    # _handle_watch_changes moved to handlers/workflow.py (Phase 7 wave 12).
-    from .handlers.workflow import _handle_watch_changes as _h
-    return await _h(args)
+# _handle_watch_changes moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 DATA_HANDLERS["scene_diff"] = _handle_scene_diff
 DATA_HANDLERS["watch_changes"] = _handle_watch_changes
@@ -5764,30 +5713,15 @@ CODE_GEN_HANDLERS["simplify_collision"] = _gen_simplify_collision
 DATA_HANDLERS["suggest_physics_settings"] = _handle_suggest_physics_settings
 
 # ══════ From feat/new-onboarding ══════
-async def _handle_scene_aware_starter_prompts(args: Dict) -> Dict:
-    # _handle_scene_aware_starter_prompts moved to handlers/workflow.py (Phase 7 wave 12).
-    from .handlers.workflow import _handle_scene_aware_starter_prompts as _h
-    return await _h(args)
+# _handle_scene_aware_starter_prompts moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-async def _handle_hardware_compatibility_check(args: Dict) -> Dict:
-    # _handle_hardware_compatibility_check moved to handlers/diagnostics.py (Phase 7 wave 10).
-    from .handlers.diagnostics import _handle_hardware_compatibility_check as _h
-    return await _h(args)
+# _handle_hardware_compatibility_check moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-async def _handle_slash_command_discovery(args: Dict) -> Dict:
-    # _handle_slash_command_discovery moved to handlers/workflow.py (Phase 7 wave 12).
-    from .handlers.workflow import _handle_slash_command_discovery as _h
-    return await _h(args)
+# _handle_slash_command_discovery moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-async def _handle_console_error_autodetect(args: Dict) -> Dict:
-    # _handle_console_error_autodetect moved to handlers/diagnostics.py (Phase 7 wave 10).
-    from .handlers.diagnostics import _handle_console_error_autodetect as _h
-    return await _h(args)
+# _handle_console_error_autodetect moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-async def _handle_post_action_suggestions(args: Dict) -> Dict:
-    # _handle_post_action_suggestions moved to handlers/workflow.py (Phase 7 wave 12).
-    from .handlers.workflow import _handle_post_action_suggestions as _h
-    return await _h(args)
+# _handle_post_action_suggestions moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 # _gen_load_scene_template moved to handlers/scene_blueprints.py (Phase 6 wave 11).
 
@@ -5905,10 +5839,7 @@ DATA_HANDLERS["profile_training_throughput"] = _handle_profile_training_throughp
 CODE_GEN_HANDLERS["generate_eval_harness"] = _gen_eval_harness
 
 # ══════ From feat/addendum-phase7C-teleop-quality ══════
-async def _handle_check_teleop_hardware(args: Dict) -> Dict:
-    # _handle_check_teleop_hardware moved to handlers/diagnostics.py (Phase 7 wave 10).
-    from .handlers.diagnostics import _handle_check_teleop_hardware as _h
-    return await _h(args)
+# _handle_check_teleop_hardware moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 def _open_hdf5_safely(path: str):
     """Return (h5py_File, None) or (None, reason_str). Never raises."""
@@ -6335,10 +6266,7 @@ async def _handle_restore_delta_snapshot(args: Dict) -> Dict:
 
 # _gen_batch_set_attributes moved to handlers/scene_authoring.py (Phase 6 wave 14).
 
-async def _handle_queue_write_locked_patch(args: Dict) -> Dict:
-    # _handle_queue_write_locked_patch moved to handlers/workflow.py (Phase 7 wave 12).
-    from .handlers.workflow import _handle_queue_write_locked_patch as _h
-    return await _h(args)
+# _handle_queue_write_locked_patch moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 # _gen_activate_area moved to handlers/scene_authoring.py (Phase 6 wave 23).
 
@@ -6361,10 +6289,7 @@ def get_nav2_bridge_profile(profile: str) -> Optional[Dict[str, Any]]:
 # _gen_export_nav2_map moved to handlers/robot.py (Phase 6 wave 24).
 # _gen_replay_rosbag moved to handlers/ros2.py (Phase 6 wave 7).
 
-async def _handle_check_tf_health(args: Dict) -> Dict:
-    # _handle_check_tf_health moved to handlers/diagnostics.py (Phase 7 wave 10).
-    from .handlers.diagnostics import _handle_check_tf_health as _h
-    return await _h(args)
+# _handle_check_tf_health moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 CODE_GEN_HANDLERS["setup_ros2_bridge"] = _gen_setup_ros2_bridge
 CODE_GEN_HANDLERS["export_nav2_map"] = _gen_export_nav2_map
@@ -6761,10 +6686,7 @@ DATA_HANDLERS["train_actuator_net"] = _handle_train_actuator_net
 
 # _gen_setup_multi_rate moved to handlers/robot.py (Phase 6 wave 13).
 
-async def _handle_diagnose_whole_body(args: Dict) -> Dict:
-    # _handle_diagnose_whole_body moved to handlers/diagnostics.py (Phase 7 wave 10).
-    from .handlers.diagnostics import _handle_diagnose_whole_body as _h
-    return await _h(args)
+# _handle_diagnose_whole_body moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 CODE_GEN_HANDLERS["setup_contact_sensors"] = _gen_setup_contact_sensors
 CODE_GEN_HANDLERS["setup_whole_body_control"] = _gen_setup_whole_body_control
@@ -6803,15 +6725,9 @@ def _wf_make_initial_plan(workflow_type: str, goal: str, params: Dict[str, Any])
         "editable": True,
     }
 
-async def _handle_start_workflow(args: Dict) -> Dict:
-    # _handle_start_workflow moved to handlers/workflow.py (Phase 7 wave 12).
-    from .handlers.workflow import _handle_start_workflow as _h
-    return await _h(args)
+# _handle_start_workflow moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-async def _handle_edit_workflow_plan(args: Dict) -> Dict:
-    # _handle_edit_workflow_plan moved to handlers/workflow.py (Phase 7 wave 12).
-    from .handlers.workflow import _handle_edit_workflow_plan as _h
-    return await _h(args)
+# _handle_edit_workflow_plan moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 def _wf_advance_phase(wf: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Move the workflow to the next phase. Returns the next phase dict or None."""
@@ -6834,30 +6750,15 @@ def _wf_advance_phase(wf: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     wf["status"] = "completed"
     return None
 
-async def _handle_approve_workflow_checkpoint(args: Dict) -> Dict:
-    # _handle_approve_workflow_checkpoint moved to handlers/workflow.py (Phase 7 wave 12).
-    from .handlers.workflow import _handle_approve_workflow_checkpoint as _h
-    return await _h(args)
+# _handle_approve_workflow_checkpoint moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-async def _handle_cancel_workflow(args: Dict) -> Dict:
-    # _handle_cancel_workflow moved to handlers/workflow.py (Phase 7 wave 12).
-    from .handlers.workflow import _handle_cancel_workflow as _h
-    return await _h(args)
+# _handle_cancel_workflow moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-async def _handle_get_workflow_status(args: Dict) -> Dict:
-    # _handle_get_workflow_status moved to handlers/workflow.py (Phase 7 wave 12).
-    from .handlers.workflow import _handle_get_workflow_status as _h
-    return await _h(args)
+# _handle_get_workflow_status moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-async def _handle_list_workflows(args: Dict) -> Dict:
-    # _handle_list_workflows moved to handlers/workflow.py (Phase 7 wave 12).
-    from .handlers.workflow import _handle_list_workflows as _h
-    return await _h(args)
+# _handle_list_workflows moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-async def _handle_execute_with_retry(args: Dict) -> Dict:
-    # _handle_execute_with_retry moved to handlers/workflow.py (Phase 7 wave 12).
-    from .handlers.workflow import _handle_execute_with_retry as _h
-    return await _h(args)
+# _handle_execute_with_retry moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 async def _handle_proactive_check(args: Dict) -> Dict:
     """Run the proactive agent for a scene-state trigger.
@@ -6938,10 +6839,7 @@ DATA_HANDLERS["proactive_check"] = _handle_proactive_check
 # ══════ From feat/addendum-collision-mesh-quality-v2 ══════
 # _gen_check_collision_mesh_code moved to handlers/physics.py (Phase 5 wave 5).
 
-async def _handle_check_collision_mesh(args: Dict) -> Dict:
-    # _handle_check_collision_mesh moved to handlers/diagnostics.py (Phase 7 wave 10).
-    from .handlers.diagnostics import _handle_check_collision_mesh as _h
-    return await _h(args)
+# _handle_check_collision_mesh moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 # _gen_fix_collision_mesh moved to handlers/physics.py (Phase 5 wave 5).
 
@@ -7016,20 +6914,14 @@ def _load_template_manifests(library_dir: Path) -> List[Dict]:
         manifests.append(data)
     return manifests
 
-async def _handle_filter_templates_by_hardware(args: Dict) -> Dict:
-    # _handle_filter_templates_by_hardware moved to handlers/scene_blueprints.py (Phase 7 wave 13).
-    from .handlers.scene_blueprints import _handle_filter_templates_by_hardware as _h
-    return await _h(args)
+# _handle_filter_templates_by_hardware moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 # _gen_export_template moved to handlers/scene_blueprints.py (Phase 6 wave 11).
 
 # _gen_import_template moved to handlers/scene_blueprints.py (Phase 6 wave 11).
 
 
-async def _handle_check_vram_headroom(args: Dict) -> Dict:
-    # _handle_check_vram_headroom moved to handlers/diagnostics.py (Phase 7 wave 10).
-    from .handlers.diagnostics import _handle_check_vram_headroom as _h
-    return await _h(args)
+# _handle_check_vram_headroom moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 def _async_task_runner(task_id: str, task_type: str, params: Dict) -> None:
     """Worker body executed in a daemon thread.
@@ -7079,15 +6971,9 @@ def _async_task_runner(task_id: str, task_type: str, params: Dict) -> None:
                 entry["finished_at"] = _time.time()
                 entry["error"] = str(e)
 
-async def _handle_dispatch_async_task(args: Dict) -> Dict:
-    # _handle_dispatch_async_task moved to handlers/workflow.py (Phase 7 wave 12).
-    from .handlers.workflow import _handle_dispatch_async_task as _h
-    return await _h(args)
+# _handle_dispatch_async_task moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-async def _handle_query_async_task(args: Dict) -> Dict:
-    # _handle_query_async_task moved to handlers/workflow.py (Phase 7 wave 12).
-    from .handlers.workflow import _handle_query_async_task as _h
-    return await _h(args)
+# _handle_query_async_task moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 # _gen_visualize_forces moved to handlers/diagnostics.py (Phase 6 wave 10).
 
@@ -7222,10 +7108,7 @@ async def _handle_measure_sim_real_gap(args: Dict) -> Dict:
     }
 
 # _handle_suggest_parameter_adjustment moved to handlers/training.py (Phase 7 wave 6).
-async def _handle_compare_sim_real_video(args: Dict) -> Dict:
-    # _handle_compare_sim_real_video moved to handlers/diagnostics.py (Phase 7 wave 10).
-    from .handlers.diagnostics import _handle_compare_sim_real_video as _h
-    return await _h(args)
+# _handle_compare_sim_real_video moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 # _gen_create_calibration_experiment moved to handlers/training.py (Phase 6 wave 24).
 
@@ -7304,10 +7187,7 @@ CODE_GEN_HANDLERS["record_trajectory"] = _gen_record_trajectory
 
     # _handle_get_kind moved to handlers/scene_authoring.py (Phase 7 wave 3).
 
-async def _handle_get_active_state(args: Dict) -> Dict:
-    # _handle_get_active_state moved to handlers/diagnostics.py (Phase 7 wave 10).
-    from .handlers.diagnostics import _handle_get_active_state as _h
-    return await _h(args)
+# _handle_get_active_state moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 DATA_HANDLERS["list_attributes"] = _handle_list_attributes
 DATA_HANDLERS["list_relationships"] = _handle_list_relationships
