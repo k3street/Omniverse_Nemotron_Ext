@@ -24,12 +24,18 @@ from service.isaac_assist_service.types.uncertainty import (
     Distribution,
     GradedScale,
 )
+from service.isaac_assist_service.types.violations import (
+    ConstraintViolation,
+    ValidationResult,
+)
 
 __all__ = [
     "Bbox3",
+    "ConstraintViolation",
     "Distribution",
     "GradedScale",
     "Pose6D",
     "Source",
+    "ValidationResult",
     "Vec3",
 ]

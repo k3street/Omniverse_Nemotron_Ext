@@ -300,8 +300,10 @@ class TestImportPurity:
 
         ia_loaded = _json.loads(proc.stdout.strip().splitlines()[-1])
 
-        # Whitelist: only the types/ package itself, its three submodules,
-        # and the parent path prefixes Python needs to resolve them.
+        # Whitelist: only the types/ package itself, its submodules, and
+        # the parent path prefixes Python needs to resolve them. Phase 11b
+        # added `violations` as a fourth submodule under the same
+        # zero-internal-deps contract.
         allowed = {
             "service",
             "service.isaac_assist_service",
@@ -309,6 +311,7 @@ class TestImportPurity:
             "service.isaac_assist_service.types.spatial",
             "service.isaac_assist_service.types.uncertainty",
             "service.isaac_assist_service.types.provenance",
+            "service.isaac_assist_service.types.violations",
         }
         forbidden = [m for m in ia_loaded if m not in allowed]
         assert forbidden == [], (
