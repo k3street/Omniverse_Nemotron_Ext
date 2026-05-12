@@ -1644,38 +1644,17 @@ def _safe_set_rotate_xyz(prim, r):
 # pattern to a `register()`-based registration and the legacy inline
 # assignments go away.
 from .handlers.scene_authoring import (  # noqa: E402
+    _gen_add_reference,
+    _gen_assign_material,
     _gen_create_prim,
     _gen_delete_prim,
     _gen_set_attribute,
+    _gen_teleport_prim,
 )
 
 
-def _gen_add_reference(args: Dict) -> str:
-    # USD AddReference accepts any asset URL and returns True regardless of
-    # whether the referenced file exists — composition is lazy. Without
-    # post-check, a bad path produces a prim with "has references" but no
-    # actual children, and the tool reports success. Verify via:
-    #   1. prim.HasAuthoredReferences() after the call
-    #   2. if the asset is a local path, os.path.exists() before the call
-    #   3. re-traverse children to catch zero-child silent composition error
-    return (
-        "import os\n"
-        "import omni.usd\n"
-        "from pxr import Sdf\n"
-        "stage = omni.usd.get_context().get_stage()\n"
-        f"prim = stage.GetPrimAtPath('{args['prim_path']}')\n"
-        f"if not prim.IsValid():\n"
-        f"    raise RuntimeError('add_reference: prim not found: {args['prim_path']}')\n"
-        f"_ref = '{args['reference_path']}'\n"
-        # Local filesystem path (not omniverse:// or http(s)://): must exist.
-        "if not any(_ref.startswith(p) for p in ('omniverse://','http://','https://','file://')):\n"
-        "    if not os.path.isabs(_ref) or not os.path.exists(_ref):\n"
-        "        raise FileNotFoundError(f'add_reference: asset not found: {_ref!r}')\n"
-        "_added = prim.GetReferences().AddReference(_ref)\n"
-        "if not _added or not prim.HasAuthoredReferences():\n"
-        "    raise RuntimeError(f'add_reference: AddReference returned success but no reference was authored on {prim.GetPath()}')\n"
-        "print(f'added reference {_ref} to {prim.GetPath()}')"
-    )
+# _gen_add_reference moved to handlers/scene_authoring.py (Phase 3 wave 2).
+# Imported back at the top of this file (see Phase 3 wave 1 import block).
 
 
 def _gen_apply_api_schema(args: Dict) -> str:
@@ -2130,15 +2109,7 @@ mat.CreateDisplacementOutput('mdl').ConnectToSource(shader.ConnectableAPI(), 'ou
 """
 
 
-def _gen_assign_material(args: Dict) -> str:
-    return (
-        "import omni.usd\n"
-        "from pxr import UsdShade\n"
-        "stage = omni.usd.get_context().get_stage()\n"
-        f"mat = UsdShade.Material(stage.GetPrimAtPath('{args['material_path']}'))\n"
-        f"prim = stage.GetPrimAtPath('{args['prim_path']}')\n"
-        "UsdShade.MaterialBindingAPI(prim).Bind(mat, UsdShade.Tokens.strongerThanDescendants)"
-    )
+# _gen_assign_material moved to handlers/scene_authoring.py (Phase 3 wave 2).
 
 
 def _gen_sim_control(args: Dict) -> str:
@@ -2189,22 +2160,7 @@ def _gen_set_physics_params(args: Dict) -> str:
     return "\n".join(lines)
 
 
-def _gen_teleport_prim(args: Dict) -> str:
-    prim_path = args["prim_path"]
-    lines = [
-        "import omni.usd",
-        "from pxr import UsdGeom, Gf",
-        _SAFE_XFORM_SNIPPET,
-        "stage = omni.usd.get_context().get_stage()",
-        f"prim = stage.GetPrimAtPath('{prim_path}')",
-    ]
-    pos = args.get("position")
-    rot = args.get("rotation_euler")
-    if pos:
-        lines.append(f"_safe_set_translate(prim, ({pos[0]}, {pos[1]}, {pos[2]}))")
-    if rot:
-        lines.append(f"_safe_set_rotate_xyz(prim, ({rot[0]}, {rot[1]}, {rot[2]}))")
-    return "\n".join(lines)
+# _gen_teleport_prim moved to handlers/scene_authoring.py (Phase 3 wave 2).
 
 
 def _gen_set_joint_targets(args: Dict) -> str:

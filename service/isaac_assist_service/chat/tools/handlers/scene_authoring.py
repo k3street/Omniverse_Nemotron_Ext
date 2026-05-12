@@ -158,6 +158,70 @@ def _gen_set_attribute(args: Dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Phase 3 wave 2 — add_reference, assign_material, teleport_prim
+
+
+def _gen_add_reference(args: Dict) -> str:
+    # USD AddReference accepts any asset URL and returns True regardless of
+    # whether the referenced file exists — composition is lazy. Without
+    # post-check, a bad path produces a prim with "has references" but no
+    # actual children, and the tool reports success. Verify via:
+    #   1. prim.HasAuthoredReferences() after the call
+    #   2. if the asset is a local path, os.path.exists() before the call
+    #   3. re-traverse children to catch zero-child silent composition error
+    return (
+        "import os\n"
+        "import omni.usd\n"
+        "from pxr import Sdf\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        f"prim = stage.GetPrimAtPath('{args['prim_path']}')\n"
+        f"if not prim.IsValid():\n"
+        f"    raise RuntimeError('add_reference: prim not found: {args['prim_path']}')\n"
+        f"_ref = '{args['reference_path']}'\n"
+        # Local filesystem path (not omniverse:// or http(s)://): must exist.
+        "if not any(_ref.startswith(p) for p in ('omniverse://','http://','https://','file://')):\n"
+        "    if not os.path.isabs(_ref) or not os.path.exists(_ref):\n"
+        "        raise FileNotFoundError(f'add_reference: asset not found: {_ref!r}')\n"
+        "_added = prim.GetReferences().AddReference(_ref)\n"
+        "if not _added or not prim.HasAuthoredReferences():\n"
+        "    raise RuntimeError(f'add_reference: AddReference returned success but no reference was authored on {prim.GetPath()}')\n"
+        "print(f'added reference {_ref} to {prim.GetPath()}')"
+    )
+
+
+def _gen_assign_material(args: Dict) -> str:
+    return (
+        "import omni.usd\n"
+        "from pxr import UsdShade\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        f"mat = UsdShade.Material(stage.GetPrimAtPath('{args['material_path']}'))\n"
+        f"prim = stage.GetPrimAtPath('{args['prim_path']}')\n"
+        "UsdShade.MaterialBindingAPI(prim).Bind(mat, UsdShade.Tokens.strongerThanDescendants)"
+    )
+
+
+def _gen_teleport_prim(args: Dict) -> str:
+    # Lazy import — same pattern as _gen_create_prim.
+    from ..tool_executor import _SAFE_XFORM_SNIPPET
+
+    prim_path = args["prim_path"]
+    lines = [
+        "import omni.usd",
+        "from pxr import UsdGeom, Gf",
+        _SAFE_XFORM_SNIPPET,
+        "stage = omni.usd.get_context().get_stage()",
+        f"prim = stage.GetPrimAtPath('{prim_path}')",
+    ]
+    pos = args.get("position")
+    rot = args.get("rotation_euler")
+    if pos:
+        lines.append(f"_safe_set_translate(prim, ({pos[0]}, {pos[1]}, {pos[2]}))")
+    if rot:
+        lines.append(f"_safe_set_rotate_xyz(prim, ({rot[0]}, {rot[1]}, {rot[2]}))")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
