@@ -1649,6 +1649,7 @@ from .handlers.scene_authoring import (  # noqa: E402
     _gen_assign_material,
     _gen_clone_prim,
     _gen_create_material,
+    _gen_create_omnigraph,
     _gen_create_prim,
     _gen_delete_prim,
     _gen_set_attribute,
@@ -1866,71 +1867,7 @@ _OG_NODE_TYPE_MAP = {
 }
 
 
-def _gen_create_omnigraph(args: Dict) -> str:
-    graph_path = args["graph_path"]
-    graph_type = args.get("graph_type", "action_graph")
-    nodes = args.get("nodes", [])
-    connections = args.get("connections", [])
-    values = args.get("values", {})
-
-    # Use plain tuples — og.Controller.node() resolves to a path string
-    # which fails inside og.Controller.edit(); tuples are the correct format.
-    # Also remap legacy node type IDs to Isaac Sim 5.1 equivalents.
-    node_defs = ",\n            ".join(
-        f"('{n['name']}', '{_OG_NODE_TYPE_MAP.get(n['type'], n['type'])}')" for n in nodes
-    ) if nodes else ""
-
-    conn_defs = ",\n            ".join(
-        f"('{c['source']}', '{c['target']}')" for c in connections
-    ) if connections else ""
-
-    # SET_VALUES for node attribute configuration (e.g. robotPath, topicName)
-    val_defs = ""
-    if values:
-        val_items = []
-        for attr_path, val in values.items():
-            if isinstance(val, str):
-                val_items.append(f"            ('{attr_path}', '{val}')")
-            else:
-                val_items.append(f"            ('{attr_path}', {val})")
-        val_defs = ",\n".join(val_items)
-
-    set_values_block = ""
-    if val_defs:
-        set_values_block = f"""        keys.SET_VALUES: [
-{val_defs}
-        ],"""
-
-    return f"""\
-import omni.graph.core as og
-
-# Resolve backing type: FABRIC_SHARED (Isaac Sim 5.x+) replaces deprecated FLATCACHING
-_bt = og.GraphBackingType
-if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
-    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
-elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
-    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
-else:
-    _backing = list(_bt)[0]  # fallback to first available
-
-keys = og.Controller.Keys
-(graph, nodes, _, _) = og.Controller.edit(
-    {{
-        "graph_path": "{graph_path}",
-        "evaluator_name": "execution",
-        "pipeline_stage": _backing,
-    }},
-    {{
-        keys.CREATE_NODES: [
-            {node_defs}
-        ],
-        keys.CONNECT: [
-            {conn_defs}
-        ],
-{set_values_block}
-    }},
-)
-"""
+# _gen_create_omnigraph moved to handlers/scene_authoring.py (Phase 3 wave 4).
 
 
 # _gen_create_material moved to handlers/scene_authoring.py (Phase 3 wave 3).
