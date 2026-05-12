@@ -1997,6 +1997,22 @@ from .handlers.vision import (  # noqa: E402
     _gen_set_render_mode,
     _gen_set_semantic_label,
     _gen_set_viewport_camera,
+    _handle_capture_camera_image,   # Phase 7 wave 11
+    _handle_capture_viewport,       # Phase 7 wave 11
+    _handle_get_camera_params,      # Phase 7 wave 11
+    _handle_get_light_properties,   # Phase 7 wave 11
+    _handle_get_render_config,      # Phase 7 wave 11
+    _handle_get_timeline_state,     # Phase 7 wave 11
+    _handle_get_viewport_camera,    # Phase 7 wave 11
+    _handle_inspect_camera,         # Phase 7 wave 11
+    _handle_list_cameras,           # Phase 7 wave 11
+    _handle_list_keyframes,         # Phase 7 wave 11
+    _handle_list_lights,            # Phase 7 wave 11
+    _handle_pixel_to_world,         # Phase 7 wave 11
+    _handle_vision_analyze_scene,   # Phase 7 wave 11
+    _handle_vision_bounding_boxes,  # Phase 7 wave 11
+    _handle_vision_detect_objects,  # Phase 7 wave 11
+    _handle_vision_plan_trajectory, # Phase 7 wave 11
 )
 
 
@@ -2124,9 +2140,7 @@ async def _handle_lookup_product_spec(args: Dict) -> Dict:
 
 # _handle_scene_summary moved to handlers/scene_authoring.py (Phase 7 wave 4).
 
-async def _handle_capture_viewport(args: Dict) -> Dict:
-    max_dim = args.get("max_dim", 1280)
-    return await kit_tools.get_viewport_image(max_dim=max_dim)
+# _handle_capture_viewport moved to handlers/vision.py (Phase 7 wave 11).
 
 
 async def _handle_get_console_errors(args: Dict) -> Dict:
@@ -4544,44 +4558,10 @@ def _get_vision_provider():
     return GeminiVisionProvider()
 
 
-async def _handle_vision_detect_objects(args: Dict) -> Dict:
-    img, mime = await _get_viewport_bytes()
-    if img is None:
-        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
-    vp = _get_vision_provider()
-    labels = args.get("labels")
-    max_obj = args.get("max_objects", 10)
-    detections = await vp.detect_objects(img, mime, labels=labels, max_objects=max_obj)
-    return {"detections": detections, "count": len(detections), "model": vp.model}
-
-
-async def _handle_vision_bounding_boxes(args: Dict) -> Dict:
-    img, mime = await _get_viewport_bytes()
-    if img is None:
-        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
-    vp = _get_vision_provider()
-    boxes = await vp.detect_bounding_boxes(img, mime, max_objects=args.get("max_objects", 25))
-    return {"bounding_boxes": boxes, "count": len(boxes), "model": vp.model}
-
-
-async def _handle_vision_plan_trajectory(args: Dict) -> Dict:
-    img, mime = await _get_viewport_bytes()
-    if img is None:
-        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
-    vp = _get_vision_provider()
-    points = await vp.plan_trajectory(
-        img, args["instruction"], num_points=args.get("num_points", 15), mime_type=mime,
-    )
-    return {"trajectory": points, "num_points": len(points), "model": vp.model}
-
-
-async def _handle_vision_analyze_scene(args: Dict) -> Dict:
-    img, mime = await _get_viewport_bytes()
-    if img is None:
-        return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
-    vp = _get_vision_provider()
-    analysis = await vp.analyze_scene(img, args["question"], mime_type=mime)
-    return {"analysis": analysis, "model": vp.model}
+# _handle_vision_detect_objects moved to handlers/vision.py (Phase 7 wave 11).
+# _handle_vision_bounding_boxes moved to handlers/vision.py (Phase 7 wave 11).
+# _handle_vision_plan_trajectory moved to handlers/vision.py (Phase 7 wave 11).
+# _handle_vision_analyze_scene moved to handlers/vision.py (Phase 7 wave 11).
 
 
 DATA_HANDLERS["vision_detect_objects"] = _handle_vision_detect_objects
@@ -5680,10 +5660,7 @@ CODE_GEN_HANDLERS["cloud_download_results"] = _gen_cloud_download_results
 # _gen_inspect_camera moved to handlers/sensors.py (Phase 6 wave 4).
 # _gen_configure_camera moved to handlers/sensors.py (Phase 6 wave 4).
 
-async def _handle_inspect_camera(args: Dict) -> Dict:
-    camera_path = args["camera_path"]
-    code = _gen_inspect_camera(args)
-    return await kit_tools.queue_exec_patch(code, f"Inspect camera at {camera_path}")
+# _handle_inspect_camera moved to handlers/vision.py (Phase 7 wave 11).
 
 DATA_HANDLERS["inspect_camera"] = _handle_inspect_camera
 
@@ -8524,85 +8501,7 @@ CODE_GEN_HANDLERS["create_broken_scene"] = _gen_create_broken_scene
 
 CODE_GEN_HANDLERS["enable_deterministic_mode"] = _gen_enable_deterministic_mode
 
-async def _handle_pixel_to_world(args: Dict) -> Dict:
-    """Project a viewport pixel through the camera + depth buffer to world."""
-    camera = args["camera"]
-    x = int(args["x"])
-    y = int(args["y"])
-    resolution = args.get("resolution")
-    res_expr = repr(list(resolution)) if resolution else "None"
-    code = f"""\
-import omni.usd
-from pxr import Usd, UsdGeom, Gf
-import json
-
-camera_path = {camera!r}
-px = {x}
-py = {y}
-override_res = {res_expr}
-
-stage = omni.usd.get_context().get_stage()
-cam_prim = stage.GetPrimAtPath(camera_path)
-result = {{'camera': camera_path, 'x': px, 'y': py}}
-
-if not cam_prim or not cam_prim.IsValid():
-    result['error'] = 'camera not found'
-elif not UsdGeom.Camera(cam_prim):
-    result['error'] = 'prim is not a UsdGeom.Camera'
-else:
-    cam = UsdGeom.Camera(cam_prim)
-    gf_cam = cam.GetCamera(Usd.TimeCode.Default())
-
-    # Determine viewport / depth resolution
-    if override_res:
-        width, height = override_res
-    else:
-        try:
-            import omni.kit.viewport.utility as vpu
-            vp = vpu.get_active_viewport()
-            width, height = vp.resolution
-        except Exception:
-            width, height = (1280, 720)
-
-    # NDC coords (top-left origin)
-    ndc_x = (px / float(width)) * 2.0 - 1.0
-    ndc_y = 1.0 - (py / float(height)) * 2.0
-
-    # Sample depth buffer if available
-    depth_m = None
-    try:
-        import omni.syntheticdata as sd
-        depth_arr = sd.sensors.get_distance_to_camera(camera_path)
-        if depth_arr is not None and depth_arr.size:
-            ix = max(0, min(width - 1, px))
-            iy = max(0, min(height - 1, py))
-            depth_m = float(depth_arr[iy, ix])
-    except Exception as exc:
-        result['depth_warning'] = f'no depth buffer: {{exc}}'
-
-    # Build inverse view-projection
-    proj = gf_cam.frustum.ComputeProjectionMatrix()
-    view = gf_cam.transform.GetInverse()
-    inv_vp = (view * proj).GetInverse()
-
-    near_pt = inv_vp.Transform(Gf.Vec3d(ndc_x, ndc_y, -1.0))
-    far_pt = inv_vp.Transform(Gf.Vec3d(ndc_x, ndc_y, 1.0))
-    direction = (far_pt - near_pt).GetNormalized()
-
-    if depth_m is None:
-        # Without depth, fall back to a unit ray at 1 m
-        depth_m = 1.0
-        result['depth_fallback'] = True
-
-    world = near_pt + direction * depth_m
-    result['world_position'] = [world[0], world[1], world[2]]
-    result['ray_origin'] = [near_pt[0], near_pt[1], near_pt[2]]
-    result['ray_direction'] = [direction[0], direction[1], direction[2]]
-    result['depth_m'] = depth_m
-
-print(json.dumps(result, default=str))
-"""
-    return await kit_tools.queue_exec_patch(code, f"pixel_to_world {camera}@({x},{y})")
+# _handle_pixel_to_world moved to handlers/vision.py (Phase 7 wave 11).
 
 # _gen_record_trajectory moved to handlers/robot.py (Phase 6 wave 13).
 
@@ -9171,106 +9070,8 @@ DATA_HANDLERS["list_graphs"] = _handle_list_graphs
 DATA_HANDLERS["inspect_graph"] = _handle_inspect_graph
 
 # ══════ From feat/atomic-tier6-lighting ══════
-async def _handle_list_lights(args: Dict) -> Dict:
-    """Enumerate all UsdLux light prims in the current stage via Kit RPC."""
-    type_tuple = repr(_LIGHT_TYPE_NAMES)
-    code = f"""\
-import omni.usd
-import json
-
-stage = omni.usd.get_context().get_stage()
-LIGHT_TYPES = set({type_tuple})
-
-lights = []
-has_dome = False
-if stage is not None:
-    for prim in stage.Traverse():
-        type_name = prim.GetTypeName()
-        if type_name not in LIGHT_TYPES:
-            continue
-        intensity_attr = prim.GetAttribute('inputs:intensity')
-        color_attr = prim.GetAttribute('inputs:color')
-        enabled_attr = prim.GetAttribute('inputs:enabled')
-        intensity = float(intensity_attr.Get()) if intensity_attr and intensity_attr.HasAuthoredValue() else None
-        color_val = color_attr.Get() if color_attr and color_attr.HasAuthoredValue() else None
-        if color_val is not None:
-            color = [float(color_val[0]), float(color_val[1]), float(color_val[2])]
-        else:
-            color = None
-        enabled = bool(enabled_attr.Get()) if enabled_attr and enabled_attr.HasAuthoredValue() else True
-        if type_name == 'DomeLight':
-            has_dome = True
-        lights.append({{
-            'path': str(prim.GetPath()),
-            'type': type_name,
-            'intensity': intensity,
-            'color': color,
-            'enabled': enabled,
-        }})
-
-print(json.dumps({{
-    'lights': lights,
-    'count': len(lights),
-    'has_dome': has_dome,
-}}))
-"""
-    return await kit_tools.queue_exec_patch(code, "List all UsdLux light prims in the stage")
-
-async def _handle_get_light_properties(args: Dict) -> Dict:
-    """Read the full attribute set of a single light prim."""
-    light_path = args["light_path"]
-    code = f"""\
-import omni.usd
-import json
-
-stage = omni.usd.get_context().get_stage()
-prim = stage.GetPrimAtPath('{light_path}')
-
-if not prim or not prim.IsValid():
-    print(json.dumps({{'error': 'prim not found', 'path': '{light_path}'}}))
-else:
-    type_name = prim.GetTypeName()
-
-    def _get(attr_name):
-        a = prim.GetAttribute(attr_name)
-        if a and a.HasAuthoredValue():
-            return a.Get()
-        if a:
-            return a.Get()
-        return None
-
-    intensity = _get('inputs:intensity')
-    exposure = _get('inputs:exposure')
-    color = _get('inputs:color')
-    enabled = _get('inputs:enabled')
-    color_temp = _get('inputs:colorTemperature')
-    angle = _get('inputs:angle') if type_name == 'DistantLight' else None
-    radius = _get('inputs:radius') if type_name in ('SphereLight', 'DiskLight') else None
-    width = _get('inputs:width') if type_name == 'RectLight' else None
-    height = _get('inputs:height') if type_name == 'RectLight' else None
-    texture_file = None
-    if type_name == 'DomeLight':
-        tex = _get('inputs:texture:file')
-        if tex is not None:
-            texture_file = str(tex)
-
-    out = {{
-        'path': '{light_path}',
-        'type': type_name,
-        'intensity': float(intensity) if intensity is not None else None,
-        'exposure': float(exposure) if exposure is not None else None,
-        'color': [float(color[0]), float(color[1]), float(color[2])] if color is not None else None,
-        'enabled': bool(enabled) if enabled is not None else True,
-        'color_temperature': float(color_temp) if color_temp is not None else None,
-        'angle': float(angle) if angle is not None else None,
-        'radius': float(radius) if radius is not None else None,
-        'width': float(width) if width is not None else None,
-        'height': float(height) if height is not None else None,
-        'texture_file': texture_file,
-    }}
-    print(json.dumps(out))
-"""
-    return await kit_tools.queue_exec_patch(code, f"Read light properties for {light_path}")
+# _handle_list_lights moved to handlers/vision.py (Phase 7 wave 11).
+# _handle_get_light_properties moved to handlers/vision.py (Phase 7 wave 11).
 
 # _gen_set_light_intensity moved to handlers/rendering.py (Phase 6 wave 17).
 
@@ -9289,192 +9090,13 @@ DATA_HANDLERS["list_lights"] = _handle_list_lights
 DATA_HANDLERS["get_light_properties"] = _handle_get_light_properties
 
 # ══════ From feat/atomic-tier7-camera ══════
-def _parse_last_json_line(output: str) -> Optional[Dict]:
-    """Return the last well-formed JSON object printed in `output`, or None."""
-    for line in reversed(output.splitlines()):
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                return json.loads(line)
-            except json.JSONDecodeError:
-                continue
-    return None
-
-async def _handle_list_cameras(args: Dict) -> Dict:
-    """Walk the stage and return all UsdGeom.Camera prims with type info."""
-    code = """\
-import omni.usd
-import json
-from pxr import Usd, UsdGeom
-
-stage = omni.usd.get_context().get_stage()
-cameras = []
-if stage is not None:
-    for prim in stage.Traverse():
-        if prim.GetTypeName() == 'Camera':
-            cam = UsdGeom.Camera(prim)
-            proj_attr = cam.GetProjectionAttr()
-            projection = proj_attr.Get() if proj_attr else 'perspective'
-            cameras.append({
-                'path': str(prim.GetPath()),
-                'name': prim.GetName(),
-                'projection': str(projection) if projection else 'perspective',
-                'purpose': str(UsdGeom.Imageable(prim).GetPurposeAttr().Get() or 'default'),
-                'kind': str(Usd.ModelAPI(prim).GetKind() or ''),
-            })
-print(json.dumps({'cameras': cameras, 'count': len(cameras)}))
-"""
-    result = await kit_tools.exec_sync(code, timeout=10)
-    if not result.get("success"):
-        return {
-            "error": f"Kit RPC /exec_sync failed: {result.get('output', 'unknown')}",
-            "hint": "Is Isaac Sim running with the extension's Kit RPC enabled?",
-        }
-    parsed = _parse_last_json_line(result.get("output", ""))
-    if parsed is None:
-        return {"error": "Failed to parse camera list", "raw_output": result.get("output", "")[:500]}
-    return parsed
-
-async def _handle_get_camera_params(args: Dict) -> Dict:
-    """Read all cinematographic attributes from a UsdGeom.Camera prim."""
-    camera_path = args.get("camera_path", "")
-    if not camera_path:
-        return {"error": "camera_path is required"}
-    # Sanitize path
-    import re as _re
-    if not _re.match(r"^/[A-Za-z0-9_/\- ]+$", camera_path):
-        return {"error": f"Invalid camera_path: {camera_path}"}
-
-    code = f"""\
-import omni.usd
-import json
-import math
-from pxr import UsdGeom
-
-stage = omni.usd.get_context().get_stage()
-prim = stage.GetPrimAtPath('{camera_path}')
-if not prim or not prim.IsValid():
-    print(json.dumps({{'error': 'Camera prim not found', 'camera_path': '{camera_path}'}}))
-elif prim.GetTypeName() != 'Camera':
-    print(json.dumps({{'error': 'Prim is not a Camera', 'camera_path': '{camera_path}', 'type': str(prim.GetTypeName())}}))
-else:
-    cam = UsdGeom.Camera(prim)
-    focal = cam.GetFocalLengthAttr().Get() or 0.0
-    h_ap = cam.GetHorizontalApertureAttr().Get() or 0.0
-    v_ap = cam.GetVerticalApertureAttr().Get() or 0.0
-    clip = cam.GetClippingRangeAttr().Get()
-    near, far = (float(clip[0]), float(clip[1])) if clip else (0.0, 0.0)
-    focus = cam.GetFocusDistanceAttr().Get() or 0.0
-    fstop = cam.GetFStopAttr().Get() or 0.0
-    proj = cam.GetProjectionAttr().Get() or 'perspective'
-
-    def _fov_deg(aperture, focal_length):
-        if focal_length <= 0 or aperture <= 0:
-            return 0.0
-        return math.degrees(2.0 * math.atan(aperture / (2.0 * focal_length)))
-
-    info = {{
-        'camera_path': '{camera_path}',
-        'projection': str(proj),
-        'focal_length_mm': float(focal),
-        'horizontal_aperture_mm': float(h_ap),
-        'vertical_aperture_mm': float(v_ap),
-        'horizontal_fov_deg': _fov_deg(float(h_ap), float(focal)),
-        'vertical_fov_deg': _fov_deg(float(v_ap), float(focal)),
-        'clipping_range_m': [near, far],
-        'focus_distance_m': float(focus),
-        'f_stop': float(fstop),
-    }}
-    print(json.dumps(info))
-"""
-    result = await kit_tools.exec_sync(code, timeout=10)
-    if not result.get("success"):
-        return {"error": f"Kit RPC /exec_sync failed: {result.get('output', 'unknown')}"}
-    parsed = _parse_last_json_line(result.get("output", ""))
-    if parsed is None:
-        return {"error": "Failed to parse camera params", "raw_output": result.get("output", "")[:500]}
-    return parsed
+# _parse_last_json_line moved to handlers/vision.py (Phase 7 wave 11).
+# _handle_list_cameras moved to handlers/vision.py (Phase 7 wave 11).
+# _handle_get_camera_params moved to handlers/vision.py (Phase 7 wave 11).
 
 # _gen_set_camera_params moved to handlers/sensors.py (Phase 6 wave 4).
 
-async def _handle_capture_camera_image(args: Dict) -> Dict:
-    """Render a single frame from the named camera and return base64 PNG."""
-    camera_path = args.get("camera_path", "")
-    if not camera_path:
-        return {"error": "camera_path is required"}
-    import re as _re
-    if not _re.match(r"^/[A-Za-z0-9_/\- ]+$", camera_path):
-        return {"error": f"Invalid camera_path: {camera_path}"}
-
-    resolution = args.get("resolution") or [1280, 720]
-    if (
-        not isinstance(resolution, (list, tuple))
-        or len(resolution) != 2
-        or not all(isinstance(v, int) and v > 0 for v in resolution)
-    ):
-        return {"error": "resolution must be [width, height] of positive integers"}
-    width, height = int(resolution[0]), int(resolution[1])
-
-    code = f"""\
-import omni.usd
-import json
-import base64
-from pxr import UsdGeom
-
-stage = omni.usd.get_context().get_stage()
-prim = stage.GetPrimAtPath('{camera_path}')
-if not prim or not prim.IsValid():
-    print(json.dumps({{'error': 'Camera prim not found', 'camera_path': '{camera_path}'}}))
-elif prim.GetTypeName() != 'Camera':
-    print(json.dumps({{'error': 'Prim is not a Camera', 'camera_path': '{camera_path}'}}))
-else:
-    try:
-        import omni.replicator.core as rep
-        rp = rep.create.render_product('{camera_path}', ({width}, {height}))
-        annot = rep.AnnotatorRegistry.get_annotator('rgb')
-        annot.attach([rp])
-        rep.orchestrator.step()
-        data = annot.get_data()
-        # Encode the numpy RGB(A) array to PNG via PIL
-        try:
-            from PIL import Image
-            import numpy as np
-            arr = np.asarray(data)
-            if arr.ndim == 3 and arr.shape[2] == 4:
-                img = Image.fromarray(arr[:, :, :3].astype('uint8'), mode='RGB')
-            else:
-                img = Image.fromarray(arr.astype('uint8'), mode='RGB')
-            import io
-            buf = io.BytesIO()
-            img.save(buf, format='PNG')
-            b64 = base64.b64encode(buf.getvalue()).decode('ascii')
-        finally:
-            try:
-                annot.detach([rp])
-            except Exception:
-                pass
-            try:
-                rp.destroy()
-            except Exception:
-                pass
-        print(json.dumps({{
-            'camera_path': '{camera_path}',
-            'resolution': [{width}, {height}],
-            'image_base64': b64,
-            'format': 'png',
-            'message': 'Rendered 1 frame from {camera_path} at {width}x{height}',
-        }}))
-    except ImportError as e:
-        print(json.dumps({{'error': 'Replicator unavailable: ' + str(e),
-                           'hint': 'omni.replicator.core extension must be enabled'}}))
-"""
-    result = await kit_tools.exec_sync(code, timeout=30)
-    if not result.get("success"):
-        return {"error": f"Kit RPC /exec_sync failed: {result.get('output', 'unknown')}"}
-    parsed = _parse_last_json_line(result.get("output", ""))
-    if parsed is None:
-        return {"error": "Failed to parse capture result", "raw_output": result.get("output", "")[:500]}
-    return parsed
+# _handle_capture_camera_image moved to handlers/vision.py (Phase 7 wave 11).
 
 # _gen_set_camera_look_at moved to handlers/sensors.py (Phase 6 wave 4).
 
@@ -9485,67 +9107,7 @@ CODE_GEN_HANDLERS["set_camera_params"] = _gen_set_camera_params
 CODE_GEN_HANDLERS["set_camera_look_at"] = _gen_set_camera_look_at
 
 # ══════ From feat/atomic-tier8-render ══════
-async def _handle_get_render_config(args: Dict) -> Dict:
-    """Read current renderer mode, SPP, max bounces, and viewport resolution.
-
-    Generates a small introspection script and queues it via Kit RPC. The Kit
-    side runs it and returns the printed JSON. When Kit is unreachable we
-    return a structured stub so the LLM still gets predictable shape.
-    """
-    code = """\
-import json
-try:
-    import omni.kit.viewport.utility as vp_util
-    import omni.usd
-    from pxr import Sdf
-
-    vp = vp_util.get_active_viewport()
-    resolution = list(vp.resolution) if vp is not None else [None, None]
-    renderer = vp.hydra_engine if vp is not None else None
-
-    stage = omni.usd.get_context().get_stage()
-
-    def _read(attr_path, default=None):
-        prim_path, _, attr_name = attr_path.rpartition('.')
-        prim = stage.GetPrimAtPath(prim_path)
-        if not prim or not prim.IsValid():
-            return default
-        attr = prim.GetAttribute(attr_name)
-        if attr is None or not attr.HasValue():
-            return default
-        return attr.Get()
-
-    spp = _read('/Render/Vars.samplesPerPixel', 1)
-    max_bounces = _read('/Render/Vars.maxBounces', 4)
-    bloom = bool(_read('/Render/PostProcess/Bloom.enabled', False))
-    tonemap = str(_read('/Render/PostProcess/Tonemap.operator', 'aces'))
-    dof = bool(_read('/Render/PostProcess/DoF.enabled', False))
-    motion_blur = bool(_read('/Render/PostProcess/MotionBlur.enabled', False))
-
-    print(json.dumps({
-        'renderer': renderer,
-        'samples_per_pixel': spp,
-        'max_bounces': max_bounces,
-        'resolution': resolution,
-        'post_process': {
-            'bloom': bloom,
-            'tonemap': tonemap,
-            'dof': dof,
-            'motion_blur': motion_blur,
-        },
-    }))
-except Exception as e:
-    print(json.dumps({'error': str(e)}))
-"""
-    result = await kit_tools.queue_exec_patch(code, "Read current render config")
-    return {
-        "queued": result.get("queued", False),
-        "patch_id": result.get("patch_id"),
-        "note": (
-            "Render config introspection queued. Kit will print a JSON dict with keys: "
-            "renderer, samples_per_pixel, max_bounces, resolution, post_process."
-        ),
-    }
+# _handle_get_render_config moved to handlers/vision.py (Phase 7 wave 11).
 
 # _gen_set_render_config moved to handlers/rendering.py (Phase 6 wave 17).
 
@@ -9576,144 +9138,13 @@ CODE_GEN_HANDLERS["set_edit_target"] = _gen_set_edit_target
 CODE_GEN_HANDLERS["flatten_layers"] = _gen_flatten_layers
 
 # ══════ From feat/atomic-tier10-animation ══════
-async def _handle_get_timeline_state(args: Dict) -> Dict:
-    """Return current timeline cursor + start/end + fps + play state."""
-    code = """\
-import json
-try:
-    import omni.timeline
-    import omni.usd
-    tl = omni.timeline.get_timeline_interface()
-    stage = omni.usd.get_context().get_stage()
-    if stage is None:
-        print(json.dumps({'error': 'no stage open'}))
-    else:
-        fps = float(stage.GetTimeCodesPerSecond() or 24.0)
-        start_code = float(stage.GetStartTimeCode())
-        end_code = float(stage.GetEndTimeCode())
-        # current_time / start / end on the timeline interface are exposed in
-        # *seconds* in modern Kit (>=105), so report both forms.
-        try:
-            cur = float(tl.get_current_time())
-        except Exception:
-            cur = float(tl.get_current_time_code()) / fps if fps else 0.0
-        is_playing = bool(tl.is_playing()) if hasattr(tl, 'is_playing') else False
-        looping = bool(tl.is_looping()) if hasattr(tl, 'is_looping') else False
-        duration_codes = max(end_code - start_code, 0.0)
-        print(json.dumps({
-            'current_time': cur,
-            'start_time': start_code,
-            'end_time': end_code,
-            'fps': fps,
-            'time_codes_per_second': fps,
-            'is_playing': is_playing,
-            'looping': looping,
-            'duration_seconds': duration_codes / fps if fps else 0.0,
-        }))
-except Exception as e:
-    print(json.dumps({'error': str(e)}))
-"""
-    result = await kit_tools.queue_exec_patch(code, "Read timeline state (current/start/end/fps/playing)")
-    return {
-        "queued": result.get("queued", False),
-        "patch_id": result.get("patch_id"),
-        "note": (
-            "Timeline-state introspection queued. Kit will print a JSON dict with keys: "
-            "current_time, start_time, end_time, fps, time_codes_per_second, is_playing, "
-            "looping, duration_seconds. Time codes are USD frames; duration_seconds = "
-            "(end_time - start_time) / fps."
-        ),
-    }
+# _handle_get_timeline_state moved to handlers/vision.py (Phase 7 wave 11).
 
 # _gen_set_timeline_range moved to handlers/animation.py (Phase 6 wave 19).
 
 # _gen_set_keyframe moved to handlers/animation.py (Phase 6 wave 19).
 
-async def _handle_list_keyframes(args: Dict) -> Dict:
-    """Read every authored TimeSample on a single attribute."""
-    prim_path = args["prim_path"]
-    attr = args["attr"]
-    prim_path_repr = repr(prim_path)
-    attr_repr = repr(attr)
-    code = (
-        "import json\n"
-        "try:\n"
-        "    import omni.usd\n"
-        "    stage = omni.usd.get_context().get_stage()\n"
-        "    if stage is None:\n"
-        "        print(json.dumps({'error': 'no stage open'}))\n"
-        "    else:\n"
-        f"        prim_path = {prim_path_repr}\n"
-        f"        attr_name = {attr_repr}\n"
-        "        prim = stage.GetPrimAtPath(prim_path)\n"
-        "        if not prim or not prim.IsValid():\n"
-        "            print(json.dumps({'error': f'prim not found: {prim_path}'}))\n"
-        "        else:\n"
-        "            attr_handle = prim.GetAttribute(attr_name)\n"
-        "            if not attr_handle or not attr_handle.IsValid():\n"
-        "                print(json.dumps({\n"
-        "                    'error': f'attribute not found: {attr_name}',\n"
-        "                    'prim_path': prim_path,\n"
-        "                }))\n"
-        "            else:\n"
-        "                fps = float(stage.GetTimeCodesPerSecond() or 24.0)\n"
-        "                times = list(attr_handle.GetTimeSamples())\n"
-        "                samples = []\n"
-        "                for tc in times:\n"
-        "                    try:\n"
-        "                        v = attr_handle.Get(tc)\n"
-        "                        # Coerce Vt/Gf types into JSON-safe primitives.\n"
-        "                        try:\n"
-        "                            v_json = list(v) if hasattr(v, '__iter__') and not isinstance(v, str) else v\n"
-        "                        except Exception:\n"
-        "                            v_json = repr(v)\n"
-        "                        samples.append({\n"
-        "                            'time_code': float(tc),\n"
-        "                            'time_seconds': float(tc) / fps if fps else 0.0,\n"
-        "                            'value': v_json,\n"
-        "                        })\n"
-        "                    except Exception as e:\n"
-        "                        samples.append({\n"
-        "                            'time_code': float(tc),\n"
-        "                            'time_seconds': float(tc) / fps if fps else 0.0,\n"
-        "                            'value': None,\n"
-        "                            'error': str(e),\n"
-        "                        })\n"
-        "                if times:\n"
-        "                    first, last = float(times[0]), float(times[-1])\n"
-        "                    range_codes = [first, last]\n"
-        "                    range_seconds = [first / fps if fps else 0.0, last / fps if fps else 0.0]\n"
-        "                else:\n"
-        "                    range_codes = []\n"
-        "                    range_seconds = []\n"
-        "                print(json.dumps({\n"
-        "                    'prim_path': prim_path,\n"
-        "                    'attr': attr_name,\n"
-        "                    'has_timesamples': bool(times),\n"
-        "                    'count': len(times),\n"
-        "                    'fps': fps,\n"
-        "                    'samples': samples,\n"
-        "                    'time_range_codes': range_codes,\n"
-        "                    'time_range_seconds': range_seconds,\n"
-        "                }))\n"
-        "except Exception as e:\n"
-        "    print(json.dumps({'error': str(e)}))\n"
-    )
-    result = await kit_tools.queue_exec_patch(
-        code, f"List keyframes for {prim_path}.{attr}"
-    )
-    return {
-        "queued": result.get("queued", False),
-        "patch_id": result.get("patch_id"),
-        "prim_path": prim_path,
-        "attr": attr,
-        "note": (
-            "Keyframe enumeration queued. Kit will print a JSON dict with keys: "
-            "prim_path, attr, has_timesamples, count, fps, samples (list of "
-            "{time_code, time_seconds, value}), time_range_codes, time_range_seconds. "
-            "has_timesamples=false means the attribute has only a default value."
-        ),
-    }
+# _handle_list_keyframes moved to handlers/vision.py (Phase 7 wave 11).
 
 # _gen_play_animation moved to handlers/animation.py (Phase 6 wave 19).
 
@@ -9995,32 +9426,7 @@ print(json.dumps({{"matches": _matches, "count": len(_matches), "criteria": _cri
 DATA_HANDLERS["select_by_criteria"] = _handle_select_by_criteria
 
 # ══════ From feat/atomic-tier15-18-misc ══════
-async def _handle_get_viewport_camera(args: Dict) -> Dict:
-    """Return the active viewport's current camera path and resolution."""
-    code = """\
-import json
-import omni.kit.viewport.utility as _vpu
-
-vp_api = _vpu.get_active_viewport()
-cam_path = None
-viewport_id = ""
-res = [0, 0]
-if vp_api is not None:
-    try:
-        cam_path = str(vp_api.camera_path) if vp_api.camera_path else None
-    except Exception:
-        cam_path = None
-    try:
-        viewport_id = getattr(vp_api, "id", "") or ""
-    except Exception:
-        viewport_id = ""
-    try:
-        res = list(vp_api.resolution)
-    except Exception:
-        res = [0, 0]
-print(json.dumps({"camera_path": cam_path, "viewport_id": viewport_id, "resolution": res}))
-"""
-    return await kit_tools.queue_exec_patch(code, "Read active viewport camera")
+# _handle_get_viewport_camera moved to handlers/vision.py (Phase 7 wave 11).
 
     # _handle_get_selected_prims moved to handlers/scene_authoring.py (Phase 7 wave 3).
 
