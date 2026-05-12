@@ -2270,14 +2270,14 @@ print(f'activate_area: scope={{scope}} kept={{kept}} deactivated={{deactivated}}
 
 
 async def _handle_list_all_prims(args: Dict) -> Dict:
-    from . import kit_tools
+    from .. import kit_tools
     ctx = await kit_tools.get_stage_context(full=True)
     return ctx.get("stage", {})
 
 
 async def _handle_get_attribute(args: Dict) -> Dict:
     """Read a single USD attribute value."""
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     attr_name = args["attr_name"]
     code = f"""\
@@ -2313,7 +2313,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_world_transform(args: Dict) -> Dict:
     """Compute world-space 4x4 transform of a prim."""
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     time_code = args.get("time_code")
     tc_expr = repr(time_code) if time_code is not None else "Usd.TimeCode.Default()"
@@ -2350,7 +2350,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_bounding_box(args: Dict) -> Dict:
     """Compute world-space AABB of a prim."""
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     purpose = args.get("purpose", "default")
     # USD's UsdGeom.Tokens enum was reorganized — Tokens.default no longer
@@ -2409,7 +2409,7 @@ print(json.dumps(result, default=str))
 async def _handle_prim_exists(args: Dict) -> Dict:
     """Boolean check for prim presence at a path. Used by verify-contract to
     validate assistant claims like 'robot at /World/Franka is loaded'."""
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     code = f"""\
 import omni.usd
@@ -2429,7 +2429,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_list_attributes(args: Dict) -> Dict:
     """Enumerate all attributes on a prim via prim.GetAttributes()."""
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     code = f"""\
 import omni.usd
@@ -2457,7 +2457,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_list_applied_schemas(args: Dict) -> Dict:
     """Return applied API schemas on a prim via prim.GetAppliedSchemas()."""
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     code = f"""\
 import omni.usd
@@ -2486,7 +2486,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_prim_metadata(args: Dict) -> Dict:
     """Read a single USD metadata field on a prim via prim.GetMetadata(key)."""
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     key = args["key"]
     code = f"""\
@@ -2527,7 +2527,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_prim_type(args: Dict) -> Dict:
     """Return prim.GetTypeName() (e.g. 'Mesh', 'Xform', 'Camera')."""
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     code = f"""\
 import omni.usd
@@ -2555,7 +2555,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_find_prims_by_schema(args: Dict) -> Dict:
     """Traverse the stage and return prims where prim.HasAPI(schema) is true."""
-    from . import kit_tools
+    from .. import kit_tools
     schema_name = args["schema_name"]
     root_path = args.get("root_path") or "/"
     limit = int(args.get("limit", 500))
@@ -2638,7 +2638,7 @@ else:
 
 async def _handle_find_prims_by_name(args: Dict) -> Dict:
     """Regex search on prim paths."""
-    from . import kit_tools
+    from .. import kit_tools
     pattern = args["pattern"]
     root_path = args.get("root_path") or "/"
     limit = int(args.get("limit", 500))
@@ -2680,7 +2680,7 @@ else:
 
 async def _handle_get_kind(args: Dict) -> Dict:
     """Read Kind metadata via Usd.ModelAPI(prim).GetKind()."""
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     code = f"""\
 import omni.usd
@@ -2717,7 +2717,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_semantic_label(args: Dict) -> Dict:
     """Read every Semantics.SemanticsAPI instance applied to a single prim."""
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     prim_path_repr = repr(prim_path)
     code = (
@@ -2787,7 +2787,7 @@ async def _handle_get_semantic_label(args: Dict) -> Dict:
 
 async def _handle_get_asset_info(args: Dict) -> Dict:
     """Read assetInfo metadata + introducing layer + sha256 for a prim."""
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     prim_path_repr = repr(prim_path)
     code = (
@@ -2896,7 +2896,7 @@ async def _handle_get_asset_info(args: Dict) -> Dict:
 
 async def _handle_get_selected_prims(args: Dict) -> Dict:
     """Return the user's current selection in the viewport / Stage panel."""
-    from . import kit_tools
+    from .. import kit_tools
     code = """\
 import json
 import omni.usd

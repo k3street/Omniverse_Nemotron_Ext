@@ -255,7 +255,7 @@ async def _handle_resolve_context_reference(args: Dict) -> Dict:
 
     Args: noun_class (cube/sphere/robot/...), recency ('last' default).
     """
-    from . import kit_tools
+    from .. import kit_tools
     noun_class = (args.get("noun_class") or args.get("class") or "").strip().lower()
     if not noun_class:
         return {"error": "resolve_context_reference requires a noun_class"}
@@ -325,7 +325,7 @@ async def _handle_resolve_coordinate_reference(args: Dict) -> Dict:
 
     Returns: {position: [x,y,z], landmark, reference_prim, rationale}.
     """
-    from . import kit_tools
+    from .. import kit_tools
     landmark = (args.get("landmark") or "").strip().lower()
     ref = (args.get("reference_prim") or "").strip()
     if not landmark:
@@ -418,7 +418,7 @@ async def _handle_resolve_relational_property(args: Dict) -> Dict:
 
     Returns: {relation, value (or reference), rationale}.
     """
-    from . import kit_tools
+    from .. import kit_tools
     relation = (args.get("relation") or "").strip().lower()
     ref = (args.get("reference_prim") or "").strip()
     factor = float(args.get("factor", 2.0))
@@ -655,7 +655,7 @@ async def _handle_resolve_prim_reference(args: Dict) -> Dict:
     we want to prove out — it's strictly more focused than the
     whole-prompt negotiator.
     """
-    from . import kit_tools
+    from .. import kit_tools
     name_hint = (args.get("name_hint") or args.get("description") or "").strip().lower()
     prim_type = (args.get("prim_type") or "").strip()
     if not name_hint and not prim_type:

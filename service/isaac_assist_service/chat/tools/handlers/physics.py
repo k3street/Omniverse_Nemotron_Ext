@@ -1223,7 +1223,7 @@ def _gen_compute_convex_hull(args: Dict) -> str:
 
 
 async def _handle_get_articulation_state(args: Dict) -> Dict:
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     code = f"""\
 import omni.usd
@@ -1244,7 +1244,7 @@ print(json.dumps(result))
 
 async def _handle_get_physics_errors(args: Dict) -> Dict:
     """Filter console logs for PhysX-specific errors and warnings."""
-    from . import kit_tools
+    from .. import kit_tools
     from ..tool_executor import _PHYSX_ERROR_RE
     ctx = await kit_tools.get_stage_context(full=False)
     logs = ctx.get("recent_logs", [])
@@ -1268,7 +1268,7 @@ async def _handle_get_physics_errors(args: Dict) -> Dict:
 
 
 async def _handle_get_joint_limits(args: Dict) -> Dict:
-    from . import kit_tools
+    from .. import kit_tools
     articulation = args["articulation"]
     joint_name = args["joint_name"]
     code = f"""\
@@ -1305,7 +1305,7 @@ print(json.dumps(result, default=str))
 
 
 async def _handle_get_contact_report(args: Dict) -> Dict:
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     max_contacts = int(args.get("max_contacts", 50))
     code = f"""\
@@ -1341,7 +1341,7 @@ async def _handle_get_joint_targets(args: Dict) -> Dict:
     """Read per-joint drive/velocity TARGETS (what the controller is aiming
     for), distinct from current state. Used to verify 'robot will move on
     Play' claims — if DriveAPI targets aren't authored, the robot won't move."""
-    from . import kit_tools
+    from .. import kit_tools
     articulation_path = args["articulation_path"]
     code = f"""\
 import omni.usd
@@ -1390,7 +1390,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_linear_velocity(args: Dict) -> Dict:
     """Return rigid body linear velocity via UsdPhysics.RigidBodyAPI."""
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     code = f"""\
 import omni.usd
@@ -1428,7 +1428,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_angular_velocity(args: Dict) -> Dict:
     """Return rigid body angular velocity via UsdPhysics.RigidBodyAPI."""
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     code = f"""\
 import omni.usd
@@ -1466,7 +1466,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_mass(args: Dict) -> Dict:
     """Return current rigid body mass via UsdPhysics.MassAPI."""
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     code = f"""\
 import omni.usd
@@ -1503,7 +1503,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_inertia(args: Dict) -> Dict:
     """Return diagonal inertia tensor via UsdPhysics.MassAPI."""
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     code = f"""\
 import omni.usd
@@ -1553,7 +1553,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_physics_scene_config(args: Dict) -> Dict:
     """Read the global PhysicsScene config: gravity, solver, iterations, dt, GPU."""
-    from . import kit_tools
+    from .. import kit_tools
     scene_path = args.get("scene_path", "")
     code = f"""\
 import omni.usd
@@ -1634,7 +1634,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_kinematic_state(args: Dict) -> Dict:
     """Return full kinematic state: pose + linear/angular velocity + acceleration estimate."""
-    from . import kit_tools
+    from .. import kit_tools
     prim_path = args["prim_path"]
     sample_dt = float(args.get("sample_dt", 0.05))
     code = f"""\
@@ -1712,7 +1712,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_joint_positions(args: Dict) -> Dict:
     """Return current position of every joint in an articulation."""
-    from . import kit_tools
+    from .. import kit_tools
     articulation = args["articulation"]
     code = f"""\
 import omni.usd
@@ -1762,7 +1762,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_joint_velocities(args: Dict) -> Dict:
     """Return current velocity of every joint in an articulation."""
-    from . import kit_tools
+    from .. import kit_tools
     articulation = args["articulation"]
     code = f"""\
 import omni.usd
@@ -1803,7 +1803,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_joint_torques(args: Dict) -> Dict:
     """Return most recently applied torque/force on every joint."""
-    from . import kit_tools
+    from .. import kit_tools
     articulation = args["articulation"]
     code = f"""\
 import omni.usd
@@ -1847,7 +1847,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_drive_gains(args: Dict) -> Dict:
     """Read current kp/kd from UsdPhysics.DriveAPI on a joint."""
-    from . import kit_tools
+    from .. import kit_tools
     joint_path = args["joint_path"]
     drive_type = args.get("drive_type", "auto")
     code = f"""\
@@ -1893,7 +1893,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_articulation_mass(args: Dict) -> Dict:
     """Sum mass of every link in the articulation."""
-    from . import kit_tools
+    from .. import kit_tools
     articulation = args["articulation"]
     code = f"""\
 import omni.usd
@@ -1935,7 +1935,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_get_center_of_mass(args: Dict) -> Dict:
     """Compute world-space mass-weighted center of mass of an articulation."""
-    from . import kit_tools
+    from .. import kit_tools
     articulation = args["articulation"]
     code = f"""\
 import omni.usd
