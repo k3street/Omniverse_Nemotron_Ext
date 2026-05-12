@@ -3876,6 +3876,539 @@ print(json.dumps({"stages": stages, "active_context": active_ctx}))
 
 
 # ---------------------------------------------------------------------------
+# Phase 7 wave 15 — scene-authoring final stragglers (compute/find/graphs/snapshots)
+
+
+async def _handle_compute_stack_placement(args: Dict) -> Dict:
+    """Compute placement positions for stacking N items on top of a target prim.
+
+    Reads target's world-axis-aligned bbox, then computes positions purely in
+    Python — no stage mutation. Returned positions are world coords intended
+    for use as drop_target / placing_position values in a pick-place flow.
+
+    Args:
+      target_path:        USD path of the target (pallet, container, zone)
+      pattern:            'column' | 'grid_RxC' (e.g. 'grid_2x2', 'grid_3x3')
+      n_items:            total positions to compute
+      cube_size:          edge length of each item (default 0.05)
+      layer_rotation_deg: yaw rotation applied per layer (e.g. 90 for brick)
+      spacing:            optional explicit center-to-center spacing
+                          (default = cube_size, i.e. flush packing)
+      anchor:             'top' (place on top of target, default) |
+                          'inside_floor' (place on target's interior floor —
+                          for bins/containers; uses target_top_z - target_height)
+
+    Returns:
+      {
+        positions: [{position: [x,y,z], rotation_deg: float}, ...],
+        n_items: <int>,
+        target_path: <str>,
+        pattern: <str>,
+        spacing: <float>,
+      }
+    """
+    from .. import kit_tools
+    target_path = args["target_path"]
+    pattern = args.get("pattern", "column")
+    n_items = int(args.get("n_items", 1))
+    cube_size = float(args.get("cube_size", 0.05))
+    cube_sizes = args.get("cube_sizes")  # optional per-item override (list)
+    if cube_sizes is not None:
+        if not isinstance(cube_sizes, (list, tuple)) or len(cube_sizes) != n_items:
+            return {"type": "error",
+                    "error": f"cube_sizes must be a list of length n_items={n_items}, got {cube_sizes!r}"}
+        try:
+            cube_sizes = [float(s) for s in cube_sizes]
+        except (ValueError, TypeError):
+            return {"type": "error", "error": f"cube_sizes entries must be numbers: {cube_sizes!r}"}
+    layer_rotation_deg = float(args.get("layer_rotation_deg", 0.0))
+    spacing = args.get("spacing")
+    spacing = float(spacing) if spacing is not None else cube_size
+    anchor = args.get("anchor", "top")
+
+    # Parse pattern → (rows, cols, skip_center) per layer
+    skip_center = False
+    if pattern == "column":
+        rows, cols = 1, 1
+    elif pattern.startswith("grid_") and "x" in pattern[5:]:
+        try:
+            r_str, c_str = pattern[5:].split("x", 1)
+            rows, cols = int(r_str), int(c_str)
+            if rows < 1 or cols < 1:
+                return {"type": "error", "error": f"grid dims must be >=1, got {rows}x{cols}"}
+        except (ValueError, IndexError):
+            return {"type": "error", "error": f"unrecognized grid pattern: {pattern}"}
+    elif pattern.startswith("donut_") and "x" in pattern[6:]:
+        try:
+            r_str, c_str = pattern[6:].split("x", 1)
+            rows, cols = int(r_str), int(c_str)
+            if rows < 3 or cols < 3 or rows % 2 == 0 or cols % 2 == 0:
+                return {"type": "error",
+                        "error": f"donut requires odd RxC >=3, got {rows}x{cols}"}
+            skip_center = True
+        except (ValueError, IndexError):
+            return {"type": "error", "error": f"unrecognized donut pattern: {pattern}"}
+    else:
+        return {"type": "error",
+                "error": f"unsupported pattern: {pattern!r} (use 'column', 'grid_RxC', or 'donut_RxC')"}
+
+    if n_items < 1:
+        return {"type": "error", "error": f"n_items must be >=1, got {n_items}"}
+
+    code = f"""\
+import json
+import omni.usd
+from pxr import Usd, UsdGeom
+
+target_path = {target_path!r}
+pattern = {pattern!r}
+n_items = {n_items}
+cube_size = {cube_size}
+cube_sizes = {cube_sizes!r}
+spacing = {spacing}
+rows, cols = {rows}, {cols}
+skip_center = {skip_center}
+layer_rotation_deg = {layer_rotation_deg}
+anchor = {anchor!r}
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath(target_path)
+result = {{
+    'target_path': target_path,
+    'pattern': pattern,
+    'n_items': n_items,
+    'spacing': spacing,
+    'positions': [],
+}}
+
+if not prim or not prim.IsValid():
+    result['error'] = f'target prim not found: {{target_path}}'
+else:
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    bbox = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+    if bbox.IsEmpty():
+        result['error'] = f'target bbox empty (no geometry?): {{target_path}}'
+    else:
+        bmin = bbox.GetMin()
+        bmax = bbox.GetMax()
+        cx = 0.5 * (bmin[0] + bmax[0])
+        cy = 0.5 * (bmin[1] + bmax[1])
+        target_top_z = float(bmax[2])
+        target_bot_z = float(bmin[2])
+        target_height = target_top_z - target_bot_z
+        # When cube_sizes provided, base_z's cube_size term is the FIRST item's
+        # size (for first-cube anchor). Subsequent items compute z per their own size.
+        first_cube_size = cube_sizes[0] if cube_sizes else cube_size
+        if anchor == 'inside_floor':
+            base_z = target_bot_z + first_cube_size * 0.5
+        else:
+            base_z = target_top_z + first_cube_size * 0.5
+
+        # Build the per-layer (row, col) sequence. For donut patterns,
+        # skip the geometric center (only valid for odd rows × odd cols).
+        layer_slots = []
+        for r in range(rows):
+            for c in range(cols):
+                if skip_center and r == rows // 2 and c == cols // 2:
+                    continue
+                layer_slots.append((r, c))
+        per_layer = len(layer_slots)
+
+        # Center the grid on (cx, cy):
+        #   col index 0..cols-1, with center at (cols-1)/2.0
+        #   row index 0..rows-1, with center at (rows-1)/2.0
+        positions = []
+        # For column mixed-SKU: z stacks cumulatively. For grid mixed-SKU
+        # multi-layer: z increment per layer assumes layer height = current
+        # item's size (genuinely ambiguous for mixed grid; documented).
+        is_column = (rows == 1 and cols == 1)
+        floor_z = target_bot_z if anchor == 'inside_floor' else target_top_z
+        for i in range(n_items):
+            layer = i // per_layer
+            slot = i % per_layer
+            row, col = layer_slots[slot]
+            x = cx + (col - (cols - 1) * 0.5) * spacing
+            y = cy + (row - (rows - 1) * 0.5) * spacing
+            this_size = cube_sizes[i] if cube_sizes else cube_size
+            if cube_sizes:
+                if is_column:
+                    # Cumulative stack: sum of all lower cubes + half this one
+                    z = floor_z + sum(cube_sizes[:i]) + this_size * 0.5
+                else:
+                    # Grid mixed-SKU multi-layer: uniform-within-layer assumption
+                    z = floor_z + this_size * 0.5 + layer * this_size
+            else:
+                z = base_z + layer * cube_size
+            yaw = (layer * layer_rotation_deg) % 360.0
+            positions.append({{
+                'position': [round(x, 6), round(y, 6), round(z, 6)],
+                'rotation_deg': yaw,
+                'size': this_size,
+            }})
+
+        result['positions'] = positions
+        result['target_bbox_min'] = [round(float(bmin[i]), 6) for i in range(3)]
+        result['target_bbox_max'] = [round(float(bmax[i]), 6) for i in range(3)]
+        result['anchor'] = anchor
+        result['base_z'] = round(base_z, 6)
+
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(
+        code, f"compute_stack_placement {target_path} {pattern} n={n_items}"
+    )
+
+
+async def _handle_compute_surface_area(args: Dict) -> Dict:
+    """Compute surface area as sum of triangle areas (after triangulation)."""
+    from .. import kit_tools
+    prim_path = args["prim_path"]
+    code = f"""\
+import json
+import math
+import omni.usd
+from pxr import Usd, UsdGeom, Gf
+
+prim_path = {prim_path!r}
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath(prim_path)
+result = {{'prim_path': prim_path, 'units': 'm^2'}}
+
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+elif not prim.IsA(UsdGeom.Mesh):
+    result['error'] = f'prim is not a Mesh: {{prim.GetTypeName()}}'
+else:
+    mesh = UsdGeom.Mesh(prim)
+    points_attr = mesh.GetPointsAttr()
+    counts_attr = mesh.GetFaceVertexCountsAttr()
+    indices_attr = mesh.GetFaceVertexIndicesAttr()
+    if not (points_attr and counts_attr and indices_attr):
+        result['error'] = 'mesh missing points / faceVertexCounts / faceVertexIndices'
+    else:
+        xf = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+        local_points = points_attr.Get() or []
+        world_points = [xf.Transform(Gf.Vec3d(p[0], p[1], p[2])) for p in local_points]
+        counts = list(counts_attr.Get() or [])
+        indices = list(indices_attr.Get() or [])
+
+        triangles = []
+        cursor = 0
+        for c in counts:
+            face = indices[cursor:cursor + c]
+            cursor += c
+            if len(face) < 3:
+                continue
+            for k in range(1, len(face) - 1):
+                triangles.append((face[0], face[k], face[k + 1]))
+
+        total_area = 0.0
+        for (a, b, c) in triangles:
+            v0 = world_points[a]
+            v1 = world_points[b]
+            v2 = world_points[c]
+            ex = v1[0] - v0[0]
+            ey = v1[1] - v0[1]
+            ez = v1[2] - v0[2]
+            fx = v2[0] - v0[0]
+            fy = v2[1] - v0[1]
+            fz = v2[2] - v0[2]
+            cx = ey * fz - ez * fy
+            cy = ez * fx - ex * fz
+            cz = ex * fy - ey * fx
+            total_area += 0.5 * math.sqrt(cx * cx + cy * cy + cz * cz)
+
+        result['triangle_count'] = len(triangles)
+        result['vertex_count'] = len(world_points)
+        result['surface_area'] = total_area
+
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"compute_surface_area {prim_path}")
+
+
+async def _handle_compute_volume(args: Dict) -> Dict:
+    """Compute mesh volume via signed tetrahedra (trimesh if available)."""
+    from .. import kit_tools
+    prim_path = args["prim_path"]
+    code = f"""\
+import json
+import omni.usd
+from pxr import Usd, UsdGeom, Gf
+
+prim_path = {prim_path!r}
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath(prim_path)
+result = {{'prim_path': prim_path, 'units': 'm^3'}}
+
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+elif not prim.IsA(UsdGeom.Mesh):
+    result['error'] = f'prim is not a Mesh: {{prim.GetTypeName()}}'
+else:
+    mesh = UsdGeom.Mesh(prim)
+    points_attr = mesh.GetPointsAttr()
+    counts_attr = mesh.GetFaceVertexCountsAttr()
+    indices_attr = mesh.GetFaceVertexIndicesAttr()
+    if not (points_attr and counts_attr and indices_attr):
+        result['error'] = 'mesh missing points / faceVertexCounts / faceVertexIndices'
+    else:
+        # Bake world transform so volume is in world units
+        xf = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+        local_points = points_attr.Get() or []
+        world_points = [xf.Transform(Gf.Vec3d(p[0], p[1], p[2])) for p in local_points]
+        counts = list(counts_attr.Get() or [])
+        indices = list(indices_attr.Get() or [])
+
+        # Triangulate (fan) every face into (i0, i_k, i_{{k+1}}) triangles
+        triangles = []
+        cursor = 0
+        for c in counts:
+            face = indices[cursor:cursor + c]
+            cursor += c
+            if len(face) < 3:
+                continue
+            for k in range(1, len(face) - 1):
+                triangles.append((face[0], face[k], face[k + 1]))
+
+        volume_signed = 0.0
+        try:
+            import trimesh
+            import numpy as np
+            verts = np.array([(p[0], p[1], p[2]) for p in world_points], dtype=float)
+            faces = np.array(triangles, dtype=int)
+            tm = trimesh.Trimesh(vertices=verts, faces=faces, process=False)
+            volume_signed = float(tm.volume)
+            backend = 'trimesh'
+        except Exception:
+            # Manual signed-tetrahedra (divergence theorem) fallback
+            for (a, b, c) in triangles:
+                v0 = world_points[a]
+                v1 = world_points[b]
+                v2 = world_points[c]
+                # Signed volume of tetrahedron (origin, v0, v1, v2)
+                volume_signed += (
+                    v0[0] * (v1[1] * v2[2] - v1[2] * v2[1])
+                    - v0[1] * (v1[0] * v2[2] - v1[2] * v2[0])
+                    + v0[2] * (v1[0] * v2[1] - v1[1] * v2[0])
+                ) / 6.0
+            backend = 'manual_tetrahedra'
+
+        result['triangle_count'] = len(triangles)
+        result['vertex_count'] = len(world_points)
+        result['volume'] = abs(volume_signed)
+        result['signed_volume'] = volume_signed
+        result['backend'] = backend
+
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"compute_volume {prim_path}")
+
+
+async def _handle_find_heavy_prims(args: Dict) -> Dict:
+    """Traverse the stage and find meshes above a triangle-count threshold."""
+    from .. import kit_tools
+    threshold = args.get("threshold_triangles", 10000)
+    code = f"""\
+import json
+import omni.usd
+from pxr import UsdGeom, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+heavy = []
+for prim in stage.TraverseAll():
+    if prim.IsA(UsdGeom.Mesh):
+        mesh = UsdGeom.Mesh(prim)
+        face_counts = mesh.GetFaceVertexCountsAttr().Get()
+        if face_counts is None:
+            continue
+        tri_count = sum(fc - 2 for fc in face_counts)
+        if tri_count >= {threshold}:
+            approx = "none"
+            if prim.HasAPI(UsdPhysics.MeshCollisionAPI):
+                approx_attr = UsdPhysics.MeshCollisionAPI(prim).GetApproximationAttr()
+                if approx_attr:
+                    approx = approx_attr.Get() or "none"
+            heavy.append({{
+                "prim_path": str(prim.GetPath()),
+                "triangle_count": tri_count,
+                "collision_approximation": approx,
+            }})
+
+heavy.sort(key=lambda x: x["triangle_count"], reverse=True)
+print(json.dumps({{"prims": heavy, "count": len(heavy), "threshold": {threshold}}}))
+"""
+    return await kit_tools.queue_exec_patch(
+        code, f"Find mesh prims with >{threshold} triangles"
+    )
+
+
+async def _handle_inspect_graph(args: Dict) -> Dict:
+    """Return nodes, connections, and attribute values for a single graph."""
+    from .. import kit_tools
+    import json
+    graph_path = args["graph_path"]
+    code = f"""\
+import json
+import omni.graph.core as og
+
+graph = og.Controller.graph("{graph_path}")
+result = {{"graph_path": "{graph_path}"}}
+if graph is None:
+    result["error"] = "Graph not found"
+    print(json.dumps(result))
+else:
+    nodes_info = []
+    connections = []
+    try:
+        for node in graph.get_nodes():
+            node_path = node.get_prim_path()
+            node_type = node.get_type_name()
+            attrs = {{}}
+            for attr in node.get_attributes():
+                try:
+                    attrs[attr.get_name()] = repr(attr.get())
+                except Exception:
+                    attrs[attr.get_name()] = "<unreadable>"
+                # Track downstream connections from this attribute
+                try:
+                    for upstream in attr.get_upstream_connections():
+                        connections.append({{
+                            "src": upstream.get_path(),
+                            "dst": attr.get_path(),
+                        }})
+                except Exception:
+                    pass
+            nodes_info.append({{
+                "name": node.get_prim_path().split("/")[-1],
+                "path": node_path,
+                "type": node_type,
+                "attributes": attrs,
+            }})
+        result["nodes"] = nodes_info
+        result["connections"] = connections
+        result["node_count"] = len(nodes_info)
+    except Exception as exc:
+        result["error"] = str(exc)
+print(json.dumps(result))
+"""
+    exec_result = await kit_tools.exec_sync(code, timeout=15)
+    if not exec_result.get("success"):
+        return {
+            "graph_path": graph_path,
+            "error": exec_result.get("output", "Kit RPC unavailable"),
+        }
+    output = exec_result.get("output", "").strip()
+    for line in reversed(output.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    return {"graph_path": graph_path, "raw_output": output}
+
+
+async def _handle_list_graphs(args: Dict) -> Dict:
+    """Enumerate all OmniGraph action graphs in the stage.
+
+    Strategy: query Kit synchronously to scan the stage for prims of type
+    'OmniGraph' (and the modern 'omni.graph.core.types.OmniGraph' fallback).
+    Falls back to empty list when Kit RPC is unavailable.
+    """
+    from .. import kit_tools
+    import json
+    code = """\
+import json
+import omni.usd
+
+stage = omni.usd.get_context().get_stage()
+graphs = []
+if stage is not None:
+    for prim in stage.Traverse():
+        type_name = prim.GetTypeName()
+        if type_name in ("OmniGraph", "ComputeGraph"):
+            graphs.append({
+                "path": str(prim.GetPath()),
+                "type": str(type_name),
+                "name": prim.GetName(),
+            })
+print(json.dumps({"graphs": graphs, "count": len(graphs)}))
+"""
+    result = await kit_tools.exec_sync(code, timeout=10)
+    if not result.get("success"):
+        return {"graphs": [], "count": 0, "error": result.get("output", "Kit RPC unavailable")}
+    output = result.get("output", "").strip()
+    # exec_sync returns the captured stdout as a single string;
+    # find the last JSON line for our payload.
+    for line in reversed(output.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    return {"graphs": [], "count": 0, "raw_output": output}
+
+
+async def _handle_save_delta_snapshot(args: Dict) -> Dict:
+    from .. import kit_tools
+    from ..tool_executor import _DELTA_ROOT, logger, _gen_save_delta_snapshot
+    import json
+    snapshot_id = args["snapshot_id"]
+    base_snapshot_id = args.get("base_snapshot_id")
+    _DELTA_ROOT.mkdir(parents=True, exist_ok=True)
+    code = _gen_save_delta_snapshot(snapshot_id, base_snapshot_id)
+    queued = await kit_tools.queue_exec_patch(code, f"Save delta snapshot {snapshot_id}")
+    # Record a manifest so restore_delta_snapshot has something to read even
+    # before Kit has returned the dirty-layer payload.
+    manifest_path = _DELTA_ROOT / f"{snapshot_id}.json"
+    manifest = {
+        "snapshot_id": snapshot_id,
+        "base_snapshot_id": base_snapshot_id,
+        "status": "queued",
+        "deltas": {},
+    }
+    try:
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    except Exception as exc:
+        logger.warning(f"[ToolExecutor] Could not write delta manifest: {exc}")
+    return {
+        "snapshot_id": snapshot_id,
+        "base_snapshot_id": base_snapshot_id,
+        "manifest_path": str(manifest_path),
+        "queued": bool(queued.get("queued", False)) if isinstance(queued, dict) else False,
+    }
+
+
+async def _handle_restore_delta_snapshot(args: Dict) -> Dict:
+    from .. import kit_tools
+    from ..tool_executor import _DELTA_ROOT, _gen_restore_delta_snapshot
+    import json
+    snapshot_id = args["snapshot_id"]
+    manifest_path = _DELTA_ROOT / f"{snapshot_id}.json"
+    if not manifest_path.exists():
+        return {
+            "snapshot_id": snapshot_id,
+            "restored": False,
+            "error": f"No delta manifest found at {manifest_path}",
+        }
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {"snapshot_id": snapshot_id, "restored": False, "error": f"Manifest unreadable: {exc}"}
+    deltas = manifest.get("deltas") or {}
+    code = _gen_restore_delta_snapshot(snapshot_id, deltas)
+    queued = await kit_tools.queue_exec_patch(code, f"Restore delta snapshot {snapshot_id}")
+    return {
+        "snapshot_id": snapshot_id,
+        "base_snapshot_id": manifest.get("base_snapshot_id"),
+        "layer_count": len(deltas),
+        "queued": bool(queued.get("queued", False)) if isinstance(queued, dict) else False,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
