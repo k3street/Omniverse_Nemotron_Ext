@@ -2926,7 +2926,7 @@ async def _handle_scene_summary(args: Dict) -> Dict:
 async def _handle_run_stage_analysis(args: Dict[str, Any]) -> Dict[str, Any]:
     """Run all (or selected) validator packs against the live stage."""
     from .. import kit_tools
-    from ...analysis.orchestrator import AnalysisOrchestrator
+    from ....analysis.orchestrator import AnalysisOrchestrator
 
     # 1. Fetch full stage context from Kit
     if not await kit_tools.is_kit_rpc_alive():

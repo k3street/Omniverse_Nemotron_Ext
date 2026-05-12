@@ -566,7 +566,7 @@ async def _handle_download_asset(args: Dict) -> Dict:
     import re as _re
     from pathlib import Path as _Path
     from .. import kit_tools
-    from ...config import config
+    from ....config import config
 
     _logger = _logging.getLogger(__name__)
 
@@ -1012,7 +1012,7 @@ async def _handle_export_scene_package(args: Dict) -> Dict:
     import re as _re
     from datetime import datetime as _dt
     from pathlib import Path as _Path
-    from ..routes import _audit
+    from ...routes import _audit
 
     session_id = args.get("session_id", "default_session")
     scene_name = args.get("scene_name", "exported_scene")
