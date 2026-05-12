@@ -1738,6 +1738,7 @@ from .handlers.diagnostics import (  # noqa: E402
     _gen_check_path_clearance,
     _gen_check_physics_health,
     _gen_check_singularity,
+    _gen_configure_zmq_stream,      # Phase 6 wave 24
     _gen_create_broken_scene,         # Phase 6 wave 23
     _gen_debug_draw,
     _gen_debug_graph,
@@ -1766,12 +1767,15 @@ from .handlers.rendering import (  # noqa: E402
 from .handlers.robot import (  # noqa: E402
     _gen_anchor_robot,
     _gen_assemble_robot,
+    _gen_create_behavior,           # Phase 6 wave 24
     _gen_create_bin,
     _gen_create_conveyor,
     _gen_create_conveyor_track,
     _gen_create_gripper,
     _gen_create_wheeled_robot,
     _gen_define_grasp_pose,
+    _gen_export_nav2_map,           # Phase 6 wave 24
+    _gen_generate_occupancy_map,    # Phase 6 wave 24
     _gen_grasp_object,
     _gen_import_robot,
     _gen_interpolate_trajectory,
@@ -1825,6 +1829,9 @@ from .handlers.teleop import (  # noqa: E402
 )
 from .handlers.training import (  # noqa: E402
     _gen_clone_envs,
+    _gen_cloud_download_results,    # Phase 6 wave 24
+    _gen_create_calibration_experiment,  # Phase 6 wave 24
+    _gen_eval_harness,              # Phase 6 wave 24
     _gen_evaluate_groot,
     _gen_evaluate_reward,
     _gen_export_policy,
@@ -8049,50 +8056,7 @@ DATA_HANDLERS["eureka_status"] = _handle_eureka_status
 CODE_GEN_HANDLERS["evaluate_reward"] = _gen_evaluate_reward
 
 # ══════ From feat/7F-zmq-bridge ══════
-def _gen_configure_zmq_stream(args: Dict) -> str:
-    """Generate OmniGraph code to wire a ZMQ PUB stream via NVIDIA's C++ ZMQ bridge node."""
-    camera_prim = args["camera_prim"]
-    pub_port = args.get("pub_port", 5555)
-    resolution = args.get("resolution", [640, 480])
-    fps = args.get("fps", 30)
-    compression = args.get("compression", "jpeg")
-
-    # Validate port range
-    if not (1024 <= pub_port <= 65535):
-        return (
-            f"# ERROR: pub_port {pub_port} out of valid range (1024-65535)\n"
-            f"raise ValueError('pub_port must be between 1024 and 65535, got {pub_port}')"
-        )
-
-    return f"""\
-import omni.graph.core as og
-
-og.Controller.edit(
-    {{"graph_path": "/ZMQStream", "evaluator_name": "execution"}},
-    {{
-        og.Controller.Keys.CREATE_NODES: [
-            ("OnTick", "omni.graph.action.OnPlaybackTick"),
-            ("ZMQBridge", "isaacsim.bridge.zmq.OgnIsaacBridgeZMQNode"),
-            ("CameraHelper", "isaacsim.ros2.bridge.ROS2CameraHelper"),
-        ],
-        og.Controller.Keys.CONNECT: [
-            ("OnTick.outputs:tick", "CameraHelper.inputs:execIn"),
-            ("CameraHelper.outputs:execOut", "ZMQBridge.inputs:execIn"),
-        ],
-        og.Controller.Keys.SET_VALUES: [
-            ("ZMQBridge.inputs:address", "tcp://127.0.0.1:{pub_port}"),
-            ("ZMQBridge.inputs:compression", "{compression}"),
-            ("CameraHelper.inputs:cameraPrim", "{camera_prim}"),
-            ("CameraHelper.inputs:enabled", True),
-            ("CameraHelper.inputs:width", {resolution[0]}),
-            ("CameraHelper.inputs:height", {resolution[1]}),
-            ("CameraHelper.inputs:fps", {fps}),
-        ],
-    }},
-)
-print("ZMQ stream configured on tcp://127.0.0.1:{pub_port}")
-"""
-
+# _gen_configure_zmq_stream moved to handlers/diagnostics.py (Phase 6 wave 24).
 # ══════ From feat/7G-groot-n1 ══════
 async def _handle_load_groot_policy(args: Dict) -> Dict:
     """Return download/launch commands for GR00T N1 policy server."""
@@ -8408,50 +8372,7 @@ async def _handle_cloud_estimate_cost(args: Dict) -> Dict:
         ),
     }
 
-def _gen_cloud_download_results(args: Dict) -> str:
-    """Generate code to download results from a cloud instance."""
-    job_id = args["job_id"]
-    output_dir = args.get("output_dir", "workspace/cloud_results")
-
-    return f'''\
-import subprocess
-import os
-
-job_id = "{job_id}"
-output_dir = "{output_dir}"
-os.makedirs(output_dir, exist_ok=True)
-
-# IsaacAutomator stores results on the cloud instance at /results/
-# Retrieve the instance IP from the deployment state
-state_file = f"deployments/{{job_id}}/state.json"
-if os.path.exists(state_file):
-    import json
-    with open(state_file) as f:
-        state = json.load(f)
-    instance_ip = state.get("instance_ip", "UNKNOWN_IP")
-    key_path = state.get("ssh_key", "~/.ssh/isaacautomator")
-else:
-    instance_ip = "UNKNOWN_IP"
-    key_path = "~/.ssh/isaacautomator"
-    print(f"WARNING: State file not found at {{state_file}}. Set instance_ip manually.")
-
-# Download results via rsync
-cmd = [
-    "rsync", "-avz", "--progress",
-    "-e", f"ssh -i {{key_path}} -o StrictHostKeyChecking=no",
-    f"ubuntu@{{instance_ip}}:/results/",
-    output_dir + "/",
-]
-print(f"Downloading results: {{' '.join(cmd)}}")
-proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-stdout, _ = proc.communicate()
-print(stdout.decode() if stdout else "")
-if proc.returncode == 0:
-    print(f"Results downloaded to {{output_dir}}/")
-else:
-    print(f"Download failed (exit code {{proc.returncode}}). Check IP and SSH key.")
-'''
-
+# _gen_cloud_download_results moved to handlers/training.py (Phase 6 wave 24).
 DATA_HANDLERS["cloud_launch"] = _handle_cloud_launch
 DATA_HANDLERS["cloud_status"] = _handle_cloud_status
 DATA_HANDLERS["cloud_teardown"] = _handle_cloud_teardown
@@ -8462,28 +8383,7 @@ CODE_GEN_HANDLERS["cloud_download_results"] = _gen_cloud_download_results
 # _gen_clone_envs moved to handlers/training.py (Phase 6 wave 6).
 # _gen_debug_draw moved to handlers/diagnostics.py (Phase 6 wave 10).
 
-def _gen_generate_occupancy_map(args: Dict) -> str:
-    origin = args.get("origin", [0, 0])
-    dimensions = args.get("dimensions", [10, 10])
-    resolution = args.get("resolution", 0.05)
-    height_range = args.get("height_range", [0, 2])
-
-    return f"""\
-from isaacsim.asset.gen.omap import MapGenerator
-import carb
-
-gen = MapGenerator()
-gen.update_settings(cell_size={resolution})
-gen.set_transform(
-    origin=carb.Float3({origin[0]}, {origin[1]}, 0),
-    min_bound=carb.Float3({-dimensions[0]/2}, {-dimensions[1]/2}, {height_range[0]}),
-    max_bound=carb.Float3({dimensions[0]/2}, {dimensions[1]/2}, {height_range[1]}),
-)
-gen.generate2d()
-buffer = gen.get_buffer()
-print(f"Occupancy map generated: {int(dimensions[0]/resolution)} x {int(dimensions[1]/resolution)} cells")
-"""
-
+# _gen_generate_occupancy_map moved to handlers/robot.py (Phase 6 wave 24).
 # _gen_inspect_camera moved to handlers/sensors.py (Phase 6 wave 4).
 # _gen_configure_camera moved to handlers/sensors.py (Phase 6 wave 4).
 
@@ -8574,184 +8474,7 @@ DATA_HANDLERS["generate_robot_description"] = _handle_generate_robot_description
 CODE_GEN_HANDLERS["solve_ik"] = _gen_solve_ik
 # _gen_set_motion_policy moved to handlers/robot.py (Phase 6 wave 12).
 # _gen_solve_ik moved to handlers/robot.py (Phase 6 wave 12).
-def _gen_create_behavior(args: Dict) -> str:
-    """Generate code to create a Cortex behavior (decider network) for a robot.
-
-    NOTE (2026-04): The 5.x Cortex API changed MotionCommander's constructor to
-    take (amp: ArticulationMotionPolicy, target_prim: SingleXFormPrim, ...)
-    instead of a prim-path string. CortexRobot also dropped the motion_commander
-    constructor kwarg. A proper behavior needs an RmpFlow/AMP configured per-
-    robot (URDF + YAML config paths), which we don't have registry access to
-    here. Rather than emit broken code, raise an actionable error when called.
-    """
-    art_path = args["articulation_path"]
-    behavior = args["behavior_type"]
-    target = args.get("target_prim", "/World/Target")
-    params = args.get("params", {})
-
-    speed = params.get("speed", 0.5)
-    threshold = params.get("threshold", 0.02)
-
-    # Fail fast with guidance — the old generated code calls
-    # MotionCommander('/path') and CortexRobot(..., motion_commander=...),
-    # both of which are invalid in Isaac Sim 5.x's Cortex framework.
-    return (
-        "raise NotImplementedError(\n"
-        "    'create_behavior is a pre-5.x Cortex API that requires per-robot '\n"
-        "    'RmpFlow + ArticulationMotionPolicy + SingleXFormPrim target plumbing. '\n"
-        "    'For Franka/UR10 pick-and-place in 5.x use isaaclab_tasks.manager_based.manipulation '\n"
-        "    'or the cortex examples bundled with your Isaac Sim install.'\n"
-        ")\n"
-    )
-
-    # --- Legacy branches below are unreachable; preserved as reference for the
-    # --- rewrite against the 5.x Cortex API.
-    if behavior == "pick_and_place":
-        place_target = params.get("place_target", "/World/PlaceTarget")
-        return f"""\
-from isaacsim.cortex.framework.cortex_world import CortexWorld
-from isaacsim.cortex.framework.robot import CortexRobot
-from isaacsim.cortex.framework.df import DfNetwork, DfDecider, DfState, DfStateMachineDecider
-from isaacsim.cortex.framework.motion_commander import MotionCommander
-import numpy as np
-
-# Create Cortex world
-world = CortexWorld()
-
-# Add robot
-robot = world.add_robot(CortexRobot(
-    name="robot",
-    prim_path='{art_path}',
-    motion_commander=MotionCommander('{art_path}'),
-))
-
-# ── Pick-and-place state machine ────────────────────────────
-class ApproachState(DfState):
-    \"\"\"Move to pre-grasp position above the target.\"\"\"
-    def enter(self):
-        target_pos = np.array(self.context['target_pos'])
-        approach_pos = target_pos + np.array([0, 0, {params.get('approach_distance', 0.1)}])
-        self.context['mc'].send_end_effector_target(
-            translation=approach_pos,
-        )
-
-    def step(self):
-        if self.context['mc'].reached_target(threshold={threshold}):
-            return 'grasp'
-        return None
-
-class GraspState(DfState):
-    \"\"\"Move down and close gripper.\"\"\"
-    def enter(self):
-        target_pos = np.array(self.context['target_pos'])
-        self.context['mc'].send_end_effector_target(
-            translation=target_pos,
-        )
-
-    def step(self):
-        if self.context['mc'].reached_target(threshold={threshold}):
-            self.context['gripper'].close()
-            return 'lift'
-        return None
-
-class LiftState(DfState):
-    \"\"\"Lift the grasped object.\"\"\"
-    def enter(self):
-        target_pos = np.array(self.context['target_pos'])
-        lift_pos = target_pos + np.array([0, 0, {params.get('lift_height', 0.15)}])
-        self.context['mc'].send_end_effector_target(
-            translation=lift_pos,
-        )
-
-    def step(self):
-        if self.context['mc'].reached_target(threshold={threshold}):
-            return 'place'
-        return None
-
-class PlaceState(DfState):
-    \"\"\"Move to place position and release.\"\"\"
-    def enter(self):
-        place_pos = np.array(self.context['place_pos'])
-        self.context['mc'].send_end_effector_target(
-            translation=place_pos,
-        )
-
-    def step(self):
-        if self.context['mc'].reached_target(threshold={threshold}):
-            self.context['gripper'].open()
-            return 'done'
-        return None
-
-# Build decider network
-pick_place_decider = DfStateMachineDecider(
-    states={{
-        'approach': ApproachState(),
-        'grasp': GraspState(),
-        'lift': LiftState(),
-        'place': PlaceState(),
-    }},
-    initial_state='approach',
-)
-
-network = DfNetwork(decider=pick_place_decider)
-world.add_decider_network(network)
-
-print("Cortex pick-and-place behavior created for {art_path}")
-print("Target: {target}, Place: {place_target}")
-"""
-
-    # follow_target
-    return f"""\
-from isaacsim.cortex.framework.cortex_world import CortexWorld
-from isaacsim.cortex.framework.robot import CortexRobot
-from isaacsim.cortex.framework.df import DfNetwork, DfDecider, DfState
-from isaacsim.cortex.framework.motion_commander import MotionCommander
-import numpy as np
-
-# Create Cortex world
-world = CortexWorld()
-
-# Add robot
-robot = world.add_robot(CortexRobot(
-    name="robot",
-    prim_path='{art_path}',
-    motion_commander=MotionCommander('{art_path}'),
-))
-
-# ── Follow-target behavior ──────────────────────────────────
-class FollowTargetState(DfState):
-    \"\"\"Continuously track a target prim with the end-effector.\"\"\"
-    def enter(self):
-        self.update_interval = {params.get('update_interval', 0.1)}
-
-    def step(self):
-        import omni.usd
-        from pxr import UsdGeom
-        stage = omni.usd.get_context().get_stage()
-        target_prim = stage.GetPrimAtPath('{target}')
-        xf = UsdGeom.Xformable(target_prim).ComputeLocalToWorldTransform(0)
-        target_pos = np.array(xf.ExtractTranslation())
-        self.context['mc'].send_end_effector_target(
-            translation=target_pos,
-        )
-        return None  # stay in this state
-
-class FollowDecider(DfDecider):
-    \"\"\"Simple decider that always runs the follow state.\"\"\"
-    def __init__(self):
-        super().__init__()
-        self.add_child('follow', FollowTargetState())
-
-    def decide(self):
-        return 'follow'
-
-network = DfNetwork(decider=FollowDecider())
-world.add_decider_network(network)
-
-print("Cortex follow-target behavior created for {art_path}")
-print("Following: {target}")
-"""
-
+# _gen_create_behavior moved to handlers/robot.py (Phase 6 wave 24).
 # _gen_create_gripper moved to handlers/robot.py (Phase 6 wave 3).
 # _gen_grasp_object moved to handlers/robot.py (Phase 6 wave 12).
 async def _handle_visualize_behavior_tree(args: Dict) -> Dict:
@@ -11123,103 +10846,7 @@ async def _handle_profile_training_throughput(args: Dict) -> Dict:
         "camera_cost_ranking": "TiledCamera << RayCasterCamera < Camera (standard)",
     }
 
-def _gen_eval_harness(args: Dict) -> str:
-    """Generate a reproducible RL evaluation script."""
-    task_name = args["task_name"]
-    num_episodes = int(args.get("num_episodes", 100))
-    output_dir = args.get("output_dir") or f"workspace/eval/{task_name}"
-    checkpoint_path = args.get("checkpoint_path", "")
-    record_video = bool(args.get("record_video", False))
-    max_steps = int(args.get("max_steps_per_episode", 1000))
-
-    # Use repr() so user-supplied paths get safely quoted in the generated code.
-    return f'''"""Evaluation harness for {task_name}.
-Auto-generated by Isaac Assist (Phase 7A Addendum).
-Runs {num_episodes} deterministic rollouts and saves per-episode metrics.
-"""
-import json
-import os
-from pathlib import Path
-
-import gymnasium as gym
-
-TASK_NAME = {task_name!r}
-NUM_EPISODES = {num_episodes}
-OUTPUT_DIR = Path({output_dir!r})
-CHECKPOINT_PATH = {checkpoint_path!r}
-RECORD_VIDEO = {record_video}
-MAX_STEPS_PER_EPISODE = {max_steps}
-
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def _load_policy(checkpoint_path: str):
-    """Load a trained RL policy from a checkpoint, or return a random fallback."""
-    if not checkpoint_path or not os.path.exists(checkpoint_path):
-        print(f"[eval] No checkpoint at {{checkpoint_path!r}} — using random policy")
-        return None
-    try:
-        import torch
-        state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-        return state.get("model_state_dict", state)
-    except Exception as exc:
-        print(f"[eval] Failed to load checkpoint: {{exc}} — falling back to random")
-        return None
-
-
-def main() -> None:
-    env = gym.make(TASK_NAME)
-    if RECORD_VIDEO:
-        from gymnasium.wrappers import RecordVideo
-        env = RecordVideo(env, video_folder=str(OUTPUT_DIR / "videos"))
-
-    policy = _load_policy(CHECKPOINT_PATH)
-
-    results = []
-    for episode in range(NUM_EPISODES):
-        obs, info = env.reset(seed=episode)
-        episode_reward = 0.0
-        terminated = False
-        truncated = False
-        step = 0
-        while not (terminated or truncated) and step < MAX_STEPS_PER_EPISODE:
-            if policy is None:
-                action = env.action_space.sample()
-            else:
-                # Placeholder forward pass — replace with your actor module.
-                action = env.action_space.sample()
-            obs, reward, terminated, truncated, info = env.step(action)
-            episode_reward += float(reward)
-            step += 1
-        results.append({{
-            "episode": episode,
-            "reward": episode_reward,
-            "success": bool(info.get("is_success", terminated and not truncated)),
-            "length": step,
-        }})
-        print(f"[eval] ep {{episode + 1}}/{{NUM_EPISODES}} reward={{episode_reward:.3f}} "
-              f"success={{results[-1]['success']}} len={{step}}")
-
-    out_file = OUTPUT_DIR / "eval_results.json"
-    out_file.write_text(json.dumps({{
-        "task_name": TASK_NAME,
-        "num_episodes": NUM_EPISODES,
-        "checkpoint_path": CHECKPOINT_PATH,
-        "results": results,
-        "summary": {{
-            "mean_reward": sum(r["reward"] for r in results) / max(len(results), 1),
-            "success_rate": sum(1 for r in results if r["success"]) / max(len(results), 1),
-            "mean_length": sum(r["length"] for r in results) / max(len(results), 1),
-        }},
-    }}, indent=2))
-    print(f"[eval] wrote {{out_file}}")
-    env.close()
-
-
-if __name__ == "__main__":
-    main()
-'''
-
+# _gen_eval_harness moved to handlers/training.py (Phase 6 wave 24).
 DATA_HANDLERS["diagnose_training"] = _handle_diagnose_training
 DATA_HANDLERS["review_reward"] = _handle_review_reward
 DATA_HANDLERS["profile_training_throughput"] = _handle_profile_training_throughput
@@ -11786,72 +11413,7 @@ def get_nav2_bridge_profile(profile: str) -> Optional[Dict[str, Any]]:
 
 # _gen_setup_ros2_bridge moved to handlers/ros2.py (Phase 6 wave 7).
 
-def _gen_export_nav2_map(args: Dict) -> str:
-    """Generate Nav2 map_server-compatible map.pgm + map.yaml from the scene."""
-    output_path = args["output_path"]
-    resolution = args.get("resolution", 0.05)
-    origin = args.get("origin", [0.0, 0.0, 0.0])
-    dimensions = args.get("dimensions", [10.0, 10.0])
-    height_range = args.get("height_range", [0.05, 0.5])
-    occupied_thresh = args.get("occupied_thresh", 0.65)
-    free_thresh = args.get("free_thresh", 0.196)
-
-    return f"""\
-import os
-from pathlib import Path
-
-# Phase 8A.3 occupancy generator (sync, runs inside Kit)
-from isaacsim.asset.gen.omap.bindings import _omap
-
-origin = ({origin[0]}, {origin[1]}, {origin[2]})
-dims_xy = ({dimensions[0]}, {dimensions[1]})
-resolution = float({resolution})
-height_min = float({height_range[0]})
-height_max = float({height_range[1]})
-
-# 1. Generate occupancy: returns (width_px, height_px, buffer)
-generator = _omap.acquire_omap_interface()
-generator.set_cell_size(resolution)
-generator.set_transform((origin[0], origin[1], origin[2]),
-                        (-dims_xy[0] / 2.0, -dims_xy[1] / 2.0, height_min),
-                        (dims_xy[0] / 2.0, dims_xy[1] / 2.0, height_max))
-generator.generate2d()
-buffer = generator.get_buffer()  # row-major occupancy: 0=free, 100=occupied, -1=unknown
-width_px = int(dims_xy[0] / resolution)
-height_px = int(dims_xy[1] / resolution)
-
-# 2. Write PGM (P5 binary grayscale, 0..255 per Nav2 map_server)
-pgm_path = Path('{output_path}').with_suffix('.pgm')
-pgm_path.parent.mkdir(parents=True, exist_ok=True)
-with open(pgm_path, 'wb') as fp:
-    header = f'P5\\n{{width_px}} {{height_px}}\\n255\\n'
-    fp.write(header.encode('ascii'))
-    pixels = bytearray()
-    for cell in buffer:
-        # Nav2 convention: 0=occupied(black), 254=free(white), 205=unknown(grey)
-        if cell == 100:
-            pixels.append(0)
-        elif cell == -1:
-            pixels.append(205)
-        else:
-            pixels.append(254)
-    fp.write(bytes(pixels))
-
-# 3. Write YAML
-yaml_path = Path('{output_path}').with_suffix('.yaml')
-yaml_text = (
-    f'image: {{pgm_path.name}}\\n'
-    f'resolution: {{resolution}}\\n'
-    f'origin: [{{origin[0]}}, {{origin[1]}}, 0.0]\\n'
-    f'occupied_thresh: {occupied_thresh}\\n'
-    f'free_thresh: {free_thresh}\\n'
-    f'negate: 0\\n'
-)
-yaml_path.write_text(yaml_text, encoding='utf-8')
-
-print(f'Nav2 map exported: {{pgm_path}} ({{width_px}}x{{height_px}}) + {{yaml_path}}')
-"""
-
+# _gen_export_nav2_map moved to handlers/robot.py (Phase 6 wave 24).
 # _gen_replay_rosbag moved to handlers/ros2.py (Phase 6 wave 7).
 
 async def _handle_check_tf_health(args: Dict) -> Dict:
@@ -13632,58 +13194,7 @@ async def _handle_compare_sim_real_video(args: Dict) -> Dict:
         "next_step": "Call vision_analyze_scene with these videos as input",
     }
 
-def _gen_create_calibration_experiment(args: Dict) -> str:
-    """Generate calibration grid search code."""
-    parameter = args.get("parameter", "friction")
-    param_range = args.get("range", [0.0, 1.0])
-    num_samples = args.get("num_samples", 7)
-    real_data_path = args.get("real_data_path", "")
-
-    return f"""\
-# Calibration experiment: {parameter} grid search ({num_samples} samples)
-import numpy as np
-import json
-import omni.usd
-from pxr import UsdPhysics
-
-values = np.linspace({param_range[0]}, {param_range[1]}, {num_samples}).tolist()
-real_data_path = {real_data_path!r}
-parameter = {parameter!r}
-
-results = []
-for i, value in enumerate(values):
-    print(f"\\n=== Trial {{i+1}}/{{len(values)}}: {{parameter}} = {{value:.3f}} ===")
-
-    stage = omni.usd.get_context().get_stage()
-
-    if parameter == "friction":
-        for prim in stage.Traverse():
-            if prim.HasAPI(UsdPhysics.MaterialAPI):
-                mat = UsdPhysics.MaterialAPI(prim)
-                mat.GetDynamicFrictionAttr().Set(float(value))
-    elif parameter == "damping":
-        for prim in stage.Traverse():
-            if prim.HasAPI(UsdPhysics.DriveAPI):
-                drive = UsdPhysics.DriveAPI(prim, "angular")
-                drive.GetDampingAttr().Set(float(value))
-    elif parameter == "stiffness":
-        for prim in stage.Traverse():
-            if prim.HasAPI(UsdPhysics.DriveAPI):
-                drive = UsdPhysics.DriveAPI(prim, "angular")
-                drive.GetStiffnessAttr().Set(float(value))
-
-    print(f"  Running sim trajectory with {{parameter}} = {{value:.3f}}...")
-    # ... execute trajectory, record sim_data ...
-    # Compare with real_data_path via measure_sim_real_gap
-    # Replace placeholder score below with real gap score:
-    score = abs(value - 0.6)  # placeholder
-
-    results.append({{"value": value, "gap_score": score}})
-
-best = min(results, key=lambda r: r["gap_score"])
-print(f"\\n✓ Best {{parameter}} value: {{best['value']:.3f}} (gap score: {{best['gap_score']:.4f}})")
-print(json.dumps(results, indent=2))
-"""
+# _gen_create_calibration_experiment moved to handlers/training.py (Phase 6 wave 24).
 
 DATA_HANDLERS["measure_sim_real_gap"] = _handle_measure_sim_real_gap
 DATA_HANDLERS["suggest_parameter_adjustment"] = _handle_suggest_parameter_adjustment

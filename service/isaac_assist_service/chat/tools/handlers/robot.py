@@ -2818,6 +2818,280 @@ else:
 """
 
 
+
+# ---------------------------------------------------------------------------
+# Phase 6 wave 24 — stragglers
+
+
+def _gen_generate_occupancy_map(args: Dict) -> str:
+    origin = args.get("origin", [0, 0])
+    dimensions = args.get("dimensions", [10, 10])
+    resolution = args.get("resolution", 0.05)
+    height_range = args.get("height_range", [0, 2])
+
+    return f"""\
+from isaacsim.asset.gen.omap import MapGenerator
+import carb
+
+gen = MapGenerator()
+gen.update_settings(cell_size={resolution})
+gen.set_transform(
+    origin=carb.Float3({origin[0]}, {origin[1]}, 0),
+    min_bound=carb.Float3({-dimensions[0]/2}, {-dimensions[1]/2}, {height_range[0]}),
+    max_bound=carb.Float3({dimensions[0]/2}, {dimensions[1]/2}, {height_range[1]}),
+)
+gen.generate2d()
+buffer = gen.get_buffer()
+print(f"Occupancy map generated: {int(dimensions[0]/resolution)} x {int(dimensions[1]/resolution)} cells")
+"""
+
+
+def _gen_create_behavior(args: Dict) -> str:
+    """Generate code to create a Cortex behavior (decider network) for a robot.
+
+    NOTE (2026-04): The 5.x Cortex API changed MotionCommander's constructor to
+    take (amp: ArticulationMotionPolicy, target_prim: SingleXFormPrim, ...)
+    instead of a prim-path string. CortexRobot also dropped the motion_commander
+    constructor kwarg. A proper behavior needs an RmpFlow/AMP configured per-
+    robot (URDF + YAML config paths), which we don't have registry access to
+    here. Rather than emit broken code, raise an actionable error when called.
+    """
+    art_path = args["articulation_path"]
+    behavior = args["behavior_type"]
+    target = args.get("target_prim", "/World/Target")
+    params = args.get("params", {})
+
+    speed = params.get("speed", 0.5)
+    threshold = params.get("threshold", 0.02)
+
+    # Fail fast with guidance — the old generated code calls
+    # MotionCommander('/path') and CortexRobot(..., motion_commander=...),
+    # both of which are invalid in Isaac Sim 5.x's Cortex framework.
+    return (
+        "raise NotImplementedError(\n"
+        "    'create_behavior is a pre-5.x Cortex API that requires per-robot '\n"
+        "    'RmpFlow + ArticulationMotionPolicy + SingleXFormPrim target plumbing. '\n"
+        "    'For Franka/UR10 pick-and-place in 5.x use isaaclab_tasks.manager_based.manipulation '\n"
+        "    'or the cortex examples bundled with your Isaac Sim install.'\n"
+        ")\n"
+    )
+
+    # --- Legacy branches below are unreachable; preserved as reference for the
+    # --- rewrite against the 5.x Cortex API.
+    if behavior == "pick_and_place":
+        place_target = params.get("place_target", "/World/PlaceTarget")
+        return f"""\
+from isaacsim.cortex.framework.cortex_world import CortexWorld
+from isaacsim.cortex.framework.robot import CortexRobot
+from isaacsim.cortex.framework.df import DfNetwork, DfDecider, DfState, DfStateMachineDecider
+from isaacsim.cortex.framework.motion_commander import MotionCommander
+import numpy as np
+
+# Create Cortex world
+world = CortexWorld()
+
+# Add robot
+robot = world.add_robot(CortexRobot(
+    name="robot",
+    prim_path='{art_path}',
+    motion_commander=MotionCommander('{art_path}'),
+))
+
+# ── Pick-and-place state machine ────────────────────────────
+class ApproachState(DfState):
+    \"\"\"Move to pre-grasp position above the target.\"\"\"
+    def enter(self):
+        target_pos = np.array(self.context['target_pos'])
+        approach_pos = target_pos + np.array([0, 0, {params.get('approach_distance', 0.1)}])
+        self.context['mc'].send_end_effector_target(
+            translation=approach_pos,
+        )
+
+    def step(self):
+        if self.context['mc'].reached_target(threshold={threshold}):
+            return 'grasp'
+        return None
+
+class GraspState(DfState):
+    \"\"\"Move down and close gripper.\"\"\"
+    def enter(self):
+        target_pos = np.array(self.context['target_pos'])
+        self.context['mc'].send_end_effector_target(
+            translation=target_pos,
+        )
+
+    def step(self):
+        if self.context['mc'].reached_target(threshold={threshold}):
+            self.context['gripper'].close()
+            return 'lift'
+        return None
+
+class LiftState(DfState):
+    \"\"\"Lift the grasped object.\"\"\"
+    def enter(self):
+        target_pos = np.array(self.context['target_pos'])
+        lift_pos = target_pos + np.array([0, 0, {params.get('lift_height', 0.15)}])
+        self.context['mc'].send_end_effector_target(
+            translation=lift_pos,
+        )
+
+    def step(self):
+        if self.context['mc'].reached_target(threshold={threshold}):
+            return 'place'
+        return None
+
+class PlaceState(DfState):
+    \"\"\"Move to place position and release.\"\"\"
+    def enter(self):
+        place_pos = np.array(self.context['place_pos'])
+        self.context['mc'].send_end_effector_target(
+            translation=place_pos,
+        )
+
+    def step(self):
+        if self.context['mc'].reached_target(threshold={threshold}):
+            self.context['gripper'].open()
+            return 'done'
+        return None
+
+# Build decider network
+pick_place_decider = DfStateMachineDecider(
+    states={{
+        'approach': ApproachState(),
+        'grasp': GraspState(),
+        'lift': LiftState(),
+        'place': PlaceState(),
+    }},
+    initial_state='approach',
+)
+
+network = DfNetwork(decider=pick_place_decider)
+world.add_decider_network(network)
+
+print("Cortex pick-and-place behavior created for {art_path}")
+print("Target: {target}, Place: {place_target}")
+"""
+
+    # follow_target
+    return f"""\
+from isaacsim.cortex.framework.cortex_world import CortexWorld
+from isaacsim.cortex.framework.robot import CortexRobot
+from isaacsim.cortex.framework.df import DfNetwork, DfDecider, DfState
+from isaacsim.cortex.framework.motion_commander import MotionCommander
+import numpy as np
+
+# Create Cortex world
+world = CortexWorld()
+
+# Add robot
+robot = world.add_robot(CortexRobot(
+    name="robot",
+    prim_path='{art_path}',
+    motion_commander=MotionCommander('{art_path}'),
+))
+
+# ── Follow-target behavior ──────────────────────────────────
+class FollowTargetState(DfState):
+    \"\"\"Continuously track a target prim with the end-effector.\"\"\"
+    def enter(self):
+        self.update_interval = {params.get('update_interval', 0.1)}
+
+    def step(self):
+        import omni.usd
+        from pxr import UsdGeom
+        stage = omni.usd.get_context().get_stage()
+        target_prim = stage.GetPrimAtPath('{target}')
+        xf = UsdGeom.Xformable(target_prim).ComputeLocalToWorldTransform(0)
+        target_pos = np.array(xf.ExtractTranslation())
+        self.context['mc'].send_end_effector_target(
+            translation=target_pos,
+        )
+        return None  # stay in this state
+
+class FollowDecider(DfDecider):
+    \"\"\"Simple decider that always runs the follow state.\"\"\"
+    def __init__(self):
+        super().__init__()
+        self.add_child('follow', FollowTargetState())
+
+    def decide(self):
+        return 'follow'
+
+network = DfNetwork(decider=FollowDecider())
+world.add_decider_network(network)
+
+print("Cortex follow-target behavior created for {art_path}")
+print("Following: {target}")
+"""
+
+
+def _gen_export_nav2_map(args: Dict) -> str:
+    """Generate Nav2 map_server-compatible map.pgm + map.yaml from the scene."""
+    output_path = args["output_path"]
+    resolution = args.get("resolution", 0.05)
+    origin = args.get("origin", [0.0, 0.0, 0.0])
+    dimensions = args.get("dimensions", [10.0, 10.0])
+    height_range = args.get("height_range", [0.05, 0.5])
+    occupied_thresh = args.get("occupied_thresh", 0.65)
+    free_thresh = args.get("free_thresh", 0.196)
+
+    return f"""\
+import os
+from pathlib import Path
+
+# Phase 8A.3 occupancy generator (sync, runs inside Kit)
+from isaacsim.asset.gen.omap.bindings import _omap
+
+origin = ({origin[0]}, {origin[1]}, {origin[2]})
+dims_xy = ({dimensions[0]}, {dimensions[1]})
+resolution = float({resolution})
+height_min = float({height_range[0]})
+height_max = float({height_range[1]})
+
+# 1. Generate occupancy: returns (width_px, height_px, buffer)
+generator = _omap.acquire_omap_interface()
+generator.set_cell_size(resolution)
+generator.set_transform((origin[0], origin[1], origin[2]),
+                        (-dims_xy[0] / 2.0, -dims_xy[1] / 2.0, height_min),
+                        (dims_xy[0] / 2.0, dims_xy[1] / 2.0, height_max))
+generator.generate2d()
+buffer = generator.get_buffer()  # row-major occupancy: 0=free, 100=occupied, -1=unknown
+width_px = int(dims_xy[0] / resolution)
+height_px = int(dims_xy[1] / resolution)
+
+# 2. Write PGM (P5 binary grayscale, 0..255 per Nav2 map_server)
+pgm_path = Path('{output_path}').with_suffix('.pgm')
+pgm_path.parent.mkdir(parents=True, exist_ok=True)
+with open(pgm_path, 'wb') as fp:
+    header = f'P5\\n{{width_px}} {{height_px}}\\n255\\n'
+    fp.write(header.encode('ascii'))
+    pixels = bytearray()
+    for cell in buffer:
+        # Nav2 convention: 0=occupied(black), 254=free(white), 205=unknown(grey)
+        if cell == 100:
+            pixels.append(0)
+        elif cell == -1:
+            pixels.append(205)
+        else:
+            pixels.append(254)
+    fp.write(bytes(pixels))
+
+# 3. Write YAML
+yaml_path = Path('{output_path}').with_suffix('.yaml')
+yaml_text = (
+    f'image: {{pgm_path.name}}\\n'
+    f'resolution: {{resolution}}\\n'
+    f'origin: [{{origin[0]}}, {{origin[1]}}, 0.0]\\n'
+    f'occupied_thresh: {occupied_thresh}\\n'
+    f'free_thresh: {free_thresh}\\n'
+    f'negate: 0\\n'
+)
+yaml_path.write_text(yaml_text, encoding='utf-8')
+
+print(f'Nav2 map exported: {{pgm_path}} ({{width_px}}x{{height_px}}) + {{yaml_path}}')
+"""
+
+
 # ---------------------------------------------------------------------------
 # Registration
 
