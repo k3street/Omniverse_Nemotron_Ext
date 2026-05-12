@@ -1756,7 +1756,9 @@ from .handlers.robot import (  # noqa: E402
     _gen_create_wheeled_robot,
     _gen_define_grasp_pose,
     _gen_grasp_object,
+    _gen_import_robot,
     _gen_interpolate_trajectory,
+    _gen_load_robot_pose,
     _gen_move_to_pose,
     _gen_navigate_to,
     _gen_plan_trajectory,
@@ -1771,6 +1773,7 @@ from .handlers.robot import (  # noqa: E402
     _gen_setup_whole_body_control,
     _gen_solve_ik,
     _gen_start_teaching_mode,
+    _gen_teach_robot_pose,
     _gen_tune_gains,
     _gen_verify_import,
 )
@@ -1899,159 +1902,7 @@ for _ in range({count}):
 # _gen_set_joint_targets moved to handlers/physics.py (Phase 5 wave 1).
 
 
-def _gen_import_robot(args: Dict) -> str:
-    file_path = args["file_path"]
-    fmt = args.get("format", "usd")
-    dest = args.get("dest_path", "/World/Robot")
-
-    # ── Asset directory from config (supports local path or Nucleus URL) ──
-    _LOCAL_ASSETS = config.assets_root_path
-    _ROBOTS_SUBDIR = config.assets_robots_subdir
-    _ROBOTS_DIR = f"{_LOCAL_ASSETS}/{_ROBOTS_SUBDIR}" if _LOCAL_ASSETS else ""
-
-    # Map common names → USD filenames within the robots subdirectory
-    _ROBOT_NAME_MAP = {
-        "franka": "franka.usd",
-        "panda": "franka.usd",
-        "franka_emika": "franka.usd",
-        "spot": "spot.usd",
-        "spot_with_arm": "spot_with_arm.usd",
-        "carter": "carter_v1.usd",
-        "nova_carter": "nova_carter.usd",
-        "carter_v2": "carter_v2.usd",
-        "jetbot": "jetbot.usd",
-        "kaya": "kaya.usd",
-        "ur10": "ur10.usd",
-        "ur5": "ur5e.usd",
-        "ur5e": "ur5e.usd",
-        "anymal": "anymal_c.usd",
-        "anymal_c": "anymal_c.usd",
-        "anymal_d": "anymal_d.usd",
-        "a1": "a1.usd",
-        "go1": "go1.usd",
-        "go2": "go2.usd",
-        "g1": "g1.usd",
-        "unitree_g1": "g1.usd",
-        "g1_23dof": "g1_23dof_robot.usd",
-        "h1": "h1.usd",
-        "unitree_h1": "h1.usd",
-        "h1_hand_left": "h1_hand_left.usd",
-        "allegro": "allegro_hand.usd",
-        "ridgeback_franka": "ridgeback_franka.usd",
-        "humanoid": "humanoid.usd",
-        "humanoid_28": "humanoid_28.usd",
-    }
-
-    if fmt == "urdf":
-        return f"""\
-import os
-from isaacsim.asset.importer.urdf import _urdf
-import omni.kit.commands
-import omni.usd
-
-# Fail fast on obvious bad inputs. URDFParseAndImportFile silently returns
-# (result=False, prim_path=None) on missing file / parse error, and the old
-# code path reported success=True anyway — a real honesty hole.
-if not os.path.exists("{file_path}"):
-    raise FileNotFoundError(f'import_robot: URDF not found at "{file_path}"')
-
-result, prim_path = omni.kit.commands.execute(
-    "URDFParseAndImportFile",
-    urdf_path="{file_path}",
-    dest_path="{dest}",
-)
-if not result or not prim_path:
-    raise RuntimeError(
-        f'import_robot: URDFParseAndImportFile failed for "{file_path}" '
-        f'(result={{result!r}}, prim_path={{prim_path!r}}) — check URDF validity and mesh paths.'
-    )
-# Double-check the prim actually landed in the stage
-_stage = omni.usd.get_context().get_stage()
-_created = _stage.GetPrimAtPath(prim_path)
-if not _created.IsValid():
-    raise RuntimeError(
-        f'import_robot: URDFParseAndImportFile returned prim_path={{prim_path!r}} '
-        f'but no prim exists at that path after import.'
-    )
-print(f'imported URDF to {{prim_path}}')
-"""
-
-    # Resolve robot name for asset_library or named imports
-    name_lower = file_path.lower().replace(" ", "_").replace("-", "_")
-    local_file = _ROBOT_NAME_MAP.get(name_lower)
-
-    if not _LOCAL_ASSETS and (fmt == "asset_library" or local_file):
-        return (
-            "# ERROR: ASSETS_ROOT_PATH is not configured in .env\n"
-            "# Set ASSETS_ROOT_PATH to your local assets folder or Nucleus URL.\n"
-            "# Example (local):   ASSETS_ROOT_PATH=/home/user/Desktop/assets\n"
-            "# Example (Nucleus): ASSETS_ROOT_PATH=omniverse://localhost/NVIDIA/Assets/Isaac/5.1\n"
-            "raise RuntimeError('ASSETS_ROOT_PATH not set in .env — cannot resolve robot assets')"
-        )
-
-    is_nucleus = _LOCAL_ASSETS.startswith("omniverse://")
-
-    if fmt == "asset_library" or local_file:
-        if local_file:
-            resolved = f"{_ROBOTS_DIR}/{local_file}"
-        else:
-            resolved = f"{_ROBOTS_DIR}/{file_path}.usd"
-
-        if is_nucleus:
-            # Nucleus URL — no local file check, USD resolves directly.
-            # Still post-verify HasAuthoredReferences so a composition error
-            # (bad Nucleus path / permissions) doesn't report success=True.
-            return (
-                "import omni.usd\n"
-                "from pxr import UsdGeom, Gf\n"
-                + _SAFE_XFORM_SNIPPET +
-                "\nstage = omni.usd.get_context().get_stage()\n"
-                f"prim = stage.DefinePrim('{dest}', 'Xform')\n"
-                f"prim.GetReferences().AddReference('{resolved}')\n"
-                f"if not prim.HasAuthoredReferences():\n"
-                f"    raise RuntimeError(f'import_robot: AddReference({resolved!r}) completed but HasAuthoredReferences=False on {dest}')\n"
-                f"_safe_set_translate(prim, (0, 0, 0))\n"
-                f"print(f'imported Nucleus asset {resolved} → {dest}')"
-            )
-        else:
-            # Local filesystem — validate the file exists, then verify the
-            # reference landed on the prim.
-            return (
-                "import omni.usd\n"
-                "from pxr import UsdGeom, Gf\n"
-                "import os\n"
-                + _SAFE_XFORM_SNIPPET +
-                "\nstage = omni.usd.get_context().get_stage()\n"
-                f"asset_path = '{resolved}'\n"
-                "if not os.path.exists(asset_path):\n"
-                f"    raise FileNotFoundError(f'Robot asset not found: {{asset_path}}')\n"
-                f"prim = stage.DefinePrim('{dest}', 'Xform')\n"
-                "prim.GetReferences().AddReference(asset_path)\n"
-                f"if not prim.HasAuthoredReferences():\n"
-                f"    raise RuntimeError(f'import_robot: AddReference({{asset_path!r}}) completed but HasAuthoredReferences=False on {dest}')\n"
-                f"_safe_set_translate(prim, (0, 0, 0))\n"
-                f"print(f'imported local asset {{asset_path}} → {dest}')"
-            )
-
-    # Default: USD reference (absolute path or URL). Accept both local
-    # filesystem paths and URL schemes; validate local paths; post-verify.
-    return (
-        "import os\n"
-        "import omni.usd\n"
-        "from pxr import UsdGeom, Gf\n"
-        + _SAFE_XFORM_SNIPPET +
-        "\nstage = omni.usd.get_context().get_stage()\n"
-        f"_ref = '{file_path}'\n"
-        "if not any(_ref.startswith(p) for p in ('omniverse://','http://','https://','file://','anon:')):\n"
-        f"    if not os.path.exists(_ref):\n"
-        f"        raise FileNotFoundError(f'import_robot: asset not found: {{_ref!r}}')\n"
-        f"prim = stage.DefinePrim('{dest}', 'Xform')\n"
-        "prim.GetReferences().AddReference(_ref)\n"
-        f"if not prim.HasAuthoredReferences():\n"
-        f"    raise RuntimeError(f'import_robot: AddReference({{_ref!r}}) completed but HasAuthoredReferences=False on {dest}')\n"
-        f"_safe_set_translate(prim, (0, 0, 0))\n"
-        f"print(f'imported {{_ref}} → {dest}')"
-    )
+# _gen_import_robot moved to handlers/robot.py (Phase 6 wave 20).
 
 
 # ── Robot anchoring ──────────────────────────────────────────────────────────
@@ -20404,154 +20255,13 @@ CODE_GEN_HANDLERS["setup_pick_place_ros2_bridge"] = _gen_setup_pick_place_ros2_b
 CODE_GEN_HANDLERS["add_proximity_sensor"] = _gen_add_proximity_sensor
 
 
-def _gen_teach_robot_pose(args: Dict) -> str:
-    """Record the current joint configuration of a robot to a JSON file
-    under workspace/robot_poses/. Used like a 'teach pendant': jog the
-    robot manually (via Kit joint-drive UI or a separate script) to the
-    desired pose, then call this to snapshot it. Industrial workflow:
-    teach home, pick_approach, pick, pick_lift, drop_approach, drop.
-    """
-    robot_path = args["robot_path"]
-    pose_name = args["pose_name"]
-    return f"""\
-import os, json, datetime, re
-import omni.usd
-from pxr import Usd, UsdPhysics
-
-robot_path = {robot_path!r}
-pose_name = {pose_name!r}
-
-from isaacsim.core.prims import SingleArticulation
-
-art = SingleArticulation(robot_path)
-art.initialize()
-
-dof_names = list(art.dof_names) if art.dof_names else []
-positions = art.get_joint_positions()
-if positions is None or len(dof_names) == 0:
-    raise RuntimeError(f"teach_robot_pose: {{robot_path}} has no readable joints. "
-                       f"Is simulation playing? Articulation must be initialized via physics step.")
-
-pose = {{
-    "robot_path": robot_path,
-    "pose_name": pose_name,
-    "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-    "dof_names": dof_names,
-    "joint_positions": [float(x) for x in positions],
-}}
-
-robot_key = re.sub(r"[^A-Za-z0-9]+", "_", robot_path.strip("/"))
-out_dir = os.path.expanduser(f"~/projects/Omniverse_Nemotron_Ext/workspace/robot_poses/{{robot_key}}")
-os.makedirs(out_dir, exist_ok=True)
-out_path = os.path.join(out_dir, f"{{pose_name}}.json")
-with open(out_path, "w") as f:
-    json.dump(pose, f, indent=2)
-
-print(json.dumps({{
-    "ok": True,
-    "pose_file": out_path,
-    "joint_count": len(dof_names),
-    "note": f"Pose {{pose_name!r}} saved. Use load_robot_pose to restore it.",
-}}))
-"""
+# _gen_teach_robot_pose moved to handlers/robot.py (Phase 6 wave 20).
 
 
 CODE_GEN_HANDLERS["teach_robot_pose"] = _gen_teach_robot_pose
 
 
-def _gen_load_robot_pose(args: Dict) -> str:
-    """Move a robot's joints to a previously-taught pose saved by
-    teach_robot_pose. With interpolation_seconds=0 (default) the move
-    is instantaneous; with >0 the positions interpolate linearly over N
-    seconds via a physics-step callback.
-    """
-    robot_path = args["robot_path"]
-    pose_name = args["pose_name"]
-    interp_s = float(args.get("interpolation_seconds", 0.0))
-    return f"""\
-import os, json, re
-import numpy as np
-
-robot_path = {robot_path!r}
-pose_name = {pose_name!r}
-interp_s = {interp_s}
-
-robot_key = re.sub(r"[^A-Za-z0-9]+", "_", robot_path.strip("/"))
-pose_path = os.path.expanduser(
-    f"~/projects/Omniverse_Nemotron_Ext/workspace/robot_poses/{{robot_key}}/{{pose_name}}.json"
-)
-if not os.path.isfile(pose_path):
-    raise FileNotFoundError(f"load_robot_pose: {{pose_path}} not found. "
-                            f"Did teach_robot_pose run for this robot and name?")
-with open(pose_path) as f:
-    pose = json.load(f)
-
-from isaacsim.core.prims import SingleArticulation
-
-art = SingleArticulation(robot_path)
-art.initialize()
-
-live_dof_names = list(art.dof_names) if art.dof_names else []
-saved_dof = pose["dof_names"]
-saved_q = pose["joint_positions"]
-
-# Remap saved_q to live_dof_names order — handles the case where the
-# saved pose was taken on a robot whose DOF order differs slightly.
-target_q = []
-for name in live_dof_names:
-    if name in saved_dof:
-        target_q.append(saved_q[saved_dof.index(name)])
-    else:
-        # Joint not in saved pose — leave current
-        current = art.get_joint_positions()
-        target_q.append(float(current[live_dof_names.index(name)]) if current is not None else 0.0)
-target_q = np.array(target_q)
-
-if interp_s <= 0.0:
-    # Instant
-    try:
-        art.set_joint_position_targets(target_q)
-    except Exception:
-        art.set_joint_positions(target_q)
-    import json
-    print(json.dumps({{"ok": True, "pose": pose_name, "mode": "instant", "joints": len(target_q)}}))
-else:
-    # Linear interpolation via physics callback
-    start_q = art.get_joint_positions()
-    if start_q is None:
-        start_q = np.zeros_like(target_q)
-    state = {{"t": 0.0, "done": False}}
-    
-    def _interp_step(dt):
-        if state["done"]:
-            return
-        state["t"] += dt
-        alpha = min(1.0, state["t"] / interp_s)
-        q = start_q + alpha * (target_q - start_q)
-        try:
-            art.set_joint_position_targets(q)
-        except Exception:
-            art.set_joint_positions(q)
-        if alpha >= 1.0:
-            state["done"] = True
-    
-    try:
-        from isaacsim.core.api import World
-        w = World.instance() or World()
-        cb_name = f"load_pose_{{robot_key}}_{{pose_name}}"
-        try:
-            w.remove_physics_callback(cb_name)
-        except Exception:
-            pass
-        w.add_physics_callback(cb_name, _interp_step)
-    except Exception as e:
-        import omni.physx
-        _sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_interp_step)
-    
-    import json
-    print(json.dumps({{"ok": True, "pose": pose_name, "mode": "interpolated",
-                      "duration_s": interp_s, "joints": len(target_q)}}))
-"""
+# _gen_load_robot_pose moved to handlers/robot.py (Phase 6 wave 20).
 
 
 CODE_GEN_HANDLERS["load_robot_pose"] = _gen_load_robot_pose
