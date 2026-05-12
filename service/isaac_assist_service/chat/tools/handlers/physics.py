@@ -1219,6 +1219,784 @@ def _gen_compute_convex_hull(args: Dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Phase 7 wave 2 — physics getters (17 data handlers)
+
+
+async def _handle_get_articulation_state(args: Dict) -> Dict:
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+from pxr import UsdPhysics
+import json
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath('{prim_path}')
+joints = []
+for child in prim.GetAllChildren():
+    if child.IsA(UsdPhysics.RevoluteJoint) or child.IsA(UsdPhysics.PrismaticJoint):
+        joints.append({{'name': child.GetName(), 'path': str(child.GetPath())}})
+result = {{'articulation_path': '{prim_path}', 'joints': joints}}
+print(json.dumps(result))
+"""
+    return await kit_tools.queue_exec_patch(code, f"Read articulation state for {prim_path}")
+
+
+async def _handle_get_physics_errors(args: Dict) -> Dict:
+    """Filter console logs for PhysX-specific errors and warnings."""
+    from . import kit_tools
+    from ..tool_executor import _PHYSX_ERROR_RE
+    ctx = await kit_tools.get_stage_context(full=False)
+    logs = ctx.get("recent_logs", [])
+    last_n = args.get("last_n", 20)
+
+    physics_logs = []
+    for entry in logs:
+        msg = entry.get("msg", "")
+        source = entry.get("source", "")
+        # Match PhysX regex OR source contains physics/physx
+        if (_PHYSX_ERROR_RE.search(msg) or
+                "physx" in source.lower() or
+                "physics" in source.lower()):
+            physics_logs.append(entry)
+
+    return {
+        "physics_errors": physics_logs[-last_n:],
+        "total_count": len(physics_logs),
+        "note": "Filtered for PhysX/physics engine messages only",
+    }
+
+
+async def _handle_get_joint_limits(args: Dict) -> Dict:
+    from . import kit_tools
+    articulation = args["articulation"]
+    joint_name = args["joint_name"]
+    code = f"""\
+import omni.usd
+from pxr import Usd, UsdPhysics
+import json
+
+stage = omni.usd.get_context().get_stage()
+art = stage.GetPrimAtPath({articulation!r})
+result = {{'articulation': {articulation!r}, 'joint_name': {joint_name!r}}}
+if not art or not art.IsValid():
+    result['error'] = 'articulation not found'
+else:
+    joint_prim = None
+    for p in Usd.PrimRange(art):
+        if p.GetName() == {joint_name!r}:
+            joint_prim = p
+            break
+    if joint_prim is None:
+        result['error'] = 'joint not found'
+    else:
+        result['joint_path'] = str(joint_prim.GetPath())
+        joint = UsdPhysics.RevoluteJoint(joint_prim) or UsdPhysics.PrismaticJoint(joint_prim)
+        if not joint:
+            result['error'] = 'joint is not Revolute or Prismatic'
+        else:
+            lower_attr = joint_prim.GetAttribute('physics:lowerLimit')
+            upper_attr = joint_prim.GetAttribute('physics:upperLimit')
+            result['lower'] = lower_attr.Get() if lower_attr and lower_attr.IsDefined() else None
+            result['upper'] = upper_attr.Get() if upper_attr and upper_attr.IsDefined() else None
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_joint_limits {articulation}.{joint_name}")
+
+
+async def _handle_get_contact_report(args: Dict) -> Dict:
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    max_contacts = int(args.get("max_contacts", 50))
+    code = f"""\
+import omni.usd
+import json
+
+prim_path = {prim_path!r}
+max_contacts = {max_contacts}
+
+# Pull the running contact buffer from the global ContactReporter (set up by
+# set_clearance_monitor or apply_api_schema(PhysxContactReportAPI)). When no
+# buffer exists yet, return an empty report instead of crashing so callers can
+# tell apart "no contacts" from "API not applied".
+buf = globals().get('_ATOMIC_CONTACT_BUFFER')
+contacts = []
+if buf is not None:
+    for entry in list(buf)[-max_contacts:]:
+        if entry.get('actor0') == prim_path or entry.get('actor1') == prim_path:
+            contacts.append(entry)
+
+result = {{
+    'prim_path': prim_path,
+    'contact_count': len(contacts),
+    'contacts': contacts,
+    'buffer_initialized': buf is not None,
+}}
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_contact_report {prim_path}")
+
+
+async def _handle_get_joint_targets(args: Dict) -> Dict:
+    """Read per-joint drive/velocity TARGETS (what the controller is aiming
+    for), distinct from current state. Used to verify 'robot will move on
+    Play' claims — if DriveAPI targets aren't authored, the robot won't move."""
+    from . import kit_tools
+    articulation_path = args["articulation_path"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+root = stage.GetPrimAtPath({articulation_path!r})
+result = {{'articulation_path': {articulation_path!r}}}
+if not root or not root.IsValid():
+    result['error'] = 'articulation not found'
+    result['joints'] = []
+else:
+    joints = []
+    for p in Usd.PrimRange(root):
+        if not (p.IsA(UsdPhysics.RevoluteJoint) or p.IsA(UsdPhysics.PrismaticJoint)):
+            continue
+        entry = {{'path': str(p.GetPath()), 'type': str(p.GetTypeName())}}
+        has_drive = False
+        for suffix in ('angular', 'linear'):
+            drive_api = UsdPhysics.DriveAPI.Get(p, suffix)
+            if drive_api:
+                tp = drive_api.GetTargetPositionAttr()
+                tv = drive_api.GetTargetVelocityAttr()
+                stiffness = drive_api.GetStiffnessAttr()
+                damping = drive_api.GetDampingAttr()
+                if tp and tp.IsAuthored():
+                    entry[f'{{suffix}}_target_position'] = float(tp.Get() or 0.0)
+                    has_drive = True
+                if tv and tv.IsAuthored():
+                    entry[f'{{suffix}}_target_velocity'] = float(tv.Get() or 0.0)
+                    has_drive = True
+                if stiffness and stiffness.IsAuthored():
+                    entry[f'{{suffix}}_stiffness'] = float(stiffness.Get() or 0.0)
+                if damping and damping.IsAuthored():
+                    entry[f'{{suffix}}_damping'] = float(damping.Get() or 0.0)
+        entry['has_drive'] = has_drive
+        joints.append(entry)
+    result['joints'] = joints
+    result['joint_count'] = len(joints)
+    result['joints_with_drive'] = sum(1 for j in joints if j.get('has_drive'))
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_joint_targets {articulation_path}")
+
+
+async def _handle_get_linear_velocity(args: Dict) -> Dict:
+    """Return rigid body linear velocity via UsdPhysics.RigidBodyAPI."""
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+elif not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+    result['error'] = 'PhysicsRigidBodyAPI not applied — apply it first'
+    result['has_rigid_body_api'] = False
+else:
+    rb = UsdPhysics.RigidBodyAPI(prim)
+    attr = rb.GetVelocityAttr()
+    if attr and attr.HasAuthoredValue():
+        v = attr.Get()
+        result['linear_velocity'] = [float(v[0]), float(v[1]), float(v[2])]
+        result['authored'] = True
+    else:
+        v = attr.Get() if attr else None
+        if v is None:
+            result['linear_velocity'] = [0.0, 0.0, 0.0]
+            result['authored'] = False
+        else:
+            result['linear_velocity'] = [float(v[0]), float(v[1]), float(v[2])]
+            result['authored'] = False
+    result['units'] = 'm/s'
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_linear_velocity {prim_path}")
+
+
+async def _handle_get_angular_velocity(args: Dict) -> Dict:
+    """Return rigid body angular velocity via UsdPhysics.RigidBodyAPI."""
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+elif not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+    result['error'] = 'PhysicsRigidBodyAPI not applied — apply it first'
+    result['has_rigid_body_api'] = False
+else:
+    rb = UsdPhysics.RigidBodyAPI(prim)
+    attr = rb.GetAngularVelocityAttr()
+    if attr and attr.HasAuthoredValue():
+        v = attr.Get()
+        result['angular_velocity'] = [float(v[0]), float(v[1]), float(v[2])]
+        result['authored'] = True
+    else:
+        v = attr.Get() if attr else None
+        if v is None:
+            result['angular_velocity'] = [0.0, 0.0, 0.0]
+            result['authored'] = False
+        else:
+            result['angular_velocity'] = [float(v[0]), float(v[1]), float(v[2])]
+            result['authored'] = False
+    result['units'] = 'deg/s'
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_angular_velocity {prim_path}")
+
+
+async def _handle_get_mass(args: Dict) -> Dict:
+    """Return current rigid body mass via UsdPhysics.MassAPI."""
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}, 'units': 'kg'}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+elif not prim.HasAPI(UsdPhysics.MassAPI):
+    result['has_mass_api'] = False
+    result['mass'] = 0.0
+    result['note'] = 'PhysicsMassAPI not applied — PhysX will compute mass from collision geometry + density'
+else:
+    result['has_mass_api'] = True
+    mass_api = UsdPhysics.MassAPI(prim)
+    attr = mass_api.GetMassAttr()
+    if attr and attr.HasAuthoredValue():
+        result['mass'] = float(attr.Get())
+        result['authored'] = True
+    else:
+        v = attr.Get() if attr else None
+        result['mass'] = float(v) if v is not None else 0.0
+        result['authored'] = False
+    den_attr = mass_api.GetDensityAttr()
+    if den_attr and den_attr.HasAuthoredValue():
+        result['density_kg_m3'] = float(den_attr.Get())
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_mass {prim_path}")
+
+
+async def _handle_get_inertia(args: Dict) -> Dict:
+    """Return diagonal inertia tensor via UsdPhysics.MassAPI."""
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}, 'units': 'kg*m^2'}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+elif not prim.HasAPI(UsdPhysics.MassAPI):
+    result['has_mass_api'] = False
+    result['diagonal_inertia'] = [0.0, 0.0, 0.0]
+    result['note'] = 'PhysicsMassAPI not applied — PhysX will compute inertia from collision geometry'
+else:
+    result['has_mass_api'] = True
+    mass_api = UsdPhysics.MassAPI(prim)
+    attr = mass_api.GetDiagonalInertiaAttr()
+    if attr and attr.HasAuthoredValue():
+        v = attr.Get()
+        result['diagonal_inertia'] = [float(v[0]), float(v[1]), float(v[2])]
+        result['authored'] = True
+    else:
+        v = attr.Get() if attr else None
+        if v is None:
+            result['diagonal_inertia'] = [0.0, 0.0, 0.0]
+            result['authored'] = False
+        else:
+            result['diagonal_inertia'] = [float(v[0]), float(v[1]), float(v[2])]
+            result['authored'] = False
+    com_attr = mass_api.GetCenterOfMassAttr()
+    if com_attr and com_attr.HasAuthoredValue():
+        com = com_attr.Get()
+        result['center_of_mass'] = [float(com[0]), float(com[1]), float(com[2])]
+    pq_attr = mass_api.GetPrincipalAxesAttr()
+    if pq_attr and pq_attr.HasAuthoredValue():
+        q = pq_attr.Get()
+        result['principal_axes_quat'] = [float(q.GetReal()),
+                                         float(q.GetImaginary()[0]),
+                                         float(q.GetImaginary()[1]),
+                                         float(q.GetImaginary()[2])]
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_inertia {prim_path}")
+
+
+async def _handle_get_physics_scene_config(args: Dict) -> Dict:
+    """Read the global PhysicsScene config: gravity, solver, iterations, dt, GPU."""
+    from . import kit_tools
+    scene_path = args.get("scene_path", "")
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+result = {{}}
+target = {scene_path!r}
+scene_prim = None
+if target:
+    scene_prim = stage.GetPrimAtPath(target)
+    if not scene_prim or not scene_prim.IsValid():
+        scene_prim = None
+        result['warning'] = f'scene_path {{target!r}} not found, falling back to first PhysicsScene on stage'
+if scene_prim is None:
+    for p in stage.Traverse():
+        if p.IsA(UsdPhysics.Scene):
+            scene_prim = p
+            break
+if scene_prim is None:
+    result['error'] = 'no UsdPhysics.Scene found on stage'
+else:
+    result['scene_path'] = str(scene_prim.GetPath())
+    scene = UsdPhysics.Scene(scene_prim)
+    # Always report gravity — `.Get()` returns the USD-schema default
+    # (direction (0,0,-1), magnitude 9.81) when not explicitly authored.
+    # Without this fallback the agent sees missing keys and has historically
+    # fabricated "nan / -inf" claims (see CW-49 run-2 verdict).
+    g_dir_attr = scene.GetGravityDirectionAttr()
+    g_mag_attr = scene.GetGravityMagnitudeAttr()
+    if g_dir_attr:
+        d = g_dir_attr.Get()
+        if d is not None:
+            result['gravity_direction'] = [float(d[0]), float(d[1]), float(d[2])]
+            result['gravity_direction_authored'] = bool(g_dir_attr.HasAuthoredValue())
+    if g_mag_attr:
+        m = g_mag_attr.Get()
+        if m is not None:
+            result['gravity_magnitude'] = float(m)
+            result['gravity_magnitude_authored'] = bool(g_mag_attr.HasAuthoredValue())
+    try:
+        from pxr import PhysxSchema
+        if scene_prim.HasAPI(PhysxSchema.PhysxSceneAPI):
+            phx = PhysxSchema.PhysxSceneAPI(scene_prim)
+            if phx.GetSolverTypeAttr() and phx.GetSolverTypeAttr().HasAuthoredValue():
+                result['solver_type'] = str(phx.GetSolverTypeAttr().Get())
+            if phx.GetMinPositionIterationCountAttr() and phx.GetMinPositionIterationCountAttr().HasAuthoredValue():
+                result['min_position_iterations'] = int(phx.GetMinPositionIterationCountAttr().Get())
+            if phx.GetMaxPositionIterationCountAttr() and phx.GetMaxPositionIterationCountAttr().HasAuthoredValue():
+                result['max_position_iterations'] = int(phx.GetMaxPositionIterationCountAttr().Get())
+            if phx.GetMinVelocityIterationCountAttr() and phx.GetMinVelocityIterationCountAttr().HasAuthoredValue():
+                result['min_velocity_iterations'] = int(phx.GetMinVelocityIterationCountAttr().Get())
+            if phx.GetMaxVelocityIterationCountAttr() and phx.GetMaxVelocityIterationCountAttr().HasAuthoredValue():
+                result['max_velocity_iterations'] = int(phx.GetMaxVelocityIterationCountAttr().Get())
+            if phx.GetEnableGPUDynamicsAttr() and phx.GetEnableGPUDynamicsAttr().HasAuthoredValue():
+                result['enable_gpu_dynamics'] = bool(phx.GetEnableGPUDynamicsAttr().Get())
+            if phx.GetBroadphaseTypeAttr() and phx.GetBroadphaseTypeAttr().HasAuthoredValue():
+                result['broadphase_type'] = str(phx.GetBroadphaseTypeAttr().Get())
+            if phx.GetTimeStepsPerSecondAttr() and phx.GetTimeStepsPerSecondAttr().HasAuthoredValue():
+                result['time_steps_per_second'] = int(phx.GetTimeStepsPerSecondAttr().Get())
+                result['time_step'] = 1.0 / float(phx.GetTimeStepsPerSecondAttr().Get())
+    except Exception as exc:
+        result['physx_scene_api_error'] = str(exc)
+    try:
+        import carb.settings
+        s = carb.settings.get_settings()
+        tps = s.get('/persistent/physics/timeStepsPerSecond')
+        if tps:
+            result.setdefault('time_steps_per_second', int(tps))
+            result.setdefault('time_step', 1.0 / float(tps))
+    except Exception:
+        pass
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, "get_physics_scene_config")
+
+
+async def _handle_get_kinematic_state(args: Dict) -> Dict:
+    """Return full kinematic state: pose + linear/angular velocity + acceleration estimate."""
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    sample_dt = float(args.get("sample_dt", 0.05))
+    code = f"""\
+import omni.usd
+import json
+import time
+from pxr import UsdGeom, UsdPhysics, Gf
+
+stage = omni.usd.get_context().get_stage()
+prim_path = {prim_path!r}
+sample_dt = {sample_dt}
+result = {{'prim_path': prim_path}}
+prim = stage.GetPrimAtPath(prim_path)
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+else:
+    # World transform via UsdGeom.Xformable.
+    try:
+        xf = UsdGeom.Xformable(prim)
+        local_to_world = xf.ComputeLocalToWorldTransform(0)
+        pos = local_to_world.ExtractTranslation()
+        rot_q = local_to_world.ExtractRotationQuat()
+        result['position'] = [float(pos[0]), float(pos[1]), float(pos[2])]
+        imag = rot_q.GetImaginary()
+        result['orientation_quat'] = [float(rot_q.GetReal()),
+                                      float(imag[0]), float(imag[1]), float(imag[2])]
+    except Exception as exc:
+        result['transform_error'] = str(exc)
+
+    has_rb = prim.HasAPI(UsdPhysics.RigidBodyAPI)
+    result['has_rigid_body_api'] = bool(has_rb)
+    if has_rb:
+        rb = UsdPhysics.RigidBodyAPI(prim)
+        v_attr = rb.GetVelocityAttr()
+        w_attr = rb.GetAngularVelocityAttr()
+        v0 = v_attr.Get() if v_attr else None
+        w0 = w_attr.Get() if w_attr else None
+        if v0 is None:
+            v0 = (0.0, 0.0, 0.0)
+        if w0 is None:
+            w0 = (0.0, 0.0, 0.0)
+        result['linear_velocity'] = [float(v0[0]), float(v0[1]), float(v0[2])]
+        result['angular_velocity'] = [float(w0[0]), float(w0[1]), float(w0[2])]
+        # Best-effort acceleration via finite diff over sample_dt seconds.
+        try:
+            time.sleep(max(0.0, sample_dt))
+            v1 = v_attr.Get() if v_attr else None
+            w1 = w_attr.Get() if w_attr else None
+            if v1 is None:
+                v1 = (0.0, 0.0, 0.0)
+            if w1 is None:
+                w1 = (0.0, 0.0, 0.0)
+            dt = max(sample_dt, 1e-6)
+            result['linear_acceleration'] = [
+                (float(v1[0]) - float(v0[0])) / dt,
+                (float(v1[1]) - float(v0[1])) / dt,
+                (float(v1[2]) - float(v0[2])) / dt,
+            ]
+            result['angular_acceleration'] = [
+                (float(w1[0]) - float(w0[0])) / dt,
+                (float(w1[1]) - float(w0[1])) / dt,
+                (float(w1[2]) - float(w0[2])) / dt,
+            ]
+            result['acceleration_dt'] = dt
+        except Exception as exc:
+            result['acceleration_error'] = str(exc)
+    else:
+        result['linear_velocity'] = [0.0, 0.0, 0.0]
+        result['angular_velocity'] = [0.0, 0.0, 0.0]
+        result['note'] = 'no PhysicsRigidBodyAPI — velocity/acceleration unavailable'
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_kinematic_state {prim_path}")
+
+
+async def _handle_get_joint_positions(args: Dict) -> Dict:
+    """Return current position of every joint in an articulation."""
+    from . import kit_tools
+    articulation = args["articulation"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+art = stage.GetPrimAtPath({articulation!r})
+result = {{'articulation': {articulation!r}, 'units': {{'revolute': 'deg', 'prismatic': 'm'}}}}
+if not art or not art.IsValid():
+    result['error'] = 'articulation not found'
+else:
+    joints = []
+    for p in Usd.PrimRange(art):
+        rj = UsdPhysics.RevoluteJoint(p)
+        pj = UsdPhysics.PrismaticJoint(p)
+        if not (rj or pj):
+            continue
+        joint_type = 'revolute' if rj else 'prismatic'
+        # Prefer PhysxJointStateAPI live state, fall back to authored target
+        state_attr = p.GetAttribute('state:angular:physics:position') if rj else p.GetAttribute('state:linear:physics:position')
+        if not (state_attr and state_attr.IsDefined()):
+            state_attr = p.GetAttribute('physics:position')
+        target_attr = p.GetAttribute('drive:angular:physics:targetPosition') if rj else p.GetAttribute('drive:linear:physics:targetPosition')
+        pos = None
+        source = None
+        if state_attr and state_attr.HasAuthoredValue():
+            pos = float(state_attr.Get())
+            source = 'state'
+        elif target_attr and target_attr.HasAuthoredValue():
+            pos = float(target_attr.Get())
+            source = 'drive_target'
+        joints.append({{
+            'name': p.GetName(),
+            'path': str(p.GetPath()),
+            'type': joint_type,
+            'position': pos,
+            'source': source,
+        }})
+    result['joint_count'] = len(joints)
+    result['joints'] = joints
+    result['positions'] = [j['position'] for j in joints]
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_joint_positions {articulation}")
+
+
+async def _handle_get_joint_velocities(args: Dict) -> Dict:
+    """Return current velocity of every joint in an articulation."""
+    from . import kit_tools
+    articulation = args["articulation"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+art = stage.GetPrimAtPath({articulation!r})
+result = {{'articulation': {articulation!r}, 'units': {{'revolute': 'deg/s', 'prismatic': 'm/s'}}}}
+if not art or not art.IsValid():
+    result['error'] = 'articulation not found'
+else:
+    joints = []
+    for p in Usd.PrimRange(art):
+        rj = UsdPhysics.RevoluteJoint(p)
+        pj = UsdPhysics.PrismaticJoint(p)
+        if not (rj or pj):
+            continue
+        joint_type = 'revolute' if rj else 'prismatic'
+        # PhysxJointStateAPI velocity attribute
+        vel_attr = p.GetAttribute('state:angular:physics:velocity') if rj else p.GetAttribute('state:linear:physics:velocity')
+        if not (vel_attr and vel_attr.IsDefined()):
+            vel_attr = p.GetAttribute('physics:velocity')
+        vel = float(vel_attr.Get()) if (vel_attr and vel_attr.HasAuthoredValue()) else 0.0
+        joints.append({{
+            'name': p.GetName(),
+            'path': str(p.GetPath()),
+            'type': joint_type,
+            'velocity': vel,
+        }})
+    result['joint_count'] = len(joints)
+    result['joints'] = joints
+    result['velocities'] = [j['velocity'] for j in joints]
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_joint_velocities {articulation}")
+
+
+async def _handle_get_joint_torques(args: Dict) -> Dict:
+    """Return most recently applied torque/force on every joint."""
+    from . import kit_tools
+    articulation = args["articulation"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+art = stage.GetPrimAtPath({articulation!r})
+result = {{'articulation': {articulation!r}, 'units': {{'revolute': 'N*m', 'prismatic': 'N'}}}}
+if not art or not art.IsValid():
+    result['error'] = 'articulation not found'
+else:
+    joints = []
+    for p in Usd.PrimRange(art):
+        rj = UsdPhysics.RevoluteJoint(p)
+        pj = UsdPhysics.PrismaticJoint(p)
+        if not (rj or pj):
+            continue
+        joint_type = 'revolute' if rj else 'prismatic'
+        # PhysxJointStateAPI: appliedJointTorque (revolute) / appliedJointForce (prismatic)
+        torque_attr = (
+            p.GetAttribute('state:angular:physics:appliedJointTorque') if rj
+            else p.GetAttribute('state:linear:physics:appliedJointForce')
+        )
+        if not (torque_attr and torque_attr.IsDefined()):
+            torque_attr = p.GetAttribute('physics:appliedTorque')
+        torque = float(torque_attr.Get()) if (torque_attr and torque_attr.HasAuthoredValue()) else 0.0
+        joints.append({{
+            'name': p.GetName(),
+            'path': str(p.GetPath()),
+            'type': joint_type,
+            'torque': torque,
+        }})
+    result['joint_count'] = len(joints)
+    result['joints'] = joints
+    result['torques'] = [j['torque'] for j in joints]
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_joint_torques {articulation}")
+
+
+async def _handle_get_drive_gains(args: Dict) -> Dict:
+    """Read current kp/kd from UsdPhysics.DriveAPI on a joint."""
+    from . import kit_tools
+    joint_path = args["joint_path"]
+    drive_type = args.get("drive_type", "auto")
+    code = f"""\
+import omni.usd
+import json
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+joint = stage.GetPrimAtPath({joint_path!r})
+requested = {drive_type!r}
+result = {{'joint_path': {joint_path!r}, 'requested_drive_type': requested}}
+if not joint or not joint.IsValid():
+    result['error'] = 'joint not found'
+else:
+    candidates = ['angular', 'linear'] if requested == 'auto' else [requested]
+    drives = {{}}
+    for token in candidates:
+        drive = UsdPhysics.DriveAPI(joint, token)
+        if not drive or not drive.GetPrim().HasAPI(UsdPhysics.DriveAPI):
+            continue
+        kp_attr = drive.GetStiffnessAttr()
+        kd_attr = drive.GetDampingAttr()
+        max_force_attr = drive.GetMaxForceAttr()
+        target_pos_attr = drive.GetTargetPositionAttr()
+        target_vel_attr = drive.GetTargetVelocityAttr()
+        drives[token] = {{
+            'kp': float(kp_attr.Get()) if (kp_attr and kp_attr.HasAuthoredValue()) else None,
+            'kd': float(kd_attr.Get()) if (kd_attr and kd_attr.HasAuthoredValue()) else None,
+            'max_force': float(max_force_attr.Get()) if (max_force_attr and max_force_attr.HasAuthoredValue()) else None,
+            'target_position': float(target_pos_attr.Get()) if (target_pos_attr and target_pos_attr.HasAuthoredValue()) else None,
+            'target_velocity': float(target_vel_attr.Get()) if (target_vel_attr and target_vel_attr.HasAuthoredValue()) else None,
+        }}
+    if not drives:
+        result['error'] = 'no DriveAPI applied on this joint'
+        result['has_drive_api'] = False
+    else:
+        result['drives'] = drives
+        result['has_drive_api'] = True
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_drive_gains {joint_path}")
+
+
+async def _handle_get_articulation_mass(args: Dict) -> Dict:
+    """Sum mass of every link in the articulation."""
+    from . import kit_tools
+    articulation = args["articulation"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+art = stage.GetPrimAtPath({articulation!r})
+result = {{'articulation': {articulation!r}, 'units': 'kg'}}
+if not art or not art.IsValid():
+    result['error'] = 'articulation not found'
+else:
+    links = []
+    total = 0.0
+    for p in Usd.PrimRange(art):
+        if not p.HasAPI(UsdPhysics.RigidBodyAPI):
+            continue
+        m = 0.0
+        authored = False
+        if p.HasAPI(UsdPhysics.MassAPI):
+            mass_attr = UsdPhysics.MassAPI(p).GetMassAttr()
+            if mass_attr and mass_attr.HasAuthoredValue():
+                m = float(mass_attr.Get())
+                authored = True
+        links.append({{
+            'name': p.GetName(),
+            'path': str(p.GetPath()),
+            'mass': m,
+            'authored': authored,
+        }})
+        total += m
+    result['link_count'] = len(links)
+    result['total_mass'] = total
+    result['links'] = links
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_articulation_mass {articulation}")
+
+
+async def _handle_get_center_of_mass(args: Dict) -> Dict:
+    """Compute world-space mass-weighted center of mass of an articulation."""
+    from . import kit_tools
+    articulation = args["articulation"]
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdGeom, UsdPhysics, Gf
+
+stage = omni.usd.get_context().get_stage()
+art = stage.GetPrimAtPath({articulation!r})
+result = {{'articulation': {articulation!r}, 'units': 'm'}}
+if not art or not art.IsValid():
+    result['error'] = 'articulation not found'
+else:
+    sum_x = sum_y = sum_z = 0.0
+    total_mass = 0.0
+    link_breakdown = []
+    for p in Usd.PrimRange(art):
+        if not p.HasAPI(UsdPhysics.RigidBodyAPI):
+            continue
+        m = 0.0
+        local_com = Gf.Vec3f(0.0, 0.0, 0.0)
+        if p.HasAPI(UsdPhysics.MassAPI):
+            mass_api = UsdPhysics.MassAPI(p)
+            mass_attr = mass_api.GetMassAttr()
+            if mass_attr and mass_attr.HasAuthoredValue():
+                m = float(mass_attr.Get())
+            com_attr = mass_api.GetCenterOfMassAttr()
+            if com_attr and com_attr.HasAuthoredValue():
+                v = com_attr.Get()
+                local_com = Gf.Vec3f(float(v[0]), float(v[1]), float(v[2]))
+        # Skip zero-mass links (PhysX auto-mass not yet computed)
+        if m <= 0.0:
+            continue
+        xf = UsdGeom.Xformable(p)
+        if not xf:
+            continue
+        mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+        world_com = mat.Transform(Gf.Vec3d(local_com[0], local_com[1], local_com[2]))
+        sum_x += m * world_com[0]
+        sum_y += m * world_com[1]
+        sum_z += m * world_com[2]
+        total_mass += m
+        link_breakdown.append({{
+            'name': p.GetName(),
+            'path': str(p.GetPath()),
+            'mass': m,
+            'world_com': [world_com[0], world_com[1], world_com[2]],
+        }})
+    if total_mass <= 0.0:
+        result['error'] = 'no mass-bearing links found (apply MassAPI to set mass)'
+        result['total_mass'] = 0.0
+        result['center_of_mass'] = None
+    else:
+        result['total_mass'] = total_mass
+        result['center_of_mass'] = [sum_x / total_mass, sum_y / total_mass, sum_z / total_mass]
+        result['link_breakdown'] = link_breakdown
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_center_of_mass {articulation}")
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
