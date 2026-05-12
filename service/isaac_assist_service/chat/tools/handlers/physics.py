@@ -61,6 +61,57 @@ def _gen_set_joint_targets(args: Dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Phase 5 wave 2 — drive gains + joint limits
+
+
+def _gen_set_drive_gains(args: Dict) -> str:
+    joint_path = args["joint_path"]
+    kp = args["kp"]
+    kd = args["kd"]
+    drive_type = args.get("drive_type", "angular")
+    return (
+        "import omni.usd\n"
+        "from pxr import UsdPhysics\n"
+        "stage = omni.usd.get_context().get_stage()\n"
+        f"joint = stage.GetPrimAtPath({joint_path!r})\n"
+        f"drive = UsdPhysics.DriveAPI.Apply(joint, {drive_type!r})\n"
+        f"drive.CreateStiffnessAttr({float(kp)!r})\n"
+        f"drive.CreateDampingAttr({float(kd)!r})\n"
+        f"print('drive_gains', {joint_path!r}, 'kp=', {float(kp)!r}, 'kd=', {float(kd)!r})"
+    )
+
+
+def _gen_set_joint_limits(args: Dict) -> str:
+    """Generate code to set physics:lowerLimit and physics:upperLimit."""
+    joint_path = args["joint_path"]
+    lower = float(args["lower"])
+    upper = float(args["upper"])
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+joint_path = {joint_path!r}
+joint = stage.GetPrimAtPath(joint_path)
+if not joint or not joint.IsValid():
+    raise RuntimeError('joint not found: ' + repr(joint_path))
+rj = UsdPhysics.RevoluteJoint(joint)
+pj = UsdPhysics.PrismaticJoint(joint)
+if not (rj or pj):
+    raise RuntimeError('joint is not Revolute or Prismatic: ' + repr(joint_path))
+lower_attr = joint.GetAttribute('physics:lowerLimit')
+if not (lower_attr and lower_attr.IsDefined()):
+    lower_attr = (rj or pj).CreateLowerLimitAttr()
+upper_attr = joint.GetAttribute('physics:upperLimit')
+if not (upper_attr and upper_attr.IsDefined()):
+    upper_attr = (rj or pj).CreateUpperLimitAttr()
+lower_attr.Set({lower})
+upper_attr.Set({upper})
+print('joint_limits ' + repr(joint_path) + ' lower=' + repr({lower}) + ' upper=' + repr({upper}))
+"""
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 

@@ -1656,6 +1656,8 @@ from .handlers.scene_authoring import (  # noqa: E402
     _gen_teleport_prim,
 )
 from .handlers.physics import (  # noqa: E402
+    _gen_set_drive_gains,
+    _gen_set_joint_limits,
     _gen_set_joint_targets,
     _gen_set_physics_params,
 )
@@ -22556,21 +22558,7 @@ print(json.dumps(result, default=str))
 """
     return await kit_tools.queue_exec_patch(code, f"get_joint_limits {articulation}.{joint_name}")
 
-def _gen_set_drive_gains(args: Dict) -> str:
-    joint_path = args["joint_path"]
-    kp = args["kp"]
-    kd = args["kd"]
-    drive_type = args.get("drive_type", "angular")
-    return (
-        "import omni.usd\n"
-        "from pxr import UsdPhysics\n"
-        "stage = omni.usd.get_context().get_stage()\n"
-        f"joint = stage.GetPrimAtPath({joint_path!r})\n"
-        f"drive = UsdPhysics.DriveAPI.Apply(joint, {drive_type!r})\n"
-        f"drive.CreateStiffnessAttr({float(kp)!r})\n"
-        f"drive.CreateDampingAttr({float(kd)!r})\n"
-        f"print('drive_gains', {joint_path!r}, 'kp=', {float(kp)!r}, 'kd=', {float(kd)!r})"
-    )
+# _gen_set_drive_gains moved to handlers/physics.py (Phase 5 wave 2).
 
 async def _handle_get_contact_report(args: Dict) -> Dict:
     prim_path = args["prim_path"]
@@ -24182,34 +24170,7 @@ print(json.dumps(result, default=str))
 """
     return await kit_tools.queue_exec_patch(code, f"get_drive_gains {joint_path}")
 
-def _gen_set_joint_limits(args: Dict) -> str:
-    """Generate code to set physics:lowerLimit and physics:upperLimit."""
-    joint_path = args["joint_path"]
-    lower = float(args["lower"])
-    upper = float(args["upper"])
-    return f"""\
-import omni.usd
-from pxr import UsdPhysics
-
-stage = omni.usd.get_context().get_stage()
-joint_path = {joint_path!r}
-joint = stage.GetPrimAtPath(joint_path)
-if not joint or not joint.IsValid():
-    raise RuntimeError('joint not found: ' + repr(joint_path))
-rj = UsdPhysics.RevoluteJoint(joint)
-pj = UsdPhysics.PrismaticJoint(joint)
-if not (rj or pj):
-    raise RuntimeError('joint is not Revolute or Prismatic: ' + repr(joint_path))
-lower_attr = joint.GetAttribute('physics:lowerLimit')
-if not (lower_attr and lower_attr.IsDefined()):
-    lower_attr = (rj or pj).CreateLowerLimitAttr()
-upper_attr = joint.GetAttribute('physics:upperLimit')
-if not (upper_attr and upper_attr.IsDefined()):
-    upper_attr = (rj or pj).CreateUpperLimitAttr()
-lower_attr.Set({lower})
-upper_attr.Set({upper})
-print('joint_limits ' + repr(joint_path) + ' lower=' + repr({lower}) + ' upper=' + repr({upper}))
-"""
+# _gen_set_joint_limits moved to handlers/physics.py (Phase 5 wave 2).
 
 def _gen_set_joint_velocity_limit(args: Dict) -> str:
     """Generate code to cap the joint's max velocity via PhysxJointAPI."""
