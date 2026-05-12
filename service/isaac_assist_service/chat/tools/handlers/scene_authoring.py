@@ -1877,6 +1877,15 @@ for _s, _d in _pairs:
 # Phase 6 wave 21 — variants + metadata + semantic label cleanup
 
 
+# Wave 21 fix-up: the @honesty_checked decorator on _gen_set_variant was
+# dropped during the initial wave-21 move; the decorator auto-prepends a
+# prim-exists check using args['prim_path'] and post-checks that the
+# variant selection actually took. Restored here to preserve runtime
+# behavior parity with pre-move dispatch.
+from ..tool_honesty import honesty_checked  # noqa: E402
+
+
+@honesty_checked(require_prim_paths=("prim_path",))
 def _gen_set_variant(args: Dict) -> str:
     # Demo retrofit: @honesty_checked auto-prepends a prim-exists check
     # using args['prim_path']. Post-check: verify the variant selection
