@@ -243,12 +243,17 @@ async def _handle_diagnose_scene_feasibility(args: Dict[str, Any]) -> Dict[str, 
     lang = args.get("lang", "sv")
 
     # --- Cache lookup ---
+    # Phase 49b: query stage revision explicitly so the dependency
+    # is visible here. When no provider is registered, get_stage_revision
+    # returns None and the key falls back to the legacy shape
+    # (backwards compatible).
     cache_key = dcache.make_key(
         robot_path=robot_path,
         pick_pose=pick_pose, drop_pose=drop_pose,
         ee_offset=ee_offset,
         obstacle_bboxes=None,  # filled in below
         seed=seed,
+        stage_revision=dcache.get_stage_revision(),
     )
     if use_cache:
         cached = dcache.get(cache_key)
