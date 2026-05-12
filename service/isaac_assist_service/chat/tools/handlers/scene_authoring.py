@@ -1468,6 +1468,411 @@ print(f"export_stage: started async export of {{target}} as {{fmt}} — completi
 
 
 # ---------------------------------------------------------------------------
+# Phase 6 wave 18 — OmniGraph node ops + bulk attribute/schema + prim grouping
+
+
+def _gen_add_node(args: Dict) -> str:
+    """Add a single node to an existing OmniGraph via og.Controller.edit()."""
+    from ..tool_executor import _OG_NODE_TYPE_MAP
+    graph_path = args["graph_path"]
+    raw_node_type = args["node_type"]
+    node_name = args["name"]
+    # Reuse the legacy → 5.1 namespace remap so callers can pass either form.
+    node_type = _OG_NODE_TYPE_MAP.get(raw_node_type, raw_node_type)
+    # Live-probed 2026-04-18: og.Controller.edit with a non-existent graph
+    # returned success=True and claimed "Added node 'tick' to /World/NoGraph"
+    # — the graph wasn't created, the node doesn't exist. Pre-check the
+    # graph prim and post-check the node actually landed.
+    return f"""\
+import omni.usd
+import omni.graph.core as og
+
+# Pre-check the graph exists — Controller.edit silently creates a new
+# graph AND silently fails to create any node under some Kit versions
+# when the parent path is missing. Fail fast instead.
+_stage = omni.usd.get_context().get_stage()
+_graph_path = {graph_path!r}
+_node_name = {node_name!r}
+_node_type = {node_type!r}
+_graph_prim = _stage.GetPrimAtPath(_graph_path)
+if not _graph_prim or not _graph_prim.IsValid():
+    raise RuntimeError(
+        f'add_node: graph not found at {{_graph_path!r}} — '
+        f'create it first with create_omnigraph or create_graph'
+    )
+
+keys = og.Controller.Keys
+_result = og.Controller.edit(
+    {{"graph_path": _graph_path}},
+    {{
+        keys.CREATE_NODES: [
+            (_node_name, _node_type),
+        ],
+    }},
+)
+
+# Post-check: verify the node landed under the graph.
+_node_path = f'{{_graph_path}}/{{_node_name}}'
+_node_prim = _stage.GetPrimAtPath(_node_path)
+if not _node_prim or not _node_prim.IsValid():
+    raise RuntimeError(
+        f'add_node: og.Controller.edit returned but no prim at {{_node_path!r}} — '
+        f'likely unknown node_type {{_node_type!r}} (extension not loaded?)'
+    )
+print(f"Added node '{{_node_name}}' ({{_node_type}}) to {{_graph_path}}")
+"""
+
+
+def _gen_connect_nodes(args: Dict) -> str:
+    """Wire src.outputs:X -> dst.inputs:Y via og.Controller.edit() with CONNECT."""
+    graph_path = args["graph_path"]
+    src = args["src"]
+    dst = args["dst"]
+    return f"""\
+import omni.graph.core as og
+
+keys = og.Controller.Keys
+og.Controller.edit(
+    {{"graph_path": "{graph_path}"}},
+    {{
+        keys.CONNECT: [
+            ("{src}", "{dst}"),
+        ],
+    }},
+)
+print(f"Connected {src} -> {dst} in {graph_path}")
+"""
+
+
+def _gen_set_graph_variable(args: Dict) -> str:
+    """Set a graph-scoped variable on an OmniGraph via og.Controller."""
+    graph_path = args["graph_path"]
+    var_name = args["name"]
+    value = args["value"]
+    return f"""\
+import omni.graph.core as og
+
+graph = og.Controller.graph("{graph_path}")
+if graph is None:
+    raise RuntimeError(f"OmniGraph not found at {graph_path}")
+
+# Try og.Controller.set_variable() first (modern API);
+# fall back to graph.get_variable(name).set(value) on older Kit builds.
+_value = {value!r}
+try:
+    og.Controller.set_variable(("{graph_path}", "{var_name}"), _value)
+    print(f"Set variable '{var_name}' on {graph_path} via og.Controller.set_variable")
+except Exception:
+    var = graph.get_variable("{var_name}")
+    if var is None:
+        raise RuntimeError(f"Variable '{var_name}' does not exist on {graph_path}")
+    var.set(_value)
+    print(f"Set variable '{var_name}' on {graph_path} via graph.get_variable().set()")
+"""
+
+
+def _gen_delete_node(args: Dict) -> str:
+    """Remove a single node via og.Controller.edit() with DELETE_NODES."""
+    graph_path = args["graph_path"]
+    node_name = args["node_name"]
+    return f"""\
+import omni.graph.core as og
+
+keys = og.Controller.Keys
+og.Controller.edit(
+    {{"graph_path": "{graph_path}"}},
+    {{
+        keys.DELETE_NODES: [
+            "{node_name}",
+        ],
+    }},
+)
+print(f"Deleted node '{node_name}' from {graph_path}")
+"""
+
+
+def _gen_bulk_set_attribute(args: Dict) -> str:
+    """T14.1 — atomically set the same attribute on many prims via Sdf.ChangeBlock."""
+    prim_paths = args["prim_paths"]
+    attr = args["attr"]
+    value = args["value"]
+    return f"""\
+import omni.usd
+from pxr import Sdf, Usd, UsdGeom, Gf
+
+stage = omni.usd.get_context().get_stage()
+_paths = {prim_paths!r}
+_attr = {attr!r}
+_value = {value!r}
+
+# Infer a USD Sdf.ValueTypeName so missing attributes can be created on the fly
+def _infer_value_type(v):
+    if isinstance(v, bool):
+        return Sdf.ValueTypeNames.Bool
+    if isinstance(v, int):
+        return Sdf.ValueTypeNames.Int
+    if isinstance(v, float):
+        return Sdf.ValueTypeNames.Float
+    if isinstance(v, str):
+        return Sdf.ValueTypeNames.String
+    if isinstance(v, (list, tuple)):
+        n = len(v)
+        if n == 2:
+            return Sdf.ValueTypeNames.Float2
+        if n == 3:
+            return Sdf.ValueTypeNames.Float3
+        if n == 4:
+            return Sdf.ValueTypeNames.Float4
+    return None
+
+_applied = 0
+_skipped_missing_prim = 0
+_skipped_create_failed = 0
+_created = 0
+
+with Sdf.ChangeBlock():
+    for _p in _paths:
+        _prim = stage.GetPrimAtPath(_p)
+        if not _prim or not _prim.IsValid():
+            _skipped_missing_prim += 1
+            continue
+        _a = _prim.GetAttribute(_attr)
+        if not _a or not _a.IsValid():
+            _tname = _infer_value_type(_value)
+            if _tname is None:
+                _skipped_create_failed += 1
+                continue
+            _a = _prim.CreateAttribute(_attr, _tname)
+            _created += 1
+        try:
+            # Wrap Vec-like lists into Gf types when the attribute expects them
+            _typename = str(_a.GetTypeName()) if _a and _a.IsValid() else ""
+            _v = _value
+            if isinstance(_value, (list, tuple)):
+                if "3" in _typename and len(_value) == 3:
+                    _v = Gf.Vec3f(*_value) if "float" in _typename.lower() else Gf.Vec3d(*_value)
+            _a.Set(_v)
+            _applied += 1
+        except Exception as _e:
+            _skipped_create_failed += 1
+
+if _applied == 0 and len(_paths) > 0:
+    # Zero applied across a non-empty prim list is a silent-success: the
+    # agent would narrate "I set X on all prims" while nothing landed.
+    # Raise with the skip breakdown so the agent can report what failed.
+    raise RuntimeError(
+        "bulk_set_attribute: 0 of " + str(len(_paths)) + " paths had the "
+        "attribute set. missing_prim=" + str(_skipped_missing_prim) +
+        ", create_failed=" + str(_skipped_create_failed) +
+        ". Check the paths exist and the attribute name / value type are compatible."
+    )
+
+print(f"bulk_set_attribute: applied={{_applied}} created={{_created}} "
+      f"missing_prim={{_skipped_missing_prim}} failed={{_skipped_create_failed}} "
+      f"attr={attr!r}")
+"""
+
+
+def _gen_bulk_apply_schema(args: Dict) -> str:
+    """T14.2 — apply the same API schema to many prims via Sdf.ChangeBlock."""
+    from ..tool_executor import _TIER14_SCHEMA_MAP
+    prim_paths = args["prim_paths"]
+    schema = args["schema"]
+    if schema in _TIER14_SCHEMA_MAP:
+        mod, cls = _TIER14_SCHEMA_MAP[schema]
+        return f"""\
+import omni.usd
+from pxr import Sdf
+from {mod} import {cls}
+
+stage = omni.usd.get_context().get_stage()
+_paths = {prim_paths!r}
+
+_applied = 0
+_missing = 0
+_already = 0
+
+with Sdf.ChangeBlock():
+    for _p in _paths:
+        _prim = stage.GetPrimAtPath(_p)
+        if not _prim or not _prim.IsValid():
+            _missing += 1
+            continue
+        if _prim.HasAPI({cls}):
+            _already += 1
+            continue
+        {cls}.Apply(_prim)
+        _applied += 1
+
+print(f"bulk_apply_schema: schema={schema!r} applied={{_applied}} "
+      f"already_had={{_already}} missing={{_missing}}")
+"""
+    # Fallback: ApplyAPISchemaCommand per prim. Verify each result by diffing
+    # GetAppliedSchemas() before/after — Kit's command silently no-ops on
+    # unknown schema names, so we raise if nothing changed.
+    return f"""\
+import omni.usd
+import omni.kit.commands
+from pxr import Sdf
+
+stage = omni.usd.get_context().get_stage()
+_paths = {prim_paths!r}
+
+_applied = 0
+_missing = 0
+_silent_noop = 0
+
+with Sdf.ChangeBlock():
+    for _p in _paths:
+        _prim = stage.GetPrimAtPath(_p)
+        if not _prim or not _prim.IsValid():
+            _missing += 1
+            continue
+        _before = set(_prim.GetAppliedSchemas() or [])
+        try:
+            omni.kit.commands.execute('ApplyAPISchemaCommand', api={schema!r}, prim=_prim)
+        except Exception:
+            _missing += 1
+            continue
+        _after = set(_prim.GetAppliedSchemas() or [])
+        if _before == _after:
+            _silent_noop += 1
+        else:
+            _applied += 1
+
+if _silent_noop > 0 and _applied == 0:
+    raise RuntimeError(
+        f'bulk_apply_schema: schema {schema!r} applied to 0 prims; '
+        f'{{_silent_noop}} silent no-ops — likely unknown schema name.'
+    )
+print(f"bulk_apply_schema: schema={schema!r} applied={{_applied}} "
+      f"silent_noops={{_silent_noop}} missing={{_missing}}")
+"""
+
+
+def _gen_group_prims(args: Dict) -> str:
+    """T14.4 — create an Xform parent and reparent prims under it."""
+    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    prim_paths = args["prim_paths"]
+    group_name = args["group_name"]
+    group_parent = args.get("group_parent", "/World")
+    # Guard against slashes in group_name
+    safe_name = str(group_name).strip("/").replace("/", "_")
+    group_path = f"{group_parent.rstrip('/')}/{safe_name}"
+    return f"""\
+import omni.usd
+from pxr import Sdf, UsdGeom, Gf
+
+{_SAFE_XFORM_SNIPPET}
+
+stage = omni.usd.get_context().get_stage()
+_paths = {prim_paths!r}
+_group_path = {group_path!r}
+
+# Create the Xform group (idempotent — DefinePrim returns existing if present)
+_group_prim = stage.DefinePrim(_group_path, "Xform")
+
+_moved = 0
+_missing = 0
+_skipped_self = 0
+
+with Sdf.ChangeBlock():
+    for _src in _paths:
+        _prim = stage.GetPrimAtPath(_src)
+        if not _prim or not _prim.IsValid():
+            _missing += 1
+            continue
+        if _src == _group_path or _src.startswith(_group_path + "/"):
+            _skipped_self += 1
+            continue
+        _leaf = _src.rsplit("/", 1)[-1]
+        _dst = _group_path + "/" + _leaf
+        # Capture world transform BEFORE the move so we can restore it
+        try:
+            _world = UsdGeom.Xformable(_prim).ComputeLocalToWorldTransform(0)
+            _pos = _world.ExtractTranslation()
+        except Exception:
+            _pos = Gf.Vec3d(0, 0, 0)
+        # Reparent via CopySpec + RemovePrim (USD's canonical "move" pattern)
+        try:
+            Sdf.CopySpec(stage.GetRootLayer(), _src, stage.GetRootLayer(), _dst)
+            stage.RemovePrim(_src)
+            _new_prim = stage.GetPrimAtPath(_dst)
+            if _new_prim and _new_prim.IsValid() and UsdGeom.Xformable(_new_prim):
+                _safe_set_translate(_new_prim, (_pos[0], _pos[1], _pos[2]))
+            _moved += 1
+        except Exception as _e:
+            _missing += 1
+
+print(f"group_prims: group={{_group_path}} moved={{_moved}} "
+      f"missing={{_missing}} skipped_self={{_skipped_self}}")
+"""
+
+
+def _gen_duplicate_prims(args: Dict) -> str:
+    """T14.5 — duplicate prims via Sdf.CopySpec and apply a positional offset."""
+    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    prim_paths = args["prim_paths"]
+    offset = args["offset"]
+    suffix = args.get("suffix", "_copy")
+    ox, oy, oz = offset[0], offset[1], offset[2]
+    return f"""\
+import omni.usd
+from pxr import Sdf, UsdGeom, Gf
+
+{_SAFE_XFORM_SNIPPET}
+
+stage = omni.usd.get_context().get_stage()
+_paths = {prim_paths!r}
+_offset = ({ox}, {oy}, {oz})
+_suffix = {suffix!r}
+
+_pairs = []
+_missing = 0
+
+def _unique_dst(base):
+    # Append numeric suffixes on collision: _copy, _copy2, _copy3, ...
+    cand = base + _suffix
+    if not stage.GetPrimAtPath(cand):
+        return cand
+    i = 2
+    while stage.GetPrimAtPath(base + _suffix + str(i)):
+        i += 1
+    return base + _suffix + str(i)
+
+with Sdf.ChangeBlock():
+    for _src in _paths:
+        _prim = stage.GetPrimAtPath(_src)
+        if not _prim or not _prim.IsValid():
+            _missing += 1
+            continue
+        _dst = _unique_dst(_src)
+        try:
+            Sdf.CopySpec(stage.GetRootLayer(), _src, stage.GetRootLayer(), _dst)
+        except Exception:
+            _missing += 1
+            continue
+        _new = stage.GetPrimAtPath(_dst)
+        if _new and _new.IsValid() and UsdGeom.Xformable(_new):
+            # Read existing local translate (if any) and add offset
+            _cur = Gf.Vec3d(0, 0, 0)
+            _xf = UsdGeom.Xformable(_new)
+            for _op in _xf.GetOrderedXformOps():
+                if _op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+                    _cur = Gf.Vec3d(_op.Get() or (0, 0, 0))
+                    break
+            _new_t = (_cur[0] + _offset[0], _cur[1] + _offset[1], _cur[2] + _offset[2])
+            _safe_set_translate(_new, _new_t)
+        _pairs.append((_src, _dst))
+
+print(f"duplicate_prims: count={{len(_pairs)}} missing={{_missing}} "
+      f"offset={offset!r}")
+for _s, _d in _pairs:
+    print(f"  {{_s}} -> {{_d}}")
+"""
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
