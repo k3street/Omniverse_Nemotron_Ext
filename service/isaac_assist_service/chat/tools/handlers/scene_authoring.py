@@ -2042,6 +2042,230 @@ def _gen_assign_class_to_children(args: Dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Phase 6 wave 23 — OmniGraph + mesh ops + area zones
+
+
+def _gen_merge_meshes(args: Dict) -> str:
+    prim_paths = args["prim_paths"]
+    output_path = args["output_path"]
+
+    return f"""\
+import omni.usd
+from isaacsim.util.merge_mesh import MeshMerger
+
+stage = omni.usd.get_context().get_stage()
+
+# Ensure output parent exists
+output_path = '{output_path}'
+parent_path = '/'.join(output_path.rsplit('/', 1)[:-1]) or '/World'
+if not stage.GetPrimAtPath(parent_path).IsValid():
+    stage.DefinePrim(parent_path, 'Xform')
+
+prim_paths = {prim_paths}
+
+# Merge meshes
+merger = MeshMerger(stage)
+merger.update_selection(prim_paths)
+merger.merge()
+
+print(f"Merged {{len(prim_paths)}} meshes: {{prim_paths}}")
+"""
+
+
+def _gen_create_graph(args: Dict) -> str:
+    """Generate OmniGraph code from a template-based description."""
+    from .. import tool_executor as _te  # noqa: PLC0415
+    _OG_TEMPLATES = _te._OG_TEMPLATES
+    _detect_template = _te._detect_template
+
+    description = args.get("description", "")
+    template_name = args.get("template")
+    graph_path = args.get("graph_path", "/World/ActionGraph")
+
+    # Auto-detect template if not explicitly specified
+    if not template_name:
+        template_name = _detect_template(description)
+    if not template_name or template_name not in _OG_TEMPLATES:
+        return (
+            f"# Could not match description to a known template: '{description}'\n"
+            f"# Available templates: {', '.join(sorted(_OG_TEMPLATES.keys()))}\n"
+            f"# Specify 'template' parameter explicitly, or use create_omnigraph for free-form graphs.\n"
+            f"raise ValueError('No matching OmniGraph template for: {description}')"
+        )
+
+    tmpl = _OG_TEMPLATES[template_name]
+    defaults = tmpl.get("defaults", {})
+
+    # Resolve parameter values from args, falling back to defaults
+    params = {}
+    for key in tmpl.get("param_keys", []):
+        val = args.get(key) or defaults.get(key, "")
+        params[key] = val
+
+    # Build node definitions
+    node_defs = ",\n            ".join(
+        f"('{name}', '{ntype}')" for name, ntype in tmpl["nodes"]
+    )
+
+    # Build connection definitions
+    conn_defs = ",\n            ".join(
+        f"('{src}', '{tgt}')" for src, tgt in tmpl["connections"]
+    )
+
+    # Build SET_VALUES with parameter substitution
+    val_items = []
+    for attr_path, val_template in tmpl.get("values", {}).items():
+        resolved = val_template.format(**params) if isinstance(val_template, str) else val_template
+        if isinstance(resolved, str):
+            val_items.append(f"            ('{attr_path}', '{resolved}')")
+        else:
+            val_items.append(f"            ('{attr_path}', {resolved})")
+
+    set_values_block = ""
+    if val_items:
+        val_defs = ",\n".join(val_items)
+        set_values_block = f"""        keys.SET_VALUES: [
+{val_defs}
+        ],"""
+
+    return f"""\
+import omni.graph.core as og
+
+# Template: {template_name} — {tmpl['description']}
+# {description}
+
+# ROS2 templates need the ROS2 bridge extension loaded first
+if "{template_name}".startswith("ros2"):
+    try:
+        import omni.kit.app as _app
+        _mgr = _app.get_app().get_extension_manager()
+        if not _mgr.is_extension_enabled("isaacsim.ros2.bridge"):
+            _mgr.set_extension_enabled_immediate("isaacsim.ros2.bridge", True)
+    except Exception as _ex:
+        print(f"[warn] could not enable isaacsim.ros2.bridge: {{_ex}}")
+
+keys = og.Controller.Keys
+(graph, nodes, _, _) = og.Controller.edit(
+    {{
+        "graph_path": "{graph_path}",
+        "evaluator_name": "execution",
+    }},
+    {{
+        keys.CREATE_NODES: [
+            {node_defs}
+        ],
+        keys.CONNECT: [
+            {conn_defs}
+        ],
+{set_values_block}
+    }},
+)
+print(f"Created {template_name} graph at {graph_path} with {{len(nodes)}} nodes")
+"""
+
+
+def _gen_explain_graph(args: Dict) -> str:
+    """Generate code that reads an OmniGraph and prints a structured JSON description."""
+    graph_path = args["graph_path"]
+    return f"""\
+import omni.graph.core as og
+import json
+
+graph = og.get_graph_by_path('{graph_path}')
+if graph is None:
+    raise ValueError("No OmniGraph found at '{graph_path}'")
+
+nodes = graph.get_nodes()
+result = {{
+    "graph_path": "{graph_path}",
+    "node_count": len(nodes),
+    "nodes": [],
+    "connections": [],
+}}
+
+for node in nodes:
+    node_info = {{
+        "name": node.get_prim_path().split("/")[-1],
+        "type": node.get_node_type().get_node_type(),
+        "path": str(node.get_prim_path()),
+    }}
+    # Read input attribute values
+    attrs = {{}}
+    for attr in node.get_attributes():
+        name = attr.get_name()
+        if name.startswith("inputs:"):
+            try:
+                val = attr.get()
+                if val is not None and not isinstance(val, (bytes, memoryview)):
+                    attrs[name] = val
+            except Exception:
+                pass
+    if attrs:
+        node_info["inputs"] = attrs
+    result["nodes"].append(node_info)
+
+    # Read connections (outputs)
+    for attr in node.get_attributes():
+        if attr.get_name().startswith("outputs:"):
+            for conn in attr.get_upstream_connections():
+                result["connections"].append({{
+                    "source": f"{{conn.get_node().get_prim_path().split('/')[-1]}}.{{conn.get_name()}}",
+                    "target": f"{{node.get_prim_path().split('/')[-1]}}.{{attr.get_name()}}",
+                }})
+
+print(json.dumps(result, indent=2, default=str))
+"""
+
+
+def _gen_activate_area(args: Dict) -> str:
+    scope = args["prim_scope"]
+    sibling_only = bool(args.get("deactivate_siblings_only", True))
+    return f"""\
+import omni.usd
+
+stage = omni.usd.get_context().get_stage()
+scope = '{scope}'
+sibling_only = {sibling_only}
+deactivated = 0
+kept = 0
+
+scope_norm = scope.rstrip('/')
+
+def _inside_scope(path):
+    return path == scope_norm or path.startswith(scope_norm + '/')
+
+# Collect ancestor paths of the scope so we can keep them active when
+# sibling_only is True (the spec's "deactivate everything outside scope"
+# would otherwise also disable the pseudo-root / /World which breaks rendering).
+ancestors = set()
+parts = scope_norm.strip('/').split('/')
+cur = ''
+for part in parts:
+    cur = cur + '/' + part
+    ancestors.add(cur)
+
+for prim in stage.TraverseAll():
+    path = str(prim.GetPath())
+    if _inside_scope(path):
+        prim.SetActive(True)
+        kept += 1
+        continue
+    if sibling_only and path in ancestors:
+        # keep structural ancestors active so the scope prim resolves
+        prim.SetActive(True)
+        kept += 1
+        continue
+    try:
+        prim.SetActive(False)
+        deactivated += 1
+    except Exception:
+        pass
+
+print(f'activate_area: scope={{scope}} kept={{kept}} deactivated={{deactivated}}')
+"""
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 

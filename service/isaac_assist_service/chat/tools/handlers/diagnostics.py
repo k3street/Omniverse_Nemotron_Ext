@@ -1633,6 +1633,286 @@ else:
 
 
 # ---------------------------------------------------------------------------
+# Phase 6 wave 23 — broken-scene + determinism + clearance monitor
+
+
+def _gen_create_broken_scene(args: Dict) -> str:
+    """Generate code that creates a scene with a specific, diagnosable fault for teaching."""
+    from .. import tool_executor as _te  # noqa: PLC0415
+    _BROKEN_SCENE_FAULTS = _te._BROKEN_SCENE_FAULTS
+
+    fault_type = args.get("fault_type", "missing_collision")
+    scene_name = args.get("scene_name", "BrokenScene")
+
+    if fault_type not in _BROKEN_SCENE_FAULTS:
+        raise ValueError(f"Unknown fault_type: {fault_type}. Valid: {list(_BROKEN_SCENE_FAULTS.keys())}")
+
+    fault = _BROKEN_SCENE_FAULTS[fault_type]
+    scene_path = f"/World/{scene_name}"
+
+    physics_scene_code = (
+        ""
+        if fault_type == "no_physics_scene"
+        else "if not stage.GetPrimAtPath('/World/PhysicsScene'):\n    UsdPhysics.Scene.Define(stage, '/World/PhysicsScene')"
+    )
+
+    if fault_type == "missing_collision":
+        fault_code = f"""\
+ground = UsdGeom.Cube.Define(stage, '{scene_path}/Ground')
+ground.AddTranslateOp().Set(Gf.Vec3d(0, 0, -0.05))
+ground.AddScaleOp().Set(Gf.Vec3f(5, 5, 0.05))
+# FAULT: NO CollisionAPI applied — the ground will not collide with anything
+# UsdPhysics.CollisionAPI.Apply(ground.GetPrim())  # THIS LINE DELIBERATELY MISSING
+
+falling = UsdGeom.Cube.Define(stage, '{scene_path}/FallingCube')
+falling.AddTranslateOp().Set(Gf.Vec3d(0, 0, 2.0))
+falling.AddScaleOp().Set(Gf.Vec3f(0.1, 0.1, 0.1))
+UsdPhysics.RigidBodyAPI.Apply(falling.GetPrim())
+UsdPhysics.CollisionAPI.Apply(falling.GetPrim())
+"""
+    elif fault_type == "zero_mass":
+        fault_code = f"""\
+body = UsdGeom.Cube.Define(stage, '{scene_path}/ZeroMassBody')
+body.AddTranslateOp().Set(Gf.Vec3d(0, 0, 1))
+UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+UsdPhysics.CollisionAPI.Apply(body.GetPrim())
+mass_api = UsdPhysics.MassAPI.Apply(body.GetPrim())
+mass_api.CreateMassAttr().Set(0.0)  # FAULT: zero mass causes PhysX NaN explosion
+"""
+    elif fault_type == "wrong_scale":
+        fault_code = f"""\
+# FAULT: object scaled 100x (cm interpreted as m)
+big = UsdGeom.Cube.Define(stage, '{scene_path}/HugeBox')
+big.AddTranslateOp().Set(Gf.Vec3d(0, 0, 50))
+big.AddScaleOp().Set(Gf.Vec3f(100, 100, 100))
+UsdPhysics.RigidBodyAPI.Apply(big.GetPrim())
+UsdPhysics.CollisionAPI.Apply(big.GetPrim())
+"""
+    elif fault_type == "inverted_joint":
+        fault_code = f"""\
+base = UsdGeom.Cube.Define(stage, '{scene_path}/Base')
+base.AddTranslateOp().Set(Gf.Vec3d(0, 0, 0.5))
+arm = UsdGeom.Cube.Define(stage, '{scene_path}/Arm')
+arm.AddTranslateOp().Set(Gf.Vec3d(0.6, 0, 0.5))
+joint = UsdPhysics.RevoluteJoint.Define(stage, '{scene_path}/Joint')
+joint.CreateBody0Rel().SetTargets(['{scene_path}/Base'])
+joint.CreateBody1Rel().SetTargets(['{scene_path}/Arm'])
+joint.CreateAxisAttr().Set('Z')  # FAULT: should be Y for typical hinge
+"""
+    elif fault_type == "no_physics_scene":
+        fault_code = f"""\
+# FAULT: PhysicsScene prim deliberately not created — no physics will run
+body = UsdGeom.Cube.Define(stage, '{scene_path}/Cube')
+body.AddTranslateOp().Set(Gf.Vec3d(0, 0, 2))
+UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+UsdPhysics.CollisionAPI.Apply(body.GetPrim())
+"""
+    else:  # inf_joint_limits
+        fault_code = f"""\
+base = UsdGeom.Cube.Define(stage, '{scene_path}/Base')
+arm = UsdGeom.Cube.Define(stage, '{scene_path}/Arm')
+arm.AddTranslateOp().Set(Gf.Vec3d(0.5, 0, 0))
+joint = UsdPhysics.RevoluteJoint.Define(stage, '{scene_path}/Joint')
+joint.CreateBody0Rel().SetTargets(['{scene_path}/Base'])
+joint.CreateBody1Rel().SetTargets(['{scene_path}/Arm'])
+joint.CreateAxisAttr().Set('Y')
+joint.CreateLowerLimitAttr().Set(float('-inf'))  # FAULT: ±inf limits
+joint.CreateUpperLimitAttr().Set(float('inf'))
+"""
+
+    return f"""\
+# Broken scene: {fault_type}
+# What breaks: {fault['what_breaks']}
+# Learning goal: {fault['learning_goal']}
+import omni.usd
+from pxr import UsdGeom, UsdPhysics, Gf
+
+stage = omni.usd.get_context().get_stage()
+scope = UsdGeom.Xform.Define(stage, '{scene_path}')
+
+{physics_scene_code}
+
+{fault_code}
+
+print(f"Created broken scene: {scene_path}")
+print(f"Fault type: {fault_type}")
+print(f"What's wrong: {fault['what_breaks']}")
+print(f"Learning goal: {fault['learning_goal']}")
+print(f"Hint: students should diagnose this without being told the answer.")
+"""
+
+
+def _gen_enable_deterministic_mode(args: Dict) -> str:
+    """Generate code to enable deterministic simulation mode for safety validation."""
+    seed = args.get("seed", 42)
+    physics_dt = args.get("physics_dt", 1.0 / 60.0)
+    solver_iterations = args.get("solver_iterations", 4)
+    archive_path = args.get("export_archive_path")
+
+    archive_code = ""
+    if archive_path:
+        archive_code = f"""
+# Export reproducibility archive
+import zipfile
+import json
+import platform
+archive = {archive_path!r}
+manifest = {{
+    "seed": {seed},
+    "physics_dt": {physics_dt},
+    "solver_iterations": {solver_iterations},
+    "platform": platform.platform(),
+    "python_version": platform.python_version(),
+}}
+try:
+    import isaacsim
+    manifest["isaac_sim_version"] = isaacsim.__version__
+except (ImportError, AttributeError):
+    pass
+try:
+    import omni.physx
+    manifest["physx_version"] = "see omni.physx package"
+except ImportError:
+    pass
+os.makedirs(os.path.dirname(archive) or ".", exist_ok=True)
+with zipfile.ZipFile(archive, "w") as z:
+    z.writestr("manifest.json", json.dumps(manifest, indent=2))
+print(f"Reproducibility archive: {{archive}}")
+"""
+
+    return f"""\
+# Enable deterministic simulation mode (Safety & Compliance S.5)
+import os
+import random
+import omni.usd
+from pxr import UsdPhysics, PhysxSchema
+
+random.seed({seed})
+try:
+    import numpy as np
+    np.random.seed({seed})
+except ImportError:
+    pass
+
+# Configure physics scene for determinism
+stage = omni.usd.get_context().get_stage()
+physics_scene_path = "/PhysicsScene"
+physics_scene = stage.GetPrimAtPath(physics_scene_path)
+if not physics_scene.IsValid():
+    physics_scene_path = "/World/PhysicsScene"
+    physics_scene = stage.GetPrimAtPath(physics_scene_path)
+
+if physics_scene.IsValid():
+    # Apply PhysxSceneAPI for advanced settings
+    physx_api = PhysxSchema.PhysxSceneAPI.Apply(physics_scene)
+    # TGS solver — deterministic for identical inputs (vs PGS which has slight nondeterminism)
+    physx_api.CreateSolverTypeAttr().Set("TGS")
+    # Force CPU mode — GPU dynamics is NOT fully deterministic
+    physx_api.CreateBroadphaseTypeAttr().Set("MBP")
+    physx_api.CreateGpuFoundLostPairsCapacityAttr().Set(0)  # Disable GPU broadphase
+    physx_api.CreateEnableGPUDynamicsAttr().Set(False)
+    # Fixed solver iterations
+    physx_api.CreateMinPositionIterationCountAttr().Set({solver_iterations})
+    physx_api.CreateMaxPositionIterationCountAttr().Set({solver_iterations})
+
+# Set fixed physics timestep
+import carb.settings
+settings = carb.settings.get_settings()
+settings.set("/persistent/simulation/minFrameRate", int(1.0 / {physics_dt}))
+settings.set("/physics/fixedTimeStep", {physics_dt})
+
+print(f"Deterministic mode ENABLED:")
+print(f"  Seed: {seed}")
+print(f"  Physics dt: {physics_dt}s ({{1.0 / {physics_dt}:.0f}} Hz)")
+print(f"  Solver iterations: {solver_iterations} (fixed)")
+print(f"  Solver: TGS (deterministic for identical inputs)")
+print(f"  GPU dynamics: DISABLED (CPU only — GPU is not fully deterministic)")
+print(f"  WARNING: PhysX GPU mode is NOT deterministic. CPU+TGS is for safety validation.")
+{archive_code}
+"""
+
+
+def _gen_set_clearance_monitor(args: Dict) -> str:
+    """Generate code that arms a clearance / near-miss monitor on a robot."""
+    art_path = args["articulation_path"]
+    clearance_mm = float(args.get("clearance_mm", 50.0))
+    warning_mm = float(args.get("warning_mm", 100.0))
+    target_prims = args.get("target_prims") or []
+
+    # Stop zone is the contactOffset — events fire when within this distance.
+    # Use the larger of warning/stop for the contactOffset itself so we get
+    # warning-zone events too; the callback then classifies them by separation.
+    monitor_offset_mm = max(clearance_mm, warning_mm)
+    stop_m = clearance_mm / 1000.0
+    warn_m = warning_mm / 1000.0
+    monitor_m = monitor_offset_mm / 1000.0
+    targets_repr = repr(list(target_prims))
+
+    return f"""\
+import omni.usd
+import omni.physx
+from pxr import Usd, UsdGeom, UsdPhysics, PhysxSchema
+
+stage = omni.usd.get_context().get_stage()
+robot_prim = stage.GetPrimAtPath('{art_path}')
+if not robot_prim.IsValid():
+    raise RuntimeError('Articulation not found: {art_path}')
+
+stop_threshold_m = {stop_m}
+warning_threshold_m = {warn_m}
+monitor_offset_m = {monitor_m}
+target_paths = set({targets_repr})
+
+# 1) Walk all descendants and arm contactOffset + contact reporting on every
+#    prim that already has a CollisionAPI (i.e. each robot link's collider).
+link_paths = []
+for desc in Usd.PrimRange(robot_prim):
+    if desc.HasAPI(UsdPhysics.CollisionAPI):
+        physx_col = PhysxSchema.PhysxCollisionAPI.Apply(desc)
+        # contactOffset is in scene units (meters in Isaac Sim defaults)
+        physx_col.CreateContactOffsetAttr().Set(monitor_offset_m)
+        # contactReport API must be applied to receive on_contact events
+        PhysxSchema.PhysxContactReportAPI.Apply(desc)
+        link_paths.append(str(desc.GetPath()))
+
+# 2) Arm the same APIs on each target so PhysX pairs them with the robot links
+for tp in target_paths:
+    tprim = stage.GetPrimAtPath(tp)
+    if tprim.IsValid() and tprim.HasAPI(UsdPhysics.CollisionAPI):
+        physx_col = PhysxSchema.PhysxCollisionAPI.Apply(tprim)
+        physx_col.CreateContactOffsetAttr().Set(monitor_offset_m)
+        PhysxSchema.PhysxContactReportAPI.Apply(tprim)
+
+# 3) Subscribe to contact-report events. `separation > 0` means the two
+#    colliders are still apart but inside the contactOffset zone.
+def _on_contact_report(contact_headers, contact_data):
+    for header in contact_headers:
+        actor0 = str(header.actor0)
+        actor1 = str(header.actor1)
+        # If targets were provided, only report robot-vs-target pairs
+        if target_paths and not (actor0 in target_paths or actor1 in target_paths):
+            continue
+        for i in range(header.contact_data_offset,
+                       header.contact_data_offset + header.num_contact_data):
+            sep = float(contact_data[i].separation)
+            if sep <= 0:
+                # Actual penetration — full collision
+                print(f'[CLEARANCE] COLLISION: {{actor0}} <-> {{actor1}} (penetration={{-sep*1000:.1f}}mm)')
+            elif sep < stop_threshold_m:
+                print(f'[CLEARANCE] STOP: {{actor0}} within {{sep*1000:.1f}}mm of {{actor1}} (<{{stop_threshold_m*1000:.0f}}mm stop zone)')
+            elif sep < warning_threshold_m:
+                print(f'[CLEARANCE] WARNING: {{actor0}} within {{sep*1000:.1f}}mm of {{actor1}} (<{{warning_threshold_m*1000:.0f}}mm warning zone)')
+
+physx_iface = omni.physx.get_physx_interface()
+_clearance_sub = physx_iface.subscribe_contact_report_events(_on_contact_report)
+
+print(f'Clearance monitor armed on {{len(link_paths)}} robot links of {art_path}')
+print(f'  warning zone: <{{warning_threshold_m*1000:.0f}}mm   stop zone: <{{stop_threshold_m*1000:.0f}}mm')
+print(f'  monitoring against {{len(target_paths)}} target prims')
+"""
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
