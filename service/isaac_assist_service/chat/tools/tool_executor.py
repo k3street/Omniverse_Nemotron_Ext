@@ -1741,6 +1741,15 @@ from .handlers.sensors import (  # noqa: E402
     _gen_inspect_camera,
     _gen_set_camera_look_at,
     _gen_set_camera_params,
+    _handle_add_force_torque_sensor,       # Phase 7 wave 9
+    _handle_add_vision_classifier_gate,    # Phase 7 wave 9
+    _handle_barcode_reader_sensor,         # Phase 7 wave 9
+    _handle_list_contacts,                 # Phase 7 wave 9
+    _handle_nir_material_sensor,           # Phase 7 wave 9
+    _handle_overlap_box,                   # Phase 7 wave 9
+    _handle_overlap_sphere,                # Phase 7 wave 9
+    _handle_raycast,                       # Phase 7 wave 9
+    _handle_sweep_sphere,                  # Phase 7 wave 9
 )
 from .handlers.physics import (  # noqa: E402
     _gen_apply_force,
@@ -4574,159 +4583,7 @@ DATA_HANDLERS["vision_plan_trajectory"] = _handle_vision_plan_trajectory
 DATA_HANDLERS["vision_analyze_scene"] = _handle_vision_analyze_scene
 
 
-async def _handle_add_vision_classifier_gate(args: Dict) -> Dict:
-    """Tier A tool — build a class-routing dict by VLM vision classification.
-
-    Agent-side helper for vision-gated palletizing/sorting (CP-N: parcel
-    singulation, vision-quality-gate, postal cross-belt sorter, etc).
-
-    Pipeline:
-      1. (Optional) set viewport to camera_path so the captured image is
-         from the requested vantage. If omitted, current viewport is used.
-      2. Capture viewport image.
-      3. For each cube_path, get its world position via BBoxCache.
-      4. Project world position to image (y, x) via the camera's
-         intrinsics. Match each cube to the nearest detection by
-         normalized image distance.
-      5. Return {cube_path: detected_label} mapping.
-
-    Args:
-      camera_path:    USD path of the camera to use (optional)
-      cube_paths:     list of USD paths to classify
-      class_labels:   list of expected class names (e.g. ['red cube', 'blue cube'])
-      destination_map: optional {class_label: destination_prim_path} —
-                       when provided, returned mapping is keyed by
-                       cube_path → destination_path (color_routing-shaped)
-                       in addition to cube_path → class_label.
-
-    Returns:
-      {
-        cube_to_class: {cube_path: detected_label, ...},
-        cube_to_destination: {cube_path: destination_path, ...} (if destination_map provided),
-        unmatched_cubes: [cube_path, ...],
-        raw_detections: [{point: [y,x], label: ...}, ...],
-        model: gemini-...,
-      }
-
-    v1 simplification: 2D-distance matching is performed in image
-    coordinates without explicit world→image projection — assumes
-    detections are returned in roughly the same order as cube_paths
-    by left-to-right viewport position. Agent should validate
-    by inspecting unmatched_cubes and raw_detections.
-    """
-    camera_path = args.get("camera_path")
-    cube_paths = list(args.get("cube_paths") or [])
-    class_labels = list(args.get("class_labels") or [])
-    destination_map = args.get("destination_map") or {}
-
-    if not cube_paths:
-        return {"type": "error", "error": "cube_paths is required and non-empty"}
-    if not class_labels:
-        return {"type": "error", "error": "class_labels is required (list of expected class names)"}
-
-    # Optionally set viewport to the requested camera before capture.
-    if camera_path:
-        try:
-            await execute_tool_call("set_viewport_camera", {"camera_path": camera_path})
-        except Exception as _e:
-            # Non-fatal: continue with current viewport
-            pass
-
-    # Force-flush render before capture. Kit RPC's /capture endpoint
-    # otherwise returns axis-only black image when the viewport hasn't
-    # rendered the new scene state yet (KNOWN LIMITATION).
-    flush_code = """
-import omni.kit.app
-app = omni.kit.app.get_app()
-for _ in range(60):
-    app.update()
-print("flushed")
-"""
-    try:
-        await kit_tools.exec_sync(flush_code, timeout=15)
-    except Exception:
-        pass
-
-    # Capture viewport
-    img, mime = await _get_viewport_bytes()
-    if img is None:
-        return {"type": "error", "error": "Could not capture viewport image. Is Isaac Sim running?"}
-
-    # Run vision detection
-    vp = _get_vision_provider()
-    detections = await vp.detect_objects(img, mime, labels=class_labels,
-                                          max_objects=max(10, len(cube_paths)))
-
-    # Get cube world positions via Kit RPC
-    pos_code = f"""\
-import omni.usd, json
-from pxr import Usd, UsdGeom
-stage = omni.usd.get_context().get_stage()
-positions = {{}}
-for path in {cube_paths!r}:
-    p = stage.GetPrimAtPath(path)
-    if not p or not p.IsValid(): continue
-    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
-    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
-    if b.IsEmpty(): continue
-    c = b.GetMidpoint()
-    positions[path] = [float(c[0]), float(c[1]), float(c[2])]
-print(json.dumps(positions))
-"""
-    pos_res = await kit_tools.exec_sync(pos_code, timeout=10)
-    cube_world_positions = {}
-    for line in (pos_res.get("output") or "").splitlines():
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                import json as _j
-                cube_world_positions = _j.loads(line)
-                break
-            except Exception:
-                continue
-
-    # Match detections to cubes by sorted left-to-right xy comparison.
-    # v1 heuristic: sort cubes by world x (ascending → leftmost first
-    # in a robot-standard front-facing camera), sort detections by
-    # image x (point[1]). Pair them in order.
-    sorted_cubes = sorted(
-        [p for p in cube_paths if p in cube_world_positions],
-        key=lambda p: cube_world_positions[p][0],
-    )
-    sorted_dets = sorted(
-        [d for d in detections if isinstance(d.get("point"), (list, tuple)) and len(d["point"]) >= 2],
-        key=lambda d: float(d["point"][1]),
-    )
-
-    cube_to_class: Dict[str, str] = {}
-    unmatched_cubes: List[str] = []
-    n_pairs = min(len(sorted_cubes), len(sorted_dets))
-    for i in range(n_pairs):
-        cube_to_class[sorted_cubes[i]] = sorted_dets[i].get("label", "")
-    for cube in sorted_cubes[n_pairs:]:
-        unmatched_cubes.append(cube)
-
-    cube_to_destination = {}
-    if destination_map:
-        for cube, label in cube_to_class.items():
-            # Fuzzy match: detected label may be "red cube" while
-            # destination_map keys are "red". Try exact, then prefix.
-            dest = destination_map.get(label)
-            if dest is None:
-                for k, v in destination_map.items():
-                    if k.lower() in label.lower() or label.lower() in k.lower():
-                        dest = v
-                        break
-            if dest:
-                cube_to_destination[cube] = dest
-
-    return {
-        "cube_to_class": cube_to_class,
-        "cube_to_destination": cube_to_destination,
-        "unmatched_cubes": unmatched_cubes,
-        "raw_detections": detections,
-        "model": getattr(vp, "model", "?"),
-    }
+# _handle_add_vision_classifier_gate moved to handlers/sensors.py (Phase 7 wave 9).
 
 
 DATA_HANDLERS["add_vision_classifier_gate"] = _handle_add_vision_classifier_gate
@@ -4772,51 +4629,7 @@ DATA_HANDLERS["surface_gripper"] = _handle_surface_gripper
 DATA_HANDLERS["create_articulated_joint"] = _handle_create_articulated_joint
 
 
-async def _handle_barcode_reader_sensor(args: Dict) -> Dict:
-    """Tier B tool — creates a barcode-reader sensor at a fixed scan position.
-
-    Reads cube identity via Semantics_class lookup when a cube enters the
-    sensor's xy zone. Output published as USD attribute on the sensor prim:
-      barcode:last_read (cube path)
-      barcode:last_class (semantic class read)
-      barcode:read_count
-
-    For canonical-time, creates the sensor prim with attrs. Runtime barcode
-    reading would be a per-tick callback (controller-side, Sprint 3+).
-
-    Args:
-      sensor_path:  USD path of the barcode-reader prim
-      position:     [x, y, z] of scan zone
-      scan_radius:  radius of scan zone (default 0.05m)
-
-    Returns: {sensor_path, position, scan_radius}
-    """
-    sensor_path = args["sensor_path"]
-    position = args.get("position", [0.4, 0.4, 0.835])
-    scan_radius = float(args.get("scan_radius", 0.05))
-
-    code = f"""\
-import omni.usd, json
-from pxr import UsdGeom, Sdf, Gf
-stage = omni.usd.get_context().get_stage()
-pp = Sdf.Path({sensor_path!r})
-prim = stage.GetPrimAtPath(pp)
-if not prim or not prim.IsValid():
-    prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
-UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d({position[0]}, {position[1]}, {position[2]}))
-prim.CreateAttribute("barcode:scan_radius", Sdf.ValueTypeNames.Float).Set({scan_radius})
-prim.CreateAttribute("barcode:last_read",   Sdf.ValueTypeNames.String).Set("")
-prim.CreateAttribute("barcode:last_class",  Sdf.ValueTypeNames.String).Set("")
-prim.CreateAttribute("barcode:read_count",  Sdf.ValueTypeNames.Int).Set(0)
-print(json.dumps({{"created": str(prim.GetPath()), "position": {position!r}, "scan_radius": {scan_radius}}}))
-"""
-    res = await kit_tools.exec_sync(code, timeout=10)
-    return {
-        "sensor_path": sensor_path,
-        "position": position,
-        "scan_radius": scan_radius,
-        "raw": (res.get("output") or "")[-200:],
-    }
+# _handle_barcode_reader_sensor moved to handlers/sensors.py (Phase 7 wave 9).
 
 
 DATA_HANDLERS["barcode_reader_sensor"] = _handle_barcode_reader_sensor
@@ -4856,60 +4669,7 @@ DATA_HANDLERS["setup_cortex_behavior"] = _handle_setup_cortex_behavior
 DATA_HANDLERS["setup_zone_partition"] = _handle_setup_zone_partition
 
 
-async def _handle_add_force_torque_sensor(args: Dict) -> Dict:
-    """Tier C tool — adds an Isaac Sim ForceSensor (force/torque) on a robot
-    end-effector or articulation joint.
-
-    Used by #22 Peg-in-Hole (force-threshold-gated phase transitions).
-    Wraps Isaac Sim's IsaacForceSensor schema.
-
-    Args:
-      sensor_path:   USD path of the force sensor
-      parent_path:   USD path of the prim to attach sensor to (robot link)
-      threshold:     force threshold for triggering events (default 5.0 N)
-
-    Returns: {sensor_path, parent_path, threshold}
-    """
-    sensor_path = args["sensor_path"]
-    parent_path = args["parent_path"]
-    threshold = float(args.get("threshold", 5.0))
-
-    code = f"""\
-import omni.usd, json
-from pxr import UsdPhysics, Sdf
-stage = omni.usd.get_context().get_stage()
-parent = stage.GetPrimAtPath({parent_path!r})
-if not parent or not parent.IsValid():
-    print(json.dumps({{"error": f"parent not found: {parent_path!r}"}})); raise SystemExit
-
-# Apply ForceSensor schema (UsdPhysics.ForceSensor or simulated via attrs)
-try:
-    api = UsdPhysics.RigidBodyAPI.Get(parent)
-    if not api:
-        api = UsdPhysics.RigidBodyAPI.Apply(parent)
-except Exception:
-    pass
-
-# Create sensor prim with reading attrs (logical wrapper; reading hooks runtime)
-from pxr import UsdGeom, Gf
-spp = Sdf.Path({sensor_path!r})
-sprim = stage.GetPrimAtPath(spp)
-if not sprim or not sprim.IsValid():
-    sprim = UsdGeom.Xform.Define(stage, spp).GetPrim()
-sprim.CreateAttribute("ftsensor:parent",      Sdf.ValueTypeNames.String).Set({parent_path!r})
-sprim.CreateAttribute("ftsensor:threshold",   Sdf.ValueTypeNames.Float).Set({threshold})
-sprim.CreateAttribute("ftsensor:last_force",  Sdf.ValueTypeNames.Float3).Set((0.0, 0.0, 0.0))
-sprim.CreateAttribute("ftsensor:last_torque", Sdf.ValueTypeNames.Float3).Set((0.0, 0.0, 0.0))
-sprim.CreateAttribute("ftsensor:triggered",   Sdf.ValueTypeNames.Bool).Set(False)
-print(json.dumps({{"sensor_path": str(sprim.GetPath()), "parent": {parent_path!r}, "threshold": {threshold}}}))
-"""
-    res = await kit_tools.exec_sync(code, timeout=10)
-    return {
-        "sensor_path": sensor_path,
-        "parent_path": parent_path,
-        "threshold": threshold,
-        "raw": (res.get("output") or "")[-200:],
-    }
+# _handle_add_force_torque_sensor moved to handlers/sensors.py (Phase 7 wave 9).
 
 
 # _handle_setup_assembly_constraint moved to handlers/robot.py (Phase 7 wave 7).
@@ -4925,43 +4685,7 @@ DATA_HANDLERS["setup_assembly_constraint"] = _handle_setup_assembly_constraint
 # _handle_create_linear_axis_robot moved to handlers/robot.py (Phase 7 wave 7).
 
 
-async def _handle_nir_material_sensor(args: Dict) -> Dict:
-    """Tier C — Near-IR material classification sensor for recycling scenarios
-    (#18). Reads cube's material:type attr (set by user pre-canonical) within
-    sensor proximity.
-
-    Args:
-      sensor_path:  USD path of the sensor
-      position:     [x,y,z] of sensor center
-      scan_radius:  detection radius
-
-    Returns: {sensor_path, position, scan_radius}
-    """
-    sensor_path = args["sensor_path"]
-    position = args.get("position", [0.4, 0.4, 0.85])
-    scan_radius = float(args.get("scan_radius", 0.05))
-
-    code = f"""\
-import omni.usd, json
-from pxr import UsdGeom, Sdf, Gf
-stage = omni.usd.get_context().get_stage()
-pp = Sdf.Path({sensor_path!r})
-prim = stage.GetPrimAtPath(pp)
-if not prim or not prim.IsValid():
-    prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
-UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d({position[0]}, {position[1]}, {position[2]}))
-prim.CreateAttribute("nir:scan_radius",  Sdf.ValueTypeNames.Float).Set({scan_radius})
-prim.CreateAttribute("nir:last_material",Sdf.ValueTypeNames.String).Set("")
-prim.CreateAttribute("nir:read_count",   Sdf.ValueTypeNames.Int).Set(0)
-print(json.dumps({{"created": str(prim.GetPath()), "position": {position!r}, "scan_radius": {scan_radius}}}))
-"""
-    res = await kit_tools.exec_sync(code, timeout=10)
-    return {
-        "sensor_path": sensor_path,
-        "position": position,
-        "scan_radius": scan_radius,
-        "raw": (res.get("output") or "")[-200:],
-    }
+# _handle_nir_material_sensor moved to handlers/sensors.py (Phase 7 wave 9).
 
 
 DATA_HANDLERS["create_recirculation_loop"] = _handle_create_recirculation_loop
@@ -9867,77 +9591,7 @@ CODE_GEN_HANDLERS["set_prim_metadata"] = _gen_set_prim_metadata
 # _handle_get_physics_scene_config moved to handlers/physics.py (Phase 7 wave 2).
 # _gen_set_physics_scene_config moved to handlers/physics.py (Phase 5 wave 3).
 
-async def _handle_list_contacts(args: Dict) -> Dict:
-    """Subscribe to PhysX contact reports for a body and return the pairs."""
-    prim_path = args["prim_path"]
-    duration = float(args.get("duration", 0.5))
-    min_impulse = float(args.get("min_impulse", 0.0))
-    code = f"""\
-import omni.usd
-import json
-import time
-from pxr import UsdPhysics, PhysxSchema
-
-stage = omni.usd.get_context().get_stage()
-prim_path = {prim_path!r}
-duration = {duration}
-min_impulse = {min_impulse}
-result = {{'prim_path': prim_path, 'duration_s': duration}}
-prim = stage.GetPrimAtPath(prim_path)
-if not prim or not prim.IsValid():
-    result['error'] = 'prim not found'
-    print(json.dumps(result, default=str))
-else:
-    # Apply contact report API if missing so PhysX emits events for this body.
-    if not prim.HasAPI(PhysxSchema.PhysxContactReportAPI):
-        PhysxSchema.PhysxContactReportAPI.Apply(prim)
-    contacts = []
-    sub = None
-    try:
-        from omni.physx import get_physx_simulation_interface
-        sim = get_physx_simulation_interface()
-
-        def _on_contact(contact_headers, contact_data):
-            for header in contact_headers:
-                pair = {{
-                    'body_a': str(getattr(header, 'actor0', '')),
-                    'body_b': str(getattr(header, 'actor1', '')),
-                    'collider_a': str(getattr(header, 'collider0', '')),
-                    'collider_b': str(getattr(header, 'collider1', '')),
-                    'contact_count': int(getattr(header, 'num_contact_data', 0)),
-                }}
-                impulse = 0.0
-                try:
-                    n = int(getattr(header, 'num_contact_data', 0))
-                    start = int(getattr(header, 'contact_data_offset', 0))
-                    for i in range(start, start + n):
-                        cd = contact_data[i]
-                        imp = cd.impulse
-                        impulse += float((imp[0]**2 + imp[1]**2 + imp[2]**2) ** 0.5)
-                except Exception:
-                    pass
-                pair['impulse'] = impulse
-                if impulse >= min_impulse:
-                    contacts.append(pair)
-
-        sub = sim.subscribe_contact_report_events(_on_contact)
-        # Step the simulation briefly to gather contacts.
-        deadline = time.time() + duration
-        while time.time() < deadline:
-            time.sleep(0.01)
-    except Exception as exc:
-        result['error'] = f'contact subscription failed: {{exc}}'
-    finally:
-        try:
-            if sub is not None:
-                sub = None
-        except Exception:
-            pass
-    result['contact_count'] = len(contacts)
-    result['contacts'] = contacts
-    print(json.dumps(result, default=str))
-"""
-    return await kit_tools.queue_exec_patch(code, f"list_contacts {prim_path}")
+# _handle_list_contacts moved to handlers/sensors.py (Phase 7 wave 9).
 
 # _gen_apply_force moved to handlers/physics.py (Phase 5 wave 3).
 
@@ -9977,203 +9631,13 @@ CODE_GEN_HANDLERS["set_joint_limits"] = _gen_set_joint_limits
 CODE_GEN_HANDLERS["set_joint_velocity_limit"] = _gen_set_joint_velocity_limit
 
 # ══════ From feat/atomic-tier4-geometry ══════
-async def _handle_raycast(args: Dict) -> Dict:
-    """Cast a single ray and return the closest PhysX hit."""
-    origin = args["origin"]
-    direction = args["direction"]
-    max_distance = float(args.get("max_distance", 1000.0))
-    code = f"""\
-import json
+# _handle_raycast moved to handlers/sensors.py (Phase 7 wave 9).
 
-origin = {list(origin)!r}
-direction = {list(direction)!r}
-max_distance = {max_distance!r}
+# _handle_overlap_sphere moved to handlers/sensors.py (Phase 7 wave 9).
 
-# Normalize direction
-import math
-_dx, _dy, _dz = direction
-_len = math.sqrt(_dx * _dx + _dy * _dy + _dz * _dz)
-if _len <= 0.0:
-    print(json.dumps({{'error': 'direction has zero length', 'origin': origin, 'direction': direction}}))
-else:
-    direction = [_dx / _len, _dy / _len, _dz / _len]
-    try:
-        from omni.physx import get_physx_scene_query_interface
-        sqi = get_physx_scene_query_interface()
-        hit = sqi.raycast_closest(origin, direction, max_distance)
-    except Exception as exc:
-        hit = {{'error': f'PhysX scene query unavailable: {{exc}}'}}
-    if isinstance(hit, dict) and hit.get('hit'):
-        result = {{
-            'hit': True,
-            'origin': origin,
-            'direction': direction,
-            'max_distance': max_distance,
-            'collision': hit.get('collision') or hit.get('rigidBody'),
-            'position': list(hit.get('position', [])),
-            'normal': list(hit.get('normal', [])),
-            'distance': float(hit.get('distance', 0.0)),
-            'face_index': hit.get('faceIndex'),
-            'material': hit.get('material'),
-        }}
-    else:
-        result = {{
-            'hit': False,
-            'origin': origin,
-            'direction': direction,
-            'max_distance': max_distance,
-        }}
-        if isinstance(hit, dict) and 'error' in hit:
-            result['error'] = hit['error']
-    print(json.dumps(result, default=str))
-"""
-    return await kit_tools.queue_exec_patch(code, f"raycast {origin} -> {direction}")
+# _handle_overlap_box moved to handlers/sensors.py (Phase 7 wave 9).
 
-async def _handle_overlap_sphere(args: Dict) -> Dict:
-    """Find every collider whose AABB overlaps the given sphere."""
-    center = args["center"]
-    radius = float(args["radius"])
-    code = f"""\
-import json
-
-center = {list(center)!r}
-radius = {radius!r}
-hits = []
-
-def _report_fn(hit):
-    # Called once per overlap. Return True to keep collecting.
-    path = getattr(hit, 'rigid_body', None) or getattr(hit, 'collision', None)
-    if path is None and isinstance(hit, dict):
-        path = hit.get('rigidBody') or hit.get('collision')
-    if path is not None:
-        hits.append(str(path))
-    return True
-
-try:
-    from omni.physx import get_physx_scene_query_interface
-    sqi = get_physx_scene_query_interface()
-    count = sqi.overlap_sphere(radius, center, _report_fn, False)
-except Exception as exc:
-    count = -1
-    hits.append(f'__error__: {{exc}}')
-
-result = {{
-    'center': center,
-    'radius': radius,
-    'count': len(hits),
-    'reported_count': count,
-    'prim_paths': hits,
-}}
-print(json.dumps(result, default=str))
-"""
-    return await kit_tools.queue_exec_patch(
-        code, f"overlap_sphere center={center} r={radius}"
-    )
-
-async def _handle_overlap_box(args: Dict) -> Dict:
-    """Find every collider that overlaps the given oriented box."""
-    center = args["center"]
-    half_extents = args["half_extents"]
-    rotation = args.get("rotation") or [0.0, 0.0, 0.0, 1.0]  # identity quaternion
-    code = f"""\
-import json
-
-center = {list(center)!r}
-half_extents = {list(half_extents)!r}
-rotation = {list(rotation)!r}
-hits = []
-
-def _report_fn(hit):
-    path = getattr(hit, 'rigid_body', None) or getattr(hit, 'collision', None)
-    if path is None and isinstance(hit, dict):
-        path = hit.get('rigidBody') or hit.get('collision')
-    if path is not None:
-        hits.append(str(path))
-    return True
-
-try:
-    from omni.physx import get_physx_scene_query_interface
-    sqi = get_physx_scene_query_interface()
-    count = sqi.overlap_box(half_extents, center, rotation, _report_fn, False)
-except Exception as exc:
-    count = -1
-    hits.append(f'__error__: {{exc}}')
-
-result = {{
-    'center': center,
-    'half_extents': half_extents,
-    'rotation': rotation,
-    'count': len(hits),
-    'reported_count': count,
-    'prim_paths': hits,
-}}
-print(json.dumps(result, default=str))
-"""
-    return await kit_tools.queue_exec_patch(
-        code, f"overlap_box center={center} half_extents={half_extents}"
-    )
-
-async def _handle_sweep_sphere(args: Dict) -> Dict:
-    """Sweep a sphere from start to end, return closest hit along the sweep."""
-    start = args["start"]
-    end = args["end"]
-    radius = float(args["radius"])
-    code = f"""\
-import json
-import math
-
-start = {list(start)!r}
-end = {list(end)!r}
-radius = {radius!r}
-
-dx = end[0] - start[0]
-dy = end[1] - start[1]
-dz = end[2] - start[2]
-distance = math.sqrt(dx * dx + dy * dy + dz * dz)
-if distance <= 0.0:
-    print(json.dumps({{
-        'error': 'sweep has zero length',
-        'start': start,
-        'end': end,
-        'radius': radius,
-    }}))
-else:
-    direction = [dx / distance, dy / distance, dz / distance]
-    try:
-        from omni.physx import get_physx_scene_query_interface
-        sqi = get_physx_scene_query_interface()
-        hit = sqi.sweep_sphere(radius, start, direction, distance)
-    except Exception as exc:
-        hit = {{'error': f'PhysX scene query unavailable: {{exc}}'}}
-    if isinstance(hit, dict) and hit.get('hit'):
-        result = {{
-            'hit': True,
-            'start': start,
-            'end': end,
-            'radius': radius,
-            'direction': direction,
-            'sweep_distance': distance,
-            'collision': hit.get('collision') or hit.get('rigidBody'),
-            'position': list(hit.get('position', [])),
-            'normal': list(hit.get('normal', [])),
-            'distance': float(hit.get('distance', 0.0)),
-        }}
-    else:
-        result = {{
-            'hit': False,
-            'start': start,
-            'end': end,
-            'radius': radius,
-            'direction': direction,
-            'sweep_distance': distance,
-        }}
-        if isinstance(hit, dict) and 'error' in hit:
-            result['error'] = hit['error']
-    print(json.dumps(result, default=str))
-"""
-    return await kit_tools.queue_exec_patch(
-        code, f"sweep_sphere {start} -> {end} r={radius}"
-    )
+# _handle_sweep_sphere moved to handlers/sensors.py (Phase 7 wave 9).
 
 async def _handle_compute_volume(args: Dict) -> Dict:
     """Compute mesh volume via signed tetrahedra (trimesh if available)."""
