@@ -1278,6 +1278,663 @@ print(f"URDF preview (first 500 chars):\\n{{urdf_string[:500]}}")
 
 
 # ---------------------------------------------------------------------------
+# Phase 6 wave 12 — motion planning + IK + grasp + waypoint recording
+
+
+def _gen_move_to_pose(args: Dict) -> str:
+    from ..tool_executor import _MOTION_ROBOT_CONFIGS  # noqa: PLC0415
+    art_path = args["articulation_path"]
+    target_pos = args["target_position"]
+    target_ori = args.get("target_orientation")
+    planner = args.get("planner", "rmpflow")
+    robot_type = args.get("robot_type", "franka").lower()
+
+    cfg = _MOTION_ROBOT_CONFIGS.get(robot_type, _MOTION_ROBOT_CONFIGS["franka"])
+    ee = cfg["ee_frame"]
+
+    if planner == "lula_rrt":
+        # Global planner — single-shot path plan
+        lines = [
+            "import omni.usd",
+            "import numpy as np",
+            "from isaacsim.robot_motion.motion_generation import LulaTaskSpaceTrajectoryGenerator",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "",
+            "# Load Lula RRT planner config",
+            f"rrt_config = interface_config_loader.load_supported_lula_rrt_config('{robot_type}')",
+            f"rrt = LulaTaskSpaceTrajectoryGenerator(**rrt_config)",
+            "",
+            f"target_pos = np.array({list(target_pos)})",
+        ]
+        if target_ori:
+            lines.append(f"target_ori = np.array({list(target_ori)})")
+        else:
+            lines.append("target_ori = None")
+        lines.extend([
+            "",
+            "# Compute trajectory",
+            f"trajectory = rrt.compute_task_space_trajectory_from_points(",
+            f"    [target_pos], [target_ori] if target_ori is not None else None",
+            f")",
+            "if trajectory is None:",
+            "    raise RuntimeError(",
+            "        'move_to_pose (lula_rrt): planner returned None — '",
+            "        'no path to the target pose. Common causes: target unreachable, '",
+            "        'IK singularity, robot_type mismatch, or obstacles in the way.'",
+            "    )",
+            "print(f'Lula RRT: planned trajectory with {{len(trajectory)}} waypoints')",
+        ])
+        return "\n".join(lines)
+
+    # Default: RMPflow (reactive, real-time)
+    lines = [
+        "import omni.usd",
+        "import numpy as np",
+        "from isaacsim.robot_motion.motion_generation import RmpFlow",
+        "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+        "from isaacsim.core.prims import SingleArticulation",
+        "from isaacsim.core.api import World",
+        "",
+        "# Load RMPflow config for the robot",
+        f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+        "rmpflow = RmpFlow(**rmpflow_config)",
+        "",
+        f"# Get the articulation",
+        f"art = SingleArticulation(prim_path='{art_path}')",
+        "world = World.instance()",
+        "if world is None:",
+        "    from isaacsim.core.api import World",
+        "    world = World()",
+        "art.initialize()",
+        "",
+        "# Set target",
+        f"target_pos = np.array({list(target_pos)})",
+    ]
+    if target_ori:
+        lines.append(f"target_ori = np.array({list(target_ori)})")
+    else:
+        lines.append("target_ori = None")
+    lines.extend([
+        f"rmpflow.set_end_effector_target(target_pos, target_ori)",
+        "",
+        "# Get current joint state and compute action",
+        "joint_positions = art.get_joint_positions()",
+        "joint_velocities = art.get_joint_velocities()",
+        "action = rmpflow.get_next_articulation_action(",
+        "    joint_positions, joint_velocities",
+        ")",
+        "",
+        "# Apply joint targets",
+        "art.apply_action(action)",
+        f"print(f'RMPflow: moving {ee} to {{target_pos}} — action applied')",
+    ])
+    return "\n".join(lines)
+
+
+def _gen_plan_trajectory(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    waypoints = args["waypoints"]
+    robot_type = args.get("robot_type", "franka").lower()
+
+    positions_str = "[" + ", ".join(
+        f"np.array({list(wp['position'])})" for wp in waypoints
+    ) + "]"
+    orientations = [wp.get("orientation") for wp in waypoints]
+    has_ori = any(o is not None for o in orientations)
+    if has_ori:
+        ori_str = "[" + ", ".join(
+            f"np.array({list(o)})" if o else "None" for o in orientations
+        ) + "]"
+    else:
+        ori_str = "None"
+
+    lines = [
+        "import numpy as np",
+        "from isaacsim.robot_motion.motion_generation import LulaTaskSpaceTrajectoryGenerator",
+        "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+        "",
+        f"rrt_config = interface_config_loader.load_supported_lula_rrt_config('{robot_type}')",
+        f"planner = LulaTaskSpaceTrajectoryGenerator(**rrt_config)",
+        "",
+        f"positions = {positions_str}",
+        f"orientations = {ori_str}",
+        "",
+        "trajectory = planner.compute_task_space_trajectory_from_points(",
+        "    positions, orientations",
+        ")",
+        "if trajectory is None:",
+        "    raise RuntimeError(",
+        "        'plan_trajectory: LulaTaskSpaceTrajectoryGenerator returned None — '",
+        "        'the planner could not connect the requested waypoints. Common causes: '",
+        "        'IK singularity near a waypoint, unreachable target pose, or robot model/robot_type mismatch.'",
+        "    )",
+        f"print(f'Planned trajectory through {len(waypoints)} waypoints')",
+    ]
+    return "\n".join(lines)
+
+
+def _gen_set_motion_policy(args: Dict) -> str:
+    art_path = args["articulation_path"]
+    policy_type = args["policy_type"]
+    robot_type = args.get("robot_type", "franka").lower()
+
+    if policy_type == "add_obstacle":
+        obs_name = args.get("obstacle_name", "obstacle_0")
+        obs_type = args.get("obstacle_type", "cuboid")
+        obs_dims = args.get("obstacle_dims", [0.1, 0.1, 0.1])
+        obs_pos = args.get("obstacle_position", [0.0, 0.0, 0.0])
+
+        lines = [
+            "import numpy as np",
+            "from isaacsim.robot_motion.motion_generation import RmpFlow",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "",
+            f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+            "rmpflow = RmpFlow(**rmpflow_config)",
+            "",
+        ]
+        if obs_type == "sphere":
+            radius = obs_dims[0] if obs_dims else 0.1
+            lines.extend([
+                f"# Add sphere obstacle '{obs_name}'",
+                f"rmpflow.add_sphere(",
+                f"    name='{obs_name}',",
+                f"    radius={radius},",
+                f"    pose=np.array([{obs_pos[0]}, {obs_pos[1]}, {obs_pos[2]}, 1.0, 0.0, 0.0, 0.0]),",
+                f")",
+                "rmpflow.update_world()",
+                f"print(f'Added sphere obstacle \\'{obs_name}\\' at {obs_pos} with radius {radius}')",
+            ])
+        else:
+            # cuboid (default)
+            lines.extend([
+                f"# Add cuboid obstacle '{obs_name}'",
+                f"rmpflow.add_cuboid(",
+                f"    name='{obs_name}',",
+                f"    dims=np.array({list(obs_dims)}),",
+                f"    pose=np.array([{obs_pos[0]}, {obs_pos[1]}, {obs_pos[2]}, 1.0, 0.0, 0.0, 0.0]),",
+                f")",
+                "rmpflow.update_world()",
+                f"print(f'Added cuboid obstacle \\'{obs_name}\\' at {obs_pos} with dims {list(obs_dims)}')",
+            ])
+        return "\n".join(lines)
+
+    if policy_type == "remove_obstacle":
+        lines = [
+            "from isaacsim.robot_motion.motion_generation import RmpFlow",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "",
+            f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+            "rmpflow = RmpFlow(**rmpflow_config)",
+            "",
+            "# RMPflow has no individual obstacle removal — reset clears all obstacles",
+            "rmpflow.reset()",
+            "print('Motion policy reset — all obstacles cleared')",
+        ]
+        return "\n".join(lines)
+
+    if policy_type == "set_joint_limits":
+        buffer_val = args.get("joint_limit_buffers", 0.05)
+        lines = [
+            "import numpy as np",
+            "from isaacsim.robot_motion.motion_generation import RmpFlow",
+            "from isaacsim.robot_motion.motion_generation import interface_config_loader",
+            "from isaacsim.core.prims import SingleArticulation",
+            "",
+            f"rmpflow_config = interface_config_loader.load_supported_motion_gen_config('{robot_type}', 'RMPflow')",
+            "rmpflow = RmpFlow(**rmpflow_config)",
+            "",
+            f"art = SingleArticulation(prim_path='{art_path}')",
+            "art.initialize()",
+            "",
+            "# Get current joint limits and add padding buffer",
+            "lower_limits = art.get_joint_positions()  # read current as reference",
+            f"buffer = {buffer_val}",
+            "dof_count = art.num_dof",
+            "print(f'Applying joint limit buffer of {buffer} rad to {dof_count} joints')",
+            "print(f'Note: Joint limit buffers are applied in the RMPflow config YAML.')",
+            "print(f'For runtime adjustment, modify rmpflow_config[\"joint_limit_buffers\"] before init.')",
+        ]
+        return "\n".join(lines)
+
+    return (
+        "raise ValueError("
+        + repr(
+            f"set_motion_policy: unknown policy_type {policy_type!r}. "
+            f"Valid: add_obstacle, remove_obstacle, set_joint_limits."
+        )
+        + ")"
+    )
+
+
+def _gen_solve_ik(args: Dict) -> str:
+    from ..tool_executor import _MOTION_ROBOT_CONFIGS, _CUROBO_ROBOT_YML_MAP  # noqa: PLC0415
+    art_path = args["articulation_path"]
+    target_pos = args["target_position"]
+    target_ori = args.get("target_orientation")
+    robot_type = args.get("robot_type", "franka").lower()
+
+    cfg = _MOTION_ROBOT_CONFIGS.get(robot_type, _MOTION_ROBOT_CONFIGS["franka"])
+    ee_frame = cfg["ee_frame"]
+    curobo_yml = _CUROBO_ROBOT_YML_MAP.get(robot_type, "franka.yml")
+
+    lines = [
+        "import numpy as np",
+        "import json",
+        "",
+        "# Try cuRobo IK first — it works without isaacsim Articulation init",
+        "# (just needs URDF + bundled YAML), so it succeeds on placeholder",
+        "# USD-only articulations where Lula's ArticulationKinematicsSolver",
+        "# fails on art.initialize(). Falls through to Lula for robots cuRobo",
+        "# doesn't ship configs for (or when CUDA/GPU unavailable).",
+        f"target_position = np.array({list(target_pos)})",
+    ]
+    if target_ori:
+        lines.append(f"target_orientation = np.array({list(target_ori)})")
+    else:
+        lines.append("target_orientation = None")
+
+    lines.extend([
+        "",
+        "_ik_via = None",
+        "_ik_solution = None",
+        "_ik_errors = []",
+        "",
+        "# ── Path 1: cuRobo (GPU/CPU, no Kit Articulation needed) ──",
+        "try:",
+        "    import torch",
+        "    from curobo.types.base import TensorDeviceType",
+        "    from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig",
+        "    from curobo.types.math import Pose",
+        f"    _curobo_yml = '{curobo_yml}'",
+        "    _tensor_args = TensorDeviceType()",
+        "    _ik_cfg = IKSolverConfig.load_from_robot_config(",
+        "        _curobo_yml,",
+        "        None,  # no world obstacles",
+        "        rotation_threshold=0.05,",
+        "        position_threshold=0.005,",
+        "        num_seeds=20,",
+        "        self_collision_check=False,",
+        "        tensor_args=_tensor_args,",
+        "    )",
+        "    _ik_solver = IKSolver(_ik_cfg)",
+        "    _qx, _qy, _qz, _qw = 0.0, 0.0, 0.0, 1.0",
+        "    if target_orientation is not None and len(target_orientation) >= 4:",
+        "        # Accept (qw, qx, qy, qz) input order; cuRobo wants (qw, qx, qy, qz)",
+        "        _qw, _qx, _qy, _qz = (float(x) for x in target_orientation[:4])",
+        "    _pose = Pose.from_list(",
+        "        [float(target_position[0]), float(target_position[1]), float(target_position[2]),",
+        "         _qw, _qx, _qy, _qz]",
+        "    )",
+        "    _result = _ik_solver.solve_single(_pose)",
+        "    if bool(_result.success.item()):",
+        "        _ik_solution = _result.solution[_result.success].cpu().numpy().tolist()",
+        "        _ik_via = 'curobo'",
+        "    else:",
+        "        _ik_errors.append('curobo: target unreachable or no IK solution found')",
+        "except Exception as _ce:",
+        "    _ik_errors.append(f'curobo: {type(_ce).__name__}: {_ce}')",
+        "",
+        "# ── Path 2: Lula via isaacsim (legacy fallback) ──",
+        "if _ik_solution is None:",
+        "    try:",
+        "        from isaacsim.robot_motion.motion_generation import LulaKinematicsSolver",
+        "        from isaacsim.robot_motion.motion_generation import ArticulationKinematicsSolver",
+        "        from isaacsim.robot_motion.motion_generation import interface_config_loader",
+        "        from isaacsim.core.prims import SingleArticulation",
+        "",
+        f"        kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config('{robot_type}')",
+        "        if kin_config is None:",
+        f"            for _alt in ['{robot_type}', '{robot_type}'.capitalize(), '{robot_type}_panda', 'Franka']:",
+        "                kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config(_alt)",
+        "                if kin_config is not None:",
+        "                    break",
+        "        if kin_config is None:",
+        "            _ik_errors.append('lula: no kinematics config registered for ' + " + repr(robot_type) + ")",
+        "        else:",
+        "            kin_solver = LulaKinematicsSolver(**kin_config)",
+        f"            art = SingleArticulation(prim_path='{art_path}')",
+        "            art.initialize()",
+        f"            art_kin = ArticulationKinematicsSolver(art, kin_solver, '{ee_frame}')",
+        "            action, _success = art_kin.compute_inverse_kinematics(",
+        "                target_position=target_position,",
+        "                target_orientation=target_orientation,",
+        "            )",
+        "            if _success:",
+        "                _ik_solution = list(getattr(action, 'joint_positions', []) or [])",
+        "                _ik_via = 'lula'",
+        "                art.apply_action(action)",
+        "            else:",
+        "                _ik_errors.append('lula: IK failed for ' + " + repr(ee_frame) + " + ' to target_position=' + str(target_position.tolist()))",
+        "    except Exception as _le:",
+        "        _ik_errors.append(f'lula: {type(_le).__name__}: {_le}')",
+        "",
+        "if _ik_solution is None:",
+        "    raise RuntimeError(",
+        f"        'solve_ik: all paths failed. Tried: ' + ' | '.join(_ik_errors)",
+        "    )",
+        f"print(f'IK solved via {{_ik_via}} — {ee_frame} → joints={{_ik_solution}}')",
+        "print(json.dumps({'method': _ik_via, 'joint_positions': _ik_solution, 'errors': _ik_errors}))",
+    ])
+    return "\n".join(lines)
+
+
+def _gen_grasp_object(args: Dict) -> str:
+    """Generate a complete grasp sequence: approach, grasp, lift."""
+    robot_path = args["robot_path"]
+    target_prim = args["target_prim"]
+    grasp_type = args.get("grasp_type", "top_down")
+    approach_dist = args.get("approach_distance", 0.1)
+    lift_height = args.get("lift_height", 0.1)
+
+    if grasp_type == "from_file":
+        grasp_file = args.get("grasp_file", "")
+        return f"""\
+import numpy as np
+import yaml
+import omni.usd
+from pxr import UsdGeom, Gf
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+
+# Load grasp specification from file
+with open('{grasp_file}', 'r') as f:
+    grasp_spec = yaml.safe_load(f)
+
+grasp_name = list(grasp_spec.get('grasps', {{}}).keys())[0]
+grasp = grasp_spec['grasps'][grasp_name]
+offset = np.array(grasp.get('gripper_offset', [0, 0, 0]))
+approach_dir = np.array(grasp.get('approach_direction', [0, 0, -1]))
+
+# Get target object position
+stage = omni.usd.get_context().get_stage()
+target_xf = UsdGeom.Xformable(stage.GetPrimAtPath('{target_prim}')).ComputeLocalToWorldTransform(0)
+target_pos = np.array(target_xf.ExtractTranslation())
+
+# Compute grasp and approach positions
+grasp_pos = target_pos + offset
+approach_pos = grasp_pos - approach_dir * {approach_dist}
+lift_pos = grasp_pos + np.array([0, 0, {lift_height}])
+
+# Setup motion planner
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('franka', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+art = SingleArticulation(prim_path='{robot_path}')
+art.initialize()
+
+# Step 1: Move to approach position
+rmpflow.set_end_effector_target(approach_pos, None)
+joint_positions = art.get_joint_positions()
+joint_velocities = art.get_joint_velocities()
+action = rmpflow.get_next_articulation_action(joint_positions, joint_velocities)
+art.apply_action(action)
+print(f"Step 1: Moving to approach position {{approach_pos}}")
+
+# Step 2: Linear approach to grasp position
+rmpflow.set_end_effector_target(grasp_pos, None)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 2: Approaching grasp position {{grasp_pos}}")
+
+# Step 3: Close gripper
+print("Step 3: Closing gripper")
+
+# Step 4: Lift
+rmpflow.set_end_effector_target(lift_pos, None)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 4: Lifting to {{lift_pos}}")
+print("Grasp sequence complete (from file: {grasp_file})")
+"""
+
+    # top_down or side grasp (geometric heuristic)
+    if grasp_type == "side":
+        approach_vector = "[1, 0, 0]"
+        grasp_ori = "np.array([0.5, 0.5, -0.5, 0.5])  # side approach quaternion"
+    else:  # top_down
+        approach_vector = "[0, 0, -1]"
+        grasp_ori = "np.array([1.0, 0.0, 0.0, 0.0])  # top-down quaternion"
+
+    return f"""\
+import numpy as np
+import omni.usd
+from pxr import UsdGeom, Gf
+from isaacsim.robot_motion.motion_generation import RmpFlow
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+from isaacsim.core.prims import SingleArticulation
+
+# Get target object position
+stage = omni.usd.get_context().get_stage()
+target_xf = UsdGeom.Xformable(stage.GetPrimAtPath('{target_prim}')).ComputeLocalToWorldTransform(0)
+target_pos = np.array(target_xf.ExtractTranslation())
+
+# Compute approach geometry ({grasp_type} grasp)
+approach_dir = np.array({approach_vector})
+grasp_pos = target_pos  # grasp at object center
+approach_pos = grasp_pos - approach_dir * {approach_dist}
+lift_pos = grasp_pos + np.array([0, 0, {lift_height}])
+grasp_orientation = {grasp_ori}
+
+# Setup motion planner
+rmpflow_config = interface_config_loader.load_supported_motion_gen_config('franka', 'RMPflow')
+rmpflow = RmpFlow(**rmpflow_config)
+art = SingleArticulation(prim_path='{robot_path}')
+art.initialize()
+
+# Step 1: Move to pre-grasp approach position
+rmpflow.set_end_effector_target(approach_pos, grasp_orientation)
+joint_positions = art.get_joint_positions()
+joint_velocities = art.get_joint_velocities()
+action = rmpflow.get_next_articulation_action(joint_positions, joint_velocities)
+art.apply_action(action)
+print(f"Step 1: Moving to approach position {{approach_pos}}")
+
+# Step 2: Linear approach to grasp position
+rmpflow.set_end_effector_target(grasp_pos, grasp_orientation)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 2: Approaching grasp position {{grasp_pos}}")
+
+# Step 3: Close gripper
+print("Step 3: Closing gripper")
+
+# Step 4: Lift object
+rmpflow.set_end_effector_target(lift_pos, grasp_orientation)
+action = rmpflow.get_next_articulation_action(art.get_joint_positions(), art.get_joint_velocities())
+art.apply_action(action)
+print(f"Step 4: Lifting to {{lift_pos}}")
+print("Grasp sequence complete ({grasp_type})")
+"""
+
+
+def _gen_define_grasp_pose(args: Dict) -> str:
+    """Generate code to create a .isaac_grasp YAML file."""
+    robot_path = args["robot_path"]
+    object_path = args["object_path"]
+    offset = args.get("gripper_offset", [0, 0, 0])
+    approach_dir = args.get("approach_direction", [0, 0, -1])
+
+    return f"""\
+import yaml
+import os
+import omni.usd
+from pxr import UsdGeom, Gf
+import numpy as np
+
+# Get object position for reference
+stage = omni.usd.get_context().get_stage()
+obj_prim = stage.GetPrimAtPath('{object_path}')
+obj_xf = UsdGeom.Xformable(obj_prim).ComputeLocalToWorldTransform(0)
+obj_pos = list(obj_xf.ExtractTranslation())
+
+# Define grasp specification
+grasp_spec = {{
+    'version': '1.0',
+    'robot_path': '{robot_path}',
+    'object_path': '{object_path}',
+    'grasps': {{
+        'default_grasp': {{
+            'gripper_offset': {list(offset)},
+            'approach_direction': {list(approach_dir)},
+            'object_reference_position': obj_pos,
+            'pre_grasp_opening': 0.04,
+            'grasp_force': 40.0,
+        }},
+    }},
+}}
+
+# Save to workspace
+grasp_dir = 'workspace/grasp_poses'
+os.makedirs(grasp_dir, exist_ok=True)
+obj_name = '{object_path}'.split('/')[-1]
+file_path = os.path.join(grasp_dir, f'{{obj_name}}.isaac_grasp')
+
+with open(file_path, 'w') as f:
+    yaml.dump(grasp_spec, f, default_flow_style=False)
+
+print(f"Grasp pose saved to {{file_path}}")
+print(f"  Robot: {robot_path}")
+print(f"  Object: {object_path}")
+print(f"  Offset: {list(offset)}")
+print(f"  Approach direction: {list(approach_dir)}")
+"""
+
+
+def _gen_record_waypoints(args: Dict) -> str:
+    """Generate code to record robot waypoints to file."""
+    art_path = args["articulation_path"]
+    output_path = args["output_path"]
+    fmt = args.get("format", "json")
+
+    if fmt == "hdf5":
+        return f"""\
+import numpy as np
+import json
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+# Capture current joint state as a waypoint
+joint_positions = art.get_joint_positions().tolist()
+joint_velocities = art.get_joint_velocities().tolist()
+joint_names = art.dof_names
+
+# Write HDF5 in robomimic schema
+import h5py
+import os
+os.makedirs(os.path.dirname('{output_path}') or '.', exist_ok=True)
+
+with h5py.File('{output_path}', 'a') as f:
+    # robomimic demo schema
+    if 'data' not in f:
+        grp = f.create_group('data')
+        grp.attrs['num_demos'] = 0
+    data = f['data']
+    demo_idx = data.attrs['num_demos']
+    demo_name = f'demo_{{demo_idx}}'
+    demo = data.create_group(demo_name)
+    demo.create_dataset('actions', data=np.array([joint_positions]))
+    obs = demo.create_group('obs')
+    obs.create_dataset('joint_pos', data=np.array([joint_positions]))
+    obs.create_dataset('joint_vel', data=np.array([joint_velocities]))
+    demo.attrs['num_samples'] = 1
+    data.attrs['num_demos'] = demo_idx + 1
+
+print(f"Recorded waypoint to {{'{output_path}'}} (HDF5 robomimic schema, demo {{demo_idx}})")
+print(f"Joint positions: {{[round(p, 4) for p in joint_positions]}}")
+"""
+
+    if fmt == "usd":
+        return f"""\
+import omni.usd
+from pxr import Usd, UsdGeom, Sdf
+import json
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+joint_positions = art.get_joint_positions().tolist()
+
+stage = omni.usd.get_context().get_stage()
+time_code = stage.GetEndTimeCode() + 1
+stage.SetEndTimeCode(time_code)
+
+# Write joint positions as USD TimeSamples on each joint drive
+joint_names = art.dof_names
+for i, jname in enumerate(joint_names):
+    joint_path = '{art_path}/' + jname
+    joint_prim = stage.GetPrimAtPath(joint_path)
+    if joint_prim.IsValid():
+        from pxr import UsdPhysics
+        drive = UsdPhysics.DriveAPI.Get(joint_prim, 'angular')
+        if drive:
+            drive.GetTargetPositionAttr().Set(joint_positions[i], time_code)
+
+print(f"Recorded waypoint as USD TimeSample at time={{time_code}}")
+print(f"Joint positions: {{[round(p, 4) for p in joint_positions]}}")
+"""
+
+    # Default: JSON format
+    return f"""\
+import json
+import os
+import numpy as np
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+art = SingleArticulation(prim_path='{art_path}')
+world = World.instance()
+if world is None:
+    world = World()
+art.initialize()
+
+joint_positions = art.get_joint_positions().tolist()
+joint_velocities = art.get_joint_velocities().tolist()
+joint_names = list(art.dof_names) if art.dof_names is not None else []
+
+if not joint_positions:
+    raise RuntimeError(
+        "record_waypoints: articulation at " + repr({art_path!r}) + " has no joints — "
+        "nothing to record. Check the prim path points at an actual articulation root."
+    )
+
+waypoint = {{
+    "joint_positions": joint_positions,
+    "joint_velocities": joint_velocities,
+    "joint_names": joint_names,
+}}
+
+# Append to existing file or create new one
+output_path = '{output_path}'
+os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+
+data = {{"waypoints": []}}
+if os.path.exists(output_path):
+    with open(output_path, 'r') as f:
+        data = json.load(f)
+
+data["waypoints"].append(waypoint)
+
+with open(output_path, 'w') as f:
+    json.dump(data, f, indent=2)
+
+print(f"Recorded waypoint {{len(data['waypoints'])}} to {{output_path}}")
+print(f"Joint positions: {{[round(p, 4) for p in joint_positions]}}")
+"""
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
