@@ -1636,120 +1636,18 @@ def _safe_set_rotate_xyz(prim, r):
 
 # ── Code generation helpers ──────────────────────────────────────────────────
 
-def _gen_create_prim(args: Dict) -> str:
-    prim_path = args["prim_path"]
-    prim_type = args["prim_type"]
-    pos = args.get("position")
-    scale = args.get("scale")
-    rot = args.get("rotation_euler")
-    size = args.get("size")
-    radius = args.get("radius")
-    height = args.get("height")
-    intensity = args.get("intensity")
-    # Validate prim_type upfront — DefinePrim accepts ANY string, returns
-    # an untyped prim for unknown types, and every downstream attr setter
-    # (GetSizeAttr / GetRadiusAttr / Xformable) silently no-ops on that.
-    # Live-probed 2026-04-18 with prim_type='BogusUnknownType' — tool
-    # returned success=True with empty output.
-    _KNOWN_PRIM_TYPES = {
-        "Cube", "Sphere", "Cylinder", "Cone", "Capsule", "Mesh", "Xform",
-        "Camera", "DistantLight", "DomeLight", "SphereLight", "RectLight",
-        "DiskLight", "CylinderLight", "Scope", "PointInstancer",
-        "BasisCurves", "Points", "NurbsPatch", "PhysicsScene",
-        "PhysicsFixedJoint", "PhysicsRevoluteJoint", "PhysicsPrismaticJoint",
-        "PhysicsSphericalJoint",
-    }
-    if prim_type and prim_type not in _KNOWN_PRIM_TYPES:
-        _types_str = sorted(_KNOWN_PRIM_TYPES)
-        _msg = f"create_prim: unknown prim_type {prim_type!r} — expected one of {_types_str}"
-        return f"raise ValueError({_msg!r})\n"
-    lines = [
-        "import omni.usd",
-        "from pxr import UsdGeom, Gf",
-        _SAFE_XFORM_SNIPPET,
-        "stage = omni.usd.get_context().get_stage()",
-        f"_cp_path = {prim_path!r}",
-        f"_cp_type = {prim_type!r}",
-        "prim = stage.DefinePrim(_cp_path, _cp_type)",
-        "if not prim.IsValid() or str(prim.GetTypeName()) != _cp_type:",
-        "    raise RuntimeError(",
-        "        f'create_prim: DefinePrim({_cp_path!r}, {_cp_type!r}) did not produce '",
-        "        f'a valid prim of the expected type (got type={prim.GetTypeName()!r})'",
-        "    )",
-    ]
-    if pos:
-        lines.append(f"_safe_set_translate(prim, ({pos[0]}, {pos[1]}, {pos[2]}))")
-    if scale:
-        lines.append(f"_safe_set_scale(prim, ({scale[0]}, {scale[1]}, {scale[2]}))")
-    if rot:
-        lines.append(f"_safe_set_rotate_xyz(prim, ({rot[0]}, {rot[1]}, {rot[2]}))")
-    # Geometric attributes authored directly. Cleaner than relying on scale
-    # because set_attribute on 'size'/'radius'/'height' matches what success
-    # criteria typically verify (the USD attribute, not the scale op).
-    if size is not None and prim_type == "Cube":
-        lines.append(f"UsdGeom.Cube(prim).GetSizeAttr().Set({float(size)})")
-    if radius is not None:
-        if prim_type == "Sphere":
-            lines.append(f"UsdGeom.Sphere(prim).GetRadiusAttr().Set({float(radius)})")
-        elif prim_type == "Cylinder":
-            lines.append(f"UsdGeom.Cylinder(prim).GetRadiusAttr().Set({float(radius)})")
-        elif prim_type == "Cone":
-            lines.append(f"UsdGeom.Cone(prim).GetRadiusAttr().Set({float(radius)})")
-        elif prim_type == "Capsule":
-            lines.append(f"UsdGeom.Capsule(prim).GetRadiusAttr().Set({float(radius)})")
-    if height is not None:
-        if prim_type == "Cylinder":
-            lines.append(f"UsdGeom.Cylinder(prim).GetHeightAttr().Set({float(height)})")
-        elif prim_type == "Cone":
-            lines.append(f"UsdGeom.Cone(prim).GetHeightAttr().Set({float(height)})")
-        elif prim_type == "Capsule":
-            lines.append(f"UsdGeom.Capsule(prim).GetHeightAttr().Set({float(height)})")
-    # Light intensity: apply when prim_type is a Light. Default to 1000 if
-    # the agent creates a Light without explicit intensity — an unset
-    # `inputs:intensity` attribute reads as None (or 0 in some renderers)
-    # so the scene stays dark despite the DomeLight prim existing.
-    _LIGHT_TYPES = {"DomeLight", "DistantLight", "SphereLight", "RectLight",
-                    "DiskLight", "CylinderLight"}
-    if prim_type in _LIGHT_TYPES:
-        _i = float(intensity) if intensity is not None else 1000.0
-        lines.append("from pxr import Sdf as _Sdf")
-        lines.append("_ia = prim.GetAttribute('inputs:intensity')")
-        lines.append("if not _ia or not _ia.IsDefined():")
-        lines.append("    _ia = prim.CreateAttribute('inputs:intensity', _Sdf.ValueTypeNames.Float)")
-        lines.append(f"_ia.Set({_i})")
-    return "\n".join(lines)
-
-
-def _gen_delete_prim(args: Dict) -> str:
-    # stage.RemovePrim returns False (not raises) on a non-existent path, and
-    # the old generator threw away that return value. Agent could then claim
-    # "deleted /World/Foo" when /World/Foo never existed — a classic honesty
-    # hole. Pre-check existence and verify post-remove.
-    return (
-        "import omni.usd\n"
-        "stage = omni.usd.get_context().get_stage()\n"
-        f"_path = '{args['prim_path']}'\n"
-        "_prim = stage.GetPrimAtPath(_path)\n"
-        "if not _prim.IsValid():\n"
-        "    raise RuntimeError(f'delete_prim: prim does not exist: {_path!r}')\n"
-        "_ok = stage.RemovePrim(_path)\n"
-        "if not _ok or stage.GetPrimAtPath(_path).IsValid():\n"
-        "    raise RuntimeError(f'delete_prim: RemovePrim({_path!r}) returned {_ok!r} but prim still in stage')\n"
-        "print(f'deleted {_path}')"
-    )
-
-
-def _gen_set_attribute(args: Dict) -> str:
-    prim_path = args["prim_path"]
-    attr_name = args["attr_name"]
-    value = args["value"]
-    return (
-        "import omni.usd\n"
-        "stage = omni.usd.get_context().get_stage()\n"
-        f"prim = stage.GetPrimAtPath('{prim_path}')\n"
-        f"attr = prim.GetAttribute('{attr_name}')\n"
-        f"attr.Set({repr(value)})"
-    )
+# Phase 3 wave 1 — these three code generators have moved to
+# handlers/scene_authoring.py. Names are re-imported here so the
+# existing CODE_GEN_HANDLERS dispatch lines (e.g.
+# `CODE_GEN_HANDLERS["create_prim"] = _gen_create_prim` further down
+# in this file) keep working unchanged. Phase 9 swaps the dispatch
+# pattern to a `register()`-based registration and the legacy inline
+# assignments go away.
+from .handlers.scene_authoring import (  # noqa: E402
+    _gen_create_prim,
+    _gen_delete_prim,
+    _gen_set_attribute,
+)
 
 
 def _gen_add_reference(args: Dict) -> str:
