@@ -2607,208 +2607,7 @@ async def _handle_diagnose_physics_error(args: Dict) -> Dict:
     }
 
 
-async def _handle_diagnose_ros2(args: Dict) -> Dict:
-    """Run comprehensive ROS2 integration health check on the current scene.
-
-    Checks performed:
-    1. ROS2Context node present in OmniGraph
-    2. ROS distro detection
-    3. QoS profile mismatches between common topic pairs
-    4. use_sim_time parameter configuration
-    5. Clock publishing (ROS2PublishClock node)
-    6. Domain ID consistency
-    7. Dangling OmniGraph connections
-    """
-    from .. import kit_tools  # noqa: PLC0415
-    from .. import tool_executor as _te  # noqa: PLC0415
-    _ROS2_QOS_PRESETS = _te._ROS2_QOS_PRESETS
-    issues: List[Dict[str, Any]] = []
-
-    # Generate diagnostic code that runs inside Kit
-    diag_code = '''\
-import omni.graph.core as og
-import json
-import os
-
-result = {
-    "ros2_context_found": False,
-    "ros2_context_path": None,
-    "distro": None,
-    "domain_id": None,
-    "clock_publisher_found": False,
-    "use_sim_time": None,
-    "og_graphs": [],
-    "dangling_connections": [],
-    "qos_nodes": [],
-}
-
-# Check ROS_DISTRO environment variable
-result["distro"] = os.environ.get("ROS_DISTRO", None)
-result["domain_id"] = os.environ.get("ROS_DOMAIN_ID", "0")
-
-# Scan all OmniGraph graphs
-try:
-    all_graphs = og.get_all_graphs()
-    for graph in all_graphs:
-        graph_path = graph.get_path_to_graph()
-        result["og_graphs"].append(graph_path)
-        nodes = graph.get_nodes()
-        for node in nodes:
-            node_type = node.get_type_name()
-            node_path = node.get_prim_path()
-
-            # Check for ROS2Context
-            if "ROS2Context" in node_type:
-                result["ros2_context_found"] = True
-                result["ros2_context_path"] = str(node_path)
-                # Try to read domain_id attribute
-                domain_attr = node.get_attribute("inputs:domain_id")
-                if domain_attr:
-                    result["domain_id_node"] = domain_attr.get()
-
-            # Check for ROS2PublishClock
-            if "PublishClock" in node_type:
-                result["clock_publisher_found"] = True
-
-            # Collect QoS-relevant nodes
-            if "ROS2" in node_type and "Publish" in node_type:
-                topic_attr = node.get_attribute("inputs:topicName")
-                qos_attr = node.get_attribute("inputs:qosProfile")
-                result["qos_nodes"].append({
-                    "node_type": node_type,
-                    "node_path": str(node_path),
-                    "topic": topic_attr.get() if topic_attr else None,
-                    "qos": qos_attr.get() if qos_attr else None,
-                })
-
-        # Check for dangling connections
-        for node in nodes:
-            for attr in node.get_attributes():
-                if attr.get_port_type() == og.AttributePortType.ATTRIBUTE_PORT_TYPE_INPUT:
-                    upstream = attr.get_upstream_connections()
-                    if not upstream and attr.get_name().startswith("inputs:execIn"):
-                        result["dangling_connections"].append({
-                            "node": str(node.get_prim_path()),
-                            "attr": attr.get_name(),
-                        })
-except Exception as e:
-    result["scan_error"] = str(e)
-
-# Check use_sim_time via carb settings
-try:
-    import carb.settings
-    settings = carb.settings.get_settings()
-    result["use_sim_time"] = settings.get("/persistent/exts/isaacsim.ros2.bridge/useSimTime")
-except Exception:
-    result["use_sim_time"] = None
-
-print(json.dumps(result))
-'''
-
-    try:
-        diag_result = await kit_tools.queue_exec_patch(diag_code, "ROS2 diagnostic scan")
-        # Parse the result if we got immediate output
-        if isinstance(diag_result, dict) and diag_result.get("output"):
-            import json as _json  # noqa: PLC0415
-            scene_info = _json.loads(diag_result["output"])
-        else:
-            scene_info = {}
-    except Exception:
-        scene_info = {}
-
-    # Issue 1: ROS2Context node
-    if not scene_info.get("ros2_context_found", False):
-        issues.append({
-            "id": "no_ros2_context",
-            "severity": "critical",
-            "message": "No ROS2Context node found in any OmniGraph",
-            "fix": "Add a ROS2Context node to your action graph. This is required for all ROS2 bridge communication.",
-            "tool_hint": "create_omnigraph with a ROS2Context node",
-        })
-
-    # Issue 2: ROS distro
-    distro = scene_info.get("distro")
-    if not distro:
-        issues.append({
-            "id": "no_ros_distro",
-            "severity": "warning",
-            "message": "ROS_DISTRO environment variable not set",
-            "fix": "Source your ROS2 workspace: source /opt/ros/<distro>/setup.bash",
-            "tool_hint": None,
-        })
-
-    # Issue 3: Clock publisher
-    if not scene_info.get("clock_publisher_found", False):
-        issues.append({
-            "id": "no_clock_publisher",
-            "severity": "warning",
-            "message": "No ROS2PublishClock node found — /clock topic will not be published",
-            "fix": "Add a ROS2PublishClock node to publish simulation time. Use configure_ros2_time tool.",
-            "tool_hint": "configure_ros2_time(mode='sim_time')",
-        })
-
-    # Issue 4: use_sim_time
-    use_sim_time = scene_info.get("use_sim_time")
-    clock_found = scene_info.get("clock_publisher_found", False)
-    if clock_found and use_sim_time is not True:
-        issues.append({
-            "id": "use_sim_time_mismatch",
-            "severity": "warning",
-            "message": "Clock publisher active but use_sim_time is not enabled",
-            "fix": "Set use_sim_time=true so ROS2 nodes use simulation clock instead of wall clock.",
-            "tool_hint": "configure_ros2_time(mode='sim_time')",
-        })
-
-    # Issue 5: Domain ID mismatch
-    env_domain = scene_info.get("domain_id", "0")
-    node_domain = scene_info.get("domain_id_node")
-    if node_domain is not None and str(node_domain) != str(env_domain):
-        issues.append({
-            "id": "domain_id_mismatch",
-            "severity": "critical",
-            "message": f"Domain ID mismatch: ROS_DOMAIN_ID={env_domain} but ROS2Context node has domain_id={node_domain}",
-            "fix": f"Set ROS_DOMAIN_ID={node_domain} in your environment, or update the ROS2Context node to domain_id={env_domain}.",
-            "tool_hint": None,
-        })
-
-    # Issue 6: QoS mismatches
-    for qos_node in scene_info.get("qos_nodes", []):
-        topic = qos_node.get("topic", "")
-        if topic:
-            topic_key = topic.strip("/").split("/")[-1]
-            preset = _ROS2_QOS_PRESETS.get(topic_key)
-            if preset and qos_node.get("qos"):
-                current_qos = str(qos_node["qos"])
-                expected_reliability = preset[0]
-                if expected_reliability not in current_qos:
-                    issues.append({
-                        "id": "qos_mismatch",
-                        "severity": "warning",
-                        "message": f"QoS mismatch on topic '{topic}': expected {expected_reliability} reliability",
-                        "fix": f"Use fix_ros2_qos(topic='{topic}') to apply the recommended QoS profile.",
-                        "tool_hint": f"fix_ros2_qos(topic='{topic}')",
-                    })
-
-    # Issue 7: Dangling connections
-    for dangling in scene_info.get("dangling_connections", []):
-        issues.append({
-            "id": "dangling_connection",
-            "severity": "info",
-            "message": f"Dangling execution input on {dangling['node']}.{dangling['attr']}",
-            "fix": "Connect this node's execIn to an OnPlaybackTick or upstream node.",
-            "tool_hint": None,
-        })
-
-    return {
-        "issues": issues,
-        "issue_count": len(issues),
-        "ros2_context_found": scene_info.get("ros2_context_found", False),
-        "distro": scene_info.get("distro"),
-        "domain_id": scene_info.get("domain_id", "0"),
-        "clock_publishing": scene_info.get("clock_publisher_found", False),
-        "graphs_scanned": len(scene_info.get("og_graphs", [])),
-        "message": f"Found {len(issues)} issue(s)" if issues else "All ROS2 checks passed — no issues found",
-    }
+# _handle_diagnose_ros2 moved to handlers/ros2.py (Phase 7 wave 14).
 
 
 async def _handle_diagnose_whole_body(args: Dict) -> Dict:
@@ -3024,6 +2823,1643 @@ async def _handle_hardware_compatibility_check(args: Dict) -> Dict:
         "checks": checks,
         "overall_status": "warn" if any(c["status"] == "warn" for c in checks) else "pass",
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 wave 14 — validate/verify/measure/trace/proactive stragglers
+
+
+async def _handle_measure_distance(args: Dict) -> Dict:
+    prim_a = args["prim_a"]
+    prim_b = args["prim_b"]
+    # UsdGeom.Xformable(invalid_prim).ComputeLocalToWorldTransform(0) silently
+    # returns the identity matrix — distance_m = 0.0, success=True. Without
+    # the IsValid gate, missing prims looked like coincident geometry. Raise
+    # with the specific invalid path so the agent can report it.
+    from .. import kit_tools  # noqa: PLC0415
+    code = f"""\
+import omni.usd
+from pxr import UsdGeom, Gf
+import json
+
+stage = omni.usd.get_context().get_stage()
+_pa = stage.GetPrimAtPath({prim_a!r})
+_pb = stage.GetPrimAtPath({prim_b!r})
+if not _pa or not _pa.IsValid():
+    raise RuntimeError('measure_distance: prim_a not found: ' + repr({prim_a!r}))
+if not _pb or not _pb.IsValid():
+    raise RuntimeError('measure_distance: prim_b not found: ' + repr({prim_b!r}))
+_xa = UsdGeom.Xformable(_pa)
+_xb = UsdGeom.Xformable(_pb)
+if not _xa or not _xb:
+    raise RuntimeError('measure_distance: one or both prims are not Xformable')
+xf_a = _xa.ComputeLocalToWorldTransform(0)
+xf_b = _xb.ComputeLocalToWorldTransform(0)
+pos_a = xf_a.ExtractTranslation()
+pos_b = xf_b.ExtractTranslation()
+dist = (pos_a - pos_b).GetLength()
+print(json.dumps({{'prim_a': {prim_a!r}, 'prim_b': {prim_b!r}, 'distance_m': dist,
+       'position_a': list(pos_a), 'position_b': list(pos_b)}}))
+"""
+    return await kit_tools.queue_exec_patch(code, f"Measure distance {prim_a} ↔ {prim_b}")
+
+
+async def _handle_measure_sim_real_gap(args: Dict) -> Dict:
+    """Compare sim and real trajectories to quantify the gap."""
+    from .. import tool_executor as _te  # noqa: PLC0415
+    _load_trajectory_for_gap = _te._load_trajectory_for_gap
+    sim_path = args.get("sim_trajectory", "")
+    real_path = args.get("real_trajectory", "")
+
+    sim = _load_trajectory_for_gap(sim_path)
+    real = _load_trajectory_for_gap(real_path)
+
+    if sim is None or real is None:
+        missing = []
+        if sim is None:
+            missing.append(sim_path)
+        if real is None:
+            missing.append(real_path)
+        return {"error": f"Trajectory file(s) not found: {missing}"}
+
+    if (isinstance(sim, dict) and sim.get("_error")) or (isinstance(real, dict) and real.get("_error")):
+        return {"error": sim.get("_error") if isinstance(sim, dict) else real.get("_error")}
+
+    sim_joints = sim.get("joint_positions") or sim.get("joints") or sim.get("q")
+    real_joints = real.get("joint_positions") or real.get("joints") or real.get("q")
+
+    if not sim_joints or not real_joints:
+        return {
+            "error": "Could not find joint_positions/joints/q in trajectory files",
+            "sim_keys": list(sim.keys()),
+            "real_keys": list(real.keys()),
+        }
+
+    n_steps = min(len(sim_joints), len(real_joints))
+    if n_steps == 0:
+        return {"error": "Empty trajectories"}
+
+    n_joints = len(sim_joints[0]) if isinstance(sim_joints[0], (list, tuple)) else 1
+    joint_errors = {}
+    for j in range(n_joints):
+        errors = []
+        for t in range(n_steps):
+            s_val = sim_joints[t][j] if isinstance(sim_joints[t], (list, tuple)) else sim_joints[t]
+            r_val = real_joints[t][j] if isinstance(real_joints[t], (list, tuple)) else real_joints[t]
+            errors.append(abs(float(s_val) - float(r_val)))
+        joint_errors[f"joint_{j}"] = {
+            "mean_error_deg": round(sum(errors) / len(errors), 4),
+            "max_error_deg": round(max(errors), 4),
+        }
+
+    worst_joint = max(joint_errors, key=lambda k: joint_errors[k]["mean_error_deg"])
+
+    ee_error_mm = None
+    sim_ee = sim.get("ee_pos") or sim.get("end_effector")
+    real_ee = real.get("ee_pos") or real.get("end_effector")
+    if sim_ee and real_ee:
+        ee_errs = []
+        for t in range(min(len(sim_ee), len(real_ee))):
+            s, r = sim_ee[t], real_ee[t]
+            d = sum((s[i] - r[i]) ** 2 for i in range(min(len(s), len(r)))) ** 0.5
+            ee_errs.append(d)
+        if ee_errs:
+            ee_error_mm = {
+                "mean_mm": round((sum(ee_errs) / len(ee_errs)) * 1000, 2),
+                "max_mm": round(max(ee_errs) * 1000, 2),
+            }
+
+    recommendation = []
+    worst_err = joint_errors[worst_joint]["mean_error_deg"]
+    if worst_err > 5.0:
+        recommendation.append(f"{worst_joint} has {worst_err:.1f}° mean error — investigate friction/damping mismatch")
+    if ee_error_mm and ee_error_mm["mean_mm"] > 10:
+        recommendation.append(f"EE drifts {ee_error_mm['mean_mm']:.0f}mm — likely joint compliance issue")
+
+    return {
+        "joint_errors": joint_errors,
+        "worst_joint": worst_joint,
+        "ee_error_mm": ee_error_mm,
+        "n_steps": n_steps,
+        "n_joints": n_joints,
+        "recommendation": recommendation,
+    }
+
+
+async def _handle_proactive_check(args: Dict) -> Dict:
+    """Run the proactive agent for a scene-state trigger.
+
+    The agent calls each tool in the trigger's playbook and aggregates
+    findings. Auto-fixes are gated by both the per-call `auto_fix=True`
+    and the AUTO_PROACTIVE_FIX env var so tests + dry runs never mutate
+    the scene without explicit opt-in.
+    """
+    import os  # noqa: PLC0415
+    import logging  # noqa: PLC0415
+    from .. import tool_executor as _te  # noqa: PLC0415
+    _PROACTIVE_TRIGGER_PLAYBOOKS = _te._PROACTIVE_TRIGGER_PLAYBOOKS
+    DATA_HANDLERS = _te.DATA_HANDLERS
+    _logger = logging.getLogger(_te.__name__)
+
+    trigger = args.get("trigger")
+    context = args.get("context") or {}
+    auto_fix_requested = bool(args.get("auto_fix", False))
+
+    playbook = _PROACTIVE_TRIGGER_PLAYBOOKS.get(trigger)
+    if playbook is None:
+        return {
+            "ok": False,
+            "error": f"Unknown proactive trigger '{trigger}'. Supported: {sorted(_PROACTIVE_TRIGGER_PLAYBOOKS)}",
+        }
+
+    auto_fix_env = os.environ.get("AUTO_PROACTIVE_FIX", "false").lower() in ("1", "true", "yes")
+    auto_fix_enabled = auto_fix_requested and auto_fix_env
+
+    findings: List[Dict[str, Any]] = []
+    for tool_name in playbook:
+        handler = DATA_HANDLERS.get(tool_name)
+        if handler is None:
+            # Tool is LLM-handled or disabled — note it and move on.
+            findings.append({
+                "tool": tool_name,
+                "skipped": True,
+                "note": "Tool handled by LLM reasoning or unavailable; no live data captured.",
+            })
+            continue
+        try:
+            # Pass the context as kwargs where the handler accepts them; otherwise
+            # just call with the raw context dict — every data handler takes a dict.
+            tool_args = {}
+            if tool_name == "explain_error":
+                tool_args = {"error_text": context.get("error_text", "")}
+            elif tool_name == "measure_distance":
+                # target_placed trigger needs prim_a + prim_b
+                if "target_path" in context and "robot_path" in context:
+                    tool_args = {"prim_a": context["target_path"], "prim_b": context["robot_path"]}
+                else:
+                    findings.append({
+                        "tool": tool_name,
+                        "skipped": True,
+                        "note": "measure_distance needs target_path + robot_path in context.",
+                    })
+                    continue
+            result = await handler(tool_args)
+            findings.append({"tool": tool_name, "result": result})
+        except Exception as exc:  # pragma: no cover — defensive
+            _logger.warning(f"[ProactiveAgent] {tool_name} raised: {exc}")
+            findings.append({"tool": tool_name, "error": str(exc)})
+
+    return {
+        "ok": True,
+        "trigger": trigger,
+        "context": context,
+        "playbook": playbook,
+        "findings": findings,
+        "auto_fix_enabled": auto_fix_enabled,
+        "auto_fix_applied": [],  # populated only when AUTO_PROACTIVE_FIX is on
+        "principle": "Proactive ≠ autonomous modification — observations only unless AUTO_PROACTIVE_FIX is enabled.",
+    }
+
+
+async def _handle_simulate_traversal_check(args: Dict) -> Dict:
+    """Function-gate counterpart to verify_pickplace_pipeline's form-gate.
+
+    Plays the timeline for `duration_s` of sim time, samples cube position
+    twice (once just before stop for velocity, once at stop for final pose),
+    and checks whether the cube actually arrived at target_path's bbox AND
+    came to rest. Returns {success, cube_initial, cube_final, cube_velocity,
+    target_bbox, in_target_xy, above_floor, at_rest, sim_duration}.
+
+    Args:
+      cube_path: prim path of the cube to track (required for single-cube mode)
+      cube_paths: list of prim paths to track in MULTI-CUBE mode — success if
+                  ANY of them reaches target_path's bbox. Useful for Cortex
+                  behavior trees and multi-cube canonicals where simulate_
+                  traversal_check shouldn't be limited to Cube_1. cube_paths
+                  takes precedence over cube_path when both provided.
+      target_path: prim path of the destination (its world bbox is the target)
+      duration_s: sim duration in seconds (default 60)
+      xy_tolerance: xy bbox tolerance in meters (default 0.0 — strict)
+      floor_tolerance: z below target floor allowed in meters (default 0.10)
+      rest_speed_threshold: max speed (m/s) to consider "at rest" (default 0.05)
+      seed: int seed for RNGs (random/numpy/torch). Default 42.
+            Run i uses seed + i to vary while staying reproducible.
+      n_runs: number of repeated runs against the same built scene. Default 1.
+              Captures initial cube xform + robot joint state + ctrl:* attrs
+              before run 0, restores them before each subsequent run, deletes
+              FJ prims created during run. Returns success_rate + per_run.
+              Run-classification: stable_ok=>=4/5, flaky=1-3/5, stable_fail=0.
+    """
+    from .. import kit_tools  # noqa: PLC0415
+    cube_paths = args.get("cube_paths") or []
+    if isinstance(cube_paths, str):
+        cube_paths = [cube_paths]
+    cube_paths = [str(p).strip() for p in cube_paths if str(p).strip()]
+    cube_path = (args.get("cube_path") or "").strip()
+    target_path = (args.get("target_path") or "").strip()
+    if not (cube_path or cube_paths) or not target_path:
+        return {"error": "simulate_traversal_check requires cube_path or cube_paths, plus target_path"}
+    # Multi-cube mode: cube_paths takes precedence. Single-cube mode: cube_path
+    # is the only target. The generated code handles both via cube_paths list.
+    if not cube_paths:
+        cube_paths = [cube_path]
+    duration_s = float(args.get("duration_s", 60))
+    xy_tolerance = float(args.get("xy_tolerance", 0.0))
+    floor_tolerance = float(args.get("floor_tolerance", 0.10))
+    rest_speed = float(args.get("rest_speed_threshold", 0.05))
+    require_upright = bool(args.get("require_upright", False))
+    upright_tol = float(args.get("upright_tolerance_dot", 0.95))
+    seed = int(args.get("seed", 42))
+    n_runs = max(1, min(int(args.get("n_runs", 1)), 50))
+
+    code = f"""\
+import omni.usd, omni.timeline, omni.kit.app, json, time as _t
+import random as _rand
+from pxr import UsdGeom, Usd, Sdf, Gf
+
+stage = omni.usd.get_context().get_stage()
+
+# Note: UsdGeom.BBoxCache caches per-prim and never invalidates against
+# physics-driven transform updates. Re-using one cache across the play
+# loop returns the AUTHORED (stale) position instead of the live one.
+# Fix 2026-05-07: build a fresh cache per query for the moving cube;
+# only static target bbox can safely use a cached lookup.
+
+def _world_pos(path):
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid():
+        return None
+    # FRESH cache per call — physics-driven xformOps require it.
+    fresh = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    b = fresh.ComputeWorldBound(p).ComputeAlignedRange()
+    if not b.IsEmpty():
+        c = b.GetMidpoint()
+        return [float(c[0]), float(c[1]), float(c[2])]
+    try:
+        xf = UsdGeom.Xformable(p)
+        t = xf.ComputeLocalToWorldTransform(0).ExtractTranslation()
+        return [float(t[0]), float(t[1]), float(t[2])]
+    except Exception:
+        return None
+
+# Static target bbox is computed ONCE before play — no cache reuse hazard.
+def _world_bbox(path):
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid():
+        return None
+    fresh = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    b = fresh.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty():
+        return None
+    mn = b.GetMin(); mx = b.GetMax()
+    return {{
+        'min': [float(mn[0]), float(mn[1]), float(mn[2])],
+        'max': [float(mx[0]), float(mx[1]), float(mx[2])],
+    }}
+
+cube_paths = {cube_paths!r}
+cube_path = cube_paths[0] if cube_paths else ""  # primary cube for legacy fields
+target_path = {target_path!r}
+duration_s = {duration_s}
+xy_tol = {xy_tolerance}
+floor_tol = {floor_tolerance}
+rest_speed = {rest_speed}
+require_upright = {require_upright}
+upright_tol = {upright_tol}
+seed_base = {seed}
+n_runs = {n_runs}
+
+def _world_up_dot(path):
+    \"\"\"Read prim's world rotation, return cube_up_vector · world_up.
+    Cube's local +Z transformed to world. Dot with world +Z gives the
+    'upright-ness' in [-1, 1] (1 = perfectly upright, -1 = upside-down,
+    0 = on its side).\"\"\"
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid():
+        return None
+    try:
+        xf = UsdGeom.Xformable(p)
+        m = xf.ComputeLocalToWorldTransform(0)
+        # world up vector after rotation = third column of rotation matrix
+        # (m * [0,0,1] direction; ignore translation)
+        col_z = (float(m[2][0]), float(m[2][1]), float(m[2][2]))
+        # Normalize (in case scale != 1)
+        n = (col_z[0]**2 + col_z[1]**2 + col_z[2]**2) ** 0.5
+        if n < 1e-9: return None
+        # Dot with world up (0,0,1) = z component normalized
+        return float(col_z[2] / n)
+    except Exception:
+        return None
+
+# ---- Phase 0 multi-run support: snapshot + restore between runs ----
+
+def _seed_all(s):
+    \"\"\"Pin random/numpy/torch seeds. cuRobo trajopt uses torch RNGs;
+    pinning before each run makes IK initial-guesses deterministic
+    given (seed, run_idx).\"\"\"
+    _rand.seed(s)
+    try:
+        import numpy as _np
+        _np.random.seed(s)
+    except Exception:
+        pass
+    try:
+        import torch as _t_mod
+        _t_mod.manual_seed(s)
+        if _t_mod.cuda.is_available():
+            _t_mod.cuda.manual_seed_all(s)
+    except Exception:
+        pass
+
+def _ensure_translate_op(prim):
+    \"\"\"Get-or-create a Translate xform op. Used for cube reset.\"\"\"
+    xf = UsdGeom.Xformable(prim)
+    for op in xf.GetOrderedXformOps():
+        if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+            return op
+    return xf.AddTranslateOp()
+
+def _snapshot_cubes():
+    \"\"\"Read cube xform translates (USD-authoritative initial state)
+    plus PhysX velocities if rigid-body API present.\"\"\"
+    snap = {{}}
+    for cp in cube_paths:
+        prim = stage.GetPrimAtPath(cp)
+        if not prim or not prim.IsValid():
+            continue
+        wp = _world_pos(cp)
+        # Local translate op value (write-back target)
+        local_t = None
+        try:
+            xf = UsdGeom.Xformable(prim)
+            for op in xf.GetOrderedXformOps():
+                if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+                    v = op.Get()
+                    if v is not None:
+                        local_t = (float(v[0]), float(v[1]), float(v[2]))
+                    break
+        except Exception:
+            pass
+        snap[cp] = {{'world': wp, 'local_t': local_t}}
+    return snap
+
+def _restore_cubes(snap):
+    \"\"\"Restore cube xform translates AND zero PhysX velocity attrs.\"\"\"
+    for cp, s in snap.items():
+        prim = stage.GetPrimAtPath(cp)
+        if not prim or not prim.IsValid():
+            continue
+        if s.get('local_t') is not None:
+            try:
+                op = _ensure_translate_op(prim)
+                op.Set(Gf.Vec3d(*s['local_t']))
+            except Exception:
+                pass
+        # Zero velocities — PhysX caches them on the rigid-body API
+        for vname in ('physics:velocity', 'physics:angularVelocity'):
+            a = prim.GetAttribute(vname)
+            if a and a.IsValid():
+                try: a.Set(Gf.Vec3f(0, 0, 0))
+                except Exception:
+                    try: a.Set(Gf.Vec3d(0, 0, 0))
+                    except Exception: pass
+
+def _snapshot_ctrl_attrs():
+    \"\"\"Walk stage, find prims with any ctrl:* attr, snapshot all values.\"\"\"
+    snap = {{}}
+    for prim in stage.Traverse():
+        ctrl_vals = {{}}
+        for a in prim.GetAttributes():
+            n = a.GetName()
+            if n.startswith('ctrl:') or n.startswith('builtin_pp:') or n.startswith('cortex:'):
+                v = a.Get()
+                if v is not None:
+                    ctrl_vals[n] = v
+        if ctrl_vals:
+            snap[str(prim.GetPath())] = ctrl_vals
+    return snap
+
+def _restore_ctrl_attrs(snap):
+    for path, vals in snap.items():
+        prim = stage.GetPrimAtPath(path)
+        if not prim or not prim.IsValid():
+            continue
+        for n, v in vals.items():
+            a = prim.GetAttribute(n)
+            if a and a.IsValid():
+                try: a.Set(v)
+                except Exception: pass
+
+def _snapshot_articulation_joints():
+    \"\"\"Capture joint positions for every articulation root via Articulation
+    Cache if the helper is loaded; fall back to UsdPhysics joint-pos attrs.\"\"\"
+    snap = {{}}
+    try:
+        from omni.isaac.core.articulations import Articulation
+    except Exception:
+        Articulation = None
+    if Articulation is None:
+        return snap
+    # Find articulation roots via PhysxSchema.PhysxArticulationAPI
+    try:
+        from pxr import PhysxSchema
+    except Exception:
+        return snap
+    for prim in stage.Traverse():
+        if prim.HasAPI(PhysxSchema.PhysxArticulationAPI):
+            try:
+                art = Articulation(str(prim.GetPath()))
+                art.initialize()
+                jp = art.get_joint_positions()
+                if jp is not None:
+                    snap[str(prim.GetPath())] = [float(x) for x in jp]
+            except Exception:
+                pass
+    return snap
+
+def _restore_articulation_joints(snap):
+    if not snap: return
+    try:
+        from omni.isaac.core.articulations import Articulation
+    except Exception:
+        return
+    for path, jp in snap.items():
+        try:
+            art = Articulation(path)
+            art.initialize()
+            art.set_joint_positions(jp)
+        except Exception:
+            pass
+
+def _snapshot_fj_set():
+    \"\"\"Set of FixedJoint prim paths existing now. Diff after run = transient FJs to delete.\"\"\"
+    out = set()
+    try:
+        from pxr import UsdPhysics
+    except Exception:
+        return out
+    for prim in stage.Traverse():
+        try:
+            if prim.IsA(UsdPhysics.FixedJoint) or prim.GetTypeName() == 'PhysicsFixedJoint':
+                out.add(str(prim.GetPath()))
+        except Exception:
+            pass
+    return out
+
+def _delete_fj_diff(initial_set):
+    \"\"\"Delete FJ prims that appeared since snapshot.\"\"\"
+    current = _snapshot_fj_set()
+    new_paths = current - initial_set
+    for path in new_paths:
+        try: stage.RemovePrim(path)
+        except Exception: pass
+
+def _do_one_run(run_idx, target_bbox):
+    \"\"\"Single play→sample cycle. Caller is responsible for reset BEFORE call.\"\"\"
+    _seed_all(seed_base + run_idx)
+    tl.set_current_time(0.0)
+    tl.play()
+    p_pre = _world_pos(cube_path) or [0,0,0]
+    pre_pos_per_cube = {{cp: (_world_pos(cp) or [0,0,0]) for cp in cube_paths}}
+    real_start = _t.time()
+    last_t = 0.0
+    while True:
+        app.update()
+        cur_t = float(tl.get_current_time())
+        if cur_t >= duration_s - 0.15 and last_t < duration_s - 0.15:
+            _p = _world_pos(cube_path)
+            if _p is not None: p_pre = _p
+            for cp in cube_paths:
+                _pp = _world_pos(cp)
+                if _pp is not None: pre_pos_per_cube[cp] = _pp
+        if cur_t >= duration_s:
+            break
+        if _t.time() - real_start > duration_s + 60:
+            break
+        last_t = cur_t
+
+    p_final = _world_pos(cube_path)
+    final_pos_per_cube = {{cp: _world_pos(cp) for cp in cube_paths}}
+    cur_t = float(tl.get_current_time())
+    tl.stop()
+
+    dt = max(cur_t - last_t, 1e-3)
+    if p_final is None:
+        velocity = [0.0, 0.0, 0.0]; speed = 0.0
+    else:
+        velocity = [(p_final[i] - p_pre[i]) / dt for i in range(3)]
+        speed = (velocity[0]**2 + velocity[1]**2 + velocity[2]**2) ** 0.5
+
+    bb = target_bbox
+    delivered = []
+    per_cube = {{}}
+    for cp in cube_paths:
+        cp_final = final_pos_per_cube.get(cp)
+        cp_pre   = pre_pos_per_cube.get(cp)
+        if cp_final is None: continue
+        cp_in_xy = (bb['min'][0] - xy_tol <= cp_final[0] <= bb['max'][0] + xy_tol
+                    and bb['min'][1] - xy_tol <= cp_final[1] <= bb['max'][1] + xy_tol)
+        cp_above = cp_final[2] >= bb['min'][2] - floor_tol
+        if cp_pre is not None:
+            cp_v = [(cp_final[i] - cp_pre[i]) / dt for i in range(3)]
+            cp_speed = (cp_v[0]**2 + cp_v[1]**2 + cp_v[2]**2) ** 0.5
+        else:
+            cp_speed = speed
+        cp_at_rest = cp_speed < rest_speed
+        cp_delivered = bool(cp_in_xy and cp_above and cp_at_rest)
+        per_cube[cp] = {{'final': cp_final, 'in_xy': cp_in_xy, 'above_floor': cp_above,
+                        'speed': cp_speed, 'delivered': cp_delivered}}
+        if cp_delivered: delivered.append(cp)
+
+    in_xy = (p_final is not None
+             and bb['min'][0] - xy_tol <= p_final[0] <= bb['max'][0] + xy_tol
+             and bb['min'][1] - xy_tol <= p_final[1] <= bb['max'][1] + xy_tol)
+    above_floor = (p_final is not None
+                   and p_final[2] >= bb['min'][2] - floor_tol)
+    at_rest = speed < rest_speed
+
+    upright_dot = _world_up_dot(cube_path)
+    upright_ok = (not require_upright) or (upright_dot is not None and upright_dot >= upright_tol)
+
+    if len(cube_paths) > 1:
+        success = bool(delivered) and upright_ok
+    else:
+        success = bool(in_xy and above_floor and at_rest and upright_ok)
+
+    return {{
+        'success': success,
+        'cube_final': p_final,
+        'cube_velocity': velocity,
+        'cube_speed': speed,
+        'in_target_xy': in_xy,
+        'above_floor': above_floor,
+        'at_rest': at_rest,
+        'cube_upright_dot': upright_dot,
+        'upright_ok': upright_ok,
+        'sim_t_reached': cur_t,
+        'delivered_cubes': delivered,
+        'per_cube_status': per_cube,
+        'seed': seed_base + run_idx,
+    }}
+
+# ---- Main ----
+
+tl = omni.timeline.get_timeline_interface()
+app = omni.kit.app.get_app()
+
+tl.stop()
+tl.set_current_time(0.0)
+tl.set_end_time(max(tl.get_end_time(), duration_s + 5.0))
+
+p_init = _world_pos(cube_path)
+target_bbox = _world_bbox(target_path)
+cube_inits = {{cp: _world_pos(cp) for cp in cube_paths}}
+
+if p_init is None or target_bbox is None:
+    print(json.dumps({{
+        'success': False,
+        'error': f'cube_path or target_path not found: cube={{p_init is not None}}, target={{target_bbox is not None}}',
+        'n_runs': n_runs, 'seed': seed_base,
+    }}))
+else:
+    # Snapshot pre-play state — only needed for reset between runs (n_runs > 1).
+    # Calling Articulation.initialize() pre-play in a stopped timeline can
+    # corrupt the SimulationView and cause cube free-fall through the floor;
+    # we therefore skip the snapshot entirely on the n_runs=1 fast path.
+    if n_runs > 1:
+        snap_cubes = _snapshot_cubes()
+        snap_ctrl = _snapshot_ctrl_attrs()
+        snap_joints = _snapshot_articulation_joints()
+        snap_fj = _snapshot_fj_set()
+    else:
+        snap_cubes = snap_ctrl = snap_joints = None
+        snap_fj = set()
+
+    runs = []
+    for ri in range(n_runs):
+        if ri > 0:
+            # Reset BEFORE run i (for i>=1). Run 0 uses scene as-is (live state from build+settle).
+            tl.stop()
+            _delete_fj_diff(snap_fj)
+            _restore_cubes(snap_cubes)
+            _restore_ctrl_attrs(snap_ctrl)
+            _restore_articulation_joints(snap_joints)
+            for _ in range(3): app.update()  # commit USD edits
+        try:
+            r = _do_one_run(ri, target_bbox)
+        except Exception as _e:
+            r = {{'success': False, 'error': f'run_exception: {{type(_e).__name__}}: {{str(_e)[:200]}}',
+                  'seed': seed_base + ri}}
+        runs.append(r)
+
+    # Aggregate
+    n_ok = sum(1 for r in runs if r.get('success'))
+    success_rate = n_ok / float(n_runs)
+    if n_runs >= 5:
+        if n_ok >= 4: status = 'stable_ok'
+        elif n_ok == 0: status = 'stable_fail'
+        else: status = 'flaky'
+    else:
+        if n_ok == n_runs: status = 'stable_ok'
+        elif n_ok == 0: status = 'stable_fail'
+        else: status = 'flaky'
+
+    # Primary result for legacy single-run callers: run 0's fields, hoisted
+    primary = runs[0] if runs else {{}}
+    out = dict(primary)
+    out.update({{
+        'cube_initial': p_init,
+        'target_path': target_path,
+        'target_bbox': target_bbox,
+        'duration_s_requested': duration_s,
+        'rest_speed_threshold': rest_speed,
+        'floor_tolerance': floor_tol,
+        'upright_tolerance_dot': upright_tol,
+        'require_upright': require_upright,
+        'cube_paths': cube_paths,
+        'n_runs': n_runs,
+        'seed_base': seed_base,
+        'n_ok': n_ok,
+        'success_rate': success_rate,
+        'status': status,
+        'runs': runs,
+    }})
+    # Multi-run: success reflects MAJORITY (≥ ceil(n/2)). Single-run: run 0.
+    if n_runs > 1:
+        out['success'] = (n_ok * 2 >= n_runs)
+    print(json.dumps(out))
+"""
+    # Phase 0.7: scale timeout with n_runs × duration_s; default 600s
+    # was insufficient for n_runs=5 × duration_s=90 (CP-35 NO_RESULT incident).
+    _scaled_timeout = max(900, int(n_runs * (duration_s + 30) * 1.5 + 60))
+    return await kit_tools.queue_exec_patch(code, "simulate_traversal_check", timeout=_scaled_timeout)
+
+
+async def _handle_trace_config(args: Dict) -> Dict:
+    """Parse IsaacLab @configclass files to trace parameter resolution chain."""
+    import ast  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    param_name = args.get("param_name", "")
+    env_source_path = args.get("env_source_path", "")
+
+    if not param_name:
+        return {"error": "param_name is required"}
+
+    parts = param_name.split(".")
+    target_attr = parts[-1]
+
+    resolution_chain: List[Dict] = []
+    final_value = None
+
+    def _trace_in_source(source_text: str, source_path: str) -> None:
+        """Walk AST looking for assignments to the target parameter."""
+        nonlocal final_value
+        try:
+            tree = ast.parse(source_text, filename=source_path)
+        except SyntaxError:
+            return
+
+        for node in ast.walk(tree):
+            # Match class-level assignments in @configclass: e.g. `dt = 0.01`
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                if node.target.id == target_attr and node.value is not None:
+                    try:
+                        value = ast.literal_eval(node.value)
+                    except (ValueError, TypeError):
+                        value = ast.dump(node.value)
+                    status = "overridden" if resolution_chain else "active"
+                    if resolution_chain:
+                        # Mark previous entry as overridden
+                        for prev in resolution_chain:
+                            if prev["status"] == "active":
+                                prev["status"] = "overridden"
+                    resolution_chain.append({
+                        "source_file": source_path,
+                        "line": node.lineno,
+                        "value": value,
+                        "status": "active",
+                    })
+                    final_value = value
+
+            # Match simple assignment: e.g. `self.dt = 0.01` or `dt = 0.01`
+            if isinstance(node, ast.Assign):
+                for t in node.targets:
+                    name = None
+                    if isinstance(t, ast.Name):
+                        name = t.id
+                    elif isinstance(t, ast.Attribute):
+                        name = t.attr
+                    if name == target_attr:
+                        try:
+                            value = ast.literal_eval(node.value)
+                        except (ValueError, TypeError):
+                            value = ast.dump(node.value)
+                        for prev in resolution_chain:
+                            if prev["status"] == "active":
+                                prev["status"] = "overridden"
+                        resolution_chain.append({
+                            "source_file": source_path,
+                            "line": node.lineno,
+                            "value": value,
+                            "status": "active",
+                        })
+                        final_value = value
+
+    # If a source path is provided, read it
+    if env_source_path:
+        source_path = Path(env_source_path)
+        if source_path.exists():
+            source_text = source_path.read_text(encoding="utf-8")
+            _trace_in_source(source_text, str(source_path))
+
+            # Look for imports/base classes to trace the chain further
+            try:
+                tree = ast.parse(source_text, filename=str(source_path))
+                for node in ast.walk(tree):
+                    if isinstance(node, (ast.Import, ast.ImportFrom)):
+                        if isinstance(node, ast.ImportFrom) and node.module:
+                            # Try to resolve relative imports to find parent configs
+                            parent_module = node.module
+                            parent_path = source_path.parent / (parent_module.replace(".", "/") + ".py")
+                            if parent_path.exists():
+                                parent_text = parent_path.read_text(encoding="utf-8")
+                                _trace_in_source(parent_text, str(parent_path))
+            except SyntaxError:
+                pass
+        else:
+            return {
+                "error": f"Source file not found: {env_source_path}",
+                "param_name": param_name,
+            }
+
+    return {
+        "param_name": param_name,
+        "final_value": final_value,
+        "resolution_chain": resolution_chain,
+        "message": (
+            f"Traced '{param_name}' through {len(resolution_chain)} source(s)."
+            if resolution_chain
+            else f"Parameter '{param_name}' not found in the provided source(s)."
+        ),
+    }
+
+
+async def _handle_validate_annotations(args: Dict) -> Dict:
+    """Cross-check SDG annotations for common quality issues.
+
+    Validates: bbox within image bounds, unique instance IDs,
+    no zero-area boxes, declared classes actually appear.
+    """
+    from .. import kit_tools  # noqa: PLC0415
+    num_samples = args.get("num_samples", 10)
+
+    code = f"""\
+import json, os, glob, random
+
+output_dirs = glob.glob('/tmp/sdg_output*') + glob.glob('workspace/sdg_output*')
+if not output_dirs:
+    print(json.dumps({{"error": "No SDG output directories found"}}))
+else:
+    out_dir = sorted(output_dirs)[-1]
+    ann_files = glob.glob(os.path.join(out_dir, '**', '*.json'), recursive=True)
+    ann_files = [f for f in ann_files if 'bounding_box' in f or 'annotation' in f]
+    samples = ann_files[:{num_samples}] if len(ann_files) <= {num_samples} else random.sample(ann_files, {num_samples})
+
+    issues = []
+    total_boxes = 0
+    instance_ids_seen = set()
+    classes_declared = set()
+    classes_found = set()
+
+    for f in samples:
+        data = json.loads(open(f).read())
+        annotations = data if isinstance(data, list) else data.get('annotations', data.get('data', []))
+        if not isinstance(annotations, list):
+            annotations = [annotations]
+        for ann in annotations:
+            total_boxes += 1
+            bbox = ann.get('bbox') or ann.get('bounding_box') or ann.get('x_min') and [ann['x_min'], ann['y_min'], ann['x_max'], ann['y_max']]
+            if bbox:
+                x0, y0, x1, y1 = bbox[0], bbox[1], bbox[2], bbox[3]
+                if x0 < 0 or y0 < 0:
+                    issues.append({{"type": "out_of_bounds", "file": f, "bbox": bbox, "detail": "Negative coordinates"}})
+                if x1 <= x0 or y1 <= y0:
+                    issues.append({{"type": "zero_area", "file": f, "bbox": bbox, "detail": "Zero or negative area"}})
+                w = ann.get('image_width', 1280)
+                h = ann.get('image_height', 720)
+                if x1 > w or y1 > h:
+                    issues.append({{"type": "out_of_bounds", "file": f, "bbox": bbox, "detail": f"Exceeds image {{w}}x{{h}}"}})
+
+            iid = ann.get('instance_id') or ann.get('id')
+            if iid is not None:
+                if iid in instance_ids_seen:
+                    issues.append({{"type": "duplicate_id", "file": f, "instance_id": iid}})
+                instance_ids_seen.add(iid)
+
+            cls = ann.get('class') or ann.get('label') or ann.get('category')
+            if cls:
+                classes_found.add(cls)
+
+        meta_classes = data.get('declared_classes') or data.get('classes') or data.get('categories')
+        if meta_classes:
+            if isinstance(meta_classes, list):
+                for c in meta_classes:
+                    classes_declared.add(c if isinstance(c, str) else c.get('name', str(c)))
+
+    missing_classes = list(classes_declared - classes_found)
+    if missing_classes:
+        issues.append({{"type": "missing_class", "declared_but_absent": missing_classes}})
+
+    clean = total_boxes - len([i for i in issues if i['type'] != 'missing_class'])
+    health = round(100 * clean / max(total_boxes, 1), 1)
+
+    print(json.dumps({{
+        "samples_checked": len(samples),
+        "total_boxes": total_boxes,
+        "issues": issues,
+        "annotation_health": health,
+        "classes_declared": list(classes_declared),
+        "classes_found": list(classes_found),
+    }}))
+"""
+    result = await kit_tools.queue_exec_patch(code, f"Validate annotations ({num_samples} samples)")
+    return {"type": "data", "queued": result.get("queued", False)}
+
+
+async def _handle_validate_calibration(args: Dict) -> Dict:
+    """Validate a calibration result on a held-out test trajectory.
+
+    Inputs:
+      - calibrated_params: dict — typically the output of calibrate_physics
+      - test_data_path: path to HDF5 with held-out real trajectory
+      - baseline_error (optional): pre-calibration error to compare against
+
+    Returns: per-joint and overall RMSE, plus contact-force comparison if F/T data
+    is detected. The actual replay-in-sim happens via IsaacLab; this handler
+    validates inputs and prepares the comparison report. If the HDF5 file already
+    contains a sim_joint_positions field (added by a prior replay run), the
+    report is computed in-process.
+    """
+    from .. import tool_executor as _te  # noqa: PLC0415
+    _check_real_data_path = _te._check_real_data_path
+    _per_joint_rmse = _te._per_joint_rmse
+
+    calibrated_params = args.get("calibrated_params")
+    test_data_path = args.get("test_data_path", "")
+    baseline_error = args.get("baseline_error")
+
+    if not isinstance(calibrated_params, dict) or not calibrated_params:
+        return {"error": "calibrated_params must be a non-empty dict"}
+
+    err = _check_real_data_path(test_data_path)
+    if err:
+        return {"error": err}
+
+    # Try to read sim/real trajectories if a prior replay has populated them.
+    sim_positions: Optional[List[List[float]]] = None
+    real_positions: Optional[List[List[float]]] = None
+    contact_forces_sim: Optional[List[List[float]]] = None
+    contact_forces_real: Optional[List[List[float]]] = None
+    has_ft_data = False
+    try:
+        import h5py  # type: ignore  # noqa: PLC0415
+        with h5py.File(test_data_path, "r") as f:
+            if "joint_positions" in f:
+                real_positions = f["joint_positions"][:].tolist()
+            if "sim_joint_positions" in f:
+                sim_positions = f["sim_joint_positions"][:].tolist()
+            if "contact_forces" in f:
+                has_ft_data = True
+                contact_forces_real = f["contact_forces"][:].tolist()
+            if "sim_contact_forces" in f:
+                contact_forces_sim = f["sim_contact_forces"][:].tolist()
+    except ImportError:
+        pass
+    except Exception as e:  # pragma: no cover — corrupted HDF5
+        return {"error": f"Failed to read test_data_path: {e}"}
+
+    per_joint_rmse: List[float] = []
+    overall_rmse: Optional[float] = None
+    if sim_positions is not None and real_positions is not None:
+        per_joint_rmse = _per_joint_rmse(sim_positions, real_positions)
+        if per_joint_rmse:
+            overall_rmse = sum(r * r for r in per_joint_rmse) / len(per_joint_rmse)
+            overall_rmse = overall_rmse ** 0.5
+
+    contact_force_rmse: Optional[float] = None
+    if contact_forces_sim is not None and contact_forces_real is not None:
+        n = min(len(contact_forces_sim), len(contact_forces_real))
+        if n > 0:
+            comp = min(len(contact_forces_sim[0]), len(contact_forces_real[0]))
+            sq = 0.0
+            count = 0
+            for t in range(n):
+                for c in range(comp):
+                    d = float(contact_forces_sim[t][c]) - float(contact_forces_real[t][c])
+                    sq += d * d
+                    count += 1
+            if count:
+                contact_force_rmse = (sq / count) ** 0.5
+
+    improvement_pct: Optional[float] = None
+    if overall_rmse is not None and baseline_error not in (None, 0):
+        try:
+            baseline = float(baseline_error)
+            if baseline > 0:
+                improvement_pct = round(100.0 * (baseline - overall_rmse) / baseline, 2)
+        except (TypeError, ValueError):
+            improvement_pct = None
+
+    needs_replay = sim_positions is None or real_positions is None
+
+    return {
+        "type": "calibration_validation",
+        "test_data_path": test_data_path,
+        "calibrated_param_keys": sorted(calibrated_params.keys()),
+        "trajectory_error": overall_rmse,
+        "per_joint_rmse": per_joint_rmse,
+        "baseline_error": baseline_error,
+        "improvement_pct": improvement_pct,
+        "has_ft_data": has_ft_data,
+        "contact_force_rmse": contact_force_rmse,
+        "needs_replay": needs_replay,
+        "message": (
+            "Validation report computed in-process from cached sim trajectories."
+            if not needs_replay
+            else "Sim trajectories not present in HDF5 — run the calibrated params in IsaacLab "
+                 "to produce 'sim_joint_positions' before reporting tracking error."
+        ),
+    }
+
+
+async def _handle_validate_scene_blueprint(args: Dict) -> Dict:
+    """Validate a scene blueprint before building. Checks for overlaps, floating objects, bad scales, and missing fields."""
+    blueprint = args.get("blueprint", {})
+    objects = blueprint.get("objects", [])
+
+    issues: List[str] = []
+    warnings: List[str] = []
+
+    if not objects:
+        issues.append("Blueprint has no objects.")
+        return {"valid": False, "issues": issues, "warnings": warnings, "object_count": 0}
+
+    # ── Check required fields on each object ────────────────────────────
+    for i, obj in enumerate(objects):
+        name = obj.get("name", f"object_{i}")
+        if not obj.get("name"):
+            warnings.append(f"Object [{i}] is missing a 'name' field.")
+        if not obj.get("position"):
+            issues.append(f"Object '{name}' is missing a 'position' field.")
+        if not obj.get("prim_type") and not obj.get("asset_path") and not obj.get("asset_name"):
+            issues.append(f"Object '{name}' has no 'prim_type', 'asset_path', or 'asset_name' — cannot create it.")
+
+    # ── Check for unrealistic scales ────────────────────────────────────
+    for obj in objects:
+        name = obj.get("name", "unnamed")
+        scale = obj.get("scale", [1, 1, 1])
+        if isinstance(scale, (list, tuple)):
+            for j, s in enumerate(scale):
+                axis = ["X", "Y", "Z"][j] if j < 3 else str(j)
+                if abs(s) < 0.001:
+                    issues.append(f"Object '{name}' has near-zero scale on {axis} axis ({s}) — likely an error.")
+                elif abs(s) > 1000:
+                    warnings.append(f"Object '{name}' has very large scale on {axis} axis ({s}) — is this intended?")
+
+    # ── Check for floating objects (z > 0 without obvious support) ──────
+    ground_level = 0.0
+    # Find ground plane or lowest object to establish reference
+    for obj in objects:
+        name_lower = obj.get("name", "").lower()
+        if any(k in name_lower for k in ("ground", "plane", "floor")):
+            pos = obj.get("position", [0, 0, 0])
+            ground_level = pos[2] if len(pos) > 2 else 0.0
+            break
+
+    for obj in objects:
+        name = obj.get("name", "unnamed")
+        name_lower = name.lower()
+        pos = obj.get("position", [0, 0, 0])
+        if len(pos) < 3:
+            continue
+        z = pos[2]
+        # Skip ground planes, cameras, lights, overhead items — they are expected to be elevated
+        if any(k in name_lower for k in ("ground", "plane", "floor", "camera", "light", "overhead", "ceiling", "lamp")):
+            continue
+        # Objects more than 0.5m above ground level may be floating
+        if z > ground_level + 0.5:
+            warnings.append(f"Object '{name}' is at z={z:.2f}m — may be floating without support.")
+
+    # ── Check for AABB overlaps (simple distance-based) ─────────────────
+    positioned_objects = []
+    for obj in objects:
+        pos = obj.get("position", [0, 0, 0])
+        scale = obj.get("scale", [1, 1, 1])
+        if isinstance(pos, (list, tuple)) and len(pos) >= 3:
+            # Approximate object radius from scale
+            if isinstance(scale, (list, tuple)) and len(scale) >= 3:
+                radius = max(abs(scale[0]), abs(scale[1]), abs(scale[2])) * 0.5
+            else:
+                radius = 0.5
+            positioned_objects.append({
+                "name": obj.get("name", "unnamed"),
+                "pos": pos,
+                "radius": radius,
+            })
+
+    for i in range(len(positioned_objects)):
+        for j in range(i + 1, len(positioned_objects)):
+            a = positioned_objects[i]
+            b = positioned_objects[j]
+            dx = a["pos"][0] - b["pos"][0]
+            dy = a["pos"][1] - b["pos"][1]
+            dz = a["pos"][2] - b["pos"][2]
+            dist = (dx * dx + dy * dy + dz * dz) ** 0.5
+            min_dist = a["radius"] + b["radius"]
+            if dist < min_dist * 0.7:  # 70% overlap threshold — some tolerance for surface items
+                warnings.append(
+                    f"Objects '{a['name']}' and '{b['name']}' may overlap "
+                    f"(distance={dist:.3f}m, combined radius={min_dist:.3f}m)."
+                )
+
+    # ── Check for scale mismatches between objects ──────────────────────
+    max_scales = []
+    for obj in objects:
+        scale = obj.get("scale", [1, 1, 1])
+        if isinstance(scale, (list, tuple)) and len(scale) >= 3:
+            max_scales.append((obj.get("name", "unnamed"), max(abs(s) for s in scale[:3])))
+        elif isinstance(scale, (int, float)):
+            max_scales.append((obj.get("name", "unnamed"), abs(scale)))
+
+    if len(max_scales) >= 2:
+        all_vals = [s for _, s in max_scales]
+        median_scale = sorted(all_vals)[len(all_vals) // 2]
+        if median_scale > 0:
+            for name, s in max_scales:
+                ratio = s / median_scale
+                if ratio > 50 or (median_scale > 0.01 and ratio < 0.02):
+                    warnings.append(
+                        f"Object '{name}' scale ({s:.3f}) differs vastly from "
+                        f"median scale ({median_scale:.3f}) — possible unit mismatch."
+                    )
+
+    valid = len(issues) == 0
+    return {
+        "valid": valid,
+        "issues": issues,
+        "warnings": warnings,
+        "object_count": len(objects),
+    }
+
+
+async def _handle_validate_semantic_labels(args: Dict) -> Dict:
+    """Lint every Semantics.SemanticsAPI annotation on the current stage."""
+    from .. import kit_tools  # noqa: PLC0415
+    code = """\
+import json
+try:
+    import omni.usd
+    from pxr import Usd, UsdGeom, Semantics
+    stage = omni.usd.get_context().get_stage()
+    if stage is None:
+        print(json.dumps({'error': 'no stage open'}))
+    else:
+        issues = []
+        labeled_prims = 0
+        class_to_prims = {}  # class_name -> [prim_path, ...]
+        for prim in stage.Traverse():
+            try:
+                instances = Semantics.SemanticsAPI.GetAll(prim) if hasattr(
+                    Semantics.SemanticsAPI, 'GetAll'
+                ) else []
+            except Exception:
+                instances = []
+            if not instances:
+                continue
+            labeled_prims += 1
+            prim_path = str(prim.GetPath())
+            # Visibility / active checks — labels on hidden prims don't render
+            try:
+                is_active = bool(prim.IsActive())
+            except Exception:
+                is_active = True
+            try:
+                imageable = UsdGeom.Imageable(prim)
+                vis = imageable.ComputeVisibility() if imageable else 'inherited'
+                is_visible = vis != 'invisible'
+            except Exception:
+                is_visible = True
+            if not is_active:
+                issues.append({
+                    'severity': 'warning', 'kind': 'inactive_labeled_prim',
+                    'prim_path': prim_path,
+                    'detail': 'Prim has Semantics labels but is deactivated — will not appear in SDG output.',
+                })
+            elif not is_visible:
+                issues.append({
+                    'severity': 'warning', 'kind': 'invisible_labeled_prim',
+                    'prim_path': prim_path,
+                    'detail': 'Prim has Semantics labels but visibility=invisible — will not render.',
+                })
+            class_seen_on_prim = []
+            for sem in instances:
+                try:
+                    instance_name = sem.GetName() if hasattr(sem, 'GetName') else ''
+                except Exception:
+                    instance_name = ''
+                try:
+                    type_attr = sem.GetSemanticTypeAttr()
+                    sem_type = type_attr.Get() if type_attr and type_attr.IsValid() else ''
+                except Exception:
+                    sem_type = ''
+                try:
+                    data_attr = sem.GetSemanticDataAttr()
+                    cls = data_attr.Get() if data_attr and data_attr.IsValid() else ''
+                except Exception:
+                    cls = ''
+                cls = '' if cls is None else str(cls)
+                if cls == '':
+                    issues.append({
+                        'severity': 'error', 'kind': 'empty_class_name',
+                        'prim_path': prim_path,
+                        'detail': f'Semantics instance {instance_name!r} has empty semanticData — SDG writer will skip the label.',
+                    })
+                else:
+                    class_to_prims.setdefault(cls, []).append(prim_path)
+                if str(sem_type) == 'class' and cls != '':
+                    class_seen_on_prim.append(cls)
+            if len(class_seen_on_prim) > 1 and len(set(class_seen_on_prim)) > 1:
+                issues.append({
+                    'severity': 'error', 'kind': 'conflicting_class_labels',
+                    'prim_path': prim_path,
+                    'detail': f'Prim has multiple semantic_type=class instances with different class_names: {sorted(set(class_seen_on_prim))}',
+                })
+        # Singleton-class warnings: a class with exactly one prim is often a typo.
+        for cls, prims in class_to_prims.items():
+            if len(prims) == 1 and len(class_to_prims) > 1:
+                issues.append({
+                    'severity': 'warning', 'kind': 'singleton_class',
+                    'prim_path': prims[0],
+                    'detail': f'Class {cls!r} is used on a single prim — likely a typo against the intended bulk class.',
+                })
+        summary = {
+            'labeled_prims': labeled_prims,
+            'classes': len(class_to_prims),
+            'issues': len(issues),
+        }
+        ok = not any(i['severity'] == 'error' for i in issues)
+        print(json.dumps({
+            'ok': ok,
+            'summary': summary,
+            'issues': issues,
+        }))
+except Exception as e:
+    print(json.dumps({'error': str(e)}))
+"""
+    result = await kit_tools.queue_exec_patch(
+        code, "Validate USD-side Semantics.SemanticsAPI annotations on the stage"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "note": (
+            "Semantic-label validation queued. Kit will print a JSON dict with keys: "
+            "ok (bool, false when any error issue is present), summary "
+            "({labeled_prims, classes, issues}), issues (list of {severity, kind, "
+            "prim_path, detail}). Distinct from PR #23 validate_annotations: this tool "
+            "lints the USD STAGE annotations, validate_annotations lints the SDG "
+            "OUTPUT FILES on disk."
+        ),
+    }
+
+
+async def _handle_validate_teleop_demo(args: Dict) -> Dict:
+    """Validate an HDF5 teleop file against the robomimic schema."""
+    from .. import tool_executor as _te  # noqa: PLC0415
+    _open_hdf5_safely = _te._open_hdf5_safely
+    import math  # noqa: PLC0415
+    path = args["hdf5_path"]
+    f, reason = _open_hdf5_safely(path)
+    if f is None:
+        # Distinguish "h5py missing" from "file missing" for the LLM
+        available = not reason.startswith("h5py")
+        return {
+            "available": available,
+            "path": path,
+            "reason": reason,
+            "demos_checked": 0,
+            "demos_ok": 0,
+            "issues": [{"demo": "*", "problem": reason}],
+            "ready_for_training": False,
+        }
+
+    issues: List[Dict[str, str]] = []
+    demos_checked = 0
+    demos_ok = 0
+    total_transitions = 0
+    try:
+        data_group = f.get("data")
+        if data_group is None:
+            issues.append({"demo": "*", "problem": "missing /data group"})
+        else:
+            for demo_name in data_group.keys():
+                demos_checked += 1
+                demo = data_group[demo_name]
+                actions = demo.get("actions")
+                if actions is None:
+                    issues.append({"demo": demo_name, "problem": "missing actions dataset"})
+                    continue
+                shape = getattr(actions, "shape", ())
+                if len(shape) != 2:
+                    issues.append({
+                        "demo": demo_name,
+                        "problem": f"actions rank {len(shape)} != 2, shape={shape}",
+                    })
+                    continue
+                if shape[0] == 0:
+                    issues.append({"demo": demo_name, "problem": "episode length 0"})
+                    continue
+                # NaN / Inf check — sample first N rows to stay L0-cheap
+                sample = actions[: min(shape[0], 4096)]
+                has_bad = False
+                for row in sample:
+                    for v in row:
+                        try:
+                            fv = float(v)
+                        except (TypeError, ValueError):
+                            continue
+                        if math.isnan(fv) or math.isinf(fv):
+                            has_bad = True
+                            break
+                    if has_bad:
+                        break
+                if has_bad:
+                    issues.append({"demo": demo_name, "problem": "NaN or Inf in actions"})
+                    continue
+                obs = demo.get("obs")
+                if obs is not None and len(obs.keys()) == 0:
+                    issues.append({"demo": demo_name, "problem": "obs group is empty"})
+                    continue
+                demos_ok += 1
+                total_transitions += int(shape[0])
+    finally:
+        try:
+            f.close()
+        except Exception:
+            pass
+
+    return {
+        "available": True,
+        "path": path,
+        "demos_checked": demos_checked,
+        "demos_ok": demos_ok,
+        "total_transitions": total_transitions,
+        "issues": issues,
+        "ready_for_training": demos_checked > 0 and len(issues) == 0,
+    }
+
+
+async def _handle_verify_pickplace_pipeline(args: Dict) -> Dict:
+    """Verify a pick-place pipeline is physically executable.
+
+    Pilot of the *verifier* tool class — counterpart to *resolvers*.
+    Resolvers translate input to structured values; verifiers check that
+    a built scene actually meets the functional requirements of a skill.
+
+    Use case: after building a pick-place cell, call this to confirm
+    every (robot, pick, place) stage is within the robot's workspace.
+    Returns per-stage reach data + a boolean `pipeline_ok` summary +
+    a list of `issues` describing any unreachable stages or handoff
+    gaps. Agent's protocol: call this BEFORE declaring the build done.
+    If pipeline_ok is False, either fix the layout or surface the
+    issue to the user.
+
+    Args (one of):
+      stages: list of {"robot_path": str, "pick_path": str, "place_path": str,
+                       optional "robot_kind": str, "reach_m": float}
+      OR pairwise: robot_path, pick_path, place_path for a single stage
+
+    Optional flags:
+      feasibility: bool (default False). When True, after form-gate runs,
+                   delegate each stage to diagnose_scene_feasibility (Phase 1)
+                   to add geometric pre-flight checks. Verdicts of
+                   `infeasible`/`overconstrained` propagate as `issues[]` so
+                   the form-gate flips to NOT-OK before expensive sim.
+                   Per Opus §F. Default off preserves current contract;
+                   canonical_instantiator turns it on for hard-instantiate.
+    """
+    from .. import kit_tools  # noqa: PLC0415
+    from .. import tool_executor as _te  # noqa: PLC0415
+    _ROBOT_REACH_M = _te._ROBOT_REACH_M
+    _augment_verify_with_feasibility = _te._augment_verify_with_feasibility
+    stages = args.get("stages")
+    if not stages:
+        # Allow a single-stage shorthand
+        rp = args.get("robot_path"); pp = args.get("pick_path"); pl = args.get("place_path")
+        if rp and pp and pl:
+            stages = [{"robot_path": rp, "pick_path": pp, "place_path": pl,
+                       "robot_kind": args.get("robot_kind", ""),
+                       "reach_m": args.get("reach_m")}]
+    if not stages:
+        return {"error": "verify_pickplace_pipeline requires 'stages' (list of {robot_path,pick_path,place_path}) or single robot_path+pick_path+place_path"}
+
+    cube_path = args.get("cube_path", "") or ""
+    footprint_bounds = args.get("footprint_bounds")  # optional [[xmin,ymin],[xmax,ymax]]
+
+    # Build the Kit script that resolves world positions per stage.
+    import json as _j  # noqa: PLC0415
+    stages_json = _j.dumps(stages)
+    cube_path_json = _j.dumps(cube_path)
+    # repr() handles Python None correctly; json.dumps() would emit "null"
+    # which is not a valid Python identifier when interpolated into the script.
+    footprint_bounds_repr = repr(footprint_bounds)
+    code = f"""\
+import omni.usd, json, builtins as _bi
+from pxr import UsdGeom, Usd, PhysxSchema
+
+stage = omni.usd.get_context().get_stage()
+cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+ROBOT_REACH = {_ROBOT_REACH_M!r}
+stages = {stages_json}
+cube_path = {cube_path_json}
+footprint_bounds = {footprint_bounds_repr}
+
+def _world_pos(path):
+    \"\"\"Return bbox center as a fallback. Used only for the robot base call below.\"\"\"
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid():
+        return None
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty():
+        try:
+            xf = UsdGeom.Xformable(p)
+            t = xf.ComputeLocalToWorldTransform(0).ExtractTranslation()
+            return [float(t[0]), float(t[1]), float(t[2])]
+        except Exception:
+            return None
+    c = b.GetMidpoint()
+    return [float(c[0]), float(c[1]), float(c[2])]
+
+def _robot_base_pos(path):
+    \"\"\"Robot base = (xy center of bbox, min z). Reach is measured from
+    the floor-mounted base, not the mid-height bbox center.\"\"\"
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid():
+        return None
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty():
+        return _world_pos(path)
+    c = b.GetMidpoint(); mn = b.GetMin()
+    return [float(c[0]), float(c[1]), float(mn[2])]
+
+def _closest_point_on_bbox(path, ref):
+    \"\"\"Return the point on prim's world-space bbox closest to ref. For
+    a long conveyor or a wide bin this lets reach calculations target
+    the nearest accessible point, not the (possibly far) bbox center.\"\"\"
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid():
+        return None
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty():
+        return _world_pos(path)
+    mn = b.GetMin(); mx = b.GetMax()
+    return [
+        float(max(mn[0], min(ref[0], mx[0]))),
+        float(max(mn[1], min(ref[1], mx[1]))),
+        float(max(mn[2], min(ref[2], mx[2]))),
+    ]
+
+def _dist(a, b):
+    return ((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2) ** 0.5
+
+def _bbox_xy_of(prim_or_path):
+    \"\"\"Return ((xmin,ymin),(xmax,ymax)) of prim's world bbox xy, or None.\"\"\"
+    if isinstance(prim_or_path, str):
+        p = stage.GetPrimAtPath(prim_or_path)
+    else:
+        p = prim_or_path
+    if not p or not p.IsValid():
+        return None
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty():
+        return None
+    mn = b.GetMin(); mx = b.GetMax()
+    return ((float(mn[0]), float(mn[1])), (float(mx[0]), float(mx[1])))
+
+def _active_conveyors():
+    \"\"\"Discover prims with PhysxSurfaceVelocityAPI applied AND non-zero velocity.
+    Returns list of (path, ((xmin,ymin),(xmax,ymax)), speed_m_per_s).\"\"\"
+    out = []
+    for prim in stage.Traverse():
+        if not prim.HasAPI(PhysxSchema.PhysxSurfaceVelocityAPI):
+            continue
+        api = PhysxSchema.PhysxSurfaceVelocityAPI(prim)
+        attr = api.GetSurfaceVelocityAttr()
+        v = attr.Get() if attr else None
+        if v is None:
+            continue
+        speed = (float(v[0])**2 + float(v[1])**2 + float(v[2])**2) ** 0.5
+        if speed < 1e-6:
+            continue
+        bb = _bbox_xy_of(prim)
+        if bb is None:
+            continue
+        out.append((str(prim.GetPath()), bb, speed))
+    return out
+
+def _segment_overlaps_bbox_xy(a, b, bbox, samples=20):
+    \"\"\"Sample segment a->b in xy; True if any sample lies inside bbox.\"\"\"
+    (xmin, ymin), (xmax, ymax) = bbox
+    for k in range(samples + 1):
+        t = k / samples
+        x = a[0] + (b[0] - a[0]) * t
+        y = a[1] + (b[1] - a[1]) * t
+        if xmin <= x <= xmax and ymin <= y <= ymax:
+            return True
+    return False
+
+def _controller_installed(robot_path, n_robots_in_pipeline):
+    \"\"\"Check builtins for a pick-place controller subscription tied to this
+    robot. Returns (attr_name, kind) or None.
+
+    cuRobo scopes its subscription per-robot (_curobo_pp_sub_<TAG>) so multi-
+    robot scenes can be checked unambiguously. Other controllers (native,
+    spline, diffik, osc) use un-tagged names — those can only be attributed
+    to a robot when there's a single robot in the pipeline.\"\"\"
+    tag = robot_path.replace('/', '_').strip('_')
+    # Per-robot tagged subs (multi-robot safe)
+    if hasattr(_bi, '_curobo_pp_sub_' + tag):
+        return ('_curobo_pp_sub_' + tag, 'curobo')
+    if hasattr(_bi, '_builtin_pp_sub_' + tag):
+        return ('_builtin_pp_sub_' + tag, 'builtin')
+    # Un-tagged subs (only safe to attribute when scene has 1 robot)
+    if n_robots_in_pipeline == 1:
+        for prefix, kind in (('_native_pp_sub', 'native'), ('_spline_pp_sub', 'spline'),
+                             ('_diffik_pp_sub', 'diffik'), ('_osc_pp_sub', 'osc')):
+            if hasattr(_bi, prefix):
+                return (prefix, kind)
+    return None
+
+results = []
+issues = []
+prev_place = None
+_n_robots = len({{s.get('robot_path','') for s in stages if s.get('robot_path','')}})
+for i, s in enumerate(stages):
+    rp = s.get('robot_path',''); pkp = s.get('pick_path',''); plp = s.get('place_path','')
+    rk = (s.get('robot_kind','') or '').lower()
+    reach = s.get('reach_m')
+    if reach is None:
+        reach = ROBOT_REACH.get(rk) if rk in ROBOT_REACH else ROBOT_REACH.get('default', 0.8)
+    rpos = _robot_base_pos(rp)
+    pkpos = _closest_point_on_bbox(pkp, rpos) if rpos else _world_pos(pkp)
+    plpos = _closest_point_on_bbox(plp, rpos) if rpos else _world_pos(plp)
+    stage_result = {{'index': i, 'robot_path': rp, 'pick_path': pkp, 'place_path': plp,
+                     'robot_pos': rpos, 'pick_pos': pkpos, 'place_pos': plpos,
+                     'reach_m': reach}}
+    bad = False
+    if rpos is None:
+        issues.append(f'stage {{i}}: robot prim {{rp!r}} not found'); bad = True
+    if pkpos is None:
+        issues.append(f'stage {{i}}: pick prim {{pkp!r}} not found'); bad = True
+    if plpos is None:
+        issues.append(f'stage {{i}}: place prim {{plp!r}} not found'); bad = True
+    if rpos and pkpos:
+        d = _dist(rpos, pkpos); stage_result['pick_distance'] = d
+        if d > reach:
+            issues.append(f'stage {{i}}: pick at {{pkp}} is {{d:.2f}}m from robot {{rp}} (>reach {{reach:.2f}}m)'); bad = True
+    if rpos and plpos:
+        d = _dist(rpos, plpos); stage_result['place_distance'] = d
+        if d > reach:
+            issues.append(f'stage {{i}}: place at {{plp}} is {{d:.2f}}m from robot {{rp}} (>reach {{reach:.2f}}m)'); bad = True
+    stage_result['reachable'] = not bad
+    # controller_installed check: per-robot subscription must exist in builtins
+    if rp:
+        ci = _controller_installed(rp, _n_robots)
+        stage_result['controller_installed'] = ci is not None
+        if ci is None:
+            issues.append(f'[controller_installed] stage {{i}}: no pick-place controller subscription found in builtins for robot {{rp}} (looked for _curobo_pp_sub_<tag>; un-tagged variants only matched when single-robot)')
+        else:
+            stage_result['controller_attr'] = ci[0]
+            stage_result['controller_kind'] = ci[1]
+    if prev_place is not None and pkpos is not None:
+        # Handoff gap: distance from previous stage's place point to this stage's pick.
+        # In a conveyor pipeline these can differ (cube travels along the conveyor)
+        # but if the conveyor doesn't span the gap, the cube never arrives.
+        gap = _dist(prev_place, pkpos)
+        stage_result['handoff_gap_to_prev'] = gap
+        if gap > 3.0:  # very loose — flag obviously broken handoffs
+            issues.append(f'stage {{i}}: handoff gap from previous place to this pick is {{gap:.2f}}m — is there a conveyor bridging?')
+        if gap > 0.30:
+            # conveyor_active check: must have an active conveyor whose xy bbox
+            # intersects the place->pick segment, otherwise the cube is stranded.
+            actives = _active_conveyors()
+            bridge = None
+            for cpath, cbbox, cspd in actives:
+                if _segment_overlaps_bbox_xy(prev_place, pkpos, cbbox):
+                    bridge = (cpath, cspd); break
+            stage_result['conveyor_active'] = bridge is not None
+            if bridge is None:
+                issues.append(f'[conveyor_active] stage {{i}}: no active conveyor bridges the {{gap:.2f}}m place->pick handoff (looking for any prim with PhysxSurfaceVelocityAPI applied AND non-zero velocity whose xy bbox intersects the segment)')
+            else:
+                stage_result['bridging_conveyor'] = bridge[0]
+                stage_result['bridging_conveyor_speed'] = bridge[1]
+    prev_place = plpos
+    results.append(stage_result)
+
+# cube_source_bridged: cube must start at first pick zone xy (within 0.20m)
+# OR be on an active conveyor whose bbox contains both the cube and the pick.
+cube_source_bridged = None
+cube_source_note = ''
+if cube_path:
+    cpos = _world_pos(cube_path)
+    first_pick = results[0].get('pick_pos') if results else None
+    if cpos is None:
+        issues.append(f'[cube_source_bridged] cube prim {{cube_path!r}} not found')
+        cube_source_bridged = False
+    elif first_pick is None:
+        issues.append(f'[cube_source_bridged] no first-stage pick position resolved')
+        cube_source_bridged = False
+    else:
+        dxy = ((cpos[0]-first_pick[0])**2 + (cpos[1]-first_pick[1])**2) ** 0.5
+        if dxy <= 0.20:
+            cube_source_bridged = True
+            cube_source_note = f'cube at first pick zone (dxy={{dxy:.2f}}m)'
+        else:
+            for cpath, cbbox, cspd in _active_conveyors():
+                (xmin, ymin), (xmax, ymax) = cbbox
+                cube_on_it = xmin <= cpos[0] <= xmax and ymin <= cpos[1] <= ymax
+                pick_in_it = xmin <= first_pick[0] <= xmax and ymin <= first_pick[1] <= ymax
+                if cube_on_it and pick_in_it:
+                    cube_source_bridged = True
+                    cube_source_note = f'cube on active conveyor {{cpath}} (speed={{cspd:.3f}}) bridges pick zone'
+                    break
+            if cube_source_bridged is None:
+                cube_source_bridged = False
+                issues.append(f'[cube_source_bridged] cube {{cube_path}} at xy=({{cpos[0]:.2f}},{{cpos[1]:.2f}}) is {{dxy:.2f}}m from first pick zone xy=({{first_pick[0]:.2f}},{{first_pick[1]:.2f}}); not at pick zone (within 0.20m) AND not on an active conveyor that bridges into it')
+                cube_source_note = 'cube stranded'
+
+# footprint_within_bounds: when caller supplies footprint_bounds, every
+# user-authored prim under /World must have its xy world bbox inside.
+# Catches CONSTRAINT-01-style "build a 2x2m cell" violations early —
+# without it, reach checks alone pass while the cell sprawls beyond bounds.
+footprint_violations = []
+if footprint_bounds:
+    (fb_xmin, fb_ymin), (fb_xmax, fb_ymax) = footprint_bounds
+    # Skip these — they're system prims with unbounded or negative-z extents
+    _skip_prefixes = ('/World/Render', '/World/persistent', '/World/Look',
+                      '/World/PhysicsScene', '/World/Materials')
+    for prim in stage.Traverse():
+        path = str(prim.GetPath())
+        if not path.startswith('/World/') or path.count('/') < 2:
+            continue
+        if path.startswith(_skip_prefixes):
+            continue
+        # Only top-level user prims — descendants are inside their parent's bbox
+        if path.count('/') > 2:
+            continue
+        bb = _bbox_xy_of(prim)
+        if bb is None:
+            continue
+        (pxmin, pymin), (pxmax, pymax) = bb
+        if pxmin < fb_xmin or pymin < fb_ymin or pxmax > fb_xmax or pymax > fb_ymax:
+            footprint_violations.append({{
+                'path': path,
+                'bbox_xy': [[round(pxmin, 3), round(pymin, 3)],
+                            [round(pxmax, 3), round(pymax, 3)]],
+            }})
+            issues.append(
+                f'[footprint_bounds] {{path}} bbox xy '
+                f'({{pxmin:.2f}},{{pymin:.2f}})->({{pxmax:.2f}},{{pymax:.2f}}) '
+                f'exceeds bounds [{{fb_xmin}},{{fb_ymin}}]->[{{fb_xmax}},{{fb_ymax}}]'
+            )
+
+ok = (all(s.get('reachable', False) for s in results)
+      and all(s.get('conveyor_active', True) for s in results)
+      and all(s.get('controller_installed', True) for s in results)
+      and (cube_source_bridged is None or cube_source_bridged)
+      and not footprint_violations
+      and not any('handoff' in i for i in issues)
+      and not any(i.startswith('[conveyor_active]') for i in issues)
+      and not any(i.startswith('[controller_installed]') for i in issues)
+      and not any(i.startswith('[cube_source_bridged]') for i in issues)
+      and not any(i.startswith('[footprint_bounds]') for i in issues))
+out = {{
+    'stages': results,
+    'issues': issues,
+    'pipeline_ok': ok,
+    'cube_source_bridged': cube_source_bridged,
+    'cube_source_note': cube_source_note,
+    'footprint_violations': footprint_violations,
+    'rationale': 'Per-stage: reach + controller subscription + handoff conveyor; pipeline-level: cube source at pick zone or on active bridging conveyor; optional: footprint_bounds for CONSTRAINT-01.',
+}}
+print(json.dumps(out))
+"""
+    result = await kit_tools.queue_exec_patch(code, "verify_pickplace_pipeline")
+    feasibility = bool(args.get("feasibility", False))
+    if feasibility:
+        result = await _augment_verify_with_feasibility(result, stages)
+    return result
 
 
 # ---------------------------------------------------------------------------
