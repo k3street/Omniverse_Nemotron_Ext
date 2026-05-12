@@ -1661,6 +1661,7 @@ from .handlers.scene_authoring import (  # noqa: E402
     _gen_add_sublayer,            # Phase 6 wave 16
     _gen_add_usd_reference,       # Phase 6 wave 16
     _gen_apply_api_schema,
+    _gen_assign_class_to_children,  # Phase 6 wave 21
     _gen_assign_material,
     _gen_batch_apply_operation,
     _gen_batch_delete_prims,
@@ -1681,6 +1682,7 @@ from .handlers.scene_authoring import (  # noqa: E402
     _gen_load_payload,            # Phase 6 wave 16
     _gen_open_stage,              # Phase 6 wave 16
     _gen_optimize_scene,
+    _gen_remove_semantic_label,     # Phase 6 wave 21
     _gen_restore_delta_snapshot,
     _gen_save_delta_snapshot,
     _gen_save_stage,              # Phase 6 wave 16
@@ -1688,6 +1690,8 @@ from .handlers.scene_authoring import (  # noqa: E402
     _gen_set_attribute,
     _gen_set_edit_target,         # Phase 6 wave 16
     _gen_set_graph_variable,      # Phase 6 wave 18
+    _gen_set_prim_metadata,       # Phase 6 wave 21
+    _gen_set_variant,             # Phase 6 wave 21
     _gen_teleport_prim,
 )
 from .handlers.scene_blueprints import (  # noqa: E402
@@ -14694,33 +14698,7 @@ print(json.dumps(result, default=str))
 from .tool_honesty import honesty_checked
 
 
-@honesty_checked(require_prim_paths=("prim_path",))
-def _gen_set_variant(args: Dict) -> str:
-    # Demo retrofit: @honesty_checked auto-prepends a prim-exists check
-    # using args['prim_path']. Post-check: verify the variant selection
-    # actually took (vsets silently no-op on unknown variant names).
-    prim_path = args["prim_path"]
-    variant_set = args["variant_set"]
-    variant = args["variant"]
-    return (
-        "import omni.usd\n"
-        "stage = omni.usd.get_context().get_stage()\n"
-        f"_sv_path = {prim_path!r}\n"
-        f"_sv_set = {variant_set!r}\n"
-        f"_sv_variant = {variant!r}\n"
-        "prim = stage.GetPrimAtPath(_sv_path)\n"
-        "vsets = prim.GetVariantSets()\n"
-        "vset = vsets.GetVariantSet(_sv_set) if vsets.HasVariantSet(_sv_set) else vsets.AddVariantSet(_sv_set)\n"
-        "vset.SetVariantSelection(_sv_variant)\n"
-        "_vs_actual = vset.GetVariantSelection()\n"
-        "if _vs_actual != _sv_variant:\n"
-        "    raise RuntimeError(\n"
-        "        f'set_variant: SetVariantSelection({_sv_variant!r}) on {_sv_set!r} of {_sv_path!r} '\n"
-        "        f'did not take — vset.GetVariantSelection() returned {_vs_actual!r} '\n"
-        "        f'(likely unknown variant name)'\n"
-        "    )\n"
-        "print('variant', _sv_path, _sv_set, '=', _sv_variant)"
-    )
+# _gen_set_variant moved to handlers/scene_authoring.py (Phase 6 wave 21).
 
 async def _handle_get_training_status(args: Dict) -> Dict:
     """Read TensorBoard event files + subprocess state for an RL run."""
@@ -15138,20 +15116,7 @@ print(json.dumps(result, default=str))
 """
     return await kit_tools.queue_exec_patch(code, f"get_prim_metadata {prim_path}.{key}")
 
-def _gen_set_prim_metadata(args: Dict) -> str:
-    """Emit code that writes a USD metadata field via prim.SetMetadata()."""
-    prim_path = args["prim_path"]
-    key = args["key"]
-    value = args["value"]
-    return (
-        "import omni.usd\n"
-        "stage = omni.usd.get_context().get_stage()\n"
-        f"prim = stage.GetPrimAtPath({prim_path!r})\n"
-        "if not prim or not prim.IsValid():\n"
-        f"    raise RuntimeError('prim not found: ' + {prim_path!r})\n"
-        f"ok = prim.SetMetadata({key!r}, {value!r})\n"
-        f"print('set_prim_metadata', {prim_path!r}, {key!r}, '=', {value!r}, 'ok=', ok)\n"
-    )
+# _gen_set_prim_metadata moved to handlers/scene_authoring.py (Phase 6 wave 21).
 
 async def _handle_get_prim_type(args: Dict) -> Dict:
     """Return prim.GetTypeName() (e.g. 'Mesh', 'Xform', 'Camera')."""
@@ -17754,114 +17719,10 @@ async def _handle_get_semantic_label(args: Dict) -> Dict:
         ),
     }
 
-def _gen_remove_semantic_label(args: Dict) -> str:
-    prim_path = args["prim_path"]
-    prim_path_repr = repr(prim_path)
-    return (
-        "import omni.usd\n"
-        "from pxr import Usd, Semantics, Sdf\n"
-        "\n"
-        "stage = omni.usd.get_context().get_stage()\n"
-        "if stage is None:\n"
-        "    raise RuntimeError('No stage is open — cannot remove semantic label')\n"
-        "\n"
-        f"prim_path = {prim_path_repr}\n"
-        "prim = stage.GetPrimAtPath(prim_path)\n"
-        "if not prim or not prim.IsValid():\n"
-        "    raise RuntimeError(f'prim not found: {prim_path}')\n"
-        "\n"
-        "# Enumerate every Semantics_* instance, remove the API and clear leftover attrs.\n"
-        "try:\n"
-        "    instances = Semantics.SemanticsAPI.GetAll(prim) if hasattr(\n"
-        "        Semantics.SemanticsAPI, 'GetAll'\n"
-        "    ) else []\n"
-        "except Exception:\n"
-        "    instances = []\n"
-        "\n"
-        "if not instances:\n"
-        "    print(f'No Semantics.SemanticsAPI applied on {prim_path} — nothing to remove (no-op)')\n"
-        "else:\n"
-        "    removed = []\n"
-        "    for sem in instances:\n"
-        "        try:\n"
-        "            instance_name = sem.GetName() if hasattr(sem, 'GetName') else ''\n"
-        "        except Exception:\n"
-        "            instance_name = ''\n"
-        "        try:\n"
-        "            prim.RemoveAPI(Semantics.SemanticsAPI, instance_name)\n"
-        "        except Exception:\n"
-        "            # Older Kit: RemoveAppliedSchema works on the underlying spec\n"
-        "            try:\n"
-        "                full = f'SemanticsAPI:{instance_name}' if instance_name else 'SemanticsAPI'\n"
-        "                prim.RemoveAppliedSchema(full)\n"
-        "            except Exception:\n"
-        "                pass\n"
-        "        # Explicitly clear the attributes RemoveAPI leaves behind so HasAPI() is False.\n"
-        "        for attr_name in (\n"
-        "            f'semantic:{instance_name}:params:semanticType' if instance_name else 'semantic:params:semanticType',\n"
-        "            f'semantic:{instance_name}:params:semanticData' if instance_name else 'semantic:params:semanticData',\n"
-        "        ):\n"
-        "            attr = prim.GetAttribute(attr_name)\n"
-        "            if attr and attr.IsValid():\n"
-        "                try:\n"
-        "                    prim.RemoveProperty(attr_name)\n"
-        "                except Exception:\n"
-        "                    pass\n"
-        "        removed.append(instance_name or '<default>')\n"
-        "    print(f'Removed Semantics.SemanticsAPI from {prim_path}: instances={removed}')\n"
-    )
+# _gen_remove_semantic_label moved to handlers/scene_authoring.py (Phase 6 wave 21).
 
-def _gen_assign_class_to_children(args: Dict) -> str:
-    prim_path = args["prim_path"]
-    class_name = args["class_name"]
-    semantic_type = args.get("semantic_type", "class")
-    prim_path_repr = repr(prim_path)
-    class_name_repr = repr(class_name)
-    semantic_type_repr = repr(semantic_type)
-    instance_name = f"Semantics_{semantic_type}"
-    instance_name_repr = repr(instance_name)
-    return (
-        "import omni.usd\n"
-        "from pxr import Usd, UsdGeom, Semantics\n"
-        "\n"
-        "stage = omni.usd.get_context().get_stage()\n"
-        "if stage is None:\n"
-        "    raise RuntimeError('No stage is open — cannot assign class to children')\n"
-        "\n"
-        f"root_path = {prim_path_repr}\n"
-        f"class_name = {class_name_repr}\n"
-        f"semantic_type = {semantic_type_repr}\n"
-        f"instance_name = {instance_name_repr}\n"
-        "\n"
-        "root = stage.GetPrimAtPath(root_path)\n"
-        "if not root or not root.IsValid():\n"
-        "    raise RuntimeError(f'prim not found: {root_path}')\n"
-        "\n"
-        "# Walk root + every descendant. Only Mesh / Imageable prims (i.e. things that\n"
-        "# render and therefore appear in SDG output) get the label — Xforms and pure\n"
-        "# grouping prims are skipped because labels on them are dead weight.\n"
-        "labeled = []\n"
-        "skipped = []\n"
-        "for prim in Usd.PrimRange(root):\n"
-        "    if not prim or not prim.IsValid():\n"
-        "        continue\n"
-        "    is_mesh = prim.IsA(UsdGeom.Mesh)\n"
-        "    is_imageable = prim.IsA(UsdGeom.Gprim)  # Mesh, Sphere, Cube, ... — anything that draws\n"
-        "    if not (is_mesh or is_imageable):\n"
-        "        skipped.append(str(prim.GetPath()))\n"
-        "        continue\n"
-        "    sem = Semantics.SemanticsAPI.Apply(prim, instance_name)\n"
-        "    sem.CreateSemanticTypeAttr().Set(semantic_type)\n"
-        "    sem.CreateSemanticDataAttr().Set(class_name)\n"
-        "    labeled.append(str(prim.GetPath()))\n"
-        "\n"
-        "print(\n"
-        "    f'assign_class_to_children: root={root_path} class={class_name!r} '\n"
-        "    f'type={semantic_type!r} labeled={len(labeled)} skipped={len(skipped)}'\n"
-        ")\n"
-        "if labeled:\n"
-        "    print(f'  first labeled: {labeled[:5]}')\n"
-    )
+
+# _gen_assign_class_to_children moved to handlers/scene_authoring.py (Phase 6 wave 21).
 
 async def _handle_validate_semantic_labels(args: Dict) -> Dict:
     """Lint every Semantics.SemanticsAPI annotation on the current stage."""
