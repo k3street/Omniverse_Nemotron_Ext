@@ -1813,6 +1813,22 @@ from .handlers.diagnostics import (  # noqa: E402
     _gen_visualize_clearance,
     _gen_visualize_collision_mesh,
     _gen_visualize_forces,
+    _handle_check_collision_mesh,   # Phase 7 wave 10
+    _handle_check_collisions,       # Phase 7 wave 10
+    _handle_check_teleop_hardware,  # Phase 7 wave 10
+    _handle_check_tf_health,        # Phase 7 wave 10
+    _handle_check_vram_headroom,    # Phase 7 wave 10
+    _handle_compare_sim_real_video, # Phase 7 wave 10
+    _handle_console_error_autodetect,  # Phase 7 wave 10
+    _handle_diagnose_domain_gap,    # Phase 7 wave 10
+    _handle_diagnose_performance,   # Phase 7 wave 10
+    _handle_diagnose_physics_error, # Phase 7 wave 10
+    _handle_diagnose_ros2,          # Phase 7 wave 10
+    _handle_diagnose_whole_body,    # Phase 7 wave 10
+    _handle_get_active_state,       # Phase 7 wave 10
+    _handle_get_console_errors,     # Phase 7 wave 10
+    _handle_get_debug_info,         # Phase 7 wave 10
+    _handle_hardware_compatibility_check,  # Phase 7 wave 10
 )
 from .handlers.rendering import (  # noqa: E402
     _gen_add_default_light,
@@ -2114,14 +2130,9 @@ async def _handle_capture_viewport(args: Dict) -> Dict:
 
 
 async def _handle_get_console_errors(args: Dict) -> Dict:
-    ctx = await kit_tools.get_stage_context(full=False)
-    logs = ctx.get("recent_logs", [])
-    min_level = args.get("min_level", "warning")
-    level_order = ["verbose", "info", "warning", "error", "fatal"]
-    min_idx = level_order.index(min_level) if min_level in level_order else 2
-    filtered = [l for l in logs if level_order.index(l.get("level", "info")) >= min_idx]
-    last_n = args.get("last_n", 50)
-    return {"errors": filtered[-last_n:], "total_count": len(filtered)}
+    # _handle_get_console_errors moved to handlers/diagnostics.py (Phase 7 wave 10).
+    from .handlers.diagnostics import _handle_get_console_errors as _h
+    return await _h(args)
 
 
 # _handle_get_articulation_state moved to handlers/physics.py (Phase 7 wave 2).
@@ -3444,13 +3455,9 @@ print(json.dumps({{'prim_a': {prim_a!r}, 'prim_b': {prim_b!r}, 'distance_m': dis
 
 
 async def _handle_get_debug_info(args: Dict) -> Dict:
-    """Return perf metrics via Kit RPC /context fallback."""
-    ctx = await kit_tools.get_stage_context(full=False)
-    return {
-        "prim_count": ctx.get("stage", {}).get("prim_count"),
-        "stage_url": ctx.get("stage", {}).get("stage_url"),
-        "note": "Full perf metrics require Kit-side instrumentation",
-    }
+    # _handle_get_debug_info moved to handlers/diagnostics.py (Phase 7 wave 10).
+    from .handlers.diagnostics import _handle_get_debug_info as _h
+    return await _h(args)
 
 
 async def _handle_lookup_api_deprecation(args: Dict) -> Dict:
@@ -4894,61 +4901,9 @@ DATA_HANDLERS["run_stage_analysis"] = _handle_run_stage_analysis
 # ══════ From feat/tools-and-bugfixes ══════
 # _handle_get_physics_errors moved to handlers/physics.py (Phase 7 wave 2).
 async def _handle_check_collisions(args: Dict) -> Dict:
-    """Validate collision meshes on a prim via Kit RPC."""
-    prim_path = args["prim_path"]
-    code = f"""\
-import omni.usd
-from pxr import Usd, UsdPhysics, UsdGeom, PhysxSchema
-import json
-
-stage = omni.usd.get_context().get_stage()
-prim = stage.GetPrimAtPath('{prim_path}')
-if not prim.IsValid():
-    print(json.dumps({{"valid": False, "error": "Prim not found: {prim_path}"}}))
-else:
-    has_collision = prim.HasAPI(UsdPhysics.CollisionAPI)
-    has_rigid_body = prim.HasAPI(UsdPhysics.RigidBodyAPI)
-    has_mass = prim.HasAPI(UsdPhysics.MassAPI)
-
-    # Count mesh children that could serve as collision geometry
-    mesh_count = 0
-    collision_children = 0
-    for child in list(Usd.PrimRange(prim))[1:]:
-        if child.IsA(UsdGeom.Mesh):
-            mesh_count += 1
-        if child.HasAPI(UsdPhysics.CollisionAPI):
-            collision_children += 1
-
-    # Check for explicit collision geometry (MeshCollisionAPI or simple shape)
-    has_mesh_collision = prim.HasAPI(PhysxSchema.PhysxCollisionAPI)
-
-    result = {{
-        "valid": True,
-        "prim_path": '{prim_path}',
-        "has_collision_api": has_collision,
-        "has_rigid_body_api": has_rigid_body,
-        "has_mass_api": has_mass,
-        "has_physx_collision": has_mesh_collision,
-        "mesh_children": mesh_count,
-        "children_with_collision": collision_children,
-        "issues": [],
-    }}
-    if not has_collision and collision_children == 0:
-        result["issues"].append("No CollisionAPI on prim or any children — physics contacts will not register")
-    if has_rigid_body and not has_collision and collision_children == 0:
-        result["issues"].append("RigidBodyAPI without any collision — prim will fall through everything")
-    if mesh_count > 0 and not has_collision and collision_children == 0:
-        result["issues"].append("Mesh geometry exists but no collision applied — apply CollisionAPI")
-
-    print(json.dumps(result))
-"""
-    result = await kit_tools.exec_sync(code)
-    if result.get("success") and result.get("output"):
-        try:
-            return {"type": "data", **json.loads(result["output"].strip())}
-        except json.JSONDecodeError:
-            pass
-    return {"type": "data", "error": result.get("output", "Failed to check collisions")}
+    # _handle_check_collisions moved to handlers/diagnostics.py (Phase 7 wave 10).
+    from .handlers.diagnostics import _handle_check_collisions as _h
+    return await _h(args)
 
 def _handle_fix_error(args: Dict) -> str:
     """Generate a fix code patch for a known physics/USD error pattern."""
@@ -5836,59 +5791,9 @@ DATA_HANDLERS["redact_finetune_data"] = _handle_redact_finetune_data
 
 # ══════ From feat/addendum-phase2-smart-debugging ══════
 async def _handle_diagnose_physics_error(args: Dict) -> Dict:
-    """Pattern-match against known PhysX errors and return diagnosis."""
-    error_text = args.get("error_text", "")
-    if not error_text.strip():
-        return {"matches": [], "message": "No error text provided."}
-
-    matches = []
-    seen_categories = set()
-
-    # Split into lines for deduplication counting
-    lines = error_text.strip().splitlines()
-
-    for entry in _PHYSX_ERROR_PATTERNS:
-        pattern = entry["pattern"]
-        if not _re.search(pattern, error_text, _re.IGNORECASE):
-            continue
-
-        # Count occurrences across lines
-        count = sum(
-            1 for line in lines
-            if _re.search(pattern, line, _re.IGNORECASE)
-        )
-        # Fallback: at least 1 if it matched the full text
-        count = max(count, 1)
-
-        # Try to extract prim path
-        prim_path = None
-        if entry.get("prim_regex"):
-            m = _re.search(entry["prim_regex"], error_text, _re.IGNORECASE)
-            if m:
-                prim_path = m.group(1)
-
-        if entry["category"] not in seen_categories:
-            seen_categories.add(entry["category"])
-            matches.append({
-                "category": entry["category"],
-                "severity": entry["severity"],
-                "fix": entry["fix"],
-                "prim_path": prim_path,
-                "occurrences": count,
-                "dedup_hint": f"This error appeared {count} time(s)." if count > 1 else None,
-            })
-
-    if not matches:
-        return {
-            "matches": [],
-            "message": "No known PhysX error patterns matched. The error may be application-specific or from a non-physics subsystem.",
-        }
-
-    return {
-        "matches": matches,
-        "total_patterns_checked": len(_PHYSX_ERROR_PATTERNS),
-        "message": f"Matched {len(matches)} known error pattern(s).",
-    }
+    # _handle_diagnose_physics_error moved to handlers/diagnostics.py (Phase 7 wave 10).
+    from .handlers.diagnostics import _handle_diagnose_physics_error as _h
+    return await _h(args)
 
 async def _handle_trace_config(args: Dict) -> Dict:
     """Parse IsaacLab @configclass files to trace parameter resolution chain."""
@@ -6114,117 +6019,9 @@ else:
 # _handle_analyze_randomization moved to handlers/training.py (Phase 7 wave 5).
 
 async def _handle_diagnose_domain_gap(args: Dict) -> Dict:
-    """Compare synthetic vs real image datasets to diagnose domain gap.
-
-    Returns a FID-like comparison score, per-class distribution differences,
-    and suggested DR adjustments.
-    """
-    synthetic_dir = args.get("synthetic_dir", "")
-    real_dir = args.get("real_dir", "")
-    checkpoint = args.get("model_checkpoint")
-
-    if not synthetic_dir or not real_dir:
-        return {"error": "Both synthetic_dir and real_dir are required"}
-
-    # Sanitize paths
-    import re as _re
-    for d in (synthetic_dir, real_dir):
-        if not _re.match(r'^[a-zA-Z0-9/_. :-]+$', d):
-            return {"error": f"Invalid path characters in: {d}"}
-
-    checkpoint_line = ""
-    if checkpoint:
-        if not _re.match(r'^[a-zA-Z0-9/_. :-]+$', checkpoint):
-            return {"error": f"Invalid path characters in checkpoint: {checkpoint}"}
-        checkpoint_line = f"checkpoint = '{checkpoint}'"
-
-    code = f"""\
-import json, os, glob
-import numpy as np
-
-synthetic_dir = '{synthetic_dir}'
-real_dir = '{real_dir}'
-{checkpoint_line}
-
-def load_image_stats(directory):
-    \"\"\"Compute per-channel mean/std over images in a directory.\"\"\"
-    from PIL import Image
-    files = glob.glob(os.path.join(directory, '**', '*.png'), recursive=True)
-    files += glob.glob(os.path.join(directory, '**', '*.jpg'), recursive=True)
-    if not files:
-        return None, 0
-    samples = files[:200] if len(files) > 200 else files
-    all_means = []
-    all_stds = []
-    for f in samples:
-        try:
-            img = np.array(Image.open(f).convert('RGB'), dtype=np.float32) / 255.0
-            all_means.append(img.mean(axis=(0, 1)))
-            all_stds.append(img.std(axis=(0, 1)))
-        except Exception:
-            continue
-    if not all_means:
-        return None, 0
-    return {{
-        "channel_means": np.mean(all_means, axis=0).tolist(),
-        "channel_stds": np.mean(all_stds, axis=0).tolist(),
-        "count": len(all_means),
-    }}, len(files)
-
-synth_stats, synth_count = load_image_stats(synthetic_dir)
-real_stats, real_count = load_image_stats(real_dir)
-
-if synth_stats is None:
-    print(json.dumps({{"error": f"No images found in synthetic dir: {{synthetic_dir}}"}}))
-elif real_stats is None:
-    print(json.dumps({{"error": f"No images found in real dir: {{real_dir}}"}}))
-else:
-    # Compute FID-like score from channel statistics
-    mean_diff = np.linalg.norm(
-        np.array(synth_stats['channel_means']) - np.array(real_stats['channel_means'])
-    )
-    std_diff = np.linalg.norm(
-        np.array(synth_stats['channel_stds']) - np.array(real_stats['channel_stds'])
-    )
-    # Simplified domain gap score (0 = identical, higher = more gap)
-    gap_score = float(mean_diff * 100 + std_diff * 50)
-
-    # Per-channel analysis
-    channels = ['R', 'G', 'B']
-    per_channel = {{}}
-    adjustments = []
-    for i, ch in enumerate(channels):
-        diff = synth_stats['channel_means'][i] - real_stats['channel_means'][i]
-        per_channel[ch] = {{
-            "synthetic_mean": round(synth_stats['channel_means'][i], 4),
-            "real_mean": round(real_stats['channel_means'][i], 4),
-            "difference": round(diff, 4),
-        }}
-        if abs(diff) > 0.1:
-            direction = "brighter" if diff > 0 else "darker"
-            adjustments.append(f"Synthetic {{ch}} channel is {{direction}} than real by {{abs(diff):.2f}} — adjust lighting/material {{ch}} intensity")
-
-    if gap_score > 15:
-        adjustments.append("High domain gap — consider adding texture/lighting randomization")
-    if gap_score > 30:
-        adjustments.append("Very high domain gap — real-to-sim calibration recommended")
-
-    result = {{
-        "domain_gap_score": round(gap_score, 2),
-        "synthetic_images": synth_count,
-        "real_images": real_count,
-        "synthetic_stats": synth_stats,
-        "real_stats": real_stats,
-        "per_channel_diff": per_channel,
-        "suggested_adjustments": adjustments,
-        "model_checkpoint": '{checkpoint or "none"}',
-    }}
-    print(json.dumps(result))
-"""
-    result = await kit_tools.queue_exec_patch(
-        code, f"Diagnose domain gap: {synthetic_dir} vs {real_dir}"
-    )
-    return {"type": "data", "queued": result.get("queued", False)}
+    # _handle_diagnose_domain_gap moved to handlers/diagnostics.py (Phase 7 wave 10).
+    from .handlers.diagnostics import _handle_diagnose_domain_gap as _h
+    return await _h(args)
 
 DATA_HANDLERS["validate_annotations"] = _handle_validate_annotations
 DATA_HANDLERS["analyze_randomization"] = _handle_analyze_randomization
@@ -6232,204 +6029,9 @@ DATA_HANDLERS["diagnose_domain_gap"] = _handle_diagnose_domain_gap
 
 # ══════ From feat/addendum-phase8F-ros2-quality ══════
 async def _handle_diagnose_ros2(args: Dict) -> Dict:
-    """Run comprehensive ROS2 integration health check on the current scene.
-
-    Checks performed:
-    1. ROS2Context node present in OmniGraph
-    2. ROS distro detection
-    3. QoS profile mismatches between common topic pairs
-    4. use_sim_time parameter configuration
-    5. Clock publishing (ROS2PublishClock node)
-    6. Domain ID consistency
-    7. Dangling OmniGraph connections
-    """
-    issues: List[Dict[str, Any]] = []
-
-    # Generate diagnostic code that runs inside Kit
-    diag_code = '''\
-import omni.graph.core as og
-import json
-import os
-
-result = {
-    "ros2_context_found": False,
-    "ros2_context_path": None,
-    "distro": None,
-    "domain_id": None,
-    "clock_publisher_found": False,
-    "use_sim_time": None,
-    "og_graphs": [],
-    "dangling_connections": [],
-    "qos_nodes": [],
-}
-
-# Check ROS_DISTRO environment variable
-result["distro"] = os.environ.get("ROS_DISTRO", None)
-result["domain_id"] = os.environ.get("ROS_DOMAIN_ID", "0")
-
-# Scan all OmniGraph graphs
-try:
-    all_graphs = og.get_all_graphs()
-    for graph in all_graphs:
-        graph_path = graph.get_path_to_graph()
-        result["og_graphs"].append(graph_path)
-        nodes = graph.get_nodes()
-        for node in nodes:
-            node_type = node.get_type_name()
-            node_path = node.get_prim_path()
-
-            # Check for ROS2Context
-            if "ROS2Context" in node_type:
-                result["ros2_context_found"] = True
-                result["ros2_context_path"] = str(node_path)
-                # Try to read domain_id attribute
-                domain_attr = node.get_attribute("inputs:domain_id")
-                if domain_attr:
-                    result["domain_id_node"] = domain_attr.get()
-
-            # Check for ROS2PublishClock
-            if "PublishClock" in node_type:
-                result["clock_publisher_found"] = True
-
-            # Collect QoS-relevant nodes
-            if "ROS2" in node_type and "Publish" in node_type:
-                topic_attr = node.get_attribute("inputs:topicName")
-                qos_attr = node.get_attribute("inputs:qosProfile")
-                result["qos_nodes"].append({
-                    "node_type": node_type,
-                    "node_path": str(node_path),
-                    "topic": topic_attr.get() if topic_attr else None,
-                    "qos": qos_attr.get() if qos_attr else None,
-                })
-
-        # Check for dangling connections
-        for node in nodes:
-            for attr in node.get_attributes():
-                if attr.get_port_type() == og.AttributePortType.ATTRIBUTE_PORT_TYPE_INPUT:
-                    upstream = attr.get_upstream_connections()
-                    if not upstream and attr.get_name().startswith("inputs:execIn"):
-                        result["dangling_connections"].append({
-                            "node": str(node.get_prim_path()),
-                            "attr": attr.get_name(),
-                        })
-except Exception as e:
-    result["scan_error"] = str(e)
-
-# Check use_sim_time via carb settings
-try:
-    import carb.settings
-    settings = carb.settings.get_settings()
-    result["use_sim_time"] = settings.get("/persistent/exts/isaacsim.ros2.bridge/useSimTime")
-except Exception:
-    result["use_sim_time"] = None
-
-print(json.dumps(result))
-'''
-
-    try:
-        diag_result = await kit_tools.queue_exec_patch(diag_code, "ROS2 diagnostic scan")
-        # Parse the result if we got immediate output
-        if isinstance(diag_result, dict) and diag_result.get("output"):
-            import json as _json
-            scene_info = _json.loads(diag_result["output"])
-        else:
-            scene_info = {}
-    except Exception:
-        scene_info = {}
-
-    # Issue 1: ROS2Context node
-    if not scene_info.get("ros2_context_found", False):
-        issues.append({
-            "id": "no_ros2_context",
-            "severity": "critical",
-            "message": "No ROS2Context node found in any OmniGraph",
-            "fix": "Add a ROS2Context node to your action graph. This is required for all ROS2 bridge communication.",
-            "tool_hint": "create_omnigraph with a ROS2Context node",
-        })
-
-    # Issue 2: ROS distro
-    distro = scene_info.get("distro")
-    if not distro:
-        issues.append({
-            "id": "no_ros_distro",
-            "severity": "warning",
-            "message": "ROS_DISTRO environment variable not set",
-            "fix": "Source your ROS2 workspace: source /opt/ros/<distro>/setup.bash",
-            "tool_hint": None,
-        })
-
-    # Issue 3: Clock publisher
-    if not scene_info.get("clock_publisher_found", False):
-        issues.append({
-            "id": "no_clock_publisher",
-            "severity": "warning",
-            "message": "No ROS2PublishClock node found — /clock topic will not be published",
-            "fix": "Add a ROS2PublishClock node to publish simulation time. Use configure_ros2_time tool.",
-            "tool_hint": "configure_ros2_time(mode='sim_time')",
-        })
-
-    # Issue 4: use_sim_time
-    use_sim_time = scene_info.get("use_sim_time")
-    clock_found = scene_info.get("clock_publisher_found", False)
-    if clock_found and use_sim_time is not True:
-        issues.append({
-            "id": "use_sim_time_mismatch",
-            "severity": "warning",
-            "message": "Clock publisher active but use_sim_time is not enabled",
-            "fix": "Set use_sim_time=true so ROS2 nodes use simulation clock instead of wall clock.",
-            "tool_hint": "configure_ros2_time(mode='sim_time')",
-        })
-
-    # Issue 5: Domain ID mismatch
-    env_domain = scene_info.get("domain_id", "0")
-    node_domain = scene_info.get("domain_id_node")
-    if node_domain is not None and str(node_domain) != str(env_domain):
-        issues.append({
-            "id": "domain_id_mismatch",
-            "severity": "critical",
-            "message": f"Domain ID mismatch: ROS_DOMAIN_ID={env_domain} but ROS2Context node has domain_id={node_domain}",
-            "fix": f"Set ROS_DOMAIN_ID={node_domain} in your environment, or update the ROS2Context node to domain_id={env_domain}.",
-            "tool_hint": None,
-        })
-
-    # Issue 6: QoS mismatches
-    for qos_node in scene_info.get("qos_nodes", []):
-        topic = qos_node.get("topic", "")
-        if topic:
-            topic_key = topic.strip("/").split("/")[-1]
-            preset = _ROS2_QOS_PRESETS.get(topic_key)
-            if preset and qos_node.get("qos"):
-                current_qos = str(qos_node["qos"])
-                expected_reliability = preset[0]
-                if expected_reliability not in current_qos:
-                    issues.append({
-                        "id": "qos_mismatch",
-                        "severity": "warning",
-                        "message": f"QoS mismatch on topic '{topic}': expected {expected_reliability} reliability",
-                        "fix": f"Use fix_ros2_qos(topic='{topic}') to apply the recommended QoS profile.",
-                        "tool_hint": f"fix_ros2_qos(topic='{topic}')",
-                    })
-
-    # Issue 7: Dangling connections
-    for dangling in scene_info.get("dangling_connections", []):
-        issues.append({
-            "id": "dangling_connection",
-            "severity": "info",
-            "message": f"Dangling execution input on {dangling['node']}.{dangling['attr']}",
-            "fix": "Connect this node's execIn to an OnPlaybackTick or upstream node.",
-            "tool_hint": None,
-        })
-
-    return {
-        "issues": issues,
-        "issue_count": len(issues),
-        "ros2_context_found": scene_info.get("ros2_context_found", False),
-        "distro": scene_info.get("distro"),
-        "domain_id": scene_info.get("domain_id", "0"),
-        "clock_publishing": scene_info.get("clock_publisher_found", False),
-        "graphs_scanned": len(scene_info.get("og_graphs", [])),
-        "message": f"Found {len(issues)} issue(s)" if issues else "All ROS2 checks passed — no issues found",
-    }
+    # _handle_diagnose_ros2 moved to handlers/diagnostics.py (Phase 7 wave 10).
+    from .handlers.diagnostics import _handle_diagnose_ros2 as _h
+    return await _h(args)
 
 # _gen_fix_ros2_qos moved to handlers/ros2.py (Phase 6 wave 7).
 
@@ -6517,109 +6119,9 @@ def _analyze_performance(stats: Dict, timing: Dict, mem: Dict) -> List[Dict]:
     return issues
 
 async def _handle_diagnose_performance(args: Dict) -> Dict:
-    """Collect PhysX stats, timing, and GPU memory, then analyze for bottlenecks."""
-    code = """\
-import json
-
-results = {"stats": {}, "timing": {}, "mem": {}}
-
-# 1. PhysX scene statistics
-try:
-    from omni.physx import get_physx_statistics_interface
-    pstats = get_physx_statistics_interface()
-    scene_stats = pstats.get_physx_scene_statistics()
-    results["stats"] = {
-        "nb_dynamic_rigids": scene_stats.get("nbDynamicRigids", 0),
-        "nb_static_rigids": scene_stats.get("nbStaticRigids", 0),
-        "nb_articulations": scene_stats.get("nbArticulations", 0),
-        "nb_trimesh_shapes": scene_stats.get("nbTriMeshShapes", 0),
-        "active_contact_pairs": scene_stats.get("nbActiveContactPairs", 0),
-        "solver_iterations": scene_stats.get("solverIterations", 4),
-    }
-except Exception as e:
-    results["stats"]["error"] = str(e)
-
-# 2. PhysX per-zone timing
-try:
-    from omni.physx import get_physx_benchmarks_interface
-    benchmarks = get_physx_benchmarks_interface()
-    benchmarks.enable_profile()
-    results["timing"] = {
-        "simulation_ms": benchmarks.get_value("Simulation") or 0,
-        "collision_detection_ms": benchmarks.get_value("Collision Detection") or 0,
-        "broad_phase_ms": benchmarks.get_value("Broad Phase") or 0,
-        "narrow_phase_ms": benchmarks.get_value("Narrow Phase") or 0,
-        "solver_ms": benchmarks.get_value("Solver") or 0,
-        "integration_ms": benchmarks.get_value("Integration") or 0,
-    }
-except Exception as e:
-    results["timing"]["error"] = str(e)
-
-# 3. Render timing + VRAM
-try:
-    from omni.hydra.engine.stats import HydraEngineStats
-    hydra = HydraEngineStats()
-    mem = hydra.get_mem_stats(detailed=True)
-    device = hydra.get_device_info()
-    results["mem"] = {
-        "used_mb": mem.get("usedMB", 0),
-        "total_mb": device.get("totalVRAM_MB", 0),
-        "per_category": mem.get("perCategory", {}),
-    }
-except Exception as e:
-    results["mem"]["error"] = str(e)
-
-# 4. FPS
-try:
-    import omni.kit.app
-    fps = omni.kit.app.get_app().get_fps()
-    results["fps"] = fps
-except Exception:
-    results["fps"] = None
-
-print(json.dumps(results))
-"""
-    kit_result = await kit_tools.queue_exec_patch(
-        code, "Collect performance diagnostics (PhysX stats + GPU memory)"
-    )
-
-    # If Kit returned data, analyze it; otherwise return the raw queue result
-    if isinstance(kit_result, dict) and "stats" in kit_result:
-        stats = kit_result.get("stats", {})
-        timing = kit_result.get("timing", {})
-        mem = kit_result.get("mem", {})
-        fps = kit_result.get("fps")
-
-        issues = _analyze_performance(stats, timing, mem)
-
-        # Determine bottleneck
-        bottleneck = "unknown"
-        if issues:
-            bottleneck = issues[0]["category"]
-
-        # Build summary
-        parts = []
-        if fps is not None:
-            parts.append(f"Your sim runs at {fps:.0f} FPS.")
-        if issues:
-            parts.append(f"{len(issues)} issue(s) found.")
-            parts.append(issues[0]["message"])
-            parts.append(issues[0]["fix"])
-        else:
-            parts.append("No obvious performance issues detected.")
-
-        return {
-            "fps": fps,
-            "bottleneck": bottleneck,
-            "issues": issues,
-            "stats": stats,
-            "timing": timing,
-            "mem": mem,
-            "summary": " ".join(parts),
-        }
-
-    # Kit RPC just queued the patch — return what we have
-    return {"type": "data", "queued": True, **kit_result}
+    # _handle_diagnose_performance moved to handlers/diagnostics.py (Phase 7 wave 10).
+    from .handlers.diagnostics import _handle_diagnose_performance as _h
+    return await _h(args)
 
 async def _handle_find_heavy_prims(args: Dict) -> Dict:
     """Traverse the stage and find meshes above a triangle-count threshold."""
@@ -7116,106 +6618,9 @@ async def _handle_scene_aware_starter_prompts(args: Dict) -> Dict:
     }
 
 async def _handle_hardware_compatibility_check(args: Dict) -> Dict:
-    """Run hardware and software compatibility probe."""
-    checks = []
-
-    # GPU info — try Kit RPC first
-    gpu_info = {"name": "unknown", "vram_gb": 0}
-    try:
-        ctx = await kit_tools.get_stage_context(full=False)
-        device = ctx.get("device", {})
-        if device:
-            gpu_info["name"] = device.get("name", "unknown")
-            gpu_info["vram_gb"] = device.get("vram_mb", 0) / 1024
-    except Exception:
-        pass
-
-    # GPU check
-    if gpu_info["name"] != "unknown":
-        checks.append({
-            "component": "GPU",
-            "value": f"{gpu_info['name']} ({gpu_info['vram_gb']:.0f} GB VRAM)",
-            "status": "pass",
-            "icon": "check",
-        })
-    else:
-        checks.append({
-            "component": "GPU",
-            "value": "Could not detect GPU (Kit RPC unavailable)",
-            "status": "warn",
-            "icon": "warning",
-        })
-
-    # VRAM warning
-    if gpu_info["vram_gb"] > 0:
-        if gpu_info["vram_gb"] < 8:
-            checks.append({
-                "component": "VRAM",
-                "value": f"{gpu_info['vram_gb']:.0f} GB — may be insufficient for complex scenes",
-                "status": "warn",
-                "icon": "warning",
-            })
-        elif gpu_info["vram_gb"] < 16:
-            checks.append({
-                "component": "VRAM",
-                "value": f"{gpu_info['vram_gb']:.0f} GB — large RL environments (>256 envs) may need more",
-                "status": "warn",
-                "icon": "warning",
-            })
-        else:
-            checks.append({
-                "component": "VRAM",
-                "value": f"{gpu_info['vram_gb']:.0f} GB — sufficient for all workloads",
-                "status": "pass",
-                "icon": "check",
-            })
-
-    # Isaac Sim version
-    isaac_version = "unknown"
-    try:
-        ctx_stage = ctx.get("stage", {})
-        isaac_version = ctx_stage.get("isaac_sim_version", "unknown")
-    except Exception:
-        pass
-    if isaac_version != "unknown":
-        checks.append({
-            "component": "Isaac Sim",
-            "value": f"{isaac_version} — compatible",
-            "status": "pass",
-            "icon": "check",
-        })
-    else:
-        checks.append({
-            "component": "Isaac Sim",
-            "value": "Version unknown (Kit RPC unavailable)",
-            "status": "info",
-            "icon": "info",
-        })
-
-    # Python version
-    import sys
-    py_version = f"{sys.version_info.major}.{sys.version_info.minor}"
-    py_ok = sys.version_info >= (3, 10)
-    checks.append({
-        "component": "Python",
-        "value": f"{py_version} — {'compatible' if py_ok else 'requires 3.10+'}",
-        "status": "pass" if py_ok else "warn",
-        "icon": "check" if py_ok else "warning",
-    })
-
-    # LLM connectivity
-    llm_mode = os.environ.get("LLM_MODE", "local")
-    checks.append({
-        "component": "LLM",
-        "value": f"Mode: {llm_mode} — no local GPU needed" if llm_mode != "local" else f"Mode: {llm_mode}",
-        "status": "info",
-        "icon": "info",
-    })
-
-    return {
-        "checks": checks,
-        "overall_status": "warn" if any(c["status"] == "warn" for c in checks) else "pass",
-    }
+    # _handle_hardware_compatibility_check moved to handlers/diagnostics.py (Phase 7 wave 10).
+    from .handlers.diagnostics import _handle_hardware_compatibility_check as _h
+    return await _h(args)
 
 async def _handle_slash_command_discovery(args: Dict) -> Dict:
     """Return slash commands filtered by scene state."""
@@ -7252,43 +6657,9 @@ async def _handle_slash_command_discovery(args: Dict) -> Dict:
     }
 
 async def _handle_console_error_autodetect(args: Dict) -> Dict:
-    """Check for new console errors since a given timestamp."""
-    since = args.get("since_timestamp", 0)
-
-    try:
-        ctx = await kit_tools.get_stage_context(full=False)
-    except Exception:
-        return {"new_error_count": 0, "errors": [], "message": "Kit RPC unavailable"}
-
-    logs = ctx.get("recent_logs", [])
-
-    # Filter for errors only (not warnings) to avoid spam
-    new_errors = []
-    for entry in logs:
-        level = entry.get("level", "info")
-        if level not in ("error", "fatal"):
-            continue
-        ts = entry.get("timestamp", 0)
-        if ts > since:
-            new_errors.append({
-                "level": level,
-                "message": entry.get("message", ""),
-                "timestamp": ts,
-            })
-
-    result = {
-        "new_error_count": len(new_errors),
-        "errors": new_errors[:10],  # cap at 10 to avoid flooding
-        "since_timestamp": since,
-    }
-
-    if new_errors:
-        result["proactive_message"] = (
-            f"{len(new_errors)} new error(s) detected. "
-            "Want me to explain them?"
-        )
-
-    return result
+    # _handle_console_error_autodetect moved to handlers/diagnostics.py (Phase 7 wave 10).
+    from .handlers.diagnostics import _handle_console_error_autodetect as _h
+    return await _h(args)
 
 async def _handle_post_action_suggestions(args: Dict) -> Dict:
     """Return next-step suggestions after a tool execution."""
@@ -7430,42 +6801,9 @@ CODE_GEN_HANDLERS["generate_eval_harness"] = _gen_eval_harness
 
 # ══════ From feat/addendum-phase7C-teleop-quality ══════
 async def _handle_check_teleop_hardware(args: Dict) -> Dict:
-    """Look up a teleop device in the known-devices table and probe local availability."""
-    device = str(args.get("device", "")).lower()
-    info = _TELEOP_DEVICES.get(device)
-    if info is None:
-        return {
-            "device": device,
-            "supported": False,
-            "reason": f"Unknown teleop device '{device}'. Known: {sorted(_TELEOP_DEVICES.keys())}",
-        }
-
-    result: Dict[str, Any] = {
-        "device": device,
-        "supported": info["supported"],
-        "transport": info["transport"],
-        "latency_budget_ms": info["latency_budget_ms"],
-        "known_limitations": list(info["known_limitations"]),
-        "notes": info["notes"],
-    }
-
-    # Local probe — best-effort, never raises into the tool loop
-    if info["transport"] == "usb-hid":
-        try:
-            dev_input = Path("/dev/input")
-            result["local_probe"] = {
-                "dev_input_exists": dev_input.exists(),
-                "entries": len(list(dev_input.iterdir())) if dev_input.exists() else 0,
-            }
-        except Exception as e:  # noqa: BLE001 — probe must never raise
-            result["local_probe"] = {"error": str(e)}
-    else:
-        # XR path — just report that the probe is out of scope for L0.
-        result["local_probe"] = {
-            "note": "Network / XR-runtime probe not performed; run the device's own diagnostics.",
-        }
-
-    return result
+    # _handle_check_teleop_hardware moved to handlers/diagnostics.py (Phase 7 wave 10).
+    from .handlers.diagnostics import _handle_check_teleop_hardware as _h
+    return await _h(args)
 
 def _open_hdf5_safely(path: str):
     """Return (h5py_File, None) or (None, reason_str). Never raises."""
@@ -7929,80 +7267,9 @@ def get_nav2_bridge_profile(profile: str) -> Optional[Dict[str, Any]]:
 # _gen_replay_rosbag moved to handlers/ros2.py (Phase 6 wave 7).
 
 async def _handle_check_tf_health(args: Dict) -> Dict:
-    """Diagnose ROS2 TF tree health by introspecting the bridge in-Kit."""
-    expected = args.get("expected_frames") or ["base_link", "odom", "map"]
-    max_age = float(args.get("max_age_seconds", 1.0))
-    root_frame = args.get("root_frame", "map")
-
-    code = f"""\
-import json
-import time
-
-expected_frames = {expected!r}
-max_age = {max_age}
-root_frame = {root_frame!r}
-
-report = {{
-    'expected_frames': expected_frames,
-    'present_frames': [],
-    'missing_frames': [],
-    'stale_frames': [],
-    'future_extrapolation_frames': [],
-    'orphan_frames': [],
-    'static_transforms_ok': True,
-    'errors': [],
-}}
-
-try:
-    import rclpy
-    from tf2_ros import Buffer, TransformListener  # noqa: F401
-except ImportError as e:
-    report['errors'].append(f'rclpy/tf2_ros not importable in Kit: {{e}}')
-    print(json.dumps(report))
-else:
-    if not rclpy.ok():
-        try:
-            rclpy.init()
-        except Exception as init_err:
-            report['errors'].append(f'rclpy.init failed: {{init_err}}')
-    node = rclpy.create_node('isaac_assist_tf_health')
-    buf = Buffer()
-    listener = TransformListener(buf, node)
-    # Spin briefly to populate the buffer
-    deadline = time.time() + 1.5
-    while time.time() < deadline:
-        rclpy.spin_once(node, timeout_sec=0.05)
-    try:
-        all_frames_yaml = buf.all_frames_as_yaml() or ''
-    except Exception as e:
-        report['errors'].append(f'all_frames_as_yaml failed: {{e}}')
-        all_frames_yaml = ''
-    # Parse the very simple YAML format (frame_name:\\n  parent: ...)
-    present = []
-    for line in all_frames_yaml.splitlines():
-        if line and not line.startswith(' ') and line.endswith(':'):
-            present.append(line[:-1].strip())
-    report['present_frames'] = present
-    report['missing_frames'] = [f for f in expected_frames if f not in present]
-    # Staleness check
-    now = node.get_clock().now()
-    for frame in present:
-        try:
-            tfs = buf.lookup_transform(root_frame, frame, rclpy.time.Time())
-            stamp = tfs.header.stamp
-            age = (now.nanoseconds - (stamp.sec * 1_000_000_000 + stamp.nanosec)) / 1e9
-            if age > max_age:
-                report['stale_frames'].append({{'frame': frame, 'age_s': age}})
-            if age < -0.05:
-                report['future_extrapolation_frames'].append({{'frame': frame, 'age_s': age}})
-        except Exception:
-            report['orphan_frames'].append(frame)
-    listener.unregister() if hasattr(listener, 'unregister') else None
-    node.destroy_node()
-    print(json.dumps(report))
-"""
-
-    return await kit_tools.queue_exec_patch(code, "Read TF tree health for Nav2 diagnostics")
+    # _handle_check_tf_health moved to handlers/diagnostics.py (Phase 7 wave 10).
+    from .handlers.diagnostics import _handle_check_tf_health as _h
+    return await _h(args)
 
 CODE_GEN_HANDLERS["setup_ros2_bridge"] = _gen_setup_ros2_bridge
 CODE_GEN_HANDLERS["export_nav2_map"] = _gen_export_nav2_map
@@ -8400,61 +7667,9 @@ DATA_HANDLERS["train_actuator_net"] = _handle_train_actuator_net
 # _gen_setup_multi_rate moved to handlers/robot.py (Phase 6 wave 13).
 
 async def _handle_diagnose_whole_body(args: Dict) -> Dict:
-    """Diagnostic checklist for humanoid balance/coordination during arm motion."""
-    articulation_path = args["articulation_path"]
-    margin = float(args.get("support_polygon_margin_m", 0.05))
-    accel_thresh = float(args.get("ee_accel_threshold_m_s2", 5.0))
-
-    checks = [
-        {
-            "id": "balance_margin",
-            "name": "Balance margin during arm motion",
-            "description": (
-                "Compare CoM ground projection to support polygon (foot contacts). "
-                f"Min margin: {margin} m. If CoM exits the polygon during reach, "
-                "the locomotion policy will compensate or the robot will tip."
-            ),
-        },
-        {
-            "id": "com_projection",
-            "name": "CoM projection vs support polygon",
-            "description": (
-                "Compute polygon from active foot contact patches, project CoM onto ground "
-                "plane, measure signed distance to nearest edge. Negative = CoM outside polygon."
-            ),
-        },
-        {
-            "id": "arm_payload_effect",
-            "name": "Arm payload effect on locomotion policy",
-            "description": (
-                "If the locomotion policy was trained with a free arm, attaching a "
-                "heavy end-effector (or carrying an object) shifts the CoM and can "
-                "destabilize gait. Retrain with payload domain randomization or use "
-                "a payload-conditioned policy."
-            ),
-        },
-        {
-            "id": "ee_acceleration",
-            "name": "EE acceleration during gait",
-            "description": (
-                f"High EE acceleration (> {accel_thresh} m/s^2) injects reaction "
-                "forces into the torso that the locomotion policy did not see during "
-                "training. Smooth the IK trajectory or add an EE-acceleration penalty."
-            ),
-        },
-    ]
-
-    return {
-        "articulation_path": articulation_path,
-        "support_polygon_margin_m": margin,
-        "ee_accel_threshold_m_s2": accel_thresh,
-        "checks": checks,
-        "message": (
-            f"Diagnose whole-body checklist for {articulation_path} "
-            f"({len(checks)} items). Run each check against the live articulation "
-            "to identify why the robot is falling during arm motion."
-        ),
-    }
+    # _handle_diagnose_whole_body moved to handlers/diagnostics.py (Phase 7 wave 10).
+    from .handlers.diagnostics import _handle_diagnose_whole_body as _h
+    return await _h(args)
 
 CODE_GEN_HANDLERS["setup_contact_sensors"] = _gen_setup_contact_sensors
 CODE_GEN_HANDLERS["setup_whole_body_control"] = _gen_setup_whole_body_control
@@ -8886,26 +8101,9 @@ DATA_HANDLERS["proactive_check"] = _handle_proactive_check
 # _gen_check_collision_mesh_code moved to handlers/physics.py (Phase 5 wave 5).
 
 async def _handle_check_collision_mesh(args: Dict) -> Dict:
-    """Analyze a USD mesh prim's collision quality (DATA handler)."""
-    prim_path = args.get("prim_path", "")
-    if not prim_path or not prim_path.startswith("/"):
-        return {"error": "prim_path must be a non-empty USD path starting with /"}
-    code = _gen_check_collision_mesh_code(prim_path)
-    result = await kit_tools.exec_sync(code, timeout=20)
-    if not result.get("success"):
-        return {
-            "error": f"Kit RPC failed: {result.get('output', 'unknown')}",
-            "hint": "Is Isaac Sim running with the Kit RPC bridge on port 8001?",
-        }
-    output = (result.get("output") or "").strip()
-    for line in reversed(output.splitlines()):
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                return json.loads(line)
-            except json.JSONDecodeError:
-                continue
-    return {"error": "Failed to parse collision-mesh response", "raw_output": output[:500]}
+    # _handle_check_collision_mesh moved to handlers/diagnostics.py (Phase 7 wave 10).
+    from .handlers.diagnostics import _handle_check_collision_mesh as _h
+    return await _h(args)
 
 # _gen_fix_collision_mesh moved to handlers/physics.py (Phase 5 wave 5).
 
@@ -9043,82 +8241,9 @@ async def _handle_filter_templates_by_hardware(args: Dict) -> Dict:
 
 
 async def _handle_check_vram_headroom(args: Dict) -> Dict:
-    """Estimate VRAM cost vs available, return warnings + suggestions."""
-    operation = args.get("operation", "custom")
-    num_envs = int(args.get("num_envs", 1))
-    complexity = args.get("complexity", "medium")
-    if complexity not in ("low", "medium", "high"):
-        complexity = "medium"
-
-    per_env_mb = args.get("per_env_mb_override")
-    if per_env_mb is None:
-        per_env_mb = _VRAM_PER_ENV_MB.get(operation, _VRAM_PER_ENV_MB["custom"]).get(
-            complexity, 32
-        )
-    per_env_mb = float(per_env_mb)
-    estimated_mb = per_env_mb * max(num_envs, 1)
-    estimated_gb = round(estimated_mb / 1024.0, 2)
-
-    device_vram_gb = args.get("device_vram_gb")
-    if device_vram_gb is None:
-        device_vram_gb = _detect_local_vram_gb()
-    used_gb = args.get("currently_used_gb")
-    if used_gb is None:
-        used_gb = _detect_used_vram_gb()
-
-    available_gb: Optional[float]
-    if device_vram_gb is not None and used_gb is not None:
-        available_gb = round(max(device_vram_gb - used_gb, 0.0), 2)
-    elif device_vram_gb is not None:
-        # Assume ~1 GB baseline used by the OS / Kit if we can't query.
-        available_gb = round(max(device_vram_gb - 1.0, 0.0), 2)
-    else:
-        available_gb = None
-
-    fits = (
-        available_gb is not None
-        and estimated_gb <= available_gb
-    )
-
-    suggestions: List[str] = []
-    if not fits and available_gb is not None:
-        # Suggest a reduced env count that fits in ~80 % of available VRAM.
-        budget_mb = available_gb * 1024.0 * 0.8
-        if per_env_mb > 0:
-            safe_envs = max(int(budget_mb // per_env_mb), 1)
-            if safe_envs < num_envs:
-                suggestions.append(
-                    f"Reduce to {safe_envs} environments (fits in ~{round(safe_envs * per_env_mb / 1024.0, 2)} GB)"
-                )
-        suggestions.append("Use headless mode to free ~2 GB")
-        suggestions.append("Use cloud compute (Phase 7H IsaacAutomator)")
-
-    warning: Optional[str] = None
-    if not fits:
-        if available_gb is None:
-            warning = (
-                f"Could not auto-detect GPU VRAM. Estimated need: {estimated_gb} GB "
-                f"for {num_envs}× {operation} ({complexity})."
-            )
-        else:
-            warning = (
-                f"This will need approximately {estimated_gb} GB additional VRAM. "
-                f"Available: {available_gb} GB — not enough for {num_envs} {operation}."
-            )
-
-    return {
-        "operation": operation,
-        "num_envs": num_envs,
-        "complexity": complexity,
-        "per_env_mb": per_env_mb,
-        "estimated_gb": estimated_gb,
-        "device_vram_gb": device_vram_gb,
-        "currently_used_gb": used_gb,
-        "available_gb": available_gb,
-        "fits": fits,
-        "warning": warning,
-        "suggestions": suggestions,
-    }
+    # _handle_check_vram_headroom moved to handlers/diagnostics.py (Phase 7 wave 10).
+    from .handlers.diagnostics import _handle_check_vram_headroom as _h
+    return await _h(args)
 
 def _async_task_runner(task_id: str, task_type: str, params: Dict) -> None:
     """Worker body executed in a daemon thread.
@@ -9363,30 +8488,9 @@ async def _handle_measure_sim_real_gap(args: Dict) -> Dict:
 
 # _handle_suggest_parameter_adjustment moved to handlers/training.py (Phase 7 wave 6).
 async def _handle_compare_sim_real_video(args: Dict) -> Dict:
-    """Compare sim and real videos using vision LLM."""
-    sim_path = args.get("sim_video_path", "")
-    real_path = args.get("real_video_path", "")
-
-    if not Path(sim_path).exists() or not Path(real_path).exists():
-        return {
-            "error": "Video file(s) not found",
-            "sim_exists": Path(sim_path).exists(),
-            "real_exists": Path(real_path).exists(),
-        }
-
-    return {
-        "sim_video": sim_path,
-        "real_video": real_path,
-        "analysis_prompt": (
-            "Compare these two robot trajectories. Identify: "
-            "1) Behavioral differences (overshoot, undershoot, tremor) "
-            "2) Contact timing differences "
-            "3) Stability/oscillation differences "
-            "4) Speed/timing differences"
-        ),
-        "note": "Vision analysis to be performed by Gemini Vision provider",
-        "next_step": "Call vision_analyze_scene with these videos as input",
-    }
+    # _handle_compare_sim_real_video moved to handlers/diagnostics.py (Phase 7 wave 10).
+    from .handlers.diagnostics import _handle_compare_sim_real_video as _h
+    return await _h(args)
 
 # _gen_create_calibration_experiment moved to handlers/training.py (Phase 6 wave 24).
 
@@ -9544,31 +8648,9 @@ CODE_GEN_HANDLERS["record_trajectory"] = _gen_record_trajectory
     # _handle_get_kind moved to handlers/scene_authoring.py (Phase 7 wave 3).
 
 async def _handle_get_active_state(args: Dict) -> Dict:
-    """Return prim.IsActive() (active/deactivated state)."""
-    prim_path = args["prim_path"]
-    code = f"""\
-import omni.usd
-import json
-
-stage = omni.usd.get_context().get_stage()
-prim = stage.GetPrimAtPath({prim_path!r})
-result = {{'prim_path': {prim_path!r}}}
-if not prim or not prim.IsValid():
-    result['error'] = 'prim not found'
-    result['is_active'] = None
-else:
-    try:
-        result['is_active'] = bool(prim.IsActive())
-    except Exception as exc:
-        result['error'] = f'IsActive failed: {{exc}}'
-        result['is_active'] = None
-    try:
-        result['is_loaded'] = bool(prim.IsLoaded())
-    except Exception:
-        result['is_loaded'] = None
-print(json.dumps(result, default=str))
-"""
-    return await kit_tools.queue_exec_patch(code, f"get_active_state {prim_path}")
+    # _handle_get_active_state moved to handlers/diagnostics.py (Phase 7 wave 10).
+    from .handlers.diagnostics import _handle_get_active_state as _h
+    return await _h(args)
 
 DATA_HANDLERS["list_attributes"] = _handle_list_attributes
 DATA_HANDLERS["list_relationships"] = _handle_list_relationships
