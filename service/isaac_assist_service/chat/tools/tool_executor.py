@@ -1907,9 +1907,14 @@ from .handlers.training import (  # noqa: E402
     _handle_analyze_randomization,  # Phase 7 wave 5
     _handle_apply_dr_preset,        # Phase 7 wave 5
     _handle_checkpoint_training,    # Phase 7 wave 5
+    _handle_cloud_estimate_cost,    # Phase 7 wave 6
+    _handle_cloud_launch,           # Phase 7 wave 6
+    _handle_cloud_status,           # Phase 7 wave 6
+    _handle_cloud_teardown,         # Phase 7 wave 6
     _handle_compare_policies,       # Phase 7 wave 5
     _handle_create_isaaclab_env,    # Phase 7 wave 5
     _handle_detect_ood,             # Phase 7 wave 5
+    _handle_diagnose_training,      # Phase 7 wave 6
     _handle_eureka_status,          # Phase 7 wave 5
     _handle_export_finetune_data,   # Phase 7 wave 5
     _handle_finetune_stats,         # Phase 7 wave 5
@@ -1920,6 +1925,17 @@ from .handlers.training import (  # noqa: E402
     _handle_get_training_status,    # Phase 7 wave 5
     _handle_iterate_reward,         # Phase 7 wave 5
     _handle_load_groot_policy,      # Phase 7 wave 5
+    _handle_load_rl_policy,         # Phase 7 wave 6
+    _handle_monitor_forgetting,     # Phase 7 wave 6
+    _handle_pause_training,         # Phase 7 wave 6
+    _handle_profile_training_throughput,  # Phase 7 wave 6
+    _handle_redact_finetune_data,   # Phase 7 wave 6
+    _handle_review_reward,          # Phase 7 wave 6
+    _handle_suggest_data_mix,       # Phase 7 wave 6
+    _handle_suggest_dr_ranges,      # Phase 7 wave 6
+    _handle_suggest_finetune_config,  # Phase 7 wave 6
+    _handle_suggest_parameter_adjustment,  # Phase 7 wave 6
+    _handle_train_actuator_net,     # Phase 7 wave 6
 )
 from .handlers.vision import (  # noqa: E402
     _gen_extract_attention_maps,
@@ -6099,48 +6115,7 @@ DATA_HANDLERS["create_linear_axis_robot"] = _handle_create_linear_axis_robot
 DATA_HANDLERS["nir_material_sensor"] = _handle_nir_material_sensor
 
 
-async def _handle_load_rl_policy(args: Dict) -> Dict:
-    """Tier C — registers a trained RL policy for runtime control. Used by
-    #30 FrankaDrawerOpen + similar manipulation-via-RL scenarios.
-
-    For canonical-time, sets metadata attrs on robot for policy reference.
-    Runtime policy execution requires controller integration.
-
-    Args:
-      robot_path:    USD path of the robot
-      policy_path:   path to .pt or .onnx checkpoint
-      observation_keys: list of observation names policy expects
-      action_dim:    action space dimensionality
-
-    Returns: {robot_path, policy_path, observation_keys, action_dim}
-    """
-    robot_path = args["robot_path"]
-    policy_path = args.get("policy_path", "")
-    observation_keys = list(args.get("observation_keys") or ["joint_positions"])
-    action_dim = int(args.get("action_dim", 7))
-
-    code = f"""\
-import omni.usd, json
-from pxr import Sdf, Vt
-stage = omni.usd.get_context().get_stage()
-robot = stage.GetPrimAtPath({robot_path!r})
-if not robot or not robot.IsValid():
-    print(json.dumps({{"error": f"robot not found: {robot_path!r}"}})); raise SystemExit
-robot.CreateAttribute("rl:policy_path",       Sdf.ValueTypeNames.String).Set({policy_path!r})
-robot.CreateAttribute("rl:observation_keys",  Sdf.ValueTypeNames.StringArray).Set(Vt.StringArray({observation_keys!r}))
-robot.CreateAttribute("rl:action_dim",        Sdf.ValueTypeNames.Int).Set({action_dim})
-robot.CreateAttribute("rl:policy_loaded",     Sdf.ValueTypeNames.Bool).Set(False)
-print(json.dumps({{"robot": {robot_path!r}, "policy": {policy_path!r}, "obs_keys": {observation_keys!r}, "action_dim": {action_dim}}}))
-"""
-    res = await kit_tools.exec_sync(code, timeout=10)
-    return {
-        "robot_path": robot_path,
-        "policy_path": policy_path,
-        "observation_keys": observation_keys,
-        "action_dim": action_dim,
-        "raw": (res.get("output") or "")[-200:],
-    }
-
+# _handle_load_rl_policy moved to handlers/training.py (Phase 7 wave 6).
 
 async def _handle_setup_grasp_pose_sampler(args: Dict) -> Dict:
     """Tier C — sets up an Isaac Replicator grasp-pose sampler for SDG
@@ -7238,189 +7213,10 @@ CODE_GEN_HANDLERS["evaluate_groot"] = _gen_evaluate_groot
 CODE_GEN_HANDLERS["finetune_groot"] = _gen_finetune_groot
 
 # ══════ From feat/7H-cloud-deployment ══════
-async def _handle_cloud_launch(args: Dict) -> Dict:
-    """Return structured deployment info for IsaacAutomator cloud launch.
-    Always requires approval regardless of auto-approve setting.
-    """
-    provider = args["provider"]
-    instance_type = args["instance_type"]
-    isaac_version = args.get("isaac_version", "5.1.0")
-    script_template = args.get("script_template", "training")
-    num_gpus = args.get("num_gpus", 1)
-
-    # Validate script template against allowlist
-    if script_template not in _CLOUD_SCRIPT_ALLOWLIST:
-        return {
-            "error": f"Unknown script_template '{script_template}'. "
-                     f"Allowed: {sorted(_CLOUD_SCRIPT_ALLOWLIST)}",
-        }
-
-    # Lookup pricing
-    pricing_key = (provider, instance_type)
-    pricing = _CLOUD_PRICING.get(pricing_key)
-    if pricing:
-        price_per_hour = pricing["price_per_hour"]
-        gpu_model = pricing["gpu"]
-    else:
-        price_per_hour = None
-        gpu_model = "unknown"
-
-    # Prerequisites per provider
-    prerequisites = {
-        "aws": [
-            "NGC API key configured (ngc config set)",
-            "AWS IAM credentials with EC2 and S3 permissions",
-            "GPU quota approved for the target region",
-            "IsaacAutomator cloned and configured",
-        ],
-        "gcp": [
-            "NGC API key configured (ngc config set)",
-            "GCP service account with Compute Engine permissions",
-            "GPU quota approved for the target zone",
-            "IsaacAutomator cloned and configured",
-        ],
-        "azure": [
-            "NGC API key configured (ngc config set)",
-            "Azure subscription with GPU VM quota",
-            "Azure CLI authenticated (az login)",
-            "IsaacAutomator cloned and configured",
-        ],
-    }
-
-    import uuid
-    job_id = f"cloud-{provider}-{uuid.uuid4().hex[:8]}"
-
-    deploy_command = (
-        f"./deploy-{provider} "
-        f"--instance-type {instance_type} "
-        f"--isaac-version {isaac_version} "
-        f"--script {script_template} "
-        f"--num-gpus {num_gpus}"
-    )
-
-    result = {
-        "job_id": job_id,
-        "deploy_command": deploy_command,
-        "provider": provider,
-        "instance_type": instance_type,
-        "isaac_version": isaac_version,
-        "script_template": script_template,
-        "num_gpus": num_gpus,
-        "gpu_model": gpu_model,
-        "estimated_cost_per_hour": price_per_hour,
-        "prerequisites": prerequisites.get(provider, []),
-        "always_require_approval": True,
-        "message": (
-            f"Ready to deploy {instance_type} ({gpu_model}) on {provider.upper()} "
-            f"with Isaac Sim {isaac_version}. "
-            + (f"Estimated cost: ${price_per_hour:.2f}/hr. " if price_per_hour else "Cost: unknown instance type. ")
-            + "Review the prerequisites and approve to proceed."
-        ),
-    }
-
-    # Track job (placeholder)
-    _cloud_jobs[job_id] = {
-        "status": "pending_approval",
-        "provider": provider,
-        "instance_type": instance_type,
-        "gpu_model": gpu_model,
-        "price_per_hour": price_per_hour,
-    }
-
-    return result
-
-async def _handle_cloud_status(args: Dict) -> Dict:
-    """Check the status of a cloud job."""
-    job_id = args["job_id"]
-
-    if job_id in _cloud_jobs:
-        job = _cloud_jobs[job_id]
-        return {
-            "job_id": job_id,
-            "status": job.get("status", "unknown"),
-            "gpu_utilization": job.get("gpu_utilization", "N/A"),
-            "estimated_remaining": job.get("estimated_remaining", "N/A"),
-            "cost_so_far": job.get("cost_so_far", "N/A"),
-        }
-
-    return {
-        "job_id": job_id,
-        "status": "not_found",
-        "gpu_utilization": None,
-        "estimated_remaining": None,
-        "cost_so_far": None,
-        "message": f"No cloud job found with ID '{job_id}'. It may have been terminated or the ID is incorrect.",
-    }
-
-async def _handle_cloud_teardown(args: Dict) -> Dict:
-    """Return teardown command for a cloud instance. Always requires approval."""
-    job_id = args["job_id"]
-
-    job = _cloud_jobs.get(job_id)
-    if job:
-        provider = job.get("provider", "unknown")
-        teardown_command = f"./destroy-{provider} --job-id {job_id}"
-        price = job.get("price_per_hour")
-        cost_warning = ""
-        if price and job.get("status") in ("running", "pending_approval"):
-            cost_warning = (
-                f"WARNING: Instance is still active at ${price:.2f}/hr. "
-                "Teardown will terminate the instance and stop billing."
-            )
-        return {
-            "job_id": job_id,
-            "teardown_command": teardown_command,
-            "provider": provider,
-            "always_require_approval": True,
-            "cost_warning": cost_warning,
-            "message": f"Ready to tear down {provider.upper()} instance {job_id}. Approve to proceed.",
-        }
-
-    return {
-        "job_id": job_id,
-        "teardown_command": f"./destroy-unknown --job-id {job_id}",
-        "provider": "unknown",
-        "always_require_approval": True,
-        "cost_warning": "",
-        "message": f"Job '{job_id}' not found in local tracking. Command generated but may fail.",
-    }
-
-async def _handle_cloud_estimate_cost(args: Dict) -> Dict:
-    """Estimate cost for a cloud GPU instance over a given duration."""
-    provider = args["provider"]
-    instance_type = args["instance_type"]
-    hours = args["hours"]
-
-    pricing_key = (provider, instance_type)
-    pricing = _CLOUD_PRICING.get(pricing_key)
-
-    if pricing:
-        price_per_hour = pricing["price_per_hour"]
-        gpu = pricing["gpu"]
-        cost_usd = round(price_per_hour * hours, 2)
-        return {
-            "cost_usd": cost_usd,
-            "price_per_hour": price_per_hour,
-            "provider": provider,
-            "instance_type": instance_type,
-            "gpu": gpu,
-            "hours": hours,
-            "message": f"{instance_type} ({gpu}) on {provider.upper()}: ${cost_usd:.2f} for {hours}h @ ${price_per_hour:.2f}/hr",
-        }
-
-    return {
-        "cost_usd": None,
-        "price_per_hour": None,
-        "provider": provider,
-        "instance_type": instance_type,
-        "gpu": "unknown",
-        "hours": hours,
-        "message": (
-            f"Instance type '{instance_type}' on {provider.upper()} not found in pricing table. "
-            f"Known types: {[f'{p}/{t}' for (p, t) in _CLOUD_PRICING.keys()]}"
-        ),
-    }
-
+# _handle_cloud_launch moved to handlers/training.py (Phase 7 wave 6).
+# _handle_cloud_status moved to handlers/training.py (Phase 7 wave 6).
+# _handle_cloud_teardown moved to handlers/training.py (Phase 7 wave 6).
+# _handle_cloud_estimate_cost moved to handlers/training.py (Phase 7 wave 6).
 # _gen_cloud_download_results moved to handlers/training.py (Phase 6 wave 24).
 DATA_HANDLERS["cloud_launch"] = _handle_cloud_launch
 DATA_HANDLERS["cloud_status"] = _handle_cloud_status
@@ -7658,15 +7454,7 @@ async def _handle_record_feedback(args: Dict) -> Dict:
 # _handle_export_finetune_data moved to handlers/training.py (Phase 7 wave 5).
 # _handle_finetune_stats moved to handlers/training.py (Phase 7 wave 5).
 
-async def _handle_redact_finetune_data(args: Dict) -> Dict:
-    """Run the redaction pipeline on an existing JSONL file."""
-    input_path = args["input_path"]
-    output_path = args.get("output_path")
-    return _turn_recorder.redact_file(
-        input_path=input_path,
-        output_path=output_path,
-    )
-
+# _handle_redact_finetune_data moved to handlers/training.py (Phase 7 wave 6).
 DATA_HANDLERS["record_feedback"] = _handle_record_feedback
 DATA_HANDLERS["export_finetune_data"] = _handle_export_finetune_data
 DATA_HANDLERS["finetune_stats"] = _handle_finetune_stats
@@ -9289,317 +9077,10 @@ def _read_checkpoint_action_std(run_dir: str) -> Optional[float]:
         logger.warning(f"[RLDebug] checkpoint std read failed: {e}")
         return None
 
-async def _handle_diagnose_training(args: Dict) -> Dict:
-    """Run all RL training diagnostics against a run directory."""
-    run_dir = args["run_dir"]
-    physics_dt = float(args.get("physics_dt", 1.0 / 120.0))
+# _handle_diagnose_training moved to handlers/training.py (Phase 7 wave 6).
 
-    run_path = Path(run_dir)
-    if not run_path.exists():
-        return {
-            "error": f"run_dir does not exist: {run_dir}",
-            "checks": {},
-            "suggestions": [],
-        }
-
-    checks: Dict[str, Dict] = {}
-    suggestions: List[str] = []
-
-    # ── Check 1: Action collapse (policy std near zero) ─────────────────
-    action_std = _read_checkpoint_action_std(run_dir)
-    if action_std is None:
-        checks["action_collapse"] = {
-            "status": "unknown",
-            "message": "No checkpoint found — could not read policy.std",
-        }
-    elif action_std < 0.01:
-        msg = (
-            "CRITICAL: Action std near zero — policy has collapsed to deterministic. "
-            "Try: increase init_noise_std, add entropy bonus, check reward scaling."
-        )
-        checks["action_collapse"] = {"status": "critical", "value": action_std, "message": msg}
-        suggestions.append("Increase init_noise_std (e.g. 0.5 → 1.0)")
-        suggestions.append("Add or raise entropy_coef (e.g. 0.001 → 0.01)")
-    else:
-        checks["action_collapse"] = {"status": "ok", "value": action_std}
-
-    # ── Check 2: Entropy collapse ───────────────────────────────────────
-    entropy = _read_tb_scalars(run_dir, "Loss/entropy")
-    if not entropy:
-        # Try alt tag names
-        entropy = _read_tb_scalars(run_dir, "Train/mean_entropy")
-    total_iters = max(len(entropy), 1)
-    progress_idx = total_iters
-    # We treat "early" as < 30% of recorded iters.
-    if entropy and entropy[-1] < 0.1 and progress_idx < int(total_iters * 0.3 + 1) + total_iters:
-        # NOTE: progress is unknowable without max_iterations, so the
-        # collapse check fires whenever entropy[-1] < 0.1 — early or not.
-        msg = (
-            "WARNING: Entropy collapsed — policy stopped exploring. "
-            "Try: increase entropy_coef to 0.01, reduce desired_kl, "
-            "check init_noise_std."
-        )
-        checks["entropy"] = {"status": "warning", "value": entropy[-1], "message": msg}
-        suggestions.append("Increase entropy_coef from 0.005 to 0.01")
-    elif entropy:
-        checks["entropy"] = {"status": "ok", "value": entropy[-1]}
-    else:
-        checks["entropy"] = {"status": "unknown", "message": "No entropy scalar found in TB logs"}
-
-    # ── Check 3: Reward hacking (reward up, success flat) ───────────────
-    reward = _read_tb_scalars(run_dir, "Train/mean_reward")
-    if not reward:
-        reward = _read_tb_scalars(run_dir, "Episode/reward")
-    success = _read_tb_scalars(run_dir, "Episode/success_rate")
-    if not success:
-        success = _read_tb_scalars(run_dir, "Train/success_rate")
-    if len(reward) >= 4 and len(success) >= 4:
-        reward_trend = reward[-1] - reward[len(reward) // 2]
-        success_trend = success[-1] - success[len(success) // 2]
-        reward_increasing = reward_trend > abs(reward[len(reward) // 2]) * 0.1 + 1e-6
-        success_flat = abs(success_trend) < 0.05
-        if reward_increasing and success_flat:
-            msg = (
-                "WARNING: Reward increasing but success rate flat — possible reward hacking. "
-                "Check reward terms for exploitable shortcuts."
-            )
-            checks["reward_hacking"] = {"status": "warning", "message": msg}
-            suggestions.append("Check reward terms for exploitable shortcuts")
-        else:
-            checks["reward_hacking"] = {"status": "ok"}
-    else:
-        checks["reward_hacking"] = {
-            "status": "unknown",
-            "message": "Need both reward and success scalars to compare trends",
-        }
-
-    # ── Check 4: Bimodal success (per-env variance) ─────────────────────
-    per_env_tags = [
-        t for t in [f"Episode/success_env_{i}" for i in range(64)]
-    ]
-    per_env_values: List[float] = []
-    for t in per_env_tags:
-        s = _read_tb_scalars(run_dir, t)
-        if s:
-            per_env_values.append(s[-1])
-    if per_env_values:
-        try:
-            import numpy as np  # type: ignore
-            arr = np.array(per_env_values, dtype=float)
-            std = float(arr.std())
-            if std > 0.15:
-                msg = (
-                    "WARNING: High variance across environments — policy may be fragile. "
-                    "Some initial conditions succeed, others always fail. "
-                    f"Success range: {arr.min():.0%}\u2013{arr.max():.0%}"
-                )
-                checks["bimodal"] = {"status": "warning", "value": std, "message": msg}
-                suggestions.append("Inspect failing initial conditions — consider curriculum or domain randomization")
-            else:
-                checks["bimodal"] = {"status": "ok", "value": std}
-        except ImportError:
-            checks["bimodal"] = {"status": "unknown", "message": "numpy not installed"}
-    else:
-        checks["bimodal"] = {"status": "unknown", "message": "No per-env success scalars found"}
-
-    # ── Check 5: NaN detection ──────────────────────────────────────────
-    has_nan = False
-    for series in (entropy, reward, success):
-        for v in series:
-            if v != v:  # NaN check (NaN != NaN)
-                has_nan = True
-                break
-        if has_nan:
-            break
-    if has_nan:
-        msg = (
-            "CRITICAL: NaN detected in TB scalars — likely numerical blowup. "
-            f"Check PD stability criterion: kp * physics_dt ({physics_dt}) must be < 0.5 "
-            "for every joint. Reduce physics_dt or lower kp."
-        )
-        checks["nan"] = {"status": "critical", "message": msg, "physics_dt": physics_dt}
-        suggestions.append(
-            f"Verify joint kp * physics_dt < 0.5 (physics_dt={physics_dt}) — reduce dt or kp"
-        )
-    else:
-        checks["nan"] = {"status": "ok"}
-
-    # ── Check 6: Throughput ─────────────────────────────────────────────
-    fps_series = _read_tb_scalars(run_dir, "Perf/total_fps")
-    if fps_series:
-        latest_fps = fps_series[-1]
-        checks["throughput"] = {"status": "ok", "fps": latest_fps}
-    else:
-        checks["throughput"] = {"status": "unknown", "message": "No Perf/total_fps scalar found"}
-
-    issue_count = sum(
-        1 for c in checks.values() if c.get("status") in ("warning", "critical")
-    )
-    return {
-        "run_dir": run_dir,
-        "status": f"{issue_count} issue{'s' if issue_count != 1 else ''} found",
-        "checks": checks,
-        "suggestions": suggestions,
-    }
-
-async def _handle_review_reward(args: Dict) -> Dict:
-    """Run static checks on a reward function before training starts."""
-    code = args.get("reward_code", "")
-    has_fall_term = bool(args.get("has_fall_termination", False))
-    declared_max = args.get("max_possible_reward")
-
-    issues: List[Dict] = []
-    suggestions: List[str] = []
-
-    if not code.strip():
-        return {"error": "reward_code is empty", "issues": [], "suggestions": []}
-
-    import re
-
-    # ── Check 1: Sparse reward ──────────────────────────────────────────
-    # Heuristic: count non-zero reward terms.  If only success_at_goal /
-    # task_success-style terms are present, training will stall.
-    success_only_terms = re.findall(
-        r"(?:success|reach_goal|task_complete)\w*", code, flags=re.IGNORECASE
-    )
-    other_terms = re.findall(
-        r"(?:RewTerm|reward_term)\(", code
-    )
-    if success_only_terms and (len(other_terms) <= len(success_only_terms)):
-        msg = (
-            "Sparse reward: only success/goal terms detected. <1% of envs will get "
-            "non-zero reward at init — training will stall. Add a dense shaping term "
-            "(e.g. distance-to-goal, progress)."
-        )
-        issues.append({"check": "sparse_reward", "status": "warning", "message": msg})
-        suggestions.append("Add a dense shaping term such as -distance_to_goal")
-
-    # ── Check 2: Dominant term (weight std >100x others) ───────────────
-    weights = [float(m) for m in re.findall(r"weight\s*=\s*(-?\d+(?:\.\d+)?)", code)]
-    if len(weights) >= 2:
-        abs_weights = [abs(w) for w in weights if w != 0]
-        if abs_weights:
-            wmax = max(abs_weights)
-            wmin = min(abs_weights)
-            if wmin > 0 and (wmax / wmin) > _DOMINANT_TERM_THRESHOLD:
-                msg = (
-                    f"Dominant term: max weight {wmax} is >{_DOMINANT_TERM_THRESHOLD:.0f}x "
-                    f"min weight {wmin}. Other terms will be invisible to the optimizer."
-                )
-                issues.append({"check": "dominant_term", "status": "warning", "message": msg})
-                suggestions.append("Rebalance reward weights so no term dominates by >100x")
-
-    # ── Check 3: Reward hacking risk ────────────────────────────────────
-    for pat, hint in _REWARD_HACK_PATTERNS:
-        if re.search(rf"\b{pat}\b", code, flags=re.IGNORECASE):
-            if not has_fall_term:
-                msg = f"Hacking risk: '{pat}' present — {hint}"
-                issues.append({"check": "hacking_risk", "status": "warning", "message": msg})
-                suggestions.append(f"Add a fall/termination condition or remove the '{pat}' term")
-
-    # ── Check 4: Scale issue ────────────────────────────────────────────
-    max_reward = declared_max
-    if max_reward is None and weights:
-        # Approximation: max reward magnitude = sum of |weights| (assumes per-step
-        # contributions normalized to ~1).
-        max_reward = sum(abs(w) for w in weights)
-    if max_reward is not None and max_reward < 0.01:
-        msg = (
-            f"Scale issue: max possible reward {max_reward:.4f} < 0.01 — value function "
-            "will struggle to learn signal. Multiply weights by ~100x."
-        )
-        issues.append({"check": "scale", "status": "warning", "message": msg, "max_reward": max_reward})
-        suggestions.append("Scale up reward weights so per-step magnitude is at least 0.01")
-
-    # ── Check 5: Success alignment ──────────────────────────────────────
-    success_present = bool(success_only_terms)
-    distance_present = bool(re.search(r"distance|reach|track", code, flags=re.IGNORECASE))
-    if success_present and not distance_present:
-        msg = (
-            "Success alignment: success criterion present but no distance/progress term — "
-            "reward components don't correlate with success criterion."
-        )
-        issues.append({"check": "success_alignment", "status": "info", "message": msg})
-        suggestions.append("Add a progress-to-goal shaping term that correlates with success")
-    elif not success_present:
-        msg = (
-            "No explicit success/goal term detected — reward may not measure what you think. "
-            "Confirm a term aligns with your task success criterion."
-        )
-        issues.append({"check": "success_alignment", "status": "info", "message": msg})
-
-    return {
-        "issues": issues,
-        "issue_count": len(issues),
-        "suggestions": suggestions,
-        "weights_analyzed": weights,
-        "has_fall_termination": has_fall_term,
-    }
-
-async def _handle_profile_training_throughput(args: Dict) -> Dict:
-    """Identify sim-bound vs train-bound RL training runs from RSL-RL perf logs."""
-    run_dir = args["run_dir"]
-    if not Path(run_dir).exists():
-        return {"error": f"run_dir does not exist: {run_dir}"}
-
-    collection = _read_tb_scalars(run_dir, "Perf/collection_time")
-    learning = _read_tb_scalars(run_dir, "Perf/learning_time")
-    fps_series = _read_tb_scalars(run_dir, "Perf/total_fps")
-
-    if not collection or not learning:
-        return {
-            "run_dir": run_dir,
-            "error": "Required Perf/collection_time and Perf/learning_time scalars missing",
-            "found_scalars": {
-                "collection_time": len(collection),
-                "learning_time": len(learning),
-                "total_fps": len(fps_series),
-            },
-        }
-
-    # Use last value (most recent iteration) for the verdict.
-    collection_ms = float(collection[-1])
-    learning_ms = float(learning[-1])
-    total_ms = collection_ms + learning_ms
-    fps = float(fps_series[-1]) if fps_series else None
-
-    if total_ms <= 0:
-        return {"error": "Total time is zero — perf logs may be malformed"}
-
-    collection_frac = collection_ms / total_ms
-    learning_frac = learning_ms / total_ms
-
-    bottleneck = "balanced"
-    suggestion = ""
-    if collection_frac > 0.8:
-        bottleneck = "sim_bound"
-        suggestion = (
-            "Simulation is the bottleneck. Reduce num_envs, simplify collision meshes, "
-            "or switch cameras to TiledCamera (10x faster than standard Camera)."
-        )
-    elif learning_frac > 0.7:
-        bottleneck = "train_bound"
-        suggestion = (
-            "GPU training is the bottleneck. Reduce network size, batch size, "
-            "or number of PPO epochs."
-        )
-    else:
-        suggestion = (
-            "Sim and learning times are roughly balanced — no single bottleneck. "
-            "Profile individual reward terms or sensors if more throughput is needed."
-        )
-
-    return {
-        "run_dir": run_dir,
-        "bottleneck": bottleneck,
-        "collection_time_ms": collection_ms,
-        "learning_time_ms": learning_ms,
-        "collection_fraction": collection_frac,
-        "learning_fraction": learning_frac,
-        "total_fps": fps,
-        "suggestion": suggestion,
-        "camera_cost_ranking": "TiledCamera << RayCasterCamera < Camera (standard)",
-    }
+# _handle_review_reward moved to handlers/training.py (Phase 7 wave 6).
+# _handle_profile_training_throughput moved to handlers/training.py (Phase 7 wave 6).
 
 # _gen_eval_harness moved to handlers/training.py (Phase 6 wave 24).
 DATA_HANDLERS["diagnose_training"] = _handle_diagnose_training
@@ -10191,90 +9672,7 @@ DATA_HANDLERS["check_tf_health"] = _handle_check_tf_health
 # ══════ From feat/addendum-dr-advanced ══════
 # _gen_configure_correlated_dr moved to handlers/sdg.py (Phase 6 wave 5).
 
-async def _handle_suggest_dr_ranges(args: Dict) -> Dict:
-    """Suggest DR ranges from heuristics, optionally refined by real-data variance."""
-    task_raw = (args.get("task_type") or "").strip()
-    robot_raw = (args.get("robot") or "").strip()
-    real_data_path = args.get("real_data_path")
-
-    if not task_raw:
-        return {"error": "task_type is required"}
-
-    task_lc = task_raw.lower().replace("-", "_").replace(" ", "_")
-    robot_lc = robot_raw.lower()
-
-    # Pick the closest matching task block.
-    task_key = None
-    for k in _DR_TASK_DEFAULTS:
-        if k in task_lc or task_lc in k:
-            task_key = k
-            break
-    if task_key is None:
-        # Fall back to manipulation-style defaults.
-        task_key = "pick_and_place"
-
-    suggested = {k: list(v) for k, v in _DR_TASK_DEFAULTS[task_key].items()}
-
-    # Robot-specific overrides.
-    robot_match = None
-    for k, v in _DR_ROBOT_HINTS.items():
-        if k in robot_lc:
-            robot_match = k
-            for hint_k, hint_v in v.items():
-                if isinstance(hint_v, list):
-                    suggested[hint_k] = list(hint_v)
-            break
-
-    # Optional empirical refinement from real sensor data.
-    empirical_used = False
-    empirical_notes: List[str] = []
-    if real_data_path:
-        rp = Path(real_data_path)
-        if not rp.exists():
-            empirical_notes.append(f"real_data_path not found: {real_data_path}")
-        else:
-            try:
-                import csv
-                rows: List[Dict[str, str]] = []
-                if rp.suffix.lower() == ".json":
-                    data = json.loads(rp.read_text())
-                    if isinstance(data, list):
-                        rows = [r for r in data if isinstance(r, dict)]
-                else:
-                    with rp.open(newline="") as fh:
-                        rows = list(csv.DictReader(fh))
-                # Numeric columns -> use min/max as suggested range.
-                if rows:
-                    keys = rows[0].keys()
-                    for key in keys:
-                        try:
-                            vals = [float(r[key]) for r in rows if r.get(key) not in (None, "")]
-                        except (TypeError, ValueError):
-                            continue
-                        if len(vals) >= 2:
-                            lo, hi = min(vals), max(vals)
-                            if hi > lo:
-                                suggested[f"empirical_{key}"] = [lo, hi]
-                                empirical_used = True
-                if empirical_used:
-                    empirical_notes.append(f"refined ranges from {len(rows)} rows in {rp.name}")
-            except Exception as exc:  # robust: never raise to the LLM
-                empirical_notes.append(f"failed to parse real_data_path: {exc}")
-
-    return {
-        "task_type": task_raw,
-        "task_matched": task_key,
-        "robot": robot_raw,
-        "robot_matched": robot_match,
-        "suggested_ranges": suggested,
-        "real_data_used": empirical_used,
-        "notes": empirical_notes,
-        "message": (
-            f"Suggested DR ranges for task='{task_raw}' (matched '{task_key}')"
-            + (f" robot='{robot_raw}' (matched '{robot_match}')" if robot_match else "")
-            + (f"; refined with empirical data" if empirical_used else "")
-        ),
-    }
+# _handle_suggest_dr_ranges moved to handlers/training.py (Phase 7 wave 6).
 
 # _handle_apply_dr_preset moved to handlers/training.py (Phase 7 wave 5).
 
@@ -10765,60 +10163,7 @@ if __name__ == "__main__":
     main()
 '''
 
-async def _handle_train_actuator_net(args: Dict) -> Dict:
-    """Generate the ActuatorNetLSTM training script and return launch command."""
-    real_data_path = args.get("real_data_path", "")
-    articulation_path = args.get("articulation_path", "")
-
-    err = _check_real_data_path(real_data_path)
-    if err:
-        return {"error": err}
-    if not articulation_path:
-        return {"error": "articulation_path is required"}
-
-    hidden_dim = int(args.get("hidden_dim", 32))
-    num_layers = int(args.get("num_layers", 2))
-    num_epochs = int(args.get("num_epochs", 200))
-    if hidden_dim <= 0 or num_layers <= 0 or num_epochs <= 0:
-        return {"error": "hidden_dim, num_layers, num_epochs must all be positive"}
-
-    robot = _safe_robot_name(articulation_path)
-    output_dir = args.get("output_dir") or f"workspace/calibration/{robot}_actuator_net"
-    out = Path(output_dir)
-    out.mkdir(parents=True, exist_ok=True)
-
-    script = _generate_actuator_net_script(
-        real_data_path=real_data_path,
-        articulation_path=articulation_path,
-        hidden_dim=hidden_dim,
-        num_layers=num_layers,
-        num_epochs=num_epochs,
-        output_dir=output_dir,
-    )
-    script_path = out / "train_actuator_net.py"
-    script_path.write_text(script, encoding="utf-8")
-
-    return {
-        "type": "actuator_net_job",
-        "always_require_approval": True,
-        "robot": robot,
-        "articulation_path": articulation_path,
-        "real_data_path": real_data_path,
-        "hidden_dim": hidden_dim,
-        "num_layers": num_layers,
-        "num_epochs": num_epochs,
-        "output_dir": str(out),
-        "script_path": str(script_path),
-        "launch_command": f"python {script_path}",
-        "checkpoint_path": str(out / "actuator_net.pt"),
-        "result_file": str(out / "result.json"),
-        "message": (
-            f"ActuatorNet training script written to {script_path}. "
-            "Long-running headless training — needs 5-10 min of diverse-motion real data. "
-            "Output is a torch checkpoint that replaces physical-parameter calibration."
-        ),
-    }
-
+# _handle_train_actuator_net moved to handlers/training.py (Phase 7 wave 6).
 DATA_HANDLERS["calibrate_physics"] = _handle_calibrate_physics
 DATA_HANDLERS["quick_calibrate"] = _handle_quick_calibrate
 DATA_HANDLERS["validate_calibration"] = _handle_validate_calibration
@@ -11797,52 +11142,7 @@ async def _handle_measure_sim_real_gap(args: Dict) -> Dict:
         "recommendation": recommendation,
     }
 
-async def _handle_suggest_parameter_adjustment(args: Dict) -> Dict:
-    """Given a gap report, suggest physics parameters to adjust."""
-    gap = args.get("gap_report", {})
-    if not gap or "joint_errors" not in gap:
-        return {"error": "Invalid gap_report — must include 'joint_errors' from measure_sim_real_gap()"}
-
-    suggestions = []
-    joint_errors = gap.get("joint_errors", {})
-    ee_error = gap.get("ee_error_mm") or {}
-
-    for joint_name, err in joint_errors.items():
-        mean_err = err["mean_error_deg"]
-        if mean_err > 5.0:
-            suggestions.append({
-                "joint": joint_name,
-                "issue": f"Mean error {mean_err:.1f}° too high",
-                "suggested_action": "Reduce damping by 30% or check actuator model",
-                "parameter": f"drive:angular:physics:damping on {joint_name}",
-                "priority": "high",
-            })
-        elif mean_err > 2.0:
-            suggestions.append({
-                "joint": joint_name,
-                "issue": f"Mean error {mean_err:.1f}° moderate",
-                "suggested_action": "Fine-tune stiffness or friction",
-                "parameter": f"drive:angular:physics:stiffness on {joint_name}",
-                "priority": "medium",
-            })
-
-    if ee_error.get("mean_mm", 0) > 10:
-        suggestions.append({
-            "issue": f"End-effector drifts {ee_error['mean_mm']:.0f}mm",
-            "suggested_action": "Add joint compliance: reduce stiffness ~20%",
-            "parameter": "joint stiffness (all)",
-            "priority": "high",
-        })
-
-    if not suggestions:
-        suggestions.append({"message": "Gap is within acceptable range — no adjustments needed"})
-
-    return {
-        "suggestions": suggestions,
-        "worst_joint": gap.get("worst_joint"),
-        "total_suggestions": len(suggestions),
-    }
-
+# _handle_suggest_parameter_adjustment moved to handlers/training.py (Phase 7 wave 6).
 async def _handle_compare_sim_real_video(args: Dict) -> Dict:
     """Compare sim and real videos using vision LLM."""
     sim_path = args.get("sim_video_path", "")
@@ -11880,104 +11180,9 @@ CODE_GEN_HANDLERS["create_calibration_experiment"] = _gen_create_calibration_exp
 # _gen_extract_attention_maps moved to handlers/vision.py (Phase 6 wave 15).
 
 # _handle_detect_ood moved to handlers/training.py (Phase 7 wave 5).
-async def _handle_suggest_data_mix(args: Dict) -> Dict:
-    """Recommend sim/real/video data ratio per NVIDIA's 1:1 recipe."""
-    task_type = args.get("task_type", "tabletop pick-and-place")
-    available = args.get("available_data", {})
-    real_demos = available.get("real_demos", 0)
-    sim_demos = available.get("sim_demos", 0)
-    video_demos = available.get("video_demos", 0)
-
-    target_real = real_demos
-    target_sim = min(sim_demos, real_demos) if real_demos > 0 else min(sim_demos, 200)
-    target_video = min(video_demos, max(target_real // 4, 0))
-
-    return {
-        "task_type": task_type,
-        "available": available,
-        "recommendation": {
-            "real_demos_to_use": target_real,
-            "sim_demos_to_use": target_sim,
-            "video_demos_to_use": target_video,
-            "total_training_examples": target_real + target_sim + target_video,
-        },
-        "rationale": "NVIDIA's validated 1:1 real-to-neural ratio (40% gain over real-only)",
-        "dr_priorities": [
-            "Spatial DR (table height + camera pose) — 3x weight",
-            "Appearance DR (textures, lighting) — 1x weight",
-        ],
-        "additional_advice": (
-            f"Consider collecting {max(50 - video_demos, 0)} more video demos for visual diversity"
-            if video_demos < 50 else "Video diversity is sufficient"
-        ),
-        "warnings": (
-            ["⚠ No real demos — sim-only training will have high sim-to-real gap"]
-            if real_demos == 0 else []
-        ),
-    }
-
-async def _handle_suggest_finetune_config(args: Dict) -> Dict:
-    """Recommend layer freeze/tune strategy."""
-    task_type = args.get("task_type", "similar_to_pretrain")
-    hardware = args.get("hardware", "RTX 4090")
-    data_size = args.get("data_size", 0)
-
-    profile = _FINETUNE_FREEZE_PROFILES.get(task_type)
-    if not profile:
-        return {"error": f"Unknown task_type: {task_type}. Valid: {list(_FINETUNE_FREEZE_PROFILES.keys())}"}
-
-    hw_batch_hints = {
-        "A6000": {"similar_to_pretrain": 200, "new_visual_domain": 16, "new_embodiment": 8},
-        "RTX 4090": {"similar_to_pretrain": 100, "new_visual_domain": 8, "new_embodiment": 4},
-        "RTX 4080": {"similar_to_pretrain": 50, "new_visual_domain": 4, "new_embodiment": 2},
-        "H100": {"similar_to_pretrain": 400, "new_visual_domain": 32, "new_embodiment": 16},
-    }
-    batch = hw_batch_hints.get(hardware, hw_batch_hints["RTX 4090"]).get(task_type, 16)
-
-    result = {
-        "task_type": task_type,
-        "hardware": hardware,
-        "freeze_layers": profile["freeze"],
-        "tune_layers": profile["tune"],
-        "rationale": profile["rationale"],
-        "recommended_batch_size": batch,
-        "lora_rank": profile["lora_rank"],
-    }
-    if "warning" in profile:
-        result["warning"] = profile["warning"]
-    if data_size and data_size < 50:
-        result["data_warning"] = f"Only {data_size} demos — consider collecting more (recommended: 200+)"
-    return result
-
-async def _handle_monitor_forgetting(args: Dict) -> Dict:
-    """Detect catastrophic forgetting via VQA regression + weight drift."""
-    checkpoint_dir = args.get("checkpoint_dir", "")
-    base_model = args.get("base_model", "")
-
-    if not Path(checkpoint_dir).exists():
-        return {"error": f"Checkpoint dir not found: {checkpoint_dir}"}
-
-    return {
-        "checkpoint_dir": checkpoint_dir,
-        "base_model": base_model,
-        "vqa_benchmarks": ["MMMU", "MMStar", "RealWorldQA", "MathVista", "AI2D"],
-        "instructions": [
-            "1. Run 30-example VQA regression suite on each checkpoint",
-            "2. Compare scores against base_model baseline",
-            "3. Compute per-layer Frobenius norm: ||W_ft - W_pre||_F",
-            "4. Alert if ANY VQA score drops >20% OR vision encoder drift > threshold",
-        ],
-        "alert_thresholds": {
-            "vqa_score_drop_pct": 20,
-            "vision_encoder_drift_max": 0.05,
-            "language_model_drift_max": 0.01,
-        },
-        "warning": "Standard fine-tuning can collapse silently to near-zero VQA scores without external checks",
-    }
-
-# _gen_export_policy moved to handlers/training.py (Phase 6 wave 6).
-# _handle_analyze_checkpoint moved to handlers/training.py (Phase 7 wave 5).
-
+# _handle_suggest_data_mix moved to handlers/training.py (Phase 7 wave 6).
+# _handle_suggest_finetune_config moved to handlers/training.py (Phase 7 wave 6).
+# _handle_monitor_forgetting moved to handlers/training.py (Phase 7 wave 6).
 CODE_GEN_HANDLERS["extract_attention_maps"] = _gen_extract_attention_maps
 DATA_HANDLERS["detect_ood"] = _handle_detect_ood
 DATA_HANDLERS["suggest_data_mix"] = _handle_suggest_data_mix
@@ -11995,28 +11200,6 @@ CODE_GEN_HANDLERS["create_broken_scene"] = _gen_create_broken_scene
 # _gen_enable_deterministic_mode moved to handlers/diagnostics.py (Phase 6 wave 23).
 
 CODE_GEN_HANDLERS["enable_deterministic_mode"] = _gen_enable_deterministic_mode
-
-# ══════ From feat/atomic-tier0-foundation ══════
-    # _handle_get_attribute moved to handlers/scene_authoring.py (Phase 7 wave 3).
-
-    # _handle_get_world_transform moved to handlers/scene_authoring.py (Phase 7 wave 3).
-
-    # _handle_get_bounding_box moved to handlers/scene_authoring.py (Phase 7 wave 3).
-
-# _gen_set_semantic_label moved to handlers/vision.py (Phase 6 wave 15).
-
-# _handle_get_joint_limits moved to handlers/physics.py (Phase 7 wave 2).
-# _gen_set_drive_gains moved to handlers/physics.py (Phase 5 wave 2).
-
-# _handle_get_contact_report moved to handlers/physics.py (Phase 7 wave 2).
-# _gen_set_render_mode moved to handlers/vision.py (Phase 6 wave 15).
-
-from .tool_honesty import honesty_checked
-
-
-# _gen_set_variant moved to handlers/scene_authoring.py (Phase 6 wave 21).
-
-# _handle_get_training_status moved to handlers/training.py (Phase 7 wave 5).
 
 async def _handle_pixel_to_world(args: Dict) -> Dict:
     """Project a viewport pixel through the camera + depth buffer to world."""
@@ -13781,58 +12964,7 @@ def _validate_env_id(env_id: Any, num_envs: int) -> Optional[str]:
 # _handle_get_env_observations moved to handlers/training.py (Phase 7 wave 5).
 # _handle_get_env_rewards moved to handlers/training.py (Phase 7 wave 5).
 # _handle_get_env_termination_state moved to handlers/training.py (Phase 7 wave 5).
-async def _handle_pause_training(args: Dict) -> Dict:
-    """Signal a running training subprocess to pause without stopping it."""
-    t0 = time.perf_counter()
-    run_id_arg = args.get("run_id")
-
-    run_id, entry = _resolve_run_id(run_id_arg)
-    if entry is None:
-        return {
-            "error": (
-                "No active training run found. Launch one with launch_training first, "
-                "or pass an explicit run_id."
-            ),
-            "requested_run_id": run_id_arg,
-        }
-
-    previous_state = entry.get("state", "unknown")
-    if previous_state == "paused":
-        return {
-            "run_id": run_id,
-            "paused": True,
-            "previous_state": "paused",
-            "note": "Run was already paused — no-op.",
-            "step": entry.get("last_known_step", 0),
-            "iteration": entry.get("last_known_iteration", 0),
-            "pid": entry.get("pid"),
-            "signal_sent": None,
-            "wall_time_ms": (time.perf_counter() - t0) * 1000.0,
-        }
-    if previous_state not in ("running",):
-        return {
-            "error": f"Cannot pause run in state '{previous_state}'. Only running runs can be paused.",
-            "run_id": run_id,
-            "previous_state": previous_state,
-        }
-
-    try:
-        ipc_result = await _query_run_ipc(entry, {"op": "pause"})
-    except Exception as e:
-        return {"error": f"IPC query failed: {e}", "run_id": run_id}
-
-    entry["state"] = "paused"
-    return {
-        "run_id": run_id,
-        "paused": True,
-        "previous_state": previous_state,
-        "step": ipc_result.get("step", entry.get("last_known_step", 0)),
-        "iteration": ipc_result.get("iteration", entry.get("last_known_iteration", 0)),
-        "pid": entry.get("pid"),
-        "signal_sent": ipc_result.get("signal_sent", "SIGUSR1"),
-        "wall_time_ms": (time.perf_counter() - t0) * 1000.0,
-    }
-
+# _handle_pause_training moved to handlers/training.py (Phase 7 wave 6).
 # _handle_checkpoint_training moved to handlers/training.py (Phase 7 wave 5).
 
 DATA_HANDLERS["get_env_observations"] = _handle_get_env_observations
@@ -13840,13 +12972,6 @@ DATA_HANDLERS["get_env_rewards"] = _handle_get_env_rewards
 DATA_HANDLERS["get_env_termination_state"] = _handle_get_env_termination_state
 DATA_HANDLERS["pause_training"] = _handle_pause_training
 DATA_HANDLERS["checkpoint_training"] = _handle_checkpoint_training
-
-# ══════ From feat/atomic-tier14-bulk ══════
-# _gen_bulk_set_attribute moved to handlers/scene_authoring.py (Phase 6 wave 18).
-# _gen_bulk_apply_schema moved to handlers/scene_authoring.py (Phase 6 wave 18).
-# _gen_group_prims moved to handlers/scene_authoring.py (Phase 6 wave 18).
-# _gen_duplicate_prims moved to handlers/scene_authoring.py (Phase 6 wave 18).
-
 
 def _build_select_by_criteria_code(criteria: Dict[str, Any]) -> str:
     """Generate the Kit-side query code for select_by_criteria.
