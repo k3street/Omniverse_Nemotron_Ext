@@ -1645,7 +1645,10 @@ def _safe_set_rotate_xyz(prim, r):
 # assignments go away.
 from .handlers.scene_authoring import (  # noqa: E402
     _gen_add_reference,
+    _gen_apply_api_schema,
     _gen_assign_material,
+    _gen_clone_prim,
+    _gen_create_material,
     _gen_create_prim,
     _gen_delete_prim,
     _gen_set_attribute,
@@ -1657,148 +1660,10 @@ from .handlers.scene_authoring import (  # noqa: E402
 # Imported back at the top of this file (see Phase 3 wave 1 import block).
 
 
-def _gen_apply_api_schema(args: Dict) -> str:
-    schema = args['schema_name']
-    prim_path = args['prim_path']
-    # Map common schema names to their pxr module + class. Names without
-    # a module prefix and with PhysX/Usd-prefix variants both supported.
-    # Kit's ApplyAPISchemaCommand fallback fails silently on PhysxSchema
-    # entries, so each PhysxSchema must have an explicit map entry.
-    SCHEMA_MAP = {
-        # UsdPhysics
-        "PhysicsRigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
-        "UsdPhysics.RigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
-        "RigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
-        "PhysicsCollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
-        "UsdPhysics.CollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
-        "CollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
-        "PhysicsMassAPI": ("pxr.UsdPhysics", "MassAPI"),
-        "UsdPhysics.MassAPI": ("pxr.UsdPhysics", "MassAPI"),
-        "MassAPI": ("pxr.UsdPhysics", "MassAPI"),
-        "PhysicsArticulationRootAPI": ("pxr.UsdPhysics", "ArticulationRootAPI"),
-        "ArticulationRootAPI": ("pxr.UsdPhysics", "ArticulationRootAPI"),
-        "PhysicsMaterialAPI": ("pxr.UsdPhysics", "MaterialAPI"),
-        "PhysicsMeshCollisionAPI": ("pxr.UsdPhysics", "MeshCollisionAPI"),
-        "PhysicsFilteredPairsAPI": ("pxr.UsdPhysics", "FilteredPairsAPI"),
-        # PhysxSchema (Kit fallback fails silently for these)
-        "PhysxRigidBodyAPI": ("pxr.PhysxSchema", "PhysxRigidBodyAPI"),
-        "PhysxCollisionAPI": ("pxr.PhysxSchema", "PhysxCollisionAPI"),
-        "PhysxSurfaceVelocityAPI": ("pxr.PhysxSchema", "PhysxSurfaceVelocityAPI"),
-        "PhysxTriggerAPI": ("pxr.PhysxSchema", "PhysxTriggerAPI"),
-        "PhysxArticulationAPI": ("pxr.PhysxSchema", "PhysxArticulationAPI"),
-        "PhysxJointAPI": ("pxr.PhysxSchema", "PhysxJointAPI"),
-        "PhysxDeformableBodyAPI": ("pxr.PhysxSchema", "PhysxDeformableBodyAPI"),
-        "PhysxParticleSystemAPI": ("pxr.PhysxSchema", "PhysxParticleSystemAPI"),
-        "PhysxContactReportAPI": ("pxr.PhysxSchema", "PhysxContactReportAPI"),
-        "PhysxVehicleAPI": ("pxr.PhysxSchema", "PhysxVehicleAPI"),
-    }
-    # Post-apply verification: check GetAppliedSchemas() contains the schema
-    # token. Without this, the Kit command path silently accepts invalid
-    # schema names ('PhysicsVelocityAPI' etc.) and reports success even though
-    # the schema was not applied — an honesty hole.
-    if schema in SCHEMA_MAP:
-        mod, cls = SCHEMA_MAP[schema]
-        return (
-            f"from {mod} import {cls}\n"
-            "import omni.usd\n"
-            f"stage = omni.usd.get_context().get_stage()\n"
-            f"prim = stage.GetPrimAtPath('{prim_path}')\n"
-            f"if not prim.IsValid():\n"
-            f"    raise RuntimeError(f'apply_api_schema: prim not found: {prim_path}')\n"
-            f"{cls}.Apply(prim)\n"
-            f"_applied = list(prim.GetAppliedSchemas() or [])\n"
-            f"if '{cls}' not in _applied and '{schema}' not in _applied:\n"
-            f"    raise RuntimeError(f'apply_api_schema: schema {cls} not in GetAppliedSchemas after Apply (got {{_applied}})')\n"
-            f"print(f'applied {cls} to {prim_path} — schemas now: {{_applied}}')"
-        )
-    # Fallback: Kit command path. Must verify via GetAppliedSchemas because
-    # omni.kit.commands.execute('ApplyAPISchemaCommand', api=<bad_name>, ...)
-    # returns None / silent-no-op rather than raising on unknown API names.
-    return (
-        "import omni.usd\n"
-        "import omni.kit.commands\n"
-        f"stage = omni.usd.get_context().get_stage()\n"
-        f"prim = stage.GetPrimAtPath('{prim_path}')\n"
-        f"if not prim.IsValid():\n"
-        f"    raise RuntimeError(f'apply_api_schema: prim not found: {prim_path}')\n"
-        f"_before = set(prim.GetAppliedSchemas() or [])\n"
-        f"omni.kit.commands.execute('ApplyAPISchemaCommand', api='{schema}', prim=prim)\n"
-        f"_after = set(prim.GetAppliedSchemas() or [])\n"
-        f"if _before == _after:\n"
-        f"    raise RuntimeError(f'apply_api_schema: schema \"{schema}\" was not applied — likely unknown schema name. prim schemas unchanged: {{sorted(_before)}}')\n"
-        f"print(f'applied {schema} to {prim_path} — new schemas: {{sorted(_after - _before)}}')"
-    )
+# _gen_apply_api_schema moved to handlers/scene_authoring.py (Phase 3 wave 3).
 
 
-def _gen_clone_prim(args: Dict) -> str:
-    src = args["source_path"]
-    tgt = args["target_path"]
-    pos = args.get("position")
-    count = args.get("count", 1)
-    spacing = args.get("spacing", 1.0)
-    collision_filter = args.get("collision_filter", False)
-
-    if count <= 1:
-        # Single clone: Sdf.CopySpec (fast, simple)
-        lines = [
-            "import omni.usd",
-            "from pxr import Sdf, UsdGeom, Gf",
-            "stage = omni.usd.get_context().get_stage()",
-            f"Sdf.CopySpec(stage.GetRootLayer(), '{src}', stage.GetRootLayer(), '{tgt}')",
-        ]
-        if pos:
-            lines.append(f"xf = UsdGeom.Xformable(stage.GetPrimAtPath('{tgt}'))")
-            lines.append("xf.ClearXformOpOrder()")
-            lines.append(f"xf.AddTranslateOp().Set(Gf.Vec3d({pos[0]}, {pos[1]}, {pos[2]}))")
-        return "\n".join(lines)
-
-    if count < 4:
-        # Small count: Sdf.CopySpec loop (simpler)
-        lines = [
-            "import omni.usd",
-            "from pxr import Sdf, UsdGeom, Gf",
-            _SAFE_XFORM_SNIPPET,
-            "stage = omni.usd.get_context().get_stage()",
-            f"for i in range({count}):",
-            f"    dest = '{tgt}_' + str(i)",
-            f"    Sdf.CopySpec(stage.GetRootLayer(), '{src}', stage.GetRootLayer(), dest)",
-            f"    _safe_set_translate(stage.GetPrimAtPath(dest), (i * {spacing}, 0, 0))",
-        ]
-        return "\n".join(lines)
-
-    # Large count (>= 4): GPU-batched GridCloner from isaacsim.core.cloner
-    import math
-    grid_side = math.ceil(math.sqrt(count))
-    filter_str = "True" if collision_filter else "False"
-    lines = [
-        "import omni.usd",
-        "from pxr import UsdGeom, Gf",
-        "from isaacsim.core.cloner import GridCloner",
-        "",
-        "stage = omni.usd.get_context().get_stage()",
-        "",
-        f"cloner = GridCloner(spacing={spacing})",
-        f"cloner.define_base_env('{src}')",
-        f"# Generate {count} target paths in a grid layout",
-        f"target_paths = cloner.generate_paths('{tgt}', {count})",
-        f"env_positions = cloner.clone(",
-        f"    source_prim_path='{src}',",
-        f"    prim_paths=target_paths,",
-        f"    copy_from_source=True,",
-        f")",
-    ]
-    if collision_filter:
-        lines.extend([
-            "",
-            "# Filter collisions between clones (required for RL envs)",
-            f"cloner.filter_collisions(",
-            f"    physicsscene_path='/World/PhysicsScene',",
-            f"    collision_root_path='{tgt}',",
-            f"    prim_paths=target_paths,",
-            f")",
-        ])
-    lines.append(f"print(f'Cloned {count} envs from {src} using GridCloner')")
-    return "\n".join(lines)
+# _gen_clone_prim moved to handlers/scene_authoring.py (Phase 3 wave 3).
 
 
 def _gen_deformable(args: Dict) -> str:
@@ -2068,45 +1933,7 @@ keys = og.Controller.Keys
 """
 
 
-def _gen_create_material(args: Dict) -> str:
-    mat_path = args["material_path"]
-    shader = args.get("shader_type", "OmniPBR")
-    color = args.get("diffuse_color", [0.8, 0.8, 0.8])
-    metallic = args.get("metallic", 0.0)
-    roughness = args.get("roughness", 0.5)
-    opacity = args.get("opacity", 1.0)
-    ior = args.get("ior", 1.5)
-
-    mdl_file = 'OmniPBR.mdl' if shader == 'OmniPBR' else f'{shader}.mdl'
-
-    return f"""\
-import omni.usd
-from pxr import UsdShade, Sdf, Gf
-
-stage = omni.usd.get_context().get_stage()
-
-# Create material prim
-mat_prim = stage.DefinePrim('{mat_path}', 'Material')
-mat = UsdShade.Material(mat_prim)
-
-# Create shader prim
-shader_prim = stage.DefinePrim('{mat_path}/Shader', 'Shader')
-shader = UsdShade.Shader(shader_prim)
-shader.CreateIdAttr('mdl')
-shader.CreateImplementationSourceAttr(UsdShade.Tokens.sourceAsset)
-shader.SetSourceAsset('{mdl_file}', 'mdl')
-shader.SetSourceAssetSubIdentifier('{shader}', 'mdl')
-
-# Set shader parameters
-shader.CreateInput('diffuse_color_constant', Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f({color[0]}, {color[1]}, {color[2]}))
-shader.CreateInput('metallic_constant', Sdf.ValueTypeNames.Float).Set({metallic})
-shader.CreateInput('reflection_roughness_constant', Sdf.ValueTypeNames.Float).Set({roughness})
-
-# Connect shader to material outputs
-mat.CreateSurfaceOutput('mdl').ConnectToSource(shader.ConnectableAPI(), 'out')
-mat.CreateVolumeOutput('mdl').ConnectToSource(shader.ConnectableAPI(), 'out')
-mat.CreateDisplacementOutput('mdl').ConnectToSource(shader.ConnectableAPI(), 'out')
-"""
+# _gen_create_material moved to handlers/scene_authoring.py (Phase 3 wave 3).
 
 
 # _gen_assign_material moved to handlers/scene_authoring.py (Phase 3 wave 2).
