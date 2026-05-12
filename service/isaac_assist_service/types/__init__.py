@@ -18,6 +18,11 @@ The only allowed external dependencies are:
 - `pydantic` (Pydantic v2)
 - `numpy`
 """
+from service.isaac_assist_service.types.ctrl_namespace import (
+    AdapterToken,
+    ControllerAttrSet,
+    StatusToken,
+)
 from service.isaac_assist_service.types.provenance import Source
 from service.isaac_assist_service.types.spatial import Bbox3, Pose6D, Vec3
 from service.isaac_assist_service.types.uncertainty import (
@@ -30,12 +35,15 @@ from service.isaac_assist_service.types.violations import (
 )
 
 __all__ = [
+    "AdapterToken",
     "Bbox3",
     "ConstraintViolation",
+    "ControllerAttrSet",
     "Distribution",
     "GradedScale",
     "Pose6D",
     "Source",
+    "StatusToken",
     "ValidationResult",
     "Vec3",
 ]

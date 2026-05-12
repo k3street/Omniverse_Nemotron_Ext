@@ -312,6 +312,7 @@ class TestImportPurity:
             "service.isaac_assist_service.types.uncertainty",
             "service.isaac_assist_service.types.provenance",
             "service.isaac_assist_service.types.violations",
+            "service.isaac_assist_service.types.ctrl_namespace",
         }
         forbidden = [m for m in ia_loaded if m not in allowed]
         assert forbidden == [], (
