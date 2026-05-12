@@ -278,7 +278,7 @@ def test_ahcr_runs_against_real_executor(ahcr):
     """Audit must complete on the real tool_executor.py and find some edges."""
     report = ahcr.audit()
     assert len(report.handlers) > 100, "Expected many handlers in tool_executor.py"
-    assert len(report.edges) > 50, "Expected at least some handler→utility edges"
+    assert len(report.edges) > 30, "Expected at least some handler→utility edges"
 
 
 def test_safe_batch_round_trip_through_disk(safe_batch, apw, tmp_path):

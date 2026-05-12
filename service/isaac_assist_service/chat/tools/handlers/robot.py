@@ -3093,6 +3093,1197 @@ print(f'Nav2 map exported: {{pgm_path}} ({{width_px}}x{{height_px}}) + {{yaml_pa
 
 
 # ---------------------------------------------------------------------------
+# Phase 7 wave 7 — robot data-handlers (creates + setups + calibrate)
+
+
+async def _handle_create_kit_tray(args: Dict) -> Dict:
+    """Tier A tool — creates a tray with N labeled slots for kitting workflows.
+
+    A kit tray is a flat platform with multiple discrete positions (slots)
+    where specific items belong. Each slot is a child Xform under the tray
+    prim, named slot_<n> with a fixed local position. Slots are queryable
+    via track_slot_occupancy at runtime.
+
+    Args:
+      tray_path:    USD path of the tray to create (parent prim)
+      position:     [x, y, z] world position of tray center
+      tray_size:    [w, d, h] tray dimensions
+      slot_layout:  pattern_name e.g. 'grid_2x2', 'grid_3x3', 'row_4'
+      slot_size:    width of each slot (default 0.05 = 5cm cube slot)
+      slot_spacing: center-to-center spacing (default = slot_size + 0.02)
+
+    Returns:
+      {tray_path, slot_paths: [path1, path2, ...], slot_centers: [[x,y,z], ...]}
+    """
+    from .. import kit_tools
+    from ..tool_executor import execute_tool_call
+    tray_path = args["tray_path"]
+    position = args.get("position", [0, 0, 0.75])
+    tray_size = args.get("tray_size", [0.30, 0.30, 0.05])
+    slot_layout = args.get("slot_layout", "grid_2x2")
+    slot_size = float(args.get("slot_size", 0.05))
+    slot_spacing = float(args.get("slot_spacing", slot_size + 0.02))
+
+    # Parse slot_layout
+    if slot_layout.startswith("grid_") and "x" in slot_layout[5:]:
+        rows, cols = (int(x) for x in slot_layout[5:].split("x"))
+        n_slots = rows * cols
+    elif slot_layout.startswith("row_"):
+        rows, cols = 1, int(slot_layout[4:])
+        n_slots = cols
+    else:
+        return {"type": "error", "error": f"unsupported slot_layout: {slot_layout!r}"}
+
+    # Build the tray prim
+    await execute_tool_call("create_prim", {
+        "prim_path": tray_path,
+        "prim_type": "Cube",
+        "position": position,
+        "scale": [tray_size[0] / 2, tray_size[1] / 2, tray_size[2] / 2],
+    })
+    await execute_tool_call("apply_api_schema", {
+        "prim_path": tray_path,
+        "schema_name": "PhysicsCollisionAPI",
+    })
+
+    # Compute slot positions
+    cx, cy = position[0], position[1]
+    tray_top_z = position[2] + tray_size[2] / 2
+    slot_paths = []
+    slot_centers = []
+    for r in range(rows):
+        for c in range(cols):
+            x = cx + (c - (cols - 1) * 0.5) * slot_spacing
+            y = cy + (r - (rows - 1) * 0.5) * slot_spacing
+            z = tray_top_z + slot_size * 0.5
+            slot_idx = r * cols + c
+            slot_path = f"{tray_path}/slot_{slot_idx + 1}"
+            slot_paths.append(slot_path)
+            slot_centers.append([round(x, 6), round(y, 6), round(z, 6)])
+
+    # Create empty Xform prims for slot tracking (each slot is a marker prim)
+    slot_init_code = f"""\
+import omni.usd
+from pxr import UsdGeom, Gf, Sdf
+stage = omni.usd.get_context().get_stage()
+slot_paths = {slot_paths!r}
+slot_centers = {slot_centers!r}
+created = []
+for path, center in zip(slot_paths, slot_centers):
+    pp = Sdf.Path(path)
+    if not stage.GetPrimAtPath(pp).IsValid():
+        prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
+        UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d(center[0], center[1], center[2]))
+        # Mark as kit_slot for track_slot_occupancy
+        prim.CreateAttribute("kit:slot_index", Sdf.ValueTypeNames.Int).Set(slot_paths.index(path))
+        prim.CreateAttribute("kit:slot_size", Sdf.ValueTypeNames.Float).Set({slot_size})
+        prim.CreateAttribute("kit:occupied", Sdf.ValueTypeNames.Bool).Set(False)
+        created.append(path)
+import json
+print(json.dumps({{"created": created}}))
+"""
+    res = await kit_tools.exec_sync(slot_init_code, timeout=15)
+
+    return {
+        "tray_path": tray_path,
+        "slot_paths": slot_paths,
+        "slot_centers": slot_centers,
+        "n_slots": n_slots,
+    }
+
+
+async def _handle_create_articulated_joint(args: Dict) -> Dict:
+    """Tier B tool — creates a USD physics joint between two prims for
+    articulated mechanisms (drawers, doors, hinges, sliders).
+
+    Wraps UsdPhysics joint creation for drawer-pull, door-open, lever-actuate,
+    rotary-table scenarios. Joint types: 'revolute' (rotation about axis),
+    'prismatic' (linear sliding), 'fixed' (rigid attachment), 'spherical'
+    (ball joint).
+
+    Args:
+      joint_path:    USD path of the joint to create
+      body0_path:    USD path of first body (parent / static frame)
+      body1_path:    USD path of second body (child / moving frame)
+      joint_type:    'revolute' | 'prismatic' | 'fixed' | 'spherical' (default 'revolute')
+      axis:          [x, y, z] axis of rotation/translation (default [0, 0, 1])
+      limit_lower:   joint limit (degrees for revolute, meters for prismatic)
+      limit_upper:   joint limit (default open: -inf to +inf)
+      drive_type:    'force' | 'acceleration' | None (default None = passive)
+
+    Returns: {joint_path, joint_type, body0, body1, axis}
+    """
+    from .. import kit_tools
+    joint_path = args["joint_path"]
+    body0_path = args.get("body0_path", "")
+    body1_path = args["body1_path"]
+    joint_type = args.get("joint_type", "revolute")
+    axis = args.get("axis", [0, 0, 1])
+    limit_lower = args.get("limit_lower")
+    limit_upper = args.get("limit_upper")
+    drive_type = args.get("drive_type")
+
+    if joint_type not in ("revolute", "prismatic", "fixed", "spherical"):
+        return {"type": "error", "error": f"unsupported joint_type: {joint_type!r}"}
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdPhysics, Sdf, Gf
+stage = omni.usd.get_context().get_stage()
+
+joint_path = {joint_path!r}
+body0_path = {body0_path!r}
+body1_path = {body1_path!r}
+joint_type = {joint_type!r}
+axis = {axis!r}
+
+# Validate bodies exist
+if body0_path and not stage.GetPrimAtPath(body0_path).IsValid():
+    print(json.dumps({{"error": f"body0 not found: {{body0_path}}"}})); raise SystemExit
+if not stage.GetPrimAtPath(body1_path).IsValid():
+    print(json.dumps({{"error": f"body1 not found: {{body1_path}}"}})); raise SystemExit
+
+# Create joint per type
+if joint_type == "revolute":
+    joint = UsdPhysics.RevoluteJoint.Define(stage, Sdf.Path(joint_path))
+elif joint_type == "prismatic":
+    joint = UsdPhysics.PrismaticJoint.Define(stage, Sdf.Path(joint_path))
+elif joint_type == "fixed":
+    joint = UsdPhysics.FixedJoint.Define(stage, Sdf.Path(joint_path))
+elif joint_type == "spherical":
+    joint = UsdPhysics.SphericalJoint.Define(stage, Sdf.Path(joint_path))
+
+if body0_path:
+    joint.CreateBody0Rel().SetTargets([Sdf.Path(body0_path)])
+joint.CreateBody1Rel().SetTargets([Sdf.Path(body1_path)])
+
+# Axis (revolute/prismatic): UsdPhysics convention is 'X', 'Y', 'Z' string — pick max-mag axis
+if joint_type in ("revolute", "prismatic"):
+    abs_axis = [abs(axis[0]), abs(axis[1]), abs(axis[2])]
+    idx = abs_axis.index(max(abs_axis))
+    joint.CreateAxisAttr().Set(["X", "Y", "Z"][idx])
+
+# Limits
+limit_lower = {limit_lower!r}
+limit_upper = {limit_upper!r}
+if limit_lower is not None or limit_upper is not None:
+    if joint_type in ("revolute", "prismatic"):
+        if limit_lower is not None:
+            joint.CreateLowerLimitAttr().Set(float(limit_lower))
+        if limit_upper is not None:
+            joint.CreateUpperLimitAttr().Set(float(limit_upper))
+
+# Drive (optional)
+drive_type = {drive_type!r}
+if drive_type and joint_type in ("revolute", "prismatic"):
+    drive_api_token = "angular" if joint_type == "revolute" else "linear"
+    drive = UsdPhysics.DriveAPI.Apply(joint.GetPrim(), drive_api_token)
+    drive.CreateTypeAttr().Set(drive_type)
+    drive.CreateMaxForceAttr().Set(1e6)
+    drive.CreateDampingAttr().Set(1e3)
+    drive.CreateStiffnessAttr().Set(1e4)
+
+print(json.dumps({{
+    "joint_path": joint_path,
+    "joint_type": joint_type,
+    "body0": body0_path,
+    "body1": body1_path,
+    "axis": axis,
+    "drive": drive_type,
+}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=15)
+    return {
+        "joint_path": joint_path,
+        "joint_type": joint_type,
+        "body0": body0_path,
+        "body1": body1_path,
+        "axis": axis,
+        "raw": (res.get("output") or "")[-300:],
+    }
+
+
+async def _handle_create_rotary_table(args: Dict) -> Dict:
+    """Tier B tool — creates a rotating turntable (revolute joint with drive).
+
+    Composite: creates a static base + rotating disc + revolute joint between.
+    Optional drive applies continuous angular velocity.
+
+    Args:
+      table_path:   USD path of the rotary table (parent prim)
+      position:     [x, y, z] of table base
+      radius:       table radius (default 0.20m)
+      height:       table thickness (default 0.05m)
+      angular_velocity_deg: continuous rotation speed (deg/s, default 0 = passive)
+
+    Returns: {table_path, base_path, disc_path, joint_path}
+    """
+    from .. import kit_tools
+    from ..tool_executor import execute_tool_call
+    table_path = args["table_path"]
+    position = args.get("position", [0, 0, 0.78])
+    radius = float(args.get("radius", 0.20))
+    height = float(args.get("height", 0.05))
+    angular_velocity_deg = float(args.get("angular_velocity_deg", 0.0))
+
+    base_path = f"{table_path}/Base"
+    disc_path = f"{table_path}/Disc"
+    joint_path = f"{table_path}/Joint"
+
+    # Base (static) — slightly below disc
+    await execute_tool_call("create_prim", {
+        "prim_path": base_path,
+        "prim_type": "Cube",
+        "position": [position[0], position[1], position[2] - height * 0.5 - 0.025],
+        "scale": [radius, radius, 0.025],
+    })
+    await execute_tool_call("apply_api_schema", {
+        "prim_path": base_path, "schema_name": "PhysicsCollisionAPI",
+    })
+
+    # Disc (rigid, rotating) — Cylinder for round shape
+    await execute_tool_call("create_prim", {
+        "prim_path": disc_path,
+        "prim_type": "Cylinder",
+        "position": position,
+        "radius": radius,
+        "height": height,
+    })
+    for api in ("PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"):
+        await execute_tool_call("apply_api_schema",
+                                  {"prim_path": disc_path, "schema_name": api})
+
+    # Revolute joint — disc rotates around world Z relative to base
+    await execute_tool_call("create_articulated_joint", {
+        "joint_path": joint_path,
+        "body0_path": base_path,
+        "body1_path": disc_path,
+        "joint_type": "revolute",
+        "axis": [0, 0, 1],
+        "drive_type": "acceleration" if angular_velocity_deg else None,
+    })
+
+    # Set continuous angular velocity if requested
+    if angular_velocity_deg:
+        vel_code = f"""\
+import omni.usd, json
+from pxr import UsdPhysics
+stage = omni.usd.get_context().get_stage()
+joint = UsdPhysics.RevoluteJoint.Get(stage, {joint_path!r})
+if joint:
+    drive = UsdPhysics.DriveAPI.Get(joint.GetPrim(), "angular")
+    if drive:
+        drive.CreateTargetVelocityAttr().Set({angular_velocity_deg})
+        print(json.dumps({{"target_velocity_deg_s": {angular_velocity_deg}}}))
+    else:
+        print(json.dumps({{"error": "no drive on joint"}}))
+else:
+    print(json.dumps({{"error": "joint not found"}}))
+"""
+        await kit_tools.exec_sync(vel_code, timeout=10)
+
+    return {
+        "table_path": table_path,
+        "base_path": base_path,
+        "disc_path": disc_path,
+        "joint_path": joint_path,
+        "radius": radius,
+        "height": height,
+        "angular_velocity_deg": angular_velocity_deg,
+    }
+
+
+async def _handle_register_moving_obstacle(args: Dict) -> Dict:
+    """Tier B tool — registers a dynamic obstacle on a robot for runtime
+    collision avoidance. cuRobo's planning_obstacles is normally static at
+    install time. This tool adds an obstacle path to a robot's runtime list,
+    so the controller can re-query its position each tick.
+
+    For canonical-time, sets a USD attribute on the robot prim:
+      curobo:moving_obstacles (StringArray) — list of obstacle paths
+
+    Runtime usage requires controller integration that reads this attr each
+    tick and updates plan_pose's obstacle list (Sprint 3+).
+
+    Args:
+      robot_path:    USD path of the robot
+      obstacle_path: USD path of the moving obstacle (e.g. another robot's hand)
+
+    Returns: {robot_path, obstacle_path, total_registered}
+    """
+    from .. import kit_tools
+    robot_path = args["robot_path"]
+    obstacle_path = args["obstacle_path"]
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdPhysics, Sdf, Vt
+stage = omni.usd.get_context().get_stage()
+robot = stage.GetPrimAtPath({robot_path!r})
+obstacle = stage.GetPrimAtPath({obstacle_path!r})
+if not robot or not robot.IsValid():
+    print(json.dumps({{"error": f"robot not found: {robot_path!r}"}})); raise SystemExit
+if not obstacle or not obstacle.IsValid():
+    print(json.dumps({{"error": f"obstacle not found: {obstacle_path!r}"}})); raise SystemExit
+
+attr = robot.GetAttribute("curobo:moving_obstacles")
+if not attr or not attr.IsValid():
+    attr = robot.CreateAttribute("curobo:moving_obstacles", Sdf.ValueTypeNames.StringArray)
+existing = list(attr.Get() or [])
+if {obstacle_path!r} not in existing:
+    existing.append({obstacle_path!r})
+attr.Set(Vt.StringArray(existing))
+print(json.dumps({{"robot": {robot_path!r}, "obstacle": {obstacle_path!r}, "total_registered": len(existing)}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "robot_path": robot_path,
+        "obstacle_path": obstacle_path,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+async def _handle_create_gravity_dispenser(args: Dict) -> Dict:
+    """Tier C tool — creates a gravity-fed dispenser hopper that pre-spawns
+    items at a given height so they fall onto a target surface (conveyor/bin).
+
+    Composite: places N cubes at a stacked height above target_path. Items
+    fall under gravity onto the target.
+
+    Args:
+      dispenser_path: USD path of dispenser parent prim
+      target_xy:    [x, y] xy of dispenser center
+      drop_height:  z-height items spawn at (default target+0.30m)
+      n_items:      how many to dispense
+      item_size:    cube edge length (default 0.05)
+
+    Returns: {dispenser_path, items: [paths], n_items}
+    """
+    from ..tool_executor import execute_tool_call
+    dispenser_path = args["dispenser_path"]
+    target_xy = args.get("target_xy", [0, 0.4])
+    drop_height = float(args.get("drop_height", 1.1))
+    n_items = int(args.get("n_items", 4))
+    item_size = float(args.get("item_size", 0.05))
+
+    # Create marker prim for dispenser (visual)
+    await execute_tool_call("create_prim", {
+        "prim_path": dispenser_path,
+        "prim_type": "Cube",
+        "position": [target_xy[0], target_xy[1], drop_height + 0.05],
+        "scale": [item_size * 1.5, item_size * 1.5, 0.025],
+    })
+    await execute_tool_call("apply_api_schema", {
+        "prim_path": dispenser_path, "schema_name": "PhysicsCollisionAPI",
+    })
+
+    # Spawn N items stacked vertically below dispenser
+    item_paths = []
+    for i in range(n_items):
+        z = drop_height - i * (item_size + 0.005)
+        path = f"{dispenser_path}/Item_{i+1}"
+        await execute_tool_call("create_prim", {
+            "prim_path": path, "prim_type": "Cube",
+            "position": [target_xy[0], target_xy[1], z], "size": item_size,
+        })
+        for api in ("PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"):
+            await execute_tool_call("apply_api_schema",
+                                      {"prim_path": path, "schema_name": api})
+        item_paths.append(path)
+
+    return {
+        "dispenser_path": dispenser_path,
+        "items": item_paths,
+        "n_items": n_items,
+        "drop_height": drop_height,
+    }
+
+
+async def _handle_create_heap_zone(args: Dict) -> Dict:
+    """Tier C tool — creates a 'heap' zone where N items pile randomly.
+
+    Used for parcel-singulation scenarios (#8). Items spawn at slightly-
+    randomized xy + same z, creating a small pile after physics settles.
+
+    Args:
+      heap_path:   USD path of heap parent prim
+      center:      [x, y, z] center of heap
+      radius:      xy radius of heap zone (default 0.10)
+      n_items:     how many to create
+      item_size:   cube edge length (default 0.05)
+
+    Returns: {heap_path, items: [paths], n_items}
+    """
+    from ..tool_executor import execute_tool_call
+    heap_path = args["heap_path"]
+    center = args.get("center", [0, 0.4, 0.85])
+    radius = float(args.get("radius", 0.10))
+    n_items = int(args.get("n_items", 5))
+    item_size = float(args.get("item_size", 0.05))
+
+    # Marker prim
+    await execute_tool_call("create_prim", {
+        "prim_path": heap_path, "prim_type": "Xform",
+    })
+
+    # Spawn items in a quasi-random spread (deterministic via index)
+    import math as _m
+    item_paths = []
+    for i in range(n_items):
+        # deterministic spread: golden angle radial
+        theta = i * 2.39996  # golden angle in radians
+        r = radius * (i / max(1, n_items - 1)) ** 0.5
+        x = center[0] + r * _m.cos(theta)
+        y = center[1] + r * _m.sin(theta)
+        z = center[2] + item_size * 0.5  # spawn slightly above
+        path = f"{heap_path}/Item_{i+1}"
+        await execute_tool_call("create_prim", {
+            "prim_path": path, "prim_type": "Cube",
+            "position": [x, y, z], "size": item_size,
+        })
+        for api in ("PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI"):
+            await execute_tool_call("apply_api_schema",
+                                      {"prim_path": path, "schema_name": api})
+        item_paths.append(path)
+
+    if item_paths:
+        await execute_tool_call("bulk_set_attribute", {
+            "prim_paths": item_paths,
+            "attr": "physxRigidBody:sleepThreshold",
+            "value": 0.0,
+        })
+
+    return {
+        "heap_path": heap_path,
+        "items": item_paths,
+        "n_items": n_items,
+        "center": center,
+    }
+
+
+async def _handle_setup_cortex_behavior(args: Dict) -> Dict:
+    """Tier B tool — installs Isaac Sim Cortex framework wrapper around a robot
+    + registers obstacles, then attaches a behavior_module DfNetwork.
+
+    Wraps add_franka_to_stage / add_ur10_to_stage + CortexWorld + behavior
+    tree mounting. Behavior trees are Python files exporting `make_decider_network`
+    function returning a DfNetwork.
+
+    For canonical-time, this tool creates the CortexWorld + robot wrapper.
+    Behavior tree loading runs at install time. Limited to behaviors built
+    into isaacsim.cortex.behaviors module.
+
+    Args:
+      robot_path:        USD path of the robot to wrap
+      robot_kind:        'franka' or 'ur10'
+      behavior_module:   Python module path with make_decider_network
+                          (e.g. 'isaacsim.cortex.behaviors.franka.peck_demo')
+      obstacles:         list of USD paths to register as obstacles
+
+    Returns: {robot_path, behavior_module, obstacles_registered, world_class}
+
+    KNOWN LIMITATIONS:
+    - Cortex framework imports may not be available in all Kit builds.
+      Tool fails gracefully with import error if framework absent.
+    - Behavior tree loading is deferred to runtime (when CortexWorld.run starts).
+    - Conflicts with cuRobo controller (different motion architectures).
+      Use Cortex OR cuRobo, not both on same robot.
+    """
+    import json
+    from .. import kit_tools
+    robot_path = args["robot_path"]
+    robot_kind = args.get("robot_kind", "franka").lower()
+    behavior_module = args.get("behavior_module", "")
+    obstacles = list(args.get("obstacles") or [])
+
+    if robot_kind not in ("franka", "ur10", "ur10e"):
+        return {"type": "error", "error": f"unsupported robot_kind: {robot_kind}"}
+
+    code = f"""\
+import omni.usd, json
+import sys
+stage = omni.usd.get_context().get_stage()
+robot_path = {robot_path!r}
+behavior_module = {behavior_module!r}
+obstacles = {obstacles!r}
+
+result = {{"robot_path": robot_path, "behavior_module": behavior_module, "obstacles": obstacles}}
+
+try:
+    from isaacsim.cortex.framework.cortex_world import CortexWorld
+    if {robot_kind!r} == "franka":
+        from isaacsim.cortex.framework.robot import add_franka_to_stage as add_robot
+    else:
+        from isaacsim.cortex.framework.robot import add_ur10_to_stage as add_robot
+
+    # Reuse existing World instance or create CortexWorld
+    world = CortexWorld.instance()
+    if world is None:
+        world = CortexWorld()
+    result["world_class"] = type(world).__name__
+
+    # Robot wrapper (assumes prim already exists; wraps it)
+    cortex_robot = add_robot(name=f"cortex_{{robot_path.replace('/', '_').strip('_')}}", prim_path=robot_path)
+    world.add_robot(cortex_robot)
+    result["robot_wrapped"] = True
+
+    # Register obstacles
+    for obs_path in obstacles:
+        prim = stage.GetPrimAtPath(obs_path)
+        if prim and prim.IsValid():
+            try:
+                from isaacsim.core.api.objects import DynamicCuboid
+                # Wrap as obstacle (DynamicCuboid wrapper around existing prim)
+                obs = DynamicCuboid(prim_path=obs_path, name=f"obs_{{obs_path.split('/')[-1]}}")
+                cortex_robot.register_obstacle(obs)
+            except Exception as _oe:
+                result.setdefault("obstacle_errors", []).append(f"{{obs_path}}: {{type(_oe).__name__}}")
+
+    # Behavior module loading (deferred — actual mount is at world.run())
+    if behavior_module:
+        try:
+            import importlib
+            mod = importlib.import_module(behavior_module)
+            result["behavior_module_loaded"] = True
+            if hasattr(mod, "make_decider_network"):
+                result["behavior_has_make_decider_network"] = True
+            else:
+                result["behavior_has_make_decider_network"] = False
+        except Exception as _be:
+            result["behavior_load_error"] = f"{{type(_be).__name__}}: {{str(_be)[:100]}}"
+except ImportError as _ie:
+    result["error"] = f"Cortex framework unavailable: {{type(_ie).__name__}}: {{str(_ie)[:200]}}"
+except Exception as _e:
+    result["error"] = f"{{type(_e).__name__}}: {{str(_e)[:200]}}"
+
+print(json.dumps(result))
+"""
+    res = await kit_tools.exec_sync(code, timeout=20)
+    out = (res.get("output") or "").strip()
+    parsed = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                parsed = json.loads(line)
+                break
+            except Exception:
+                continue
+    return parsed or {"error": "could not parse cortex setup output", "raw": out[-300:]}
+
+
+async def _handle_setup_assembly_constraint(args: Dict) -> Dict:
+    """Tier C tool — creates an assembly constraint (peg-into-hole) via
+    UsdPhysics joint when the peg is sufficiently aligned with the hole.
+
+    For canonical-time, sets up the peg + hole prims with a metadata
+    relationship. Runtime (Sprint 3+) would create FixedJoint when peg
+    enters hole within tolerance.
+
+    Args:
+      peg_path:    USD path of the peg
+      hole_path:   USD path of the hole
+      tolerance:   alignment tolerance (default 0.005m)
+      constraint_path: USD path for the resulting joint (default <hole>/AssemblyJoint)
+
+    Returns: {peg_path, hole_path, constraint_path, tolerance}
+    """
+    from .. import kit_tools
+    peg_path = args["peg_path"]
+    hole_path = args["hole_path"]
+    tolerance = float(args.get("tolerance", 0.005))
+    constraint_path = args.get("constraint_path") or f"{hole_path}/AssemblyJoint"
+
+    code = f"""\
+import omni.usd, json
+from pxr import Sdf, UsdGeom
+stage = omni.usd.get_context().get_stage()
+hole = stage.GetPrimAtPath({hole_path!r})
+peg = stage.GetPrimAtPath({peg_path!r})
+if not hole or not hole.IsValid():
+    print(json.dumps({{"error": f"hole not found: {hole_path!r}"}})); raise SystemExit
+if not peg or not peg.IsValid():
+    print(json.dumps({{"error": f"peg not found: {peg_path!r}"}})); raise SystemExit
+hole.CreateAttribute("assembly:peg_path",        Sdf.ValueTypeNames.String).Set({peg_path!r})
+hole.CreateAttribute("assembly:tolerance",       Sdf.ValueTypeNames.Float).Set({tolerance})
+hole.CreateAttribute("assembly:constraint_path", Sdf.ValueTypeNames.String).Set({constraint_path!r})
+hole.CreateAttribute("assembly:engaged",         Sdf.ValueTypeNames.Bool).Set(False)
+print(json.dumps({{"hole": {hole_path!r}, "peg": {peg_path!r}, "tolerance": {tolerance}, "constraint_path": {constraint_path!r}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "peg_path": peg_path,
+        "hole_path": hole_path,
+        "constraint_path": constraint_path,
+        "tolerance": tolerance,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+async def _handle_create_recirculation_loop(args: Dict) -> Dict:
+    """Tier C — creates a closed-loop conveyor (rectangular path) for recirculation
+    sortation scenarios (#17 Postal Cross-Belt Sorter). Composed of 4 conveyor
+    segments arranged in a rectangle.
+
+    Args:
+      loop_path:  USD path of loop parent
+      center:     [x, y, z] center
+      length:     longest dimension of rectangle
+      width:      shorter dimension
+      velocity:   conveyor surface velocity magnitude (default 0.2)
+
+    Returns: {loop_path, segments: [...], length, width}
+    """
+    from ..tool_executor import execute_tool_call
+    loop_path = args["loop_path"]
+    center = args.get("center", [0, 0, 0.78])
+    length = float(args.get("length", 2.0))
+    width = float(args.get("width", 0.6))
+    velocity = float(args.get("velocity", 0.2))
+
+    # Create parent Xform
+    await execute_tool_call("create_prim", {
+        "prim_path": loop_path, "prim_type": "Xform",
+    })
+
+    # 4 segments: top (+y, moves +x), right (+x, moves -y), bottom (-y, moves -x), left (-x, moves +y)
+    # Each segment extended by ext_overlap on both ends so corners overlap
+    # (prevents cubes from falling through segment-segment gaps).
+    ext_overlap = 0.10
+    seg_length = length + 2 * ext_overlap
+    seg_width  = width  + 2 * ext_overlap
+    segments = [
+        ("Top",    [center[0], center[1] + width / 2, center[2]], [seg_length, 0.10, 0.05], [+velocity, 0, 0]),
+        ("Right",  [center[0] + length / 2, center[1], center[2]], [0.10, seg_width, 0.05], [0, -velocity, 0]),
+        ("Bottom", [center[0], center[1] - width / 2, center[2]], [seg_length, 0.10, 0.05], [-velocity, 0, 0]),
+        ("Left",   [center[0] - length / 2, center[1], center[2]], [0.10, seg_width, 0.05], [0, +velocity, 0]),
+    ]
+    seg_paths = []
+    for name, pos, size, vel in segments:
+        seg_path = f"{loop_path}/{name}"
+        await execute_tool_call("create_conveyor", {
+            "prim_path": seg_path, "position": pos, "size": size, "surface_velocity": list(vel),
+        })
+        seg_paths.append({"path": seg_path, "name": name, "velocity": list(vel)})
+
+    # Corners no longer needed — segment overlap by ext_overlap covers gaps.
+
+    return {
+        "loop_path": loop_path,
+        "segments": seg_paths,
+        "length": length,
+        "width": width,
+        "ext_overlap": ext_overlap,
+    }
+
+
+async def _handle_create_linear_axis_robot(args: Dict) -> Dict:
+    """Tier C — creates a linear-axis (gantry) wrapping for a manipulator.
+    The base of the manipulator is mounted on a prismatic-jointed slider
+    that moves along world X (or specified axis).
+
+    Args:
+      robot_path:    USD path of the manipulator (already imported)
+      slider_path:   USD path for the slider (default: <robot>_Slider)
+      axis:          [x, y, z] direction of slider motion (default world X)
+      limit_lower:   slider position min (m)
+      limit_upper:   slider position max (m)
+
+    Returns: {robot_path, slider_path, joint_path, axis}
+    """
+    from ..tool_executor import execute_tool_call
+    robot_path = args["robot_path"]
+    slider_path = args.get("slider_path") or f"{robot_path}_Slider"
+    axis = args.get("axis", [1, 0, 0])
+    limit_lower = args.get("limit_lower", -1.0)
+    limit_upper = args.get("limit_upper", 1.0)
+
+    # Create slider parent prim (small base block under robot)
+    await execute_tool_call("create_prim", {
+        "prim_path": slider_path,
+        "prim_type": "Cube",
+        "position": [0, 0, 0.05],
+        "scale": [0.05, 0.10, 0.025],
+    })
+    for api in ("PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"):
+        await execute_tool_call("apply_api_schema",
+                                  {"prim_path": slider_path, "schema_name": api})
+
+    # Prismatic joint between slider and world
+    joint_path = f"{slider_path}/SliderJoint"
+    await execute_tool_call("create_articulated_joint", {
+        "joint_path": joint_path,
+        "body0_path": "",  # empty = grounded
+        "body1_path": slider_path,
+        "joint_type": "prismatic",
+        "axis": axis,
+        "limit_lower": limit_lower,
+        "limit_upper": limit_upper,
+        "drive_type": "force",
+    })
+
+    return {
+        "robot_path": robot_path,
+        "slider_path": slider_path,
+        "joint_path": joint_path,
+        "axis": axis,
+        "limit_range": [limit_lower, limit_upper],
+    }
+
+
+async def _handle_setup_grasp_pose_sampler(args: Dict) -> Dict:
+    """Tier C — sets up an Isaac Replicator grasp-pose sampler for SDG
+    scenarios (#32 GraspingWorkflow SDG).
+
+    Stores config attrs on a marker prim. Actual SDG execution at runtime
+    requires Replicator pipeline.
+
+    Args:
+      sampler_path: USD path of the sampler
+      target_path:  USD path of object to sample grasps for
+      n_samples:    number of grasp poses (default 100)
+      sampling_mode: 'antipodal' | 'top_down' | 'parallel_jaw' (default 'antipodal')
+
+    Returns: {sampler_path, target_path, n_samples, sampling_mode}
+    """
+    from .. import kit_tools
+    sampler_path = args["sampler_path"]
+    target_path = args["target_path"]
+    n_samples = int(args.get("n_samples", 100))
+    sampling_mode = args.get("sampling_mode", "antipodal")
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Sdf
+stage = omni.usd.get_context().get_stage()
+target = stage.GetPrimAtPath({target_path!r})
+if not target or not target.IsValid():
+    print(json.dumps({{"error": f"target not found: {target_path!r}"}})); raise SystemExit
+sp = Sdf.Path({sampler_path!r})
+prim = stage.GetPrimAtPath(sp)
+if not prim or not prim.IsValid():
+    prim = UsdGeom.Xform.Define(stage, sp).GetPrim()
+prim.CreateAttribute("grasp:target",         Sdf.ValueTypeNames.String).Set({target_path!r})
+prim.CreateAttribute("grasp:n_samples",      Sdf.ValueTypeNames.Int).Set({n_samples})
+prim.CreateAttribute("grasp:sampling_mode",  Sdf.ValueTypeNames.String).Set({sampling_mode!r})
+prim.CreateAttribute("grasp:samples_generated", Sdf.ValueTypeNames.Int).Set(0)
+print(json.dumps({{"sampler": str(prim.GetPath()), "target": {target_path!r}, "n_samples": {n_samples}, "mode": {sampling_mode!r}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "sampler_path": sampler_path,
+        "target_path": target_path,
+        "n_samples": n_samples,
+        "sampling_mode": sampling_mode,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+async def _handle_generate_robot_description(args: Dict) -> Dict:
+    """Check if a robot has pre-built motion generation configs."""
+    from ..tool_executor import _SUPPORTED_MOTION_ROBOTS, _MOTION_ROBOT_CONFIGS  # noqa: PLC0415
+    art_path = args["articulation_path"]
+    robot_type = args.get("robot_type", "").lower()
+
+    # Try to identify robot type from path if not provided
+    if not robot_type:
+        path_lower = art_path.lower()
+        for name in _SUPPORTED_MOTION_ROBOTS:
+            if name in path_lower:
+                robot_type = name
+                break
+
+    if robot_type in _SUPPORTED_MOTION_ROBOTS:
+        cfg = _MOTION_ROBOT_CONFIGS.get(robot_type, {})
+        return {
+            "supported": True,
+            "robot_type": robot_type,
+            "config_files": {
+                "rmpflow_config": cfg.get("rmp_config", f"{robot_type}/rmpflow"),
+                "robot_descriptor": cfg.get("desc", f"{robot_type}/robot_descriptor.yaml"),
+                "urdf": cfg.get("urdf", f"{robot_type}/lula_gen.urdf"),
+                "end_effector_frame": cfg.get("ee_frame", "ee_link"),
+            },
+            "usage": (
+                "This robot has pre-built configs. Use "
+                "interface_config_loader.load_supported_motion_gen_config("
+                f"'{robot_type}', 'RMPflow') to load them."
+            ),
+            "message": (
+                f"Robot '{robot_type}' is pre-supported for motion generation. "
+                f"Config files are bundled with the isaacsim.robot_motion.motion_generation extension."
+            ),
+        }
+
+    return {
+        "supported": False,
+        "robot_type": robot_type or "(unknown)",
+        "articulation_path": art_path,
+        "instructions": (
+            "This robot does not have pre-built motion generation configs. "
+            "To create them:\n"
+            "1. Open the XRDF Editor GUI (Window > Extensions > XRDF Editor) to "
+            "define collision spheres, joint limits, and end-effector frames.\n"
+            "2. Export the XRDF file and Lula robot descriptor YAML.\n"
+            "3. Use the exported files with LulaKinematicsSolver and RmpFlow.\n\n"
+            "For programmatic collision sphere editing, use the CollisionSphereEditor "
+            "from isaacsim.robot_setup.xrdf_editor:\n"
+            "  - CollisionSphereEditor.add_sphere(link_path, position, radius)\n"
+            "  - CollisionSphereEditor.clear_link_spheres(link_path)\n"
+            "  - CollisionSphereEditor.clear_spheres()\n"
+            "  - CollisionSphereEditor.delete_sphere(sphere_id)"
+        ),
+        "message": (
+            f"Robot '{robot_type or 'unknown'}' at '{art_path}' is not pre-supported. "
+            "Use the XRDF Editor to generate collision spheres and robot descriptors."
+        ),
+    }
+
+
+async def _handle_apply_robot_fix_profile(args: Dict) -> Dict:
+    """Look up known robot import issues and return a fix profile."""
+    from ..tool_executor import _ROBOT_FIX_PROFILES, _detect_robot_for_fix  # noqa: PLC0415
+    art_path = args["articulation_path"]
+    robot_name = args.get("robot_name", "")
+
+    # Auto-detect from path if not provided
+    if not robot_name:
+        robot_name = _detect_robot_for_fix(art_path)
+
+    if not robot_name or robot_name not in _ROBOT_FIX_PROFILES:
+        return {
+            "found": False,
+            "robot_name": robot_name or "unknown",
+            "articulation_path": art_path,
+            "message": (
+                f"No fix profile found for '{robot_name or 'unknown'}'. "
+                f"Known robots: {', '.join(sorted(_ROBOT_FIX_PROFILES.keys()))}. "
+                f"Use verify_import to diagnose issues instead."
+            ),
+        }
+
+    profile = _ROBOT_FIX_PROFILES[robot_name].copy()
+    # Substitute articulation path into fix code templates
+    fixes = []
+    for fix in profile["fixes"]:
+        fixes.append({
+            "description": fix["description"],
+            "code": fix["code"].replace("{art_path}", art_path),
+        })
+    profile["fixes"] = fixes
+    profile["articulation_path"] = art_path
+    profile["found"] = True
+    profile["message"] = f"Fix profile for '{profile['display_name']}' — {len(fixes)} fixes available."
+
+    return profile
+
+
+async def _handle_calibrate_physics(args: Dict) -> Dict:
+    """Generate a Ray-Tune+Optuna calibration script and return the launch command."""
+    from pathlib import Path as _Path
+    from ..tool_executor import (  # noqa: PLC0415
+        _DEFAULT_CALIBRATE_PARAMS,
+        _VALID_CALIBRATE_PARAMS,
+        _check_real_data_path,
+        _safe_robot_name,
+        _generate_calibration_script,
+        _suggested_dr_ranges,
+    )
+    real_data_path = args.get("real_data_path", "")
+    articulation_path = args.get("articulation_path", "")
+
+    err = _check_real_data_path(real_data_path)
+    if err:
+        return {"error": err}
+    if not articulation_path:
+        return {"error": "articulation_path is required"}
+
+    raw_params = args.get("parameters_to_calibrate") or _DEFAULT_CALIBRATE_PARAMS
+    parameters = [p for p in raw_params if p in _VALID_CALIBRATE_PARAMS]
+    if not parameters:
+        return {
+            "error": f"No valid parameters_to_calibrate. Allowed: {sorted(_VALID_CALIBRATE_PARAMS)}",
+        }
+
+    num_samples = int(args.get("num_samples", 100))
+    num_workers = int(args.get("num_workers", 4))
+    if num_samples <= 0:
+        return {"error": "num_samples must be positive"}
+    if num_workers <= 0:
+        return {"error": "num_workers must be positive"}
+
+    robot = _safe_robot_name(articulation_path)
+    output_dir = args.get("output_dir") or f"workspace/calibration/{robot}"
+    out = _Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    script = _generate_calibration_script(
+        real_data_path=real_data_path,
+        articulation_path=articulation_path,
+        parameters=parameters,
+        num_samples=num_samples,
+        num_workers=num_workers,
+        output_dir=output_dir,
+    )
+    script_path = out / "calibrate_physics.py"
+    script_path.write_text(script, encoding="utf-8")
+
+    # Approximate runtime: 30-120 min for 100 samples (per spec)
+    est_minutes = max(5, int(num_samples * 0.6))
+
+    return {
+        "type": "calibration_job",
+        "always_require_approval": True,
+        "robot": robot,
+        "articulation_path": articulation_path,
+        "real_data_path": real_data_path,
+        "parameters_to_calibrate": parameters,
+        "num_samples": num_samples,
+        "num_workers": num_workers,
+        "output_dir": str(out),
+        "script_path": str(script_path),
+        "launch_command": f"python {script_path}",
+        "estimated_minutes": est_minutes,
+        "suggested_dr_ranges": _suggested_dr_ranges(parameters),
+        "result_file": str(out / "result.json"),
+        "message": (
+            f"Calibration script written to {script_path}. "
+            f"This is a long-running headless job (~{est_minutes} min) — "
+            "run it manually inside isaac_lab_env (Ray + Optuna already installed). "
+            "Results land in result.json."
+        ),
+    }
+
+
+async def _handle_quick_calibrate(args: Dict) -> Dict:
+    """Faster calibration: only the highest-impact parameters."""
+    from pathlib import Path as _Path
+    from ..tool_executor import (  # noqa: PLC0415
+        _QUICK_CALIBRATE_PARAMS,
+        _check_real_data_path,
+        _safe_robot_name,
+        _generate_calibration_script,
+        _suggested_dr_ranges,
+    )
+    real_data_path = args.get("real_data_path", "")
+    articulation_path = args.get("articulation_path", "")
+
+    err = _check_real_data_path(real_data_path)
+    if err:
+        return {"error": err}
+    if not articulation_path:
+        return {"error": "articulation_path is required"}
+
+    parameters = list(_QUICK_CALIBRATE_PARAMS)
+    if args.get("include_masses") is False:
+        parameters = [p for p in parameters if p != "masses"]
+
+    robot = _safe_robot_name(articulation_path)
+    output_dir = args.get("output_dir") or f"workspace/calibration/{robot}_quick"
+    out = _Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    # Quick calibration uses fewer samples (~30) and runs ~5 min per spec
+    num_samples = 30
+    num_workers = 4
+
+    script = _generate_calibration_script(
+        real_data_path=real_data_path,
+        articulation_path=articulation_path,
+        parameters=parameters,
+        num_samples=num_samples,
+        num_workers=num_workers,
+        output_dir=output_dir,
+    )
+    script_path = out / "quick_calibrate.py"
+    script_path.write_text(script, encoding="utf-8")
+
+    return {
+        "type": "calibration_job",
+        "always_require_approval": True,
+        "mode": "quick",
+        "robot": robot,
+        "articulation_path": articulation_path,
+        "real_data_path": real_data_path,
+        "parameters_to_calibrate": parameters,
+        "num_samples": num_samples,
+        "output_dir": str(out),
+        "script_path": str(script_path),
+        "launch_command": f"python {script_path}",
+        "estimated_minutes": 5,
+        "suggested_dr_ranges": _suggested_dr_ranges(parameters),
+        "result_file": str(out / "result.json"),
+        "message": (
+            f"Quick-calibration script written to {script_path} (~5 min, "
+            f"{len(parameters)} parameters: {parameters}). "
+            "Run it inside isaac_lab_env. For higher fidelity use calibrate_physics."
+        ),
+    }
+
+
+async def _handle_get_gripper_state(args: Dict) -> Dict:
+    """Report whether a gripper is open/closed plus current grip force."""
+    from .. import kit_tools
+    articulation = args["articulation"]
+    gripper_joints = list(args.get("gripper_joints") or [])
+    open_threshold = float(args.get("open_threshold", 0.6))
+    closed_threshold = float(args.get("closed_threshold", 0.1))
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+art = stage.GetPrimAtPath({articulation!r})
+gripper_names = list({gripper_joints!r})
+open_threshold = {open_threshold}
+closed_threshold = {closed_threshold}
+result = {{
+    'articulation': {articulation!r},
+    'gripper_joints': gripper_names,
+    'open_threshold': open_threshold,
+    'closed_threshold': closed_threshold,
+}}
+if not art or not art.IsValid():
+    result['error'] = 'articulation not found'
+elif not gripper_names:
+    result['error'] = 'gripper_joints must not be empty'
+else:
+    found = []
+    for p in Usd.PrimRange(art):
+        if p.GetName() in gripper_names:
+            found.append(p)
+    if not found:
+        result['error'] = 'none of the named gripper joints were found under the articulation'
+        result['joints'] = []
+    else:
+        joints = []
+        positions = []
+        torques = []
+        normalized = []
+        for p in found:
+            rj = UsdPhysics.RevoluteJoint(p)
+            pj = UsdPhysics.PrismaticJoint(p)
+            if not (rj or pj):
+                continue
+            jt = 'revolute' if rj else 'prismatic'
+            pos_attr = p.GetAttribute('state:angular:physics:position') if rj else p.GetAttribute('state:linear:physics:position')
+            if not (pos_attr and pos_attr.IsDefined()):
+                pos_attr = p.GetAttribute('physics:position')
+            pos = float(pos_attr.Get()) if (pos_attr and pos_attr.HasAuthoredValue()) else 0.0
+            lower_attr = p.GetAttribute('physics:lowerLimit')
+            upper_attr = p.GetAttribute('physics:upperLimit')
+            lower = float(lower_attr.Get()) if (lower_attr and lower_attr.HasAuthoredValue()) else 0.0
+            upper = float(upper_attr.Get()) if (upper_attr and upper_attr.HasAuthoredValue()) else 0.0
+            torque_attr = (
+                p.GetAttribute('state:angular:physics:appliedJointTorque') if rj
+                else p.GetAttribute('state:linear:physics:appliedJointForce')
+            )
+            torque = float(torque_attr.Get()) if (torque_attr and torque_attr.HasAuthoredValue()) else 0.0
+            span = upper - lower if upper > lower else 0.0
+            norm = (pos - lower) / span if span > 0.0 else 0.0
+            joints.append({{
+                'name': p.GetName(),
+                'path': str(p.GetPath()),
+                'type': jt,
+                'position': pos,
+                'lower_limit': lower,
+                'upper_limit': upper,
+                'normalized': norm,
+                'torque': torque,
+            }})
+            positions.append(pos)
+            torques.append(torque)
+            normalized.append(norm)
+        if not joints:
+            result['error'] = 'matched prims are not Revolute/Prismatic joints'
+        else:
+            avg_norm = sum(normalized) / len(normalized)
+            if avg_norm >= open_threshold:
+                state = 'open'
+            elif avg_norm <= closed_threshold:
+                state = 'closed'
+            else:
+                state = 'midway'
+            result['joints'] = joints
+            result['state'] = state
+            result['avg_normalized'] = avg_norm
+            result['force_estimate'] = sum(abs(t) for t in torques) / len(torques)
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_gripper_state {articulation}")
+
+
+async def _handle_setup_isaac_ros_cumotion_moveit(args):
+    """Phase 6 M4: configure isaac_ros_cumotion plugin for an external MoveIt2.
+
+    Companion to M1's setup_ros2_control_compat. M1 wires the topic-based
+    ros2_control bridge (so MoveIt2 can drive Isaac Sim joints). M4 selects
+    cuMotion as the planning backend INSIDE MoveIt2 — emits a planning
+    pipeline YAML that MoveIt2 loads via:
+        ros2 launch moveit_setup_assistant launch \\
+            planning_pipeline:=cumotion \\
+            robot_description_kinematics:=<kin_yaml>
+
+    Args:
+      robot_path: USD path of the robot (used for naming + base_frame)
+      output_dir: where to write planning_pipeline.yaml (default /tmp)
+      planner_id: cuMotion sub-planner (default "PathPlanner")
+      max_planning_time: seconds (default 5.0)
+      goal_tolerance_pos_m: position tolerance (default 0.005)
+      goal_tolerance_orient_rad: orientation tolerance (default 0.05)
+
+    Returns: {ok, yaml_path, planner_id, robot_name, ros2_launch_args}.
+    Does NOT start MoveIt2 — that's the user's external launch responsibility.
+    """
+    import os, json
+    robot_path = args.get("robot_path", "")
+    if not robot_path:
+        return {"error": "setup_isaac_ros_cumotion_moveit requires robot_path"}
+    output_dir = args.get("output_dir") or "/tmp"
+    planner_id = args.get("planner_id") or "PathPlanner"
+    max_planning_time = float(args.get("max_planning_time", 5.0))
+    goal_tol_pos = float(args.get("goal_tolerance_pos_m", 0.005))
+    goal_tol_ori = float(args.get("goal_tolerance_orient_rad", 0.05))
+
+    robot_name = robot_path.split("/")[-1] or "robot"
+    yaml_path = os.path.join(output_dir, f"{robot_name}_planning_pipeline.yaml")
+
+    yaml = (
+        "# Generated by setup_isaac_ros_cumotion_moveit (Phase 6 M4)\n"
+        "# Loads as MoveIt2 planning_pipeline YAML.\n"
+        "planning_plugin: 'isaac_ros_cumotion::CumotionPlannerManager'\n"
+        f"planner_configs:\n"
+        f"  {planner_id}:\n"
+        f"    type: 'isaac_ros_cumotion::{planner_id}'\n"
+        f"    max_planning_time: {max_planning_time}\n"
+        f"    goal_position_tolerance: {goal_tol_pos}\n"
+        f"    goal_orientation_tolerance: {goal_tol_ori}\n"
+        "    use_cuda_graph: true\n"
+        "    enable_collision_checking: true\n"
+        f"    request_adapters: ''\n"
+    )
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        with open(yaml_path, "w") as f:
+            f.write(yaml)
+    except Exception as e:
+        return {"error": f"yaml_write_failed: {type(e).__name__}: {e}"}
+
+    return {
+        "ok": True,
+        "yaml_path": yaml_path,
+        "planner_id": planner_id,
+        "robot_name": robot_name,
+        "ros2_launch_args": (
+            f"planning_pipeline:={planner_id} "
+            f"robot_description_planning:={yaml_path}"
+        ),
+        "note": "External step: 'ros2 launch moveit_setup_assistant ...' to apply.",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
