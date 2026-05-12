@@ -1768,6 +1768,20 @@ from .handlers.rendering import (  # noqa: E402
     _gen_set_render_config,
     _gen_set_render_resolution,
 )
+from .handlers.resolve import (  # noqa: E402
+    _handle_resolve_constraint_phrase,
+    _handle_resolve_context_reference,
+    _handle_resolve_coordinate_reference,
+    _handle_resolve_count_vagueness,
+    _handle_resolve_material_properties,
+    _handle_resolve_prim_reference,
+    _handle_resolve_relational_property,
+    _handle_resolve_robot_class,
+    _handle_resolve_sequence_phrase,
+    _handle_resolve_size_adjective,
+    _handle_resolve_skill_composition,
+    _handle_resolve_success_condition,
+)
 from .handlers.robot import (  # noqa: E402
     _gen_anchor_robot,
     _gen_assemble_robot,
@@ -2084,45 +2098,7 @@ _COUNT_BUCKETS = {
 }
 
 
-async def _handle_resolve_count_vagueness(args: Dict) -> Dict:
-    """Map a vague count phrase ('a few', 'many', 'several') to a canonical
-    integer. Pilot #4 of the typed-variable resolver pattern.
-
-    Same shape as resolve_size_adjective: extract the count phrase from
-    the prompt, get a stable integer, use it in the next tool call. The
-    fallback for unknown phrases is 3 (smallest non-pair group) with a
-    warning so the agent doesn't silently crash on an unrecognised term.
-
-    Returns alternatives so the agent can pick a different count if the
-    user pushes back ('not THAT many, more like a couple').
-    """
-    term_raw = (args.get("term") or "").strip().lower()
-    if not term_raw:
-        return {"error": "resolve_count_vagueness requires a term ('few', 'many', etc)"}
-
-    count = _COUNT_BUCKETS.get(term_raw)
-    if count is None:
-        # Try matching the first word of multi-word phrases.
-        first = term_raw.split()[0]
-        count = _COUNT_BUCKETS.get(first)
-    if count is None:
-        return {
-            "term": term_raw,
-            "count": 3,
-            "warning": f"unknown count term {term_raw!r} — defaulted to 3",
-            "known_terms": sorted(set(_COUNT_BUCKETS.keys()))[:30],
-        }
-    # Group the alternatives in increasing order — agent can pivot up/down.
-    alternatives = {
-        "one": 1, "couple": 2, "few": 3, "several": 5, "many": 10,
-        "dozens": 24, "hundreds": 100,
-    }
-    return {
-        "term": term_raw,
-        "count": count,
-        "alternatives": alternatives,
-        "rationale": f"Canonical count for {term_raw!r}; tuned to common usage.",
-    }
+    # _handle_resolve_count_vagueness moved to handlers/resolve.py (Phase 7 wave 1).
 
 
 # robot-class → registry key. Anchors generic class language ('a manipulator',
@@ -2163,61 +2139,7 @@ _ROBOT_CLASS_DEFAULTS = {
 }
 
 
-async def _handle_resolve_robot_class(args: Dict) -> Dict:
-    """Map a generic robot class phrase ('a manipulator', 'a wheeled robot')
-    to a concrete robot_name from the robot_wizard registry. Pilot #5.
-
-    Use case: user asks for 'a manipulator' or 'a humanoid' without
-    specifying which model. Without this resolver the LLM either invents
-    a name + path (often wrong) or asks unnecessarily. With it, the
-    agent gets a sane default + the registry's canonical asset URL.
-
-    Returns the resolved robot_name + the registry entry's cloud URL so
-    the agent can pass robot_name=... straight to robot_wizard or use
-    the URL for import_robot. Includes alternatives the agent can pivot
-    to if the user pushes back ('not Franka, give me a UR10').
-    """
-    class_raw = (args.get("robot_class") or args.get("class") or "").strip().lower()
-    if not class_raw:
-        return {"error": "resolve_robot_class requires a robot_class (e.g. 'manipulator', 'humanoid')"}
-
-    robot_name = _ROBOT_CLASS_DEFAULTS.get(class_raw)
-    if robot_name is None:
-        # Try matching the head noun.
-        for word in reversed(class_raw.split()):
-            if word in _ROBOT_CLASS_DEFAULTS:
-                robot_name = _ROBOT_CLASS_DEFAULTS[word]
-                break
-    if robot_name is None:
-        return {
-            "robot_class": class_raw,
-            "warning": f"unknown robot class {class_raw!r}",
-            "known_classes": sorted(set(_ROBOT_CLASS_DEFAULTS.keys())),
-        }
-
-    entry = _ROBOT_WIZARD_REGISTRY.get(robot_name) or {}
-    if isinstance(entry, str):
-        entry = _ROBOT_WIZARD_REGISTRY.get(entry, {})
-    asset_url = ""
-    try:
-        asset_url = _resolve_robot_asset(entry) if entry else ""
-    except Exception:
-        pass
-
-    return {
-        "robot_class": class_raw,
-        "robot_name": robot_name,
-        "asset_url": asset_url,
-        "robot_type": entry.get("robot_type", "manipulator") if isinstance(entry, dict) else "manipulator",
-        "alternatives": {
-            "manipulator": "franka_panda",
-            "wheeled": "nova_carter",
-            "humanoid": "h1",
-            "quadruped": "anymal_c",
-            "hand": "allegro",
-        },
-        "rationale": f"Registry default for class {class_raw!r}; resolves to {robot_name!r}.",
-    }
+    # _handle_resolve_robot_class moved to handlers/resolve.py (Phase 7 wave 1).
 
 
 _MATERIAL_PROPERTIES = {
@@ -2240,31 +2162,7 @@ _MATERIAL_PROPERTIES = {
 }
 
 
-async def _handle_resolve_material_properties(args: Dict) -> Dict:
-    """Map a material descriptor ('metal', 'rubber', 'soft', 'deformable')
-    to physics properties (density, friction, restitution, body_type).
-
-    Pilot #6. Replaces LLM-invented numbers for material properties with
-    canonical defaults the user can refine. Body_type signals to the agent
-    whether to reach for RigidBodyAPI or PhysxDeformableBodyAPI.
-    """
-    term = (args.get("material") or args.get("term") or "").strip().lower()
-    if not term:
-        return {"error": "resolve_material_properties requires a material term"}
-    entry = _MATERIAL_PROPERTIES.get(term)
-    while isinstance(entry, str):
-        entry = _MATERIAL_PROPERTIES.get(entry)
-    if not entry:
-        return {
-            "material": term,
-            "warning": f"unknown material {term!r}",
-            "known_materials": sorted(k for k, v in _MATERIAL_PROPERTIES.items() if isinstance(v, dict)),
-        }
-    return {
-        "material": term,
-        **entry,
-        "rationale": f"Canonical physics properties for {term!r}; SI units (kg/m^3 for density, dimensionless for friction/restitution).",
-    }
+    # _handle_resolve_material_properties moved to handlers/resolve.py (Phase 7 wave 1).
 
 
 _CONSTRAINT_RE_NUMERIC = __import__("re").compile(
@@ -2283,158 +2181,11 @@ _UNIT_TO_SI = {
 }
 
 
-async def _handle_resolve_constraint_phrase(args: Dict) -> Dict:
-    """Parse a constraint phrase ('with 5cm clearance', '10kg max weight',
-    'within 2 minutes', 'no closer than 1m') into structured numeric data.
+    # _handle_resolve_constraint_phrase moved to handlers/resolve.py (Phase 7 wave 1).
 
-    Pilot #7. Returns the extracted value normalised to SI units plus the
-    constraint kind heuristically classified from keyword presence
-    (clearance / mass / time / distance / angular / collision-avoidance).
-    """
-    phrase = (args.get("phrase") or args.get("constraint") or "").strip().lower()
-    if not phrase:
-        return {"error": "resolve_constraint_phrase requires a phrase"}
+    # _handle_resolve_sequence_phrase moved to handlers/resolve.py (Phase 7 wave 1).
 
-    # Heuristic constraint-kind classification
-    kind = "unknown"
-    if any(k in phrase for k in ("clearance", "gap", "spacing", "avstånd", "mellanrum")):
-        kind = "clearance"
-    elif any(k in phrase for k in ("weight", "mass", "kg", "vikt", "tung", "lätt")):
-        kind = "mass"
-    elif any(k in phrase for k in ("time", "duration", "within", "tid", "minut", "second")):
-        kind = "time"
-    elif any(k in phrase for k in ("collide", "collision", "krock", "without hitting", "without colliding")):
-        kind = "collision_avoidance"
-    elif any(k in phrase for k in ("angle", "rotation", "vinkel", "rad", "deg")):
-        kind = "angular"
-    elif any(k in phrase for k in ("fit", "fits in", "passar", "max", "limit", "size")):
-        kind = "size"
-
-    # Parse first numeric+unit; ignore "no closer than" sign — the
-    # numeric magnitude is what matters for the agent.
-    m = _CONSTRAINT_RE_NUMERIC.search(phrase)
-    parsed = None
-    if m:
-        try:
-            value = float(m.group("value"))
-            unit_raw = (m.group("unit") or "").lower()
-            si_unit, mult = _UNIT_TO_SI.get(unit_raw, (None, 1.0))
-            parsed = {
-                "value": value * mult,
-                "raw_value": value,
-                "raw_unit": unit_raw or None,
-                "si_unit": si_unit,
-            }
-        except Exception:
-            pass
-
-    return {
-        "phrase": phrase,
-        "kind": kind,
-        "parsed": parsed,
-        "rationale": (
-            f"Constraint kind heuristically classified as {kind!r}; "
-            f"value extracted via regex. Use parsed.value (SI) in tool args."
-        ),
-    }
-
-
-async def _handle_resolve_sequence_phrase(args: Dict) -> Dict:
-    """Split a sequence phrase ('first X, then Y', 'after X do Y') into an
-    ordered list of intent fragments.
-
-    Pilot #8. Pure text parsing — no scene access needed. Returns the
-    fragments in order so the agent can issue tool calls in sequence.
-    Detects common ordering markers in English + Swedish.
-    """
-    phrase = (args.get("phrase") or args.get("text") or "").strip()
-    if not phrase:
-        return {"error": "resolve_sequence_phrase requires a phrase"}
-
-    import re as _re
-    # Split on ordering markers; lower-cased copy used for boundary detection.
-    pl = phrase.lower()
-    # Replace separators with a unique split-token.
-    split_pat = _re.compile(
-        r"\b(?:then|after that|afterwards|next|finally|sen|sedan|därefter|sista|först|first)\b|;|\.|,",
-        _re.IGNORECASE,
-    )
-    raw_parts = [p.strip() for p in split_pat.split(phrase) if p and p.strip()]
-    # Discard empty fragments and strip leading conjunctions.
-    fragments = []
-    for p in raw_parts:
-        p = _re.sub(r"^(and|och|sen|then)\s+", "", p, flags=_re.IGNORECASE).strip()
-        if p:
-            fragments.append(p)
-    return {
-        "phrase": phrase,
-        "fragments": fragments,
-        "count": len(fragments),
-        "rationale": "Parsed sequence fragments in execution order; issue tool calls in this order.",
-    }
-
-
-async def _handle_resolve_context_reference(args: Dict) -> Dict:
-    """Resolve an implicit context reference ('another one', 'the same as
-    before', 'the last cube I made') by querying the stage.
-
-    Pilot #9. Without conversation-history access we can still answer
-    most cases by looking at what's currently in the stage and picking
-    the most-recently-named prim of the requested class.
-
-    Args: noun_class (cube/sphere/robot/...), recency ('last' default).
-    """
-    noun_class = (args.get("noun_class") or args.get("class") or "").strip().lower()
-    if not noun_class:
-        return {"error": "resolve_context_reference requires a noun_class"}
-
-    code = f"""\
-import omni.usd, json
-from pxr import UsdGeom, UsdPhysics
-
-stage = omni.usd.get_context().get_stage()
-noun = {noun_class!r}
-
-TYPE_MAP = {{
-    'cube':['Cube'], 'box':['Cube'],
-    'sphere':['Sphere'], 'ball':['Sphere'],
-    'cylinder':['Cylinder'], 'cone':['Cone'],
-    'mesh':['Mesh'],
-    'camera':['Camera'],
-    'light':['DistantLight','DomeLight','SphereLight','RectLight','DiskLight','CylinderLight'],
-}}
-matches = []
-for p in stage.Traverse():
-    if not p.IsValid() or not p.IsActive():
-        continue
-    type_name = str(p.GetTypeName() or '')
-    path = str(p.GetPath())
-    if path.startswith('/Render') or path.startswith('/OmniverseKit') or '/HydraTextures' in path:
-        continue
-    is_match = False
-    if noun in ('robot','articulation'):
-        is_match = p.HasAPI(UsdPhysics.ArticulationRootAPI)
-    elif noun in TYPE_MAP:
-        is_match = type_name in TYPE_MAP[noun]
-    elif type_name.lower() == noun:
-        is_match = True
-    if is_match:
-        matches.append({{'prim_path': path, 'type': type_name}})
-
-# Pick the LAST in stage-traversal order; that's a heuristic for "most
-# recently created" since USD doesn't store timestamps and Omniverse adds
-# new prims at the end of their parent's children.
-result = {{
-    'noun_class': noun,
-    'matches': matches,
-    'count': len(matches),
-    'last': matches[-1] if matches else None,
-    'first': matches[0] if matches else None,
-}}
-print(json.dumps(result))
-"""
-    return await kit_tools.queue_exec_patch(code, f"resolve_context_reference {noun_class!r}")
-
+    # _handle_resolve_context_reference moved to handlers/resolve.py (Phase 7 wave 1).
 
 _SKILL_RECIPES = {
     "assembly_line": {
@@ -2564,96 +2315,7 @@ _COORD_LANDMARKS = {
 }
 
 
-async def _handle_resolve_coordinate_reference(args: Dict) -> Dict:
-    """Resolve a named coordinate reference ('origin', 'center of X',
-    'top-left corner of Y', 'edge of Z') to world-space coordinates.
-
-    Pilot of the coordinate-landmark resolver class. Eliminates LLM-
-    invented coordinates for descriptors like 'corner of the table'
-    (which the LLM otherwise just guesses, often badly).
-
-    Args:
-      landmark: the descriptor — one of 'origin', 'center', 'top',
-                'bottom', 'top-left', 'top-right', 'bottom-left',
-                'bottom-right', 'edge_+x', 'edge_-x', 'edge_+y', 'edge_-y'
-      reference_prim: prim path the landmark is relative to. Empty/None
-                      means world (origin/center is world origin).
-
-    Returns: {position: [x,y,z], landmark, reference_prim, rationale}.
-    """
-    landmark = (args.get("landmark") or "").strip().lower()
-    ref = (args.get("reference_prim") or "").strip()
-    if not landmark:
-        return {"error": "resolve_coordinate_reference requires landmark (origin/center/corner/edge/...)"}
-
-    # World-anchored landmarks
-    if landmark in ("origin", "world origin", "center of stage", "stage center"):
-        return {
-            "position": [0.0, 0.0, 0.0],
-            "landmark": landmark,
-            "reference_prim": "world",
-            "rationale": "World origin — the canonical (0,0,0) anchor.",
-        }
-
-    if not ref:
-        return {
-            "error": f"landmark {landmark!r} requires a reference_prim (e.g. 'top of /World/Cube')",
-            "known_landmarks": ["origin", "center", "top", "bottom",
-                                "top-left", "top-right", "bottom-left", "bottom-right",
-                                "edge_+x", "edge_-x", "edge_+y", "edge_-y"],
-        }
-
-    # Prim-relative landmarks need a Kit RPC call to get the bbox.
-    code = f"""\
-import omni.usd, json
-from pxr import UsdGeom, Usd
-
-stage = omni.usd.get_context().get_stage()
-ref = {ref!r}
-landmark = {landmark!r}
-
-p = stage.GetPrimAtPath(ref)
-if not p or not p.IsValid():
-    print(json.dumps({{'error': 'reference_prim not found: ' + ref}}))
-else:
-    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
-    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
-    if b.IsEmpty():
-        print(json.dumps({{'error': 'reference_prim has empty bbox'}}))
-    else:
-        mn = b.GetMin(); mx = b.GetMax(); c = b.GetMidpoint()
-        # Map landmark → point.
-        candidates = {{
-            'center':       [float(c[0]), float(c[1]), float(c[2])],
-            'top':          [float(c[0]), float(c[1]), float(mx[2])],
-            'bottom':       [float(c[0]), float(c[1]), float(mn[2])],
-            'top-left':     [float(mn[0]), float(c[1]), float(mx[2])],
-            'top-right':    [float(mx[0]), float(c[1]), float(mx[2])],
-            'bottom-left':  [float(mn[0]), float(c[1]), float(mn[2])],
-            'bottom-right': [float(mx[0]), float(c[1]), float(mn[2])],
-            'edge_+x':      [float(mx[0]), float(c[1]), float(c[2])],
-            'edge_-x':      [float(mn[0]), float(c[1]), float(c[2])],
-            'edge_+y':      [float(c[0]), float(mx[1]), float(c[2])],
-            'edge_-y':      [float(c[0]), float(mn[1]), float(c[2])],
-            'left':         [float(mn[0]), float(c[1]), float(c[2])],
-            'right':        [float(mx[0]), float(c[1]), float(c[2])],
-            'front':        [float(c[0]), float(mn[1]), float(c[2])],
-            'back':         [float(c[0]), float(mx[1]), float(c[2])],
-        }}
-        pos = candidates.get(landmark)
-        if pos is None:
-            print(json.dumps({{'error': 'unknown landmark', 'known': sorted(candidates.keys())}}))
-        else:
-            print(json.dumps({{
-                'position': pos,
-                'landmark': landmark,
-                'reference_prim': ref,
-                'bbox_min': [float(mn[0]),float(mn[1]),float(mn[2])],
-                'bbox_max': [float(mx[0]),float(mx[1]),float(mx[2])],
-                'rationale': 'Computed from world-space bbox; landmark mapped to bbox corner/face/center.',
-            }}))
-"""
-    return await kit_tools.queue_exec_patch(code, f"resolve_coordinate_reference {landmark!r} of {ref!r}")
+    # _handle_resolve_coordinate_reference moved to handlers/resolve.py (Phase 7 wave 1).
 
 
 _RELATIONAL_PATTERN_RE = __import__("re").compile(
@@ -2662,146 +2324,9 @@ _RELATIONAL_PATTERN_RE = __import__("re").compile(
 )
 
 
-async def _handle_resolve_relational_property(args: Dict) -> Dict:
-    """Resolve a relational property like 'twice the size of X' or 'same
-    color as Y' or '50% of Z's height' to a concrete numeric value or
-    attribute reference.
+    # _handle_resolve_relational_property moved to handlers/resolve.py (Phase 7 wave 1).
 
-    Pilot for cross-prim relations. Tightly scoped to size/scale
-    relations for now (most common); color/material/orientation can
-    extend later.
-
-    Args:
-      relation: one of 'size_factor' (twice/half/N×), 'same_size_as',
-                'opposite_facing', 'same_height_as', 'same_color_as'
-      reference_prim: prim to base the relation on (Kit RPC reads it)
-      factor: numeric multiplier when relation is size_factor (default 2.0)
-
-    Returns: {relation, value (or reference), rationale}.
-    """
-    relation = (args.get("relation") or "").strip().lower()
-    ref = (args.get("reference_prim") or "").strip()
-    factor = float(args.get("factor", 2.0))
-
-    if not relation:
-        return {"error": "resolve_relational_property requires relation"}
-    if not ref:
-        return {"error": f"relation {relation!r} requires reference_prim"}
-
-    if relation in ("size_factor", "twice the size of", "half the size of",
-                    "n times bigger", "n× larger", "scaled relative to",
-                    "same_size_as", "same size as"):
-        if relation in ("same_size_as", "same size as"):
-            factor = 1.0
-        if "half" in relation:
-            factor = 0.5
-        code = f"""\
-import omni.usd, json
-from pxr import UsdGeom, Usd
-
-stage = omni.usd.get_context().get_stage()
-ref = {ref!r}
-
-p = stage.GetPrimAtPath(ref)
-if not p or not p.IsValid():
-    print(json.dumps({{'error': 'reference_prim not found: ' + ref}}))
-else:
-    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
-    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
-    if b.IsEmpty():
-        print(json.dumps({{'error': 'reference_prim has empty bbox'}}))
-    else:
-        mn = b.GetMin(); mx = b.GetMax()
-        size_xyz = [float(mx[0]-mn[0]), float(mx[1]-mn[1]), float(mx[2]-mn[2])]
-        avg = sum(size_xyz) / 3.0
-        scaled = [s * {factor!r} for s in size_xyz]
-        scaled_avg = avg * {factor!r}
-        out = {{
-            'reference_prim': ref,
-            'reference_size_xyz': size_xyz,
-            'reference_size_avg': avg,
-            'factor': {factor!r},
-            'derived_size_xyz': scaled,
-            'derived_size_avg': scaled_avg,
-            'rationale': 'Reference size from world bbox; derived = reference × factor.',
-        }}
-        print(json.dumps(out))
-"""
-        return await kit_tools.queue_exec_patch(code, f"resolve_relational_property {relation!r} ref={ref}")
-
-    return {
-        "error": f"unsupported relation {relation!r}",
-        "supported": ["size_factor", "same_size_as", "twice the size of", "half the size of"],
-    }
-
-
-async def _handle_resolve_success_condition(args: Dict) -> Dict:
-    """Extract a structured success condition from a prompt's intent.
-
-    The third resolver class — counterpart to input-resolvers and
-    output-verifiers. This one extracts what 'done' means for the
-    current intent so the agent can plan the verify step in advance.
-
-    Args:
-      intent_kind: one of {object_traversal, static_layout, controller_setup, data_pipeline}
-      object: the thing that traverses (for traversal kind)
-      start_location: where it begins (path or descriptor)
-      end_location: where it must end up (path or descriptor)
-      components: list of expected prims (for static_layout)
-
-    Returns: {kind, success_condition: {start_state, end_state}, verify_with, rationale}.
-    Agent uses this to know what verifier to call before declaring done.
-    """
-    kind = (args.get("intent_kind") or "").strip().lower()
-    if not kind:
-        return {"error": "resolve_success_condition requires intent_kind",
-                "known_kinds": sorted(_SUCCESS_CONDITION_TEMPLATES.keys())}
-    template = _SUCCESS_CONDITION_TEMPLATES.get(kind)
-    if not template:
-        return {"error": f"unknown intent_kind {kind!r}",
-                "known_kinds": sorted(_SUCCESS_CONDITION_TEMPLATES.keys())}
-
-    out = {
-        "intent_kind": kind,
-        "success_condition": {},
-        "verify_with": template["verify_with"],
-        "rationale": template["rationale"],
-        "fields_required": template["fields"],
-    }
-    if kind == "object_traversal":
-        obj = args.get("object", "")
-        start = args.get("start_location", "")
-        end = args.get("end_location", "")
-        out["success_condition"] = {
-            "start_state": f"{obj} located at {start}" if obj and start else "(unspecified — call again with object+start_location)",
-            "end_state": f"{obj} located at {end}" if obj and end else "(unspecified — call again with object+end_location)",
-            "object": obj, "start_location": start, "end_location": end,
-        }
-        # Surface ambiguity if any field empty — agent should ASK.
-        missing = [f for f in template["fields"] if not args.get(f)]
-        if missing:
-            out["needs_clarification"] = True
-            out["missing_fields"] = missing
-            out["suggested_question"] = (
-                f"To verify the assembly is complete I need: {', '.join(missing)}. "
-                f"Could you specify?"
-            )
-    elif kind == "static_layout":
-        components = args.get("components") or []
-        out["success_condition"] = {"required_components": list(components)}
-    elif kind == "controller_setup":
-        out["success_condition"] = {
-            "robot": args.get("robot", ""),
-            "controller_type": args.get("controller_type", ""),
-        }
-    elif kind == "data_pipeline":
-        out["success_condition"] = {
-            "source": args.get("source", ""),
-            "sink": args.get("sink", ""),
-            "throughput": args.get("throughput", ""),
-        }
-    return out
-
+    # _handle_resolve_success_condition moved to handlers/resolve.py (Phase 7 wave 1).
 
 async def _handle_verify_pickplace_pipeline(args: Dict) -> Dict:
     """Verify a pick-place pipeline is physically executable.
@@ -3692,219 +3217,11 @@ else:
     return await kit_tools.queue_exec_patch(code, "simulate_traversal_check", timeout=_scaled_timeout)
 
 
-async def _handle_resolve_skill_composition(args: Dict) -> Dict:
-    """Map a skill-composition name ('pick-and-place', 'calibration', 'ros2')
-    to a known tool chain. Pilot #10.
+    # _handle_resolve_skill_composition moved to handlers/resolve.py (Phase 7 wave 1).
 
-    Returns the recipe so the agent can issue the tool calls in order.
-    Args_template fields like '<ROBOT>' tell the agent it needs to fill
-    that in (typically by calling resolve_prim_reference first).
-    """
-    name = (args.get("skill") or args.get("name") or "").strip().lower()
-    if not name:
-        return {"error": "resolve_skill_composition requires a skill name"}
-    entry = _SKILL_RECIPES.get(name)
-    while isinstance(entry, str):
-        entry = _SKILL_RECIPES.get(entry)
-    if not entry:
-        return {
-            "skill": name,
-            "warning": f"unknown skill {name!r}",
-            "known_skills": sorted(k for k, v in _SKILL_RECIPES.items() if isinstance(v, dict)),
-        }
-    return {
-        "skill": name,
-        "description": entry["description"],
-        "tool_chain": entry["tool_chain"],
-        "rationale": "Canonical recipe; fill <ANGLE_BRACKET> placeholders with resolved prim paths before calling each tool in order.",
-    }
+    # _handle_resolve_size_adjective moved to handlers/resolve.py (Phase 7 wave 1).
 
-
-async def _handle_resolve_size_adjective(args: Dict) -> Dict:
-    """Map a size adjective ('small', 'large', 'tiny') for a given object
-    class to a canonical numeric extent in meters.
-
-    Pilot #3 of the typed-variable resolver pattern. The LLM extracts the
-    adjective and the head noun (object class) from the user's prompt
-    and calls this tool. Returns one canonical value plus the bucket
-    map so the agent can pick a different bucket if the user pushes
-    back ('not THAT small, more like medium').
-
-    Examples:
-      'a small cube'    → {value: 0.05, unit: 'meters', class: 'cube', bucket: 'small'}
-      'a large table'   → {value: 2.0,  unit: 'meters', class: 'table', bucket: 'large'}
-      'a tiny sphere'   → {value: 0.02, unit: 'meters', class: 'sphere', bucket: 'tiny'}
-
-    Side benefits:
-      - Eliminates LLM-invented numbers (each invocation gives different
-        sizes for "a small cube"; this gives the same one).
-      - Forces agreement across multi-prim prompts ("a small cube and
-        a small sphere" become the same bucket → comparable sizes).
-      - Future canary tests can pin specific values for regression checks.
-    """
-    adjective_raw = (args.get("adjective") or "").strip().lower()
-    object_class_raw = (args.get("object_class") or "").strip().lower()
-    if not adjective_raw:
-        return {"error": "resolve_size_adjective requires an adjective (e.g. 'small', 'tiny')"}
-
-    bucket = _SIZE_BUCKET_ALIASES.get(adjective_raw)
-    if bucket is None:
-        # Unknown adjective — return medium as safe default + warn.
-        return {
-            "adjective": adjective_raw,
-            "object_class": object_class_raw or "default",
-            "bucket": "medium",
-            "value": _SIZE_BUCKETS.get(object_class_raw, _SIZE_BUCKETS["default"])["medium"],
-            "unit": "meters",
-            "warning": f"unknown size adjective {adjective_raw!r} — defaulted to 'medium'",
-            "known_adjectives": sorted(set(_SIZE_BUCKET_ALIASES.values())),
-        }
-
-    class_key = object_class_raw if object_class_raw in _SIZE_BUCKETS else "default"
-    bucket_map = _SIZE_BUCKETS[class_key]
-    value = bucket_map[bucket]
-    return {
-        "adjective": adjective_raw,
-        "bucket": bucket,
-        "object_class": class_key,
-        "object_class_known": object_class_raw in _SIZE_BUCKETS,
-        "value": value,
-        "unit": "meters",
-        "alternatives": bucket_map,  # full map so agent sees neighbour buckets
-        "rationale": (
-            f"Canonical {bucket}-bucket value for {class_key!r}; "
-            "tuned to common Isaac Sim / industrial-robotics conventions."
-        ),
-    }
-
-
-async def _handle_resolve_prim_reference(args: Dict) -> Dict:
-    """Resolve a deictic noun phrase ('kuben', 'the cube', 'roboten') to one
-    or more concrete prim paths in the current stage.
-
-    Pilot #2 of the typed-variable-resolver pattern (after place_on_top_of).
-    The LLM identifies a deictic reference in the user prompt, extracts a
-    `name_hint` (the head noun, normalised) and optionally a `prim_type`
-    (Cube/Sphere/Robot/Camera/Light/...), and calls this tool. The tool
-    returns the matching candidates.
-
-    The agent's protocol after the call:
-      - 1 match → use the returned prim_path directly
-      - >1 match → ask the user "which one?" with the candidate list
-      - 0 match → tell the user nothing matches; offer to create or rename
-
-    No numerical reasoning by the LLM; no prim-path hallucination. The
-    "ambiguous → ask" path is the resolver-level clarification mechanism
-    we want to prove out — it's strictly more focused than the
-    whole-prompt negotiator.
-    """
-    name_hint = (args.get("name_hint") or args.get("description") or "").strip().lower()
-    prim_type = (args.get("prim_type") or "").strip()
-    if not name_hint and not prim_type:
-        return {"error": "resolve_prim_reference requires either name_hint or prim_type"}
-
-    code = f"""\
-import omni.usd
-import json
-from pxr import Usd, UsdGeom, UsdPhysics, UsdLux, Gf
-
-stage = omni.usd.get_context().get_stage()
-name_hint = {name_hint!r}
-prim_type_filter = {prim_type!r}
-
-# Map common natural-language hints to USD typeNames + schema APIs.
-# Includes Swedish + English heads. Order matters: most specific first.
-TYPE_HINTS = {{
-    'cube': ['Cube'], 'kub': ['Cube'], 'kuben': ['Cube'], 'box': ['Cube'],
-    'sphere': ['Sphere'], 'sfär': ['Sphere'], 'boll': ['Sphere'], 'ball': ['Sphere'],
-    'cylinder': ['Cylinder'],
-    'cone': ['Cone'], 'kon': ['Cone'],
-    'capsule': ['Capsule'], 'kapsel': ['Capsule'],
-    'mesh': ['Mesh'],
-    'camera': ['Camera'], 'kamera': ['Camera'], 'kameran': ['Camera'],
-    'light': ['DistantLight','DomeLight','SphereLight','RectLight','DiskLight','CylinderLight'],
-    'ljus': ['DistantLight','DomeLight','SphereLight','RectLight','DiskLight','CylinderLight'],
-    'ljuset': ['DistantLight','DomeLight','SphereLight','RectLight','DiskLight','CylinderLight'],
-    'lampa': ['DistantLight','DomeLight','SphereLight','RectLight','DiskLight','CylinderLight'],
-}}
-hint_types = TYPE_HINTS.get(name_hint, [])
-
-# Normalise the name hint for substring matching against prim paths.
-# Strip common Swedish definite-article suffixes so 'kuben' also matches
-# /World/Cube_3 (the agent's lookup hint is more useful than a literal
-# substring search would be).
-def _normalise(h):
-    h = h.lower()
-    for suf in ('en', 'er', 'et', 'na', 's'):
-        if h.endswith(suf) and len(h) - len(suf) >= 3:
-            return h[:-len(suf)]
-    return h
-
-stem = _normalise(name_hint) if name_hint else ''
-
-def _is_robot(prim):
-    return prim.HasAPI(UsdPhysics.ArticulationRootAPI)
-
-def _is_light(prim):
-    schemas = prim.GetTypeName()
-    return schemas in TYPE_HINTS['light']
-
-candidates = []
-for p in stage.Traverse():
-    if not p.IsValid() or not p.IsActive():
-        continue
-    type_name = str(p.GetTypeName() or '')
-    path = str(p.GetPath())
-    pl = path.lower()
-
-    # Filter by explicit prim_type when supplied. 'Robot' / 'robot' is a
-    # virtual class — match articulations regardless of typeName.
-    if prim_type_filter:
-        ptf = prim_type_filter.lower()
-        if ptf in ('robot','robotar','articulation','manipulator','humanoid'):
-            if not _is_robot(p): continue
-        elif ptf in ('light','ljus','lamp'):
-            if not _is_light(p): continue
-        elif type_name.lower() != ptf:
-            continue
-    elif name_hint in ('robot','roboten','robotar'):
-        if not _is_robot(p): continue
-    elif hint_types:
-        if type_name not in hint_types and not _is_light(p) and name_hint not in ('light','ljus','ljuset','lampa'):
-            if type_name not in hint_types: continue
-    elif stem:
-        if stem not in pl and stem not in type_name.lower():
-            continue
-
-    # Skip Kit's internal scopes (render config, environment skydome etc)
-    if path.startswith('/Render') or path.startswith('/OmniverseKit') or '/HydraTextures' in path:
-        continue
-
-    cand = {{'prim_path': path, 'type': type_name}}
-    try:
-        xf = UsdGeom.Xformable(p)
-        if xf:
-            t = xf.ComputeLocalToWorldTransform(0).ExtractTranslation()
-            cand['position'] = [float(t[0]), float(t[1]), float(t[2])]
-    except Exception:
-        pass
-    candidates.append(cand)
-
-result = {{
-    'name_hint': name_hint,
-    'prim_type_filter': prim_type_filter,
-    'candidates': candidates,
-    'count': len(candidates),
-    'exact_match': candidates[0]['prim_path'] if len(candidates) == 1 else None,
-    'ambiguous': len(candidates) > 1,
-    'no_match': len(candidates) == 0,
-}}
-print(json.dumps(result))
-"""
-    return await kit_tools.queue_exec_patch(
-        code, f"resolve_prim_reference name_hint={name_hint!r} type={prim_type!r}"
-    )
-
+    # _handle_resolve_prim_reference moved to handlers/resolve.py (Phase 7 wave 1).
 
 async def _handle_place_on_top_of(args: Dict) -> Dict:
     """Place `prim_path` on top of `target_prim_path` using authoritative
