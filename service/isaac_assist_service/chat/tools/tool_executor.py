@@ -1712,6 +1712,7 @@ from .handlers.physics import (  # noqa: E402
     _gen_apply_force,
     _gen_apply_physics_material,
     _gen_check_collision_mesh_code,
+    _gen_compute_convex_hull,       # Phase 6 wave 22
     _gen_configure_self_collision,
     _gen_deformable,
     _gen_deformable_body,
@@ -1722,20 +1723,25 @@ from .handlers.physics import (  # noqa: E402
     _gen_set_joint_limits,
     _gen_set_joint_targets,
     _gen_set_joint_velocity_limit,
+    _gen_set_linear_velocity,       # Phase 6 wave 22
     _gen_set_physics_params,
     _gen_set_physics_scene_config,
     _gen_setup_contact_sensors,
     _gen_simplify_collision,
 )
 from .handlers.diagnostics import (  # noqa: E402
+    _gen_build_stage_index,         # Phase 6 wave 22
     _gen_check_path_clearance,
     _gen_check_physics_health,
     _gen_check_singularity,
     _gen_debug_draw,
     _gen_debug_graph,
+    _gen_enable_extension,          # Phase 6 wave 22
     _gen_highlight_prim,
     _gen_monitor_joint_effort,
     _gen_preflight_check,
+    _gen_show_workspace,            # Phase 6 wave 22
+    _gen_sim_control,               # Phase 6 wave 22
     _gen_visualize_clearance,
     _gen_visualize_collision_mesh,
     _gen_visualize_forces,
@@ -1821,6 +1827,7 @@ from .handlers.training import (  # noqa: E402
 )
 from .handlers.vision import (  # noqa: E402
     _gen_extract_attention_maps,
+    _gen_focus_viewport_on,         # Phase 6 wave 22
     _gen_quick_demo,
     _gen_record_demo_video,
     _gen_render_video,
@@ -1875,30 +1882,7 @@ _OG_NODE_TYPE_MAP = {
 # _gen_assign_material moved to handlers/scene_authoring.py (Phase 3 wave 2).
 
 
-def _gen_sim_control(args: Dict) -> str:
-    action = args["action"]
-    if action == "play":
-        return "import omni.timeline\nomni.timeline.get_timeline_interface().play()"
-    if action == "pause":
-        return "import omni.timeline\nomni.timeline.get_timeline_interface().pause()"
-    if action == "stop":
-        return "import omni.timeline\nomni.timeline.get_timeline_interface().stop()"
-    if action == "step":
-        count = args.get("step_count", 1)
-        return f"""\
-import omni.timeline
-tl = omni.timeline.get_timeline_interface()
-for _ in range({count}):
-    tl.forward_one_frame()
-"""
-    if action == "reset":
-        return (
-            "import omni.timeline\n"
-            "tl = omni.timeline.get_timeline_interface()\n"
-            "tl.stop()\n"
-            "tl.set_current_time(0)"
-        )
-    return f"# Unknown sim action: {action}"
+# _gen_sim_control moved to handlers/diagnostics.py (Phase 6 wave 22).
 
 
 # _gen_set_physics_params moved to handlers/physics.py (Phase 5 wave 1).
@@ -9663,94 +9647,7 @@ CODE_GEN_HANDLERS["fix_ros2_qos"] = _gen_fix_ros2_qos
 CODE_GEN_HANDLERS["configure_ros2_time"] = _gen_configure_ros2_time
 
 # ══════ From feat/addendum-phase8B-workspace-singularity-v2 ══════
-def _gen_show_workspace(args: Dict) -> str:
-    """Generate code to visualize robot workspace with manipulability gradient."""
-    art_path = args["articulation_path"]
-    resolution = args.get("resolution", 500000)
-    color_mode = args.get("color_mode", "manipulability")
-
-    return f"""\
-import omni.usd
-import numpy as np
-from pxr import Usd, UsdPhysics
-from isaacsim.util.debug_draw import _debug_draw
-
-stage = omni.usd.get_context().get_stage()
-art_prim = stage.GetPrimAtPath('{art_path}')
-if not art_prim.IsValid():
-    raise RuntimeError('Articulation not found: {art_path}')
-
-# Collect revolute joint limits
-joints = []
-for desc in list(Usd.PrimRange(art_prim))[1:]:
-    if desc.IsA(UsdPhysics.RevoluteJoint) or desc.IsA(UsdPhysics.RevoluteJoint):
-        lo_attr = desc.GetAttribute('physics:lowerLimit')
-        hi_attr = desc.GetAttribute('physics:upperLimit')
-        lo = np.radians(lo_attr.Get() if lo_attr and lo_attr.Get() is not None else -180.0)
-        hi = np.radians(hi_attr.Get() if hi_attr and hi_attr.Get() is not None else 180.0)
-        joints.append({{'name': desc.GetName(), 'lower': lo, 'upper': hi}})
-
-n_joints = len(joints)
-if n_joints == 0:
-    raise RuntimeError('No revolute joints found')
-
-n_samples = min({resolution}, 500000)
-print(f'Sampling {{n_samples}} configurations across {{n_joints}} joints...')
-
-# Random joint configs within limits
-q_samples = np.zeros((n_samples, n_joints))
-for i, j in enumerate(joints):
-    q_samples[:, i] = np.random.uniform(j['lower'], j['upper'], n_samples)
-
-# Forward kinematics using Lula
-from isaacsim.robot_motion.motion_generation import LulaKinematicsSolver
-from isaacsim.robot_motion.motion_generation import interface_config_loader
-
-try:
-    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config('{art_path}'.split('/')[-1].lower())
-    kin = LulaKinematicsSolver(**kin_config)
-except Exception:
-    print('Robot not in pre-supported list — cannot compute FK')
-    raise
-
-ee_positions = []
-manipulability = []
-eps = 1e-4
-
-for q in q_samples[:min(n_samples, 50000)]:  # cap for Jacobian computation
-    # FK
-    pos, _ = kin.compute_forward_kinematics('{art_path}'.split('/')[-1], q)
-    ee_positions.append(pos)
-
-    # Numerical Jacobian for manipulability
-    J = np.zeros((3, n_joints))
-    for k in range(n_joints):
-        q_plus = q.copy(); q_plus[k] += eps
-        pos_plus, _ = kin.compute_forward_kinematics('{art_path}'.split('/')[-1], q_plus)
-        J[:, k] = (np.array(pos_plus) - np.array(pos)) / eps
-    w = np.sqrt(max(np.linalg.det(J @ J.T), 0))
-    manipulability.append(w)
-
-ee_positions = np.array(ee_positions)
-manipulability = np.array(manipulability)
-
-# Color mapping
-if '{color_mode}' == 'reachability':
-    colors = [(0, 1, 0, 0.5)] * len(ee_positions)  # green
-elif '{color_mode}' == 'singularity_distance':
-    w_norm = manipulability / (manipulability.max() + 1e-10)
-    colors = [(1 - v, v, 0, 0.5) for v in w_norm]  # red=singularity, green=safe
-else:  # manipulability
-    w_norm = manipulability / (manipulability.max() + 1e-10)
-    colors = [(1 - v, v, 0, 0.5) for v in w_norm]  # green=high, red=low
-
-# Draw
-draw = _debug_draw.acquire_debug_draw_interface()
-draw.clear_points()
-points = [(float(p[0]), float(p[1]), float(p[2])) for p in ee_positions]
-draw.draw_points(points, colors, [3] * len(points))
-print(f'Workspace visualized: {{len(points)}} points, mode={color_mode}')
-"""
+# _gen_show_workspace moved to handlers/diagnostics.py (Phase 6 wave 22).
 
 # _gen_check_singularity moved to handlers/diagnostics.py (Phase 6 wave 10).
 
@@ -11846,39 +11743,7 @@ CODE_GEN_HANDLERS["enforce_class_balance"] = _gen_enforce_class_balance
 DATA_HANDLERS["benchmark_sdg"] = _handle_benchmark_sdg
 
 # ══════ From feat/addendum-enterprise-scale ══════
-def _gen_build_stage_index(args: Dict) -> str:
-    """Emit code that walks the stage with Usd.PrimRange and prints an index."""
-    prim_scope = args.get("prim_scope") or "/World"
-    max_prims = int(args.get("max_prims", 50000))
-    return f"""\
-import json
-import omni.usd
-from pxr import Usd, UsdPhysics
-
-stage = omni.usd.get_context().get_stage()
-root = stage.GetPrimAtPath('{prim_scope}') or stage.GetPseudoRoot()
-index = {{}}
-count = 0
-for prim in Usd.PrimRange(root):
-    if count >= {max_prims}:
-        break
-    try:
-        schemas = [s.GetType().typeName for s in prim.GetAppliedSchemas()]
-    except Exception:
-        schemas = []
-    try:
-        has_physics = prim.HasAPI(UsdPhysics.RigidBodyAPI)
-    except Exception:
-        has_physics = False
-    index[str(prim.GetPath())] = {{
-        'type': prim.GetTypeName(),
-        'schemas': schemas,
-        'has_physics': bool(has_physics),
-    }}
-    count += 1
-
-print(json.dumps({{'prim_scope': '{prim_scope}', 'prim_count': count, 'truncated': count >= {max_prims}, 'index': index}}))
-"""
+# _gen_build_stage_index moved to handlers/diagnostics.py (Phase 6 wave 22).
 
 async def _handle_build_stage_index(args: Dict) -> Dict:
     """Build the metadata index and populate the module-level cache."""
@@ -15415,27 +15280,7 @@ print(json.dumps(result, default=str))
 """
     return await kit_tools.queue_exec_patch(code, f"get_angular_velocity {prim_path}")
 
-def _gen_set_linear_velocity(args: Dict) -> str:
-    """Generate code to set rigid body linear velocity."""
-    prim_path = args["prim_path"]
-    vel = args.get("vel") or [0.0, 0.0, 0.0]
-    vx, vy, vz = float(vel[0]), float(vel[1]), float(vel[2])
-    return f"""\
-import omni.usd
-from pxr import UsdPhysics, Gf
-
-stage = omni.usd.get_context().get_stage()
-prim_path = {prim_path!r}
-prim = stage.GetPrimAtPath(prim_path)
-if not prim or not prim.IsValid():
-    raise RuntimeError('prim not found: ' + repr(prim_path))
-if not prim.HasAPI(UsdPhysics.RigidBodyAPI):
-    UsdPhysics.RigidBodyAPI.Apply(prim)
-rb = UsdPhysics.RigidBodyAPI(prim)
-attr = rb.GetVelocityAttr() or rb.CreateVelocityAttr()
-attr.Set(Gf.Vec3f({vx}, {vy}, {vz}))
-print('Set linear velocity on ' + repr(prim_path) + ' to ({vx}, {vy}, {vz}) m/s')
-"""
+# _gen_set_linear_velocity moved to handlers/physics.py (Phase 6 wave 22).
 
 async def _handle_get_mass(args: Dict) -> Dict:
     """Return current rigid body mass via UsdPhysics.MassAPI."""
@@ -16483,86 +16328,7 @@ print(json.dumps(result, default=str))
 """
     return await kit_tools.queue_exec_patch(code, f"compute_surface_area {prim_path}")
 
-def _gen_compute_convex_hull(args: Dict) -> str:
-    """Apply convexHull collision approximation, optionally export hull mesh."""
-    prim_path = args["prim_path"]
-    export_hull_path = args.get("export_hull_path")
-    lines = [
-        "import omni.usd",
-        "from pxr import Usd, UsdGeom, UsdPhysics, Gf, Sdf, Vt",
-        "",
-        f"prim_path = {prim_path!r}",
-        f"export_hull_path = {export_hull_path!r}",
-        "stage = omni.usd.get_context().get_stage()",
-        "prim = stage.GetPrimAtPath(prim_path)",
-        "if not prim or not prim.IsValid():",
-        "    raise RuntimeError(f'prim not found: {prim_path}')",
-        "if not prim.IsA(UsdGeom.Mesh):",
-        "    raise RuntimeError(f'prim is not a Mesh: {prim.GetTypeName()}')",
-        "",
-        "# 1) Mark the prim as a collider, then declare convexHull approximation",
-        "UsdPhysics.CollisionAPI.Apply(prim)",
-        "mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)",
-        "approx_attr = mesh_collision.GetApproximationAttr()",
-        "if not approx_attr or not approx_attr.IsDefined():",
-        "    approx_attr = mesh_collision.CreateApproximationAttr()",
-        "approx_attr.Set(UsdPhysics.Tokens.convexHull)",
-        "",
-        "exported_path = None",
-        "if export_hull_path:",
-        "    # 2) Compute the convex hull (scipy if available, else manual gift-wrap)",
-        "    mesh = UsdGeom.Mesh(prim)",
-        "    xf = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())",
-        "    local_points = mesh.GetPointsAttr().Get() or []",
-        "    world_points = [xf.Transform(Gf.Vec3d(p[0], p[1], p[2])) for p in local_points]",
-        "    hull_vertices = []",
-        "    hull_triangles = []",
-        "    if len(world_points) < 4:",
-        "        raise RuntimeError(f'need at least 4 points for a 3D hull, got {len(world_points)}')",
-        "    try:",
-        "        import numpy as np",
-        "        from scipy.spatial import ConvexHull",
-        "        pts = np.array([(p[0], p[1], p[2]) for p in world_points], dtype=float)",
-        "        hull = ConvexHull(pts)",
-        "        index_remap = {orig: new for new, orig in enumerate(sorted(set(int(i) for i in hull.vertices)))}",
-        "        hull_vertices = [tuple(pts[orig]) for orig in sorted(index_remap.keys())]",
-        "        for simplex in hull.simplices:",
-        "            tri = tuple(index_remap[int(i)] for i in simplex)",
-        "            hull_triangles.append(tri)",
-        "    except Exception:",
-        "        # Manual fallback: just take the AABB-corner hull (8 verts, 12 triangles).",
-        "        # This is a coarse but always-valid convex envelope when scipy is missing.",
-        "        xs = [p[0] for p in world_points]",
-        "        ys = [p[1] for p in world_points]",
-        "        zs = [p[2] for p in world_points]",
-        "        mn = (min(xs), min(ys), min(zs))",
-        "        mx = (max(xs), max(ys), max(zs))",
-        "        hull_vertices = [",
-        "            (mn[0], mn[1], mn[2]), (mx[0], mn[1], mn[2]),",
-        "            (mx[0], mx[1], mn[2]), (mn[0], mx[1], mn[2]),",
-        "            (mn[0], mn[1], mx[2]), (mx[0], mn[1], mx[2]),",
-        "            (mx[0], mx[1], mx[2]), (mn[0], mx[1], mx[2]),",
-        "        ]",
-        "        hull_triangles = [",
-        "            (0, 1, 2), (0, 2, 3),  # -Z",
-        "            (4, 6, 5), (4, 7, 6),  # +Z",
-        "            (0, 4, 5), (0, 5, 1),  # -Y",
-        "            (3, 2, 6), (3, 6, 7),  # +Y",
-        "            (0, 3, 7), (0, 7, 4),  # -X",
-        "            (1, 5, 6), (1, 6, 2),  # +X",
-        "        ]",
-        "    # 3) Author hull mesh prim",
-        "    hull_prim = stage.DefinePrim(export_hull_path, 'Mesh')",
-        "    hull_mesh = UsdGeom.Mesh(hull_prim)",
-        "    hull_mesh.CreatePointsAttr([Gf.Vec3f(*v) for v in hull_vertices])",
-        "    hull_mesh.CreateFaceVertexCountsAttr([3] * len(hull_triangles))",
-        "    flat_indices = [idx for tri in hull_triangles for idx in tri]",
-        "    hull_mesh.CreateFaceVertexIndicesAttr(flat_indices)",
-        "    exported_path = export_hull_path",
-        "",
-        "print(f'compute_convex_hull applied to {prim_path} (export={exported_path})')",
-    ]
-    return "\n".join(lines)
+# _gen_compute_convex_hull moved to handlers/physics.py (Phase 6 wave 22).
 
 DATA_HANDLERS["raycast"] = _handle_raycast
 DATA_HANDLERS["overlap_sphere"] = _handle_overlap_sphere
@@ -18615,39 +18381,7 @@ print(json.dumps({"selected_paths": paths, "count": len(paths), "primary": prima
 
 # _gen_highlight_prim moved to handlers/diagnostics.py (Phase 6 wave 10).
 
-def _gen_focus_viewport_on(args: Dict) -> str:
-    prim_path = args["prim_path"]
-    # Old version printed "prim not found" and returned success=True — the
-    # viewport wasn't framed but the agent could claim it was. Also the
-    # outer try/except swallowed framing failures so partial failures
-    # (extension not loaded, etc.) flowed up as success.
-    # Note: bind prim_path to a Python variable in the generated code so
-    # the f-string interpolation in messages uses that variable — avoids
-    # quote-char collisions when prim_path repr gets embedded twice.
-    return f"""\
-import omni.usd
-import omni.kit.commands
-
-_prim_path = {prim_path!r}
-ctx = omni.usd.get_context()
-stage = ctx.get_stage()
-prim = stage.GetPrimAtPath(_prim_path)
-if not prim or not prim.IsValid():
-    raise RuntimeError(f'focus_viewport_on: prim not found: {{_prim_path!r}}')
-
-ctx.get_selection().set_selected_prim_paths([_prim_path], True)
-import omni.kit.viewport.utility as _vpu
-vp_api = _vpu.get_active_viewport()
-if vp_api is None:
-    raise RuntimeError('focus_viewport_on: no active viewport')
-try:
-    _vpu.frame_viewport_selection(vp_api)
-except Exception:
-    # Fallback: older Kit versions use the FramePrimsCommand. If it also
-    # fails, we surface the underlying error — no silent swallow.
-    omni.kit.commands.execute('FramePrimsCommand', prim_to_move=[], prims_to_frame=[_prim_path])
-print(f"focus_viewport_on: framed {{_prim_path!r}}")
-"""
+# _gen_focus_viewport_on moved to handlers/vision.py (Phase 6 wave 22).
 
 # _gen_save_stage moved to handlers/scene_authoring.py (Phase 6 wave 16).
 # _gen_open_stage moved to handlers/scene_authoring.py (Phase 6 wave 16).
@@ -18738,32 +18472,7 @@ print(json.dumps({{"extensions": out, "total": len(out)}}))
 """
     return await kit_tools.queue_exec_patch(code, "List Kit extensions")
 
-def _gen_enable_extension(args: Dict) -> str:
-    ext_id = args["ext_id"]
-    # set_extension_enabled_immediate returns False for unknown ext ids
-    # (and the try/except used to swallow the signal). Post-check
-    # is_extension_enabled and raise when it's still disabled.
-    return f"""\
-import omni.kit.app
-
-mgr = omni.kit.app.get_app().get_extension_manager()
-ext_id = {repr(ext_id)}
-if mgr.is_extension_enabled(ext_id):
-    print(f"enable_extension: '{{ext_id}}' already enabled")
-else:
-    try:
-        ok = mgr.set_extension_enabled_immediate(ext_id, True)
-    except Exception as e:
-        raise RuntimeError(
-            f"enable_extension: set_extension_enabled_immediate raised for '{{ext_id}}': {{e}}"
-        )
-    if not mgr.is_extension_enabled(ext_id):
-        raise RuntimeError(
-            f"enable_extension: '{{ext_id}}' is still disabled after set_enabled "
-            f"(set_extension_enabled_immediate returned {{ok!r}}) — likely unknown extension id."
-        )
-    print(f"enable_extension: '{{ext_id}}' enabled")
-"""
+# _gen_enable_extension moved to handlers/diagnostics.py (Phase 6 wave 22).
 
 # _gen_create_audio_prim moved to handlers/animation.py (Phase 6 wave 19).
 

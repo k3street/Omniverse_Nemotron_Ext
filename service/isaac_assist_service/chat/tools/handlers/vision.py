@@ -360,6 +360,45 @@ def _gen_set_render_mode(args: Dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Phase 6 wave 22 — stragglers
+
+
+def _gen_focus_viewport_on(args: Dict) -> str:
+    prim_path = args["prim_path"]
+    # Old version printed "prim not found" and returned success=True — the
+    # viewport wasn't framed but the agent could claim it was. Also the
+    # outer try/except swallowed framing failures so partial failures
+    # (extension not loaded, etc.) flowed up as success.
+    # Note: bind prim_path to a Python variable in the generated code so
+    # the f-string interpolation in messages uses that variable — avoids
+    # quote-char collisions when prim_path repr gets embedded twice.
+    return f"""\
+import omni.usd
+import omni.kit.commands
+
+_prim_path = {prim_path!r}
+ctx = omni.usd.get_context()
+stage = ctx.get_stage()
+prim = stage.GetPrimAtPath(_prim_path)
+if not prim or not prim.IsValid():
+    raise RuntimeError(f'focus_viewport_on: prim not found: {{_prim_path!r}}')
+
+ctx.get_selection().set_selected_prim_paths([_prim_path], True)
+import omni.kit.viewport.utility as _vpu
+vp_api = _vpu.get_active_viewport()
+if vp_api is None:
+    raise RuntimeError('focus_viewport_on: no active viewport')
+try:
+    _vpu.frame_viewport_selection(vp_api)
+except Exception:
+    # Fallback: older Kit versions use the FramePrimsCommand. If it also
+    # fails, we surface the underlying error — no silent swallow.
+    omni.kit.commands.execute('FramePrimsCommand', prim_to_move=[], prims_to_frame=[_prim_path])
+print(f"focus_viewport_on: framed {{_prim_path!r}}")
+"""
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 

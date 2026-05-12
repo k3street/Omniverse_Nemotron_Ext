@@ -1110,6 +1110,115 @@ print(f"OK: repaired {{PRIM_PATH}} — {{len(tm.faces)}} triangles, {{len(hulls)
 
 
 # ---------------------------------------------------------------------------
+# Phase 6 wave 22 — stragglers
+
+
+def _gen_set_linear_velocity(args: Dict) -> str:
+    """Generate code to set rigid body linear velocity."""
+    prim_path = args["prim_path"]
+    vel = args.get("vel") or [0.0, 0.0, 0.0]
+    vx, vy, vz = float(vel[0]), float(vel[1]), float(vel[2])
+    return f"""\
+import omni.usd
+from pxr import UsdPhysics, Gf
+
+stage = omni.usd.get_context().get_stage()
+prim_path = {prim_path!r}
+prim = stage.GetPrimAtPath(prim_path)
+if not prim or not prim.IsValid():
+    raise RuntimeError('prim not found: ' + repr(prim_path))
+if not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+    UsdPhysics.RigidBodyAPI.Apply(prim)
+rb = UsdPhysics.RigidBodyAPI(prim)
+attr = rb.GetVelocityAttr() or rb.CreateVelocityAttr()
+attr.Set(Gf.Vec3f({vx}, {vy}, {vz}))
+print('Set linear velocity on ' + repr(prim_path) + ' to ({vx}, {vy}, {vz}) m/s')
+"""
+
+
+def _gen_compute_convex_hull(args: Dict) -> str:
+    """Apply convexHull collision approximation, optionally export hull mesh."""
+    prim_path = args["prim_path"]
+    export_hull_path = args.get("export_hull_path")
+    lines = [
+        "import omni.usd",
+        "from pxr import Usd, UsdGeom, UsdPhysics, Gf, Sdf, Vt",
+        "",
+        f"prim_path = {prim_path!r}",
+        f"export_hull_path = {export_hull_path!r}",
+        "stage = omni.usd.get_context().get_stage()",
+        "prim = stage.GetPrimAtPath(prim_path)",
+        "if not prim or not prim.IsValid():",
+        "    raise RuntimeError(f'prim not found: {prim_path}')",
+        "if not prim.IsA(UsdGeom.Mesh):",
+        "    raise RuntimeError(f'prim is not a Mesh: {prim.GetTypeName()}')",
+        "",
+        "# 1) Mark the prim as a collider, then declare convexHull approximation",
+        "UsdPhysics.CollisionAPI.Apply(prim)",
+        "mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)",
+        "approx_attr = mesh_collision.GetApproximationAttr()",
+        "if not approx_attr or not approx_attr.IsDefined():",
+        "    approx_attr = mesh_collision.CreateApproximationAttr()",
+        "approx_attr.Set(UsdPhysics.Tokens.convexHull)",
+        "",
+        "exported_path = None",
+        "if export_hull_path:",
+        "    # 2) Compute the convex hull (scipy if available, else manual gift-wrap)",
+        "    mesh = UsdGeom.Mesh(prim)",
+        "    xf = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())",
+        "    local_points = mesh.GetPointsAttr().Get() or []",
+        "    world_points = [xf.Transform(Gf.Vec3d(p[0], p[1], p[2])) for p in local_points]",
+        "    hull_vertices = []",
+        "    hull_triangles = []",
+        "    if len(world_points) < 4:",
+        "        raise RuntimeError(f'need at least 4 points for a 3D hull, got {len(world_points)}')",
+        "    try:",
+        "        import numpy as np",
+        "        from scipy.spatial import ConvexHull",
+        "        pts = np.array([(p[0], p[1], p[2]) for p in world_points], dtype=float)",
+        "        hull = ConvexHull(pts)",
+        "        index_remap = {orig: new for new, orig in enumerate(sorted(set(int(i) for i in hull.vertices)))}",
+        "        hull_vertices = [tuple(pts[orig]) for orig in sorted(index_remap.keys())]",
+        "        for simplex in hull.simplices:",
+        "            tri = tuple(index_remap[int(i)] for i in simplex)",
+        "            hull_triangles.append(tri)",
+        "    except Exception:",
+        "        # Manual fallback: just take the AABB-corner hull (8 verts, 12 triangles).",
+        "        # This is a coarse but always-valid convex envelope when scipy is missing.",
+        "        xs = [p[0] for p in world_points]",
+        "        ys = [p[1] for p in world_points]",
+        "        zs = [p[2] for p in world_points]",
+        "        mn = (min(xs), min(ys), min(zs))",
+        "        mx = (max(xs), max(ys), max(zs))",
+        "        hull_vertices = [",
+        "            (mn[0], mn[1], mn[2]), (mx[0], mn[1], mn[2]),",
+        "            (mx[0], mx[1], mn[2]), (mn[0], mx[1], mn[2]),",
+        "            (mn[0], mn[1], mx[2]), (mx[0], mn[1], mx[2]),",
+        "            (mx[0], mx[1], mx[2]), (mn[0], mx[1], mx[2]),",
+        "        ]",
+        "        hull_triangles = [",
+        "            (0, 1, 2), (0, 2, 3),  # -Z",
+        "            (4, 6, 5), (4, 7, 6),  # +Z",
+        "            (0, 4, 5), (0, 5, 1),  # -Y",
+        "            (3, 2, 6), (3, 6, 7),  # +Y",
+        "            (0, 3, 7), (0, 7, 4),  # -X",
+        "            (1, 5, 6), (1, 6, 2),  # +X",
+        "        ]",
+        "    # 3) Author hull mesh prim",
+        "    hull_prim = stage.DefinePrim(export_hull_path, 'Mesh')",
+        "    hull_mesh = UsdGeom.Mesh(hull_prim)",
+        "    hull_mesh.CreatePointsAttr([Gf.Vec3f(*v) for v in hull_vertices])",
+        "    hull_mesh.CreateFaceVertexCountsAttr([3] * len(hull_triangles))",
+        "    flat_indices = [idx for tri in hull_triangles for idx in tri]",
+        "    hull_mesh.CreateFaceVertexIndicesAttr(flat_indices)",
+        "    exported_path = export_hull_path",
+        "",
+        "print(f'compute_convex_hull applied to {prim_path} (export={exported_path})')",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 

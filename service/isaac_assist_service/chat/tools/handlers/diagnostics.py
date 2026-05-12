@@ -1450,6 +1450,189 @@ else:
 
 
 # ---------------------------------------------------------------------------
+# Phase 6 wave 22 — stragglers
+
+
+def _gen_sim_control(args: Dict) -> str:
+    action = args["action"]
+    if action == "play":
+        return "import omni.timeline\nomni.timeline.get_timeline_interface().play()"
+    if action == "pause":
+        return "import omni.timeline\nomni.timeline.get_timeline_interface().pause()"
+    if action == "stop":
+        return "import omni.timeline\nomni.timeline.get_timeline_interface().stop()"
+    if action == "step":
+        count = args.get("step_count", 1)
+        return f"""\
+import omni.timeline
+tl = omni.timeline.get_timeline_interface()
+for _ in range({count}):
+    tl.forward_one_frame()
+"""
+    if action == "reset":
+        return (
+            "import omni.timeline\n"
+            "tl = omni.timeline.get_timeline_interface()\n"
+            "tl.stop()\n"
+            "tl.set_current_time(0)"
+        )
+    return f"# Unknown sim action: {action}"
+
+
+def _gen_show_workspace(args: Dict) -> str:
+    """Generate code to visualize robot workspace with manipulability gradient."""
+    art_path = args["articulation_path"]
+    resolution = args.get("resolution", 500000)
+    color_mode = args.get("color_mode", "manipulability")
+
+    return f"""\
+import omni.usd
+import numpy as np
+from pxr import Usd, UsdPhysics
+from isaacsim.util.debug_draw import _debug_draw
+
+stage = omni.usd.get_context().get_stage()
+art_prim = stage.GetPrimAtPath('{art_path}')
+if not art_prim.IsValid():
+    raise RuntimeError('Articulation not found: {art_path}')
+
+# Collect revolute joint limits
+joints = []
+for desc in list(Usd.PrimRange(art_prim))[1:]:
+    if desc.IsA(UsdPhysics.RevoluteJoint) or desc.IsA(UsdPhysics.RevoluteJoint):
+        lo_attr = desc.GetAttribute('physics:lowerLimit')
+        hi_attr = desc.GetAttribute('physics:upperLimit')
+        lo = np.radians(lo_attr.Get() if lo_attr and lo_attr.Get() is not None else -180.0)
+        hi = np.radians(hi_attr.Get() if hi_attr and hi_attr.Get() is not None else 180.0)
+        joints.append({{'name': desc.GetName(), 'lower': lo, 'upper': hi}})
+
+n_joints = len(joints)
+if n_joints == 0:
+    raise RuntimeError('No revolute joints found')
+
+n_samples = min({resolution}, 500000)
+print(f'Sampling {{n_samples}} configurations across {{n_joints}} joints...')
+
+# Random joint configs within limits
+q_samples = np.zeros((n_samples, n_joints))
+for i, j in enumerate(joints):
+    q_samples[:, i] = np.random.uniform(j['lower'], j['upper'], n_samples)
+
+# Forward kinematics using Lula
+from isaacsim.robot_motion.motion_generation import LulaKinematicsSolver
+from isaacsim.robot_motion.motion_generation import interface_config_loader
+
+try:
+    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config('{art_path}'.split('/')[-1].lower())
+    kin = LulaKinematicsSolver(**kin_config)
+except Exception:
+    print('Robot not in pre-supported list — cannot compute FK')
+    raise
+
+ee_positions = []
+manipulability = []
+eps = 1e-4
+
+for q in q_samples[:min(n_samples, 50000)]:  # cap for Jacobian computation
+    # FK
+    pos, _ = kin.compute_forward_kinematics('{art_path}'.split('/')[-1], q)
+    ee_positions.append(pos)
+
+    # Numerical Jacobian for manipulability
+    J = np.zeros((3, n_joints))
+    for k in range(n_joints):
+        q_plus = q.copy(); q_plus[k] += eps
+        pos_plus, _ = kin.compute_forward_kinematics('{art_path}'.split('/')[-1], q_plus)
+        J[:, k] = (np.array(pos_plus) - np.array(pos)) / eps
+    w = np.sqrt(max(np.linalg.det(J @ J.T), 0))
+    manipulability.append(w)
+
+ee_positions = np.array(ee_positions)
+manipulability = np.array(manipulability)
+
+# Color mapping
+if '{color_mode}' == 'reachability':
+    colors = [(0, 1, 0, 0.5)] * len(ee_positions)  # green
+elif '{color_mode}' == 'singularity_distance':
+    w_norm = manipulability / (manipulability.max() + 1e-10)
+    colors = [(1 - v, v, 0, 0.5) for v in w_norm]  # red=singularity, green=safe
+else:  # manipulability
+    w_norm = manipulability / (manipulability.max() + 1e-10)
+    colors = [(1 - v, v, 0, 0.5) for v in w_norm]  # green=high, red=low
+
+# Draw
+draw = _debug_draw.acquire_debug_draw_interface()
+draw.clear_points()
+points = [(float(p[0]), float(p[1]), float(p[2])) for p in ee_positions]
+draw.draw_points(points, colors, [3] * len(points))
+print(f'Workspace visualized: {{len(points)}} points, mode={color_mode}')
+"""
+
+
+def _gen_build_stage_index(args: Dict) -> str:
+    """Emit code that walks the stage with Usd.PrimRange and prints an index."""
+    prim_scope = args.get("prim_scope") or "/World"
+    max_prims = int(args.get("max_prims", 50000))
+    return f"""\
+import json
+import omni.usd
+from pxr import Usd, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+root = stage.GetPrimAtPath('{prim_scope}') or stage.GetPseudoRoot()
+index = {{}}
+count = 0
+for prim in Usd.PrimRange(root):
+    if count >= {max_prims}:
+        break
+    try:
+        schemas = [s.GetType().typeName for s in prim.GetAppliedSchemas()]
+    except Exception:
+        schemas = []
+    try:
+        has_physics = prim.HasAPI(UsdPhysics.RigidBodyAPI)
+    except Exception:
+        has_physics = False
+    index[str(prim.GetPath())] = {{
+        'type': prim.GetTypeName(),
+        'schemas': schemas,
+        'has_physics': bool(has_physics),
+    }}
+    count += 1
+
+print(json.dumps({{'prim_scope': '{prim_scope}', 'prim_count': count, 'truncated': count >= {max_prims}, 'index': index}}))
+"""
+
+
+def _gen_enable_extension(args: Dict) -> str:
+    ext_id = args["ext_id"]
+    # set_extension_enabled_immediate returns False for unknown ext ids
+    # (and the try/except used to swallow the signal). Post-check
+    # is_extension_enabled and raise when it's still disabled.
+    return f"""\
+import omni.kit.app
+
+mgr = omni.kit.app.get_app().get_extension_manager()
+ext_id = {repr(ext_id)}
+if mgr.is_extension_enabled(ext_id):
+    print(f"enable_extension: '{{ext_id}}' already enabled")
+else:
+    try:
+        ok = mgr.set_extension_enabled_immediate(ext_id, True)
+    except Exception as e:
+        raise RuntimeError(
+            f"enable_extension: set_extension_enabled_immediate raised for '{{ext_id}}': {{e}}"
+        )
+    if not mgr.is_extension_enabled(ext_id):
+        raise RuntimeError(
+            f"enable_extension: '{{ext_id}}' is still disabled after set_enabled "
+            f"(set_extension_enabled_immediate returned {{ok!r}}) — likely unknown extension id."
+        )
+    print(f"enable_extension: '{{ext_id}}' enabled")
+"""
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
