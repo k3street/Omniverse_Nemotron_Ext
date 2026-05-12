@@ -1658,6 +1658,10 @@ from .handlers.scene_authoring import (  # noqa: E402
 from .handlers.physics import (  # noqa: E402
     _gen_apply_force,
     _gen_apply_physics_material,
+    _gen_configure_self_collision,
+    _gen_deformable,
+    _gen_deformable_body,
+    _gen_deformable_surface,
     _gen_set_drive_gains,
     _gen_set_joint_limits,
     _gen_set_joint_targets,
@@ -1677,187 +1681,13 @@ from .handlers.physics import (  # noqa: E402
 # _gen_clone_prim moved to handlers/scene_authoring.py (Phase 3 wave 3).
 
 
-def _gen_deformable(args: Dict) -> str:
-    """Generate PhysX deformable body/surface code from presets."""
-    prim_path = args["prim_path"]
-    sbt = args["soft_body_type"]
-
-    presets = _load_deformable_presets().get("presets", {})
-
-    # Map user-friendly names to preset keys
-    preset_map = {
-        "cloth": "cloth_cotton",
-        "sponge": "sponge_soft",
-        "rubber": "rubber_soft",
-        "gel": "gel_soft",
-        "rope": "rope_nylon",
-    }
-    preset_key = preset_map.get(sbt, f"{sbt}_soft")
-    preset = presets.get(preset_key, {})
-    params = preset.get("params", {})
-
-    # Allow user overrides
-    if args.get("youngs_modulus"):
-        params["youngs_modulus"] = args["youngs_modulus"]
-    if args.get("poissons_ratio"):
-        params["poissons_ratio"] = args["poissons_ratio"]
-    if args.get("damping"):
-        params["damping"] = args["damping"]
-    if args.get("self_collision") is not None:
-        params["self_collision"] = args["self_collision"]
-
-    api_type = preset.get("api", "PhysxDeformableBodyAPI")
-    density = preset.get("density_kg_m3", 1000)
-
-    if "Surface" in api_type:
-        return _gen_deformable_surface(prim_path, params, density)
-    return _gen_deformable_body(prim_path, params, density)
+# _gen_deformable moved to handlers/physics.py (Phase 5 wave 4).
 
 
-def _gen_deformable_body(prim_path: str, params: Dict, density: float) -> str:
-    ym = params.get("youngs_modulus", 10000)
-    pr = params.get("poissons_ratio", 0.3)
-    damp = params.get("damping", 0.01)
-    sc = str(params.get("self_collision", True))
-    iters = params.get("solver_position_iteration_count", 32)
-    vvd = params.get("vertex_velocity_damping", 0.05)
-
-    return f"""\
-import omni.usd
-import numpy as np
-from pxr import UsdPhysics, PhysxSchema, UsdGeom, Gf, Vt, Sdf
-
-stage = omni.usd.get_context().get_stage()
-prim = stage.GetPrimAtPath('{prim_path}')
-
-# Ensure prim is a valid subdivided Mesh (PhysX requires triangle data)
-if not prim.IsA(UsdGeom.Mesh):
-    # Replace implicit surface (Plane, Cube, etc.) with a subdivided Mesh
-    xform = UsdGeom.Xformable(prim)
-    pos = xform.GetLocalTransformation().IsIdentity() and Gf.Vec3d(0,0,0) or \\
-          xform.ComputeLocalToWorldTransform(0).ExtractTranslation()
-    stage.RemovePrim('{prim_path}')
-    prim = stage.DefinePrim('{prim_path}', 'Mesh')
-
-mesh = UsdGeom.Mesh(prim)
-pts = mesh.GetPointsAttr().Get()
-if pts is None or len(pts) < 9:
-    # Generate a 10x10 subdivided plane mesh
-    res = 10
-    size = 1.0
-    verts = []
-    for j in range(res + 1):
-        for i in range(res + 1):
-            x = (i / res - 0.5) * size
-            y = (j / res - 0.5) * size
-            verts.append(Gf.Vec3f(x, y, 0.0))
-    faces = []
-    counts = []
-    for j in range(res):
-        for i in range(res):
-            v0 = j * (res + 1) + i
-            v1 = v0 + 1
-            v2 = v0 + (res + 1) + 1
-            v3 = v0 + (res + 1)
-            faces.extend([v0, v1, v2])
-            faces.extend([v0, v2, v3])
-            counts.extend([3, 3])
-    mesh.GetPointsAttr().Set(Vt.Vec3fArray(verts))
-    mesh.GetFaceVertexCountsAttr().Set(Vt.IntArray(counts))
-    mesh.GetFaceVertexIndicesAttr().Set(Vt.IntArray(faces))
-
-# Apply deformable body
-deformable_api = PhysxSchema.PhysxDeformableBodyAPI.Apply(prim)
-deformable_api.CreateSolverPositionIterationCountAttr({iters})
-deformable_api.CreateVertexVelocityDampingAttr({vvd})
-deformable_api.CreateSelfCollisionAttr({sc})
-
-# Material
-mat_path = '{prim_path}/DeformableMaterial'
-mat_prim = stage.DefinePrim(mat_path, 'PhysxDeformableBodyMaterial')
-mat_api = PhysxSchema.PhysxDeformableBodyMaterialAPI.Apply(mat_prim)
-mat_api.CreateYoungsModulusAttr({ym})
-mat_api.CreatePoissonsRatioAttr({pr})
-mat_api.CreateDampingAttr({damp})
-mat_api.CreateDensityAttr({density})
-
-# Bind material
-from pxr import UsdShade
-UsdShade.MaterialBindingAPI(prim).Bind(
-    UsdShade.Material(stage.GetPrimAtPath(mat_path)),
-    UsdShade.Tokens.strongerThanDescendants)
-"""
+# _gen_deformable_body moved to handlers/physics.py (Phase 5 wave 4).
 
 
-def _gen_deformable_surface(prim_path: str, params: Dict, density: float) -> str:
-    ss = params.get("stretch_stiffness", 10000)
-    bs = params.get("bend_stiffness", 0.02)
-    damp = params.get("damping", 0.005)
-    sc = str(params.get("self_collision", True))
-    scfd = params.get("self_collision_filter_distance", 0.002)
-
-    return f"""\
-import omni.usd
-from pxr import UsdPhysics, PhysxSchema, UsdGeom, Gf, Vt, Sdf
-
-stage = omni.usd.get_context().get_stage()
-prim = stage.GetPrimAtPath('{prim_path}')
-
-# Ensure prim is a valid subdivided Mesh (PhysX cloth requires triangle data)
-if not prim.IsA(UsdGeom.Mesh):
-    xform = UsdGeom.Xformable(prim)
-    pos = xform.ComputeLocalToWorldTransform(0).ExtractTranslation()
-    stage.RemovePrim('{prim_path}')
-    prim = stage.DefinePrim('{prim_path}', 'Mesh')
-    UsdGeom.Xformable(prim).AddTranslateOp().Set(Gf.Vec3d(pos[0], pos[1], pos[2]))
-
-mesh = UsdGeom.Mesh(prim)
-pts = mesh.GetPointsAttr().Get()
-if pts is None or len(pts) < 9:
-    # Generate a 20x20 subdivided plane mesh for cloth simulation
-    res = 20
-    size = 1.0
-    verts = []
-    for j in range(res + 1):
-        for i in range(res + 1):
-            x = (i / res - 0.5) * size
-            y = (j / res - 0.5) * size
-            verts.append(Gf.Vec3f(x, y, 0.0))
-    faces = []
-    counts = []
-    for j in range(res):
-        for i in range(res):
-            v0 = j * (res + 1) + i
-            v1 = v0 + 1
-            v2 = v0 + (res + 1) + 1
-            v3 = v0 + (res + 1)
-            faces.extend([v0, v1, v2])
-            faces.extend([v0, v2, v3])
-            counts.extend([3, 3])
-    mesh.GetPointsAttr().Set(Vt.Vec3fArray(verts))
-    mesh.GetFaceVertexCountsAttr().Set(Vt.IntArray(counts))
-    mesh.GetFaceVertexIndicesAttr().Set(Vt.IntArray(faces))
-
-# Apply deformable surface (cloth)
-surface_api = PhysxSchema.PhysxDeformableSurfaceAPI.Apply(prim)
-surface_api.CreateSelfCollisionAttr({sc})
-surface_api.CreateSelfCollisionFilterDistanceAttr({scfd})
-
-# Material
-mat_path = '{prim_path}/ClothMaterial'
-mat_prim = stage.DefinePrim(mat_path, 'PhysxDeformableSurfaceMaterial')
-mat_api = PhysxSchema.PhysxDeformableSurfaceMaterialAPI.Apply(mat_prim)
-mat_api.CreateStretchStiffnessAttr({ss})
-mat_api.CreateBendStiffnessAttr({bs})
-mat_api.CreateDampingAttr({damp})
-mat_api.CreateDensityAttr({density})
-
-# Bind material
-from pxr import UsdShade
-UsdShade.MaterialBindingAPI(prim).Bind(
-    UsdShade.Material(stage.GetPrimAtPath(mat_path)),
-    UsdShade.Tokens.strongerThanDescendants)
-"""
+# _gen_deformable_surface moved to handlers/physics.py (Phase 5 wave 4).
 
 
 # Isaac Sim 5.1 OmniGraph node type mapping:
@@ -11448,70 +11278,7 @@ def _gen_assemble_robot(args: Dict) -> str:
         ")\n"
     )
 
-def _gen_configure_self_collision(args: Dict) -> str:
-    art_path = args["articulation_path"]
-    mode = args["mode"]
-    filtered_pairs = args.get("filtered_pairs", [])
-
-    # Live-probed 2026-04-18: old code called .Apply on an invalid prim
-    # returned from stage.GetPrimAtPath('<bad>') and USD's internal Apply
-    # path silently no-oped — tool reported success=True with no effect.
-    # Add explicit guard on the articulation root.
-    lines = [
-        "import omni.usd",
-        "from pxr import UsdPhysics, PhysxSchema",
-        "",
-        "stage = omni.usd.get_context().get_stage()",
-        f"_art_path = {art_path!r}",
-        "robot_prim = stage.GetPrimAtPath(_art_path)",
-        "if not robot_prim or not robot_prim.IsValid():",
-        "    raise RuntimeError(f'configure_self_collision: articulation not found: {_art_path!r}')",
-        "",
-    ]
-
-    if mode == "auto":
-        lines.extend([
-            "# Auto mode: keep defaults (adjacent links already skip collision)",
-            f"print('Self-collision for {art_path}: auto (default PhysX behavior)')",
-        ])
-    elif mode == "enable":
-        lines.extend([
-            "# Enable self-collision on the articulation",
-            "if not robot_prim.HasAPI(PhysxSchema.PhysxArticulationAPI):",
-            "    PhysxSchema.PhysxArticulationAPI.Apply(robot_prim)",
-            "artic_api = PhysxSchema.PhysxArticulationAPI(robot_prim)",
-            "artic_api.CreateEnabledSelfCollisionsAttr(True)",
-            f"print('Self-collision ENABLED for {art_path}')",
-        ])
-    elif mode == "disable":
-        lines.extend([
-            "# Disable self-collision on the articulation",
-            "if not robot_prim.HasAPI(PhysxSchema.PhysxArticulationAPI):",
-            "    PhysxSchema.PhysxArticulationAPI.Apply(robot_prim)",
-            "artic_api = PhysxSchema.PhysxArticulationAPI(robot_prim)",
-            "artic_api.CreateEnabledSelfCollisionsAttr(False)",
-            f"print('Self-collision DISABLED for {art_path}')",
-        ])
-
-    if filtered_pairs:
-        lines.extend([
-            "",
-            "# Apply collision filtering for specified link pairs",
-        ])
-        for pair in filtered_pairs:
-            if len(pair) == 2:
-                lines.extend([
-                    f"link_a = stage.GetPrimAtPath('{pair[0]}')",
-                    f"link_b = stage.GetPrimAtPath('{pair[1]}')",
-                    "if not link_a.IsValid() or not link_b.IsValid():",
-                    f"    raise RuntimeError('configure_self_collision: filter pair links not found: {pair[0]!r} / {pair[1]!r}')",
-                    "filteredPairsAPI = UsdPhysics.FilteredPairsAPI.Apply(robot_prim)",
-                    f"filteredPairsAPI.GetFilteredPairsRel().AddTarget('{pair[0]}')",
-                    f"filteredPairsAPI.GetFilteredPairsRel().AddTarget('{pair[1]}')",
-                    f"print(f'Filtered collision pair: {pair[0]} <-> {pair[1]}')",
-                ])
-
-    return "\n".join(lines)
+# _gen_configure_self_collision moved to handlers/physics.py (Phase 5 wave 4).
 
 CODE_GEN_HANDLERS["robot_wizard"] = _gen_robot_wizard
 CODE_GEN_HANDLERS["tune_gains"] = _gen_tune_gains
