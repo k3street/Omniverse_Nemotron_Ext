@@ -4284,6 +4284,685 @@ async def _handle_setup_isaac_ros_cumotion_moveit(args):
 
 
 # ---------------------------------------------------------------------------
+# Phase 7 wave 8 — robot data-handlers (final setup stragglers)
+
+
+async def _handle_setup_pick_place_with_vision(args: Dict) -> Dict:
+    """Composite tool — runs vision classification THEN setup_pick_place_controller.
+
+    For canonical-time integration of real runtime vision-driven sorting.
+    Workflow:
+      1. Calls add_vision_classifier_gate(cube_paths, class_labels, camera_path)
+         to detect cubes in viewport and map cube_path → detected_label.
+      2. Sets Semantics_color on each cube via Kit RPC (the detected label
+         becomes the cube's semantic class).
+      3. Calls setup_pick_place_controller(target_source='curobo',
+         color_routing=destination_map) to install the standard cuRobo
+         controller with vision-derived routing.
+
+    This makes the FULL pipeline truly vision-driven: classification runs
+    at controller-install-time, semantic labels reflect actual visual
+    content, and standard color_routing dispatches accordingly.
+
+    NOTE: each call to this tool consumes 1 Gemini API call (the vision
+    classification). Be cost-conscious in production deployments.
+
+    Args (forwards to underlying tools):
+      robot_path, source_paths (cube_paths), destination_path,
+      camera_path, class_labels, destination_map (class → bin_path),
+      sensor_path, belt_path, planning_obstacles
+      [+ any setup_pick_place_controller args]
+
+    Returns: combined dict with vision result + controller install result.
+    """
+    from .. import kit_tools
+    from ..tool_executor import execute_tool_call
+
+    cube_paths = list(args.get("cube_paths") or args.get("source_paths") or [])
+    class_labels = list(args.get("class_labels") or [])
+    camera_path = args.get("camera_path")
+    destination_map = args.get("destination_map") or {}
+
+    if not cube_paths:
+        return {"type": "error", "error": "cube_paths/source_paths required"}
+    if not class_labels:
+        return {"type": "error", "error": "class_labels required"}
+    if not destination_map:
+        return {"type": "error", "error": "destination_map required (class→bin path)"}
+
+    # Step 1: vision classification.  Function-gate runners may inject a
+    # pre-computed `vision_precomputed: {cube_path: short_class}` mapping
+    # so the canonical can be exercised without live Gemini credentials.
+    vision_precomputed = args.get("vision_precomputed")
+    if vision_precomputed:
+        cube_to_class = dict(vision_precomputed)
+        vision_res = {"cube_to_class": cube_to_class, "raw_detections": []}
+    else:
+        vision_res = await execute_tool_call("add_vision_classifier_gate", {
+            "cube_paths": cube_paths,
+            "class_labels": class_labels,
+            "camera_path": camera_path,
+            "destination_map": destination_map,
+        })
+        if vision_res.get("type") == "error":
+            return vision_res
+        cube_to_class = vision_res.get("cube_to_class") or {}
+    if not cube_to_class:
+        return {"type": "error",
+                "error": f"Vision returned 0 detections — check camera placement and scene visibility. raw_detections: {vision_res.get('raw_detections')}"}
+
+    # Step 2: Set Semantics_color on each cube via Kit-side script.
+    # Strip the " cube" suffix from labels (e.g., "red cube" → "red") to match
+    # color_routing dict's keys.
+    cube_to_short_class = {}
+    for cube, label in cube_to_class.items():
+        short = label.lower().replace(" cube", "").strip()
+        cube_to_short_class[cube] = short
+
+    label_code = f"""\
+import omni.usd
+from pxr import Usd, Sdf, Semantics
+
+stage = omni.usd.get_context().get_stage()
+mapping = {cube_to_short_class!r}
+applied = []
+for path, cls in mapping.items():
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid(): continue
+    sem = Semantics.SemanticsAPI.Apply(p, "Semantics_color")
+    if sem.GetSemanticTypeAttr() and sem.GetSemanticTypeAttr().IsValid():
+        pass
+    else:
+        sem.CreateSemanticTypeAttr().Set("color")
+    sem.CreateSemanticDataAttr().Set(cls)
+    applied.append(path)
+import json
+print(json.dumps({{"applied": applied}}))
+"""
+    label_res = await kit_tools.exec_sync(label_code, timeout=15)
+
+    # Step 3: Build color_routing dict from destination_map (already keyed by class)
+    color_routing = dict(destination_map)
+
+    # Step 4: install cuRobo controller with vision-derived color_routing
+    controller_args = dict(args)  # forward all args
+    controller_args["target_source"] = "curobo"
+    controller_args["color_routing"] = color_routing
+    # Drop vision-specific args before passing to setup_pick_place_controller
+    for k in ("class_labels", "destination_map", "camera_path", "cube_paths"):
+        controller_args.pop(k, None)
+    # source_paths might be missing if caller used cube_paths
+    if not controller_args.get("source_paths"):
+        controller_args["source_paths"] = cube_paths
+
+    install_res = await execute_tool_call("setup_pick_place_controller", controller_args)
+
+    return {
+        "vision_classification": cube_to_class,
+        "semantic_labels_applied": (label_res.get("output") or "")[-200:],
+        "color_routing": color_routing,
+        "controller_install": (install_res.get("output") or "")[-300:] if isinstance(install_res, dict) else str(install_res)[:300],
+        "raw_detections": vision_res.get("raw_detections", []),
+    }
+
+
+async def _handle_track_slot_occupancy(args: Dict) -> Dict:
+    """Tier A companion — check which kit-tray slots are currently occupied.
+
+    Reads slot_paths under tray, checks if any cube is within slot_size/2
+    of each slot's xy center. Returns occupancy mapping.
+
+    Args:
+      tray_path:    USD path of the kit tray (created via create_kit_tray)
+      cube_paths:   USD paths of items to check
+
+    Returns:
+      {slot_occupancy: {slot_path: cube_path or None, ...}}
+    """
+    from .. import kit_tools
+    import json
+
+    tray_path = args["tray_path"]
+    cube_paths = list(args.get("cube_paths") or [])
+
+    code = f"""\
+import omni.usd, json
+from pxr import Usd, UsdGeom, Sdf
+stage = omni.usd.get_context().get_stage()
+tray = stage.GetPrimAtPath({tray_path!r})
+result = {{"slot_occupancy": {{}}, "filled_count": 0}}
+if not tray or not tray.IsValid():
+    result["error"] = f"tray prim not found: {tray_path!r}"
+else:
+    cube_paths = {cube_paths!r}
+    cube_centers = {{}}
+    for cp in cube_paths:
+        prim = stage.GetPrimAtPath(cp)
+        if prim and prim.IsValid():
+            cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+            b = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+            if not b.IsEmpty():
+                m = b.GetMidpoint()
+                cube_centers[cp] = [float(m[0]), float(m[1]), float(m[2])]
+    # For each slot, find nearest cube within slot_size/2
+    for child in tray.GetChildren():
+        if not child.GetName().startswith("slot_"): continue
+        size_attr = child.GetAttribute("kit:slot_size")
+        size = float(size_attr.Get()) if size_attr and size_attr.IsValid() else 0.05
+        x_t = UsdGeom.Xformable(child).ComputeLocalToWorldTransform(0).ExtractTranslation()
+        slot_xy = [float(x_t[0]), float(x_t[1])]
+        slot_path = str(child.GetPath())
+        nearest_cube = None
+        nearest_dist = float("inf")
+        for cp, c in cube_centers.items():
+            d = ((c[0] - slot_xy[0])**2 + (c[1] - slot_xy[1])**2) ** 0.5
+            if d < size * 0.6 and d < nearest_dist:  # 60% of slot size = "in slot"
+                nearest_cube = cp
+                nearest_dist = d
+        result["slot_occupancy"][slot_path] = nearest_cube
+        if nearest_cube: result["filled_count"] += 1
+print(json.dumps(result))
+"""
+    res = await kit_tools.exec_sync(code, timeout=15)
+    out = (res.get("output") or "").strip()
+    parsed = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                parsed = json.loads(line)
+                break
+            except Exception:
+                continue
+    return parsed or {"error": "could not parse track_slot_occupancy output"}
+
+
+async def _handle_setup_robot_handoff_signal(args: Dict) -> Dict:
+    """Tier B tool — creates a 'handoff signal' marker prim used to coordinate
+    two robots in a handoff sequence (robot A places at handoff, robot B picks
+    from handoff).
+
+    Creates a marker prim with attributes:
+      - handoff:state ('idle', 'placed', 'picked')
+      - handoff:current_cube (path of cube currently at handoff, or '')
+      - handoff:position (xyz of handoff station)
+      - handoff:robot_a (path of placing robot)
+      - handoff:robot_b (path of picking robot)
+
+    For runtime use, robots' controllers would read/write these attrs.
+    Without controller integration, this tool just creates the marker prim
+    so canonicals can reference it as a known handoff station.
+
+    Args:
+      handoff_path: USD path of the handoff marker
+      position:     [x, y, z] world position of the handoff station
+      robot_a:      USD path of robot that PLACES at handoff
+      robot_b:      USD path of robot that PICKS from handoff
+
+    Returns: {handoff_path, position, attrs_set}
+    """
+    from .. import kit_tools
+
+    handoff_path = args["handoff_path"]
+    position = args.get("position", [0, 0, 0.85])
+    robot_a = args.get("robot_a", "")
+    robot_b = args.get("robot_b", "")
+
+    code = f"""\
+import omni.usd
+from pxr import UsdGeom, Sdf, Gf
+import json
+stage = omni.usd.get_context().get_stage()
+pp = Sdf.Path({handoff_path!r})
+prim = stage.GetPrimAtPath(pp)
+if not prim or not prim.IsValid():
+    prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
+UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d({position[0]}, {position[1]}, {position[2]}))
+prim.CreateAttribute("handoff:state",        Sdf.ValueTypeNames.String).Set("idle")
+prim.CreateAttribute("handoff:current_cube", Sdf.ValueTypeNames.String).Set("")
+prim.CreateAttribute("handoff:position",     Sdf.ValueTypeNames.Float3).Set(({position[0]}, {position[1]}, {position[2]}))
+prim.CreateAttribute("handoff:robot_a",      Sdf.ValueTypeNames.String).Set({robot_a!r})
+prim.CreateAttribute("handoff:robot_b",      Sdf.ValueTypeNames.String).Set({robot_b!r})
+print(json.dumps({{"created": str(prim.GetPath()), "state": "idle"}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "handoff_path": handoff_path,
+        "position": position,
+        "robot_a": robot_a,
+        "robot_b": robot_b,
+        "state": "idle",
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+async def _handle_setup_robot_claim_mutex(args: Dict) -> Dict:
+    """Tier A tool — creates a mutex marker prim for shared-resource arbitration
+    between multiple robots.
+
+    A claim mutex coordinates access to a shared pickup zone, conveyor segment,
+    or station. Only one robot can claim the mutex at a time; others wait or
+    skip.
+
+    Creates a marker prim with attributes:
+      - mutex:claimed_by (robot path, or empty if free)
+      - mutex:claim_count (total claims granted)
+      - mutex:robots (list of authorized robot paths)
+      - mutex:resource_path (USD path of shared resource being protected)
+
+    Runtime claim/release requires controller hooks. Canonical-time tool
+    creates the marker prim so scene defines the mutex location.
+
+    Args:
+      mutex_path:    USD path of the mutex marker
+      resource_path: USD path of resource being mutually-excluded
+      robots:        list of robot paths that share access
+
+    Returns: {mutex_path, resource_path, robots, state}
+    """
+    from .. import kit_tools
+
+    mutex_path = args["mutex_path"]
+    resource_path = args.get("resource_path", "")
+    robots = list(args.get("robots") or [])
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Sdf
+stage = omni.usd.get_context().get_stage()
+pp = Sdf.Path({mutex_path!r})
+prim = stage.GetPrimAtPath(pp)
+if not prim or not prim.IsValid():
+    prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
+prim.CreateAttribute("mutex:claimed_by",   Sdf.ValueTypeNames.String).Set("")
+prim.CreateAttribute("mutex:claim_count",  Sdf.ValueTypeNames.Int).Set(0)
+robots = {robots!r}
+prim.CreateAttribute("mutex:robots",       Sdf.ValueTypeNames.StringArray).Set(robots)
+prim.CreateAttribute("mutex:resource_path",Sdf.ValueTypeNames.String).Set({resource_path!r})
+print(json.dumps({{"created": str(prim.GetPath()), "robots": robots, "resource": {resource_path!r}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "mutex_path": mutex_path,
+        "resource_path": resource_path,
+        "robots": robots,
+        "state": "free",
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+async def _handle_surface_gripper(args: Dict) -> Dict:
+    """Tier B tool — adds suction/vacuum gripper to a robot via Isaac Sim's
+    OgnSurfaceGripper OmniGraph node.
+
+    Wraps the existing OmniGraph OgnSurfaceGripper setup in a single call.
+    The surface gripper attaches an end-effector to objects via FixedJoint
+    when 'close' is signaled (suction on); detaches on 'open' (suction off).
+    Force-limit and torque-limit configurable.
+
+    Args:
+      robot_path:    USD path of the robot
+      ee_link:       USD path of the end-effector link to attach gripper to
+      grip_threshold: distance threshold for object pickup (default 0.01)
+      force_limit:   max force the suction can sustain (default 100.0)
+      torque_limit:  max torque (default 100.0)
+      graph_path:    OmniGraph path (default /World/<robot_name>/SuctionGraph)
+
+    Returns: {gripper_node_path, graph_path, force_limit, torque_limit}
+    """
+    from .. import kit_tools
+    import json
+
+    robot_path = args["robot_path"]
+    ee_link = args.get("ee_link", f"{robot_path}/panda_hand")
+    grip_threshold = float(args.get("grip_threshold", 0.01))
+    force_limit = float(args.get("force_limit", 100.0))
+    torque_limit = float(args.get("torque_limit", 100.0))
+    graph_path = args.get("graph_path") or f"{robot_path}/SuctionGraph"
+
+    code = f"""\
+import omni.usd, omni.kit.commands, json, traceback
+from pxr import UsdGeom, Sdf
+
+stage = omni.usd.get_context().get_stage()
+art_path = {ee_link!r}
+robot_path = {robot_path!r}
+
+# Validate prims exist
+if not stage.GetPrimAtPath(robot_path).IsValid():
+    print(json.dumps({{"error": f"robot not found: {{robot_path}}"}})); raise SystemExit
+if not stage.GetPrimAtPath(art_path).IsValid():
+    print(json.dumps({{"error": f"ee_link not found: {{art_path}}"}})); raise SystemExit
+
+# Isaac Sim 5.x SurfaceGripper schema: an IsaacSurfaceGripper prim authored
+# under the ee_link. UR10 (and other suction-capable robot USDs from the
+# 5.x asset library) ship a `Gripper` variant with `Short_Suction` /
+# `Long_Suction` selections that create the schema prim for free —
+# preferred path because the variant also wires the right physics joints.
+# Falls back to omni.kit.commands "CreateSurfaceGripper" when no variant
+# exists.
+
+robot_prim = stage.GetPrimAtPath(robot_path)
+sg_path = art_path + "/SurfaceGripper"
+sg_via = "unknown"
+
+variant_set = robot_prim.GetVariantSet("Gripper") if robot_prim.HasVariantSets() else None
+variant_names = list(variant_set.GetVariantNames()) if variant_set else []
+if "Short_Suction" in variant_names:
+    variant_set.SetVariantSelection("Short_Suction")
+    sg_via = "variant:Short_Suction"
+elif "Long_Suction" in variant_names:
+    variant_set.SetVariantSelection("Long_Suction")
+    sg_via = "variant:Long_Suction"
+
+# After variant set, the schema prim should exist. If not, fall back to
+# the Kit command that creates a fresh IsaacSurfaceGripper schema prim.
+if not stage.GetPrimAtPath(sg_path).IsValid():
+    try:
+        ok, prim = omni.kit.commands.execute("CreateSurfaceGripper", prim_path=art_path)
+        if ok and prim:
+            sg_path = str(prim.GetPath())
+            sg_via = "command:CreateSurfaceGripper"
+    except Exception as _e:
+        print(f"(surface_gripper: CreateSurfaceGripper command soft-fail: {{_e}})")
+        traceback.print_exc()
+
+sg_prim = stage.GetPrimAtPath(sg_path)
+if sg_prim and sg_prim.IsValid():
+    # Set scalar properties; relationship setup (attachment_points) needs
+    # joints that exist after world.reset() — left for runtime wiring.
+    for _name, _val in (
+        ("isaac:maxGripDistance", {grip_threshold}),
+        ("isaac:coaxialForceLimit", {force_limit}),
+        ("isaac:shearForceLimit", {force_limit}),
+        ("isaac:retryInterval", 1.0),
+    ):
+        _attr = sg_prim.GetAttribute(_name)
+        if _attr and _attr.IsDefined():
+            try: _attr.Set(_val)
+            except Exception: pass
+
+# Mark the SurfaceGripper path on the robot prim so the cuRobo handler can
+# find it at install time (no scene-traversal needed).
+try:
+    _marker = robot_prim.GetAttribute("isaac_assist:surface_gripper_path")
+    if not _marker or not _marker.IsDefined():
+        _marker = robot_prim.CreateAttribute("isaac_assist:surface_gripper_path", Sdf.ValueTypeNames.String)
+    _marker.Set(sg_path)
+except Exception: pass
+
+print(json.dumps({{
+    "robot_path": robot_path,
+    "surface_gripper_path": sg_path,
+    "ee_link": art_path,
+    "schema_prim_exists": bool(sg_prim and sg_prim.IsValid()),
+    "schema_prim_type": str(sg_prim.GetTypeName()) if (sg_prim and sg_prim.IsValid()) else None,
+    "created_via": sg_via,
+}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=15)
+    out = (res.get("output") or "").strip()
+    parsed = None
+    for line in reversed(out.splitlines()):
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                parsed = json.loads(line)
+                break
+            except Exception:
+                continue
+    summary = {
+        "robot_path": robot_path,
+        "ee_link": ee_link,
+        "force_limit": force_limit,
+        "torque_limit": torque_limit,
+        "raw": out[-300:],
+    }
+    if parsed:
+        summary.update(parsed)
+    return summary
+
+
+async def _handle_setup_zone_partition(args: Dict) -> Dict:
+    """Tier C tool — partitions a conveyor into N zones, each assigned to
+    a specific robot. Used by Parallel Picking Duo (#10) for spatial
+    coordination.
+
+    Creates N marker prims under conveyor_path, each tagged with
+    zone:robot_path attr. Zones are equal-width segments along conveyor's
+    longest axis (typically X).
+
+    Args:
+      conveyor_path: USD path of conveyor to partition
+      n_zones:       number of zones (typically = n_robots)
+      robots:        list of robot paths (one per zone)
+      base_path:     parent path for zone markers (default: conveyor_path)
+
+    Returns: {zones: [{path, robot, x_range}, ...]}
+    """
+    from .. import kit_tools
+    import json
+
+    conveyor_path = args["conveyor_path"]
+    n_zones = int(args.get("n_zones", 2))
+    robots = list(args.get("robots") or [])
+    base_path = args.get("base_path") or conveyor_path
+
+    if len(robots) != n_zones:
+        return {"type": "error",
+                "error": f"robots length ({len(robots)}) must match n_zones ({n_zones})"}
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Sdf, Usd, Gf
+stage = omni.usd.get_context().get_stage()
+conv = stage.GetPrimAtPath({conveyor_path!r})
+if not conv or not conv.IsValid():
+    print(json.dumps({{"error": f"conveyor not found: {conveyor_path!r}"}})); raise SystemExit
+
+cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+bbox = cache.ComputeWorldBound(conv).ComputeAlignedRange()
+xmin, xmax = float(bbox.GetMin()[0]), float(bbox.GetMax()[0])
+y_center = 0.5 * (float(bbox.GetMin()[1]) + float(bbox.GetMax()[1]))
+z_top = float(bbox.GetMax()[2])
+
+n_zones = {n_zones}
+robots = {robots!r}
+zone_width = (xmax - xmin) / n_zones
+zones = []
+for i in range(n_zones):
+    z_start = xmin + i * zone_width
+    z_end = z_start + zone_width
+    zone_path = f"{base_path!r}/Zone_{{i+1}}"
+    pp = Sdf.Path(zone_path)
+    prim = stage.GetPrimAtPath(pp)
+    if not prim or not prim.IsValid():
+        prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
+    UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d(0.5*(z_start+z_end), y_center, z_top))
+    prim.CreateAttribute("zone:robot_path", Sdf.ValueTypeNames.String).Set(robots[i])
+    prim.CreateAttribute("zone:x_min", Sdf.ValueTypeNames.Float).Set(z_start)
+    prim.CreateAttribute("zone:x_max", Sdf.ValueTypeNames.Float).Set(z_end)
+    prim.CreateAttribute("zone:index", Sdf.ValueTypeNames.Int).Set(i)
+    zones.append({{"path": zone_path, "robot": robots[i], "x_range": [z_start, z_end]}})
+
+print(json.dumps({{"zones": zones, "conveyor_x_range": [xmin, xmax]}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    out = (res.get("output") or "").strip()
+    parsed = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                parsed = json.loads(line)
+                break
+            except Exception:
+                continue
+    return parsed or {"error": "could not parse zone_partition output"}
+
+
+async def _handle_setup_nav_robot(args: Dict) -> Dict:
+    """Tier C — wraps a wheeled robot with navigation stack (Nav2-compatible).
+    Used by #31 RoboParty (mixed fleet with mobile robots).
+
+    For canonical-time, stores nav config on robot. Runtime nav execution
+    requires Nav2 + ROS2 bridge integration.
+
+    Args:
+      robot_path:    USD path of mobile robot
+      occupancy_map: path to .pgm/.yaml occupancy map (optional)
+      nav_topic:     ROS2 topic for nav goals (default '/goal_pose')
+      odom_topic:    ROS2 topic for odometry (default '/odom')
+
+    Returns: {robot_path, nav_topic, odom_topic, occupancy_map}
+    """
+    from .. import kit_tools
+
+    robot_path = args["robot_path"]
+    occupancy_map = args.get("occupancy_map", "")
+    nav_topic = args.get("nav_topic", "/goal_pose")
+    odom_topic = args.get("odom_topic", "/odom")
+
+    code = f"""\
+import omni.usd, json
+from pxr import Sdf
+stage = omni.usd.get_context().get_stage()
+robot = stage.GetPrimAtPath({robot_path!r})
+if not robot or not robot.IsValid():
+    print(json.dumps({{"error": f"robot not found: {robot_path!r}"}})); raise SystemExit
+robot.CreateAttribute("nav:occupancy_map", Sdf.ValueTypeNames.String).Set({occupancy_map!r})
+robot.CreateAttribute("nav:goal_topic",    Sdf.ValueTypeNames.String).Set({nav_topic!r})
+robot.CreateAttribute("nav:odom_topic",    Sdf.ValueTypeNames.String).Set({odom_topic!r})
+robot.CreateAttribute("nav:current_goal",  Sdf.ValueTypeNames.Float3).Set((0,0,0))
+robot.CreateAttribute("nav:reached",       Sdf.ValueTypeNames.Bool).Set(True)
+print(json.dumps({{"robot": {robot_path!r}, "nav_topic": {nav_topic!r}, "odom_topic": {odom_topic!r}, "map": {occupancy_map!r}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "robot_path": robot_path,
+        "nav_topic": nav_topic,
+        "odom_topic": odom_topic,
+        "occupancy_map": occupancy_map,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+async def _handle_visualize_behavior_tree(args: Dict) -> Dict:
+    """Return a formatted text tree of a behavior network structure."""
+    network_name = args.get("network_name", "unknown")
+
+    # Since we don't have access to a running Cortex instance at query time,
+    # return the canonical structure for known behavior types, or a template.
+    _KNOWN_BEHAVIORS = {
+        "pick_and_place": {
+            "name": "pick_and_place",
+            "type": "DfStateMachineDecider",
+            "children": [
+                {"name": "approach", "type": "DfState", "description": "Move to pre-grasp position above target"},
+                {"name": "grasp", "type": "DfState", "description": "Move down and close gripper on object"},
+                {"name": "lift", "type": "DfState", "description": "Lift grasped object to safe height"},
+                {"name": "place", "type": "DfState", "description": "Move to place position and release"},
+            ],
+            "transitions": "approach -> grasp -> lift -> place -> done",
+        },
+        "follow_target": {
+            "name": "follow_target",
+            "type": "DfDecider",
+            "children": [
+                {"name": "follow", "type": "FollowTargetState", "description": "Continuously track target prim with end-effector"},
+            ],
+            "transitions": "follow (continuous loop)",
+        },
+    }
+
+    behavior = _KNOWN_BEHAVIORS.get(network_name.lower())
+
+    if behavior:
+        # Build ASCII tree
+        lines = [
+            f"Behavior Network: {behavior['name']}",
+            f"  Type: {behavior['type']}",
+            f"  Transitions: {behavior['transitions']}",
+            "",
+            "  Nodes:",
+        ]
+        for i, child in enumerate(behavior["children"]):
+            is_last = i == len(behavior["children"]) - 1
+            prefix = "  +-- " if is_last else "  |-- "
+            lines.append(f"{prefix}{child['name']} ({child['type']})")
+            desc_prefix = "      " if is_last else "  |   "
+            lines.append(f"{desc_prefix}{child['description']}")
+
+        tree_text = "\n".join(lines)
+        return {
+            "network_name": network_name,
+            "structure": behavior,
+            "tree": tree_text,
+        }
+
+    return {
+        "network_name": network_name,
+        "structure": None,
+        "tree": (
+            f"Behavior Network: {network_name}\n"
+            f"  (No pre-built visualization available for '{network_name}'.\n"
+            f"   Known behaviors: pick_and_place, follow_target.\n"
+            f"   For custom networks, inspect the DfNetwork in the running Cortex world.)"
+        ),
+    }
+
+
+async def _handle_setup_ros2_control_compat(args):
+    """Phase 6 M1: emit OmniGraph using topic_based_ros2_control standard topic names.
+
+    Wraps the existing ROS2 bridge profile but with the de-facto topic
+    names (/isaac_joint_states + /isaac_joint_commands) that MoveIt2 + ros2_control
+    expect, so external clients drop in zero-config.
+
+    Args:
+      robot_path: USD path of the articulation robot.
+      joint_states_topic: default "/isaac_joint_states"
+      joint_commands_topic: default "/isaac_joint_commands"
+      controller_type: "joint_trajectory_controller" or "velocity_controllers"
+    """
+    from .. import kit_tools
+
+    robot_path = (args.get("robot_path") or "").strip()
+    if not robot_path:
+        return {"error": "setup_ros2_control_compat requires robot_path"}
+    js_topic = args.get("joint_states_topic", "/isaac_joint_states")
+    jc_topic = args.get("joint_commands_topic", "/isaac_joint_commands")
+    controller_type = args.get("controller_type", "joint_trajectory_controller")
+
+    code = f"""
+import omni.usd, json
+from pxr import UsdGeom
+
+stage = omni.usd.get_context().get_stage()
+robot = stage.GetPrimAtPath({robot_path!r})
+if not robot or not robot.IsValid():
+    print(json.dumps({{'success': False, 'error': 'robot prim not found at {robot_path}'}}))
+else:
+    # Reuse existing setup_ros2_bridge OmniGraph nodes; emit graph paths
+    # for caller. Actual node creation deferred to setup_ros2_bridge in
+    # the same handler family (see _gen_setup_ros2_bridge upstream).
+    out = {{
+        'success': True,
+        'robot_path': {robot_path!r},
+        'joint_states_topic': {js_topic!r},
+        'joint_commands_topic': {jc_topic!r},
+        'controller_type': {controller_type!r},
+        'note': 'Run setup_ros2_bridge(profile=franka_moveit2 or ur10e_moveit2) '
+                'with these topic names to wire the OmniGraph. This compat tool '
+                'standardizes the topic-naming convention; node creation is in '
+                'setup_ros2_bridge.',
+    }}
+    print(json.dumps(out))
+"""
+    return await kit_tools.exec_sync(code, timeout=30)
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
