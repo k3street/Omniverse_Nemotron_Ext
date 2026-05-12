@@ -4963,6 +4963,187 @@ else:
 
 
 # ---------------------------------------------------------------------------
+# Phase 7 wave 16 — final data-handler stragglers (COMPLETES data-handler migration)
+
+
+async def _handle_place_on_top_of(args: Dict) -> Dict:
+    """Place `prim_path` on top of `target_prim_path` using authoritative
+    bounding-box geometry.
+
+    The "spatial-language → coordinates" middle layer: the LLM identifies
+    that the user said "X on top of Y" (variables: source=X, target=Y) and
+    calls this tool. No numeric reasoning by the LLM — top z is read from
+    the target's world-space bbox, source's bottom z is read from its local
+    bbox, the translate is computed so the source's mesh sits exactly on
+    top with `clearance` (default 1cm) of gap.
+
+    Robust to:
+      - Cube `size`/`scale`/`translate` interactions (bbox is authoritative).
+      - Source assets whose origin is NOT at the geometric base (e.g. Franka's
+        flange thickness extending below local z=0).
+      - Nested xform parents on either prim.
+    """
+    from .. import kit_tools
+    source_path = args.get("prim_path") or args.get("source_prim_path") or ""
+    target_path = args.get("target_prim_path") or args.get("on_top_of") or ""
+    clearance = float(args.get("clearance", 0.001))
+    xy_align = args.get("xy_align", "center")
+    if not source_path or not target_path:
+        return {"error": "place_on_top_of requires prim_path (source) and target_prim_path"}
+    if xy_align not in ("center", "preserve"):
+        return {"error": f"xy_align must be 'center' or 'preserve', got {xy_align!r}"}
+
+    code = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdGeom, Gf
+
+stage = omni.usd.get_context().get_stage()
+src = stage.GetPrimAtPath({source_path!r})
+tgt = stage.GetPrimAtPath({target_path!r})
+result = {{'source': {source_path!r}, 'target': {target_path!r}, 'clearance': {clearance!r}}}
+
+if not src or not src.IsValid():
+    result['error'] = 'source prim not found: ' + {source_path!r}
+elif not tgt or not tgt.IsValid():
+    result['error'] = 'target prim not found: ' + {target_path!r}
+else:
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    tgt_bbox = cache.ComputeWorldBound(tgt).ComputeAlignedRange()
+    if tgt_bbox.IsEmpty():
+        result['error'] = 'target prim has empty bounding box (no geometry?)'
+    else:
+        top_z = tgt_bbox.GetMax()[2]
+        target_center = tgt_bbox.GetMidpoint()
+        result['target_top_z'] = float(top_z)
+        result['target_center'] = [float(target_center[0]), float(target_center[1]), float(target_center[2])]
+
+        # Source's bbox in its OWN local frame (no transforms applied).
+        # ComputeUntransformedBound is the correct call: it gives the
+        # geometric extent of the prim before its own translate/scale/orient
+        # is applied. ComputeLocalBound (which we used initially) returns
+        # bbox in the PARENT'S frame and INCLUDES the prim's own translate
+        # — that produced the embedded-in-cube bug for a sphere translated
+        # to z=0.5: src_bottom came back as 0.25 instead of -0.25 (the
+        # sphere radius), so the sphere ended up half a metre too low.
+        src_bbox_local = cache.ComputeUntransformedBound(src).ComputeAlignedRange()
+        if src_bbox_local.IsEmpty():
+            # Robot articulations sometimes report empty local bbox — fall back
+            # to assuming geometric origin at flange (offset = 0).
+            src_bottom_local = 0.0
+            result['source_local_bottom_fallback'] = True
+        else:
+            src_bottom_local = src_bbox_local.GetMin()[2]
+        result['source_bottom_local_z'] = float(src_bottom_local)
+
+        desired_world_z = float(top_z) + {clearance!r} - float(src_bottom_local)
+
+        xf = UsdGeom.Xformable(src)
+        translate_op = None
+        for op in xf.GetOrderedXformOps():
+            if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+                translate_op = op
+                break
+        if translate_op is None:
+            translate_op = xf.AddTranslateOp()
+
+        cur = translate_op.Get() or Gf.Vec3d(0.0, 0.0, 0.0)
+        if {xy_align!r} == 'center':
+            new_x, new_y = float(target_center[0]), float(target_center[1])
+        else:  # preserve
+            new_x, new_y = float(cur[0]), float(cur[1])
+        translate_op.Set(Gf.Vec3d(new_x, new_y, desired_world_z))
+        result['placed_at'] = [new_x, new_y, desired_world_z]
+        result['success'] = True
+
+print(json.dumps(result))
+"""
+    return await kit_tools.queue_exec_patch(
+        code, f"place_on_top_of {source_path} on {target_path} clearance={clearance}"
+    )
+
+
+async def _handle_list_available_controllers(args) -> dict:
+    """Probe current runtime env and report per-controller availability.
+
+    Agent uses this before calling setup_pick_place_controller to pick
+    the right target_source for the user's hardware + scenario.
+
+    Returns:
+      {
+        "env": {"gpu_available": bool, "arch_name": str, ...},
+        "controllers": {
+          "native":   {"available": True,  "hardware_req": "CPU", ...},
+          "curobo":   {"available": False, "reason_if_not": "...", ...},
+          ...
+        },
+        "recommended_for_hardware": ["native", "spline", ...]
+      }
+    """
+    from ..tool_executor import (
+        _probe_gpu_capability,
+        _probe_scipy,
+        _probe_curobo,
+        _probe_isaac_lab,
+        _CONTROLLER_METADATA,
+    )
+    env = {
+        "gpu": _probe_gpu_capability(),
+        "scipy": _probe_scipy(),
+        "curobo": _probe_curobo(),
+        "isaac_lab": _probe_isaac_lab(),
+    }
+    # Determine availability per target_source
+    results = {}
+    for name, meta in _CONTROLLER_METADATA.items():
+        entry = dict(meta)
+        # Availability rules
+        if name in {"native", "sensor_gated", "fixed_poses", "cube_tracking", "ros2_cmd"}:
+            entry["available"] = True
+        elif name == "spline":
+            # spline works on pure numpy (falls back to np.interp); scipy preferred
+            entry["available"] = True
+            entry["interp_backend"] = "scipy.CubicSpline" if env["scipy"]["available"] else "numpy linear (fallback)"
+        elif name == "curobo":
+            gpu_ok = env["gpu"]["gpu_available"]
+            cc = env["gpu"].get("compute_capability")
+            cc_ok = False
+            if cc:
+                try: cc_ok = int(cc.split(".")[0]) >= 7
+                except Exception: pass
+            # curobo is "runnable" (install runs without crashing) when bridgeable;
+            # FULL delivery needs content/ YAMLs which are missing. Mark as
+            # runnable=True but note the caveat.
+            curobo_avail = env["curobo"]["available"] or env["curobo"].get("bridgeable", False)
+            entry["available"] = bool(gpu_ok and cc_ok and curobo_avail)
+            entry["notes"] = "Install runs (env-bridge + wp.func patch). Full MotionPlanner blocked on missing franka.yml + content/ YAMLs (I-27)." if curobo_avail else None
+            if not entry["available"]:
+                reasons = []
+                if not gpu_ok: reasons.append(env["gpu"].get("reason") or "no GPU")
+                if gpu_ok and not cc_ok: reasons.append(f"GPU cc {cc} < 7.0 (Volta minimum)")
+                if not curobo_avail: reasons.append(env["curobo"].get("reason") or "curobo not available")
+                entry["reason_if_not"] = "; ".join(reasons)
+        elif name in {"diffik", "osc"}:
+            # Isaac Lab is bridgeable via sys.path.insert + invalidate_caches;
+            # generators apply the bridge automatically.
+            lab_avail = env["isaac_lab"]["available"] or env["isaac_lab"].get("bridgeable", False)
+            entry["available"] = lab_avail
+            if not entry["available"]:
+                entry["reason_if_not"] = env["isaac_lab"].get("reason")
+        elif name == "auto":
+            entry["available"] = True
+        results[name] = entry
+    # Recommend in priority order, filtering unavailable
+    priority = ["curobo", "spline", "native", "sensor_gated", "diffik", "osc"]
+    recommended = [n for n in priority if results.get(n, {}).get("available")]
+    return {
+        "env": env,
+        "controllers": results,
+        "recommended_for_hardware": recommended,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 

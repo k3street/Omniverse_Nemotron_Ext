@@ -1997,6 +1997,108 @@ print(json.dumps(result, default=str))
 
 
 # ---------------------------------------------------------------------------
+# Phase 7 wave 16 — final data-handler stragglers (COMPLETES data-handler migration)
+
+
+async def _handle_lookup_material(args: Dict) -> Dict:
+    """Look up physics material properties for a material pair."""
+    from ..tool_executor import _load_physics_materials, _normalize_material_name
+    mat_a_raw = args.get("material_a", "")
+    mat_b_raw = args.get("material_b", "")
+    if not mat_a_raw or not mat_b_raw:
+        return {"error": "Both material_a and material_b are required."}
+
+    db = _load_physics_materials()
+    mat_a = _normalize_material_name(mat_a_raw)
+    mat_b = _normalize_material_name(mat_b_raw)
+
+    # Check if materials exist in database
+    materials = db.get("materials", {})
+    available = sorted(materials.keys())
+    if mat_a not in materials and mat_b not in materials:
+        return {
+            "found": False,
+            "error": f"Unknown materials: '{mat_a_raw}' and '{mat_b_raw}'",
+            "available_materials": available,
+        }
+    if mat_a not in materials:
+        return {
+            "found": False,
+            "error": f"Unknown material: '{mat_a_raw}' (normalized: '{mat_a}')",
+            "available_materials": available,
+        }
+    if mat_b not in materials:
+        return {
+            "found": False,
+            "error": f"Unknown material: '{mat_b_raw}' (normalized: '{mat_b}')",
+            "available_materials": available,
+        }
+
+    # Check pair overrides (both orderings)
+    pairs = db.get("pairs", {})
+    pair_key_ab = f"{mat_a}:{mat_b}"
+    pair_key_ba = f"{mat_b}:{mat_a}"
+    if pair_key_ab in pairs:
+        result = dict(pairs[pair_key_ab])
+        result["found"] = True
+        result["pair"] = pair_key_ab
+        result["lookup_type"] = "pair_specific"
+        result["material_a"] = mat_a
+        result["material_b"] = mat_b
+        result["density_a_kg_m3"] = materials[mat_a]["density_kg_m3"]
+        result["density_b_kg_m3"] = materials[mat_b]["density_kg_m3"]
+        return result
+    if pair_key_ba in pairs:
+        result = dict(pairs[pair_key_ba])
+        result["found"] = True
+        result["pair"] = pair_key_ba
+        result["lookup_type"] = "pair_specific"
+        result["material_a"] = mat_a
+        result["material_b"] = mat_b
+        result["density_a_kg_m3"] = materials[mat_a]["density_kg_m3"]
+        result["density_b_kg_m3"] = materials[mat_b]["density_kg_m3"]
+        return result
+
+    # Combine individual materials (PhysX average combine mode)
+    a = materials[mat_a]
+    b = materials[mat_b]
+    sf_a = a["static_friction"] if isinstance(a["static_friction"], (int, float)) else a["static_friction"][0]
+    sf_b = b["static_friction"] if isinstance(b["static_friction"], (int, float)) else b["static_friction"][0]
+    df_a = a["dynamic_friction"] if isinstance(a["dynamic_friction"], (int, float)) else a["dynamic_friction"][0]
+    df_b = b["dynamic_friction"] if isinstance(b["dynamic_friction"], (int, float)) else b["dynamic_friction"][0]
+    rest_a = a["restitution"]
+    rest_b = b["restitution"]
+
+    return {
+        "found": True,
+        "pair": f"{mat_a}:{mat_b}",
+        "lookup_type": "average_combine",
+        "static_friction": round((sf_a + sf_b) / 2, 4),
+        "dynamic_friction": round((df_a + df_b) / 2, 4),
+        "restitution": round((rest_a + rest_b) / 2, 4),
+        "combine_mode": "average",
+        "material_a": mat_a,
+        "material_b": mat_b,
+        "density_a_kg_m3": a["density_kg_m3"],
+        "density_b_kg_m3": b["density_kg_m3"],
+        "note": "Computed via PhysX average combine — pair-specific data not available",
+    }
+
+
+async def _handle_suggest_physics_settings(args: Dict) -> Dict:
+    """Return recommended physics settings for the given scene type."""
+    from ..tool_executor import _PHYSICS_SETTINGS_PRESETS
+    scene_type = args.get("scene_type", "manipulation")
+    preset = _PHYSICS_SETTINGS_PRESETS.get(scene_type)
+    if preset is None:
+        return {
+            "error": f"Unknown scene type '{scene_type}'. Valid types: {', '.join(_PHYSICS_SETTINGS_PRESETS.keys())}",
+            "valid_types": list(_PHYSICS_SETTINGS_PRESETS.keys()),
+        }
+    return {"type": "data", "settings": preset}
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 

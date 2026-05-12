@@ -11,7 +11,7 @@ Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 6.
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -697,6 +697,118 @@ def _gen_generate_teleop_watchdog_script(args: Dict) -> str:
         "    loop = asyncio.get_event_loop()\n"
         "    return loop.create_task(watchdog_loop())\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 wave 16 — final data-handler stragglers (COMPLETES data-handler migration)
+
+
+async def _handle_summarize_teleop_session(args: Dict) -> Dict:
+    """Summarize duration and per-joint statistics for an HDF5 teleop session."""
+    from ..tool_executor import _open_hdf5_safely
+    path = args["hdf5_path"]
+    fps_override = args.get("fps")
+    f, reason = _open_hdf5_safely(path)
+    if f is None:
+        available = not reason.startswith("h5py")
+        return {
+            "available": available,
+            "path": path,
+            "reason": reason,
+            "demos": 0,
+        }
+
+    try:
+        root_fps = f.attrs.get("fps") if hasattr(f, "attrs") else None
+        fps = int(fps_override or root_fps or 30)
+        data_group = f.get("data")
+        if data_group is None:
+            return {
+                "available": True,
+                "path": path,
+                "reason": "missing /data group",
+                "demos": 0,
+                "fps": fps,
+            }
+
+        demo_count = 0
+        total_transitions = 0
+        total_duration = 0.0
+        # Per-joint aggregates
+        joint_min: List[float] = []
+        joint_max: List[float] = []
+        joint_vel_abs_sum: List[float] = []
+        joint_vel_abs_peak: List[float] = []
+        joint_sample_count = 0
+
+        for demo_name in data_group.keys():
+            demo = data_group[demo_name]
+            actions = demo.get("actions")
+            if actions is None:
+                continue
+            shape = getattr(actions, "shape", ())
+            if len(shape) != 2 or shape[0] == 0:
+                continue
+            demo_count += 1
+            n_steps = int(shape[0])
+            n_joints = int(shape[1])
+            total_transitions += n_steps
+            total_duration += n_steps / float(fps)
+
+            # Grow per-joint arrays lazily
+            while len(joint_min) < n_joints:
+                joint_min.append(float("inf"))
+                joint_max.append(float("-inf"))
+                joint_vel_abs_sum.append(0.0)
+                joint_vel_abs_peak.append(0.0)
+
+            sample = actions[: min(n_steps, 4096)]
+            prev_row: Optional[List[float]] = None
+            for row in sample:
+                for j, v in enumerate(row):
+                    try:
+                        fv = float(v)
+                    except (TypeError, ValueError):
+                        continue
+                    if fv < joint_min[j]:
+                        joint_min[j] = fv
+                    if fv > joint_max[j]:
+                        joint_max[j] = fv
+                    if prev_row is not None:
+                        dv = abs(fv - prev_row[j])
+                        joint_vel_abs_sum[j] += dv
+                        if dv > joint_vel_abs_peak[j]:
+                            joint_vel_abs_peak[j] = dv
+                prev_row = [float(x) for x in row]
+                joint_sample_count += 1
+
+        per_joint = []
+        denom = max(joint_sample_count - demo_count, 1)
+        for j, lo in enumerate(joint_min):
+            hi = joint_max[j]
+            per_joint.append({
+                "joint": j,
+                "range_rad": (hi - lo) if hi > lo else 0.0,
+                "min": (lo if lo != float("inf") else 0.0),
+                "max": (hi if hi != float("-inf") else 0.0),
+                "vel_mean": joint_vel_abs_sum[j] / denom * fps,
+                "vel_max": joint_vel_abs_peak[j] * fps,
+            })
+
+        return {
+            "available": True,
+            "path": path,
+            "demos": demo_count,
+            "total_duration_s": total_duration,
+            "total_transitions": total_transitions,
+            "fps": fps,
+            "per_joint": per_joint,
+        }
+    finally:
+        try:
+            f.close()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------

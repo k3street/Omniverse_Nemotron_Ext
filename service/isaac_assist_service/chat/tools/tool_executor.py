@@ -1640,6 +1640,7 @@ from .handlers.arena import (  # noqa: E402
     _gen_create_arena,
     _gen_create_arena_variant,
     _gen_run_arena_benchmark,
+    _handle_arena_leaderboard,          # Phase 7 wave 16
 )
 from .handlers.animation import (  # noqa: E402
     _gen_create_audio_prim,
@@ -1808,6 +1809,8 @@ from .handlers.physics import (  # noqa: E402
     _handle_get_mass,                        # Phase 7 wave 2
     _handle_get_physics_errors,              # Phase 7 wave 2
     _handle_get_physics_scene_config,        # Phase 7 wave 2
+    _handle_lookup_material,                 # Phase 7 wave 16
+    _handle_suggest_physics_settings,        # Phase 7 wave 16
 )
 from .handlers.pick_place import (  # noqa: E402
     _gen_setup_pick_place_controller,
@@ -1848,6 +1851,7 @@ from .handlers.diagnostics import (  # noqa: E402
     _handle_get_console_errors,     # Phase 7 wave 10
     _handle_get_debug_info,         # Phase 7 wave 10
     _handle_hardware_compatibility_check,  # Phase 7 wave 10
+    _handle_list_extensions,            # Phase 7 wave 16
     _handle_measure_distance,       # Phase 7 wave 14
     _handle_measure_sim_real_gap,   # Phase 7 wave 14
     _handle_proactive_check,        # Phase 7 wave 14
@@ -1928,6 +1932,8 @@ from .handlers.robot import (  # noqa: E402
     _handle_create_rotary_table,       # Phase 7 wave 7
     _handle_generate_robot_description, # Phase 7 wave 7
     _handle_get_gripper_state,         # Phase 7 wave 7
+    _handle_list_available_controllers, # Phase 7 wave 16
+    _handle_place_on_top_of,            # Phase 7 wave 16
     _handle_quick_calibrate,           # Phase 7 wave 7
     _handle_register_moving_obstacle,  # Phase 7 wave 7
     _handle_setup_assembly_constraint, # Phase 7 wave 7
@@ -1966,6 +1972,8 @@ from .handlers.sdg import (  # noqa: E402
     _gen_enforce_class_balance,
     _gen_export_dataset,
     _gen_preview_dr,
+    _handle_benchmark_sdg,              # Phase 7 wave 16
+    _handle_preview_sdg,                # Phase 7 wave 16
 )
 from .handlers.teleop import (  # noqa: E402
     _gen_configure_teleop_mapping,
@@ -1975,6 +1983,7 @@ from .handlers.teleop import (  # noqa: E402
     _gen_start_teleop_session,
     _gen_stop_teleop_session,
     _gen_teleop_safety_config,
+    _handle_summarize_teleop_session,   # Phase 7 wave 16
 )
 from .handlers.training import (  # noqa: E402
     _gen_clone_envs,
@@ -2562,100 +2571,7 @@ async def _augment_verify_with_feasibility(verify_result: Dict, stages: list) ->
 
     # _handle_resolve_prim_reference moved to handlers/resolve.py (Phase 7 wave 1).
 
-async def _handle_place_on_top_of(args: Dict) -> Dict:
-    """Place `prim_path` on top of `target_prim_path` using authoritative
-    bounding-box geometry.
-
-    The "spatial-language → coordinates" middle layer: the LLM identifies
-    that the user said "X on top of Y" (variables: source=X, target=Y) and
-    calls this tool. No numeric reasoning by the LLM — top z is read from
-    the target's world-space bbox, source's bottom z is read from its local
-    bbox, the translate is computed so the source's mesh sits exactly on
-    top with `clearance` (default 1cm) of gap.
-
-    Robust to:
-      - Cube `size`/`scale`/`translate` interactions (bbox is authoritative).
-      - Source assets whose origin is NOT at the geometric base (e.g. Franka's
-        flange thickness extending below local z=0).
-      - Nested xform parents on either prim.
-    """
-    source_path = args.get("prim_path") or args.get("source_prim_path") or ""
-    target_path = args.get("target_prim_path") or args.get("on_top_of") or ""
-    clearance = float(args.get("clearance", 0.001))
-    xy_align = args.get("xy_align", "center")
-    if not source_path or not target_path:
-        return {"error": "place_on_top_of requires prim_path (source) and target_prim_path"}
-    if xy_align not in ("center", "preserve"):
-        return {"error": f"xy_align must be 'center' or 'preserve', got {xy_align!r}"}
-
-    code = f"""\
-import omni.usd
-import json
-from pxr import Usd, UsdGeom, Gf
-
-stage = omni.usd.get_context().get_stage()
-src = stage.GetPrimAtPath({source_path!r})
-tgt = stage.GetPrimAtPath({target_path!r})
-result = {{'source': {source_path!r}, 'target': {target_path!r}, 'clearance': {clearance!r}}}
-
-if not src or not src.IsValid():
-    result['error'] = 'source prim not found: ' + {source_path!r}
-elif not tgt or not tgt.IsValid():
-    result['error'] = 'target prim not found: ' + {target_path!r}
-else:
-    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
-    tgt_bbox = cache.ComputeWorldBound(tgt).ComputeAlignedRange()
-    if tgt_bbox.IsEmpty():
-        result['error'] = 'target prim has empty bounding box (no geometry?)'
-    else:
-        top_z = tgt_bbox.GetMax()[2]
-        target_center = tgt_bbox.GetMidpoint()
-        result['target_top_z'] = float(top_z)
-        result['target_center'] = [float(target_center[0]), float(target_center[1]), float(target_center[2])]
-
-        # Source's bbox in its OWN local frame (no transforms applied).
-        # ComputeUntransformedBound is the correct call: it gives the
-        # geometric extent of the prim before its own translate/scale/orient
-        # is applied. ComputeLocalBound (which we used initially) returns
-        # bbox in the PARENT'S frame and INCLUDES the prim's own translate
-        # — that produced the embedded-in-cube bug for a sphere translated
-        # to z=0.5: src_bottom came back as 0.25 instead of -0.25 (the
-        # sphere radius), so the sphere ended up half a metre too low.
-        src_bbox_local = cache.ComputeUntransformedBound(src).ComputeAlignedRange()
-        if src_bbox_local.IsEmpty():
-            # Robot articulations sometimes report empty local bbox — fall back
-            # to assuming geometric origin at flange (offset = 0).
-            src_bottom_local = 0.0
-            result['source_local_bottom_fallback'] = True
-        else:
-            src_bottom_local = src_bbox_local.GetMin()[2]
-        result['source_bottom_local_z'] = float(src_bottom_local)
-
-        desired_world_z = float(top_z) + {clearance!r} - float(src_bottom_local)
-
-        xf = UsdGeom.Xformable(src)
-        translate_op = None
-        for op in xf.GetOrderedXformOps():
-            if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
-                translate_op = op
-                break
-        if translate_op is None:
-            translate_op = xf.AddTranslateOp()
-
-        cur = translate_op.Get() or Gf.Vec3d(0.0, 0.0, 0.0)
-        if {xy_align!r} == 'center':
-            new_x, new_y = float(target_center[0]), float(target_center[1])
-        else:  # preserve
-            new_x, new_y = float(cur[0]), float(cur[1])
-        translate_op.Set(Gf.Vec3d(new_x, new_y, desired_world_z))
-        result['placed_at'] = [new_x, new_y, desired_world_z]
-        result['success'] = True
-
-print(json.dumps(result))
-"""
-    return await kit_tools.queue_exec_patch(
-        code, f"place_on_top_of {source_path} on {target_path} clearance={clearance}"
-    )
+    # _handle_place_on_top_of moved to handlers/robot.py (Phase 7 wave 16).
 
 
 # _handle_measure_distance moved to handlers/diagnostics.py (Phase 7 wave 14).
@@ -3694,22 +3610,7 @@ DATA_HANDLERS["validate_scene_blueprint"] = _handle_validate_scene_blueprint
 
 # _gen_add_domain_randomizer moved to handlers/sdg.py (Phase 6 wave 5).
 
-async def _handle_preview_sdg(args: Dict) -> Dict:
-    """Step the Replicator orchestrator a few times for preview frames."""
-    num_samples = args.get("num_samples", 3)
-
-    code = f"""\
-import omni.replicator.core as rep
-import json
-
-num_samples = {num_samples}
-for i in range(num_samples):
-    rep.orchestrator.step()
-    print(f"Preview frame {{i + 1}}/{num_samples} generated")
-
-print(json.dumps({{"preview_frames": num_samples, "status": "done"}}))
-"""
-    return await kit_tools.queue_exec_patch(code, f"Preview SDG: generate {num_samples} sample frames")
+    # _handle_preview_sdg moved to handlers/sdg.py (Phase 7 wave 16).
 
 # _gen_export_dataset moved to handlers/sdg.py (Phase 6 wave 5).
 
@@ -3903,79 +3804,7 @@ def _arena_env_id(scene_type: str, robot_asset: str, task: str) -> str:
 
 
 
-async def _handle_arena_leaderboard(args: Dict) -> Dict:
-    """Format a leaderboard table from benchmark results."""
-    results = args.get("results", [])
-
-    if not results:
-        return {
-            "leaderboard": "No results to display.",
-            "entries": [],
-        }
-
-    # Collect all unique metric keys across results
-    all_metrics = set()
-    for r in results:
-        all_metrics.update(r.get("metrics", {}).keys())
-    metric_cols = sorted(all_metrics)
-
-    # Build leaderboard entries
-    entries = []
-    for i, r in enumerate(results):
-        entry = {
-            "rank": i + 1,
-            "env_id": r.get("env_id", "unknown"),
-            "robot": r.get("robot", "unknown"),
-        }
-        for m in metric_cols:
-            entry[m] = r.get("metrics", {}).get(m, "N/A")
-        entries.append(entry)
-
-    # Sort by success_rate descending if available, else by first metric
-    sort_key = "success_rate" if "success_rate" in metric_cols else (metric_cols[0] if metric_cols else None)
-    if sort_key:
-        entries.sort(
-            key=lambda e: e.get(sort_key, 0) if isinstance(e.get(sort_key), (int, float)) else 0,
-            reverse=True,
-        )
-        for i, e in enumerate(entries):
-            e["rank"] = i + 1
-
-    # Format as text table
-    header_cols = ["Rank", "Robot", "Env ID"] + metric_cols
-    rows = []
-    for e in entries:
-        row = [str(e["rank"]), e["robot"], e["env_id"]]
-        for m in metric_cols:
-            val = e.get(m, "N/A")
-            if isinstance(val, float):
-                row.append(f"{val:.4f}")
-            else:
-                row.append(str(val))
-        rows.append(row)
-
-    # Calculate column widths
-    col_widths = [len(h) for h in header_cols]
-    for row in rows:
-        for i, cell in enumerate(row):
-            col_widths[i] = max(col_widths[i], len(cell))
-
-    # Build formatted table
-    sep = "+" + "+".join("-" * (w + 2) for w in col_widths) + "+"
-    header_line = "|" + "|".join(f" {h:<{col_widths[i]}} " for i, h in enumerate(header_cols)) + "|"
-    table_lines = [sep, header_line, sep]
-    for row in rows:
-        line = "|" + "|".join(f" {cell:<{col_widths[i]}} " for i, cell in enumerate(row)) + "|"
-        table_lines.append(line)
-    table_lines.append(sep)
-    table_text = "\n".join(table_lines)
-
-    return {
-        "leaderboard": table_text,
-        "entries": entries,
-        "metric_columns": metric_cols,
-        "count": len(entries),
-    }
+    # _handle_arena_leaderboard moved to handlers/arena.py (Phase 7 wave 16).
 
 CODE_GEN_HANDLERS["create_arena"] = _gen_create_arena
 CODE_GEN_HANDLERS["create_arena_variant"] = _gen_create_arena_variant
@@ -4326,88 +4155,7 @@ def _normalize_material_name(name: str) -> str:
 
 # _gen_apply_physics_material moved to handlers/physics.py (Phase 5 wave 3).
 
-async def _handle_lookup_material(args: Dict) -> Dict:
-    """Look up physics material properties for a material pair."""
-    mat_a_raw = args.get("material_a", "")
-    mat_b_raw = args.get("material_b", "")
-    if not mat_a_raw or not mat_b_raw:
-        return {"error": "Both material_a and material_b are required."}
-
-    db = _load_physics_materials()
-    mat_a = _normalize_material_name(mat_a_raw)
-    mat_b = _normalize_material_name(mat_b_raw)
-
-    # Check if materials exist in database
-    materials = db.get("materials", {})
-    available = sorted(materials.keys())
-    if mat_a not in materials and mat_b not in materials:
-        return {
-            "found": False,
-            "error": f"Unknown materials: '{mat_a_raw}' and '{mat_b_raw}'",
-            "available_materials": available,
-        }
-    if mat_a not in materials:
-        return {
-            "found": False,
-            "error": f"Unknown material: '{mat_a_raw}' (normalized: '{mat_a}')",
-            "available_materials": available,
-        }
-    if mat_b not in materials:
-        return {
-            "found": False,
-            "error": f"Unknown material: '{mat_b_raw}' (normalized: '{mat_b}')",
-            "available_materials": available,
-        }
-
-    # Check pair overrides (both orderings)
-    pairs = db.get("pairs", {})
-    pair_key_ab = f"{mat_a}:{mat_b}"
-    pair_key_ba = f"{mat_b}:{mat_a}"
-    if pair_key_ab in pairs:
-        result = dict(pairs[pair_key_ab])
-        result["found"] = True
-        result["pair"] = pair_key_ab
-        result["lookup_type"] = "pair_specific"
-        result["material_a"] = mat_a
-        result["material_b"] = mat_b
-        result["density_a_kg_m3"] = materials[mat_a]["density_kg_m3"]
-        result["density_b_kg_m3"] = materials[mat_b]["density_kg_m3"]
-        return result
-    if pair_key_ba in pairs:
-        result = dict(pairs[pair_key_ba])
-        result["found"] = True
-        result["pair"] = pair_key_ba
-        result["lookup_type"] = "pair_specific"
-        result["material_a"] = mat_a
-        result["material_b"] = mat_b
-        result["density_a_kg_m3"] = materials[mat_a]["density_kg_m3"]
-        result["density_b_kg_m3"] = materials[mat_b]["density_kg_m3"]
-        return result
-
-    # Combine individual materials (PhysX average combine mode)
-    a = materials[mat_a]
-    b = materials[mat_b]
-    sf_a = a["static_friction"] if isinstance(a["static_friction"], (int, float)) else a["static_friction"][0]
-    sf_b = b["static_friction"] if isinstance(b["static_friction"], (int, float)) else b["static_friction"][0]
-    df_a = a["dynamic_friction"] if isinstance(a["dynamic_friction"], (int, float)) else a["dynamic_friction"][0]
-    df_b = b["dynamic_friction"] if isinstance(b["dynamic_friction"], (int, float)) else b["dynamic_friction"][0]
-    rest_a = a["restitution"]
-    rest_b = b["restitution"]
-
-    return {
-        "found": True,
-        "pair": f"{mat_a}:{mat_b}",
-        "lookup_type": "average_combine",
-        "static_friction": round((sf_a + sf_b) / 2, 4),
-        "dynamic_friction": round((df_a + df_b) / 2, 4),
-        "restitution": round((rest_a + rest_b) / 2, 4),
-        "combine_mode": "average",
-        "material_a": mat_a,
-        "material_b": mat_b,
-        "density_a_kg_m3": a["density_kg_m3"],
-        "density_b_kg_m3": b["density_kg_m3"],
-        "note": "Computed via PhysX average combine — pair-specific data not available",
-    }
+    # _handle_lookup_material moved to handlers/physics.py (Phase 7 wave 16).
 
 # ══════ From feat/new-scene-diff ══════
 def _parse_unified_diff_to_changes(raw_diff_lines: List[str]) -> List[Dict]:
@@ -4544,16 +4292,7 @@ DATA_HANDLERS["watch_changes"] = _handle_watch_changes
 
 # _gen_simplify_collision moved to handlers/physics.py (Phase 5 wave 5).
 
-async def _handle_suggest_physics_settings(args: Dict) -> Dict:
-    """Return recommended physics settings for the given scene type."""
-    scene_type = args.get("scene_type", "manipulation")
-    preset = _PHYSICS_SETTINGS_PRESETS.get(scene_type)
-    if preset is None:
-        return {
-            "error": f"Unknown scene type '{scene_type}'. Valid types: {', '.join(_PHYSICS_SETTINGS_PRESETS.keys())}",
-            "valid_types": list(_PHYSICS_SETTINGS_PRESETS.keys()),
-        }
-    return {"type": "data", "settings": preset}
+    # _handle_suggest_physics_settings moved to handlers/physics.py (Phase 7 wave 16).
 
 CODE_GEN_HANDLERS["optimize_scene"] = _gen_optimize_scene
 CODE_GEN_HANDLERS["simplify_collision"] = _gen_simplify_collision
@@ -4704,111 +4443,7 @@ def _open_hdf5_safely(path: str):
 
 # _handle_validate_teleop_demo moved to handlers/diagnostics.py (Phase 7 wave 14).
 
-async def _handle_summarize_teleop_session(args: Dict) -> Dict:
-    """Summarize duration and per-joint statistics for an HDF5 teleop session."""
-    path = args["hdf5_path"]
-    fps_override = args.get("fps")
-    f, reason = _open_hdf5_safely(path)
-    if f is None:
-        available = not reason.startswith("h5py")
-        return {
-            "available": available,
-            "path": path,
-            "reason": reason,
-            "demos": 0,
-        }
-
-    try:
-        root_fps = f.attrs.get("fps") if hasattr(f, "attrs") else None
-        fps = int(fps_override or root_fps or 30)
-        data_group = f.get("data")
-        if data_group is None:
-            return {
-                "available": True,
-                "path": path,
-                "reason": "missing /data group",
-                "demos": 0,
-                "fps": fps,
-            }
-
-        demo_count = 0
-        total_transitions = 0
-        total_duration = 0.0
-        # Per-joint aggregates
-        joint_min: List[float] = []
-        joint_max: List[float] = []
-        joint_vel_abs_sum: List[float] = []
-        joint_vel_abs_peak: List[float] = []
-        joint_sample_count = 0
-
-        for demo_name in data_group.keys():
-            demo = data_group[demo_name]
-            actions = demo.get("actions")
-            if actions is None:
-                continue
-            shape = getattr(actions, "shape", ())
-            if len(shape) != 2 or shape[0] == 0:
-                continue
-            demo_count += 1
-            n_steps = int(shape[0])
-            n_joints = int(shape[1])
-            total_transitions += n_steps
-            total_duration += n_steps / float(fps)
-
-            # Grow per-joint arrays lazily
-            while len(joint_min) < n_joints:
-                joint_min.append(float("inf"))
-                joint_max.append(float("-inf"))
-                joint_vel_abs_sum.append(0.0)
-                joint_vel_abs_peak.append(0.0)
-
-            sample = actions[: min(n_steps, 4096)]
-            prev_row: Optional[List[float]] = None
-            for row in sample:
-                for j, v in enumerate(row):
-                    try:
-                        fv = float(v)
-                    except (TypeError, ValueError):
-                        continue
-                    if fv < joint_min[j]:
-                        joint_min[j] = fv
-                    if fv > joint_max[j]:
-                        joint_max[j] = fv
-                    if prev_row is not None:
-                        dv = abs(fv - prev_row[j])
-                        joint_vel_abs_sum[j] += dv
-                        if dv > joint_vel_abs_peak[j]:
-                            joint_vel_abs_peak[j] = dv
-                prev_row = [float(x) for x in row]
-                joint_sample_count += 1
-
-        per_joint = []
-        denom = max(joint_sample_count - demo_count, 1)
-        for j, lo in enumerate(joint_min):
-            hi = joint_max[j]
-            per_joint.append({
-                "joint": j,
-                "range_rad": (hi - lo) if hi > lo else 0.0,
-                "min": (lo if lo != float("inf") else 0.0),
-                "max": (hi if hi != float("-inf") else 0.0),
-                "vel_mean": joint_vel_abs_sum[j] / denom * fps,
-                "vel_max": joint_vel_abs_peak[j] * fps,
-            })
-
-        return {
-            "available": True,
-            "path": path,
-            "demos": demo_count,
-            "total_duration_s": total_duration,
-            "total_transitions": total_transitions,
-            "fps": fps,
-            "per_joint": per_joint,
-        }
-    finally:
-        try:
-            f.close()
-        except Exception:
-            pass
+    # _handle_summarize_teleop_session moved to handlers/teleop.py (Phase 7 wave 16).
 
 
 # _gen_export_teleop_mapping moved to handlers/teleop.py (Phase 6 wave 8).
@@ -4831,101 +4466,7 @@ DATA_HANDLERS["summarize_teleop_session"] = _handle_summarize_teleop_session
 
 # _gen_enforce_class_balance moved to handlers/sdg.py (Phase 6 wave 5).
 
-async def _handle_benchmark_sdg(args: Dict) -> Dict:
-    """Run a headless SDG throughput benchmark.
-
-    Generates a short measurement loop and queues it to Kit; returns the
-    patch queue status plus the expected preset baseline for the current
-    annotator combination.
-    """
-    pipeline_id = args.get("pipeline_id", "")
-    num_frames = int(args.get("num_frames", 100))
-    annotators = args.get("annotators") or ["rgb"]
-    resolution = args.get("resolution") or [1280, 720]
-
-    # Sanitize pipeline_id to avoid injection into the generated script.
-    import re as _re
-    if pipeline_id and not _re.match(r"^[a-zA-Z0-9/_.:-]*$", pipeline_id):
-        return {"error": f"Invalid characters in pipeline_id: {pipeline_id!r}"}
-    if not all(isinstance(a, str) and _re.match(r"^[a-zA-Z0-9_]+$", a) for a in annotators):
-        return {"error": f"Invalid annotator identifier in {annotators!r}"}
-    if not (isinstance(resolution, list) and len(resolution) == 2 and all(isinstance(x, int) for x in resolution)):
-        return {"error": "resolution must be [width, height] ints"}
-
-    # Preset baselines (expected FPS on RTX 4090) derived from the spec table.
-    preset_baselines = {
-        frozenset({"rgb"}): (30, 60),
-        frozenset({"rgb", "depth", "bounding_box_2d"}): (15, 25),
-        frozenset({"rgb", "depth", "semantic_segmentation", "instance_segmentation", "normals"}): (5, 10),
-    }
-    key = frozenset(annotators)
-    baseline = preset_baselines.get(key)
-
-    code = f"""\
-import json
-import time
-import omni.replicator.core as rep
-
-ANNOTATORS = {list(annotators)!r}
-NUM_FRAMES = {num_frames}
-RESOLUTION = ({resolution[0]}, {resolution[1]})
-
-with rep.new_layer():
-    camera = rep.get.camera()
-    rp = rep.create.render_product(camera, RESOLUTION)
-
-    for a in ANNOTATORS:
-        try:
-            rep.AnnotatorRegistry.get_annotator(a).attach([rp])
-        except Exception:
-            pass
-
-    t0 = time.time()
-    rep.orchestrator.run_until_complete(num_frames=NUM_FRAMES)
-    elapsed = max(time.time() - t0, 1e-6)
-
-fps = NUM_FRAMES / elapsed
-
-# VRAM + disk I/O are best-effort — fall back to nulls if unavailable
-vram_peak_mb = None
-try:
-    import torch
-    if torch.cuda.is_available():
-        vram_peak_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
-except Exception:
-    pass
-
-# Coarse bottleneck label
-bottleneck = 'gpu_render'
-if fps < 5 and vram_peak_mb is not None and vram_peak_mb > 10_000:
-    bottleneck = 'gpu_memory'
-elif fps < 2:
-    bottleneck = 'disk_write'
-
-print(json.dumps({{
-    'pipeline_id': {pipeline_id!r},
-    'num_frames': NUM_FRAMES,
-    'annotators': ANNOTATORS,
-    'resolution': list(RESOLUTION),
-    'elapsed_s': round(elapsed, 3),
-    'fps': round(fps, 2),
-    'vram_peak_mb': vram_peak_mb,
-    'bottleneck': bottleneck,
-}}))
-"""
-
-    result = await kit_tools.queue_exec_patch(
-        code, f"Benchmark SDG ({num_frames} frames, {len(annotators)} annotators)"
-    )
-    return {
-        "queued": result.get("queued", False),
-        "pipeline_id": pipeline_id,
-        "num_frames": num_frames,
-        "annotators": list(annotators),
-        "resolution": list(resolution),
-        "expected_fps_range": list(baseline) if baseline else None,
-        "note": "Actual FPS is printed by the Kit-side benchmark once the patch is approved and executed.",
-    }
+    # _handle_benchmark_sdg moved to handlers/sdg.py (Phase 7 wave 16).
 
 CODE_GEN_HANDLERS["scatter_on_surface"] = _gen_scatter_on_surface
 CODE_GEN_HANDLERS["configure_differential_sdg"] = _gen_configure_differential_sdg
@@ -6027,45 +5568,7 @@ DATA_HANDLERS["select_by_criteria"] = _handle_select_by_criteria
 # _gen_export_stage moved to handlers/scene_authoring.py (Phase 6 wave 16).
 
 # _handle_list_opened_stages moved to handlers/scene_authoring.py (Phase 7 wave 4).
-async def _handle_list_extensions(args: Dict) -> Dict:
-    """List Kit extensions registered with the extension manager."""
-    enabled_only = bool(args.get("enabled_only", False))
-    name_filter = args.get("name_filter") or ""
-    code = f"""\
-import json
-import omni.kit.app
-
-mgr = omni.kit.app.get_app().get_extension_manager()
-exts = list(mgr.get_extensions())
-enabled_only = {repr(enabled_only)}
-nf = {repr(name_filter)}.lower()
-
-out = []
-for ext in exts:
-    try:
-        ext_id = ext.get("id") or ext.get("name") or ""
-        version = ext.get("version") or ""
-        enabled = bool(ext.get("enabled", False))
-        title = ext.get("title") or ext.get("name") or ext_id
-    except AttributeError:
-        ext_id = getattr(ext, "id", "") or ""
-        version = getattr(ext, "version", "") or ""
-        enabled = bool(getattr(ext, "enabled", False))
-        title = getattr(ext, "title", "") or ext_id
-    if enabled_only and not enabled:
-        continue
-    if nf and nf not in str(ext_id).lower():
-        continue
-    out.append({{
-        "id": str(ext_id),
-        "version": str(version),
-        "enabled": enabled,
-        "title": str(title),
-    }})
-
-print(json.dumps({{"extensions": out, "total": len(out)}}))
-"""
-    return await kit_tools.queue_exec_patch(code, "List Kit extensions")
+    # _handle_list_extensions moved to handlers/diagnostics.py (Phase 7 wave 16).
 
 # _gen_enable_extension moved to handlers/diagnostics.py (Phase 6 wave 22).
 
@@ -6560,77 +6063,7 @@ def _probe_isaac_lab():
     return {"available": False, "reason": "isaaclab not importable and not found in isaac_lab_env", "bridgeable": False}
 
 
-async def _handle_list_available_controllers(args) -> dict:
-    """Probe current runtime env and report per-controller availability.
-
-    Agent uses this before calling setup_pick_place_controller to pick
-    the right target_source for the user's hardware + scenario.
-
-    Returns:
-      {
-        "env": {"gpu_available": bool, "arch_name": str, ...},
-        "controllers": {
-          "native":   {"available": True,  "hardware_req": "CPU", ...},
-          "curobo":   {"available": False, "reason_if_not": "...", ...},
-          ...
-        },
-        "recommended_for_hardware": ["native", "spline", ...]
-      }
-    """
-    env = {
-        "gpu": _probe_gpu_capability(),
-        "scipy": _probe_scipy(),
-        "curobo": _probe_curobo(),
-        "isaac_lab": _probe_isaac_lab(),
-    }
-    # Determine availability per target_source
-    results = {}
-    for name, meta in _CONTROLLER_METADATA.items():
-        entry = dict(meta)
-        # Availability rules
-        if name in {"native", "sensor_gated", "fixed_poses", "cube_tracking", "ros2_cmd"}:
-            entry["available"] = True
-        elif name == "spline":
-            # spline works on pure numpy (falls back to np.interp); scipy preferred
-            entry["available"] = True
-            entry["interp_backend"] = "scipy.CubicSpline" if env["scipy"]["available"] else "numpy linear (fallback)"
-        elif name == "curobo":
-            gpu_ok = env["gpu"]["gpu_available"]
-            cc = env["gpu"].get("compute_capability")
-            cc_ok = False
-            if cc:
-                try: cc_ok = int(cc.split(".")[0]) >= 7
-                except Exception: pass
-            # curobo is "runnable" (install runs without crashing) when bridgeable;
-            # FULL delivery needs content/ YAMLs which are missing. Mark as
-            # runnable=True but note the caveat.
-            curobo_avail = env["curobo"]["available"] or env["curobo"].get("bridgeable", False)
-            entry["available"] = bool(gpu_ok and cc_ok and curobo_avail)
-            entry["notes"] = "Install runs (env-bridge + wp.func patch). Full MotionPlanner blocked on missing franka.yml + content/ YAMLs (I-27)." if curobo_avail else None
-            if not entry["available"]:
-                reasons = []
-                if not gpu_ok: reasons.append(env["gpu"].get("reason") or "no GPU")
-                if gpu_ok and not cc_ok: reasons.append(f"GPU cc {cc} < 7.0 (Volta minimum)")
-                if not curobo_avail: reasons.append(env["curobo"].get("reason") or "curobo not available")
-                entry["reason_if_not"] = "; ".join(reasons)
-        elif name in {"diffik", "osc"}:
-            # Isaac Lab is bridgeable via sys.path.insert + invalidate_caches;
-            # generators apply the bridge automatically.
-            lab_avail = env["isaac_lab"]["available"] or env["isaac_lab"].get("bridgeable", False)
-            entry["available"] = lab_avail
-            if not entry["available"]:
-                entry["reason_if_not"] = env["isaac_lab"].get("reason")
-        elif name == "auto":
-            entry["available"] = True
-        results[name] = entry
-    # Recommend in priority order, filtering unavailable
-    priority = ["curobo", "spline", "native", "sensor_gated", "diffik", "osc"]
-    recommended = [n for n in priority if results.get(n, {}).get("available")]
-    return {
-        "env": env,
-        "controllers": results,
-        "recommended_for_hardware": recommended,
-    }
+    # _handle_list_available_controllers moved to handlers/robot.py (Phase 7 wave 16).
 
 
 DATA_HANDLERS["list_available_controllers"] = _handle_list_available_controllers

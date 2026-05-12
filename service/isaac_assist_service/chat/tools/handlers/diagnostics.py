@@ -4463,6 +4463,52 @@ print(json.dumps(out))
 
 
 # ---------------------------------------------------------------------------
+# Phase 7 wave 16 — final data-handler stragglers (COMPLETES data-handler migration)
+
+
+async def _handle_list_extensions(args: Dict) -> Dict:
+    """List Kit extensions registered with the extension manager."""
+    from .. import kit_tools
+    enabled_only = bool(args.get("enabled_only", False))
+    name_filter = args.get("name_filter") or ""
+    code = f"""\
+import json
+import omni.kit.app
+
+mgr = omni.kit.app.get_app().get_extension_manager()
+exts = list(mgr.get_extensions())
+enabled_only = {repr(enabled_only)}
+nf = {repr(name_filter)}.lower()
+
+out = []
+for ext in exts:
+    try:
+        ext_id = ext.get("id") or ext.get("name") or ""
+        version = ext.get("version") or ""
+        enabled = bool(ext.get("enabled", False))
+        title = ext.get("title") or ext.get("name") or ext_id
+    except AttributeError:
+        ext_id = getattr(ext, "id", "") or ""
+        version = getattr(ext, "version", "") or ""
+        enabled = bool(getattr(ext, "enabled", False))
+        title = getattr(ext, "title", "") or ext_id
+    if enabled_only and not enabled:
+        continue
+    if nf and nf not in str(ext_id).lower():
+        continue
+    out.append({{
+        "id": str(ext_id),
+        "version": str(version),
+        "enabled": enabled,
+        "title": str(title),
+    }})
+
+print(json.dumps({{"extensions": out, "total": len(out)}}))
+"""
+    return await kit_tools.queue_exec_patch(code, "List Kit extensions")
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
