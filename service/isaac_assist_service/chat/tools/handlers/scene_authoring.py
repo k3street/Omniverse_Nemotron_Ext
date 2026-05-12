@@ -2266,6 +2266,651 @@ print(f'activate_area: scope={{scope}} kept={{kept}} deactivated={{deactivated}}
 
 
 # ---------------------------------------------------------------------------
+# Phase 7 wave 3 — scene-authoring data-handlers (introspection)
+
+
+async def _handle_list_all_prims(args: Dict) -> Dict:
+    from . import kit_tools
+    ctx = await kit_tools.get_stage_context(full=True)
+    return ctx.get("stage", {})
+
+
+async def _handle_get_attribute(args: Dict) -> Dict:
+    """Read a single USD attribute value."""
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    attr_name = args["attr_name"]
+    code = f"""\
+import omni.usd
+import json
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}, 'attr_name': {attr_name!r}}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+else:
+    attr = prim.GetAttribute({attr_name!r})
+    if not attr or not attr.IsDefined():
+        result['error'] = 'attribute not defined'
+        result['available'] = [a.GetName() for a in prim.GetAttributes()][:50]
+    else:
+        try:
+            value = attr.Get()
+        except Exception as exc:
+            value = None
+            result['error'] = f'attr.Get() failed: {{exc}}'
+        # Convert pxr.Vt / Gf types to plain Python for json
+        try:
+            value = list(value) if hasattr(value, '__iter__') and not isinstance(value, (str, bytes)) else value
+        except Exception:
+            value = repr(value)
+        result['value'] = value
+        result['type_name'] = attr.GetTypeName().type.typeName
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_attribute {prim_path}.{attr_name}")
+
+async def _handle_get_world_transform(args: Dict) -> Dict:
+    """Compute world-space 4x4 transform of a prim."""
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    time_code = args.get("time_code")
+    tc_expr = repr(time_code) if time_code is not None else "Usd.TimeCode.Default()"
+    code = f"""\
+import omni.usd
+from pxr import Usd, UsdGeom, Gf
+import json
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+else:
+    xf = UsdGeom.Xformable(prim)
+    if not xf:
+        result['error'] = 'prim is not Xformable'
+    else:
+        m = xf.ComputeLocalToWorldTransform({tc_expr})
+        result['matrix'] = [m[i][j] for i in range(4) for j in range(4)]
+        t = m.ExtractTranslation()
+        r = m.ExtractRotationQuat()
+        # Pull scale from the upper 3x3
+        sx = Gf.Vec3d(m[0][0], m[0][1], m[0][2]).GetLength()
+        sy = Gf.Vec3d(m[1][0], m[1][1], m[1][2]).GetLength()
+        sz = Gf.Vec3d(m[2][0], m[2][1], m[2][2]).GetLength()
+        result['translation'] = [t[0], t[1], t[2]]
+        im = r.GetImaginary()
+        result['rotation_quat'] = [r.GetReal(), im[0], im[1], im[2]]
+        result['scale'] = [sx, sy, sz]
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_world_transform {prim_path}")
+
+async def _handle_get_bounding_box(args: Dict) -> Dict:
+    """Compute world-space AABB of a prim."""
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    purpose = args.get("purpose", "default")
+    # USD's UsdGeom.Tokens enum was reorganized — Tokens.default no longer
+    # exists in some pxr versions. Use the string literal directly via the
+    # purpose-name lookup (which matches "default", "render", "proxy", "guide"
+    # against the registered purpose tokens). Fall back to no purpose filter
+    # if even that is rejected.
+    code = f"""\
+import omni.usd
+from pxr import Usd, UsdGeom, Gf
+import json
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+else:
+    # Robust purpose-token lookup. Some Isaac Sim 5.x USD versions removed
+    # UsdGeom.Tokens.default; getattr with fallback handles both shapes.
+    _purpose_attr = {purpose!r}
+    try:
+        purpose_token = getattr(UsdGeom.Tokens, _purpose_attr)
+        purposes = [purpose_token]
+    except AttributeError:
+        # Fall back to no purpose filter — BBoxCache then computes for all
+        purposes = [UsdGeom.Tokens.default_] if hasattr(UsdGeom.Tokens, 'default_') else []
+        if not purposes:
+            # Final fallback: omit purpose argument entirely
+            purposes = None
+    try:
+        if purposes is not None:
+            cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), purposes, useExtentsHint=True)
+        else:
+            cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), useExtentsHint=True)
+        bbox = cache.ComputeWorldBound(prim)
+        rng = bbox.ComputeAlignedRange()
+        if rng.IsEmpty():
+            result['error'] = 'empty bbox'
+        else:
+            mn = rng.GetMin()
+            mx = rng.GetMax()
+            cx = (mn[0] + mx[0]) / 2.0
+            cy = (mn[1] + mx[1]) / 2.0
+            cz = (mn[2] + mx[2]) / 2.0
+            result['min'] = [mn[0], mn[1], mn[2]]
+            result['max'] = [mx[0], mx[1], mx[2]]
+            result['center'] = [cx, cy, cz]
+            result['size'] = [mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]]
+    except Exception as _e:
+        result['error'] = f'bbox compute failed: {{type(_e).__name__}}: {{_e}}'
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_bounding_box {prim_path}")
+
+async def _handle_prim_exists(args: Dict) -> Dict:
+    """Boolean check for prim presence at a path. Used by verify-contract to
+    validate assistant claims like 'robot at /World/Franka is loaded'."""
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+import json
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+exists = bool(prim and prim.IsValid())
+result = {{'prim_path': {prim_path!r}, 'exists': exists}}
+if exists:
+    result['type_name'] = str(prim.GetTypeName())
+    result['applied_schemas'] = [str(s) for s in (prim.GetAppliedSchemas() or [])]
+    result['child_count'] = len(list(prim.GetChildren()))
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"prim_exists {prim_path}")
+
+
+async def _handle_list_attributes(args: Dict) -> Dict:
+    """Enumerate all attributes on a prim via prim.GetAttributes()."""
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+import json
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+else:
+    attrs = []
+    for attr in prim.GetAttributes():
+        attrs.append({{
+            'name': attr.GetName(),
+            'type': attr.GetTypeName().type.typeName,
+            'has_value': bool(attr.HasValue()),
+            'custom': bool(attr.IsCustom()),
+        }})
+    result['attribute_count'] = len(attrs)
+    result['attributes'] = attrs
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"list_attributes {prim_path}")
+
+async def _handle_list_applied_schemas(args: Dict) -> Dict:
+    """Return applied API schemas on a prim via prim.GetAppliedSchemas()."""
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+import json
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+else:
+    try:
+        schemas = list(prim.GetAppliedSchemas())
+    except Exception as exc:
+        schemas = []
+        result['error'] = f'GetAppliedSchemas failed: {{exc}}'
+    result['applied_schemas'] = [str(s) for s in schemas]
+    result['schema_count'] = len(schemas)
+    try:
+        result['type_name'] = prim.GetTypeName()
+    except Exception:
+        result['type_name'] = None
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"list_applied_schemas {prim_path}")
+
+async def _handle_get_prim_metadata(args: Dict) -> Dict:
+    """Read a single USD metadata field on a prim via prim.GetMetadata(key)."""
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    key = args["key"]
+    code = f"""\
+import omni.usd
+import json
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}, 'key': {key!r}}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+else:
+    try:
+        if not prim.HasMetadata({key!r}):
+            result['has_metadata'] = False
+            result['value'] = None
+        else:
+            value = prim.GetMetadata({key!r})
+            result['has_metadata'] = True
+            result['python_type'] = type(value).__name__
+            try:
+                json.dumps(value)
+                result['value'] = value
+            except Exception:
+                # Non-json-serialisable USD types — coerce to repr
+                try:
+                    if hasattr(value, '__iter__') and not isinstance(value, (str, bytes)):
+                        result['value'] = list(value)
+                    else:
+                        result['value'] = repr(value)
+                except Exception:
+                    result['value'] = repr(value)
+    except Exception as exc:
+        result['error'] = f'GetMetadata failed: {{exc}}'
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_prim_metadata {prim_path}.{key}")
+
+async def _handle_get_prim_type(args: Dict) -> Dict:
+    """Return prim.GetTypeName() (e.g. 'Mesh', 'Xform', 'Camera')."""
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+import json
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+else:
+    try:
+        type_name = prim.GetTypeName()
+    except Exception as exc:
+        type_name = ''
+        result['error'] = f'GetTypeName failed: {{exc}}'
+    result['type_name'] = str(type_name) if type_name else ''
+    try:
+        result['is_a_model'] = bool(prim.IsModel())
+    except Exception:
+        result['is_a_model'] = None
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_prim_type {prim_path}")
+
+async def _handle_find_prims_by_schema(args: Dict) -> Dict:
+    """Traverse the stage and return prims where prim.HasAPI(schema) is true."""
+    from . import kit_tools
+    schema_name = args["schema_name"]
+    root_path = args.get("root_path") or "/"
+    limit = int(args.get("limit", 500))
+    code = f"""\
+import omni.usd
+from pxr import Usd, UsdPhysics, UsdGeom, UsdShade
+import json
+
+schema_name = {schema_name!r}
+limit = {limit}
+
+stage = omni.usd.get_context().get_stage()
+result = {{'schema_name': schema_name, 'root_path': {root_path!r}}}
+
+# Resolve schema class. Users pass the applied-schema token (e.g.
+# "PhysicsRigidBodyAPI"), but the Python class is UsdPhysics.RigidBodyAPI —
+# the module prefix is dropped. Try both the literal name and variants with
+# the conventional "Physics"/"Geom"/"Shade" prefix stripped.
+_mod_prefix_map = (
+    (UsdPhysics, "Physics"),
+    (UsdGeom, "Geom"),
+    (UsdShade, "Shade"),
+)
+schema_cls = None
+for mod, prefix in _mod_prefix_map:
+    for candidate_name in (schema_name, schema_name[len(prefix):] if schema_name.startswith(prefix) else None):
+        if candidate_name is None:
+            continue
+        cand = getattr(mod, candidate_name, None)
+        if cand is not None:
+            schema_cls = cand
+            break
+    if schema_cls is not None:
+        break
+if schema_cls is None:
+    try:
+        import pxr
+        for mod_name in dir(pxr):
+            mod = getattr(pxr, mod_name, None)
+            for candidate_name in (schema_name,):
+                cand = getattr(mod, candidate_name, None) if mod is not None else None
+                if cand is not None:
+                    schema_cls = cand
+                    break
+            if schema_cls is not None:
+                break
+    except Exception as exc:
+        result['lookup_error'] = str(exc)
+
+if schema_cls is None:
+    result['error'] = f'unknown schema: {{schema_name}}'
+    result['matches'] = []
+    print(json.dumps(result, default=str))
+else:
+    root_prim = stage.GetPrimAtPath({root_path!r})
+    if not root_prim or not root_prim.IsValid():
+        root_prim = stage.GetPseudoRoot()
+    matches = []
+    for p in Usd.PrimRange(root_prim):
+        try:
+            if p.HasAPI(schema_cls):
+                matches.append(str(p.GetPath()))
+                if len(matches) >= limit:
+                    break
+        except Exception:
+            # Some non-API schemas raise — fall back to typed-schema check
+            try:
+                if p.IsA(schema_cls):
+                    matches.append(str(p.GetPath()))
+                    if len(matches) >= limit:
+                        break
+            except Exception:
+                continue
+    result['match_count'] = len(matches)
+    result['matches'] = matches
+    result['truncated'] = len(matches) >= limit
+    print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"find_prims_by_schema {schema_name}")
+
+async def _handle_find_prims_by_name(args: Dict) -> Dict:
+    """Regex search on prim paths."""
+    from . import kit_tools
+    pattern = args["pattern"]
+    root_path = args.get("root_path") or "/"
+    limit = int(args.get("limit", 500))
+    code = f"""\
+import omni.usd
+from pxr import Usd
+import re
+import json
+
+pattern = {pattern!r}
+limit = {limit}
+root_path = {root_path!r}
+
+stage = omni.usd.get_context().get_stage()
+result = {{'pattern': pattern, 'root_path': root_path}}
+try:
+    rx = re.compile(pattern)
+except re.error as exc:
+    result['error'] = f'invalid regex: {{exc}}'
+    result['matches'] = []
+    print(json.dumps(result, default=str))
+else:
+    root_prim = stage.GetPrimAtPath(root_path)
+    if not root_prim or not root_prim.IsValid():
+        root_prim = stage.GetPseudoRoot()
+    matches = []
+    for p in Usd.PrimRange(root_prim):
+        path_str = str(p.GetPath())
+        if rx.search(path_str):
+            matches.append(path_str)
+            if len(matches) >= limit:
+                break
+    result['match_count'] = len(matches)
+    result['matches'] = matches
+    result['truncated'] = len(matches) >= limit
+    print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"find_prims_by_name {pattern}")
+
+async def _handle_get_kind(args: Dict) -> Dict:
+    """Read Kind metadata via Usd.ModelAPI(prim).GetKind()."""
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    code = f"""\
+import omni.usd
+from pxr import Usd, Kind
+import json
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath({prim_path!r})
+result = {{'prim_path': {prim_path!r}}}
+if not prim or not prim.IsValid():
+    result['error'] = 'prim not found'
+else:
+    try:
+        model = Usd.ModelAPI(prim)
+        kind = model.GetKind()
+        result['kind'] = str(kind) if kind else ''
+        # Useful classification helpers
+        try:
+            registry = Kind.Registry()
+            if kind:
+                result['is_a_model'] = bool(registry.IsA(kind, 'model'))
+                result['is_a_component'] = bool(registry.IsA(kind, 'component'))
+                result['is_a_assembly'] = bool(registry.IsA(kind, 'assembly'))
+                result['is_a_group'] = bool(registry.IsA(kind, 'group'))
+            else:
+                result['is_a_model'] = False
+        except Exception as exc:
+            result['kind_registry_error'] = str(exc)
+    except Exception as exc:
+        result['error'] = f'GetKind failed: {{exc}}'
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(code, f"get_kind {prim_path}")
+
+async def _handle_get_semantic_label(args: Dict) -> Dict:
+    """Read every Semantics.SemanticsAPI instance applied to a single prim."""
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    prim_path_repr = repr(prim_path)
+    code = (
+        "import json\n"
+        "try:\n"
+        "    import omni.usd\n"
+        "    from pxr import Usd, Semantics\n"
+        "    stage = omni.usd.get_context().get_stage()\n"
+        "    if stage is None:\n"
+        "        print(json.dumps({'error': 'no stage open'}))\n"
+        "    else:\n"
+        f"        prim_path = {prim_path_repr}\n"
+        "        prim = stage.GetPrimAtPath(prim_path)\n"
+        "        if not prim or not prim.IsValid():\n"
+        "            print(json.dumps({'error': f'prim not found: {prim_path}'}))\n"
+        "        else:\n"
+        "            try:\n"
+        "                instances = Semantics.SemanticsAPI.GetAll(prim) if hasattr(\n"
+        "                    Semantics.SemanticsAPI, 'GetAll'\n"
+        "                ) else []\n"
+        "            except Exception:\n"
+        "                instances = []\n"
+        "            labels = []\n"
+        "            for sem in instances:\n"
+        "                try:\n"
+        "                    instance_name = sem.GetName() if hasattr(sem, 'GetName') else ''\n"
+        "                except Exception:\n"
+        "                    instance_name = ''\n"
+        "                try:\n"
+        "                    type_attr = sem.GetSemanticTypeAttr()\n"
+        "                    sem_type = type_attr.Get() if type_attr and type_attr.IsValid() else ''\n"
+        "                except Exception:\n"
+        "                    sem_type = ''\n"
+        "                try:\n"
+        "                    data_attr = sem.GetSemanticDataAttr()\n"
+        "                    cls = data_attr.Get() if data_attr and data_attr.IsValid() else ''\n"
+        "                except Exception:\n"
+        "                    cls = ''\n"
+        "                labels.append({\n"
+        "                    'instance': str(instance_name),\n"
+        "                    'semantic_type': str(sem_type) if sem_type is not None else '',\n"
+        "                    'class_name': str(cls) if cls is not None else '',\n"
+        "                })\n"
+        "            print(json.dumps({\n"
+        "                'prim_path': prim_path,\n"
+        "                'has_semantics': bool(labels),\n"
+        "                'labels': labels,\n"
+        "                'count': len(labels),\n"
+        "            }))\n"
+        "except Exception as e:\n"
+        "    print(json.dumps({'error': str(e)}))\n"
+    )
+    result = await kit_tools.queue_exec_patch(
+        code, f"Read Semantics.SemanticsAPI labels on {prim_path}"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "prim_path": prim_path,
+        "note": (
+            "Semantic-label lookup queued. Kit will print a JSON dict with keys: "
+            "prim_path, has_semantics, labels (list of {instance, semantic_type, "
+            "class_name}), count. has_semantics=false means the prim is not labeled — "
+            "that is a normal state, not an error."
+        ),
+    }
+
+async def _handle_get_asset_info(args: Dict) -> Dict:
+    """Read assetInfo metadata + introducing layer + sha256 for a prim."""
+    from . import kit_tools
+    prim_path = args["prim_path"]
+    prim_path_repr = repr(prim_path)
+    code = (
+        "import json\n"
+        "import os\n"
+        "import hashlib\n"
+        "try:\n"
+        "    import omni.usd\n"
+        "    from pxr import Usd, Sdf\n"
+        "    stage = omni.usd.get_context().get_stage()\n"
+        "    if stage is None:\n"
+        "        print(json.dumps({'error': 'no stage open'}))\n"
+        "    else:\n"
+        f"        prim_path = {prim_path_repr}\n"
+        "        prim = stage.GetPrimAtPath(prim_path)\n"
+        "        if not prim or not prim.IsValid():\n"
+        "            print(json.dumps({'error': f'prim not found: {prim_path}'}))\n"
+        "        else:\n"
+        "            ai = {}\n"
+        "            try:\n"
+        "                raw = prim.GetAssetInfo() or {}\n"
+        "                # GetAssetInfo returns a VtDictionary — coerce to plain dict.\n"
+        "                ai = {k: raw[k] for k in raw.keys()} if hasattr(raw, 'keys') else dict(raw)\n"
+        "            except Exception:\n"
+        "                ai = {}\n"
+        "            asset_info = {\n"
+        "                'identifier': str(ai.get('identifier', '') or ''),\n"
+        "                'name': str(ai.get('name', '') or ''),\n"
+        "                'version': str(ai.get('version', '') or ''),\n"
+        "                'payload_asset_dependencies': [\n"
+        "                    str(x) for x in (ai.get('payloadAssetDependencies') or [])\n"
+        "                ],\n"
+        "            }\n"
+        "            has_asset_info = bool(\n"
+        "                asset_info['identifier'] or asset_info['name']\n"
+        "                or asset_info['version'] or asset_info['payload_asset_dependencies']\n"
+        "            )\n"
+        "            # Introducing layer — the layer that brought this prim into the\n"
+        "            # composed stage. Use prim.GetPrimStack()[0] (strongest spec).\n"
+        "            intro_layer = {'identifier': '', 'real_path': '', 'version': None, 'sha256': None}\n"
+        "            try:\n"
+        "                stack = prim.GetPrimStack()\n"
+        "                if stack:\n"
+        "                    spec = stack[0]\n"
+        "                    layer = spec.layer if hasattr(spec, 'layer') else None\n"
+        "                    if layer is not None:\n"
+        "                        intro_layer['identifier'] = str(layer.identifier)\n"
+        "                        intro_layer['real_path'] = str(layer.realPath or '')\n"
+        "                        intro_layer['version'] = str(layer.GetCustomLayerData().get('version', '')) or None\n"
+        "                        rp = intro_layer['real_path']\n"
+        "                        if rp and os.path.isfile(rp):\n"
+        "                            try:\n"
+        "                                size = os.path.getsize(rp)\n"
+        "                            except OSError:\n"
+        "                                size = 0\n"
+        "                            if 0 < size < 256 * 1024 * 1024:\n"
+        "                                h = hashlib.sha256()\n"
+        "                                with open(rp, 'rb') as f:\n"
+        "                                    for chunk in iter(lambda: f.read(65536), b''):\n"
+        "                                        h.update(chunk)\n"
+        "                                intro_layer['sha256'] = h.hexdigest()\n"
+        "            except Exception:\n"
+        "                pass\n"
+        "            try:\n"
+        "                from pxr import Kind\n"
+        "                model = Usd.ModelAPI(prim)\n"
+        "                kind_val = model.GetKind() if model else ''\n"
+        "                prim_kind = str(kind_val) if kind_val else None\n"
+        "            except Exception:\n"
+        "                prim_kind = None\n"
+        "            try:\n"
+        "                spec_str = str(prim.GetSpecifier()).split('.')[-1].lower()\n"
+        "                if spec_str.startswith('specifier'):\n"
+        "                    spec_str = spec_str[len('specifier'):]\n"
+        "            except Exception:\n"
+        "                spec_str = 'def'\n"
+        "            print(json.dumps({\n"
+        "                'prim_path': prim_path,\n"
+        "                'has_asset_info': has_asset_info,\n"
+        "                'asset_info': asset_info,\n"
+        "                'introducing_layer': intro_layer,\n"
+        "                'prim_kind': prim_kind,\n"
+        "                'prim_specifier': spec_str,\n"
+        "            }))\n"
+        "except Exception as e:\n"
+        "    print(json.dumps({'error': str(e)}))\n"
+    )
+    result = await kit_tools.queue_exec_patch(
+        code, f"Read asset info / origin / hash for {prim_path}"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "patch_id": result.get("patch_id"),
+        "prim_path": prim_path,
+        "note": (
+            "Asset-info lookup queued. Kit will print a JSON dict with keys: "
+            "prim_path, has_asset_info, asset_info ({identifier, name, version, "
+            "payload_asset_dependencies}), introducing_layer ({identifier, "
+            "real_path, version, sha256}), prim_kind, prim_specifier. "
+            "has_asset_info=false is normal — most prims do not author the "
+            "assetInfo metadata. sha256=null when the layer is bigger than 256 MB "
+            "(synchronous hashing would block Kit) or the layer is not a real "
+            "on-disk file (e.g. anonymous in-memory layer)."
+        ),
+    }
+
+async def _handle_get_selected_prims(args: Dict) -> Dict:
+    """Return the user's current selection in the viewport / Stage panel."""
+    from . import kit_tools
+    code = """\
+import json
+import omni.usd
+
+ctx = omni.usd.get_context()
+sel = ctx.get_selection()
+paths = list(sel.get_selected_prim_paths()) if sel is not None else []
+primary = paths[-1] if paths else None
+print(json.dumps({"selected_paths": paths, "count": len(paths), "primary": primary}))
+"""
+    return await kit_tools.queue_exec_patch(code, "Read user selection")
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
