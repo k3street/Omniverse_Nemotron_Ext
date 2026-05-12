@@ -1650,6 +1650,8 @@ from .handlers.arena import (  # noqa: E402
 # assignments go away.
 from .handlers.scene_authoring import (  # noqa: E402
     _gen_add_reference,
+    _gen_add_sublayer,            # Phase 6 wave 16
+    _gen_add_usd_reference,       # Phase 6 wave 16
     _gen_apply_api_schema,
     _gen_assign_material,
     _gen_batch_apply_operation,
@@ -1660,11 +1662,17 @@ from .handlers.scene_authoring import (  # noqa: E402
     _gen_create_omnigraph,
     _gen_create_prim,
     _gen_delete_prim,
+    _gen_export_stage,            # Phase 6 wave 16
+    _gen_flatten_layers,          # Phase 6 wave 16
+    _gen_load_payload,            # Phase 6 wave 16
+    _gen_open_stage,              # Phase 6 wave 16
     _gen_optimize_scene,
     _gen_restore_delta_snapshot,
     _gen_save_delta_snapshot,
+    _gen_save_stage,              # Phase 6 wave 16
     _gen_scatter_on_surface,
     _gen_set_attribute,
+    _gen_set_edit_target,         # Phase 6 wave 16
     _gen_teleport_prim,
 )
 from .handlers.scene_blueprints import (  # noqa: E402
@@ -17877,79 +17885,8 @@ except Exception as e:
         ),
     }
 
-def _gen_add_sublayer(args: Dict) -> str:
-    layer_path = args["layer_path"]
-    layer_path_repr = repr(layer_path)
-    return (
-        "import os\n"
-        "import omni.usd\n"
-        "from pxr import Sdf\n"
-        "\n"
-        "stage = omni.usd.get_context().get_stage()\n"
-        "if stage is None:\n"
-        "    raise RuntimeError('No stage is open — cannot add sublayer')\n"
-        "\n"
-        f"layer_path = {layer_path_repr}\n"
-        "\n"
-        "# Create the file if it does not already exist (anonymous and omniverse:// URLs skip)\n"
-        "if not layer_path.startswith('anon:') and '://' not in layer_path:\n"
-        "    if not os.path.exists(layer_path):\n"
-        "        new_layer = Sdf.Layer.CreateNew(layer_path)\n"
-        "        if new_layer is None:\n"
-        "            raise RuntimeError(f'Failed to create new sublayer at {layer_path}')\n"
-        "        new_layer.Save()\n"
-        "elif '://' in layer_path:\n"
-        "    # Remote URL (omniverse://, http(s)://, file://, anon:): the local\n"
-        "    # file-create path is skipped, so verify the layer actually resolves\n"
-        "    # via the asset resolver before we append it to subLayerPaths —\n"
-        "    # otherwise an unreachable URL produces a 'success' with a dead\n"
-        "    # reference in the layer stack.\n"
-        "    _probe = Sdf.Layer.FindOrOpen(layer_path)\n"
-        "    if _probe is None:\n"
-        "        raise RuntimeError(\n"
-        "            'add_sublayer: Sdf.Layer.FindOrOpen(' + repr(layer_path) + ') returned None — '\n"
-        "            'the URL could not be resolved by the asset resolver. Refusing to attach '\n"
-        "            'a dead sublayer reference.'\n"
-        "        )\n"
-        "\n"
-        "root = stage.GetRootLayer()\n"
-        "if layer_path in list(root.subLayerPaths):\n"
-        "    print(f'Sublayer already attached: {layer_path}')\n"
-        "else:\n"
-        "    # Insert at position 0 → strongest sublayer below the root\n"
-        "    root.subLayerPaths.insert(0, layer_path)\n"
-        "    print(f'Attached sublayer: {layer_path}')\n"
-    )
-
-def _gen_set_edit_target(args: Dict) -> str:
-    layer_path = args["layer_path"]
-    layer_path_repr = repr(layer_path)
-    return (
-        "import omni.usd\n"
-        "from pxr import Sdf, Usd\n"
-        "\n"
-        "stage = omni.usd.get_context().get_stage()\n"
-        "if stage is None:\n"
-        "    raise RuntimeError('No stage is open — cannot set edit target')\n"
-        "\n"
-        f"layer_path = {layer_path_repr}\n"
-        "layer = Sdf.Layer.FindOrOpen(layer_path)\n"
-        "if layer is None:\n"
-        "    # Try to find the layer already inside the stage's layer stack\n"
-        "    for stack_layer in stage.GetLayerStack():\n"
-        "        if stack_layer.identifier == layer_path:\n"
-        "            layer = stack_layer\n"
-        "            break\n"
-        "if layer is None:\n"
-        "    raise RuntimeError(\n"
-        "        f'Layer not found: {layer_path}. Use list_layers() to see attached layers '\n"
-        "        f'or add_sublayer() to attach it first.'\n"
-        "    )\n"
-        "\n"
-        "stage.SetEditTarget(Usd.EditTarget(layer))\n"
-        "print(f'Edit target is now: {layer.identifier}')\n"
-    )
-
+# _gen_add_sublayer moved to handlers/scene_authoring.py (Phase 6 wave 16).
+# _gen_set_edit_target moved to handlers/scene_authoring.py (Phase 6 wave 16).
 async def _handle_list_variant_sets(args: Dict) -> Dict:
     """Read every variant set declared on a prim and the current selection on each."""
     prim_path = args["prim_path"]
@@ -18049,28 +17986,7 @@ async def _handle_list_variants(args: Dict) -> Dict:
         ),
     }
 
-def _gen_flatten_layers(args: Dict) -> str:
-    output_path = args["output_path"]
-    output_path_repr = repr(output_path)
-    return (
-        "import omni.usd\n"
-        "\n"
-        "stage = omni.usd.get_context().get_stage()\n"
-        "if stage is None:\n"
-        "    raise RuntimeError('No stage is open — cannot flatten layers')\n"
-        "\n"
-        f"output_path = {output_path_repr}\n"
-        "flat = stage.Flatten()\n"
-        "if flat is None:\n"
-        "    raise RuntimeError('stage.Flatten() returned None')\n"
-        "\n"
-        "ok = flat.Export(output_path)\n"
-        "if not ok:\n"
-        "    raise RuntimeError(f'Failed to export flattened stage to {output_path}')\n"
-        "\n"
-        "print(f'Flattened stage exported to: {output_path}')\n"
-    )
-
+# _gen_flatten_layers moved to handlers/scene_authoring.py (Phase 6 wave 16).
 DATA_HANDLERS["list_layers"] = _handle_list_layers
 DATA_HANDLERS["list_variant_sets"] = _handle_list_variant_sets
 DATA_HANDLERS["list_variants"] = _handle_list_variants
@@ -18834,84 +18750,7 @@ async def _handle_list_references(args: Dict) -> Dict:
         ),
     }
 
-def _gen_add_usd_reference(args: Dict) -> str:
-    prim_path = args["prim_path"]
-    usd_url = args["usd_url"]
-    ref_prim_path = args.get("ref_prim_path")
-    layer_offset_seconds = args.get("layer_offset_seconds")
-    instanceable = bool(args.get("instanceable", False))
-
-    prim_path_repr = repr(prim_path)
-    usd_url_repr = repr(usd_url)
-    ref_prim_path_repr = repr(ref_prim_path) if ref_prim_path else "None"
-    layer_offset_repr = (
-        repr(float(layer_offset_seconds)) if layer_offset_seconds is not None else "None"
-    )
-    instanceable_repr = "True" if instanceable else "False"
-
-    return (
-        "import os\n"
-        "import omni.usd\n"
-        "from pxr import Usd, Sdf, UsdGeom\n"
-        "\n"
-        "stage = omni.usd.get_context().get_stage()\n"
-        "if stage is None:\n"
-        "    raise RuntimeError('No stage is open — cannot add USD reference')\n"
-        "\n"
-        f"prim_path = {prim_path_repr}\n"
-        f"usd_url = {usd_url_repr}\n"
-        f"ref_prim_path = {ref_prim_path_repr}\n"
-        f"layer_offset_seconds = {layer_offset_repr}\n"
-        f"instanceable = {instanceable_repr}\n"
-        "\n"
-        # Validate local filesystem paths before calling AddReference — USD
-        # accepts any URL and the composition failure surfaces later (or
-        # never). Remote URLs go through USD's asset resolver as before.
-        "if not any(usd_url.startswith(p) for p in ('omniverse://','http://','https://','file://','anon:')):\n"
-        "    if not os.path.isabs(usd_url) or not os.path.exists(usd_url):\n"
-        "        raise FileNotFoundError(f'add_usd_reference: asset not found: {usd_url!r}')\n"
-        "\n"
-        "# Auto-create the holding prim as an Xform if it does not exist.\n"
-        "prim = stage.GetPrimAtPath(prim_path)\n"
-        "if not prim or not prim.IsValid():\n"
-        "    prim = UsdGeom.Xform.Define(stage, prim_path).GetPrim()\n"
-        "    print(f'Created Xform at {prim_path} to hold the reference')\n"
-        "\n"
-        "# Build the LayerOffset in USD time codes (caller passes SECONDS).\n"
-        "layer_offset = None\n"
-        "if layer_offset_seconds is not None:\n"
-        "    try:\n"
-        "        tcps = stage.GetTimeCodesPerSecond() or 24.0\n"
-        "    except Exception:\n"
-        "        tcps = 24.0\n"
-        "    layer_offset = Sdf.LayerOffset(layer_offset_seconds * tcps, 1.0)\n"
-        "\n"
-        "refs_api = prim.GetReferences()\n"
-        "_had_refs_before = prim.HasAuthoredReferences()\n"
-        "if ref_prim_path and layer_offset is not None:\n"
-        "    refs_api.AddReference(usd_url, ref_prim_path, layer_offset)\n"
-        "elif ref_prim_path:\n"
-        "    refs_api.AddReference(usd_url, ref_prim_path)\n"
-        "elif layer_offset is not None:\n"
-        "    refs_api.AddReference(usd_url, '', layer_offset)\n"
-        "else:\n"
-        "    refs_api.AddReference(usd_url)\n"
-        "\n"
-        "if not prim.HasAuthoredReferences():\n"
-        "    raise RuntimeError(f'add_usd_reference: AddReference completed but HasAuthoredReferences is still False on {prim_path}')\n"
-        "\n"
-        "if instanceable:\n"
-        "    # USD point-instancing: per-instance edits below this prim are dropped.\n"
-        "    prim.SetInstanceable(True)\n"
-        "    print(f'  prim marked instanceable=True (per-instance edits below {prim_path} will be dropped)')\n"
-        "\n"
-        "print(\n"
-        "    f'add_usd_reference: prim={prim_path} asset={usd_url!r} '\n"
-        "    f'ref_prim={ref_prim_path!r} offset_s={layer_offset_seconds} '\n"
-        "    f'instanceable={instanceable}'\n"
-        ")\n"
-    )
-
+# _gen_add_usd_reference moved to handlers/scene_authoring.py (Phase 6 wave 16).
 async def _handle_list_payloads(args: Dict) -> Dict:
     """Enumerate USD payload arcs (deferred-load) on a prim."""
     prim_path = args["prim_path"]
@@ -19022,47 +18861,7 @@ async def _handle_list_payloads(args: Dict) -> Dict:
         ),
     }
 
-def _gen_load_payload(args: Dict) -> str:
-    prim_path = args["prim_path"]
-    prim_path_repr = repr(prim_path)
-    return (
-        "import omni.usd\n"
-        "from pxr import Usd, Sdf\n"
-        "\n"
-        "stage = omni.usd.get_context().get_stage()\n"
-        "if stage is None:\n"
-        "    raise RuntimeError('No stage is open — cannot load payload')\n"
-        "\n"
-        f"prim_path = {prim_path_repr}\n"
-        "prim = stage.GetPrimAtPath(prim_path)\n"
-        "if not prim or not prim.IsValid():\n"
-        "    raise RuntimeError(f'prim not found: {prim_path}')\n"
-        "\n"
-        "# Soft no-op if the prim's payload(s) are already in the load set.\n"
-        "try:\n"
-        "    load_set = stage.GetLoadSet()\n"
-        "    already_loaded = prim.GetPath() in load_set\n"
-        "except Exception:\n"
-        "    already_loaded = False\n"
-        "\n"
-        "if already_loaded:\n"
-        "    print(f'Payload already loaded for {prim_path} — nothing to do (no-op)')\n"
-        "else:\n"
-        "    # LoadAndUnload({prim_path}, set()) loads the payload + descendants.\n"
-        "    try:\n"
-        "        stage.LoadAndUnload(\n"
-        "            {Sdf.Path(prim_path)},\n"
-        "            set(),\n"
-        "            Usd.LoadWithDescendants,\n"
-        "        )\n"
-        "    except Exception:\n"
-        "        # Older Kit signature without policy arg:\n"
-        "        stage.LoadAndUnload({Sdf.Path(prim_path)}, set())\n"
-        "    print(\n"
-        "        f'load_payload: activated payload(s) on {prim_path} (LoadWithDescendants)'\n"
-        "    )\n"
-    )
-
+# _gen_load_payload moved to handlers/scene_authoring.py (Phase 6 wave 16).
 async def _handle_get_asset_info(args: Dict) -> Dict:
     """Read assetInfo metadata + introducing layer + sha256 for a prim."""
     prim_path = args["prim_path"]
@@ -19915,127 +19714,9 @@ except Exception:
 print(f"focus_viewport_on: framed {{_prim_path!r}}")
 """
 
-def _gen_save_stage(args: Dict) -> str:
-    path = args["path"]
-    # Live-reproduced bug: save_stage('/nonexistent/dir/scene.usd') returned
-    # result=True and the tool reported 'wrote ...' — but the file wasn't
-    # there. Kit's save is async + doesn't propagate filesystem errors
-    # synchronously, AND the try/except swallowed any that did leak.
-    # Fix: pre-check parent dir exists and is writable (for local paths),
-    # post-check the file landed, and stop calling the output "wrote"
-    # until we've confirmed it.
-    return f"""\
-import os
-import omni.usd
-
-ctx = omni.usd.get_context()
-target = {repr(path)}
-
-# Pre-check local filesystem destinations. Remote URLs (omniverse://,
-# http(s)://, file://, anon:) go through the asset resolver.
-if not any(target.startswith(p) for p in ('omniverse://','http://','https://','file://','anon:')):
-    _parent = os.path.dirname(os.path.abspath(target)) or '.'
-    if not os.path.isdir(_parent):
-        raise FileNotFoundError(f'save_stage: parent directory does not exist: {{_parent!r}}')
-    if not os.access(_parent, os.W_OK):
-        raise PermissionError(f'save_stage: parent directory not writable: {{_parent!r}}')
-
-current = ctx.get_stage_url() or ""
-if current and current == target:
-    result = ctx.save_stage()
-else:
-    result = ctx.save_as_stage(target)
-
-# USD's save_stage returns True even when the actual write failed (async
-# pipeline). For local paths, verify the file materialized.
-if not result:
-    raise RuntimeError(f'save_stage: ctx returned result={{result!r}} for {{target!r}}')
-if not any(target.startswith(p) for p in ('omniverse://','http://','https://','file://','anon:')):
-    if not os.path.exists(target):
-        raise RuntimeError(
-            f'save_stage: ctx reported success but no file at {{target!r}} — '
-            f'check filesystem permissions / disk space / USD async pipeline.'
-        )
-print(f'save_stage: confirmed write of {{target}}')
-"""
-
-def _gen_open_stage(args: Dict) -> str:
-    path = args["path"]
-    # Two holes the old version had: (1) ctx.open_stage returns False on
-    # missing file but the print said "opened {target} (ok=False)" — the word
-    # "opened" is a lie; (2) the try/except swallowed exceptions, so the tool
-    # reported success=True and the agent would parrot "opened" to the user.
-    return f"""\
-import os
-import omni.usd
-
-ctx = omni.usd.get_context()
-target = {repr(path)}
-# Local filesystem paths must exist. Remote/session URLs (omniverse://,
-# http(s)://, file://, anon:) resolve through USD's asset resolver and can't
-# be checked with os.path.exists.
-if not any(target.startswith(p) for p in ('omniverse://','http://','https://','file://','anon:')):
-    if not os.path.exists(target):
-        raise FileNotFoundError(f'open_stage: no such file: {{target!r}}')
-ok = ctx.open_stage(target)
-if not ok:
-    raise RuntimeError(f'open_stage: ctx.open_stage({{target!r}}) returned False — USD could not load the stage')
-print(f"open_stage: successfully opened {{target}}")
-"""
-
-def _gen_export_stage(args: Dict) -> str:
-    path = args["path"]
-    fmt = args["format"].lower()
-    # Original fire-and-forget pattern was structurally dishonest:
-    #   asyncio.ensure_future(...)  # never awaited
-    # The tool reported success=True while the actual export was still in
-    # flight. Any exception raised inside _do_export never reached the
-    # caller. Fix: validate inputs synchronously upfront (fmt allowlist,
-    # parent directory exists for local paths), then still schedule the
-    # async export — but the sync phase at least catches typos and missing
-    # directories. Output text also changed from "wrote" (past tense) to
-    # "started" to avoid the false-complete implication.
-    return f"""\
-import os
-import asyncio
-import omni.kit.app
-
-target = {repr(path)}
-fmt = {repr(fmt)}
-
-_ALLOWED_FMTS = {{'usd', 'usda', 'usdc', 'usdz', 'glb', 'gltf', 'obj', 'fbx', 'stl'}}
-if fmt not in _ALLOWED_FMTS:
-    raise ValueError(
-        f"export_stage: unsupported format {{fmt!r}} — expected one of {{sorted(_ALLOWED_FMTS)}}"
-    )
-
-# Local paths: parent directory must exist so the async writer has a
-# place to land the file. Remote/Nucleus URLs skip this check.
-if not any(target.startswith(p) for p in ('omniverse://','http://','https://','file://','anon:')):
-    _parent = os.path.dirname(os.path.abspath(target)) or '.'
-    if not os.path.isdir(_parent):
-        raise FileNotFoundError(
-            f"export_stage: parent directory does not exist: {{_parent!r}}"
-        )
-
-async def _do_export():
-    try:
-        ext_mgr = omni.kit.app.get_app().get_extension_manager()
-        ext_id = "omni.kit.tool.asset_exporter"
-        if not ext_mgr.is_extension_enabled(ext_id):
-            ext_mgr.set_extension_enabled_immediate(ext_id, True)
-        from omni.kit.tool.asset_exporter import ExportContext, export_asset
-        ec = ExportContext()
-        ec.export_path = target
-        ec.export_format = fmt
-        result = await export_asset(ec)
-        print(f"export_stage: async export finished for {{target}} ({{fmt}}) — result={{result}}")
-    except Exception as e:
-        print(f"export_stage: async export failed for {{target}} ({{fmt}}): {{e}}")
-
-asyncio.ensure_future(_do_export())
-print(f"export_stage: started async export of {{target}} as {{fmt}} — completion is logged separately")
-"""
+# _gen_save_stage moved to handlers/scene_authoring.py (Phase 6 wave 16).
+# _gen_open_stage moved to handlers/scene_authoring.py (Phase 6 wave 16).
+# _gen_export_stage moved to handlers/scene_authoring.py (Phase 6 wave 16).
 
 async def _handle_list_opened_stages(args: Dict) -> Dict:
     """List all UsdContexts and the stage URL each holds."""
