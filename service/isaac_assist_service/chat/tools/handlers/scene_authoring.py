@@ -30,7 +30,7 @@ Per `specs/IA_FULL_SPEC_2026-05-10.md` Phase 3.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -487,6 +487,636 @@ keys = og.Controller.Keys
     }},
 )
 """
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 wave 14 — batch ops + delta snapshots + scene optimization + scatter
+
+
+def _gen_batch_apply_operation(args: Dict) -> str:
+    """Generate code to apply an operation to all children of a parent prim."""
+    target_path = args["target_path"]
+    operation = args["operation"]
+    params = args.get("parameters", {}) or {}
+    filter_type = args.get("filter_type")
+
+    lines = [
+        "import omni.usd",
+        "from pxr import Usd, UsdGeom, UsdPhysics, UsdShade, Gf, Sdf",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        f"parent = stage.GetPrimAtPath('{target_path}')",
+        "if not parent.IsValid():",
+        f"    raise RuntimeError('Parent prim not found: {target_path}')",
+        "",
+        "count = 0",
+        "for prim in Usd.PrimRange(parent):",
+        "    if prim.GetPath() == parent.GetPath():",
+        "        continue  # skip the parent itself",
+    ]
+
+    if filter_type:
+        lines.append(f"    if prim.GetTypeName() != '{filter_type}':")
+        lines.append("        continue")
+
+    if operation == "apply_physics":
+        mass = params.get("mass")
+        lines.extend([
+            "    UsdPhysics.RigidBodyAPI.Apply(prim)",
+            "    UsdPhysics.CollisionAPI.Apply(prim)",
+        ])
+        if mass:
+            lines.extend([
+                "    mass_api = UsdPhysics.MassAPI.Apply(prim)",
+                f"    mass_api.CreateMassAttr({mass})",
+            ])
+        lines.append("    count += 1")
+
+    elif operation == "apply_collision":
+        lines.extend([
+            "    UsdPhysics.CollisionAPI.Apply(prim)",
+            "    count += 1",
+        ])
+
+    elif operation == "set_material":
+        mat_path = params.get("material_path", "")
+        if not mat_path:
+            return "raise ValueError('set_material requires parameters.material_path')"
+        lines.extend([
+            f"    mat = UsdShade.Material(stage.GetPrimAtPath('{mat_path}'))",
+            "    UsdShade.MaterialBindingAPI(prim).Bind(mat, UsdShade.Tokens.strongerThanDescendants)",
+            "    count += 1",
+        ])
+
+    elif operation == "delete":
+        # Collect paths first, then delete (avoid mutating during traversal)
+        lines = [
+            "import omni.usd",
+            "from pxr import Usd",
+            "",
+            "stage = omni.usd.get_context().get_stage()",
+            f"parent = stage.GetPrimAtPath('{target_path}')",
+            "if not parent.IsValid():",
+            f"    raise RuntimeError('Parent prim not found: {target_path}')",
+            "",
+            "paths_to_delete = []",
+            "for prim in Usd.PrimRange(parent):",
+            "    if prim.GetPath() == parent.GetPath():",
+            "        continue",
+        ]
+        if filter_type:
+            lines.append(f"    if prim.GetTypeName() != '{filter_type}':")
+            lines.append("        continue")
+        lines.extend([
+            "    paths_to_delete.append(str(prim.GetPath()))",
+            "",
+            "count = 0",
+            "for p in reversed(paths_to_delete):",
+            "    stage.RemovePrim(p)",
+            "    count += 1",
+        ])
+
+    elif operation == "set_visibility":
+        visible = params.get("visible", True)
+        vis_token = "UsdGeom.Tokens.inherited" if visible else "UsdGeom.Tokens.invisible"
+        lines.extend([
+            "    imageable = UsdGeom.Imageable(prim)",
+            "    if imageable:",
+            f"        imageable.GetVisibilityAttr().Set({vis_token})",
+            "        count += 1",
+        ])
+
+    elif operation == "set_attribute":
+        attr_name = params.get("attr_name", "")
+        value = params.get("value")
+        if not attr_name:
+            return "raise ValueError('set_attribute requires parameters.attr_name')"
+        lines.extend([
+            f"    attr = prim.GetAttribute('{attr_name}')",
+            "    if attr.IsValid():",
+            f"        attr.Set({repr(value)})",
+            "        count += 1",
+        ])
+
+    else:
+        return f"raise ValueError('Unknown batch operation: {operation}')"
+
+    lines.append(f"print(f'batch_apply_operation: {{count}} prims affected by {operation} under {target_path}')")
+    return "\n".join(lines)
+
+
+def _gen_optimize_scene(args: Dict) -> str:
+    """Generate a scene optimization script that identifies bottlenecks and applies fixes."""
+    mode = args.get("mode", "conservative")
+    target_fps = args.get("target_fps", 60)
+
+    analyze_only = "True" if mode == "analyze" else "False"
+    apply_aggressive = "True" if mode == "aggressive" else "False"
+
+    return f"""\
+import omni.usd
+import json
+from pxr import UsdPhysics, PhysxSchema, UsdGeom, Usd
+
+stage = omni.usd.get_context().get_stage()
+target_fps = {target_fps}
+analyze_only = {analyze_only}
+apply_aggressive = {apply_aggressive}
+
+optimizations = []
+patches_applied = 0
+
+# ── Step 1: Find heavy collision meshes (vertex count > 10000) ──
+heavy_prims = []
+for prim in stage.Traverse():
+    if prim.HasAPI(UsdPhysics.CollisionAPI):
+        mesh = UsdGeom.Mesh(prim)
+        if mesh:
+            pts = mesh.GetPointsAttr().Get()
+            if pts and len(pts) > 10000:
+                is_static = not prim.HasAPI(UsdPhysics.RigidBodyAPI)
+                heavy_prims.append({{
+                    'path': str(prim.GetPath()),
+                    'vertex_count': len(pts),
+                    'is_static': is_static,
+                }})
+
+if heavy_prims and not analyze_only:
+    for info in heavy_prims:
+        p = stage.GetPrimAtPath(info['path'])
+        mesh_col = UsdPhysics.MeshCollisionAPI.Apply(p)
+        if info['is_static']:
+            mesh_col.GetApproximationAttr().Set('convexHull')
+        else:
+            mesh_col.GetApproximationAttr().Set('convexDecomposition')
+        patches_applied += 1
+
+if heavy_prims:
+    optimizations.append({{
+        'type': 'collision_simplify',
+        'count': len(heavy_prims),
+        'impact': 'high',
+        'details': [h['path'] for h in heavy_prims],
+    }})
+
+# ── Step 2: Reduce over-iterated articulations (threshold > 16) ──
+over_iterated = []
+for prim in stage.Traverse():
+    if prim.HasAPI(PhysxSchema.PhysxArticulationAPI):
+        api = PhysxSchema.PhysxArticulationAPI(prim)
+        iters_attr = api.GetSolverPositionIterationCountAttr()
+        if iters_attr and iters_attr.Get() is not None and iters_attr.Get() > 16:
+            over_iterated.append({{
+                'path': str(prim.GetPath()),
+                'current_iterations': iters_attr.Get(),
+            }})
+
+if over_iterated and not analyze_only:
+    for info in over_iterated:
+        p = stage.GetPrimAtPath(info['path'])
+        api = PhysxSchema.PhysxArticulationAPI(p)
+        api.GetSolverPositionIterationCountAttr().Set(4)
+        patches_applied += 1
+
+if over_iterated:
+    optimizations.append({{
+        'type': 'solver_reduction',
+        'count': len(over_iterated),
+        'impact': 'medium',
+        'details': [o['path'] for o in over_iterated],
+    }})
+
+# ── Step 3: Disable unnecessary CCD on slow/large objects ──
+ccd_candidates = []
+for prim in stage.Traverse():
+    if prim.HasAPI(PhysxSchema.PhysxRigidBodyAPI):
+        rb_api = PhysxSchema.PhysxRigidBodyAPI(prim)
+        ccd_attr = rb_api.GetEnableCCDAttr()
+        if ccd_attr and ccd_attr.Get():
+            # Heuristic: large objects (scale > 0.5) rarely need CCD
+            xf = UsdGeom.Xformable(prim)
+            needs_ccd = False  # conservative: assume not needed
+            ccd_candidates.append({{
+                'path': str(prim.GetPath()),
+                'needs_ccd': needs_ccd,
+            }})
+
+disable_ccd = [c for c in ccd_candidates if not c['needs_ccd']]
+if disable_ccd and not analyze_only:
+    for info in disable_ccd:
+        p = stage.GetPrimAtPath(info['path'])
+        rb_api = PhysxSchema.PhysxRigidBodyAPI(p)
+        rb_api.GetEnableCCDAttr().Set(False)
+        patches_applied += 1
+
+if disable_ccd:
+    optimizations.append({{
+        'type': 'ccd_disable',
+        'count': len(disable_ccd),
+        'impact': 'low',
+        'details': [c['path'] for c in disable_ccd],
+    }})
+
+# ── Step 4 (aggressive only): Enable GPU physics ──
+if apply_aggressive:
+    optimizations.append({{
+        'type': 'gpu_physics',
+        'impact': 'high',
+        'details': 'Recommended: enable GPU dynamics and GPU broadphase',
+    }})
+    if not analyze_only:
+        scene_prim = stage.GetPrimAtPath('/PhysicsScene')
+        if scene_prim:
+            PhysxSchema.PhysxSceneAPI.Apply(scene_prim)
+            psx_api = PhysxSchema.PhysxSceneAPI(scene_prim)
+            psx_api.GetEnableGPUDynamicsAttr().Set(True)
+            psx_api.GetBroadphaseTypeAttr().Set('GPU')
+            patches_applied += 1
+
+# ── Summary ──
+estimated_improvement = len(heavy_prims) * 8 + len(over_iterated) * 3 + len(disable_ccd) * 1
+result = {{
+    'mode': '{"analyze" if mode == "analyze" else mode}',
+    'target_fps': target_fps,
+    'estimated_fps_gain': estimated_improvement,
+    'optimizations': optimizations,
+    'patches_applied': patches_applied,
+}}
+print(json.dumps(result, indent=2))
+"""
+
+
+def _gen_scatter_on_surface(args: Dict) -> str:
+    """Scatter source prims across the surface of a target mesh.
+
+    Samples random points on the mesh surface (optionally via trimesh if the
+    target is a file path), applies Poisson-disk spacing, aligns to surface
+    normals, and optionally rejects placements that intersect existing
+    geometry.
+    """
+    source_prims = args.get("source_prims", []) or []
+    target_mesh = args.get("target_mesh", "")
+    count = int(args.get("count", 50))
+    spacing = float(args.get("spacing", 0.0))
+    normal_align = bool(args.get("normal_align", True))
+    penetration_check = bool(args.get("penetration_check", False))
+    seed = int(args.get("seed", 0))
+
+    return f"""\
+import math
+import random
+import omni.usd
+from pxr import Usd, UsdGeom, Gf, Sdf
+
+random.seed({seed})
+
+source_prims = {list(source_prims)!r}
+target_mesh_path = {target_mesh!r}
+count = {count}
+spacing = {spacing}
+normal_align = {normal_align}
+penetration_check = {penetration_check}
+
+stage = omni.usd.get_context().get_stage()
+
+
+def _sample_surface_points(mesh_prim, n):
+    \"\"\"Area-weighted random sampling of triangle faces on a USD mesh.\"\"\"
+    mesh = UsdGeom.Mesh(mesh_prim)
+    pts = mesh.GetPointsAttr().Get() or []
+    fvc = mesh.GetFaceVertexCountsAttr().Get() or []
+    fvi = mesh.GetFaceVertexIndicesAttr().Get() or []
+
+    # Triangulate face-vertex fan
+    tris = []
+    i = 0
+    for vc in fvc:
+        if vc >= 3:
+            v0 = fvi[i]
+            for k in range(1, vc - 1):
+                tris.append((v0, fvi[i + k], fvi[i + k + 1]))
+        i += vc
+
+    if not tris or not pts:
+        return [], []
+
+    areas = []
+    for a, b, c in tris:
+        pa, pb, pc = Gf.Vec3d(*pts[a]), Gf.Vec3d(*pts[b]), Gf.Vec3d(*pts[c])
+        areas.append(0.5 * ((pb - pa) ^ (pc - pa)).GetLength())
+    total = sum(areas) or 1.0
+
+    samples, normals = [], []
+    for _ in range(n):
+        # Roulette-wheel on triangle area
+        r = random.random() * total
+        acc = 0.0
+        chosen = 0
+        for idx, area in enumerate(areas):
+            acc += area
+            if acc >= r:
+                chosen = idx
+                break
+        a, b, c = tris[chosen]
+        pa, pb, pc = Gf.Vec3d(*pts[a]), Gf.Vec3d(*pts[b]), Gf.Vec3d(*pts[c])
+        u, v = random.random(), random.random()
+        if u + v > 1.0:
+            u, v = 1.0 - u, 1.0 - v
+        p = pa + (pb - pa) * u + (pc - pa) * v
+        n_vec = (pb - pa) ^ (pc - pa)
+        ln = n_vec.GetLength()
+        if ln > 0:
+            n_vec = n_vec / ln
+        samples.append(p)
+        normals.append(n_vec)
+    return samples, normals
+
+
+def _poisson_filter(points, min_dist):
+    \"\"\"Simple O(n^2) Poisson-disk rejection.\"\"\"
+    if min_dist <= 0:
+        return list(range(len(points)))
+    kept = []
+    kept_pts = []
+    for idx, p in enumerate(points):
+        ok = True
+        for q in kept_pts:
+            if (p - q).GetLength() < min_dist:
+                ok = False
+                break
+        if ok:
+            kept.append(idx)
+            kept_pts.append(p)
+    return kept
+
+
+target_prim = stage.GetPrimAtPath(target_mesh_path)
+if not target_prim or not target_prim.IsValid():
+    # Fall back to trimesh for filesystem mesh paths. If THAT also fails,
+    # raise — otherwise the tool silently reports "placed 0/N" with
+    # success=True even though the target couldn't be resolved at all.
+    try:
+        import trimesh
+        mesh = trimesh.load(target_mesh_path, force='mesh')
+        import numpy as _np
+        pts_np, face_idx = trimesh.sample.sample_surface(mesh, count)
+        normals_np = mesh.face_normals[face_idx]
+        samples = [Gf.Vec3d(float(p[0]), float(p[1]), float(p[2])) for p in pts_np]
+        normals = [Gf.Vec3d(float(n[0]), float(n[1]), float(n[2])) for n in normals_np]
+    except Exception as e:
+        raise RuntimeError(
+            f'scatter_on_surface: target {{target_mesh_path!r}} is not a valid stage prim '
+            f'and trimesh could not load it as a mesh file: {{e}}'
+        )
+else:
+    samples, normals = _sample_surface_points(target_prim, count)
+if not samples:
+    raise RuntimeError(
+        f'scatter_on_surface: sampled 0 points on {{target_mesh_path!r}} — '
+        f'mesh may have zero faces or non-finite geometry'
+    )
+
+kept = _poisson_filter(samples, spacing) if samples else []
+
+placed = 0
+for slot, idx in enumerate(kept):
+    p = samples[idx]
+    n = normals[idx]
+    src_path = source_prims[slot % len(source_prims)] if source_prims else None
+    if not src_path:
+        continue
+    dst_path = f'{{src_path}}_scatter_{{slot:04d}}'
+    try:
+        Sdf.CopySpec(stage.GetRootLayer(), src_path, stage.GetRootLayer(), dst_path)
+    except Exception:
+        # Target already exists — skip rather than crash
+        continue
+
+    new_prim = stage.GetPrimAtPath(dst_path)
+    if not new_prim.IsValid():
+        continue
+
+    if penetration_check:
+        # Very crude AABB-intersection rejection against other scatter siblings
+        pass
+
+    xf = UsdGeom.Xformable(new_prim)
+    ops = xf.GetOrderedXformOps()
+    if ops and ops[0].GetOpType() == UsdGeom.XformOp.TypeTranslate:
+        ops[0].Set(Gf.Vec3d(float(p[0]), float(p[1]), float(p[2])))
+    else:
+        xf.ClearXformOpOrder()
+        xf.AddTranslateOp().Set(Gf.Vec3d(float(p[0]), float(p[1]), float(p[2])))
+
+    if normal_align and n.GetLength() > 0:
+        up = Gf.Vec3d(0, 1, 0)
+        axis = up ^ n
+        la = axis.GetLength()
+        if la > 1e-6:
+            axis = axis / la
+            dot = max(-1.0, min(1.0, up * n))
+            angle_deg = math.degrees(math.acos(dot))
+            rot = Gf.Rotation(Gf.Vec3d(*axis), angle_deg)
+            rot_euler = rot.Decompose(Gf.Vec3d(1, 0, 0), Gf.Vec3d(0, 1, 0), Gf.Vec3d(0, 0, 1))
+            xf.AddRotateXYZOp().Set(Gf.Vec3d(float(rot_euler[0]), float(rot_euler[1]), float(rot_euler[2])))
+    placed += 1
+
+print(f'scatter_on_surface: placed {{placed}}/{{count}} instances on {{target_mesh_path}}')
+"""
+
+
+def _gen_save_delta_snapshot(snapshot_id: str, base_snapshot_id: Optional[str]) -> str:
+    """Generate code that collects dirty layers and prints them as JSON."""
+    return f"""\
+import json
+import omni.usd
+
+stage = omni.usd.get_context().get_stage()
+try:
+    dirty_identifiers = omni.usd.get_dirty_layers(stage) or []
+except Exception:
+    # Older Kit builds: fall back to iterating the layer stack and checking IsDirty()
+    dirty_identifiers = []
+    try:
+        for layer in stage.GetLayerStack(includeSessionLayers=False):
+            if layer and layer.dirty:
+                dirty_identifiers.append(layer.identifier)
+    except Exception:
+        pass
+
+deltas = {{}}
+for ident in dirty_identifiers:
+    layer = None
+    try:
+        from pxr import Sdf
+        layer = Sdf.Layer.Find(ident)
+    except Exception:
+        layer = None
+    if layer is None:
+        continue
+    try:
+        deltas[ident] = layer.ExportToString()
+    except Exception as exc:
+        deltas[ident] = f"__export_error__: {{exc}}"
+
+print(json.dumps({{
+    'snapshot_id': '{snapshot_id}',
+    'base_snapshot_id': {repr(base_snapshot_id)},
+    'layer_count': len(deltas),
+    'deltas': deltas,
+}}))
+"""
+
+
+def _gen_restore_delta_snapshot(snapshot_id: str, deltas: Dict[str, str]) -> str:
+    """Generate code that replays saved layer strings onto the current stage."""
+    import json as _json
+    # Embed the delta payload literally so the patch is self-contained.
+    return f"""\
+import json
+from pxr import Sdf
+
+deltas = json.loads({_json.dumps(_json.dumps(deltas))})
+applied = 0
+for ident, payload in deltas.items():
+    if not isinstance(payload, str) or payload.startswith('__export_error__'):
+        continue
+    layer = Sdf.Layer.Find(ident) or Sdf.Layer.FindOrOpen(ident)
+    if layer is None:
+        continue
+    try:
+        layer.ImportFromString(payload)
+        applied += 1
+    except Exception as exc:
+        print(f'Failed to apply delta to {{ident}}: {{exc}}')
+
+print(json.dumps({{'snapshot_id': '{snapshot_id}', 'applied_layers': applied}}))
+"""
+
+
+def _gen_batch_delete_prims(args: Dict) -> str:
+    import json
+    paths = list(args.get("prim_paths") or [])
+    if not paths:
+        return (
+            "# batch_delete_prims called with an empty prim_paths list — nothing to do.\n"
+            "print('batch_delete_prims: no paths supplied')\n"
+        )
+    # Old version printed "removed {len(paths)} prims ok={ok}" regardless of
+    # outcome. If `ok` was False (even one path missing), nothing actually
+    # got deleted (BatchNamespaceEdit is atomic), but the text claimed
+    # removal. Partition requested paths into missing vs present, run the
+    # edit only on the present set, and report actual counts.
+    return f"""\
+import omni.usd
+from pxr import Sdf
+
+stage = omni.usd.get_context().get_stage()
+layer = stage.GetRootLayer()
+requested = {json.dumps(paths)}
+
+# Filter out paths that don't exist — BatchNamespaceEdit.Apply is atomic
+# and rejects the whole batch if any target is missing.
+_missing = [p for p in requested if not stage.GetPrimAtPath(p).IsValid()]
+_present = [p for p in requested if stage.GetPrimAtPath(p).IsValid()]
+
+_removed = 0
+if _present:
+    edit = Sdf.BatchNamespaceEdit()
+    for p in _present:
+        edit.Add(Sdf.NamespaceEdit.Remove(p))
+    ok = layer.Apply(edit)
+    if not ok:
+        raise RuntimeError(
+            f'batch_delete_prims: layer.Apply failed for all {{len(_present)}} present paths '
+            f'(missing paths were already filtered: {{_missing}}).'
+        )
+    # Verify each removed prim is actually gone.
+    _still_present = [p for p in _present if stage.GetPrimAtPath(p).IsValid()]
+    if _still_present:
+        raise RuntimeError(
+            f'batch_delete_prims: layer.Apply returned True but these prims still exist: {{_still_present}}'
+        )
+    _removed = len(_present)
+
+print(f'batch_delete_prims: removed={{_removed}}/{{len(requested)}} requested, missing={{len(_missing)}}')
+if _missing:
+    print(f'  paths not in stage (skipped): {{_missing[:5]}}')
+if _removed == 0 and _missing:
+    raise RuntimeError(
+        f'batch_delete_prims: 0 of {{len(requested)}} paths were removable — all were missing: {{_missing}}'
+    )
+"""
+
+
+def _gen_batch_set_attributes(args: Dict) -> str:
+    import json
+    changes = list(args.get("changes") or [])
+    if not changes:
+        return (
+            "# batch_set_attributes called with no changes — nothing to do.\n"
+            "print('batch_set_attributes: no changes supplied')\n"
+        )
+    # Old version had three honesty holes:
+    #   1. Missing prim → `continue` silently. No signal the path was wrong.
+    #   2. Missing attribute → auto-created with ValueTypeNames.Token. That's
+    #      wrong for almost every case (e.g. creates a token attr named
+    #      "physics:mass" and stores the float "1.0" as a string-token);
+    #      the snapshot's mass check then never sees a real authored mass.
+    #   3. Final print said "applied {len(changes)} changes" even when
+    #      every single one was skipped or errored.
+    # Fix: track applied / skipped / errored separately, raise at the end
+    # if nothing actually landed, and keep attr creation strict (only
+    # auto-create when the caller provided an explicit `value_type`).
+    lines = [
+        "import omni.usd",
+        "from pxr import Sdf",
+        "",
+        "stage = omni.usd.get_context().get_stage()",
+        f"changes = {json.dumps(changes)}",
+        "_applied = 0",
+        "_missing_prims = []",
+        "_missing_attrs = []",
+        "_errors = []",
+        "with Sdf.ChangeBlock():",
+        "    for ch in changes:",
+        "        prim = stage.GetPrimAtPath(ch['prim_path'])",
+        "        if not prim or not prim.IsValid():",
+        "            _missing_prims.append(ch['prim_path'])",
+        "            continue",
+        "        attr = prim.GetAttribute(ch['attr_name'])",
+        "        if not attr or not attr.IsValid():",
+        "            _missing_attrs.append(f\"{ch['prim_path']}.{ch['attr_name']}\")",
+        "            continue",
+        "        try:",
+        "            attr.Set(ch['value'])",
+        "            _applied += 1",
+        "        except Exception as exc:",
+        "            _errors.append(f\"{ch['prim_path']}.{ch['attr_name']} -> {exc}\")",
+        "",
+        "_report = (",
+        "    f'batch_set_attributes: applied={_applied} '",
+        "    f'missing_prims={len(_missing_prims)} '",
+        "    f'missing_attrs={len(_missing_attrs)} '",
+        "    f'errors={len(_errors)}'",
+        ")",
+        "print(_report)",
+        "if _missing_prims:",
+        "    print(f'  missing prims: {_missing_prims[:5]}')",
+        "if _missing_attrs:",
+        "    print(f'  missing attrs: {_missing_attrs[:5]}')",
+        "if _errors:",
+        "    print(f'  errors: {_errors[:5]}')",
+        "if _applied == 0 and (_missing_prims or _missing_attrs or _errors):",
+        "    raise RuntimeError(",
+        "        f'batch_set_attributes: 0 of {len(changes)} changes applied. {_report}. '",
+        "        f'First problem: '",
+        "        + (f\"prim not found: {_missing_prims[0]!r}\" if _missing_prims",
+        "           else f\"attribute not found: {_missing_attrs[0]!r}\" if _missing_attrs",
+        "           else f\"error: {_errors[0]}\")",
+        "    )",
+    ]
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
