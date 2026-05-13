@@ -22,11 +22,11 @@ logger = logging.getLogger(__name__)
 
 # ── Paths to knowledge files ─────────────────────────────────────────────────
 _WORKSPACE = Path(__file__).resolve().parents[4] / "workspace"
-_SENSOR_SPECS_PATH = _WORKSPACE / "knowledge" / "sensor_specs.jsonl"
+# _SENSOR_SPECS_PATH migrated to handlers/scene_blueprints.py (Phase 8 wave 7, 2026-05-13).
 # _DEFORMABLE_PRESETS_PATH migrated to handlers/physics.py (Phase 8 wave 6).
 
 # Cache loaded once
-_sensor_specs: Optional[List[Dict]] = None
+# _sensor_specs migrated to handlers/scene_blueprints.py (Phase 8 wave 7, 2026-05-13).
 # _deformable_presets migrated to handlers/physics.py (Phase 8 wave 6).
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -335,7 +335,7 @@ _GROOT_EMBODIMENTS = {
 }
 
 # from: feat/addendum-community-remote-v2
-_ISAA_MANIFEST_VERSION = 1
+# _ISAA_MANIFEST_VERSION migrated to handlers/scene_blueprints.py (Phase 8 wave 7, 2026-05-13).
 
 # from: feat/atomic-tier6-lighting
 # _LIGHT_TYPE_NAMES migrated to handlers/vision.py (Phase 8 wave 4, 2026-05-13).
@@ -960,79 +960,7 @@ _RUN_REGISTRY: Dict[str, Dict[str, Any]] = {}
 # _SCENE_STYLE_PRESETS migrated to handlers/vision.py (Phase 8 wave 4, 2026-05-13).
 
 # from: feat/6A-physx-validation
-_SCENE_TEMPLATES = {
-    "tabletop_manipulation": {
-        "description": "Table-top manipulation scene with a Franka robot arm, objects to grasp, and an overhead camera. Ideal for pick-and-place tasks.",
-        "category": "manipulation",
-        "room_dims": [4, 4, 3],
-        "objects": [
-            {"name": "GroundPlane", "prim_type": "Plane", "position": [0, 0, 0], "scale": [5, 5, 1]},
-            {"name": "Table", "prim_type": "Cube", "position": [0, 0, 0.4], "scale": [0.8, 0.6, 0.4]},
-            {"name": "Franka", "prim_path": "/World/Franka", "asset_name": "franka", "position": [0, -0.3, 0.8], "scale": [1, 1, 1]},
-            {"name": "Cube_Red", "prim_type": "Cube", "position": [0.15, 0.1, 0.85], "scale": [0.03, 0.03, 0.03]},
-            {"name": "Cube_Green", "prim_type": "Cube", "position": [-0.1, 0.15, 0.85], "scale": [0.03, 0.03, 0.03]},
-            {"name": "Cylinder_Blue", "prim_type": "Cylinder", "position": [0.05, -0.1, 0.85], "scale": [0.02, 0.02, 0.04]},
-            {"name": "OverheadCamera", "prim_type": "Camera", "position": [0, 0, 1.8], "rotation": [-90, 0, 0]},
-        ],
-        "suggested_sensors": ["camera (overhead, 1280x720)", "contact_sensor (gripper fingers)"],
-        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 120.0, "solver_iterations": 32},
-    },
-    "warehouse_picking": {
-        "description": "Warehouse bin-picking scene with shelving units, a mobile robot, bins with objects, and an overhead camera. Good for logistics and order-fulfillment tasks.",
-        "category": "warehouse",
-        "room_dims": [10, 8, 4],
-        "objects": [
-            {"name": "GroundPlane", "prim_type": "Plane", "position": [0, 0, 0], "scale": [12, 10, 1]},
-            {"name": "Shelf_A", "prim_type": "Cube", "position": [-2, 2, 1.0], "scale": [1.2, 0.4, 2.0]},
-            {"name": "Shelf_B", "prim_type": "Cube", "position": [2, 2, 1.0], "scale": [1.2, 0.4, 2.0]},
-            {"name": "Bin_1", "prim_type": "Cube", "position": [-2, 2, 0.3], "scale": [0.4, 0.3, 0.25]},
-            {"name": "Bin_2", "prim_type": "Cube", "position": [-2, 2, 0.8], "scale": [0.4, 0.3, 0.25]},
-            {"name": "Bin_3", "prim_type": "Cube", "position": [2, 2, 0.3], "scale": [0.4, 0.3, 0.25]},
-            {"name": "MobileRobot", "prim_path": "/World/Carter", "asset_name": "carter", "position": [0, -1, 0], "scale": [1, 1, 1]},
-            {"name": "OverheadCamera", "prim_type": "Camera", "position": [0, 0, 3.5], "rotation": [-90, 0, 0]},
-        ],
-        "suggested_sensors": ["camera (overhead, 1920x1080)", "rtx_lidar (mobile robot)"],
-        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 60.0, "solver_iterations": 16},
-    },
-    "mobile_navigation": {
-        "description": "Indoor navigation scene with a ground plane, walls, obstacles, and a wheeled robot with lidar. Good for SLAM and path-planning tasks.",
-        "category": "mobile",
-        "room_dims": [8, 8, 3],
-        "objects": [
-            {"name": "GroundPlane", "prim_type": "Plane", "position": [0, 0, 0], "scale": [10, 10, 1]},
-            {"name": "Wall_North", "prim_type": "Cube", "position": [0, 4, 1.0], "scale": [8, 0.1, 2.0]},
-            {"name": "Wall_South", "prim_type": "Cube", "position": [0, -4, 1.0], "scale": [8, 0.1, 2.0]},
-            {"name": "Wall_East", "prim_type": "Cube", "position": [4, 0, 1.0], "scale": [0.1, 8, 2.0]},
-            {"name": "Wall_West", "prim_type": "Cube", "position": [-4, 0, 1.0], "scale": [0.1, 8, 2.0]},
-            {"name": "Obstacle_1", "prim_type": "Cylinder", "position": [1.5, 1.0, 0.5], "scale": [0.3, 0.3, 1.0]},
-            {"name": "Obstacle_2", "prim_type": "Cube", "position": [-1.0, -1.5, 0.4], "scale": [0.6, 0.6, 0.8]},
-            {"name": "Obstacle_3", "prim_type": "Cylinder", "position": [-2.0, 2.0, 0.5], "scale": [0.25, 0.25, 1.0]},
-            {"name": "Jetbot", "prim_path": "/World/Jetbot", "asset_name": "jetbot", "position": [0, 0, 0.05], "scale": [1, 1, 1]},
-        ],
-        "suggested_sensors": ["rtx_lidar (robot-mounted, 360 deg)", "camera (front-facing)"],
-        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 60.0, "solver_iterations": 16},
-    },
-    "inspection_cell": {
-        "description": "Automated inspection cell with a conveyor belt, inspection cameras, structured lighting, and sample objects. Good for quality-inspection and defect-detection tasks.",
-        "category": "inspection",
-        "room_dims": [6, 4, 3],
-        "objects": [
-            {"name": "GroundPlane", "prim_type": "Plane", "position": [0, 0, 0], "scale": [8, 6, 1]},
-            {"name": "Conveyor", "prim_type": "Cube", "position": [0, 0, 0.45], "scale": [3.0, 0.5, 0.05]},
-            {"name": "ConveyorLegs_L", "prim_type": "Cube", "position": [-1.2, 0, 0.2], "scale": [0.05, 0.4, 0.4]},
-            {"name": "ConveyorLegs_R", "prim_type": "Cube", "position": [1.2, 0, 0.2], "scale": [0.05, 0.4, 0.4]},
-            {"name": "InspectionCamera_Top", "prim_type": "Camera", "position": [0, 0, 1.5], "rotation": [-90, 0, 0]},
-            {"name": "InspectionCamera_Side", "prim_type": "Camera", "position": [0, -1.2, 0.8], "rotation": [0, 0, 0]},
-            {"name": "Light_Bar_1", "prim_type": "RectLight", "position": [-0.5, 0, 1.2], "scale": [0.8, 0.1, 0.05]},
-            {"name": "Light_Bar_2", "prim_type": "RectLight", "position": [0.5, 0, 1.2], "scale": [0.8, 0.1, 0.05]},
-            {"name": "SampleObject_1", "prim_type": "Cube", "position": [-0.3, 0, 0.5], "scale": [0.08, 0.08, 0.08]},
-            {"name": "SampleObject_2", "prim_type": "Cylinder", "position": [0.1, 0, 0.5], "scale": [0.04, 0.04, 0.06]},
-            {"name": "SampleObject_3", "prim_type": "Sphere", "position": [0.4, 0, 0.52], "scale": [0.03, 0.03, 0.03]},
-        ],
-        "suggested_sensors": ["camera (top-down, high-res 4K)", "camera (side-view, 1280x720)"],
-        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 120.0, "solver_iterations": 32},
-    },
-}
+# _SCENE_TEMPLATES migrated to handlers/scene_blueprints.py (Phase 8 wave 7, 2026-05-13).
 
 # from: feat/new-onboarding
 _SLASH_COMMANDS = [
@@ -1192,7 +1120,7 @@ _TELEOP_DEVICES = {
 }
 
 # from: feat/addendum-community-remote-v2
-_TEMPLATE_EXPORT_DIR = _WORKSPACE / "templates" / "exports"
+# _TEMPLATE_EXPORT_DIR migrated to handlers/scene_blueprints.py (Phase 8 wave 7, 2026-05-13).
 
 # from: feat/new-omnigraph-assistant
 _TEMPLATE_KEYWORDS = {
@@ -1207,7 +1135,7 @@ _TEMPLATE_KEYWORDS = {
 }
 
 # from: feat/addendum-community-remote-v2
-_TEMPLATE_LIBRARY_DIR = _WORKSPACE / "templates" / "library"
+# _TEMPLATE_LIBRARY_DIR migrated to handlers/scene_blueprints.py (Phase 8 wave 7, 2026-05-13).
 
 # from: feat/atomic-tier12-asset-mgmt
 _TIER12_HELPERS = (
@@ -1342,21 +1270,7 @@ _turn_recorder = TurnRecorder()
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-def _load_sensor_specs() -> List[Dict]:
-    global _sensor_specs
-    if _sensor_specs is not None:
-        return _sensor_specs
-    specs = []
-    if _SENSOR_SPECS_PATH.exists():
-        for line in _SENSOR_SPECS_PATH.read_text().splitlines():
-            line = line.strip()
-            if line:
-                specs.append(json.loads(line))
-    _sensor_specs = specs
-    return specs
-
-
-# _load_deformable_presets migrated to handlers/physics.py (Phase 8 wave 6, 2026-05-13).
+# _load_sensor_specs migrated to handlers/scene_blueprints.py (Phase 8 wave 7, 2026-05-13).
 
 
 # ── Safe xform helper (inlined into generated code) ─────────────────────────
