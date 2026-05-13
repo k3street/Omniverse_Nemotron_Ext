@@ -13,6 +13,191 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict
 
+# ---------------------------------------------------------------------------
+# Theme-local constants + helpers (Phase 8 wave 9, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.pick_place.
+
+_PP_RMPFLOW_HEADER = """
+import os
+import json
+import numpy as np
+import omni.usd
+import omni.physx
+from pxr import UsdGeom, UsdPhysics, Sdf, Gf
+from isaacsim.robot_motion.motion_generation import RmpFlow, ArticulationMotionPolicy
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api import World
+
+def _find_franka_configs():
+    roots = ["/home/anton/.local/share/ov/data/exts",
+             "/home/anton/.local/share/ov/pkg",
+             "/opt/isaac-sim",
+             os.environ.get("ISAAC_PATH", "")]
+    for root in roots:
+        if not root or not os.path.isdir(root):
+            continue
+        for dirpath, _, files in os.walk(root):
+            if "motion_policy_configs" in dirpath and dirpath.endswith("franka/rmpflow"):
+                fs = set(files)
+                if "franka_rmpflow_common.yaml" in fs and "robot_descriptor.yaml" in fs:
+                    urdf = os.path.normpath(os.path.join(dirpath, "..", "lula_franka_gen.urdf"))
+                    if not os.path.isfile(urdf):
+                        urdf = None
+                    return {{
+                        "rmpflow": os.path.join(dirpath, "franka_rmpflow_common.yaml"),
+                        "descriptor": os.path.join(dirpath, "robot_descriptor.yaml"),
+                        "urdf": urdf,
+                    }}
+    return None
+"""
+
+_PP_OBSERVABILITY_SNIPPET = """
+# ── Observability: ctrl:* attrs on robot prim ────────────────────────
+# Canonical ctrl:* contract (see docs/qa/ctrl_attrs_schema.md). Every
+# pick-place controller emits these attrs so downstream tools
+# (diagnose_scene, auto_judge, benchmark_controllers) can probe state
+# without controller-specific knowledge.
+_robot_prim = stage.GetPrimAtPath(ROBOT_PATH)
+def _ensure_attr(name, type_name, default):
+    a = _robot_prim.GetAttribute(name)
+    if not a or not a.IsDefined():
+        a = _robot_prim.CreateAttribute(name, type_name)
+    try:
+        if a.Get() is None: a.Set(default)
+    except Exception: pass
+    return a
+
+_a_mode = _ensure_attr("ctrl:mode", Sdf.ValueTypeNames.String, "")
+_a_phase = _ensure_attr("ctrl:phase", Sdf.ValueTypeNames.String, "wait_sensor")
+_a_cubes = _ensure_attr("ctrl:cubes_delivered", Sdf.ValueTypeNames.Int, 0)
+_a_cycles = _ensure_attr("ctrl:cycles_attempted", Sdf.ValueTypeNames.Int, 0)
+_a_err = _ensure_attr("ctrl:error_count", Sdf.ValueTypeNames.Int, 0)
+_a_last_err = _ensure_attr("ctrl:last_error", Sdf.ValueTypeNames.String, "")
+_a_picked = _ensure_attr("ctrl:picked_path", Sdf.ValueTypeNames.String, "")
+_a_tick = _ensure_attr("ctrl:tick_count", Sdf.ValueTypeNames.Int, 0)
+# Phase 4 diagnostic counters (2026-05-10): plan_calls/plan_fails counts
+# cuRobo plan_pose attempts, last_fail_goal records the last failed pose.
+_a_plan_calls = _ensure_attr("ctrl:plan_calls", Sdf.ValueTypeNames.Int, 0)
+_a_plan_fails = _ensure_attr("ctrl:plan_fails", Sdf.ValueTypeNames.Int, 0)
+_a_last_fail_goal = _ensure_attr("ctrl:last_fail_goal", Sdf.ValueTypeNames.String, "")
+# Reset counters on install (avoid stale values from prior runs).
+_a_err.Set(0); _a_cubes.Set(0); _a_cycles.Set(0); _a_tick.Set(0); _a_last_err.Set("")
+_a_plan_calls.Set(0); _a_plan_fails.Set(0); _a_last_fail_goal.Set("")
+"""
+
+_PP_SCENE_RESET_MGR_SNIPPET = """
+# ── Scene Reset Manager (robot-agnostic Stop+Play recovery) ──────────
+# A single global manager that coordinates Stop+Play recovery for any
+# number of registered controllers (native_pp, sensor_gated, UR10
+# pick-place, palletizing, etc.). Installed idempotently: if it
+# already exists, we just register our reset hook with it.
+#
+# Contract (also documented in docs/qa/ctrl_attrs_schema.md):
+#   - register(name, reset_fn): reset_fn() returns True on success,
+#     False to retry next tick (PLAY event fires before physics view
+#     is valid; manager handles retry for all controllers uniformly)
+#   - unregister(name): remove on controller teardown
+_MGR_ATTR = "_scene_reset_manager"
+if not hasattr(builtins, _MGR_ATTR):
+    import omni.timeline as _otl_mgr
+    class _SceneResetManager:
+        def __init__(self):
+            self.hooks = {}       # name → reset_fn (returns bool)
+            self.pending = set()  # names still trying to reset
+            self.stopped = False
+            self._tl_sub = None
+            self._physics_sub = None
+        def register(self, name, reset_fn):
+            self.hooks[name] = reset_fn
+        def unregister(self, name):
+            self.hooks.pop(name, None)
+            self.pending.discard(name)
+        def _on_timeline(self, ev):
+            try:
+                _et = int(ev.type)
+                _play = int(_otl_mgr.TimelineEventType.PLAY)
+                _stop = int(_otl_mgr.TimelineEventType.STOP)
+            except Exception: return
+            if _et == _stop:
+                self.stopped = True
+            elif _et == _play and self.stopped:
+                self.stopped = False
+                self.pending = set(self.hooks.keys())
+        def _on_tick(self, dt):
+            if not self.pending: return
+            for name in list(self.pending):
+                fn = self.hooks.get(name)
+                if fn is None:
+                    self.pending.discard(name); continue
+                try:
+                    if fn(): self.pending.discard(name)
+                except Exception as _e:
+                    print(f"(reset-hook '{name}' exception: {_e})")
+    _mgr = _SceneResetManager()
+    _mgr._tl_sub = _otl_mgr.get_timeline_interface().get_timeline_event_stream().create_subscription_to_pop(_mgr._on_timeline)
+    _mgr._physics_sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_mgr._on_tick)
+    setattr(builtins, _MGR_ATTR, _mgr)
+    print("(scene reset manager installed)")
+"""
+
+def _resolve_auto_target_source(args: dict) -> tuple[str, str]:
+    """Pick best available target_source for the current env.
+
+    Returns (resolved_target_source, reason_str). Used by
+    setup_pick_place_controller when target_source='auto'.
+
+    Priority: curobo > native > spline > diffik.
+    (Skips sensor_gated/fixed_poses/cube_tracking/ros2_cmd — those
+    require explicit opt-in because of sim2real-honesty or config
+    requirements.)
+    """
+    # Inline probes — can't await here since this is sync-called from generator
+    gpu = _probe_gpu_capability()
+    curobo = _probe_curobo()
+    isaac_lab = _probe_isaac_lab()
+    cc = gpu.get("compute_capability")
+    cc_major = 0
+    if cc:
+        try: cc_major = int(cc.split(".")[0])
+        except Exception: pass
+    # Priority: industrial-quality GPU path first, then CPU winner (spline —
+    # benchmark showed 3/4 vs native's 0/4), then native for Franka
+    # compatibility, then Isaac Lab diffik, then native fallback.
+    # 1) curobo if GPU >= Volta AND curobo available
+    if gpu["gpu_available"] and cc_major >= 7 and curobo["available"]:
+        return "curobo", f"GPU={gpu['arch_name']} cc={cc}; curobo available"
+    # 2) spline — verified 3/4 delivery on conveyor benchmark, beats native 3x
+    if _probe_scipy()["available"]:
+        return "spline", "scipy available; spline is CPU-only winner (3/4 vs native 0/4)"
+    # 3) native — Franka-only fallback without scipy
+    if args.get("robot_path", "").lower().endswith(("franka", "/franka")) or \
+       "franka" in args.get("robot_path", "").lower():
+        return "native", "Franka detected, scipy unavailable; native PickPlaceController fallback"
+    # 4) diffik if Isaac Lab present
+    if isaac_lab["available"]:
+        return "diffik", "Isaac Lab available; no better option"
+    # 5) Last resort
+    return "native", "no better option; falling back to native"
+
+
+
+
+
+
+
+
+
+# _handle_setup_ros2_control_compat moved to handlers/robot.py (Phase 7 wave 8).
+
+
+# _handle_emit_ros2_control_yaml moved to handlers/ros2.py (Phase 7 wave 14).
+
+
+# _handle_precheck_ros2_environment moved to handlers/ros2.py (Phase 7 wave 14).
+
+
+# Register the new handlers
+
 
 # ---------------------------------------------------------------------------
 # Phase 6 wave 25 — pick-place suite (controller + 9 variants + ros2 bridge)
@@ -43,7 +228,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
     joint-level control, UsdPhysics.FixedJoint for cube-to-EE attach
     during transport, gripper joint targets for open/close.
     """
-    from ..tool_executor import _resolve_auto_target_source  # noqa: PLC0415
+    # _resolve_auto_target_source migrated to module body (Phase 8 wave 9).
     mode = args.get("target_source", "cube_tracking")
     if mode == "auto":
         resolved, reason = _resolve_auto_target_source(args)
@@ -1320,9 +1505,8 @@ def _gen_pick_place_sensor_gated(robot_path, sensor_path, belt_path, pick_pose_n
     variant. Sim2real-honest in both cases: sensor is still binary,
     belt pauses on trigger, no ground-truth cube tracking.
     """
-    from ..tool_executor import (  # noqa: PLC0415
-        _PP_RMPFLOW_HEADER,
-    )
+    # (Phase 8 wave 9) tool_executor imports migrated to module body:
+    # _PP_RMPFLOW_HEADER migrated to module body (Phase 8 wave 9).
     # Decide style: coord-based (IK) or pose-based (joint replay)
     use_coords = (pick_target is not None and drop_target is not None
                   and home_target is not None)
@@ -1993,10 +2177,9 @@ def _gen_pick_place_native(robot_path, sensor_path, belt_path,
       - Live cube tracking: `picking_position` reads source prim's
         current world pose each tick (retargets as cube moves on belt).
     """
-    from ..tool_executor import (  # noqa: PLC0415
-        _PP_OBSERVABILITY_SNIPPET,
-        _PP_SCENE_RESET_MGR_SNIPPET,
-    )
+    # (Phase 8 wave 9) tool_executor imports migrated to module body:
+    # _PP_OBSERVABILITY_SNIPPET migrated to module body (Phase 8 wave 9).
+    # _PP_SCENE_RESET_MGR_SNIPPET migrated to module body (Phase 8 wave 9).
     import json as _json
     return f"""\
 # ── setup_pick_place_controller (native) ─────────────────────────────
@@ -2611,10 +2794,9 @@ def _gen_pick_place_spline(robot_path, sensor_path, belt_path,
     through the 7-DoF joint configurations at waypoint times. Fallback
     to np.interp per-joint if scipy unavailable.
     """
-    from ..tool_executor import (  # noqa: PLC0415
-        _PP_OBSERVABILITY_SNIPPET,
-        _PP_SCENE_RESET_MGR_SNIPPET,
-    )
+    # (Phase 8 wave 9) tool_executor imports migrated to module body:
+    # _PP_OBSERVABILITY_SNIPPET migrated to module body (Phase 8 wave 9).
+    # _PP_SCENE_RESET_MGR_SNIPPET migrated to module body (Phase 8 wave 9).
     import json as _json
     grip_style_norm = grip_style if grip_style in ("fixed_joint", "friction") else "fixed_joint"
     return f"""\
@@ -3355,10 +3537,9 @@ def _gen_pick_place_curobo(robot_path, sensor_path, belt_path,
         For CP-37/46/48 etc with explicit obstacle list, this lets
         plan_pose succeed.
     """
-    from ..tool_executor import (  # noqa: PLC0415
-        _PP_OBSERVABILITY_SNIPPET,
-        _PP_SCENE_RESET_MGR_SNIPPET,
-    )
+    # (Phase 8 wave 9) tool_executor imports migrated to module body:
+    # _PP_OBSERVABILITY_SNIPPET migrated to module body (Phase 8 wave 9).
+    # _PP_SCENE_RESET_MGR_SNIPPET migrated to module body (Phase 8 wave 9).
     """GPU-accelerated global trajectory optimization via cuRobo MotionPlanner.
 
     **Unlocked 2026-04-21** — four breakthroughs:
@@ -4650,10 +4831,9 @@ def _gen_pick_place_diffik(robot_path, sensor_path, belt_path,
     for simple tabletop scenarios; worse when the 6 waypoints need
     obstacle avoidance).
     """
-    from ..tool_executor import (  # noqa: PLC0415
-        _PP_OBSERVABILITY_SNIPPET,
-        _PP_SCENE_RESET_MGR_SNIPPET,
-    )
+    # (Phase 8 wave 9) tool_executor imports migrated to module body:
+    # _PP_OBSERVABILITY_SNIPPET migrated to module body (Phase 8 wave 9).
+    # _PP_SCENE_RESET_MGR_SNIPPET migrated to module body (Phase 8 wave 9).
     import json as _json
     return f"""\
 # ── setup_pick_place_controller (diffik) — Isaac Lab DifferentialIKController ─
@@ -5168,10 +5348,9 @@ def _gen_pick_place_osc(robot_path, sensor_path, belt_path,
     contact-rich tasks (polishing, assembly) where compliant motion
     matters more than drop precision.
     """
-    from ..tool_executor import (  # noqa: PLC0415
-        _PP_OBSERVABILITY_SNIPPET,
-        _PP_SCENE_RESET_MGR_SNIPPET,
-    )
+    # (Phase 8 wave 9) tool_executor imports migrated to module body:
+    # _PP_OBSERVABILITY_SNIPPET migrated to module body (Phase 8 wave 9).
+    # _PP_SCENE_RESET_MGR_SNIPPET migrated to module body (Phase 8 wave 9).
     import json as _json
     return f"""\
 # ── setup_pick_place_controller (osc) — Isaac Lab OperationalSpaceController ──
