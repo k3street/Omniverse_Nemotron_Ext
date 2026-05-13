@@ -448,7 +448,8 @@
 60b:
   title: 'SDG: extreme domain randomization (EDR) preset'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
+  landed_date: '2026-05-13'
   note: preset edge cases
   gate: pytest tests/test_sub_phase_60b_sdg_preset_edge_cases.py — edge-case preset list has ≥3 entries
   files:
