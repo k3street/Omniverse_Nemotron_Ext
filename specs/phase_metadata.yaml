@@ -688,7 +688,8 @@
 80b:
   title: Grasp-stability defaults + `grip_safe_mode` controller arg
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
+  landed_date: '2026-05-13'
   note: suction array sensor
   gate: pytest — suction array detects pickup signal from N suction cups in parallel
   files:
