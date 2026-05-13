@@ -421,7 +421,7 @@ def _gen_create_omnigraph(args: Dict) -> str:
     # _OG_NODE_TYPE_MAP is cross-theme (~3 callers across tool_executor.py),
     # so it stays in tool_executor.py until Phase 8's deeper shared-module
     # pass. Lazy import keeps module-load circular-free.
-    from ..tool_executor import _OG_NODE_TYPE_MAP
+    from ._shared import _OG_NODE_TYPE_MAP
 
     graph_path = args["graph_path"]
     graph_type = args.get("graph_type", "action_graph")
@@ -1473,7 +1473,7 @@ print(f"export_stage: started async export of {{target}} as {{fmt}} — completi
 
 def _gen_add_node(args: Dict) -> str:
     """Add a single node to an existing OmniGraph via og.Controller.edit()."""
-    from ..tool_executor import _OG_NODE_TYPE_MAP
+    from ._shared import _OG_NODE_TYPE_MAP
     graph_path = args["graph_path"]
     raw_node_type = args["node_type"]
     node_name = args["name"]

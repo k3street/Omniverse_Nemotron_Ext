@@ -1895,21 +1895,7 @@ from .handlers.workflow import (  # noqa: E402
 # _gen_deformable_surface moved to handlers/physics.py (Phase 5 wave 4).
 
 
-# Isaac Sim 5.1 OmniGraph node type mapping:
-# The LLM often uses legacy omni.isaac.* prefixes. Remap to the correct isaacsim.* types.
-_OG_NODE_TYPE_MAP = {
-    # ROS2 bridge nodes (Isaac Sim 5.1 uses isaacsim.ros2.bridge.*)
-    "omni.isaac.ros2_bridge.ROS2Context": "isaacsim.ros2.bridge.ROS2Context",
-    "omni.isaac.ros2_bridge.ROS2PublishClock": "isaacsim.ros2.bridge.ROS2PublishClock",
-    "omni.isaac.ros2_bridge.ROS2PublishJointState": "isaacsim.ros2.bridge.ROS2PublishJointState",
-    "omni.isaac.ros2_bridge.ROS2SubscribeJointState": "isaacsim.ros2.bridge.ROS2SubscribeJointState",
-    "omni.isaac.ros2_bridge.ROS2PublishTransformTree": "isaacsim.ros2.bridge.ROS2PublishTransformTree",
-    "omni.isaac.ros2_bridge.ROS2PublishImage": "isaacsim.ros2.bridge.ROS2PublishImage",
-    # ArticulationController is in core.nodes, NOT ros2.bridge
-    "omni.isaac.ros2_bridge.ROS2ArticulationController": "isaacsim.core.nodes.IsaacArticulationController",
-    "isaacsim.ros2.bridge.ROS2ArticulationController": "isaacsim.core.nodes.IsaacArticulationController",
-    "omni.isaac.core_nodes.IsaacArticulationController": "isaacsim.core.nodes.IsaacArticulationController",
-}
+# _OG_NODE_TYPE_MAP migrated to handlers/_shared.py (Phase 8 wave 5, 2026-05-13).
 
 
 # _gen_create_omnigraph moved to handlers/scene_authoring.py (Phase 3 wave 4).
@@ -3805,19 +3791,7 @@ def _read_checkpoint_action_std(run_dir: str) -> Optional[float]:
 # ══════ From feat/addendum-phase7C-teleop-quality ══════
 # _handle_check_teleop_hardware moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-def _open_hdf5_safely(path: str):
-    """Return (h5py_File, None) or (None, reason_str). Never raises."""
-    try:
-        import h5py  # type: ignore
-    except ImportError:
-        return None, "h5py is not installed"
-    p = Path(path)
-    if not p.exists():
-        return None, f"file does not exist: {path}"
-    try:
-        return h5py.File(str(p), "r"), None
-    except Exception as e:  # noqa: BLE001
-        return None, f"failed to open HDF5: {e}"
+# _open_hdf5_safely migrated to handlers/_shared.py (Phase 8 wave 5, 2026-05-13).
 
 # _handle_validate_teleop_demo moved to handlers/diagnostics.py (Phase 7 wave 14).
 

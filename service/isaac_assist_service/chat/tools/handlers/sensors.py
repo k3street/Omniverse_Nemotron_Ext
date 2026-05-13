@@ -473,7 +473,8 @@ async def _handle_add_vision_classifier_gate(args: Dict) -> Dict:
     by inspecting unmatched_cubes and raw_detections.
     """
     from .. import kit_tools
-    from ..tool_executor import execute_tool_call, _get_viewport_bytes, _get_vision_provider
+    from ..tool_executor import execute_tool_call  # dispatch entry, stays in tool_executor
+    from ._shared import _get_viewport_bytes, _get_vision_provider
     camera_path = args.get("camera_path")
     cube_paths = list(args.get("cube_paths") or [])
     class_labels = list(args.get("class_labels") or [])

@@ -83,8 +83,45 @@ def _safe_set_rotate_xyz(prim, r):
     xf.AddRotateXYZOp().Set(Gf.Vec3d(*r))
 '''
 
+# Phase 8 wave 5 (2026-05-13): _OG_NODE_TYPE_MAP migrated from
+# tool_executor.py:1900. Used by scene_authoring + ros2 OmniGraph
+# code generators to remap legacy omni.isaac.* → isaacsim.* node types.
+_OG_NODE_TYPE_MAP = {
+    # ROS2 bridge nodes (Isaac Sim 5.1 uses isaacsim.ros2.bridge.*)
+    "omni.isaac.ros2_bridge.ROS2Context": "isaacsim.ros2.bridge.ROS2Context",
+    "omni.isaac.ros2_bridge.ROS2PublishClock": "isaacsim.ros2.bridge.ROS2PublishClock",
+    "omni.isaac.ros2_bridge.ROS2PublishJointState": "isaacsim.ros2.bridge.ROS2PublishJointState",
+    "omni.isaac.ros2_bridge.ROS2SubscribeJointState": "isaacsim.ros2.bridge.ROS2SubscribeJointState",
+    "omni.isaac.ros2_bridge.ROS2PublishTransformTree": "isaacsim.ros2.bridge.ROS2PublishTransformTree",
+    "omni.isaac.ros2_bridge.ROS2PublishImage": "isaacsim.ros2.bridge.ROS2PublishImage",
+    # ArticulationController is in core.nodes, NOT ros2.bridge
+    "omni.isaac.ros2_bridge.ROS2ArticulationController": "isaacsim.core.nodes.IsaacArticulationController",
+    "isaacsim.ros2.bridge.ROS2ArticulationController": "isaacsim.core.nodes.IsaacArticulationController",
+    "omni.isaac.core_nodes.IsaacArticulationController": "isaacsim.core.nodes.IsaacArticulationController",
+}
+
+
+# Phase 8 wave 5: _open_hdf5_safely migrated from tool_executor.py:3808.
+# Used by teleop (validate demo) + diagnostics (check teleop hardware).
+def _open_hdf5_safely(path: str):
+    """Return (h5py_File, None) or (None, reason_str). Never raises."""
+    from pathlib import Path
+    try:
+        import h5py  # type: ignore
+    except ImportError:
+        return None, "h5py is not installed"
+    p = Path(path)
+    if not p.exists():
+        return None, f"file does not exist: {path}"
+    try:
+        return h5py.File(str(p), "r"), None
+    except Exception as e:  # noqa: BLE001
+        return None, f"failed to open HDF5: {e}"
+
+
 CONSTANTS: dict[str, object] = {
     "SAFE_XFORM_SNIPPET": _SAFE_XFORM_SNIPPET,
+    "OG_NODE_TYPE_MAP": _OG_NODE_TYPE_MAP,
 }
 
 
@@ -148,6 +185,8 @@ def __getattr__(name: str):  # PEP 562 module-level __getattr__
 __all__ = [
     "CONSTANTS",
     "_SAFE_XFORM_SNIPPET",
+    "_OG_NODE_TYPE_MAP",
+    "_open_hdf5_safely",
     # Plus the lazy-imported names; importers see them via __getattr__.
     *_LEGACY_REEXPORT_NAMES,
 ]

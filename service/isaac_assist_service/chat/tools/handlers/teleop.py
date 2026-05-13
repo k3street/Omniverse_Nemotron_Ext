@@ -722,7 +722,7 @@ def _gen_generate_teleop_watchdog_script(args: Dict) -> str:
 
 async def _handle_summarize_teleop_session(args: Dict) -> Dict:
     """Summarize duration and per-joint statistics for an HDF5 teleop session."""
-    from ..tool_executor import _open_hdf5_safely
+    from ._shared import _open_hdf5_safely
     path = args["hdf5_path"]
     fps_override = args.get("fps")
     f, reason = _open_hdf5_safely(path)

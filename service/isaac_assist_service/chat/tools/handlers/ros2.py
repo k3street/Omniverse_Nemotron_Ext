@@ -492,7 +492,7 @@ print("Configured {mode} mode: ROS2 nodes will use simulation clock from /clock 
 
 def _gen_setup_ros2_bridge(args: Dict) -> str:
     """Generate OmniGraph code for a complete ROS2 bridge profile."""
-    from ..tool_executor import _OG_NODE_TYPE_MAP  # noqa: PLC0415
+    from ._shared import _OG_NODE_TYPE_MAP
     profile_name = args["profile"]
     robot_path = args["robot_path"]
     graph_path = args.get("graph_path", "/World/ROS2_Bridge")
