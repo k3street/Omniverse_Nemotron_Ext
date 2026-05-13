@@ -586,9 +586,14 @@
   blocked_by: []
 '71':
   title: Yaskawa GP25 onboarding (production-grade demo)
-  agent_type: opus-runtime
-  status: scaffold
-  note: Yaskawa GP25 — needs Nucleus
+  agent_type: sonnet-mechanical
+  status: landed
+  landed_date: '2026-05-13'
+  note: SPEC/DATA layer landed. Runtime onboarding (Nucleus import, Kit RPC validation) remains scaffold.
+  gate: pytest — GP25 entry resolvable from robot wizard registry + spec data round-trips
+  files:
+    - service/isaac_assist_service/multimodal/yaskawa_gp25_onboarding.py
+    - tests/test_phase_71_yaskawa_gp25_onboarding.py
 '72':
   title: '`setup_assembly_constraint` runtime'
   agent_type: opus-runtime
