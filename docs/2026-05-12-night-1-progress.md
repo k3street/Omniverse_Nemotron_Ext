@@ -4,16 +4,17 @@ Branch: `refactor/2026-05-12-foundation-night-1` (anton remote, 100+ commits)
 
 ## TL;DR
 
-`tool_executor.py`: **35,842 → 2,737 lines (−92.4%)**. The dispatch is now
+`tool_executor.py`: **35,842 → 2,456 lines (−93.1%)**. The dispatch is now
 register-callback-driven (Phase 9), the monolith is structurally hollowed
-out, and Phase 8 has **25 waves** landed (~105 symbols migrated to theme
+out, and Phase 8 has **27 waves** landed (~117 symbols migrated to theme
 modules or `handlers/_shared.py`).
 
-Final handler→tool_executor imports: **9** total — 8× `execute_tool_call`
-(dispatch entry, intentionally stays) + 1× lazy `logger` import. Phase 8
-is functionally complete; only Phase 15 (workflow stateful unit:
-`_WRITE_LOCK_QUEUE`, `_ASYNC_TASKS_LOCK`, supporting classes) remains
-in the recovered-state block.
+Final handler→tool_executor imports: **10** total — 9× `execute_tool_call`
+(dispatch entry — 8 in robot, 1 in sensors, 1 lazy-proxy in diagnostics
+for test patchability) + 1× lazy `logger` import. Phase 8 is functionally
+complete; only Phase 15 (workflow stateful unit: `_WRITE_LOCK_QUEUE`,
+`_ASYNC_TASKS_LOCK`, supporting classes) remains in the recovered-state
+block.
 
 **Time-bombs defused**: 13+ stale-reference sites (`_te.X` attribute
 access to migrated symbols, multi-line imports missed by batch
