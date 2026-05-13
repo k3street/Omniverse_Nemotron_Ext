@@ -340,19 +340,21 @@
   note: rule names list
 47b:
   title: Honesty-decorator long-tail rollout
-  agent_type: opus-runtime
-  status: scaffold
-  note: silent-success rules — needs prod data
-  gate: pytest — 5 new rules registered in PatchValidatorRule registry
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: >-
+    SPEC/DECORATOR layer landed — SilentSuccessRule catalogue (10 rules),
+    HonestyDecorator (audit + wrap + raise_on_critical), audit_handler_module
+    AST scanner. 17 pytest tests pass. Runtime rollout across all handlers
+    still needs prod traffic data (opus-runtime phase).
+  gate: pytest tests/test_sub_phase_47b_honesty_decorator_long_tail.py — 17 tests pass
   files:
-  - service/isaac_assist_service/multimodal/sub_phase_47b_patch_validator_silent_success.py
-  - service/isaac_assist_service/chat/tools/patch_validators/rules/silent_success.py
-  - tests/test_sub_phase_47b_patch_validator_silent_success.py
-  loc: 300
-  effort_min: 120
+  - service/isaac_assist_service/multimodal/sub_phase_47b_honesty_decorator_long_tail.py
+  - tests/test_sub_phase_47b_honesty_decorator_long_tail.py
+  loc: 280
   blocked_by:
   - '11'
-  needs_runtime: production gap-log data to identify the right patterns
 '48':
   title: 'Diagnose dimension: cycle time estimate'
   agent_type: sonnet-bounded
