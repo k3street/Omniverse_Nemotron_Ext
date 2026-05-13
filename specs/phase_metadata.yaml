@@ -414,7 +414,7 @@
 56c:
   title: Scenario-profile controller config
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: ctrl profile attr
   gate: pytest — ctrl:profile attr added to controller schema; integrated with ctrl_namespace types
   files:
@@ -648,7 +648,7 @@
 78b:
   title: Yrkesroll (vocational-role) template audit + brick-stacking PhysX root cause
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: leaderboard uploader
   gate: pytest — uploader posts JSON to a configured URL; handles 4xx/5xx with retry+backoff
   files:
