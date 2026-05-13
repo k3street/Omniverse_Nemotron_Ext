@@ -603,7 +603,7 @@
 72c:
   title: '`validate_scene_blueprint` strengthening'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: blueprint validator
   gate: 'pytest — blueprint validator catches: 3 missing fields, 2 invalid object_class refs, AABB overlap'
   files:
@@ -984,7 +984,7 @@
 '105':
   title: Public release announcement + demos
   agent_type: sonnet-mechanical
-  status: scaffold
+  status: landed
   note: release announcement markdown
   gate: docs/release/announcement_v1.md exists with intro/features/changelog/credits/install
   files:
