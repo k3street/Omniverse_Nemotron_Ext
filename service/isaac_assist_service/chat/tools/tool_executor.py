@@ -58,8 +58,6 @@ from .handlers._state import StageWriteLockQueue as _StageWriteLockQueue  # noqa
 
 # ── Recovered module-level state from PR branches ───────────────────────
 
-# from: feat/7D-arena
-
 # Phase 8 wave 28 (2026-05-13): _ASYNC_TASKS + _ASYNC_TASKS_LOCK
 # canonical home moved to handlers/_state.py. Aliased here so any
 # remaining `_te._ASYNC_TASKS*` callsites see the same instances.
@@ -75,83 +73,13 @@ from .handlers import _state as _state_module  # noqa: E402
 _WORKFLOWS = _state_module._WORKFLOWS  # noqa: F811
 _WORKFLOW_TEMPLATES = _state_module._WORKFLOW_TEMPLATES  # noqa: F811
 
-# from: feat/addendum-phase5-pedagogy-uncertainty-v2
-
-# from: feat/7H-cloud-deployment
-# from: feat/7H-cloud-deployment
-
-# from: feat/7H-cloud-deployment
-
-# from: feat/new-physics-calibration
-
-# from: feat/new-onboarding
-
-# from: feat/addendum-enterprise-scale
-
-# from: feat/7C-xr-teleoperation
-
-# from: feat/addendum-phase7A-rl-debugging
-
-# from: feat/addendum-dr-advanced
-
-# from: feat/new-physics-calibration
-
-# from: feat/addendum-dr-advanced
-
-# from: feat/addendum-dr-advanced
-
-# from: feat/7E-eureka-rewards
 _eureka_runs: Dict[str, Dict] = {}
 
-# from: feat/addendum-phase7G-groot-tooling-v2
-
-# from: feat/addendum-phase7G-groot-tooling-v2
-
-# from: feat/addendum-phase3-urdf-postprocessor
-
-# from: feat/7G-groot-n1
-
-# from: feat/addendum-community-remote-v2
-
-# from: feat/atomic-tier6-lighting
-
-# from: feat/new-onboarding
-
-# from: feat/addendum-ros2-nav2
-
-# from: feat/new-omnigraph-assistant
-
 # _PHYSICS_MATERIALS_PATH + _physics_materials migrated to handlers/physics.py (Phase 8 wave 6).
-
-# from: feat/new-auto-simplification
-
-# from: feat/addendum-phase2-smart-debugging
-
-# from: feat/6A-physx-validation
-
-# from: feat/addendum-collision-mesh-quality-v2
-
-# from: feat/addendum-collision-mesh-quality-v2
-
-# from: feat/atomic-tier8-render
-
-# from: feat/phase10-autonomous-workflows
-
-# from: feat/new-physics-calibration
-
-# from: feat/new-quick-demo-builder-v2
-
-# from: feat/addendum-community-remote-v2
-
-# from: feat/addendum-phase7A-rl-debugging
-
-# from: feat/addendum-phase3-urdf-postprocessor
 
 # _ROBOT_NAME_PATTERNS + _detect_robot_type deleted as dead code (2026-05-13).
 # Pattern dict was used only by _detect_robot_type below; _detect_robot_type
 # had zero callers (confirmed via grep). Removed in Phase 8 cleanup.
-
-# from: feat/8D-robot-setup
 
 # Named-robot registry for robot_wizard — maps a known name to the
 # canonical RELATIVE path under the Isaac asset root (5.x layout).
@@ -165,47 +93,9 @@ _eureka_runs: Dict[str, Dict] = {}
 # Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd. This registry is
 # the authoritative import source; _CATALOG_ROBOTS just drives search.
 
-# from: feat/addendum-enterprise-scale
-
-# from: feat/addendum-enterprise-scale
-
-# from: feat/new-onboarding
-
-# from: feat/7C-xr-teleoperation
-
-# from: feat/new-onboarding
-
-# from: feat/8B-motion-planning-complete
-
-# from: feat/addendum-phase7C-teleop-quality
-
-# from: feat/addendum-community-remote-v2
-
-# from: feat/new-omnigraph-assistant
-
-# from: feat/addendum-community-remote-v2
-
-# from: feat/atomic-tier12-asset-mgmt
-
-# from: feat/atomic-tier14-bulk
-
-# from: feat/new-physics-calibration
-
-# from: feat/addendum-community-remote-v2
-
-# from: feat/addendum-humanoid-advanced
-
-# from: feat/phase10-autonomous-workflows
-
-# from: feat/phase10-autonomous-workflows
-
-# from: feat/phase10-autonomous-workflows
-
-# from: feat/addendum-enterprise-scale
 # Phase 8 wave 29 (2026-05-13): singleton lives in handlers/_state.py.
 from .handlers._state import WRITE_LOCK_QUEUE as _WRITE_LOCK_QUEUE  # noqa: E402, F401
 
-# from: feat/9-finetune-flywheel
 _turn_recorder = TurnRecorder()
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -218,19 +108,6 @@ _turn_recorder = TurnRecorder()
 
 # ── Code generation helpers ──────────────────────────────────────────────────
 
-from .handlers.arena import (  # noqa: E402
-    _gen_create_arena,
-    _gen_create_arena_variant,
-    _gen_run_arena_benchmark,
-    _handle_arena_leaderboard,          # Phase 7 wave 16
-)
-from .handlers.animation import (  # noqa: E402
-    _gen_create_audio_prim,
-    _gen_play_animation,
-    _gen_set_audio_property,
-    _gen_set_keyframe,
-    _gen_set_timeline_range,
-)
 # Phase 3 wave 1 — these three code generators have moved to
 # handlers/scene_authoring.py. Names are re-imported here so the
 # existing CODE_GEN_HANDLERS dispatch lines (e.g.
@@ -238,423 +115,6 @@ from .handlers.animation import (  # noqa: E402
 # in this file) keep working unchanged. Phase 9 swaps the dispatch
 # pattern to a `register()`-based registration and the legacy inline
 # assignments go away.
-from .handlers.scene_authoring import (  # noqa: E402
-    _gen_add_node,                # Phase 6 wave 18
-    _gen_add_reference,
-    _gen_add_sublayer,            # Phase 6 wave 16
-    _gen_add_usd_reference,       # Phase 6 wave 16
-    _gen_activate_area,           # Phase 6 wave 23
-    _gen_apply_api_schema,
-    _gen_assign_class_to_children,  # Phase 6 wave 21
-    _gen_assign_material,
-    _gen_batch_apply_operation,
-    _gen_batch_delete_prims,
-    _gen_batch_set_attributes,
-    _gen_bulk_apply_schema,       # Phase 6 wave 18
-    _gen_bulk_set_attribute,      # Phase 6 wave 18
-    _gen_clone_prim,
-    _gen_connect_nodes,           # Phase 6 wave 18
-    _gen_create_graph,            # Phase 6 wave 23
-    _gen_create_material,
-    _gen_create_omnigraph,
-    _gen_create_prim,
-    _gen_delete_node,             # Phase 6 wave 18
-    _gen_delete_prim,
-    _gen_duplicate_prims,         # Phase 6 wave 18
-    _gen_explain_graph,           # Phase 6 wave 23
-    _gen_export_stage,            # Phase 6 wave 16
-    _gen_flatten_layers,          # Phase 6 wave 16
-    _gen_group_prims,             # Phase 6 wave 18
-    _gen_load_payload,            # Phase 6 wave 16
-    _gen_merge_meshes,            # Phase 6 wave 23
-    _gen_open_stage,              # Phase 6 wave 16
-    _gen_optimize_scene,
-    _gen_remove_semantic_label,     # Phase 6 wave 21
-    _gen_restore_delta_snapshot,
-    _gen_save_delta_snapshot,
-    _gen_save_stage,              # Phase 6 wave 16
-    _gen_scatter_on_surface,
-    _gen_set_attribute,
-    _gen_set_edit_target,         # Phase 6 wave 16
-    _gen_set_graph_variable,      # Phase 6 wave 18
-    _gen_set_prim_metadata,       # Phase 6 wave 21
-    _gen_set_variant,             # Phase 6 wave 21
-    _gen_teleport_prim,
-    _handle_build_stage_index,    # Phase 7 wave 4
-    _handle_compute_stack_placement,  # Phase 7 wave 15
-    _handle_compute_surface_area,  # Phase 7 wave 15
-    _handle_compute_volume,       # Phase 7 wave 15
-    _handle_count_prims_under_path,  # Phase 7 wave 4
-    _handle_find_heavy_prims,     # Phase 7 wave 15
-    _handle_find_prims_by_name,   # Phase 7 wave 3
-    _handle_find_prims_by_schema,  # Phase 7 wave 3
-    _handle_get_asset_info,       # Phase 7 wave 3
-    _handle_get_attribute,        # Phase 7 wave 3
-    _handle_get_bounding_box,     # Phase 7 wave 3
-    _handle_get_kind,             # Phase 7 wave 3
-    _handle_get_prim_metadata,    # Phase 7 wave 3
-    _handle_get_prim_type,        # Phase 7 wave 3
-    _handle_get_selected_prims,   # Phase 7 wave 3
-    _handle_get_semantic_label,   # Phase 7 wave 3
-    _handle_get_world_transform,  # Phase 7 wave 3
-    _handle_inspect_graph,        # Phase 7 wave 15
-    _handle_list_all_prims,       # Phase 7 wave 3
-    _handle_list_applied_schemas,  # Phase 7 wave 3
-    _handle_list_attributes,      # Phase 7 wave 3
-    _handle_list_graphs,          # Phase 7 wave 15
-    _handle_list_layers,          # Phase 7 wave 4
-    _handle_list_opened_stages,   # Phase 7 wave 4
-    _handle_list_payloads,        # Phase 7 wave 4
-    _handle_list_references,      # Phase 7 wave 4
-    _handle_list_relationships,   # Phase 7 wave 4
-    _handle_list_semantic_classes,  # Phase 7 wave 4
-    _handle_list_variant_sets,    # Phase 7 wave 4
-    _handle_list_variants,        # Phase 7 wave 4
-    _handle_prim_exists,          # Phase 7 wave 3
-    _handle_query_stage_index,    # Phase 7 wave 4
-    _handle_restore_delta_snapshot,  # Phase 7 wave 15
-    _handle_run_stage_analysis,   # Phase 7 wave 4
-    _handle_save_delta_snapshot,  # Phase 7 wave 15
-    _handle_scene_diff,           # Phase 7 wave 4
-    _handle_scene_summary,        # Phase 7 wave 4
-    _handle_select_by_criteria,   # Phase 7 wave 4
-)
-from .handlers.scene_blueprints import (  # noqa: E402
-    _gen_build_scene_from_blueprint,
-    _gen_export_template,
-    _gen_import_template,
-    _gen_load_scene_template,
-    _handle_catalog_search,
-    _handle_download_asset,
-    _handle_export_scene_package,
-    _handle_filter_templates_by_hardware,
-    _handle_generate_scene_blueprint,
-    _handle_list_local_files,
-    _handle_list_scene_templates,
-    _handle_load_scene_template,
-    _handle_lookup_api_deprecation,
-    _handle_lookup_knowledge,
-    _handle_lookup_product_spec,
-    _handle_nucleus_browse,
-)
-from .handlers.sensors import (  # noqa: E402
-    _gen_add_proximity_sensor,
-    _gen_add_sensor,
-    _gen_configure_camera,
-    _gen_inspect_camera,
-    _gen_set_camera_look_at,
-    _gen_set_camera_params,
-    _handle_add_force_torque_sensor,       # Phase 7 wave 9
-    _handle_add_vision_classifier_gate,    # Phase 7 wave 9
-    _handle_barcode_reader_sensor,         # Phase 7 wave 9
-    _handle_list_contacts,                 # Phase 7 wave 9
-    _handle_nir_material_sensor,           # Phase 7 wave 9
-    _handle_overlap_box,                   # Phase 7 wave 9
-    _handle_overlap_sphere,                # Phase 7 wave 9
-    _handle_raycast,                       # Phase 7 wave 9
-    _handle_sweep_sphere,                  # Phase 7 wave 9
-)
-from .handlers.physics import (  # noqa: E402
-    _gen_apply_force,
-    _gen_apply_physics_material,
-    _gen_check_collision_mesh_code,
-    _gen_compute_convex_hull,       # Phase 6 wave 22
-    _gen_configure_self_collision,
-    _gen_deformable,
-    _gen_deformable_body,
-    _gen_deformable_surface,
-    _gen_fix_collision_mesh,
-    _gen_optimize_collision,
-    _gen_set_drive_gains,
-    _gen_set_joint_limits,
-    _gen_set_joint_targets,
-    _gen_set_joint_velocity_limit,
-    _gen_set_linear_velocity,       # Phase 6 wave 22
-    _gen_set_physics_params,
-    _gen_set_physics_scene_config,
-    _gen_setup_contact_sensors,
-    _gen_simplify_collision,
-    _handle_get_angular_velocity,            # Phase 7 wave 2
-    _handle_get_articulation_mass,           # Phase 7 wave 2
-    _handle_get_articulation_state,          # Phase 7 wave 2
-    _handle_get_center_of_mass,              # Phase 7 wave 2
-    _handle_get_contact_report,              # Phase 7 wave 2
-    _handle_get_drive_gains,                 # Phase 7 wave 2
-    _handle_get_inertia,                     # Phase 7 wave 2
-    _handle_get_joint_limits,                # Phase 7 wave 2
-    _handle_get_joint_positions,             # Phase 7 wave 2
-    _handle_get_joint_targets,               # Phase 7 wave 2
-    _handle_get_joint_torques,               # Phase 7 wave 2
-    _handle_get_joint_velocities,            # Phase 7 wave 2
-    _handle_get_kinematic_state,             # Phase 7 wave 2
-    _handle_get_linear_velocity,             # Phase 7 wave 2
-    _handle_get_mass,                        # Phase 7 wave 2
-    _handle_get_physics_errors,              # Phase 7 wave 2
-    _handle_get_physics_scene_config,        # Phase 7 wave 2
-    _handle_lookup_material,                 # Phase 7 wave 16
-    _handle_suggest_physics_settings,        # Phase 7 wave 16
-)
-from .handlers.pick_place import (  # noqa: E402
-    _gen_setup_pick_place_controller,
-    _gen_setup_pick_place_ros2_bridge,
-)
-from .handlers.diagnostics import (  # noqa: E402
-    _gen_build_stage_index,         # Phase 6 wave 22
-    _gen_check_path_clearance,
-    _gen_check_physics_health,
-    _gen_check_singularity,
-    _gen_configure_zmq_stream,      # Phase 6 wave 24
-    _gen_create_broken_scene,         # Phase 6 wave 23
-    _gen_debug_draw,
-    _gen_debug_graph,
-    _gen_enable_deterministic_mode,   # Phase 6 wave 23
-    _gen_enable_extension,          # Phase 6 wave 22
-    _gen_highlight_prim,
-    _gen_monitor_joint_effort,
-    _gen_preflight_check,
-    _gen_set_clearance_monitor,       # Phase 6 wave 23
-    _gen_show_workspace,            # Phase 6 wave 22
-    _gen_sim_control,               # Phase 6 wave 22
-    _gen_visualize_clearance,
-    _gen_visualize_collision_mesh,
-    _gen_visualize_forces,
-    _handle_check_collision_mesh,   # Phase 7 wave 10
-    _handle_check_collisions,       # Phase 7 wave 10
-    _handle_check_teleop_hardware,  # Phase 7 wave 10
-    _handle_check_tf_health,        # Phase 7 wave 10
-    _handle_check_vram_headroom,    # Phase 7 wave 10
-    _handle_compare_sim_real_video, # Phase 7 wave 10
-    _handle_console_error_autodetect,  # Phase 7 wave 10
-    _handle_diagnose_domain_gap,    # Phase 7 wave 10
-    _handle_diagnose_performance,   # Phase 7 wave 10
-    _handle_diagnose_physics_error, # Phase 7 wave 10
-    _handle_diagnose_whole_body,    # Phase 7 wave 10
-    _handle_get_active_state,       # Phase 7 wave 10
-    _handle_get_console_errors,     # Phase 7 wave 10
-    _handle_get_debug_info,         # Phase 7 wave 10
-    _handle_hardware_compatibility_check,  # Phase 7 wave 10
-    _handle_list_extensions,            # Phase 7 wave 16
-    _handle_measure_distance,       # Phase 7 wave 14
-    _handle_measure_sim_real_gap,   # Phase 7 wave 14
-    _handle_proactive_check,        # Phase 7 wave 14
-    _handle_simulate_traversal_check,  # Phase 7 wave 14
-    _handle_trace_config,           # Phase 7 wave 14
-    _handle_validate_annotations,   # Phase 7 wave 14
-    _handle_validate_calibration,   # Phase 7 wave 14
-    _handle_validate_scene_blueprint,  # Phase 7 wave 14
-    _handle_validate_semantic_labels,  # Phase 7 wave 14
-    _handle_validate_teleop_demo,   # Phase 7 wave 14
-    _handle_verify_pickplace_pipeline,  # Phase 7 wave 14
-)
-from .handlers.rendering import (  # noqa: E402
-    _gen_add_default_light,
-    _gen_create_hdri_skydome,
-    _gen_enable_post_process,
-    _gen_set_environment_background,
-    _gen_set_light_color,
-    _gen_set_light_intensity,
-    _gen_set_render_config,
-    _gen_set_render_resolution,
-)
-from .handlers.resolve import (  # noqa: E402
-    _handle_resolve_constraint_phrase,
-    _handle_resolve_context_reference,
-    _handle_resolve_coordinate_reference,
-    _handle_resolve_count_vagueness,
-    _handle_resolve_material_properties,
-    _handle_resolve_prim_reference,
-    _handle_resolve_relational_property,
-    _handle_resolve_robot_class,
-    _handle_resolve_sequence_phrase,
-    _handle_resolve_size_adjective,
-    _handle_resolve_skill_composition,
-    _handle_resolve_success_condition,
-)
-from .handlers.robot import (  # noqa: E402
-    _gen_anchor_robot,
-    _gen_assemble_robot,
-    _gen_create_behavior,           # Phase 6 wave 24
-    _gen_create_bin,
-    _gen_create_conveyor,
-    _gen_create_conveyor_track,
-    _gen_create_gripper,
-    _gen_create_wheeled_robot,
-    _gen_define_grasp_pose,
-    _gen_export_nav2_map,           # Phase 6 wave 24
-    _gen_generate_occupancy_map,    # Phase 6 wave 24
-    _gen_grasp_object,
-    _gen_import_robot,
-    _gen_interpolate_trajectory,
-    _gen_load_robot_pose,
-    _gen_move_to_pose,
-    _gen_navigate_to,
-    _gen_plan_trajectory,
-    _gen_publish_robot_description,
-    _gen_record_trajectory,
-    _gen_record_waypoints,
-    _gen_replay_trajectory,
-    _gen_robot_wizard,
-    _gen_set_motion_policy,
-    _gen_setup_multi_rate,
-    _gen_setup_rsi_from_demos,
-    _gen_setup_whole_body_control,
-    _gen_solve_ik,
-    _gen_start_teaching_mode,
-    _gen_teach_robot_pose,
-    _gen_tune_gains,
-    _gen_verify_import,
-    _handle_apply_robot_fix_profile,   # Phase 7 wave 7
-    _handle_calibrate_physics,         # Phase 7 wave 7
-    _handle_create_articulated_joint,  # Phase 7 wave 7
-    _handle_create_gravity_dispenser,  # Phase 7 wave 7
-    _handle_create_heap_zone,          # Phase 7 wave 7
-    _handle_create_kit_tray,           # Phase 7 wave 7
-    _handle_create_linear_axis_robot,  # Phase 7 wave 7
-    _handle_create_recirculation_loop, # Phase 7 wave 7
-    _handle_create_rotary_table,       # Phase 7 wave 7
-    _handle_generate_robot_description, # Phase 7 wave 7
-    _handle_get_gripper_state,         # Phase 7 wave 7
-    _handle_list_available_controllers, # Phase 7 wave 16
-    _handle_place_on_top_of,            # Phase 7 wave 16
-    _handle_quick_calibrate,           # Phase 7 wave 7
-    _handle_register_moving_obstacle,  # Phase 7 wave 7
-    _handle_setup_assembly_constraint, # Phase 7 wave 7
-    _handle_setup_cortex_behavior,     # Phase 7 wave 7
-    _handle_setup_grasp_pose_sampler,  # Phase 7 wave 7
-    _handle_setup_isaac_ros_cumotion_moveit, # Phase 7 wave 7
-    _handle_setup_nav_robot,           # Phase 7 wave 8
-    _handle_setup_pick_place_with_vision,  # Phase 7 wave 8
-    _handle_setup_robot_claim_mutex,   # Phase 7 wave 8
-    _handle_setup_robot_handoff_signal, # Phase 7 wave 8
-    _handle_setup_ros2_control_compat, # Phase 7 wave 8
-    _handle_setup_zone_partition,      # Phase 7 wave 8
-    _handle_surface_gripper,           # Phase 7 wave 8
-    _handle_track_slot_occupancy,      # Phase 7 wave 8
-    _handle_visualize_behavior_tree,   # Phase 7 wave 8
-)
-from .handlers.ros2 import (  # noqa: E402
-    _gen_configure_ros2_bridge,
-    _gen_configure_ros2_time,
-    _gen_fix_ros2_qos,
-    _gen_replay_rosbag,
-    _gen_setup_ros2_bridge,
-    _gen_show_tf_tree,
-    _handle_diagnose_ros2,          # Phase 7 wave 14
-    _handle_emit_ros2_control_yaml, # Phase 7 wave 14
-    _handle_precheck_ros2_environment,  # Phase 7 wave 14
-)
-from .handlers.sdg import (  # noqa: E402
-    _gen_add_domain_randomizer,
-    _gen_add_latency_randomization,
-    _gen_configure_coco_yolo_writer,
-    _gen_configure_correlated_dr,
-    _gen_configure_differential_sdg,
-    _gen_configure_sdg,
-    _gen_create_sdg_pipeline,
-    _gen_enforce_class_balance,
-    _gen_export_dataset,
-    _gen_preview_dr,
-    _handle_benchmark_sdg,              # Phase 7 wave 16
-    _handle_preview_sdg,                # Phase 7 wave 16
-)
-from .handlers.teleop import (  # noqa: E402
-    _gen_configure_teleop_mapping,
-    _gen_export_teleop_mapping,
-    _gen_generate_teleop_watchdog_script,
-    _gen_record_teleop_demo,
-    _gen_start_teleop_session,
-    _gen_stop_teleop_session,
-    _gen_teleop_safety_config,
-    _handle_summarize_teleop_session,   # Phase 7 wave 16
-)
-from .handlers.training import (  # noqa: E402
-    _gen_clone_envs,
-    _gen_cloud_download_results,    # Phase 6 wave 24
-    _gen_create_calibration_experiment,  # Phase 6 wave 24
-    _gen_eval_harness,              # Phase 6 wave 24
-    _gen_evaluate_groot,
-    _gen_evaluate_reward,
-    _gen_export_policy,
-    _gen_finetune_groot,
-    _gen_launch_training,
-    _gen_setup_loco_manipulation_training,
-    _handle_analyze_checkpoint,     # Phase 7 wave 5
-    _handle_analyze_randomization,  # Phase 7 wave 5
-    _handle_apply_dr_preset,        # Phase 7 wave 5
-    _handle_checkpoint_training,    # Phase 7 wave 5
-    _handle_cloud_estimate_cost,    # Phase 7 wave 6
-    _handle_cloud_launch,           # Phase 7 wave 6
-    _handle_cloud_status,           # Phase 7 wave 6
-    _handle_cloud_teardown,         # Phase 7 wave 6
-    _handle_compare_policies,       # Phase 7 wave 5
-    _handle_create_isaaclab_env,    # Phase 7 wave 5
-    _handle_detect_ood,             # Phase 7 wave 5
-    _handle_diagnose_training,      # Phase 7 wave 6
-    _handle_eureka_status,          # Phase 7 wave 5
-    _handle_export_finetune_data,   # Phase 7 wave 5
-    _handle_finetune_stats,         # Phase 7 wave 5
-    _handle_generate_reward,        # Phase 7 wave 5
-    _handle_get_env_observations,   # Phase 7 wave 5
-    _handle_get_env_rewards,        # Phase 7 wave 5
-    _handle_get_env_termination_state,  # Phase 7 wave 5
-    _handle_get_training_status,    # Phase 7 wave 5
-    _handle_iterate_reward,         # Phase 7 wave 5
-    _handle_load_groot_policy,      # Phase 7 wave 5
-    _handle_load_rl_policy,         # Phase 7 wave 6
-    _handle_monitor_forgetting,     # Phase 7 wave 6
-    _handle_pause_training,         # Phase 7 wave 6
-    _handle_profile_training_throughput,  # Phase 7 wave 6
-    _handle_redact_finetune_data,   # Phase 7 wave 6
-    _handle_review_reward,          # Phase 7 wave 6
-    _handle_suggest_data_mix,       # Phase 7 wave 6
-    _handle_suggest_dr_ranges,      # Phase 7 wave 6
-    _handle_suggest_finetune_config,  # Phase 7 wave 6
-    _handle_suggest_parameter_adjustment,  # Phase 7 wave 6
-    _handle_train_actuator_net,     # Phase 7 wave 6
-)
-from .handlers.vision import (  # noqa: E402
-    _gen_extract_attention_maps,
-    _gen_focus_viewport_on,         # Phase 6 wave 22
-    _gen_quick_demo,
-    _gen_record_demo_video,
-    _gen_render_video,
-    _gen_set_render_mode,
-    _gen_set_semantic_label,
-    _gen_set_viewport_camera,
-    _handle_capture_camera_image,   # Phase 7 wave 11
-    _handle_capture_viewport,       # Phase 7 wave 11
-    _handle_get_camera_params,      # Phase 7 wave 11
-    _handle_get_light_properties,   # Phase 7 wave 11
-    _handle_get_render_config,      # Phase 7 wave 11
-    _handle_get_timeline_state,     # Phase 7 wave 11
-    _handle_get_viewport_camera,    # Phase 7 wave 11
-    _handle_inspect_camera,         # Phase 7 wave 11
-    _handle_list_cameras,           # Phase 7 wave 11
-    _handle_list_keyframes,         # Phase 7 wave 11
-    _handle_list_lights,            # Phase 7 wave 11
-    _handle_pixel_to_world,         # Phase 7 wave 11
-    _handle_vision_analyze_scene,   # Phase 7 wave 11
-    _handle_vision_bounding_boxes,  # Phase 7 wave 11
-    _handle_vision_detect_objects,  # Phase 7 wave 11
-    _handle_vision_plan_trajectory, # Phase 7 wave 11
-)
-from .handlers.workflow import (  # noqa: E402
-    _handle_approve_workflow_checkpoint,
-    _handle_cancel_workflow,
-    _handle_dispatch_async_task,
-    _handle_edit_workflow_plan,
-    _handle_execute_with_retry,
-    _handle_get_workflow_status,
-    _handle_list_workflows,
-    _handle_post_action_suggestions,
-    _handle_query_async_task,
-    _handle_queue_write_locked_patch,
-    _handle_record_feedback,
-    _handle_scene_aware_starter_prompts,
-    _handle_slash_command_discovery,
-    _handle_start_workflow,
-    _handle_watch_changes,
-)
 
 # Imported back at the top of this file (see Phase 3 wave 1 import block).
 
@@ -697,8 +157,6 @@ register_handlers(DATA_HANDLERS, CODE_GEN_HANDLERS)
 # These are conservative envelope estimates from the manufacturer specs;
 # actual cuRobo / Lula IK can refine but the envelope is what matters
 # for pipeline-feasibility-without-running-IK.
-
-
 
 # Data-only handlers (no code gen → return data directly to LLM)
 
@@ -915,8 +373,6 @@ import fnmatch as _fnmatch_files
 
 # ─── Vision tools — _get_viewport_bytes + _get_vision_provider migrated to handlers/_shared.py (Phase 14, 2026-05-13) ───
 
-
-
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
@@ -929,12 +385,6 @@ import fnmatch as _fnmatch_files
 # get_nav2_bridge_profile deleted as dead code (2026-05-13).
 # Zero callers across service/, tests/, scripts/ via comprehensive grep.
 # _NAV2_BRIDGE_PROFILES was migrated to handlers/ros2.py (Phase 8 wave 4).
-
-
-
-
-
-
 
 # ── Recovered handler registrations (missing from original bundle extraction) ─
 
@@ -980,9 +430,37 @@ import fnmatch as _fnmatch_files
 #   - Observability: every pick-place controller creates ctrl:* attrs on
 #       its robot prim. See _PP_CTRL_ATTRS for the canonical list.
 
-
 # ══════════════════════════════════════════════════════════════════════
 # Controller matrix — availability probe (FAS 4)
 # ══════════════════════════════════════════════════════════════════════
 
 # === Phase 6 M4 — cuMotion-as-MoveIt2 ===
+
+# ---------------------------------------------------------------------------
+# Phase 14 finish (2026-05-13): PEP 562 lazy re-export for handler symbols.
+# tool_executor.py used to import every _handle_X / _gen_X from every theme
+# module so that legacy callers (tests, slash_commands.py) could do
+# `from tool_executor import _handle_X`. Phase 14 replaces those ~400
+# explicit imports with a single dynamic dispatch — names are resolved
+# lazily by walking the registered handler dispatch dicts.
+
+_THEME_MODULE_NAMES = (
+    "arena", "animation", "scene_authoring", "scene_blueprints", "sensors",
+    "physics", "pick_place", "diagnostics", "rendering", "resolve",
+    "robot", "ros2", "sdg", "teleop", "training", "vision", "workflow",
+)
+
+def __getattr__(name: str):
+    """Resolve _handle_X / _gen_X / _gen_Y from theme modules."""
+    if name.startswith("_handle_") or name.startswith("_gen_"):
+        for mod_name in _THEME_MODULE_NAMES:
+            try:
+                from importlib import import_module
+                mod = import_module(f".handlers.{mod_name}", package=__package__)
+                if hasattr(mod, name):
+                    return getattr(mod, name)
+            except ImportError:
+                continue
+    raise AttributeError(
+        f"module 'tool_executor' has no attribute {name!r} (lazy resolution failed)"
+    )
