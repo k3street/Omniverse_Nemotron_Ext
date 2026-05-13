@@ -5437,13 +5437,7 @@ async def _handle_list_available_controllers(args) -> dict:
         "recommended_for_hardware": ["native", "spline", ...]
       }
     """
-    from ..tool_executor import (
-        _probe_gpu_capability,
-        _probe_scipy,
-        _probe_curobo,
-        _probe_isaac_lab,
-        # _CONTROLLER_METADATA migrated to module body (Phase 8 wave 16).
-    )
+    from ._shared import _probe_gpu_capability, _probe_scipy, _probe_curobo, _probe_isaac_lab
     env = {
         "gpu": _probe_gpu_capability(),
         "scipy": _probe_scipy(),

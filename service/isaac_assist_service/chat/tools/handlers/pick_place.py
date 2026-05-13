@@ -151,6 +151,10 @@ def _resolve_auto_target_source(args: dict) -> tuple[str, str]:
     require explicit opt-in because of sim2real-honesty or config
     requirements.)
     """
+    # Probes migrated to handlers/_shared.py (Phase 8 wave 17).
+    from ._shared import (
+        _probe_gpu_capability, _probe_scipy, _probe_curobo, _probe_isaac_lab,
+    )
     # Inline probes — can't await here since this is sync-called from generator
     gpu = _probe_gpu_capability()
     curobo = _probe_curobo()

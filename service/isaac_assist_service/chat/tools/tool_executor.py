@@ -3467,123 +3467,16 @@ _PP_CTRL_ATTRS = [
 # _CONTROLLER_METADATA migrated to handlers/robot.py (Phase 8 wave 16, 2026-05-13).
 
 
-def _probe_gpu_capability():
-    """Return dict with gpu_available, compute_capability, arch_name, vram_gb."""
-    out = {"gpu_available": False, "compute_capability": None,
-           "arch_name": None, "vram_gb": None, "cuda_available": False,
-           "reason": None}
-    try:
-        import torch
-        out["cuda_available"] = bool(torch.cuda.is_available())
-        if not out["cuda_available"]:
-            out["reason"] = "torch.cuda.is_available() = False"
-            return out
-        out["gpu_available"] = True
-        cap = torch.cuda.get_device_capability(0)
-        out["compute_capability"] = f"{cap[0]}.{cap[1]}"
-        arch_map = {
-            (6,0): "Pascal", (6,1): "Pascal", (6,2): "Pascal",
-            (7,0): "Volta", (7,2): "Volta",
-            (7,5): "Turing",
-            (8,0): "Ampere", (8,6): "Ampere", (8,7): "Ampere", (8,9): "Ada",
-            (9,0): "Hopper",
-            (10,0): "Blackwell",
-            (12,0): "Blackwell",
-        }
-        out["arch_name"] = arch_map.get(cap, f"compute_{cap[0]}.{cap[1]}")
-        props = torch.cuda.get_device_properties(0)
-        out["vram_gb"] = round(props.total_memory / 1024 / 1024 / 1024, 1)
-    except ImportError:
-        out["reason"] = "torch not importable"
-    except Exception as e:
-        out["reason"] = f"{type(e).__name__}: {e}"
-    return out
+# _probe_gpu_capability migrated to handlers/_shared.py (Phase 8 wave 17, 2026-05-13).
 
 
-def _probe_scipy():
-    try:
-        import scipy.interpolate  # noqa: F401
-        import scipy
-        return {"available": True, "version": getattr(scipy, "__version__", "?")}
-    except ImportError:
-        return {"available": False, "reason": "scipy not importable"}
-    except Exception as e:
-        return {"available": False, "reason": f"{type(e).__name__}: {e}"}
+# _probe_scipy migrated to handlers/_shared.py (Phase 8 wave 17, 2026-05-13).
 
 
-def _probe_curobo():
-    """Probe cuRobo availability. Valid = importable AND content/ present.
-
-    The `isaac_lab_env/site-packages/curobo` is usable ONLY if we also
-    monkey-patch wp.func (see I-28) AND have franka.yml + internal
-    YAMLs (see I-27). This install lacks content/ so full MotionPlanner
-    integration is blocked, but the env-bridge pattern works and core
-    modules import.
-    """
-    import os, glob
-    # In-Kit or direct import
-    try:
-        import curobo  # noqa: F401
-        return {"available": True, "note": "curobo imports; content/ may still be absent"}
-    except ImportError:
-        pass
-    # Check isaac_lab_env candidate paths
-    for pat in [
-        "/home/anton/miniconda3/envs/isaac_lab_env/lib/python3.*/site-packages/curobo",
-        os.path.expanduser("~/miniconda3/envs/isaac_lab_env/lib/python*/site-packages/curobo"),
-        os.path.expanduser("~/isaac_lab_env/lib/python*/site-packages/curobo"),
-    ]:
-        hits = glob.glob(pat)
-        if hits:
-            env_path = hits[0]
-            content_dir = os.path.join(env_path, "content")
-            has_content = os.path.isdir(content_dir) and any(
-                f.endswith((".yml", ".yaml"))
-                for f in os.listdir(content_dir) if os.path.isfile(os.path.join(content_dir, f))
-            ) if os.path.isdir(content_dir) else False
-            return {
-                "available": False,
-                "reason": "env-bridge required (sys.path.insert + invalidate_caches + wp.func patch); MotionPlanner additionally blocked on missing content/ YAMLs" if not has_content else "env-bridge required",
-                "env_bridge_path": env_path,
-                "has_content_yamls": has_content,
-                "bridgeable": True,
-            }
-    return {"available": False, "reason": "curobo not found in current env or isaac_lab_env", "bridgeable": False}
+# _probe_curobo migrated to handlers/_shared.py (Phase 8 wave 17, 2026-05-13).
 
 
-def _probe_isaac_lab():
-    """Probe Isaac Lab availability. In practice, isaaclab is importable
-    inside Kit AFTER sys.path.insert + importlib.invalidate_caches (see I-29).
-    So the controller generators are bridgeable even when `import isaaclab`
-    fails from the main process.
-    """
-    import os, glob
-    try:
-        import isaaclab  # noqa: F401
-        return {"available": True}
-    except ImportError:
-        pass
-    for pat in [
-        "/home/anton/miniconda3/envs/isaac_lab_env/lib/python3.*/site-packages/isaaclab-*.dist-info",
-        os.path.expanduser("~/miniconda3/envs/isaac_lab_env/lib/python*/site-packages/isaaclab-*.dist-info"),
-    ]:
-        hits = glob.glob(pat)
-        if hits:
-            return {
-                "available": False,
-                "reason": "env-bridge required (sys.path.insert + invalidate_caches); controller generators handle this automatically",
-                "env_bridge_path": hits[0],
-                "bridgeable": True,
-            }
-    return {"available": False, "reason": "isaaclab not importable and not found in isaac_lab_env", "bridgeable": False}
-
-
-    # _handle_list_available_controllers moved to handlers/robot.py (Phase 7 wave 16).
-
-
-
-
-# _resolve_auto_target_source migrated to handlers/pick_place.py (Phase 8 wave 9, 2026-05-13).
+# _probe_isaac_lab migrated to handlers/_shared.py (Phase 8 wave 17, 2026-05-13).
 
 
 # === Phase 6 M4 — cuMotion-as-MoveIt2 ===
