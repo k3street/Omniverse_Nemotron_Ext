@@ -11,8 +11,8 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-05-13T02:01:15+00:00
-Tool count: 416
+Generated: 2026-05-13T12:04:54+00:00
+Tool count: 423
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
 """
@@ -3725,6 +3725,67 @@ class SetAudioPropertyArgs(BaseModel):
     value: Any = Field(..., description="New value — number for volume/gain/pitch/attenuation/start_time, bool for auto_play.")
 
 
+class ReadLayoutSpecArgs(BaseModel):
+    """Read the current LayoutSpec persisted for a multimodal session. Returns either the full spec JSON + summary, or a compact summary only, depending on detail_level."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    session_id: str = Field(..., description="Multimodal session ID.")
+    detail_level: Optional[str] = Field(None, description="summary = compact text; full = full JSON + summary. Default: full.")
+
+
+class UpdateLayoutSpecArgs(BaseModel):
+    """Apply mutations to the LayoutSpec for a multimodal session and persist a new revision via compare-and-set (CAS). Caller must supply parent_revision they read; mismatch returns a 409-style conflict. Su"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    session_id: str = Field(..., description="Multimodal session ID.")
+    mutations: List[Dict[str, Any]] = Field(..., description="List of mutation dicts. See spec for mutation shapes.")
+    parent_revision: int = Field(..., description="The revision number caller read. Must match current; else conflict returned.")
+    reason: Optional[str] = Field(None, description="One-line explanation of why this mutation was proposed; surfaces in UI.")
+
+
+class CommitLayoutSpecArgs(BaseModel):
+    """Promote a proposed LayoutSpec to committed state. Today this is a telemetry-only marker (persisted spec is always authoritative). Logs the commit event for the session."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    session_id: str = Field(..., description="Multimodal session ID.")
+
+
+class ApplyLayoutSpecToSceneArgs(BaseModel):
+    """Apply (ratify) the current LayoutSpec for a session against a canonical template; returns ratify status (ok / needs_choice / rejected) with bindings, diagnostics, and ambiguous-role candidates. When f"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    session_id: str = Field(..., description="Multimodal session ID.")
+    template_id: Optional[str] = Field(None, description="Optional canonical template ID to ratify against. If absent, similarity gate picks.")
+    force_freeform: Optional[bool] = Field(None, description="Skip canonical ratify and fall to T5 free-form. Default: false.")
+
+
+class QueryLayoutMetricArgs(BaseModel):
+    """Query a geometric or structural metric against the current LayoutSpec without returning the full state. Cheap lookup for chat-side reasoning. Supported metrics: distance (args: from_id, to_id), reacha"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    session_id: str = Field(..., description="Multimodal session ID.")
+    metric: str = Field(..., description="Metric name (e.g. 'distance', 'reachable').")
+    args: Optional[Dict[str, Any]] = Field(None, description="Metric-specific arguments. See spec for per-metric shape.")
+
+
+class ExecuteContactSequencePlanArgs(BaseModel):
+    """Execute an N-step contact-sequence plan: approach → make_contact → apply_force / slide / twist → release / verify. Each step specifies prim_a + prim_b, optional target force/torque/duration, and a suc"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    steps: List[Dict[str, Any]] = Field(..., description="List of step dicts. Each: step_idx, step_type, prim_a, prim_b, optional target_force_N, target_torque_Nm, duration_s, success_predicate, retry_count, mutex_paths.")
+    abort_on_failure: Optional[bool] = Field(None, description="Stop plan execution on first failure. Default: true.")
+    dry_run: Optional[bool] = Field(None, description="Use pure-Python state machine (default true). False requires Kit RPC.")
+
+
+class RebindRoleArgs(BaseModel):
+    """Re-bind a role in a canonical template to a different object_id in the current LayoutSpec. Used after an apply_layout_spec_to_scene call returns status=needs_choice or status=rejected, to fix ambiguou"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    session_id: str = Field(..., description="Multimodal session ID.")
+    role_name: str = Field(..., description="Name of the role to rebind (e.g. 'pick_target', 'tool').")
+    target: str = Field(..., description="object_id in the LayoutSpec to bind the role to.")
+
+
 # ---------------------------------------------------------------------------
 # Tool-name → model-class lookup
 
@@ -4145,4 +4206,11 @@ MODEL_REGISTRY = {
     "enable_extension": EnableExtensionArgs,
     "create_audio_prim": CreateAudioPrimArgs,
     "set_audio_property": SetAudioPropertyArgs,
+    "read_layout_spec": ReadLayoutSpecArgs,
+    "update_layout_spec": UpdateLayoutSpecArgs,
+    "commit_layout_spec": CommitLayoutSpecArgs,
+    "apply_layout_spec_to_scene": ApplyLayoutSpecToSceneArgs,
+    "query_layout_metric": QueryLayoutMetricArgs,
+    "execute_contact_sequence_plan": ExecuteContactSequencePlanArgs,
+    "rebind_role": RebindRoleArgs,
 }

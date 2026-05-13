@@ -41,6 +41,7 @@ THEMED_MODULES = (
     "animation",
     "pick_place",
     "rendering",
+    "contact_sequence",
 )
 
 

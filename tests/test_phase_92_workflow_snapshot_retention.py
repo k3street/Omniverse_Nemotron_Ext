@@ -17,13 +17,20 @@ pytestmark = pytest.mark.l0
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _ref_now() -> datetime:
+    """Stable reference 'now' for all tests."""
+    return datetime(2026, 5, 13, 12, 0, 0, tzinfo=timezone.utc)
+
+
 def _make_snapshot(
     snapshot_dir: Path,
     name: str,
     age_days: float,
     manifest: dict | None = None,
 ) -> Path:
-    """Create a snapshot sub-directory with a manifest.json, backdated by *age_days*."""
+    """Create a snapshot sub-directory with manifest.json, backdated by
+    *age_days*. mtime is anchored to ``_ref_now()`` so the pruner's age
+    math matches expectations regardless of wall-clock time."""
     snap = snapshot_dir / name
     snap.mkdir(parents=True, exist_ok=True)
 
@@ -31,15 +38,9 @@ def _make_snapshot(
         manifest = {"snapshot_id": name, "status": "complete"}
     (snap / "manifest.json").write_text(json.dumps(manifest))
 
-    now_ts = time.time()
-    past_ts = now_ts - age_days * 86400
+    past_ts = _ref_now().timestamp() - age_days * 86400
     os.utime(snap, (past_ts, past_ts))
     return snap
-
-
-def _ref_now() -> datetime:
-    """Stable reference 'now' for all tests."""
-    return datetime(2026, 5, 13, 12, 0, 0, tzinfo=timezone.utc)
 
 
 # ---------------------------------------------------------------------------
