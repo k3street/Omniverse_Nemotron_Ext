@@ -6,6 +6,17 @@ Uses the Google GenAI API to analyze viewport images for:
 - Object tracking across frames
 - Trajectory planning from images
 - Scene understanding and spatial reasoning
+
+## Relationship to `multimodal.vision_provider_gemini`
+
+This module is the CONCRETE ASYNC API CALLER — it hits Gemini's REST
+endpoint via aiohttp using GEMINI_API_KEY. The Phase 76 typed protocol
+layer (Protocol, dataclasses, Mock) lives at
+`service.isaac_assist_service.multimodal.vision_provider_gemini`. The
+two are layers, not duplicates; see that module's docstring for the
+matrix.
+
+Wired callers: `chat/tools/handlers/vision.py`, `chat/tools/handlers/_shared.py`.
 """
 import aiohttp
 import base64
