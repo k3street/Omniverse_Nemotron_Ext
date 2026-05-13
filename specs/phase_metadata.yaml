@@ -975,13 +975,14 @@
 '103':
   title: User-facing onboarding tutorial
   agent_type: sonnet-mechanical
-  status: scaffold
-  note: onboarding tutorial markdown
-  gate: docs/tutorial/onboarding.md exists with 5+ guided steps + screenshots placeholders
+  status: landed
+  note: onboarding tutorial markdown + state machine
+  gate: pytest tests/test_phase_103_onboarding_tutorial.py — 13 tests pass
   files:
   - service/isaac_assist_service/multimodal/onboarding_tutorial.py
-  - docs/tutorial/onboarding.md
-  loc: 50
+  - docs/onboarding_tutorial.md
+  - tests/test_phase_103_onboarding_tutorial.py
+  loc: 250
   effort_min: 60
   blocked_by:
   - '18'
