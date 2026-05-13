@@ -9285,6 +9285,39 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "execute_contact_sequence_plan",
+            "description": (
+                "Execute an N-step contact-sequence plan: approach → make_contact "
+                "→ apply_force / slide / twist → release / verify. Each step "
+                "specifies prim_a + prim_b, optional target force/torque/duration, "
+                "and a success predicate. Optional mutex_paths gate shared-resource "
+                "locking across multi-robot plans. dry_run=true (default) uses the "
+                "pure-Python state machine; dry_run=false requires Kit RPC + PhysX."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "List of step dicts. Each: step_idx, step_type, prim_a, prim_b, optional target_force_N, target_torque_Nm, duration_s, success_predicate, retry_count, mutex_paths.",
+                    },
+                    "abort_on_failure": {
+                        "type": "boolean",
+                        "description": "Stop plan execution on first failure. Default: true.",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "Use pure-Python state machine (default true). False requires Kit RPC.",
+                    },
+                },
+                "required": ["steps"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "rebind_role",
             "description": (
                 "Re-bind a role in a canonical template to a different object_id in the current "

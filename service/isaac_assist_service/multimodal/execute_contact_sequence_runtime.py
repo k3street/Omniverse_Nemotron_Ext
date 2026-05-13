@@ -65,6 +65,7 @@ class ContactStep:
     duration_s: float = 1.0
     success_predicate: str = "contact_established"
     retry_count: int = 0
+    mutex_paths: List[str] = field(default_factory=list)
 
 
 @dataclass
