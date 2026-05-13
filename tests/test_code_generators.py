@@ -987,6 +987,82 @@ _TEST_VECTORS = [
         {"articulation_path": "/W/R"},
         ["UsdPhysics", "/W/R"],
     ),
+    # ----- qa-20-followup: drain _KNOWN_UNTESTED ratchet (batch 5) -----
+    (
+        "create_arena",
+        {"scene_type": "pick_place", "arena_id": "a1", "robot_asset": "/W/R", "task": "reach"},
+        ["isaaclab_tasks"],
+    ),
+    (
+        "create_arena_variant",
+        {"base_env_id": "a1", "variant_name": "v1", "robot_asset": "/W/R"},
+        ["isaaclab_tasks"],
+    ),
+    (
+        "create_wheeled_robot",
+        {"robot_path": "/W/W", "drive_type": "differential", "wheel_radius": 0.05, "wheel_base": 0.3},
+        ["wheeled_robots"],
+    ),
+    (
+        "export_dataset",
+        {"output_dir": "/tmp/out", "pipeline_id": "p1", "num_frames": 100},
+        ["omni.replicator.core"],
+    ),
+    (
+        "export_nav2_map",
+        {"output_path": "/tmp/map.png", "origin": [0, 0, 0], "resolution": 0.05, "width": 10.0, "height": 10.0},
+        ["import os", "/tmp/map.png"],
+    ),
+    (
+        "export_policy",
+        {"checkpoint": "/tmp/ck.pt", "output_path": "/tmp/p.onnx", "target_device": "cpu"},
+        ["GR00T", "TensorRT"],
+    ),
+    (
+        "export_teleop_mapping",
+        {"session_name": "s1", "output_path": "/tmp/m.json", "device": "xbox_gamepad"},
+        ["import json", "xbox_gamepad"],
+    ),
+    (
+        "extract_attention_maps",
+        {"checkpoint_path": "/tmp/ck.pt", "observation_path": "/tmp/obs.h5"},
+        ["GR00T attention", "import torch"],
+    ),
+    (
+        "record_teleop_demo",
+        {"output_path": "/tmp/demo.h5", "session_name": "s1", "robot_path": "/W/R"},
+        ["UsdPhysics", "/W/R"],
+    ),
+    (
+        "setup_loco_manipulation_training",
+        {"task_description": "pick", "robot": "humanoid_h1"},
+        ["Loco-manipulation"],
+    ),
+    (
+        "setup_pick_place_controller",
+        {"robot_path": "/W/R", "source_paths": ["/W/C"], "destination_path": "/W/B"},
+        ["setup_pick_place_controller"],
+    ),
+    (
+        "setup_pick_place_ros2_bridge",
+        {"robot_path": "/W/R", "source_paths": ["/W/C"], "destination_path": "/W/B"},
+        ["setup_pick_place_ros2_bridge"],
+    ),
+    (
+        "setup_ros2_bridge",
+        {"profile": "rtps", "robot_path": "/W/R"},
+        ["Unknown profile"],
+    ),
+    (
+        "setup_rsi_from_demos",
+        {"demo_path": "/tmp/d.h5", "env_cfg": {}},
+        ["Reference State", "/tmp/d.h5"],
+    ),
+    (
+        "setup_whole_body_control",
+        {"articulation_path": "/W/R", "locomotion_policy": "rl_policy"},
+        ["whole-body", "/W/R"],
+    ),
 ]
 
 
@@ -1119,18 +1195,13 @@ class TestAllCodeGenHandlersCovered:
     """
 
     _KNOWN_UNTESTED: "frozenset[str]" = frozenset({
-        # Remaining handlers requiring complex/multi-arg setups that need
-        # individual investigation. Each one needs a tailored test vector
-        # with the right combination of fields (e.g. create_arena needs
-        # 'robot_asset', setup_pick_place_controller needs 'destination_path',
-        # interpolate_trajectory has an args-shape issue, etc.).
-        'create_arena', 'create_arena_variant', 'create_wheeled_robot',
-        'export_dataset', 'export_nav2_map', 'export_policy',
-        'export_teleop_mapping', 'extract_attention_maps',
-        'interpolate_trajectory', 'record_teleop_demo',
-        'setup_loco_manipulation_training', 'setup_pick_place_controller',
-        'setup_pick_place_ros2_bridge', 'setup_ros2_bridge',
-        'setup_rsi_from_demos', 'setup_whole_body_control',
+        # Single remaining handler — interpolate_trajectory has a nested
+        # args-shape requirement (joint_positions inside waypoints) that
+        # needs full per-robot-DOF data to exercise meaningfully. Not
+        # worth synthesizing for the smoke test; a follow-up should
+        # write an integration test that exercises it against a real
+        # 7-DOF articulation snapshot.
+        'interpolate_trajectory',
     })
 
     def test_all_handlers_tested(self):
