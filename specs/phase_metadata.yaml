@@ -528,9 +528,9 @@
   note: USD reference validation
 '67':
   title: 'Live spawn validation: `create_articulated_joint` post-checks'
-  agent_type: opus-runtime
-  status: scaffold
-  note: joint validation
+  agent_type: sonnet-bounded
+  status: landed
+  note: joint validator — pure-Python, 27 tests, no Kit dependency
 '68':
   title: 'Live spawn validation: `apply_api_schema` post-checks'
   agent_type: opus-runtime
@@ -838,9 +838,9 @@
   note: Windows MSYS2 CI
 '89':
   title: ROCm + Intel Arc + DirectML smoke tests
-  agent_type: opus-runtime
-  status: scaffold
-  note: ROCm/Arc/DirectML hw
+  agent_type: sonnet-bounded
+  status: landed
+  note: SPEC/DETECTION layer — vendor detector + compatibility matrix + dry-run smoke runner
 '90':
   title: 'Secret redactor: extended pattern set'
   agent_type: sonnet-mechanical
