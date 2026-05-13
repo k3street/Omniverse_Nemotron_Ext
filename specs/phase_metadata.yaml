@@ -268,9 +268,25 @@
   note: 5 canonical templates — data
 '29':
   title: 'Canvas mirror panel: live state-sync from Kit'
-  agent_type: TS-only
-  status: scaffold
-  note: MirrorPanel.vue
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: >-
+    SPEC/LISTENER layer landed — StageEventClassifier (ObjectsChanged →
+    prim_added/prim_removed/prim_transformed, AttributeValueChanged →
+    attribute_changed, MetadataChanged → metadata_changed), StageEvent
+    dataclass, DebouncedEventDispatcher (enqueue/flush/should_flush/
+    pending_count), coalesce_events (add+remove drop, last-transform,
+    last-attr). 32 pytest tests pass. Kit Sdf.Notice wiring remains
+    scaffold (guarded behind try/except at module level).
+  gate: >-
+    pytest tests/test_phase_29_stage_event_listener.py — event filter
+    classifies prim_add/prim_remove/prim_transform, debounce coalesces
+    rapid events
+  files:
+  - exts/isaac_6.0/omni.isaac.assist/omni/isaac/assist/ui/stage_event_listener.py
+  - tests/test_phase_29_stage_event_listener.py
+  loc: 280
 '30':
   title: Multimodal "force_freeform" path
   agent_type: sonnet-mechanical
