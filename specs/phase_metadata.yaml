@@ -709,7 +709,7 @@
 '81':
   title: 'Multi-rate physics: high-rate vision + low-rate planning'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: multi-rate config
 81b:
   title: 'Validation primitive pattern: routes and corridors'
