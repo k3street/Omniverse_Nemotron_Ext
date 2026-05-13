@@ -794,6 +794,7 @@
   title: 'Settings exposure: every runtime knob via MCP'
   agent_type: sonnet-bounded
   status: landed
+  landed_date: '2026-05-13'
   note: settings registry
   gate: 'pytest — settings registry: list_all, get(key), set(key, val) with type validation'
   files:
@@ -848,7 +849,7 @@
 '93':
   title: '`proactive_check` deepening'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: proactive check rules
   gate: 'pytest — trigger ladder: scene_opened → robot_imported → console_error each emit expected tool list'
   files:
