@@ -503,6 +503,50 @@ async def _handle_capture_viewport(args: Dict) -> Dict:
     return await kit_tools.get_viewport_image(max_dim=max_dim)
 
 
+# Phase 77 — module-level viewport hash cache (shared across capture
+# operations that opt-in by passing the bytes through). Lazily initialized
+# at first use.
+_VIEWPORT_CACHE = None
+
+
+def _get_viewport_cache():
+    """Phase 77 — lazily construct the singleton viewport hash cache."""
+    global _VIEWPORT_CACHE
+    if _VIEWPORT_CACHE is None:
+        from service.isaac_assist_service.multimodal.viewport_hash_cache import (
+            ViewportHashCache,
+        )
+        _VIEWPORT_CACHE = ViewportHashCache()
+    return _VIEWPORT_CACHE
+
+
+async def _handle_viewport_cache_stats(args: Dict) -> Dict[str, Any]:
+    """Return Phase 77 ViewportHashCache stats (hits, misses, evictions, etc.).
+
+    The cache is module-singleton; callers can populate it by passing
+    bytes through the ``viewport_cache.put(...)`` API. This tool exposes
+    the running counters and supports a ``clear`` action.
+
+    Args:
+        clear: bool, default False. When True, clears the cache first.
+
+    Returns:
+        Dict with ``hits, misses, evictions, entries, total_bytes, hit_rate``.
+    """
+    cache = _get_viewport_cache()
+    if bool(args.get("clear", False)):
+        cache.clear()
+    stats = cache.stats()
+    return {
+        "hits": stats.hits,
+        "misses": stats.misses,
+        "evictions": stats.evictions,
+        "entries": stats.entries,
+        "total_bytes": stats.total_bytes,
+        "hit_rate": stats.hit_rate,
+    }
+
+
 async def _handle_capture_camera_image(args: Dict) -> Dict:
     """Render a single frame from the named camera and return base64 PNG."""
     from .. import kit_tools
@@ -1164,9 +1208,10 @@ def register(
     Called by `handlers/_dispatch.py:register_handlers()` which is the
     sole dispatch entry point from `tool_executor.py`.
     """
-    # Data handlers (16)
+    # Data handlers (17)
     data["capture_camera_image"] = _handle_capture_camera_image
     data["capture_viewport"] = _handle_capture_viewport
+    data["viewport_cache_stats"] = _handle_viewport_cache_stats
     data["get_camera_params"] = _handle_get_camera_params
     data["get_light_properties"] = _handle_get_light_properties
     data["get_render_config"] = _handle_get_render_config

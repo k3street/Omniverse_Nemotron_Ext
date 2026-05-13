@@ -11,8 +11,8 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-05-13T12:15:14+00:00
-Tool count: 427
+Generated: 2026-05-13T12:18:32+00:00
+Tool count: 430
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
 """
@@ -3805,6 +3805,35 @@ class ValidateUsdReferencePostArgs(BaseModel):
     strict: Optional[bool] = Field(None)
 
 
+class ValidateAssemblyConstraintArgs(BaseModel):
+    """Pre-flight validation for an assembly constraint spec (Phase 72). Pure Python; no Kit/PhysX. Checks name non-empty, target prims set, type in known set, required params present per constraint type (di"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    name: str
+    type: str
+    target_a: Dict[str, Any]
+    target_b: Dict[str, Any]
+    tolerance_m: Optional[float] = Field(None)
+    tolerance_rad: Optional[float] = Field(None)
+    params: Optional[Dict[str, Any]] = Field(None)
+
+
+class ViewportCacheStatsArgs(BaseModel):
+    """Return Phase 77 ViewportHashCache statistics: hits, misses, evictions, entries, total_bytes, hit_rate. Optional clear=true resets the cache."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    clear: Optional[bool] = Field(None, description="If true, clear the cache before returning stats.")
+
+
+class RetrieveTemplateByRoleArgs(BaseModel):
+    """Phase 20 role-based canonical-template retrieval. Ranks templates by exact role-hint match, then fuzzy token overlap, with legacy templates appended below role-based matches."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    query: str = Field(..., description="Free-text user request.")
+    role_hints: Optional[List[str]] = Field(None, description="Optional role names to weight toward (e.g. 'picker').")
+    max_results: Optional[int] = Field(None)
+
+
 class ValidateJointPostArgs(BaseModel):
     """Run Phase 67 validator against a synthetic articulated-joint state (typically observed after create_articulated_joint). Checks: prim_exists, body0_set, body1_set, axis_set, axis_valid, limits_consiste"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
@@ -4267,6 +4296,9 @@ MODEL_REGISTRY = {
     "sample_correlated_dr": SampleCorrelatedDrArgs,
     "eureka_history": EurekaHistoryArgs,
     "validate_usd_reference_post": ValidateUsdReferencePostArgs,
+    "validate_assembly_constraint": ValidateAssemblyConstraintArgs,
+    "viewport_cache_stats": ViewportCacheStatsArgs,
+    "retrieve_template_by_role": RetrieveTemplateByRoleArgs,
     "validate_joint_post": ValidateJointPostArgs,
     "execute_contact_sequence_plan": ExecuteContactSequencePlanArgs,
     "rebind_role": RebindRoleArgs,

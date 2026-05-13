@@ -1019,6 +1019,53 @@ print(json.dumps(result))
 
 
 # ---------------------------------------------------------------------------
+# Phase 20 — RoleRetriever-backed canonical-template lookup
+
+
+async def _handle_retrieve_template_by_role(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Use the Phase 20 RoleRetriever to rank canonical templates against
+    a user query and optional role hints.
+
+    Pure-Python ranking — role-based matches ahead of legacy. No Kit
+    invocation.
+
+    Args:
+        query: free-text user request (required).
+        role_hints: optional list of role names to weight toward.
+        max_results: cap on returned matches (default 10).
+
+    Returns:
+        Dict with ``matches`` (list of dicts) and ``count``.
+    """
+    from service.isaac_assist_service.chat.tools.role_retriever import RoleRetriever
+
+    query = str(args.get("query") or "")
+    if not query:
+        return {"error": "query is required", "matches": [], "count": 0}
+    role_hints = list(args.get("role_hints") or [])
+    max_results = int(args.get("max_results", 10))
+
+    retriever = RoleRetriever()
+    matches = retriever.retrieve_with_roles(
+        query=query, role_hints=role_hints, max_results=max_results
+    )
+    return {
+        "matches": [
+            {
+                "template_id": m.template_id,
+                "source": m.source,
+                "match_score": m.match_score,
+                "matched_role": m.matched_role,
+                "matched_tags": list(m.matched_tags),
+                "notes": m.notes,
+            }
+            for m in matches
+        ],
+        "count": len(matches),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
@@ -1031,8 +1078,9 @@ def register(
     Called by `handlers/_dispatch.py:register_handlers()` which is the
     sole dispatch entry point from `tool_executor.py`.
     """
-    # Data handlers (12)
+    # Data handlers (13)
     data["resolve_constraint_phrase"] = _handle_resolve_constraint_phrase
+    data["retrieve_template_by_role"] = _handle_retrieve_template_by_role
     data["resolve_context_reference"] = _handle_resolve_context_reference
     data["resolve_coordinate_reference"] = _handle_resolve_coordinate_reference
     data["resolve_count_vagueness"] = _handle_resolve_count_vagueness

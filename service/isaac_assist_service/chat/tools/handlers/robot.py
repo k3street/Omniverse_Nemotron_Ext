@@ -5542,6 +5542,67 @@ async def _handle_list_available_controllers(args) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Phase 72 — assembly-constraint validator (pre-flight check)
+
+
+async def _handle_validate_assembly_constraint(args: Dict) -> Dict[str, Any]:
+    """Validate an AssemblyConstraint spec via the Phase 72 runtime.
+
+    Pre-flight check — runs ``validate_constraint_spec`` from the Phase 72
+    AssemblyConstraintRuntime against the proposed constraint shape. No
+    Kit/PhysX dispatch; pure-Python validation only.
+
+    Args:
+        name: required constraint name.
+        type: one of coincident_axes, concentric, tangent, parallel_planes,
+            fixed_offset, angle_between, distance_between.
+        target_a: dict with prim_path, feature, optional offset_m.
+        target_b: same shape as target_a.
+        tolerance_m: optional, default 0.001.
+        tolerance_rad: optional, default 0.01.
+        params: type-specific params (e.g., distance, angle_rad, offset).
+
+    Returns:
+        Dict with ``issues`` (list of str). Empty list means valid spec.
+    """
+    from service.isaac_assist_service.multimodal.setup_assembly_constraint_runtime import (
+        AssemblyConstraint,
+        AssemblyConstraintRuntime,
+        ConstraintTarget,
+    )
+
+    def _make_target(raw: Dict) -> ConstraintTarget:
+        offset = raw.get("offset_m") or (0.0, 0.0, 0.0)
+        return ConstraintTarget(
+            prim_path=str(raw.get("prim_path", "")),
+            feature=raw.get("feature", "origin"),
+            offset_m=tuple(float(v) for v in offset)[:3],  # type: ignore[arg-type]
+        )
+
+    try:
+        constraint = AssemblyConstraint(
+            name=str(args.get("name", "")),
+            type=args.get("type", "fixed_offset"),
+            target_a=_make_target(args.get("target_a") or {}),
+            target_b=_make_target(args.get("target_b") or {}),
+            tolerance_m=float(args.get("tolerance_m", 0.001)),
+            tolerance_rad=float(args.get("tolerance_rad", 0.01)),
+            params=dict(args.get("params") or {}),
+        )
+    except (TypeError, ValueError, KeyError) as exc:
+        return {"valid": False, "issues": [f"malformed constraint: {exc}"]}
+
+    runtime = AssemblyConstraintRuntime(dry_run=True)
+    issues = runtime.validate_constraint_spec(constraint)
+    return {
+        "valid": not issues,
+        "issues": issues,
+        "name": constraint.name,
+        "type": constraint.type,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Phase 67 — post-spawn validation for create_articulated_joint
 
 
@@ -5613,6 +5674,7 @@ def register(
     data["apply_robot_fix_profile"] = _handle_apply_robot_fix_profile
     data["calibrate_physics"] = _handle_calibrate_physics
     data["create_articulated_joint"] = _handle_create_articulated_joint
+    data["validate_assembly_constraint"] = _handle_validate_assembly_constraint
     data["validate_joint_post"] = _handle_validate_joint_post
     data["create_gravity_dispenser"] = _handle_create_gravity_dispenser
     data["create_heap_zone"] = _handle_create_heap_zone

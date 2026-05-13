@@ -9391,6 +9391,81 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "validate_assembly_constraint",
+            "description": (
+                "Pre-flight validation for an assembly constraint spec (Phase 72). "
+                "Pure Python; no Kit/PhysX. Checks name non-empty, target prims set, "
+                "type in known set, required params present per constraint type "
+                "(distance_between needs 'distance', angle_between needs 'angle_rad', "
+                "fixed_offset needs 'offset')."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "type": {
+                        "type": "string",
+                        "enum": ["coincident_axes", "concentric", "tangent",
+                                 "parallel_planes", "fixed_offset", "angle_between",
+                                 "distance_between"],
+                    },
+                    "target_a": {"type": "object"},
+                    "target_b": {"type": "object"},
+                    "tolerance_m": {"type": "number"},
+                    "tolerance_rad": {"type": "number"},
+                    "params": {"type": "object"},
+                },
+                "required": ["name", "type", "target_a", "target_b"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "viewport_cache_stats",
+            "description": (
+                "Return Phase 77 ViewportHashCache statistics: hits, misses, "
+                "evictions, entries, total_bytes, hit_rate. Optional clear=true "
+                "resets the cache."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "clear": {
+                        "type": "boolean",
+                        "description": "If true, clear the cache before returning stats.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "retrieve_template_by_role",
+            "description": (
+                "Phase 20 role-based canonical-template retrieval. Ranks "
+                "templates by exact role-hint match, then fuzzy token overlap, "
+                "with legacy templates appended below role-based matches."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Free-text user request."},
+                    "role_hints": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional role names to weight toward (e.g. 'picker').",
+                    },
+                    "max_results": {"type": "integer"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "validate_joint_post",
             "description": (
                 "Run Phase 67 validator against a synthetic articulated-joint "
