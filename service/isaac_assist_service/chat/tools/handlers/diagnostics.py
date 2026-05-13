@@ -1857,8 +1857,7 @@ else:
 def _gen_create_broken_scene(args: Dict) -> str:
     """Generate code that creates a scene with a specific, diagnosable fault for teaching."""
     from .. import tool_executor as _te  # noqa: PLC0415
-    _BROKEN_SCENE_FAULTS = _te._BROKEN_SCENE_FAULTS
-
+    # Phase 8 mop-up — _BROKEN_SCENE_FAULTS is now module-local.
     fault_type = args.get("fault_type", "missing_collision")
     scene_name = args.get("scene_name", "BrokenScene")
 
@@ -2274,7 +2273,7 @@ async def _handle_check_teleop_hardware(args: Dict) -> Dict:
     """Look up a teleop device in the known-devices table and probe local availability."""
     from pathlib import Path  # noqa: PLC0415
     from .. import tool_executor as _te  # noqa: PLC0415
-    _TELEOP_DEVICES = _te._TELEOP_DEVICES
+    # Phase 8 mop-up — _TELEOP_DEVICES is now module-local.
     device = str(args.get("device", "")).lower()
     info = _TELEOP_DEVICES.get(device)
     if info is None:
@@ -2393,7 +2392,7 @@ else:
 async def _handle_check_vram_headroom(args: Dict) -> Dict:
     """Estimate VRAM cost vs available, return warnings + suggestions."""
     from .. import tool_executor as _te  # noqa: PLC0415
-    _VRAM_PER_ENV_MB = _te._VRAM_PER_ENV_MB
+    # Phase 8 mop-up — _VRAM_PER_ENV_MB is now module-local.
     _detect_local_vram_gb = _te._detect_local_vram_gb
     _detect_used_vram_gb = _te._detect_used_vram_gb
     operation = args.get("operation", "custom")
@@ -2770,7 +2769,7 @@ async def _handle_diagnose_physics_error(args: Dict) -> Dict:
     """Pattern-match against known PhysX errors and return diagnosis."""
     import re as _re  # noqa: PLC0415
     from .. import tool_executor as _te  # noqa: PLC0415
-    _PHYSX_ERROR_PATTERNS = _te._PHYSX_ERROR_PATTERNS
+    # Phase 8 mop-up — _PHYSX_ERROR_PATTERNS is now module-local.
     error_text = args.get("error_text", "")
     if not error_text.strip():
         return {"matches": [], "message": "No error text provided."}
@@ -3920,7 +3919,7 @@ async def _handle_validate_calibration(args: Dict) -> Dict:
     report is computed in-process.
     """
     from .. import tool_executor as _te  # noqa: PLC0415
-    _check_real_data_path = _te._check_real_data_path
+    from ._shared import _check_real_data_path  # noqa: PLC0415
     _per_joint_rmse = _te._per_joint_rmse
 
     calibrated_params = args.get("calibrated_params")
@@ -4254,8 +4253,7 @@ except Exception as e:
 
 async def _handle_validate_teleop_demo(args: Dict) -> Dict:
     """Validate an HDF5 teleop file against the robomimic schema."""
-    from .. import tool_executor as _te  # noqa: PLC0415
-    _open_hdf5_safely = _te._open_hdf5_safely
+    from ._shared import _open_hdf5_safely  # noqa: PLC0415
     import math  # noqa: PLC0415
     path = args["hdf5_path"]
     f, reason = _open_hdf5_safely(path)

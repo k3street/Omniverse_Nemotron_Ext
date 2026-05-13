@@ -299,7 +299,7 @@ async def _handle_scene_aware_starter_prompts(args: Dict) -> Dict:
                                          "go1", "go2", "h1", "allegro")):
             has_robot = True
             robot_paths.append(str(p))
-            if any(kw in p_lower for kw in _te._MOBILE_ROBOT_KEYWORDS):
+            if any(kw in p_lower for kw in _MOBILE_ROBOT_KEYWORDS):
                 is_mobile = True
 
     if isinstance(articulations, list) and len(articulations) > 0:
@@ -325,7 +325,7 @@ async def _handle_scene_aware_starter_prompts(args: Dict) -> Dict:
     else:
         archetype = "empty"
 
-    template = _te._STARTER_PROMPTS[archetype]
+    template = _STARTER_PROMPTS[archetype]
 
     # Build scene summary line
     summary_parts = []
@@ -368,7 +368,7 @@ async def _handle_slash_command_discovery(args: Dict) -> Dict:
             has_physics = has_physics if has_physics is not None else False
 
     commands = []
-    for cmd in _te._SLASH_COMMANDS:
+    for cmd in _SLASH_COMMANDS:
         if cmd.get("always"):
             commands.append({"command": cmd["command"], "description": cmd["description"]})
         elif cmd.get("requires_robot") and has_robot:
@@ -390,12 +390,12 @@ async def _handle_post_action_suggestions(args: Dict) -> Dict:
     tool_args = args.get("tool_args", {})
     tool_result = args.get("tool_result", {})
 
-    suggestions = _te._SUGGESTION_MAP.get(completed_tool, _te._DEFAULT_SUGGESTIONS)
+    suggestions = _SUGGESTION_MAP.get(completed_tool, _DEFAULT_SUGGESTIONS)
 
     # Context-aware adjustments
     if completed_tool == "import_robot":
         robot_name = tool_args.get("file_path", "")
-        if any(kw in robot_name.lower() for kw in _te._MOBILE_ROBOT_KEYWORDS):
+        if any(kw in robot_name.lower() for kw in _MOBILE_ROBOT_KEYWORDS):
             suggestions = [
                 "Set up navigation for the mobile robot",
                 "Add a lidar sensor",
@@ -448,7 +448,7 @@ async def _handle_start_workflow(args: Dict) -> Dict:
     import uuid as _wf_uuid  # noqa: PLC0415
     wf_id = f"wf_{_wf_uuid.uuid4().hex[:12]}"
     scope_prim = args.get("scope_prim", "/World")
-    max_retries = min(int(args.get("max_retries", 3)), _te._WORKFLOW_RETRY_HARD_CAP)
+    max_retries = min(int(args.get("max_retries", 3)), _WORKFLOW_RETRY_HARD_CAP)
     auto_approve = bool(args.get("auto_approve_checkpoints", False))
 
     plan = _te._wf_make_initial_plan(workflow_type, goal, args.get("params") or {})
@@ -715,7 +715,7 @@ async def _handle_execute_with_retry(args: Dict) -> Dict:
     code = args.get("code", "")
     description = args.get("description", "Autonomous error-fix execution")
     requested_max = int(args.get("max_retries", 3))
-    max_retries = min(requested_max, _te._WORKFLOW_RETRY_HARD_CAP)
+    max_retries = min(requested_max, _WORKFLOW_RETRY_HARD_CAP)
     context_hints = args.get("context_hints") or []
 
     if not code:

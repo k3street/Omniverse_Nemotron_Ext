@@ -659,7 +659,7 @@ async def _handle_diagnose_ros2(args: Dict) -> Dict:
     """
     from .. import kit_tools  # noqa: PLC0415
     from .. import tool_executor as _te  # noqa: PLC0415
-    _ROS2_QOS_PRESETS = _te._ROS2_QOS_PRESETS
+    # Phase 8 mop-up — _ROS2_QOS_PRESETS is now module-local.
     from typing import List, Dict as _Dict, Any  # noqa: PLC0415
     issues: List[_Dict[str, Any]] = []
 
