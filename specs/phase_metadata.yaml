@@ -917,14 +917,15 @@
 96b:
   title: Spec-reality reconciliation workflow
   agent_type: sonnet-mechanical
-  status: scaffold
-  note: ghost-handler ratchet
-  gate: scripts/ghost_handler_ratchet.py reports zero ghost handlers (every name has a body)
+  status: landed
+  landed_date: '2026-05-13'
+  note: spec-reality reconciliation
+  gate: pytest tests/test_sub_phase_96b_spec_reality_reconciliation.py — reconciliation
+    detects unreferenced files and orphan spec lines
   files:
-  - service/isaac_assist_service/multimodal/sub_phase_96b_gh_handler_ratchet.py
-  - scripts/ghost_handler_ratchet.py
-  - tests/test_sub_phase_96b_gh_handler_ratchet.py
-  loc: 150
+  - service/isaac_assist_service/multimodal/sub_phase_96b_spec_reality_reconciliation.py
+  - tests/test_sub_phase_96b_spec_reality_reconciliation.py
+  loc: 220
   effort_min: 45
   blocked_by:
   - '96'
