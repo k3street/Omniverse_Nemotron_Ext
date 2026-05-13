@@ -1027,17 +1027,9 @@
   - '18'
 '99':
   title: Pick-hold-weld scenario end-to-end
-  agent_type: sonnet-bounded
-  status: landed
-  landed_date: '2026-05-13'
-  note: scenario state machine + scoring rubric (SPEC/SCENARIO layer; runtime execution deferred to opus-runtime)
-  gate: pytest tests/test_sub_phase_99_pick_hold_weld_scenario.py — 16 tests pass
-  files:
-  - service/isaac_assist_service/multimodal/sub_phase_99_pick_hold_weld_scenario.py
-  - tests/test_sub_phase_99_pick_hold_weld_scenario.py
-  loc: 280
-  effort_min: 60
-  blocked_by: []
+  agent_type: opus-runtime
+  status: scaffold
+  note: pick-hold-weld scenario
 '100':
   title: 'Arena benchmark: hand-crafted vs IA-authored'
   agent_type: sonnet-mechanical
@@ -1058,15 +1050,9 @@
   note: Linux binary release
 '102':
   title: 'Release: macOS / Windows binaries'
-  agent_type: sonnet-bounded
-  status: landed
-  landed_date: '2026-05-13'
-  note: macOS/Windows release — manifest schema, signing helpers, platform detection
-  gate: pytest tests/test_phase_102_release_macos_windows.py — 20 tests pass
-  files:
-  - service/isaac_assist_service/multimodal/release_macos_windows.py
-  - tests/test_phase_102_release_macos_windows.py
-  loc: 250
+  agent_type: opus-runtime
+  status: scaffold
+  note: macOS/Windows release
 '103':
   title: User-facing onboarding tutorial
   agent_type: sonnet-mechanical
