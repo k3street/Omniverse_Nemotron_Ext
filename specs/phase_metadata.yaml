@@ -510,9 +510,9 @@
   note: GR00T evaluator harness
 '63':
   title: '`execute_contact_sequence_plan` — N-step contact-sequence runtime'
-  agent_type: opus-runtime
-  status: scaffold
-  note: contact sequence runtime
+  agent_type: sonnet-bounded
+  status: landed
+  note: contact sequence state machine + predicate evaluator + dry-run executor
 63b:
   title: 'cuRoboV2 backend: B-spline trajectories + depth-fused TSDF + constrained planning'
   agent_type: opus-runtime
@@ -525,9 +525,9 @@
   note: pose estimation
 63d:
   title: Multi-robot coordination runtime (handoff + mutex enforcement)
-  agent_type: opus-runtime
-  status: scaffold
-  note: telemetry runtime
+  agent_type: sonnet-bounded
+  status: landed
+  note: mutex + handoff state machine + deadlock detection
 '64':
   title: Eureka run state actually persisted
   agent_type: sonnet-bounded
