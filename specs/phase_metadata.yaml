@@ -1006,12 +1006,13 @@
 '106':
   title: Post-release retrospective + roadmap
   agent_type: sonnet-mechanical
-  status: scaffold
-  note: retrospective template
-  gate: 'docs/retrospective/template.md exists with sections: shipped/skipped/blockers/learnings/next'
+  status: landed
+  note: retrospective template + builder + classify_priority
+  gate: pytest -- retrospective template renders, roadmap tier classifier deterministic
   files:
   - service/isaac_assist_service/multimodal/post_release_retrospective.py
-  - docs/retrospective/template.md
-  loc: 0
+  - docs/templates/retrospective_template.md
+  - tests/test_phase_106_post_release_retrospective.py
+  loc: 200
   effort_min: 30
   blocked_by: []
