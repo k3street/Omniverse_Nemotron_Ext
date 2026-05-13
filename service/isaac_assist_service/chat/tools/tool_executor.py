@@ -2034,128 +2034,9 @@ def _analyze_performance(stats: Dict, timing: Dict, mem: Dict) -> List[Dict]:
 # _normalize_material_name migrated to handlers/physics.py (Phase 8 wave 6, 2026-05-13).
 
 # ══════ From feat/new-scene-diff ══════
-def _parse_unified_diff_to_changes(raw_diff_lines: List[str]) -> List[Dict]:
-    """Parse a unified diff of USDA text into structured SceneChange dicts.
+# _parse_unified_diff_to_changes migrated to handlers/scene_authoring.py (Phase 8 wave 21, 2026-05-13).
 
-    Each returned dict has:
-        prim_path: str
-        change_type: "added" | "removed" | "modified"
-        details: dict  (attribute, old, new, or raw line)
-    """
-    import re
-    changes: List[Dict] = []
-    current_prim: Optional[str] = None
-
-    # Track added/removed lines to pair modifications
-    added_lines: List[str] = []
-    removed_lines: List[str] = []
-
-    def _flush_pending():
-        nonlocal added_lines, removed_lines
-        if not current_prim:
-            added_lines.clear()
-            removed_lines.clear()
-            return
-        # Pair removed/added as modifications
-        paired = min(len(removed_lines), len(added_lines))
-        for i in range(paired):
-            changes.append({
-                "prim_path": current_prim,
-                "change_type": "modified",
-                "details": {"old_line": removed_lines[i].strip(), "new_line": added_lines[i].strip()},
-            })
-        for i in range(paired, len(removed_lines)):
-            changes.append({
-                "prim_path": current_prim,
-                "change_type": "removed",
-                "details": {"line": removed_lines[i].strip()},
-            })
-        for i in range(paired, len(added_lines)):
-            changes.append({
-                "prim_path": current_prim,
-                "change_type": "added",
-                "details": {"line": added_lines[i].strip()},
-            })
-        added_lines = []
-        removed_lines = []
-
-    prim_re = re.compile(r'^\s*def\s+(\w+)\s+"([^"]+)"')
-    for line in raw_diff_lines:
-        # Skip diff headers
-        if line.startswith("---") or line.startswith("+++") or line.startswith("@@"):
-            _flush_pending()
-            continue
-
-        # Detect prim context from context lines
-        m = prim_re.match(line.lstrip("+-"))
-        if m:
-            _flush_pending()
-            current_prim = m.group(2)
-            # A whole prim definition added/removed
-            if line.startswith("+") and not line.startswith("+++"):
-                changes.append({
-                    "prim_path": current_prim,
-                    "change_type": "added",
-                    "details": {"prim_type": m.group(1)},
-                })
-            elif line.startswith("-") and not line.startswith("---"):
-                changes.append({
-                    "prim_path": current_prim,
-                    "change_type": "removed",
-                    "details": {"prim_type": m.group(1)},
-                })
-            continue
-
-        if line.startswith("-") and not line.startswith("---"):
-            removed_lines.append(line[1:])
-        elif line.startswith("+") and not line.startswith("+++"):
-            added_lines.append(line[1:])
-        else:
-            _flush_pending()
-
-    _flush_pending()
-
-    # Deduplicate: group by prim_path + change_type
-    seen: Dict[tuple, Dict] = {}
-    deduped: List[Dict] = []
-    for c in changes:
-        key = (c["prim_path"], c["change_type"])
-        if key not in seen:
-            seen[key] = c
-            deduped.append(c)
-        else:
-            # Merge details for same prim
-            existing = seen[key]
-            if "modifications" not in existing:
-                existing["modifications"] = [existing.get("details", {})]
-            existing["modifications"].append(c.get("details", {}))
-    return deduped
-
-def _summarize_changes(changes: List[Dict]) -> str:
-    """Generate a concise human-readable summary from structured changes."""
-    if not changes:
-        return "No changes detected."
-
-    added = [c for c in changes if c["change_type"] == "added"]
-    removed = [c for c in changes if c["change_type"] == "removed"]
-    modified = [c for c in changes if c["change_type"] == "modified"]
-
-    parts: List[str] = []
-    total = len(added) + len(removed) + len(modified)
-    parts.append(f"{total} change(s) detected:")
-
-    for c in added:
-        ptype = c.get("details", {}).get("prim_type", "prim")
-        parts.append(f"  + Added {ptype}: {c['prim_path']}")
-    for c in removed:
-        ptype = c.get("details", {}).get("prim_type", "prim")
-        parts.append(f"  - Removed {ptype}: {c['prim_path']}")
-    for c in modified:
-        detail = c.get("details", {})
-        desc = detail.get("new_line", detail.get("line", "property changed"))
-        parts.append(f"  ~ Modified: {c['prim_path']} ({desc})")
-
-    return "\n".join(parts)
+# _summarize_changes migrated to handlers/scene_authoring.py (Phase 8 wave 21, 2026-05-13).
 
 # _handle_scene_diff moved to handlers/scene_authoring.py (Phase 7 wave 4).
 # _handle_watch_changes moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
@@ -2249,42 +2130,9 @@ def _summarize_changes(changes: List[Dict]) -> str:
 # _gen_build_stage_index moved to handlers/diagnostics.py (Phase 6 wave 22).
 
 # _handle_build_stage_index moved to handlers/scene_authoring.py (Phase 7 wave 4).
-def _score_prim_for_query(path: str, meta: Dict[str, Any], keywords: List[str]) -> int:
-    """Simple keyword scoring: count hits in path / type / schemas."""
-    score = 0
-    haystack_parts = [path.lower(), str(meta.get("type", "")).lower()]
-    for s in meta.get("schemas", []) or []:
-        haystack_parts.append(str(s).lower())
-    haystack = " ".join(haystack_parts)
-    for kw in keywords:
-        kw_lower = kw.lower().strip()
-        if not kw_lower:
-            continue
-        if kw_lower in haystack:
-            score += 1
-    return score
+# _score_prim_for_query migrated to handlers/scene_authoring.py (Phase 8 wave 21, 2026-05-13).
 
-def _neighbour_paths(selected: str) -> List[str]:
-    """Return paths considered neighbours of `selected` — parent, siblings, direct children."""
-    if not selected:
-        return []
-    selected = selected.rstrip("/")
-    parent = selected.rsplit("/", 1)[0] or "/"
-    neighbours: List[str] = []
-    for path in _STAGE_INDEX.keys():
-        if path == selected:
-            continue
-        if path == parent:
-            neighbours.append(path)
-            continue
-        # siblings share the parent prefix
-        if parent != "/" and path.startswith(parent + "/") and path.count("/") == selected.count("/"):
-            neighbours.append(path)
-            continue
-        # direct children of selected
-        if path.startswith(selected + "/") and path.count("/") == selected.count("/") + 1:
-            neighbours.append(path)
-    return neighbours
+# _neighbour_paths migrated to handlers/scene_authoring.py (Phase 8 wave 21, 2026-05-13).
 
 # _handle_query_stage_index moved to handlers/scene_authoring.py (Phase 7 wave 4).
 # _gen_save_delta_snapshot moved to handlers/scene_authoring.py (Phase 6 wave 14).
@@ -2822,71 +2670,7 @@ def _validate_env_id(env_id: Any, num_envs: int) -> Optional[str]:
 # _handle_checkpoint_training moved to handlers/training.py (Phase 7 wave 5).
 
 
-def _build_select_by_criteria_code(criteria: Dict[str, Any]) -> str:
-    """Generate the Kit-side query code for select_by_criteria.
-
-    Split out from the handler so tests can exercise the generator
-    without a live Kit RPC.
-    """
-    return f"""\
-import omni.usd
-from pxr import Usd, Sdf
-import json
-import re
-
-stage = omni.usd.get_context().get_stage()
-_criteria = {criteria!r}
-
-_type = _criteria.get("type")
-_schema = _criteria.get("has_schema")
-_name_pat = _criteria.get("name_pattern")
-_path_pat = _criteria.get("path_pattern")
-_has_attr = _criteria.get("has_attribute")
-_kind = _criteria.get("kind")
-_parent = _criteria.get("parent")
-_active = _criteria.get("active")
-
-_name_re = re.compile(_name_pat) if _name_pat else None
-_path_re = re.compile(_path_pat) if _path_pat else None
-
-# Traversal root — whole stage or a parent subtree
-if _parent:
-    _root = stage.GetPrimAtPath(_parent)
-    _iterator = iter(Usd.PrimRange(_root)) if _root and _root.IsValid() else iter([])
-else:
-    _iterator = iter(stage.Traverse())
-
-_matches = []
-for _prim in _iterator:
-    if _type and _prim.GetTypeName() != _type:
-        continue
-    if _schema:
-        _applied = [str(a) for a in _prim.GetAppliedSchemas()]
-        if _schema not in _applied and not _applied.__contains__(_schema):
-            # Also check substring match for aliases like "PhysicsRigidBodyAPI"
-            if not any(_schema in a for a in _applied):
-                continue
-    if _name_re and not _name_re.search(_prim.GetName()):
-        continue
-    if _path_re and not _path_re.search(str(_prim.GetPath())):
-        continue
-    if _has_attr:
-        _a = _prim.GetAttribute(_has_attr)
-        if not _a or not _a.IsValid():
-            continue
-    if _kind:
-        from pxr import Usd as _U
-        _k = _U.ModelAPI(_prim).GetKind()
-        if _k != _kind:
-            continue
-    if _active is not None:
-        if bool(_prim.IsActive()) != bool(_active):
-            continue
-    _matches.append(str(_prim.GetPath()))
-
-_matches.sort()
-print(json.dumps({{"matches": _matches, "count": len(_matches), "criteria": _criteria}}))
-"""
+# _build_select_by_criteria_code migrated to handlers/scene_authoring.py (Phase 8 wave 21, 2026-05-13).
 
 # _handle_select_by_criteria moved to handlers/scene_authoring.py (Phase 7 wave 4).
 
