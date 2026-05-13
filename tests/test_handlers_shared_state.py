@@ -90,9 +90,20 @@ def test_shared_module_imports():
     assert hasattr(_shared, "_LEGACY_REEXPORT_NAMES")
 
 
-def test_shared_constants_starts_empty():
+def test_shared_constants_populated_per_phase_8():
+    """Phase 8 lifts cross-handler constants out of tool_executor.py
+    into `handlers/_shared.CONSTANTS`. Phase 8 wave 3 (2026-05-13)
+    migrated SAFE_XFORM_SNIPPET as the first cross-theme constant.
+
+    Pre-Phase-8 assertion was `CONSTANTS == {}`. Updated to a presence
+    check on the migrated key — new constants added by later Phase 8
+    waves will extend this list.
+    """
     from service.isaac_assist_service.chat.tools.handlers._shared import CONSTANTS
-    assert CONSTANTS == {}
+    assert "SAFE_XFORM_SNIPPET" in CONSTANTS, (
+        "Phase 8 wave 3 migrated SAFE_XFORM_SNIPPET to _shared.CONSTANTS — "
+        f"check this didn't regress. Current keys: {sorted(CONSTANTS.keys())}"
+    )
 
 
 def test_shared_legacy_reexport_names_match_spec():

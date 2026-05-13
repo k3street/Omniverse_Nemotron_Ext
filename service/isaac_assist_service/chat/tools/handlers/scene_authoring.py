@@ -40,7 +40,7 @@ from typing import Any, Callable, Dict, Optional
 def _gen_create_prim(args: Dict) -> str:
     # Lazy import to avoid circular dependency at module load time;
     # _SAFE_XFORM_SNIPPET stays in tool_executor.py until Phase 8.
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
 
     prim_path = args["prim_path"]
     prim_type = args["prim_type"]
@@ -202,7 +202,7 @@ def _gen_assign_material(args: Dict) -> str:
 
 def _gen_teleport_prim(args: Dict) -> str:
     # Lazy import — same pattern as _gen_create_prim.
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
 
     prim_path = args["prim_path"]
     lines = [
@@ -300,7 +300,7 @@ def _gen_apply_api_schema(args: Dict) -> str:
 
 def _gen_clone_prim(args: Dict) -> str:
     # Lazy import — same pattern as _gen_create_prim.
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
 
     src = args["source_path"]
     tgt = args["target_path"]
@@ -1752,7 +1752,7 @@ print(f"bulk_apply_schema: schema={schema!r} applied={{_applied}} "
 
 def _gen_group_prims(args: Dict) -> str:
     """T14.4 — create an Xform parent and reparent prims under it."""
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
     prim_paths = args["prim_paths"]
     group_name = args["group_name"]
     group_parent = args.get("group_parent", "/World")
@@ -1811,7 +1811,7 @@ print(f"group_prims: group={{_group_path}} moved={{_moved}} "
 
 def _gen_duplicate_prims(args: Dict) -> str:
     """T14.5 — duplicate prims via Sdf.CopySpec and apply a positional offset."""
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
     prim_paths = args["prim_paths"]
     offset = args["offset"]
     suffix = args.get("suffix", "_copy")

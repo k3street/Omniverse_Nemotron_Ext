@@ -14,6 +14,19 @@ from typing import Any, Callable, Dict
 
 
 # ---------------------------------------------------------------------------
+# Rendering-local constants (Phase 8 wave 2, 2026-05-13)
+# Migrated from tool_executor.py:849. Used only by this module — kept
+# theme-local rather than promoted to _shared.py.
+
+_POST_PROCESS_PATHS = {
+    "bloom": "/Render/PostProcess/Bloom",
+    "tonemap": "/Render/PostProcess/Tonemap",
+    "dof": "/Render/PostProcess/DoF",
+    "motion_blur": "/Render/PostProcess/MotionBlur",
+}
+
+
+# ---------------------------------------------------------------------------
 # Phase 6 wave 17 — lighting + render config + HDRI + post-process
 
 
@@ -208,7 +221,6 @@ def _gen_set_render_resolution(args: Dict) -> str:
     )
 
 def _gen_enable_post_process(args: Dict) -> str:
-    from ..tool_executor import _POST_PROCESS_PATHS  # noqa: PLC0415
     effect = args["effect"]
     params = args.get("params", {}) or {}
     enabled = args.get("enabled", True)

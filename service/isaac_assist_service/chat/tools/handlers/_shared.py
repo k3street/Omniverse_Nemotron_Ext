@@ -50,7 +50,42 @@ if TYPE_CHECKING:
 # read-only constants here, NOT in `_state.py`'s mutable dataclasses).
 # Populated as Phase 3-7 lift them out of tool_executor.py.
 
-CONSTANTS: dict[str, object] = {}
+# Phase 8 wave 3 (2026-05-13): _SAFE_XFORM_SNIPPET migrated from
+# tool_executor.py:1596. Used by animation/sensors/scene_blueprints/
+# scene_authoring code generators to inject safe transform setters.
+_SAFE_XFORM_SNIPPET = '''\
+
+def _safe_set_translate(prim, pos):
+    """Set translate, reusing existing op if present."""
+    xf = UsdGeom.Xformable(prim)
+    for op in xf.GetOrderedXformOps():
+        if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+            op.Set(Gf.Vec3d(*pos))
+            return
+    xf.AddTranslateOp().Set(Gf.Vec3d(*pos))
+
+def _safe_set_scale(prim, s):
+    """Set scale, reusing existing op if present."""
+    xf = UsdGeom.Xformable(prim)
+    for op in xf.GetOrderedXformOps():
+        if op.GetOpType() == UsdGeom.XformOp.TypeScale:
+            op.Set(Gf.Vec3d(*s))
+            return
+    xf.AddScaleOp().Set(Gf.Vec3d(*s))
+
+def _safe_set_rotate_xyz(prim, r):
+    """Set rotateXYZ, reusing existing op if present."""
+    xf = UsdGeom.Xformable(prim)
+    for op in xf.GetOrderedXformOps():
+        if op.GetOpType() == UsdGeom.XformOp.TypeRotateXYZ:
+            op.Set(Gf.Vec3d(*r))
+            return
+    xf.AddRotateXYZOp().Set(Gf.Vec3d(*r))
+'''
+
+CONSTANTS: dict[str, object] = {
+    "SAFE_XFORM_SNIPPET": _SAFE_XFORM_SNIPPET,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +147,7 @@ def __getattr__(name: str):  # PEP 562 module-level __getattr__
 
 __all__ = [
     "CONSTANTS",
+    "_SAFE_XFORM_SNIPPET",
     # Plus the lazy-imported names; importers see them via __getattr__.
     *_LEGACY_REEXPORT_NAMES,
 ]

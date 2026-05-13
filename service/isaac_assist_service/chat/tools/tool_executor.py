@@ -846,12 +846,7 @@ _PHYSX_HULL_MAX_POLYS = 255    # Cooked hull polygon limit
 _PHYSX_HULL_MAX_VERTS = 64     # GPU PhysX vertex limit per hull
 
 # from: feat/atomic-tier8-render
-_POST_PROCESS_PATHS = {
-    "bloom": "/Render/PostProcess/Bloom",
-    "tonemap": "/Render/PostProcess/Tonemap",
-    "dof": "/Render/PostProcess/DoF",
-    "motion_blur": "/Render/PostProcess/MotionBlur",
-}
+# _POST_PROCESS_PATHS migrated to handlers/rendering.py (Phase 8 wave 2, 2026-05-13).
 
 # from: feat/phase10-autonomous-workflows
 _PROACTIVE_TRIGGER_PLAYBOOKS: Dict[str, List[str]] = {
@@ -1596,37 +1591,9 @@ def _load_deformable_presets() -> Dict:
 # ── Safe xform helper (inlined into generated code) ─────────────────────────
 # Referenced USD assets (e.g. robots) often already have xform ops.
 # Calling AddTranslateOp() again crashes with "Error in AddXformOp".
-# This snippet is injected into generated code to safely set transforms.
-
-_SAFE_XFORM_SNIPPET = '''\
-
-def _safe_set_translate(prim, pos):
-    """Set translate, reusing existing op if present."""
-    xf = UsdGeom.Xformable(prim)
-    for op in xf.GetOrderedXformOps():
-        if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
-            op.Set(Gf.Vec3d(*pos))
-            return
-    xf.AddTranslateOp().Set(Gf.Vec3d(*pos))
-
-def _safe_set_scale(prim, s):
-    """Set scale, reusing existing op if present."""
-    xf = UsdGeom.Xformable(prim)
-    for op in xf.GetOrderedXformOps():
-        if op.GetOpType() == UsdGeom.XformOp.TypeScale:
-            op.Set(Gf.Vec3d(*s))
-            return
-    xf.AddScaleOp().Set(Gf.Vec3d(*s))
-
-def _safe_set_rotate_xyz(prim, r):
-    """Set rotateXYZ, reusing existing op if present."""
-    xf = UsdGeom.Xformable(prim)
-    for op in xf.GetOrderedXformOps():
-        if op.GetOpType() == UsdGeom.XformOp.TypeRotateXYZ:
-            op.Set(Gf.Vec3d(*r))
-            return
-    xf.AddRotateXYZOp().Set(Gf.Vec3d(*r))
-'''
+# _SAFE_XFORM_SNIPPET migrated to handlers/_shared.py (Phase 8 wave 3, 2026-05-13).
+# Cross-handler constant; 9 import sites across 5 themes now use:
+#   from ._shared import _SAFE_XFORM_SNIPPET
 
 
 # ── Code generation helpers ──────────────────────────────────────────────────

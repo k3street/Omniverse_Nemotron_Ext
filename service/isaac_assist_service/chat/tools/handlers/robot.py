@@ -2514,7 +2514,7 @@ def _gen_record_trajectory(args: Dict) -> str:
 
 
 def _gen_import_robot(args: Dict) -> str:
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
     from ....config import config  # noqa: E402
 
     file_path = args["file_path"]

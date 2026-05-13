@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict
 
 def _gen_build_scene_from_blueprint(args: Dict) -> str:
     """Generate code to build a scene from a structured blueprint."""
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
     blueprint = args.get("blueprint", {})
     objects = blueprint.get("objects", [])
     dry_run = args.get("dry_run", False)

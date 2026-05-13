@@ -17,7 +17,7 @@ from typing import Any, Callable, Dict, List
 
 def _gen_add_sensor(args: Dict) -> str:
     """Generate code for adding a sensor based on type and optional product spec."""
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
     prim_path = args["prim_path"]
     sensor_type = args["sensor_type"]
 
@@ -174,7 +174,7 @@ def _gen_set_camera_look_at(args: Dict) -> str:
     *inverse* view matrix, so we extract its inverse and decompose into a
     rotation that the camera xform op can consume.
     """
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
     camera_path = args["camera_path"]
     target = args["target"]
     if not isinstance(target, (list, tuple)) or len(target) != 3:

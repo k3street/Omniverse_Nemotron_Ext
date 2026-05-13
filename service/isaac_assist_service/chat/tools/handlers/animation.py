@@ -158,7 +158,7 @@ def _gen_play_animation(args: Dict) -> str:
 
 
 def _gen_create_audio_prim(args: Dict) -> str:
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
     pos = args["position"]
     audio_file = args["audio_file"]
     prim_path = args.get("prim_path", "")
