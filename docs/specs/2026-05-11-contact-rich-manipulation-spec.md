@@ -1,11 +1,23 @@
 # Compliance & Force-Feedback Successor Spec
 
-**Date:** 2026-05-11 (v1) — 2026-05-13 (v2 narrow rewrite)
-**Status:** v2 — narrowed scope. Compliance layer only. VLA + RL
-deferred to Phase 62b/62c extensions.
-**Owner:** TBD
+**Date:** 2026-05-11 (v1) — 2026-05-13 (v2 narrow rewrite) — 2026-05-13 (v2.1 agentic)
+**Status:** v2.1 — agent-executable. See **Section 18** for the task
+breakdown each cron iteration should pick from, **Section 19** for
+the verification protocol every task must pass, and **Section 20**
+for the cron runner contract.
+**Owner:** Autonomous agents (Sonnet-default; Opus only where Section
+18 explicitly tags `opus-judgment` / `opus-runtime`).
 **Estimated LOC:** 600-900 (compliance handlers + ros2_control bridge
 + FT sensor harmonization + tests)
+
+> **Agentic execution**: this spec is designed to be worked through by
+> autonomous Sonnet agents under cron supervision. Each task in
+> Section 18 is self-contained and includes its own brief, files,
+> verification command, and agent classification. The cron runner in
+> Section 20 picks the next pending task, executes it, verifies it
+> per Section 19, commits + pushes, then yields to the next wake-up.
+> Opus is reserved for the small subset of tasks that require
+> cross-module judgment, novel algorithm design, or live Kit RPC.
 
 **Dependencies (must land first):**
 - IA Full Spec **Phase 80b** — grip_safe_mode + per-prim physics
@@ -715,3 +727,292 @@ Lessons from v1 review (2026-05-13):
   joint-target control hands off to compliance control. Default 0.5.
   Matches Phase 63b's `lock_orientation_from` parameter for seamless
   transition.
+
+---
+
+## 18. Agentic task breakdown
+
+Each row is a self-contained brief — an agent picks one with
+`STATUS: pending`, reads the row, executes per the Files/Verify
+columns, commits with `feat(crm-<id>): <title>`, then flips STATUS to
+`done — <hash>`. **Sonnet handles the majority; Opus is reserved for
+the small `opus-judgment` / `opus-runtime` subset.**
+
+### 18.1 Phase A — Foundation
+
+#### CRM-A1 — ros2_control bridge wiring (opus-judgment)
+- **Files**: `exts/isaac_6.0/omni.isaac.assist/omni/isaac/assist/extension.py`, `exts/isaac_6.0/omni.isaac.assist/omni/isaac/assist/ros2_control_bridge.py` (NEW)
+- **Brief**: Add a minimal bridge that subscribes to ros2_control topics for admittance/impedance state and re-publishes Isaac F/T sensor readings on the matching topic. Default to Option A (external graph hop via ros2_bridge); leave Option B (in-Kit port) as a documented future optimization. Cross-reference Open Question §13.1.
+- **Why opus-judgment**: architecture decision (Option A vs B), needs to weigh latency budget against maintenance cost, must not duplicate any existing ros2_bridge wiring.
+- **LOC**: ~100
+- **Blocked-by**: Phase 80b (LANDED), Phase 19 (LANDED)
+- **Verify**: `python -c "import service.isaac_assist_service.chat.tools.tool_executor as te; print('bridge imports ok')"`. Manual: extension loads cleanly in dry-run.
+- **STATUS**: pending
+
+#### CRM-A2 — setup_admittance_controller tool (sonnet-bounded)
+- **Files**: `service/isaac_assist_service/chat/tools/compliance_handlers.py` (NEW), `service/isaac_assist_service/chat/tools/tool_schemas.py` (extend), `tests/test_compliance_handlers.py` (NEW)
+- **Brief**: Implement `_handle_setup_admittance_controller` per §5.1 signature. Pure-Python admittance step law: `F = K·(x_desired - x_actual) - D·v_actual + F_ext`. Dry-run mode returns config dict; live mode raises `NotImplementedError("requires Kit RPC + ros2_control bridge")`. Register in DATA_HANDLERS via new `compliance` themed module. Add schema to ISAAC_SIM_TOOLS.
+- **LOC**: ~150 handler + 100 tests
+- **Blocked-by**: CRM-A1
+- **Verify**: `python -m pytest tests/test_compliance_handlers.py::TestAdmittance --tb=short` ≥8 tests pass; `python -c "import asyncio; from service.isaac_assist_service.chat.tools import tool_executor as te; r=asyncio.run(te.execute_tool_call('setup_admittance_controller', {'robot_path':'/W/R'})); assert 'error' not in r or 'dry_run' in r"`
+- **STATUS**: pending
+
+#### CRM-A3 — F/T sensor harmonization (sonnet-mechanical)
+- **Files**: existing handler at `service/isaac_assist_service/chat/tools/handlers/sensors.py` (locate via grep for `_handle_add_force_torque_sensor` or the codegen); `service/isaac_assist_service/chat/tools/tool_schemas.py` (update existing add_force_torque_sensor schema at ~line 1880)
+- **Brief**: Extend existing `add_force_torque_sensor` with `noise_std: float = 0.0` and `publish_topic: str | None = None` kwargs. DO NOT add a new tool. Backward-compat: existing callers without the new kwargs see identical behavior.
+- **LOC**: ~50
+- **Blocked-by**: none (independent of A1/A2)
+- **Verify**: `python -m pytest tests/test_ft_sensor_extension.py --tb=short` ≥4 tests; existing F/T sensor tests still pass.
+- **STATUS**: pending
+
+### 18.2 Phase B — Variants
+
+#### CRM-B1 — setup_impedance_controller tool (sonnet-bounded)
+- **Files**: `service/isaac_assist_service/chat/tools/compliance_handlers.py` (extend), `tests/test_compliance_handlers.py` (extend)
+- **Brief**: Implement `_handle_setup_impedance_controller` per §5.2. Validate `torque_mode=True`; if False, return error suggesting admittance. Cartesian stiffness/damping math: `τ = J^T · (Kx·Δx + Dx·v + Kr·Δr + Dr·ω)`. Dry-run only; live raises NotImplementedError.
+- **LOC**: ~120 handler + tests
+- **Blocked-by**: CRM-A2
+- **Verify**: `pytest tests/test_compliance_handlers.py::TestImpedance` ≥8 tests
+- **STATUS**: pending
+
+#### CRM-B2 — set_compliance_params runtime mutation (sonnet-bounded)
+- **Files**: `compliance_handlers.py` (extend), test file (extend)
+- **Brief**: Per §5.3. In-memory state dict keyed by robot_path; param mutation is additive (None args pass through). Used by variable_impedance K-schedule.
+- **LOC**: ~80
+- **Blocked-by**: CRM-A2 (uses same state dict)
+- **Verify**: `pytest tests/test_compliance_handlers.py::TestParamMutation` ≥5 tests
+- **STATUS**: pending
+
+#### CRM-B3 — release_compliance cleanup (sonnet-mechanical)
+- **Files**: `compliance_handlers.py` (extend), test file (extend)
+- **Brief**: Per §5.4. Pops state dict entry; idempotent (releasing an absent robot_path returns ok=True with note).
+- **LOC**: ~50
+- **Blocked-by**: CRM-B2
+- **Verify**: `pytest tests/test_compliance_handlers.py::TestRelease` ≥4 tests
+- **STATUS**: pending
+
+### 18.3 Phase C — Auto-pick + bridge
+
+#### CRM-C1 — compliance_mode template field (sonnet-mechanical)
+- **Files**: `service/isaac_assist_service/multimodal/types.py` (extend LayoutSpec or its template-fields counterpart), `service/isaac_assist_service/multimodal/validate.py` (add accept-or-reject for the field)
+- **Brief**: Add optional `compliance_mode: str | None`, `compliance_params: dict`, `compliance_handoff_at: float = 0.5` fields per §6. Validation: mode must be in the 6-mode enum OR None; handoff_at in [0,1]; params is a dict (no nested validation).
+- **LOC**: ~30
+- **Blocked-by**: none
+- **Verify**: `pytest tests/test_layout_spec_compliance_field.py` ≥6 tests
+- **STATUS**: pending
+
+#### CRM-C2 — Auto-pick algorithm (opus-judgment)
+- **Files**: `service/isaac_assist_service/chat/tools/role_retriever.py` (extend), `tests/test_compliance_autopick.py` (NEW)
+- **Brief**: Implement `autopick_compliance_mode` per §4.1. Reads `intent.structural_features.has_contact_phase` + role_bindings.primary_robot. Returns None for free-space tasks; admittance for position-mode robots with contact phase; franka_cartesian_impedance for Franka with real_robot_deployment tag.
+- **Why opus-judgment**: cross-module rule design — touches intent/role/template wiring + needs to anticipate future robot classes without breaking the table.
+- **LOC**: ~100
+- **Blocked-by**: CRM-C1
+- **Verify**: `pytest tests/test_compliance_autopick.py` ≥12 tests covering all 6 modes + None case
+- **STATUS**: pending
+
+#### CRM-C3 — Override validator (opus-judgment)
+- **Files**: `service/isaac_assist_service/chat/tools/compliance_validator.py` (NEW), `tests/test_compliance_autopick.py` (extend with TestOverride)
+- **Brief**: Implement `validate_compliance_override` per §4.2. Use Phase 11b's `ConstraintViolation` / `ValidationResult` framework (see Phase 18 + 11b cross-refs in §14). ~20 hard-incompat rules. Each rule: (mode_match, predicate, message).
+- **Why opus-judgment**: 20-rule design needs spec-level coverage of impedance/admittance/FDCC/torque-mode interactions; must not duplicate Phase 11b's framework.
+- **LOC**: ~60
+- **Blocked-by**: CRM-C2
+- **Verify**: `pytest tests/test_compliance_autopick.py::TestOverride` ≥8 tests; integration via Phase 11b `ValidationResult` round-trip
+- **STATUS**: pending
+
+#### CRM-C4 — follow_trajectory_with_compliance bridge (opus-judgment)
+- **Files**: `compliance_handlers.py` (extend), `tests/test_trajectory_compliance_handoff.py` (NEW)
+- **Brief**: Per §5.5. Consumes Phase 63b trajectory + handoff_at fraction. Generates code that: (1) executes trajectory rigid up to handoff_at, (2) hands off to compliance controller, (3) yields `final_pose` + `t_handoff_observed` + `ft_at_handoff`. Same fraction as Phase 63b's `lock_orientation_from` (seamless transition assertion in test).
+- **Why opus-judgment**: state machine cross-cutting (rigid→compliant transition, F/T feedback gating, timeout/retry semantics).
+- **LOC**: ~200
+- **Blocked-by**: CRM-A2, CRM-B1, CRM-B2, CRM-B3
+- **Verify**: `pytest tests/test_trajectory_compliance_handoff.py` ≥10 tests including continuity at handoff_at
+- **STATUS**: pending
+
+### 18.4 Phase D — Telemetry + docs
+
+#### CRM-D1 — Telemetry event constants (sonnet-mechanical)
+- **Files**: `service/isaac_assist_service/multimodal/telemetry.py` (extend)
+- **Brief**: Add the 8 EVENT_* constants from §8. Pure string constants; if telemetry uses Literal-typed dispatch, register them too.
+- **LOC**: ~50
+- **Blocked-by**: none
+- **Verify**: `pytest tests/test_telemetry_compliance_events.py` ≥4 tests; constants exported
+- **STATUS**: pending
+
+#### CRM-D2 — Telemetry aggregators (sonnet-bounded)
+- **Files**: `scripts/qa/analyze_multimodal_usage.py` (extend)
+- **Brief**: Add `compliance_usage_breakdown(events)` and `contact_phase_success_rate(events)` per §8. Pure-Python aggregation over event list.
+- **LOC**: ~100
+- **Blocked-by**: CRM-D1
+- **Verify**: `pytest tests/test_compliance_aggregators.py` ≥6 tests
+- **STATUS**: pending
+
+#### CRM-D3 — Compliance tuning guide (sonnet-mechanical)
+- **Files**: `docs/guides/compliance_tuning.md` (NEW)
+- **Brief**: User-facing guide. Sections: (1) when to use admittance vs impedance vs FDCC, (2) tuning K/D/M for common tasks (peg-insert, surface-following), (3) troubleshooting (oscillation, drift, sluggish response), (4) cross-reference to Phase 63b trajectory + handoff_at.
+- **LOC**: ~300 lines markdown
+- **Blocked-by**: CRM-C4 (so guide references the bridge tool by its final signature)
+- **Verify**: `python -c "p='docs/guides/compliance_tuning.md'; t=open(p).read(); assert all(s in t for s in ['admittance', 'impedance', 'FDCC', 'handoff_at', 'K_xyz'])"`
+- **STATUS**: pending
+
+### 18.5 Phase T — Tests + E2E
+
+#### CRM-T1 — L0 unit pack consolidation (sonnet-bounded)
+- **Files**: `tests/test_compliance_handlers.py`, `tests/test_compliance_autopick.py`, `tests/test_trajectory_compliance_handoff.py`
+- **Brief**: Round each of these to ≥10 tests minimum. Specifically ensure: spring-law math has ≥3 numerical tests, param validation has ≥4 boundary tests, mode conversion has ≥2 tests, override hard-incompat list covers ≥6 distinct rule classes.
+- **LOC**: +400 (mostly test bodies)
+- **Blocked-by**: CRM-A2, CRM-B1, CRM-C2, CRM-C3, CRM-C4
+- **Verify**: total compliance-related L0 tests ≥30
+- **STATUS**: pending
+
+#### CRM-T2 — L1 mocked integration (sonnet-bounded)
+- **Files**: `tests/test_compliance_under_load.py` (NEW)
+- **Brief**: Mocked F/T sensor stream applies a 10N step input; assert admittance EE displacement matches `F/K` (steady-state) within 5% after 200ms (settling). Tests step response shape with damping ratio assertions.
+- **LOC**: ~100
+- **Blocked-by**: CRM-A2 + CRM-A3
+- **Verify**: `pytest tests/test_compliance_under_load.py` ≥4 tests
+- **STATUS**: pending
+
+#### CRM-T3 — E2E peg-insert against live Kit (opus-runtime)
+- **Files**: `tests/test_peg_insert_e2e.py` (NEW)
+- **Brief**: Marked `@pytest.mark.compliance_e2e` (opt-in). Spawns peg-in-hole scene per `CP-NEW-peg-in-hole-single` template. Auto-pick should select admittance. Run trajectory + handoff, then compare against rigid baseline (compliance_mode=null). Goal per §9.3: ≥50% better insertion success with admittance.
+- **Why opus-runtime**: requires live Kit, CP scene spawn, real F/T sensor sampling, comparison against rigid baseline runs.
+- **LOC**: ~100
+- **Blocked-by**: CRM-A1, CRM-A2, CRM-C2, CRM-C4 (full stack must be wired)
+- **Verify**: `pytest tests/test_peg_insert_e2e.py -m compliance_e2e --tb=short` — manual run; success criterion in test body
+- **STATUS**: pending — defer until A+B+C land if no Kit available at cron time
+
+### 18.6 Task summary
+
+| Phase | Sonnet | Opus | Total |
+|---|---:|---:|---:|
+| A — Foundation | 2 (A2, A3) | 1 (A1 judgment) | 3 |
+| B — Variants | 3 (B1, B2, B3) | 0 | 3 |
+| C — Auto-pick + bridge | 1 (C1) | 3 (C2, C3, C4 judgment) | 4 |
+| D — Telemetry + docs | 3 (D1, D2, D3) | 0 | 3 |
+| T — Tests | 2 (T1, T2) | 1 (T3 runtime) | 3 |
+| **Total** | **11** | **5** | **16** |
+
+**Sonnet : Opus = 11 : 5 = 69 : 31.** Opus reserved for judgment
+(architecture, multi-rule algorithm design, state-machine bridge) and
+runtime (live Kit). All formulaic handler/test/doc work is Sonnet.
+
+---
+
+## 19. Verification protocol
+
+Every task in Section 18 must pass these gates before commit + push.
+The cron runner enforces this.
+
+### 19.1 Code quality gates (auto)
+
+1. **Imports clean**: `python -c "import service.isaac_assist_service.chat.tools.tool_executor"` — no ImportError after any change.
+2. **Pytest baseline**: `python -m pytest tests/ --tb=no -q | tail -2` — failing-test count must not grow vs HEAD baseline.
+3. **Task-specific tests**: every task's Verify command must pass before commit. If it doesn't, agent must NOT commit; instead, leave STATUS: pending and add `BLOCKED: <reason>` line.
+4. **Schema regen if tools added**: if a task adds a new tool to ISAAC_SIM_TOOLS, run `python scripts/gen_handler_models.py` and commit the regenerated `_models.py` in the same commit.
+5. **No silent success**: every new handler must return a dict with a `success: bool` key OR raise `NotImplementedError` with a clear actionable message ("requires Kit RPC", "set GEMINI_API_KEY", etc.). No bare-return-None handlers.
+
+### 19.2 Code-style gates (meticulous review)
+
+Each task's diff must satisfy:
+1. **No bare `except:`**. Use `except (SpecificError, ...):`.
+2. **No print() in production code paths** (only in dry-run codegen and tests).
+3. **Type hints on public functions** (Args + Returns).
+4. **Docstrings** on every new tool handler (Args / Returns sections).
+5. **No TODO comments** in shipped code unless paired with an actionable owner (e.g. `# TODO(crm-c4): see Phase 19 wiring`).
+6. **No magic numbers** in math — name the constant (`_DEFAULT_ADMITTANCE_K = 500.0`).
+
+### 19.3 Boundary clarity gate (per Phase-76 layering lesson)
+
+When a task ships a dry_run/mock path alongside a real-path stub:
+1. Class-level docstring must explicitly state which mode does what.
+2. Live-mode methods must raise `NotImplementedError` with an actionable
+   message ("requires Kit RPC, GR00T weights, etc.").
+3. Tests must verify both the dry-run-success path and the live-mode-raises path.
+
+### 19.4 Honesty gate
+
+For every commit, the diff of `_KNOWN_UNTESTED` in
+`tests/test_code_generators.py` MUST NOT grow. If a task adds a new
+codegen handler, it must also add a test vector. New handlers without
+vectors are not allowed.
+
+### 19.5 Commit message contract
+
+Every commit message starts with `feat(crm-<id>): <one-line title>` or
+`test(crm-<id>): <title>` or `docs(crm-<id>): <title>`. Body lists
+files touched, gate results, and explicit "Sonnet:" or "Opus:" tag.
+Footer must include `Co-Authored-By:` line.
+
+### 19.6 Failure mode: blocked task
+
+If a task can't be completed cleanly:
+1. Do NOT commit partial work to the main branch.
+2. Leave STATUS line as: `STATUS: blocked — <reason> — <commit hash of last clean state>`
+3. Move on to next pending task that has no overlap.
+4. Surface the blockage in a `docs/qa/crm_blockers.md` log with timestamp + agent type that hit it.
+
+---
+
+## 20. Cron runner instructions
+
+### 20.1 What to do on every wake-up
+
+1. `cd /home/anton/projects/Omniverse_Nemotron_Ext`
+2. `git pull --rebase` (sync with any concurrent agents — shouldn't be any, but defensive)
+3. Read `docs/specs/2026-05-11-contact-rich-manipulation-spec.md`, Section 18 task table.
+4. Find the FIRST task with `STATUS: pending` AND all `Blocked-by` deps are `done`.
+5. If none found, check if all are `done`: if yes, run §20.4 self-shutdown. If no, exit (waiting on blockers).
+6. Read the task brief inline (the Files/Brief/Verify rows).
+7. Implement per the brief. **Sonnet does the work for `sonnet-*` tagged tasks; for `opus-*` tasks the runner pauses and waits for a human Opus session OR launches an Opus sub-agent if available.**
+8. Run §19 verification gates. If any fail, leave STATUS: blocked per §19.6 and exit.
+9. Stage files, commit per §19.5 contract, push.
+10. Update the spec's STATUS line for the just-completed task to `done — <commit hash>`.
+11. Commit the spec update with `docs(crm-status): <id> done`.
+12. Push.
+13. Yield (return from wake-up; next cron iteration picks up the next pending task).
+
+### 20.2 Sonnet vs Opus dispatch
+
+The cron-launched session is Sonnet by default. When the next pending
+task is `opus-judgment` or `opus-runtime`:
+- For `opus-judgment`: the cron session spawns an Opus sub-agent via
+  `Agent({ subagent_type: "general-purpose", model: "opus", ... })`
+  with the task brief as prompt.
+- For `opus-runtime`: SKIP if no Kit RPC available; mark task with
+  `STATUS: deferred — needs Kit RPC` and continue.
+
+### 20.3 Concurrency & safety
+
+- One agent at a time on this branch. Cron fires every 30 min; each
+  fire's work must finish before the next fire begins. Use `git fetch`
+  + `git rev-parse origin/<branch>` to detect concurrent work; if HEAD
+  has moved on the remote, rebase before starting a task.
+- All work goes on branch `refactor/2026-05-12-foundation-night-1`
+  unless a follow-up branch is requested.
+- Never force-push.
+- Never skip pre-commit hooks.
+- If a task touches files outside its declared Files list, abort the
+  task and mark BLOCKED with a scope-creep note.
+
+### 20.4 Self-shutdown when complete
+
+After completing the LAST task (Section 18.5's CRM-T3 or whichever
+ranks last as pending), the agent:
+1. Verifies all tasks show STATUS: done in the spec.
+2. Runs `python -m pytest tests/ -m "not compliance_e2e" --tb=no -q | tail -2` and pastes the result into a final summary commit.
+3. Updates `MEMORY.md` with a one-line completion note.
+4. Calls `CronDelete` on its own cron job ID (the runner is passed
+   the cron ID via the prompt).
+5. Final push.
+
+### 20.5 Wake-up prompt template
+
+The cron prompt itself is the agent's entry instruction. Use this
+exact format so successive wake-ups are idempotent:
+
+```
+[CRM-CRON] Open /home/anton/projects/Omniverse_Nemotron_Ext/docs/specs/2026-05-11-contact-rich-manipulation-spec.md Section 18. Pick first pending task with all blocked_by deps done. Execute per the brief. Verify per Section 19. Commit + push per Section 19.5. Update STATUS line to done — <hash>. If no pending work, run Section 20.4 self-shutdown. Branch: refactor/2026-05-12-foundation-night-1. Cron ID for self-shutdown: <CRON_ID>.
+```
+
+The `<CRON_ID>` is substituted at cron-creation time and remains
+constant across wake-ups.
