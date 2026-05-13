@@ -955,10 +955,10 @@ async def _handle_filter_templates_by_hardware(args: Dict) -> Dict:
     from pathlib import Path as _Path
     from typing import List as _List
     from ..tool_executor import (
-        _TEMPLATE_LIBRARY_DIR,
         _detect_local_vram_gb,
         _load_template_manifests,
     )
+    # _TEMPLATE_LIBRARY_DIR is module-local (Phase 8 wave 7)
     device_vram_gb = args.get("device_vram_gb")
     if device_vram_gb is None:
         device_vram_gb = _detect_local_vram_gb()
