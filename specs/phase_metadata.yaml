@@ -836,7 +836,7 @@
 '92':
   title: Workflow snapshot retention
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: workflow snapshot retention
   gate: pytest — retention policy applied to snapshot dir; archives old + deletes oldest
   files:
@@ -861,7 +861,7 @@
 '94':
   title: Knowledge base feedback loop
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: KB feedback writer
   gate: pytest — feedback append + KB index refresh
   files:
