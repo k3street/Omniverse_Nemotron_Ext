@@ -604,13 +604,14 @@
 70b:
   title: '`create_behavior` rewrite for Isaac Sim 5.x'
   agent_type: sonnet-mechanical
-  status: scaffold
-  note: subassembly library data
-  gate: pytest — 5+ canonical sub-assemblies registered (arm-base / wrist / gripper / sensor-mount / cart)
+  status: landed
+  landed_date: '2026-05-13'
+  note: SPEC/CODE-GEN layer — BehaviorPattern enum (7), BehaviorConfig dataclass, BEHAVIOR_TEMPLATES (7), CreateBehaviorCodeGenerator; Isaac Sim 5.x Cortex API only (no MotionCommander/CortexRobot pre-5.x patterns)
+  gate: pytest tests/test_phase_70b_create_behavior_codegen.py — 34 tests pass; code generator emits valid Isaac Sim 5.x Cortex behavior code; behavior pattern enum complete
   files:
-  - service/isaac_assist_service/multimodal/sub_phase_70b_robot_subassembly_library.py
-  - tests/test_sub_phase_70b_robot_subassembly_library.py
-  loc: 250
+  - service/isaac_assist_service/multimodal/create_behavior_codegen.py
+  - tests/test_phase_70b_create_behavior_codegen.py
+  loc: 280
   effort_min: 90
   blocked_by:
   - '70'
