@@ -5,9 +5,9 @@ shared utilities) and Phase 13 (archive recovered-state block).
 
 ## Summary
 
-- Total symbols: 7
+- Total symbols: 5
 - DEAD (no references anywhere): **0** — safe to delete
-- INTERNAL_ONLY (only used inside tool_executor.py): **5** — delete after auditing internal uses
+- INTERNAL_ONLY (only used inside tool_executor.py): **3** — delete after auditing internal uses
 - HANDLER_USED (used by handlers/*.py): **2** — migrate to handlers/_shared.py or _state.py
 - EXTERNAL_USED (used by service/, tests/, scripts/ outside handlers/): **0** — migrate cautiously
 
@@ -18,7 +18,5 @@ shared utilities) and Phase 13 (archive recovered-state block).
 | 59 | class | `_LockedPatch` | INTERNAL_ONLY |
 | 66 | class | `_StageWriteLockQueue` | INTERNAL_ONLY |
 | 112 | constant | `_ASYNC_TASKS_LOCK` | HANDLER_USED |
-| 183 | constant | `_DR_RANGE_HINTS` | INTERNAL_ONLY |
-| 312 | constant | `_ROBOT_NAME_PATTERNS` | INTERNAL_ONLY |
-| 365 | constant | `_TEMPLATE_KEYWORDS` | INTERNAL_ONLY |
-| 449 | constant | `_WRITE_LOCK_QUEUE` | HANDLER_USED |
+| 271 | constant | `_ROBOT_NAME_PATTERNS` | INTERNAL_ONLY |
+| 399 | constant | `_WRITE_LOCK_QUEUE` | HANDLER_USED |

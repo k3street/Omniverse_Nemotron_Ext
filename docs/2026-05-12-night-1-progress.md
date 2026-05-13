@@ -4,12 +4,14 @@ Branch: `refactor/2026-05-12-foundation-night-1` (anton remote, 100+ commits)
 
 ## TL;DR
 
-`tool_executor.py`: **35,842 → 3,870 lines (−89.2%)**. The dispatch is now
+`tool_executor.py`: **35,842 → 3,796 lines (−89.4%)**. The dispatch is now
 register-callback-driven (Phase 9), the monolith is structurally hollowed
-out, and Phase 8 has 13 waves landed (~70 symbols migrated to theme
+out, and Phase 8 has 15 waves landed (~80 symbols migrated to theme
 modules or `handlers/_shared.py`). Only 2 HANDLER_USED symbols remain
 in the recovered-state block (`_WRITE_LOCK_QUEUE` and `_ASYNC_TASKS_LOCK`
-— both stateful workflow machinery deferred to Phase 15).
+— both stateful workflow machinery deferred to Phase 15). 11
+stale-reference time-bombs (`_te.X` attribute access to migrated
+constants) were caught and defused after Phase 8 waves 10-15.
 
 ## What landed tonight
 
