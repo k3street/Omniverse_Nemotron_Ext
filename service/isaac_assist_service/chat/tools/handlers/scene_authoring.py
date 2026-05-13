@@ -69,6 +69,33 @@ _TIER14_SCHEMA_MAP = {
 
 _DELTA_ROOT = _WORKSPACE / "snapshots" / "deltas"
 
+# Phase 8 wave 14 (2026-05-13): _TEMPLATE_KEYWORDS + _detect_template
+# migrated from tool_executor.py. Used only by _gen_create_graph.
+_TEMPLATE_KEYWORDS = {
+    "ros2_clock": ["clock", "sim_time", "simulation time", "simtime"],
+    "ros2_joint_state": ["joint state", "joint_state", "joint states", "joint positions"],
+    "ros2_camera": ["camera", "image", "rgb", "depth image"],
+    "ros2_lidar": ["lidar", "laser scan", "laserscan", "point cloud lidar"],
+    "ros2_cmd_vel": ["cmd_vel", "twist", "teleop", "drive", "velocity command"],
+    "ros2_tf": ["tf", "transform tree", "transforms", "tf2"],
+    "ros2_imu": ["imu", "inertial", "accelerometer", "gyroscope"],
+    "ros2_odom": ["odom", "odometry"],
+}
+
+
+def _detect_template(description: str) -> Optional[str]:
+    """Auto-detect the best template from a natural language description."""
+    desc_lower = description.lower()
+    best_match = None
+    best_score = 0
+    for template_name, keywords in _TEMPLATE_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in desc_lower)
+        if score > best_score:
+            best_score = score
+            best_match = template_name
+    return best_match if best_score > 0 else None
+
+
 _OG_TEMPLATES = {
     "ros2_clock": {
         "description": "Publish simulation clock to ROS2 /clock topic",
@@ -2290,11 +2317,7 @@ print(f"Merged {{len(prim_paths)}} meshes: {{prim_paths}}")
 
 def _gen_create_graph(args: Dict) -> str:
     """Generate OmniGraph code from a template-based description."""
-    # Phase 8 wave 12: _OG_TEMPLATES now module-local; _detect_template
-    # still lazy-imported from tool_executor.
-    from .. import tool_executor as _te  # noqa: PLC0415
-    _detect_template = _te._detect_template
-
+    # Phase 8 wave 14: _detect_template + _TEMPLATE_KEYWORDS now module-local.
     description = args.get("description", "")
     template_name = args.get("template")
     graph_path = args.get("graph_path", "/World/ActionGraph")

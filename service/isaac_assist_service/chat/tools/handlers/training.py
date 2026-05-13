@@ -13,6 +13,49 @@ from __future__ import annotations
 from typing import Any, Callable, Dict
 
 # ---------------------------------------------------------------------------
+# Theme-local DR symbols (Phase 8 wave 15, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.training.
+
+_DR_ROBOT_HINTS: Dict[str, Dict[str, Any]] = {
+    "franka": {"gripper_friction": [0.5, 1.0], "joint_damping_default": "URDF"},
+    "panda": {"gripper_friction": [0.5, 1.0], "joint_damping_default": "URDF"},
+    "ur10": {"gripper_friction": [0.4, 0.9], "joint_damping_default": "URDF"},
+    "ur5": {"gripper_friction": [0.4, 0.9], "joint_damping_default": "URDF"},
+    "anymal": {"ground_friction": [0.5, 1.2], "joint_damping_default": "URDF"},
+    "g1": {"joint_damping_default": "URDF", "action_latency_ms": [5, 25]},
+}
+
+_DR_TASK_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    "pick_and_place": {
+        "object_mass_kg": [0.1, 2.0],
+        "gripper_friction": [0.5, 1.0],
+        "joint_damping_scale": [0.8, 1.2],
+        "gravity_m_s2": [9.71, 9.91],
+        "action_latency_ms": [10, 50],
+        "lighting_lux": [300, 2000],
+    },
+    "locomotion": {
+        "ground_friction": [0.4, 1.2],
+        "joint_damping_scale": [0.7, 1.3],
+        "gravity_m_s2": [9.71, 9.91],
+        "action_latency_ms": [5, 30],
+        "terrain_height_m": [0.0, 0.15],
+    },
+    "navigation": {
+        "wheel_friction": [0.3, 0.9],
+        "lidar_noise_m": [0.0, 0.05],
+        "imu_bias_rad_s": [0.0, 0.01],
+        "action_latency_ms": [20, 80],
+    },
+    "assembly": {
+        "object_mass_kg": [0.05, 0.5],
+        "part_friction": [0.3, 0.9],
+        "tolerance_mm": [0.1, 1.0],
+        "action_latency_ms": [10, 40],
+    },
+}
+
+# ---------------------------------------------------------------------------
 # Theme-local constants + helpers (Phase 8 wave 13, 2026-05-13)
 # Migrated from tool_executor.py — used only by handlers.training.
 
@@ -2179,7 +2222,7 @@ async def _handle_suggest_dr_ranges(args: Dict) -> Dict:
     import json
     from pathlib import Path
     from typing import List as _List
-    from ..tool_executor import _DR_TASK_DEFAULTS, _DR_ROBOT_HINTS
+    # Phase 8 wave 15 — _DR_TASK_DEFAULTS migrated.
     task_raw = (args.get("task_type") or "").strip()
     robot_raw = (args.get("robot") or "").strip()
     real_data_path = args.get("real_data_path")

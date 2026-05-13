@@ -180,54 +180,13 @@ _DR_PRESETS: Dict[str, Dict[str, Any]] = {
 }
 
 # from: feat/new-physics-calibration
-_DR_RANGE_HINTS = {
-    "friction": "+-30% of calibrated values",
-    "damping": "+-20%",
-    "armature": "+-10%",
-    "masses": "+-5-10%",
-    "viscous_friction": "+-20%",
-}
+# _DR_RANGE_HINTS migrated to handlers/robot.py (Phase 8 wave 15, 2026-05-13).
 
 # from: feat/addendum-dr-advanced
-_DR_ROBOT_HINTS: Dict[str, Dict[str, Any]] = {
-    "franka": {"gripper_friction": [0.5, 1.0], "joint_damping_default": "URDF"},
-    "panda": {"gripper_friction": [0.5, 1.0], "joint_damping_default": "URDF"},
-    "ur10": {"gripper_friction": [0.4, 0.9], "joint_damping_default": "URDF"},
-    "ur5": {"gripper_friction": [0.4, 0.9], "joint_damping_default": "URDF"},
-    "anymal": {"ground_friction": [0.5, 1.2], "joint_damping_default": "URDF"},
-    "g1": {"joint_damping_default": "URDF", "action_latency_ms": [5, 25]},
-}
+# _DR_ROBOT_HINTS migrated to handlers/training.py (Phase 8 wave 15, 2026-05-13).
 
 # from: feat/addendum-dr-advanced
-_DR_TASK_DEFAULTS: Dict[str, Dict[str, Any]] = {
-    "pick_and_place": {
-        "object_mass_kg": [0.1, 2.0],
-        "gripper_friction": [0.5, 1.0],
-        "joint_damping_scale": [0.8, 1.2],
-        "gravity_m_s2": [9.71, 9.91],
-        "action_latency_ms": [10, 50],
-        "lighting_lux": [300, 2000],
-    },
-    "locomotion": {
-        "ground_friction": [0.4, 1.2],
-        "joint_damping_scale": [0.7, 1.3],
-        "gravity_m_s2": [9.71, 9.91],
-        "action_latency_ms": [5, 30],
-        "terrain_height_m": [0.0, 0.15],
-    },
-    "navigation": {
-        "wheel_friction": [0.3, 0.9],
-        "lidar_noise_m": [0.0, 0.05],
-        "imu_bias_rad_s": [0.0, 0.01],
-        "action_latency_ms": [20, 80],
-    },
-    "assembly": {
-        "object_mass_kg": [0.05, 0.5],
-        "part_friction": [0.3, 0.9],
-        "tolerance_mm": [0.1, 1.0],
-        "action_latency_ms": [10, 40],
-    },
-}
+# _DR_TASK_DEFAULTS migrated to handlers/training.py (Phase 8 wave 15, 2026-05-13).
 
 # from: feat/7E-eureka-rewards
 _eureka_runs: Dict[str, Dict] = {}
@@ -362,16 +321,7 @@ _STAGE_INDEX_META: Dict[str, Any] = {"prim_scope": None, "prim_count": 0}
 # _TEMPLATE_EXPORT_DIR migrated to handlers/scene_blueprints.py (Phase 8 wave 7, 2026-05-13).
 
 # from: feat/new-omnigraph-assistant
-_TEMPLATE_KEYWORDS = {
-    "ros2_clock": ["clock", "sim_time", "simulation time", "simtime"],
-    "ros2_joint_state": ["joint state", "joint_state", "joint states", "joint positions"],
-    "ros2_camera": ["camera", "image", "rgb", "depth image"],
-    "ros2_lidar": ["lidar", "laser scan", "laserscan", "point cloud lidar"],
-    "ros2_cmd_vel": ["cmd_vel", "twist", "teleop", "drive", "velocity command"],
-    "ros2_tf": ["tf", "transform tree", "transforms", "tf2"],
-    "ros2_imu": ["imu", "inertial", "accelerometer", "gyroscope"],
-    "ros2_odom": ["odom", "odometry"],
-}
+# _TEMPLATE_KEYWORDS migrated to handlers/scene_authoring.py (Phase 8 wave 14, 2026-05-13).
 
 # from: feat/addendum-community-remote-v2
 # _TEMPLATE_LIBRARY_DIR migrated to handlers/scene_blueprints.py (Phase 8 wave 7, 2026-05-13).
@@ -2457,17 +2407,7 @@ def _summarize_changes(changes: List[Dict]) -> str:
 
 
 # ══════ From feat/new-omnigraph-assistant ══════
-def _detect_template(description: str) -> Optional[str]:
-    """Auto-detect the best template from a natural language description."""
-    desc_lower = description.lower()
-    best_match = None
-    best_score = 0
-    for template_name, keywords in _TEMPLATE_KEYWORDS.items():
-        score = sum(1 for kw in keywords if kw in desc_lower)
-        if score > best_score:
-            best_score = score
-            best_match = template_name
-    return best_match if best_score > 0 else None
+# _detect_template migrated to handlers/scene_authoring.py (Phase 8 wave 14, 2026-05-13).
 
 # _gen_create_graph moved to handlers/scene_authoring.py (Phase 6 wave 23).
 
@@ -2680,8 +2620,7 @@ def _safe_robot_name(articulation_path: str) -> str:
     name = articulation_path.rstrip("/").split("/")[-1] or "robot"
     return "".join(c if c.isalnum() or c in "_-" else "_" for c in name).lower()
 
-def _suggested_dr_ranges(parameters: List[str]) -> Dict[str, str]:
-    return {p: _DR_RANGE_HINTS[p] for p in parameters if p in _DR_RANGE_HINTS}
+# _suggested_dr_ranges migrated to handlers/robot.py (Phase 8 wave 15, 2026-05-13).
 
 def _generate_calibration_script(
     real_data_path: str,

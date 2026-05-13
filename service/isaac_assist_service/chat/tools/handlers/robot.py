@@ -15,6 +15,21 @@ from __future__ import annotations
 from typing import Any, Callable, Dict
 
 # ---------------------------------------------------------------------------
+# Theme-local DR symbols (Phase 8 wave 15, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.robot.
+
+_DR_RANGE_HINTS = {
+    "friction": "+-30% of calibrated values",
+    "damping": "+-20%",
+    "armature": "+-10%",
+    "masses": "+-5-10%",
+    "viscous_friction": "+-20%",
+}
+
+def _suggested_dr_ranges(parameters: List[str]) -> Dict[str, str]:
+    return {p: _DR_RANGE_HINTS[p] for p in parameters if p in _DR_RANGE_HINTS}
+
+# ---------------------------------------------------------------------------
 # Theme-local constants + helpers (Phase 8 wave 13, 2026-05-13)
 # Migrated from tool_executor.py — used only by handlers.robot.
 
@@ -4192,7 +4207,7 @@ async def _handle_calibrate_physics(args: Dict) -> Dict:
         _check_real_data_path,
         _safe_robot_name,
         _generate_calibration_script,
-        _suggested_dr_ranges,
+        # _suggested_dr_ranges migrated to module body (Phase 8 wave 15).
     )
     real_data_path = args.get("real_data_path", "")
     articulation_path = args.get("articulation_path", "")
@@ -4268,7 +4283,7 @@ async def _handle_quick_calibrate(args: Dict) -> Dict:
         _check_real_data_path,
         _safe_robot_name,
         _generate_calibration_script,
-        _suggested_dr_ranges,
+        # _suggested_dr_ranges migrated to module body (Phase 8 wave 15).
     )
     real_data_path = args.get("real_data_path", "")
     articulation_path = args.get("articulation_path", "")
