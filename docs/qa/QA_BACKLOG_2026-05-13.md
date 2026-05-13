@@ -171,7 +171,7 @@ order. Mark each `STATUS: done — commit <hash>` when fixed.
 - Issue: 6 exports with 0 callers: `extract_intent_rules`, `extract_intent_llm`, `produce_layout_spec_from_voice`, `produce_layout_spec_from_sketch`, `produce_layout_spec_from_photo`, `prims_to_layout_spec`.
 - Fix: Leave in `__init__.py` (these are pre-wired for future phases) but add a `# pre-wired for future phases` comment block.
 - Verify: Comment present; no removals.
-- STATUS: pending
+- STATUS: done — a71f9d9
 
 ### ITEM 18 — `test_all_handlers_tested` baseline failure
 - Source: A3
@@ -179,7 +179,7 @@ order. Mark each `STATUS: done — commit <hash>` when fixed.
 - Issue: 148 of 173 codegen handlers lack test vectors. Pre-existing, growing. Test was never green even before this session.
 - Fix: Add `_KNOWN_UNTESTED: frozenset[str]` containing the 148 handlers + comment explaining it's a ratchet. Future additions cannot land without a vector. Existing backlog is documented but not blocking.
 - Verify: `python -m pytest tests/test_code_generators.py::TestAllCodeGenHandlersCovered::test_all_handlers_tested` passes (with frozenset exemption).
-- STATUS: pending
+- STATUS: done — a71f9d9 (143-entry _KNOWN_UNTESTED ratchet + inverse-prune test)
 
 ### ITEM 19 — Test depth gaps (Phase 61/64/70/76/88b)
 - Source: C test quality audit
@@ -191,13 +191,13 @@ order. Mark each `STATUS: done — commit <hash>` when fixed.
   - Phase 70: add test for dangling `parent_attach_point` (no earlier part has matching `self_attach_point`)
   - Phase 76: add tests for `MockVisionProvider` with `image_bytes=b""` and unknown task
   - Phase 88b: add behavior test for non-dry-run that doesn't just assert NotImplementedError
-- STATUS: pending
+- STATUS: done — a71f9d9 (tests/test_qa_19_edge_cases.py adds 5 missing edge-case tests)
 
 ### ITEM 20 — Metadata-tautology test cleanup
 - Source: C test quality audit
 - Issue: ~20 tests across the suite just assert `PHASE_STATUS == "landed"` or `meta["phase"] == X`. Inflates test count without coverage.
 - Fix: Leave one metadata test per file (sanity check). Convert the extra metadata-only tests (`test_phase_metadata_status_landed`, `_spec_ref_present`, `_phase_id`) into a single `test_metadata_shape()` that checks all fields in one go.
-- STATUS: pending
+- STATUS: deferred — low-value polish across ~20 test files; not blocking and the inflated count doesn't cause false greens.
 
 ---
 
