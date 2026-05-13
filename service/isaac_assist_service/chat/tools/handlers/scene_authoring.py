@@ -30,7 +30,223 @@ Per `specs/IA_FULL_SPEC_2026-05-10.md` Phase 3.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from typing import Any, Callable, Dict, Optional
+
+# ---------------------------------------------------------------------------
+# Theme-local constants (Phase 8 wave 12, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.scene_authoring.
+
+_WORKSPACE = Path(__file__).resolve().parents[5] / "workspace"
+
+_TIER12_HELPERS = (
+    "            def _layer_offset_dict(lo):\n"
+    "                if lo is None:\n"
+    "                    return {'offset': 0.0, 'scale': 1.0}\n"
+    "                try:\n"
+    "                    return {'offset': float(lo.offset), 'scale': float(lo.scale)}\n"
+    "                except Exception:\n"
+    "                    return {'offset': 0.0, 'scale': 1.0}\n"
+)
+
+_TIER14_SCHEMA_MAP = {
+    "PhysicsRigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
+    "UsdPhysics.RigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
+    "RigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
+    "PhysicsCollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
+    "UsdPhysics.CollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
+    "CollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
+    "PhysicsMassAPI": ("pxr.UsdPhysics", "MassAPI"),
+    "UsdPhysics.MassAPI": ("pxr.UsdPhysics", "MassAPI"),
+    "MassAPI": ("pxr.UsdPhysics", "MassAPI"),
+    "PhysxRigidBodyAPI": ("pxr.PhysxSchema", "PhysxRigidBodyAPI"),
+    "PhysxCollisionAPI": ("pxr.PhysxSchema", "PhysxCollisionAPI"),
+    "PhysxDeformableBodyAPI": ("pxr.PhysxSchema", "PhysxDeformableBodyAPI"),
+    "PhysxTriggerAPI": ("pxr.PhysxSchema", "PhysxTriggerAPI"),
+    "PhysxContactReportAPI": ("pxr.PhysxSchema", "PhysxContactReportAPI"),
+}
+
+_DELTA_ROOT = _WORKSPACE / "snapshots" / "deltas"
+
+_OG_TEMPLATES = {
+    "ros2_clock": {
+        "description": "Publish simulation clock to ROS2 /clock topic",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("publish_clock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "publish_clock.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_clock.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_clock.inputs:timeStamp"),
+        ],
+        "values": {},
+        "param_keys": [],
+    },
+    "ros2_joint_state": {
+        "description": "Publish robot joint states to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("articulation_controller", "isaacsim.core.nodes.IsaacArticulationController"),
+            ("publish_joint_state", "isaacsim.ros2.bridge.ROS2PublishJointState"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "publish_joint_state.inputs:execIn"),
+            ("on_playback_tick.outputs:tick", "articulation_controller.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_joint_state.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_joint_state.inputs:timeStamp"),
+        ],
+        "values": {
+            "articulation_controller.inputs:robotPath": "{robot_path}",
+            "publish_joint_state.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["robot_path", "topic"],
+        "defaults": {"topic": "/joint_states"},
+    },
+    "ros2_camera": {
+        "description": "Publish camera images to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("camera_helper", "isaacsim.ros2.bridge.ROS2CameraHelper"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "camera_helper.inputs:execIn"),
+            ("ros2_context.outputs:context", "camera_helper.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "camera_helper.inputs:timeStamp"),
+        ],
+        "values": {
+            "camera_helper.inputs:cameraPrimPath": "{camera_path}",
+            "camera_helper.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["camera_path", "topic"],
+        "defaults": {"topic": "/camera/image_raw"},
+    },
+    "ros2_lidar": {
+        "description": "Publish lidar scans to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("read_lidar", "isaacsim.sensor.nodes.IsaacReadLidar"),
+            ("publish_laser_scan", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "read_lidar.inputs:execIn"),
+            ("read_lidar.outputs:execOut", "publish_laser_scan.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_laser_scan.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_laser_scan.inputs:timeStamp"),
+            ("read_lidar.outputs:azimuthRange", "publish_laser_scan.inputs:azimuthRange"),
+            ("read_lidar.outputs:depthRange", "publish_laser_scan.inputs:depthRange"),
+            ("read_lidar.outputs:horizontalResolution", "publish_laser_scan.inputs:horizontalResolution"),
+            ("read_lidar.outputs:intensitiesData", "publish_laser_scan.inputs:intensitiesData"),
+            ("read_lidar.outputs:linearDepthData", "publish_laser_scan.inputs:linearDepthData"),
+            ("read_lidar.outputs:numCols", "publish_laser_scan.inputs:numCols"),
+            ("read_lidar.outputs:numRows", "publish_laser_scan.inputs:numRows"),
+        ],
+        "values": {
+            "read_lidar.inputs:lidarPrimPath": "{lidar_path}",
+            "publish_laser_scan.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["lidar_path", "topic"],
+        "defaults": {"topic": "/scan"},
+    },
+    "ros2_cmd_vel": {
+        "description": "Subscribe to /cmd_vel and drive a differential robot",
+        "nodes": [
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("subscribe_twist", "isaacsim.ros2.bridge.ROS2SubscribeTwist"),
+            ("differential_controller", "isaacsim.robot.wheeled_robots.DifferentialController"),
+            ("articulation_controller", "isaacsim.core.nodes.IsaacArticulationController"),
+        ],
+        "connections": [
+            ("ros2_context.outputs:context", "subscribe_twist.inputs:context"),
+            ("subscribe_twist.outputs:linearVelocity", "differential_controller.inputs:linearVelocity"),
+            ("subscribe_twist.outputs:angularVelocity", "differential_controller.inputs:angularVelocity"),
+            ("differential_controller.outputs:velocityCommand", "articulation_controller.inputs:velocityCommand"),
+        ],
+        "values": {
+            "subscribe_twist.inputs:topicName": "{topic}",
+            "articulation_controller.inputs:robotPath": "{robot_path}",
+        },
+        "param_keys": ["robot_path", "topic"],
+        "defaults": {"topic": "/cmd_vel"},
+    },
+    "ros2_tf": {
+        "description": "Publish TF transform tree to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("publish_tf", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "publish_tf.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_tf.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_tf.inputs:timeStamp"),
+        ],
+        "values": {
+            "publish_tf.inputs:parentPrim": "{root_prim}",
+        },
+        "param_keys": ["root_prim"],
+        "defaults": {"root_prim": "/World"},
+    },
+    "ros2_imu": {
+        "description": "Publish IMU data to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_imu", "isaacsim.sensor.nodes.IsaacReadIMU"),
+            ("publish_imu", "isaacsim.ros2.bridge.ROS2PublishImu"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "read_imu.inputs:execIn"),
+            ("read_imu.outputs:execOut", "publish_imu.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_imu.inputs:context"),
+            ("read_imu.outputs:angVel", "publish_imu.inputs:angularVelocity"),
+            ("read_imu.outputs:linAcc", "publish_imu.inputs:linearAcceleration"),
+            ("read_imu.outputs:orientation", "publish_imu.inputs:orientation"),
+        ],
+        "values": {
+            "read_imu.inputs:imuPrimPath": "{imu_path}",
+            "publish_imu.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["imu_path", "topic"],
+        "defaults": {"topic": "/imu/data"},
+    },
+    "ros2_odom": {
+        "description": "Publish odometry data to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("compute_odom", "isaacsim.core.nodes.IsaacComputeOdometry"),
+            ("publish_odom", "isaacsim.ros2.bridge.ROS2PublishOdometry"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "compute_odom.inputs:execIn"),
+            ("compute_odom.outputs:execOut", "publish_odom.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_odom.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_odom.inputs:timeStamp"),
+            ("compute_odom.outputs:angularVelocity", "publish_odom.inputs:angularVelocity"),
+            ("compute_odom.outputs:linearVelocity", "publish_odom.inputs:linearVelocity"),
+            ("compute_odom.outputs:orientation", "publish_odom.inputs:orientation"),
+            ("compute_odom.outputs:position", "publish_odom.inputs:position"),
+        ],
+        "values": {
+            "compute_odom.inputs:chassisPrimPath": "{chassis_path}",
+            "publish_odom.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["chassis_path", "topic"],
+        "defaults": {"topic": "/odom"},
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -1675,7 +1891,7 @@ print(f"bulk_set_attribute: applied={{_applied}} created={{_created}} "
 
 def _gen_bulk_apply_schema(args: Dict) -> str:
     """T14.2 — apply the same API schema to many prims via Sdf.ChangeBlock."""
-    from ..tool_executor import _TIER14_SCHEMA_MAP
+    # Phase 8 wave 12 — _TIER14_SCHEMA_MAP migrated.
     prim_paths = args["prim_paths"]
     schema = args["schema"]
     if schema in _TIER14_SCHEMA_MAP:
@@ -2074,8 +2290,9 @@ print(f"Merged {{len(prim_paths)}} meshes: {{prim_paths}}")
 
 def _gen_create_graph(args: Dict) -> str:
     """Generate OmniGraph code from a template-based description."""
+    # Phase 8 wave 12: _OG_TEMPLATES now module-local; _detect_template
+    # still lazy-imported from tool_executor.
     from .. import tool_executor as _te  # noqa: PLC0415
-    _OG_TEMPLATES = _te._OG_TEMPLATES
     _detect_template = _te._detect_template
 
     description = args.get("description", "")
@@ -3575,7 +3792,7 @@ except Exception as e:
 async def _handle_list_references(args: Dict) -> Dict:
     """Enumerate USD reference arcs composed onto a prim."""
     from .. import kit_tools
-    from ..tool_executor import _TIER12_HELPERS
+    # Phase 8 wave 12 — _TIER12_HELPERS migrated.
 
     prim_path = args["prim_path"]
     prim_path_repr = repr(prim_path)
@@ -3682,7 +3899,7 @@ async def _handle_list_references(args: Dict) -> Dict:
 async def _handle_list_payloads(args: Dict) -> Dict:
     """Enumerate USD payload arcs (deferred-load) on a prim."""
     from .. import kit_tools
-    from ..tool_executor import _TIER12_HELPERS
+    # Phase 8 wave 12 — _TIER12_HELPERS migrated.
 
     prim_path = args["prim_path"]
     prim_path_repr = repr(prim_path)
@@ -4353,7 +4570,7 @@ print(json.dumps({"graphs": graphs, "count": len(graphs)}))
 
 async def _handle_save_delta_snapshot(args: Dict) -> Dict:
     from .. import kit_tools
-    from ..tool_executor import _DELTA_ROOT, logger, _gen_save_delta_snapshot
+    from ..tool_executor import logger, _gen_save_delta_snapshot
     import json
     snapshot_id = args["snapshot_id"]
     base_snapshot_id = args.get("base_snapshot_id")
@@ -4383,7 +4600,7 @@ async def _handle_save_delta_snapshot(args: Dict) -> Dict:
 
 async def _handle_restore_delta_snapshot(args: Dict) -> Dict:
     from .. import kit_tools
-    from ..tool_executor import _DELTA_ROOT, _gen_restore_delta_snapshot
+    from ..tool_executor import _gen_restore_delta_snapshot
     import json
     snapshot_id = args["snapshot_id"]
     manifest_path = _DELTA_ROOT / f"{snapshot_id}.json"

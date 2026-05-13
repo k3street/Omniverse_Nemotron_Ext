@@ -12,6 +12,34 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict
 
+# ---------------------------------------------------------------------------
+# Theme-local constants (Phase 8 wave 12, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.training.
+
+_DOMINANT_TERM_THRESHOLD = 100.0  # one term's |weight| > 100x another → dominant
+
+_REWARD_HACK_PATTERNS = [
+    ("alive_bonus", "alive bonus reward without an explicit fall/early-termination is exploitable — robot learns to just stand still"),
+    ("survival_bonus", "survival bonus without termination — same hacking risk as alive_bonus"),
+    ("time_bonus", "time-based reward — robot may stall to milk the bonus"),
+]
+
+_CLOUD_PRICING = {
+    ("aws", "g5.2xlarge"): {"price_per_hour": 1.21, "gpu": "A10G"},
+    ("aws", "g6e.2xlarge"): {"price_per_hour": 2.50, "gpu": "L40S"},
+    ("gcp", "g2-standard-8"): {"price_per_hour": 1.35, "gpu": "L4"},
+    ("azure", "NCasT4_v3"): {"price_per_hour": 1.10, "gpu": "T4"},
+}
+
+_CLOUD_SCRIPT_ALLOWLIST = {"training", "sdg", "evaluation", "headless_sim"}
+
+_EXPORT_TARGETS = {
+    "jetson_agx_orin": {"format": "TensorRT bf16", "expected_hz": 5.8, "fp8_supported": False, "note": "Official pipeline"},
+    "jetson_orin_nx": {"format": "TensorRT bf16", "expected_hz": 3.0, "fp8_supported": False, "note": "FP8/NVFP4 unsupported (SM87)"},
+    "x86_rtx4090": {"format": "TensorRT bf16", "expected_hz": 15.0, "fp8_supported": True, "note": "Best desktop performance"},
+    "x86_a6000": {"format": "TensorRT bf16", "expected_hz": 12.0, "fp8_supported": True, "note": "High VRAM headroom"},
+}
+
 
 # ---------------------------------------------------------------------------
 # Phase 6 wave 6 — training launch + reward eval + GR00T + env cloning + policy export
@@ -386,7 +414,7 @@ def _gen_setup_loco_manipulation_training(args: Dict) -> str:
 
 def _gen_export_policy(args: Dict) -> str:
     """Generate code to export GR00T checkpoint to TensorRT."""
-    from ..tool_executor import _EXPORT_TARGETS  # noqa: PLC0415
+    # Phase 8 wave 12 — _EXPORT_TARGETS migrated.
     checkpoint = args["checkpoint"]
     target = args["target_device"]
     budget_ms = args.get("inference_budget_ms")
@@ -1406,7 +1434,7 @@ async def _handle_checkpoint_training(args: Dict) -> Dict:
 
 async def _handle_cloud_estimate_cost(args: Dict) -> Dict:
     """Estimate cost for a cloud GPU instance over a given duration."""
-    from ..tool_executor import _CLOUD_PRICING
+    # Phase 8 wave 12 — _CLOUD_PRICING migrated.
     provider = args["provider"]
     instance_type = args["instance_type"]
     hours = args["hours"]
@@ -1446,7 +1474,7 @@ async def _handle_cloud_launch(args: Dict) -> Dict:
     """Return structured deployment info for IsaacAutomator cloud launch.
     Always requires approval regardless of auto-approve setting.
     """
-    from ..tool_executor import _CLOUD_PRICING, _CLOUD_SCRIPT_ALLOWLIST, _cloud_jobs
+    from ..tool_executor import _cloud_jobs
     provider = args["provider"]
     instance_type = args["instance_type"]
     isaac_version = args.get("isaac_version", "5.1.0")
@@ -1960,7 +1988,7 @@ async def _handle_redact_finetune_data(args: Dict) -> Dict:
 
 async def _handle_review_reward(args: Dict) -> Dict:
     """Run static checks on a reward function before training starts."""
-    from ..tool_executor import _DOMINANT_TERM_THRESHOLD, _REWARD_HACK_PATTERNS
+    # Phase 8 wave 12 — _REWARD_HACK_PATTERNS migrated.
     from typing import List as _List
     code = args.get("reward_code", "")
     has_fall_term = bool(args.get("has_fall_termination", False))
