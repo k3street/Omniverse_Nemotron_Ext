@@ -505,9 +505,9 @@
   note: orchestrator layer landed; GPU/weights gate deferred
 62b:
   title: GR00T N1.7 finetune + Mimic/Dreams blueprint integration
-  agent_type: opus-runtime
-  status: scaffold
-  note: GR00T evaluator harness
+  agent_type: sonnet-bounded
+  status: landed
+  note: eval harness + blueprint validation landed; GR00T inference/Mimic/Dreams exec opus-runtime gated
 '63':
   title: '`execute_contact_sequence_plan` — N-step contact-sequence runtime'
   agent_type: sonnet-bounded
