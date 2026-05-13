@@ -182,9 +182,9 @@
   - tests/test_phase_21_role_template_index.py
 '22':
   title: '`sync_from_stage` — round-trip Kit → LayoutSpec'
-  agent_type: opus-runtime
-  status: scaffold
-  note: needs Kit RPC list_prims
+  agent_type: sonnet-bounded
+  status: landed
+  note: SPEC/PARSER layer (pure Python) landed; live Kit /list_prims stays scaffold
   gate: 'pytest tests/test_sync_from_stage.py + Kit smoke: sync returns LayoutSpec.shape with classified prims'
   files:
   - service/isaac_assist_service/multimodal/sync_stage.py
