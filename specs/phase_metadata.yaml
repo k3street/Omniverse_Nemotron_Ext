@@ -513,9 +513,9 @@
   note: telemetry runtime
 '64':
   title: Eureka run state actually persisted
-  agent_type: opus-runtime
-  status: scaffold
-  note: Eureka workers
+  agent_type: sonnet-bounded
+  status: landed
+  note: SQLite-backed EurekaRunStateStore
 '65':
   title: Training run persistence
   agent_type: sonnet-bounded
@@ -548,9 +548,16 @@
   loc: 240
 '69':
   title: 'Live spawn validation: contact reachability'
-  agent_type: opus-runtime
-  status: scaffold
-  note: contact reachability
+  agent_type: sonnet-bounded
+  status: landed
+  note: contact reachability — pure-Python, 29 tests, slab-method AABB occlusion
+  gate: pytest tests/test_phase_69_spawn_validator_contact_reachability.py — 29 tests pass
+  files:
+  - service/isaac_assist_service/multimodal/spawn_validator_contact_reachability.py
+  - tests/test_phase_69_spawn_validator_contact_reachability.py
+  loc: 280
+  effort_min: 60
+  blocked_by: []
 '70':
   title: '`assemble_robot` implementation'
   agent_type: opus-judgment
