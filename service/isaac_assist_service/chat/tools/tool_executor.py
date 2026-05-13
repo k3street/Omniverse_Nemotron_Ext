@@ -139,45 +139,7 @@ _cloud_jobs: Dict[str, Dict] = {}
 # _DOMINANT_TERM_THRESHOLD migrated to handlers/training.py (Phase 8 wave 12, 2026-05-13).
 
 # from: feat/addendum-dr-advanced
-_DR_PRESETS: Dict[str, Dict[str, Any]] = {
-    "indoor_industrial": {
-        "description": "Indoor industrial workspace — fluorescent overhead, concrete floor.",
-        "lighting_lux": [300, 2000],
-        "floor_texture": ["concrete_smooth", "concrete_rough", "epoxy_grey"],
-        "light_temperature_k": [3500, 5500],
-        "ambient_color": [[0.8, 0.85, 0.9], [1.0, 1.0, 1.0]],
-    },
-    "outdoor_daylight": {
-        "description": "Outdoor scene — sun + sky, varying cloud cover.",
-        "sun_elevation_deg": [15, 75],
-        "sun_azimuth_deg": [0, 360],
-        "cloud_cover": [0.0, 0.8],
-        "ground_material": ["asphalt", "grass", "gravel", "dirt"],
-    },
-    "warehouse": {
-        "description": "Warehouse — shelves, mixed lighting, cardboard.",
-        "shelf_offset_m": [-0.05, 0.05],
-        "lighting_lux": [200, 1500],
-        "box_texture": ["cardboard_clean", "cardboard_worn", "cardboard_taped"],
-        "aisle_width_m": [1.8, 3.5],
-    },
-    "cleanroom": {
-        "description": "Cleanroom — controlled environment, minimal variation.",
-        "lighting_lux": [800, 1200],
-        "ambient_color": [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]],
-        "floor_texture": ["epoxy_white"],
-        "particulate_density": [0.0, 0.05],
-    },
-    "aggressive_sim2real": {
-        "description": "Maximum robustness — every parameter at +/-50%.",
-        "mass_scale": [0.5, 1.5],
-        "friction_scale": [0.5, 1.5],
-        "damping_scale": [0.5, 1.5],
-        "gravity_scale": [0.95, 1.05],
-        "lighting_scale": [0.3, 1.7],
-        "action_latency_ms": [10, 80],
-    },
-}
+# _DR_PRESETS migrated to handlers/training.py (Phase 8 wave 16, 2026-05-13).
 
 # from: feat/new-physics-calibration
 # _DR_RANGE_HINTS migrated to handlers/robot.py (Phase 8 wave 15, 2026-05-13).
@@ -1335,32 +1297,7 @@ async def execute_tool_call(
 # ── Motion Planning (RMPflow / Lula) ─────────────────────────────────────────
 
 # Robot config map: robot_type → (rmpflow_config_dir, robot_description_path, urdf_path, end_effector_frame)
-_MOTION_ROBOT_CONFIGS = {
-    "franka": {
-        "rmp_config": "franka/rmpflow",
-        "desc": "franka/robot_descriptor.yaml",
-        "urdf": "franka/lula_franka_gen.urdf",
-        "ee_frame": "panda_hand",
-    },
-    "ur10": {
-        "rmp_config": "universal_robots/ur10/rmpflow",
-        "desc": "universal_robots/ur10/robot_descriptor.yaml",
-        "urdf": "universal_robots/ur10/lula_ur10_gen.urdf",
-        "ee_frame": "ee_link",
-    },
-    "ur5e": {
-        "rmp_config": "universal_robots/ur5e/rmpflow",
-        "desc": "universal_robots/ur5e/robot_descriptor.yaml",
-        "urdf": "universal_robots/ur5e/lula_ur5e_gen.urdf",
-        "ee_frame": "ee_link",
-    },
-    "cobotta": {
-        "rmp_config": "denso/cobotta_pro_900/rmpflow",
-        "desc": "denso/cobotta_pro_900/robot_descriptor.yaml",
-        "urdf": "denso/cobotta_pro_900/lula_cobotta_gen.urdf",
-        "ee_frame": "onrobot_rg6_base_link",
-    },
-}
+# _MOTION_ROBOT_CONFIGS migrated to handlers/robot.py (Phase 8 wave 16, 2026-05-13).
 
 
 # _gen_move_to_pose moved to handlers/robot.py (Phase 6 wave 12).
@@ -1507,28 +1444,12 @@ import os as _os_files
 import glob as _glob_files
 import fnmatch as _fnmatch_files
 
-_LIST_LOCAL_DEFAULT_ROOTS = [
-    "/home/anton/projects/Omniverse_Nemotron_Ext/workspace",
-    "/home/anton/projects/Omniverse_Nemotron_Ext/data",
-    "/home/anton/Downloads",
-    "/home/anton/Documents",
-    "/home/anton/robots",
-    "/home/anton/projects/myarm",
-    "/home/anton/projects/sharp_football",
-    "/tmp",
-]
+# _LIST_LOCAL_DEFAULT_ROOTS migrated to handlers/scene_blueprints.py (Phase 8 wave 16, 2026-05-13).
 # Hard cap to stop the agent from triggering massive filesystem walks.
-_LIST_LOCAL_MAX_RESULTS = 200
-_LIST_LOCAL_MAX_DEPTH = 6
+# _LIST_LOCAL_MAX_RESULTS migrated to handlers/scene_blueprints.py (Phase 8 wave 16, 2026-05-13).
+# _LIST_LOCAL_MAX_DEPTH migrated to handlers/scene_blueprints.py (Phase 8 wave 16, 2026-05-13).
 # Asset-relevant extensions only — refuse to surface secrets / source code.
-_LIST_LOCAL_ALLOWED_EXTS = {
-    ".urdf", ".usd", ".usda", ".usdc", ".usdz",
-    ".step", ".stp", ".iges", ".igs", ".stl", ".obj", ".fbx", ".gltf", ".glb",
-    ".ifc", ".ifczip",
-    ".yaml", ".yml", ".json",  # config, scene templates
-    ".pcd", ".ply",  # point clouds
-    ".png", ".jpg", ".jpeg", ".exr", ".hdr",  # textures (filtered by name pattern)
-}
+# _LIST_LOCAL_ALLOWED_EXTS migrated to handlers/scene_blueprints.py (Phase 8 wave 16, 2026-05-13).
 
 
 # _handle_list_local_files moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
@@ -1555,28 +1476,7 @@ _LIST_LOCAL_ALLOWED_EXTS = {
 
 # ── IsaacLab RL Training ─────────────────────────────────────────────────────
 
-_RL_TASK_TEMPLATES = {
-    "manipulation": {
-        "obs": ["joint_pos", "joint_vel", "ee_pos", "ee_ori", "target_pos", "target_rel"],
-        "actions": "joint_positions",
-        "rewards": ["reach_target", "grasp_success", "action_penalty", "is_terminated"],
-    },
-    "locomotion": {
-        "obs": ["base_lin_vel", "base_ang_vel", "projected_gravity", "joint_pos", "joint_vel", "actions"],
-        "actions": "joint_positions",
-        "rewards": ["track_lin_vel", "track_ang_vel", "feet_air_time", "action_rate", "is_terminated"],
-    },
-    "navigation": {
-        "obs": ["base_pos", "base_ori", "base_lin_vel", "target_pos", "target_rel", "lidar_scan"],
-        "actions": "base_velocity",
-        "rewards": ["reach_goal", "collision_penalty", "progress_to_goal", "action_penalty"],
-    },
-    "custom": {
-        "obs": ["joint_pos", "joint_vel"],
-        "actions": "joint_positions",
-        "rewards": ["task_success", "action_penalty"],
-    },
-}
+# _RL_TASK_TEMPLATES migrated to handlers/training.py (Phase 8 wave 16, 2026-05-13).
 
 
 # _handle_create_isaaclab_env moved to handlers/training.py (Phase 7 wave 5).
@@ -2093,18 +1993,7 @@ Task success rate: {metrics.get('task_success_rate', 'N/A')}
 # _gen_set_motion_policy moved to handlers/robot.py (Phase 6 wave 12).
 # _handle_generate_robot_description moved to handlers/robot.py (Phase 7 wave 7).
 
-_CUROBO_ROBOT_YML_MAP = {
-    "franka": "franka.yml",
-    "franka_panda": "franka.yml",
-    "panda": "franka.yml",
-    "ur10e": "ur10e.yml",
-    "ur10": "ur10.yml",
-    "ur5e": "ur5e.yml",
-    "ur5": "ur5e.yml",
-    "iiwa": "iiwa.yml",
-    "kinova_gen3": "kinova_gen3.yml",
-    "jaco7": "jaco7.yml",
-}
+# _CUROBO_ROBOT_YML_MAP migrated to handlers/robot.py (Phase 8 wave 16, 2026-05-13).
 
 
 # _gen_set_motion_policy moved to handlers/robot.py (Phase 6 wave 12).
@@ -3575,98 +3464,7 @@ _PP_CTRL_ATTRS = [
 # Controller matrix — availability probe (FAS 4)
 # ══════════════════════════════════════════════════════════════════════
 
-_CONTROLLER_METADATA = {
-    "native": {
-        "hardware_req": "CPU (Franka only)",
-        "cycle_class": "medium",          # short / medium / long
-        "collision_aware": "partial",      # true / false / partial
-        "motion_quality": 2,                # 1-5, 5=best
-        "use_case_fit": ["dynamic_targets", "belt_picking", "live_cube_tracking"],
-        "summary": "Canonical Isaac Sim franka.PickPlaceController + RmpFlow. Reactive. Good for Franka on moving targets. CPU only.",
-        "avoid": ["obstacle-rich scenes", "non-Franka arms"],
-    },
-    "sensor_gated": {
-        "hardware_req": "CPU",
-        "cycle_class": "medium",
-        "collision_aware": "false",
-        "motion_quality": 2,
-        "use_case_fit": ["industrial_sim2real", "plc_mimic", "teach_replay"],
-        "summary": "Sensor-triggered state machine with pre-taught or coord-based PICK/DROP/HOME. Generic (any arm with RmpFlow config).",
-        "avoid": ["complex multi-segment planning", "online re-planning"],
-    },
-    "fixed_poses": {
-        "hardware_req": "CPU",
-        "cycle_class": "varies",
-        "collision_aware": "false",
-        "motion_quality": 1,
-        "use_case_fit": ["cycle_time_demos", "validation", "pose_replay"],
-        "summary": "Timer-driven pose-list replay. No sensing, no grasping logic.",
-        "avoid": ["any real pick-place task"],
-    },
-    "cube_tracking": {
-        "hardware_req": "CPU",
-        "cycle_class": "medium",
-        "collision_aware": "false",
-        "motion_quality": 2,
-        "use_case_fit": ["ml_demo_generation"],
-        "summary": "Omniscient reactive tracker — cheats using ground-truth cube pose each frame. NOT sim2real honest.",
-        "avoid": ["sim2real evaluation", "industrial training"],
-    },
-    "ros2_cmd": {
-        "hardware_req": "External",
-        "cycle_class": "varies",
-        "collision_aware": "depends",
-        "motion_quality": 3,
-        "use_case_fit": ["digital_twin", "plc_in_loop", "external_moveit"],
-        "summary": "Subscribes to external target-pose / gripper topics. State machine lives outside Isaac Sim.",
-        "avoid": ["self-contained Isaac Sim simulations"],
-    },
-    "spline": {
-        "hardware_req": "CPU",
-        "cycle_class": "medium",
-        "collision_aware": "pre-check only",
-        "motion_quality": 4,
-        "use_case_fit": ["repetitive_cycles", "sim2real_demos", "cpu_only", "deterministic_motion"],
-        "summary": "Pre-planned 6-waypoint Cartesian trajectory with warm-start IK chaining + scipy.CubicSpline interpolation. Smooth, deterministic, CPU-only. Beats native on delivery rate.",
-        "avoid": ["obstacle-rich scenes", "highly-dynamic targets"],
-    },
-    "curobo": {
-        "hardware_req": "NVIDIA GPU >= Volta (compute_capability >= 7.0), 4GB VRAM",
-        "cycle_class": "short",
-        "collision_aware": "true",
-        "motion_quality": 5,
-        "use_case_fit": ["obstacle_rich_scenes", "precision_picking", "production_cycle_time"],
-        "summary": "GPU-accelerated global trajectory optimization with collision checking (Cuboid/SDF/mesh). Industrial quality motion, fastest cycle time when hardware supports.",
-        "avoid": ["no GPU / pre-Volta GPU"],
-    },
-    "diffik": {
-        "hardware_req": "CPU, Isaac Lab",
-        "cycle_class": "long",
-        "collision_aware": "false",
-        "motion_quality": 2,
-        "use_case_fit": ["teleop", "cartesian_rl_observation", "simple_free_motion"],
-        "summary": "Stateless Jacobian-based differential IK (Isaac Lab). No planning or collision awareness. Jittery but fast per-step compute.",
-        "avoid": ["singularity-prone trajectories", "obstacle avoidance"],
-    },
-    "osc": {
-        "hardware_req": "CPU, Isaac Lab",
-        "cycle_class": "long",
-        "collision_aware": "false",
-        "motion_quality": 3,
-        "use_case_fit": ["contact_rich_tasks", "polishing", "assembly", "compliant_motion"],
-        "summary": "Operational-space control with task-space impedance (torque mode). Experimental. Accept 2/4 delivery minimum.",
-        "avoid": ["standard pick-place without contact tasks"],
-    },
-    "auto": {
-        "hardware_req": "any",
-        "cycle_class": "varies",
-        "collision_aware": "varies",
-        "motion_quality": None,
-        "use_case_fit": ["unknown_hardware", "portable_scripts", "agent_selects"],
-        "summary": "Probes runtime env and selects best available (curobo → native → spline → diffik).",
-        "avoid": [],
-    },
-}
+# _CONTROLLER_METADATA migrated to handlers/robot.py (Phase 8 wave 16, 2026-05-13).
 
 
 def _probe_gpu_capability():

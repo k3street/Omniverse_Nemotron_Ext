@@ -15,6 +15,143 @@ from __future__ import annotations
 from typing import Any, Callable, Dict
 
 # ---------------------------------------------------------------------------
+# Theme-local constants (Phase 8 wave 16, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.robot.
+
+_MOTION_ROBOT_CONFIGS = {
+    "franka": {
+        "rmp_config": "franka/rmpflow",
+        "desc": "franka/robot_descriptor.yaml",
+        "urdf": "franka/lula_franka_gen.urdf",
+        "ee_frame": "panda_hand",
+    },
+    "ur10": {
+        "rmp_config": "universal_robots/ur10/rmpflow",
+        "desc": "universal_robots/ur10/robot_descriptor.yaml",
+        "urdf": "universal_robots/ur10/lula_ur10_gen.urdf",
+        "ee_frame": "ee_link",
+    },
+    "ur5e": {
+        "rmp_config": "universal_robots/ur5e/rmpflow",
+        "desc": "universal_robots/ur5e/robot_descriptor.yaml",
+        "urdf": "universal_robots/ur5e/lula_ur5e_gen.urdf",
+        "ee_frame": "ee_link",
+    },
+    "cobotta": {
+        "rmp_config": "denso/cobotta_pro_900/rmpflow",
+        "desc": "denso/cobotta_pro_900/robot_descriptor.yaml",
+        "urdf": "denso/cobotta_pro_900/lula_cobotta_gen.urdf",
+        "ee_frame": "onrobot_rg6_base_link",
+    },
+}
+
+_CUROBO_ROBOT_YML_MAP = {
+    "franka": "franka.yml",
+    "franka_panda": "franka.yml",
+    "panda": "franka.yml",
+    "ur10e": "ur10e.yml",
+    "ur10": "ur10.yml",
+    "ur5e": "ur5e.yml",
+    "ur5": "ur5e.yml",
+    "iiwa": "iiwa.yml",
+    "kinova_gen3": "kinova_gen3.yml",
+    "jaco7": "jaco7.yml",
+}
+
+_CONTROLLER_METADATA = {
+    "native": {
+        "hardware_req": "CPU (Franka only)",
+        "cycle_class": "medium",          # short / medium / long
+        "collision_aware": "partial",      # true / false / partial
+        "motion_quality": 2,                # 1-5, 5=best
+        "use_case_fit": ["dynamic_targets", "belt_picking", "live_cube_tracking"],
+        "summary": "Canonical Isaac Sim franka.PickPlaceController + RmpFlow. Reactive. Good for Franka on moving targets. CPU only.",
+        "avoid": ["obstacle-rich scenes", "non-Franka arms"],
+    },
+    "sensor_gated": {
+        "hardware_req": "CPU",
+        "cycle_class": "medium",
+        "collision_aware": "false",
+        "motion_quality": 2,
+        "use_case_fit": ["industrial_sim2real", "plc_mimic", "teach_replay"],
+        "summary": "Sensor-triggered state machine with pre-taught or coord-based PICK/DROP/HOME. Generic (any arm with RmpFlow config).",
+        "avoid": ["complex multi-segment planning", "online re-planning"],
+    },
+    "fixed_poses": {
+        "hardware_req": "CPU",
+        "cycle_class": "varies",
+        "collision_aware": "false",
+        "motion_quality": 1,
+        "use_case_fit": ["cycle_time_demos", "validation", "pose_replay"],
+        "summary": "Timer-driven pose-list replay. No sensing, no grasping logic.",
+        "avoid": ["any real pick-place task"],
+    },
+    "cube_tracking": {
+        "hardware_req": "CPU",
+        "cycle_class": "medium",
+        "collision_aware": "false",
+        "motion_quality": 2,
+        "use_case_fit": ["ml_demo_generation"],
+        "summary": "Omniscient reactive tracker — cheats using ground-truth cube pose each frame. NOT sim2real honest.",
+        "avoid": ["sim2real evaluation", "industrial training"],
+    },
+    "ros2_cmd": {
+        "hardware_req": "External",
+        "cycle_class": "varies",
+        "collision_aware": "depends",
+        "motion_quality": 3,
+        "use_case_fit": ["digital_twin", "plc_in_loop", "external_moveit"],
+        "summary": "Subscribes to external target-pose / gripper topics. State machine lives outside Isaac Sim.",
+        "avoid": ["self-contained Isaac Sim simulations"],
+    },
+    "spline": {
+        "hardware_req": "CPU",
+        "cycle_class": "medium",
+        "collision_aware": "pre-check only",
+        "motion_quality": 4,
+        "use_case_fit": ["repetitive_cycles", "sim2real_demos", "cpu_only", "deterministic_motion"],
+        "summary": "Pre-planned 6-waypoint Cartesian trajectory with warm-start IK chaining + scipy.CubicSpline interpolation. Smooth, deterministic, CPU-only. Beats native on delivery rate.",
+        "avoid": ["obstacle-rich scenes", "highly-dynamic targets"],
+    },
+    "curobo": {
+        "hardware_req": "NVIDIA GPU >= Volta (compute_capability >= 7.0), 4GB VRAM",
+        "cycle_class": "short",
+        "collision_aware": "true",
+        "motion_quality": 5,
+        "use_case_fit": ["obstacle_rich_scenes", "precision_picking", "production_cycle_time"],
+        "summary": "GPU-accelerated global trajectory optimization with collision checking (Cuboid/SDF/mesh). Industrial quality motion, fastest cycle time when hardware supports.",
+        "avoid": ["no GPU / pre-Volta GPU"],
+    },
+    "diffik": {
+        "hardware_req": "CPU, Isaac Lab",
+        "cycle_class": "long",
+        "collision_aware": "false",
+        "motion_quality": 2,
+        "use_case_fit": ["teleop", "cartesian_rl_observation", "simple_free_motion"],
+        "summary": "Stateless Jacobian-based differential IK (Isaac Lab). No planning or collision awareness. Jittery but fast per-step compute.",
+        "avoid": ["singularity-prone trajectories", "obstacle avoidance"],
+    },
+    "osc": {
+        "hardware_req": "CPU, Isaac Lab",
+        "cycle_class": "long",
+        "collision_aware": "false",
+        "motion_quality": 3,
+        "use_case_fit": ["contact_rich_tasks", "polishing", "assembly", "compliant_motion"],
+        "summary": "Operational-space control with task-space impedance (torque mode). Experimental. Accept 2/4 delivery minimum.",
+        "avoid": ["standard pick-place without contact tasks"],
+    },
+    "auto": {
+        "hardware_req": "any",
+        "cycle_class": "varies",
+        "collision_aware": "varies",
+        "motion_quality": None,
+        "use_case_fit": ["unknown_hardware", "portable_scripts", "agent_selects"],
+        "summary": "Probes runtime env and selects best available (curobo → native → spline → diffik).",
+        "avoid": [],
+    },
+}
+
+# ---------------------------------------------------------------------------
 # Theme-local DR symbols (Phase 8 wave 15, 2026-05-13)
 # Migrated from tool_executor.py — used only by handlers.robot.
 
@@ -1502,7 +1639,7 @@ print(f"URDF preview (first 500 chars):\\n{{urdf_string[:500]}}")
 
 
 def _gen_move_to_pose(args: Dict) -> str:
-    from ..tool_executor import _MOTION_ROBOT_CONFIGS  # noqa: PLC0415
+    # Phase 8 wave 16 — _MOTION_ROBOT_CONFIGS migrated.
     art_path = args["articulation_path"]
     target_pos = args["target_position"]
     target_ori = args.get("target_orientation")
@@ -1728,7 +1865,7 @@ def _gen_set_motion_policy(args: Dict) -> str:
 
 
 def _gen_solve_ik(args: Dict) -> str:
-    from ..tool_executor import _MOTION_ROBOT_CONFIGS, _CUROBO_ROBOT_YML_MAP  # noqa: PLC0415
+    # Phase 8 wave 16 — _CUROBO_ROBOT_YML_MAP migrated.
     art_path = args["articulation_path"]
     target_pos = args["target_position"]
     target_ori = args.get("target_orientation")
@@ -4101,7 +4238,7 @@ print(json.dumps({{"sampler": str(prim.GetPath()), "target": {target_path!r}, "n
 
 async def _handle_generate_robot_description(args: Dict) -> Dict:
     """Check if a robot has pre-built motion generation configs."""
-    from ..tool_executor import _MOTION_ROBOT_CONFIGS  # noqa: PLC0415
+    # Phase 8 wave 16 — _MOTION_ROBOT_CONFIGS migrated.
     art_path = args["articulation_path"]
     robot_type = args.get("robot_type", "").lower()
 
@@ -5305,7 +5442,7 @@ async def _handle_list_available_controllers(args) -> dict:
         _probe_scipy,
         _probe_curobo,
         _probe_isaac_lab,
-        _CONTROLLER_METADATA,
+        # _CONTROLLER_METADATA migrated to module body (Phase 8 wave 16).
     )
     env = {
         "gpu": _probe_gpu_capability(),

@@ -15,6 +15,34 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
+# Theme-local constants (Phase 8 wave 16, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.scene_blueprints.
+
+_LIST_LOCAL_DEFAULT_ROOTS = [
+    "/home/anton/projects/Omniverse_Nemotron_Ext/workspace",
+    "/home/anton/projects/Omniverse_Nemotron_Ext/data",
+    "/home/anton/Downloads",
+    "/home/anton/Documents",
+    "/home/anton/robots",
+    "/home/anton/projects/myarm",
+    "/home/anton/projects/sharp_football",
+    "/tmp",
+]
+
+_LIST_LOCAL_MAX_RESULTS = 200
+
+_LIST_LOCAL_MAX_DEPTH = 6
+
+_LIST_LOCAL_ALLOWED_EXTS = {
+    ".urdf", ".usd", ".usda", ".usdc", ".usdz",
+    ".step", ".stp", ".iges", ".igs", ".stl", ".obj", ".fbx", ".gltf", ".glb",
+    ".ifc", ".ifczip",
+    ".yaml", ".yml", ".json",  # config, scene templates
+    ".pcd", ".ply",  # point clouds
+    ".png", ".jpg", ".jpeg", ".exr", ".hdr",  # textures (filtered by name pattern)
+}
+
+# ---------------------------------------------------------------------------
 # Theme-local constants + helpers (Phase 8 wave 7, 2026-05-13)
 # Migrated from tool_executor.py — used only by this module.
 
@@ -849,12 +877,8 @@ async def _handle_list_local_files(args: Dict) -> Dict:
     """
     import fnmatch as _fnmatch_files
     import os as _os_files
-    from ..tool_executor import (
-        _LIST_LOCAL_ALLOWED_EXTS,
-        _LIST_LOCAL_DEFAULT_ROOTS,
-        _LIST_LOCAL_MAX_DEPTH,
-        _LIST_LOCAL_MAX_RESULTS,
-    )
+    # (Phase 8 wave 16) tool_executor imports migrated to module body:
+    # _LIST_LOCAL_MAX_DEPTH migrated to module body (Phase 8 wave 16).
     pattern = (args.get("pattern") or "*").strip()
     extensions_raw = args.get("extensions") or []
     if isinstance(extensions_raw, str):

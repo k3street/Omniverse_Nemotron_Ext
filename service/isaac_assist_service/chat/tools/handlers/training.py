@@ -13,6 +13,73 @@ from __future__ import annotations
 from typing import Any, Callable, Dict
 
 # ---------------------------------------------------------------------------
+# Theme-local constants (Phase 8 wave 16, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.training.
+
+_DR_PRESETS: Dict[str, Dict[str, Any]] = {
+    "indoor_industrial": {
+        "description": "Indoor industrial workspace — fluorescent overhead, concrete floor.",
+        "lighting_lux": [300, 2000],
+        "floor_texture": ["concrete_smooth", "concrete_rough", "epoxy_grey"],
+        "light_temperature_k": [3500, 5500],
+        "ambient_color": [[0.8, 0.85, 0.9], [1.0, 1.0, 1.0]],
+    },
+    "outdoor_daylight": {
+        "description": "Outdoor scene — sun + sky, varying cloud cover.",
+        "sun_elevation_deg": [15, 75],
+        "sun_azimuth_deg": [0, 360],
+        "cloud_cover": [0.0, 0.8],
+        "ground_material": ["asphalt", "grass", "gravel", "dirt"],
+    },
+    "warehouse": {
+        "description": "Warehouse — shelves, mixed lighting, cardboard.",
+        "shelf_offset_m": [-0.05, 0.05],
+        "lighting_lux": [200, 1500],
+        "box_texture": ["cardboard_clean", "cardboard_worn", "cardboard_taped"],
+        "aisle_width_m": [1.8, 3.5],
+    },
+    "cleanroom": {
+        "description": "Cleanroom — controlled environment, minimal variation.",
+        "lighting_lux": [800, 1200],
+        "ambient_color": [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]],
+        "floor_texture": ["epoxy_white"],
+        "particulate_density": [0.0, 0.05],
+    },
+    "aggressive_sim2real": {
+        "description": "Maximum robustness — every parameter at +/-50%.",
+        "mass_scale": [0.5, 1.5],
+        "friction_scale": [0.5, 1.5],
+        "damping_scale": [0.5, 1.5],
+        "gravity_scale": [0.95, 1.05],
+        "lighting_scale": [0.3, 1.7],
+        "action_latency_ms": [10, 80],
+    },
+}
+
+_RL_TASK_TEMPLATES = {
+    "manipulation": {
+        "obs": ["joint_pos", "joint_vel", "ee_pos", "ee_ori", "target_pos", "target_rel"],
+        "actions": "joint_positions",
+        "rewards": ["reach_target", "grasp_success", "action_penalty", "is_terminated"],
+    },
+    "locomotion": {
+        "obs": ["base_lin_vel", "base_ang_vel", "projected_gravity", "joint_pos", "joint_vel", "actions"],
+        "actions": "joint_positions",
+        "rewards": ["track_lin_vel", "track_ang_vel", "feet_air_time", "action_rate", "is_terminated"],
+    },
+    "navigation": {
+        "obs": ["base_pos", "base_ori", "base_lin_vel", "target_pos", "target_rel", "lidar_scan"],
+        "actions": "base_velocity",
+        "rewards": ["reach_goal", "collision_penalty", "progress_to_goal", "action_penalty"],
+    },
+    "custom": {
+        "obs": ["joint_pos", "joint_vel"],
+        "actions": "joint_positions",
+        "rewards": ["task_success", "action_penalty"],
+    },
+}
+
+# ---------------------------------------------------------------------------
 # Theme-local DR symbols (Phase 8 wave 15, 2026-05-13)
 # Migrated from tool_executor.py — used only by handlers.training.
 
@@ -759,7 +826,7 @@ if __name__ == "__main__":
 
 async def _handle_create_isaaclab_env(args: Dict) -> Dict:
     """Generate an IsaacLab env scaffold — returns config as data for the LLM to refine."""
-    from ..tool_executor import _RL_TASK_TEMPLATES, _generate_isaaclab_env_code
+    from ..tool_executor import _generate_isaaclab_env_code
     task_name = args["task_name"]
     robot_path = args["robot_path"]
     task_type = args.get("task_type", "manipulation")
@@ -1129,7 +1196,7 @@ else:
 
 async def _handle_apply_dr_preset(args: Dict) -> Dict:
     """Look up a DR preset by name."""
-    from ..tool_executor import _DR_PRESETS
+    # Phase 8 wave 16 — _DR_PRESETS migrated.
     preset = (args.get("preset") or "").strip().lower()
     if not preset:
         return {"error": "preset is required", "available": sorted(_DR_PRESETS.keys())}
