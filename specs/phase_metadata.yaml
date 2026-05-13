@@ -140,9 +140,16 @@
   note: honesty charter
 '19':
   title: Implement Kit RPC execution path for `apply_layout_spec_to_scene`
-  agent_type: opus-runtime
-  status: scaffold
-  note: needs Kit RPC for per-class branching
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: >-
+    CODE-GENERATOR layer landed — LayoutSpecCodeGenerator (generate_for_prim,
+    generate_full_script, validate_generated_code), SUPPORTED_PRIM_CLASSES (11
+    entries), get_phase_metadata(). Per-class branching: UsdGeom for geometry/
+    camera/xform, UsdLux for lights, AddReference for references, Xform fallback
+    for unknowns. 30 pytest tests pass (5 existing + 25 new). Live Kit RPC
+    execution remains scaffold.
   gate: pytest tests/test_apply_layout_spec.py — all pass; dry_run returns generated_code with `omni.usd.get_context().get_stage()`
   files:
   - service/isaac_assist_service/multimodal/instantiator.py
@@ -151,7 +158,7 @@
   effort_min: 60
   blocked_by:
   - '9'
-  needs_runtime: Kit RPC for full per-class branching (dry_run scaffold landed)
+  needs_runtime: Kit RPC for full per-class branching execution (code generation complete)
 '20':
   title: Role-based template refactor
   agent_type: sonnet-bounded
