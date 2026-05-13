@@ -1212,7 +1212,8 @@ async def _handle_iterate_reward(args: Dict) -> Dict:
 
 async def _handle_eureka_status(args: Dict) -> Dict:
     """Return current status of a Eureka optimization run."""
-    from ..tool_executor import _eureka_runs
+    from ._state import EUREKA
+    _eureka_runs = EUREKA.runs
     run_id = args["run_id"]
 
     if run_id in _eureka_runs:
@@ -1362,7 +1363,8 @@ async def _handle_compare_policies(args: Dict) -> Dict:
 
 async def _handle_export_finetune_data(args: Dict) -> Dict:
     """Export recorded turns to a provider-specific fine-tuning format."""
-    from ..tool_executor import _turn_recorder
+    from ._state import get_turn_recorder
+    _turn_recorder = get_turn_recorder()
     fmt = args["format"]
     min_quality = args.get("min_quality", "approved_successful")
     output_path = args.get("output_path")
@@ -1375,7 +1377,8 @@ async def _handle_export_finetune_data(args: Dict) -> Dict:
 
 async def _handle_finetune_stats(args: Dict) -> Dict:
     """Return aggregate statistics about recorded fine-tuning data."""
-    from ..tool_executor import _turn_recorder
+    from ._state import get_turn_recorder
+    _turn_recorder = get_turn_recorder()
     return _turn_recorder.get_stats()
 
 
@@ -2407,7 +2410,8 @@ async def _handle_profile_training_throughput(args: Dict) -> Dict:
 
 async def _handle_redact_finetune_data(args: Dict) -> Dict:
     """Run the redaction pipeline on an existing JSONL file."""
-    from ..tool_executor import _turn_recorder
+    from ._state import get_turn_recorder
+    _turn_recorder = get_turn_recorder()
     input_path = args["input_path"]
     output_path = args.get("output_path")
     return _turn_recorder.redact_file(

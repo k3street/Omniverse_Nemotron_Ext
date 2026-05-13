@@ -141,7 +141,8 @@ async def _handle_record_feedback(args: Dict) -> Dict:
     approved = args["approved"]
     edited = args.get("edited", False)
     correction = args.get("correction")
-    return _te._turn_recorder.record_feedback(
+    from ._state import get_turn_recorder
+    return get_turn_recorder().record_feedback(
         session_id=session_id,
         turn_id=turn_id,
         approved=approved,
