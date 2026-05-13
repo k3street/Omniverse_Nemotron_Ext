@@ -882,9 +882,14 @@
   note: CI matrix spec + YAML template + build-target enumeration
 88b:
   title: Production patch sandboxing for high-risk patches
-  agent_type: opus-runtime
-  status: scaffold
-  note: Windows MSYS2 CI
+  agent_type: sonnet-bounded
+  status: landed
+  note: SPEC/SANDBOX layer — risk classifier, sandbox policy engine, dry-run isolation
+  gate: pytest — risk classifier scores patches; sandbox policy gates execution
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_88b_patch_sandboxing.py
+  - tests/test_sub_phase_88b_patch_sandboxing.py
+  loc: 280
 '89':
   title: ROCm + Intel Arc + DirectML smoke tests
   agent_type: sonnet-bounded
@@ -1009,9 +1014,16 @@
   blocked_by: []
 97b:
   title: Fast-sweep CP-regression harness (N=1 over all canonicals)
-  agent_type: opus-runtime
-  status: scaffold
-  note: long-running benchmark
+  agent_type: sonnet-bounded
+  status: landed
+  note: harness orchestrator + sweep config + result aggregator + regression detector
+  gate: pytest tests/test_sub_phase_97b_fast_sweep_cp_regression.py -- all pass
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_97b_fast_sweep_cp_regression.py
+  - tests/test_sub_phase_97b_fast_sweep_cp_regression.py
+  loc: 280
+  effort_min: 30
+  blocked_by: []
 '98':
   title: Documentation polish
   agent_type: sonnet-mechanical
