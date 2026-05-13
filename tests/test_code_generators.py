@@ -537,6 +537,320 @@ _TEST_VECTORS = [
         {"output_path": "/tmp/v.mp4"},
         ["/tmp/v.mp4"],
     ),
+    # ----- qa-20-followup: drain _KNOWN_UNTESTED ratchet (batch 3) -----
+    (
+        "activate_area",
+        {"area_id": "A1", "prim_scope": "/W/Areas"},
+        ["omni.usd.get_context()", "/W/Areas"],
+    ),
+    (
+        "add_latency_randomization",
+        {"mean_ms": 50, "std_ms": 10},
+        ["latency randomization"],
+    ),
+    (
+        "add_node",
+        {"graph_path": "/W/G", "node_type": "omni.graph.nodes.Add", "name": "N1"},
+        ["omni.graph.core", "/W/G"],
+    ),
+    (
+        "add_sublayer",
+        {"layer_path": "/tmp/sub.usda"},
+        ["omni.usd", "/tmp/sub.usda"],
+    ),
+    (
+        "add_usd_reference",
+        {"prim_path": "/W/Ref", "usd_url": "/tmp/robot.usd"},
+        ["omni.usd", "/W/Ref"],
+    ),
+    (
+        "apply_force",
+        {"prim_path": "/W/B", "force": [0.0, 0.0, 100.0]},
+        ["UsdPhysics", "/W/B"],
+    ),
+    (
+        "apply_physics_material",
+        {"prim_path": "/W/B", "material_name": "Steel"},
+        ["UsdPhysics", "/W/B"],
+    ),
+    (
+        "assemble_robot",
+        {"base_path": "/W/Base", "attachment_path": "/W/EE"},
+        ["Phase 70", "RobotAssembler"],
+    ),
+    (
+        "assign_class_to_children",
+        {"prim_path": "/W/Parent", "class_name": "cube"},
+        ["Semantics", "/W/Parent"],
+    ),
+    (
+        "batch_delete_prims",
+        {"prim_paths": ["/W/A", "/W/B"]},
+        ["omni.usd", "/W/A"],
+    ),
+    (
+        "batch_set_attributes",
+        {"updates": [{"prim_path": "/W/A", "attr": "visibility", "value": "invisible"}]},
+        ["batch_set_attributes"],
+    ),
+    (
+        "bulk_apply_schema",
+        {"prim_paths": ["/W/A"], "schema": "PhysicsCollisionAPI"},
+        ["CollisionAPI"],
+    ),
+    (
+        "bulk_set_attribute",
+        {"prim_paths": ["/W/A"], "attr": "visibility", "value": "invisible"},
+        ["omni.usd", "/W/A"],
+    ),
+    (
+        "check_physics_health",
+        {},
+        ["UsdPhysics", "import omni.usd"],
+    ),
+    (
+        "check_singularity",
+        {"articulation_path": "/W/R", "target_position": [1, 0, 0.5]},
+        ["isaacsim", "/W/R"],
+    ),
+    (
+        "compute_convex_hull",
+        {"prim_path": "/W/Mesh"},
+        ["UsdGeom", "/W/Mesh"],
+    ),
+    (
+        "configure_camera",
+        {"camera_path": "/W/Cam", "fov": 60},
+        ["UsdGeom", "/W/Cam"],
+    ),
+    (
+        "configure_coco_yolo_writer",
+        {"output_dir": "/tmp/coco", "format": "coco"},
+        ["omni.replicator.core", "/tmp/coco"],
+    ),
+    (
+        "configure_correlated_dr",
+        {
+            "parameter_groups": [
+                {"params": ["a", "b"], "ranges": {"a": [0, 1]}, "correlation": 0.5}
+            ]
+        },
+        ["Correlated", "import numpy"],
+    ),
+    (
+        "configure_differential_sdg",
+        {"baseline_pipeline_id": "p1", "candidate_pipeline_id": "p2"},
+        ["omni.replicator.core"],
+    ),
+    (
+        "configure_ros2_bridge",
+        {},
+        ["configure_ros2_bridge"],
+    ),
+    (
+        "configure_ros2_time",
+        {"mode": "system"},
+        ["omni.graph.core"],
+    ),
+    (
+        "configure_self_collision",
+        {"articulation_path": "/W/R", "mode": "enable"},
+        ["UsdPhysics", "/W/R"],
+    ),
+    (
+        "configure_teleop_mapping",
+        {"robot_path": "/W/R", "mapping_file": "/tmp/m.json"},
+        ["UsdPhysics", "Teleop"],
+    ),
+    (
+        "configure_zmq_stream",
+        {"camera_prim": "/W/Cam", "endpoint": "tcp://localhost:5555"},
+        ["omni.graph.core"],
+    ),
+    (
+        "connect_nodes",
+        {"graph_path": "/W/G", "src": "A.out", "dst": "B.in"},
+        ["omni.graph.core", "/W/G"],
+    ),
+    (
+        "create_audio_prim",
+        {"prim_path": "/W/Audio", "audio_file": "/tmp/x.wav", "position": [0, 0, 0]},
+        ["UsdMedia", "/W/Audio"],
+    ),
+    (
+        "create_behavior",
+        {
+            "robot_path": "/W/R",
+            "behavior_name": "pp",
+            "behavior_type": "pick_place",
+            "pick_pose": {"x": 0, "y": 0, "z": 0.5, "roll": 0, "pitch": 0, "yaw": 0},
+            "place_pose": {"x": 1, "y": 0, "z": 0.5, "roll": 0, "pitch": 0, "yaw": 0},
+        },
+        ["isaacsim.cortex.framework"],
+    ),
+    (
+        "create_bin",
+        {"prim_path": "/W/Bin"},
+        ["UsdGeom", "/W/Bin"],
+    ),
+    (
+        "create_broken_scene",
+        {"scenario": "cube_clipping"},
+        ["Broken scene"],
+    ),
+    (
+        "create_calibration_experiment",
+        {"experiment_name": "cam_intrinsics"},
+        ["Calibration experiment", "import numpy"],
+    ),
+    (
+        "create_conveyor",
+        {"prim_path": "/W/Conv", "length": 2.0},
+        ["UsdPhysics", "/W/Conv"],
+    ),
+    (
+        "create_graph",
+        {"graph_path": "/W/G"},
+        ["template"],
+    ),
+    (
+        "create_hdri_skydome",
+        {"hdri_path": "/tmp/sky.hdr"},
+        ["UsdLux", "/tmp/sky.hdr"],
+    ),
+    (
+        "create_sdg_pipeline",
+        {"output_dir": "/tmp/sdg"},
+        ["omni.replicator.core"],
+    ),
+    (
+        "enable_deterministic_mode",
+        {"seed": 42},
+        ["deterministic", "import os"],
+    ),
+    (
+        "enable_post_process",
+        {"effect": "bloom"},
+        ["omni.usd"],
+    ),
+    (
+        "enforce_class_balance",
+        {
+            "pipeline_id": "p1",
+            "target_distribution": {"cube": 0.5, "sphere": 0.5},
+        },
+        ["omni.replicator.core"],
+    ),
+    (
+        "export_template",
+        {"name": "pick_place", "output_path": "/tmp/t.json"},
+        ["import json"],
+    ),
+    (
+        "fix_collision_mesh",
+        {"prim_path": "/W/M"},
+        ["UsdPhysics", "/W/M"],
+    ),
+    (
+        "fix_ros2_qos",
+        {"topic": "/img"},
+        ["omni.graph.core", "/img"],
+    ),
+    (
+        "generate_occupancy_map",
+        {"output_path": "/tmp/map.png"},
+        ["MapGenerator"],
+    ),
+    (
+        "grasp_object",
+        {"robot_path": "/W/R", "target_prim": "/W/Cube"},
+        ["UsdGeom", "/W/R"],
+    ),
+    (
+        "import_template",
+        {"file_path": "/tmp/t.json"},
+        ["import json"],
+    ),
+    (
+        "load_robot_pose",
+        {"robot_path": "/W/R", "pose_name": "home"},
+        ["import os", "home"],
+    ),
+    (
+        "optimize_scene",
+        {},
+        ["UsdPhysics", "import json"],
+    ),
+    (
+        "preview_dr",
+        {"preset": "lighting_jitter"},
+        ["preview"],
+    ),
+    (
+        "quick_demo",
+        {"scenario": "pick_place"},
+        ["Quick Demo Builder", "franka"],
+    ),
+    (
+        "record_waypoints",
+        {"articulation_path": "/W/R", "output_path": "/tmp/wp.json"},
+        ["isaacsim", "/W/R"],
+    ),
+    (
+        "replay_rosbag",
+        {"bag_path": "/tmp/bag.db3"},
+        ["import subprocess", "/tmp/bag.db3"],
+    ),
+    (
+        "replay_trajectory",
+        {"articulation_path": "/W/R", "trajectory_path": "/tmp/t.json"},
+        ["isaacsim", "/W/R"],
+    ),
+    (
+        "render_video",
+        {"output_path": "/tmp/v.mp4", "duration": 5},
+        ["/tmp/v.mp4"],
+    ),
+    (
+        "robot_wizard",
+        {"robot_class": "franka_panda"},
+        ["robot_wizard"],
+    ),
+    (
+        "scatter_on_surface",
+        {"surface_path": "/W/Table", "count": 10},
+        ["UsdGeom", "random"],
+    ),
+    (
+        "set_joint_velocity_limit",
+        {"joint_path": "/W/J", "vel_limit": 3.14},
+        ["UsdPhysics", "/W/J"],
+    ),
+    (
+        "set_motion_policy",
+        {"articulation_path": "/W/R", "policy_type": "rmpflow"},
+        ["set_motion_policy"],
+    ),
+    (
+        "set_physics_scene_config",
+        {"gravity": [0, 0, -9.81]},
+        ["UsdPhysics"],
+    ),
+    (
+        "setup_multi_rate",
+        {"physics_dt": 0.005, "render_dt": 0.033},
+        ["Dual-rate", "VecEnv"],
+    ),
+    (
+        "start_teaching_mode",
+        {"articulation_path": "/W/R", "mode": "free_drive"},
+        ["start_teaching_mode"],
+    ),
+    (
+        "tune_gains",
+        {"articulation_path": "/W/R"},
+        ["UsdPhysics", "/W/R"],
+    ),
 ]
 
 
@@ -669,50 +983,23 @@ class TestAllCodeGenHandlersCovered:
     """
 
     _KNOWN_UNTESTED: "frozenset[str]" = frozenset({
-        'activate_area', 'add_domain_randomizer',
-        'add_latency_randomization', 'add_node', 'add_proximity_sensor',
-        'add_sublayer', 'add_usd_reference', 'apply_force',
-        'apply_physics_material', 'assemble_robot', 'assign_class_to_children',
-        'batch_delete_prims', 'batch_set_attributes', 'bulk_apply_schema',
-        'bulk_set_attribute', 'check_path_clearance', 'check_physics_health',
-        'check_singularity', 'clone_envs', 'cloud_download_results',
-        'compute_convex_hull', 'configure_camera', 'configure_coco_yolo_writer',
-        'configure_correlated_dr', 'configure_differential_sdg',
-        'configure_ros2_bridge', 'configure_ros2_time',
-        'configure_self_collision', 'configure_teleop_mapping',
-        'configure_zmq_stream', 'connect_nodes', 'create_arena',
-        'create_arena_variant', 'create_audio_prim', 'create_behavior',
-        'create_bin', 'create_broken_scene', 'create_calibration_experiment',
-        'create_conveyor', 'create_conveyor_track', 'create_graph',
-        'create_gripper', 'create_hdri_skydome', 'create_sdg_pipeline',
-        'create_wheeled_robot', 'debug_draw',
-        'define_grasp_pose',
-        'enable_deterministic_mode', 'enable_post_process',
-        'enforce_class_balance', 'evaluate_groot', 'evaluate_reward',
-        'export_dataset', 'export_nav2_map',
-        'export_policy', 'export_teleop_mapping',
-        'export_template', 'extract_attention_maps', 'finetune_groot',
-        'fix_collision_mesh', 'fix_ros2_qos',
-        'generate_eval_harness',
-        'generate_occupancy_map', 'generate_teleop_watchdog_script',
-        'grasp_object', 'import_template',
-        'interpolate_trajectory', 'load_payload', 'load_robot_pose',
+        'add_domain_randomizer', 'add_proximity_sensor',
+        'check_path_clearance', 'clone_envs', 'cloud_download_results',
+        'create_arena', 'create_arena_variant', 'create_conveyor_track',
+        'create_gripper', 'create_wheeled_robot', 'debug_draw',
+        'define_grasp_pose', 'evaluate_groot', 'evaluate_reward',
+        'export_dataset', 'export_nav2_map', 'export_policy',
+        'export_teleop_mapping', 'extract_attention_maps', 'finetune_groot',
+        'generate_eval_harness', 'generate_teleop_watchdog_script',
+        'interpolate_trajectory', 'load_payload',
         'merge_meshes', 'monitor_joint_effort', 'navigate_to',
-        'optimize_collision', 'optimize_scene', 'play_animation',
-        'preview_dr', 'publish_robot_description',
-        'quick_demo', 'record_teleop_demo',
-        'record_trajectory', 'record_waypoints',
-        'render_video', 'replay_rosbag', 'replay_trajectory', 'robot_wizard',
-        'run_arena_benchmark', 'scatter_on_surface',
-        'set_joint_velocity_limit',
-        'set_motion_policy', 'set_physics_scene_config',
+        'optimize_collision', 'play_animation',
+        'publish_robot_description', 'record_teleop_demo',
+        'record_trajectory', 'run_arena_benchmark',
         'setup_contact_sensors', 'setup_loco_manipulation_training',
-        'setup_multi_rate', 'setup_pick_place_controller',
-        'setup_pick_place_ros2_bridge', 'setup_ros2_bridge',
-        'setup_rsi_from_demos', 'setup_whole_body_control',
-        'simplify_collision', 'solve_ik',
-        'start_teaching_mode',
-        'tune_gains',
+        'setup_pick_place_controller', 'setup_pick_place_ros2_bridge',
+        'setup_ros2_bridge', 'setup_rsi_from_demos',
+        'setup_whole_body_control', 'simplify_collision', 'solve_ik',
         'verify_import',
     })
 
