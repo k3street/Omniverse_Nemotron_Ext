@@ -12,7 +12,122 @@ Per `specs/IA_FULL_SPEC_2026-05-10.md` Phases 2 + 6.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List, Optional
+
+# ---------------------------------------------------------------------------
+# Theme-local helpers (Phase 8 wave 20, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.robot.
+
+def _generate_calibration_script(
+    real_data_path: str,
+    articulation_path: str,
+    parameters: List[str],
+    num_samples: int,
+    num_workers: int,
+    output_dir: str,
+) -> str:
+    """Generate the headless Bayesian-optimization script.
+
+    Uses Ray Tune + OptunaSearch (already in isaac_lab_env). The script replays
+    commanded torques in sim and minimizes trajectory mismatch.
+    """
+    return f'''"""Auto-generated physics calibration script.
+Articulation: {articulation_path}
+Real data:    {real_data_path}
+Parameters:   {parameters}
+"""
+from __future__ import annotations
+import json
+import os
+from pathlib import Path
+
+import h5py
+import numpy as np
+import ray
+from ray import tune
+from ray.tune.search.optuna import OptunaSearch
+
+REAL_DATA_PATH = {real_data_path!r}
+ARTICULATION_PATH = {articulation_path!r}
+PARAMETERS = {parameters!r}
+OUTPUT_DIR = Path({output_dir!r})
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def load_real_data(path):
+    with h5py.File(path, "r") as f:
+        return {{
+            "joint_positions": f["joint_positions"][:],
+            "joint_velocities": f["joint_velocities"][:],
+            "joint_torques_commanded": f["joint_torques_commanded"][:],
+        }}
+
+
+def replay_trajectory(art, commanded_torques):
+    """Stub — IsaacLab integration replays commanded torques in sim."""
+    raise NotImplementedError("Replay must run inside isaac_lab_env (GPU + Kit)")
+
+
+def trajectory_distance(sim, real):
+    return float(np.sqrt(np.mean((sim - real) ** 2)))
+
+
+def objective(config):
+    real = load_real_data(REAL_DATA_PATH)
+    # IsaacLab env imports happen inside the trial process (needs GPU)
+    from isaaclab.app import AppLauncher
+    app = AppLauncher(headless=True).app  # noqa: F841
+    from isaaclab.assets import Articulation
+    art = Articulation.from_path(ARTICULATION_PATH)
+    if "friction" in config:
+        art.write_joint_friction_coefficient_to_sim(config["friction"])
+    if "damping" in config:
+        art.write_joint_damping_to_sim(config["damping"])
+    if "armature" in config:
+        art.write_joint_armature_to_sim(config["armature"])
+    if "masses" in config:
+        art.set_masses(config["masses"])
+    sim_traj = replay_trajectory(art, real["joint_torques_commanded"])
+    error = trajectory_distance(sim_traj, real["joint_positions"])
+    return {{"loss": error}}
+
+
+def make_search_space(parameters):
+    space = {{}}
+    if "friction" in parameters:
+        space["friction"] = tune.uniform(0.1, 2.0)
+    if "damping" in parameters:
+        space["damping"] = tune.uniform(0.01, 1.0)
+    if "armature" in parameters:
+        space["armature"] = tune.uniform(0.0, 0.5)
+    if "viscous_friction" in parameters:
+        space["viscous_friction"] = tune.uniform(0.0, 0.5)
+    if "masses" in parameters:
+        space["masses_scale"] = tune.uniform(0.8, 1.2)
+    return space
+
+
+def main():
+    ray.init(num_cpus={num_workers}, ignore_reinit_error=True)
+    analysis = tune.run(
+        objective,
+        search_alg=OptunaSearch(metric="loss", mode="min"),
+        config=make_search_space(PARAMETERS),
+        num_samples={num_samples},
+        local_dir=str(OUTPUT_DIR / "ray_results"),
+    )
+    best = analysis.get_best_config(metric="loss", mode="min")
+    result = {{
+        "calibrated_parameters": best,
+        "best_loss": analysis.best_result["loss"],
+    }}
+    (OUTPUT_DIR / "result.json").write_text(json.dumps(result, indent=2))
+    print(json.dumps(result, indent=2))
+
+
+if __name__ == "__main__":
+    main()
+'''
 
 # ---------------------------------------------------------------------------
 # Theme-local constants (Phase 8 wave 16, 2026-05-13)
@@ -4339,7 +4454,7 @@ async def _handle_calibrate_physics(args: Dict) -> Dict:
     """Generate a Ray-Tune+Optuna calibration script and return the launch command."""
     from pathlib import Path as _Path
     from ._shared import _check_real_data_path, _safe_robot_name
-    from ..tool_executor import _generate_calibration_script
+    # Phase 8 wave 20 — _generate_calibration_script migrated.
     real_data_path = args.get("real_data_path", "")
     articulation_path = args.get("articulation_path", "")
 
@@ -4410,7 +4525,7 @@ async def _handle_quick_calibrate(args: Dict) -> Dict:
     """Faster calibration: only the highest-impact parameters."""
     from pathlib import Path as _Path
     from ._shared import _check_real_data_path, _safe_robot_name
-    from ..tool_executor import _generate_calibration_script
+    # Phase 8 wave 20 — _generate_calibration_script migrated.
     real_data_path = args.get("real_data_path", "")
     articulation_path = args.get("articulation_path", "")
 
