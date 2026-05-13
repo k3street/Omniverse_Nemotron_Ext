@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
@@ -7,6 +8,10 @@ import path from "path";
 // StaticFiles mount at /floorplan in service/isaac_assist_service/main.py.
 // Dev server proxies API + SSE calls to the FastAPI service on :8000.
 export default defineConfig({
+    test: {
+        environment: "node",
+        include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    },
     plugins: [react()],
     resolve: {
         alias: {
