@@ -2414,10 +2414,10 @@ else:
 
 async def _handle_check_vram_headroom(args: Dict) -> Dict:
     """Estimate VRAM cost vs available, return warnings + suggestions."""
-    from .. import tool_executor as _te  # noqa: PLC0415
-    # Phase 8 mop-up — _VRAM_PER_ENV_MB is now module-local.
-    _detect_local_vram_gb = _te._detect_local_vram_gb
-    _detect_used_vram_gb = _te._detect_used_vram_gb
+    # Phase 8 wave 18 — _detect_local_vram_gb now in _shared,
+    # _detect_used_vram_gb is module-local. _VRAM_PER_ENV_MB is also
+    # module-local (wave 10).
+    from ._shared import _detect_local_vram_gb
     operation = args.get("operation", "custom")
     num_envs = int(args.get("num_envs", 1))
     complexity = args.get("complexity", "medium")
