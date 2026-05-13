@@ -15,6 +15,44 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
+# Theme-local helpers (Phase 8 wave 18, 2026-05-13)
+
+def _load_template_manifests(library_dir: Path) -> List[Dict]:
+    """Load manifest.json from each template directory in library_dir.
+
+    Each entry is augmented with `_template_dir` so the caller can resolve
+    paths.  Missing or malformed manifests are skipped.
+    """
+    manifests: List[Dict] = []
+    if not library_dir.exists():
+        return manifests
+    for entry in sorted(library_dir.iterdir()):
+        if not entry.is_dir():
+            continue
+        manifest_path = entry / "manifest.json"
+        if not manifest_path.exists():
+            continue
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[filter_templates_by_hardware] bad manifest at {manifest_path}: {e}")
+            continue
+        if not isinstance(data, dict):
+            continue
+        data["_template_dir"] = str(entry)
+        manifests.append(data)
+    return manifests
+
+# _handle_filter_templates_by_hardware moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
+
+# _gen_export_template moved to handlers/scene_blueprints.py (Phase 6 wave 11).
+
+# _gen_import_template moved to handlers/scene_blueprints.py (Phase 6 wave 11).
+
+
+# _handle_check_vram_headroom moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
+
+# ---------------------------------------------------------------------------
 # Theme-local constants (Phase 8 wave 16, 2026-05-13)
 # Migrated from tool_executor.py — used only by handlers.scene_blueprints.
 
@@ -978,11 +1016,9 @@ async def _handle_filter_templates_by_hardware(args: Dict) -> Dict:
     """Filter templates by GPU VRAM + tag/category."""
     from pathlib import Path as _Path
     from typing import List as _List
-    from ..tool_executor import (
-        _detect_local_vram_gb,
-        _load_template_manifests,
-    )
-    # _TEMPLATE_LIBRARY_DIR is module-local (Phase 8 wave 7)
+    from ._shared import _detect_local_vram_gb
+    # _load_template_manifests, _TEMPLATE_LIBRARY_DIR are module-local
+    # (Phase 8 waves 7 + 18).
     device_vram_gb = args.get("device_vram_gb")
     if device_vram_gb is None:
         device_vram_gb = _detect_local_vram_gb()

@@ -349,6 +349,28 @@ def _probe_isaac_lab():
 
 # _resolve_auto_target_source migrated to handlers/pick_place.py (Phase 8 wave 9, 2026-05-13).
 
+
+
+# Phase 8 wave 18 (2026-05-13): cross-theme vram detection helper.
+
+def _detect_local_vram_gb() -> Optional[float]:
+    """Best-effort GPU VRAM detection via the existing fingerprint collector."""
+    try:
+        from ...fingerprint.collector import get_gpu_info
+    except Exception:
+        return None
+    try:
+        gpus = get_gpu_info() or []
+    except Exception:
+        return None
+    if not gpus:
+        return None
+    # Use the largest-VRAM GPU (matches Isaac Sim's preferred device)
+    best = max(g.get("vram_mb", 0) for g in gpus)
+    if best <= 0:
+        return None
+    return round(best / 1024.0, 2)
+
 CONSTANTS: dict[str, object] = {
     "SAFE_XFORM_SNIPPET": _SAFE_XFORM_SNIPPET,
     "OG_NODE_TYPE_MAP": _OG_NODE_TYPE_MAP,
@@ -423,6 +445,7 @@ __all__ = [
     "_probe_scipy",
     "_probe_curobo",
     "_probe_isaac_lab",
+    "_detect_local_vram_gb",
     # Plus the lazy-imported names; importers see them via __getattr__.
     *_LEGACY_REEXPORT_NAMES,
 ]

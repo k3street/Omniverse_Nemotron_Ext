@@ -15,6 +15,29 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
+# Theme-local helpers (Phase 8 wave 18, 2026-05-13)
+
+def _detect_used_vram_gb() -> Optional[float]:
+    """Best-effort current VRAM usage via nvidia-smi."""
+    try:
+        from ...fingerprint.collector import run_shell
+    except Exception:
+        return None
+    try:
+        out = run_shell("nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits")
+    except Exception:
+        return None
+    if not out:
+        return None
+    try:
+        # Take the first GPU
+        first = out.splitlines()[0].strip()
+        used_mb = float(first)
+        return round(used_mb / 1024.0, 2)
+    except Exception:
+        return None
+
+# ---------------------------------------------------------------------------
 # Theme-local constants (Phase 8 wave 10, 2026-05-13)
 # Migrated from tool_executor.py — used only by handlers.diagnostics.
 

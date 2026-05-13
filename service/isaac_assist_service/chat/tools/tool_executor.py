@@ -2830,78 +2830,11 @@ def _wf_advance_phase(wf: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 # ══════ From feat/addendum-community-remote-v2 ══════
-def _detect_local_vram_gb() -> Optional[float]:
-    """Best-effort GPU VRAM detection via the existing fingerprint collector."""
-    try:
-        from ...fingerprint.collector import get_gpu_info
-    except Exception:
-        return None
-    try:
-        gpus = get_gpu_info() or []
-    except Exception:
-        return None
-    if not gpus:
-        return None
-    # Use the largest-VRAM GPU (matches Isaac Sim's preferred device)
-    best = max(g.get("vram_mb", 0) for g in gpus)
-    if best <= 0:
-        return None
-    return round(best / 1024.0, 2)
+# _detect_local_vram_gb migrated to handlers/_shared.py (Phase 8 wave 18, 2026-05-13).
 
-def _detect_used_vram_gb() -> Optional[float]:
-    """Best-effort current VRAM usage via nvidia-smi."""
-    try:
-        from ...fingerprint.collector import run_shell
-    except Exception:
-        return None
-    try:
-        out = run_shell("nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits")
-    except Exception:
-        return None
-    if not out:
-        return None
-    try:
-        # Take the first GPU
-        first = out.splitlines()[0].strip()
-        used_mb = float(first)
-        return round(used_mb / 1024.0, 2)
-    except Exception:
-        return None
+# _detect_used_vram_gb migrated to handlers/handlers/diagnostics.py (Phase 8 wave 18, 2026-05-13).
 
-def _load_template_manifests(library_dir: Path) -> List[Dict]:
-    """Load manifest.json from each template directory in library_dir.
-
-    Each entry is augmented with `_template_dir` so the caller can resolve
-    paths.  Missing or malformed manifests are skipped.
-    """
-    manifests: List[Dict] = []
-    if not library_dir.exists():
-        return manifests
-    for entry in sorted(library_dir.iterdir()):
-        if not entry.is_dir():
-            continue
-        manifest_path = entry / "manifest.json"
-        if not manifest_path.exists():
-            continue
-        try:
-            data = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"[filter_templates_by_hardware] bad manifest at {manifest_path}: {e}")
-            continue
-        if not isinstance(data, dict):
-            continue
-        data["_template_dir"] = str(entry)
-        manifests.append(data)
-    return manifests
-
-# _handle_filter_templates_by_hardware moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
-
-# _gen_export_template moved to handlers/scene_blueprints.py (Phase 6 wave 11).
-
-# _gen_import_template moved to handlers/scene_blueprints.py (Phase 6 wave 11).
-
-
-# _handle_check_vram_headroom moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
+# _load_template_manifests migrated to handlers/handlers/scene_blueprints.py (Phase 8 wave 18, 2026-05-13).
 
 def _async_task_runner(task_id: str, task_type: str, params: Dict) -> None:
     """Worker body executed in a daemon thread.
