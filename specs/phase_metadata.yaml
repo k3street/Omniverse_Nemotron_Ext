@@ -527,9 +527,14 @@
   note: 'SPEC/MATH layer landed (B-spline de Boor, TSDFConfig, ConstraintSpec, CuRoboV2Backend); GPU/Warp planning remains opus-runtime gated; 27 tests pass'
 63c:
   title: Per-robot-family cuRobo debugging protocol
-  agent_type: opus-runtime
-  status: scaffold
-  note: pose estimation
+  agent_type: sonnet-bounded
+  status: landed
+  note: debug checklist + failure classifier + fixup recipes per robot family; 30 tests pass
+  gate: pytest tests/test_sub_phase_63c_curobo_debug_protocol.py -- 30 tests pass
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_63c_curobo_debug_protocol.py
+  - tests/test_sub_phase_63c_curobo_debug_protocol.py
+  loc: 280
 63d:
   title: Multi-robot coordination runtime (handoff + mutex enforcement)
   agent_type: sonnet-bounded
