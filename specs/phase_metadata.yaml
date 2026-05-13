@@ -168,8 +168,13 @@
 '21':
   title: 'Role library: scene-template index by role'
   agent_type: sonnet-mechanical
-  status: scaffold
+  status: landed
   note: inverted index, data
+  landed_date: '2026-05-13'
+  gate: pytest tests/test_phase_21_role_template_index.py — index lookup by role returns matching templates
+  files:
+  - service/isaac_assist_service/multimodal/role_template_index.py
+  - tests/test_phase_21_role_template_index.py
 '22':
   title: '`sync_from_stage` — round-trip Kit → LayoutSpec'
   agent_type: opus-runtime
