@@ -14,6 +14,22 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
+# ---------------------------------------------------------------------------
+# Phase 14 + 16 (2026-05-13): migrated from tool_executor.py.
+
+_PROACTIVE_TRIGGER_PLAYBOOKS: Dict[str, List[str]] = {
+    "scene_opened":      ["scene_summary", "get_console_errors"],
+    "robot_imported":    ["scene_summary", "get_articulation_state"],
+    "console_error":     ["get_console_errors", "explain_error"],
+    "training_started":  ["get_console_errors"],
+    "training_active":   ["get_console_errors"],
+    "training_finished": ["get_console_errors"],
+    "sim_idle":          ["scene_summary"],
+    "sim_play":          ["get_console_errors", "scene_summary"],
+    "fps_drop":          ["get_debug_info", "scene_summary"],
+    "target_placed":     ["scene_summary", "measure_distance"],
+}
+
 
 def _lazy_execute_tool_call(*args, **kwargs):
     """Lazy proxy for tool_executor.execute_tool_call to avoid circular

@@ -16,6 +16,34 @@ from __future__ import annotations
 import re as _re
 from typing import Any, Awaitable, Callable, Dict
 
+# ---------------------------------------------------------------------------
+# Phase 14 + 16 (2026-05-13): migrated from tool_executor.py.
+
+_ROBOT_REACH_M = {
+    "franka_panda": 0.855,  # Franka Panda — 855mm reach
+    "ur5e":         0.850,
+    "ur10":         1.300,
+    "ur10e":        1.300,
+    "kinova":       0.902,
+    "h1":           0.580,  # H1 humanoid arm reach (one arm)
+    "g1":           0.450,
+    "default":      0.800,
+}
+
+_COORD_LANDMARKS = {
+    # Named anchor points — return position relative to a reference prim
+    # (or world origin when no reference). Ordered most-specific first.
+    "origin": "world",
+    "world origin": "world",
+    "center of stage": "world",
+    "stage center": "world",
+}
+
+_RELATIONAL_PATTERN_RE = __import__("re").compile(
+    r"(?P<factor>\d+(?:\.\d+)?)\s*[xX×]?\s*(?P<rel>times|x|×|the size of|larger than|smaller than|bigger than)?",
+    __import__("re").IGNORECASE,
+)
+
 from ._shared import _ROBOT_WIZARD_REGISTRY, _resolve_robot_asset
 
 # ---------------------------------------------------------------------------

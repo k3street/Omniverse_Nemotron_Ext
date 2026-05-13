@@ -195,6 +195,59 @@ def get_turn_recorder():
     return _TURN_RECORDER_SINGLETON
 
 
+
+# ---------------------------------------------------------------------------
+# Phase 14 + 16 (2026-05-13): migrated from tool_executor.py.
+
+_WORKFLOWS: Dict[str, Dict[str, Any]] = {}
+
+_WORKFLOW_TEMPLATES: Dict[str, Dict[str, Any]] = {
+    "rl_training": {
+        "description": "Full RL training pipeline (W1 from spec)",
+        "phases": [
+            {"name": "plan",        "checkpoint": True,  "error_fix": False},
+            {"name": "env_creation","checkpoint": False, "error_fix": True},
+            {"name": "reward",      "checkpoint": True,  "error_fix": False},
+            {"name": "training",    "checkpoint": False, "error_fix": False},
+            {"name": "results",     "checkpoint": True,  "error_fix": False},
+            {"name": "deploy",      "checkpoint": True,  "error_fix": False},
+        ],
+        "default_params": {
+            "num_envs": 64,
+            "env_spacing": 2.5,
+            "algo": "ppo",
+            "num_iterations": 5000,
+        },
+    },
+    "robot_import": {
+        "description": "Robot import & configuration (W2 from spec)",
+        "phases": [
+            {"name": "plan",            "checkpoint": True,  "error_fix": False},
+            {"name": "import",          "checkpoint": False, "error_fix": True},
+            {"name": "verify",          "checkpoint": False, "error_fix": False},
+            {"name": "auto_fix",        "checkpoint": True,  "error_fix": False},
+            {"name": "motion_planning", "checkpoint": False, "error_fix": True},
+            {"name": "report",          "checkpoint": False, "error_fix": False},
+        ],
+        "default_params": {
+            "fix_profile": "auto",
+        },
+    },
+    "sim_debugging": {
+        "description": "Simulation debugging with autonomous error-fix loop (W4 from spec)",
+        "phases": [
+            {"name": "diagnose",   "checkpoint": False, "error_fix": False},
+            {"name": "hypothesis", "checkpoint": False, "error_fix": False},
+            {"name": "fix",        "checkpoint": True,  "error_fix": True},
+            {"name": "verify",     "checkpoint": False, "error_fix": False},
+            {"name": "report",     "checkpoint": False, "error_fix": False},
+        ],
+        "default_params": {
+            "max_hypothesis_iterations": 3,
+        },
+    },
+}
+
 __all__ = [
     "WorkflowState",
     "EurekaState",
@@ -202,6 +255,8 @@ __all__ = [
     "DRState",
     "BridgeState",
     "WORKFLOWS",
+    "_WORKFLOW_TEMPLATES",
+    "_WORKFLOWS",
     "EUREKA",
     "TRAINING",
     "ASYNC_TASKS",

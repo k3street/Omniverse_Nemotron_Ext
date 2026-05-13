@@ -66,6 +66,15 @@ from .handlers._state import StageWriteLockQueue as _StageWriteLockQueue  # noqa
 from .handlers._state import ASYNC_TASKS as _ASYNC_TASKS  # noqa: E402, F401
 from .handlers._state import ASYNC_TASKS_LOCK as _ASYNC_TASKS_LOCK  # noqa: E402, F401
 
+# Phase 14 + 16 (2026-05-13): canonical homes moved to handlers/_state.py.
+# Aliased here for any remaining `_te.X` callsites. NOTE: these are
+# the legacy `_WORKFLOWS` dict + `_WORKFLOW_TEMPLATES` registry, NOT
+# the typed `WORKFLOWS = WorkflowState()` singleton. Names kept with
+# underscore prefix to preserve `_te._WORKFLOWS` access semantics.
+from .handlers import _state as _state_module  # noqa: E402
+_WORKFLOWS = _state_module._WORKFLOWS  # noqa: F811
+_WORKFLOW_TEMPLATES = _state_module._WORKFLOW_TEMPLATES  # noqa: F811
+
 # from: feat/addendum-phase5-pedagogy-uncertainty-v2
 
 # from: feat/7H-cloud-deployment
@@ -127,18 +136,6 @@ _eureka_runs: Dict[str, Dict] = {}
 # from: feat/atomic-tier8-render
 
 # from: feat/phase10-autonomous-workflows
-_PROACTIVE_TRIGGER_PLAYBOOKS: Dict[str, List[str]] = {
-    "scene_opened":      ["scene_summary", "get_console_errors"],
-    "robot_imported":    ["scene_summary", "get_articulation_state"],
-    "console_error":     ["get_console_errors", "explain_error"],
-    "training_started":  ["get_console_errors"],
-    "training_active":   ["get_console_errors"],
-    "training_finished": ["get_console_errors"],
-    "sim_idle":          ["scene_summary"],
-    "sim_play":          ["get_console_errors", "scene_summary"],
-    "fps_drop":          ["get_debug_info", "scene_summary"],
-    "target_placed":     ["scene_summary", "measure_distance"],
-}
 
 # from: feat/new-physics-calibration
 
@@ -201,55 +198,8 @@ _PROACTIVE_TRIGGER_PLAYBOOKS: Dict[str, List[str]] = {
 # from: feat/phase10-autonomous-workflows
 
 # from: feat/phase10-autonomous-workflows
-_WORKFLOWS: Dict[str, Dict[str, Any]] = {}
 
 # from: feat/phase10-autonomous-workflows
-_WORKFLOW_TEMPLATES: Dict[str, Dict[str, Any]] = {
-    "rl_training": {
-        "description": "Full RL training pipeline (W1 from spec)",
-        "phases": [
-            {"name": "plan",        "checkpoint": True,  "error_fix": False},
-            {"name": "env_creation","checkpoint": False, "error_fix": True},
-            {"name": "reward",      "checkpoint": True,  "error_fix": False},
-            {"name": "training",    "checkpoint": False, "error_fix": False},
-            {"name": "results",     "checkpoint": True,  "error_fix": False},
-            {"name": "deploy",      "checkpoint": True,  "error_fix": False},
-        ],
-        "default_params": {
-            "num_envs": 64,
-            "env_spacing": 2.5,
-            "algo": "ppo",
-            "num_iterations": 5000,
-        },
-    },
-    "robot_import": {
-        "description": "Robot import & configuration (W2 from spec)",
-        "phases": [
-            {"name": "plan",            "checkpoint": True,  "error_fix": False},
-            {"name": "import",          "checkpoint": False, "error_fix": True},
-            {"name": "verify",          "checkpoint": False, "error_fix": False},
-            {"name": "auto_fix",        "checkpoint": True,  "error_fix": False},
-            {"name": "motion_planning", "checkpoint": False, "error_fix": True},
-            {"name": "report",          "checkpoint": False, "error_fix": False},
-        ],
-        "default_params": {
-            "fix_profile": "auto",
-        },
-    },
-    "sim_debugging": {
-        "description": "Simulation debugging with autonomous error-fix loop (W4 from spec)",
-        "phases": [
-            {"name": "diagnose",   "checkpoint": False, "error_fix": False},
-            {"name": "hypothesis", "checkpoint": False, "error_fix": False},
-            {"name": "fix",        "checkpoint": True,  "error_fix": True},
-            {"name": "verify",     "checkpoint": False, "error_fix": False},
-            {"name": "report",     "checkpoint": False, "error_fix": False},
-        ],
-        "default_params": {
-            "max_hypothesis_iterations": 3,
-        },
-    },
-}
 
 # from: feat/addendum-enterprise-scale
 # Phase 8 wave 29 (2026-05-13): singleton lives in handlers/_state.py.
@@ -747,30 +697,8 @@ register_handlers(DATA_HANDLERS, CODE_GEN_HANDLERS)
 # These are conservative envelope estimates from the manufacturer specs;
 # actual cuRobo / Lula IK can refine but the envelope is what matters
 # for pipeline-feasibility-without-running-IK.
-_ROBOT_REACH_M = {
-    "franka_panda": 0.855,  # Franka Panda — 855mm reach
-    "ur5e":         0.850,
-    "ur10":         1.300,
-    "ur10e":        1.300,
-    "kinova":       0.902,
-    "h1":           0.580,  # H1 humanoid arm reach (one arm)
-    "g1":           0.450,
-    "default":      0.800,
-}
 
-_COORD_LANDMARKS = {
-    # Named anchor points — return position relative to a reference prim
-    # (or world origin when no reference). Ordered most-specific first.
-    "origin": "world",
-    "world origin": "world",
-    "center of stage": "world",
-    "stage center": "world",
-}
 
-_RELATIONAL_PATTERN_RE = __import__("re").compile(
-    r"(?P<factor>\d+(?:\.\d+)?)\s*[xX×]?\s*(?P<rel>times|x|×|the size of|larger than|smaller than|bigger than)?",
-    __import__("re").IGNORECASE,
-)
 
 # Data-only handlers (no code gen → return data directly to LLM)
 
@@ -1052,23 +980,6 @@ import fnmatch as _fnmatch_files
 #   - Observability: every pick-place controller creates ctrl:* attrs on
 #       its robot prim. See _PP_CTRL_ATTRS for the canonical list.
 
-_PP_CTRL_ATTRS = [
-    # (attr_name, usd_type_name_literal, default_value_literal)
-    ("ctrl:mode",            "Sdf.ValueTypeNames.String", '""'),
-    ("ctrl:phase",           "Sdf.ValueTypeNames.String", '"wait_sensor"'),
-    ("ctrl:cubes_delivered", "Sdf.ValueTypeNames.Int",    "0"),
-    ("ctrl:error_count",     "Sdf.ValueTypeNames.Int",    "0"),
-    ("ctrl:last_error",      "Sdf.ValueTypeNames.String", '""'),
-    ("ctrl:picked_path",     "Sdf.ValueTypeNames.String", '""'),
-    ("ctrl:tick_count",      "Sdf.ValueTypeNames.Int",    "0"),
-    # Phase 4 diagnostic counters (added 2026-05-10): incremented in
-    # cuRobo handler around _planner.plan_pose() calls. Lets probes
-    # distinguish "controller never planned" (plan_calls=0) from
-    # "controller tried but planner failed" (plan_calls>0, plan_fails>0).
-    ("ctrl:plan_calls",      "Sdf.ValueTypeNames.Int",    "0"),
-    ("ctrl:plan_fails",      "Sdf.ValueTypeNames.Int",    "0"),
-    ("ctrl:last_fail_goal",  "Sdf.ValueTypeNames.String", '""'),
-]
 
 # ══════════════════════════════════════════════════════════════════════
 # Controller matrix — availability probe (FAS 4)
