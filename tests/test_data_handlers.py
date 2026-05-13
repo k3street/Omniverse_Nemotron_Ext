@@ -134,7 +134,7 @@ class TestCatalogSearch:
 
         import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
         # Reset cached index
-        monkeypatch.setattr(te, "_asset_index", None)
+        monkeypatch.setattr(sb, "_asset_index", None)
         handler = DATA_HANDLERS["catalog_search"]
         result = await handler({"query": "franka", "asset_type": "robot", "limit": 5})
         assert "results" in result
@@ -148,7 +148,7 @@ class TestCatalogSearch:
         import service.isaac_assist_service.chat.tools.tool_executor as te
 
         import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
-        monkeypatch.setattr(te, "_asset_index", None)
+        monkeypatch.setattr(sb, "_asset_index", None)
         handler = DATA_HANDLERS["catalog_search"]
         result = await handler({"query": "zzzznonexistent"})
         assert result["total_matches"] == 0

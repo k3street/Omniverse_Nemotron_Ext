@@ -13,7 +13,132 @@ import json
 import logging
 from pathlib import Path
 
+from ....config import config
+
 from typing import Any, Callable, Dict, List, Optional
+
+# ---------------------------------------------------------------------------
+# Theme-local asset-index unit (Phase 8 wave 23, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.scene_blueprints.
+
+_asset_index: Optional[List[Dict]] = None
+
+_CATALOG_ROBOTS = {
+    "franka": "franka.usd",
+    "panda": "franka.usd",
+    "spot": "spot.usd",
+    "spot_with_arm": "spot_with_arm.usd",
+    "carter": "carter_v1.usd",
+    "jetbot": "jetbot.usd",
+    "kaya": "kaya.usd",
+    "ur10": "ur10.usd",
+    "ur5e": "ur5e.usd",
+    "anymal_c": "anymal_c.usd",
+    "anymal_d": "anymal_d.usd",
+    "a1": "a1.usd",
+    "go1": "go1.usd",
+    "go2": "go2.usd",
+    "g1": "g1.usd",
+    "unitree_g1": "g1.usd",
+    "g1_23dof": "g1_23dof_robot.usd",
+    "h1": "h1.usd",
+    "unitree_h1": "h1.usd",
+    "h1_hand_left": "h1_hand_left.usd",
+    "allegro_hand": "allegro_hand.usd",
+    "ridgeback_franka": "ridgeback_franka.usd",
+    "humanoid": "humanoid.usd",
+    "humanoid_28": "humanoid_28.usd",
+}
+
+def _invalidate_asset_index() -> None:
+    """Invalidate the cached asset index so the next search rebuilds it."""
+    global _asset_index
+    _asset_index = None
+
+def _build_asset_index() -> List[Dict]:
+    """Build searchable index from asset_catalog.json (fast) + known robots."""
+    global _asset_index
+    if _asset_index is not None:
+        return _asset_index
+
+    index = []
+    assets_root = getattr(config, "assets_root_path", None) or ""
+    robots_sub = getattr(config, "assets_robots_subdir", None) or "Collected_Robots"
+    robots_dir = f"{assets_root}/{robots_sub}" if assets_root else ""
+
+    # 1. Load asset_catalog.json (5,000+ entries with rich metadata)
+    catalog_path = Path(assets_root) / "asset_catalog.json" if assets_root else None
+    catalog_loaded = False
+    if catalog_path and catalog_path.exists():
+        try:
+            catalog = json.loads(catalog_path.read_text())
+            for entry in catalog.get("assets", []):
+                tags = entry.get("tags", [])
+                index.append({
+                    "name": entry.get("name", ""),
+                    "type": entry.get("category", "prop"),
+                    "path": entry.get("usd_path", ""),
+                    "rel_path": entry.get("relative_path", ""),
+                    "tags": tags,
+                    "source": "asset_catalog",
+                })
+            catalog_loaded = True
+            logger.info(f"[AssetIndex] Loaded {len(index)} entries from asset_catalog.json")
+        except Exception as e:
+            logger.warning(f"[AssetIndex] Failed to load asset_catalog.json: {e}")
+
+    # 2. Always add the known robot name map (canonical names → files)
+    for name, filename in _CATALOG_ROBOTS.items():
+        index.append({
+            "name": name,
+            "type": "robot",
+            "path": f"{robots_dir}/{filename}" if robots_dir else filename,
+            "source": "robot_library",
+        })
+
+    # 3. JSONL manifest (user-added entries)
+    manifest_path = _WORKSPACE / "knowledge" / "asset_manifest.jsonl"
+    if manifest_path.exists():
+        for line in manifest_path.read_text().splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    index.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+
+    # 4. Filesystem walk only if catalog wasn't loaded (slow fallback)
+    if not catalog_loaded and assets_root:
+        search_dir = Path(assets_root)
+        if search_dir.exists():
+            try:
+                for f in search_dir.rglob("*"):
+                    if f.suffix.lower() in (".usd", ".usda", ".usdz"):
+                        rel = f.relative_to(search_dir)
+                        name_parts = rel.stem.replace("_", " ").replace("-", " ")
+                        path_str = str(rel).lower()
+                        if any(k in path_str for k in ("robot", "arm", "gripper", "manipulator")):
+                            atype = "robot"
+                        elif any(k in path_str for k in ("env", "room", "warehouse", "house", "kitchen")):
+                            atype = "environment"
+                        elif any(k in path_str for k in ("sensor", "camera", "lidar")):
+                            atype = "sensor"
+                        elif any(k in path_str for k in ("material", "mdl", "texture")):
+                            atype = "material"
+                        else:
+                            atype = "prop"
+                        index.append({
+                            "name": name_parts,
+                            "type": atype,
+                            "path": str(f),
+                            "source": "filesystem",
+                            "rel_path": str(rel),
+                        })
+            except PermissionError:
+                pass
+
+    _asset_index = index
+    return _asset_index
 
 logger = logging.getLogger(__name__)
 
@@ -632,7 +757,7 @@ async def _handle_lookup_product_spec(args: Dict) -> Dict:
 
 async def _handle_catalog_search(args: Dict) -> Dict:
     """Fuzzy-match assets by name, type, and path."""
-    from ..tool_executor import _build_asset_index
+    # Phase 8 wave 23 — _build_asset_index migrated.
     query = args.get("query", "").lower()
     asset_type = args.get("asset_type", "any").lower()
     limit = args.get("limit", 10)
@@ -868,7 +993,7 @@ else:
         catalog_error = f"catalog file not found at {catalog_path}"
 
     # Invalidate cached asset index so next search picks up the new entry
-    from ..tool_executor import _invalidate_asset_index
+    # Phase 8 wave 23 — _invalidate_asset_index migrated.
     _invalidate_asset_index()
 
     size = dl_result.get("size", 0)
