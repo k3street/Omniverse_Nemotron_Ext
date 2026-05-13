@@ -894,9 +894,10 @@
 '96':
   title: Quarterly audit of `tool_executor.py` size + ghost handlers
   agent_type: sonnet-mechanical
-  status: scaffold
+  status: landed
+  landed_date: '2026-05-13'
   note: quarterly audit script
-  gate: scripts/quarterly_audit_tool_executor.py runs and produces report
+  gate: scripts/quarterly_audit.py runs and produces report
   files:
   - service/isaac_assist_service/multimodal/quarterly_audit_tool_executor.py
   - scripts/quarterly_audit.py
