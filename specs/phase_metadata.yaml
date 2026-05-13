@@ -821,9 +821,9 @@
   note: MCP client integration
 '88':
   title: Linux pre-built binary CI pipeline
-  agent_type: opus-runtime
-  status: scaffold
-  note: Linux CI infra
+  agent_type: sonnet-mechanical
+  status: landed
+  note: CI matrix spec + YAML template + build-target enumeration
 88b:
   title: Production patch sandboxing for high-risk patches
   agent_type: opus-runtime
