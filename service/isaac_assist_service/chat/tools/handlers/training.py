@@ -10,7 +10,14 @@ Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 6.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from typing import Any, Callable, Dict, List, Optional
+
+# Phase 8 wave 24 (2026-05-13): training-local state caches + path
+# constants. Migrated from tool_executor.py.
+_WORKSPACE = Path(__file__).resolve().parents[5] / "workspace"
+_cloud_jobs: Dict[str, Dict] = {}
 
 # ---------------------------------------------------------------------------
 # Theme-local helpers (Phase 8 wave 20, 2026-05-13)
@@ -1572,7 +1579,7 @@ async def _handle_get_training_status(args: Dict) -> Dict:
     """Read TensorBoard event files + subprocess state for an RL run."""
     import os
     from pathlib import Path
-    from ..tool_executor import _WORKSPACE
+    # Phase 8 wave 24 — _WORKSPACE migrated.
 
     run_id = args["run_id"]
     log_dir = args.get("log_dir") or str(_WORKSPACE / "rl_checkpoints" / run_id)
@@ -1897,7 +1904,7 @@ async def _handle_cloud_launch(args: Dict) -> Dict:
     """Return structured deployment info for IsaacAutomator cloud launch.
     Always requires approval regardless of auto-approve setting.
     """
-    from ..tool_executor import _cloud_jobs
+    # Phase 8 wave 24 — _cloud_jobs migrated.
     provider = args["provider"]
     instance_type = args["instance_type"]
     isaac_version = args.get("isaac_version", "5.1.0")
@@ -1988,7 +1995,7 @@ async def _handle_cloud_launch(args: Dict) -> Dict:
 
 async def _handle_cloud_status(args: Dict) -> Dict:
     """Check the status of a cloud job."""
-    from ..tool_executor import _cloud_jobs
+    # Phase 8 wave 24 — _cloud_jobs migrated.
     job_id = args["job_id"]
 
     if job_id in _cloud_jobs:
@@ -2013,7 +2020,7 @@ async def _handle_cloud_status(args: Dict) -> Dict:
 
 async def _handle_cloud_teardown(args: Dict) -> Dict:
     """Return teardown command for a cloud instance. Always requires approval."""
-    from ..tool_executor import _cloud_jobs
+    # Phase 8 wave 24 — _cloud_jobs migrated.
     job_id = args["job_id"]
 
     job = _cloud_jobs.get(job_id)

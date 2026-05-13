@@ -115,8 +115,7 @@ _ASYNC_TASKS_LOCK = _threading.Lock()
 # _BROKEN_SCENE_FAULTS migrated to handlers/diagnostics.py (Phase 8 wave 10, 2026-05-13).
 
 # from: feat/7H-cloud-deployment
-_cloud_jobs: Dict[str, Dict] = {}
-
+# _cloud_jobs migrated to handlers/training.py (Phase 8 wave 24, 2026-05-13).
 # from: feat/7H-cloud-deployment
 # _CLOUD_PRICING migrated to handlers/training.py (Phase 8 wave 12, 2026-05-13).
 
