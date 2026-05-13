@@ -245,11 +245,8 @@ print(json.dumps({{'articulation_path': '{art_path}', 'issues': issues, 'total':
 
 
 def _gen_robot_wizard(args: Dict) -> str:
-    from ..tool_executor import (
-        _ROBOT_WIZARD_REGISTRY,
-        _ROBOT_TYPE_DEFAULTS,
-        _resolve_robot_asset,
-    )
+    from ..tool_executor import _ROBOT_TYPE_DEFAULTS
+    from ._shared import _ROBOT_WIZARD_REGISTRY, _resolve_robot_asset
 
     # Resolve `robot_name` against the registry BEFORE requiring asset_path.
     # This is the deterministic path: agent says robot_name="franka_panda"

@@ -119,6 +119,117 @@ def _open_hdf5_safely(path: str):
         return None, f"failed to open HDF5: {e}"
 
 
+
+# Phase 8 wave 8 (2026-05-13): cross-theme symbols used by resolve + robot.
+
+_ROBOT_WIZARD_REGISTRY = {
+    "franka_panda": {
+        "rel_path": "Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd",
+        "robot_type": "manipulator",
+        # Franka-specific profile — overrides generic `manipulator` defaults.
+        # Added after 2026-04-21 conveyor_pick_place debugging; generic
+        # kp=1000/kd=100 is too weak for Franka position control, and the
+        # default Gripper variant doesn't render fingers in some Kit
+        # builds. Full profile lets `robot_wizard` configure an
+        # out-of-the-box working Franka without downstream patches.
+        "drive_stiffness": 6000,
+        "drive_damping": 500,
+        "variants": {"Gripper": "AlternateFinger"},
+        "home_joints": [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.04, 0.04],
+        "ee_link": "panda_hand",
+        "gripper_joints": ["panda_finger_joint1", "panda_finger_joint2"],
+        "gripper_open": 0.04,
+        "gripper_close": 0.0,
+        "rmpflow_config_rel": "motion_policy_configs/franka/rmpflow/franka_rmpflow_common.yaml",
+    },
+    # Aliases
+    "franka": "franka_panda",
+    "panda": "franka_panda",
+    "franka_emika_panda": "franka_panda",
+
+    # Additional robots — minimal entries (cloud URL only, no fine-grained
+    # profile). Sufficient for robot_wizard / resolve_robot_class pipelines:
+    # the wizard's `if registry_hit:` branch fills in defaults from the
+    # generic robot_type table when a profile isn't specified. Cloud URLs
+    # follow Isaac Sim 5.1 conventions; if a specific path drifts, edit
+    # here once rather than every caller.
+    # Paths verified against the user's local 5.0 asset bundle on
+    # /mnt/shared_data/isaac-sim-assets-complete-5.0.0; cloud_url uses
+    # the same relative path against the public S3 prefix. _resolve_robot_asset
+    # prefers local-disk lookup when ASSETS_ROOT_PATH is set, falling back
+    # to the cloud URL when it isn't.
+    "h1": {
+        "rel_path": "Isaac/Robots/Unitree/H1/h1.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/H1/h1.usd",
+        "robot_type": "humanoid",
+    },
+    "g1": {
+        "rel_path": "Isaac/Robots/Unitree/G1/g1.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/g1.usd",
+        "robot_type": "humanoid",
+    },
+    "spot": {
+        "rel_path": "Isaac/Robots/BostonDynamics/spot/spot.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/BostonDynamics/spot/spot.usd",
+        "robot_type": "mobile",
+    },
+    "anymal_c": {
+        "rel_path": "Isaac/Robots/ANYbotics/anymal_c/anymal_c.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/ANYbotics/anymal_c/anymal_c.usd",
+        "robot_type": "mobile",
+    },
+    "nova_carter": {
+        "rel_path": "Isaac/Robots/NVIDIA/NovaCarter/nova_carter.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/NVIDIA/NovaCarter/nova_carter.usd",
+        "robot_type": "mobile",
+    },
+    "ur10e": {
+        "rel_path": "Isaac/Robots/UniversalRobots/ur10e/ur10e.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/UniversalRobots/ur10e/ur10e.usd",
+        "robot_type": "manipulator",
+    },
+    "allegro": {
+        "rel_path": "Isaac/Robots/WonikRobotics/AllegroHand/allegro_hand.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/WonikRobotics/AllegroHand/allegro_hand.usd",
+        "robot_type": "manipulator",
+    },
+    # Aliases for the robots above
+    "unitree_h1": "h1",
+    "unitree_g1": "g1",
+    "carter": "nova_carter",
+    "ur10": "ur10e",
+}
+
+def _resolve_robot_asset(entry: Dict) -> str:
+    """Return the best asset path for a robot registry entry.
+
+    Prefers local disk (ASSETS_ROOT_PATH + rel_path) when present, since
+    USD's asset resolver is ~50-100× faster off disk than over HTTPS and
+    doesn't depend on internet. Falls back to the cloud URL otherwise.
+    """
+    import os as _os
+    assets_root = _os.environ.get("ASSETS_ROOT_PATH", "").rstrip("/")
+    if assets_root and entry.get("rel_path"):
+        local = f"{assets_root}/{entry['rel_path']}"
+        if _os.path.exists(local):
+            return local
+    return entry.get("cloud_url", "")
+
+# from: feat/addendum-phase8F-ros2-quality
+# _ROS2_QOS_PRESETS migrated to handlers/ros2.py (Phase 8 wave 4, 2026-05-13).
+
+# from: feat/atomic-tier13-rl-runtime
+_RUN_REGISTRY: Dict[str, Dict[str, Any]] = {}
+
+# from: feat/new-quick-demo-builder-v2
+# _SCENE_STYLE_PRESETS migrated to handlers/vision.py (Phase 8 wave 4, 2026-05-13).
+
+# from: feat/6A-physx-validation
+# _SCENE_TEMPLATES migrated to handlers/scene_blueprints.py (Phase 8 wave 7, 2026-05-13).
+
+# from: feat/new-onboarding
+
 CONSTANTS: dict[str, object] = {
     "SAFE_XFORM_SNIPPET": _SAFE_XFORM_SNIPPET,
     "OG_NODE_TYPE_MAP": _OG_NODE_TYPE_MAP,
@@ -187,6 +298,8 @@ __all__ = [
     "_SAFE_XFORM_SNIPPET",
     "_OG_NODE_TYPE_MAP",
     "_open_hdf5_safely",
+    "_ROBOT_WIZARD_REGISTRY",
+    "_resolve_robot_asset",
     # Plus the lazy-imported names; importers see them via __getattr__.
     *_LEGACY_REEXPORT_NAMES,
 ]
