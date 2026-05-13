@@ -610,16 +610,22 @@ def test_gen_create_prim_authors_size_radius_height():
     assert "GetSizeAttr" not in code_sph2
 
 
-def test_gen_create_behavior_fails_fast():
-    """Regression: Isaac Sim 5.x Cortex API requires RmpFlow/AMP plumbing
-    we don't have here. Better to raise NotImplementedError than emit code
-    that calls MotionCommander('/path') and fails with a signature error."""
+def test_gen_create_behavior_emits_5x_cortex_code():
+    """Phase 70b — _gen_create_behavior now emits valid 5.x Cortex code via
+    CreateBehaviorCodeGenerator instead of raising NotImplementedError.
+    The old MotionCommander('/path') pattern must NOT appear in the output."""
     import sys
     sys.path.insert(0, "service")
-    from isaac_assist_service.chat.tools.tool_executor import _gen_create_behavior
+    from isaac_assist_service.chat.tools.handlers.robot import _gen_create_behavior
     code = _gen_create_behavior({"articulation_path": "/World/Franka",
                                  "behavior_type": "pick_and_place"})
-    assert "raise NotImplementedError" in code
+    # Must NOT be a NotImplementedError raise any more
+    assert "raise NotImplementedError" not in code
+    # Must use the 5.x Cortex namespace
+    assert "isaacsim.cortex.framework" in code
+    # Must NOT use the deprecated pre-5.x MotionCommander path-string pattern
+    assert "MotionCommander('/World" not in code
+    assert 'MotionCommander("/World' not in code
     import ast
     ast.parse(code)  # must be valid Python
 
