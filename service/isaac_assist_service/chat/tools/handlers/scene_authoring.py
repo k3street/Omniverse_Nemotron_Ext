@@ -35,6 +35,14 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 # ---------------------------------------------------------------------------
+# Theme-local state caches (Phase 8 wave 22, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.scene_authoring.
+
+_STAGE_INDEX: Dict[str, Dict[str, Any]] = {}
+
+_STAGE_INDEX_META: Dict[str, Any] = {"prim_scope": None, "prim_count": 0}
+
+# ---------------------------------------------------------------------------
 # Theme-local helpers (Phase 8 wave 21, 2026-05-13)
 # Migrated from tool_executor.py — used only by handlers.scene_authoring.
 
@@ -3651,7 +3659,7 @@ else:
 async def _handle_build_stage_index(args: Dict) -> Dict:
     """Build the metadata index and populate the module-level cache."""
     from .. import kit_tools
-    from ..tool_executor import _STAGE_INDEX, _STAGE_INDEX_META, _gen_build_stage_index
+    from ..tool_executor import _gen_build_stage_index
 
     prim_scope = args.get("prim_scope") or "/World"
     max_prims = int(args.get("max_prims", 50000))
@@ -3673,11 +3681,7 @@ async def _handle_build_stage_index(args: Dict) -> Dict:
 
 async def _handle_query_stage_index(args: Dict) -> Dict:
     """Return prims relevant to the keywords plus neighbours of selected_prim."""
-    from ..tool_executor import (
-        _STAGE_INDEX,
-        # _score_prim_for_query migrated to module body (Phase 8 wave 21).
-        # _neighbour_paths migrated to module body (Phase 8 wave 21).
-    )
+    # _STAGE_INDEX (wave 22) + _neighbour_paths (wave 21) module-local.
 
     keywords = args.get("keywords") or []
     if isinstance(keywords, str):
@@ -4823,7 +4827,8 @@ print(json.dumps({"graphs": graphs, "count": len(graphs)}))
 
 async def _handle_save_delta_snapshot(args: Dict) -> Dict:
     from .. import kit_tools
-    from ..tool_executor import logger, _gen_save_delta_snapshot
+    # _gen_save_delta_snapshot is module-local (line 1401).
+    from ..tool_executor import logger
     import json
     snapshot_id = args["snapshot_id"]
     base_snapshot_id = args.get("base_snapshot_id")
@@ -4853,7 +4858,7 @@ async def _handle_save_delta_snapshot(args: Dict) -> Dict:
 
 async def _handle_restore_delta_snapshot(args: Dict) -> Dict:
     from .. import kit_tools
-    from ..tool_executor import _gen_restore_delta_snapshot
+    # _gen_restore_delta_snapshot is module-local (line 1444).
     import json
     snapshot_id = args["snapshot_id"]
     manifest_path = _DELTA_ROOT / f"{snapshot_id}.json"

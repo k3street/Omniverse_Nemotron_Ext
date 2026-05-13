@@ -254,10 +254,10 @@ _PROACTIVE_TRIGGER_PLAYBOOKS: Dict[str, List[str]] = {
 # _SLASH_COMMANDS migrated to handlers/workflow.py (Phase 8 wave 13, 2026-05-13).
 
 # from: feat/addendum-enterprise-scale
-_STAGE_INDEX: Dict[str, Dict[str, Any]] = {}
+# _STAGE_INDEX migrated to handlers/scene_authoring.py (Phase 8 wave 22, 2026-05-13).
 
 # from: feat/addendum-enterprise-scale
-_STAGE_INDEX_META: Dict[str, Any] = {"prim_scope": None, "prim_count": 0}
+# _STAGE_INDEX_META migrated to handlers/scene_authoring.py (Phase 8 wave 22, 2026-05-13).
 
 # from: feat/new-onboarding
 # _STARTER_PROMPTS migrated to handlers/workflow.py (Phase 8 wave 13, 2026-05-13).
