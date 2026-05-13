@@ -4,6 +4,11 @@ Implements pure-Python mutex/lock semantics, handoff token state machine,
 and deadlock detection for multi-robot resource coordination.
 
 Per specs/IA_FULL_SPEC_2026-05-10.md Phase 63d.
+
+WARNING: This module is in-process coordination ONLY. It does not dispatch
+Kit RPC calls or move physical robots. Wire physical execution at the caller
+level — the state machine here only tracks mutex ownership and handoff
+phases. A ``phase = "completed"`` transition does NOT mean a robot moved.
 """
 from __future__ import annotations
 
@@ -60,7 +65,13 @@ class HandoffToken:
 
 
 class RobotResourceMutex:
-    """Thread-unsafe (single-threaded) mutex registry for robot resources."""
+    """Thread-unsafe (single-threaded) mutex registry for robot resources.
+
+    WARNING: This class is in-process coordination ONLY. It does not dispatch
+    Kit RPC calls or move physical robots. Acquiring or releasing a mutex here
+    has no effect on actual robot hardware or USD stage state. Physical
+    execution must be wired at the caller level.
+    """
 
     def __init__(self) -> None:
         self._locks: Dict[ResourceID, MutexState] = {}
@@ -190,7 +201,13 @@ class RobotResourceMutex:
 
 
 class HandoffCoordinator:
-    """Manages robot-to-robot payload handoff state machines."""
+    """Manages robot-to-robot payload handoff state machines.
+
+    WARNING: This class is in-process coordination ONLY. It does not dispatch
+    Kit RPC calls or move physical robots. A ``phase = "completed"`` transition
+    records a logical state change only — it does NOT mean a physical handoff
+    occurred. Physical execution must be wired at the caller level.
+    """
 
     LEGAL_TRANSITIONS: Dict[HandoffPhase, set] = {
         "uninitiated": {"requested", "aborted"},

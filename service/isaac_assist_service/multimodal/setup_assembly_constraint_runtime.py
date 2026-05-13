@@ -172,8 +172,12 @@ class AssemblyConstraintRuntime:
 
     Args:
         dry_run: When True (default), physics-dependent checks are skipped
-            and reported as satisfied.  Set to False only when running under
-            a live Kit RPC session.
+            and reported as satisfied.  When False, calling ``evaluate_one``
+            or ``evaluate_all`` on a physics-dependent constraint type
+            (``coincident_axes``, ``tangent``, ``parallel_planes``,
+            ``angle_between``) raises ``NotImplementedError`` — live
+            Kit/PhysX evaluation is not implemented without the opus-runtime.
+            Use ``dry_run=True`` for harness testing.
     """
 
     def __init__(self, dry_run: bool = True) -> None:
@@ -347,26 +351,21 @@ class AssemblyConstraintRuntime:
             return self._eval_fixed_offset(c, prim_positions)
         else:
             # coincident_axes / tangent / parallel_planes / angle_between
-            # need Kit/PhysX context — dry-run returns satisfied.
-            if self._dry_run:
-                return ConstraintEvaluation(
-                    constraint_name=c.name,
-                    satisfied=True,
-                    error_m=0.0,
-                    error_rad=0.0,
-                    distance_to_satisfaction=0.0,
-                    message=f"dry-run: {c.type!r} check skipped (needs Kit RPC)",
+            # need Kit/PhysX context.
+            if not self._dry_run:
+                raise NotImplementedError(
+                    f"Live Kit/PhysX evaluation of {c.type!r} requires "
+                    "opus-runtime — use dry_run=True for harness testing"
                 )
-            # Live path placeholder
             return ConstraintEvaluation(
                 constraint_name=c.name,
-                satisfied=False,
+                satisfied=True,
                 error_m=0.0,
                 error_rad=0.0,
-                distance_to_satisfaction=float("inf"),
+                distance_to_satisfaction=0.0,
                 message=(
-                    f"{c.type!r} evaluation requires live Kit RPC session; "
-                    "not implemented for non-dry-run without runtime."
+                    "dry-run: physics-dependent type evaluated as satisfied "
+                    "without Kit/PhysX"
                 ),
             )
 
