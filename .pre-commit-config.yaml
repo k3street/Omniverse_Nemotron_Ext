@@ -1,0 +1,30 @@
+# Pre-commit hooks for tools hygiene (Phase 17).
+#
+# Install: pip install pre-commit && pre-commit install
+# Run on all files: pre-commit run --all-files
+#
+# Per spec/IA_FULL_SPEC_2026-05-10.md Phase 17 + 17b.
+
+repos:
+  - repo: local
+    hooks:
+      - id: no-handler-in-dispatch
+        name: Forbid new handlers in tool_executor.py (Phase 17)
+        entry: python scripts/lint/no_handler_in_dispatch.py
+        language: system
+        files: ^service/isaac_assist_service/chat/tools/tool_executor\.py$
+        pass_filenames: false
+
+      - id: regen-models-check
+        name: Pydantic models freshness check (Phase 17)
+        entry: python scripts/lint/regen_models_check.py
+        language: system
+        files: ^service/isaac_assist_service/chat/tools/(tool_schemas|handlers/_models)\.py$
+        pass_filenames: false
+
+      - id: mandate-guard
+        name: RL/IA mandate-boundary scanner (Phase 17b)
+        entry: python scripts/lint_mandate.py
+        language: system
+        files: ^(service|exts|web|scripts)/.*\.(py|md)$|^docs/specs/.*\.md$
+        pass_filenames: true
