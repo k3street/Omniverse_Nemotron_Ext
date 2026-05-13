@@ -254,10 +254,22 @@
   status: landed
   note: industrial canonicals
 31b:
-  title: 'Industrial bridges full surface: Modbus, MQTT-Sparkplug, OpenPLC + lifecycle'
-  agent_type: opus-runtime
-  status: scaffold
-  note: bridge lifecycle — needs Modbus/OPC-UA
+  title: 'Industrial bridges full surface: Modbus, MQTT-Sparkplug, OPC-UA'
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: >-
+    SPEC/STATE-MACHINE layer landed — BridgeProtocol/BridgeState Literals,
+    RegisterMapEntry, BridgeConfig, IndustrialBridge state machine with dry-run
+    connect/disconnect, register read/write, batch ops, health_check.
+    4 BRIDGE_PRESETS. 20 pytest tests pass. Live PLC connection remains scaffold.
+  gate: pytest tests/test_sub_phase_31b_industrial_bridges_full.py — 20 tests pass
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_31b_industrial_bridges_full.py
+  - tests/test_sub_phase_31b_industrial_bridges_full.py
+  loc: 340
+  blocked_by:
+  - '31'
 '32':
   title: 'Epoch II convergence test: 30-object canvas scene'
   agent_type: sonnet-bounded
@@ -586,9 +598,17 @@
   - '70'
 70c:
   title: Articulated DRAG controller (`setup_articulated_pull_controller`)
-  agent_type: opus-runtime
-  status: scaffold
-  note: DRAG controller
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: SPEC/CONTROLLER layer — PD control law + ramp + safety limiter (pure Python math)
+  gate: pytest — PD controller converges on target; safety limiter caps force
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_70c_articulated_drag_controller.py
+  - tests/test_sub_phase_70c_articulated_drag_controller.py
+  loc: 250
+  effort_min: 60
+  blocked_by: []
 70d:
   title: 'Drop-target default: catalog-aware computation'
   agent_type: sonnet-mechanical
