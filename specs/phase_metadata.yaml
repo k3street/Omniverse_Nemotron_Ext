@@ -710,7 +710,7 @@
 81b:
   title: 'Validation primitive pattern: routes and corridors'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: route validators
   gate: pytest — RouteValidator subclass extends Phase 11b; catches inverted path direction + duplicate waypoints
   files:
@@ -728,7 +728,7 @@
 '82':
   title: Epoch V convergence test
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: Epoch V convergence
   gate: pytest — 30-tool capability convergence (mock all runtime-blocked tools)
   files:
