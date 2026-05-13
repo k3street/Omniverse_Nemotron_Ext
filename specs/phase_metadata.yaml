@@ -501,7 +501,7 @@
 '74':
   title: 'Sensor catalog query: structured filter'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: structured filter
 '75':
   title: User-supplied object class registry
