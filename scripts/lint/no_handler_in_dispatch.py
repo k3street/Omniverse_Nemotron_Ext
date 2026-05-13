@@ -30,10 +30,11 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
-# The single documented straggler that's allowed to stay in
-# tool_executor.py for now. Phase 13/14 cleanup will move it.
-ALLOWED_HANDLER_NAMES = frozenset({"_handle_fix_error"})
-ALLOWED_DISPATCH_TOOLS = frozenset({"fix_error"})
+# Phase 9 follow-up (2026-05-13): _handle_fix_error migrated to
+# handlers/diagnostics.py — the allowlist is now empty. New stragglers
+# must be migrated, not allowlisted.
+ALLOWED_HANDLER_NAMES = frozenset()
+ALLOWED_DISPATCH_TOOLS = frozenset()
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _DEFAULT_TARGET = (

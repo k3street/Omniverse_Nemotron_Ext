@@ -66,13 +66,17 @@ def test_nhd_flags_gen_def(nhd, tmp_path):
     assert "_gen_my_codegen" in violations[0][1]
 
 
-def test_nhd_allows_fix_error_straggler(nhd, tmp_path):
-    """`_handle_fix_error` is the documented straggler — never flagged."""
+def test_nhd_flags_fix_error_after_migration(nhd, tmp_path):
+    """Post-Phase-9-followup (2026-05-13): `_handle_fix_error` was migrated
+    to handlers/diagnostics.py. The allowlist is now empty — even
+    `_handle_fix_error` in tool_executor.py would be flagged.
+    """
     src = "def _handle_fix_error(args):\n    return ''\n"
     p = tmp_path / "fake_executor.py"
     p.write_text(src)
     violations = nhd.scan(p)
-    assert violations == []
+    assert len(violations) == 1
+    assert "_handle_fix_error" in violations[0][1]
 
 
 def test_nhd_flags_dispatch_assignment(nhd, tmp_path):
@@ -90,8 +94,10 @@ def test_nhd_flags_dispatch_assignment(nhd, tmp_path):
     assert "my_tool" in violations[0][1]
 
 
-def test_nhd_allows_fix_error_dispatch(nhd, tmp_path):
-    """`CODE_GEN_HANDLERS["fix_error"] = ...` is permitted (straggler)."""
+def test_nhd_flags_fix_error_dispatch_after_migration(nhd, tmp_path):
+    """`CODE_GEN_HANDLERS["fix_error"] = ...` is also flagged after the
+    Phase 9 followup migration. The allowlist is empty.
+    """
     src = textwrap.dedent(
         """
         CODE_GEN_HANDLERS = {}
@@ -101,7 +107,8 @@ def test_nhd_allows_fix_error_dispatch(nhd, tmp_path):
     p = tmp_path / "fake_executor.py"
     p.write_text(src)
     violations = nhd.scan(p)
-    assert violations == []
+    assert len(violations) == 1
+    assert "fix_error" in violations[0][1]
 
 
 def test_nhd_passes_on_real_tool_executor(nhd):
