@@ -55,50 +55,11 @@ from dataclasses import dataclass, field
 from typing import Tuple
 
 
-@dataclass(order=True)
-class _LockedPatch:
-    sort_key: Tuple[int, int] = field(compare=True)
-    code: str = field(compare=False, default="")
-    description: str = field(compare=False, default="")
-    priority: int = field(compare=False, default=0)
-
-
-class _StageWriteLockQueue:
-    """Minimal serialized queue — mirrors the spec's StageWriteLock pattern."""
-
-    def __init__(self) -> None:
-        self._lock = _asyncio.Lock()
-        self._pending: List[_LockedPatch] = []
-        self._counter = 0
-
-    async def submit(self, code: str, description: str, priority: int) -> Dict[str, Any]:
-        self._counter += 1
-        # Higher priority first; stable by insertion order for ties.
-        patch = _LockedPatch(
-            sort_key=(-int(priority), self._counter),
-            code=code,
-            description=description,
-            priority=int(priority),
-        )
-        async with self._lock:
-            self._pending.append(patch)
-            self._pending.sort()
-            queue_depth = len(self._pending)
-        result = await kit_tools.queue_exec_patch(code, description)
-        async with self._lock:
-            # Pop the matching entry so the queue drains in order.
-            for idx, p in enumerate(self._pending):
-                if p is patch:
-                    self._pending.pop(idx)
-                    break
-        return {
-            "queued": bool(result.get("queued", False)) if isinstance(result, dict) else False,
-            "priority": int(priority),
-            "queue_depth": queue_depth,
-        }
-
-    def pending(self) -> int:
-        return len(self._pending)
+# Phase 8 wave 29 (2026-05-13): _LockedPatch + _StageWriteLockQueue
+# canonical home moved to handlers/_state.py. Aliased here for any
+# remaining `_te._LockedPatch` / `_te._StageWriteLockQueue` callsites.
+from .handlers._state import LockedPatch as _LockedPatch  # noqa: E402, F401
+from .handlers._state import StageWriteLockQueue as _StageWriteLockQueue  # noqa: E402, F401
 
 # ── Recovered module-level state from PR branches ───────────────────────
 
@@ -352,7 +313,8 @@ _WORKFLOW_TEMPLATES: Dict[str, Dict[str, Any]] = {
 }
 
 # from: feat/addendum-enterprise-scale
-_WRITE_LOCK_QUEUE = _StageWriteLockQueue()
+# Phase 8 wave 29 (2026-05-13): singleton lives in handlers/_state.py.
+from .handlers._state import WRITE_LOCK_QUEUE as _WRITE_LOCK_QUEUE  # noqa: E402, F401
 
 # from: feat/9-finetune-flywheel
 _turn_recorder = TurnRecorder()

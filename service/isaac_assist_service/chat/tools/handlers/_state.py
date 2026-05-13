@@ -112,15 +112,66 @@ ASYNC_TASKS: Dict[str, Dict[str, Any]] = {}
 _TURN_RECORDER_SINGLETON = None
 
 
-def get_write_lock_queue():
-    """Return the shared _StageWriteLockQueue singleton.
+# Phase 8 wave 29 (2026-05-13): _LockedPatch + _StageWriteLockQueue
+# migrated from tool_executor.py. Workflow uses these to serialize
+# stage-mutating patches through Kit RPC. The singleton lives here.
+import asyncio as _asyncio  # noqa: E402
+from typing import Tuple as _Tuple  # noqa: E402
 
-    Phase 8 wave 28 — singleton lives in `tool_executor.py:_WRITE_LOCK_QUEUE`
-    (initialized at module load alongside its class). Workflow handlers
-    use it to serialize stage-mutating patches.
-    """
-    from .. import tool_executor as _te
-    return _te._WRITE_LOCK_QUEUE
+
+@dataclass(order=True)
+class LockedPatch:
+    """Patch queue entry with priority + insertion-order ordering."""
+    sort_key: _Tuple[int, int] = field(compare=True)
+    code: str = field(compare=False, default="")
+    description: str = field(compare=False, default="")
+    priority: int = field(compare=False, default=0)
+
+
+class StageWriteLockQueue:
+    """Minimal serialized queue — mirrors the spec's StageWriteLock pattern."""
+
+    def __init__(self) -> None:
+        self._lock = _asyncio.Lock()
+        self._pending: list = []
+        self._counter = 0
+
+    async def submit(self, code: str, description: str, priority: int) -> Dict[str, Any]:
+        from .. import kit_tools  # noqa: PLC0415
+        self._counter += 1
+        patch = LockedPatch(
+            sort_key=(-int(priority), self._counter),
+            code=code,
+            description=description,
+            priority=int(priority),
+        )
+        async with self._lock:
+            self._pending.append(patch)
+            self._pending.sort()
+            queue_depth = len(self._pending)
+        result = await kit_tools.queue_exec_patch(code, description)
+        async with self._lock:
+            for idx, p in enumerate(self._pending):
+                if p is patch:
+                    self._pending.pop(idx)
+                    break
+        return {
+            "queued": bool(result.get("queued", False)) if isinstance(result, dict) else False,
+            "priority": int(priority),
+            "queue_depth": queue_depth,
+        }
+
+    def pending(self) -> int:
+        return len(self._pending)
+
+
+# Singleton instance — workflow uses get_write_lock_queue() to access.
+WRITE_LOCK_QUEUE = StageWriteLockQueue()
+
+
+def get_write_lock_queue() -> StageWriteLockQueue:
+    """Return the shared StageWriteLockQueue singleton."""
+    return WRITE_LOCK_QUEUE
 
 
 def get_turn_recorder():
@@ -155,6 +206,9 @@ __all__ = [
     "TRAINING",
     "ASYNC_TASKS",
     "ASYNC_TASKS_LOCK",
+    "LockedPatch",
+    "StageWriteLockQueue",
+    "WRITE_LOCK_QUEUE",
     "get_write_lock_queue",
     "get_turn_recorder",
     "DR",
