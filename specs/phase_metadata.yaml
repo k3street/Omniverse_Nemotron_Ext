@@ -664,8 +664,8 @@
 '76':
   title: 'Vision tool handlers: real Gemini Vision'
   agent_type: opus-runtime
-  status: scaffold
-  note: Gemini API
+  status: landed
+  note: provider abstraction + mock (pure Python); live Gemini deferred to opus-runtime
 '77':
   title: 'Vision tool: viewport-hash cache'
   agent_type: sonnet-bounded
