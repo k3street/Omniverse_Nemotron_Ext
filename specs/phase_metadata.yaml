@@ -759,9 +759,14 @@
   blocked_by: []
 80c:
   title: Curved-belt + belt-junction primitives
-  agent_type: opus-runtime
-  status: scaffold
-  note: gripper force feedback
+  agent_type: sonnet-bounded
+  status: landed
+  note: pure-math geometry layer; arc-length, centerline sampling, junction kinematics
+  gate: pytest tests/test_sub_phase_80c_curved_belt_primitives.py — 28/28 passed
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_80c_curved_belt_primitives.py
+  - tests/test_sub_phase_80c_curved_belt_primitives.py
+  loc: 280
 '81':
   title: 'Multi-rate physics: high-rate vision + low-rate planning'
   agent_type: sonnet-bounded
