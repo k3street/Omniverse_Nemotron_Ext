@@ -751,9 +751,20 @@
   loc: 280
 79b:
   title: IsaacLab 2.3 G1 locomanipulation env + WBC integration
-  agent_type: opus-runtime
-  status: scaffold
-  note: WBC locomotion
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: >-
+    SPEC/ENV-CONFIG layer landed — G1HardwareSpec, G1ObservationSpec,
+    G1ActionSpec, LocomanipCurriculumStage, DEFAULT_CURRICULUM (5 stages),
+    IsaacLabG1EnvConfig, G1EnvConfigValidator, G1CurriculumScheduler,
+    make_default_g1_env_config. 37 pytest tests pass.
+    Live IsaacLab GPU integration remains opus-runtime scope.
+  gate: pytest tests/test_sub_phase_79b_isaaclab_g1_locomanip.py — 37 tests pass (gate confirmed)
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_79b_isaaclab_g1_locomanip.py
+  - tests/test_sub_phase_79b_isaaclab_g1_locomanip.py
+  loc: 280
 '80':
   title: Surface gripper + suction modeling
   agent_type: opus-runtime
