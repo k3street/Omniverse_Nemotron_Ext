@@ -1396,7 +1396,7 @@ async def _handle_get_training_status(args: Dict) -> Dict:
 async def _handle_get_env_observations(args: Dict) -> Dict:
     """Read the observation tensor for one env in a running IsaacLab worker."""
     import time
-    from ..tool_executor import _resolve_run_id, _validate_env_id, _query_run_ipc
+    from ._shared import _resolve_run_id, _validate_env_id, _query_run_ipc
     t0 = time.perf_counter()
     env_id = args.get("env_id")
     run_id_arg = args.get("run_id")
@@ -1435,7 +1435,7 @@ async def _handle_get_env_observations(args: Dict) -> Dict:
 async def _handle_get_env_rewards(args: Dict) -> Dict:
     """Read per-term reward breakdown for one env at the current step."""
     import time
-    from ..tool_executor import _resolve_run_id, _validate_env_id, _query_run_ipc
+    from ._shared import _resolve_run_id, _validate_env_id, _query_run_ipc
     t0 = time.perf_counter()
     env_id = args.get("env_id")
     run_id_arg = args.get("run_id")
@@ -1478,7 +1478,7 @@ async def _handle_get_env_rewards(args: Dict) -> Dict:
 async def _handle_get_env_termination_state(args: Dict) -> Dict:
     """Report termination flags (success / timeout / crashed / done) for one env."""
     import time
-    from ..tool_executor import _resolve_run_id, _validate_env_id, _query_run_ipc
+    from ._shared import _resolve_run_id, _validate_env_id, _query_run_ipc
     t0 = time.perf_counter()
     env_id = args.get("env_id")
     run_id_arg = args.get("run_id")
@@ -1529,7 +1529,7 @@ async def _handle_get_env_termination_state(args: Dict) -> Dict:
 async def _handle_checkpoint_training(args: Dict) -> Dict:
     """Trigger an out-of-band checkpoint save on a running training subprocess."""
     import time
-    from ..tool_executor import _resolve_run_id, _query_run_ipc
+    from ._shared import _resolve_run_id, _query_run_ipc
     t0 = time.perf_counter()
     run_id_arg = args.get("run_id")
     include_replay = bool(args.get("include_replay_buffer", False))
@@ -2018,7 +2018,7 @@ async def _handle_monitor_forgetting(args: Dict) -> Dict:
 async def _handle_pause_training(args: Dict) -> Dict:
     """Signal a running training subprocess to pause without stopping it."""
     import time
-    from ..tool_executor import _resolve_run_id, _query_run_ipc
+    from ._shared import _resolve_run_id, _query_run_ipc
     t0 = time.perf_counter()
     run_id_arg = args.get("run_id")
 
