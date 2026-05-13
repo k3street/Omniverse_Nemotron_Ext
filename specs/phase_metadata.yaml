@@ -401,7 +401,7 @@
 56b:
   title: Bootstrap-CI confidence reporting under DR
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: recalibration log
   gate: pytest tests/test_sub_phase_56b_recalibration_log.py — log writes ndjson, queryable by dimension
   files:
