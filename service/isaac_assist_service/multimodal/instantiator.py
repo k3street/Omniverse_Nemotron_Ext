@@ -278,28 +278,72 @@ class InstantiateResult:
 def _build_canonical_code(spec, template_id: Optional[str]) -> str:
     """Build the USD-Python patch that materialises spec.objects.
 
-    Phase 19 scaffold: emits a stub patch that imports `omni.usd` and
-    calls `get_stage()`. Real per-class branching (franka_panda → asset
-    reference, cube → UsdGeom.Cube + translate, etc.) is the Phase 19
-    "real implementation" work — needs Kit RPC to verify each class.
+    Phase 19 LANDED: delegates to LayoutSpecCodeGenerator which emits
+    real per-class USD Define() calls (UsdGeom for geometry/cameras/xforms,
+    UsdLux for lights, AddReference for asset references). Returns a
+    Kit-executable script with proper `omni.usd.get_context().get_stage()`
+    header.
     """
     objects = getattr(spec, "objects", None) or []
-    lines = [
-        "import omni.usd",
-        "from pxr import Sdf, UsdGeom, Gf",
-        "",
-        "stage = omni.usd.get_context().get_stage()",
-        f"# template_id={template_id!r}",
-        f"# {len(objects)} objects in spec",
-    ]
+
+    _CLASS_NORMALIZER = {
+        "cube": "Cube", "sphere": "Sphere", "cylinder": "Cylinder",
+        "cone": "Cone", "plane": "Plane",
+        "camera": "Camera", "xform": "Xform",
+        "distant_light": "DistantLight", "distantlight": "DistantLight",
+        "sphere_light": "SphereLight", "spherelight": "SphereLight",
+        "dome_light": "DomeLight", "domelight": "DomeLight",
+    }
+
+    prims: List[Dict[str, Any]] = []
     for i, obj in enumerate(objects):
-        obj_class = getattr(obj, "object_class", None) or obj.get("object_class", "unknown")
-        position = getattr(obj, "position", None) or obj.get("position", [0, 0, 0])
-        prim_path = f"/World/{obj_class}_{i + 1}"
-        lines.append(f"# Object {i}: {obj_class} @ {position}")
-        lines.append(f"# TODO Phase 19 full: emit canonical {obj_class} patch at {prim_path}")
-    lines.append("print('Phase 19 scaffold — no objects materialised')")
-    return "\n".join(lines)
+        if hasattr(obj, "object_class"):
+            obj_class = getattr(obj, "object_class", "unknown") or "unknown"
+            position = getattr(obj, "position", None) or [0.0, 0.0, 0.0]
+            rotation = getattr(obj, "rotation_euler_deg", None) or [0.0, 0.0, 0.0]
+            scale = getattr(obj, "scale", None) or [1.0, 1.0, 1.0]
+            asset_ref = getattr(obj, "asset_path", None) or getattr(obj, "asset_ref", None)
+        else:
+            obj_class = obj.get("object_class", "unknown")
+            position = obj.get("position", [0.0, 0.0, 0.0])
+            rotation = obj.get("rotation_euler_deg", [0.0, 0.0, 0.0])
+            scale = obj.get("scale", [1.0, 1.0, 1.0])
+            asset_ref = obj.get("asset_path") or obj.get("asset_ref")
+
+        normalized_class = _CLASS_NORMALIZER.get(
+            str(obj_class).lower(), str(obj_class)
+        )
+        if normalized_class not in SUPPORTED_PRIM_CLASSES:
+            if asset_ref:
+                normalized_class = "Reference"
+            else:
+                normalized_class = "Xform"
+
+        prim_desc: Dict[str, Any] = {
+            "prim_class": normalized_class,
+            "prim_path": f"/World/{normalized_class}_{i + 1}",
+            "position": position,
+            "rotation_euler_deg": rotation,
+            "scale": scale,
+            "_source_class": str(obj_class),
+        }
+        if normalized_class == "Reference" and asset_ref:
+            prim_desc["extra_attrs"] = {"asset_path": str(asset_ref)}
+        prims.append(prim_desc)
+
+    generator = LayoutSpecCodeGenerator(use_get_context=True)
+    header_comment = (
+        f"# Phase 19 code-gen: {len(prims)} prims, template_id={template_id!r}\n"
+    )
+    source_comments = "\n".join(
+        f"# object[{i}]: source_class={p['_source_class']!r} -> "
+        f"prim_class={p['prim_class']!r}, path={p['prim_path']!r}"
+        for i, p in enumerate(prims)
+    )
+    for p in prims:
+        p.pop("_source_class", None)
+    body = generator.generate_full_script(prims)
+    return header_comment + (source_comments + "\n" if source_comments else "") + body
 
 
 async def instantiate(
