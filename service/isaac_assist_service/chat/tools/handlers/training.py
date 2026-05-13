@@ -2458,11 +2458,8 @@ async def _handle_suggest_parameter_adjustment(args: Dict) -> Dict:
 async def _handle_train_actuator_net(args: Dict) -> Dict:
     """Generate the ActuatorNetLSTM training script and return launch command."""
     from pathlib import Path
-    from ..tool_executor import (
-        _check_real_data_path,
-        _safe_robot_name,
-        _generate_actuator_net_script,
-    )
+    from ._shared import _check_real_data_path, _safe_robot_name
+    from ..tool_executor import _generate_actuator_net_script
     real_data_path = args.get("real_data_path", "")
     articulation_path = args.get("articulation_path", "")
 

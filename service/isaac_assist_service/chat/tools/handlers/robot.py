@@ -4338,14 +4338,8 @@ async def _handle_apply_robot_fix_profile(args: Dict) -> Dict:
 async def _handle_calibrate_physics(args: Dict) -> Dict:
     """Generate a Ray-Tune+Optuna calibration script and return the launch command."""
     from pathlib import Path as _Path
-    from ..tool_executor import (  # noqa: PLC0415
-        # _DEFAULT_CALIBRATE_PARAMS migrated to module body (Phase 8 wave 11).
-        # _VALID_CALIBRATE_PARAMS migrated to module body (Phase 8 wave 11).
-        _check_real_data_path,
-        _safe_robot_name,
-        _generate_calibration_script,
-        # _suggested_dr_ranges migrated to module body (Phase 8 wave 15).
-    )
+    from ._shared import _check_real_data_path, _safe_robot_name
+    from ..tool_executor import _generate_calibration_script
     real_data_path = args.get("real_data_path", "")
     articulation_path = args.get("articulation_path", "")
 
@@ -4415,13 +4409,8 @@ async def _handle_calibrate_physics(args: Dict) -> Dict:
 async def _handle_quick_calibrate(args: Dict) -> Dict:
     """Faster calibration: only the highest-impact parameters."""
     from pathlib import Path as _Path
-    from ..tool_executor import (  # noqa: PLC0415
-        # _QUICK_CALIBRATE_PARAMS migrated to module body (Phase 8 wave 11).
-        _check_real_data_path,
-        _safe_robot_name,
-        _generate_calibration_script,
-        # _suggested_dr_ranges migrated to module body (Phase 8 wave 15).
-    )
+    from ._shared import _check_real_data_path, _safe_robot_name
+    from ..tool_executor import _generate_calibration_script
     real_data_path = args.get("real_data_path", "")
     articulation_path = args.get("articulation_path", "")
 
