@@ -522,9 +522,9 @@
   note: contact sequence state machine + predicate evaluator + dry-run executor
 63b:
   title: 'cuRoboV2 backend: B-spline trajectories + depth-fused TSDF + constrained planning'
-  agent_type: opus-runtime
-  status: scaffold
-  note: cuRobo V2
+  agent_type: sonnet-bounded
+  status: landed
+  note: 'SPEC/MATH layer landed (B-spline de Boor, TSDFConfig, ConstraintSpec, CuRoboV2Backend); GPU/Warp planning remains opus-runtime gated; 27 tests pass'
 63c:
   title: Per-robot-family cuRobo debugging protocol
   agent_type: opus-runtime
