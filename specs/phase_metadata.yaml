@@ -523,9 +523,14 @@
   note: SQLite training store
 '66':
   title: 'Live spawn validation: `add_usd_reference` post-checks'
-  agent_type: opus-runtime
-  status: scaffold
-  note: USD reference validation
+  agent_type: sonnet-bounded
+  status: landed
+  note: USD reference validator — pure-Python, 19 tests, no Kit dependency
+  gate: pytest — validator catches dangling reference, asset_not_found, depth-limit, circular
+  files:
+  - service/isaac_assist_service/multimodal/spawn_validator_usd_ref.py
+  - tests/test_phase_66_spawn_validator_usd_ref.py
+  loc: 240
 '67':
   title: 'Live spawn validation: `create_articulated_joint` post-checks'
   agent_type: sonnet-bounded
@@ -533,9 +538,14 @@
   note: joint validator — pure-Python, 27 tests, no Kit dependency
 '68':
   title: 'Live spawn validation: `apply_api_schema` post-checks'
-  agent_type: opus-runtime
-  status: scaffold
-  note: schema validation
+  agent_type: sonnet-bounded
+  status: landed
+  note: API schema validator — pure-Python, 13+ tests, no Kit dependency
+  gate: pytest tests/test_phase_68_spawn_validator_api_schema.py — validator catches unknown schema, conflicting schemas, missing required attrs
+  files:
+  - service/isaac_assist_service/multimodal/spawn_validator_api_schema.py
+  - tests/test_phase_68_spawn_validator_api_schema.py
+  loc: 240
 '69':
   title: 'Live spawn validation: contact reachability'
   agent_type: opus-runtime
