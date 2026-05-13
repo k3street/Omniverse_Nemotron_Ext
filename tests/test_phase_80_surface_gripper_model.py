@@ -12,7 +12,7 @@ pytestmark = pytest.mark.l0
 # ---------------------------------------------------------------------------
 
 def _import_module():
-    from service.isaac_assist_service.multimodal import surface_gripper_model as m
+    from service.isaac_assist_service.multimodal import surface_gripper_suction as m
     return m
 
 

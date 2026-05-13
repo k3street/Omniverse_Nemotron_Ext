@@ -825,10 +825,12 @@
   agent_type: opus-runtime
   status: landed
   landed_date: '2026-05-13'
-  note: surface gripper force/hold-capacity model + gripper-type registry
-  gate: pytest tests/test_phase_80_surface_gripper_model.py — suction force model returns physically reasonable values; gripper registry covers 8+ types
+  note: surface gripper force/hold-capacity model + gripper-type registry; surface_gripper_suction.py is canonical; surface_gripper_model.py is shim alias
+  gate: pytest tests/test_phase_80_surface_gripper_suction.py tests/test_phase_80_surface_gripper_model.py — suction force model returns physically reasonable values; gripper registry covers 8+ types
   files:
+  - service/isaac_assist_service/multimodal/surface_gripper_suction.py
   - service/isaac_assist_service/multimodal/surface_gripper_model.py
+  - tests/test_phase_80_surface_gripper_suction.py
   - tests/test_phase_80_surface_gripper_model.py
   loc: 280
 80b:
