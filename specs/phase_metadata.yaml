@@ -782,9 +782,15 @@
   - 11b
 81c:
   title: MoveIt 2 + cuMotion external execution bridge
-  agent_type: opus-runtime
-  status: scaffold
-  note: high-rate sensor pipe
+  agent_type: sonnet-bounded
+  status: landed
+  note: bridge config + message schemas + dry-run orchestrator + service-call shape validation
+  gate: pytest — bridge config validates, message envelopes round-trip, dry-run plan request returns trajectory dict
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_81c_moveit_cumotion_bridge.py
+  - tests/test_sub_phase_81c_moveit_cumotion_bridge.py
+  loc: 280
+  effort_min: 90
 '82':
   title: Epoch V convergence test
   agent_type: sonnet-bounded
