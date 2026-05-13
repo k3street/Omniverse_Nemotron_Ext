@@ -730,9 +730,19 @@
   - 8d
 '79':
   title: 'Whole-body control: humanoid loco-manipulation'
-  agent_type: opus-runtime
-  status: scaffold
-  note: WBC — needs MuJoCo/IsaacLab GPU
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: >-
+    SPEC/REWARD-DECOMP layer landed — WBCRewardComponents/Weights/Observation/
+    TerminationFlags dataclasses, WBCRewardCalculator (compute_components,
+    compute_total, compute_termination, summary), distance helper.
+    33 pytest tests pass. MuJoCo/IsaacLab runtime integration remains scaffold.
+  gate: pytest tests/test_phase_79_wbc_humanoid_loco_manip.py — 33 tests pass
+  files:
+  - service/isaac_assist_service/multimodal/wbc_humanoid_loco_manip.py
+  - tests/test_phase_79_wbc_humanoid_loco_manip.py
+  loc: 280
 79b:
   title: IsaacLab 2.3 G1 locomanipulation env + WBC integration
   agent_type: opus-runtime
