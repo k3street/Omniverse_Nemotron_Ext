@@ -933,9 +933,18 @@
   - '94'
 '95':
   title: 'RAG: real NVIDIA docs scraping'
-  agent_type: opus-runtime
-  status: scaffold
-  note: NVIDIA docs scraping
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: SCRAPER layer — URL frontier, page parser, chunking, dedup, MockHTTPClient
+  gate: pytest — scraper enumerates URLs, dedupes, chunks page text, produces RAG docs
+  files:
+  - service/isaac_assist_service/multimodal/rag_nvidia_scraper.py
+  - tests/test_phase_95_rag_nvidia_scraper.py
+  loc: 280
+  effort_min: 60
+  blocked_by:
+  - '94'
 '96':
   title: Quarterly audit of `tool_executor.py` size + ghost handlers
   agent_type: sonnet-mechanical
