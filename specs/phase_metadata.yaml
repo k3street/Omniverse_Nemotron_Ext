@@ -631,7 +631,7 @@
 '91':
   title: Audit log retention enforcement
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: audit log retention
 '92':
   title: Workflow snapshot retention
