@@ -591,7 +591,8 @@
 72b:
   title: Contact-classification → joint-type inference
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
+  landed_date: '2026-05-13'
   note: constraint violations
   gate: pytest — ConstraintViolation subclass for assembly constraints; emits via Phase 11b channel
   files:
