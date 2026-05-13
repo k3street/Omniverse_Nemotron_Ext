@@ -756,7 +756,7 @@
 '84':
   title: Per-session QA logging expansion
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: QA logging buffer
   gate: pytest — log writes ndjson; per-session ring buffer caps at 10k events
   files:
@@ -768,7 +768,7 @@
 '85':
   title: '`MCPResult` type discrimination'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: MCPResult dataclass
   gate: pytest — MCPResult.kind Literal[...] discriminator; encoder/decoder round-trip
   files:
@@ -793,7 +793,7 @@
 '86':
   title: 'Settings exposure: every runtime knob via MCP'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: settings registry
   gate: 'pytest — settings registry: list_all, get(key), set(key, val) with type validation'
   files:
