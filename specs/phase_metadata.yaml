@@ -204,8 +204,14 @@
 '23':
   title: Snap engine hardening
   agent_type: TS-only
-  status: scaffold
-  note: snap.ts
+  status: landed
+  landed_date: '2026-05-13'
+  note: snap engine hardening (TS) landed
+  gate: npx vitest run src/canvas/snap.test.ts — 34 tests pass
+  files:
+  - web/floor-plan-ui/src/canvas/snap.ts
+  - web/floor-plan-ui/src/canvas/snap.test.ts
+  loc: 350
 '24':
   title: Agent confirm bar wired to workflow lifecycle
   agent_type: TS-only
