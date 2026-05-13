@@ -662,7 +662,7 @@
 78c:
   title: Asset-precheck + mock fallbacks per yrkesroll asset type
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: baseline freeze
   gate: pytest — freeze + compare round-trip; delta report on stratified runs
   files:
