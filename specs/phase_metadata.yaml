@@ -941,13 +941,12 @@
 '98':
   title: Documentation polish
   agent_type: sonnet-mechanical
-  status: scaffold
-  note: doc polish task
-  gate: docs/architecture/{handlers,honesty,mandate_boundary}.md all link to phase_metadata.yaml; spec_coverage.md regenerated
+  status: landed
+  note: MarkdownPolisher linter + auto_fix; 7 rules; 23 pytest tests pass
+  gate: pytest tests/test_phase_98_documentation_polish.py -- all pass
   files:
   - service/isaac_assist_service/multimodal/documentation_polish.py
-  - docs/architecture/handlers.md
-  - docs/spec_coverage.md
+  - tests/test_phase_98_documentation_polish.py
   loc: 0
   effort_min: 90
   blocked_by:
