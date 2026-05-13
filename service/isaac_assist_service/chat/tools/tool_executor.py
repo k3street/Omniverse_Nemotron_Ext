@@ -103,12 +103,7 @@ class _StageWriteLockQueue:
 # ── Recovered module-level state from PR branches ───────────────────────
 
 # from: feat/7D-arena
-_ARENA_SCENE_MAP = {
-    "tabletop_pick_and_place": "isaaclab_tasks.envs.arena.scenes.tabletop",
-    "kitchen": "isaaclab_tasks.envs.arena.scenes.kitchen",
-    "galileo": "isaaclab_tasks.envs.arena.scenes.galileo",
-    "custom": None,
-}
+# _ARENA_SCENE_MAP migrated to handlers/arena.py (Phase 8 wave 1, 2026-05-13).
 
 # from: feat/addendum-community-remote-v2
 _ASYNC_TASKS: Dict[str, Dict[str, Any]] = {}
@@ -3297,12 +3292,7 @@ def _get_vision_provider():
 
 
 # ══════ From feat/7D-arena ══════
-def _arena_env_id(scene_type: str, robot_asset: str, task: str) -> str:
-    """Generate a gymnasium-style env_id from arena components."""
-    scene_part = scene_type.replace("_", " ").title().replace(" ", "")
-    robot_part = robot_asset.split("/")[-1].replace(".usd", "").replace("_", " ").title().replace(" ", "")
-    task_part = task.replace("_", " ").title().replace(" ", "")
-    return f"Arena-{scene_part}{task_part}-{robot_part}-v0"
+# _arena_env_id migrated to handlers/arena.py (Phase 8 wave 1, 2026-05-13).
 
 # _gen_create_arena moved to handlers/arena.py (Phase 6 wave 9).
 
