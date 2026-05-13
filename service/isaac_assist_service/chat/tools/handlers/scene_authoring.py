@@ -3659,7 +3659,8 @@ else:
 async def _handle_build_stage_index(args: Dict) -> Dict:
     """Build the metadata index and populate the module-level cache."""
     from .. import kit_tools
-    from ..tool_executor import _gen_build_stage_index
+    # _gen_build_stage_index lives in handlers/diagnostics.py (Phase 6 wave 22)
+    from .diagnostics import _gen_build_stage_index
 
     prim_scope = args.get("prim_scope") or "/World"
     max_prims = int(args.get("max_prims", 50000))
