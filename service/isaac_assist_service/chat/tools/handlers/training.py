@@ -14,6 +14,23 @@ from pathlib import Path
 
 from typing import Any, Callable, Dict, List, Optional
 
+# ---------------------------------------------------------------------------
+# Theme-local helpers (Phase 8 wave 26, 2026-05-13)
+
+def _format_component_metrics(metrics: Dict) -> str:
+    """Format per-component training metrics for the mutation prompt."""
+    components = metrics.get("components", {})
+    if not components:
+        return "No component metrics available."
+    lines = []
+    for name, data in components.items():
+        mean_vals = data.get("mean", [])
+        converged = data.get("converged", False)
+        mean_str = ", ".join(f"{v:.4f}" for v in mean_vals[-5:]) if mean_vals else "N/A"
+        status = "converged" if converged else "not converged"
+        lines.append(f"  {name}: mean=[{mean_str}] ({status})")
+    return "\n".join(lines)
+
 # Phase 8 wave 24 (2026-05-13): training-local state caches + path
 # constants. Migrated from tool_executor.py.
 _WORKSPACE = Path(__file__).resolve().parents[5] / "workspace"

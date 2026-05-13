@@ -15,6 +15,74 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
+# Theme-local helpers (Phase 8 wave 26, 2026-05-13)
+
+def _analyze_performance(stats: Dict, timing: Dict, mem: Dict) -> List[Dict]:
+    """Analyze profiling data and return a list of performance issues."""
+    issues = []
+
+    # Physics narrow-phase bottleneck
+    narrow_ms = timing.get("narrow_phase_ms", 0)
+    if narrow_ms > 10:
+        issues.append({
+            "category": "physics_narrow_phase",
+            "severity": "high",
+            "message": (
+                f"Narrow phase takes {narrow_ms:.0f}ms. "
+                f"Heavy trimesh colliders are likely the cause."
+            ),
+            "fix": "Switch to convexHull or convexDecomposition approximation",
+        })
+
+    # VRAM pressure
+    used_mb = mem.get("used_mb", 0)
+    total_mb = mem.get("total_mb", 1)
+    if total_mb > 0 and used_mb / total_mb > 0.9:
+        issues.append({
+            "category": "memory",
+            "severity": "high",
+            "message": f"GPU memory {used_mb:.0f}/{total_mb:.0f} MB (>90%)",
+            "breakdown": mem.get("per_category", {}),
+            "fix": "Reduce texture resolution or number of render products",
+        })
+
+    # Solver convergence
+    solver_ms = timing.get("solver_ms", 0)
+    solver_iters = stats.get("solver_iterations", 0)
+    if solver_ms > 5 and solver_iters > 16:
+        issues.append({
+            "category": "solver",
+            "severity": "medium",
+            "message": (
+                f"Solver takes {solver_ms:.0f}ms at "
+                f"{solver_iters} iterations"
+            ),
+            "fix": "Reduce solver iterations to 4-8 for non-contact-critical bodies",
+        })
+
+    # Broad-phase bottleneck
+    broad_ms = timing.get("broad_phase_ms", 0)
+    if broad_ms > 8:
+        issues.append({
+            "category": "physics_broad_phase",
+            "severity": "medium",
+            "message": f"Broad phase takes {broad_ms:.0f}ms",
+            "fix": "Reduce number of active rigid bodies or increase physics scene bounds",
+        })
+
+    # High dynamic rigid body count
+    nb_dynamic = stats.get("nb_dynamic_rigids", 0)
+    if nb_dynamic > 500:
+        issues.append({
+            "category": "scene_complexity",
+            "severity": "medium",
+            "message": f"{nb_dynamic} dynamic rigid bodies in scene",
+            "fix": "Consider using GPU pipeline or reducing active body count",
+        })
+
+    return issues
+
+# ---------------------------------------------------------------------------
 # Theme-local helpers (Phase 8 wave 18, 2026-05-13)
 
 def _detect_used_vram_gb() -> Optional[float]:
@@ -2683,7 +2751,7 @@ async def _handle_diagnose_performance(args: Dict) -> Dict:
     """Collect PhysX stats, timing, and GPU memory, then analyze for bottlenecks."""
     from .. import kit_tools  # noqa: PLC0415
     from .. import tool_executor as _te  # noqa: PLC0415
-    _analyze_performance = _te._analyze_performance
+    # _analyze_performance migrated to module body (Phase 8 wave 26).
     code = """\
 import json
 

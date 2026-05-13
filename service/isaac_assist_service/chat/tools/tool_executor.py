@@ -1726,19 +1726,7 @@ def _get_vision_provider():
 
 
 # ══════ From feat/7E-eureka-rewards ══════
-def _format_component_metrics(metrics: Dict) -> str:
-    """Format per-component training metrics for the mutation prompt."""
-    components = metrics.get("components", {})
-    if not components:
-        return "No component metrics available."
-    lines = []
-    for name, data in components.items():
-        mean_vals = data.get("mean", [])
-        converged = data.get("converged", False)
-        mean_str = ", ".join(f"{v:.4f}" for v in mean_vals[-5:]) if mean_vals else "N/A"
-        status = "converged" if converged else "not converged"
-        lines.append(f"  {name}: mean=[{mean_str}] ({status})")
-    return "\n".join(lines)
+# _format_component_metrics migrated to handlers/training.py (Phase 8 wave 26, 2026-05-13).
 
 # _build_mutation_prompt migrated to handlers/training.py (Phase 8 wave 20, 2026-05-13).
 
@@ -1844,70 +1832,7 @@ def _format_component_metrics(metrics: Dict) -> str:
 # _gen_verify_import moved to handlers/robot.py (Phase 6 wave 1).
 
 # _detect_robot_for_fix migrated to handlers/robot.py (Phase 8 wave 13, 2026-05-13).
-def _analyze_performance(stats: Dict, timing: Dict, mem: Dict) -> List[Dict]:
-    """Analyze profiling data and return a list of performance issues."""
-    issues = []
-
-    # Physics narrow-phase bottleneck
-    narrow_ms = timing.get("narrow_phase_ms", 0)
-    if narrow_ms > 10:
-        issues.append({
-            "category": "physics_narrow_phase",
-            "severity": "high",
-            "message": (
-                f"Narrow phase takes {narrow_ms:.0f}ms. "
-                f"Heavy trimesh colliders are likely the cause."
-            ),
-            "fix": "Switch to convexHull or convexDecomposition approximation",
-        })
-
-    # VRAM pressure
-    used_mb = mem.get("used_mb", 0)
-    total_mb = mem.get("total_mb", 1)
-    if total_mb > 0 and used_mb / total_mb > 0.9:
-        issues.append({
-            "category": "memory",
-            "severity": "high",
-            "message": f"GPU memory {used_mb:.0f}/{total_mb:.0f} MB (>90%)",
-            "breakdown": mem.get("per_category", {}),
-            "fix": "Reduce texture resolution or number of render products",
-        })
-
-    # Solver convergence
-    solver_ms = timing.get("solver_ms", 0)
-    solver_iters = stats.get("solver_iterations", 0)
-    if solver_ms > 5 and solver_iters > 16:
-        issues.append({
-            "category": "solver",
-            "severity": "medium",
-            "message": (
-                f"Solver takes {solver_ms:.0f}ms at "
-                f"{solver_iters} iterations"
-            ),
-            "fix": "Reduce solver iterations to 4-8 for non-contact-critical bodies",
-        })
-
-    # Broad-phase bottleneck
-    broad_ms = timing.get("broad_phase_ms", 0)
-    if broad_ms > 8:
-        issues.append({
-            "category": "physics_broad_phase",
-            "severity": "medium",
-            "message": f"Broad phase takes {broad_ms:.0f}ms",
-            "fix": "Reduce number of active rigid bodies or increase physics scene bounds",
-        })
-
-    # High dynamic rigid body count
-    nb_dynamic = stats.get("nb_dynamic_rigids", 0)
-    if nb_dynamic > 500:
-        issues.append({
-            "category": "scene_complexity",
-            "severity": "medium",
-            "message": f"{nb_dynamic} dynamic rigid bodies in scene",
-            "fix": "Consider using GPU pipeline or reducing active body count",
-        })
-
-    return issues
+# _analyze_performance migrated to handlers/diagnostics.py (Phase 8 wave 26, 2026-05-13).
 
 # _handle_diagnose_performance moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
@@ -2041,9 +1966,9 @@ def _analyze_performance(stats: Dict, timing: Dict, mem: Dict) -> List[Dict]:
 
 
 # ══════ From feat/addendum-ros2-nav2 ══════
-def get_nav2_bridge_profile(profile: str) -> Optional[Dict[str, Any]]:
-    """Public lookup helper used by tests and Nav2 bridge code-gen."""
-    return _NAV2_BRIDGE_PROFILES.get(profile)
+# get_nav2_bridge_profile deleted as dead code (2026-05-13).
+# Zero callers across service/, tests/, scripts/ via comprehensive grep.
+# _NAV2_BRIDGE_PROFILES was migrated to handlers/ros2.py (Phase 8 wave 4).
 
 # _gen_setup_ros2_bridge moved to handlers/ros2.py (Phase 6 wave 7).
 
