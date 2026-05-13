@@ -1063,6 +1063,19 @@ _TEST_VECTORS = [
         {"articulation_path": "/W/R", "locomotion_policy": "rl_policy"},
         ["whole-body", "/W/R"],
     ),
+    (
+        "interpolate_trajectory",
+        {
+            "articulation_path": "/W/R",
+            "waypoints": [
+                {"joint_positions": [0.0] * 7},
+                {"joint_positions": [1.0] * 7},
+            ],
+            "method": "linear",
+            "num_steps": 10,
+        },
+        ["import numpy", "Sparse waypoints"],
+    ),
 ]
 
 
@@ -1194,15 +1207,7 @@ class TestAllCodeGenHandlersCovered:
     issue.
     """
 
-    _KNOWN_UNTESTED: "frozenset[str]" = frozenset({
-        # Single remaining handler — interpolate_trajectory has a nested
-        # args-shape requirement (joint_positions inside waypoints) that
-        # needs full per-robot-DOF data to exercise meaningfully. Not
-        # worth synthesizing for the smoke test; a follow-up should
-        # write an integration test that exercises it against a real
-        # 7-DOF articulation snapshot.
-        'interpolate_trajectory',
-    })
+    _KNOWN_UNTESTED: "frozenset[str]" = frozenset()
 
     def test_all_handlers_tested(self):
         tested = {v[0] for v in _TEST_VECTORS}
