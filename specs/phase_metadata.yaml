@@ -640,9 +640,15 @@
     - tests/test_phase_71_yaskawa_gp25_onboarding.py
 '72':
   title: '`setup_assembly_constraint` runtime'
-  agent_type: opus-runtime
-  status: scaffold
-  note: assembly constraint runtime
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: SPEC/CONSTRAINT layer landed (pure-Python). Live USD/PhysX wiring remains opus-runtime.
+  gate: pytest — constraint validates required fields; satisfaction check tracks per-constraint state; dry-run simulator advances state
+  files:
+    - service/isaac_assist_service/multimodal/setup_assembly_constraint_runtime.py
+    - tests/test_phase_72_setup_assembly_constraint_runtime.py
+  loc: 280
 72b:
   title: Contact-classification → joint-type inference
   agent_type: sonnet-bounded
