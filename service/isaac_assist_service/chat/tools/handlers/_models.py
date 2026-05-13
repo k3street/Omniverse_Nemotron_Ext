@@ -11,8 +11,8 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-05-13T12:04:54+00:00
-Tool count: 423
+Generated: 2026-05-13T12:15:14+00:00
+Tool count: 427
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
 """
@@ -3768,6 +3768,59 @@ class QueryLayoutMetricArgs(BaseModel):
     args: Optional[Dict[str, Any]] = Field(None, description="Metric-specific arguments. See spec for per-metric shape.")
 
 
+class SampleCorrelatedDrArgs(BaseModel):
+    """Draw N samples from a correlated multivariate normal preset for domain randomization. Pure Python (Cholesky-based). Use preset='sensor_camera' for the bundled lighting/exposure/white_balance/noise pre"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    preset: Optional[str] = Field(None, description="Optional bundled preset name (e.g. 'sensor_camera').")
+    axes: Optional[List[Dict[str, Any]]] = Field(None, description="List of axis dicts: {name, mean, std}. Required when no preset.")
+    correlations: Optional[List[Dict[str, Any]]] = Field(None, description="List of {axis_a, axis_b, rho} pairs.")
+    n_samples: Optional[int] = Field(None, description="Number of samples. Defaults to preset's num_samples.")
+    seed: Optional[int] = Field(None, description="Optional RNG seed for reproducibility.")
+    name: Optional[str] = Field(None, description="Label for the config when no preset given.")
+
+
+class EurekaHistoryArgs(BaseModel):
+    """Query persisted Eureka run history (Phase 64 SQLite store). Returns either a specific run + its iterations (when run_id is given) or a paginated list of recent runs filtered by status."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    run_id: Optional[str] = Field(None, description="Specific run ID; if absent, returns list of runs.")
+    status_filter: Optional[str] = Field(None, description="Filter listing by run status.")
+    limit: Optional[int] = Field(None, description="Max runs to return (default 20).")
+    db_path: Optional[str] = Field(None, description="Optional SQLite file path; defaults to in-memory.")
+
+
+class ValidateUsdReferencePostArgs(BaseModel):
+    """Run Phase 66 validator against a synthetic USD-reference state (typically observed after add_usd_reference). Checks: target_set, asset_exists, asset_too_large, prim_type_resolved, parent_exists, depth"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    prim_path: str
+    reference_target: str
+    asset_exists: Optional[bool] = Field(None)
+    asset_size_bytes: Optional[int] = Field(None)
+    prim_type_after: Optional[str] = Field(None)
+    parent_path: Optional[str] = Field(None)
+    depth: Optional[int] = Field(None)
+    is_circular: Optional[bool] = Field(None)
+    strict: Optional[bool] = Field(None)
+
+
+class ValidateJointPostArgs(BaseModel):
+    """Run Phase 67 validator against a synthetic articulated-joint state (typically observed after create_articulated_joint). Checks: prim_exists, body0_set, body1_set, axis_set, axis_valid, limits_consiste"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    prim_path: str
+    joint_type: Optional[str] = Field(None)
+    body0: Optional[str] = Field(None)
+    body1: Optional[str] = Field(None)
+    axis: Optional[str] = Field(None)
+    lower_limit: Optional[float] = Field(None)
+    upper_limit: Optional[float] = Field(None)
+    articulation_root_path: Optional[str] = Field(None)
+    exists: Optional[bool] = Field(None)
+    strict: Optional[bool] = Field(None)
+
+
 class ExecuteContactSequencePlanArgs(BaseModel):
     """Execute an N-step contact-sequence plan: approach → make_contact → apply_force / slide / twist → release / verify. Each step specifies prim_a + prim_b, optional target force/torque/duration, and a suc"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
@@ -4211,6 +4264,10 @@ MODEL_REGISTRY = {
     "commit_layout_spec": CommitLayoutSpecArgs,
     "apply_layout_spec_to_scene": ApplyLayoutSpecToSceneArgs,
     "query_layout_metric": QueryLayoutMetricArgs,
+    "sample_correlated_dr": SampleCorrelatedDrArgs,
+    "eureka_history": EurekaHistoryArgs,
+    "validate_usd_reference_post": ValidateUsdReferencePostArgs,
+    "validate_joint_post": ValidateJointPostArgs,
     "execute_contact_sequence_plan": ExecuteContactSequencePlanArgs,
     "rebind_role": RebindRoleArgs,
 }

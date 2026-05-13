@@ -1227,6 +1227,81 @@ async def _handle_iterate_reward(args: Dict) -> Dict:
     }
 
 
+async def _handle_eureka_history(args: Dict) -> Dict:
+    """Query persisted Eureka run history from the Phase 64 SQLite store.
+
+    Pure-Python persistence layer (no GPU/Kit). When a `run_id` is given,
+    returns that run + its iterations; otherwise lists recent runs.
+
+    Args:
+        run_id: optional. If present, return run + iterations for that ID.
+        status_filter: optional ``"running"|"completed"|"failed"|"cancelled"``.
+        limit: max runs to list (default 20).
+        db_path: optional override; defaults to in-memory store (which is
+            empty unless the same process previously persisted runs).
+
+    Returns:
+        Dict with either ``{run, iterations, count}`` or ``{runs, count}``.
+    """
+    from service.isaac_assist_service.multimodal.eureka_run_state_store import (
+        EurekaRunStateStore,
+    )
+
+    db_path = args.get("db_path") or ":memory:"
+    store = EurekaRunStateStore(db_path=db_path)
+    try:
+        run_id = args.get("run_id")
+        if run_id:
+            run = store.get_run(str(run_id))
+            iterations = store.get_iterations(str(run_id))
+            return {
+                "run": {
+                    "run_id": run.run_id,
+                    "task_description": run.task_description,
+                    "environment_id": run.environment_id,
+                    "started_at": run.started_at,
+                    "status": run.status,
+                    "best_score": run.best_score,
+                    "best_iteration": run.best_iteration,
+                    "total_iterations": run.total_iterations,
+                    "finished_at": run.finished_at,
+                } if run else None,
+                "iterations": [
+                    {
+                        "iteration_idx": it.iteration_idx,
+                        "score": it.score,
+                        "success_rate": it.success_rate,
+                        "n_episodes": it.n_episodes,
+                        "created_at": it.created_at,
+                        "errors": list(it.errors),
+                    }
+                    for it in iterations
+                ],
+                "count": len(iterations),
+            }
+        runs = store.list_runs(
+            status_filter=args.get("status_filter"),
+            limit=int(args.get("limit", 20)),
+        )
+        return {
+            "runs": [
+                {
+                    "run_id": r.run_id,
+                    "task_description": r.task_description,
+                    "status": r.status,
+                    "best_score": r.best_score,
+                    "total_iterations": r.total_iterations,
+                    "started_at": r.started_at,
+                    "finished_at": r.finished_at,
+                }
+                for r in runs
+            ],
+            "count": len(runs),
+        }
+    finally:
+        store.close()
+
+
 async def _handle_eureka_status(args: Dict) -> Dict:
     """Return current status of a Eureka optimization run."""
     from ._state import EUREKA
@@ -2827,6 +2902,7 @@ def register(
     data["create_isaaclab_env"] = _handle_create_isaaclab_env
     data["detect_ood"] = _handle_detect_ood
     data["diagnose_training"] = _handle_diagnose_training
+    data["eureka_history"] = _handle_eureka_history
     data["eureka_status"] = _handle_eureka_status
     data["export_finetune_data"] = _handle_export_finetune_data
     data["finetune_stats"] = _handle_finetune_stats

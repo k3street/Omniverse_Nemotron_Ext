@@ -202,6 +202,30 @@ _ROBOT_WIZARD_REGISTRY = {
     "ur10": "ur10e",
 }
 
+
+def _wire_yaskawa_gp25() -> None:
+    """Phase 71 — attach the Yaskawa GP25 spec into _ROBOT_WIZARD_REGISTRY.
+
+    Pulls the registry entry from ``multimodal.yaskawa_gp25_onboarding`` so
+    the GP25 spec data (payload, reach, joint limits, controller protocol,
+    Nucleus asset path, gripper recommendations) is reachable through
+    ``robot_wizard`` and ``resolve_robot_class`` without duplicating the
+    onboarding module's content here.
+    """
+    try:
+        from service.isaac_assist_service.multimodal.yaskawa_gp25_onboarding import (
+            gp25_to_robot_wizard_entry,
+        )
+    except Exception:  # pragma: no cover — defensive in case import order shifts
+        return
+    entry = gp25_to_robot_wizard_entry()
+    _ROBOT_WIZARD_REGISTRY.setdefault("yaskawa_gp25", entry)
+    _ROBOT_WIZARD_REGISTRY.setdefault("gp25", "yaskawa_gp25")
+    _ROBOT_WIZARD_REGISTRY.setdefault("yaskawa_motoman_gp25", "yaskawa_gp25")
+
+
+_wire_yaskawa_gp25()
+
 def _resolve_robot_asset(entry: Dict) -> str:
     """Return the best asset path for a robot registry entry.
 

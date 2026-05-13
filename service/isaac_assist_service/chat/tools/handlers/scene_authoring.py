@@ -4885,6 +4885,60 @@ async def _handle_restore_delta_snapshot(args: Dict) -> Dict:
 
 
 # ---------------------------------------------------------------------------
+# Phase 66 — post-spawn validation for add_usd_reference
+
+
+async def _handle_validate_usd_reference_post(args: Dict) -> Dict[str, Any]:
+    """Run Phase 66 validator against a synthetic USDReferenceState dict.
+
+    Pure-Python check; the caller supplies the post-spawn state they
+    observed (or expect) from a real Kit ``add_usd_reference`` call.
+
+    Args:
+        prim_path: required.
+        reference_target: required (asset URL or USD path).
+        asset_exists: bool, default True.
+        asset_size_bytes: int, default 0.
+        prim_type_after: str or None.
+        parent_path: str or None.
+        depth: int, default 1.
+        is_circular: bool, default False.
+        strict: bool, default False (elevates warns to errors).
+
+    Returns:
+        Dict with ``passed``, ``findings`` (list of dicts), ``severity_counts``.
+    """
+    from service.isaac_assist_service.multimodal.spawn_validator_usd_ref import (
+        USDReferenceState,
+        USDReferenceValidator,
+    )
+
+    state = USDReferenceState(
+        prim_path=str(args.get("prim_path", "")),
+        reference_target=str(args.get("reference_target", "")),
+        asset_exists=bool(args.get("asset_exists", True)),
+        asset_size_bytes=int(args.get("asset_size_bytes", 0)),
+        prim_type_after=args.get("prim_type_after"),
+        parent_path=args.get("parent_path"),
+        depth=int(args.get("depth", 1)),
+        is_circular=bool(args.get("is_circular", False)),
+    )
+    validator = USDReferenceValidator(strict=bool(args.get("strict", False)))
+    findings = validator.validate(state)
+    counts: Dict[str, int] = {"error": 0, "warn": 0, "info": 0}
+    for f in findings:
+        counts[f.severity] = counts.get(f.severity, 0) + 1
+    return {
+        "passed": validator.passed(findings),
+        "findings": [
+            {"check_id": f.check_id, "severity": f.severity, "message": f.message}
+            for f in findings
+        ],
+        "severity_counts": counts,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
@@ -4897,8 +4951,9 @@ def register(
     Called by `handlers/_dispatch.py:register_handlers()` which is the
     sole dispatch entry point from `tool_executor.py`.
     """
-    # Data handlers (38)
+    # Data handlers (39)
     data["build_stage_index"] = _handle_build_stage_index
+    data["validate_usd_reference_post"] = _handle_validate_usd_reference_post
     data["compute_stack_placement"] = _handle_compute_stack_placement
     data["compute_surface_area"] = _handle_compute_surface_area
     data["compute_volume"] = _handle_compute_volume

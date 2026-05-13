@@ -9285,6 +9285,144 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "sample_correlated_dr",
+            "description": (
+                "Draw N samples from a correlated multivariate normal preset for "
+                "domain randomization. Pure Python (Cholesky-based). Use preset="
+                "'sensor_camera' for the bundled lighting/exposure/white_balance/"
+                "noise preset, or supply your own axes (mean+std) and correlations "
+                "(rho pairs). Returns the samples and the empirical correlation for "
+                "each requested pair."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "preset": {
+                        "type": "string",
+                        "description": "Optional bundled preset name (e.g. 'sensor_camera').",
+                    },
+                    "axes": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "List of axis dicts: {name, mean, std}. Required when no preset.",
+                    },
+                    "correlations": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "List of {axis_a, axis_b, rho} pairs.",
+                    },
+                    "n_samples": {
+                        "type": "integer",
+                        "description": "Number of samples. Defaults to preset's num_samples.",
+                    },
+                    "seed": {
+                        "type": "integer",
+                        "description": "Optional RNG seed for reproducibility.",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Label for the config when no preset given.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "eureka_history",
+            "description": (
+                "Query persisted Eureka run history (Phase 64 SQLite store). "
+                "Returns either a specific run + its iterations (when run_id is "
+                "given) or a paginated list of recent runs filtered by status."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "run_id": {
+                        "type": "string",
+                        "description": "Specific run ID; if absent, returns list of runs.",
+                    },
+                    "status_filter": {
+                        "type": "string",
+                        "enum": ["running", "completed", "failed", "cancelled"],
+                        "description": "Filter listing by run status.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max runs to return (default 20).",
+                    },
+                    "db_path": {
+                        "type": "string",
+                        "description": "Optional SQLite file path; defaults to in-memory.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_usd_reference_post",
+            "description": (
+                "Run Phase 66 validator against a synthetic USD-reference state "
+                "(typically observed after add_usd_reference). Checks: target_set, "
+                "asset_exists, asset_too_large, prim_type_resolved, parent_exists, "
+                "depth_within_limit, not_circular, target_extension. Returns "
+                "findings categorized by severity."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string"},
+                    "reference_target": {"type": "string"},
+                    "asset_exists": {"type": "boolean"},
+                    "asset_size_bytes": {"type": "integer"},
+                    "prim_type_after": {"type": "string"},
+                    "parent_path": {"type": "string"},
+                    "depth": {"type": "integer"},
+                    "is_circular": {"type": "boolean"},
+                    "strict": {"type": "boolean"},
+                },
+                "required": ["prim_path", "reference_target"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_joint_post",
+            "description": (
+                "Run Phase 67 validator against a synthetic articulated-joint "
+                "state (typically observed after create_articulated_joint). "
+                "Checks: prim_exists, body0_set, body1_set, axis_set, axis_valid, "
+                "limits_consistent, articulation_root, joint_type_known. Returns "
+                "findings categorized by severity."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string"},
+                    "joint_type": {
+                        "type": "string",
+                        "enum": ["revolute", "prismatic", "fixed", "spherical"],
+                    },
+                    "body0": {"type": "string"},
+                    "body1": {"type": "string"},
+                    "axis": {"type": "string", "enum": ["X", "Y", "Z"]},
+                    "lower_limit": {"type": "number"},
+                    "upper_limit": {"type": "number"},
+                    "articulation_root_path": {"type": "string"},
+                    "exists": {"type": "boolean"},
+                    "strict": {"type": "boolean"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "execute_contact_sequence_plan",
             "description": (
                 "Execute an N-step contact-sequence plan: approach → make_contact "

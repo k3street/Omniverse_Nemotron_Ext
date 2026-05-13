@@ -5542,6 +5542,61 @@ async def _handle_list_available_controllers(args) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Phase 67 — post-spawn validation for create_articulated_joint
+
+
+async def _handle_validate_joint_post(args: Dict) -> Dict[str, Any]:
+    """Run Phase 67 validator against a synthetic JointPrimState dict.
+
+    Pure-Python check; caller supplies post-spawn state observed (or
+    expected) from a real Kit ``create_articulated_joint`` invocation.
+
+    Args:
+        prim_path: required.
+        joint_type: one of ``revolute|prismatic|fixed|spherical``.
+        body0: parent prim path or None.
+        body1: child prim path or None.
+        axis: ``X|Y|Z`` or None.
+        lower_limit, upper_limit: floats or None.
+        articulation_root_path: str or None.
+        exists: bool, default True.
+        strict: bool, default False.
+
+    Returns:
+        Dict with ``passed``, ``findings``, ``severity_counts``.
+    """
+    from service.isaac_assist_service.multimodal.spawn_validator_joint import (
+        JointPrimState,
+        JointSpawnValidator,
+    )
+
+    state = JointPrimState(
+        prim_path=str(args.get("prim_path", "")),
+        joint_type=args.get("joint_type", "revolute"),
+        body0=args.get("body0"),
+        body1=args.get("body1"),
+        axis=args.get("axis"),
+        lower_limit=args.get("lower_limit"),
+        upper_limit=args.get("upper_limit"),
+        articulation_root_path=args.get("articulation_root_path"),
+        exists=bool(args.get("exists", True)),
+    )
+    validator = JointSpawnValidator(strict=bool(args.get("strict", False)))
+    findings = validator.validate(state)
+    counts: Dict[str, int] = {"error": 0, "warn": 0, "info": 0}
+    for f in findings:
+        counts[f.severity] = counts.get(f.severity, 0) + 1
+    return {
+        "passed": validator.passed(findings),
+        "findings": [
+            {"check_id": f.check_id, "severity": f.severity, "message": f.message}
+            for f in findings
+        ],
+        "severity_counts": counts,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
@@ -5554,10 +5609,11 @@ def register(
     Called by `handlers/_dispatch.py:register_handlers()` which is the
     sole dispatch entry point from `tool_executor.py`.
     """
-    # Data handlers (28)
+    # Data handlers (29)
     data["apply_robot_fix_profile"] = _handle_apply_robot_fix_profile
     data["calibrate_physics"] = _handle_calibrate_physics
     data["create_articulated_joint"] = _handle_create_articulated_joint
+    data["validate_joint_post"] = _handle_validate_joint_post
     data["create_gravity_dispenser"] = _handle_create_gravity_dispenser
     data["create_heap_zone"] = _handle_create_heap_zone
     data["create_kit_tray"] = _handle_create_kit_tray
