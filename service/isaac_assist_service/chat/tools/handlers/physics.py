@@ -2234,7 +2234,7 @@ def register(
     Called by `handlers/_dispatch.py:register_handlers()` which is the
     sole dispatch entry point from `tool_executor.py`.
     """
-    # Data handlers (18)
+    # Data handlers (19)
     data["get_angular_velocity"] = _handle_get_angular_velocity
     data["get_articulation_mass"] = _handle_get_articulation_mass
     data["get_articulation_state"] = _handle_get_articulation_state
@@ -2250,6 +2250,7 @@ def register(
     data["get_kinematic_state"] = _handle_get_kinematic_state
     data["get_linear_velocity"] = _handle_get_linear_velocity
     data["get_mass"] = _handle_get_mass
+    data["get_physics_errors"] = _handle_get_physics_errors
     data["get_physics_scene_config"] = _handle_get_physics_scene_config
     data["lookup_material"] = _handle_lookup_material
     data["suggest_physics_settings"] = _handle_suggest_physics_settings
