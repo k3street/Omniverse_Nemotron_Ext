@@ -9156,5 +9156,157 @@ ISAAC_SIM_TOOLS = [
                 },
             },
         },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_layout_spec",
+            "description": (
+                "Read the current LayoutSpec persisted for a multimodal session. Returns either "
+                "the full spec JSON + summary, or a compact summary only, depending on "
+                "detail_level."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Multimodal session ID."},
+                    "detail_level": {
+                        "type": "string",
+                        "enum": ["summary", "full"],
+                        "description": "summary = compact text; full = full JSON + summary. Default: full.",
+                    },
+                },
+                "required": ["session_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_layout_spec",
+            "description": (
+                "Apply mutations to the LayoutSpec for a multimodal session and persist a new "
+                "revision via compare-and-set (CAS). Caller must supply parent_revision they read; "
+                "mismatch returns a 409-style conflict. Surfaces in the SPA confirm bar."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Multimodal session ID."},
+                    "mutations": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "List of mutation dicts. See spec for mutation shapes.",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "One-line explanation of why this mutation was proposed; surfaces in UI.",
+                    },
+                    "parent_revision": {
+                        "type": "integer",
+                        "description": "The revision number caller read. Must match current; else conflict returned.",
+                    },
+                },
+                "required": ["session_id", "mutations", "parent_revision"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "commit_layout_spec",
+            "description": (
+                "Promote a proposed LayoutSpec to committed state. Today this is a telemetry-only "
+                "marker (persisted spec is always authoritative). Logs the commit event for the "
+                "session."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Multimodal session ID."},
+                },
+                "required": ["session_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_layout_spec_to_scene",
+            "description": (
+                "Apply (ratify) the current LayoutSpec for a session against a canonical template; "
+                "returns ratify status (ok / needs_choice / rejected) with bindings, diagnostics, "
+                "and ambiguous-role candidates. When force_freeform=True, skips ratification and "
+                "falls to free-form (T5) planning."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Multimodal session ID."},
+                    "template_id": {
+                        "type": "string",
+                        "description": "Optional canonical template ID to ratify against. If absent, similarity gate picks.",
+                    },
+                    "force_freeform": {
+                        "type": "boolean",
+                        "description": "Skip canonical ratify and fall to T5 free-form. Default: false.",
+                    },
+                },
+                "required": ["session_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_layout_metric",
+            "description": (
+                "Query a geometric or structural metric against the current LayoutSpec without "
+                "returning the full state. Cheap lookup for chat-side reasoning. Supported "
+                "metrics: distance (args: from_id, to_id), reachable (args: robot_id, target_id, "
+                "reach_m), and others per spec."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Multimodal session ID."},
+                    "metric": {
+                        "type": "string",
+                        "description": "Metric name (e.g. 'distance', 'reachable').",
+                    },
+                    "args": {
+                        "type": "object",
+                        "description": "Metric-specific arguments. See spec for per-metric shape.",
+                    },
+                },
+                "required": ["session_id", "metric"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rebind_role",
+            "description": (
+                "Re-bind a role in a canonical template to a different object_id in the current "
+                "LayoutSpec. Used after an apply_layout_spec_to_scene call returns "
+                "status=needs_choice or status=rejected, to fix ambiguous or wrong bindings."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Multimodal session ID."},
+                    "role_name": {
+                        "type": "string",
+                        "description": "Name of the role to rebind (e.g. 'pick_target', 'tool').",
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "object_id in the LayoutSpec to bind the role to.",
+                    },
+                },
+                "required": ["session_id", "role_name", "target"],
+            },
+        },
+    },
 
 ]
