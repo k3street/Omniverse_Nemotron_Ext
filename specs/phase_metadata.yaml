@@ -716,8 +716,14 @@
 '80':
   title: Surface gripper + suction modeling
   agent_type: opus-runtime
-  status: scaffold
-  note: surface gripper physics
+  status: landed
+  landed_date: '2026-05-13'
+  note: surface gripper force/hold-capacity model + gripper-type registry
+  gate: pytest tests/test_phase_80_surface_gripper_model.py — suction force model returns physically reasonable values; gripper registry covers 8+ types
+  files:
+  - service/isaac_assist_service/multimodal/surface_gripper_model.py
+  - tests/test_phase_80_surface_gripper_model.py
+  loc: 280
 80b:
   title: Grasp-stability defaults + `grip_safe_mode` controller arg
   agent_type: sonnet-bounded
@@ -840,9 +846,15 @@
   blocked_by: []
 '87':
   title: Stdio MCP shim hardening
-  agent_type: opus-runtime
-  status: scaffold
-  note: MCP client integration
+  agent_type: sonnet-bounded
+  status: landed
+  note: error-handling + lifecycle state machine + envelope parsing; pure Python
+  files:
+  - service/isaac_assist_service/multimodal/stdio_mcp_shim.py
+  - tests/test_phase_87_stdio_mcp_shim.py
+  loc: 280
+  effort_min: 60
+  blocked_by: []
 '88':
   title: Linux pre-built binary CI pipeline
   agent_type: sonnet-mechanical
