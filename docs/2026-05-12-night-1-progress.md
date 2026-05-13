@@ -4,10 +4,17 @@ Branch: `refactor/2026-05-12-foundation-night-1` (anton remote, 100+ commits)
 
 ## TL;DR
 
-`tool_executor.py`: **35,842 → 2,456 lines (−93.1%)**. The dispatch is now
+`tool_executor.py`: **35,842 → 2,418 lines (−93.3%)**. The dispatch is now
 register-callback-driven (Phase 9), the monolith is structurally hollowed
-out, and Phase 8 has **28 waves** landed (~122 symbols migrated to theme
-modules, `handlers/_shared.py`, or `handlers/_state.py`).
+out, and Phase 8 + 15 have **29 waves** landed (~125 symbols migrated to
+theme modules, `handlers/_shared.py`, or `handlers/_state.py`).
+
+**Recovered-state block audit: 0 symbols of any classification**
+(0 DEAD, 0 INTERNAL_ONLY, 0 HANDLER_USED, 0 EXTERNAL_USED). The block
+now contains only migration-marker comments + 5 alias imports
+(`_ASYNC_TASKS`, `_ASYNC_TASKS_LOCK`, `_LockedPatch`,
+`_StageWriteLockQueue`, `_WRITE_LOCK_QUEUE`) preserving backwards
+compatibility for any `_te.X` callsites that may still exist.
 
 Final handler→tool_executor imports: **10** total — 9× `execute_tool_call`
 (dispatch entry — 8 in robot, 1 in sensors, 1 lazy-proxy in diagnostics
