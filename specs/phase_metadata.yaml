@@ -1115,9 +1115,13 @@
   blocked_by: []
 '101':
   title: 'Release: Linux pre-built binary'
-  agent_type: opus-runtime
-  status: scaffold
-  note: Linux binary release
+  agent_type: sonnet-mechanical
+  status: landed
+  note: Linux binary release — manifest schema, validator, distro detector, JSON round-trip
+  files:
+  - service/isaac_assist_service/multimodal/release_linux_binary.py
+  - tests/test_phase_101_release_linux_binary.py
+  loc: 250
 '102':
   title: 'Release: macOS / Windows binaries'
   agent_type: opus-runtime
