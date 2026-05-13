@@ -995,82 +995,7 @@ _RELATIONAL_PATTERN_RE = __import__("re").compile(
 # _handle_verify_pickplace_pipeline moved to handlers/diagnostics.py (Phase 7 wave 14).
 
 
-async def _augment_verify_with_feasibility(verify_result: Dict, stages: list) -> Dict:
-    """Phase 1.5 — Opus §F. Run diagnose_scene_feasibility for each stage's
-    pick+drop pose, merge any infeasible/overconstrained violations into the
-    verify_result['issues'] list. Sets pipeline_ok=False if any CRITICAL
-    violations found.
-
-    Reads stage pick_pos / place_pos from verify_result['results']
-    (already computed by the kit-side script) — avoids second Kit RPC trip
-    to compute them.
-    """
-    import json as _j
-    out_text = (verify_result.get("output") or "").strip()
-    parsed = None
-    for line in out_text.splitlines()[::-1]:
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                parsed = _j.loads(line); break
-            except Exception:
-                continue
-    if not parsed:
-        return verify_result  # non-parseable; leave alone
-
-    stage_results = parsed.get("results") or []
-    issues = list(parsed.get("issues") or [])
-    pipeline_ok = bool(parsed.get("pipeline_ok"))
-    feasibility_reports = []
-
-    for i, sr in enumerate(stage_results):
-        rp = sr.get("robot_path")
-        pick_pos = sr.get("pick_pos")
-        place_pos = sr.get("place_pos")
-        if not rp or not pick_pos or not place_pos:
-            continue
-        try:
-            diag_res = await execute_tool_call("diagnose_scene_feasibility", {
-                "robot_path": rp,
-                "pick_pose": pick_pos,
-                "drop_pose": place_pos,
-                "robot_base": sr.get("robot_pos") or [0, 0, 0],
-                "max_reach": sr.get("reach_m") or 0.855,
-                "use_cache": True,
-            })
-        except Exception as e:
-            issues.append(f"[feasibility] stage {i}: diagnose call failed: {type(e).__name__}: {str(e)[:80]}")
-            continue
-        if isinstance(diag_res, dict) and "verdict" in diag_res:
-            d = diag_res
-        else:
-            d = None
-            for line in (diag_res.get("output") or "").splitlines()[::-1]:
-                line = line.strip()
-                if line.startswith("{"):
-                    try:
-                        d = _j.loads(line); break
-                    except Exception:
-                        continue
-        if not d:
-            continue
-        feasibility_reports.append({"stage_index": i, "verdict": d.get("verdict"),
-                                     "n_violations": len(d.get("violations") or [])})
-        verdict = d.get("verdict")
-        if verdict in ("infeasible", "overconstrained"):
-            for v in (d.get("violations") or []):
-                if v.get("severity") in ("ERROR", "CRITICAL"):
-                    issues.append(f"[feasibility] stage {i}: {v.get('message')}")
-            if verdict == "infeasible":
-                pipeline_ok = False
-
-    parsed["issues"] = issues
-    parsed["pipeline_ok"] = pipeline_ok
-    parsed["feasibility_reports"] = feasibility_reports
-
-    # Re-serialize the augmented payload onto the result for the caller
-    new_output = _j.dumps(parsed)
-    return {**verify_result, "output": new_output}
+# _augment_verify_with_feasibility migrated to handlers/diagnostics.py (Phase 8 wave 27, 2026-05-13).
 
 
 # _handle_simulate_traversal_check moved to handlers/diagnostics.py (Phase 7 wave 14).
@@ -2022,20 +1947,7 @@ def _check_real_data_path(path: str) -> Optional[str]:
 # _handle_calibrate_physics moved to handlers/robot.py (Phase 7 wave 7).
 # _handle_quick_calibrate moved to handlers/robot.py (Phase 7 wave 7).
 
-def _per_joint_rmse(sim_traj: List[List[float]], real_traj: List[List[float]]) -> List[float]:
-    """RMSE per joint between two joint-trajectory arrays of shape (T, n_joints)."""
-    n_steps = min(len(sim_traj), len(real_traj))
-    if n_steps == 0:
-        return []
-    n_joints = min(len(sim_traj[0]), len(real_traj[0])) if sim_traj[0] else 0
-    rmses: List[float] = []
-    for j in range(n_joints):
-        sq = 0.0
-        for t in range(n_steps):
-            d = float(sim_traj[t][j]) - float(real_traj[t][j])
-            sq += d * d
-        rmses.append((sq / n_steps) ** 0.5)
-    return rmses
+# _per_joint_rmse migrated to handlers/diagnostics.py (Phase 8 wave 27, 2026-05-13).
 
 # _handle_validate_calibration moved to handlers/diagnostics.py (Phase 7 wave 14).
 
@@ -2061,56 +1973,13 @@ def _per_joint_rmse(sim_traj: List[List[float]], real_traj: List[List[float]]) -
 def _wf_now_iso() -> str:
     return _wf_dt.utcnow().isoformat() + "Z"
 
-def _wf_make_initial_plan(workflow_type: str, goal: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Build the initial editable plan artifact from a template + goal + params.
-
-    The LLM is expected to refine this further on the user-facing side; this
-    function only produces the structural skeleton so the workflow can be
-    persisted and queried before the LLM round-trips.
-    """
-    tpl = _WORKFLOW_TEMPLATES[workflow_type]
-    merged_params = dict(tpl["default_params"])
-    merged_params.update(params or {})
-    return {
-        "workflow_type": workflow_type,
-        "goal": goal,
-        "params": merged_params,
-        "phases": [
-            {
-                "name": p["name"],
-                "checkpoint": p["checkpoint"],
-                "error_fix": p["error_fix"],
-                "status": "pending",
-            }
-            for p in tpl["phases"]
-        ],
-        "editable": True,
-    }
+# _wf_make_initial_plan migrated to handlers/workflow.py (Phase 8 wave 27, 2026-05-13).
 
 # _handle_start_workflow moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 # _handle_edit_workflow_plan moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-def _wf_advance_phase(wf: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Move the workflow to the next phase. Returns the next phase dict or None."""
-    phases = wf["plan"]["phases"]
-    current = wf["current_phase"]
-    # Mark current as completed
-    for p in phases:
-        if p["name"] == current and p["status"] != "completed":
-            p["status"] = "completed"
-            wf["completed_phases"].append(current)
-            break
-    # Find next pending phase
-    for p in phases:
-        if p["status"] == "pending":
-            wf["current_phase"] = p["name"]
-            p["status"] = "in_progress"
-            return p
-    # No phases left
-    wf["current_phase"] = None
-    wf["status"] = "completed"
-    return None
+# _wf_advance_phase migrated to handlers/workflow.py (Phase 8 wave 27, 2026-05-13).
 
 # _handle_approve_workflow_checkpoint moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
@@ -2142,53 +2011,7 @@ def _wf_advance_phase(wf: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 # _load_template_manifests migrated to handlers/handlers/scene_blueprints.py (Phase 8 wave 18, 2026-05-13).
 
-def _async_task_runner(task_id: str, task_type: str, params: Dict) -> None:
-    """Worker body executed in a daemon thread.
-
-    Real long-running ops (SDG, training) are dispatched via Kit; here we
-    simulate progress so the lifecycle is observable from the chat panel.
-    Production integrations replace this body with concrete handlers per
-    task_type.
-    """
-    try:
-        with _ASYNC_TASKS_LOCK:
-            entry = _ASYNC_TASKS.get(task_id)
-            if entry is None:
-                return
-            entry["state"] = "running"
-            entry["started_at"] = _time.time()
-
-        # Heuristic total duration so a smoke test completes quickly.
-        total_steps = max(int(params.get("steps", 5)), 1)
-        step_sleep = float(params.get("step_seconds", 0.0))
-        for i in range(total_steps):
-            if step_sleep > 0:
-                _time.sleep(step_sleep)
-            with _ASYNC_TASKS_LOCK:
-                entry = _ASYNC_TASKS.get(task_id)
-                if entry is None or entry.get("state") == "cancelled":
-                    return
-                entry["progress"] = (i + 1) / total_steps
-
-        with _ASYNC_TASKS_LOCK:
-            entry = _ASYNC_TASKS.get(task_id)
-            if entry is None:
-                return
-            entry["state"] = "done"
-            entry["finished_at"] = _time.time()
-            entry["progress"] = 1.0
-            entry["result"] = {
-                "task_type": task_type,
-                "params": params,
-                "message": f"{task_type} task completed",
-            }
-    except Exception as e:  # noqa: BLE001
-        with _ASYNC_TASKS_LOCK:
-            entry = _ASYNC_TASKS.get(task_id)
-            if entry is not None:
-                entry["state"] = "error"
-                entry["finished_at"] = _time.time()
-                entry["error"] = str(e)
+# _async_task_runner migrated to handlers/workflow.py (Phase 8 wave 27, 2026-05-13).
 
 # _handle_dispatch_async_task moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
@@ -2206,36 +2029,7 @@ def _async_task_runner(task_id: str, task_type: str, params: Dict) -> None:
 
 
 # ══════ From feat/new-sim-to-real-gap-v2 ══════
-def _load_trajectory_for_gap(path: str) -> Optional[Dict]:
-    """Load trajectory from HDF5 or CSV. Returns dict of arrays or None on error."""
-    if not Path(path).exists():
-        return None
-    try:
-        if path.endswith((".h5", ".hdf5")):
-            try:
-                import h5py
-            except ImportError:
-                return {"_error": "h5py not installed"}
-            data = {}
-            with h5py.File(path, "r") as f:
-                for key in f.keys():
-                    try:
-                        data[key] = f[key][:].tolist()
-                    except Exception:
-                        pass
-            return data
-        elif path.endswith(".csv"):
-            import csv
-            data: Dict = {"rows": []}
-            with open(path, "r") as fp:
-                reader = csv.DictReader(fp)
-                for row in reader:
-                    data["rows"].append(row)
-            return data
-        else:
-            return {"_error": f"Unsupported file format: {path}"}
-    except Exception as e:
-        return {"_error": str(e)}
+# _load_trajectory_for_gap migrated to handlers/diagnostics.py (Phase 8 wave 27, 2026-05-13).
 
 # _handle_measure_sim_real_gap moved to handlers/diagnostics.py (Phase 7 wave 14).
 

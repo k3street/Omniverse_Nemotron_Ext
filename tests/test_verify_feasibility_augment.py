@@ -9,7 +9,7 @@ import pytest
 
 pytestmark = [pytest.mark.l0, pytest.mark.asyncio]
 
-from service.isaac_assist_service.chat.tools import tool_executor as te
+from service.isaac_assist_service.chat.tools.handlers import diagnostics as te
 
 
 def _verify_result(stages_result, issues=None, pipeline_ok=True) -> Dict[str, Any]:

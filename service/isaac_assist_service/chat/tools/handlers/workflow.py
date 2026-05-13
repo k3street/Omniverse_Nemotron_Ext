@@ -13,6 +13,104 @@ from __future__ import annotations
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
+# Theme-local helpers (Phase 8 wave 27, 2026-05-13)
+
+def _wf_make_initial_plan(workflow_type: str, goal: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the initial editable plan artifact from a template + goal + params.
+
+    The LLM is expected to refine this further on the user-facing side; this
+    function only produces the structural skeleton so the workflow can be
+    persisted and queried before the LLM round-trips.
+    """
+    tpl = _WORKFLOW_TEMPLATES[workflow_type]
+    merged_params = dict(tpl["default_params"])
+    merged_params.update(params or {})
+    return {
+        "workflow_type": workflow_type,
+        "goal": goal,
+        "params": merged_params,
+        "phases": [
+            {
+                "name": p["name"],
+                "checkpoint": p["checkpoint"],
+                "error_fix": p["error_fix"],
+                "status": "pending",
+            }
+            for p in tpl["phases"]
+        ],
+        "editable": True,
+    }
+
+def _wf_advance_phase(wf: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Move the workflow to the next phase. Returns the next phase dict or None."""
+    phases = wf["plan"]["phases"]
+    current = wf["current_phase"]
+    # Mark current as completed
+    for p in phases:
+        if p["name"] == current and p["status"] != "completed":
+            p["status"] = "completed"
+            wf["completed_phases"].append(current)
+            break
+    # Find next pending phase
+    for p in phases:
+        if p["status"] == "pending":
+            wf["current_phase"] = p["name"]
+            p["status"] = "in_progress"
+            return p
+    # No phases left
+    wf["current_phase"] = None
+    wf["status"] = "completed"
+    return None
+
+def _async_task_runner(task_id: str, task_type: str, params: Dict) -> None:
+    """Worker body executed in a daemon thread.
+
+    Real long-running ops (SDG, training) are dispatched via Kit; here we
+    simulate progress so the lifecycle is observable from the chat panel.
+    Production integrations replace this body with concrete handlers per
+    task_type.
+    """
+    try:
+        with _ASYNC_TASKS_LOCK:
+            entry = _ASYNC_TASKS.get(task_id)
+            if entry is None:
+                return
+            entry["state"] = "running"
+            entry["started_at"] = _time.time()
+
+        # Heuristic total duration so a smoke test completes quickly.
+        total_steps = max(int(params.get("steps", 5)), 1)
+        step_sleep = float(params.get("step_seconds", 0.0))
+        for i in range(total_steps):
+            if step_sleep > 0:
+                _time.sleep(step_sleep)
+            with _ASYNC_TASKS_LOCK:
+                entry = _ASYNC_TASKS.get(task_id)
+                if entry is None or entry.get("state") == "cancelled":
+                    return
+                entry["progress"] = (i + 1) / total_steps
+
+        with _ASYNC_TASKS_LOCK:
+            entry = _ASYNC_TASKS.get(task_id)
+            if entry is None:
+                return
+            entry["state"] = "done"
+            entry["finished_at"] = _time.time()
+            entry["progress"] = 1.0
+            entry["result"] = {
+                "task_type": task_type,
+                "params": params,
+                "message": f"{task_type} task completed",
+            }
+    except Exception as e:  # noqa: BLE001
+        with _ASYNC_TASKS_LOCK:
+            entry = _ASYNC_TASKS.get(task_id)
+            if entry is not None:
+                entry["state"] = "error"
+                entry["finished_at"] = _time.time()
+                entry["error"] = str(e)
+
+# ---------------------------------------------------------------------------
 # Theme-local constants + helpers (Phase 8 wave 13, 2026-05-13)
 # Migrated from tool_executor.py — used only by handlers.workflow.
 
@@ -452,7 +550,7 @@ async def _handle_start_workflow(args: Dict) -> Dict:
     max_retries = min(int(args.get("max_retries", 3)), _WORKFLOW_RETRY_HARD_CAP)
     auto_approve = bool(args.get("auto_approve_checkpoints", False))
 
-    plan = _te._wf_make_initial_plan(workflow_type, goal, args.get("params") or {})
+    plan = _wf_make_initial_plan(workflow_type, goal, args.get("params") or {})
 
     from datetime import datetime as _wf_dt  # noqa: PLC0415
     def _wf_now_iso() -> str:
@@ -596,7 +694,7 @@ async def _handle_approve_workflow_checkpoint(args: Dict) -> Dict:
         }
 
     # approve → advance to next phase
-    next_phase = _te._wf_advance_phase(wf)
+    next_phase = _wf_advance_phase(wf)
     if next_phase is None:
         return {
             "ok": True,
@@ -784,7 +882,7 @@ async def _handle_dispatch_async_task(args: Dict) -> Dict:
     # reasoning (e.g. when running under pytest without a real Kit).
     if not args.get("dry_run"):
         thread = _threading.Thread(
-            target=_te._async_task_runner,
+            target=_async_task_runner,
             args=(task_id, task_type, params),
             name=f"async-{task_id}",
             daemon=True,

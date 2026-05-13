@@ -14,6 +14,150 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
+
+def _lazy_execute_tool_call(*args, **kwargs):
+    """Lazy proxy for tool_executor.execute_tool_call to avoid circular
+    import at module load. Tests patch `execute_tool_call` directly on
+    this module; this proxy makes that work without needing a top-level
+    import."""
+    from ..tool_executor import execute_tool_call as _real
+    return _real(*args, **kwargs)
+
+
+execute_tool_call = _lazy_execute_tool_call
+
+
+# ---------------------------------------------------------------------------
+# Theme-local helpers (Phase 8 wave 27, 2026-05-13)
+
+def _per_joint_rmse(sim_traj: List[List[float]], real_traj: List[List[float]]) -> List[float]:
+    """RMSE per joint between two joint-trajectory arrays of shape (T, n_joints)."""
+    n_steps = min(len(sim_traj), len(real_traj))
+    if n_steps == 0:
+        return []
+    n_joints = min(len(sim_traj[0]), len(real_traj[0])) if sim_traj[0] else 0
+    rmses: List[float] = []
+    for j in range(n_joints):
+        sq = 0.0
+        for t in range(n_steps):
+            d = float(sim_traj[t][j]) - float(real_traj[t][j])
+            sq += d * d
+        rmses.append((sq / n_steps) ** 0.5)
+    return rmses
+
+def _load_trajectory_for_gap(path: str) -> Optional[Dict]:
+    """Load trajectory from HDF5 or CSV. Returns dict of arrays or None on error."""
+    if not Path(path).exists():
+        return None
+    try:
+        if path.endswith((".h5", ".hdf5")):
+            try:
+                import h5py
+            except ImportError:
+                return {"_error": "h5py not installed"}
+            data = {}
+            with h5py.File(path, "r") as f:
+                for key in f.keys():
+                    try:
+                        data[key] = f[key][:].tolist()
+                    except Exception:
+                        pass
+            return data
+        elif path.endswith(".csv"):
+            import csv
+            data: Dict = {"rows": []}
+            with open(path, "r") as fp:
+                reader = csv.DictReader(fp)
+                for row in reader:
+                    data["rows"].append(row)
+            return data
+        else:
+            return {"_error": f"Unsupported file format: {path}"}
+    except Exception as e:
+        return {"_error": str(e)}
+
+async def _augment_verify_with_feasibility(verify_result: Dict, stages: list) -> Dict:
+    """Phase 1.5 — Opus §F. Run diagnose_scene_feasibility for each stage's
+    pick+drop pose, merge any infeasible/overconstrained violations into the
+    verify_result['issues'] list. Sets pipeline_ok=False if any CRITICAL
+    violations found.
+
+    Reads stage pick_pos / place_pos from verify_result['results']
+    (already computed by the kit-side script) — avoids second Kit RPC trip
+    to compute them.
+
+    Test contract: callers patch this module's `execute_tool_call`
+    binding (see test_verify_feasibility_augment.py). The function reads
+    the module-level name, so patching diagnostics.execute_tool_call
+    intercepts the call.
+    """
+    import json as _j
+    out_text = (verify_result.get("output") or "").strip()
+    parsed = None
+    for line in out_text.splitlines()[::-1]:
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                parsed = _j.loads(line); break
+            except Exception:
+                continue
+    if not parsed:
+        return verify_result  # non-parseable; leave alone
+
+    stage_results = parsed.get("results") or []
+    issues = list(parsed.get("issues") or [])
+    pipeline_ok = bool(parsed.get("pipeline_ok"))
+    feasibility_reports = []
+
+    for i, sr in enumerate(stage_results):
+        rp = sr.get("robot_path")
+        pick_pos = sr.get("pick_pos")
+        place_pos = sr.get("place_pos")
+        if not rp or not pick_pos or not place_pos:
+            continue
+        try:
+            diag_res = await execute_tool_call("diagnose_scene_feasibility", {
+                "robot_path": rp,
+                "pick_pose": pick_pos,
+                "drop_pose": place_pos,
+                "robot_base": sr.get("robot_pos") or [0, 0, 0],
+                "max_reach": sr.get("reach_m") or 0.855,
+                "use_cache": True,
+            })
+        except Exception as e:
+            issues.append(f"[feasibility] stage {i}: diagnose call failed: {type(e).__name__}: {str(e)[:80]}")
+            continue
+        if isinstance(diag_res, dict) and "verdict" in diag_res:
+            d = diag_res
+        else:
+            d = None
+            for line in (diag_res.get("output") or "").splitlines()[::-1]:
+                line = line.strip()
+                if line.startswith("{"):
+                    try:
+                        d = _j.loads(line); break
+                    except Exception:
+                        continue
+        if not d:
+            continue
+        feasibility_reports.append({"stage_index": i, "verdict": d.get("verdict"),
+                                     "n_violations": len(d.get("violations") or [])})
+        verdict = d.get("verdict")
+        if verdict in ("infeasible", "overconstrained"):
+            for v in (d.get("violations") or []):
+                if v.get("severity") in ("ERROR", "CRITICAL"):
+                    issues.append(f"[feasibility] stage {i}: {v.get('message')}")
+            if verdict == "infeasible":
+                pipeline_ok = False
+
+    parsed["issues"] = issues
+    parsed["pipeline_ok"] = pipeline_ok
+    parsed["feasibility_reports"] = feasibility_reports
+
+    # Re-serialize the augmented payload onto the result for the caller
+    new_output = _j.dumps(parsed)
+    return {**verify_result, "output": new_output}
+
 # ---------------------------------------------------------------------------
 # Theme-local helpers (Phase 8 wave 26, 2026-05-13)
 
@@ -3175,7 +3319,7 @@ print(json.dumps({{'prim_a': {prim_a!r}, 'prim_b': {prim_b!r}, 'distance_m': dis
 async def _handle_measure_sim_real_gap(args: Dict) -> Dict:
     """Compare sim and real trajectories to quantify the gap."""
     from .. import tool_executor as _te  # noqa: PLC0415
-    _load_trajectory_for_gap = _te._load_trajectory_for_gap
+    # _load_trajectory_for_gap migrated to module body (Phase 8 wave 27).
     sim_path = args.get("sim_trajectory", "")
     real_path = args.get("real_trajectory", "")
 
@@ -4011,8 +4155,7 @@ async def _handle_validate_calibration(args: Dict) -> Dict:
     """
     from .. import tool_executor as _te  # noqa: PLC0415
     from ._shared import _check_real_data_path  # noqa: PLC0415
-    _per_joint_rmse = _te._per_joint_rmse
-
+    # _per_joint_rmse migrated to module body (Phase 8 wave 27).
     calibrated_params = args.get("calibrated_params")
     test_data_path = args.get("test_data_path", "")
     baseline_error = args.get("baseline_error")
@@ -4459,7 +4602,7 @@ async def _handle_verify_pickplace_pipeline(args: Dict) -> Dict:
     from .. import kit_tools  # noqa: PLC0415
     from .. import tool_executor as _te  # noqa: PLC0415
     _ROBOT_REACH_M = _te._ROBOT_REACH_M
-    _augment_verify_with_feasibility = _te._augment_verify_with_feasibility
+    # _augment_verify_with_feasibility migrated to module body (Phase 8 wave 27).
     stages = args.get("stages")
     if not stages:
         # Allow a single-stage shorthand
