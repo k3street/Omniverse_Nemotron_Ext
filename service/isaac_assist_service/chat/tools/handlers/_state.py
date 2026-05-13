@@ -97,10 +97,30 @@ TRAINING = TrainingState()
 DR = DRState()
 BRIDGES = BridgeState()
 
+# Phase 8 wave 28 (2026-05-13): async-task registry + lock migrated from
+# tool_executor.py. Workflow theme owns both. Module-level so consumers
+# import directly (no lazy proxy needed — they're plain Python objects).
+import threading as _threading  # noqa: E402
+
+ASYNC_TASKS_LOCK: _threading.Lock = _threading.Lock()
+ASYNC_TASKS: Dict[str, Dict[str, Any]] = {}
+
+
 # Phase 8 wave 25 (2026-05-13): TURN_RECORDER singleton migrated from
 # tool_executor.py. Cross-theme: used by workflow + training.
 # Lazy-instantiated to avoid import-time side effects.
 _TURN_RECORDER_SINGLETON = None
+
+
+def get_write_lock_queue():
+    """Return the shared _StageWriteLockQueue singleton.
+
+    Phase 8 wave 28 — singleton lives in `tool_executor.py:_WRITE_LOCK_QUEUE`
+    (initialized at module load alongside its class). Workflow handlers
+    use it to serialize stage-mutating patches.
+    """
+    from .. import tool_executor as _te
+    return _te._WRITE_LOCK_QUEUE
 
 
 def get_turn_recorder():
@@ -133,6 +153,9 @@ __all__ = [
     "WORKFLOWS",
     "EUREKA",
     "TRAINING",
+    "ASYNC_TASKS",
+    "ASYNC_TASKS_LOCK",
+    "get_write_lock_queue",
     "get_turn_recorder",
     "DR",
     "BRIDGES",

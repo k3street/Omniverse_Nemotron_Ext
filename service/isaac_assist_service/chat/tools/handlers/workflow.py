@@ -12,6 +12,10 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+# Phase 8 wave 28 (2026-05-13): import shared async-task state.
+import time as _time
+from ._state import ASYNC_TASKS as _ASYNC_TASKS, ASYNC_TASKS_LOCK as _ASYNC_TASKS_LOCK
+
 # ---------------------------------------------------------------------------
 # Theme-local helpers (Phase 8 wave 27, 2026-05-13)
 
@@ -523,7 +527,8 @@ async def _handle_queue_write_locked_patch(args: Dict) -> Dict:
         msg = format_issues_for_llm(issues)
         logger.warning(f"[ToolExecutor] queue_write_locked_patch blocked: {msg}")
         return {"type": "error", "error": msg, "validation_blocked": True}
-    outcome = await _te._WRITE_LOCK_QUEUE.submit(code, desc, priority)
+    from ._state import get_write_lock_queue
+    outcome = await get_write_lock_queue().submit(code, desc, priority)
     return {**outcome, "description": desc}
 
 
@@ -863,8 +868,8 @@ async def _handle_dispatch_async_task(args: Dict) -> Dict:
     label = args.get("label") or f"{task_type} task"
 
     task_id = f"task_{task_type}_{_uuid.uuid4().hex[:8]}"
-    with _te._ASYNC_TASKS_LOCK:
-        _te._ASYNC_TASKS[task_id] = {
+    with _ASYNC_TASKS_LOCK:
+        _ASYNC_TASKS[task_id] = {
             "task_id": task_id,
             "task_type": task_type,
             "label": label,
@@ -903,8 +908,8 @@ async def _handle_query_async_task(args: Dict) -> Dict:
     from .. import tool_executor as _te  # noqa: PLC0415
     import time as _time  # noqa: PLC0415
     task_id = args["task_id"]
-    with _te._ASYNC_TASKS_LOCK:
-        entry = _te._ASYNC_TASKS.get(task_id)
+    with _ASYNC_TASKS_LOCK:
+        entry = _ASYNC_TASKS.get(task_id)
         if entry is None:
             return {"task_id": task_id, "state": "unknown", "error": "task_id not found"}
         snapshot = dict(entry)

@@ -105,11 +105,11 @@ class _StageWriteLockQueue:
 # from: feat/7D-arena
 # _ARENA_SCENE_MAP migrated to handlers/arena.py (Phase 8 wave 1, 2026-05-13).
 
-# from: feat/addendum-community-remote-v2
-_ASYNC_TASKS: Dict[str, Dict[str, Any]] = {}
-
-# from: feat/addendum-community-remote-v2
-_ASYNC_TASKS_LOCK = _threading.Lock()
+# Phase 8 wave 28 (2026-05-13): _ASYNC_TASKS + _ASYNC_TASKS_LOCK
+# canonical home moved to handlers/_state.py. Aliased here so any
+# remaining `_te._ASYNC_TASKS*` callsites see the same instances.
+from .handlers._state import ASYNC_TASKS as _ASYNC_TASKS  # noqa: E402, F401
+from .handlers._state import ASYNC_TASKS_LOCK as _ASYNC_TASKS_LOCK  # noqa: E402, F401
 
 # from: feat/addendum-phase5-pedagogy-uncertainty-v2
 # _BROKEN_SCENE_FAULTS migrated to handlers/diagnostics.py (Phase 8 wave 10, 2026-05-13).
