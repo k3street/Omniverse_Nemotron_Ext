@@ -5,10 +5,10 @@ shared utilities) and Phase 13 (archive recovered-state block).
 
 ## Summary
 
-- Total symbols: 42
+- Total symbols: 36
 - DEAD (no references anywhere): **0** — safe to delete
 - INTERNAL_ONLY (only used inside tool_executor.py): **6** — delete after auditing internal uses
-- HANDLER_USED (used by handlers/*.py): **36** — migrate to handlers/_shared.py or _state.py
+- HANDLER_USED (used by handlers/*.py): **30** — migrate to handlers/_shared.py or _state.py
 - EXTERNAL_USED (used by service/, tests/, scripts/ outside handlers/): **0** — migrate cautiously
 
 ## Classification
@@ -30,7 +30,6 @@ shared utilities) and Phase 13 (archive recovered-state block).
 | 278 | constant | `_FINETUNE_FREEZE_PROFILES` | HANDLER_USED |
 | 301 | constant | `_FIX_PROFILE_PATTERNS` | INTERNAL_ONLY |
 | 310 | constant | `_GROOT_EMBODIMENTS` | HANDLER_USED |
-| 338 | constant | `_ISAA_MANIFEST_VERSION` | HANDLER_USED |
 | 344 | constant | `_MOBILE_ROBOT_KEYWORDS` | HANDLER_USED |
 | 350 | constant | `_OG_TEMPLATES` | HANDLER_USED |
 | 535 | constant | `_PHYSX_ERROR_PATTERNS` | HANDLER_USED |
@@ -39,21 +38,16 @@ shared utilities) and Phase 13 (archive recovered-state block).
 | 721 | constant | `_ROBOT_FIX_PROFILES` | HANDLER_USED |
 | 832 | constant | `_ROBOT_NAME_PATTERNS` | INTERNAL_ONLY |
 | 841 | constant | `_ROBOT_TYPE_DEFAULTS` | HANDLER_USED |
-| 858 | constant | `_ROBOT_WIZARD_REGISTRY` | HANDLER_USED |
-| 938 | function | `_resolve_robot_asset` | HANDLER_USED |
-| 963 | constant | `_SCENE_TEMPLATES` | HANDLER_USED |
-| 1038 | constant | `_SLASH_COMMANDS` | HANDLER_USED |
-| 1056 | constant | `_STARTER_PROMPTS` | HANDLER_USED |
-| 1103 | constant | `_SUGGESTION_MAP` | HANDLER_USED |
-| 1152 | constant | `_SUPPORTED_MOTION_ROBOTS` | HANDLER_USED |
-| 1158 | constant | `_TELEOP_DEVICES` | HANDLER_USED |
-| 1195 | constant | `_TEMPLATE_EXPORT_DIR` | HANDLER_USED |
-| 1198 | constant | `_TEMPLATE_KEYWORDS` | INTERNAL_ONLY |
-| 1210 | constant | `_TEMPLATE_LIBRARY_DIR` | HANDLER_USED |
-| 1213 | constant | `_TIER12_HELPERS` | HANDLER_USED |
-| 1224 | constant | `_TIER14_SCHEMA_MAP` | HANDLER_USED |
-| 1242 | constant | `_VALID_CALIBRATE_PARAMS` | HANDLER_USED |
-| 1245 | constant | `_VRAM_PER_ENV_MB` | HANDLER_USED |
-| 1254 | constant | `_WHOLE_BODY_PROFILES` | HANDLER_USED |
-| 1282 | constant | `_WORKFLOW_RETRY_HARD_CAP` | HANDLER_USED |
-| 1336 | constant | `_WRITE_LOCK_QUEUE` | HANDLER_USED |
+| 862 | constant | `_SLASH_COMMANDS` | HANDLER_USED |
+| 880 | constant | `_STARTER_PROMPTS` | HANDLER_USED |
+| 927 | constant | `_SUGGESTION_MAP` | HANDLER_USED |
+| 976 | constant | `_SUPPORTED_MOTION_ROBOTS` | HANDLER_USED |
+| 982 | constant | `_TELEOP_DEVICES` | HANDLER_USED |
+| 1022 | constant | `_TEMPLATE_KEYWORDS` | INTERNAL_ONLY |
+| 1037 | constant | `_TIER12_HELPERS` | HANDLER_USED |
+| 1048 | constant | `_TIER14_SCHEMA_MAP` | HANDLER_USED |
+| 1066 | constant | `_VALID_CALIBRATE_PARAMS` | HANDLER_USED |
+| 1069 | constant | `_VRAM_PER_ENV_MB` | HANDLER_USED |
+| 1078 | constant | `_WHOLE_BODY_PROFILES` | HANDLER_USED |
+| 1106 | constant | `_WORKFLOW_RETRY_HARD_CAP` | HANDLER_USED |
+| 1160 | constant | `_WRITE_LOCK_QUEUE` | HANDLER_USED |

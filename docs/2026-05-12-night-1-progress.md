@@ -1,14 +1,15 @@
 # IA rev. 2 foundation refactor — Night 1 progress report (2026-05-12/13)
 
-Branch: `refactor/2026-05-12-foundation-night-1` (anton remote, 92+ commits)
+Branch: `refactor/2026-05-12-foundation-night-1` (anton remote, 100+ commits)
 
 ## TL;DR
 
-`tool_executor.py`: **35,842 → 5,508 lines (−84.6%)**. The dispatch is now
+`tool_executor.py`: **35,842 → 4,617 lines (−87.1%)**. The dispatch is now
 register-callback-driven (Phase 9), the monolith is structurally hollowed
-out, and the architecture doc reflects the live shape. Phase 8 + 13
-remain blocked on a careful 50-symbol migration that needs daytime
-supervision.
+out, and Phase 8 has 9 waves landed (~36 symbols migrated to theme
+modules or `handlers/_shared.py`). 30 HANDLER_USED symbols remain in
+the recovered-state block — daytime continuation should pick from
+training, scene_authoring, and robot.
 
 ## What landed tonight
 
@@ -20,7 +21,16 @@ supervision.
 | 12 | No circular imports | 20 tests (AST cycle detection + isolated-load + topological sort). `scripts/diag_imports.py` for graphviz. |
 | 17 | Tools-hygiene pre-commit | `scripts/lint/no_handler_in_dispatch.py`, `scripts/lint/regen_models_check.py`, wired in `.pre-commit-config.yaml`. |
 | 18 | Handler architecture doc | `docs/architecture/handlers.md` rewritten to describe the live shape (399 lines). |
-| 8-audit | Recovered-state audit | `scripts/audit_recovered_state.py` + `docs/audits/recovered_state_audit.md` classify 57 symbols (0 DEAD, 7 INTERNAL_ONLY, 50 HANDLER_USED). |
+| 8 wave 1 | arena | `_ARENA_SCENE_MAP`, `_arena_env_id` → `handlers/arena.py`. |
+| 8 wave 2 | rendering | `_POST_PROCESS_PATHS` → `handlers/rendering.py`. |
+| 8 wave 3 | cross-theme snippet | `_SAFE_XFORM_SNIPPET` (used by 5 themes) → `handlers/_shared.py`. 9 import sites updated. |
+| 8 wave 4 | teleop+vision+ros2 batch | 8 theme-local constants (presets, templates, light type names, ROS2 QoS profiles, NAV2 bridge profiles). |
+| 8 wave 5 | cross-theme constants | `_OG_NODE_TYPE_MAP` (scene_authoring+ros2) + `_open_hdf5_safely` (teleop+diagnostics) → `_shared.py`. sensors.py uses `_shared` for `_get_viewport_bytes`/`_get_vision_provider`. |
+| 8 wave 6 | physics | 7 physics-local + 4 supporting globals (`_DEFORMABLE_PRESETS_PATH`, `_PHYSICS_MATERIALS_PATH`, cache globals) → `handlers/physics.py`. |
+| 8 wave 7 | scene_blueprints | 7 symbols incl. `_SCENE_TEMPLATES`, `_SENSOR_SPECS_PATH`, `_sensor_specs`, `_load_sensor_specs`, template directories. Test file updated. |
+| 8 wave 8 | resolve + cross-theme | 9 resolve-local + 2 cross-theme (`_ROBOT_WIZARD_REGISTRY`, `_resolve_robot_asset`) → `_shared.py`. robot.py imports flipped. |
+| 8 wave 9 | pick_place | 4 symbols incl. 3 RmpFlow code snippets + `_resolve_auto_target_source` → `handlers/pick_place.py`. Empty-paren-import bug caught + fixed. |
+| 8-audit | Recovered-state audit | `scripts/audit_recovered_state.py` + `docs/audits/recovered_state_audit.md` classify symbols (0 DEAD, 6 INTERNAL_ONLY, 30 HANDLER_USED remaining). |
 
 Already-done phases verified passing tests:
 - Phase 8b (determinism harness), 8c (typed primitives), 11b (ConstraintViolation),
@@ -40,27 +50,50 @@ unrelated to this session):
 
 ## What remains (and why deferred)
 
-### Phase 8 — Extract shared utilities (BLOCKED ON SUPERVISION)
+### Phase 8 — Extract shared utilities (PARTIAL — 9 WAVES LANDED)
 
-The recovered-state block at `tool_executor.py:32-1572` (1540 lines) contains
-57 module-level symbols. The audit (`docs/audits/recovered_state_audit.md`)
-shows **50** are referenced by `handlers/*.py` via lazy import. Migrating
-each requires:
+Tonight migrated 36 symbols (~30 handler→tool_executor imports
+resolved). Stats:
 
-1. Move the symbol body to `handlers/_shared.py` (constants/utilities) or
-   `handlers/_state.py` (mutable state).
-2. Update every `from ..tool_executor import _X` site to
-   `from ._shared import _X` (or the state-module path).
-3. Verify runtime via Kit RPC.
+- HANDLER_USED in recovered-state block: 50 → 30
+- Handler→tool_executor.py imports: 102 → 61
+- tool_executor.py: 5,508 → 4,617 lines (-891 lines)
 
-102 handler→tool_executor imports remain. This is judgment-heavy work
-and risks subtle behavior changes if a transitive reference is missed.
-Recommended approach for daytime:
+The 30 HANDLER_USED symbols remaining are concentrated in:
 
-- One theme at a time (e.g. start with `handlers/arena.py` — only 2
-  symbols imported from `tool_executor`).
-- For each theme, move symbols + flip imports + run handler-specific
-  tests + spot-check via Kit RPC dispatch.
+- training (25 imports) — heavy state (TRAINING singleton, IPC handles).
+  Multiple cache globals + complex dependencies. **Daytime-supervised
+  recommended.**
+- robot (15 imports) — `_ROBOT_FIX_PROFILES`, `_detect_robot_for_fix`,
+  motion profile helpers. Some symbols cross with scene_authoring.
+- scene_authoring (11 imports) — `_OG_TEMPLATES`, `_BROKEN_SCENE_FAULTS`,
+  `_DELTA_ROOT` etc. Some likely already moved as side-effect of waves
+  3/5.
+
+Migration recipe proven across 9 waves:
+
+1. Pick a theme (smallest cross-ref count first).
+2. For each symbol it imports from `tool_executor`:
+   - If used by ONE theme: move to `handlers/<theme>.py` module level.
+   - If used by 2+ themes: move to `handlers/_shared.py` + add to
+     `__all__` + register in `CONSTANTS` dict if read-only.
+3. Update every `from ..tool_executor import _X` site to point at new
+   location.
+4. Delete original from `tool_executor.py` (replace with single-line
+   marker comment that documents migration phase + wave + date).
+5. Run pytest. If a test still imports the symbol from tool_executor,
+   update the test (with `phase-8-wave-N` comment).
+6. Beware of supporting globals — `_load_X` functions may use module-
+   level cache `_x` and path `_X_PATH`. Migrate as a UNIT.
+
+Pitfalls caught tonight:
+
+- Empty parenthesized imports (multi-line `from X import (\n)\n` is a
+  SyntaxError). Post-pass regex flattens to comments.
+- Cache-backing globals (`_deformable_presets`, `_physics_materials`)
+  are easy to miss when migrating their loader function.
+- Multi-line imports in handler files don't match simple single-line
+  regex (`_gen_robot_wizard` in robot.py needed manual edit).
 
 ### Phase 11 — Patch validator pipeline (RISK-BOUNDED)
 
