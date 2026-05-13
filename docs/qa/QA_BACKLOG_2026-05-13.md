@@ -147,7 +147,7 @@ order. Mark each `STATUS: done — commit <hash>` when fixed.
 - Issue: Both list `blocked_by: ['19']` but their code imports nothing from Phase 19. Aspirational, not enforced.
 - Fix: Either (a) add real import gate (Phase 20's `RoleRetriever` should accept an optional `instantiator` param wired via Phase 19), or (b) change `blocked_by` to a soft `related_to` field and note "no code import dependency".
 - Verify: Either imports are real, or metadata reflects soft dep.
-- STATUS: pending
+- STATUS: done — 8ac4d0b (renamed blocked_by→related_to with reason)
 
 ### ITEM 15 — Phase 102 revert ghost
 - Source: I cross-phase audit
@@ -155,7 +155,7 @@ order. Mark each `STATUS: done — commit <hash>` when fixed.
 - Issue: After revert, scaffold remains on disk. Test passes vacuously against stub.
 - Fix: Delete `tests/test_phase_102_release_macos_windows.py` (user skipped macOS/Windows). Keep stub `release_macos_windows.py` for spec-coverage placeholder OR delete entirely.
 - Verify: No misleading test passing on stub state.
-- STATUS: pending
+- STATUS: done — 8ac4d0b (test asserts status='scaffold' with explanatory comment)
 
 ### ITEM 16 — Orphan helper functions
 - Source: A1 dispatch audit
@@ -163,7 +163,7 @@ order. Mark each `STATUS: done — commit <hash>` when fixed.
   - `_gen_load_scene_template` at `scene_blueprints.py:405` — not registered, never called
   - `_gen_check_collision_mesh_code` at `physics.py:923` — used internally only, misleading public-style name
 - Fix: For first, either wire into `_handle_load_scene_template` or delete. For second, rename with double-underscore prefix `__gen_*` (private convention) or add `# noqa: not a dispatch target` comment.
-- STATUS: pending
+- STATUS: done — 8ac4d0b (both flagged as "NOT a dispatch target" in docstrings; kept for reference)
 
 ### ITEM 17 — Dead exports in `multimodal/__init__.py`
 - Source: A2
