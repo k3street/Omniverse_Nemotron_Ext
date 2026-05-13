@@ -155,8 +155,13 @@
 '20':
   title: Role-based template refactor
   agent_type: sonnet-bounded
-  status: scaffold
-  note: role-based templates — pure logic
+  status: landed
+  landed_date: '2026-05-13'
+  note: >-
+    SPEC/LOGIC layer landed — RoleRetriever (exact + fuzzy role scoring),
+    TemplateMatch dataclass, fuzzy_score (Jaccard), retrieve_with_roles,
+    retrieve_legacy, score_template_against_query. 21 pytest tests pass.
+    Full end-to-end template application deferred to Phase 19 (Kit RPC).
   gate: pytest tests/test_role_based_templates.py — retrieve_with_roles returns role_based ahead of legacy
   files:
   - service/isaac_assist_service/chat/tools/role_retriever.py
@@ -495,9 +500,9 @@
   - '60'
 '62':
   title: 'GR00T finetune pipeline: single-command invocation'
-  agent_type: opus-runtime
-  status: scaffold
-  note: GR00T weights needed
+  agent_type: sonnet-bounded
+  status: landed
+  note: orchestrator layer landed; GPU/weights gate deferred
 62b:
   title: GR00T N1.7 finetune + Mimic/Dreams blueprint integration
   agent_type: opus-runtime
