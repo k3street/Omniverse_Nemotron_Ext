@@ -267,14 +267,9 @@ _PROACTIVE_TRIGGER_PLAYBOOKS: Dict[str, List[str]] = {
 # from: feat/addendum-phase3-urdf-postprocessor
 # _ROBOT_FIX_PROFILES migrated to handlers/robot.py (Phase 8 wave 13, 2026-05-13).
 
-# from: feat/addendum-phase3-urdf-postprocessor
-_ROBOT_NAME_PATTERNS = {
-    "franka": ["franka", "panda"],
-    "ur10": ["ur10"],
-    "ur5": ["ur5"],
-    "ur5e": ["ur5e"],
-    "cobotta": ["cobotta"],
-}
+# _ROBOT_NAME_PATTERNS + _detect_robot_type deleted as dead code (2026-05-13).
+# Pattern dict was used only by _detect_robot_type below; _detect_robot_type
+# had zero callers (confirmed via grep). Removed in Phase 8 cleanup.
 
 # from: feat/8D-robot-setup
 # _ROBOT_TYPE_DEFAULTS migrated to handlers/robot.py (Phase 8 wave 13, 2026-05-13).
@@ -2166,15 +2161,7 @@ _CUROBO_ROBOT_YML_MAP = {
 # _gen_check_physics_health moved to handlers/diagnostics.py (Phase 6 wave 10).
 
 
-# ══════ From feat/addendum-phase3-urdf-postprocessor ══════
-def _detect_robot_type(articulation_path: str) -> Optional[str]:
-    """Auto-detect robot type from articulation path."""
-    path_lower = articulation_path.lower()
-    for robot_type, patterns in _ROBOT_NAME_PATTERNS.items():
-        for pat in patterns:
-            if pat in path_lower:
-                return robot_type
-    return None
+# _detect_robot_type deleted as dead code — see line ~271 marker above.
 
 # _gen_verify_import moved to handlers/robot.py (Phase 6 wave 1).
 
