@@ -781,7 +781,8 @@
 85b:
   title: 'MCP advanced primitives: Sampling + Elicitation + stateless sessions'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
+  landed_date: '2026-05-13'
   note: streaming results
   gate: pytest — chunked result emission; partial-then-final flow
   files:
