@@ -1,0 +1,9 @@
+"""Phase 60b contract test."""
+import pytest
+pytestmark = pytest.mark.l0
+
+
+def test_phase_60b_metadata():
+    from service.isaac_assist_service.multimodal.sub_phase_60b_sdg_preset_edge_cases import get_phase_metadata
+    md = get_phase_metadata()
+    assert md["phase"] == "60b"
