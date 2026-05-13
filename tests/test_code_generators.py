@@ -851,6 +851,142 @@ _TEST_VECTORS = [
         {"articulation_path": "/W/R"},
         ["UsdPhysics", "/W/R"],
     ),
+    # ----- qa-20-followup: drain _KNOWN_UNTESTED ratchet (batch 4) -----
+    (
+        "add_domain_randomizer",
+        {"target": "/W/L", "param_path": "inputs:intensity", "randomizer_type": "uniform", "lo": 500, "hi": 2000},
+        ["omni.replicator.core"],
+    ),
+    (
+        "add_proximity_sensor",
+        {"sensor_path": "/W/R/Sensor", "parent_path": "/W/R", "position": [0, 0, 1], "detection_distance": 1.0},
+        ["UsdPhysics", "/W/R"],
+    ),
+    (
+        "check_path_clearance",
+        {"articulation_path": "/W/R", "trajectory": [[0, 0, 0], [1, 0, 0]]},
+        ["UsdPhysics", "/W/R"],
+    ),
+    (
+        "clone_envs",
+        {"source_path": "/W/Env", "num_envs": 4},
+        ["GridCloner"],
+    ),
+    (
+        "cloud_download_results",
+        {"job_id": "j1", "output_dir": "/tmp/out"},
+        ["import subprocess", "j1"],
+    ),
+    (
+        "create_conveyor_track",
+        {"waypoints": [[0, 0, 0], [1, 0, 0]]},
+        ["UsdGeom"],
+    ),
+    (
+        "create_gripper",
+        {"articulation_path": "/W/R", "gripper_type": "parallel_jaw"},
+        ["ParallelGripper"],
+    ),
+    (
+        "debug_draw",
+        {"prim_path": "/W/X", "draw_type": "bbox", "points": [[0, 0, 0], [1, 0, 0]]},
+        ["debug_draw"],
+    ),
+    (
+        "define_grasp_pose",
+        {"robot_path": "/W/R", "object_path": "/W/C", "pose_name": "top"},
+        ["UsdGeom", "/W/R"],
+    ),
+    (
+        "evaluate_groot",
+        {"task": "pick_place", "checkpoint_path": "/tmp/ck.pt"},
+        ["import subprocess"],
+    ),
+    (
+        "evaluate_reward",
+        {"reward_code": "r=1", "env_id": "e1"},
+        ["import subprocess"],
+    ),
+    (
+        "finetune_groot",
+        {"demo_data": "/tmp/d.h5", "output_dir": "/tmp/out"},
+        ["import subprocess", "GR00T"],
+    ),
+    (
+        "generate_eval_harness",
+        {"task_name": "pick_place", "output_dir": "/tmp/eval"},
+        ["Evaluation harness", "pick_place"],
+    ),
+    (
+        "generate_teleop_watchdog_script",
+        {"robot_path": "/W/R", "output_path": "/tmp/wd.py"},
+        ["Teleop watchdog"],
+    ),
+    (
+        "load_payload",
+        {"prim_path": "/W/R/EE", "mass": 1.0},
+        ["import omni.usd", "/W/R/EE"],
+    ),
+    (
+        "merge_meshes",
+        {"prim_paths": ["/W/A", "/W/B"], "output_path": "/W/Merged"},
+        ["MeshMerger"],
+    ),
+    (
+        "monitor_joint_effort",
+        {"articulation_path": "/W/R", "threshold": 100.0},
+        ["omni.physx", "/W/R"],
+    ),
+    (
+        "navigate_to",
+        {"robot_path": "/W/R", "target_position": [1, 1, 0]},
+        ["wheeled_robots", "/W/R"],
+    ),
+    (
+        "optimize_collision",
+        {"prim_path": "/W/M", "approximation": "convexHull"},
+        ["UsdPhysics", "/W/M"],
+    ),
+    (
+        "play_animation",
+        {"animation_path": "/W/A", "start": 0, "end": 100},
+        ["omni.timeline"],
+    ),
+    (
+        "publish_robot_description",
+        {"articulation_path": "/W/R", "topic": "/robot_description"},
+        ["UsdPhysics", "rclpy"],
+    ),
+    (
+        "record_trajectory",
+        {"articulation": "/W/R", "duration": 5.0},
+        ["import omni.usd"],
+    ),
+    (
+        "run_arena_benchmark",
+        {"env_id": "e1", "arena_id": "a1"},
+        ["import subprocess", "num_episodes"],
+    ),
+    (
+        "setup_contact_sensors",
+        {"articulation_path": "/W/R", "body_names": ["link1"]},
+        ["ContactSensorCfg", "/W/R"],
+    ),
+    (
+        "simplify_collision",
+        {"prim_path": "/W/M", "approximation": "convexHull"},
+        ["UsdPhysics", "/W/M"],
+    ),
+    (
+        "solve_ik",
+        {"articulation_path": "/W/R", "target_position": [1, 0, 0.5]},
+        ["cuRobo IK"],
+    ),
+    (
+        "verify_import",
+        {"articulation_path": "/W/R"},
+        ["UsdPhysics", "/W/R"],
+    ),
 ]
 
 
@@ -983,24 +1119,18 @@ class TestAllCodeGenHandlersCovered:
     """
 
     _KNOWN_UNTESTED: "frozenset[str]" = frozenset({
-        'add_domain_randomizer', 'add_proximity_sensor',
-        'check_path_clearance', 'clone_envs', 'cloud_download_results',
-        'create_arena', 'create_arena_variant', 'create_conveyor_track',
-        'create_gripper', 'create_wheeled_robot', 'debug_draw',
-        'define_grasp_pose', 'evaluate_groot', 'evaluate_reward',
+        # Remaining handlers requiring complex/multi-arg setups that need
+        # individual investigation. Each one needs a tailored test vector
+        # with the right combination of fields (e.g. create_arena needs
+        # 'robot_asset', setup_pick_place_controller needs 'destination_path',
+        # interpolate_trajectory has an args-shape issue, etc.).
+        'create_arena', 'create_arena_variant', 'create_wheeled_robot',
         'export_dataset', 'export_nav2_map', 'export_policy',
-        'export_teleop_mapping', 'extract_attention_maps', 'finetune_groot',
-        'generate_eval_harness', 'generate_teleop_watchdog_script',
-        'interpolate_trajectory', 'load_payload',
-        'merge_meshes', 'monitor_joint_effort', 'navigate_to',
-        'optimize_collision', 'play_animation',
-        'publish_robot_description', 'record_teleop_demo',
-        'record_trajectory', 'run_arena_benchmark',
-        'setup_contact_sensors', 'setup_loco_manipulation_training',
-        'setup_pick_place_controller', 'setup_pick_place_ros2_bridge',
-        'setup_ros2_bridge', 'setup_rsi_from_demos',
-        'setup_whole_body_control', 'simplify_collision', 'solve_ik',
-        'verify_import',
+        'export_teleop_mapping', 'extract_attention_maps',
+        'interpolate_trajectory', 'record_teleop_demo',
+        'setup_loco_manipulation_training', 'setup_pick_place_controller',
+        'setup_pick_place_ros2_bridge', 'setup_ros2_bridge',
+        'setup_rsi_from_demos', 'setup_whole_body_control',
     })
 
     def test_all_handlers_tested(self):
