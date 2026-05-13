@@ -985,20 +985,9 @@ import fnmatch as _fnmatch_files
 
 # ── IsaacLab RL Training ─────────────────────────────────────────────────────
 
-# ─── Vision tools (Gemini Robotics-ER 1.6) ──────────────────────────────────
+# ─── Vision tools — _get_viewport_bytes + _get_vision_provider migrated to handlers/_shared.py (Phase 14, 2026-05-13) ───
 
-async def _get_viewport_bytes() -> tuple:
-    """Capture the viewport and return (raw_bytes, mime_type)."""
-    result = await kit_tools.get_viewport_image(max_dim=1280)
-    b64 = result.get("image_b64") or result.get("data", "")
-    if not b64:
-        return None, None
-    import base64
-    return base64.b64decode(b64), "image/png"
 
-def _get_vision_provider():
-    from ..vision_gemini import GeminiVisionProvider
-    return GeminiVisionProvider()
 
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
@@ -1013,66 +1002,11 @@ def _get_vision_provider():
 # Zero callers across service/, tests/, scripts/ via comprehensive grep.
 # _NAV2_BRIDGE_PROFILES was migrated to handlers/ros2.py (Phase 8 wave 4).
 
-def _safe_robot_name(articulation_path: str) -> str:
-    """Derive a filesystem-safe slug from a USD path, e.g. '/World/Franka' -> 'franka'."""
-    name = articulation_path.rstrip("/").split("/")[-1] or "robot"
-    return "".join(c if c.isalnum() or c in "_-" else "_" for c in name).lower()
 
-def _check_real_data_path(path: str) -> Optional[str]:
-    """Return an error string if the real_data_path is unusable, else None."""
-    if not path:
-        return "real_data_path is required"
-    p = Path(path)
-    if not p.exists():
-        return f"real_data_path not found: {path}"
-    if p.suffix.lower() not in (".h5", ".hdf5"):
-        return f"real_data_path must be HDF5 (.h5/.hdf5), got {p.suffix}"
-    return None
 
-def _wf_now_iso() -> str:
-    return _wf_dt.utcnow().isoformat() + "Z"
 
-def _resolve_run_id(run_id: Optional[str]) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
-    """Resolve a run_id (or None → most-recent active run) to its registry entry.
 
-    Returns (run_id, entry) or (None, None) if no matching run exists.
-    """
-    if not _RUN_REGISTRY:
-        return None, None
-    if run_id is None:
-        # Pick the most-recently-launched RUNNING (or PAUSED) run.
-        candidates = [
-            (rid, e) for rid, e in _RUN_REGISTRY.items()
-            if e.get("state") in ("running", "paused")
-        ]
-        if not candidates:
-            return None, None
-        # Newest by launch_time
-        candidates.sort(key=lambda kv: kv[1].get("launch_time", 0.0), reverse=True)
-        return candidates[0]
-    entry = _RUN_REGISTRY.get(run_id)
-    return (run_id, entry) if entry else (None, None)
 
-async def _query_run_ipc(entry: Dict[str, Any], request: Dict[str, Any]) -> Dict[str, Any]:
-    """Send an IPC request to a running launch_training subprocess.
-
-    Override in tests via monkeypatch. The real implementation talks to the
-    subprocess over its Unix socket (entry['ipc_socket']).
-    """
-    handler = entry.get("ipc_handler")
-    if handler is None:
-        raise RuntimeError(
-            "No IPC handler registered for this run — was it launched via launch_training?"
-        )
-    return await handler(request)
-
-def _validate_env_id(env_id: Any, num_envs: int) -> Optional[str]:
-    """Return an error message if env_id is invalid, else None."""
-    if not isinstance(env_id, int) or isinstance(env_id, bool):
-        return f"env_id must be an integer, got {type(env_id).__name__}"
-    if env_id < 0 or env_id >= num_envs:
-        return f"env_id {env_id} out of range [0, {num_envs})"
-    return None
 
 # ── Recovered handler registrations (missing from original bundle extraction) ─
 
