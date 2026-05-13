@@ -878,7 +878,8 @@
 94b:
   title: 'Data flywheel: auto-capture golden patterns + sim2real loop'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
+  landed_date: '2026-05-13'
   note: KB freshness audit
   gate: pytest — audit script reports stale > 90 days entries
   files:
