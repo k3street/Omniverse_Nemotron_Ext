@@ -590,8 +590,9 @@
 '70':
   title: '`assemble_robot` implementation'
   agent_type: opus-judgment
-  status: scaffold
-  note: assemble_robot algorithm
+  status: landed
+  landed_date: '2026-05-13'
+  note: assemble_robot algorithm (composition + topology layer; Kit RPC authoring still scaffold)
   gate: pytest tests/test_phase_70_assemble_robot.py — assembles 3-piece arm + base + gripper from typed config
   files:
   - service/isaac_assist_service/multimodal/assemble_robot.py
