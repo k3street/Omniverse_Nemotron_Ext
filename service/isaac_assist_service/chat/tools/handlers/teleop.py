@@ -13,13 +13,30 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Dict, List, Optional
 
+# ---------------------------------------------------------------------------
+# Theme-local constants (Phase 8 wave 4, 2026-05-13)
+# Migrated from tool_executor.py — used only by this module.
+
+_STREAM_QUALITY_PRESETS = {
+    "low": {"width": 640, "height": 480, "bitrate_mbps": 2, "fps": 30},
+    "medium": {"width": 1280, "height": 720, "bitrate_mbps": 8, "fps": 60},
+    "high": {"width": 1920, "height": 1080, "bitrate_mbps": 20, "fps": 90},
+}
+
+_DEVICE_AXIS_DEFAULTS = {
+    "quest_3": ["left_x", "left_y", "right_x", "right_y", "trigger_left", "trigger_right", "grip_left", "grip_right"],
+    "vision_pro": ["left_x", "left_y", "right_x", "right_y", "pinch_left", "pinch_right"],
+    "spacemouse": ["tx", "ty", "tz", "rx", "ry", "rz"],
+    "keyboard": ["w", "a", "s", "d", "q", "e"],
+}
+
 
 # ---------------------------------------------------------------------------
 # Phase 6 wave 8 — teleop session + mapping + safety + watchdog
 
 
 def _gen_start_teleop_session(args: Dict) -> str:
-    from ..tool_executor import _STREAM_QUALITY_PRESETS, _DEVICE_AXIS_DEFAULTS
+    # Phase 8 wave 4 — _DEVICE_AXIS_DEFAULTS migrated to module body.
     robot_path = args["robot_path"]
     device = args.get("input_device", "keyboard")
     quality = args.get("stream_quality", "medium")

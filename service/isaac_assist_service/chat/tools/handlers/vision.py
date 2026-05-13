@@ -12,6 +12,71 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict
 
+# ---------------------------------------------------------------------------
+# Theme-local constants (Phase 8 wave 4, 2026-05-13)
+# Migrated from tool_executor.py — used only by this module.
+
+_RENDER_QUALITY_PRESETS = {
+    "preview": {
+        "renderer": "RayTracing",
+        "resolution": (1280, 720),
+        "spp": 1,
+    },
+    "presentation": {
+        "renderer": "PathTracing",
+        "resolution": (1920, 1080),
+        "spp": 64,
+    },
+    "production": {
+        "renderer": "PathTracing",
+        "resolution": (3840, 2160),
+        "spp": 256,
+    },
+}
+
+_QUICK_DEMO_TEMPLATES = {
+    "pick_place": {
+        "default_robot": "franka",
+        "default_objects": ["cube"],
+        "policy_checkpoint": "ppo_pick_place_franka.pt",
+        "policy_algo": "ppo",
+        "task": "Pick objects from tray and place in bin",
+        "camera_position": [1.5, -1.0, 1.2],
+    },
+    "mobile_nav": {
+        "default_robot": "jetbot",
+        "default_objects": ["waypoint"],
+        "policy_checkpoint": "astar_diffdrive_jetbot.pt",
+        "policy_algo": "astar",
+        "task": "Navigate to waypoint avoiding obstacles",
+        "camera_position": [0, -3, 4],
+    },
+    "humanoid_walk": {
+        "default_robot": "g1",
+        "default_objects": [],
+        "policy_checkpoint": "groot_n1_g1_walk.pt",
+        "policy_algo": "groot",
+        "task": "Walk forward 2m with stable balance",
+        "camera_position": [3, -3, 2],
+    },
+}
+
+_SCENE_STYLE_PRESETS = {
+    "clean": {"intensity": 1500, "background": "white_floor"},
+    "industrial": {"intensity": 1000, "background": "concrete"},
+    "lab": {"intensity": 2000, "background": "neutral_gray"},
+    "dramatic": {"intensity": 800, "background": "dark"},
+}
+
+_LIGHT_TYPE_NAMES = (
+    "DistantLight",
+    "DomeLight",
+    "SphereLight",
+    "RectLight",
+    "DiskLight",
+    "CylinderLight",
+)
+
 
 # ---------------------------------------------------------------------------
 # Phase 6 wave 15 — viewport + render + semantic + attention + demo video
@@ -43,7 +108,7 @@ def _gen_set_viewport_camera(args: Dict) -> str:
 
 def _gen_render_video(args: Dict) -> str:
     """Generate code that runs Movie Capture for a clip."""
-    from ..tool_executor import _RENDER_QUALITY_PRESETS
+    # Phase 8 wave 4 — _RENDER_QUALITY_PRESETS migrated to module body.
     duration = float(args["duration"])
     camera = args.get("camera")  # may be None → active viewport camera
     quality = args.get("quality", "preview")
@@ -109,7 +174,7 @@ print(f'[render_video] preset={{QUALITY}} renderer={{RENDERER}} '
 
 def _gen_quick_demo(args: Dict) -> str:
     """Build a complete demo scene by chaining template + robot + objects + policy + camera."""
-    from ..tool_executor import _QUICK_DEMO_TEMPLATES, _SCENE_STYLE_PRESETS
+    # Phase 8 wave 4 — _SCENE_STYLE_PRESETS migrated to module body.
     demo_type = args.get("demo_type", "pick_place")
     template = _QUICK_DEMO_TEMPLATES.get(demo_type, _QUICK_DEMO_TEMPLATES["pick_place"])
     robot = args.get("robot", template["default_robot"])
@@ -612,7 +677,7 @@ print(json.dumps(result, default=str))
 async def _handle_list_lights(args: Dict) -> Dict:
     """Enumerate all UsdLux light prims in the current stage via Kit RPC."""
     from .. import kit_tools
-    from ..tool_executor import _LIGHT_TYPE_NAMES
+    # Phase 8 wave 4 — _LIGHT_TYPE_NAMES migrated to module body.
     type_tuple = repr(_LIGHT_TYPE_NAMES)
     code = f"""\
 import omni.usd

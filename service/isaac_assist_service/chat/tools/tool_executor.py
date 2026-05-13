@@ -167,12 +167,7 @@ _DEFAULT_SUGGESTIONS = [
 _DELTA_ROOT = _WORKSPACE / "snapshots" / "deltas"
 
 # from: feat/7C-xr-teleoperation
-_DEVICE_AXIS_DEFAULTS = {
-    "quest_3": ["left_x", "left_y", "right_x", "right_y", "trigger_left", "trigger_right", "grip_left", "grip_right"],
-    "vision_pro": ["left_x", "left_y", "right_x", "right_y", "pinch_left", "pinch_right"],
-    "spacemouse": ["tx", "ty", "tz", "rx", "ry", "rz"],
-    "keyboard": ["w", "a", "s", "d", "q", "e"],
-}
+# _DEVICE_AXIS_DEFAULTS migrated to handlers/teleop.py (Phase 8 wave 4, 2026-05-13).
 
 # from: feat/addendum-phase7A-rl-debugging
 _DOMINANT_TERM_THRESHOLD = 100.0  # one term's |weight| > 100x another → dominant
@@ -343,109 +338,13 @@ _GROOT_EMBODIMENTS = {
 _ISAA_MANIFEST_VERSION = 1
 
 # from: feat/atomic-tier6-lighting
-_LIGHT_TYPE_NAMES = (
-    "DistantLight",
-    "DomeLight",
-    "SphereLight",
-    "RectLight",
-    "DiskLight",
-    "CylinderLight",
-)
+# _LIGHT_TYPE_NAMES migrated to handlers/vision.py (Phase 8 wave 4, 2026-05-13).
 
 # from: feat/new-onboarding
 _MOBILE_ROBOT_KEYWORDS = {"carter", "jetbot", "nova_carter", "kaya", "husky", "turtlebot"}
 
 # from: feat/addendum-ros2-nav2
-_NAV2_BRIDGE_PROFILES = {
-    "ur10e_moveit2": {
-        "description": "UR10e arm wired for MoveIt2 — joint state publish, FollowJointTrajectory subscribe, TF.",
-        "topics": ["/joint_states", "/joint_command", "/tf"],
-        "nodes": [
-            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
-            ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
-            ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
-            ("PublishJointState", "isaacsim.ros2.bridge.ROS2PublishJointState"),
-            ("SubscribeJointState", "isaacsim.ros2.bridge.ROS2SubscribeJointState"),
-            ("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
-            ("ArticulationController", "isaacsim.core.nodes.IsaacArticulationController"),
-        ],
-        "topic_values": {
-            "PublishJointState.inputs:topicName": "/joint_states",
-            "SubscribeJointState.inputs:topicName": "/joint_command",
-        },
-    },
-    "jetbot_nav2": {
-        "description": "Jetbot wired for Nav2 — lidar publish, cmd_vel subscribe, odom publish, TF, clock.",
-        "topics": ["/scan", "/cmd_vel", "/odom", "/tf", "/clock"],
-        "nodes": [
-            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
-            ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
-            ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
-            ("PublishLidar", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
-            ("SubscribeCmdVel", "isaacsim.ros2.bridge.ROS2SubscribeTwist"),
-            ("PublishOdom", "isaacsim.ros2.bridge.ROS2PublishOdometry"),
-            ("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
-            ("DifferentialController", "isaacsim.robot.wheeled_robots.DifferentialController"),
-        ],
-        "topic_values": {
-            "PublishLidar.inputs:topicName": "/scan",
-            "SubscribeCmdVel.inputs:topicName": "/cmd_vel",
-            "PublishOdom.inputs:topicName": "/odom",
-            "PublishClock.inputs:topicName": "/clock",
-        },
-    },
-    "franka_moveit2": {
-        "description": "Franka arm wired for MoveIt2 — joint state, gripper state, TF.",
-        "topics": ["/joint_states", "/gripper", "/tf"],
-        "nodes": [
-            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
-            ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
-            ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
-            ("PublishJointState", "isaacsim.ros2.bridge.ROS2PublishJointState"),
-            ("SubscribeJointState", "isaacsim.ros2.bridge.ROS2SubscribeJointState"),
-            ("PublishGripper", "isaacsim.ros2.bridge.ROS2PublishJointState"),
-            ("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
-            ("ArticulationController", "isaacsim.core.nodes.IsaacArticulationController"),
-        ],
-        "topic_values": {
-            "PublishJointState.inputs:topicName": "/joint_states",
-            "SubscribeJointState.inputs:topicName": "/joint_command",
-            "PublishGripper.inputs:topicName": "/gripper",
-        },
-    },
-    "amr_full": {
-        "description": "Full AMR — 2x lidar, 4x camera, odom, cmd_vel, TF, clock.",
-        "topics": [
-            "/scan_front", "/scan_rear", "/cmd_vel", "/odom", "/tf", "/clock",
-            "/camera_front/image_raw", "/camera_rear/image_raw",
-            "/camera_left/image_raw", "/camera_right/image_raw",
-        ],
-        "nodes": [
-            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
-            ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
-            ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
-            ("PublishLidarFront", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
-            ("PublishLidarRear", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
-            ("SubscribeCmdVel", "isaacsim.ros2.bridge.ROS2SubscribeTwist"),
-            ("PublishOdom", "isaacsim.ros2.bridge.ROS2PublishOdometry"),
-            ("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
-            ("PublishCamFront", "isaacsim.ros2.bridge.ROS2PublishImage"),
-            ("PublishCamRear", "isaacsim.ros2.bridge.ROS2PublishImage"),
-            ("PublishCamLeft", "isaacsim.ros2.bridge.ROS2PublishImage"),
-            ("PublishCamRight", "isaacsim.ros2.bridge.ROS2PublishImage"),
-        ],
-        "topic_values": {
-            "PublishLidarFront.inputs:topicName": "/scan_front",
-            "PublishLidarRear.inputs:topicName": "/scan_rear",
-            "SubscribeCmdVel.inputs:topicName": "/cmd_vel",
-            "PublishOdom.inputs:topicName": "/odom",
-            "PublishCamFront.inputs:topicName": "/camera_front/image_raw",
-            "PublishCamRear.inputs:topicName": "/camera_rear/image_raw",
-            "PublishCamLeft.inputs:topicName": "/camera_left/image_raw",
-            "PublishCamRight.inputs:topicName": "/camera_right/image_raw",
-        },
-    },
-}
+# _NAV2_BRIDGE_PROFILES migrated to handlers/ros2.py (Phase 8 wave 4, 2026-05-13).
 
 # from: feat/new-omnigraph-assistant
 _OG_TEMPLATES = {
@@ -866,51 +765,10 @@ _PROACTIVE_TRIGGER_PLAYBOOKS: Dict[str, List[str]] = {
 _QUICK_CALIBRATE_PARAMS = ["armature", "friction", "masses"]
 
 # from: feat/new-quick-demo-builder-v2
-_QUICK_DEMO_TEMPLATES = {
-    "pick_place": {
-        "default_robot": "franka",
-        "default_objects": ["cube"],
-        "policy_checkpoint": "ppo_pick_place_franka.pt",
-        "policy_algo": "ppo",
-        "task": "Pick objects from tray and place in bin",
-        "camera_position": [1.5, -1.0, 1.2],
-    },
-    "mobile_nav": {
-        "default_robot": "jetbot",
-        "default_objects": ["waypoint"],
-        "policy_checkpoint": "astar_diffdrive_jetbot.pt",
-        "policy_algo": "astar",
-        "task": "Navigate to waypoint avoiding obstacles",
-        "camera_position": [0, -3, 4],
-    },
-    "humanoid_walk": {
-        "default_robot": "g1",
-        "default_objects": [],
-        "policy_checkpoint": "groot_n1_g1_walk.pt",
-        "policy_algo": "groot",
-        "task": "Walk forward 2m with stable balance",
-        "camera_position": [3, -3, 2],
-    },
-}
+# _QUICK_DEMO_TEMPLATES migrated to handlers/vision.py (Phase 8 wave 4, 2026-05-13).
 
 # from: feat/addendum-community-remote-v2
-_RENDER_QUALITY_PRESETS = {
-    "preview": {
-        "renderer": "RayTracing",
-        "resolution": (1280, 720),
-        "spp": 1,
-    },
-    "presentation": {
-        "renderer": "PathTracing",
-        "resolution": (1920, 1080),
-        "spp": 64,
-    },
-    "production": {
-        "renderer": "PathTracing",
-        "resolution": (3840, 2160),
-        "spp": 256,
-    },
-}
+# _RENDER_QUALITY_PRESETS migrated to handlers/vision.py (Phase 8 wave 4, 2026-05-13).
 
 # from: feat/addendum-phase7A-rl-debugging
 _REWARD_HACK_PATTERNS = [
@@ -1153,28 +1011,13 @@ def _resolve_robot_asset(entry: Dict) -> str:
     return entry.get("cloud_url", "")
 
 # from: feat/addendum-phase8F-ros2-quality
-_ROS2_QOS_PRESETS = {
-    "scan": ("BEST_EFFORT", "VOLATILE", "Laser scan data — high-frequency, drop-tolerant"),
-    "robot_description": ("RELIABLE", "TRANSIENT_LOCAL", "Robot URDF — latched, must arrive"),
-    "tf": ("RELIABLE", "VOLATILE", "Transform tree — must be reliable"),
-    "tf_static": ("RELIABLE", "TRANSIENT_LOCAL", "Static transforms — latched"),
-    "cmd_vel": ("RELIABLE", "VOLATILE", "Velocity commands — must not be dropped"),
-    "camera": ("BEST_EFFORT", "VOLATILE", "Camera images — high-bandwidth, drop-tolerant"),
-    "image": ("BEST_EFFORT", "VOLATILE", "Image data — high-bandwidth, drop-tolerant"),
-    "joint_states": ("RELIABLE", "VOLATILE", "Joint state feedback — must be reliable"),
-    "clock": ("BEST_EFFORT", "VOLATILE", "Simulation clock — high-frequency"),
-}
+# _ROS2_QOS_PRESETS migrated to handlers/ros2.py (Phase 8 wave 4, 2026-05-13).
 
 # from: feat/atomic-tier13-rl-runtime
 _RUN_REGISTRY: Dict[str, Dict[str, Any]] = {}
 
 # from: feat/new-quick-demo-builder-v2
-_SCENE_STYLE_PRESETS = {
-    "clean": {"intensity": 1500, "background": "white_floor"},
-    "industrial": {"intensity": 1000, "background": "concrete"},
-    "lab": {"intensity": 2000, "background": "neutral_gray"},
-    "dramatic": {"intensity": 800, "background": "dark"},
-}
+# _SCENE_STYLE_PRESETS migrated to handlers/vision.py (Phase 8 wave 4, 2026-05-13).
 
 # from: feat/6A-physx-validation
 _SCENE_TEMPLATES = {
@@ -1314,11 +1157,7 @@ _STARTER_PROMPTS = {
 }
 
 # from: feat/7C-xr-teleoperation
-_STREAM_QUALITY_PRESETS = {
-    "low": {"width": 640, "height": 480, "bitrate_mbps": 2, "fps": 30},
-    "medium": {"width": 1280, "height": 720, "bitrate_mbps": 8, "fps": 60},
-    "high": {"width": 1920, "height": 1080, "bitrate_mbps": 20, "fps": 90},
-}
+# _STREAM_QUALITY_PRESETS migrated to handlers/teleop.py (Phase 8 wave 4, 2026-05-13).
 
 # from: feat/new-onboarding
 _SUGGESTION_MAP = {
