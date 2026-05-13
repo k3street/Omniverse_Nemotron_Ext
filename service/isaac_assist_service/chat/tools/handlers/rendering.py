@@ -336,8 +336,18 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 6 wave 17 — dispatch lines in tool_executor.py still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Code-gen handlers (8)
+    codegen["add_default_light"] = _gen_add_default_light
+    codegen["create_hdri_skydome"] = _gen_create_hdri_skydome
+    codegen["enable_post_process"] = _gen_enable_post_process
+    codegen["set_environment_background"] = _gen_set_environment_background
+    codegen["set_light_color"] = _gen_set_light_color
+    codegen["set_light_intensity"] = _gen_set_light_intensity
+    codegen["set_render_config"] = _gen_set_render_config
+    codegen["set_render_resolution"] = _gen_set_render_resolution
+

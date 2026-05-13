@@ -819,8 +819,20 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 6 wave 8 — dispatch lines in tool_executor.py still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Data handlers (1)
+    data["summarize_teleop_session"] = _handle_summarize_teleop_session
+
+    # Code-gen handlers (7)
+    codegen["configure_teleop_mapping"] = _gen_configure_teleop_mapping
+    codegen["export_teleop_mapping"] = _gen_export_teleop_mapping
+    codegen["generate_teleop_watchdog_script"] = _gen_generate_teleop_watchdog_script
+    codegen["record_teleop_demo"] = _gen_record_teleop_demo
+    codegen["start_teleop_session"] = _gen_start_teleop_session
+    codegen["stop_teleop_session"] = _gen_stop_teleop_session
+    codegen["teleop_safety_config"] = _gen_teleop_safety_config
+

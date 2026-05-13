@@ -5773,8 +5773,12 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 6 wave 25 — dispatch lines in tool_executor.py still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Code-gen handlers (2)
+    codegen["setup_pick_place_controller"] = _gen_setup_pick_place_controller
+    codegen["setup_pick_place_ros2_bridge"] = _gen_setup_pick_place_ros2_bridge
+

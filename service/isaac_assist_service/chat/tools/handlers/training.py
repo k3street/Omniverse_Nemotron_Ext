@@ -2333,8 +2333,55 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 6 wave 6 — dispatch lines in tool_executor.py still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Data handlers (33)
+    data["analyze_checkpoint"] = _handle_analyze_checkpoint
+    data["analyze_randomization"] = _handle_analyze_randomization
+    data["apply_dr_preset"] = _handle_apply_dr_preset
+    data["checkpoint_training"] = _handle_checkpoint_training
+    data["cloud_estimate_cost"] = _handle_cloud_estimate_cost
+    data["cloud_launch"] = _handle_cloud_launch
+    data["cloud_status"] = _handle_cloud_status
+    data["cloud_teardown"] = _handle_cloud_teardown
+    data["compare_policies"] = _handle_compare_policies
+    data["create_isaaclab_env"] = _handle_create_isaaclab_env
+    data["detect_ood"] = _handle_detect_ood
+    data["diagnose_training"] = _handle_diagnose_training
+    data["eureka_status"] = _handle_eureka_status
+    data["export_finetune_data"] = _handle_export_finetune_data
+    data["finetune_stats"] = _handle_finetune_stats
+    data["generate_reward"] = _handle_generate_reward
+    data["get_env_observations"] = _handle_get_env_observations
+    data["get_env_rewards"] = _handle_get_env_rewards
+    data["get_env_termination_state"] = _handle_get_env_termination_state
+    data["get_training_status"] = _handle_get_training_status
+    data["iterate_reward"] = _handle_iterate_reward
+    data["load_groot_policy"] = _handle_load_groot_policy
+    data["load_rl_policy"] = _handle_load_rl_policy
+    data["monitor_forgetting"] = _handle_monitor_forgetting
+    data["pause_training"] = _handle_pause_training
+    data["profile_training_throughput"] = _handle_profile_training_throughput
+    data["redact_finetune_data"] = _handle_redact_finetune_data
+    data["review_reward"] = _handle_review_reward
+    data["suggest_data_mix"] = _handle_suggest_data_mix
+    data["suggest_dr_ranges"] = _handle_suggest_dr_ranges
+    data["suggest_finetune_config"] = _handle_suggest_finetune_config
+    data["suggest_parameter_adjustment"] = _handle_suggest_parameter_adjustment
+    data["train_actuator_net"] = _handle_train_actuator_net
+
+    # Code-gen handlers (10)
+    codegen["clone_envs"] = _gen_clone_envs
+    codegen["cloud_download_results"] = _gen_cloud_download_results
+    codegen["create_calibration_experiment"] = _gen_create_calibration_experiment
+    codegen["evaluate_groot"] = _gen_evaluate_groot
+    codegen["evaluate_reward"] = _gen_evaluate_reward
+    codegen["export_policy"] = _gen_export_policy
+    codegen["finetune_groot"] = _gen_finetune_groot
+    codegen["generate_eval_harness"] = _gen_eval_harness
+    codegen["launch_training"] = _gen_launch_training
+    codegen["setup_loco_manipulation_training"] = _gen_setup_loco_manipulation_training
+

@@ -772,8 +772,21 @@ def register(
     data: Dict[str, Callable[..., Awaitable[Any]]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 7 wave 1 — dispatch lines in tool_executor.py still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Data handlers (12)
+    data["resolve_constraint_phrase"] = _handle_resolve_constraint_phrase
+    data["resolve_context_reference"] = _handle_resolve_context_reference
+    data["resolve_coordinate_reference"] = _handle_resolve_coordinate_reference
+    data["resolve_count_vagueness"] = _handle_resolve_count_vagueness
+    data["resolve_material_properties"] = _handle_resolve_material_properties
+    data["resolve_prim_reference"] = _handle_resolve_prim_reference
+    data["resolve_relational_property"] = _handle_resolve_relational_property
+    data["resolve_robot_class"] = _handle_resolve_robot_class
+    data["resolve_sequence_phrase"] = _handle_resolve_sequence_phrase
+    data["resolve_size_adjective"] = _handle_resolve_size_adjective
+    data["resolve_skill_composition"] = _handle_resolve_skill_composition
+    data["resolve_success_condition"] = _handle_resolve_success_condition

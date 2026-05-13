@@ -5151,8 +5151,72 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 6 wave 1 — dispatch lines in `tool_executor.py` still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Data handlers (28)
+    data["apply_robot_fix_profile"] = _handle_apply_robot_fix_profile
+    data["calibrate_physics"] = _handle_calibrate_physics
+    data["create_articulated_joint"] = _handle_create_articulated_joint
+    data["create_gravity_dispenser"] = _handle_create_gravity_dispenser
+    data["create_heap_zone"] = _handle_create_heap_zone
+    data["create_kit_tray"] = _handle_create_kit_tray
+    data["create_linear_axis_robot"] = _handle_create_linear_axis_robot
+    data["create_recirculation_loop"] = _handle_create_recirculation_loop
+    data["create_rotary_table"] = _handle_create_rotary_table
+    data["generate_robot_description"] = _handle_generate_robot_description
+    data["get_gripper_state"] = _handle_get_gripper_state
+    data["list_available_controllers"] = _handle_list_available_controllers
+    data["place_on_top_of"] = _handle_place_on_top_of
+    data["quick_calibrate"] = _handle_quick_calibrate
+    data["register_moving_obstacle"] = _handle_register_moving_obstacle
+    data["setup_assembly_constraint"] = _handle_setup_assembly_constraint
+    data["setup_cortex_behavior"] = _handle_setup_cortex_behavior
+    data["setup_grasp_pose_sampler"] = _handle_setup_grasp_pose_sampler
+    data["setup_isaac_ros_cumotion_moveit"] = _handle_setup_isaac_ros_cumotion_moveit
+    data["setup_nav_robot"] = _handle_setup_nav_robot
+    data["setup_pick_place_with_vision"] = _handle_setup_pick_place_with_vision
+    data["setup_robot_claim_mutex"] = _handle_setup_robot_claim_mutex
+    data["setup_robot_handoff_signal"] = _handle_setup_robot_handoff_signal
+    data["setup_ros2_control_compat"] = _handle_setup_ros2_control_compat
+    data["setup_zone_partition"] = _handle_setup_zone_partition
+    data["surface_gripper"] = _handle_surface_gripper
+    data["track_slot_occupancy"] = _handle_track_slot_occupancy
+    data["visualize_behavior_tree"] = _handle_visualize_behavior_tree
+
+    # Code-gen handlers (32)
+    codegen["anchor_robot"] = _gen_anchor_robot
+    codegen["assemble_robot"] = _gen_assemble_robot
+    codegen["create_behavior"] = _gen_create_behavior
+    codegen["create_bin"] = _gen_create_bin
+    codegen["create_conveyor"] = _gen_create_conveyor
+    codegen["create_conveyor_track"] = _gen_create_conveyor_track
+    codegen["create_gripper"] = _gen_create_gripper
+    codegen["create_wheeled_robot"] = _gen_create_wheeled_robot
+    codegen["define_grasp_pose"] = _gen_define_grasp_pose
+    codegen["export_nav2_map"] = _gen_export_nav2_map
+    codegen["generate_occupancy_map"] = _gen_generate_occupancy_map
+    codegen["grasp_object"] = _gen_grasp_object
+    codegen["import_robot"] = _gen_import_robot
+    codegen["interpolate_trajectory"] = _gen_interpolate_trajectory
+    codegen["load_robot_pose"] = _gen_load_robot_pose
+    codegen["move_to_pose"] = _gen_move_to_pose
+    codegen["navigate_to"] = _gen_navigate_to
+    codegen["plan_trajectory"] = _gen_plan_trajectory
+    codegen["publish_robot_description"] = _gen_publish_robot_description
+    codegen["record_trajectory"] = _gen_record_trajectory
+    codegen["record_waypoints"] = _gen_record_waypoints
+    codegen["replay_trajectory"] = _gen_replay_trajectory
+    codegen["robot_wizard"] = _gen_robot_wizard
+    codegen["set_motion_policy"] = _gen_set_motion_policy
+    codegen["setup_multi_rate"] = _gen_setup_multi_rate
+    codegen["setup_rsi_from_demos"] = _gen_setup_rsi_from_demos
+    codegen["setup_whole_body_control"] = _gen_setup_whole_body_control
+    codegen["solve_ik"] = _gen_solve_ik
+    codegen["start_teaching_mode"] = _gen_start_teaching_mode
+    codegen["teach_robot_pose"] = _gen_teach_robot_pose
+    codegen["tune_gains"] = _gen_tune_gains
+    codegen["verify_import"] = _gen_verify_import
+

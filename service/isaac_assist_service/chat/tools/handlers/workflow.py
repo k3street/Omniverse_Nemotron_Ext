@@ -714,8 +714,24 @@ def register(
     data: Dict[str, Callable[..., Awaitable[Any]]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 7 wave 12 — dispatch lines in tool_executor.py still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Data handlers (15)
+    data["approve_workflow_checkpoint"] = _handle_approve_workflow_checkpoint
+    data["cancel_workflow"] = _handle_cancel_workflow
+    data["dispatch_async_task"] = _handle_dispatch_async_task
+    data["edit_workflow_plan"] = _handle_edit_workflow_plan
+    data["execute_with_retry"] = _handle_execute_with_retry
+    data["get_workflow_status"] = _handle_get_workflow_status
+    data["list_workflows"] = _handle_list_workflows
+    data["post_action_suggestions"] = _handle_post_action_suggestions
+    data["query_async_task"] = _handle_query_async_task
+    data["queue_write_locked_patch"] = _handle_queue_write_locked_patch
+    data["record_feedback"] = _handle_record_feedback
+    data["scene_aware_starter_prompts"] = _handle_scene_aware_starter_prompts
+    data["slash_command_discovery"] = _handle_slash_command_discovery
+    data["start_workflow"] = _handle_start_workflow
+    data["watch_changes"] = _handle_watch_changes

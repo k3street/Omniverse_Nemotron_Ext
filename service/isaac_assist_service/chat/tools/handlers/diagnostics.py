@@ -4516,8 +4516,57 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 6 wave 10 — dispatch lines in tool_executor.py still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Data handlers (27)
+    data["check_collision_mesh"] = _handle_check_collision_mesh
+    data["check_teleop_hardware"] = _handle_check_teleop_hardware
+    data["check_tf_health"] = _handle_check_tf_health
+    data["check_vram_headroom"] = _handle_check_vram_headroom
+    data["compare_sim_real_video"] = _handle_compare_sim_real_video
+    data["console_error_autodetect"] = _handle_console_error_autodetect
+    data["diagnose_domain_gap"] = _handle_diagnose_domain_gap
+    data["diagnose_performance"] = _handle_diagnose_performance
+    data["diagnose_physics_error"] = _handle_diagnose_physics_error
+    data["diagnose_whole_body"] = _handle_diagnose_whole_body
+    data["explain_error"] = None  # LLM-inline (no executor)
+    data["get_active_state"] = _handle_get_active_state
+    data["get_console_errors"] = _handle_get_console_errors
+    data["get_debug_info"] = _handle_get_debug_info
+    data["hardware_compatibility_check"] = _handle_hardware_compatibility_check
+    data["list_extensions"] = _handle_list_extensions
+    data["measure_distance"] = _handle_measure_distance
+    data["measure_sim_real_gap"] = _handle_measure_sim_real_gap
+    data["proactive_check"] = _handle_proactive_check
+    data["simulate_traversal_check"] = _handle_simulate_traversal_check
+    data["trace_config"] = _handle_trace_config
+    data["validate_annotations"] = _handle_validate_annotations
+    data["validate_calibration"] = _handle_validate_calibration
+    data["validate_scene_blueprint"] = _handle_validate_scene_blueprint
+    data["validate_semantic_labels"] = _handle_validate_semantic_labels
+    data["validate_teleop_demo"] = _handle_validate_teleop_demo
+    data["verify_pickplace_pipeline"] = _handle_verify_pickplace_pipeline
+
+    # Code-gen handlers (18)
+    codegen["check_path_clearance"] = _gen_check_path_clearance
+    codegen["check_physics_health"] = _gen_check_physics_health
+    codegen["check_singularity"] = _gen_check_singularity
+    codegen["configure_zmq_stream"] = _gen_configure_zmq_stream
+    codegen["create_broken_scene"] = _gen_create_broken_scene
+    codegen["debug_draw"] = _gen_debug_draw
+    codegen["debug_graph"] = _gen_debug_graph
+    codegen["enable_deterministic_mode"] = _gen_enable_deterministic_mode
+    codegen["enable_extension"] = _gen_enable_extension
+    codegen["highlight_prim"] = _gen_highlight_prim
+    codegen["monitor_joint_effort"] = _gen_monitor_joint_effort
+    codegen["preflight_check"] = _gen_preflight_check
+    codegen["set_clearance_monitor"] = _gen_set_clearance_monitor
+    codegen["show_workspace"] = _gen_show_workspace
+    codegen["sim_control"] = _gen_sim_control
+    codegen["visualize_clearance"] = _gen_visualize_clearance
+    codegen["visualize_collision_mesh"] = _gen_visualize_collision_mesh
+    codegen["visualize_forces"] = _gen_visualize_forces
+

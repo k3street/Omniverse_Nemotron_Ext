@@ -965,8 +965,26 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 6 wave 4 — dispatch lines in `tool_executor.py` still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Data handlers (9)
+    data["add_force_torque_sensor"] = _handle_add_force_torque_sensor
+    data["add_vision_classifier_gate"] = _handle_add_vision_classifier_gate
+    data["barcode_reader_sensor"] = _handle_barcode_reader_sensor
+    data["list_contacts"] = _handle_list_contacts
+    data["nir_material_sensor"] = _handle_nir_material_sensor
+    data["overlap_box"] = _handle_overlap_box
+    data["overlap_sphere"] = _handle_overlap_sphere
+    data["raycast"] = _handle_raycast
+    data["sweep_sphere"] = _handle_sweep_sphere
+
+    # Code-gen handlers (5)
+    codegen["add_proximity_sensor"] = _gen_add_proximity_sensor
+    codegen["add_sensor_to_prim"] = _gen_add_sensor
+    codegen["configure_camera"] = _gen_configure_camera
+    codegen["set_camera_look_at"] = _gen_set_camera_look_at
+    codegen["set_camera_params"] = _gen_set_camera_params
+

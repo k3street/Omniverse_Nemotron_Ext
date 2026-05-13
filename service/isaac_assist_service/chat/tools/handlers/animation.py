@@ -292,8 +292,15 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 6 wave 19 — dispatch lines in tool_executor.py still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Code-gen handlers (5)
+    codegen["create_audio_prim"] = _gen_create_audio_prim
+    codegen["play_animation"] = _gen_play_animation
+    codegen["set_audio_property"] = _gen_set_audio_property
+    codegen["set_keyframe"] = _gen_set_keyframe
+    codegen["set_timeline_range"] = _gen_set_timeline_range
+

@@ -2106,8 +2106,46 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 5 wave 1 — dispatch lines in `tool_executor.py` still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Data handlers (18)
+    data["get_angular_velocity"] = _handle_get_angular_velocity
+    data["get_articulation_mass"] = _handle_get_articulation_mass
+    data["get_articulation_state"] = _handle_get_articulation_state
+    data["get_center_of_mass"] = _handle_get_center_of_mass
+    data["get_contact_report"] = _handle_get_contact_report
+    data["get_drive_gains"] = _handle_get_drive_gains
+    data["get_inertia"] = _handle_get_inertia
+    data["get_joint_limits"] = _handle_get_joint_limits
+    data["get_joint_positions"] = _handle_get_joint_positions
+    data["get_joint_targets"] = _handle_get_joint_targets
+    data["get_joint_torques"] = _handle_get_joint_torques
+    data["get_joint_velocities"] = _handle_get_joint_velocities
+    data["get_kinematic_state"] = _handle_get_kinematic_state
+    data["get_linear_velocity"] = _handle_get_linear_velocity
+    data["get_mass"] = _handle_get_mass
+    data["get_physics_scene_config"] = _handle_get_physics_scene_config
+    data["lookup_material"] = _handle_lookup_material
+    data["suggest_physics_settings"] = _handle_suggest_physics_settings
+
+    # Code-gen handlers (16)
+    codegen["apply_force"] = _gen_apply_force
+    codegen["apply_physics_material"] = _gen_apply_physics_material
+    codegen["compute_convex_hull"] = _gen_compute_convex_hull
+    codegen["configure_self_collision"] = _gen_configure_self_collision
+    codegen["create_deformable_mesh"] = _gen_deformable
+    codegen["fix_collision_mesh"] = _gen_fix_collision_mesh
+    codegen["optimize_collision"] = _gen_optimize_collision
+    codegen["set_drive_gains"] = _gen_set_drive_gains
+    codegen["set_joint_limits"] = _gen_set_joint_limits
+    codegen["set_joint_targets"] = _gen_set_joint_targets
+    codegen["set_joint_velocity_limit"] = _gen_set_joint_velocity_limit
+    codegen["set_linear_velocity"] = _gen_set_linear_velocity
+    codegen["set_physics_params"] = _gen_set_physics_params
+    codegen["set_physics_scene_config"] = _gen_set_physics_scene_config
+    codegen["setup_contact_sensors"] = _gen_setup_contact_sensors
+    codegen["simplify_collision"] = _gen_simplify_collision
+

@@ -1185,8 +1185,27 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 6 wave 11 — dispatch lines in tool_executor.py still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Data handlers (12)
+    data["catalog_search"] = _handle_catalog_search
+    data["download_asset"] = _handle_download_asset
+    data["export_scene_package"] = _handle_export_scene_package
+    data["filter_templates_by_hardware"] = _handle_filter_templates_by_hardware
+    data["generate_scene_blueprint"] = _handle_generate_scene_blueprint
+    data["list_local_files"] = _handle_list_local_files
+    data["list_scene_templates"] = _handle_list_scene_templates
+    data["load_scene_template"] = _handle_load_scene_template
+    data["lookup_api_deprecation"] = _handle_lookup_api_deprecation
+    data["lookup_knowledge"] = _handle_lookup_knowledge
+    data["lookup_product_spec"] = _handle_lookup_product_spec
+    data["nucleus_browse"] = _handle_nucleus_browse
+
+    # Code-gen handlers (3)
+    codegen["build_scene_from_blueprint"] = _gen_build_scene_from_blueprint
+    codegen["export_template"] = _gen_export_template
+    codegen["import_template"] = _gen_import_template
+

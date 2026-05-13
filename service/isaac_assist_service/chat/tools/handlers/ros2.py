@@ -850,8 +850,21 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 6 wave 7 — dispatch lines in tool_executor.py still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Data handlers (3)
+    data["diagnose_ros2"] = _handle_diagnose_ros2
+    data["emit_ros2_control_yaml"] = _handle_emit_ros2_control_yaml
+    data["precheck_ros2_environment"] = _handle_precheck_ros2_environment
+
+    # Code-gen handlers (6)
+    codegen["configure_ros2_bridge"] = _gen_configure_ros2_bridge
+    codegen["configure_ros2_time"] = _gen_configure_ros2_time
+    codegen["fix_ros2_qos"] = _gen_fix_ros2_qos
+    codegen["replay_rosbag"] = _gen_replay_rosbag
+    codegen["setup_ros2_bridge"] = _gen_setup_ros2_bridge
+    codegen["show_tf_tree"] = _gen_show_tf_tree
+

@@ -1094,8 +1094,36 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 6 wave 15 — dispatch lines in tool_executor.py still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Data handlers (16)
+    data["capture_camera_image"] = _handle_capture_camera_image
+    data["capture_viewport"] = _handle_capture_viewport
+    data["get_camera_params"] = _handle_get_camera_params
+    data["get_light_properties"] = _handle_get_light_properties
+    data["get_render_config"] = _handle_get_render_config
+    data["get_timeline_state"] = _handle_get_timeline_state
+    data["get_viewport_camera"] = _handle_get_viewport_camera
+    data["inspect_camera"] = _handle_inspect_camera
+    data["list_cameras"] = _handle_list_cameras
+    data["list_keyframes"] = _handle_list_keyframes
+    data["list_lights"] = _handle_list_lights
+    data["pixel_to_world"] = _handle_pixel_to_world
+    data["vision_analyze_scene"] = _handle_vision_analyze_scene
+    data["vision_bounding_boxes"] = _handle_vision_bounding_boxes
+    data["vision_detect_objects"] = _handle_vision_detect_objects
+    data["vision_plan_trajectory"] = _handle_vision_plan_trajectory
+
+    # Code-gen handlers (8)
+    codegen["extract_attention_maps"] = _gen_extract_attention_maps
+    codegen["focus_viewport_on"] = _gen_focus_viewport_on
+    codegen["quick_demo"] = _gen_quick_demo
+    codegen["record_demo_video"] = _gen_record_demo_video
+    codegen["render_video"] = _gen_render_video
+    codegen["set_render_mode"] = _gen_set_render_mode
+    codegen["set_semantic_label"] = _gen_set_semantic_label
+    codegen["set_viewport_camera"] = _gen_set_viewport_camera
+

@@ -13,7 +13,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 from . import kit_tools
 from .patch_validator import validate_patch, format_issues_for_llm, has_blocking_issues
 from ...config import config
@@ -2152,26 +2152,15 @@ _OG_NODE_TYPE_MAP = {
 
 # ── Code generation dispatch ─────────────────────────────────────────────────
 
-CODE_GEN_HANDLERS = {
-    "create_prim": _gen_create_prim,
-    "delete_prim": _gen_delete_prim,
-    "set_attribute": _gen_set_attribute,
-    "add_reference": _gen_add_reference,
-    "apply_api_schema": _gen_apply_api_schema,
-    "clone_prim": _gen_clone_prim,
-    "create_deformable_mesh": _gen_deformable,
-    "create_omnigraph": _gen_create_omnigraph,
-    "create_material": _gen_create_material,
-    "assign_material": _gen_assign_material,
-    "sim_control": _gen_sim_control,
-    "set_physics_params": _gen_set_physics_params,
-    "teleport_prim": _gen_teleport_prim,
-    "set_joint_targets": _gen_set_joint_targets,
-    "import_robot": _gen_import_robot,
-    "anchor_robot": _gen_anchor_robot,
-    "set_viewport_camera": _gen_set_viewport_camera,
-    "configure_sdg": _gen_configure_sdg,
-}
+# Phase 9 (2026-05-13): both dispatch dicts populated by
+# handlers/_dispatch.py:register_handlers() — sole entry point.
+# Replaces 2 dict literals + ~340 inline assignments + 3 external
+# registrator calls + ROS2 try/except block (all migrated).
+CODE_GEN_HANDLERS: Dict[str, Callable[..., Any]] = {}
+DATA_HANDLERS: Dict[str, Callable[..., Awaitable[Any]]] = {}
+
+from .handlers._dispatch import register_handlers
+register_handlers(DATA_HANDLERS, CODE_GEN_HANDLERS)
 
 
 # ── Spec / data lookup handlers (no code gen, just return data) ──────────────
@@ -2587,78 +2576,7 @@ async def _augment_verify_with_feasibility(verify_result: Dict, stages: list) ->
 
 
 # Data-only handlers (no code gen → return data directly to LLM)
-DATA_HANDLERS = {
-    "lookup_product_spec": _handle_lookup_product_spec,
-    "scene_summary": _handle_scene_summary,
-    "capture_viewport": _handle_capture_viewport,
-    "get_console_errors": _handle_get_console_errors,
-    "get_articulation_state": _handle_get_articulation_state,
-    "list_all_prims": _handle_list_all_prims,
-    "measure_distance": _handle_measure_distance,
-    "place_on_top_of": _handle_place_on_top_of,
-    "resolve_prim_reference": _handle_resolve_prim_reference,
-    "resolve_size_adjective": _handle_resolve_size_adjective,
-    "resolve_count_vagueness": _handle_resolve_count_vagueness,
-    "resolve_robot_class": _handle_resolve_robot_class,
-    "resolve_material_properties": _handle_resolve_material_properties,
-    "resolve_constraint_phrase": _handle_resolve_constraint_phrase,
-    "resolve_sequence_phrase": _handle_resolve_sequence_phrase,
-    "resolve_context_reference": _handle_resolve_context_reference,
-    "resolve_skill_composition": _handle_resolve_skill_composition,
-    "resolve_success_condition": _handle_resolve_success_condition,
-    "resolve_coordinate_reference": _handle_resolve_coordinate_reference,
-    "resolve_relational_property": _handle_resolve_relational_property,
-    "verify_pickplace_pipeline": _handle_verify_pickplace_pipeline,
-    "simulate_traversal_check": _handle_simulate_traversal_check,
-    "get_debug_info": _handle_get_debug_info,
-    "lookup_knowledge": _handle_lookup_knowledge,
-    "lookup_api_deprecation": _handle_lookup_api_deprecation,
-    "explain_error": None,  # handled inline by LLM (no tool execution)
-}
 
-# ── ROS2 live handlers (via rosbridge / ros-mcp) ────────────────────────────
-try:
-    from .ros_mcp_tools import (
-        handle_ros2_connect,
-        handle_ros2_list_topics,
-        handle_ros2_get_topic_type,
-        handle_ros2_get_message_type,
-        handle_ros2_subscribe_once,
-        handle_ros2_publish,
-        handle_ros2_publish_sequence,
-        handle_ros2_list_services,
-        handle_ros2_call_service,
-        handle_ros2_list_nodes,
-        handle_ros2_get_node_details,
-    )
-    DATA_HANDLERS.update({
-        "ros2_connect": handle_ros2_connect,
-        "ros2_list_topics": handle_ros2_list_topics,
-        "ros2_get_topic_type": handle_ros2_get_topic_type,
-        "ros2_get_message_type": handle_ros2_get_message_type,
-        "ros2_subscribe_once": handle_ros2_subscribe_once,
-        "ros2_publish": handle_ros2_publish,
-        "ros2_publish_sequence": handle_ros2_publish_sequence,
-        "ros2_list_services": handle_ros2_list_services,
-        "ros2_call_service": handle_ros2_call_service,
-        "ros2_list_nodes": handle_ros2_list_nodes,
-        "ros2_get_node_details": handle_ros2_get_node_details,
-    })
-except ImportError:
-    logger.warning("[ToolExecutor] ros-mcp not installed — ROS2 live tools disabled (pip install ros-mcp)")
-    DATA_HANDLERS.update({
-        "ros2_connect": None,
-        "ros2_list_topics": None,
-        "ros2_get_topic_type": None,
-        "ros2_get_message_type": None,
-        "ros2_subscribe_once": None,
-        "ros2_publish": None,
-        "ros2_publish_sequence": None,
-        "ros2_list_services": None,
-        "ros2_call_service": None,
-        "ros2_list_nodes": None,
-        "ros2_get_node_details": None,
-    })
 
 
 # ── Main dispatch ────────────────────────────────────────────────────────────
@@ -2851,7 +2769,6 @@ async def execute_tool_call(
 
 
 # Register the sensor generator
-CODE_GEN_HANDLERS["add_sensor_to_prim"] = _gen_add_sensor
 
 
 # ── Motion Planning (RMPflow / Lula) ─────────────────────────────────────────
@@ -2887,8 +2804,6 @@ _MOTION_ROBOT_CONFIGS = {
 
 # _gen_move_to_pose moved to handlers/robot.py (Phase 6 wave 12).
 # _gen_plan_trajectory moved to handlers/robot.py (Phase 6 wave 12).
-CODE_GEN_HANDLERS["move_to_pose"] = _gen_move_to_pose
-CODE_GEN_HANDLERS["plan_trajectory"] = _gen_plan_trajectory
 
 
 # ── Asset Catalog Search ─────────────────────────────────────────────────────
@@ -3019,7 +2934,6 @@ def _build_asset_index() -> List[Dict]:
 # _handle_catalog_search moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 
-DATA_HANDLERS["catalog_search"] = _handle_catalog_search
 
 
 # ── Local Filesystem Search ──────────────────────────────────────────────────
@@ -3059,7 +2973,6 @@ _LIST_LOCAL_ALLOWED_EXTS = {
 # _handle_list_local_files moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 
-DATA_HANDLERS["list_local_files"] = _handle_list_local_files
 
 
 # ── Nucleus Browse & Download ────────────────────────────────────────────────
@@ -3067,8 +2980,6 @@ DATA_HANDLERS["list_local_files"] = _handle_list_local_files
 # _handle_nucleus_browse moved to handlers/scene_blueprints.py (Phase 7 wave 13).
 # _handle_download_asset moved to handlers/scene_blueprints.py (Phase 7 wave 13).
 
-DATA_HANDLERS["nucleus_browse"] = _handle_nucleus_browse
-DATA_HANDLERS["download_asset"] = _handle_download_asset
 
 
 # ── Scene Builder ────────────────────────────────────────────────────────────
@@ -3079,8 +2990,6 @@ DATA_HANDLERS["download_asset"] = _handle_download_asset
 # _handle_generate_scene_blueprint moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 
-DATA_HANDLERS["generate_scene_blueprint"] = _handle_generate_scene_blueprint
-CODE_GEN_HANDLERS["build_scene_from_blueprint"] = _gen_build_scene_from_blueprint
 
 
 # ── IsaacLab RL Training ─────────────────────────────────────────────────────
@@ -3204,8 +3113,6 @@ class {task}EnvCfg(ManagerBasedRLEnvCfg):
 # _gen_launch_training moved to handlers/training.py (Phase 6 wave 6).
 
 
-DATA_HANDLERS["create_isaaclab_env"] = _handle_create_isaaclab_env
-CODE_GEN_HANDLERS["launch_training"] = _gen_launch_training
 
 
 # ─── Vision tools (Gemini Robotics-ER 1.6) ──────────────────────────────────
@@ -3231,22 +3138,16 @@ def _get_vision_provider():
 # _handle_vision_analyze_scene moved to handlers/vision.py (Phase 7 wave 11).
 
 
-DATA_HANDLERS["vision_detect_objects"] = _handle_vision_detect_objects
-DATA_HANDLERS["vision_bounding_boxes"] = _handle_vision_bounding_boxes
-DATA_HANDLERS["vision_plan_trajectory"] = _handle_vision_plan_trajectory
-DATA_HANDLERS["vision_analyze_scene"] = _handle_vision_analyze_scene
 
 
 # _handle_add_vision_classifier_gate moved to handlers/sensors.py (Phase 7 wave 9).
 
 
-DATA_HANDLERS["add_vision_classifier_gate"] = _handle_add_vision_classifier_gate
 
 
 # _handle_setup_pick_place_with_vision moved to handlers/robot.py (Phase 7 wave 8).
 
 
-DATA_HANDLERS["setup_pick_place_with_vision"] = _handle_setup_pick_place_with_vision
 
 
 # _handle_create_kit_tray moved to handlers/robot.py (Phase 7 wave 7).
@@ -3255,50 +3156,41 @@ DATA_HANDLERS["setup_pick_place_with_vision"] = _handle_setup_pick_place_with_vi
 # _handle_track_slot_occupancy moved to handlers/robot.py (Phase 7 wave 8).
 
 
-DATA_HANDLERS["create_kit_tray"] = _handle_create_kit_tray
-DATA_HANDLERS["track_slot_occupancy"] = _handle_track_slot_occupancy
 
 
 # _handle_setup_robot_handoff_signal moved to handlers/robot.py (Phase 7 wave 8).
 
 
-DATA_HANDLERS["setup_robot_handoff_signal"] = _handle_setup_robot_handoff_signal
 
 
 # _handle_setup_robot_claim_mutex moved to handlers/robot.py (Phase 7 wave 8).
 
 
-DATA_HANDLERS["setup_robot_claim_mutex"] = _handle_setup_robot_claim_mutex
 
 
 # _handle_surface_gripper moved to handlers/robot.py (Phase 7 wave 8).
 
 
-DATA_HANDLERS["surface_gripper"] = _handle_surface_gripper
 
 
 # _handle_create_articulated_joint moved to handlers/robot.py (Phase 7 wave 7).
 
 
-DATA_HANDLERS["create_articulated_joint"] = _handle_create_articulated_joint
 
 
 # _handle_barcode_reader_sensor moved to handlers/sensors.py (Phase 7 wave 9).
 
 
-DATA_HANDLERS["barcode_reader_sensor"] = _handle_barcode_reader_sensor
 
 
 # _handle_create_rotary_table moved to handlers/robot.py (Phase 7 wave 7).
 
 
-DATA_HANDLERS["create_rotary_table"] = _handle_create_rotary_table
 
 
 # _handle_register_moving_obstacle moved to handlers/robot.py (Phase 7 wave 7).
 
 
-DATA_HANDLERS["register_moving_obstacle"] = _handle_register_moving_obstacle
 
 
 # _handle_create_gravity_dispenser moved to handlers/robot.py (Phase 7 wave 7).
@@ -3307,20 +3199,16 @@ DATA_HANDLERS["register_moving_obstacle"] = _handle_register_moving_obstacle
 # _handle_create_heap_zone moved to handlers/robot.py (Phase 7 wave 7).
 
 
-DATA_HANDLERS["create_gravity_dispenser"] = _handle_create_gravity_dispenser
-DATA_HANDLERS["create_heap_zone"] = _handle_create_heap_zone
 
 
 # _handle_setup_cortex_behavior moved to handlers/robot.py (Phase 7 wave 7).
 
 
-DATA_HANDLERS["setup_cortex_behavior"] = _handle_setup_cortex_behavior
 
 
 # _handle_setup_zone_partition moved to handlers/robot.py (Phase 7 wave 8).
 
 
-DATA_HANDLERS["setup_zone_partition"] = _handle_setup_zone_partition
 
 
 # _handle_add_force_torque_sensor moved to handlers/sensors.py (Phase 7 wave 9).
@@ -3329,8 +3217,6 @@ DATA_HANDLERS["setup_zone_partition"] = _handle_setup_zone_partition
 # _handle_setup_assembly_constraint moved to handlers/robot.py (Phase 7 wave 7).
 
 
-DATA_HANDLERS["add_force_torque_sensor"] = _handle_add_force_torque_sensor
-DATA_HANDLERS["setup_assembly_constraint"] = _handle_setup_assembly_constraint
 
 
 # _handle_create_recirculation_loop moved to handlers/robot.py (Phase 7 wave 7).
@@ -3342,9 +3228,6 @@ DATA_HANDLERS["setup_assembly_constraint"] = _handle_setup_assembly_constraint
 # _handle_nir_material_sensor moved to handlers/sensors.py (Phase 7 wave 9).
 
 
-DATA_HANDLERS["create_recirculation_loop"] = _handle_create_recirculation_loop
-DATA_HANDLERS["create_linear_axis_robot"] = _handle_create_linear_axis_robot
-DATA_HANDLERS["nir_material_sensor"] = _handle_nir_material_sensor
 
 
 # _handle_load_rl_policy moved to handlers/training.py (Phase 7 wave 6).
@@ -3355,9 +3238,6 @@ DATA_HANDLERS["nir_material_sensor"] = _handle_nir_material_sensor
 # _handle_setup_nav_robot moved to handlers/robot.py (Phase 7 wave 8).
 
 
-DATA_HANDLERS["load_rl_policy"] = _handle_load_rl_policy
-DATA_HANDLERS["setup_grasp_pose_sampler"] = _handle_setup_grasp_pose_sampler
-DATA_HANDLERS["setup_nav_robot"] = _handle_setup_nav_robot
 
 
 # ── Scene Package Export ─────────────────────────────────────────────────────
@@ -3368,14 +3248,12 @@ DATA_HANDLERS["setup_nav_robot"] = _handle_setup_nav_robot
 # _handle_export_scene_package moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
 
 
-DATA_HANDLERS["export_scene_package"] = _handle_export_scene_package
 
 
 # ── Stage Analysis ───────────────────────────────────────────────────────────
 
 # _handle_run_stage_analysis moved to handlers/scene_authoring.py (Phase 7 wave 4).
 
-DATA_HANDLERS["run_stage_analysis"] = _handle_run_stage_analysis
 
 
 # ══════ From feat/tools-and-bugfixes ══════
@@ -3600,10 +3478,6 @@ gymnasium.register(
 '''
 
 CODE_GEN_HANDLERS["fix_error"] = _handle_fix_error
-DATA_HANDLERS["list_scene_templates"] = _handle_list_scene_templates
-DATA_HANDLERS["load_scene_template"] = _handle_load_scene_template
-CODE_GEN_HANDLERS["batch_apply_operation"] = _gen_batch_apply_operation
-DATA_HANDLERS["validate_scene_blueprint"] = _handle_validate_scene_blueprint
 
 # ══════ From feat/7B-replicator-sdg-v2 ══════
 # _gen_create_sdg_pipeline moved to handlers/sdg.py (Phase 6 wave 5).
@@ -3629,11 +3503,6 @@ DATA_HANDLERS["validate_scene_blueprint"] = _handle_validate_scene_blueprint
 
 # _gen_teleop_safety_config moved to handlers/teleop.py (Phase 6 wave 8).
 
-CODE_GEN_HANDLERS["start_teleop_session"] = _gen_start_teleop_session
-CODE_GEN_HANDLERS["configure_teleop_mapping"] = _gen_configure_teleop_mapping
-CODE_GEN_HANDLERS["record_teleop_demo"] = _gen_record_teleop_demo
-CODE_GEN_HANDLERS["stop_teleop_session"] = _gen_stop_teleop_session
-CODE_GEN_HANDLERS["teleop_safety_config"] = _gen_teleop_safety_config
 
 # ══════ From feat/7D-arena ══════
 def _arena_env_id(scene_type: str, robot_asset: str, task: str) -> str:
@@ -3806,10 +3675,6 @@ def _arena_env_id(scene_type: str, robot_asset: str, task: str) -> str:
 
     # _handle_arena_leaderboard moved to handlers/arena.py (Phase 7 wave 16).
 
-CODE_GEN_HANDLERS["create_arena"] = _gen_create_arena
-CODE_GEN_HANDLERS["create_arena_variant"] = _gen_create_arena_variant
-CODE_GEN_HANDLERS["run_arena_benchmark"] = _gen_run_arena_benchmark
-DATA_HANDLERS["arena_leaderboard"] = _handle_arena_leaderboard
 
 # ══════ From feat/7E-eureka-rewards ══════
 def _format_component_metrics(metrics: Dict) -> str:
@@ -3847,10 +3712,6 @@ Task success rate: {metrics.get('task_success_rate', 'N/A')}
 
 # _handle_eureka_status moved to handlers/training.py (Phase 7 wave 5).
 
-DATA_HANDLERS["generate_reward"] = _handle_generate_reward
-DATA_HANDLERS["iterate_reward"] = _handle_iterate_reward
-DATA_HANDLERS["eureka_status"] = _handle_eureka_status
-CODE_GEN_HANDLERS["evaluate_reward"] = _gen_evaluate_reward
 
 # ══════ From feat/7F-zmq-bridge ══════
 # _gen_configure_zmq_stream moved to handlers/diagnostics.py (Phase 6 wave 24).
@@ -3861,10 +3722,6 @@ CODE_GEN_HANDLERS["evaluate_reward"] = _gen_evaluate_reward
 # _gen_finetune_groot moved to handlers/training.py (Phase 6 wave 6).
 # _handle_compare_policies moved to handlers/training.py (Phase 7 wave 5).
 
-DATA_HANDLERS["load_groot_policy"] = _handle_load_groot_policy
-DATA_HANDLERS["compare_policies"] = _handle_compare_policies
-CODE_GEN_HANDLERS["evaluate_groot"] = _gen_evaluate_groot
-CODE_GEN_HANDLERS["finetune_groot"] = _gen_finetune_groot
 
 # ══════ From feat/7H-cloud-deployment ══════
 # _handle_cloud_launch moved to handlers/training.py (Phase 7 wave 6).
@@ -3872,11 +3729,6 @@ CODE_GEN_HANDLERS["finetune_groot"] = _gen_finetune_groot
 # _handle_cloud_teardown moved to handlers/training.py (Phase 7 wave 6).
 # _handle_cloud_estimate_cost moved to handlers/training.py (Phase 7 wave 6).
 # _gen_cloud_download_results moved to handlers/training.py (Phase 6 wave 24).
-DATA_HANDLERS["cloud_launch"] = _handle_cloud_launch
-DATA_HANDLERS["cloud_status"] = _handle_cloud_status
-DATA_HANDLERS["cloud_teardown"] = _handle_cloud_teardown
-DATA_HANDLERS["cloud_estimate_cost"] = _handle_cloud_estimate_cost
-CODE_GEN_HANDLERS["cloud_download_results"] = _gen_cloud_download_results
 
 # ══════ From feat/8A-quick-wins ══════
 # _gen_clone_envs moved to handlers/training.py (Phase 6 wave 6).
@@ -3888,7 +3740,6 @@ CODE_GEN_HANDLERS["cloud_download_results"] = _gen_cloud_download_results
 
 # _handle_inspect_camera moved to handlers/vision.py (Phase 7 wave 11).
 
-DATA_HANDLERS["inspect_camera"] = _handle_inspect_camera
 
 # ══════ From feat/8B-motion-planning-complete ══════
 # _gen_set_motion_policy moved to handlers/robot.py (Phase 6 wave 12).
@@ -3908,9 +3759,6 @@ _CUROBO_ROBOT_YML_MAP = {
 }
 
 
-CODE_GEN_HANDLERS["set_motion_policy"] = _gen_set_motion_policy
-DATA_HANDLERS["generate_robot_description"] = _handle_generate_robot_description
-CODE_GEN_HANDLERS["solve_ik"] = _gen_solve_ik
 # _gen_set_motion_policy moved to handlers/robot.py (Phase 6 wave 12).
 # _gen_solve_ik moved to handlers/robot.py (Phase 6 wave 12).
 # _gen_create_behavior moved to handlers/robot.py (Phase 6 wave 24).
@@ -3918,12 +3766,7 @@ CODE_GEN_HANDLERS["solve_ik"] = _gen_solve_ik
 # _gen_grasp_object moved to handlers/robot.py (Phase 6 wave 12).
 # _handle_visualize_behavior_tree moved to handlers/robot.py (Phase 7 wave 8).
 
-CODE_GEN_HANDLERS["create_behavior"] = _gen_create_behavior
-CODE_GEN_HANDLERS["create_gripper"] = _gen_create_gripper
 # _gen_define_grasp_pose moved to handlers/robot.py (Phase 6 wave 12).
-CODE_GEN_HANDLERS["grasp_object"] = _gen_grasp_object
-CODE_GEN_HANDLERS["define_grasp_pose"] = _gen_define_grasp_pose
-DATA_HANDLERS["visualize_behavior_tree"] = _handle_visualize_behavior_tree
 
 # ══════ From feat/8D-robot-setup ══════
 # _gen_robot_wizard moved to handlers/robot.py (Phase 6 wave 2).
@@ -3934,10 +3777,6 @@ DATA_HANDLERS["visualize_behavior_tree"] = _handle_visualize_behavior_tree
 
 # _gen_configure_self_collision moved to handlers/physics.py (Phase 5 wave 4).
 
-CODE_GEN_HANDLERS["robot_wizard"] = _gen_robot_wizard
-CODE_GEN_HANDLERS["tune_gains"] = _gen_tune_gains
-CODE_GEN_HANDLERS["assemble_robot"] = _gen_assemble_robot
-CODE_GEN_HANDLERS["configure_self_collision"] = _gen_configure_self_collision
 
 # ══════ From feat/8E-wheeled-robots ══════
 # _gen_create_wheeled_robot moved to handlers/robot.py (Phase 6 wave 3).
@@ -3949,12 +3788,6 @@ CODE_GEN_HANDLERS["configure_self_collision"] = _gen_configure_self_collision
 # _gen_create_bin moved to handlers/robot.py (Phase 6 wave 3).
 
 
-CODE_GEN_HANDLERS["create_wheeled_robot"] = _gen_create_wheeled_robot
-CODE_GEN_HANDLERS["navigate_to"] = _gen_navigate_to
-CODE_GEN_HANDLERS["create_conveyor"] = _gen_create_conveyor
-CODE_GEN_HANDLERS["create_conveyor_track"] = _gen_create_conveyor_track
-CODE_GEN_HANDLERS["create_bin"] = _gen_create_bin
-CODE_GEN_HANDLERS["merge_meshes"] = _gen_merge_meshes
 
 # ══════ From feat/8F-ros2-deep ══════
 # _gen_show_tf_tree moved to handlers/ros2.py (Phase 6 wave 7).
@@ -3963,9 +3796,6 @@ CODE_GEN_HANDLERS["merge_meshes"] = _gen_merge_meshes
 
 # _gen_configure_ros2_bridge moved to handlers/ros2.py (Phase 6 wave 7).
 
-CODE_GEN_HANDLERS["show_tf_tree"] = _gen_show_tf_tree
-CODE_GEN_HANDLERS["publish_robot_description"] = _gen_publish_robot_description
-CODE_GEN_HANDLERS["configure_ros2_bridge"] = _gen_configure_ros2_bridge
 
 # ══════ From feat/9-finetune-flywheel ══════
 # _handle_record_feedback moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
@@ -3974,10 +3804,6 @@ CODE_GEN_HANDLERS["configure_ros2_bridge"] = _gen_configure_ros2_bridge
 # _handle_finetune_stats moved to handlers/training.py (Phase 7 wave 5).
 
 # _handle_redact_finetune_data moved to handlers/training.py (Phase 7 wave 6).
-DATA_HANDLERS["record_feedback"] = _handle_record_feedback
-DATA_HANDLERS["export_finetune_data"] = _handle_export_finetune_data
-DATA_HANDLERS["finetune_stats"] = _handle_finetune_stats
-DATA_HANDLERS["redact_finetune_data"] = _handle_redact_finetune_data
 
 # ══════ From feat/addendum-phase2-smart-debugging ══════
 # _handle_diagnose_physics_error moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
@@ -3986,9 +3812,6 @@ DATA_HANDLERS["redact_finetune_data"] = _handle_redact_finetune_data
 
 # _gen_check_physics_health moved to handlers/diagnostics.py (Phase 6 wave 10).
 
-DATA_HANDLERS["diagnose_physics_error"] = _handle_diagnose_physics_error
-DATA_HANDLERS["trace_config"] = _handle_trace_config
-CODE_GEN_HANDLERS["check_physics_health"] = _gen_check_physics_health
 
 # ══════ From feat/addendum-phase3-urdf-postprocessor ══════
 def _detect_robot_type(articulation_path: str) -> Optional[str]:
@@ -4013,8 +3836,6 @@ def _detect_robot_for_fix(articulation_path: str) -> Optional[str]:
 
 # _handle_apply_robot_fix_profile moved to handlers/robot.py (Phase 7 wave 7).
 
-CODE_GEN_HANDLERS["verify_import"] = _gen_verify_import
-DATA_HANDLERS["apply_robot_fix_profile"] = _handle_apply_robot_fix_profile
 
 # ══════ From feat/addendum-phase7B-sdg-quality ══════
 # _handle_validate_annotations moved to handlers/diagnostics.py (Phase 7 wave 14).
@@ -4023,9 +3844,6 @@ DATA_HANDLERS["apply_robot_fix_profile"] = _handle_apply_robot_fix_profile
 
 # _handle_diagnose_domain_gap moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-DATA_HANDLERS["validate_annotations"] = _handle_validate_annotations
-DATA_HANDLERS["analyze_randomization"] = _handle_analyze_randomization
-DATA_HANDLERS["diagnose_domain_gap"] = _handle_diagnose_domain_gap
 
 # ══════ From feat/addendum-phase8F-ros2-quality ══════
 # _handle_diagnose_ros2 moved to handlers/ros2.py (Phase 7 wave 14).
@@ -4034,9 +3852,6 @@ DATA_HANDLERS["diagnose_domain_gap"] = _handle_diagnose_domain_gap
 
 # _gen_configure_ros2_time moved to handlers/ros2.py (Phase 6 wave 7).
 
-DATA_HANDLERS["diagnose_ros2"] = _handle_diagnose_ros2
-CODE_GEN_HANDLERS["fix_ros2_qos"] = _gen_fix_ros2_qos
-CODE_GEN_HANDLERS["configure_ros2_time"] = _gen_configure_ros2_time
 
 # ══════ From feat/addendum-phase8B-workspace-singularity-v2 ══════
 # _gen_show_workspace moved to handlers/diagnostics.py (Phase 6 wave 22).
@@ -4045,9 +3860,6 @@ CODE_GEN_HANDLERS["configure_ros2_time"] = _gen_configure_ros2_time
 
 # _gen_monitor_joint_effort moved to handlers/diagnostics.py (Phase 6 wave 10).
 
-CODE_GEN_HANDLERS["show_workspace"] = _gen_show_workspace
-CODE_GEN_HANDLERS["check_singularity"] = _gen_check_singularity
-CODE_GEN_HANDLERS["monitor_joint_effort"] = _gen_monitor_joint_effort
 
 # ══════ From feat/new-performance-diagnostics ══════
 def _analyze_performance(stats: Dict, timing: Dict, mem: Dict) -> List[Dict]:
@@ -4121,9 +3933,6 @@ def _analyze_performance(stats: Dict, timing: Dict, mem: Dict) -> List[Dict]:
 
 # _gen_optimize_collision moved to handlers/physics.py (Phase 5 wave 5).
 
-DATA_HANDLERS["diagnose_performance"] = _handle_diagnose_performance
-DATA_HANDLERS["find_heavy_prims"] = _handle_find_heavy_prims
-CODE_GEN_HANDLERS["optimize_collision"] = _gen_optimize_collision
 
 # ══════ From feat/new-material-database ══════
 def _load_physics_materials() -> Dict:
@@ -4284,8 +4093,6 @@ def _summarize_changes(changes: List[Dict]) -> str:
 # _handle_scene_diff moved to handlers/scene_authoring.py (Phase 7 wave 4).
 # _handle_watch_changes moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-DATA_HANDLERS["scene_diff"] = _handle_scene_diff
-DATA_HANDLERS["watch_changes"] = _handle_watch_changes
 
 # ══════ From feat/new-auto-simplification ══════
 # _gen_optimize_scene moved to handlers/scene_authoring.py (Phase 6 wave 14).
@@ -4294,9 +4101,6 @@ DATA_HANDLERS["watch_changes"] = _handle_watch_changes
 
     # _handle_suggest_physics_settings moved to handlers/physics.py (Phase 7 wave 16).
 
-CODE_GEN_HANDLERS["optimize_scene"] = _gen_optimize_scene
-CODE_GEN_HANDLERS["simplify_collision"] = _gen_simplify_collision
-DATA_HANDLERS["suggest_physics_settings"] = _handle_suggest_physics_settings
 
 # ══════ From feat/new-onboarding ══════
 # _handle_scene_aware_starter_prompts moved to handlers/workflow.py (Phase 7 wave 12+13 redirect-stub stripped).
@@ -4311,11 +4115,6 @@ DATA_HANDLERS["suggest_physics_settings"] = _handle_suggest_physics_settings
 
 # _gen_load_scene_template moved to handlers/scene_blueprints.py (Phase 6 wave 11).
 
-DATA_HANDLERS["scene_aware_starter_prompts"] = _handle_scene_aware_starter_prompts
-DATA_HANDLERS["hardware_compatibility_check"] = _handle_hardware_compatibility_check
-DATA_HANDLERS["slash_command_discovery"] = _handle_slash_command_discovery
-DATA_HANDLERS["console_error_autodetect"] = _handle_console_error_autodetect
-DATA_HANDLERS["post_action_suggestions"] = _handle_post_action_suggestions
 
 # ══════ From feat/new-omnigraph-assistant ══════
 def _detect_template(description: str) -> Optional[str]:
@@ -4344,15 +4143,10 @@ def _detect_template(description: str) -> Optional[str]:
 
 # _gen_interpolate_trajectory moved to handlers/robot.py (Phase 6 wave 13).
 
-CODE_GEN_HANDLERS["start_teaching_mode"] = _gen_start_teaching_mode
-CODE_GEN_HANDLERS["record_waypoints"] = _gen_record_waypoints
-CODE_GEN_HANDLERS["replay_trajectory"] = _gen_replay_trajectory
-CODE_GEN_HANDLERS["interpolate_trajectory"] = _gen_interpolate_trajectory
 
 # ══════ From feat/preflight-check-23 ══════
 # _gen_preflight_check moved to handlers/diagnostics.py (Phase 6 wave 10).
 
-CODE_GEN_HANDLERS["preflight_check"] = _gen_preflight_check
 
 # ══════ From feat/addendum-phase7A-rl-debugging ══════
 def _read_tb_scalars(run_dir: str, tag: str) -> List[float]:
@@ -4419,10 +4213,6 @@ def _read_checkpoint_action_std(run_dir: str) -> Optional[float]:
 # _handle_profile_training_throughput moved to handlers/training.py (Phase 7 wave 6).
 
 # _gen_eval_harness moved to handlers/training.py (Phase 6 wave 24).
-DATA_HANDLERS["diagnose_training"] = _handle_diagnose_training
-DATA_HANDLERS["review_reward"] = _handle_review_reward
-DATA_HANDLERS["profile_training_throughput"] = _handle_profile_training_throughput
-CODE_GEN_HANDLERS["generate_eval_harness"] = _gen_eval_harness
 
 # ══════ From feat/addendum-phase7C-teleop-quality ══════
 # _handle_check_teleop_hardware moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
@@ -4451,11 +4241,6 @@ def _open_hdf5_safely(path: str):
 
 # _gen_generate_teleop_watchdog_script moved to handlers/teleop.py (Phase 6 wave 8).
 
-CODE_GEN_HANDLERS["export_teleop_mapping"] = _gen_export_teleop_mapping
-CODE_GEN_HANDLERS["generate_teleop_watchdog_script"] = _gen_generate_teleop_watchdog_script
-DATA_HANDLERS["check_teleop_hardware"] = _handle_check_teleop_hardware
-DATA_HANDLERS["validate_teleop_demo"] = _handle_validate_teleop_demo
-DATA_HANDLERS["summarize_teleop_session"] = _handle_summarize_teleop_session
 
 # ══════ From feat/addendum-phase7B-sdg-advanced ══════
 # _gen_scatter_on_surface moved to handlers/scene_authoring.py (Phase 6 wave 14).
@@ -4468,11 +4253,6 @@ DATA_HANDLERS["summarize_teleop_session"] = _handle_summarize_teleop_session
 
     # _handle_benchmark_sdg moved to handlers/sdg.py (Phase 7 wave 16).
 
-CODE_GEN_HANDLERS["scatter_on_surface"] = _gen_scatter_on_surface
-CODE_GEN_HANDLERS["configure_differential_sdg"] = _gen_configure_differential_sdg
-CODE_GEN_HANDLERS["configure_coco_yolo_writer"] = _gen_configure_coco_yolo_writer
-CODE_GEN_HANDLERS["enforce_class_balance"] = _gen_enforce_class_balance
-DATA_HANDLERS["benchmark_sdg"] = _handle_benchmark_sdg
 
 # ══════ From feat/addendum-enterprise-scale ══════
 # _gen_build_stage_index moved to handlers/diagnostics.py (Phase 6 wave 22).
@@ -4532,14 +4312,6 @@ def _neighbour_paths(selected: str) -> List[str]:
 
 # _gen_activate_area moved to handlers/scene_authoring.py (Phase 6 wave 23).
 
-CODE_GEN_HANDLERS["batch_delete_prims"] = _gen_batch_delete_prims
-CODE_GEN_HANDLERS["batch_set_attributes"] = _gen_batch_set_attributes
-CODE_GEN_HANDLERS["activate_area"] = _gen_activate_area
-DATA_HANDLERS["build_stage_index"] = _handle_build_stage_index
-DATA_HANDLERS["query_stage_index"] = _handle_query_stage_index
-DATA_HANDLERS["save_delta_snapshot"] = _handle_save_delta_snapshot
-DATA_HANDLERS["restore_delta_snapshot"] = _handle_restore_delta_snapshot
-DATA_HANDLERS["queue_write_locked_patch"] = _handle_queue_write_locked_patch
 
 # ══════ From feat/addendum-ros2-nav2 ══════
 def get_nav2_bridge_profile(profile: str) -> Optional[Dict[str, Any]]:
@@ -4553,10 +4325,6 @@ def get_nav2_bridge_profile(profile: str) -> Optional[Dict[str, Any]]:
 
 # _handle_check_tf_health moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-CODE_GEN_HANDLERS["setup_ros2_bridge"] = _gen_setup_ros2_bridge
-CODE_GEN_HANDLERS["export_nav2_map"] = _gen_export_nav2_map
-CODE_GEN_HANDLERS["replay_rosbag"] = _gen_replay_rosbag
-DATA_HANDLERS["check_tf_health"] = _handle_check_tf_health
 
 # ══════ From feat/addendum-dr-advanced ══════
 # _gen_configure_correlated_dr moved to handlers/sdg.py (Phase 6 wave 5).
@@ -4569,11 +4337,6 @@ DATA_HANDLERS["check_tf_health"] = _handle_check_tf_health
 
 # _gen_preview_dr moved to handlers/sdg.py (Phase 6 wave 5).
 
-CODE_GEN_HANDLERS["configure_correlated_dr"] = _gen_configure_correlated_dr
-CODE_GEN_HANDLERS["add_latency_randomization"] = _gen_add_latency_randomization
-CODE_GEN_HANDLERS["preview_dr"] = _gen_preview_dr
-DATA_HANDLERS["suggest_dr_ranges"] = _handle_suggest_dr_ranges
-DATA_HANDLERS["apply_dr_preset"] = _handle_apply_dr_preset
 
 # ══════ From feat/addendum-clearance-detection ══════
 # _gen_set_clearance_monitor moved to handlers/diagnostics.py (Phase 6 wave 23).
@@ -4582,9 +4345,6 @@ DATA_HANDLERS["apply_dr_preset"] = _handle_apply_dr_preset
 
 # _gen_check_path_clearance moved to handlers/diagnostics.py (Phase 6 wave 10).
 
-CODE_GEN_HANDLERS["set_clearance_monitor"] = _gen_set_clearance_monitor
-CODE_GEN_HANDLERS["visualize_clearance"] = _gen_visualize_clearance
-CODE_GEN_HANDLERS["check_path_clearance"] = _gen_check_path_clearance
 
 # ══════ From feat/new-physics-calibration ══════
 def _safe_robot_name(articulation_path: str) -> str:
@@ -4833,10 +4593,6 @@ if __name__ == "__main__":
 '''
 
 # _handle_train_actuator_net moved to handlers/training.py (Phase 7 wave 6).
-DATA_HANDLERS["calibrate_physics"] = _handle_calibrate_physics
-DATA_HANDLERS["quick_calibrate"] = _handle_quick_calibrate
-DATA_HANDLERS["validate_calibration"] = _handle_validate_calibration
-DATA_HANDLERS["train_actuator_net"] = _handle_train_actuator_net
 
 # ══════ From feat/addendum-humanoid-advanced ══════
 # _gen_setup_contact_sensors moved to handlers/physics.py (Phase 5 wave 5).
@@ -4851,12 +4607,6 @@ DATA_HANDLERS["train_actuator_net"] = _handle_train_actuator_net
 
 # _handle_diagnose_whole_body moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-CODE_GEN_HANDLERS["setup_contact_sensors"] = _gen_setup_contact_sensors
-CODE_GEN_HANDLERS["setup_whole_body_control"] = _gen_setup_whole_body_control
-CODE_GEN_HANDLERS["setup_loco_manipulation_training"] = _gen_setup_loco_manipulation_training
-CODE_GEN_HANDLERS["setup_rsi_from_demos"] = _gen_setup_rsi_from_demos
-CODE_GEN_HANDLERS["setup_multi_rate"] = _gen_setup_multi_rate
-DATA_HANDLERS["diagnose_whole_body"] = _handle_diagnose_whole_body
 
 # ══════ From feat/phase10-autonomous-workflows ══════
 def _wf_now_iso() -> str:
@@ -4925,14 +4675,6 @@ def _wf_advance_phase(wf: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 # _handle_proactive_check moved to handlers/diagnostics.py (Phase 7 wave 14).
 
-DATA_HANDLERS["start_workflow"] = _handle_start_workflow
-DATA_HANDLERS["edit_workflow_plan"] = _handle_edit_workflow_plan
-DATA_HANDLERS["approve_workflow_checkpoint"] = _handle_approve_workflow_checkpoint
-DATA_HANDLERS["cancel_workflow"] = _handle_cancel_workflow
-DATA_HANDLERS["get_workflow_status"] = _handle_get_workflow_status
-DATA_HANDLERS["list_workflows"] = _handle_list_workflows
-DATA_HANDLERS["execute_with_retry"] = _handle_execute_with_retry
-DATA_HANDLERS["proactive_check"] = _handle_proactive_check
 
 # ══════ From feat/addendum-collision-mesh-quality-v2 ══════
 # _gen_check_collision_mesh_code moved to handlers/physics.py (Phase 5 wave 5).
@@ -4943,9 +4685,6 @@ DATA_HANDLERS["proactive_check"] = _handle_proactive_check
 
 # _gen_visualize_collision_mesh moved to handlers/diagnostics.py (Phase 6 wave 10).
 
-DATA_HANDLERS["check_collision_mesh"] = _handle_check_collision_mesh
-CODE_GEN_HANDLERS["fix_collision_mesh"] = _gen_fix_collision_mesh
-CODE_GEN_HANDLERS["visualize_collision_mesh"] = _gen_visualize_collision_mesh
 
 # ══════ From feat/addendum-community-remote-v2 ══════
 def _detect_local_vram_gb() -> Optional[float]:
@@ -5077,22 +4816,12 @@ def _async_task_runner(task_id: str, task_type: str, params: Dict) -> None:
 
 # _gen_render_video moved to handlers/vision.py (Phase 6 wave 15).
 
-DATA_HANDLERS["filter_templates_by_hardware"] = _handle_filter_templates_by_hardware
-CODE_GEN_HANDLERS["export_template"] = _gen_export_template
-CODE_GEN_HANDLERS["import_template"] = _gen_import_template
-DATA_HANDLERS["check_vram_headroom"] = _handle_check_vram_headroom
-DATA_HANDLERS["dispatch_async_task"] = _handle_dispatch_async_task
-DATA_HANDLERS["query_async_task"] = _handle_query_async_task
-CODE_GEN_HANDLERS["visualize_forces"] = _gen_visualize_forces
-CODE_GEN_HANDLERS["render_video"] = _gen_render_video
 
 # ══════ From feat/new-quick-demo-builder-v2 ══════
 # _gen_quick_demo moved to handlers/vision.py (Phase 6 wave 15).
 
 # _gen_record_demo_video moved to handlers/vision.py (Phase 6 wave 15).
 
-CODE_GEN_HANDLERS["quick_demo"] = _gen_quick_demo
-CODE_GEN_HANDLERS["record_demo_video"] = _gen_record_demo_video
 
 # ══════ From feat/new-sim-to-real-gap-v2 ══════
 def _load_trajectory_for_gap(path: str) -> Optional[Dict]:
@@ -5133,10 +4862,6 @@ def _load_trajectory_for_gap(path: str) -> Optional[Dict]:
 
 # _gen_create_calibration_experiment moved to handlers/training.py (Phase 6 wave 24).
 
-DATA_HANDLERS["measure_sim_real_gap"] = _handle_measure_sim_real_gap
-DATA_HANDLERS["suggest_parameter_adjustment"] = _handle_suggest_parameter_adjustment
-DATA_HANDLERS["compare_sim_real_video"] = _handle_compare_sim_real_video
-CODE_GEN_HANDLERS["create_calibration_experiment"] = _gen_create_calibration_experiment
 
 # ══════ From feat/addendum-phase7G-groot-tooling-v2 ══════
 # _gen_extract_attention_maps moved to handlers/vision.py (Phase 6 wave 15).
@@ -5145,23 +4870,14 @@ CODE_GEN_HANDLERS["create_calibration_experiment"] = _gen_create_calibration_exp
 # _handle_suggest_data_mix moved to handlers/training.py (Phase 7 wave 6).
 # _handle_suggest_finetune_config moved to handlers/training.py (Phase 7 wave 6).
 # _handle_monitor_forgetting moved to handlers/training.py (Phase 7 wave 6).
-CODE_GEN_HANDLERS["extract_attention_maps"] = _gen_extract_attention_maps
-DATA_HANDLERS["detect_ood"] = _handle_detect_ood
-DATA_HANDLERS["suggest_data_mix"] = _handle_suggest_data_mix
-DATA_HANDLERS["suggest_finetune_config"] = _handle_suggest_finetune_config
-DATA_HANDLERS["monitor_forgetting"] = _handle_monitor_forgetting
-CODE_GEN_HANDLERS["export_policy"] = _gen_export_policy
-DATA_HANDLERS["analyze_checkpoint"] = _handle_analyze_checkpoint
 
 # ══════ From feat/addendum-phase5-pedagogy-uncertainty-v2 ══════
 # _gen_create_broken_scene moved to handlers/diagnostics.py (Phase 6 wave 23).
 
-CODE_GEN_HANDLERS["create_broken_scene"] = _gen_create_broken_scene
 
 # ══════ From feat/addendum-safety-compliance-v2 ══════
 # _gen_enable_deterministic_mode moved to handlers/diagnostics.py (Phase 6 wave 23).
 
-CODE_GEN_HANDLERS["enable_deterministic_mode"] = _gen_enable_deterministic_mode
 
 # _handle_pixel_to_world moved to handlers/vision.py (Phase 7 wave 11).
 
@@ -5174,21 +4890,6 @@ CODE_GEN_HANDLERS["enable_deterministic_mode"] = _gen_enable_deterministic_mode
 
 # _handle_get_joint_targets moved to handlers/physics.py (Phase 7 wave 2).
 
-DATA_HANDLERS["get_attribute"] = _handle_get_attribute
-DATA_HANDLERS["get_world_transform"] = _handle_get_world_transform
-DATA_HANDLERS["get_bounding_box"] = _handle_get_bounding_box
-DATA_HANDLERS["get_joint_limits"] = _handle_get_joint_limits
-DATA_HANDLERS["get_contact_report"] = _handle_get_contact_report
-DATA_HANDLERS["get_training_status"] = _handle_get_training_status
-DATA_HANDLERS["pixel_to_world"] = _handle_pixel_to_world
-DATA_HANDLERS["prim_exists"] = _handle_prim_exists
-DATA_HANDLERS["count_prims_under_path"] = _handle_count_prims_under_path
-DATA_HANDLERS["get_joint_targets"] = _handle_get_joint_targets
-CODE_GEN_HANDLERS["set_semantic_label"] = _gen_set_semantic_label
-CODE_GEN_HANDLERS["set_drive_gains"] = _gen_set_drive_gains
-CODE_GEN_HANDLERS["set_render_mode"] = _gen_set_render_mode
-CODE_GEN_HANDLERS["set_variant"] = _gen_set_variant
-CODE_GEN_HANDLERS["record_trajectory"] = _gen_record_trajectory
 
 # ══════ From feat/atomic-tier1-usd-core ══════
     # _handle_list_attributes moved to handlers/scene_authoring.py (Phase 7 wave 3).
@@ -5210,16 +4911,6 @@ CODE_GEN_HANDLERS["record_trajectory"] = _gen_record_trajectory
 
 # _handle_get_active_state moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
 
-DATA_HANDLERS["list_attributes"] = _handle_list_attributes
-DATA_HANDLERS["list_relationships"] = _handle_list_relationships
-DATA_HANDLERS["list_applied_schemas"] = _handle_list_applied_schemas
-DATA_HANDLERS["get_prim_metadata"] = _handle_get_prim_metadata
-DATA_HANDLERS["get_prim_type"] = _handle_get_prim_type
-DATA_HANDLERS["find_prims_by_schema"] = _handle_find_prims_by_schema
-DATA_HANDLERS["find_prims_by_name"] = _handle_find_prims_by_name
-DATA_HANDLERS["get_kind"] = _handle_get_kind
-DATA_HANDLERS["get_active_state"] = _handle_get_active_state
-CODE_GEN_HANDLERS["set_prim_metadata"] = _gen_set_prim_metadata
 
 # ══════ From feat/atomic-tier2-physics ══════
 # _handle_get_linear_velocity moved to handlers/physics.py (Phase 7 wave 2).
@@ -5236,16 +4927,6 @@ CODE_GEN_HANDLERS["set_prim_metadata"] = _gen_set_prim_metadata
 # _gen_apply_force moved to handlers/physics.py (Phase 5 wave 3).
 
 # _handle_get_kinematic_state moved to handlers/physics.py (Phase 7 wave 2).
-DATA_HANDLERS["get_linear_velocity"] = _handle_get_linear_velocity
-DATA_HANDLERS["get_angular_velocity"] = _handle_get_angular_velocity
-DATA_HANDLERS["get_mass"] = _handle_get_mass
-DATA_HANDLERS["get_inertia"] = _handle_get_inertia
-DATA_HANDLERS["get_physics_scene_config"] = _handle_get_physics_scene_config
-DATA_HANDLERS["list_contacts"] = _handle_list_contacts
-DATA_HANDLERS["get_kinematic_state"] = _handle_get_kinematic_state
-CODE_GEN_HANDLERS["set_linear_velocity"] = _gen_set_linear_velocity
-CODE_GEN_HANDLERS["set_physics_scene_config"] = _gen_set_physics_scene_config
-CODE_GEN_HANDLERS["apply_force"] = _gen_apply_force
 
 # ══════ From feat/atomic-tier3-articulation ══════
 # _handle_get_joint_positions moved to handlers/physics.py (Phase 7 wave 2).
@@ -5260,15 +4941,6 @@ CODE_GEN_HANDLERS["apply_force"] = _gen_apply_force
 # _handle_get_center_of_mass moved to handlers/physics.py (Phase 7 wave 2).
 # _handle_get_gripper_state moved to handlers/robot.py (Phase 7 wave 7).
 
-DATA_HANDLERS["get_joint_positions"] = _handle_get_joint_positions
-DATA_HANDLERS["get_joint_velocities"] = _handle_get_joint_velocities
-DATA_HANDLERS["get_joint_torques"] = _handle_get_joint_torques
-DATA_HANDLERS["get_drive_gains"] = _handle_get_drive_gains
-DATA_HANDLERS["get_articulation_mass"] = _handle_get_articulation_mass
-DATA_HANDLERS["get_center_of_mass"] = _handle_get_center_of_mass
-DATA_HANDLERS["get_gripper_state"] = _handle_get_gripper_state
-CODE_GEN_HANDLERS["set_joint_limits"] = _gen_set_joint_limits
-CODE_GEN_HANDLERS["set_joint_velocity_limit"] = _gen_set_joint_velocity_limit
 
 # ══════ From feat/atomic-tier4-geometry ══════
 # _handle_raycast moved to handlers/sensors.py (Phase 7 wave 9).
@@ -5285,19 +4957,11 @@ CODE_GEN_HANDLERS["set_joint_velocity_limit"] = _gen_set_joint_velocity_limit
 
 # _gen_compute_convex_hull moved to handlers/physics.py (Phase 6 wave 22).
 
-DATA_HANDLERS["raycast"] = _handle_raycast
-DATA_HANDLERS["overlap_sphere"] = _handle_overlap_sphere
-DATA_HANDLERS["overlap_box"] = _handle_overlap_box
-DATA_HANDLERS["sweep_sphere"] = _handle_sweep_sphere
-DATA_HANDLERS["compute_volume"] = _handle_compute_volume
-DATA_HANDLERS["compute_surface_area"] = _handle_compute_surface_area
-CODE_GEN_HANDLERS["compute_convex_hull"] = _gen_compute_convex_hull
 
 
 # _handle_compute_stack_placement moved to handlers/scene_authoring.py (Phase 7 wave 15).
 
 
-DATA_HANDLERS["compute_stack_placement"] = _handle_compute_stack_placement
 
 # ══════ From feat/atomic-tier5-omnigraph ══════
 # _gen_add_node moved to handlers/scene_authoring.py (Phase 6 wave 18).
@@ -5308,12 +4972,6 @@ DATA_HANDLERS["compute_stack_placement"] = _handle_compute_stack_placement
 # _handle_list_graphs moved to handlers/scene_authoring.py (Phase 7 wave 15).
 # _handle_inspect_graph moved to handlers/scene_authoring.py (Phase 7 wave 15).
 
-CODE_GEN_HANDLERS["add_node"] = _gen_add_node
-CODE_GEN_HANDLERS["connect_nodes"] = _gen_connect_nodes
-CODE_GEN_HANDLERS["set_graph_variable"] = _gen_set_graph_variable
-CODE_GEN_HANDLERS["delete_node"] = _gen_delete_node
-DATA_HANDLERS["list_graphs"] = _handle_list_graphs
-DATA_HANDLERS["inspect_graph"] = _handle_inspect_graph
 
 # ══════ From feat/atomic-tier6-lighting ══════
 # _handle_list_lights moved to handlers/vision.py (Phase 7 wave 11).
@@ -5328,12 +4986,6 @@ DATA_HANDLERS["inspect_graph"] = _handle_inspect_graph
 # _gen_add_default_light moved to handlers/rendering.py (Phase 6 wave 17).
 
 
-CODE_GEN_HANDLERS["set_light_intensity"] = _gen_set_light_intensity
-CODE_GEN_HANDLERS["set_light_color"] = _gen_set_light_color
-CODE_GEN_HANDLERS["create_hdri_skydome"] = _gen_create_hdri_skydome
-CODE_GEN_HANDLERS["add_default_light"] = _gen_add_default_light
-DATA_HANDLERS["list_lights"] = _handle_list_lights
-DATA_HANDLERS["get_light_properties"] = _handle_get_light_properties
 
 # ══════ From feat/atomic-tier7-camera ══════
 # _parse_last_json_line moved to handlers/vision.py (Phase 7 wave 11).
@@ -5346,11 +4998,6 @@ DATA_HANDLERS["get_light_properties"] = _handle_get_light_properties
 
 # _gen_set_camera_look_at moved to handlers/sensors.py (Phase 6 wave 4).
 
-DATA_HANDLERS["list_cameras"] = _handle_list_cameras
-DATA_HANDLERS["get_camera_params"] = _handle_get_camera_params
-DATA_HANDLERS["capture_camera_image"] = _handle_capture_camera_image
-CODE_GEN_HANDLERS["set_camera_params"] = _gen_set_camera_params
-CODE_GEN_HANDLERS["set_camera_look_at"] = _gen_set_camera_look_at
 
 # ══════ From feat/atomic-tier8-render ══════
 # _handle_get_render_config moved to handlers/vision.py (Phase 7 wave 11).
@@ -5363,11 +5010,6 @@ CODE_GEN_HANDLERS["set_camera_look_at"] = _gen_set_camera_look_at
 
 # _gen_set_environment_background moved to handlers/rendering.py (Phase 6 wave 17).
 
-DATA_HANDLERS["get_render_config"] = _handle_get_render_config
-CODE_GEN_HANDLERS["set_render_config"] = _gen_set_render_config
-CODE_GEN_HANDLERS["set_render_resolution"] = _gen_set_render_resolution
-CODE_GEN_HANDLERS["enable_post_process"] = _gen_enable_post_process
-CODE_GEN_HANDLERS["set_environment_background"] = _gen_set_environment_background
 
 # ══════ From feat/atomic-tier9-layers ══════
 # _handle_list_layers moved to handlers/scene_authoring.py (Phase 7 wave 4).
@@ -5376,12 +5018,6 @@ CODE_GEN_HANDLERS["set_environment_background"] = _gen_set_environment_backgroun
 # _handle_list_variant_sets moved to handlers/scene_authoring.py (Phase 7 wave 4).
 # _handle_list_variants moved to handlers/scene_authoring.py (Phase 7 wave 4).
 # _gen_flatten_layers moved to handlers/scene_authoring.py (Phase 6 wave 16).
-DATA_HANDLERS["list_layers"] = _handle_list_layers
-DATA_HANDLERS["list_variant_sets"] = _handle_list_variant_sets
-DATA_HANDLERS["list_variants"] = _handle_list_variants
-CODE_GEN_HANDLERS["add_sublayer"] = _gen_add_sublayer
-CODE_GEN_HANDLERS["set_edit_target"] = _gen_set_edit_target
-CODE_GEN_HANDLERS["flatten_layers"] = _gen_flatten_layers
 
 # ══════ From feat/atomic-tier10-animation ══════
 # _handle_get_timeline_state moved to handlers/vision.py (Phase 7 wave 11).
@@ -5394,11 +5030,6 @@ CODE_GEN_HANDLERS["flatten_layers"] = _gen_flatten_layers
 
 # _gen_play_animation moved to handlers/animation.py (Phase 6 wave 19).
 
-DATA_HANDLERS["get_timeline_state"] = _handle_get_timeline_state
-DATA_HANDLERS["list_keyframes"] = _handle_list_keyframes
-CODE_GEN_HANDLERS["set_timeline_range"] = _gen_set_timeline_range
-CODE_GEN_HANDLERS["set_keyframe"] = _gen_set_keyframe
-CODE_GEN_HANDLERS["play_animation"] = _gen_play_animation
 
 # ══════ From feat/atomic-tier11-sdg ══════
 # _handle_list_semantic_classes moved to handlers/scene_authoring.py (Phase 7 wave 4).
@@ -5411,11 +5042,6 @@ CODE_GEN_HANDLERS["play_animation"] = _gen_play_animation
 
 # _handle_validate_semantic_labels moved to handlers/diagnostics.py (Phase 7 wave 14).
 
-DATA_HANDLERS["list_semantic_classes"] = _handle_list_semantic_classes
-DATA_HANDLERS["get_semantic_label"] = _handle_get_semantic_label
-DATA_HANDLERS["validate_semantic_labels"] = _handle_validate_semantic_labels
-CODE_GEN_HANDLERS["remove_semantic_label"] = _gen_remove_semantic_label
-CODE_GEN_HANDLERS["assign_class_to_children"] = _gen_assign_class_to_children
 
 # ══════ From feat/atomic-tier12-asset-mgmt ══════
 # _handle_list_references moved to handlers/scene_authoring.py (Phase 7 wave 4).
@@ -5424,11 +5050,6 @@ CODE_GEN_HANDLERS["assign_class_to_children"] = _gen_assign_class_to_children
 # _gen_load_payload moved to handlers/scene_authoring.py (Phase 6 wave 16).
     # _handle_get_asset_info moved to handlers/scene_authoring.py (Phase 7 wave 3).
 
-DATA_HANDLERS["list_references"] = _handle_list_references
-DATA_HANDLERS["list_payloads"] = _handle_list_payloads
-DATA_HANDLERS["get_asset_info"] = _handle_get_asset_info
-CODE_GEN_HANDLERS["add_usd_reference"] = _gen_add_usd_reference
-CODE_GEN_HANDLERS["load_payload"] = _gen_load_payload
 
 # ══════ From feat/atomic-tier13-rl-runtime ══════
 def _resolve_run_id(run_id: Optional[str]) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
@@ -5479,11 +5100,6 @@ def _validate_env_id(env_id: Any, num_envs: int) -> Optional[str]:
 # _handle_pause_training moved to handlers/training.py (Phase 7 wave 6).
 # _handle_checkpoint_training moved to handlers/training.py (Phase 7 wave 5).
 
-DATA_HANDLERS["get_env_observations"] = _handle_get_env_observations
-DATA_HANDLERS["get_env_rewards"] = _handle_get_env_rewards
-DATA_HANDLERS["get_env_termination_state"] = _handle_get_env_termination_state
-DATA_HANDLERS["pause_training"] = _handle_pause_training
-DATA_HANDLERS["checkpoint_training"] = _handle_checkpoint_training
 
 def _build_select_by_criteria_code(criteria: Dict[str, Any]) -> str:
     """Generate the Kit-side query code for select_by_criteria.
@@ -5552,7 +5168,6 @@ print(json.dumps({{"matches": _matches, "count": len(_matches), "criteria": _cri
 """
 
 # _handle_select_by_criteria moved to handlers/scene_authoring.py (Phase 7 wave 4).
-DATA_HANDLERS["select_by_criteria"] = _handle_select_by_criteria
 
 # ══════ From feat/atomic-tier15-18-misc ══════
 # _handle_get_viewport_camera moved to handlers/vision.py (Phase 7 wave 11).
@@ -5576,38 +5191,8 @@ DATA_HANDLERS["select_by_criteria"] = _handle_select_by_criteria
 
 # _gen_set_audio_property moved to handlers/animation.py (Phase 6 wave 19).
 
-CODE_GEN_HANDLERS["highlight_prim"] = _gen_highlight_prim
-CODE_GEN_HANDLERS["focus_viewport_on"] = _gen_focus_viewport_on
-DATA_HANDLERS["get_viewport_camera"] = _handle_get_viewport_camera
-DATA_HANDLERS["get_selected_prims"] = _handle_get_selected_prims
-CODE_GEN_HANDLERS["save_stage"] = _gen_save_stage
-CODE_GEN_HANDLERS["open_stage"] = _gen_open_stage
-CODE_GEN_HANDLERS["export_stage"] = _gen_export_stage
-DATA_HANDLERS["list_opened_stages"] = _handle_list_opened_stages
-CODE_GEN_HANDLERS["enable_extension"] = _gen_enable_extension
-DATA_HANDLERS["list_extensions"] = _handle_list_extensions
-CODE_GEN_HANDLERS["create_audio_prim"] = _gen_create_audio_prim
-CODE_GEN_HANDLERS["set_audio_property"] = _gen_set_audio_property
 
 # ── Recovered handler registrations (missing from original bundle extraction) ─
-CODE_GEN_HANDLERS["add_domain_randomizer"] = _gen_add_domain_randomizer
-CODE_GEN_HANDLERS["apply_physics_material"] = _gen_apply_physics_material
-DATA_HANDLERS["lookup_material"] = _handle_lookup_material
-DATA_HANDLERS["preview_sdg"] = _handle_preview_sdg
-CODE_GEN_HANDLERS["create_sdg_pipeline"] = _gen_create_sdg_pipeline
-CODE_GEN_HANDLERS["bulk_set_attribute"] = _gen_bulk_set_attribute
-CODE_GEN_HANDLERS["group_prims"] = _gen_group_prims
-CODE_GEN_HANDLERS["duplicate_prims"] = _gen_duplicate_prims
-CODE_GEN_HANDLERS["bulk_apply_schema"] = _gen_bulk_apply_schema
-CODE_GEN_HANDLERS["clone_envs"] = _gen_clone_envs
-CODE_GEN_HANDLERS["configure_camera"] = _gen_configure_camera
-CODE_GEN_HANDLERS["configure_zmq_stream"] = _gen_configure_zmq_stream
-CODE_GEN_HANDLERS["create_graph"] = _gen_create_graph
-CODE_GEN_HANDLERS["debug_draw"] = _gen_debug_draw
-CODE_GEN_HANDLERS["debug_graph"] = _gen_debug_graph
-CODE_GEN_HANDLERS["explain_graph"] = _gen_explain_graph
-CODE_GEN_HANDLERS["export_dataset"] = _gen_export_dataset
-CODE_GEN_HANDLERS["generate_occupancy_map"] = _gen_generate_occupancy_map
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -5634,13 +5219,11 @@ CODE_GEN_HANDLERS["generate_occupancy_map"] = _gen_generate_occupancy_map
 # _gen_pick_place_builtin moved to handlers/pick_place.py (Phase 6 wave 25).
 
 
-CODE_GEN_HANDLERS["setup_pick_place_controller"] = _gen_setup_pick_place_controller
 
 
 # _gen_setup_pick_place_ros2_bridge moved to handlers/pick_place.py (Phase 6 wave 25).
 
 
-CODE_GEN_HANDLERS["setup_pick_place_ros2_bridge"] = _gen_setup_pick_place_ros2_bridge
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -5653,19 +5236,16 @@ CODE_GEN_HANDLERS["setup_pick_place_ros2_bridge"] = _gen_setup_pick_place_ros2_b
 # _gen_add_proximity_sensor moved to handlers/sensors.py (Phase 6 wave 4).
 
 
-CODE_GEN_HANDLERS["add_proximity_sensor"] = _gen_add_proximity_sensor
 
 
 # _gen_teach_robot_pose moved to handlers/robot.py (Phase 6 wave 20).
 
 
-CODE_GEN_HANDLERS["teach_robot_pose"] = _gen_teach_robot_pose
 
 
 # _gen_load_robot_pose moved to handlers/robot.py (Phase 6 wave 20).
 
 
-CODE_GEN_HANDLERS["load_robot_pose"] = _gen_load_robot_pose
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -6066,7 +5646,6 @@ def _probe_isaac_lab():
     # _handle_list_available_controllers moved to handlers/robot.py (Phase 7 wave 16).
 
 
-DATA_HANDLERS["list_available_controllers"] = _handle_list_available_controllers
 
 
 def _resolve_auto_target_source(args: dict) -> tuple[str, str]:
@@ -6109,33 +5688,10 @@ def _resolve_auto_target_source(args: dict) -> tuple[str, str]:
     return "native", "no better option; falling back to native"
 
 
-# === MULTIMODAL HANDLERS (multimodal-foundation session) ===
-# Per docs/specs/2026-05-09-multi-session-coordination.md §3 ("Shared files —
-# sectional ownership"). All handler bodies live in multimodal_handlers.py to
-# keep merge surface in this shared file at one import + one registration call.
-from .multimodal_handlers import register_multimodal_handlers
-register_multimodal_handlers(DATA_HANDLERS)
-# === END MULTIMODAL HANDLERS ===
 
 
-# === DIAGNOSE FEASIBILITY (controller-logic session) ===
-# Pre-flight constraint validator per docs/specs/2026-05-09-diagnose-scene-
-# feasibility.md (Master Plan Phase 1). Handler body lives in
-# service/isaac_assist_service/diagnose/tool.py to keep this shared file at
-# one import + one registration call.
-from ...diagnose.tool import register_diagnose_handlers
-register_diagnose_handlers(DATA_HANDLERS)
-# === END DIAGNOSE FEASIBILITY ===
 
 
-# === INDUSTRIAL BRIDGES (controller-logic session) ===
-# Phase 6 M2: modbus_tcp_bridge_attach + diagnose_modbus_bridge + detach.
-# Per docs/specs/2026-05-09-industrial-expansion-spec.md Phase 8.
-# Subprocess-supervised pymodbus client; reads holding registers, pushes
-# USD attr updates. Future: opcua (M3), mqtt-sparkplug (M5), openplc (M5).
-from .bridge_tools import register_bridge_handlers
-register_bridge_handlers(DATA_HANDLERS)
-# === END INDUSTRIAL BRIDGES ===
 
 
 
@@ -6149,9 +5705,6 @@ register_bridge_handlers(DATA_HANDLERS)
 
 
 # Register the new handlers
-DATA_HANDLERS["setup_ros2_control_compat"] = _handle_setup_ros2_control_compat
-DATA_HANDLERS["emit_ros2_control_yaml"] = _handle_emit_ros2_control_yaml
-DATA_HANDLERS["precheck_ros2_environment"] = _handle_precheck_ros2_environment
 
 
 # === Phase 6 M4 — cuMotion-as-MoveIt2 ===
@@ -6159,5 +5712,4 @@ DATA_HANDLERS["precheck_ros2_environment"] = _handle_precheck_ros2_environment
 # _handle_setup_isaac_ros_cumotion_moveit moved to handlers/robot.py (Phase 7 wave 7).
 
 
-DATA_HANDLERS["setup_isaac_ros_cumotion_moveit"] = _handle_setup_isaac_ros_cumotion_moveit
 

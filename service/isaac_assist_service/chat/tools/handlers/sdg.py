@@ -842,8 +842,24 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 6 wave 5 — dispatch lines in tool_executor.py still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Data handlers (2)
+    data["benchmark_sdg"] = _handle_benchmark_sdg
+    data["preview_sdg"] = _handle_preview_sdg
+
+    # Code-gen handlers (10)
+    codegen["add_domain_randomizer"] = _gen_add_domain_randomizer
+    codegen["add_latency_randomization"] = _gen_add_latency_randomization
+    codegen["configure_coco_yolo_writer"] = _gen_configure_coco_yolo_writer
+    codegen["configure_correlated_dr"] = _gen_configure_correlated_dr
+    codegen["configure_differential_sdg"] = _gen_configure_differential_sdg
+    codegen["configure_sdg"] = _gen_configure_sdg
+    codegen["create_sdg_pipeline"] = _gen_create_sdg_pipeline
+    codegen["enforce_class_balance"] = _gen_enforce_class_balance
+    codegen["export_dataset"] = _gen_export_dataset
+    codegen["preview_dr"] = _gen_preview_dr
+

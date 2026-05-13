@@ -4416,19 +4416,89 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 3 wave 1 — register the three handlers moved out of tool_executor.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
 
-    Dispatch lines in `tool_executor.py:CODE_GEN_HANDLERS` still list these
-    by name (resolving via the import that pulls them back into
-    `tool_executor`'s namespace), so calling this register() today would
-    silently double-register if it ran. Phase 9 swaps the dispatch pattern
-    so this register() becomes the authoritative entry point and the
-    inline `CODE_GEN_HANDLERS["create_prim"] = _gen_create_prim`
-    assignments in `tool_executor.py` go away.
-
-    Until Phase 9: this register() does NOT populate the dispatch (the
-    inline assignments do that). The function is here as a contract
-    placeholder; Phase 9 fills in the body.
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    # Intentional no-op until Phase 9 swaps dispatch.
-    return None
+    # Data handlers (38)
+    data["build_stage_index"] = _handle_build_stage_index
+    data["compute_stack_placement"] = _handle_compute_stack_placement
+    data["compute_surface_area"] = _handle_compute_surface_area
+    data["compute_volume"] = _handle_compute_volume
+    data["count_prims_under_path"] = _handle_count_prims_under_path
+    data["find_heavy_prims"] = _handle_find_heavy_prims
+    data["find_prims_by_name"] = _handle_find_prims_by_name
+    data["find_prims_by_schema"] = _handle_find_prims_by_schema
+    data["get_asset_info"] = _handle_get_asset_info
+    data["get_attribute"] = _handle_get_attribute
+    data["get_bounding_box"] = _handle_get_bounding_box
+    data["get_kind"] = _handle_get_kind
+    data["get_prim_metadata"] = _handle_get_prim_metadata
+    data["get_prim_type"] = _handle_get_prim_type
+    data["get_selected_prims"] = _handle_get_selected_prims
+    data["get_semantic_label"] = _handle_get_semantic_label
+    data["get_world_transform"] = _handle_get_world_transform
+    data["inspect_graph"] = _handle_inspect_graph
+    data["list_all_prims"] = _handle_list_all_prims
+    data["list_applied_schemas"] = _handle_list_applied_schemas
+    data["list_attributes"] = _handle_list_attributes
+    data["list_graphs"] = _handle_list_graphs
+    data["list_layers"] = _handle_list_layers
+    data["list_opened_stages"] = _handle_list_opened_stages
+    data["list_payloads"] = _handle_list_payloads
+    data["list_references"] = _handle_list_references
+    data["list_relationships"] = _handle_list_relationships
+    data["list_semantic_classes"] = _handle_list_semantic_classes
+    data["list_variant_sets"] = _handle_list_variant_sets
+    data["list_variants"] = _handle_list_variants
+    data["prim_exists"] = _handle_prim_exists
+    data["query_stage_index"] = _handle_query_stage_index
+    data["restore_delta_snapshot"] = _handle_restore_delta_snapshot
+    data["run_stage_analysis"] = _handle_run_stage_analysis
+    data["save_delta_snapshot"] = _handle_save_delta_snapshot
+    data["scene_diff"] = _handle_scene_diff
+    data["scene_summary"] = _handle_scene_summary
+    data["select_by_criteria"] = _handle_select_by_criteria
+
+    # Code-gen handlers (39)
+    codegen["activate_area"] = _gen_activate_area
+    codegen["add_node"] = _gen_add_node
+    codegen["add_reference"] = _gen_add_reference
+    codegen["add_sublayer"] = _gen_add_sublayer
+    codegen["add_usd_reference"] = _gen_add_usd_reference
+    codegen["apply_api_schema"] = _gen_apply_api_schema
+    codegen["assign_class_to_children"] = _gen_assign_class_to_children
+    codegen["assign_material"] = _gen_assign_material
+    codegen["batch_apply_operation"] = _gen_batch_apply_operation
+    codegen["batch_delete_prims"] = _gen_batch_delete_prims
+    codegen["batch_set_attributes"] = _gen_batch_set_attributes
+    codegen["bulk_apply_schema"] = _gen_bulk_apply_schema
+    codegen["bulk_set_attribute"] = _gen_bulk_set_attribute
+    codegen["clone_prim"] = _gen_clone_prim
+    codegen["connect_nodes"] = _gen_connect_nodes
+    codegen["create_graph"] = _gen_create_graph
+    codegen["create_material"] = _gen_create_material
+    codegen["create_omnigraph"] = _gen_create_omnigraph
+    codegen["create_prim"] = _gen_create_prim
+    codegen["delete_node"] = _gen_delete_node
+    codegen["delete_prim"] = _gen_delete_prim
+    codegen["duplicate_prims"] = _gen_duplicate_prims
+    codegen["explain_graph"] = _gen_explain_graph
+    codegen["export_stage"] = _gen_export_stage
+    codegen["flatten_layers"] = _gen_flatten_layers
+    codegen["group_prims"] = _gen_group_prims
+    codegen["load_payload"] = _gen_load_payload
+    codegen["merge_meshes"] = _gen_merge_meshes
+    codegen["open_stage"] = _gen_open_stage
+    codegen["optimize_scene"] = _gen_optimize_scene
+    codegen["remove_semantic_label"] = _gen_remove_semantic_label
+    codegen["save_stage"] = _gen_save_stage
+    codegen["scatter_on_surface"] = _gen_scatter_on_surface
+    codegen["set_attribute"] = _gen_set_attribute
+    codegen["set_edit_target"] = _gen_set_edit_target
+    codegen["set_graph_variable"] = _gen_set_graph_variable
+    codegen["set_prim_metadata"] = _gen_set_prim_metadata
+    codegen["set_variant"] = _gen_set_variant
+    codegen["teleport_prim"] = _gen_teleport_prim
+
