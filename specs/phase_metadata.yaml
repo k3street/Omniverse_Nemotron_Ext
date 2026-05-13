@@ -747,7 +747,7 @@
 '83':
   title: 'Governance: every overnight patch runs through policy_engine'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: governance overnight
   gate: pytest — policy_engine veto fires on synthetic high-risk patch in dry-run path
   files:
