@@ -175,8 +175,9 @@
   - tests/test_role_based_templates.py
   loc: 250
   effort_min: 90
-  blocked_by:
+  related_to:
   - '19'
+  related_to_reason: 'Phase 19 hosts the end-to-end Kit RPC application path that consumes role-ranked templates; Phase 20''s retriever has no code-import dependency on Phase 19.'
 '21':
   title: 'Role library: scene-template index by role'
   agent_type: sonnet-mechanical
@@ -198,8 +199,9 @@
   - tests/test_sync_from_stage.py
   loc: 400
   effort_min: 180
-  blocked_by:
+  related_to:
   - '19'
+  related_to_reason: 'Phase 22 pairs with Phase 19 (round-trip) but the SPEC/PARSER layer parses synthetic prim dicts and has no code-import dependency on Phase 19''s code generator.'
   needs_runtime: Kit RPC /list_prims
 '23':
   title: Snap engine hardening

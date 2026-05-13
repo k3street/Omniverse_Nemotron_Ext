@@ -921,7 +921,15 @@ def _gen_setup_contact_sensors(args: Dict) -> str:
 
 
 def _gen_check_collision_mesh_code(prim_path: str) -> str:
-    """Build the read-only Kit/USD/trimesh analysis script for check_collision_mesh."""
+    """Build the read-only Kit/USD/trimesh analysis script for
+    ``check_collision_mesh``.
+
+    NOT a dispatch target — this is an internal helper used by
+    ``diagnostics._handle_check_collision_mesh``. The dispatch entry
+    point ``codegen["check_collision_mesh"]`` is wired in
+    ``diagnostics.register`` to ``_gen_fix_collision_mesh``; this
+    function is invoked only from inside the read-only data handler.
+    """
     # Phase 8 wave 6 — _PHYSX_HULL_MAX_VERTS migrated to module body.
 
     safe_path = prim_path.replace("'", "").replace('"', "")
