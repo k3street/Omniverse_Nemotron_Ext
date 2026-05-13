@@ -249,12 +249,41 @@ def _apply_result_cap(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
     }
     return out
 
+def _validate_args_pydantic(tool_name: str, arguments: Dict[str, Any]) -> Optional[str]:
+    """Phase 10 (2026-05-13) — validate args via the generated Pydantic
+    model from handlers/_models.py:MODEL_REGISTRY. Returns None on
+    success, or a structured error message string on validation failure.
+
+    The handler still receives the original `arguments` dict — this
+    function only signals invalid input before dispatch. Permissive
+    models (extra='allow', Optional fields) mean validation rarely
+    rejects; it catches the egregious cases (wrong type, missing
+    required field).
+    """
+    try:
+        from .handlers._models import MODEL_REGISTRY
+    except Exception:
+        return None  # Models not available — skip validation gracefully
+    model_cls = MODEL_REGISTRY.get(tool_name)
+    if model_cls is None:
+        return None  # Unknown tool — fall through to dispatch's own error path
+    try:
+        model_cls.model_validate(arguments)
+        return None
+    except Exception as e:
+        return f"validation failed: {type(e).__name__}: {str(e)[:300]}"
+
+
 async def execute_tool_call(
     tool_name: str,
     arguments: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
     Execute a single tool call and return the result dict.
+
+    Phase 10 (2026-05-13): args are validated against the generated
+    Pydantic model in handlers/_models.py:MODEL_REGISTRY before dispatch.
+    Validation failures return early with `type=error, validation_blocked=True`.
 
     Returns:
         {"type": "code_patch", "code": ..., "description": ...}  for code-gen tools
@@ -265,6 +294,16 @@ async def execute_tool_call(
     which truncates oversized result payloads to bound LLM token cost.
     """
     logger.info(f"[ToolExecutor] Executing tool: {tool_name}({json.dumps(arguments)[:200]})")
+
+    # Phase 10: input validation via Pydantic model.
+    validation_err = _validate_args_pydantic(tool_name, arguments)
+    if validation_err is not None:
+        logger.warning(f"[ToolExecutor] {tool_name}: {validation_err}")
+        return _apply_result_cap(tool_name, {
+            "type": "error",
+            "error": validation_err,
+            "validation_blocked": True,
+        })
 
     async def _inner() -> Dict[str, Any]:
         # 1. Data handlers — return result directly
