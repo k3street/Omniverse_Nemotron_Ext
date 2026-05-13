@@ -14,6 +14,224 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
+# ---------------------------------------------------------------------------
+# Theme-local constants (Phase 8 wave 10, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.diagnostics.
+
+_BROKEN_SCENE_FAULTS = {
+    "missing_collision": {
+        "what_breaks": "Ground plane has no CollisionAPI — robot falls through floor",
+        "learning_goal": "Physics basics — CollisionAPI must be applied for objects to interact",
+    },
+    "zero_mass": {
+        "what_breaks": "Robot link has mass=0 — articulation behaves erratically",
+        "learning_goal": "Inertia understanding — every dynamic body needs positive mass",
+    },
+    "wrong_scale": {
+        "what_breaks": "Object imported at 100x scale (cm vs m mismatch)",
+        "learning_goal": "USD units — metersPerUnit must match between asset and stage",
+    },
+    "inverted_joint": {
+        "what_breaks": "One joint axis flipped — robot moves opposite direction",
+        "learning_goal": "URDF import debugging — axis conventions can flip",
+    },
+    "no_physics_scene": {
+        "what_breaks": "Missing PhysicsScene prim — no physics simulation runs",
+        "learning_goal": "Scene setup — every physics-enabled stage needs a PhysicsScene",
+    },
+    "inf_joint_limits": {
+        "what_breaks": "Joint limits set to ±inf — arm can move through itself or environment",
+        "learning_goal": "URDF best practices — always set finite joint limits",
+    },
+}
+
+_PHYSX_ERROR_PATTERNS = [
+    {
+        "pattern": r"negative mass",
+        "category": "mass_configuration",
+        "fix": "Set the mass to a positive value via UsdPhysics.MassAPI. Check that density and volume are both positive.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"joint limit exceeded",
+        "category": "joint_limits",
+        "fix": "Increase the joint limit range or add damping to prevent overshoot. Check RevoluteJoint.LowerLimitAttr/UpperLimitAttr.",
+        "severity": "warning",
+        "prim_regex": r"joint[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"collision mesh invalid|degenerate triangle|invalid mesh",
+        "category": "collision_mesh",
+        "fix": "Regenerate the collision mesh with convex decomposition. Remove degenerate (zero-area) triangles from the source mesh.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"solver diverge|solver divergence|simulation diverge",
+        "category": "solver_divergence",
+        "fix": "Lower the physics timestep (e.g. 1/120 instead of 1/60), increase solver iterations (positionIterations=16, velocityIterations=4), or reduce extreme mass ratios.",
+        "severity": "critical",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"invalid inertia|zero inertia|non-positive inertia",
+        "category": "inertia_tensor",
+        "fix": "Set a valid diagonal inertia tensor via MassAPI.DiagonalInertiaAttr. All components must be > 0.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"missing collision|no collision api|CollisionAPI not applied",
+        "category": "missing_collision",
+        "fix": "Apply UsdPhysics.CollisionAPI to the mesh prim: UsdPhysics.CollisionAPI.Apply(prim).",
+        "severity": "error",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"PhysicsScene.*not found|no physics scene",
+        "category": "missing_physics_scene",
+        "fix": "Create a PhysicsScene prim: stage.DefinePrim('/World/PhysicsScene', 'PhysicsScene'). Apply UsdPhysics.Scene API.",
+        "severity": "critical",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"mass ratio|extreme mass ratio",
+        "category": "mass_ratio",
+        "fix": "Reduce the mass ratio between contacting bodies to below 100:1. Consider using articulations instead of free bodies for robot links.",
+        "severity": "warning",
+        "prim_regex": r"(?:between|bodies)[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"articulation.*loop|closed loop|kinematic loop",
+        "category": "articulation_loop",
+        "fix": "PhysX does not support closed-loop articulations. Break the loop by removing one joint or using a D6 joint with a spring constraint instead.",
+        "severity": "critical",
+        "prim_regex": r"articulation[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"self.intersection|self.penetration|initial overlap|interpenetration",
+        "category": "initial_overlap",
+        "fix": "Move the overlapping bodies apart before starting simulation. Use debug draw to visualize collision shapes.",
+        "severity": "warning",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"too many contacts|contact buffer overflow",
+        "category": "contact_overflow",
+        "fix": "Increase PhysxScene.maxNbContactDataBlocks or simplify collision geometry. Consider using collision filtering.",
+        "severity": "error",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"gpu.*memory|cuda.*out of memory|gpu.*buffer",
+        "category": "gpu_memory",
+        "fix": "Reduce the number of collision pairs, lower particle counts, or use simpler collision shapes (convex hull instead of triangle mesh).",
+        "severity": "critical",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"fixed base.*missing|no fixed base|floating base",
+        "category": "fixed_base",
+        "fix": "Set PhysxArticulationAPI.fixedBase=True on the articulation root prim for stationary robots.",
+        "severity": "warning",
+        "prim_regex": r"articulation[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"nan|NaN detected|not a number",
+        "category": "nan_values",
+        "fix": "NaN typically indicates numerical instability. Check for zero-mass bodies, extreme forces, or missing gravity direction. Lower timestep and increase solver iterations.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"joint drive.*target|drive target out of range",
+        "category": "drive_target",
+        "fix": "Ensure joint drive targets are within the joint limit range. Clamp target values to [lowerLimit, upperLimit].",
+        "severity": "warning",
+        "prim_regex": r"joint[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"invalid transform|singular matrix|non-finite transform",
+        "category": "invalid_transform",
+        "fix": "Reset the prim transform to identity. Check for zero-scale axes or non-orthogonal rotation matrices.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"broadphase.*overflow|pair buffer.*full",
+        "category": "broadphase_overflow",
+        "fix": "Increase PhysxScene.maxBiasCoefficient or reduce the number of dynamic objects. Use collision groups to limit pair generation.",
+        "severity": "error",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"unstable simulation|jitter|oscillat",
+        "category": "simulation_instability",
+        "fix": "Increase solver iterations, add damping to joints, or lower the physics timestep. Check for stiff springs without adequate damping.",
+        "severity": "warning",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"metersPerUnit.*mismatch|scale mismatch|unit mismatch",
+        "category": "unit_mismatch",
+        "fix": "Ensure all referenced assets use the same metersPerUnit. Set UsdGeom.SetStageMetersPerUnit(stage, 1.0) or scale the referenced asset.",
+        "severity": "error",
+        "prim_regex": r"asset[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"exceeded velocity|velocity clamp|max velocity",
+        "category": "velocity_exceeded",
+        "fix": "Increase PhysxRigidBodyAPI.maxLinearVelocity or reduce applied forces. Default max is 100 m/s.",
+        "severity": "warning",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+]
+
+_TELEOP_DEVICES = {
+    "quest_3": {
+        "supported": True,
+        "transport": "webxr",
+        "latency_budget_ms": 80,
+        "known_limitations": [
+            "Meta Browser required; Safari does not expose XR_EXT_hand_tracking",
+        ],
+        "notes": "Quest 3 uses WebXR over Wi-Fi — keep router <= 10 ms from host.",
+    },
+    "vision_pro": {
+        "supported": True,
+        "transport": "cloudxr",
+        "latency_budget_ms": 60,
+        "known_limitations": [
+            "Requires native CloudXR app on visionOS",
+            "WebXR on Safari does NOT expose hand tracking — browser path will not work",
+        ],
+        "notes": "Vision Pro must use the NVIDIA CloudXR native app, not Safari.",
+    },
+    "spacemouse": {
+        "supported": True,
+        "transport": "usb-hid",
+        "latency_budget_ms": 20,
+        "known_limitations": ["6-DoF only — no hand retargeting"],
+        "notes": "3Dconnexion SpaceMouse over USB-HID. Local, sub-20 ms RTT.",
+    },
+    "keyboard": {
+        "supported": True,
+        "transport": "usb-hid",
+        "latency_budget_ms": 20,
+        "known_limitations": ["Discrete input only — coarse joint nudges"],
+        "notes": "Keyboard fallback for smoke tests without XR hardware.",
+    },
+}
+
+_VRAM_PER_ENV_MB = {
+    "clone": {"low": 8, "medium": 16, "high": 32},
+    "train": {"low": 12, "medium": 24, "high": 48},
+    "sdg": {"low": 32, "medium": 64, "high": 128},
+    "render": {"low": 256, "medium": 512, "high": 1024},
+    "custom": {"low": 16, "medium": 32, "high": 64},
+}
+
 
 # ---------------------------------------------------------------------------
 # Phase 6 wave 10 — debug-draw + physics health + singularity + visualization

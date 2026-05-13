@@ -14,6 +14,48 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict
 
+# ---------------------------------------------------------------------------
+# Theme-local constants (Phase 8 wave 11, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.robot.
+
+_DEFAULT_CALIBRATE_PARAMS = ["friction", "damping", "masses"]
+
+_QUICK_CALIBRATE_PARAMS = ["armature", "friction", "masses"]
+
+_SUPPORTED_MOTION_ROBOTS = {
+    "franka", "ur10", "ur5e", "ur3e", "cobotta", "rs007n",
+    "dofbot", "kawasaki", "flexiv_rizon",
+}
+
+_VALID_CALIBRATE_PARAMS = {"friction", "damping", "armature", "masses", "viscous_friction"}
+
+_WHOLE_BODY_PROFILES = {
+    "g1": {
+        "locomotion": "hover_g1_flat.pt",
+        "command_type": "velocity",
+        "ee_frame": "left_hand",
+        "status": "Working (IsaacLab 2.3)",
+    },
+    "h1": {
+        "locomotion": "hover_h1_rough.pt",
+        "command_type": "velocity",
+        "ee_frame": "left_hand",
+        "status": "Working",
+    },
+    "figure02": {
+        "locomotion": "custom",
+        "command_type": "velocity",
+        "ee_frame": "left_hand",
+        "status": "Manual config required",
+    },
+    "generic": {
+        "locomotion": "custom",
+        "command_type": "velocity",
+        "ee_frame": "left_hand",
+        "status": "Generic skeleton — review before use",
+    },
+}
+
 
 # ---------------------------------------------------------------------------
 # Phase 6 wave 1 — anchor_robot + verify_import
@@ -2286,7 +2328,7 @@ print(f"Linear interpolation: {{len(wp_array)}} waypoints -> {{len(interpolated)
 
 def _gen_setup_whole_body_control(args: Dict) -> str:
     """Generate ActionGroupCfg combining a locomotion RL policy + arm planner."""
-    from ..tool_executor import _WHOLE_BODY_PROFILES
+    # Phase 8 wave 11 — _WHOLE_BODY_PROFILES migrated.
     articulation_path = args["articulation_path"]
     locomotion_policy = args["locomotion_policy"]
     arm_planner = args.get("arm_planner", "pink_ik")
@@ -3878,7 +3920,7 @@ print(json.dumps({{"sampler": str(prim.GetPath()), "target": {target_path!r}, "n
 
 async def _handle_generate_robot_description(args: Dict) -> Dict:
     """Check if a robot has pre-built motion generation configs."""
-    from ..tool_executor import _SUPPORTED_MOTION_ROBOTS, _MOTION_ROBOT_CONFIGS  # noqa: PLC0415
+    from ..tool_executor import _MOTION_ROBOT_CONFIGS  # noqa: PLC0415
     art_path = args["articulation_path"]
     robot_type = args.get("robot_type", "").lower()
 
@@ -3979,8 +4021,8 @@ async def _handle_calibrate_physics(args: Dict) -> Dict:
     """Generate a Ray-Tune+Optuna calibration script and return the launch command."""
     from pathlib import Path as _Path
     from ..tool_executor import (  # noqa: PLC0415
-        _DEFAULT_CALIBRATE_PARAMS,
-        _VALID_CALIBRATE_PARAMS,
+        # _DEFAULT_CALIBRATE_PARAMS migrated to module body (Phase 8 wave 11).
+        # _VALID_CALIBRATE_PARAMS migrated to module body (Phase 8 wave 11).
         _check_real_data_path,
         _safe_robot_name,
         _generate_calibration_script,
@@ -4056,7 +4098,7 @@ async def _handle_quick_calibrate(args: Dict) -> Dict:
     """Faster calibration: only the highest-impact parameters."""
     from pathlib import Path as _Path
     from ..tool_executor import (  # noqa: PLC0415
-        _QUICK_CALIBRATE_PARAMS,
+        # _QUICK_CALIBRATE_PARAMS migrated to module body (Phase 8 wave 11).
         _check_real_data_path,
         _safe_robot_name,
         _generate_calibration_script,
