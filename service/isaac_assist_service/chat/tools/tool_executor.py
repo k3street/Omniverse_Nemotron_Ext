@@ -127,11 +127,7 @@ _cloud_jobs: Dict[str, Dict] = {}
 # _DEFAULT_CALIBRATE_PARAMS migrated to handlers/robot.py (Phase 8 wave 11, 2026-05-13).
 
 # from: feat/new-onboarding
-_DEFAULT_SUGGESTIONS = [
-    "Run the simulation to see the result",
-    "Capture a viewport screenshot",
-    "Check for any physics warnings",
-]
+# _DEFAULT_SUGGESTIONS migrated to handlers/workflow.py (Phase 8 wave 13, 2026-05-13).
 
 # from: feat/addendum-enterprise-scale
 # _DELTA_ROOT migrated to handlers/scene_authoring.py (Phase 8 wave 12, 2026-05-13).
@@ -240,64 +236,13 @@ _eureka_runs: Dict[str, Dict] = {}
 # _EXPORT_TARGETS migrated to handlers/training.py (Phase 8 wave 12, 2026-05-13).
 
 # from: feat/addendum-phase7G-groot-tooling-v2
-_FINETUNE_FREEZE_PROFILES = {
-    "similar_to_pretrain": {
-        "freeze": ["vision_encoder", "language_model"],
-        "tune": ["dit_layers", "connectors"],
-        "rationale": "NVIDIA's own recipe — preserves visual+language priors, adapts action head",
-        "lora_rank": 0,
-    },
-    "new_visual_domain": {
-        "freeze": ["language_model"],
-        "tune": ["vision_encoder", "dit_layers", "connectors"],
-        "rationale": "New visual domain requires vision adaptation. Cuts batch from 200 to 16 on A6000.",
-        "lora_rank": 0,
-        "warning": "Don't Blind Your VLA: unfreezing vision can cause OOD generalization loss",
-    },
-    "new_embodiment": {
-        "freeze": [],
-        "tune": ["all (LoRA)"],
-        "rationale": "New robot morphology requires full re-tuning. LoRA rank 16 fits on RTX 4080 <8GB",
-        "lora_rank": 16,
-    },
-}
+# _FINETUNE_FREEZE_PROFILES migrated to handlers/training.py (Phase 8 wave 13, 2026-05-13).
 
 # from: feat/addendum-phase3-urdf-postprocessor
-_FIX_PROFILE_PATTERNS = {
-    "franka": ["franka", "panda"],
-    "ur5": ["ur5"],
-    "ur10": ["ur10"],
-    "g1": ["g1", "unitree_g1"],
-    "allegro": ["allegro"],
-}
+# _FIX_PROFILE_PATTERNS migrated to handlers/robot.py (Phase 8 wave 13, 2026-05-13).
 
 # from: feat/7G-groot-n1
-_GROOT_EMBODIMENTS = {
-    "LIBERO_PANDA": {
-        "obs_type": "rgb+proprio",
-        "action_dim": 7,
-        "description": "Franka Panda in LIBERO benchmark",
-        "vram_gb": 24,
-    },
-    "OXE_WIDOWX": {
-        "obs_type": "rgb+proprio",
-        "action_dim": 7,
-        "description": "WidowX from Open X-Embodiment",
-        "vram_gb": 24,
-    },
-    "UNITREE_G1": {
-        "obs_type": "rgb+proprio",
-        "action_dim": 29,
-        "description": "Unitree G1 humanoid",
-        "vram_gb": 24,
-    },
-    "custom": {
-        "obs_type": "rgb+proprio",
-        "action_dim": None,
-        "description": "Custom embodiment — configure manually",
-        "vram_gb": 24,
-    },
-}
+# _GROOT_EMBODIMENTS migrated to handlers/training.py (Phase 8 wave 13, 2026-05-13).
 
 # from: feat/addendum-community-remote-v2
 # _ISAA_MANIFEST_VERSION migrated to handlers/scene_blueprints.py (Phase 8 wave 7, 2026-05-13).
@@ -306,7 +251,7 @@ _GROOT_EMBODIMENTS = {
 # _LIGHT_TYPE_NAMES migrated to handlers/vision.py (Phase 8 wave 4, 2026-05-13).
 
 # from: feat/new-onboarding
-_MOBILE_ROBOT_KEYWORDS = {"carter", "jetbot", "nova_carter", "kaya", "husky", "turtlebot"}
+# _MOBILE_ROBOT_KEYWORDS migrated to handlers/workflow.py (Phase 8 wave 13, 2026-05-13).
 
 # from: feat/addendum-ros2-nav2
 # _NAV2_BRIDGE_PROFILES migrated to handlers/ros2.py (Phase 8 wave 4, 2026-05-13).
@@ -361,115 +306,7 @@ _PROACTIVE_TRIGGER_PLAYBOOKS: Dict[str, List[str]] = {
 # _REWARD_HACK_PATTERNS migrated to handlers/training.py (Phase 8 wave 12, 2026-05-13).
 
 # from: feat/addendum-phase3-urdf-postprocessor
-_ROBOT_FIX_PROFILES = {
-    "franka": {
-        "robot_name": "franka",
-        "display_name": "Franka Emika Panda",
-        "known_issues": [
-            "rootJoint creates unwanted floating base — delete it",
-            "Default drive stiffness too low for position control",
-            "panda_hand and finger links often missing CollisionAPI",
-        ],
-        "fixes": [
-            {
-                "description": "Delete rootJoint to allow fixedBase anchoring",
-                "code": "stage.RemovePrim('{art_path}/rootJoint')",
-            },
-            {
-                "description": "Set fixedBase for stationary arm",
-                "code": "PhysxSchema.PhysxArticulationAPI.Apply(stage.GetPrimAtPath('{art_path}')).CreateEnabledSelfCollisionsAttr(False)",
-            },
-            {
-                "description": "Set drive stiffness Kp=1000, Kd=100 on all joints",
-                "code": "# Apply Kp=1000, Kd=100 to all revolute joints",
-            },
-            {
-                "description": "Add CollisionAPI to hand and finger links",
-                "code": "# Apply CollisionAPI to panda_hand, panda_leftfinger, panda_rightfinger",
-            },
-        ],
-        "drive_gains": {"kp": 1000, "kd": 100},
-    },
-    "ur5": {
-        "robot_name": "ur5",
-        "display_name": "Universal Robots UR5",
-        "known_issues": [
-            "Joint limits often imported as ±infinity",
-            "Missing collision meshes on wrist links",
-        ],
-        "fixes": [
-            {
-                "description": "Set finite joint limits (±2π for revolute joints)",
-                "code": "# Set lowerLimit=-6.283, upperLimit=6.283 on all revolute joints",
-            },
-            {
-                "description": "Add CollisionAPI to wrist links",
-                "code": "# Apply CollisionAPI to wrist_1_link, wrist_2_link, wrist_3_link",
-            },
-        ],
-        "drive_gains": {"kp": 800, "kd": 80},
-    },
-    "ur10": {
-        "robot_name": "ur10",
-        "display_name": "Universal Robots UR10",
-        "known_issues": [
-            "Joint limits often imported as ±infinity",
-            "Missing collision meshes on wrist links",
-            "Default mass values may be incorrect for UR10 (heavier than UR5)",
-        ],
-        "fixes": [
-            {
-                "description": "Set finite joint limits (±2π for revolute joints)",
-                "code": "# Set lowerLimit=-6.283, upperLimit=6.283 on all revolute joints",
-            },
-            {
-                "description": "Add CollisionAPI to wrist links",
-                "code": "# Apply CollisionAPI to wrist_1_link, wrist_2_link, wrist_3_link",
-            },
-        ],
-        "drive_gains": {"kp": 1000, "kd": 100},
-    },
-    "g1": {
-        "robot_name": "g1",
-        "display_name": "Unitree G1 Humanoid",
-        "known_issues": [
-            "Many links imported with zero mass",
-            "Extreme inertia ratios between torso and finger links",
-            "Self-collision filtering needed for dense link structure",
-        ],
-        "fixes": [
-            {
-                "description": "Set minimum mass (0.1 kg) on zero-mass links",
-                "code": "# Set mass=0.1 on all links where mass==0",
-            },
-            {
-                "description": "Enable self-collision filtering",
-                "code": "PhysxSchema.PhysxArticulationAPI.Apply(root).CreateEnabledSelfCollisionsAttr(True)",
-            },
-        ],
-        "drive_gains": {"kp": 500, "kd": 50},
-    },
-    "allegro": {
-        "robot_name": "allegro",
-        "display_name": "Allegro Hand",
-        "known_issues": [
-            "Very small link masses cause solver instability",
-            "Finger joint limits must be carefully bounded",
-            "CollisionAPI often missing on fingertip links",
-        ],
-        "fixes": [
-            {
-                "description": "Set minimum mass (0.01 kg) on finger links",
-                "code": "# Set mass=0.01 on all finger links",
-            },
-            {
-                "description": "Add CollisionAPI to all fingertip links",
-                "code": "# Apply CollisionAPI to all *_tip links",
-            },
-        ],
-        "drive_gains": {"kp": 100, "kd": 10},
-    },
-}
+# _ROBOT_FIX_PROFILES migrated to handlers/robot.py (Phase 8 wave 13, 2026-05-13).
 
 # from: feat/addendum-phase3-urdf-postprocessor
 _ROBOT_NAME_PATTERNS = {
@@ -481,11 +318,7 @@ _ROBOT_NAME_PATTERNS = {
 }
 
 # from: feat/8D-robot-setup
-_ROBOT_TYPE_DEFAULTS = {
-    "manipulator": {"stiffness": 1000, "damping": 100},
-    "mobile":      {"stiffness": 500,  "damping": 50},
-    "humanoid":    {"stiffness": 800,  "damping": 80},
-}
+# _ROBOT_TYPE_DEFAULTS migrated to handlers/robot.py (Phase 8 wave 13, 2026-05-13).
 
 # Named-robot registry for robot_wizard — maps a known name to the
 # canonical RELATIVE path under the Isaac asset root (5.x layout).
@@ -502,16 +335,7 @@ _ROBOT_TYPE_DEFAULTS = {
 
 
 # _resolve_robot_asset migrated to handlers/_shared.py (Phase 8 wave 8, 2026-05-13).
-_SLASH_COMMANDS = [
-    {"command": "/help", "description": "What can I do?", "always": True},
-    {"command": "/scene", "description": "Summarize current scene", "always": True},
-    {"command": "/debug", "description": "Diagnose physics issues", "requires_physics": True},
-    {"command": "/performance", "description": "Why is my sim slow?", "always": True},
-    {"command": "/workspace", "description": "Show robot workspace", "requires_robot": True},
-    {"command": "/diff", "description": "What changed?", "always": True},
-    {"command": "/import", "description": "Import a robot", "always": True},
-    {"command": "/template", "description": "Load a scene template", "always": True},
-]
+# _SLASH_COMMANDS migrated to handlers/workflow.py (Phase 8 wave 13, 2026-05-13).
 
 # from: feat/addendum-enterprise-scale
 _STAGE_INDEX: Dict[str, Dict[str, Any]] = {}
@@ -520,100 +344,13 @@ _STAGE_INDEX: Dict[str, Dict[str, Any]] = {}
 _STAGE_INDEX_META: Dict[str, Any] = {"prim_scope": None, "prim_count": 0}
 
 # from: feat/new-onboarding
-_STARTER_PROMPTS = {
-    "empty": {
-        "welcome": "Your scene is empty — a blank canvas!",
-        "prompts": [
-            "Import a robot: 'add a Franka Panda to the scene'",
-            "Load a template: 'set up a pick and place scene'",
-            "Browse assets: 'show me available robots'",
-        ],
-    },
-    "robot_only": {
-        "welcome": "I see a robot in the scene, but no objects to interact with.",
-        "prompts": [
-            "Add objects: 'place 3 cubes on a table'",
-            "Test the robot: 'move the arm to a test position'",
-            "Check setup: 'are the collision meshes correct?'",
-        ],
-    },
-    "robot_and_objects": {
-        "welcome": "Your scene has a robot and objects — ready for action!",
-        "prompts": [
-            "Move the arm to grab the nearest object",
-            "Why is the robot not moving?",
-            "Show me the robot's workspace",
-        ],
-    },
-    "mobile_robot": {
-        "welcome": "I see a mobile robot in the scene.",
-        "prompts": [
-            "Drive the robot forward 2 meters",
-            "Set up navigation: 'create an occupancy map'",
-            "Check sensors: 'what sensors does the robot have?'",
-        ],
-    },
-    "no_physics": {
-        "welcome": "Physics is not enabled in this scene.",
-        "prompts": [
-            "Enable physics for this scene",
-            "Add rigid body physics to the objects",
-            "Set up a physics scene with gravity",
-        ],
-    },
-}
+# _STARTER_PROMPTS migrated to handlers/workflow.py (Phase 8 wave 13, 2026-05-13).
 
 # from: feat/7C-xr-teleoperation
 # _STREAM_QUALITY_PRESETS migrated to handlers/teleop.py (Phase 8 wave 4, 2026-05-13).
 
 # from: feat/new-onboarding
-_SUGGESTION_MAP = {
-    "import_robot": [
-        "Configure the gripper",
-        "Check if the collision meshes are correct",
-        "Move the arm to a test position",
-    ],
-    "create_prim": [
-        "Add physics to this object",
-        "Change the material or color",
-        "Position it precisely in the scene",
-    ],
-    "clone_prim": [
-        "Set up physics for all copies",
-        "Create an RL training environment",
-        "Adjust spacing between copies",
-    ],
-    "move_to_pose": [
-        "Plan a pick-and-place sequence",
-        "Check for collisions along the path",
-        "Record the joint positions",
-    ],
-    "sim_control": [
-        "Capture a screenshot of the result",
-        "Check for physics errors",
-        "Measure performance (FPS, frame time)",
-    ],
-    "create_material": [
-        "Apply this material to an object",
-        "Adjust roughness or metallic properties",
-        "Create a glass or transparent variant",
-    ],
-    "configure_sdg": [
-        "Preview a sample frame",
-        "Add more randomizers (lighting, pose)",
-        "Export to COCO or KITTI format",
-    ],
-    "set_physics_params": [
-        "Test with a simulation run",
-        "Add rigid body physics to objects",
-        "Check solver iteration count for stability",
-    ],
-    "load_scene_template": [
-        "Run the simulation to see it in action",
-        "Customize the robot's behavior",
-        "Capture a screenshot of the scene",
-    ],
-}
+# _SUGGESTION_MAP migrated to handlers/workflow.py (Phase 8 wave 13, 2026-05-13).
 
 # from: feat/8B-motion-planning-complete
 # _SUPPORTED_MOTION_ROBOTS migrated to handlers/robot.py (Phase 8 wave 11, 2026-05-13).
@@ -655,7 +392,7 @@ _TEMPLATE_KEYWORDS = {
 # _WHOLE_BODY_PROFILES migrated to handlers/robot.py (Phase 8 wave 11, 2026-05-13).
 
 # from: feat/phase10-autonomous-workflows
-_WORKFLOW_RETRY_HARD_CAP = 5
+# _WORKFLOW_RETRY_HARD_CAP migrated to handlers/workflow.py (Phase 8 wave 13, 2026-05-13).
 
 # from: feat/phase10-autonomous-workflows
 _WORKFLOWS: Dict[str, Dict[str, Any]] = {}
@@ -2491,43 +2228,7 @@ def _detect_robot_type(articulation_path: str) -> Optional[str]:
 
 # _gen_verify_import moved to handlers/robot.py (Phase 6 wave 1).
 
-def _detect_robot_for_fix(articulation_path: str) -> Optional[str]:
-    """Auto-detect robot name from articulation path for fix profile lookup."""
-    path_lower = articulation_path.lower()
-    for robot_name, patterns in _FIX_PROFILE_PATTERNS.items():
-        for pat in patterns:
-            if pat in path_lower:
-                return robot_name
-    return None
-
-# _handle_apply_robot_fix_profile moved to handlers/robot.py (Phase 7 wave 7).
-
-
-# ══════ From feat/addendum-phase7B-sdg-quality ══════
-# _handle_validate_annotations moved to handlers/diagnostics.py (Phase 7 wave 14).
-
-# _handle_analyze_randomization moved to handlers/training.py (Phase 7 wave 5).
-
-# _handle_diagnose_domain_gap moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
-
-
-# ══════ From feat/addendum-phase8F-ros2-quality ══════
-# _handle_diagnose_ros2 moved to handlers/ros2.py (Phase 7 wave 14).
-
-# _gen_fix_ros2_qos moved to handlers/ros2.py (Phase 6 wave 7).
-
-# _gen_configure_ros2_time moved to handlers/ros2.py (Phase 6 wave 7).
-
-
-# ══════ From feat/addendum-phase8B-workspace-singularity-v2 ══════
-# _gen_show_workspace moved to handlers/diagnostics.py (Phase 6 wave 22).
-
-# _gen_check_singularity moved to handlers/diagnostics.py (Phase 6 wave 10).
-
-# _gen_monitor_joint_effort moved to handlers/diagnostics.py (Phase 6 wave 10).
-
-
-# ══════ From feat/new-performance-diagnostics ══════
+# _detect_robot_for_fix migrated to handlers/robot.py (Phase 8 wave 13, 2026-05-13).
 def _analyze_performance(stats: Dict, timing: Dict, mem: Dict) -> List[Dict]:
     """Analyze profiling data and return a list of performance issues."""
     issues = []

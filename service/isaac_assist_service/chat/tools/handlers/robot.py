@@ -15,6 +15,172 @@ from __future__ import annotations
 from typing import Any, Callable, Dict
 
 # ---------------------------------------------------------------------------
+# Theme-local constants + helpers (Phase 8 wave 13, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.robot.
+
+_FIX_PROFILE_PATTERNS = {
+    "franka": ["franka", "panda"],
+    "ur5": ["ur5"],
+    "ur10": ["ur10"],
+    "g1": ["g1", "unitree_g1"],
+    "allegro": ["allegro"],
+}
+
+_ROBOT_FIX_PROFILES = {
+    "franka": {
+        "robot_name": "franka",
+        "display_name": "Franka Emika Panda",
+        "known_issues": [
+            "rootJoint creates unwanted floating base — delete it",
+            "Default drive stiffness too low for position control",
+            "panda_hand and finger links often missing CollisionAPI",
+        ],
+        "fixes": [
+            {
+                "description": "Delete rootJoint to allow fixedBase anchoring",
+                "code": "stage.RemovePrim('{art_path}/rootJoint')",
+            },
+            {
+                "description": "Set fixedBase for stationary arm",
+                "code": "PhysxSchema.PhysxArticulationAPI.Apply(stage.GetPrimAtPath('{art_path}')).CreateEnabledSelfCollisionsAttr(False)",
+            },
+            {
+                "description": "Set drive stiffness Kp=1000, Kd=100 on all joints",
+                "code": "# Apply Kp=1000, Kd=100 to all revolute joints",
+            },
+            {
+                "description": "Add CollisionAPI to hand and finger links",
+                "code": "# Apply CollisionAPI to panda_hand, panda_leftfinger, panda_rightfinger",
+            },
+        ],
+        "drive_gains": {"kp": 1000, "kd": 100},
+    },
+    "ur5": {
+        "robot_name": "ur5",
+        "display_name": "Universal Robots UR5",
+        "known_issues": [
+            "Joint limits often imported as ±infinity",
+            "Missing collision meshes on wrist links",
+        ],
+        "fixes": [
+            {
+                "description": "Set finite joint limits (±2π for revolute joints)",
+                "code": "# Set lowerLimit=-6.283, upperLimit=6.283 on all revolute joints",
+            },
+            {
+                "description": "Add CollisionAPI to wrist links",
+                "code": "# Apply CollisionAPI to wrist_1_link, wrist_2_link, wrist_3_link",
+            },
+        ],
+        "drive_gains": {"kp": 800, "kd": 80},
+    },
+    "ur10": {
+        "robot_name": "ur10",
+        "display_name": "Universal Robots UR10",
+        "known_issues": [
+            "Joint limits often imported as ±infinity",
+            "Missing collision meshes on wrist links",
+            "Default mass values may be incorrect for UR10 (heavier than UR5)",
+        ],
+        "fixes": [
+            {
+                "description": "Set finite joint limits (±2π for revolute joints)",
+                "code": "# Set lowerLimit=-6.283, upperLimit=6.283 on all revolute joints",
+            },
+            {
+                "description": "Add CollisionAPI to wrist links",
+                "code": "# Apply CollisionAPI to wrist_1_link, wrist_2_link, wrist_3_link",
+            },
+        ],
+        "drive_gains": {"kp": 1000, "kd": 100},
+    },
+    "g1": {
+        "robot_name": "g1",
+        "display_name": "Unitree G1 Humanoid",
+        "known_issues": [
+            "Many links imported with zero mass",
+            "Extreme inertia ratios between torso and finger links",
+            "Self-collision filtering needed for dense link structure",
+        ],
+        "fixes": [
+            {
+                "description": "Set minimum mass (0.1 kg) on zero-mass links",
+                "code": "# Set mass=0.1 on all links where mass==0",
+            },
+            {
+                "description": "Enable self-collision filtering",
+                "code": "PhysxSchema.PhysxArticulationAPI.Apply(root).CreateEnabledSelfCollisionsAttr(True)",
+            },
+        ],
+        "drive_gains": {"kp": 500, "kd": 50},
+    },
+    "allegro": {
+        "robot_name": "allegro",
+        "display_name": "Allegro Hand",
+        "known_issues": [
+            "Very small link masses cause solver instability",
+            "Finger joint limits must be carefully bounded",
+            "CollisionAPI often missing on fingertip links",
+        ],
+        "fixes": [
+            {
+                "description": "Set minimum mass (0.01 kg) on finger links",
+                "code": "# Set mass=0.01 on all finger links",
+            },
+            {
+                "description": "Add CollisionAPI to all fingertip links",
+                "code": "# Apply CollisionAPI to all *_tip links",
+            },
+        ],
+        "drive_gains": {"kp": 100, "kd": 10},
+    },
+}
+
+_ROBOT_TYPE_DEFAULTS = {
+    "manipulator": {"stiffness": 1000, "damping": 100},
+    "mobile":      {"stiffness": 500,  "damping": 50},
+    "humanoid":    {"stiffness": 800,  "damping": 80},
+}
+
+def _detect_robot_for_fix(articulation_path: str) -> Optional[str]:
+    """Auto-detect robot name from articulation path for fix profile lookup."""
+    path_lower = articulation_path.lower()
+    for robot_name, patterns in _FIX_PROFILE_PATTERNS.items():
+        for pat in patterns:
+            if pat in path_lower:
+                return robot_name
+    return None
+
+# _handle_apply_robot_fix_profile moved to handlers/robot.py (Phase 7 wave 7).
+
+
+# ══════ From feat/addendum-phase7B-sdg-quality ══════
+# _handle_validate_annotations moved to handlers/diagnostics.py (Phase 7 wave 14).
+
+# _handle_analyze_randomization moved to handlers/training.py (Phase 7 wave 5).
+
+# _handle_diagnose_domain_gap moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
+
+
+# ══════ From feat/addendum-phase8F-ros2-quality ══════
+# _handle_diagnose_ros2 moved to handlers/ros2.py (Phase 7 wave 14).
+
+# _gen_fix_ros2_qos moved to handlers/ros2.py (Phase 6 wave 7).
+
+# _gen_configure_ros2_time moved to handlers/ros2.py (Phase 6 wave 7).
+
+
+# ══════ From feat/addendum-phase8B-workspace-singularity-v2 ══════
+# _gen_show_workspace moved to handlers/diagnostics.py (Phase 6 wave 22).
+
+# _gen_check_singularity moved to handlers/diagnostics.py (Phase 6 wave 10).
+
+# _gen_monitor_joint_effort moved to handlers/diagnostics.py (Phase 6 wave 10).
+
+
+# ══════ From feat/new-performance-diagnostics ══════
+
+# ---------------------------------------------------------------------------
 # Theme-local constants (Phase 8 wave 11, 2026-05-13)
 # Migrated from tool_executor.py — used only by handlers.robot.
 
@@ -287,7 +453,7 @@ print(json.dumps({{'articulation_path': '{art_path}', 'issues': issues, 'total':
 
 
 def _gen_robot_wizard(args: Dict) -> str:
-    from ..tool_executor import _ROBOT_TYPE_DEFAULTS
+    # Phase 8 wave 13 — _ROBOT_TYPE_DEFAULTS migrated.
     from ._shared import _ROBOT_WIZARD_REGISTRY, _resolve_robot_asset
 
     # Resolve `robot_name` against the registry BEFORE requiring asset_path.
@@ -3981,7 +4147,7 @@ async def _handle_generate_robot_description(args: Dict) -> Dict:
 
 async def _handle_apply_robot_fix_profile(args: Dict) -> Dict:
     """Look up known robot import issues and return a fix profile."""
-    from ..tool_executor import _ROBOT_FIX_PROFILES, _detect_robot_for_fix  # noqa: PLC0415
+    # Phase 8 wave 13 — _detect_robot_for_fix migrated.
     art_path = args["articulation_path"]
     robot_name = args.get("robot_name", "")
 

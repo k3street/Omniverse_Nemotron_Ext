@@ -12,6 +12,122 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+# ---------------------------------------------------------------------------
+# Theme-local constants + helpers (Phase 8 wave 13, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.workflow.
+
+_DEFAULT_SUGGESTIONS = [
+    "Run the simulation to see the result",
+    "Capture a viewport screenshot",
+    "Check for any physics warnings",
+]
+
+_MOBILE_ROBOT_KEYWORDS = {"carter", "jetbot", "nova_carter", "kaya", "husky", "turtlebot"}
+
+_SLASH_COMMANDS = [
+    {"command": "/help", "description": "What can I do?", "always": True},
+    {"command": "/scene", "description": "Summarize current scene", "always": True},
+    {"command": "/debug", "description": "Diagnose physics issues", "requires_physics": True},
+    {"command": "/performance", "description": "Why is my sim slow?", "always": True},
+    {"command": "/workspace", "description": "Show robot workspace", "requires_robot": True},
+    {"command": "/diff", "description": "What changed?", "always": True},
+    {"command": "/import", "description": "Import a robot", "always": True},
+    {"command": "/template", "description": "Load a scene template", "always": True},
+]
+
+_STARTER_PROMPTS = {
+    "empty": {
+        "welcome": "Your scene is empty — a blank canvas!",
+        "prompts": [
+            "Import a robot: 'add a Franka Panda to the scene'",
+            "Load a template: 'set up a pick and place scene'",
+            "Browse assets: 'show me available robots'",
+        ],
+    },
+    "robot_only": {
+        "welcome": "I see a robot in the scene, but no objects to interact with.",
+        "prompts": [
+            "Add objects: 'place 3 cubes on a table'",
+            "Test the robot: 'move the arm to a test position'",
+            "Check setup: 'are the collision meshes correct?'",
+        ],
+    },
+    "robot_and_objects": {
+        "welcome": "Your scene has a robot and objects — ready for action!",
+        "prompts": [
+            "Move the arm to grab the nearest object",
+            "Why is the robot not moving?",
+            "Show me the robot's workspace",
+        ],
+    },
+    "mobile_robot": {
+        "welcome": "I see a mobile robot in the scene.",
+        "prompts": [
+            "Drive the robot forward 2 meters",
+            "Set up navigation: 'create an occupancy map'",
+            "Check sensors: 'what sensors does the robot have?'",
+        ],
+    },
+    "no_physics": {
+        "welcome": "Physics is not enabled in this scene.",
+        "prompts": [
+            "Enable physics for this scene",
+            "Add rigid body physics to the objects",
+            "Set up a physics scene with gravity",
+        ],
+    },
+}
+
+_SUGGESTION_MAP = {
+    "import_robot": [
+        "Configure the gripper",
+        "Check if the collision meshes are correct",
+        "Move the arm to a test position",
+    ],
+    "create_prim": [
+        "Add physics to this object",
+        "Change the material or color",
+        "Position it precisely in the scene",
+    ],
+    "clone_prim": [
+        "Set up physics for all copies",
+        "Create an RL training environment",
+        "Adjust spacing between copies",
+    ],
+    "move_to_pose": [
+        "Plan a pick-and-place sequence",
+        "Check for collisions along the path",
+        "Record the joint positions",
+    ],
+    "sim_control": [
+        "Capture a screenshot of the result",
+        "Check for physics errors",
+        "Measure performance (FPS, frame time)",
+    ],
+    "create_material": [
+        "Apply this material to an object",
+        "Adjust roughness or metallic properties",
+        "Create a glass or transparent variant",
+    ],
+    "configure_sdg": [
+        "Preview a sample frame",
+        "Add more randomizers (lighting, pose)",
+        "Export to COCO or KITTI format",
+    ],
+    "set_physics_params": [
+        "Test with a simulation run",
+        "Add rigid body physics to objects",
+        "Check solver iteration count for stability",
+    ],
+    "load_scene_template": [
+        "Run the simulation to see it in action",
+        "Customize the robot's behavior",
+        "Capture a screenshot of the scene",
+    ],
+}
+
+_WORKFLOW_RETRY_HARD_CAP = 5
+
 
 # ---------------------------------------------------------------------------
 # Phase 7 wave 12 — workflow data-handlers

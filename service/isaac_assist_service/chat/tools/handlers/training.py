@@ -13,6 +13,59 @@ from __future__ import annotations
 from typing import Any, Callable, Dict
 
 # ---------------------------------------------------------------------------
+# Theme-local constants + helpers (Phase 8 wave 13, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.training.
+
+_FINETUNE_FREEZE_PROFILES = {
+    "similar_to_pretrain": {
+        "freeze": ["vision_encoder", "language_model"],
+        "tune": ["dit_layers", "connectors"],
+        "rationale": "NVIDIA's own recipe — preserves visual+language priors, adapts action head",
+        "lora_rank": 0,
+    },
+    "new_visual_domain": {
+        "freeze": ["language_model"],
+        "tune": ["vision_encoder", "dit_layers", "connectors"],
+        "rationale": "New visual domain requires vision adaptation. Cuts batch from 200 to 16 on A6000.",
+        "lora_rank": 0,
+        "warning": "Don't Blind Your VLA: unfreezing vision can cause OOD generalization loss",
+    },
+    "new_embodiment": {
+        "freeze": [],
+        "tune": ["all (LoRA)"],
+        "rationale": "New robot morphology requires full re-tuning. LoRA rank 16 fits on RTX 4080 <8GB",
+        "lora_rank": 16,
+    },
+}
+
+_GROOT_EMBODIMENTS = {
+    "LIBERO_PANDA": {
+        "obs_type": "rgb+proprio",
+        "action_dim": 7,
+        "description": "Franka Panda in LIBERO benchmark",
+        "vram_gb": 24,
+    },
+    "OXE_WIDOWX": {
+        "obs_type": "rgb+proprio",
+        "action_dim": 7,
+        "description": "WidowX from Open X-Embodiment",
+        "vram_gb": 24,
+    },
+    "UNITREE_G1": {
+        "obs_type": "rgb+proprio",
+        "action_dim": 29,
+        "description": "Unitree G1 humanoid",
+        "vram_gb": 24,
+    },
+    "custom": {
+        "obs_type": "rgb+proprio",
+        "action_dim": None,
+        "description": "Custom embodiment — configure manually",
+        "vram_gb": 24,
+    },
+}
+
+# ---------------------------------------------------------------------------
 # Theme-local constants (Phase 8 wave 12, 2026-05-13)
 # Migrated from tool_executor.py — used only by handlers.training.
 
@@ -806,7 +859,7 @@ async def _handle_eureka_status(args: Dict) -> Dict:
 
 async def _handle_load_groot_policy(args: Dict) -> Dict:
     """Return download/launch commands for GR00T N1 policy server."""
-    from ..tool_executor import _GROOT_EMBODIMENTS
+    # Phase 8 wave 13 — _GROOT_EMBODIMENTS migrated.
     model_id = args.get("model_id", "nvidia/GR00T-N1.6-3B")
     robot_path = args["robot_path"]
     embodiment_key = args.get("embodiment", "custom")
@@ -2212,7 +2265,7 @@ async def _handle_suggest_dr_ranges(args: Dict) -> Dict:
 
 async def _handle_suggest_finetune_config(args: Dict) -> Dict:
     """Recommend layer freeze/tune strategy."""
-    from ..tool_executor import _FINETUNE_FREEZE_PROFILES
+    # Phase 8 wave 13 — _FINETUNE_FREEZE_PROFILES migrated.
     task_type = args.get("task_type", "similar_to_pretrain")
     hardware = args.get("hardware", "RTX 4090")
     data_size = args.get("data_size", 0)
