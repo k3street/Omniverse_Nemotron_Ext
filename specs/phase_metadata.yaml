@@ -207,7 +207,7 @@
 25b:
   title: Object class metadata depth
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: user palette extensions
   gate: pytest tests/test_sub_phase_25b_object_palette_user_extensions.py — user can register custom class beyond 60-palette
   files:
@@ -566,7 +566,8 @@
 70d:
   title: 'Drop-target default: catalog-aware computation'
   agent_type: sonnet-mechanical
-  status: scaffold
+  status: landed
+  landed_date: '2026-05-13'
   note: bin interior metadata
   gate: pytest — bin metadata loader returns interior dimensions for 5+ bin SKUs
   files:
