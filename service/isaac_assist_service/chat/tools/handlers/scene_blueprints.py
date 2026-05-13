@@ -10,9 +10,12 @@ Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 6.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from typing import Any, Callable, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Theme-local helpers (Phase 8 wave 18, 2026-05-13)
