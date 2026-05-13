@@ -738,7 +738,7 @@
     TerminationFlags dataclasses, WBCRewardCalculator (compute_components,
     compute_total, compute_termination, summary), distance helper.
     33 pytest tests pass. MuJoCo/IsaacLab runtime integration remains scaffold.
-  gate: pytest tests/test_phase_79_wbc_humanoid_loco_manip.py — 33 tests pass
+  gate: pytest tests/test_phase_79_wbc_humanoid_loco_manip.py — 33 tests pass (gate confirmed)
   files:
   - service/isaac_assist_service/multimodal/wbc_humanoid_loco_manip.py
   - tests/test_phase_79_wbc_humanoid_loco_manip.py
