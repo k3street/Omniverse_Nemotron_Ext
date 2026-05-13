@@ -937,9 +937,16 @@
   - '96'
 '97':
   title: Performance regression CI
-  agent_type: opus-runtime
-  status: scaffold
-  note: perf regression benchmarks
+  agent_type: sonnet-mechanical
+  status: landed
+  note: BenchmarkSample/Suite/RegressionFinding/Report dataclasses + PerformanceRegressionDetector; BENCHMARK_SPEC 8 entries; load/save JSON helpers; 15 pytest tests pass
+  gate: pytest tests/test_phase_97_performance_regression_ci.py -- 15 tests pass
+  files:
+  - service/isaac_assist_service/multimodal/performance_regression_ci.py
+  - tests/test_phase_97_performance_regression_ci.py
+  loc: 240
+  effort_min: 60
+  blocked_by: []
 97b:
   title: Fast-sweep CP-regression harness (N=1 over all canonicals)
   agent_type: opus-runtime
