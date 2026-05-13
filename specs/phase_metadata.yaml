@@ -651,9 +651,9 @@
   note: Gemini API
 '77':
   title: 'Vision tool: viewport-hash cache'
-  agent_type: opus-runtime
-  status: scaffold
-  note: viewport hash cache — needs viewport
+  agent_type: sonnet-bounded
+  status: landed
+  note: pure-Python cache layer (hash, TTL, LRU, byte-budget); viewport population deferred to runtime
 '78':
   title: IsaacLab arena leaderboard
   agent_type: sonnet-bounded
