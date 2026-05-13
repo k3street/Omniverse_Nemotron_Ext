@@ -467,7 +467,8 @@
 '61':
   title: 'SDG: correlated DR for sensor-camera pairs'
   agent_type: opus-judgment
-  status: scaffold
+  status: landed
+  landed_date: '2026-05-13'
   note: correlated DR — multivariate normal
   gate: pytest — multivariate normal sampler produces correlation matrix matching spec ρ within 5%
   files:
