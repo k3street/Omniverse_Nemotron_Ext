@@ -406,6 +406,137 @@ _TEST_VECTORS = [
         {},
         ["Stop Teleop Session", "import omni.usd"],
     ),
+    # ----- qa-20-followup: drain _KNOWN_UNTESTED ratchet (batch 2) -----
+    (
+        "set_keyframe",
+        {"prim_path": "/W/Cube", "attr": "translate", "value": [1.0, 2.0, 3.0], "time": 10},
+        ["omni.usd.get_context()", "/W/Cube"],
+    ),
+    (
+        "set_camera_params",
+        {"camera_path": "/W/Cam", "focal_length": 50},
+        ["omni.usd.get_context()", "/W/Cam"],
+    ),
+    (
+        "set_camera_look_at",
+        {"camera_path": "/W/Cam", "target": [0.0, 0.0, 0.0]},
+        ["import omni.usd", "/W/Cam"],
+    ),
+    (
+        "set_render_resolution",
+        {"width": 1920, "height": 1080},
+        ["omni.kit.viewport.utility", "1920", "1080"],
+    ),
+    (
+        "set_render_mode",
+        {"mode": "path_traced"},
+        ["carb.settings", "PathTracing"],
+    ),
+    (
+        "set_light_intensity",
+        {"light_path": "/W/L", "intensity": 1000},
+        ["import omni.usd", "/W/L"],
+    ),
+    (
+        "set_light_color",
+        {"light_path": "/W/L", "rgb": [1.0, 0.5, 0.2]},
+        ["import omni.usd", "/W/L"],
+    ),
+    (
+        "set_drive_gains",
+        {"joint_path": "/W/J", "kp": 500, "kd": 50},
+        ["UsdPhysics", "/W/J"],
+    ),
+    (
+        "set_joint_limits",
+        {"joint_path": "/W/J", "lower": -1.57, "upper": 1.57},
+        ["UsdPhysics", "/W/J"],
+    ),
+    (
+        "set_linear_velocity",
+        {"prim_path": "/W/B", "velocity": [0.0, 0.0, 0.5]},
+        ["import omni.usd", "/W/B"],
+    ),
+    (
+        "set_semantic_label",
+        {"prim_path": "/W/C", "class_name": "cube"},
+        ["Semantics", "/W/C"],
+    ),
+    (
+        "remove_semantic_label",
+        {"prim_path": "/W/C"},
+        ["import omni.usd", "/W/C"],
+    ),
+    (
+        "set_variant",
+        {"prim_path": "/W/Robot", "variant_set": "Gripper", "variant": "Default"},
+        ["omni.usd", "/W/Robot"],
+    ),
+    (
+        "set_timeline_range",
+        {"start": 0, "end": 100},
+        ["omni.timeline", "100"],
+    ),
+    (
+        "set_edit_target",
+        {"layer_path": "/W/Layer.usda"},
+        ["import omni.usd", "/W/Layer.usda"],
+    ),
+    (
+        "set_environment_background",
+        {"preset": "sky"},
+        ["import omni.usd"],
+    ),
+    (
+        "set_graph_variable",
+        {"graph_path": "/W/G", "name": "x", "value": 1.0},
+        ["import omni.graph.core", "/W/G"],
+    ),
+    (
+        "set_audio_property",
+        {"prim_path": "/W/A", "prop": "volume", "value": 0.5},
+        ["UsdMedia", "/W/A"],
+    ),
+    (
+        "set_prim_metadata",
+        {"prim_path": "/W/C", "key": "mykey", "value": "myval"},
+        ["import omni.usd", "/W/C"],
+    ),
+    (
+        "set_render_config",
+        {"renderer": "rtx", "samples_per_pixel": 8},
+        ["import omni.usd", "/Render/Vars"],
+    ),
+    (
+        "set_clearance_monitor",
+        {"articulation_path": "/W/R", "min_distance": 0.1},
+        ["import omni.usd", "/W/R"],
+    ),
+    (
+        "visualize_clearance",
+        {"articulation_path": "/W/R"},
+        ["debug_draw", "/W/R"],
+    ),
+    (
+        "visualize_collision_mesh",
+        {"prim_path": "/W/B"},
+        ["UsdPhysics", "/W/B"],
+    ),
+    (
+        "visualize_forces",
+        {"articulation_path": "/W/R"},
+        ["import omni.usd", "/W/R"],
+    ),
+    (
+        "teleop_safety_config",
+        {"robot_path": "/W/R", "max_velocity": 1.0},
+        ["Teleop Safety", "/W/R"],
+    ),
+    (
+        "record_demo_video",
+        {"output_path": "/tmp/v.mp4"},
+        ["/tmp/v.mp4"],
+    ),
 ]
 
 
@@ -569,27 +700,20 @@ class TestAllCodeGenHandlersCovered:
         'merge_meshes', 'monitor_joint_effort', 'navigate_to',
         'optimize_collision', 'optimize_scene', 'play_animation',
         'preview_dr', 'publish_robot_description',
-        'quick_demo', 'record_demo_video', 'record_teleop_demo',
-        'record_trajectory', 'record_waypoints', 'remove_semantic_label',
+        'quick_demo', 'record_teleop_demo',
+        'record_trajectory', 'record_waypoints',
         'render_video', 'replay_rosbag', 'replay_trajectory', 'robot_wizard',
         'run_arena_benchmark', 'scatter_on_surface',
-        'set_audio_property', 'set_camera_look_at', 'set_camera_params',
-        'set_clearance_monitor', 'set_drive_gains', 'set_edit_target',
-        'set_environment_background', 'set_graph_variable',
-        'set_joint_limits', 'set_joint_velocity_limit', 'set_keyframe',
-        'set_light_color', 'set_light_intensity', 'set_linear_velocity',
-        'set_motion_policy', 'set_physics_scene_config', 'set_prim_metadata',
-        'set_render_config', 'set_render_mode', 'set_render_resolution',
-        'set_semantic_label', 'set_timeline_range', 'set_variant',
+        'set_joint_velocity_limit',
+        'set_motion_policy', 'set_physics_scene_config',
         'setup_contact_sensors', 'setup_loco_manipulation_training',
         'setup_multi_rate', 'setup_pick_place_controller',
         'setup_pick_place_ros2_bridge', 'setup_ros2_bridge',
         'setup_rsi_from_demos', 'setup_whole_body_control',
         'simplify_collision', 'solve_ik',
         'start_teaching_mode',
-        'teleop_safety_config', 'tune_gains',
-        'verify_import', 'visualize_clearance', 'visualize_collision_mesh',
-        'visualize_forces',
+        'tune_gains',
+        'verify_import',
     })
 
     def test_all_handlers_tested(self):
