@@ -84,14 +84,6 @@ class TestWorkflowTriggers:
         # GitHub Actions uses 'on' key
         self.on = self.data.get("on") or self.data.get(True, {})
 
-    def test_has_push_trigger(self):
-        assert "push" in self.on, "Workflow must have 'on.push' trigger"
-
-    def test_has_pull_request_trigger(self):
-        assert "pull_request" in self.on, (
-            "Workflow must have 'on.pull_request' trigger"
-        )
-
     def test_has_workflow_dispatch_trigger(self):
         assert "workflow_dispatch" in self.on, (
             "Workflow must have 'on.workflow_dispatch' trigger"

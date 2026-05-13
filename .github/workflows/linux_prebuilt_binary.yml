@@ -8,14 +8,9 @@
 name: linux_prebuilt_binary
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
+  # Manual-only — auto-triggers disabled to avoid email noise.
+  # Build runs need self-hosted runner with proper toolchain; enable once that's set up.
   workflow_dispatch:
-  schedule:
-    # Nightly at 02:00 UTC — also triggers aarch64 builds
-    - cron: '0 2 * * *'
 
 permissions:
   contents: read
