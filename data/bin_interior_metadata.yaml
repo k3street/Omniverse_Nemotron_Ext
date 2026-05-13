@@ -1,0 +1,73 @@
+# Bin Interior Metadata Registry
+# Industrial bin SKUs with precise interior dimensions for drop-target computation.
+# All dimensions in millimeters. Payload capacity in kg.
+
+- sku: AKRO-MILS-30220
+  name: Akro-Mils 30220 Small Parts Bin
+  manufacturer: Akro-Mils
+  exterior_mm: [178, 102, 76]
+  interior_mm: [165, 89, 64]
+  wall_thickness_mm: 6.5
+  max_payload_kg: 4.5
+  stackable: true
+  opening_orientation: top
+
+- sku: QUANTUM-QSB-211
+  name: Quantum QSB-211 Stackable Shelf Bin
+  manufacturer: Quantum Storage Systems
+  exterior_mm: [273, 178, 152]
+  interior_mm: [254, 159, 140]
+  wall_thickness_mm: 9.5
+  max_payload_kg: 14.5
+  stackable: true
+  opening_orientation: top
+
+- sku: LEWISBINS-NEX2415-6
+  name: LEWISBins NEX2415-6 KLT-Style Bin
+  manufacturer: Lewis Systems
+  exterior_mm: [610, 381, 153]
+  interior_mm: [584, 355, 140]
+  wall_thickness_mm: 13.0
+  max_payload_kg: 27.0
+  stackable: true
+  opening_orientation: top
+
+- sku: SCHAEFER-LF6280
+  name: Schaefer Eurobehälter LF6280 KLT 600x400
+  manufacturer: SSI Schaefer
+  exterior_mm: [600, 400, 280]
+  interior_mm: [565, 366, 261]
+  wall_thickness_mm: 17.5
+  max_payload_kg: 50.0
+  stackable: true
+  opening_orientation: top
+
+- sku: STEEL-TOTE-241612
+  name: Steel Tote Bin 24x16x12
+  manufacturer: Jamco Products
+  exterior_mm: [610, 406, 305]
+  interior_mm: [591, 387, 292]
+  wall_thickness_mm: 9.5
+  max_payload_kg: 136.0
+  stackable: false
+  opening_orientation: top
+
+- sku: AKRO-MILS-39105
+  name: Akro-Mils 39105 AkroBins Large
+  manufacturer: Akro-Mils
+  exterior_mm: [406, 203, 178]
+  interior_mm: [381, 178, 165]
+  wall_thickness_mm: 12.5
+  max_payload_kg: 27.0
+  stackable: true
+  opening_orientation: top
+
+- sku: QUANTUM-DG93000
+  name: Quantum DG93000 Dividable Grid Container
+  manufacturer: Quantum Storage Systems
+  exterior_mm: [762, 356, 152]
+  interior_mm: [737, 330, 140]
+  wall_thickness_mm: 12.5
+  max_payload_kg: 22.7
+  stackable: true
+  opening_orientation: top
