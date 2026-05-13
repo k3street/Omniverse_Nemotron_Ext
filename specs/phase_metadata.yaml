@@ -1027,9 +1027,10 @@
   - '18'
 '99':
   title: Pick-hold-weld scenario end-to-end
-  agent_type: opus-runtime
-  status: scaffold
-  note: pick-hold-weld scenario
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: pick-hold-weld scenario (state machine + scoring layer)
 '100':
   title: 'Arena benchmark: hand-crafted vs IA-authored'
   agent_type: sonnet-mechanical
