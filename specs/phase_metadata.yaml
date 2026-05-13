@@ -521,7 +521,7 @@
 '78':
   title: IsaacLab arena leaderboard
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: arena leaderboard JSON registry
 78b:
   title: Yrkesroll (vocational-role) template audit + brick-stacking PhysX root cause
