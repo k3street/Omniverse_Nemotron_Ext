@@ -6,15 +6,23 @@ Branch: `refactor/2026-05-12-foundation-night-1` (anton remote, 100+ commits)
 
 `tool_executor.py`: **35,842 → 2,456 lines (−93.1%)**. The dispatch is now
 register-callback-driven (Phase 9), the monolith is structurally hollowed
-out, and Phase 8 has **27 waves** landed (~117 symbols migrated to theme
-modules or `handlers/_shared.py`).
+out, and Phase 8 has **28 waves** landed (~122 symbols migrated to theme
+modules, `handlers/_shared.py`, or `handlers/_state.py`).
 
 Final handler→tool_executor imports: **10** total — 9× `execute_tool_call`
 (dispatch entry — 8 in robot, 1 in sensors, 1 lazy-proxy in diagnostics
-for test patchability) + 1× lazy `logger` import. Phase 8 is functionally
-complete; only Phase 15 (workflow stateful unit: `_WRITE_LOCK_QUEUE`,
-`_ASYNC_TASKS_LOCK`, supporting classes) remains in the recovered-state
-block.
+for test patchability) + 1× lazy `logger` import. Phase 8 is fully
+complete. Phase 15 (workflow stateful) is also functionally complete —
+`ASYNC_TASKS` + `ASYNC_TASKS_LOCK` migrated to `_state.py` module level;
+`_WRITE_LOCK_QUEUE` exposed via `_state.get_write_lock_queue()` accessor.
+
+The only tool_executor.py code that handlers reach for now is:
+- `execute_tool_call` (dispatch entry — STAYS by design)
+- `_LockedPatch` + `_StageWriteLockQueue` classes + `_WRITE_LOCK_QUEUE`
+  singleton (used by `_state.get_write_lock_queue()` — physical location
+  is incidental, accessed through the typed accessor)
+- `_LEGACY_REEXPORT_NAMES` utility functions (lazy bridge via _shared.py)
+- The dispatch core (`_apply_result_cap` + `execute_tool_call`)
 
 **Time-bombs defused**: 13+ stale-reference sites (`_te.X` attribute
 access to migrated symbols, multi-line imports missed by batch
