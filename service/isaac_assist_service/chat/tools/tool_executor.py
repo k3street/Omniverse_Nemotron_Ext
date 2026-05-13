@@ -23,11 +23,11 @@ logger = logging.getLogger(__name__)
 # ── Paths to knowledge files ─────────────────────────────────────────────────
 _WORKSPACE = Path(__file__).resolve().parents[4] / "workspace"
 _SENSOR_SPECS_PATH = _WORKSPACE / "knowledge" / "sensor_specs.jsonl"
-_DEFORMABLE_PRESETS_PATH = _WORKSPACE / "knowledge" / "deformable_presets.json"
+# _DEFORMABLE_PRESETS_PATH migrated to handlers/physics.py (Phase 8 wave 6).
 
 # Cache loaded once
 _sensor_specs: Optional[List[Dict]] = None
-_deformable_presets: Optional[Dict] = None
+# _deformable_presets migrated to handlers/physics.py (Phase 8 wave 6).
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Recovered state for bundled PR handlers (local QA branch only)
@@ -526,66 +526,10 @@ _OG_TEMPLATES = {
     },
 }
 
-# from: feat/new-material-database
-_PHYSICS_MATERIALS_PATH = _WORKSPACE / "knowledge" / "physics_materials.json"
-_physics_materials = None  # lazy-initialized by _load_physics_materials()
+# _PHYSICS_MATERIALS_PATH + _physics_materials migrated to handlers/physics.py (Phase 8 wave 6).
 
 # from: feat/new-auto-simplification
-_PHYSICS_SETTINGS_PRESETS = {
-    "rl_training": {
-        "scene_type": "rl_training",
-        "description": "RL training with 1024 environments — maximum throughput",
-        "solver": "TGS",
-        "solver_position_iterations": 4,
-        "solver_velocity_iterations": 1,
-        "gpu_dynamics": True,
-        "broadphase": "GPU",
-        "ccd": False,
-        "time_step": 1.0 / 120,
-        "time_steps_per_second": 120,
-        "notes": "Use TGS solver with minimal iterations for speed. GPU dynamics required for large env counts. Disable CCD to save compute.",
-    },
-    "manipulation": {
-        "scene_type": "manipulation",
-        "description": "Precision manipulation (pick-and-place, assembly)",
-        "solver": "TGS",
-        "solver_position_iterations": 16,
-        "solver_velocity_iterations": 1,
-        "gpu_dynamics": False,
-        "broadphase": "MBP",
-        "ccd": True,
-        "ccd_note": "Enable CCD on gripper fingers only — not all objects",
-        "time_step": 1.0 / 240,
-        "time_steps_per_second": 240,
-        "notes": "Higher iterations for stable contacts. CCD on gripper prevents finger pass-through. 240 Hz for smooth grasping.",
-    },
-    "mobile_robot": {
-        "scene_type": "mobile_robot",
-        "description": "Mobile robot navigation (wheeled/legged)",
-        "solver": "TGS",
-        "solver_position_iterations": 4,
-        "solver_velocity_iterations": 1,
-        "gpu_dynamics": True,
-        "broadphase": "GPU",
-        "ccd": False,
-        "time_step": 1.0 / 60,
-        "time_steps_per_second": 60,
-        "notes": "Low iterations sufficient for wheel/ground contact. GPU dynamics helps with large environments. 60 Hz matches typical sensor rates.",
-    },
-    "digital_twin": {
-        "scene_type": "digital_twin",
-        "description": "Digital twin visualization (minimal physics)",
-        "solver": "PGS",
-        "solver_position_iterations": 4,
-        "solver_velocity_iterations": 1,
-        "gpu_dynamics": False,
-        "broadphase": "MBP",
-        "ccd": False,
-        "time_step": 1.0 / 60,
-        "time_steps_per_second": 60,
-        "notes": "PGS solver is sufficient for visualization-only scenes. Disable GPU dynamics and CCD to minimize resource usage.",
-    },
-}
+# _PHYSICS_SETTINGS_PRESETS migrated to handlers/physics.py (Phase 8 wave 6, 2026-05-13).
 
 # from: feat/addendum-phase2-smart-debugging
 _PHYSX_ERROR_PATTERNS = [
@@ -732,17 +676,13 @@ _PHYSX_ERROR_PATTERNS = [
 ]
 
 # from: feat/6A-physx-validation
-_PHYSX_ERROR_RE = re.compile(
-    r"physx.*?error|px.*?error|physics.*?simulation.*?error|"
-    r"articulation.*?error|joint.*?error",
-    re.IGNORECASE,
-)
+# _PHYSX_ERROR_RE migrated to handlers/physics.py (Phase 8 wave 6, 2026-05-13).
 
 # from: feat/addendum-collision-mesh-quality-v2
-_PHYSX_HULL_MAX_POLYS = 255    # Cooked hull polygon limit
+# _PHYSX_HULL_MAX_POLYS migrated to handlers/physics.py (Phase 8 wave 6, 2026-05-13).
 
 # from: feat/addendum-collision-mesh-quality-v2
-_PHYSX_HULL_MAX_VERTS = 64     # GPU PhysX vertex limit per hull
+# _PHYSX_HULL_MAX_VERTS migrated to handlers/physics.py (Phase 8 wave 6, 2026-05-13).
 
 # from: feat/atomic-tier8-render
 # _POST_PROCESS_PATHS migrated to handlers/rendering.py (Phase 8 wave 2, 2026-05-13).
@@ -1416,15 +1356,7 @@ def _load_sensor_specs() -> List[Dict]:
     return specs
 
 
-def _load_deformable_presets() -> Dict:
-    global _deformable_presets
-    if _deformable_presets is not None:
-        return _deformable_presets
-    if _DEFORMABLE_PRESETS_PATH.exists():
-        _deformable_presets = json.loads(_DEFORMABLE_PRESETS_PATH.read_text())
-    else:
-        _deformable_presets = {"presets": {}}
-    return _deformable_presets
+# _load_deformable_presets migrated to handlers/physics.py (Phase 8 wave 6, 2026-05-13).
 
 
 # ── Safe xform helper (inlined into generated code) ─────────────────────────
@@ -3509,36 +3441,9 @@ def _analyze_performance(stats: Dict, timing: Dict, mem: Dict) -> List[Dict]:
 
 
 # ══════ From feat/new-material-database ══════
-def _load_physics_materials() -> Dict:
-    global _physics_materials
-    if _physics_materials is not None:
-        return _physics_materials
-    if _PHYSICS_MATERIALS_PATH.exists():
-        _physics_materials = json.loads(_PHYSICS_MATERIALS_PATH.read_text())
-    else:
-        _physics_materials = {"materials": {}, "pairs": {}, "aliases": {}}
-    return _physics_materials
+# _load_physics_materials migrated to handlers/physics.py (Phase 8 wave 6, 2026-05-13).
 
-def _normalize_material_name(name: str) -> str:
-    """Normalize a user-supplied material name to a database key."""
-    db = _load_physics_materials()
-    key = name.strip().lower().replace(" ", "_").replace("-", "_")
-    # Check aliases first
-    aliases = db.get("aliases", {})
-    if key in aliases:
-        return aliases[key]
-    # Check direct match in materials
-    if key in db["materials"]:
-        return key
-    # Partial match: e.g. "mild steel" -> "steel_mild"
-    for mat_key in db["materials"]:
-        if key in mat_key or mat_key in key:
-            return mat_key
-    return key
-
-# _gen_apply_physics_material moved to handlers/physics.py (Phase 5 wave 3).
-
-    # _handle_lookup_material moved to handlers/physics.py (Phase 7 wave 16).
+# _normalize_material_name migrated to handlers/physics.py (Phase 8 wave 6, 2026-05-13).
 
 # ══════ From feat/new-scene-diff ══════
 def _parse_unified_diff_to_changes(raw_diff_lines: List[str]) -> List[Dict]:

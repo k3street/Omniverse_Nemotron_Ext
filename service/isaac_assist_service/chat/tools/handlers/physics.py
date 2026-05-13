@@ -11,7 +11,130 @@ Per `specs/IA_FULL_SPEC_2026-05-10.md` Phases 2 + 5.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict
+import json
+import re
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional
+
+# ---------------------------------------------------------------------------
+# Theme-local constants + helpers (Phase 8 wave 6, 2026-05-13)
+# Migrated from tool_executor.py — used only by this module.
+
+# Knowledge-base paths (from tool_executor.py:24-26).
+_WORKSPACE = Path(__file__).resolve().parents[5] / "workspace"
+_DEFORMABLE_PRESETS_PATH = _WORKSPACE / "knowledge" / "deformable_presets.json"
+_PHYSICS_MATERIALS_PATH = _WORKSPACE / "knowledge" / "physics_materials.json"
+
+# Lazy-initialised caches (filled by _load_*).
+_deformable_presets: Optional[Dict] = None
+_physics_materials: Optional[Dict] = None
+
+_PHYSICS_SETTINGS_PRESETS = {
+    "rl_training": {
+        "scene_type": "rl_training",
+        "description": "RL training with 1024 environments — maximum throughput",
+        "solver": "TGS",
+        "solver_position_iterations": 4,
+        "solver_velocity_iterations": 1,
+        "gpu_dynamics": True,
+        "broadphase": "GPU",
+        "ccd": False,
+        "time_step": 1.0 / 120,
+        "time_steps_per_second": 120,
+        "notes": "Use TGS solver with minimal iterations for speed. GPU dynamics required for large env counts. Disable CCD to save compute.",
+    },
+    "manipulation": {
+        "scene_type": "manipulation",
+        "description": "Precision manipulation (pick-and-place, assembly)",
+        "solver": "TGS",
+        "solver_position_iterations": 16,
+        "solver_velocity_iterations": 1,
+        "gpu_dynamics": False,
+        "broadphase": "MBP",
+        "ccd": True,
+        "ccd_note": "Enable CCD on gripper fingers only — not all objects",
+        "time_step": 1.0 / 240,
+        "time_steps_per_second": 240,
+        "notes": "Higher iterations for stable contacts. CCD on gripper prevents finger pass-through. 240 Hz for smooth grasping.",
+    },
+    "mobile_robot": {
+        "scene_type": "mobile_robot",
+        "description": "Mobile robot navigation (wheeled/legged)",
+        "solver": "TGS",
+        "solver_position_iterations": 4,
+        "solver_velocity_iterations": 1,
+        "gpu_dynamics": True,
+        "broadphase": "GPU",
+        "ccd": False,
+        "time_step": 1.0 / 60,
+        "time_steps_per_second": 60,
+        "notes": "Low iterations sufficient for wheel/ground contact. GPU dynamics helps with large environments. 60 Hz matches typical sensor rates.",
+    },
+    "digital_twin": {
+        "scene_type": "digital_twin",
+        "description": "Digital twin visualization (minimal physics)",
+        "solver": "PGS",
+        "solver_position_iterations": 4,
+        "solver_velocity_iterations": 1,
+        "gpu_dynamics": False,
+        "broadphase": "MBP",
+        "ccd": False,
+        "time_step": 1.0 / 60,
+        "time_steps_per_second": 60,
+        "notes": "PGS solver is sufficient for visualization-only scenes. Disable GPU dynamics and CCD to minimize resource usage.",
+    },
+}
+
+_PHYSX_ERROR_RE = re.compile(
+    r"physx.*?error|px.*?error|physics.*?simulation.*?error|"
+    r"articulation.*?error|joint.*?error",
+    re.IGNORECASE,
+)
+
+_PHYSX_HULL_MAX_POLYS = 255    # Cooked hull polygon limit
+
+_PHYSX_HULL_MAX_VERTS = 64     # GPU PhysX vertex limit per hull
+
+def _load_deformable_presets() -> Dict:
+    global _deformable_presets
+    if _deformable_presets is not None:
+        return _deformable_presets
+    if _DEFORMABLE_PRESETS_PATH.exists():
+        _deformable_presets = json.loads(_DEFORMABLE_PRESETS_PATH.read_text())
+    else:
+        _deformable_presets = {"presets": {}}
+    return _deformable_presets
+
+def _load_physics_materials() -> Dict:
+    global _physics_materials
+    if _physics_materials is not None:
+        return _physics_materials
+    if _PHYSICS_MATERIALS_PATH.exists():
+        _physics_materials = json.loads(_PHYSICS_MATERIALS_PATH.read_text())
+    else:
+        _physics_materials = {"materials": {}, "pairs": {}, "aliases": {}}
+    return _physics_materials
+
+def _normalize_material_name(name: str) -> str:
+    """Normalize a user-supplied material name to a database key."""
+    db = _load_physics_materials()
+    key = name.strip().lower().replace(" ", "_").replace("-", "_")
+    # Check aliases first
+    aliases = db.get("aliases", {})
+    if key in aliases:
+        return aliases[key]
+    # Check direct match in materials
+    if key in db["materials"]:
+        return key
+    # Partial match: e.g. "mild steel" -> "steel_mild"
+    for mat_key in db["materials"]:
+        if key in mat_key or mat_key in key:
+            return mat_key
+    return key
+
+# _gen_apply_physics_material moved to handlers/physics.py (Phase 5 wave 3).
+
+    # _handle_lookup_material moved to handlers/physics.py (Phase 7 wave 16).
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +240,7 @@ print('joint_limits ' + repr(joint_path) + ' lower=' + repr({lower}) + ' upper='
 
 def _gen_apply_physics_material(args: Dict) -> str:
     """Generate code to create a PhysicsMaterialAPI with values from the material database."""
-    from ..tool_executor import _load_physics_materials, _normalize_material_name
+    # Phase 8 wave 6 — _normalize_material_name migrated to module body.
 
     prim_path = args["prim_path"]
     material_name = args["material_name"]
@@ -411,7 +534,7 @@ print('joint_velocity_limit ' + repr(joint_path) + ' vel_limit=' + repr({vel_lim
 
 def _gen_deformable(args: Dict) -> str:
     """Generate PhysX deformable body/surface code from presets."""
-    from ..tool_executor import _load_deformable_presets
+    # Phase 8 wave 6 — _load_deformable_presets migrated to module body.
 
     prim_path = args["prim_path"]
     sbt = args["soft_body_type"]
@@ -799,7 +922,7 @@ def _gen_setup_contact_sensors(args: Dict) -> str:
 
 def _gen_check_collision_mesh_code(prim_path: str) -> str:
     """Build the read-only Kit/USD/trimesh analysis script for check_collision_mesh."""
-    from ..tool_executor import _PHYSX_HULL_MAX_VERTS, _PHYSX_HULL_MAX_POLYS
+    # Phase 8 wave 6 — _PHYSX_HULL_MAX_VERTS migrated to module body.
 
     safe_path = prim_path.replace("'", "").replace('"', "")
     return f"""
@@ -968,7 +1091,7 @@ else:
 
 def _gen_fix_collision_mesh(args: Dict) -> str:
     """Generate auto-repair code: normals → degenerate → holes → simplify → CoACD → write back."""
-    from ..tool_executor import _PHYSX_HULL_MAX_VERTS, _PHYSX_HULL_MAX_POLYS
+    # Phase 8 wave 6 — _PHYSX_HULL_MAX_VERTS migrated to module body.
 
     prim_path = args["prim_path"]
     target = args.get("target_triangles")
@@ -1245,7 +1368,7 @@ print(json.dumps(result))
 async def _handle_get_physics_errors(args: Dict) -> Dict:
     """Filter console logs for PhysX-specific errors and warnings."""
     from .. import kit_tools
-    from ..tool_executor import _PHYSX_ERROR_RE
+    # Phase 8 wave 6 — _PHYSX_ERROR_RE migrated to module body.
     ctx = await kit_tools.get_stage_context(full=False)
     logs = ctx.get("recent_logs", [])
     last_n = args.get("last_n", 20)
@@ -2002,7 +2125,7 @@ print(json.dumps(result, default=str))
 
 async def _handle_lookup_material(args: Dict) -> Dict:
     """Look up physics material properties for a material pair."""
-    from ..tool_executor import _load_physics_materials, _normalize_material_name
+    # Phase 8 wave 6 — _normalize_material_name migrated to module body.
     mat_a_raw = args.get("material_a", "")
     mat_b_raw = args.get("material_b", "")
     if not mat_a_raw or not mat_b_raw:
@@ -2087,7 +2210,7 @@ async def _handle_lookup_material(args: Dict) -> Dict:
 
 async def _handle_suggest_physics_settings(args: Dict) -> Dict:
     """Return recommended physics settings for the given scene type."""
-    from ..tool_executor import _PHYSICS_SETTINGS_PRESETS
+    # Phase 8 wave 6 — _PHYSICS_SETTINGS_PRESETS migrated to module body.
     scene_type = args.get("scene_type", "manipulation")
     preset = _PHYSICS_SETTINGS_PRESETS.get(scene_type)
     if preset is None:
