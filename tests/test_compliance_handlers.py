@@ -1,5 +1,4 @@
-"""CRM-A2 / CRM-B1 — L0 tests for setup_admittance_controller and
-setup_impedance_controller.
+"""CRM-A2 / CRM-B1 / CRM-B2 / CRM-B3 — L0 tests for compliance handlers.
 
 TestAdmittance covers:
   - dry-run default config dict
@@ -23,8 +22,14 @@ TestImpedance covers:
   - tool reachable via tool_executor.execute_tool_call
   - dry_run=False raises NotImplementedError with required message text
 
-Per docs/specs/2026-05-11-contact-rich-manipulation-spec.md §5.1 (CRM-A2)
-and §5.2 (CRM-B1).
+TestRelease covers:
+  - install admittance → release → state dict empty, was_installed=True
+  - release without prior install → was_installed=False, success=True (idempotent)
+  - released_mode returned matches what was installed
+  - dry_run=False raises NotImplementedError
+
+Per docs/specs/2026-05-11-contact-rich-manipulation-spec.md §5.1 (CRM-A2),
+§5.2 (CRM-B1), §5.3 (CRM-B2), and §5.4 (CRM-B3).
 """
 from __future__ import annotations
 
@@ -532,3 +537,111 @@ class TestParamMutation:
             await set_p({"robot_path": robot, "dry_run": False})
         msg = str(exc_info.value)
         assert "Kit RPC" in msg or "ros2_control" in msg or "bridge" in msg
+
+
+class TestRelease:
+    """L0 test suite for release_compliance (CRM-B3).
+
+    Verifies idempotent teardown of the in-memory compliance state entry.
+    """
+
+    # ------------------------------------------------------------------
+    # Helpers
+
+    def _get_setup_handler(self):
+        from service.isaac_assist_service.chat.tools.handlers.compliance import (
+            _handle_setup_admittance_controller,
+        )
+        return _handle_setup_admittance_controller
+
+    def _get_release_handler(self):
+        from service.isaac_assist_service.chat.tools.handlers.compliance import (
+            _handle_release_compliance,
+        )
+        return _handle_release_compliance
+
+    def _get_state_dict(self):
+        from service.isaac_assist_service.chat.tools.handlers import compliance
+        return compliance._INSTALLED_COMPLIANCE
+
+    # ------------------------------------------------------------------
+    # T1 — install admittance → release → state dict entry removed,
+    #       was_installed=True
+
+    @pytest.mark.asyncio
+    async def test_install_then_release_removes_state_entry(self):
+        """After installing admittance, release_compliance pops the entry from
+        _INSTALLED_COMPLIANCE and returns was_installed=True."""
+        setup = self._get_setup_handler()
+        release = self._get_release_handler()
+        robot = "/World/FrankaB3T1"
+
+        install_result = await setup({"robot_path": robot})
+        assert install_result["success"] is True
+
+        result = await release({"robot_path": robot})
+
+        assert result["success"] is True
+        assert result["was_installed"] is True
+        # State entry must be gone
+        state = self._get_state_dict()
+        assert robot not in state
+
+    # ------------------------------------------------------------------
+    # T2 — release without prior install → was_installed=False, success=True
+    #       (idempotent)
+
+    @pytest.mark.asyncio
+    async def test_release_absent_robot_returns_idempotent_success(self):
+        """Releasing a robot_path with no installed controller returns
+        success=True, was_installed=False, and a descriptive note."""
+        release = self._get_release_handler()
+        robot = "/World/FrankaB3T2_never_installed"
+
+        # Ensure this path is absent.
+        state = self._get_state_dict()
+        state.pop(robot, None)
+
+        result = await release({"robot_path": robot})
+
+        assert result["success"] is True
+        assert result["was_installed"] is False
+        assert "note" in result
+        assert "no compliance controller" in result["note"].lower()
+
+    # ------------------------------------------------------------------
+    # T3 — released_mode returned matches what was installed
+
+    @pytest.mark.asyncio
+    async def test_released_mode_matches_installed_mode(self):
+        """released_mode in the result must equal the compliance_mode that was
+        stored by the setup handler."""
+        setup = self._get_setup_handler()
+        release = self._get_release_handler()
+        robot = "/World/FrankaB3T3"
+
+        install_result = await setup({"robot_path": robot})
+        assert install_result["compliance_mode"] == "admittance"
+
+        result = await release({"robot_path": robot})
+
+        assert result["was_installed"] is True
+        assert result["released_mode"] == "admittance"
+
+    # ------------------------------------------------------------------
+    # T4 — dry_run=False raises NotImplementedError
+
+    @pytest.mark.asyncio
+    async def test_live_mode_raises_not_implemented(self):
+        """release_compliance with dry_run=False raises NotImplementedError
+        referencing Kit RPC and ros2_control bridge."""
+        setup = self._get_setup_handler()
+        release = self._get_release_handler()
+        robot = "/World/FrankaB3T4"
+
+        await setup({"robot_path": robot})
+
+        with pytest.raises(NotImplementedError) as exc_info:
+            await release({"robot_path": robot, "dry_run": False})
+        msg = str(exc_info.value)
+        assert "Kit RPC" in msg or "ros2_control" in msg

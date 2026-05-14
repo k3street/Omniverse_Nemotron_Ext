@@ -1,9 +1,10 @@
-"""CRM-A2 / CRM-B1 / CRM-B2 — compliance handlers.
+"""CRM-A2 / CRM-B1 / CRM-B2 / CRM-B3 — compliance handlers.
 
 Implements:
 - `setup_admittance_controller` per CRM spec §5.1 (CRM-A2)
 - `setup_impedance_controller` per §5.2 (CRM-B1)
 - `set_compliance_params` per §5.3 (CRM-B2)
+- `release_compliance` per §5.4 (CRM-B3)
 
 Admittance step law (pure Python, no Kit required for dry-run):
     F = K·(x_desired - x_actual) - D·v_actual + F_ext
@@ -572,6 +573,110 @@ async def set_compliance_params(
 
 
 # ---------------------------------------------------------------------------
+# release_compliance handler (CRM-B3)
+
+
+async def _handle_release_compliance(
+    args: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Dispatch handler for `release_compliance` tool.
+
+    Pops the robot_path entry from _INSTALLED_COMPLIANCE.  Idempotent —
+    releasing an absent robot_path returns success=True with a note.
+
+    Args (from tool call):
+        robot_path: USD path to the robot articulation root — required.
+        dry_run:    True (default) → mutate in-memory state dict only.
+                    False → raises NotImplementedError (requires Kit RPC).
+
+    Returns:
+        Absent controller:
+            {success: True, robot_path, was_installed: False, note: str}
+        Present controller removed:
+            {success: True, robot_path, was_installed: True,
+             released_mode: str}
+
+    Raises:
+        NotImplementedError: when dry_run=False (Kit RPC teardown not
+        yet implemented).
+    """
+    robot_path: str = args.get("robot_path", "")
+    if not robot_path:
+        return {
+            "success": False,
+            "error": "robot_path is required",
+        }
+
+    dry_run: bool = bool(args.get("dry_run", True))
+    if not dry_run:
+        raise NotImplementedError(
+            "release_compliance live mode requires Kit RPC to tear down "
+            "ros2_control bridge — provisioned bridge not yet available. "
+            "Use dry_run=True to release the in-memory state entry."
+        )
+
+    entry = _INSTALLED_COMPLIANCE.pop(robot_path, None)
+    if entry is None:
+        return {
+            "success": True,
+            "robot_path": robot_path,
+            "was_installed": False,
+            "note": "no compliance controller was installed",
+        }
+
+    return {
+        "success": True,
+        "robot_path": robot_path,
+        "was_installed": True,
+        "released_mode": entry.get("compliance_mode", "unknown"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Public signature (matches §5.4 exactly — used by higher-level callers)
+
+
+async def release_compliance(
+    robot_path: str,
+    dry_run: bool = True,
+) -> dict:
+    """Remove a previously installed compliance controller for a robot.
+
+    Pops the robot_path entry from the module-level _INSTALLED_COMPLIANCE
+    state dict, restoring the robot to its pre-compliance (rigid
+    joint-target) state.
+
+    Idempotent: releasing a robot_path that has no installed controller
+    returns success=True with was_installed=False and a descriptive note —
+    it is safe to call on any robot_path without checking first.
+
+    In dry-run mode (default) modifies only the in-memory state dict.
+    In live mode (dry_run=False) raises NotImplementedError until the
+    Kit RPC + ros2_control bridge teardown path is wired.
+
+    Args:
+        robot_path: USD path to the robot articulation root.
+        dry_run:    If True, release in-memory state only (no Kit calls).
+
+    Returns:
+        If controller was installed and released:
+            {success: True, robot_path, was_installed: True,
+             released_mode: str}
+        If no controller was present (idempotent success):
+            {success: True, robot_path, was_installed: False,
+             note: "no compliance controller was installed"}
+
+    Raises:
+        NotImplementedError: when dry_run=False (bridge teardown not yet
+        wired).
+    """
+    return await _handle_release_compliance({
+        "robot_path": robot_path,
+        "dry_run": dry_run,
+    })
+
+
+# ---------------------------------------------------------------------------
 # Dispatch registration
 
 
@@ -583,3 +688,4 @@ def register(
     data["setup_admittance_controller"] = _handle_setup_admittance_controller
     data["setup_impedance_controller"] = _handle_setup_impedance_controller
     data["set_compliance_params"] = _handle_set_compliance_params
+    data["release_compliance"] = _handle_release_compliance

@@ -2097,6 +2097,40 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "release_compliance",
+            "description": (
+                "CRM-B3 — Remove a previously installed compliance controller and restore the robot "
+                "to its rigid joint-target path. Pops the robot_path entry from the in-memory "
+                "_INSTALLED_COMPLIANCE state dict. "
+                "Idempotent: releasing a robot_path with no installed controller returns "
+                "success=True with was_installed=False and a descriptive note — safe to call "
+                "without checking first. "
+                "Returns was_installed=True and released_mode when a controller was removed. "
+                "dry_run=True (default) modifies only in-memory state; dry_run=False raises "
+                "NotImplementedError (requires Kit RPC to tear down ros2_control bridge)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {
+                        "type": "string",
+                        "description": "USD path to the robot articulation root, e.g. '/World/Franka'.",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": (
+                            "If true (default), release in-memory state only (no Kit calls). "
+                            "Set false only when Kit RPC + ros2_control bridge teardown is provisioned."
+                        ),
+                    },
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "setup_assembly_constraint",
             "description": "Tier C — sets up assembly relationship between peg and hole. Used by #22 Peg-in-Hole. Runtime FixedJoint creation when peg aligns within tolerance is Sprint 3+.",
             "parameters": {

@@ -11,8 +11,8 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-05-14T01:53:04+00:00
-Tool count: 433
+Generated: 2026-05-14T02:03:25+00:00
+Tool count: 434
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
 """
@@ -928,6 +928,14 @@ class SetComplianceParamsArgs(BaseModel):
     damping_rot: Optional[List[float]] = Field(None, description="New rotational damping coefficient per axis [N·m·s/rad]. Omit to leave unchanged.")
     mass_rot: Optional[List[float]] = Field(None, description="New virtual inertia per rotational axis [kg·m²]. Omit to leave unchanged.")
     dry_run: Optional[bool] = Field(None, description="If true (default), mutate in-memory state and return merged dict. Set false only when Kit RPC + bridge is provisioned.")
+
+
+class ReleaseComplianceArgs(BaseModel):
+    """CRM-B3 — Remove a previously installed compliance controller and restore the robot to its rigid joint-target path. Pops the robot_path entry from the in-memory _INSTALLED_COMPLIANCE state dict. Idempo"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    robot_path: str = Field(..., description="USD path to the robot articulation root, e.g. '/World/Franka'.")
+    dry_run: Optional[bool] = Field(None, description="If true (default), release in-memory state only (no Kit calls). Set false only when Kit RPC + ros2_control bridge teardown is provisioned.")
 
 
 class SetupAssemblyConstraintArgs(BaseModel):
@@ -4018,6 +4026,7 @@ MODEL_REGISTRY = {
     "setup_admittance_controller": SetupAdmittanceControllerArgs,
     "setup_impedance_controller": SetupImpedanceControllerArgs,
     "set_compliance_params": SetComplianceParamsArgs,
+    "release_compliance": ReleaseComplianceArgs,
     "setup_assembly_constraint": SetupAssemblyConstraintArgs,
     "setup_zone_partition": SetupZonePartitionArgs,
     "setup_cortex_behavior": SetupCortexBehaviorArgs,
