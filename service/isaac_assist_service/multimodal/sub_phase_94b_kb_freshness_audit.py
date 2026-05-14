@@ -114,13 +114,21 @@ class KBFreshnessAuditor:
     # Public API
     # ------------------------------------------------------------------
 
-    def audit(self) -> FreshnessReport:
+    def audit(self, now: datetime | None = None) -> FreshnessReport:
         """Walk *kb_dir* and return a :class:`FreshnessReport`.
+
+        Args:
+            now: Reference timestamp used as "current time" when computing
+                 ages.  Defaults to ``datetime.now(timezone.utc)`` when
+                 ``None``.  Pass an explicit value in tests to make
+                 boundary-day assertions deterministic.
 
         Handles a missing or empty directory gracefully (all counts zero).
         """
-        entries = self._scan()
-        now_iso = datetime.now(timezone.utc).isoformat()
+        if now is None:
+            now = datetime.now(timezone.utc)
+        entries = self._scan(now=now)
+        now_iso = now.isoformat()
 
         total = len(entries)
         stale_count = sum(1 for e in entries if e.stale)
@@ -143,18 +151,28 @@ class KBFreshnessAuditor:
             scanned_at=now_iso,
         )
 
-    def list_stale(self) -> List[KBEntryAge]:
-        """Return only stale entries (age > threshold), sorted oldest-first."""
+    def list_stale(self, now: datetime | None = None) -> List[KBEntryAge]:
+        """Return only stale entries (age > threshold), sorted oldest-first.
+
+        Args:
+            now: Reference timestamp for age computation.  Defaults to
+                 ``datetime.now(timezone.utc)`` when ``None``.
+        """
         return sorted(
-            (e for e in self._scan() if e.stale),
+            (e for e in self._scan(now=now) if e.stale),
             key=lambda e: e.age_days,
             reverse=True,
         )
 
-    def list_all(self) -> List[KBEntryAge]:
-        """Return every entry (fresh + stale), sorted oldest-first."""
+    def list_all(self, now: datetime | None = None) -> List[KBEntryAge]:
+        """Return every entry (fresh + stale), sorted oldest-first.
+
+        Args:
+            now: Reference timestamp for age computation.  Defaults to
+                 ``datetime.now(timezone.utc)`` when ``None``.
+        """
         return sorted(
-            self._scan(),
+            self._scan(now=now),
             key=lambda e: e.age_days,
             reverse=True,
         )
@@ -163,12 +181,18 @@ class KBFreshnessAuditor:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _scan(self) -> List[KBEntryAge]:
-        """Collect :class:`KBEntryAge` records for every KB file found."""
+    def _scan(self, now: datetime | None = None) -> List[KBEntryAge]:
+        """Collect :class:`KBEntryAge` records for every KB file found.
+
+        Args:
+            now: Reference timestamp used as "current time".  Defaults to
+                 ``datetime.now(timezone.utc)`` when ``None``.
+        """
         if not self._kb_dir.exists():
             return []
 
-        now = datetime.now(timezone.utc)
+        if now is None:
+            now = datetime.now(timezone.utc)
         results: List[KBEntryAge] = []
 
         for pattern in self._EXTENSIONS:
