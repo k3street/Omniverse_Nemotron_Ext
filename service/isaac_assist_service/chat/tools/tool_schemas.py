@@ -339,14 +339,13 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_physics_params",
-            "description": "Configure scene-level physics parameters (gravity, timestep, solver iterations).",
+            "description": "Configure scene-level physics parameters (gravity direction/magnitude, timestep).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "gravity_direction": {"type": "array", "items": {"type": "number"}, "description": "[x, y, z]"},
                     "gravity_magnitude": {"type": "number"},
                     "time_step": {"type": "number", "description": "Physics timestep in seconds"},
-                    "solver_iterations": {"type": "integer"},
                 },
             },
         },
