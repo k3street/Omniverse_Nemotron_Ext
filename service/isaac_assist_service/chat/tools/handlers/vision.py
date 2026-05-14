@@ -700,6 +700,16 @@ else:
 
 
 async def _handle_inspect_camera(args: Dict) -> Dict:
+    """Execute an inspect_camera query against a camera prim via Kit RPC.
+
+    Args:
+        args: Dict containing:
+            - camera_path (str): USD path to the camera prim.
+
+    Returns:
+        Dict with focal_length, horizontal_aperture, clipping_range and other
+        camera attributes as reported by the Kit-side inspector.
+    """
     from .. import kit_tools
     from .sensors import _gen_inspect_camera
     camera_path = args["camera_path"]

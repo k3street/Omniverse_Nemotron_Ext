@@ -31,6 +31,16 @@ _POST_PROCESS_PATHS = {
 
 
 def _gen_set_light_intensity(args: Dict) -> str:
+    """Generate code to set inputs:intensity on a light prim.
+
+    Args:
+        args: Dict containing:
+            - light_path (str): USD path to the light prim.
+            - intensity (float): New intensity value (clamped to >= 0).
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     light_path = args["light_path"]
     intensity = float(args["intensity"])
     if intensity < 0:
@@ -50,6 +60,16 @@ def _gen_set_light_intensity(args: Dict) -> str:
     )
 
 def _gen_set_light_color(args: Dict) -> str:
+    """Generate code to set inputs:color on a light prim.
+
+    Args:
+        args: Dict containing:
+            - light_path (str): USD path to the light prim.
+            - rgb (list): [r, g, b] colour components (0–1 range, clamped to >= 0).
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     light_path = args["light_path"]
     rgb = args["rgb"]
     if not isinstance(rgb, (list, tuple)) or len(rgb) != 3:
@@ -70,6 +90,17 @@ def _gen_set_light_color(args: Dict) -> str:
     )
 
 def _gen_create_hdri_skydome(args: Dict) -> str:
+    """Generate code to define or replace a UsdLux.DomeLight with an HDRI texture.
+
+    Args:
+        args: Dict containing:
+            - hdri_path (str): Asset path to the .hdr or .exr texture.
+            - dome_path (str, optional): USD path for the dome prim (default /Environment/DomeLight).
+            - intensity (float, optional): Light intensity (default 1000, clamped to >= 0).
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     hdri_path = args["hdri_path"]
     dome_path = args.get("dome_path", "/Environment/DomeLight")
     intensity = float(args.get("intensity", 1000.0))
@@ -163,6 +194,17 @@ print(json.dumps({{
 """
 
 def _gen_set_render_config(args: Dict) -> str:
+    """Generate code to configure the active render mode and quality settings.
+
+    Args:
+        args: Dict containing:
+            - renderer (str): Render mode — PathTracing | RaytracedLighting | RealTime.
+            - samples_per_pixel (int, optional): Path-tracer spp.
+            - max_bounces (int, optional): Maximum ray bounce depth.
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     renderer = args["renderer"]
     spp = args.get("samples_per_pixel")
     max_bounces = args.get("max_bounces")
@@ -209,6 +251,16 @@ def _gen_set_render_config(args: Dict) -> str:
     return "\n".join(lines)
 
 def _gen_set_render_resolution(args: Dict) -> str:
+    """Generate code to set the active viewport render resolution.
+
+    Args:
+        args: Dict containing:
+            - width (int): Viewport width in pixels.
+            - height (int): Viewport height in pixels.
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     width = int(args["width"])
     height = int(args["height"])
     return (
@@ -221,6 +273,19 @@ def _gen_set_render_resolution(args: Dict) -> str:
     )
 
 def _gen_enable_post_process(args: Dict) -> str:
+    """Generate code to enable or disable a post-process effect with optional parameters.
+
+    Supported effects: bloom, tonemap, dof, motion_blur.
+
+    Args:
+        args: Dict containing:
+            - effect (str): Effect name.
+            - enabled (bool, optional): True to enable, False to disable (default True).
+            - params (dict, optional): Effect-specific parameter overrides.
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     effect = args["effect"]
     params = args.get("params", {}) or {}
     enabled = args.get("enabled", True)
@@ -280,6 +345,20 @@ def _gen_enable_post_process(args: Dict) -> str:
     return "\n".join(lines)
 
 def _gen_set_environment_background(args: Dict) -> str:
+    """Generate code to set the scene background to an HDRI texture or solid colour.
+
+    When both hdri_path and color are supplied, the HDRI takes precedence.
+
+    Args:
+        args: Dict containing:
+            - hdri_path (str, optional): Asset path to .hdr/.exr texture.
+            - color (list, optional): [r, g, b] solid background colour (0–1).
+            - intensity (float, optional): Dome light intensity (default 1000).
+            - rotation_deg (float, optional): Dome rotation in degrees (default 0).
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     hdri_path = args.get("hdri_path")
     color = args.get("color")
     intensity = args.get("intensity", 1000.0)

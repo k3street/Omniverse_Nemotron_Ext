@@ -292,6 +292,7 @@ def _probe_gpu_capability():
     return out
 
 def _probe_scipy():
+    """Probe scipy availability and return version metadata."""
     try:
         import scipy.interpolate  # noqa: F401
         import scipy
@@ -462,6 +463,7 @@ async def _get_viewport_bytes() -> tuple:
     return base64.b64decode(b64), "image/png"
 
 def _get_vision_provider():
+    """Return the singleton GeminiVisionProvider instance."""
     from ..vision_gemini import GeminiVisionProvider
     return GeminiVisionProvider()
 
@@ -482,6 +484,7 @@ def _check_real_data_path(path: str) -> Optional[str]:
     return None
 
 def _wf_now_iso() -> str:
+    """Return the current UTC timestamp as an ISO-8601 string with trailing Z."""
     return _wf_dt.now(_wf_tz.utc).isoformat() + "Z"
 
 def _resolve_run_id(run_id: Optional[str]) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:

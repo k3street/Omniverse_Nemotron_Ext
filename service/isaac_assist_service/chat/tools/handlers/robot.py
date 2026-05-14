@@ -6039,6 +6039,7 @@ async def _handle_validate_assembly_constraint(args: Dict) -> Dict[str, Any]:
     )
 
     def _make_target(raw: Dict) -> ConstraintTarget:
+        """Build a ConstraintTarget from a raw args dict, defaulting offset to origin."""
         offset = raw.get("offset_m") or (0.0, 0.0, 0.0)
         return ConstraintTarget(
             prim_path=str(raw.get("prim_path", "")),

@@ -489,6 +489,19 @@ _VRAM_PER_ENV_MB = {
 
 
 def _gen_debug_draw(args: Dict) -> str:
+    """Generate code to draw debug primitives (points, lines, spheres) in the viewport.
+
+    Args:
+        args: Dict containing:
+            - draw_type (str): 'points', 'lines', or 'spheres'.
+            - points (list): Point coordinates [[x,y,z], ...].
+            - color (list, optional): RGBA colour (default [1,0,0,1]).
+            - size (float, optional): Point/sphere size (default 5).
+            - lifetime (float, optional): Seconds before auto-clear; 0 = persistent.
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     draw_type = args["draw_type"]
     points = args["points"]
     color = args.get("color", [1, 0, 0, 1])
@@ -1854,6 +1867,17 @@ print(f'[visualize_forces] drew arrows for {{ART_PATH}} at scale={{SCALE}} (upda
 
 
 def _gen_highlight_prim(args: Dict) -> str:
+    """Generate code to draw a bounding-box wireframe around a prim for a short duration.
+
+    Args:
+        args: Dict containing:
+            - prim_path (str): USD path to highlight.
+            - color (list, optional): [r, g, b] outline colour (default yellow [1,1,0]).
+            - duration (float, optional): Seconds before the outline clears (default 2.0).
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     prim_path = args["prim_path"]
     color = args.get("color", [1.0, 1.0, 0.0])
     duration = float(args.get("duration", 2.0))
@@ -1923,6 +1947,16 @@ else:
 
 
 def _gen_sim_control(args: Dict) -> str:
+    """Generate code to control simulation playback (play/pause/stop/step/reset).
+
+    Args:
+        args: Dict containing:
+            - action (str): One of play | pause | stop | step | reset.
+            - step_count (int, optional): Number of frames to advance when action='step'.
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     action = args["action"]
     if action == "play":
         return "import omni.timeline\nomni.timeline.get_timeline_interface().play()"
@@ -2074,6 +2108,15 @@ print(json.dumps({{'prim_scope': '{prim_scope}', 'prim_count': count, 'truncated
 
 
 def _gen_enable_extension(args: Dict) -> str:
+    """Generate code to enable a Kit extension by ID with post-enable verification.
+
+    Args:
+        args: Dict containing:
+            - ext_id (str): Kit extension identifier (e.g. 'isaacsim.robot.policy.franka').
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     ext_id = args["ext_id"]
     # set_extension_enabled_immediate returns False for unknown ext ids
     # (and the try/except used to swallow the signal). Post-check
@@ -3171,6 +3214,17 @@ print(json.dumps(result, default=str))
 
 
 async def _handle_get_console_errors(args: Dict) -> Dict:
+    """Return recent Kit console log entries at or above a minimum severity level.
+
+    Args:
+        args: Dict containing:
+            - min_level (str, optional): Minimum severity to include —
+              verbose | info | warning | error | fatal (default 'warning').
+            - last_n (int, optional): Maximum entries to return (default 50).
+
+    Returns:
+        Dict with keys errors (list) and total_count (int).
+    """
     from .. import kit_tools  # noqa: PLC0415
     ctx = await kit_tools.get_stage_context(full=False)
     logs = ctx.get("recent_logs", [])
@@ -3303,6 +3357,19 @@ async def _handle_hardware_compatibility_check(args: Dict) -> Dict:
 
 
 async def _handle_measure_distance(args: Dict) -> Dict:
+    """Measure the world-space distance between two prims via Kit RPC.
+
+    Raises RuntimeError (surfaced in the result) when either prim path is
+    invalid rather than silently returning 0.0.
+
+    Args:
+        args: Dict containing:
+            - prim_a (str): USD path to the first prim.
+            - prim_b (str): USD path to the second prim.
+
+    Returns:
+        Dict with keys distance_m (float), prim_a, prim_b (or error string).
+    """
     prim_a = args["prim_a"]
     prim_b = args["prim_b"]
     # UsdGeom.Xformable(invalid_prim).ComputeLocalToWorldTransform(0) silently

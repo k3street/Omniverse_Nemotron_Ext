@@ -144,11 +144,29 @@ class StageWriteLockQueue:
     """Minimal serialized queue — mirrors the spec's StageWriteLock pattern."""
 
     def __init__(self) -> None:
+        """Initialise the queue with an empty pending list and an asyncio lock."""
         self._lock = _asyncio.Lock()
         self._pending: list = []
         self._counter = 0
 
     async def submit(self, code: str, description: str, priority: int) -> Dict[str, Any]:
+        """Queue a patch for Kit execution and return queue metadata.
+
+        The patch is inserted into the priority-sorted pending list while the
+        lock is held, then forwarded to kit_tools.queue_exec_patch.  The entry
+        is removed from the pending list once execution completes.
+
+        Args:
+            code: Python source to execute inside Kit.
+            description: Human-readable label for audit and tracing.
+            priority: Higher values run first (sort key = -priority).
+
+        Returns:
+            Dict with keys:
+                - queued (bool): Whether Kit accepted the patch.
+                - priority (int): The priority passed in.
+                - queue_depth (int): Snapshot of queue length at submit time.
+        """
         from .. import kit_tools  # noqa: PLC0415
         self._counter += 1
         patch = LockedPatch(
@@ -174,6 +192,7 @@ class StageWriteLockQueue:
         }
 
     def pending(self) -> int:
+        """Return the number of patches currently in the queue."""
         return len(self._pending)
 
 

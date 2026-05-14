@@ -109,6 +109,7 @@ def _parse_unified_diff_to_changes(raw_diff_lines: List[str]) -> List[Dict]:
     removed_lines: List[str] = []
 
     def _flush_pending():
+        """Pair pending added/removed lines into 'modified' change records."""
         nonlocal added_lines, removed_lines
         if not current_prim:
             added_lines.clear()
@@ -3355,6 +3356,17 @@ print(json.dumps(result, indent=2, default=str))
 
 
 def _gen_activate_area(args: Dict) -> str:
+    """Generate code to activate a prim scope and optionally deactivate its siblings.
+
+    Args:
+        args: Dict containing:
+            - prim_scope (str): USD path of the scope to activate.
+            - deactivate_siblings_only (bool, optional): When True, only prims
+              outside this scope at the same level are deactivated (default True).
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     scope = args["prim_scope"]
     sibling_only = bool(args.get("deactivate_siblings_only", True))
     return f"""\

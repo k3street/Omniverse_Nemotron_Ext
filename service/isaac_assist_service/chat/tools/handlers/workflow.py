@@ -612,6 +612,7 @@ async def _handle_start_workflow(args: Dict) -> Dict:
 
     from datetime import datetime as _wf_dt, timezone as _wf_tz  # noqa: PLC0415
     def _wf_now_iso() -> str:
+        """Return current UTC time as ISO-8601 string with trailing Z."""
         return _wf_dt.now(_wf_tz.utc).isoformat() + "Z"
 
     workflow = {
@@ -663,6 +664,7 @@ async def _handle_edit_workflow_plan(args: Dict) -> Dict:
     from .. import tool_executor as _te  # noqa: PLC0415
     from datetime import datetime as _wf_dt, timezone as _wf_tz  # noqa: PLC0415
     def _wf_now_iso() -> str:
+        """Return current UTC time as ISO-8601 string with trailing Z."""
         return _wf_dt.now(_wf_tz.utc).isoformat() + "Z"
 
     wf_id = args.get("workflow_id")
@@ -717,6 +719,7 @@ async def _handle_approve_workflow_checkpoint(args: Dict) -> Dict:
     from .. import tool_executor as _te  # noqa: PLC0415
     from datetime import datetime as _wf_dt, timezone as _wf_tz  # noqa: PLC0415
     def _wf_now_iso() -> str:
+        """Return current UTC time as ISO-8601 string with trailing Z."""
         return _wf_dt.now(_wf_tz.utc).isoformat() + "Z"
 
     wf_id = args.get("workflow_id")
@@ -805,6 +808,7 @@ async def _handle_cancel_workflow(args: Dict) -> Dict:
     from .. import tool_executor as _te  # noqa: PLC0415
     from datetime import datetime as _wf_dt, timezone as _wf_tz  # noqa: PLC0415
     def _wf_now_iso() -> str:
+        """Return current UTC time as ISO-8601 string with trailing Z."""
         return _wf_dt.now(_wf_tz.utc).isoformat() + "Z"
 
     wf_id = args.get("workflow_id")

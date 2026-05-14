@@ -97,12 +97,14 @@ _PHYSX_HULL_MAX_VERTS = 64     # GPU PhysX vertex limit per hull
 
 @functools.lru_cache(maxsize=1)
 def _load_deformable_presets() -> Dict:
+    """Load deformable material presets from the JSON data file (cached)."""
     if _DEFORMABLE_PRESETS_PATH.exists():
         return json.loads(_DEFORMABLE_PRESETS_PATH.read_text())
     return {"presets": {}}
 
 @functools.lru_cache(maxsize=1)
 def _load_physics_materials() -> Dict:
+    """Load physics material database from the JSON data file (cached)."""
     if _PHYSICS_MATERIALS_PATH.exists():
         return json.loads(_PHYSICS_MATERIALS_PATH.read_text())
     return {"materials": {}, "pairs": {}, "aliases": {}}
@@ -134,6 +136,17 @@ def _normalize_material_name(name: str) -> str:
 
 
 def _gen_set_physics_params(args: Dict) -> str:
+    """Generate code to configure the PhysicsScene gravity and time-step settings.
+
+    Args:
+        args: Dict containing any of:
+            - gravity_direction (list): [x, y, z] unit vector.
+            - gravity_magnitude (float): Gravity in m/s².
+            - time_step (float): Physics step size in seconds.
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     lines = [
         "import omni.usd",
         "from pxr import UsdPhysics, Gf",
@@ -156,6 +169,18 @@ def _gen_set_physics_params(args: Dict) -> str:
 
 
 def _gen_set_joint_targets(args: Dict) -> str:
+    """Generate code to set position or velocity targets on an articulation joint.
+
+    Args:
+        args: Dict containing:
+            - articulation_path (str): USD path to the articulation root.
+            - joint_name (str, optional): Joint child prim name.
+            - target_position (float, optional): Drive target position.
+            - target_velocity (float, optional): Drive target velocity.
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     art_path = args["articulation_path"]
     joint = args.get("joint_name", "")
     pos = args.get("target_position")
@@ -180,6 +205,18 @@ def _gen_set_joint_targets(args: Dict) -> str:
 
 
 def _gen_set_drive_gains(args: Dict) -> str:
+    """Generate code to apply DriveAPI and set stiffness (kp) and damping (kd) gains.
+
+    Args:
+        args: Dict containing:
+            - joint_path (str): USD path to the joint prim.
+            - kp (float): Position (stiffness) gain.
+            - kd (float): Velocity (damping) gain.
+            - drive_type (str, optional): 'angular' or 'linear' (default 'angular').
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     joint_path = args["joint_path"]
     kp = args["kp"]
     kd = args["kd"]
@@ -564,6 +601,17 @@ def _gen_deformable(args: Dict) -> str:
 
 
 def _gen_deformable_body(prim_path: str, params: Dict, density: float) -> str:
+    """Generate code to apply PhysxDeformableBodyAPI to a mesh prim.
+
+    Args:
+        prim_path: USD path to the target prim.
+        params: Material parameters (youngs_modulus, poissons_ratio, damping,
+            self_collision, solver_position_iteration_count, vertex_velocity_damping).
+        density: Material density in kg/m³.
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     ym = params.get("youngs_modulus", 10000)
     pr = params.get("poissons_ratio", 0.3)
     damp = params.get("damping", 0.01)
@@ -639,6 +687,17 @@ UsdShade.MaterialBindingAPI(prim).Bind(
 
 
 def _gen_deformable_surface(prim_path: str, params: Dict, density: float) -> str:
+    """Generate code to apply PhysxDeformableSurfaceAPI (cloth) to a mesh prim.
+
+    Args:
+        prim_path: USD path to the target prim.
+        params: Cloth parameters (stretch_stiffness, bend_stiffness, damping,
+            self_collision, self_collision_filter_distance).
+        density: Material density in kg/m³.
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     ss = params.get("stretch_stiffness", 10000)
     bs = params.get("bend_stiffness", 0.02)
     damp = params.get("damping", 0.005)
@@ -710,6 +769,17 @@ UsdShade.MaterialBindingAPI(prim).Bind(
 
 
 def _gen_configure_self_collision(args: Dict) -> str:
+    """Generate code to configure PhysX self-collision on an articulation.
+
+    Args:
+        args: Dict containing:
+            - articulation_path (str): USD path to the articulation root.
+            - mode (str): 'enable' or 'disable'.
+            - filtered_pairs (list, optional): Pairs of link paths to exclude from collision.
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     art_path = args["articulation_path"]
     mode = args["mode"]
     filtered_pairs = args.get("filtered_pairs", [])
@@ -1346,6 +1416,15 @@ def _gen_compute_convex_hull(args: Dict) -> str:
 
 
 async def _handle_get_articulation_state(args: Dict) -> Dict:
+    """Return the articulation's joint list via Kit RPC execution.
+
+    Args:
+        args: Dict containing:
+            - prim_path (str): USD path to the articulation root.
+
+    Returns:
+        Dict with keys articulation_path and joints (list of {name, path}).
+    """
     from .. import kit_tools
     prim_path = args["prim_path"]
     code = f"""\
@@ -1391,6 +1470,16 @@ async def _handle_get_physics_errors(args: Dict) -> Dict:
 
 
 async def _handle_get_joint_limits(args: Dict) -> Dict:
+    """Return lower/upper limits for a named joint via Kit RPC.
+
+    Args:
+        args: Dict containing:
+            - articulation (str): USD path to the articulation root.
+            - joint_name (str): Name of the joint child prim.
+
+    Returns:
+        Dict with keys articulation, joint_name, joint_path, lower, upper (or error).
+    """
     from .. import kit_tools
     articulation = args["articulation"]
     joint_name = args["joint_name"]
@@ -1428,6 +1517,18 @@ print(json.dumps(result, default=str))
 
 
 async def _handle_get_contact_report(args: Dict) -> Dict:
+    """Return recent contact events for a prim from the global contact buffer.
+
+    Requires PhysxContactReportAPI to have been applied beforehand.
+
+    Args:
+        args: Dict containing:
+            - prim_path (str): USD path of the prim to query.
+            - max_contacts (int, optional): Maximum entries to return (default 50).
+
+    Returns:
+        Dict with keys prim_path, contact_count, contacts, buffer_initialized.
+    """
     from .. import kit_tools
     prim_path = args["prim_path"]
     max_contacts = int(args.get("max_contacts", 50))
