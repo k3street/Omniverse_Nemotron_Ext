@@ -14,6 +14,29 @@ from __future__ import annotations
 from typing import Any, Callable, Dict
 
 # ---------------------------------------------------------------------------
+# Module-level named constants (extracted 2026-05-14, refactor/magic-1)
+
+# RmpFlow integration constants
+_RMPFLOW_MAX_SUBSTEP_S: float = 0.016   # RmpFlow maximum substep size, seconds (~62.5 Hz integration cap)
+_PHYSICS_DT_DEFAULT_S: float = 1.0 / 60.0  # default physics timestep, seconds (60 Hz)
+
+# Franka gripper geometry
+_FRANKA_PALM_TO_FINGERTIP_M: float = 0.105  # distance from panda_hand palm frame to fingertip ends, meters;
+                                              # EE target is set to cube_center + this offset so fingertips
+                                              # wrap the cube (observed 2026-04-19: lower value collides belt)
+_FRANKA_FINGER_OPEN_M: float = 0.04         # finger joint position for fully open gripper, meters
+
+# Orientation constraint threshold
+_UPRIGHT_DOT_THRESHOLD_DEFAULT: float = 0.85  # minimum dot(ee_z, world_z) for "upright" cuRobo grasp filter
+
+# Friction material physics properties
+_GRIP_FRICTION_STATIC: float = 1.5    # static friction coefficient for FrictionGripMaterial
+_GRIP_FRICTION_DYNAMIC: float = 1.2   # dynamic friction coefficient for FrictionGripMaterial
+
+# Minimum belt velocity magnitude treated as "moving" (below this → belt is stopped)
+_BELT_MOVING_THRESHOLD: float = 1e-6  # m/s; sum(|v_i|) below this treats belt as stationary
+
+# ---------------------------------------------------------------------------
 # Phase 14 + 16 (2026-05-13): migrated from tool_executor.py.
 
 _PP_CTRL_ATTRS = [
@@ -271,7 +294,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
     ee_link = args.get("end_effector_link", "panda_hand")
     fj1 = args.get("gripper_joint_1", "panda_finger_joint1")
     fj2 = args.get("gripper_joint_2", "panda_finger_joint2")
-    open_val = float(args.get("gripper_open", 0.04))
+    open_val = float(args.get("gripper_open", _FRANKA_FINGER_OPEN_M))
     close_val = float(args.get("gripper_close", 0.0))
     approach_h = float(args.get("approach_height", 0.12))
     lift_h = float(args.get("lift_height", 0.20))
@@ -321,7 +344,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             gripper_rotation=args.get("gripper_rotation"),
             robot_family=args.get("robot_family", "franka"),
             require_upright=bool(args.get("require_upright", False)),
-            upright_dot_threshold=float(args.get("upright_dot_threshold", 0.85)),
+            upright_dot_threshold=float(args.get("upright_dot_threshold", _UPRIGHT_DOT_THRESHOLD_DEFAULT)),
             mutex_path=args.get("mutex_path"),
             scenario_profile=args.get("scenario_profile"),
         )
@@ -470,9 +493,9 @@ rmpflow = RmpFlow(
     urdf_path=cfg["urdf"],
     rmpflow_config_path=cfg["rmpflow"],
     end_effector_frame_name=EE_LINK,
-    maximum_substep_size=0.016,
+    maximum_substep_size={_RMPFLOW_MAX_SUBSTEP_S},
 )
-amp = ArticulationMotionPolicy(franka, rmpflow, default_physics_dt=1.0/60.0)
+amp = ArticulationMotionPolicy(franka, rmpflow, default_physics_dt={_PHYSICS_DT_DEFAULT_S})
 
 # Gripper fingers are NOT articulated by rmpflow — apply direct position
 # targets for open/close. RmpFlow only drives the 7 arm joints.
@@ -577,11 +600,11 @@ def _advance(dt):
             if cube is None:
                 S["remaining"].pop(0); S["phase"] = "next"; return
             # panda_hand (the EE frame) is the gripper palm; fingertips
-            # extend ~0.105m below. Target the palm at cube_top + 0.105m
+            # extend ~{_FRANKA_PALM_TO_FINGERTIP_M}m below. Target the palm at cube_top + {_FRANKA_PALM_TO_FINGERTIP_M}m
             # so the fingertips wrap the cube. Previously we targeted
             # cube + 0.015m which put the fingertips 9cm inside the belt,
             # and RmpFlow refused to penetrate the collision.
-            tgt = cube + np.array([0, 0, 0.105])
+            tgt = cube + np.array([0, 0, {_FRANKA_PALM_TO_FINGERTIP_M}])
             S["current_target"] = tgt
             _set_target(tgt)
             S["phase"] = "descend"
@@ -596,14 +619,14 @@ def _advance(dt):
     elif phase == "grasp":
         if now - S["phase_enter_t"] > 0.4:  # brief pause for gripper to close
             # Contact gate: verify EE (panda_hand palm) is at the descend
-            # target (cube + 0.105m so fingertips wrap the cube). Checking
+            # target (cube + {_FRANKA_PALM_TO_FINGERTIP_M}m so fingertips wrap the cube). Checking
             # against cube center directly would always fail since palm-to-
-            # cube-center is ~0.105m by design. Observed 2026-04-19: without
+            # cube-center is ~{_FRANKA_PALM_TO_FINGERTIP_M}m by design. Observed 2026-04-19: without
             # this gate, FixedJoint.Apply preserves a 0.5m offset when
             # descend times out.
             ee = _ee_pos_np()
             cube = _bbox_center_np(S["current_cube"])
-            target_pos = cube + np.array([0, 0, 0.105]) if cube is not None else None
+            target_pos = cube + np.array([0, 0, {_FRANKA_PALM_TO_FINGERTIP_M}]) if cube is not None else None
             _grip_ok = (ee is not None and target_pos is not None
                         and float(np.linalg.norm(ee - target_pos)) <= 0.06)
             if not _grip_ok:
@@ -1006,7 +1029,7 @@ _belt_prim = stage.GetPrimAtPath(BELT_PATH) if BELT_PATH else None
 _belt_sv = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocity") if (_belt_prim and _belt_prim.IsValid()) else None
 _belt_en = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocityEnabled") if (_belt_prim and _belt_prim.IsValid()) else None
 _captured_belt = tuple(_belt_sv.Get()) if (_belt_sv and _belt_sv.IsDefined() and _belt_sv.Get()) else None
-_nominal_belt = _captured_belt if (_captured_belt and sum(abs(v) for v in _captured_belt) > 1e-6) else (0.2, 0.0, 0.0)
+_nominal_belt = _captured_belt if (_captured_belt and sum(abs(v) for v in _captured_belt) > {_BELT_MOVING_THRESHOLD}) else (0.2, 0.0, 0.0)
 
 # BELT-PAUSE-FROM-CALLBACK FIX (2026-05-08):
 # Direct USD writes from inside _on_step (subscribed to physics_step_events)
@@ -1629,8 +1652,8 @@ GRIPPER_CLOSE = {close_val}
 stage = omni.usd.get_context().get_stage()
 world = World.instance() or World()
 
-# Canonical Franka ready pose — 9 DOFs (7 arm + 2 fingers at 0.04 open).
-_FRANKA_READY = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.04, 0.04])
+# Canonical Franka ready pose — 9 DOFs (7 arm + 2 fingers at {_FRANKA_FINGER_OPEN_M}m open).
+_FRANKA_READY = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, {_FRANKA_FINGER_OPEN_M}, {_FRANKA_FINGER_OPEN_M}])
 
 franka = SingleArticulation(ROBOT_PATH, name="franka_pp_sg")
 try:
@@ -1760,7 +1783,7 @@ if _USE_COORDS:
         urdf_path=cfg["urdf"],
         rmpflow_config_path=cfg["rmpflow"],
         end_effector_frame_name=EE_LINK,
-        maximum_substep_size=0.016,
+        maximum_substep_size={_RMPFLOW_MAX_SUBSTEP_S},
     )
 
     # CRITICAL: tell RmpFlow where the robot base is in world. Without
@@ -1790,7 +1813,7 @@ if _USE_COORDS:
     except Exception as _e:
         print(f"(set_cspace_target skipped: {{_e}})")
 
-    amp = ArticulationMotionPolicy(franka, rmpflow, default_physics_dt=1.0/60.0)
+    amp = ArticulationMotionPolicy(franka, rmpflow, default_physics_dt={_PHYSICS_DT_DEFAULT_S})
     _TARGETS = {{"pick": PICK_TARGET, "drop": DROP_TARGET, "home": HOME_TARGET}}
 
     def _ee_pos_np():
@@ -1887,8 +1910,8 @@ if GRIP_STYLE == "friction" and SOURCE_PATHS:
         UsdShade.Material.Define(stage, _mat_path)
         _mat_prim = stage.GetPrimAtPath(_mat_path)
     _pmat = _UP.MaterialAPI.Apply(_mat_prim)
-    _pmat.CreateStaticFrictionAttr().Set(1.5)
-    _pmat.CreateDynamicFrictionAttr().Set(1.2)
+    _pmat.CreateStaticFrictionAttr().Set({_GRIP_FRICTION_STATIC})
+    _pmat.CreateDynamicFrictionAttr().Set({_GRIP_FRICTION_DYNAMIC})
     _pmat.CreateRestitutionAttr().Set(0.0)
     # Apply material to source cubes + gripper fingers via relationship
     _attach_paths = list(SOURCE_PATHS) + [
