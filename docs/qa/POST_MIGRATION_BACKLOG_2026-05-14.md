@@ -78,20 +78,22 @@ individual handlers for hygiene. This backlog catches up.
 - DOCS-2d (`5605ce1` → `e5e3a6b`, 8 commits): 27 across sensors/vision/sdg/ros2/workflow/teleop/robot residual/scene_blueprints. compliance.py needed no work.
 - Estimated coverage after Wave 3b: ~207/419 GOOD (~49%, up from 45/419 = 11% after Wave 2). Remaining backlog lives in non-handler modules (multimodal/, planner/, finetune/, etc.) — defer to Wave 4 if needed.
 
-## Wave 3d — follow-ups surfaced during 3a
+## Wave 3c — landed — `5caca5e`
+- `yard_map.pgm`/`yard_map.yaml` deleted (empty 0x0 stubs from default `export_nav2_map` output) + added to .gitignore.
+- 2 research docs (composition-research-report, specs-2-3-4-review) committed.
 
-### EUREKA-1: Dead read on EUREKA.runs
-- **Source**: CONC-3 agent
-- **Fix**: Either delete `_handle_eureka_status` reader + EUREKA singleton + scaffolding tests (coordinated), or wire production writes when Phase 64 lands.
-- **STATUS**: pending (coordinated decision)
+## Wave 3d — landed (Phase 64) — `10b0a55`
+- EUREKA-1 chose wire-up over delete since spec Phase 64 explicitly schedules writers.
+- `_handle_generate_reward` seeds `EUREKA.runs[run_id]` with status="initialized", iteration counters.
+- `_handle_iterate_reward` accepts optional `run_id`, increments + tracks best fitness + auto-completes.
+- `eureka_state_persisted.py` PHASE_STATUS: scaffold → landed.
+- 8 new tests; baseline 6543 → 6550.
 
-## Wave 3c — user-decision
-
-### YARD-MAP cleanup
-- **Source**: untracked files in working tree
-- **Files**: `yard_map.pgm`, `yard_map.yaml`, `docs/research/2026-05-11-composition-research-report.md`, `docs/research/2026-05-13-specs-2-3-4-review.md`
-- **Action**: triage — commit / gitignore / delete
-- **STATUS**: pending (user decision)
+## Wave 4 — landed — `0e2c50b`
+- DOCS-3a (multimodal/): 12 batched commits + 1 recovery commit after 600s stall (in-progress edits quality-verified before commit).
+- DOCS-3b (planner/+finetune/): 41 docstrings, 10 commits `f0079a2..c7feacf`.
+- DOCS-3c (analysis/knowledge/chat/governance/snapshots/fingerprint/etc): 6 commits `cc1bebf..7f343dd`.
+- Zero Section 19 honesty holes detected in planner/finetune sweep.
 
 ---
 
@@ -101,5 +103,7 @@ individual handlers for hygiene. This backlog catches up.
 - Post-Wave-1: 6529 pass, 0 fail (silent-success was additive, no behavior change)
 - Post-Wave-2: 6540 pass, 0 fail (+11 from CONC-1's `tests/test_concurrency_locks.py`)
 - Post-Wave-3a: 6543 pass, 0 fail (+1 CONC-2b T11, +2 KB-1 boundary; CONC-2 also recovered ~3 previously-broken tests via fixture cleanup)
-- Post-Wave-3b: **6543 pass, 0 fail** (docstring-only, no test changes)
-- Branch tip after Wave 3b: `e5e3a6b`
+- Post-Wave-3b: 6543 pass, 0 fail (docstring-only, no test changes)
+- Post-Wave-3d (Phase 64): 6550 pass, 0 fail (+7 Eureka writer tests)
+- Post-Wave-4 (DOCS-3): **6550 pass, 0 fail** (docstring-only)
+- Branch tip after Wave 4: `0e2c50b`
