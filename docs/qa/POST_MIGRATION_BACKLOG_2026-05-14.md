@@ -69,12 +69,14 @@ individual handlers for hygiene. This backlog catches up.
 - 23 constants extracted: sensors.py (9), scene_authoring.py (6), scene_blueprints.py (6), pick_place.py (8).
 - Examples: `_FRANKA_PALM_TO_FINGERTIP_M`, `_GRAVITY_MS2`, `_RMPFLOW_MAX_SUBSTEP_S`, `_CAM_APERTURE_MM`.
 
-## Wave 3b — pending
+## Wave 3b — landed (2026-05-14 ~14:30–16:30 CEST)
 
-### DOCS-2: Remaining THIN/MISSING (~300 funcs after Wave 2/3a)
-- Modules: `pick_place.py` (11 THIN), `training.py` (41 THIN), `scene_authoring.py` (78 MISSING+THIN), `diagnostics.py:_handle_simulate_traversal_check` (1 PARTIAL).
-- Approach: split into 3-4 parallel agents per module.
-- **STATUS**: pending
+### DOCS-2: 162 docstrings across 12 commits — done
+- DOCS-2a (`be5b9d4`, `46b8184`): 13 in pick_place + diagnostics. Bonus: orphaned dead-statement docstring in `_gen_pick_place_curobo` merged.
+- DOCS-2b (`5a79974`): 44 in training.py — file now 51/51 GOOD.
+- DOCS-2c (`2dfbd86`): 78 in scene_authoring.py.
+- DOCS-2d (`5605ce1` → `e5e3a6b`, 8 commits): 27 across sensors/vision/sdg/ros2/workflow/teleop/robot residual/scene_blueprints. compliance.py needed no work.
+- Estimated coverage after Wave 3b: ~207/419 GOOD (~49%, up from 45/419 = 11% after Wave 2). Remaining backlog lives in non-handler modules (multimodal/, planner/, finetune/, etc.) — defer to Wave 4 if needed.
 
 ## Wave 3d — follow-ups surfaced during 3a
 
@@ -98,5 +100,6 @@ individual handlers for hygiene. This backlog catches up.
 - Pre-Wave-1 baseline: 6529 pass, 0 fail
 - Post-Wave-1: 6529 pass, 0 fail (silent-success was additive, no behavior change)
 - Post-Wave-2: 6540 pass, 0 fail (+11 from CONC-1's `tests/test_concurrency_locks.py`)
-- Post-Wave-3a: **6543 pass, 0 fail** (+1 CONC-2b T11, +2 KB-1 boundary; CONC-2 also recovered ~3 previously-broken tests via fixture cleanup)
-- Branch tip after Wave 3a: `aa5dda0`
+- Post-Wave-3a: 6543 pass, 0 fail (+1 CONC-2b T11, +2 KB-1 boundary; CONC-2 also recovered ~3 previously-broken tests via fixture cleanup)
+- Post-Wave-3b: **6543 pass, 0 fail** (docstring-only, no test changes)
+- Branch tip after Wave 3b: `e5e3a6b`
