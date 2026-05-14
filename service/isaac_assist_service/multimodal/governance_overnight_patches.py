@@ -60,6 +60,17 @@ class OvernightPatchPolicy:
         self,
         business_hours_local: tuple[int, int] = (8, 18),
     ) -> None:
+        """Configure the overnight-patch policy with local business hours.
+
+        Args:
+            business_hours_local (tuple[int, int], optional): Start and end hour
+                (24-h clock, local time, end exclusive), e.g. ``(8, 18)`` covers
+                08:00–17:59. Defaults to ``(8, 18)``.
+
+        Raises:
+            ValueError: If the tuple does not have exactly 2 elements, or if
+                ``start >= end`` or values are outside [0, 24].
+        """
         if len(business_hours_local) != 2:
             raise ValueError("business_hours_local must be a 2-tuple (start, end)")
         start, end = business_hours_local
@@ -191,6 +202,12 @@ class PolicyAuditLog:
     """
 
     def __init__(self, log_path: Path) -> None:
+        """Initialise the audit log, creating the parent directory if needed.
+
+        Args:
+            log_path (Path): Path to the ``.ndjson`` audit file; parent dirs
+                are created automatically.
+        """
         self._log_path = Path(log_path)
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
         # In-memory list mirrors what was appended this session.

@@ -29,6 +29,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
+    """Return phase identification and status for Phase 98.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -109,6 +114,12 @@ class MarkdownPolisher:
     """
 
     def __init__(self, max_line_length: int = 100) -> None:
+        """Initialise the polisher with a configurable line-length threshold.
+
+        Args:
+            max_line_length (int, optional): Lines longer than this are flagged
+                ``long_line`` (code-fence blocks excluded). Defaults to 100.
+        """
         self.max_line_length = max_line_length
 
     # ------------------------------------------------------------------
