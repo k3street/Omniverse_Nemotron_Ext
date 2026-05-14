@@ -279,6 +279,19 @@ _DR_RANGE_HINTS = {
 }
 
 def _suggested_dr_ranges(parameters: List[str]) -> Dict[str, str]:
+    """Return human-readable DR range hints for a list of physics parameter names.
+
+    Filters ``_DR_RANGE_HINTS`` to only the requested parameters, silently
+    dropping any name that has no hint entry.
+
+    Args:
+        parameters (List[str]): Physics parameter names to look up (e.g.
+            ``["mass", "friction"]``).
+
+    Returns:
+        Dict[str, str]: Mapping of parameter name → range hint string for
+            each name that exists in ``_DR_RANGE_HINTS``.
+    """
     return {p: _DR_RANGE_HINTS[p] for p in parameters if p in _DR_RANGE_HINTS}
 
 # ---------------------------------------------------------------------------
@@ -495,6 +508,27 @@ _WHOLE_BODY_PROFILES = {
 
 
 def _gen_anchor_robot(args: Dict) -> str:
+    """Generate Python that anchors a robot articulation to the world or a surface prim.
+
+    Applies ``ArticulationRootAPI`` to the robot root and, when
+    ``anchor_surface_path`` is provided, creates a ``FixedJoint`` between the
+    robot's base link and the target surface so the robot cannot slide or tip
+    during simulation.
+
+    Args:
+        args: Tool arguments dict containing:
+            - robot_path (str): USD prim path to the robot articulation root.
+            - anchor_surface_path (str, optional): USD prim path of the surface
+              to fix the robot to. If omitted, the robot is fixed to the world
+              frame via its ArticulationRootAPI alone.
+            - base_link_name (str, optional): Name of the base link to use as
+              the joint body. Defaults to ``"panda_link0"``.
+            - position (list[float], optional): ``[x, y, z]`` world position
+              for the anchor joint's local offset. Defaults to no offset.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     robot_path = args["robot_path"]
     anchor_surface = args.get("anchor_surface_path", "")
     base_link = args.get("base_link_name", "panda_link0")
@@ -1179,6 +1213,25 @@ print(f"Set Kp={kp}, Kd={kd} on {{joint_count}} drives")
 
 
 def _gen_assemble_robot(args: Dict) -> str:
+    """Generate Phase 70 / 5.x-compliant code to assemble two robot parts with a fixed joint.
+
+    Uses ``AssemblySpec`` + ``assemble()`` to validate the assembly plan and
+    emit ``RobotAssembler``-compatible code. Falls back to a demo three-link arm
+    when ``base_path`` or ``attachment_path`` is not provided.
+
+    Args:
+        args: Tool arguments dict containing:
+            - base_path (str, optional): USD prim path to the base robot.
+            - attachment_path (str, optional): USD prim path to the part to
+              attach (e.g. a gripper).
+            - base_mount (str, optional): Mount point name on the base.
+              Defaults to ``"flange"``.
+            - attach_mount (str, optional): Mount point name on the attachment.
+              Defaults to ``"base"``.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     from service.isaac_assist_service.multimodal.assemble_robot import (
         AssemblySpec,
         RobotPart,
@@ -1346,6 +1399,30 @@ print("Use SurfaceGripper.inputs:close to activate suction")
 
 
 def _gen_create_wheeled_robot(args: Dict) -> str:
+    """Generate Python that creates a wheeled robot controller via IsaacSim's WheeledRobot API.
+
+    Selects ``DifferentialController``, ``AckermannController``, or
+    ``HolonomicController`` based on ``drive_type``, and emits a ``drive()``
+    helper that clamps to the requested speed limits.
+
+    Args:
+        args: Tool arguments dict containing:
+            - robot_path (str): USD prim path where the robot is (or will be)
+              located.
+            - drive_type (str): Locomotion model — one of ``"differential"``,
+              ``"ackermann"``, or ``"holonomic"``.
+            - wheel_radius (float): Wheel radius in metres.
+            - wheel_base (float): Distance between wheel centres in metres.
+            - wheel_dof_names (list[str], optional): Explicit DOF names; if
+              omitted the controller uses its defaults.
+            - max_linear_speed (float, optional): Linear speed clamp in m/s.
+              Defaults to ``1.0``.
+            - max_angular_speed (float, optional): Angular speed clamp in
+              rad/s. Defaults to ``3.14``.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     robot_path = args["robot_path"]
     drive_type = args["drive_type"]
     wheel_radius = args["wheel_radius"]
@@ -1659,6 +1736,24 @@ print(json.dumps({{
 
 
 def _gen_create_conveyor_track(args: Dict) -> str:
+    """Generate Python that lays a multi-segment conveyor track along a polyline path.
+
+    Each consecutive waypoint pair becomes a scaled Cube segment rotated to
+    align with the segment direction. A PhysX surface-velocity drive is applied
+    to each segment so objects placed on the track are propelled at ``speed``.
+
+    Args:
+        args: Tool arguments dict containing:
+            - waypoints (list[list[float]]): Ordered list of ``[x, y]`` (or
+              ``[x, y, z]``) world-space anchor points for the track centre.
+            - belt_width (float, optional): Belt width in metres. Defaults to
+              ``0.5``.
+            - speed (float, optional): Surface velocity in m/s along the
+              track direction. Defaults to ``0.5``.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     waypoints = args["waypoints"]
     belt_width = args.get("belt_width", 0.5)
     speed = args.get("speed", 0.5)
@@ -1838,6 +1933,22 @@ print(json.dumps({{
 
 
 def _gen_publish_robot_description(args: Dict) -> str:
+    """Generate Python that publishes a simplified URDF of an articulation to a ROS2 topic.
+
+    Traverses the USD articulation to build a minimal URDF string (links +
+    joints) and latches it onto the requested topic with a transient-local
+    QoS profile so late-subscribing nodes (e.g. ``robot_state_publisher``)
+    receive the description.
+
+    Args:
+        args: Tool arguments dict containing:
+            - articulation_path (str): USD prim path to the articulation root.
+            - topic (str, optional): ROS2 topic name. Defaults to
+              ``"/robot_description"``.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     art_path = args["articulation_path"]
     topic = args.get("topic", "/robot_description")
     return f'''\
@@ -2070,6 +2181,26 @@ def _gen_move_to_pose(args: Dict) -> str:
 
 
 def _gen_plan_trajectory(args: Dict) -> str:
+    """Generate Python that plans a task-space trajectory through Cartesian waypoints.
+
+    Uses ``LulaTaskSpaceTrajectoryGenerator`` (IsaacSim 5.x motion generation)
+    to compute a smooth joint trajectory through the requested end-effector
+    positions and optional orientations. Raises ``RuntimeError`` if the planner
+    returns ``None`` (unreachable pose, singularity, or model mismatch).
+
+    Args:
+        args: Tool arguments dict containing:
+            - articulation_path (str): USD prim path to the robot articulation.
+            - waypoints (list[dict]): Ordered list of waypoints. Each dict
+              must contain ``"position"`` (3-element list, world-space XYZ)
+              and may optionally contain ``"orientation"`` (4-element
+              quaternion ``[w, x, y, z]`` or ``None``).
+            - robot_type (str, optional): Robot model identifier for loading
+              the Lula config (e.g. ``"franka"``). Defaults to ``"franka"``.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     art_path = args["articulation_path"]
     waypoints = args["waypoints"]
     robot_type = args.get("robot_type", "franka").lower()
@@ -3215,6 +3346,26 @@ def _gen_setup_multi_rate(args: Dict) -> str:
 
 
 def _gen_record_trajectory(args: Dict) -> str:
+    """Generate Python that samples joint state from an articulation and saves it as .npz.
+
+    Subscribes a physics-step callback that records joint positions, velocities,
+    and applied forces at the requested sample rate. Automatically unsubscribes
+    and writes the output file when the elapsed simulation time reaches
+    ``duration``. Raises ``RuntimeError`` if no Revolute/Prismatic joints are
+    found under the articulation path.
+
+    Args:
+        args: Tool arguments dict containing:
+            - articulation (str): USD prim path to the articulation root.
+            - duration (float): Recording duration in simulation seconds.
+            - output_path (str, optional): Output ``.npz`` file path.
+              Defaults to ``"workspace/trajectories/trajectory.npz"``.
+            - rate_hz (float, optional): Sample rate in Hz. Defaults to
+              ``60.0``.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     articulation = args["articulation"]
     duration = float(args["duration"])
     output_path = args.get("output_path")
@@ -3643,6 +3794,22 @@ else:
 
 
 def _gen_generate_occupancy_map(args: Dict) -> str:
+    """Generate Python that builds a 2-D occupancy grid of the scene via IsaacSim MapGenerator.
+
+    Args:
+        args: Tool arguments dict containing:
+            - origin (list[float], optional): ``[x, y]`` world origin for the
+              map. Defaults to ``[0, 0]``.
+            - dimensions (list[float], optional): ``[width, height]`` extent
+              in metres. Defaults to ``[10, 10]``.
+            - resolution (float, optional): Cell size in metres. Defaults to
+              ``0.05``.
+            - height_range (list[float], optional): ``[min_z, max_z]`` range
+              of obstacles to include. Defaults to ``[0, 2]``.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     origin = args.get("origin", [0, 0])
     dimensions = args.get("dimensions", [10, 10])
     resolution = args.get("resolution", 0.05)
