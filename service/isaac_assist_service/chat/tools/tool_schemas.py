@@ -3315,11 +3315,13 @@ ISAAC_SIM_TOOLS = [
                 },
             },
         },
+    # DEPRECATED: configure_camera — superseded by set_camera_params (more complete, nested params dict).
+    # Handler kept for back-compat; do not add new features here.
     {
             "type": "function",
             "function": {
                 "name": "configure_camera",
-                "description": "Set camera properties on a USD camera prim: focal length, aperture, clipping range, focus distance.",
+                "description": "[DEPRECATED — use set_camera_params instead] Set camera properties on a USD camera prim: focal length, aperture, clipping range, focus distance.",
                 "parameters": {
                     "type": "object",
                     "properties": {
