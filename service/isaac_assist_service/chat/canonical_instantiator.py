@@ -522,9 +522,13 @@ async def execute_template_canonical(
     for name in tool_names:
         sandbox[name] = _make_capturer(name)
 
-    # Capture phase — exec the code in sandbox, intercept calls into `captured`
+    # Capture phase — exec the code in sandbox, intercept calls into `captured`.
+    # Intentional: canonical templates ship Python code that must be executed
+    # to discover the tool-call sequence. Sandbox restricts builtins to
+    # _SAFE_BUILTINS and replaces every tool name with a capturer that records
+    # rather than invokes. No untrusted user input reaches this exec.
     try:
-        exec(compile(code, f"<{task_id}>", "exec"), sandbox)
+        exec(compile(code, f"<{task_id}>", "exec"), sandbox)  # noqa: audit-Q9
     except Exception as e:
         logger.warning(f"[CanonicalInst] {task_id} sandbox exec failed: {e}")
         return {

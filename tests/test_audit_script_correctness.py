@@ -272,6 +272,44 @@ def test_q12_blocking_io_negative(audit_module):
 # Q14 Schema drift — binding-pattern recognition
 # ---------------------------------------------------------------------------
 
+def test_noqa_suppresses_all_check_types(audit_module):
+    """`# noqa: audit-QX` on a line must suppress check QX for that line.
+
+    The noqa fixture mirrors the positive fixtures but with suppression
+    comments — audit must produce zero hits in it across Q3, Q9, Q10, Q12.
+    """
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+    audit_module._NOQA_CACHE.clear()  # cache busts since SERVICE_ROOT changed
+
+    # Q3 — utcnow
+    utcnow_hits = [
+        h for h in audit_module.check_no_utcnow()
+        if "noqa_suppression" in h["file"]
+    ]
+    assert utcnow_hits == [], f"Q3 should respect noqa, got {utcnow_hits}"
+
+    # Q9 — eval/exec
+    eval_hits = [
+        h for h in audit_module.check_no_eval_exec()
+        if "noqa_suppression" in h["file"]
+    ]
+    assert eval_hits == [], f"Q9 should respect noqa, got {eval_hits}"
+
+    # Q10 — shell=True
+    shell_hits = [
+        h for h in audit_module.check_no_shell_true()
+        if "noqa_suppression" in h["file"]
+    ]
+    assert shell_hits == [], f"Q10 should respect noqa, got {shell_hits}"
+
+    # Q12 — blocking I/O
+    block_hits = [
+        h for h in audit_module.check_no_blocking_io_in_async()
+        if "noqa_suppression" in h["file"]
+    ]
+    assert block_hits == [], f"Q12 should respect noqa, got {block_hits}"
+
+
 def test_q14_binding_pattern_recognition():
     """The Q14 audit must recognise all 6 binding patterns.
 

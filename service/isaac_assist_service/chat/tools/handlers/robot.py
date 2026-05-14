@@ -37,6 +37,7 @@ Real data:    {real_data_path}
 Parameters:   {parameters}
 """
 from __future__ import annotations
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -5128,9 +5129,8 @@ async def _handle_setup_isaac_ros_cumotion_moveit(args: Dict[str, Any]) -> Dict[
         f"    request_adapters: ''\n"
     )
     try:
-        os.makedirs(output_dir, exist_ok=True)
-        with open(yaml_path, "w") as f:
-            f.write(yaml)
+        await asyncio.to_thread(os.makedirs, output_dir, exist_ok=True)
+        await asyncio.to_thread(Path(yaml_path).write_text, yaml)
     except Exception as e:
         return {"error": f"yaml_write_failed: {type(e).__name__}: {e}"}
 

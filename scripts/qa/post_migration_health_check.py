@@ -57,6 +57,49 @@ def rel(path: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
+# noqa suppression — `# noqa: audit-QX` on the same line skips that line
+# from the named check. Supports comma-separated multi-check suppression
+# e.g. `# noqa: audit-Q9, audit-Q12`.
+# ---------------------------------------------------------------------------
+
+_NOQA_RE = re.compile(r"#\s*noqa:\s*([\w\-,\s]+)", re.IGNORECASE)
+
+
+def _read_noqa_index(path: Path) -> Dict[int, set]:
+    """Map line-number -> set of check IDs suppressed on that line."""
+    index: Dict[int, set] = {}
+    try:
+        for i, line in enumerate(path.read_text().splitlines(), start=1):
+            m = _NOQA_RE.search(line)
+            if not m:
+                continue
+            ids = {s.strip().lower() for s in m.group(1).split(",")}
+            # Accept "audit-Q9" / "Q9" / "audit-q9" — normalise to lowercase
+            normalised = set()
+            for x in ids:
+                if x.startswith("audit-"):
+                    normalised.add(x[len("audit-"):])
+                else:
+                    normalised.add(x)
+            index[i] = normalised
+    except (UnicodeDecodeError, FileNotFoundError):
+        pass
+    return index
+
+
+# Per-process cache keyed by Path so repeated checks share the work
+_NOQA_CACHE: Dict[Path, Dict[int, set]] = {}
+
+
+def is_suppressed(path: Path, lineno: int, check_id: str) -> bool:
+    """True iff `# noqa: audit-<check_id>` appears on `lineno` in `path`."""
+    if path not in _NOQA_CACHE:
+        _NOQA_CACHE[path] = _read_noqa_index(path)
+    line_ids = _NOQA_CACHE[path].get(lineno, set())
+    return check_id.lower() in line_ids
+
+
+# ---------------------------------------------------------------------------
 # Q3: datetime.utcnow() — Y, cheap
 # ---------------------------------------------------------------------------
 
@@ -73,6 +116,7 @@ def check_no_utcnow() -> List[Dict]:
                 and node.func.attr == "utcnow"
                 and isinstance(node.func.value, ast.Name)
                 and node.func.value.id == "datetime"
+                and not is_suppressed(path, node.lineno, "Q3")
             ):
                 hits.append({"file": rel(path), "line": node.lineno})
     return hits
@@ -104,6 +148,7 @@ def check_no_get_event_loop() -> List[Dict]:
                 and isinstance(node.func.value, ast.Name)
                 and node.func.value.id == "asyncio"
                 and node.lineno not in whitelist_lines
+                and not is_suppressed(path, node.lineno, "Q4")
             ):
                 hits.append({"file": rel(path), "line": node.lineno})
     return hits
@@ -124,6 +169,7 @@ def check_no_eval_exec() -> List[Dict]:
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)
                 and node.func.id in {"eval", "exec"}
+                and not is_suppressed(path, node.lineno, "Q9")
             ):
                 hits.append({
                     "file": rel(path),
@@ -150,6 +196,7 @@ def check_no_shell_true() -> List[Dict]:
                         kw.arg == "shell"
                         and isinstance(kw.value, ast.Constant)
                         and kw.value.value is True
+                        and not is_suppressed(path, node.lineno, "Q10")
                     ):
                         hits.append({"file": rel(path), "line": node.lineno})
     return hits
@@ -248,6 +295,7 @@ def check_no_blocking_io_in_async() -> List[Dict]:
                 if (
                     isinstance(node.func, ast.Name)
                     and node.func.id in BLOCKING_FUNCS
+                    and not is_suppressed(path, node.lineno, "Q12")
                 ):
                     hits.append({
                         "file": rel(path),
@@ -259,7 +307,9 @@ def check_no_blocking_io_in_async() -> List[Dict]:
                     node.func.value, ast.Name
                 ):
                     key = (node.func.value.id, node.func.attr)
-                    if key in BLOCKING_ATTRS:
+                    if key in BLOCKING_ATTRS and not is_suppressed(
+                        path, node.lineno, "Q12"
+                    ):
                         hits.append({
                             "file": rel(path),
                             "line": node.lineno,

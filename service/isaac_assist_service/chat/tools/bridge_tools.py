@@ -360,11 +360,12 @@ async def _handle_modbus_tcp_bridge_detach(args: Dict[str, Any]) -> Dict[str, An
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         return {"already_dead": True, "pid": pid}
-    # Wait up to 5s
+    # Wait up to 5s for the SIGTERM to take effect. Use asyncio.sleep so
+    # the event loop isn't blocked while other handlers run.
     for _ in range(50):
         try:
             os.kill(pid, 0)
-            time.sleep(0.1)
+            await asyncio.sleep(0.1)
         except ProcessLookupError:
             return {"ok": True, "pid": pid, "method": "SIGTERM"}
     # Force-kill
