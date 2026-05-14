@@ -560,7 +560,7 @@ def _gen_export_template(args: Dict) -> str:
 
     """
     # Phase 8 wave 7 — _TEMPLATE_EXPORT_DIR migrated to module body.
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt, timezone as _tz
     name = args["name"]
     safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in name)
     description = args.get("description", "")
@@ -569,7 +569,7 @@ def _gen_export_template(args: Dict) -> str:
     min_vram_gb = args.get("min_vram_gb")
     recommended_vram_gb = args.get("recommended_vram_gb")
     tags = args.get("tags", []) or []
-    timestamp = _dt.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    timestamp = _dt.now(_tz.utc).strftime("%Y%m%dT%H%M%SZ")
 
     # Build the manifest dict literal we want serialized inside Kit.
     manifest = {
