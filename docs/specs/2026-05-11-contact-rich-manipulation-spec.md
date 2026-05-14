@@ -747,7 +747,7 @@ the small `opus-judgment` / `opus-runtime` subset.**
 - **LOC**: ~100
 - **Blocked-by**: Phase 80b (LANDED), Phase 19 (LANDED)
 - **Verify**: `python -c "import service.isaac_assist_service.chat.tools.tool_executor as te; print('bridge imports ok')"`. Manual: extension loads cleanly in dry-run.
-- **STATUS**: pending
+- **STATUS**: done — d6baf6f
 
 #### CRM-A2 — setup_admittance_controller tool (sonnet-bounded)
 - **Files**: `service/isaac_assist_service/chat/tools/compliance_handlers.py` (NEW), `service/isaac_assist_service/chat/tools/tool_schemas.py` (extend), `tests/test_compliance_handlers.py` (NEW)
