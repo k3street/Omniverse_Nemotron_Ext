@@ -20,7 +20,11 @@ logger = logging.getLogger(__name__)
 
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits."""
+    """Return phase identification and status for Phase 86.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -44,6 +48,7 @@ class SettingsRegistry:
     """Registry that holds and validates all runtime settings."""
 
     def __init__(self) -> None:
+        """Initialise the registry with empty settings and values dicts."""
         self._settings: Dict[str, Setting] = {}
         self._values: Dict[str, Any] = {}
 
@@ -63,7 +68,11 @@ class SettingsRegistry:
     # ------------------------------------------------------------------
 
     def list_all(self) -> List[Dict[str, Any]]:
-        """Return all settings as a list of dicts."""
+        """Return all registered settings as a list of dicts.
+
+        Each dict has keys ``name``, ``type``, ``current_value``, ``default``,
+        and ``description``.
+        """
         return [
             {
                 "name": s.name,

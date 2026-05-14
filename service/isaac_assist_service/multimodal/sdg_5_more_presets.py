@@ -68,6 +68,11 @@ FIVE_MORE_PRESETS: Dict[str, Dict[str, Any]] = {
 
 
 def get_phase_metadata() -> Dict[str, Any]:
+    """Return phase identification and status for Phase 60.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID, "title": PHASE_TITLE, "status": PHASE_STATUS,
         "spec_ref": "specs/IA_FULL_SPEC_2026-05-10.md Phase 60",
@@ -75,8 +80,10 @@ def get_phase_metadata() -> Dict[str, Any]:
 
 
 def list_presets() -> list:
+    """Return the list of available Phase 60 preset names."""
     return list(FIVE_MORE_PRESETS.keys())
 
 
 def get_preset(name: str) -> Dict[str, Any]:
+    """Return the preset dict for *name*, or an empty dict if not found."""
     return FIVE_MORE_PRESETS.get(name, {})

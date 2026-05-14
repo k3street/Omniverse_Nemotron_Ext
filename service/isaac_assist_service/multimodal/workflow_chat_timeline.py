@@ -25,6 +25,11 @@ def render_timeline_for_chat(workflow_record: Dict[str, Any]) -> List[Dict[str, 
 
 
 def _actions_for_event(event: Dict[str, Any]) -> List[str]:
+    """Return the list of chat action buttons appropriate for *event*.
+
+    Approval-transition events surface ``["approve", "reject", "revise"]``;
+    all other events return an empty list.
+    """
     et = event.get("event_type", "")
     if "awaiting_approval" in et:
         return ["approve", "reject", "revise"]

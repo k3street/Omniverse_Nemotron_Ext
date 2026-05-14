@@ -44,7 +44,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits."""
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -133,11 +137,11 @@ class VisionProvider(Protocol):
     """Protocol that every vision provider must satisfy."""
 
     def analyze_scene(self, req: VisionRequest) -> VisionResponse:
-        """Analyse the overall scene composition."""
+        """Analyse the overall scene composition and describe object placement."""
         ...
 
     def detect_objects(self, req: VisionRequest) -> VisionResponse:
-        """Detect and classify objects in the image."""
+        """Detect and classify all distinct object classes in the image."""
         ...
 
     def bounding_boxes(self, req: VisionRequest) -> VisionResponse:
@@ -180,6 +184,15 @@ class GeminiVisionProvider:
         timeout_s: float = 30.0,
         max_retries: int = 3,
     ) -> None:
+        """Initialise the provider.
+
+        Args:
+            api_key (str, optional): Gemini API key. Falls back to the
+                ``GEMINI_API_KEY`` environment variable at call time.
+            model (str): Gemini model identifier.
+            timeout_s (float): Per-request HTTP timeout in seconds.
+            max_retries (int): Number of retry attempts on transient errors.
+        """
         self.api_key = api_key
         self.model = model
         self.timeout_s = timeout_s
@@ -257,6 +270,7 @@ class MockVisionProvider:
     """
 
     def analyze_scene(self, req: VisionRequest) -> VisionResponse:  # noqa: ARG002
+        """Return a mock scene-analysis response with a static description string."""
         return VisionResponse(
             task="scene_analyze",
             text="Mock scene: 3 cubes on table",
@@ -264,6 +278,7 @@ class MockVisionProvider:
         )
 
     def detect_objects(self, req: VisionRequest) -> VisionResponse:  # noqa: ARG002
+        """Return mock detected objects with pre-seeded bounding boxes."""
         return VisionResponse(
             task="detect_objects",
             text="cube, table",
@@ -272,6 +287,7 @@ class MockVisionProvider:
         )
 
     def bounding_boxes(self, req: VisionRequest) -> VisionResponse:  # noqa: ARG002
+        """Return mock normalised bounding boxes for the pre-seeded object list."""
         return VisionResponse(
             task="bounding_boxes",
             bounding_boxes=list(_MOCK_BOXES),
@@ -279,6 +295,7 @@ class MockVisionProvider:
         )
 
     def plan_trajectory(self, req: VisionRequest) -> VisionResponse:  # noqa: ARG002
+        """Return a mock trajectory response with three hard-coded waypoints."""
         return VisionResponse(
             task="plan_trajectory",
             text="waypoints: [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]]",

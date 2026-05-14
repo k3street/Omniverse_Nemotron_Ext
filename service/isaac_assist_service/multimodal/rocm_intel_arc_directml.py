@@ -29,10 +29,10 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits.
+    """Return phase identification and status for this phase.
 
-    Canonical module is `gpu_vendor_detection`; this file is a re-export
-    shim retained for the original spec path.
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
     """
     return {
         "phase": PHASE_ID,

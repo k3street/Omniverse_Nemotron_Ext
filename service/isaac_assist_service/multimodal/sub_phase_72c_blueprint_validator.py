@@ -43,6 +43,11 @@ _REQUIRED_FIELDS = ("name", "objects", "physics_settings")
 
 
 def get_phase_metadata() -> Dict[str, Any]:
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,

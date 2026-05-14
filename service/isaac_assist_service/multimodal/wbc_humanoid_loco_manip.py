@@ -300,7 +300,11 @@ class WBCRewardCalculator:
 # ---------------------------------------------------------------------------
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits."""
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": 79,
         "title": "Whole-body control: humanoid loco-manipulation",
