@@ -241,7 +241,7 @@ class KitRPCServer:
             _SYNC_EXEC_QUEUE.put((code, result_holder))
 
             # Wait on a thread so we don't block the aiohttp event loop
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             completed = await loop.run_in_executor(
                 None, lambda: result_holder["event"].wait(timeout=timeout)
             )
