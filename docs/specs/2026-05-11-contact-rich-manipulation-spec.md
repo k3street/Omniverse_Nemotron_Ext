@@ -781,7 +781,7 @@ the small `opus-judgment` / `opus-runtime` subset.**
 - **LOC**: ~80
 - **Blocked-by**: CRM-A2 (uses same state dict)
 - **Verify**: `pytest tests/test_compliance_handlers.py::TestParamMutation` ≥5 tests
-- **STATUS**: done — pending-commit
+- **STATUS**: done — d936040
 
 #### CRM-B3 — release_compliance cleanup (sonnet-mechanical)
 - **Files**: `compliance_handlers.py` (extend), test file (extend)
