@@ -1,3 +1,9 @@
+"""Document indexer — splits raw text into FTS5 chunks.
+
+MVP chunking strategy: split on double newlines (paragraph boundaries).
+Chunks shorter than 50 characters are dropped as noise. Headings starting
+with ``#`` are extracted and used as the ``section_path`` label.
+"""
 import logging
 from typing import List
 from .storage.fts_store import FTSStore
@@ -5,7 +11,10 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
+
 class DocumentIndexer:
+    """Splits a raw document into paragraph chunks and writes them to FTSStore."""
+
     def __init__(self):
         self.store = FTSStore()
 

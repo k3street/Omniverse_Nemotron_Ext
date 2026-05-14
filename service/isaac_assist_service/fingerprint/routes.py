@@ -1,3 +1,9 @@
+"""Fingerprint API routes — cached hardware snapshot and compatibility verdict.
+
+Fingerprint collection runs a set of shell probes (nvidia-smi, nvcc) and is
+cached with a 5-minute TTL to avoid hammering the OS on every request.
+The ``POST /collect`` endpoint forces an immediate re-scan.
+"""
 import asyncio
 import time
 from fastapi import APIRouter
@@ -36,6 +42,11 @@ async def force_refresh_fingerprint():
 
 @router.get("/resolve")
 async def get_resolution():
+    """Return the cached hardware compatibility verdict, refreshing if expired.
+
+    Returns:
+        dict: Compatibility verdict as returned by ``resolve_compatibility()``.
+    """
     global _cached_fingerprint, _cached_resolution, _cache_timestamp
     async with _cache_lock:
         now = time.monotonic()

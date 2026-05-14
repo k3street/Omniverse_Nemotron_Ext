@@ -1,11 +1,22 @@
+"""Source registry — maps doc-domain IDs to crawl targets.
+
+MVP: sources are hardcoded.  A future migration will load them from a
+JSONL config file so operators can add custom sources without code changes.
+"""
 import json
 import logging
 from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
+
 class SourceRegistry:
-    """ Manages the mapping of domains to crawl. MVP: Hardcoded defaults. """
+    """In-memory registry of enabled documentation sources.
+
+    Provides a single ``get_sources()`` method that returns only enabled
+    entries; callers do not need to filter themselves.
+    """
+
     def __init__(self):
         self.sources = [
             {
@@ -29,4 +40,9 @@ class SourceRegistry:
         ]
 
     def get_sources(self) -> List[Dict]:
+        """Return all sources whose ``enabled`` flag is True.
+
+        Returns:
+            list[dict]: Enabled source entries in insertion order.
+        """
         return [s for s in self.sources if s["enabled"]]
