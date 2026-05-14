@@ -87,6 +87,19 @@ contact = ContactSensor(prim_path='{prim_path}/ContactSensor')
 
 
 def _gen_inspect_camera(args: Dict) -> str:
+    """Generate Python that reads and prints a camera prim's optical parameters as JSON.
+
+    Validates that the prim exists and is a UsdGeom.Camera before reading
+    attributes; guards against silent null-returns from invalid prims in some
+    USD builds.
+
+    Args:
+        args: Tool arguments dict containing:
+            - camera_path (str): USD prim path to the camera (e.g. ``/World/Camera``).
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     camera_path = args["camera_path"]
     # UsdGeom.Camera(invalid_prim).GetFocalLengthAttr().Get() returns None
     # silently in some USD builds — JSON printed with every field=null but
@@ -120,6 +133,24 @@ print(json.dumps(result))
 """
 
 def _gen_configure_camera(args: Dict) -> str:
+    """Generate Python that sets any subset of UsdGeom.Camera optical attributes.
+
+    Emits one ``.Set()`` call per provided argument key. Keys not present in
+    ``args`` are silently skipped, so the caller may supply any combination of
+    supported fields.
+
+    Args:
+        args: Tool arguments dict containing:
+            - camera_path (str): USD prim path to the target Camera.
+            - focal_length (float, optional): Lens focal length in mm.
+            - horizontal_aperture (float, optional): Sensor horizontal width in mm.
+            - vertical_aperture (float, optional): Sensor vertical height in mm.
+            - clipping_range (list[float], optional): ``[near, far]`` clip distances.
+            - focus_distance (float, optional): Focus distance in scene units.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     camera_path = args["camera_path"]
     lines = [
         "import omni.usd",
