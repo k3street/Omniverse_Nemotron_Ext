@@ -44,7 +44,15 @@ _ISAAC_SIM_PARENT_DIRS = [
 
 
 def find_isaac_sim() -> Path | None:
-    """Return path to Isaac Sim installation root, or None."""
+    """Locate the Isaac Sim installation root directory.
+
+    First checks the direct candidate paths (``_ISAAC_SIM_DIRECT``), then walks
+    versioned subdirectories under ``_ISAAC_SIM_PARENT_DIRS``. A directory is
+    considered valid when it contains ``python.sh`` or ``kit/python.sh``.
+
+    Returns:
+        Path: Resolved installation root, or None if Isaac Sim is not found.
+    """
     # 1. Check direct paths first
     for candidate in _ISAAC_SIM_DIRECT:
         if candidate.exists() and (candidate / "python.sh").exists():
@@ -147,6 +155,7 @@ class SimResult:
 
     @property
     def passed(self) -> bool:
+        """True when the subprocess exited cleanly with no errors or crash signals."""
         return (
             not self.timed_out
             and self.returncode == 0
@@ -158,6 +167,7 @@ class SimResult:
 
     @property
     def summary(self) -> str:
+        """Return a one-line description of the most prominent failure, or "OK"."""
         if self.timed_out:
             return "TIMEOUT"
         if self.has_segfault:
@@ -183,7 +193,12 @@ class SimResult:
         return "OK"
 
     def as_log_block(self) -> str:
-        """Full log block for agent feedback."""
+        """Format stdout, stderr, and antipatterns as a multi-section log block for agent feedback.
+
+        Returns:
+            str: Sections separated by "--- HEADER ---" dividers, suitable for
+            pasting directly into a Coder repair prompt.
+        """
         parts = [
             f"=== Execution Mode: {self.execution_mode} | "
             f"Return: {self.returncode} | Duration: {self.duration_s:.2f}s ===",
@@ -202,7 +217,15 @@ class SimResult:
 # ── Code analysis helpers ─────────────────────────────────────────────────────
 
 def detect_requirements(code: str) -> set[str]:
-    """Detect what simulator libraries the code needs."""
+    """Detect which simulator library groups the code requires via import pattern matching.
+
+    Args:
+        code (str): Python source code to analyse.
+
+    Returns:
+        set[str]: Subset of {"usd", "omniverse", "isaac_sim", "isaac_lab",
+        "cadquery", "freecad"} indicating detected dependencies.
+    """
     needs: set[str] = set()
     if re.search(r"\bfrom\s+pxr\b|import\s+pxr\b|from\s+pxr\.", code):
         needs.add("usd")
@@ -220,7 +243,16 @@ def detect_requirements(code: str) -> set[str]:
 
 
 def extract_code_blocks(text: str) -> list[str]:
-    """Extract fenced Python code blocks from markdown text."""
+    """Extract fenced Python code blocks from markdown text.
+
+    Tries ```python and ```py fences first, then falls back to bare ``` fences.
+
+    Args:
+        text (str): Markdown-formatted text from an LLM response.
+
+    Returns:
+        list[str]: Stripped code block strings, in document order.
+    """
     blocks = re.findall(r"```(?:python|py)?\n(.*?)```", text, re.DOTALL)
     if not blocks:
         blocks = re.findall(r"```\n(.*?)```", text, re.DOTALL)
@@ -228,7 +260,15 @@ def extract_code_blocks(text: str) -> list[str]:
 
 
 def validate_syntax(code: str) -> tuple[bool, str]:
-    """Returns (is_valid, error_message)."""
+    """Parse code and report syntax validity.
+
+    Args:
+        code (str): Python source code to check.
+
+    Returns:
+        tuple[bool, str]: ``(True, "")`` when valid; ``(False, error_message)``
+        on SyntaxError where ``error_message`` includes line number and description.
+    """
     try:
         ast.parse(code)
         return True, ""
@@ -237,7 +277,18 @@ def validate_syntax(code: str) -> tuple[bool, str]:
 
 
 def check_antipatterns(code: str) -> dict[str, str]:
-    """Scan code for Isaac Sim antipatterns. Returns {name: description}."""
+    """Scan code for known Isaac Sim crash-inducing antipatterns.
+
+    Checks against the ``ANTIPATTERNS`` registry: nested_rigid_body, missing_apply,
+    bad_joint_path, and hardcoded_env_path.
+
+    Args:
+        code (str): Python source code to scan.
+
+    Returns:
+        dict[str, str]: Mapping of ``{antipattern_name: human_readable_description}``
+        for each pattern found. Empty dict means code is clean.
+    """
     found: dict[str, str] = {}
     for name, (pattern, description) in ANTIPATTERNS.items():
         if pattern.search(code):
@@ -422,10 +473,16 @@ def run_all_blocks(
     mode: str = "auto",
     timeout: int = 45,
 ) -> list[tuple[str, SimResult]]:
-    """
-    Extract all code blocks from markdown text and run each one.
+    """Extract all fenced code blocks from markdown text and run each in a subprocess.
 
-    Returns a list of (code, SimResult) pairs.
+    Args:
+        text (str): Markdown text containing one or more fenced code blocks.
+        mode (str, optional): Execution mode forwarded to ``run_code``. Defaults to "auto".
+        timeout (int, optional): Per-block subprocess timeout in seconds. Defaults to 45.
+
+    Returns:
+        list[tuple[str, SimResult]]: Ordered list of ``(code_str, SimResult)`` pairs,
+        one entry per extracted block. Returns an empty list if no blocks are found.
     """
     blocks = extract_code_blocks(text)
     if not blocks:
