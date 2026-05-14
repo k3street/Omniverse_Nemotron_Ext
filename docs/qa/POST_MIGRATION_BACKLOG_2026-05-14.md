@@ -44,45 +44,50 @@ individual handlers for hygiene. This backlog catches up.
 - GOOD count: 35 → 45 of 419
 - Note: 6 `robot.py` docstrings landed via DEPR-1's commit `54aa246` due to file overlap — DOCS-1 commits then no-op'd for those 6
 
-## Wave 3 — deferred / low-priority
+## Wave 3a — landed (2026-05-14 ~13:00–14:30 CEST)
 
-### DEPR-2: Extra utcnow() sites (out-of-scope from Wave 2)
-- **Source**: DEPR-1 agent surfaced during sweep
-- **Sites**: 8 in `workflow.py`, `_shared.py`, 2 more in `scene_blueprints.py`
+### DEPR-2: 8 extra utcnow() sites — done — `b6e4b3a`, `c4bd52b`, `67ed62f`
+- _shared.py (1), workflow.py (4), scene_blueprints.py (3). All passed `-W error::DeprecationWarning`.
+
+### CONC-2b: multimodal/routes.py workflow RMW — done — `a091ae9`
+- `_forward_workflow_approve`/`reject` wrapped with `_wf_lock_for(wf)`. T11 test in `test_concurrency_locks.py` proves serialization via SleepingLock+Barrier.
+
+### CONC-2: lazy-load lru_cache wrap — done — `531d9c0`
+- 6 funcs wrapped: `_load_deformable_presets`, `_load_physics_materials`, `_load_catalog`, `_load_specs`, `_load_sensor_specs`, `_build_asset_index`.
+- Excluded `_load` in `deprecations_index.py` (side-effect loader, not return-value cache).
+- Test fixes: monkeypatch direct + `cache_clear()` in fixtures.
+
+### CONC-3: dead singleton delete — verified-no-op
+- All 5 candidates (WORKFLOWS/EUREKA/TRAINING/DR/BRIDGES) have writes in `tests/test_handlers_shared_state.py`. Per "if any write exists, leave it" rule: zero deletions.
+- Surfaced: `EUREKA.runs` has 1 prod read in `training.py:1308` but 0 prod writes — dead-read returns "not_found" forever. See Wave 3d EUREKA-1.
+
+### KB-1: Phase 94b time injection — done — `4ab2e9b`
+- `KBFreshnessAuditor._scan/audit/list_stale/list_all` accept `now: datetime | None = None`.
+- 2 boundary tests pin threshold semantics: `>` strict (90d = fresh, 91d = stale).
+
+### MAGIC-1: magic number sweep — done — `7f1ae78`, `858ff83`, `aa5dda0` (+ scene_blueprints in `67ed62f`)
+- 23 constants extracted: sensors.py (9), scene_authoring.py (6), scene_blueprints.py (6), pick_place.py (8).
+- Examples: `_FRANKA_PALM_TO_FINGERTIP_M`, `_GRAVITY_MS2`, `_RMPFLOW_MAX_SUBSTEP_S`, `_CAM_APERTURE_MM`.
+
+## Wave 3b — pending
+
+### DOCS-2: Remaining THIN/MISSING (~300 funcs after Wave 2/3a)
+- Modules: `pick_place.py` (11 THIN), `training.py` (41 THIN), `scene_authoring.py` (78 MISSING+THIN), `diagnostics.py:_handle_simulate_traversal_check` (1 PARTIAL).
+- Approach: split into 3-4 parallel agents per module.
 - **STATUS**: pending
 
-### CONC-2b: multimodal/routes.py RMW on _WORKFLOWS
-- **Source**: CONC-1 agent surfaced; agent stayed in scope
-- **Fix**: `_forward_workflow_approve`/`_forward_workflow_reject` should `_wf_lock_for(wf)`-wrap their RMW
-- **STATUS**: pending (lazy-setdefault makes it currently safe but inconsistent)
+## Wave 3d — follow-ups surfaced during 3a
 
-### MAGIC-1: Magic number sweep
-- **Source**: code-quality audit 2026-05-13
-- **Example**: `barcode_reader_sensor` position default `[0.4, 0.4, 0.835]` unnamed
-- **STATUS**: deferred
+### EUREKA-1: Dead read on EUREKA.runs
+- **Source**: CONC-3 agent
+- **Fix**: Either delete `_handle_eureka_status` reader + EUREKA singleton + scaffolding tests (coordinated), or wire production writes when Phase 64 lands.
+- **STATUS**: pending (coordinated decision)
 
-### DOCS-2: Remaining THIN/MISSING (~300 funcs after Wave 2 top-30)
-- **STATUS**: deferred until Wave 2 completes; will redo audit then
-
-### CONC-2: Lazy-load file readers (`_deformable_presets` etc.)
-- **Source**: concurrency audit, LOW-RISK bucket
-- **Fix**: wrap in `functools.lru_cache(maxsize=1)`
-- **STATUS**: deferred (idempotent so currently safe)
-
-### CONC-3: Delete unwritten scaffolding singletons (WORKFLOWS/EUREKA/TRAINING/DR/BRIDGES in _state.py)
-- **Source**: concurrency audit found zero writes anywhere
-- **Risk**: pre-bakes future bugs by sitting unused with no lock pattern
-- **STATUS**: deferred (separate refactor decision)
-
-### KB-1: Phase 94b time injection
-- **Source**: time-brittleness audit MEDIUM-LOW
-- **Risk**: theoretical — tests use 5/10/30/60/100/120/400 days vs 30/90 thresholds, all wide margins. Boundary-day case (89 vs 90) could flip on slow CI.
-- **Fix**: `_scan(now: datetime | None = None)` injection
-- **STATUS**: deferred
+## Wave 3c — user-decision
 
 ### YARD-MAP cleanup
 - **Source**: untracked files in working tree
-- **Files**: `yard_map.pgm`, `yard_map.yaml`, 2 research docs
+- **Files**: `yard_map.pgm`, `yard_map.yaml`, `docs/research/2026-05-11-composition-research-report.md`, `docs/research/2026-05-13-specs-2-3-4-review.md`
 - **Action**: triage — commit / gitignore / delete
 - **STATUS**: pending (user decision)
 
@@ -92,5 +97,6 @@ individual handlers for hygiene. This backlog catches up.
 
 - Pre-Wave-1 baseline: 6529 pass, 0 fail
 - Post-Wave-1: 6529 pass, 0 fail (silent-success was additive, no behavior change)
-- Post-Wave-2: **6540 pass, 0 fail** (+11 from CONC-1's `tests/test_concurrency_locks.py`)
-- Branch tip after Wave 2: `836b277`
+- Post-Wave-2: 6540 pass, 0 fail (+11 from CONC-1's `tests/test_concurrency_locks.py`)
+- Post-Wave-3a: **6543 pass, 0 fail** (+1 CONC-2b T11, +2 KB-1 boundary; CONC-2 also recovered ~3 previously-broken tests via fixture cleanup)
+- Branch tip after Wave 3a: `aa5dda0`
