@@ -542,6 +542,29 @@ async def _handle_post_action_suggestions(args: Dict) -> Dict:
 
 
 async def _handle_queue_write_locked_patch(args: Dict) -> Dict:
+    """Submit a Python patch to the write-locked queue for serialised USD edits.
+
+    Validates the patch through the patch validator before queueing. Blocked
+    patches (those with breaking issues) are rejected immediately without being
+    queued.
+
+    Args:
+        args: Tool arguments dict containing:
+            - code (str): Python source code to execute under the write lock.
+            - description (str, optional): Human-readable description of the
+              patch. Defaults to ``"Write-locked patch"``.
+            - priority (int, optional): Queue priority (higher = sooner).
+              Defaults to ``0``.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - success (bool): True if the patch was queued successfully.
+            - description (str): Echo of the provided description.
+            - error (str, optional): Validation error message if the patch was
+              blocked.
+            - validation_blocked (bool, optional): True when the patch was
+              rejected by the validator.
+    """
     from .. import tool_executor as _te  # noqa: PLC0415
     code = args.get("code", "")
     desc = args.get("description", "Write-locked patch")
