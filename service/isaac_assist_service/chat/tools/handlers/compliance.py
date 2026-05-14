@@ -1,16 +1,22 @@
-"""CRM-A2 — compliance handler: setup_admittance_controller.
+"""CRM-A2 / CRM-B1 — compliance handlers: setup_admittance_controller,
+setup_impedance_controller.
 
-Implements the `setup_admittance_controller` tool per the CRM spec §5.1.
+Implements `setup_admittance_controller` per CRM spec §5.1 (CRM-A2) and
+`setup_impedance_controller` per §5.2 (CRM-B1).
 
 Admittance step law (pure Python, no Kit required for dry-run):
     F = K·(x_desired - x_actual) - D·v_actual + F_ext
+
+Impedance control law (pure Python, no Kit required for dry-run):
+    τ = J^T · (Kx·Δx + Dx·v + Kr·Δr + Dr·ω)
 
 Dry-run mode validates args and returns a config dict describing what the
 controller would look like. Live mode raises NotImplementedError with a clear
 actionable message directing the caller to provision the Kit RPC +
 ros2_control bridge.
 
-Per docs/specs/2026-05-11-contact-rich-manipulation-spec.md §5.1 (CRM-A2).
+Per docs/specs/2026-05-11-contact-rich-manipulation-spec.md §5.1 (CRM-A2)
+and §5.2 (CRM-B1).
 """
 from __future__ import annotations
 
@@ -217,6 +223,199 @@ async def setup_admittance_controller(
 
 
 # ---------------------------------------------------------------------------
+# Impedance step law — pure Python
+
+
+def _impedance_torque(
+    Kx: List[float],
+    Dx: List[float],
+    Kr: List[float],
+    Dr: List[float],
+    delta_x: List[float],
+    v_linear: List[float],
+    delta_r: List[float],
+    omega: List[float],
+) -> List[float]:
+    """Compute Cartesian impedance generalised torques per axis.
+
+    τ = J^T · (Kx·Δx + Dx·v + Kr·Δr + Dr·ω)
+
+    This function computes the Cartesian wrench components (3 translational +
+    3 rotational) that the impedance controller would command. In a real
+    deployment these are multiplied by the Jacobian transpose (J^T) to map to
+    joint torques; that step requires live kinematics and is deferred to the
+    Kit RPC layer.
+
+    Args:
+        Kx:        Cartesian translational stiffness per axis [N/m].
+        Dx:        Cartesian translational damping per axis [N·s/m].
+        Kr:        Rotational stiffness per axis [N·m/rad].
+        Dr:        Rotational damping per axis [N·m·s/rad].
+        delta_x:   Position error (x_desired − x_actual) per axis [m].
+        v_linear:  End-effector linear velocity per axis [m/s].
+        delta_r:   Orientation error per axis [rad].
+        omega:     End-effector angular velocity per axis [rad/s].
+
+    Returns:
+        List[float] of 6 elements — [fx, fy, fz, tx, ty, tz] — representing
+        the Cartesian wrench that J^T will map to joint torques.
+    """
+    n = len(Kx)
+    translational = [Kx[i] * delta_x[i] + Dx[i] * v_linear[i] for i in range(n)]
+    rotational = [Kr[i] * delta_r[i] + Dr[i] * omega[i] for i in range(len(Kr))]
+    return translational + rotational
+
+
+# ---------------------------------------------------------------------------
+# Impedance handler
+
+
+async def _handle_setup_impedance_controller(
+    args: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Dispatch handler for `setup_impedance_controller` tool.
+
+    Args (from tool call, all optional except robot_path):
+        robot_path:           USD path to the robot articulation root.
+        target_frame:         Tool frame name (default "tool0").
+        Kx:                   Cartesian translational stiffness [N/m] (3-vector).
+        Kr:                   Rotational stiffness [N·m/rad] (3-vector).
+        Dx:                   Translational damping [N·s/m] (3-vector).
+        Dr:                   Rotational damping [N·m·s/rad] (3-vector).
+        null_space_stiffness: Null-space stiffness scalar (keeps arm near
+                              rest configuration).
+        null_space_damping:   Null-space damping scalar.
+        torque_mode:          Must be True; if False returns error with
+                              recommended_alternative="admittance".
+        dry_run:              True → return config dict; False → Kit RPC.
+
+    Returns dict with success: bool on all paths.
+    Structured error on torque_mode=False: {success, error,
+    recommended_alternative}.
+    """
+    robot_path: str = args.get("robot_path", "")
+    if not robot_path:
+        return {
+            "success": False,
+            "error": "robot_path is required",
+        }
+
+    torque_mode: bool = bool(args.get("torque_mode", True))
+    if not torque_mode:
+        return {
+            "success": False,
+            "error": (
+                "setup_impedance_controller requires torque_mode=True. "
+                "Impedance control maps Cartesian errors to joint torques "
+                "(τ = J^T·(Kx·Δx + Dx·v + Kr·Δr + Dr·ω)) and therefore "
+                "requires a torque-command interface (e.g. Franka FCI in "
+                "libfranka). Your robot appears to be in position-mode only. "
+                "Use setup_admittance_controller instead, which operates on "
+                "position-mode robots with an external F/T sensor."
+            ),
+            "recommended_alternative": "admittance",
+        }
+
+    target_frame: str = args.get("target_frame", "tool0")
+    Kx: List[float] = args.get("Kx", [400.0, 400.0, 400.0])
+    Kr: List[float] = args.get("Kr", [40.0, 40.0, 40.0])
+    Dx: List[float] = args.get("Dx", [40.0, 40.0, 40.0])
+    Dr: List[float] = args.get("Dr", [4.0, 4.0, 4.0])
+    null_space_stiffness: float = float(args.get("null_space_stiffness", 0.5))
+    null_space_damping: float = float(args.get("null_space_damping", 0.5))
+    dry_run: bool = bool(args.get("dry_run", True))
+
+    if not dry_run:
+        raise NotImplementedError(
+            "setup_impedance_controller live mode requires Kit RPC + "
+            "ros2_control bridge + torque-mode robot. "
+            "Use dry_run=True to receive the config dict for offline inspection, "
+            "or provision the bridge (CRM-A1) with a torque-capable robot and "
+            "retry with dry_run=False."
+        )
+
+    result: Dict[str, Any] = {
+        "success": True,
+        "dry_run": True,
+        "robot_path": robot_path,
+        "target_frame": target_frame,
+        "Kx": Kx,
+        "Kr": Kr,
+        "Dx": Dx,
+        "Dr": Dr,
+        "null_space_stiffness": null_space_stiffness,
+        "null_space_damping": null_space_damping,
+        "compliance_mode": "impedance",
+        "torque_mode": True,
+    }
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Public signature for setup_impedance_controller (matches §5.2 exactly)
+
+
+async def setup_impedance_controller(
+    robot_path: str,
+    target_frame: str = "tool0",
+    Kx: list[float] = [400.0]*3,
+    Kr: list[float] = [40.0]*3,
+    Dx: list[float] = [40.0]*3,
+    Dr: list[float] = [4.0]*3,
+    null_space_stiffness: float = 0.5,
+    null_space_damping: float = 0.5,
+    torque_mode: bool = True,
+    dry_run: bool = True,
+) -> dict:
+    """Configure a Cartesian impedance controller for a torque-mode robot.
+
+    Impedance control law: τ = J^T · (Kx·Δx + Dx·v + Kr·Δr + Dr·ω)
+
+    Requires torque_mode=True; returns a structured error with
+    recommended_alternative="admittance" if torque_mode=False.
+
+    In dry-run mode (default) returns a config dict with all resolved
+    parameters without touching Kit or ROS2.
+
+    In live mode (dry_run=False) raises NotImplementedError until the
+    Kit RPC + ros2_control bridge is provisioned.
+
+    Args:
+        robot_path:           USD path to the robot articulation root.
+        target_frame:         Tool/end-effector frame name.
+        Kx:                   Cartesian translational stiffness [N/m].
+        Kr:                   Rotational stiffness [N·m/rad].
+        Dx:                   Translational damping [N·s/m].
+        Dr:                   Rotational damping [N·m·s/rad].
+        null_space_stiffness: Null-space stiffness scalar.
+        null_space_damping:   Null-space damping scalar.
+        torque_mode:          Must be True for impedance control.
+        dry_run:              If True, return config dict only (no Kit calls).
+
+    Returns:
+        dict with success: bool and controller config on success, or
+        success: False + error: str + recommended_alternative: str when
+        torque_mode=False.
+
+    Raises:
+        NotImplementedError: when dry_run=False (bridge not yet wired).
+    """
+    return await _handle_setup_impedance_controller({
+        "robot_path": robot_path,
+        "target_frame": target_frame,
+        "Kx": Kx,
+        "Kr": Kr,
+        "Dx": Dx,
+        "Dr": Dr,
+        "null_space_stiffness": null_space_stiffness,
+        "null_space_damping": null_space_damping,
+        "torque_mode": torque_mode,
+        "dry_run": dry_run,
+    })
+
+
+# ---------------------------------------------------------------------------
 # Dispatch registration
 
 
@@ -226,3 +425,4 @@ def register(
 ) -> None:
     """Register compliance handlers into the dispatch table."""
     data["setup_admittance_controller"] = _handle_setup_admittance_controller
+    data["setup_impedance_controller"] = _handle_setup_impedance_controller

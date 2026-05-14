@@ -1,6 +1,7 @@
-"""CRM-A2 — L0 tests for setup_admittance_controller.
+"""CRM-A2 / CRM-B1 — L0 tests for setup_admittance_controller and
+setup_impedance_controller.
 
-Covers:
+TestAdmittance covers:
   - dry-run default config dict
   - custom stiffness/damping reflected in output
   - compliance_mode field
@@ -12,7 +13,18 @@ Covers:
   - dispatch module membership
   - stiffness_xyz must be positive
 
-Per docs/specs/2026-05-11-contact-rich-manipulation-spec.md §5.1 (CRM-A2).
+TestImpedance covers:
+  - dry-run with torque_mode=True returns config dict
+  - dry-run with torque_mode=False returns error + recommended_alternative=admittance
+  - compliance_mode == "impedance" in successful return
+  - Kx/Kr/Dx/Dr defaults match spec
+  - custom Kx/Kr/Dx/Dr reflected in output
+  - null_space_stiffness + null_space_damping in output
+  - tool reachable via tool_executor.execute_tool_call
+  - dry_run=False raises NotImplementedError with required message text
+
+Per docs/specs/2026-05-11-contact-rich-manipulation-spec.md §5.1 (CRM-A2)
+and §5.2 (CRM-B1).
 """
 from __future__ import annotations
 
@@ -221,3 +233,158 @@ class TestAdmittance:
         result = await handler({})
         assert result["success"] is False
         assert "robot_path" in result.get("error", "")
+
+
+class TestImpedance:
+    """L0 test suite for setup_impedance_controller (CRM-B1).
+
+    Cartesian impedance law: τ = J^T · (Kx·Δx + Dx·v + Kr·Δr + Dr·ω)
+    Requires torque_mode=True; returns structured error with
+    recommended_alternative="admittance" when torque_mode=False.
+    """
+
+    # ------------------------------------------------------------------
+    # Helpers
+
+    def _get_handler(self):
+        from service.isaac_assist_service.chat.tools.handlers.compliance import (
+            _handle_setup_impedance_controller,
+        )
+        return _handle_setup_impedance_controller
+
+    # ------------------------------------------------------------------
+    # T1 — dry-run with torque_mode=True returns config dict
+
+    @pytest.mark.asyncio
+    async def test_dry_run_torque_mode_true_returns_config_dict(self):
+        """Dry-run with torque_mode=True returns complete config dict."""
+        handler = self._get_handler()
+        result = await handler({"robot_path": "/World/Franka"})
+
+        assert result["success"] is True
+        assert result["dry_run"] is True
+        assert result["robot_path"] == "/World/Franka"
+
+    # ------------------------------------------------------------------
+    # T2 — dry-run with torque_mode=False returns error + recommended_alternative
+
+    @pytest.mark.asyncio
+    async def test_dry_run_torque_mode_false_returns_error(self):
+        """torque_mode=False returns error dict with success=False and
+        recommended_alternative='admittance'."""
+        handler = self._get_handler()
+        result = await handler({
+            "robot_path": "/World/UR10",
+            "torque_mode": False,
+        })
+
+        assert result["success"] is False
+        assert "error" in result
+        assert result.get("recommended_alternative") == "admittance"
+
+    @pytest.mark.asyncio
+    async def test_torque_mode_false_error_message_mentions_admittance(self):
+        """Error message on torque_mode=False must explain why and name admittance."""
+        handler = self._get_handler()
+        result = await handler({
+            "robot_path": "/World/UR10",
+            "torque_mode": False,
+        })
+        assert "admittance" in result.get("error", "").lower()
+
+    # ------------------------------------------------------------------
+    # T3 — compliance_mode == "impedance" in successful return
+
+    @pytest.mark.asyncio
+    async def test_compliance_mode_is_impedance(self):
+        """Successful dry-run must report compliance_mode == 'impedance'."""
+        handler = self._get_handler()
+        result = await handler({"robot_path": "/World/Franka"})
+        assert result["compliance_mode"] == "impedance"
+
+    # ------------------------------------------------------------------
+    # T4 — Kx / Kr / Dx / Dr defaults match spec §5.2
+
+    @pytest.mark.asyncio
+    async def test_default_gains_match_spec(self):
+        """Default Kx=[400]*3, Kr=[40]*3, Dx=[40]*3, Dr=[4]*3 per §5.2."""
+        handler = self._get_handler()
+        result = await handler({"robot_path": "/World/Franka"})
+
+        assert result["Kx"] == [400.0, 400.0, 400.0]
+        assert result["Kr"] == [40.0, 40.0, 40.0]
+        assert result["Dx"] == [40.0, 40.0, 40.0]
+        assert result["Dr"] == [4.0, 4.0, 4.0]
+
+    # ------------------------------------------------------------------
+    # T5 — custom Kx / Kr / Dx / Dr reflected in output
+
+    @pytest.mark.asyncio
+    async def test_custom_gains_reflected_in_output(self):
+        """Custom gain values appear unchanged in the returned dict."""
+        handler = self._get_handler()
+        result = await handler({
+            "robot_path": "/World/Franka",
+            "Kx": [600.0, 600.0, 300.0],
+            "Kr": [60.0, 60.0, 30.0],
+            "Dx": [60.0, 60.0, 30.0],
+            "Dr": [6.0, 6.0, 3.0],
+        })
+
+        assert result["success"] is True
+        assert result["Kx"] == [600.0, 600.0, 300.0]
+        assert result["Kr"] == [60.0, 60.0, 30.0]
+        assert result["Dx"] == [60.0, 60.0, 30.0]
+        assert result["Dr"] == [6.0, 6.0, 3.0]
+
+    # ------------------------------------------------------------------
+    # T6 — null_space_stiffness + null_space_damping in output
+
+    @pytest.mark.asyncio
+    async def test_null_space_defaults_in_output(self):
+        """null_space_stiffness and null_space_damping present with spec defaults."""
+        handler = self._get_handler()
+        result = await handler({"robot_path": "/World/Franka"})
+
+        assert result["null_space_stiffness"] == 0.5
+        assert result["null_space_damping"] == 0.5
+
+    @pytest.mark.asyncio
+    async def test_custom_null_space_params_reflected(self):
+        """Custom null-space params appear in the returned dict."""
+        handler = self._get_handler()
+        result = await handler({
+            "robot_path": "/World/Franka",
+            "null_space_stiffness": 1.5,
+            "null_space_damping": 0.8,
+        })
+
+        assert result["null_space_stiffness"] == 1.5
+        assert result["null_space_damping"] == 0.8
+
+    # ------------------------------------------------------------------
+    # T7 — tool reachable via tool_executor.execute_tool_call
+
+    @pytest.mark.asyncio
+    async def test_tool_reachable_via_execute_tool_call(self):
+        """setup_impedance_controller is wired in DATA_HANDLERS."""
+        from service.isaac_assist_service.chat.tools import tool_executor
+        result = await tool_executor.execute_tool_call(
+            "setup_impedance_controller",
+            {"robot_path": "/World/Franka"},
+        )
+        assert result.get("success") is True
+        assert result.get("dry_run") is True
+
+    # ------------------------------------------------------------------
+    # T8 — dry_run=False raises NotImplementedError with required text
+
+    @pytest.mark.asyncio
+    async def test_live_mode_raises_not_implemented(self):
+        """dry_run=False raises NotImplementedError referencing Kit RPC,
+        ros2_control bridge, and torque-mode robot."""
+        handler = self._get_handler()
+        with pytest.raises(NotImplementedError) as exc_info:
+            await handler({"robot_path": "/World/Franka", "dry_run": False})
+        msg = str(exc_info.value)
+        assert "Kit RPC" in msg or "ros2_control" in msg or "torque-mode" in msg

@@ -11,8 +11,8 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-05-14T01:32:31+00:00
-Tool count: 431
+Generated: 2026-05-14T01:40:30+00:00
+Tool count: 432
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
 """
@@ -898,6 +898,22 @@ class SetupAdmittanceControllerArgs(BaseModel):
     ft_sensor_path: Optional[str] = Field(None, description="Optional USD path to the force/torque sensor prim whose readings feed the F_ext term.")
     chain_after: Optional[str] = Field(None, description="ros2_control controller that runs before the admittance layer. Default 'joint_trajectory_controller'.")
     dry_run: Optional[bool] = Field(None, description="If true (default), return config dict without touching Kit or ROS2. Set false only when bridge is provisioned.")
+
+
+class SetupImpedanceControllerArgs(BaseModel):
+    """CRM-B1 — Tier C compliance tool. Configures a Cartesian impedance controller for a torque-mode robot using the law τ = J^T·(Kx·Δx + Dx·v + Kr·Δr + Dr·ω). Requires torque_mode=True; returns error with"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    robot_path: str = Field(..., description="USD path to the robot articulation root, e.g. '/World/Franka'.")
+    target_frame: Optional[str] = Field(None, description="Tool/end-effector frame name used by ros2_control. Default 'tool0'.")
+    Kx: Optional[List[float]] = Field(None, description="Cartesian translational stiffness per axis [N/m]. Default [400.0, 400.0, 400.0].")
+    Kr: Optional[List[float]] = Field(None, description="Rotational stiffness per axis [N·m/rad]. Default [40.0, 40.0, 40.0].")
+    Dx: Optional[List[float]] = Field(None, description="Cartesian translational damping per axis [N·s/m]. Default [40.0, 40.0, 40.0].")
+    Dr: Optional[List[float]] = Field(None, description="Rotational damping per axis [N·m·s/rad]. Default [4.0, 4.0, 4.0].")
+    null_space_stiffness: Optional[float] = Field(None, description="Null-space stiffness scalar — keeps the arm near its rest configuration. Default 0.5.")
+    null_space_damping: Optional[float] = Field(None, description="Null-space damping scalar. Default 0.5.")
+    torque_mode: Optional[bool] = Field(None, description="Must be true for impedance control. Set false on position-mode robots to receive an error with recommended_alternative='admittance'.")
+    dry_run: Optional[bool] = Field(None, description="If true (default), return config dict without touching Kit or ROS2. Set false only when bridge + torque-mode robot is provisioned.")
 
 
 class SetupAssemblyConstraintArgs(BaseModel):
@@ -3986,6 +4002,7 @@ MODEL_REGISTRY = {
     "nir_material_sensor": NirMaterialSensorArgs,
     "add_force_torque_sensor": AddForceTorqueSensorArgs,
     "setup_admittance_controller": SetupAdmittanceControllerArgs,
+    "setup_impedance_controller": SetupImpedanceControllerArgs,
     "setup_assembly_constraint": SetupAssemblyConstraintArgs,
     "setup_zone_partition": SetupZonePartitionArgs,
     "setup_cortex_behavior": SetupCortexBehaviorArgs,

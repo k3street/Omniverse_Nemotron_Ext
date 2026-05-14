@@ -1971,6 +1971,71 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "setup_impedance_controller",
+            "description": (
+                "CRM-B1 — Tier C compliance tool. Configures a Cartesian impedance controller "
+                "for a torque-mode robot using the law τ = J^T·(Kx·Δx + Dx·v + Kr·Δr + Dr·ω). "
+                "Requires torque_mode=True; returns error with recommended_alternative='admittance' "
+                "if the robot is position-mode only. "
+                "dry_run=True (default) returns a config dict for offline inspection; "
+                "dry_run=False requires Kit RPC + ros2_control bridge + torque-mode robot (CRM-A1). "
+                "Used by contact-rich tasks on torque-capable robots (e.g. Franka FCI)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {
+                        "type": "string",
+                        "description": "USD path to the robot articulation root, e.g. '/World/Franka'.",
+                    },
+                    "target_frame": {
+                        "type": "string",
+                        "description": "Tool/end-effector frame name used by ros2_control. Default 'tool0'.",
+                    },
+                    "Kx": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Cartesian translational stiffness per axis [N/m]. Default [400.0, 400.0, 400.0].",
+                    },
+                    "Kr": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Rotational stiffness per axis [N·m/rad]. Default [40.0, 40.0, 40.0].",
+                    },
+                    "Dx": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Cartesian translational damping per axis [N·s/m]. Default [40.0, 40.0, 40.0].",
+                    },
+                    "Dr": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Rotational damping per axis [N·m·s/rad]. Default [4.0, 4.0, 4.0].",
+                    },
+                    "null_space_stiffness": {
+                        "type": "number",
+                        "description": "Null-space stiffness scalar — keeps the arm near its rest configuration. Default 0.5.",
+                    },
+                    "null_space_damping": {
+                        "type": "number",
+                        "description": "Null-space damping scalar. Default 0.5.",
+                    },
+                    "torque_mode": {
+                        "type": "boolean",
+                        "description": "Must be true for impedance control. Set false on position-mode robots to receive an error with recommended_alternative='admittance'.",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "If true (default), return config dict without touching Kit or ROS2. Set false only when bridge + torque-mode robot is provisioned.",
+                    },
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "setup_assembly_constraint",
             "description": "Tier C — sets up assembly relationship between peg and hole. Used by #22 Peg-in-Hole. Runtime FixedJoint creation when peg aligns within tolerance is Sprint 3+.",
             "parameters": {
