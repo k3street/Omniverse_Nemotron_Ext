@@ -1,0 +1,13 @@
+{
+  "task_id": "AL-06",
+  "goal": "Define a version-pinning scheme for 3-year reproducibility across Isaac Sim / Kit / PhysX / driver / MDL.",
+  "tools_used": ["lookup_knowledge", "run_stage_analysis", "trace_config", "export_scene_package"],
+  "thoughts": "Axes that matter: Isaac Sim release, Kit, PhysX, CUDA, driver, MDL, OS. Containers with digest pinning (NOT tag pinning — tags are mutable) are durable. GPU driver is uncontrollable — document it, don't pretend to pin. Bit-exact across driver versions is NOT guaranteed. Procurement-hates-Docker fallback: pinned apt/conda stack plus archived installer blobs plus documented driver.",
+  "code": "# 1. Identify version axes from a live install\nconfig = trace_config(scope=\"full\")\n# Expected keys: isaac_sim_version, kit_version, physx_version, cuda_version,\n# driver_version, mdl_version, os_version\nlookup_knowledge(query=\"isaac sim release notes bundled physx kit version mapping\")\n\n# 2. Compliance artifact bundle per scene\n# versions.yaml committed next to scene:\n# isaac_sim: \"<ISAAC_SIM_VER>\"\n# isaac_sim_container_digest: \"sha256:<DIGEST>\"     # NOT tag\n# kit: \"<KIT_VER>\"\n# physx: \"<PHYSX_VER>\"\n# driver: \"<DRIVER_VER>\"   # documented, not enforced\n# mdl: \"<MDL_VER>\"\n# cuda: \"<CUDA_VER>\"\n# os: \"ubuntu-22.04\"\n# scene_usd_sha256: \"<USD_HASH>\"\n\n# 3. Physics snapshot (solver settings are part of reproducibility)\nrun_stage_analysis(scene_path=\"<SCENE_PATH>\", emit=\"physics_settings\")\n\n# 4. Bundle for 3-year archive\nexport_scene_package(\n    source_scene=\"<SCENE_PATH>\",\n    dest=\"<ARCHIVE_PATH>/<SCENE>_<VERSION_HASH>.usdz\",\n    include_metadata_sidecar=True,  # versions.yaml embedded\n)\n\n# 5. No-container fallback:\n# Archive the .run installer + apt package list + conda env.yaml + driver deb hash.\n# Slower to rehydrate but works when procurement refuses Docker.",
+  "failure_modes": [
+    "assistant pins by tag instead of digest",
+    "assistant claims bit-exact across driver versions",
+    "assistant ignores the procurement 'no Docker' constraint",
+    "assistant forgets PhysX version axis"
+  ]
+}

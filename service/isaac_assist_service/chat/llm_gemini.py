@@ -1,16 +1,115 @@
 import aiohttp
 import logging
 import json
+import os
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
+
+
+# ── Track C 9.1 instrumentation: provider 503 incident logging ──────────────
+# Persist non-200 responses (503, 429, 500, 502, 504) to a rolling JSONL so
+# we can analyze the actual root cause of throttling: payload-size, RPM
+# rate-limit, provider instability, or specific malformed requests. Without
+# this data, "Gemini 503" remains anecdotal and architecture decisions are
+# hypothesis-betting (per docs/specs/2026-05-08-kcode-research-and-vault-spec.md).
+#
+# Headers we keep (subset, no auth tokens):
+_PROVIDER_HEADERS_TO_KEEP = (
+    "retry-after", "x-ratelimit-limit", "x-ratelimit-remaining",
+    "x-ratelimit-reset", "x-request-id", "server-timing",
+    "content-type", "date",
+)
+_PROVIDER_INCIDENT_LOG = (
+    Path(__file__).resolve().parents[3] / "workspace" / "qa_runs" / "provider_incidents.jsonl"
+)
+
+
+def _retry_after_wait(backoff_s: float, retry_after_header: Optional[str],
+                      max_wait_s: float = 60.0) -> float:
+    """Combine backoff with provider-supplied retry-after header.
+
+    Provider's retry-after takes precedence when:
+    - it parses as a non-negative number of seconds
+    - it's longer than current backoff (we never shorten waits — that
+      would defeat exponential backoff's job)
+
+    Result is bounded to [backoff_s, max_wait_s] so a malicious or
+    misconfigured retry-after can't stall a request indefinitely.
+
+    HTTP-date form retry-after (RFC 7231) is intentionally NOT parsed —
+    Gemini consistently sends seconds-as-int for 429s and the date form
+    would require timezone-aware parsing for marginal benefit.
+    """
+    if not retry_after_header:
+        return backoff_s
+    try:
+        ra = float(retry_after_header)
+    except (TypeError, ValueError):
+        return backoff_s
+    if ra <= 0:
+        return backoff_s
+    return max(backoff_s, min(ra, max_wait_s))
+
+
+def _persist_provider_incident(
+    status: int,
+    attempt: int,
+    payload_bytes: int,
+    messages_count: int,
+    attempt_dt: float,
+    response_excerpt: str,
+    response_headers: Dict,
+    last_success_ts: Optional[float],
+    model: str,
+) -> None:
+    """Append one incident line to provider_incidents.jsonl. Best-effort —
+    swallows all errors so logging never breaks the chat path."""
+    try:
+        _PROVIDER_INCIDENT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        kept_headers = {
+            k.lower(): v for k, v in response_headers.items()
+            if k.lower() in _PROVIDER_HEADERS_TO_KEEP
+        }
+        entry = {
+            "ts": now,
+            "ts_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+            "model": model,
+            "status": status,
+            "attempt": attempt,
+            "payload_bytes": payload_bytes,
+            "messages_count": messages_count,
+            "attempt_dt_s": round(attempt_dt, 3),
+            "since_last_200_s": round(now - last_success_ts, 3) if last_success_ts else None,
+            "response_excerpt": response_excerpt,
+            "response_headers": kept_headers,
+        }
+        with open(_PROVIDER_INCIDENT_LOG, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, default=str) + "\n")
+    except Exception as _e:
+        # Logger.debug because this MUST NOT propagate to the chat path
+        try:
+            logger.debug(f"_persist_provider_incident failed: {_e}")
+        except Exception:
+            pass
+
+# Env-gated: expose Gemini's chain-of-thought (thought-parts) for debugging.
+# Default OFF — thoughts cost 2-4x more tokens and are noise in production.
+# Set GEMINI_EXPOSE_THOUGHTS=1 during smoke-testing or when diagnosing a
+# reasoning bug (Cube 3/4 swap, wrong tool pick, fabricated verify claim).
+_EXPOSE_THOUGHTS = os.environ.get("GEMINI_EXPOSE_THOUGHTS", "0") == "1"
+
 
 @dataclass
 class LLMResponse:
     text: str
     actions: List[Dict] = field(default_factory=list)
     tool_calls: Optional[List[Dict]] = None
+    thoughts: Optional[List[str]] = None
 
 SYSTEM_PROMPT = (
     "You are Isaac Assist, an expert AI embedded inside NVIDIA Isaac Sim — "
@@ -18,7 +117,35 @@ SYSTEM_PROMPT = (
     "You help robotics engineers diagnose scene issues, generate USD patches, "
     "and answer questions about Omniverse, PhysX, ROS2, and robot simulation. "
     "Be concise and precise. When you suggest code, use Python that works inside "
-    "the Omniverse Kit scripting environment."
+    "the Omniverse Kit scripting environment.\n\n"
+    "Response discipline:\n"
+    "- Match the user's intent. Action phrasing ('do X', 'make X', 'drop it in', "
+    "'run the import', 'just give me the script') means CALL TOOLS or RETURN CODE "
+    "— keep prose to one short line or skip it entirely.\n"
+    "- Do not pad action requests with background explanation the user did not ask for. "
+    "Do not ask for confirmation when the user has already specified what they want "
+    "— just do it.\n"
+    "- Only explain at length when the user asked a question ('what is…', 'why…', "
+    "'how does…') or when there is a genuine ambiguity that would change the action. "
+    "Ambiguous? Ask ONE concise clarifying question, do not write a tutorial.\n"
+    "- If the user says 'less prose' or similar, drop all prose for the rest of the "
+    "session and emit only code / tool calls / one-line confirmations.\n\n"
+    "Grounding discipline (CRITICAL):\n"
+    "- NEVER describe scene contents, tool output, API return values, file paths, "
+    "asset names, standard-document quotations, or product specifications unless "
+    "a tool actually returned that information in this session.\n"
+    "- If a tool returned an error, empty output, or didn't run: say 'I don't have "
+    "verified output from <tool_name>, so I can't confirm that' and either retry, "
+    "call a different tool, or ask the user.\n"
+    "- NEVER pattern-match API names based on what they 'should look like'. When "
+    "unsure of a module path, class name, or function signature, say 'I'm not "
+    "sure of the exact API — let me look it up' and call lookup_knowledge or "
+    "ask the user to confirm.\n"
+    "- NEVER quote specific numbers from ISO/IEC/ANSI standards, product datasheets, "
+    "or manufacturer specs as authoritative. If asked for such numbers, say 'I'd "
+    "need to check the standard directly; my cited value could be wrong'.\n"
+    "- Confident-wrong is worse than 'I don't know'. Users prefer admitted "
+    "uncertainty over fabrication."
 )
 
 class GeminiProvider:
@@ -47,13 +174,23 @@ class GeminiProvider:
                 system = SYSTEM_PROMPT
         gemini_messages = self._format_messages(messages)
 
+        gen_config = {
+            "temperature": 0.2,
+            "maxOutputTokens": 4096,
+        }
+        if _EXPOSE_THOUGHTS:
+            # Ask Gemini 3 to return thought-parts. includeThoughts=True turns
+            # on the `thought: true` marker on returned parts; thinkingBudget
+            # caps the max thought-token spend per turn (1024 is enough for
+            # most agent-turn reasoning without blowing the budget).
+            gen_config["thinkingConfig"] = {
+                "includeThoughts": True,
+                "thinkingBudget": 1024,
+            }
         payload = {
             "system_instruction": {"parts": [{"text": system}]},
             "contents": gemini_messages,
-            "generationConfig": {
-                "temperature": 0.2,
-                "maxOutputTokens": 4096,
-            },
+            "generationConfig": gen_config,
         }
 
         # Convert OpenAI tool schemas to Gemini function declarations
@@ -76,24 +213,86 @@ class GeminiProvider:
         # Google recommends exponential backoff for these; keep total wait bounded
         # so we don't blow the caller's timeout.
         import asyncio as _asyncio_rt
+        import time as _time_rt
         retry_statuses = {429, 500, 502, 503, 504}
         max_attempts = 4
         backoff = 2.0  # seconds; doubles each retry
         last_error = None
+
+        # Track-C 9.1 instrumentation: persist 503/429/etc incidents to a
+        # rolling JSONL log so we can later analyze WHEN they happen, what
+        # payload size, time between incidents, time since last success.
+        # Without this, "Gemini 503" remains anecdotal — we can't separate
+        # rate-limit from payload-size from provider-instability.
+        _last_success_ts = getattr(self.__class__, "_last_gemini_success_ts", None)
+
+        # Instrumentation: log payload size + attempt timing so we can
+        # tell apart "Gemini is slow" from "we're retrying 503s" from
+        # "our prompt grew huge". One log line per attempt + a summary
+        # at the end. Look for "[GeminiCall]" in the uvicorn output.
+        try:
+            _payload_bytes = len(json.dumps(payload, default=str).encode("utf-8"))
+        except Exception:
+            _payload_bytes = -1
+        _call_t0 = _time_rt.monotonic()
+        logger.warning(
+            f"[GeminiCall] start payload={_payload_bytes} bytes "
+            f"messages={len(messages)} tools={len(payload.get('tools', [{}])[0].get('functionDeclarations', []))}"
+        )
+
         for attempt in range(1, max_attempts + 1):
+            _att_t0 = _time_rt.monotonic()
             async with aiohttp.ClientSession() as session:
                 try:
                     async with session.post(self.base_url, json=payload) as response:
+                        _att_dt = _time_rt.monotonic() - _att_t0
                         if response.status == 200:
                             data = await response.json()
+                            _total_dt = _time_rt.monotonic() - _call_t0
+                            try:
+                                _resp_bytes = len(json.dumps(data, default=str).encode("utf-8"))
+                            except Exception:
+                                _resp_bytes = -1
+                            logger.warning(
+                                f"[GeminiCall] OK 200 attempt={attempt} "
+                                f"attempt_dt={_att_dt:.2f}s total_dt={_total_dt:.2f}s "
+                                f"resp={_resp_bytes}b"
+                            )
+                            # Mark success ts on the class so siblings see it
+                            self.__class__._last_gemini_success_ts = _time_rt.time()
                             return self._parse_response(data)
                         error_text = await response.text()
+                        logger.warning(
+                            f"[GeminiCall] HTTP {response.status} attempt={attempt} "
+                            f"attempt_dt={_att_dt:.2f}s err={error_text[:120]}"
+                        )
+                        # Track-C 9.1: persist non-200 incident for later analysis
+                        try:
+                            _persist_provider_incident(
+                                status=response.status,
+                                attempt=attempt,
+                                payload_bytes=_payload_bytes,
+                                messages_count=len(messages),
+                                attempt_dt=_att_dt,
+                                response_excerpt=error_text[:500],
+                                response_headers=dict(response.headers),
+                                last_success_ts=_last_success_ts,
+                                model=self.model,
+                            )
+                        except Exception:
+                            pass  # Logging must NEVER break the chat path
                         if response.status in retry_statuses and attempt < max_attempts:
+                            # Honor retry-after header if provider sent one
+                            # (cooperates with rate-limit buckets — see the
+                            # _retry_after_wait helper for parsing rules).
+                            ra = response.headers.get("retry-after")
+                            actual_wait = _retry_after_wait(backoff, ra)
                             logger.warning(
                                 f"Gemini {response.status} (attempt {attempt}/{max_attempts}), "
-                                f"retrying in {backoff:.1f}s"
+                                f"retrying in {actual_wait:.1f}s"
+                                + (f" (retry-after={ra!r})" if ra else "")
                             )
-                            await _asyncio_rt.sleep(backoff)
+                            await _asyncio_rt.sleep(actual_wait)
                             backoff *= 2
                             last_error = error_text
                             continue
@@ -155,25 +354,28 @@ class GeminiProvider:
                 })
                 continue
 
-            # Assistant with tool_calls → model message with functionCall
+            # Assistant with tool_calls → model message with functionCall.
+            # Gemini 3.x requires thought_signature in functionCall parts when
+            # continuing a tool-calling conversation. We preserve the signature
+            # from the original response via tc["thought_signature"] if present.
             if role == "assistant" and msg.get("tool_calls"):
                 parts = []
                 if msg.get("content"):
                     parts.append({"text": msg["content"]})
                 for tc in msg["tool_calls"]:
-                    if "gemini_part" in tc:
-                        parts.append(tc["gemini_part"])
-                    elif "gemini_fc" in tc:
-                        parts.append({"functionCall": tc["gemini_fc"]})
-                    else:
-                        fn = tc.get("function", {})
-                        args = fn.get("arguments", "{}")
-                        parts.append({
-                            "functionCall": {
-                                "name": fn["name"],
-                                "args": json.loads(args) if isinstance(args, str) else args,
-                            }
-                        })
+                    fn = tc.get("function", {})
+                    args = fn.get("arguments", "{}")
+                    part = {
+                        "functionCall": {
+                            "name": fn["name"],
+                            "args": json.loads(args) if isinstance(args, str) else args,
+                        }
+                    }
+                    # Gemini 3.x: thoughtSignature is a sibling of functionCall on the part
+                    ts = tc.get("thought_signature")
+                    if ts:
+                        part["thoughtSignature"] = ts
+                    parts.append(part)
                 gemini_msgs.append({"role": "model", "parts": parts})
                 continue
 
@@ -195,29 +397,40 @@ class GeminiProvider:
 
         text_parts = []
         tool_calls = []
+        thoughts = []
 
         for part in parts:
+            # Gemini 3 thought-parts carry `thought: true` alongside `text`.
+            # Route them to `thoughts` so they don't bleed into user-facing
+            # text — only the final non-thought text should reach the chat.
+            if part.get("thought") is True:
+                if "text" in part:
+                    thoughts.append(part["text"])
+                continue
             if "text" in part:
                 text_parts.append(part["text"])
             elif "functionCall" in part:
                 fc = part["functionCall"]
-                logger.info(f"Raw Gemini Part: {part}")
-                tool_calls.append({
+                entry = {
                     "id": f"gemini_{fc['name']}",
                     "type": "function",
                     "function": {
                         "name": fc["name"],
                         "arguments": json.dumps(fc.get("args", {})),
                     },
-                    "gemini_fc": fc,
-                    "gemini_part": part,
-                })
+                }
+                # Gemini 3.x: thoughtSignature is a sibling of functionCall on the part
+                ts = part.get("thoughtSignature")
+                if ts:
+                    entry["thought_signature"] = ts
+                tool_calls.append(entry)
 
         text = "\n".join(text_parts)
         return LLMResponse(
             text=text,
             actions=self._parse_actions(text),
             tool_calls=tool_calls if tool_calls else None,
+            thoughts=thoughts if thoughts else None,
         )
 
     def _clean_params(self, params: Dict) -> Dict:

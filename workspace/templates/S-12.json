@@ -1,0 +1,12 @@
+{
+  "task_id": "S-12",
+  "goal": "Migrate 4.x omni.isaac.ros2_bridge import paths to the correct 5.x module. Agent must cite isaacsim.ros2.nodes / isaacsim.ros2.bridge and flag AMENT_PREFIX_PATH env requirement.",
+  "tools_used": ["lookup_api_deprecation"],
+  "thoughts": "Second cite task after T-13 — proves deprecations-index approach generalizes. Row ros2_bridge_namespace carries the canonical fact.",
+  "code": "lookup_api_deprecation(query='ROS2 bridge 4.x to 5.x namespace')\n# -> row with namespace_5x: 'isaacsim.ros2.nodes (5.0+) or isaacsim.ros2.bridge'\n# Correct reply: cite both 5.x paths + AMENT env requirement + ModuleNotFoundError on 4.x paths.",
+  "failure_modes": [
+    "Invents a third namespace like isaacsim.ros2_bridge.",
+    "Gives only one of the two version-gated paths without explaining the gate.",
+    "Forgets the AMENT_PREFIX_PATH env requirement."
+  ]
+}

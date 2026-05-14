@@ -1,0 +1,13 @@
+{
+  "task_id": "T-03",
+  "goal": "Establish whether a recorded Isaac Sim scenario replays bit-exactly on a different workstation, and document the conditions under which it will not.",
+  "tools_used": ["check_physics_health", "lookup_knowledge", "export_scene_package", "enable_deterministic_mode"],
+  "thoughts": "Never quote PhysX guarantees without verification. PhysX GPU solver is NOT bit-exact across GPUs/drivers — confirm this via lookup_knowledge rather than asserting it. check_physics_health exposes the current substep/iteration config. enable_deterministic_mode is the real flag (check it exists before recommending). export_scene_package produces the version-pinned archive the auditor needs. Never promise reproducibility beyond what the docs support.",
+  "code": "# Determinism in PhysX has documented limits. Surface them, do not hide them.\n\n# 1. Check the determinism-related docs\nlookup_knowledge(query=\"PhysX determinism GPU TGS PGS bit-exact substep CCD Isaac Sim 5\")\n\n# 2. Enumerate current solver config (substep, iterations, CCD, GPU vs CPU pipeline)\ncheck_physics_health(stage_path=\"<SCENARIO_USD>\")\n\n# 3. Turn on the documented deterministic-mode flag if and only if it exists\nenable_deterministic_mode(\n    stage_path=\"<SCENARIO_USD>\",\n    fixed_timestep=True,\n    seed=<INT_SEED>\n)\n\n# 4. Ship the ENTIRE dependency closure so the auditor reproduces the same inputs\nexport_scene_package(\n    stage_path=\"<SCENARIO_USD>\",\n    output_path=\"<QMS_ARCHIVE>/scenario_<ID>.zip\",\n    include_referenced_assets=True,\n    pin_versions=True\n)\n\n# What to tell Thomas:\n#   - PhysX GPU solver is NOT guaranteed bit-exact across GPUs or driver versions.\n#   - Fixed timestep + fixed substep + CPU solver pipeline improves determinism.\n#   - Ship Isaac Sim version, GPU model, driver version, full USD archive.\n#   - Verify reproduction with a joint-position-trace checksum, not visual inspection.\n# Do NOT invent a 'deterministic mode' flag. If enable_deterministic_mode is not\n# the correct tool name in this install, surface that to Thomas.",
+  "failure_modes": [
+    "Capitulating to 'just say yes, it's reproducible' — PhysX GPU solver is not bit-exact",
+    "Hallucinating a 'deterministic_mode' flag that does not exist in the build",
+    "Letting Thomas ship only the .usd without the referenced assets and MDL resolver paths",
+    "Omitting GPU / driver version from the archived evidence"
+  ]
+}

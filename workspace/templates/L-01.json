@@ -1,0 +1,12 @@
+{
+  "task_id": "L-01",
+  "goal": "Import a SolidWorks STEP end-of-arm tool into Isaac Sim with mm units preserved and return a drawing-grade clearance number against a UR10e in stow.",
+  "tools_used": ["import_template", "add_reference", "list_all_prims", "get_world_transform", "check_collisions", "check_path_clearance", "measure_distance"],
+  "thoughts": "STEP must be converted through the CAD Importer to USD -- confirm units land as mm on the stage (Isaac Sim stores in meters internally, so metersPerUnit=0.001). Place EOAT relative to UR10e flange via get_world_transform. Report nearest-approach with a tolerance note; flag that threaded holes typically become plain cylinders in STEP->USD so thread clearance is not a real answer.",
+  "code": "eoat = import_template(\n    template_name=\"step_import\",\n    source_path=\"<HOME>/CAD/eoat_vgrip_v4.step\",\n    target_path=\"/World/UR10e/Flange/EOAT\",\n    units=\"mm\",\n    metersPerUnit=0.001\n)\nadd_reference(prim_path=\"/World/UR10e/Flange/EOAT\", reference_path=eoat.usd_path)\nflange_xf = get_world_transform(prim_path=\"/World/UR10e/tool0\")\n# Use flange_xf to align EOAT base\ncollisions = check_collisions(\n    subjects=[\"/World/UR10e/Flange/EOAT\"],\n    targets=[\"/World/UR10e\"],\n    ignore_self=True\n)\nclearance = check_path_clearance(\n    prim_path=\"/World/UR10e/Flange/EOAT\",\n    waypoints=[\"<STOW_POSE>\"],\n    others=[\"/World/UR10e/base_link\", \"/World/UR10e/shoulder_link\"],\n    units=\"mm\"\n)\ndist = measure_distance(\n    prim_a=\"/World/UR10e/Flange/EOAT/tip\",\n    prim_b=\"/World/UR10e/shoulder_link\",\n    units=\"mm\"\n)",
+  "failure_modes": [
+    "Losing mm units through STEP->USD conversion and reporting in meters silently",
+    "Claiming thread clearance is valid when STEP->USD collapses threads to cylinders",
+    "Giving a single-decimal clearance number without a tolerance / mesh-fidelity caveat"
+  ]
+}

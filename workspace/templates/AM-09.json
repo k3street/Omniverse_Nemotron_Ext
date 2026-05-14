@@ -1,0 +1,12 @@
+{
+  "task_id": "AM-09",
+  "goal": "Tell him honestly the minimum USD subset needed for a Tuesday demo and what he can defer.",
+  "tools_used": ["lookup_knowledge", "scene_aware_starter_prompts"],
+  "thoughts": "Truth: USD is an open Pixar standard, not NVIDIA-proprietary. For a Tuesday demo he can treat .usd as a scene-file format and use the UI. Minimum subset: stage, prim, reference, xform -- one line each. Skip: layer composition, value resolution, schema authoring. Do NOT link the 400-page spec. Do NOT promise he can 'ignore USD' -- error messages are USD-shaped.",
+  "code": "kb = lookup_knowledge(\n    query=\"Isaac Sim 5.x USD minimum for beginner stage prim reference xform what to skip\"\n)\nstarters = scene_aware_starter_prompts(\n    user_goal=\"understand just enough USD to run a demo Tuesday\",\n    user_level=\"beginner\"\n)\n# Talking points to deliver:\n# - USD = Pixar open standard, not NVIDIA-only\n# - stage = the scene file you opened\n# - prim = one node in the scene tree (robot, light, camera)\n# - reference = 'include this other usd file here'\n# - xform = position/rotation of a prim (~Unity Transform)\n# Skip for now: layers, composition arcs, schema authoring, variants",
+  "failure_modes": [
+    "Linking the OpenUSD spec PDF to a first-time user under deadline pressure",
+    "Claiming he can fully ignore USD (errors still speak in USD terms)",
+    "Recommending glTF as a 'simpler alternative' when Isaac Sim's native is USD"
+  ]
+}

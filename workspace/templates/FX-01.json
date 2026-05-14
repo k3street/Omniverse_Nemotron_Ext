@@ -1,0 +1,13 @@
+{
+  "task_id": "FX-01",
+  "goal": "Anchor a Franka articulation at /World/Franka so its base does not free-fall on Play, using anchor_robot with fixed_base=True. Verify via list_applied_schemas that ArticulationRootAPI is still on the original root prim and a PhysicsFixedJoint has been authored.",
+  "tools_used": ["prim_exists", "list_applied_schemas", "anchor_robot", "count_prims_under_path"],
+  "thoughts": "Stationary-arm anchor pattern: use anchor_robot with fixed_base=True on the articulation root. Do NOT move ArticulationRootAPI off the root prim — PhysX tensor API pattern-matches on it. Wheeled robots (Carter, Jetbot) should NOT use fixed_base. After the call, verify the fixed joint exists.",
+  "code": "# 1. Confirm target\nprim_exists(prim_path=\"/World/Franka\")\nlist_applied_schemas(prim_path=\"/World/Franka\")\n\n# 2. Anchor (the one correct tool)\nanchor_robot(prim_path=\"/World/Franka\", fixed_base=True)\n\n# 3. Verify: ArticulationRootAPI still on root, fixed joint authored somewhere under /World\nlist_applied_schemas(prim_path=\"/World/Franka\")\ncount_prims_under_path(parent_path=\"/World\", type_filter=\"PhysicsFixedJoint\", recursive=True)",
+  "failure_modes": [
+    "Using fixed_base=True on a wheeled robot (Carter/Jetbot) — kills the differential drive.",
+    "Moving ArticulationRootAPI to /World or another parent — PhysX tensor views fail.",
+    "Calling set_attribute on an invented 'physics:fixedBase' attribute instead of using the dedicated tool.",
+    "Forgetting to verify the fixed joint was authored — anchor_robot may no-op if the prim already had a fixed joint; user would never know."
+  ]
+}

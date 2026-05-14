@@ -1,0 +1,11 @@
+{
+  "task_id": "AD-08",
+  "goal": "User asserts '4 cubes directly under /World/envs' but the cubes are nested one level deeper (4 envs directly, cubes in each env). Agent must correct the nesting.",
+  "tools_used": ["count_prims_under_path"],
+  "thoughts": "Exercises verify-contract item (b) count-claim with recursive disambiguation. The shallow count on /World/envs is 4 (matches the claimed number), but those 4 are xforms, not cubes. If the agent echoes the user's phrasing, the orchestrator's extra recursive call shows the cubes live at +1 nesting depth — warning cites that.",
+  "code": "count_prims_under_path(parent_path=\"/World/envs\", recursive=False)\n# -> {\"count\": 4}  (four env_N xforms)\ncount_prims_under_path(parent_path=\"/World/envs\", recursive=True, type_filter=\"Cube\")\n# -> {\"count\": 4}  (four cubes, but at depth 2)\n# Reply: '/World/envs has 4 xforms directly; the 4 cubes are one level deeper at /World/envs/env_N/Cube.'",
+  "failure_modes": [
+    "Echoing 'yes, 4 cubes under /World/envs' — shallow count matches noun count by coincidence, but the nesting claim is still wrong.",
+    "Counting with only recursive=True and ignoring depth — reports 4 cubes exist but loses the directly-under-vs-nested distinction."
+  ]
+}

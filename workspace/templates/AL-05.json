@@ -1,0 +1,13 @@
+{
+  "task_id": "AL-05",
+  "goal": "Design a GitLab CI pipeline that hard-gates USD/URDF PRs via headless Isaac Sim validation.",
+  "tools_used": ["run_stage_analysis", "verify_import", "check_physics_health", "check_collision_mesh", "export_scene_package", "preflight_check"],
+  "thoughts": "Hard gates = non-negotiable fail conditions: unresolved refs, negative mass, NaN transform, contact-force explosion at Play, broken articulation. Soft-advisory for perf regressions. Diff-based selectivity is critical — 90 s scene load x N scenes is unusable; only validate scenes touched in the MR. Per-runner GPU allocation: headless Isaac Sim needs EGL, so runners must be GPU-tagged. Un-game-able checks: numeric physics health, mass > 0, ref resolution — these can't be worked around by engineers. Never propose GUI validation.",
+  "code": "# 1. Validation script invoked per changed scene (runs inside isaac-sim container)\n# validate_scene.py (called by .gitlab-ci.yml)\npreflight = preflight_check(scene_path=\"<CHANGED_SCENE>\")\nimport_ok = verify_import(prim_path=\"<ROBOT_PRIM>\")\nanalysis = run_stage_analysis(scene_path=\"<CHANGED_SCENE>\", checks=[\"unresolved_refs\", \"negative_mass\", \"nan_transform\"])\nphysics = check_physics_health(focus=\"contact_force_explosion\", play_duration_s=2.0)\nmeshes = check_collision_mesh(scene_path=\"<CHANGED_SCENE>\")\n\nfailed = any(not x.ok for x in [preflight, import_ok, analysis, physics, meshes])\nif failed:\n    export_scene_package(source_scene=\"<CHANGED_SCENE>\", dest=\"/artifacts/failure_bundle.usdz\")\n    raise SystemExit(1)\n\n# 2. .gitlab-ci.yml fragment — diff-based selectivity\n# stages: [validate]\n# validate_usd:\n#   image: <ISAAC_SIM_HEADLESS_IMAGE_DIGEST>\n#   tags: [gpu, isaac-sim]  # runners with GPU\n#   rules:\n#     - changes: [\"**/*.usd\", \"**/*.usda\", \"**/*.urdf\"]\n#   script:\n#     - |\n#       for f in $(git diff --name-only $CI_MERGE_REQUEST_DIFF_BASE_SHA HEAD -- '*.usd' '*.urdf'); do\n#         ./omni.isaac.sim.headless.sh --exec validate_scene.py --scene $f\n#       done\n#   artifacts:\n#     when: on_failure\n#     paths: [artifacts/]\n\n# 3. Scene load caching: bake a warm-cache image per week; PR runs inherit the cache",
+  "failure_modes": [
+    "assistant proposes re-running full scene suite per PR",
+    "assistant recommends GUI validation",
+    "assistant forgets diff-based selectivity",
+    "assistant doesn't tag GPU runners for headless EGL"
+  ]
+}

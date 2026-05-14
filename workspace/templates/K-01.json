@@ -1,0 +1,13 @@
+{
+  "task_id": "K-01",
+  "goal": "Lay out an ABB IRB 6700 bin-picking cell from a CATIA STEP fixture — GUI-first workflow, TCP frames at pick/place points, cycle-time estimate under 45 s.",
+  "tools_used": ["catalog_search", "nucleus_browse", "import_robot", "create_prim", "lookup_knowledge"],
+  "thoughts": "Kenji distrusts 'here is a Python script'. Offer GUI-first flow: asset browser drag-in for ABB, CAD importer for the STEP file (mm->m unit conversion matters — STEP is almost always mm), TCP frames as child Xforms created via GUI gizmo. Cycle time: Isaac Sim has NO built-in Gantt — be honest, propose script-to-CSV-to-matplotlib. Use factory vocabulary (TCP, cycle, fixture), not 'prim' / 'OmniGraph'. Explicitly acknowledge the VC Gantt gap.",
+  "code": "# 1. Find shipped ABB IRB 6700 asset (asset browser path, Kenji drag-drops)\ncatalog_search(query=\"ABB IRB 6700 235/2.65 USD Isaac Sim shipped asset\")\nnucleus_browse(path=\"omniverse://localhost/NVIDIA/Assets/Isaac/5.0/Isaac/Robots/ABB/\")\n\n# 2. STEP import via CAD importer (GUI: File > Import > STEP)\n#    Critical: set length unit mm -> m at import, NOT after\nimport_robot(\n    urdf_path=\"<ABSOLUTE_STEP_PATH>\",    # /home/kenji/cells/line4/bin_fixture.step\n    dest_path=\"/World/Cell/BinFixture\",\n    fix_base=True,\n    merge_fixed_joints=True\n)\n\n# 3. TCP frames at pick and place as child Xforms under robot flange\ncreate_prim(\n    prim_path=\"/World/IRB_6700/tool0/tcp_pick\",\n    prim_type=\"Xform\",\n    attributes={\"xformOp:translate\": (\"<TX>\",\"<TY>\",\"<TZ>\"),\n                 \"xformOp:orient\":    (\"<QW>\",\"<QX>\",\"<QY>\",\"<QZ>\"),\n                 \"xformOpOrder\": [\"xformOp:translate\",\"xformOp:orient\"]}\n)\ncreate_prim(prim_path=\"/World/IRB_6700/tool0/tcp_place\", prim_type=\"Xform\", attributes={\"...\": \"...\"})\n\n# 4. Cycle-time measurement — honest path, no built-in Gantt\nlookup_knowledge(query=\"Isaac Sim cycle time logging joint trajectory timeline CSV matplotlib Gantt\")\n# Concrete approach: timestamp each waypoint transition in a small logger,\n# emit CSV, render Gantt in matplotlib. Isaac Sim is continuous-physics-first;\n# Visual Components and Plant Sim have native Gantt -- Isaac Sim does not.",
+  "failure_modes": [
+    "STEP imported at mm scale — robot cell is 1000x oversized, reach study lies",
+    "Threaded holes lost on STEP tesselation — normal CAD-to-mesh limitation, flag it",
+    "Claiming Isaac Sim has a built-in Gantt — it does not, Kenji will catch the lie",
+    "Jumping to Python motion-planning script as the primary path — Kenji disengages"
+  ]
+}

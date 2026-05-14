@@ -1,0 +1,13 @@
+{
+  "task_id": "R-02",
+  "goal": "Launch a pre-built warehouse/AMR demo scene in under 2 minutes for Raj's client pitch call.",
+  "tools_used": ["quick_demo", "list_scene_templates"],
+  "thoughts": "No teaching, no customization. quick_demo is the one-shot. Pick warehouse AMR preset because the client cares about logistics. If quick_demo fails, fall back to list_scene_templates and load the closest match. Skip run_stage_analysis unless Raj asks.",
+  "code": "# One shot. Pick demo aligned with client vertical.\nquick_demo(demo_name=\"<WAREHOUSE_AMR_PRESET>\")\n\n# If that errors, enumerate real templates and pick closest\nlist_scene_templates()  # only on failure\n# load_scene_template(template_name=\"<FALLBACK_TEMPLATE>\")",
+  "failure_modes": [
+    "Lecturing Raj on scene-template architecture",
+    "Picking a manipulation demo when client said AMR",
+    "Demo asset streams slowly \u2014 must pre-warm before call",
+    "Invented demo_name that is not in the registry"
+  ]
+}

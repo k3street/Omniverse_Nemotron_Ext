@@ -1,0 +1,13 @@
+{
+  "task_id": "R-11",
+  "goal": "Ship subcontractor a reproducible package: scene + checkpoint + one-command run script + sanity check.",
+  "tools_used": ["export_scene_package", "run_stage_analysis", "run_usd_script"],
+  "thoughts": "Two past 'works on my machine' failures \u2014 this one must pin everything. export_scene_package with relative refs. Ship checkpoint separately via signed URL (2GB bloats the zip). Sanity-check script loads scene, steps physics 10x, prints an observation hash \u2014 matches = env reproducible, mismatches = investigate before writing code. Pin Isaac Sim version in README.",
+  "code": "# 1. Audit refs before packing\nrun_stage_analysis()\n\n# 2. Pack scene (not checkpoint)\nexport_scene_package(\n    stage_path=\"<STAGE_USD>\",\n    output_path=\"<HANDOFF_ZIP>\",\n    format=\"zip\",\n    rewrite_refs_relative=True,\n    include_textures=True,\n    isaac_sim_version=\"<5.1.0>\"\n)\n\n# 3. Sanity-check script \u2014 subcontractor runs this first\nrun_usd_script(\n    description=\"Generate reproducibility check script\",\n    code=\"\"\"\n# reproducibility_check.py \u2014 expected SHA at bottom\nimport hashlib, json, omni.usd\nstage = omni.usd.get_context().open_stage('<RELATIVE_STAGE_PATH>')\nfor _ in range(10):\n    omni.kit.commands.execute('Simulate')\nobs = get_env_observations(env_id=0)\nprint('OBS_HASH', hashlib.sha256(json.dumps(obs, sort_keys=True).encode()).hexdigest())\n# EXPECTED: <RAJS_LOCAL_HASH>\n\"\"\"\n)\n\n# 4. Ship checkpoint via signed URL in README, NOT in zip",
+  "failure_modes": [
+    "Absolute paths from Raj's home dir leak into run script",
+    "Windows subcontractor hits path-separator issues \u2014 always use pathlib",
+    "Checkpoint inside zip balloons it to 2GB+",
+    "Sanity check depends on deterministic physics without pinning timestep/seed"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "task_id": "M-04",
+  "goal": "Draft a dense reward function for Allegro in-hand cube reorientation using real IsaacLab mdp reward terms, with shaping weights exposed as an ablatable dict.",
+  "tools_used": ["lookup_knowledge", "generate_reward", "review_reward", "run_usd_script"],
+  "thoughts": "Maya wants shaping (distance-to-target-quat, fingertip contact bonus, action-rate penalty, angular-velocity penalty) on top of existing sparse reward, no OmniGraph. Key pitfall: near identity, 1-|q1.q2| has vanishing gradient — use orientation_command_error / quat_error_magnitude from isaaclab.utils.math. Return RewardTermCfg (2.x name) entries, weights in a dict Maya can sweep.",
+  "code": "# 1. Ground in real IsaacLab reward term patterns\nlookup_knowledge(query=\"IsaacLab 2.x RewardTermCfg mdp orientation_command_error in-hand manipulation\")\n\n# 2. Generate with explicit env spec\ngenerate_reward(\n    task_description=\"Allegro in-hand cube reorientation, dense shaping\",\n    observations=[\"fingertip_pos\", \"cube_pose\", \"target_quat\", \"joint_pos\", \"joint_vel\", \"last_action\"],\n    style=\"isaaclab_manager_based\",\n    terms=[\n        {\"name\": \"orientation_tracking\", \"fn\": \"orientation_command_error\", \"weight\": \"<W_ORI>\"},\n        {\"name\": \"fingertip_contact\",   \"fn\": \"contact_force_threshold\",  \"weight\": \"<W_CONTACT>\"},\n        {\"name\": \"action_rate\",         \"fn\": \"action_rate_l2\",           \"weight\": \"<W_ARATE>\"},\n        {\"name\": \"cube_ang_vel\",        \"fn\": \"ang_vel_l2\",               \"weight\": \"<W_AVEL>\"},\n        {\"name\": \"cube_drop\",           \"fn\": \"root_height_below_minimum\", \"weight\": \"<W_DROP>\"}\n    ]\n)\n\n# 3. Critique the generated reward before wiring it in\nreview_reward(reward_cfg_path=\"<GENERATED_REWARD_CFG>\")\n\n# 4. Verify observation term shapes match before training dry-run\nrun_usd_script(script=\"print([(t.name, t.cfg.func.__name__) for t in env.observation_manager.active_terms['policy']])\")",
+  "failure_modes": [
+    "Hand-rolled quaternion diff (1 - |q1.q2|) has zero gradient near identity — use quat_error_magnitude",
+    "Using RewTerm (old 1.x name) instead of RewardTermCfg (2.x) — breaks import",
+    "OmniGraph-based rewards pollute the env and Maya explicitly rejected them",
+    "Missing terminal penalty on cube drop leaves sparse signal hole at failure"
+  ]
+}

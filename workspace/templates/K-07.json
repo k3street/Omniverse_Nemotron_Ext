@@ -1,0 +1,13 @@
+{
+  "task_id": "K-07",
+  "goal": "Enforce 95% soft limits on IRB 6700 joints via a motion-planner-side trim (not articulation attrs) and shape trajectory jerk via Lula/RMPflow or a vel/accel profile — because URDF joint limits are hard.",
+  "tools_used": ["list_all_prims", "set_attribute", "lookup_knowledge", "lookup_product_spec", "set_joint_limits"],
+  "thoughts": "URDF joint limits in the articulation are HARD limits — PhysX clamps on violation. Soft limits at 95% belong in the motion planner or trajectory trimmer, not the articulation. set_joint_targets emits step inputs; drive P/D + maxForce shape the RESPONSE but give you no jerk control. ABB-style trapezoidal vel/accel/jerk profile needs Lula RMPflow or a scripted spline. RAPID is proprietary — can't import; JSON config the engineer maintains is the honest path. ISO 10218-1 >=5% soft-limit margin standard.",
+  "code": "# 1. Inspect existing drive APIs and joint limits on joint 2\nlist_all_prims(root=\"/World/IRB_6700\", schema_filter=\"PhysicsDriveAPI\")\n\n# 2. Confirm ABB rated vel/accel spec before tuning drives\nlookup_product_spec(query=\"ABB IRB 6700 235/2.65 joint rated velocity acceleration specification manual\")\n\n# 3. Motion planner patterns (Lula / RMPflow / Cortex) that DO give jerk control\nlookup_knowledge(query=\"Isaac Sim Lula RMPflow Cortex motion generator trapezoidal velocity jerk limit\")\n\n# 4. Drive tuning for max vel / max force (shapes response, not jerk directly)\nset_attribute(\n    prim_path=\"/World/IRB_6700/joint_2\",\n    attribute=\"drive:angular:physics:maxVelocity\",\n    value=\"<MAX_VEL_JOINT2>\"   # match ABB rated spec\n)\nset_attribute(\n    prim_path=\"/World/IRB_6700/joint_2\",\n    attribute=\"drive:angular:physics:maxForce\",\n    value=\"<MAX_FORCE_JOINT2>\"\n)\n\n# 5. Do NOT change hard joint limits -- keep URDF authority, trim at planner level:\n#    SOFT_LIMITS = {'joint_2': (-65*0.95, 85*0.95), ...}  # JSON maintained by engineer\n#    targets = clamp(targets, SOFT_LIMITS)  before issuing to articulation\n\n# 6. If the engineer explicitly wants to expose soft limits in USD for visualization\n#    (optional, not replacing the planner trim):\nset_joint_limits(\n    prim_path=\"/World/IRB_6700/joint_2\",\n    lower=\"<SOFT_LO_DEG>\",\n    upper=\"<SOFT_HI_DEG>\"\n)",
+  "failure_modes": [
+    "Setting USD joint limits to 95% and expecting the planner to obey — planner reads URDF source",
+    "Just lowering max velocity and calling it jerk ramping — gives you vel control, not jerk",
+    "Promising a RAPID-import path — ABB RAPID is proprietary, no importer",
+    "Forgetting ISO 10218-1 >=5% margin — soft limits at 99% violate the standard"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "task_id": "M-10",
+  "goal": "Tell Maya why her 1xA100 and 4xA100 runs diverge at step 2000 despite identical seeds — GPU PhysX is NOT bit-exact across different card counts.",
+  "tools_used": ["lookup_knowledge", "check_physics_health", "run_usd_script"],
+  "thoughts": "Do NOT promise reproducibility from a single seed. GPU PhysX reduction order depends on solver partitioning which depends on card count and num_envs layout. TGS is iterative and more sensitive to partitioning than PGS. Four distinct RNG streams exist: env.seed (task reset), torch (policy), numpy (obs/rewards stats), action-noise/DR seeds — all must be pinned separately. Offer CPU PhysX as the honest escape hatch with a throughput warning.",
+  "code": "# 1. Cite the actual caveat, not marketing copy\nlookup_knowledge(query=\"PhysX GPU determinism reduction order solver partitioning TGS PGS multi-GPU IsaacLab\")\n\n# 2. Surface solver type + GPU count from the scene\ncheck_physics_health()\nrun_usd_script(script=\"\"\"\nfrom pxr import UsdPhysics\nstage = omni.usd.get_context().get_stage()\nfor p in stage.Traverse():\n    if p.IsA(UsdPhysics.Scene):\n        print('solver', p.GetAttribute('physxScene:solverType').Get())\n        print('broadphase', p.GetAttribute('physxScene:broadphaseType').Get())\n        print('gpu_dynamics', p.GetAttribute('physxScene:enableGPUDynamics').Get())\n\"\"\")\n\n# 3. Pin all four RNG streams explicitly (no single master seed)\n# env.seed(<SEED>)           # task/reset RNG\n# torch.manual_seed(<SEED>)  # policy + init\n# numpy.random.seed(<SEED>)  # obs stats / rollout buffer\n# cfg.events.<noise_term>.params['seed'] = <SEED>   # DR/action noise stream\n\n# 4. Practical reproducibility policy Maya should commit to her paper:\n#   - same GPU SKU + same CUDA + same driver\n#   - same num_envs AND same card count\n#   - tolerances on eval curves, NOT bit-match\n#   - if reviewer demands bit-match: switch to CPU PhysX for the figure\n#     (cfg.sim.use_gpu_pipeline=False, enableGPUDynamics=False)\n#     honest tradeoff: ~100x throughput drop",
+  "failure_modes": [
+    "Promising bit-exact reproducibility by setting a single seed=42 flag",
+    "Pinning only torch.manual_seed and missing the env/numpy/DR streams",
+    "Switching to CPU PhysX silently — Maya discovers the 100x slowdown mid-run",
+    "Claiming TGS is as deterministic as PGS across partitioning — it is not"
+  ]
+}

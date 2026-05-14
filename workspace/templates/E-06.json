@@ -1,0 +1,13 @@
+{
+  "task_id": "E-06",
+  "goal": "Kick off a Replicator SDG run overnight producing ~10k COCO-format labelled warehouse-shelf images (RGB, instance seg, 2D bbox, depth) for the perception team.",
+  "tools_used": ["lookup_knowledge", "list_all_prims", "create_sdg_pipeline", "configure_coco_yolo_writer", "export_dataset"],
+  "thoughts": "Use omni.replicator.core + omni.replicator.isaac for bbox annotators — not a hand-rolled camera loop. Minimum useful randomizer set: camera pose, lighting, box count/position, box texture (4 knobs, not 30). BasicWriter for throughput dev, CocoWriter for the perception team's actual format. ETA ~1 img/sec per 4090 at 1024x1024 RTX RealTime -> 10k in ~3 hours. YOLO conversion is a one-shot post-process, not a second SDG run.",
+  "code": "# 1. Patterns for Replicator + Isaac Sim SDG\nlookup_knowledge(query=\"omni.replicator.core omni.replicator.isaac BasicWriter CocoWriter bbox instance segmentation\")\n\n# 2. Find shelves and box prims to randomize\nlist_all_prims(root=\"/World/Shelves\", name_contains=\"box\")\n\n# 3. Author the SDG pipeline — minimum viable randomizers\ncreate_sdg_pipeline(\n    camera_prim=\"<CAMERA_PRIM_PATH>\",\n    randomizers=[\n        {\"kind\": \"camera_pose\", \"lookat\": \"<SHELF_CENTER>\", \"radius_range\": (\"<R_LO>\",\"<R_HI>\")},\n        {\"kind\": \"dome_light_intensity\", \"range\": (\"<I_LO>\",\"<I_HI>\")},\n        {\"kind\": \"scatter\", \"target_prims\": \"/World/Shelves/*/box_*\", \"count_range\": (\"<N_LO>\",\"<N_HI>\")},\n        {\"kind\": \"material_swap\", \"target\": \"box_*\", \"materials\": \"<BOX_MDL_LIBRARY>\"}\n    ],\n    annotators=[\"rgb\", \"instance_segmentation\", \"bounding_box_2d_tight\", \"depth\"]\n)\n\n# 4. COCO writer config (the team asked for COCO; YOLO conversion is post-process)\nconfigure_coco_yolo_writer(\n    output_dir=\"<OUTPUT_DIR>\",\n    format=\"coco\",\n    classes=[\"box\"],\n    include_depth=True\n)\n\n# 5. Launch headless and let it run overnight\nexport_dataset(pipeline=\"<PIPELINE_ID>\", num_frames=10000, headless=True)\n\n# ETA: ~1 img/s per 4090 at 1024x1024 RTX RealTime -> ~3h for 10k.\n# YOLO: cocotoyolo.py post-process, no second SDG run needed.",
+  "failure_modes": [
+    "Hand-rolled camera loop — misses instance seg annotator wiring",
+    "30 randomizers instead of 4 — 10x iteration time, marginal diversity gain",
+    "BasicWriter shipped to perception team — wrong format, they rebuild the dataloader",
+    "Forgetting headless — overnight run holds the viewport GPU, throughput collapses"
+  ]
+}

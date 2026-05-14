@@ -1,0 +1,13 @@
+{
+  "task_id": "G-06",
+  "goal": "Move the existing cube at /World/Box from (1,0,0) to (3,2,0.5). Keep the same path, size, and prim — just update its translate op. Verify with get_world_transform.",
+  "tools_used": ["prim_exists", "set_attribute", "get_world_transform"],
+  "thoughts": "The cube was created with AddTranslateOp, so it already has an xformOp:translate in its xformOpOrder. Mutate the existing op via set_attribute on xformOp:translate — NEVER call AddTranslateOp on a prim that already has one. Verify with get_world_transform to catch silent failures.",
+  "code": "prim_exists(prim_path=\"/World/Box\")\n\n# Mutate the existing translate op — do NOT add a new one\nset_attribute(\n    prim_path=\"/World/Box\",\n    attr_name=\"xformOp:translate\",\n    value=[3.0, 2.0, 0.5]\n)\n\nget_world_transform(prim_path=\"/World/Box\")",
+  "failure_modes": [
+    "AddTranslateOp on a prim that already has xformOps — authoring is duplicated and the old translate may win (xformOpOrder not updated).",
+    "Creating a new cube at /World/Box_moved — task says move, not duplicate.",
+    "Editing via DefinePrim again — may clobber other authored attrs on the same prim.",
+    "Forgetting to verify — a silently-dropped set_attribute leaves the cube at (1,0,0)."
+  ]
+}

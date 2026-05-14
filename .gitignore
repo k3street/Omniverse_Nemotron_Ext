@@ -20,6 +20,14 @@ data/
 outputs/
 workspace/*
 !workspace/knowledge/
+!workspace/templates/
+
+# Runtime state (not source)
+service/workspace/
+logs/
+
+# Brainstorming notes (local only)
+brainstorm/
 
 # IDEs
 .idea/
@@ -39,3 +47,5 @@ workspace/*
 # Personal launch override (tracked version is launch_isaac.sh)
 launch_isaac_fixed.sh
 =3.0.0
+.claude/
+docs/research/PRIVATE/

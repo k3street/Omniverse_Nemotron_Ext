@@ -1,0 +1,13 @@
+{
+  "task_id": "K-10",
+  "goal": "Give Kenji a straight answer on Fanuc R-30iB Plus support: no native driver ships with Isaac Sim, integration via ROS2 + community Fanuc driver or Fanuc PCDK/FOCAS; HIL validation needs vendor tools or certified rigs.",
+  "tools_used": ["lookup_knowledge", "lookup_product_spec", "catalog_search"],
+  "thoughts": "Kenji is screening for sales-deck lies. Honest answer: Isaac Sim does NOT ship a Fanuc R-30iB driver. Integration paths: (a) Fanuc PCDK/FOCAS for direct controller comms, (b) ROS2 bridge via community Fanuc driver. Maturity gap: ABB/KUKA community drivers are more mature than Fanuc as of 2026. RoboGuide remains the vendor-native HIL path. TUV-compliant HIL — Isaac Sim is NOT a certified tool, say so. Isaac Sim's strength is AI/vision/training, not controller HIL.",
+  "code": "# 1. Confirm the actual scope of the Isaac Sim ROS2 bridge\nlookup_knowledge(query=\"Isaac Sim omni.isaac.ros2_bridge Fanuc controller integration scope supported\")\n\n# 2. Fanuc R-30iB Plus interface options (vendor-native)\nlookup_product_spec(query=\"Fanuc R-30iB Plus PCDK FOCAS socket interface ROS2 community driver maturity\")\n\n# 3. Any shipped Fanuc examples in the Isaac Sim asset / extension catalog\ncatalog_search(query=\"Fanuc R-30iB example extension Isaac Sim 5.0 shipped\")\n\n# Evidence-based summary for Kenji:\n#  1. Isaac Sim ships NO native Fanuc R-30iB driver (as of 5.0).\n#  2. Integration paths, ranked by maturity:\n#       a. Fanuc PCDK / FOCAS  -- vendor-native, most reliable\n#       b. ROS2 bridge + community Fanuc driver (fanuc_driver / fanuc_ros2_driver)\n#          -- works, but less mature than ABB/KUKA community drivers as of 2026\n#  3. HIL validation for safety-of-use: RoboGuide remains vendor-native. Isaac Sim is\n#     NOT a TUV-validated tool for controller HIL; certified HIL rigs are separate.\n#  4. Kinematic model import (URDF / USD) of the IRB-equivalent Fanuc arm works fine --\n#     that is distinct from live controller comms.\n#  5. Isaac Sim's sweet spot = AI/vision/training upstream of the cell, not RoboGuide replacement.\n# Do NOT tell Kenji 'fully supported' -- that is exactly the sales-deck answer he is screening for.",
+  "failure_modes": [
+    "Saying 'yes, fully supported' — Kenji rejects Isaac Sim on the spot",
+    "Conflating kinematic-model import with live controller HIL — they are different problems",
+    "Claiming Isaac Sim is TUV-compliant for HIL safety validation — it is not",
+    "Missing the ABB/KUKA vs Fanuc community-driver maturity gap — Kenji knows this already"
+  ]
+}

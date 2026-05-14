@@ -1,0 +1,13 @@
+{
+  "task_id": "E-05",
+  "goal": "Diagnose an 8/10 grasp-slip rate on the real G1 after training — point Tobias at zero friction DR and insufficient mass DR, not at a bigger network.",
+  "tools_used": ["lookup_knowledge", "run_stage_analysis", "apply_robot_fix_profile", "check_physics_health", "suggest_dr_ranges"],
+  "thoughts": "Contact physics gap, not capacity problem. Real friction ~0.5 measured, sim mu=0.5 fixed = zero DR. Real mass varies +/-50%, sim only +/-10%. Asymmetric friction range 0.3-0.9 (skew low — slippage is the failure mode), mass 50-200% of nominal. Rigid sim contacts vs compliant real fingertips is the 2nd-order fix (next sprint, not this one). Visual DR is irrelevant for grasp slip — that is perception territory.",
+  "code": "# 1. Anchor in real sim-to-real grasp-slip patterns, not generic DR advice\nlookup_knowledge(query=\"sim-to-real grasping friction mass domain randomization range asymmetric IsaacLab\")\n\n# 2. Inspect the material actually bound to the box/gripper contact pair\nrun_stage_analysis(scope=\"<GRIPPER_PRIM_PATH>\")\ncheck_physics_health()\n\n# 3. Priors-aware range suggestions (NOT symmetric around nominal)\nsuggest_dr_ranges(\n    params=[\n        {\"name\": \"box_gripper_static_friction\",  \"prior\": 0.5, \"asymmetry\": \"skew_low\",    \"range\": (0.3, 0.9)},\n        {\"name\": \"box_gripper_dynamic_friction\", \"prior\": 0.4, \"asymmetry\": \"skew_low\",    \"range\": (0.25, 0.8)},\n        {\"name\": \"box_mass\",                     \"prior\": 1.0, \"asymmetry\": \"symmetric\",  \"range\": (0.5, 2.0)}\n    ]\n)\n\n# 4. If a shipped grasp-DR profile matches, apply it rather than reinventing\napply_robot_fix_profile(profile=\"grasp_contact_dr\", target=\"<ROBOT_PRIM_PATH>\")\n\n# Slack summary for Tobias (not a thesis):\n#  1. Friction DR 0.3-0.9 skew-low (real measured ~0.5)\n#  2. Mass DR 50-200% (real varies ~50%, not 10%)\n#  3. Retrain 3 windows — fits before demo\n#  4. Gripper compliance = next sprint, not this one\n#  5. Visual DR not the issue — skip for now",
+  "failure_modes": [
+    "Recommending a bigger network — it is a physics gap not capacity",
+    "Symmetric DR around 0.5 still misses the low-friction real failures",
+    "Visual DR rabbit hole — irrelevant for contact slippage",
+    "Gripper-compliance modeling now — blows the 3-window budget before demo"
+  ]
+}

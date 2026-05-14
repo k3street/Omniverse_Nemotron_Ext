@@ -1,0 +1,13 @@
+{
+  "task_id": "R-07",
+  "goal": "Scripted: add conveyor USD as a reference at translate (2,0,0) with 90\u00b0 Z rotation, save.",
+  "tools_used": ["add_reference", "set_attribute", "save_stage"],
+  "thoughts": "Skip run_usd_script \u2014 add_reference + set_attribute is two RPC calls and already covers the case. Use xformOp:translate and xformOp:rotateZ with the modern UsdGeom.XformOp API via set_attribute. Save the stage so it survives a kit restart.",
+  "code": "add_reference(\n    prim_path=\"<CONVEYOR_PRIM_PATH>\",       # /World/Conveyor_01 (suffix if exists)\n    reference_path=\"<CONVEYOR_USD>\"          # /home/raj/downloads/conveyor_v2.usd\n)\n\nset_attribute(\n    prim_path=\"<CONVEYOR_PRIM_PATH>\",\n    attr_name=\"xformOp:translate\",\n    value=[2.0, 0.0, 0.0]\n)\nset_attribute(\n    prim_path=\"<CONVEYOR_PRIM_PATH>\",\n    attr_name=\"xformOp:rotateZ\",\n    value=90.0\n)\n\nsave_stage(stage_path=\"<STAGE_USD>\")\n\n# If prim path collision: increment suffix _01 \u2192 _02 before add_reference.",
+  "failure_modes": [
+    "Using deprecated UsdGeom.Xformable.AddTranslateOp without xformOpOrder update",
+    "Path collision \u2014 second add_reference overwrites the first silently",
+    "Stage not saved \u2014 conveyor gone on next kit launch",
+    "Rotation axis wrong because conveyor asset has non-standard up-axis"
+  ]
+}

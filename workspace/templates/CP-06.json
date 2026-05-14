@@ -1,0 +1,44 @@
+{
+  "task_id": "CP-06",
+  "goal": "Build a Franka pick-and-place cell using the **bundled NVIDIA PickPlaceController** (RMPflow + ParallelGripper) instead of cuRobo. Demonstrates the alternative controller path for users who don't have cuRobo configured or want simpler RMPflow-based motion. Same scene as CP-01 (table, conveyor, 4 cubes, bin) but `target_source='builtin'` invokes the per-robot bundled controller from isaacsim.robot.manipulators.examples.franka. Robot-agnostic infrastructure: builtin handler dispatches to franka/ur10/ur10e/cobotta per robot_family arg.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six specifics for CP-06 (builtin controller variant of CP-01):\n1) Identical scene to CP-01: 2x1x0.75m table, 3m conveyor, 4 cubes at x=-1.4..-0.65, bin at y=-0.4. Same physics setup (CPU dynamics, sleepThreshold=0, rubber on cubes).\n2) target_source='builtin' invokes _gen_pick_place_builtin which imports isaacsim.robot.manipulators.examples.franka.controllers.PickPlaceController. NVIDIA's pre-tuned RMPflow + ParallelGripper.\n3) robot_family='franka' explicit (auto-detect also works via USD reference path scan — looks for 'franka' or 'panda' substring).\n4) Builds a separate _builtin_pp_sub_<TAG> subscription distinct from _curobo_pp_sub_<TAG>. Form-gate (verify_pickplace_pipeline) recognizes both prefixes as valid controller installations.\n5) Cube queue handled by per-step state machine: read first undelivered cube within 0.95m reach, call controller.forward(picking_position, placing_position, current_joint_positions, end_effector_offset), advance on is_done().\n6) Scene state setup mirrors CP-01: world.scene.add(robot) then world.reset() (initializes physics_sim_view + gripper) then PickPlaceController(gripper=robot.gripper, ...). The world.reset() step is critical — without it robot.gripper is None and controller crashes.",
+  "code": "# DomeLight — without this the viewport renders black after new_stage()\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\n# Parent Xform\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# Table — Cube default size=2, scale to 2x1x0.75m with top at z=0.75\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# CPU dynamics required for PhysxSurfaceVelocityAPI\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Franka on table, oriented so cube/belt at world +Y is in robot's base +X\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Long conveyor belt in front of robot. Apparent speed ~3x nominal due\n# to PhysX stick-slip with high-friction material.\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Cubes start OUTSIDE robot's 0.70m pick reach so belt has visible work.\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\n# sleepThreshold=0 on all cubes\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\n# Rubber on cubes only — combined-friction with default-mu fingers\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Bin behind robot, floor flush on table top\ncreate_bin(prim_path=\"/World/Bin\", position=[0, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\n# Pick station inside robot reach\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Builtin controller — uses NVIDIA's bundled per-robot PickPlaceController.\n# Alternative to CP-01's cuRobo. Simpler, no GPU/CUDA setup needed; works any\n# install where isaacsim.robot.manipulators.examples is available.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"builtin\",\n    robot_family=\"franka\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Bin\"\n)",
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "robot_kind": "franka",
+        "pick_path": "/World/PickSensor",
+        "place_path": "/World/Bin"
+      }
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Bin",
+    "duration_s": 60
+  },
+  "failure_modes": [
+    "Skipping world.reset() before PickPlaceController init → robot.gripper is None → 'NoneType has no attribute link_names' crash. Builtin handler does world.reset() automatically.",
+    "robot_family='auto' fails to detect → pass explicit 'franka' (or 'ur10', 'ur10e', 'cobotta_pro_900'). Auto-detect scans USD reference paths for known robot substrings.",
+    "Same physics gotchas as CP-01: GPU dynamics disabled, sleepThreshold=0, rubber on cubes only, DomeLight=1000.",
+    "isaacsim.robot.manipulators.examples not installed → ModuleNotFoundError. This module is bundled with Isaac Sim 5.x but may be missing in stripped installs."
+  ],
+  "extension_notes": "CP-06 is the 'parallel canonical' to CP-01: same scene, different controller path. Validates that target_source='builtin' works for Franka. CP-07 (UR10 + builtin) is blocked on surface_gripper variant — needs Sprint 3's `surface_gripper` tool to enable. CP-08 (CobottaPro900) blocked because Cobotta wrapper class isn't in this Isaac Sim install — would need custom wrapper.",
+  "delivery": "Cube_1 picked from conveyor and dropped into Bin via Franka + bundled PickPlaceController",
+  "cube_path": "/World/Cube_1"
+}

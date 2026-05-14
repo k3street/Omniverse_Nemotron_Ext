@@ -1,0 +1,12 @@
+{
+  "task_id": "AM-07",
+  "goal": "Translate a console error into plain English with a one-step fix, honest about severity.",
+  "tools_used": ["explain_error", "diagnose_physics_error", "lookup_knowledge", "get_console_errors"],
+  "thoughts": "Translate, do not echo. Hit explain_error with the actual text, not a summary. diagnose_physics_error checks the stage for the common cause behind 'articulation root / rigid body API' messages. Be honest if it's a benign warning -- don't make him panic 30 minutes from his call.",
+  "code": "errs = get_console_errors(since_seconds=600, severity=[\"error\", \"warning\"])\nfor e in errs.entries:\n    plain = explain_error(\n        error_text=e.text,\n        audience=\"beginner\",\n        include_fix=True,\n        include_severity_note=True\n    )\ndiag = diagnose_physics_error(\n    scope_path=\"/World\",\n    checks=[\"articulation_root\", \"rigid_body_api\", \"contact_report\"]\n)\nkb = lookup_knowledge(\n    query=\"Isaac Sim 5.x articulation root missing rigid body api beginner fix\"\n)",
+  "failure_modes": [
+    "Echoing the traceback instead of translating it",
+    "Panicking him about a benign warning",
+    "Sending him into USD physics schema reading instead of the one-click fix"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "task_id": "E-02",
+  "goal": "Give Erik a 60-second green/yellow/red verdict on Lena's demo_cell_v4 scene — is it customer-ready or not.",
+  "tools_used": ["scene_summary", "run_stage_analysis", "lookup_knowledge"],
+  "thoughts": "Erik has 5 minutes. Start with scene_summary, not a Python shell. Customer-visible issues (missing textures, default grey, z-fighting, unlit corners) matter more than engineering edge cases. Functional risks = G1 joint limits, disabled colliders, kinematicEnabled=True on things that should be dynamic. Do NOT dump 400 prim paths. Commit to a verdict, do not hedge.",
+  "code": "# 1. Bird's-eye view, no Python shell\nscene_summary(stage_path=\"omniverse://localhost/Projects/Picking/demo_cell_v4.usd\")\n\n# 2. One-shot quality sweep — materials, colliders, unapplied schemas\nrun_stage_analysis(scope=\"/World\")\n\n# 3. Ground the customer-visible checklist\nlookup_knowledge(query=\"Isaac Sim demo readiness checklist textures z-fighting lighting MDL\")\n\n# Output template for Slack to Lena (exactly 3 bullets):\n# GREEN:  <e.g. scripted cycle, physics stable, all colliders active>\n# YELLOW: <e.g. 3 boxes still on default grey MDL, customer will notice>\n# RED:    <e.g. conveyor belt mesh has no assigned material, or kinematicEnabled=True on Robot base>\n# Verdict: <go | needs-fix-by-Thursday | pull-demo>",
+  "failure_modes": [
+    "Dumping 400 lines of list_all_prims output — Erik bails",
+    "Hedging (no verdict) — Erik needs a call to paste to Lena",
+    "Missing the VP-of-logistics POV (texture/motion/collisions, not code)",
+    "Engineering-only lens that ignores cosmetic customer-visible issues"
+  ]
+}

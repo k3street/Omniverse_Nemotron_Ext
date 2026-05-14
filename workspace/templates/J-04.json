@@ -1,0 +1,13 @@
+{
+  "task_id": "J-04",
+  "goal": "Reference solution for homework #3: add a second Franka ~1 m apart, fully articulated, saved.",
+  "tools_used": ["load_scene_template", "add_reference", "set_attribute", "save_stage", "run_stage_analysis"],
+  "thoughts": "Two learning styles \u2014 give GUI click-path AND scripted version. Core gotcha: distinct prim path (Franka_01 vs Franka_02) because USD won't merge two references at the same path. Separate pose so they don't stack. Save the stage \u2014 the step students forget and TAs have to re-grade.",
+  "code": "# GUI path (handout bullet list):\n# 1. Create menu \u2192 Add Reference, pick franka.usd, name it 'Franka_02'\n# 2. Select /World/Franka_02, Property panel, set xform:translate=[1.0, 0, 0]\n# 3. File \u2192 Save Stage\n\n# Scripted equivalent (for CS-leaning students):\nload_scene_template(template_name=\"<SINGLE_FRANKA_TABLETOP>\")\n\nadd_reference(\n    prim_path=\"/World/Franka_02\",                  # distinct name \u2014 mandatory\n    reference_path=\"<FRANKA_USD_ASSET>\"\n)\nset_attribute(\n    prim_path=\"/World/Franka_02\",\n    attr_name=\"xformOp:translate\",\n    value=[1.0, 0.0, 0.0]                           # 1 m apart\n)\n\nrun_stage_analysis()   # assert 2 ArticulationRoots present\nsave_stage(stage_path=\"<STUDENT_HW3_USD>\")\n\n# Why distinct name: two prims at same path = USD composition collapses them.",
+  "failure_modes": [
+    "Students give both references the same prim path \u2014 second silently merges",
+    "Forgetting save_stage \u2014 next launch loses the second arm",
+    "GUI copy-paste does NOT create a reference \u2014 it duplicates flattened",
+    "Placing both at origin \u2014 visually stacked, physics jitters"
+  ]
+}

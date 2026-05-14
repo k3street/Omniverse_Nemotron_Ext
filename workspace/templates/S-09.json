@@ -1,0 +1,13 @@
+{
+  "task_id": "S-09",
+  "goal": "Match sim stereo camera intrinsics to real Hawk module (fx=958.57, baseline 150mm, 2064x1544).",
+  "tools_used": ["list_all_prims", "get_camera_params", "set_camera_params", "set_attribute", "run_usd_script", "ros2_list_topics"],
+  "thoughts": "USD cameras don't expose fx directly — derive via fx = (focalLength / horizontalAperture) * width_px. Pick horizontalAperture that matches real sensor width, then solve for focalLength. Baseline fix: translate the RIGHT camera prim by +baseline in x, don't rotate the stereo parent. USD radial distortion: Isaac Sim cameras are pinhole by default; real distortion needs the fisheye/omnidirectional camera model or post-process in the perception node. Disparity 2px offset is usually principal-point (cx) asymmetry.",
+  "code": "# 1. Locate L/R cameras\ncams = list_all_prims(type_filter=\"Camera\", path_contains=\"front_stereo\")\nleft, right = cams[0].path, cams[1].path\n\n# 2. Derive focalLength from target fx\n# fx = (focalLength / horizontalAperture) * width_px\n# Pick horizontalAperture matching real Hawk sensor width (mm)\nH_APERTURE = <SENSOR_WIDTH_MM>\nWIDTH_PX   = 2064\nTARGET_FX  = 958.57\nFOCAL      = TARGET_FX * H_APERTURE / WIDTH_PX\n\nfor cam in [left, right]:\n    set_camera_params(\n        prim_path=cam,\n        focal_length=FOCAL,\n        horizontal_aperture=H_APERTURE,\n        vertical_aperture=H_APERTURE * 1544 / 2064,\n        resolution=[2064, 1544],\n    )\n\n# 3. Set baseline by translating RIGHT camera only\nset_attribute(prim_path=right, attribute=\"xformOp:translate\", value=[0.150, 0, 0])\n\n# 4. Verify via /camera_info\nros2_list_topics()\nrun_usd_script(code=\"import rclpy; # echo /front_stereo_camera/left/camera_info, confirm K[0]~958.57\")",
+  "failure_modes": [
+    "assistant tries to set fx directly as a USD attribute",
+    "assistant rotates the stereo parent to set baseline",
+    "assistant promises full radial distortion on pinhole camera",
+    "assistant confuses principal-point offset with baseline"
+  ]
+}

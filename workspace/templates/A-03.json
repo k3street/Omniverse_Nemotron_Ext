@@ -1,0 +1,13 @@
+{
+  "task_id": "A-03",
+  "goal": "Get Alex's Robotiq 2F-85 gripper to close around a cube and hold it, in under 15 minutes, simplest path possible.",
+  "tools_used": ["scene_summary", "grasp_object"],
+  "thoughts": "Alex wants a one-shot close-and-hold, not a motion-planning tutorial. scene_summary confirms the gripper articulation is actually in the stage. grasp_object is the canned gripper-close helper — NOT cuRobo, NOT Lula, NOT IsaacLab. If the cube shoots across the room, it's usually contact offset or friction on the cube material — one-line fix, not a lecture.",
+  "code": "# Close-and-hold in under 15 min. Hit Play.\n\n# 1. Make sure the gripper is actually in the scene\nscene_summary(stage_path=\"<CURRENT_STAGE>\")\n\n# 2. Tell the gripper to close on the cube\ngrasp_object(\n    gripper_prim=\"/World/UR5e/Robotiq_2F85\",\n    target_prim=\"/World/Cube\",\n    close_force=40\n)\n\n# Hit Play.\n\n# If the cube shoots across the room: in the Cube's Physics Material,\n# raise dynamic friction to ~0.8. That's it.",
+  "failure_modes": [
+    "Mentioning cuRobo / Lula / motion planners / RL — tab closed",
+    "More than one code block or over 10 lines",
+    "Forgetting the 'hit Play' line at the end",
+    "Explaining the contact-offset math instead of giving the knob"
+  ]
+}

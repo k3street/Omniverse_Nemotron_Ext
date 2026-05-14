@@ -1,0 +1,12 @@
+{
+  "task_id": "AM-05",
+  "goal": "Four-line cheat sheet mapping prim/xform/articulation/joint to Unity concepts where they exist.",
+  "tools_used": ["lookup_knowledge", "list_all_prims", "scene_aware_starter_prompts"],
+  "thoughts": "Ground definitions in real Isaac Sim 5.x terminology via lookup_knowledge. Honest mappings: prim ~ any scene-tree node, xform ~ Unity Transform, joint ~ joint/fixed-joint, articulation = no real Unity equivalent (the whole robot as one physics object). Follow with a click-and-see walkthrough of the loaded robot's tree.",
+  "code": "kb = lookup_knowledge(\n    query=\"Isaac Sim 5.x glossary prim xform articulation joint Unity equivalents\"\n)\ntree = list_all_prims(path_prefix=\"/World/Robot\", max_depth=4)\n# Walk the scene tree:\n# - click a joint prim -> see body0/body1 relationships\n# - click the articulation root -> see it owns all the joints\nstarters = scene_aware_starter_prompts(\n    user_goal=\"understand scene tree concepts\",\n    user_level=\"beginner\"\n)",
+  "failure_modes": [
+    "Pasting the USD schema hierarchy PDF",
+    "Claiming articulation maps cleanly to Unity prefab (it does not)",
+    "Lecturing on composition arcs before he has clicked a prim"
+  ]
+}

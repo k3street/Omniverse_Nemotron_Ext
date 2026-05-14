@@ -9,8 +9,10 @@ Flow:
   4. If LLM returns text → return to user (with any pending code patches)
 """
 from __future__ import annotations
+import asyncio
 import json
 import logging
+import os
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -18,11 +20,171 @@ from typing import Any, Dict, List, Optional
 from .provider_factory import get_llm_provider, get_distiller_provider
 from .intent_router import classify_intent
 from ..config import config
+
+
+# ── Conversation-history compression (Gemini 503 mitigation) ───────────────
+# Tool results accumulate verbose content (generated patch code, full output
+# strings) across multi-round agent flows. After ~10-15 tool rounds the
+# request payload reaches 1-3 MB, which Gemini Flash 503-throttles
+# aggressively. Compressing OLDER tool_result content keeps recent context
+# full-detail (so the agent can reason about what just happened) while
+# preventing unbounded payload growth.
+_KEEP_LAST_TOOL_RESULTS_FULL = int(os.environ.get("KEEP_LAST_TOOL_RESULTS_FULL", "3"))
+_COMPRESS_OUTPUT_MAX_CHARS = int(os.environ.get("COMPRESS_OUTPUT_MAX_CHARS", "600"))
+
+
+_TRUNCATION_MARKER = "...[truncated"  # Marker in already-compressed content
+
+
+def _compress_tool_result_content(content_str: str, max_output_chars: int = _COMPRESS_OUTPUT_MAX_CHARS) -> str:
+    """Compress a JSON-stringified tool result. Drop the verbose `code`
+    field (generated patch source), truncate `output` to max_output_chars,
+    keep success/error/type/queued/executed and small auxiliary fields.
+
+    Idempotent: applying twice yields the same result as once. We detect
+    already-truncated content via the marker and skip re-truncation."""
+    try:
+        d = json.loads(content_str)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        # Non-JSON: just truncate raw, but only if not already truncated
+        if _TRUNCATION_MARKER in content_str:
+            return content_str
+        if len(content_str) > max_output_chars:
+            return content_str[:max_output_chars] + f"...[truncated {len(content_str)} chars]"
+        return content_str
+    if not isinstance(d, dict):
+        return content_str
+    compressed: Dict[str, Any] = {}
+    # Always keep core diagnostic fields
+    for k in ("type", "success", "executed", "queued", "error", "description"):
+        if k in d:
+            compressed[k] = d[k]
+    # Truncate `output` if present (idempotent: skip if already marked)
+    if "output" in d:
+        out_str = str(d["output"])
+        if _TRUNCATION_MARKER in out_str:
+            # Already compressed — keep as-is to avoid marker-doubling
+            compressed["output"] = out_str
+        elif len(out_str) > max_output_chars:
+            compressed["output"] = (
+                out_str[:max_output_chars] + f"...[truncated {len(out_str)} chars]"
+            )
+        else:
+            compressed["output"] = out_str
+    # Keep other small auxiliary fields, drop verbose ones (`code`)
+    for k, v in d.items():
+        if k in compressed or k == "code":
+            continue
+        s = json.dumps(v, default=str) if not isinstance(v, str) else v
+        if len(s) <= 200:
+            compressed[k] = v
+    return json.dumps(compressed, default=str)
+
+
+def _compress_old_tool_results(messages: List[Dict], keep_last_n: int = _KEEP_LAST_TOOL_RESULTS_FULL) -> List[Dict]:
+    """Compress tool_result messages except the most recent keep_last_n.
+    Recent results stay full-detail so the agent can reason about what
+    just happened; older results get content trimmed to reduce payload."""
+    tool_indices = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+    if len(tool_indices) <= keep_last_n:
+        return messages
+    to_compress = set(tool_indices[:-keep_last_n])
+    out: List[Dict] = []
+    for i, m in enumerate(messages):
+        if i in to_compress:
+            new_content = _compress_tool_result_content(m.get("content", ""))
+            new_msg = dict(m)
+            new_msg["content"] = new_content
+            out.append(new_msg)
+        else:
+            out.append(m)
+    return out
+
+
+def _measure_messages_bytes(messages: List[Dict]) -> int:
+    """Sum json.dumps size of all messages — proxy for request payload bytes."""
+    return sum(len(json.dumps(m, default=str)) for m in messages)
+
+
+# P2 — per-call request budget (kcode-spec sec 6.3). Complement to P1
+# (per-tool single-call cap in tool_executor): bounds CUMULATIVE payload
+# growth across many tool results. Drops oldest tool_result content with
+# a marker until total bytes ≤ budget. Preserves message order and the
+# message itself (so tool_call_id linkage stays intact).
+_PER_CALL_BUDGET_DEFAULT = int(os.environ.get("PER_CALL_BUDGET_BYTES", "200000"))
+
+
+def _apply_per_call_budget(
+    messages: List[Dict], budget_bytes: int = _PER_CALL_BUDGET_DEFAULT,
+) -> List[Dict]:
+    """Drop oldest tool_result content (FIFO) until total bytes ≤ budget.
+
+    Returns a new list of messages with old tool_results' content
+    replaced by a `<dropped tool_result n=N from message=I>` marker.
+    The tool_call_id and role fields are preserved so the assistant
+    reply chain still resolves correctly.
+
+    Idempotent — re-applying on already-budgeted messages is a no-op
+    (markers can't be re-dropped since they're already small).
+    """
+    if os.environ.get("PER_CALL_BUDGET", "on").lower() in ("off", "0", "false"):
+        return messages
+    total = _measure_messages_bytes(messages)
+    if total <= budget_bytes:
+        return messages
+    out = [dict(m) for m in messages]
+    # Walk from oldest tool_result forward; replace each with marker
+    # until total fits.
+    for i, m in enumerate(out):
+        if total <= budget_bytes:
+            break
+        if m.get("role") != "tool":
+            continue
+        content = m.get("content") or ""
+        if not isinstance(content, str):
+            continue
+        if content.startswith("<dropped tool_result"):
+            continue  # already budgeted
+        # Estimate savings = current size minus marker size
+        marker = (
+            f"<dropped tool_result n={len(content)} from_msg={i} "
+            f"reason=per_call_budget>"
+        )
+        before = len(json.dumps(m, default=str))
+        m["content"] = marker
+        after = len(json.dumps(m, default=str))
+        total -= (before - after)
+    return out
+
+
+def _compress_for_llm(messages: List[Dict], session_id: str = "") -> List[Dict]:
+    """Apply tool_result compression + per-call budget, log size delta.
+
+    Pipeline:
+    1. P0 (always): compress old tool_results (drop verbose code, truncate output)
+    2. P2 (env-flagged): if total bytes > budget, FIFO-drop oldest tool_results
+
+    Track C instrumentation: log every reduction so 503 root-cause
+    analysis is data-driven.
+    """
+    pre = _measure_messages_bytes(messages)
+    out = _compress_old_tool_results(messages)
+    post_compress = _measure_messages_bytes(out)
+    out = _apply_per_call_budget(out)
+    post = _measure_messages_bytes(out)
+    if pre != post:
+        logger.info(
+            f"[{session_id}] payload compress: {pre} → {post} bytes "
+            f"({100 * post / pre:.0f}%, saved {pre - post})"
+        )
+    return out
 from .context_distiller import (
     ConversationKnowledge,
     DistilledContext,
     distill_context,
     update_knowledge_from_tool,
+    _KEYWORD_RULES,
+    RULE_MULTI_STEP_PLAN,
 )
 from .tools.kit_tools import (
     get_stage_context,
@@ -32,6 +194,14 @@ from .tools.kit_tools import (
 )
 from .tools.tool_schemas import ISAAC_SIM_TOOLS
 from .tools.tool_executor import execute_tool_call
+from .tools.descriptions import describe as _describe_tool
+from .slash_commands import parse_slash, execute_slash
+from .session_trace import emit as _trace_emit
+from .cancel_registry import (
+    is_cancelled as _is_cancelled,
+    clear as _cancel_clear,
+)
+import time as _t
 from ..retrieval.context_retriever import (
     retrieve_context,
     format_retrieved_context,
@@ -171,7 +341,318 @@ Selection awareness: When the user has selected a prim in the viewport or stage 
 properties are included in the context below. References like "this", "it", "the selected object",
 "make this bigger", "change its color", or "delete it" all refer to the selected prim.
 Use the selected prim's path directly when calling tools — do NOT ask the user to specify the path.
+
+Response discipline:
+- Match the user's intent. Action phrasing ("do X", "make X", "drop it in", "run the import",
+  "just give me the script") means CALL TOOLS or RETURN CODE — keep prose to one short line or
+  skip it entirely.
+- Do not pad action requests with background explanation the user did not ask for. Do not ask for
+  confirmation when the user has already specified what they want — just do it.
+- Only explain at length when the user asked a question ("what is…", "why…", "how does…") or
+  when there is a genuine ambiguity that would change the action. Ambiguous? Ask ONE concise
+  clarifying question, do not write a tutorial.
+- If the user says "less prose" or similar, drop all prose for the rest of the session and emit
+  only code / tool calls / one-line confirmations.
 """
+
+
+import re as _re_mod
+
+
+# NOTE: path was previously `(?P<path>...)?` which, combined with the
+# preceding non-greedy `{0,200}?`, meant the engine always picked 0 chars
+# and no path — the extractor then dropped the match for lack of a path.
+# Net effect: count-claim verification was silently disabled. Making path
+# non-optional forces the engine to consume enough to reach a /World/...
+# reference; matches without a path no longer produce a count claim.
+#
+# The gap-fill char class uses `[^.\n]` instead of `[^\n]` so the regex
+# can NOT cross a period — stops the count+path linkage from jumping
+# sentence boundaries (e.g. "16 robots. /World/envs is empty." no
+# longer produces a spurious (16, "robots", "/World/envs") claim).
+# Commas are still allowed as intra-sentence separators.
+_COUNT_PAT = _re_mod.compile(
+    r"\b(?P<n>\d{1,4})\s+(?P<noun>arms?|robots?|clones?|copies|instances?|envs?|environments?|cubes?|spheres?|cameras?)\b[^.\n]{0,200}?(?P<path>/World[/A-Za-z0-9_]+)",
+    _re_mod.I,
+)
+_POSE_PAT = _re_mod.compile(
+    r"(?P<path>/World[/A-Za-z0-9_]+)[^\n]{0,180}?"
+    r"(?:at|to|positioned at|located at|moved to|placed at|transform)\s*"
+    r"\(?\s*(?P<x>-?\d+(?:\.\d+)?)\s*,\s*"
+    r"(?P<y>-?\d+(?:\.\d+)?)\s*,\s*"
+    r"(?P<z>-?\d+(?:\.\d+)?)\s*\)?",
+    _re_mod.I,
+)
+_SCHEMA_PAT = _re_mod.compile(
+    r"(?P<schema>(?:Physics|Physx|UsdPhysics\.|PhysxSchema\.)?\w+API)"
+    r"[^\n]{0,120}?"
+    r"(?P<path>/World[/A-Za-z0-9_]+)"
+    r"|"
+    r"(?P<path2>/World[/A-Za-z0-9_]+)"
+    r"[^\n]{0,120}?"
+    r"(?P<schema2>(?:Physics|Physx|UsdPhysics\.|PhysxSchema\.)?\w+API)",
+    _re_mod.I,
+)
+_ATTR_SEP = r"(?:\s*[=:]\s*|\s+(?:is|of|set to|=)\s+)"
+_ATTR_WORDS = r"mass|friction|restitution|damping|stiffness|radius|height|density|size"
+_ATTR_PAT_PATH_FIRST = _re_mod.compile(
+    r"(?P<path>/World[/A-Za-z0-9_]+)"
+    r"[^\n]{0,120}?"
+    r"(?P<attr>" + _ATTR_WORDS + r")"
+    + _ATTR_SEP +
+    r"(?P<val>-?\d+(?:\.\d+)?)",
+    _re_mod.I,
+)
+_ATTR_PAT_ATTR_FIRST = _re_mod.compile(
+    r"\b(?P<attr>" + _ATTR_WORDS + r")\b"
+    r"[^\n]{0,20}?"
+    r"(?:on\s+|of\s+|for\s+)?"
+    r"(?P<path>/World[/A-Za-z0-9_]+)"
+    r"[^\n]{0,40}?"
+    r"(?:is|of|set to|=|:)\s*"
+    r"(?P<val>-?\d+(?:\.\d+)?)",
+    _re_mod.I,
+)
+# attr → (connector) → value → (on/of/for) → path
+# Covers "height set to 2.0 on /World/Cylinder" — the val-before-path
+# phrasing that neither path-first nor attr-first (val-after-path)
+# patterns match. Surfaced as an xfail in the edge-case tests.
+_ATTR_PAT_VAL_BEFORE_PATH = _re_mod.compile(
+    r"\b(?P<attr>" + _ATTR_WORDS + r")\b"
+    r"[^\n]{0,20}?"
+    r"(?:is|of|set to|=|:)\s*"
+    r"(?P<val>-?\d+(?:\.\d+)?)"
+    r"[^\n]{0,30}?"
+    r"(?:on\s+|of\s+|for\s+)"
+    r"(?P<path>/World[/A-Za-z0-9_]+)",
+    _re_mod.I,
+)
+_ATTR_NAME_MAP = {
+    "mass": "physics:mass",
+    "friction": "physics:dynamicFriction",
+    "restitution": "physics:restitution",
+    "damping": "drive:angular:physics:damping",
+    "stiffness": "drive:angular:physics:stiffness",
+    "radius": "radius",
+    "height": "height",
+    "density": "physics:density",
+    "size": "size",
+}
+
+
+def _extract_count_claims(reply: str) -> List[tuple]:
+    """Extract (n, noun, path) count claims from a reply.
+
+    Matches patterns like "16 arms under /World/envs" or "cloned 16 Franka".
+    Claims without a /World/... path are discarded — counts without a place
+    can't be verified. Deduped on (n, path) keeping first-seen noun.
+    """
+    seen = set()
+    out: List[tuple] = []
+    for m in _COUNT_PAT.finditer(reply or ""):
+        path = m.group("path")
+        if not path:
+            continue
+        n = int(m.group("n"))
+        key = (n, path)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((n, m.group("noun"), path))
+    return out
+
+
+def _extract_pose_claims(reply: str) -> List[tuple]:
+    """Extract (path, (x, y, z)) TRANSLATION pose claims. Coordinates rounded
+    to 3 dp. Rotation-verb phrasings ("rotated to (0, 90, 0)") are excluded
+    because the orchestrator's verify-contract (c) cross-checks against
+    get_world_transform's TRANSLATION field — matching rotation tuples there
+    would produce false-positive mismatch warnings (AD-21 surfaced this).
+
+    Matches "/World/X at (1, 2, 3)", "... moved to (a, b, c)", etc. Deduped
+    on the full (path, claim) tuple.
+    """
+    seen = set()
+    out: List[tuple] = []
+    for m in _POSE_PAT.finditer(reply or ""):
+        # Exclude rotation-verb phrasings. The verb alternation includes
+        # "to", which matches inside "rotated to" — so the regex picks up
+        # rotation claims we don't want to cross-check via translation.
+        # Inspect the text from path-start to verb-start for a rotation
+        # marker.
+        span_text = (reply or "")[m.start():m.end()]
+        if _re_mod.search(r"\brotat(?:ed|ion|e)\b", span_text, _re_mod.I):
+            continue
+        path = m.group("path")
+        claim = (
+            round(float(m.group("x")), 3),
+            round(float(m.group("y")), 3),
+            round(float(m.group("z")), 3),
+        )
+        key = (path, claim)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((path, claim))
+    return out
+
+
+def _extract_schema_claims(reply: str) -> List[tuple]:
+    """Extract (schema, path) API-application claims.
+
+    Handles both directions: "RigidBodyAPI applied to /World/X" and
+    "/World/X has CollisionAPI". Schema name is normalized — the
+    UsdPhysics./PhysxSchema. prefixes and trailing punctuation are stripped.
+    Deduped on (schema, path).
+    """
+    seen = set()
+    out: List[tuple] = []
+    for m in _SCHEMA_PAT.finditer(reply or ""):
+        schema = (m.group("schema") or m.group("schema2") or "")
+        schema = schema.lstrip("UsdPhysics.").lstrip("PhysxSchema.").rstrip(".,;:")
+        path = m.group("path") or m.group("path2")
+        if not schema or not path:
+            continue
+        key = (schema, path)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((schema, path))
+    return out
+
+
+def _extract_attr_claims(reply: str) -> List[tuple]:
+    """Extract (path, attr_short, value) attribute-value claims.
+
+    Handles both phrasings: path-first ("/World/X has mass=1.0") and
+    attr-first ("mass on /World/X is 1.0"). Returns the short attr word
+    (lowercase, e.g. "mass") — callers map to the full USD attribute name
+    via _ATTR_NAME_MAP before calling get_attribute. Deduped on
+    (path, attr, value).
+    """
+    seen = set()
+    out: List[tuple] = []
+    for m in (
+        list(_ATTR_PAT_PATH_FIRST.finditer(reply or ""))
+        + list(_ATTR_PAT_ATTR_FIRST.finditer(reply or ""))
+        + list(_ATTR_PAT_VAL_BEFORE_PATH.finditer(reply or ""))
+    ):
+        path = m.group("path")
+        attr = m.group("attr").lower()
+        claim = round(float(m.group("val")), 3)
+        key = (path, attr, claim)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((path, attr, claim))
+    return out
+
+
+_CREATION_VERB_PAT = _re_mod.compile(
+    r"\b(?:placed?|placerat?|placerade|created?|skapat?|skapade|added?|"
+    r"lade\s+till|lagt\s+till|authored?|genererat|genererade)\b",
+    _re_mod.I,
+)
+_BACKTICK_NAME_PAT = _re_mod.compile(r"`([A-Z][A-Za-z0-9_]{0,40})`")
+
+
+def _extract_bare_prim_name_claims(reply: str) -> List[str]:
+    """Extract bare backtick-quoted prim names used in a creation context.
+
+    Catches the 2026-04-19 failure: reply says
+        "placerat två nya kuber (`Cube_3` och `Cube_4`)"
+    while real prims landed at /Cube, /Cube_01 at root.
+    The (a) path-check only sees /World/... paths; these bare names slip
+    through. Returned as /World/<Name> so the caller can probe prim_exists.
+
+    Gating: only names that appear within 80 chars of a creation verb
+    (placed/placerat/created/skapat/added/lade till/...) and look like
+    prim identifiers (CapCase, alphanum+underscore). Paths already
+    fully-qualified (starting with `/`) are skipped — they're handled
+    by the existing /World/... extractor.
+    """
+    out: List[str] = []
+    seen: set = set()
+    text = reply or ""
+    verb_spans = [m.start() for m in _CREATION_VERB_PAT.finditer(text)]
+    if not verb_spans:
+        return out
+    for m in _BACKTICK_NAME_PAT.finditer(text):
+        name = m.group(1)
+        # Skip path-like tokens — handled by the /World/... extractor.
+        if "/" in name:
+            continue
+        # Require a creation verb within 80 chars before or after.
+        near = any(abs(vs - m.start()) <= 80 for vs in verb_spans)
+        if not near:
+            continue
+        path = f"/World/{name}"
+        if path in seen:
+            continue
+        seen.add(path)
+        out.append(path)
+    return out
+
+
+def _partition_path_existence(
+    executed_tools: List[Dict[str, Any]],
+) -> tuple[set, set]:
+    """Parse a turn's tool results into (confirmed_present, confirmed_absent)
+    prim-path sets.
+
+    Used by the Fas 2 verify-contract item (a) path check to decide which
+    claimed paths can be skipped (already grounded in tool observation as
+    present), flagged immediately (observed absent), or need a fresh
+    prim_exists probe (unverified).
+
+    A tool result counts toward existence evidence when its payload carries
+    both a ``prim_path`` (starting with ``/World``) and a boolean ``exists``
+    field. Data handlers wrap their payload in ``{"output": "<json>"}``,
+    so we try parsing that first and also inspect the top-level dict.
+    """
+    confirmed_absent: set = set()
+    confirmed_present: set = set()
+    for t in executed_tools or []:
+        result = t.get("result") or {}
+        payloads: List[Any] = []
+        out_str = result.get("output") if isinstance(result, dict) else None
+        if isinstance(out_str, str) and out_str.strip().startswith("{"):
+            try:
+                payloads.append(json.loads(out_str))
+            except Exception:
+                pass
+        if isinstance(result, dict):
+            payloads.append(result)
+        for pl in payloads:
+            if not isinstance(pl, dict):
+                continue
+            pp = pl.get("prim_path")
+            ex = pl.get("exists")
+            if isinstance(pp, str) and pp.startswith("/World"):
+                if ex is False:
+                    confirmed_absent.add(pp)
+                elif ex is True:
+                    confirmed_present.add(pp)
+    return confirmed_present, confirmed_absent
+
+
+def _summarize_args(args: Dict[str, Any]) -> str:
+    """One-line summary of tool-call args for the live UI strip.
+
+    Priority: prim_path leaf → path leaf → first non-empty value.
+    Truncated to 30 chars. Full args still flow through args_full for
+    the tooltip.
+    """
+    if not args:
+        return ""
+    for key in ("prim_path", "path", "prim", "target"):
+        if key in args and args[key]:
+            v = str(args[key])
+            return v.rsplit("/", 1)[-1] if "/" in v else v[:30]
+    for v in args.values():
+        if v not in (None, "", [], {}):
+            return str(v)[:30]
+    return ""
 
 
 class ChatOrchestrator:
@@ -232,8 +713,149 @@ class ChatOrchestrator:
         )
         logger.info(f"[{session_id}] USER: {user_message}")
 
+        # Trace the user message (silent on IO failure)
+        _trace_emit(session_id, "user_msg", {"text": user_message})
+        # Live progress: signal turn start so the UI can show "Thinking…"
+        # immediately, before the LLM call latency begins.
+        _trace_emit(session_id, "turn_started", {
+            "user_message_preview": (user_message or "")[:120],
+        })
+        # Drop any stale cancel flag from a previous turn before we start
+        # polling it in the round loop.
+        _cancel_clear(session_id)
+
+        # ── 0. Slash-command interception ────────────────────────────────────
+        # /note /block /pin /cite /help short-circuit the LLM — deterministic,
+        # free, fast. Anything else falls through to the normal pipeline.
+        _slash = parse_slash(user_message)
+        if _slash is not None:
+            def _slash_emit(ev_type: str, payload: Dict[str, Any]) -> None:
+                _trace_emit(session_id, ev_type, payload)
+
+            reply = await execute_slash(
+                _slash["cmd"], _slash["arg"],
+                history=history,
+                emit_trace=_slash_emit,
+                session_id=session_id,
+            )
+            # Record the slash in history so pin/next turn can see it
+            history.append({"role": "user", "content": user_message})
+            history.append({"role": "assistant", "content": reply["reply"]})
+            _trace_emit(session_id, "agent_reply", {
+                "text": reply["reply"][:500],
+                "intent": "slash_command",
+            })
+            return reply
+
         # ── 1. Classify intent ───────────────────────────────────────────────
-        intent = await classify_intent(user_message, self.llm_provider)
+        # Returns a dict {intent, multi_step, complexity, confidence}. multi_step
+        # drives the round-0 read-only tool gate below (see _multi_step usage).
+        # complexity gates the negotiator (Fas 2 of strategic-brain layer).
+        intent_result = await classify_intent(user_message, self.llm_provider)
+        intent = intent_result["intent"]
+        intent_is_multi_step = intent_result.get("multi_step", False)
+        intent_complexity = intent_result.get("complexity", "single")
+        _trace_emit(session_id, "intent_complexity", {
+            "complexity": intent_complexity,
+            "multi_step": intent_is_multi_step,
+            "intent": intent,
+            "message_preview": user_message[:80],
+        })
+
+        # ── 1.2. Negotiator gate (only for complex prompts) ──────────────────
+        # When the prompt is "complex", run a single fast-LLM clarification
+        # check BEFORE template_retriever / tool_loop. If required inputs are
+        # missing, reply with questions immediately and end the turn — the
+        # user fills them in and the next turn proceeds normally.
+        # Avoids the v1 template_retriever collision that killed b93bcca.
+        # Env-gated: STRATEGIC_NEGOTIATOR=off skips entirely (default: on).
+        # Disabled when intent is a pure question (general_query) — answering
+        # comes first, clarification on doing-things only.
+        import os as _os_mod
+        _negotiator_enabled = _os_mod.environ.get(
+            "STRATEGIC_NEGOTIATOR", "on"
+        ).lower() != "off"
+        # Skip negotiator if the previous assistant turn already issued a
+        # clarification — the user is now ANSWERING our questions, not making
+        # a fresh ambiguous request. Continuing to negotiate would loop
+        # forever ("Before I start, I need a few things..." → user answers
+        # → "Before I start, I need a few things..."). The orchestrator's
+        # job in turn N+1 is to USE the answer, not re-litigate ambiguity.
+        _last_assistant = None
+        for h in reversed(history):
+            if h.get("role") == "assistant":
+                _last_assistant = h.get("content", "")
+                break
+        _prior_was_clarification = bool(_last_assistant) and (
+            "Before I start, I need a few things" in _last_assistant
+            or "Once you confirm, I'll continue" in _last_assistant
+        )
+        if (
+            _negotiator_enabled
+            and intent_complexity == "complex"
+            and intent != "general_query"
+            and not _prior_was_clarification
+        ):
+            try:
+                from .negotiator import negotiate, format_clarification_reply
+                neg = await negotiate(user_message, self.llm_provider)
+                _trace_emit(session_id, "negotiator", {
+                    "needs_clarification": neg["needs_clarification"],
+                    "n_questions": len(neg["questions"]),
+                    "reasoning": neg["reasoning"],
+                })
+                if neg["needs_clarification"]:
+                    clarif_text = format_clarification_reply(neg, user_message)
+                    history.append({"role": "user", "content": user_message})
+                    history.append({"role": "assistant", "content": clarif_text})
+                    _trace_emit(session_id, "agent_reply", {
+                        "text": clarif_text[:500],
+                        "intent": "negotiation_clarification",
+                    })
+                    return {
+                        "intent": "negotiation_clarification",
+                        "reply": clarif_text,
+                        "tool_calls": [],
+                        "code_patches": [],
+                    }
+            except Exception as _ne:
+                # Fail-open — never let negotiation block normal flow
+                logger.warning(f"[Negotiator] gate failed ({_ne}), proceeding")
+        elif _prior_was_clarification:
+            _trace_emit(session_id, "negotiator_skipped", {
+                "reason": "prior turn was clarification — proceeding to act on user's answer",
+            })
+
+        # ── 1.5. Auto turn-snapshot for stage-mutating turns ─────────────────
+        # Before running any tools that might write to the stage, save the
+        # current root-layer USDA to disk. `/undo` restores this snapshot so
+        # a user can revert a turn-worth of agent mischief in one shot —
+        # exactly what was missing from the 2026-04-19 conveyor smoke-test
+        # (scale + delete + conveyor-create was impossible to cleanly revert).
+        # Non-mutating intents skip the snapshot to keep token/rpc cost low.
+        # Hoisted out of the if so we can read it later when emitting agent_reply
+        # — the UI uses has_snapshot to gate the per-bubble undo button.
+        _snap_result: Optional[Dict[str, Any]] = None
+        _MUTATING_INTENTS = {"patch_request", "scene_diagnose"}
+        if intent in _MUTATING_INTENTS and await is_kit_rpc_alive():
+            try:
+                from .turn_snapshot import capture as _capture_turn
+                _snap_label = _re_mod.sub(r"[^A-Za-z0-9]", "_", user_message[:30])
+                _snap_result = await _capture_turn(session_id, label=_snap_label)
+                if _snap_result.get("ok"):
+                    _trace_emit(session_id, "turn_snapshot_saved", {
+                        "path": _snap_result.get("path"),
+                        "turn_index": _snap_result.get("turn_index"),
+                        "layer_size": _snap_result.get("layer_size"),
+                    })
+                else:
+                    logger.warning(
+                        f"[{session_id}] turn snapshot failed: "
+                        f"{_snap_result.get('error')}"
+                    )
+            except Exception as e:
+                # Never crash a user turn because snapshotting failed.
+                logger.warning(f"[{session_id}] turn snapshot exception: {e}")
 
         # ── 2. Gather live scene context if Kit is reachable ─────────────────
         scene_context_text = ""
@@ -281,6 +903,193 @@ class ChatOrchestrator:
             negative_patterns_text = _kb.format_negative_patterns(neg_patterns)
         except Exception as e:
             logger.warning(f"[{session_id}] Negative pattern retrieval failed: {e}")
+
+        # Retrieve workflow templates (pre-generated offline from task specs).
+        # Two paths:
+        #   HARD-INSTANTIATE when top match similarity > CANONICAL_THRESHOLD —
+        #     pre-execute the canonical's `code` field as tool calls, then
+        #     instruct LLM to verify+report only. Eliminates iteration, keeps
+        #     conversation history small, deterministic for canonical shapes.
+        #   FEW-SHOT GUIDE otherwise — inject templates as `**Approach**:`
+        #     reference; agent still authors its own tool chain.
+        # Env-gated: CANONICAL_INSTANTIATE=off disables hard-instantiate path.
+        # Two thresholds: top-similarity AND top-vs-second margin. Both
+        # required. Calibration anchored on 2026-05-08 prompts (sentence-
+        # transformers all-MiniLM-L6-v2 default embeddings):
+        #   own-goal-text query              → top sim 0.89-0.91, gap 0.39-0.41
+        #   "pick and place cell with Franka" → CP-01 sim 0.49, gap 0.24 (confident)
+        #   CP-02 paraphrase                  → CP-02 sim 0.55, gap 0.21 (confident)
+        #   VR-19 actual prompt               → CP-02 sim 0.51, gap 0.006 (ambiguous —
+        #                                       CP-01 right behind, fall back to iter)
+        # Gap requirement is the key — it stops false positives when two
+        # canonicals are similarly relevant. Env-tunable so we can adjust
+        # without code changes when retrieval improves or embedding model
+        # changes (different models give different distance distributions).
+        _canonical_min_sim = float(os.environ.get("CANONICAL_MIN_SIM", "0.45"))
+        _canonical_min_margin = float(os.environ.get("CANONICAL_MIN_MARGIN", "0.20"))
+        _canonical_enabled = (os.environ.get("CANONICAL_INSTANTIATE", "on").lower()
+                              in ("on", "true", "1", "yes"))
+        # Track which build tools the canonical instantiated — these get
+        # filtered OUT of the LLM's tool schema so the agent physically
+        # cannot rebuild what's already there. Empty list = no filtering.
+        _instantiated_build_tools: List[str] = []
+
+        try:
+            from .tools.template_retriever import (
+                retrieve_templates_with_scores, format_for_prompt
+            )
+            # top_k tradeoff: higher k → more gap signal for confidence, but
+            # more attention dilution + larger system prompt. 3 is the
+            # default (fits CP-{01,02,N} for assembly-line family without
+            # bloating prompt). Env-tunable for experimentation.
+            _template_top_k = int(os.environ.get("TEMPLATE_TOP_K", "3"))
+            scored = retrieve_templates_with_scores(user_message, top_k=_template_top_k)
+            top_sim = scored[0]["similarity"] if scored else 0.0
+            second_sim = scored[1]["similarity"] if len(scored) > 1 else 0.0
+            margin = top_sim - second_sim
+            confident_match = (
+                _canonical_enabled
+                and scored
+                and top_sim >= _canonical_min_sim
+                and margin >= _canonical_min_margin
+            )
+
+            if confident_match:
+                # HARD-INSTANTIATE PATH
+                from .canonical_instantiator import (
+                    execute_template_canonical,
+                    settle_after_canonical,
+                    execute_template_verify,
+                    format_instantiation_summary,
+                )
+                top = scored[0]
+                logger.info(
+                    f"[{session_id}] Canonical match {top['task_id']} "
+                    f"sim={top_sim:.2f} margin={margin:.2f} "
+                    f"(threshold sim≥{_canonical_min_sim} margin≥{_canonical_min_margin}) — "
+                    f"hard-instantiating template code"
+                )
+                inst_result = await execute_template_canonical(top["template"])
+                # Settle: stop timeline, restore cube positions + conveyor
+                # velocities to template-authored values. Setup_pick_place_
+                # controller install starts physics; for compact scenes
+                # (cubes near robot, e.g. CP-04), the controller can fire
+                # _pause_belt before verify runs, mutating surface velocity
+                # to 0 and drifting cubes. Settle gives verify a clean
+                # design-time scene state.
+                settle_result = await settle_after_canonical(top["template"])
+                if settle_result.get("settled"):
+                    logger.info(
+                        f"[{session_id}] Settled: "
+                        f"{settle_result.get('n_cubes_restored', 0)} cubes, "
+                        f"{settle_result.get('n_conveyors_restored', 0)} conveyors restored"
+                    )
+                # Also pre-execute verify_pickplace_pipeline using the
+                # canonical's prescribed verify_args. This eliminates the
+                # LLM path-naming creativity issue: the LLM gets verify
+                # results as ground truth and just needs to summarize +
+                # optionally call simulate.
+                verify_result = await execute_template_verify(top["template"])
+                if verify_result.get("executed"):
+                    logger.info(
+                        f"[{session_id}] Pre-executed verify: "
+                        f"pipeline_ok={verify_result.get('pipeline_ok')} "
+                        f"issues={len(verify_result.get('issues', []))}"
+                    )
+                summary_text = format_instantiation_summary(
+                    inst_result, top["template"], verify_result
+                )
+                if summary_text:
+                    if patterns_text:
+                        patterns_text = patterns_text + "\n\n" + summary_text
+                    else:
+                        patterns_text = summary_text
+                # Capture tool names that just executed — we'll filter these
+                # out of the LLM tool schema so the agent literally cannot
+                # call them again (stronger than directive language alone).
+                _instantiated_build_tools = sorted({
+                    e["tool"] for e in inst_result.get("executed", []) if e.get("ok")
+                })
+            else:
+                # FEW-SHOT GUIDE PATH (existing behavior)
+                templates = [s["template"] for s in scored]
+                if templates:
+                    tpl_text = format_for_prompt(templates)
+                    if patterns_text:
+                        patterns_text = patterns_text + "\n\n" + tpl_text
+                    else:
+                        patterns_text = tpl_text
+        except Exception as e:
+            logger.warning(f"[{session_id}] Template retrieval/instantiation failed: {e}")
+
+        # ── 3.5. Strategic-brain Fas 3: spec_generator + gap_analyzer ────────
+        # When complexity=="complex", produce a structured execution plan and
+        # inject as a dedicated CHECKLIST in patterns_text. Templates still
+        # flow normally — the spec is supplementary, with clear "REQUIRED"
+        # framing that differentiates from "reference templates".
+        # Empirically motivated: 40% of broad-canary fails were
+        # "skipped_required_tool" — agent didn't call tools task-spec
+        # mandates. The spec lists those tools by name as post-conditions.
+        # Env-gated: STRATEGIC_SPEC=off disables.
+        _spec_enabled = (
+            _os_mod.environ.get("STRATEGIC_SPEC", "on").lower() != "off"
+        )
+        if (
+            _spec_enabled
+            and intent_complexity == "complex"
+            and intent != "general_query"
+        ):
+            try:
+                from .spec_generator import generate_spec, format_spec_as_checklist
+                from .gap_analyzer import analyze as gap_analyze, get_registered_tools
+                spec = await generate_spec(user_message, self.llm_provider)
+                if spec:
+                    registered = get_registered_tools()
+                    gap = gap_analyze(spec.get("steps", []), registered)
+                    checklist = format_spec_as_checklist(spec, gap_report=gap)
+                    if patterns_text:
+                        patterns_text = checklist + "\n\n---\n\n" + patterns_text
+                    else:
+                        patterns_text = checklist
+                    _trace_emit(session_id, "spec_generated", {
+                        "n_steps": len(spec.get("steps", [])),
+                        "matched": len(gap.get("matched", [])),
+                        "partial": len(gap.get("partial", {})),
+                        "missing": len(gap.get("missing", [])),
+                        "reasoning": spec.get("reasoning", "")[:120],
+                    })
+            except Exception as _se:
+                # Fail-open — never block normal flow on spec generation
+                logger.warning(f"[SpecGenerator] gate failed ({_se}), proceeding")
+
+        # Auto-inject cite-index matches from deprecations.jsonl. Agents
+        # routinely FAIL to call lookup_api_deprecation even when a rule
+        # tells them to, and rule-injection alone has no enforcement. Pull
+        # top-3 cite rows based on prompt keywords and prepend to rag_text
+        # so the canonical recipes (conveyor surface-velocity combo, Franka
+        # import URL, open-top bin structure, etc.) land in the system
+        # prompt without requiring agent tool-call.
+        try:
+            from ..knowledge.deprecations_index import lookup as _cite_lookup
+            cite_rows = _cite_lookup(user_message, top_k=3)
+            if cite_rows:
+                cite_parts = ["## Canonical API / pattern cites for this request", ""]
+                for row in cite_rows:
+                    cite_parts.append(f"### {row['id']}")
+                    cite_parts.append(row.get("cite", "").strip())
+                    if row.get("caveats"):
+                        cite_parts.append("**Caveats:**")
+                        for c in row["caveats"]:
+                            cite_parts.append(f"- {c}")
+                    cite_parts.append("")
+                cite_preamble = "\n".join(cite_parts)
+                rag_text = cite_preamble + ("\n\n" + rag_text if rag_text else "")
+                _trace_emit(session_id, "cites_auto_injected", {
+                    "row_ids": [r["id"] for r in cite_rows],
+                    "chars": len(cite_preamble),
+                })
+        except Exception as e:
+            logger.warning(f"[{session_id}] Cite auto-injection failed: {e}")
 
         # ── 4. DISTILL: build compact context via the distillation pipeline ──
         selected_prim = context.get("selected_prim") if context else None
@@ -335,6 +1144,26 @@ class ChatOrchestrator:
             except Exception as e:
                 logger.warning(f"[{session_id}] Viewport auto-inject failed: {e}")
 
+        # When hard-instantiate ran, REPLACE the selected_tools list with an
+        # explicit verify/inspect/fix subset pulled from ISAAC_SIM_TOOLS.
+        # The distiller narrows tools per-prompt and may have excluded many
+        # verify/fix tools (it expected a build prompt). Replacing rather
+        # than filtering ensures the agent has the verifiers + targeted-fix
+        # tools it needs without any build tools that would let it rebuild.
+        # The set is stable across calls (the verify/inspect/fix vocabulary
+        # doesn't change per-prompt) so it's a constant rather than a knob.
+        if _instantiated_build_tools:
+            from .canonical_instantiator import ALLOWED_AFTER_INSTANTIATE
+            _all_tool_schemas = ISAAC_SIM_TOOLS
+            selected_tools = [
+                t for t in _all_tool_schemas
+                if t.get("function", {}).get("name") in ALLOWED_AFTER_INSTANTIATE
+            ]
+            logger.info(
+                f"[{session_id}] Hard-instantiate tool subset: "
+                f"{len(selected_tools)} verify/inspect/fix tools (build tools removed)"
+            )
+
         logger.info(
             f"[{session_id}] Distilled: ~{distilled.token_estimate} tokens, "
             f"{len(selected_tools)} tools"
@@ -348,15 +1177,124 @@ class ChatOrchestrator:
         _TOOL_CALL_LIMITS = {"lookup_knowledge": 2}
         tool_call_counts: Dict[str, int] = {}
 
+        # Retry-spam halt: count CONSECUTIVE failed patches in the turn.
+        # Reset counter on any success. If ≥N failures in a row — regardless
+        # of description — agent is stuck and we break the loop to force a
+        # reasoned summary.
+        #
+        # Threshold history:
+        #   - v1 (2026-04-19, thr=3): fired too early. In the conveyor test
+        #     agent was mid-exploration on attempt 4 when halted, and never
+        #     got to scale/place the cubes — giving HONEST partial success
+        #     but LESS functional output than attempt 1 which had no halt.
+        #   - v2 (2026-04-19, thr=6): current. Catches genuine spam (≥6 in
+        #     a row all failing) but allows agent's natural explore-a-few-
+        #     variants-then-adjust rhythm. In attempt 1 agent needed 5-7
+        #     fails before hitting the working cube-mutation script; that's
+        #     allowed now.
+        _SPAM_HALT_THRESHOLD = 6
+        consecutive_fail_count = 0
+        first_failed_description: str = ""
+        spam_halted = False
+
+        # 2026-04-19 ROLLBACK: earlier this day we gated round 0 of multi-step
+        # turns to a read-only tool subset, aiming to force the agent to plan
+        # before mutating. Empirically this REGRESSED behavior — the agent
+        # read the gate as "prepare a comprehensive mega-patch" and shoved
+        # all steps (create conveyor, scale cubes, place cubes) into a single
+        # atomic script. When the script failed, the subsequent retries
+        # focused only on the last failing sub-step, and the earlier
+        # successful-in-theory sub-steps (cube mutations) were silently
+        # dropped. Reply then fabricated success for the dropped steps.
+        # The stepwise "try small patches, keep what lands" pattern the
+        # default (no gate) already produces beats this manual planning
+        # attempt. Keep the LLM-based multi_step classification for trace
+        # visibility, but don't let it change tool availability.
+        # Use the LLM-based classifier result (set above by classify_intent).
+        # Fall back to the regex keyword patterns if classifier failed or
+        # returned low confidence — defense in depth for the phrasings the
+        # LLM might miss (Swedish edge cases, idiomatic English).
+        _multi_step = bool(intent_is_multi_step)
+        if not _multi_step:
+            # Regex fallback: cheap, catches the obvious sequencing phrases.
+            _multi_step = any(
+                pat.search(user_message or "")
+                and RULE_MULTI_STEP_PLAN in rules
+                for pat, rules in _KEYWORD_RULES
+            )
+        if _multi_step:
+            _trace_emit(session_id, "multi_step_detected", {
+                "prompt_prefix": (user_message or "")[:120],
+                "source": "classifier" if intent_is_multi_step else "regex_fallback",
+            })
+
         max_rounds = config.max_tool_rounds
+        cancelled = False
+        # Pre-init so the post-loop `reply = response.text` doesn't NameError
+        # if cancel fires BEFORE the first LLM call ever returns. Use a tiny
+        # stub object that exposes .text — keeps the existing reply-assembly
+        # code path uniform without sprinkling None checks everywhere.
+        class _StubResponse:
+            text = ""
+            actions = None
+            tool_calls = None
+        response = _StubResponse()
         for round_idx in range(max_rounds):
+            # Cancel check at the top of each round — between LLM rounds is
+            # the natural decision point. If the user hit Stop, exit cleanly
+            # before issuing another LLM call.
+            if _is_cancelled(session_id):
+                _trace_emit(session_id, "cancel_acknowledged", {"round": round_idx})
+                cancelled = True
+                break
+            # Pure direct await + asyncio.wait_for as the only wrapper.
+            # This matches the orchestrator's pre-3677f25 shape, which
+            # the user observed running stably for days. Stop only takes
+            # effect between rounds (the cancel check at the top of the
+            # loop), not mid-LLM-call — acceptable trade-off if the
+            # additional polling-based wrappers were causing the slow
+            # round-2 calls user reported.
+            #
+            # Hard 300 s timeout is the only safety net around a truly
+            # hung request.
+            _LLM_HARD_TIMEOUT = 300.0
+            # Compress old tool_result content to prevent payload bloat
+            # across multi-round flows (Gemini Flash 503-throttles >1MB).
+            llm_messages = _compress_for_llm(messages, session_id)
+            response = None
             try:
-                response = await self.llm_provider.complete(
-                    messages, {"tools": selected_tools}
+                response = await asyncio.wait_for(
+                    self.llm_provider.complete(llm_messages, {"tools": selected_tools}),
+                    timeout=_LLM_HARD_TIMEOUT,
                 )
+            except asyncio.TimeoutError:
+                _trace_emit(session_id, "error", {
+                    "where": "llm_call",
+                    "reason": f"LLM did not respond within {_LLM_HARD_TIMEOUT:.0f}s",
+                })
+                cancelled = True
             except Exception as e:
                 logger.error(f"LLM provider error: {e}")
                 raise
+
+            if cancelled:
+                break
+
+            # Capture Gemini chain-of-thought when GEMINI_EXPOSE_THOUGHTS=1.
+            # Thoughts are stored in the session trace (not shown to user) so
+            # we can post-hoc diagnose reasoning bugs like the 2026-04-19
+            # Cube 3/4 swap without asking the user to repro.
+            _thoughts = getattr(response, "thoughts", None)
+            if _thoughts:
+                for _th in _thoughts:
+                    _trace_emit(session_id, "agent_thought", {
+                        "round": round_idx,
+                        "text": _th[:2000],
+                    })
+                logger.info(
+                    f"[{session_id}] Captured {len(_thoughts)} thought-part(s) "
+                    f"({sum(len(t) for t in _thoughts)} chars)"
+                )
 
             # Check if the LLM wants to call tools
             tool_calls = getattr(response, "tool_calls", None) or response.actions
@@ -376,6 +1314,16 @@ class ChatOrchestrator:
             tool_results = []
 
             for tc in real_tool_calls:
+                # Inner cancel check — between tools within a round. Lets us
+                # bail mid-round so we don't fire all queued tools after the
+                # user hit Stop.
+                if _is_cancelled(session_id):
+                    _trace_emit(session_id, "cancel_acknowledged", {
+                        "round": round_idx,
+                        "remaining_in_round": len(real_tool_calls) - real_tool_calls.index(tc),
+                    })
+                    cancelled = True
+                    break
                 fn_name = tc.get("function", {}).get("name") or tc.get("name", "")
                 fn_args_raw = tc.get("function", {}).get("arguments") or tc.get("arguments", "{}")
                 fn_args = json.loads(fn_args_raw) if isinstance(fn_args_raw, str) else fn_args_raw
@@ -392,8 +1340,36 @@ class ChatOrchestrator:
                                  "Use the results you already have and proceed with your answer.",
                     }
                 else:
-                    logger.info(f"[{session_id}] TOOL CALL: {fn_name}({json.dumps(fn_args)[:150]})")
+                    # Truncation: 800 chars default, but for run_usd_script we need
+                    # the FULL code to diagnose placement bugs (otherwise we never
+                    # see what the agent actually emitted to Kit).
+                    _limit = 4000 if fn_name == "run_usd_script" else 800
+                    logger.info(f"[{session_id}] TOOL CALL: {fn_name}({json.dumps(fn_args)[:_limit]})")
+                    # Live progress: bracket the tool call with started/finished
+                    # events so the UI can render a row, spin during execution,
+                    # then mark ✓/✗. tc_id ties them together.
+                    _t0 = _t.monotonic()
+                    _trace_emit(session_id, "tool_call_started", {
+                        "tc_id": tc_id,
+                        "tool": fn_name,
+                        "args_preview": _summarize_args(fn_args),
+                        "args_full": fn_args,
+                        "description": _describe_tool(fn_name),
+                    })
                     result = await execute_tool_call(fn_name, fn_args)
+                    _elapsed_ms = int((_t.monotonic() - _t0) * 1000)
+                    _success = (
+                        result.get("success")
+                        if "success" in result
+                        else (result.get("type") != "error")
+                    )
+                    _trace_emit(session_id, "tool_call_finished", {
+                        "tc_id": tc_id,
+                        "tool": fn_name,
+                        "success": bool(_success),
+                        "elapsed_ms": _elapsed_ms,
+                        "error": (result.get("error") if result.get("type") == "error" else None),
+                    })
 
                 executed_tools.append({
                     "tool": fn_name,
@@ -402,10 +1378,36 @@ class ChatOrchestrator:
                 })
 
                 if result.get("type") == "code_patch":
-                    code_patches.append({
-                        "code": result.get("code", ""),
-                        "description": result.get("description", ""),
-                    })
+                    # If the patch already ran (AUTO_APPROVE=true or other
+                    # auto-exec path), it's already in the stage — don't
+                    # re-surface it as an Approve & Execute button, which
+                    # confuses the user into clicking to redo completed work.
+                    # The tool call record (executed_tools) still captures
+                    # that it ran with success/output.
+                    if result.get("executed"):
+                        _trace_emit(session_id, "patch_executed", {
+                            "description": result.get("description", ""),
+                            "success": result.get("success"),
+                        })
+                        # Retry-spam halt: count CONSECUTIVE failures. Reset
+                        # on any success. Description can vary between retries
+                        # (agent often renames "Creating X..." → "Retrying X..."
+                        # → "Setting attrs..." while failing for the same root
+                        # cause) so we don't compare strings — just count.
+                        if result.get("success") is False:
+                            if consecutive_fail_count == 0:
+                                first_failed_description = (
+                                    result.get("description") or ""
+                                )[:80]
+                            consecutive_fail_count += 1
+                        else:
+                            consecutive_fail_count = 0
+                            first_failed_description = ""
+                    else:
+                        code_patches.append({
+                            "code": result.get("code", ""),
+                            "description": result.get("description", ""),
+                        })
 
                 update_knowledge_from_tool(knowledge, fn_name, fn_args, result)
 
@@ -425,11 +1427,16 @@ class ChatOrchestrator:
                 except Exception:
                     pass  # audit must never block chat
 
-                assistant_tool_calls.append({
+                entry = {
                     "id": tc_id,
                     "type": "function",
                     "function": {"name": fn_name, "arguments": json.dumps(fn_args)},
-                })
+                }
+                # Preserve thought_signature (Gemini 3.x requires it on continuation)
+                ts = tc.get("thought_signature")
+                if ts:
+                    entry["thought_signature"] = ts
+                assistant_tool_calls.append(entry)
                 tool_results.append({
                     "role": "tool",
                     "tool_call_id": tc_id,
@@ -448,15 +1455,668 @@ class ChatOrchestrator:
             # keeping base64 blobs in the context across rounds wastes ~200 K
             # tokens per image and causes "prompt is too long" failures.
             _scrub_images_from_messages(messages[:-len(tool_results)])
+
+            # If cancel fired inside the per-tool loop, break the round loop
+            # too — don't issue another LLM call.
+            if cancelled:
+                break
+
+            # Retry-spam halt: break out if ≥N consecutive patches have
+            # returned success=false. Descriptions can vary (agent renames
+            # the operation across retries) — count is the reliable signal.
+            if consecutive_fail_count >= _SPAM_HALT_THRESHOLD:
+                logger.warning(
+                    f"[{session_id}] Retry-spam halt: {consecutive_fail_count} "
+                    f"consecutive failed patches (first='{first_failed_description}') "
+                    f"— breaking tool loop at round {round_idx}"
+                )
+                _trace_emit(session_id, "retry_spam_halt", {
+                    "consecutive_fails": consecutive_fail_count,
+                    "first_failed_description": first_failed_description,
+                    "threshold": _SPAM_HALT_THRESHOLD,
+                    "round": round_idx,
+                })
+                # Nudge the agent to stop and reason.
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"HALT: you've run {consecutive_fail_count} patches in "
+                        f"a row that all returned success=false. Stop calling "
+                        f"tools now. In your reply: (1) summarize what failed "
+                        f"and what specific error repeated across attempts, "
+                        f"(2) state the most likely root cause, (3) propose ONE "
+                        f"concrete next step. Do NOT retry the same pattern. "
+                        f"If an earlier part of the user's multi-step request "
+                        f"is already done (e.g. the conveyor geometry was "
+                        f"created but the motion-logic failed), explicitly "
+                        f"list what DID land vs what did NOT — do not claim "
+                        f"success for steps that never executed."
+                    ),
+                })
+                spam_halted = True
+                break
         else:
             logger.warning(f"[{session_id}] Hit max tool rounds ({max_rounds})")
 
+        # If halted by spam-detection, do one final LLM call WITHOUT tools to
+        # produce the reasoned summary. Tools are excluded so the agent can't
+        # sneak in another retry.
+        if spam_halted:
+            try:
+                halt_ctx = dict(context) if isinstance(context, dict) else {}
+                halt_ctx["tools"] = []
+                halt_response = await self.llm_provider.complete(_compress_for_llm(messages, session_id), halt_ctx)
+                if halt_response.text and halt_response.text.strip():
+                    response = halt_response  # reply = response.text on next line
+            except Exception as e:
+                logger.warning(f"[{session_id}] Post-halt summary failed: {e}")
+
         reply = response.text or ""
+
+        # Cancel reply path: if the user hit Stop, short-circuit the
+        # post-loop pipeline (verify, anti-fabrication, code-block check)
+        # and return a canned summary. The agent_reply trace event still
+        # fires below — the UI relies on it to clear the live strip.
+        if cancelled:
+            n = len(executed_tools or [])
+            reply = (
+                f"Stopped. Completed {n} step{'s' if n != 1 else ''} before stop. "
+                "Type a new prompt to continue or refine."
+            )
+            _cancel_clear(session_id)
+
+        # Anti-fabrication: if the last round of tool calls contained failures
+        # (success=false or executed=false) and the reply doesn't acknowledge
+        # them — i.e. it sounds like the effect succeeded — force a rewrite.
+        # This is the motion-fabrication pattern seen in R-02 / AM-01: Assist
+        # says "callback registered, hit Play" after run_usd_script failed.
+        # Skip on cancel — the canned "Stopped" reply contains "completed"
+        # which would falsely trigger the rewrite.
+        if reply.strip() and executed_tools and not cancelled:
+            last_round_fails = [
+                t for t in executed_tools[-6:]  # last ~round of calls
+                if not t.get("result", {}).get("success", True)
+                or t.get("result", {}).get("executed") is False
+            ]
+            reply_l = reply.lower()
+            ack_words = ("fail", "error", "didn't", "did not", "couldn't",
+                         "could not", "not applied", "not authored", "not registered",
+                         "did not succeed", "was not", "wasn't")
+            # Success-claim keywords — expanded with common scene-mutation verbs
+            # beyond the original "callback/play" family. Each word is a strong
+            # signal of "effect landed" that the agent shouldn't be using when
+            # a tool call in the same round came back success=False.
+            claims_success = any(w in reply_l for w in
+                ("ready", "registered", "loaded", "is set", "configured",
+                 "applied", "hit play", "press play", "done",
+                 "created", "placed", "anchored", "added", "removed",
+                 "deleted", "imported", "attached", "enabled", "disabled",
+                 "successfully", "completed"))
+            acks_failure = any(w in reply_l for w in ack_words)
+            if last_round_fails and claims_success and not acks_failure:
+                logger.warning(
+                    f"[{session_id}] Reply claims success with {len(last_round_fails)} tool failures — forcing honesty rewrite"
+                )
+                failed_names = ", ".join(
+                    f"{t['tool']}(success={t['result'].get('success')}, executed={t['result'].get('executed')})"
+                    for t in last_round_fails[:4]
+                )
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"Your previous reply described the effect as succeeded "
+                        f"('ready' / 'registered' / 'hit Play' / similar), but "
+                        f"these tool calls FAILED: {failed_names}. "
+                        "Rewrite the reply honestly: say exactly which step failed "
+                        "and why, do NOT tell the user to hit Play if no working "
+                        "drive/callback was actually installed, and propose one "
+                        "concrete next step. Do NOT call more tools. Keep it tight."
+                    ),
+                })
+                try:
+                    rewrite_ctx = dict(context) if isinstance(context, dict) else {}
+                    rewrite_ctx["tools"] = []
+                    rewrite_response = await self.llm_provider.complete(_compress_for_llm(messages, session_id), rewrite_ctx)
+                    rewrite = (rewrite_response.text or "").strip()
+                    if rewrite:
+                        reply = rewrite
+                except Exception as e:
+                    logger.warning(f"[{session_id}] Honesty rewrite failed: {e}")
+
+        # Anti-silent-execution: reply is a backend-error placeholder (503
+        # from llm_gemini.py: "trouble reaching my reasoning backend", "backend
+        # returned N", "backend is overloaded") but tool calls in this turn
+        # DID execute successfully — often writing real changes to the stage
+        # (AUTO_APPROVE=true path). The user sees the effect (ljuset tänds)
+        # but the chat says "try again", and history stores the error string,
+        # so the NEXT turn has no memory of what was just done and the agent
+        # confidently says "Jag har inte gjort några ändringar". Rewrite the
+        # reply with a synthesized summary built from executed_tools so both
+        # the user AND future turns see ground truth.
+        _ERROR_REPLY_MARKERS = (
+            "trouble reaching my reasoning backend",
+            "couldn't reach my reasoning backend",
+            "couldn't complete that request (backend returned",
+            "backend is overloaded",
+        )
+        _reply_is_error = any(m in reply.lower() for m in _ERROR_REPLY_MARKERS)
+        _any_successful_tool = any(
+            (t.get("result") or {}).get("success") is True
+            or (t.get("result") or {}).get("executed") is True
+            for t in (executed_tools or [])
+        )
+        if _reply_is_error and _any_successful_tool:
+            logger.warning(
+                f"[{session_id}] Reply is backend-error but {len(executed_tools)} "
+                f"tools ran with successes — synthesizing from tool log"
+            )
+            lines = []
+            for t in executed_tools or []:
+                res = t.get("result") or {}
+                name = t.get("tool") or "?"
+                ok = res.get("success") is True or res.get("executed") is True
+                desc = res.get("description") or res.get("code", "")[:80]
+                mark = "✓" if ok else "✗"
+                lines.append(f"  {mark} {name}({desc[:100]})")
+            reply = (
+                "The reasoning backend hiccupped mid-turn, but these tool calls "
+                "DID run against the stage:\n"
+                + "\n".join(lines[:8])
+                + "\n\nThe effect is in your stage now. If the result looks wrong, "
+                  "say what you see — I'll reconcile from there."
+            )
+
+        # Anti-ghosting: if the LLM finished calling tools but never produced
+        # visible text, the user sees a blank reply and assumes we died. Force
+        # one more call with tools disabled, asking for a concise summary.
+        if not reply.strip() and executed_tools:
+            logger.warning(f"[{session_id}] Empty reply with {len(executed_tools)} tools — forcing summary")
+            messages.append({
+                "role": "user",
+                "content": (
+                    "You just ran tools but didn't write a reply to the user. "
+                    "Now write ONE concise paragraph summarising (a) what you did, "
+                    "(b) what the user should see in the viewport or stage right now, "
+                    "(c) any caveats or next step you'd suggest. "
+                    "Do NOT call more tools. If the viewport might not show the result "
+                    "(e.g., camera not framed on the new prim), say so explicitly and "
+                    "tell them to frame-focus on the prim path."
+                ),
+            })
+            try:
+                summary_ctx = dict(context) if isinstance(context, dict) else {}
+                summary_ctx["tools"] = []  # disable tool-calling for summary
+                summary_response = await self.llm_provider.complete(_compress_for_llm(messages, session_id), summary_ctx)
+                reply = (summary_response.text or "").strip()
+            except Exception as e:
+                logger.warning(f"[{session_id}] Anti-ghosting summary failed: {e}")
+            if not reply:
+                # Fallback — synthesize from tool names so the user sees something
+                tools_run = ", ".join({t.get("tool") for t in executed_tools if t.get("tool")})
+                reply = (
+                    f"I ran these tools: {tools_run}. "
+                    "Check the stage tree / viewport for the result; frame-focus on the new "
+                    "prim if the camera isn't on it yet."
+                )
+
+        # Anti-fabricated-menu-path: Kit menu paths like
+        # "Window > Extensions" or "**Isaac Utils** > **Common Samples** > ..."
+        # are a common hallucination (AM-01 T5). Flag any such path in reply
+        # that did NOT appear in a tool result this session.
+        if reply.strip():
+            try:
+                import re as _re
+                tool_result_blob = " ".join(
+                    json.dumps(t.get("result", {}), default=str)
+                    for t in executed_tools
+                )
+                # Bold-markdown menu paths: **X** > **Y** > **Z** (2+ hops)
+                bold_menu = _re.findall(
+                    r"\*\*([A-Z][A-Za-z0-9 _/-]{1,40})\*\*\s*[>›→]\s*\*\*([A-Z][A-Za-z0-9 _/-]{1,40})\*\*(?:\s*[>›→]\s*\*\*([A-Z][A-Za-z0-9 _/-]{1,40})\*\*)?",
+                    reply,
+                )
+                # Plain menu paths starting with known Kit roots
+                _KIT_ROOTS = ("Window", "File", "Edit", "Tools", "Layout",
+                              "Help", "Create", "Isaac Utils", "Isaac Examples",
+                              "Extension Manager")
+                plain_menu = _re.findall(
+                    rf"\b({'|'.join(_re.escape(r) for r in _KIT_ROOTS)})\s*[>›→]\s*([A-Z][A-Za-z0-9 _/-]{{1,40}})(?:\s*[>›→]\s*([A-Z][A-Za-z0-9 _/-]{{1,40}}))?",
+                    reply,
+                )
+                unverified = []
+                for parts in bold_menu + plain_menu:
+                    nonempty = [p for p in parts if p]
+                    if len(nonempty) < 2:
+                        continue
+                    path_str = " > ".join(nonempty)
+                    # Verified if ALL path components appear in some tool result
+                    if not all(p in tool_result_blob for p in nonempty):
+                        unverified.append(path_str)
+                if unverified:
+                    logger.warning(
+                        f"[{session_id}] Unverified menu paths in reply: {unverified[:3]}"
+                    )
+                    warn = (
+                        "\n\n⚠️ The menu path(s) above ("
+                        + "; ".join(f"'{p}'" for p in unverified[:3])
+                        + ") were not retrieved from any tool this session — "
+                        "they may not exist in your Kit build. Verify via the "
+                        "Extension Manager or share a screenshot of your toolbar."
+                    )
+                    reply = reply + warn
+            except Exception as e:
+                logger.warning(f"[{session_id}] menu-path validation failed: {e}")
+
+        # Verify-before-assert contract: check every scene-state claim in the
+        # reply against ground truth by auto-invoking the verify primitives.
+        # This is the structural (Fas 2) replacement for Fix B's keyword
+        # heuristic — no prompt engineering, model-agnostic, runs after the
+        # LLM has committed to its answer.
+        #
+        # Two claim classes we can verify deterministically right now:
+        #   (a) Prim-path claims — reply mentions `/World/X` → verify prim_exists
+        #   (b) Count claims     — "I cloned N ..." or "N arms" + a path → verify count
+        if reply.strip() and executed_tools is not None:
+            try:
+                import re as _re
+                from .tools.tool_executor import execute_tool_call as _exec
+                verify_warnings = []
+
+                # (a) All USD-like paths mentioned in the reply
+                claimed_paths = set(_re.findall(r"(?<![A-Za-z0-9_])/World[/A-Za-z0-9_]+", reply))
+                # Also catch bare backtick-quoted prim names used in
+                # creation contexts (e.g. "placerat `Cube_3`" without path) —
+                # the 2026-04-19 regression where agent named Cube_3/Cube_4
+                # while actual prims landed at /Cube, /Cube_01 at root.
+                for _p in _extract_bare_prim_name_claims(reply):
+                    claimed_paths.add(_p)
+                # See _partition_path_existence for the semantics: a path
+                # observed with exists=false in any tool output counts as
+                # CONFIRMED ABSENT and is flagged immediately; a path
+                # observed with exists=true is CONFIRMED PRESENT and skipped;
+                # everything else falls through to a fresh prim_exists probe.
+                # This closes the inversion-of-meaning gap the prior dumb
+                # substring skip missed.
+                confirmed_present, confirmed_absent = _partition_path_existence(executed_tools)
+                for p in claimed_paths & confirmed_absent:
+                    verify_warnings.append(f"`{p}` does not exist in the stage")
+                unverified_paths = [
+                    p for p in claimed_paths
+                    if p not in confirmed_present and p not in confirmed_absent
+                ]
+                # Cap at 4 verifications to keep cost bounded
+                for p in sorted(unverified_paths)[:4]:
+                    try:
+                        ver = await _exec("prim_exists", {"prim_path": p})
+                        # DATA_HANDLERS return dict with 'output' (json string) OR direct fields
+                        out = ver.get("output") if isinstance(ver, dict) else None
+                        if isinstance(out, str) and out.strip().startswith("{"):
+                            try:
+                                parsed = json.loads(out)
+                            except Exception:
+                                parsed = {}
+                        else:
+                            parsed = ver if isinstance(ver, dict) else {}
+                        exists = parsed.get("exists")
+                        if exists is False:
+                            verify_warnings.append(f"`{p}` does not exist in the stage")
+                    except Exception as e:
+                        logger.debug(f"[{session_id}] verify prim_exists({p}) failed: {e}")
+
+                # (b) Count claims: "N arms", "N robots", "N clones", etc.
+                # Extraction is deduped + path-filtered in _extract_count_claims;
+                # we cap verifications at 2 per turn for bounded cost.
+                for _ci, (n, _noun, path) in enumerate(_extract_count_claims(reply)):
+                    if _ci >= 2:
+                        break
+                    try:
+                        ver = await _exec("count_prims_under_path", {
+                            "parent_path": path, "recursive": False,
+                        })
+                        out = ver.get("output") if isinstance(ver, dict) else None
+                        parsed = {}
+                        if isinstance(out, str) and out.strip().startswith("{"):
+                            try: parsed = json.loads(out)
+                            except: pass
+                        actual = parsed.get("count")
+                        # Shallow mismatch — if the recursive count matches,
+                        # the nesting is off rather than the total wrong; tell
+                        # the user so they can re-parent or re-query.
+                        if isinstance(actual, int) and actual != n:
+                            rec_actual = None
+                            try:
+                                rec_ver = await _exec("count_prims_under_path", {
+                                    "parent_path": path, "recursive": True,
+                                })
+                                rec_out = rec_ver.get("output") if isinstance(rec_ver, dict) else None
+                                rec_parsed = {}
+                                if isinstance(rec_out, str) and rec_out.strip().startswith("{"):
+                                    try: rec_parsed = json.loads(rec_out)
+                                    except: pass
+                                rec_actual = rec_parsed.get("count")
+                            except Exception:
+                                pass
+                            if isinstance(rec_actual, int) and rec_actual == n:
+                                verify_warnings.append(
+                                    f"reply claims {n} {_noun} under `{path}`, "
+                                    f"but only {actual} are direct children; "
+                                    f"the {n} match appears in the recursive count — "
+                                    f"prims are nested deeper than the claim implies"
+                                )
+                            else:
+                                rec_str = f", recursive={rec_actual}" if rec_actual is not None else ""
+                                verify_warnings.append(
+                                    f"reply claims {n} {_noun} under `{path}`, "
+                                    f"but count_prims_under_path found {actual}"
+                                    + rec_str
+                                )
+                    except Exception as e:
+                        logger.debug(f"[{session_id}] verify count({path}) failed: {e}")
+
+                # (c) Transform / pose claims — extraction deduped in
+                # _extract_pose_claims; cap at 2 verifications per turn.
+                # 5cm tolerance on each axis matches most G-task criteria.
+                for _pi, (path, claim) in enumerate(_extract_pose_claims(reply)):
+                    if _pi >= 2:
+                        break
+                    try:
+                        ver = await _exec("get_world_transform", {"prim_path": path})
+                        out = ver.get("output") if isinstance(ver, dict) else None
+                        parsed = {}
+                        if isinstance(out, str) and out.strip().startswith("{"):
+                            try: parsed = json.loads(out)
+                            except: pass
+                        tr = parsed.get("translation") or parsed.get("world_translation") or parsed.get("position")
+                        if isinstance(tr, (list, tuple)) and len(tr) >= 3:
+                            actual = (round(float(tr[0]), 3),
+                                      round(float(tr[1]), 3),
+                                      round(float(tr[2]), 3))
+                            # 5cm tolerance on each axis — matches the tolerances
+                            # used in most G-task success criteria.
+                            if any(abs(a - c) > 0.05 for a, c in zip(actual, claim)):
+                                verify_warnings.append(
+                                    f"reply claims `{path}` at {claim}, "
+                                    f"but get_world_transform returned {actual}"
+                                )
+                    except Exception as e:
+                        logger.debug(f"[{session_id}] verify pose({path}) failed: {e}")
+
+                # (d) Schema / API application claims — extraction normalizes
+                # the schema prefix and dedups in _extract_schema_claims; cap
+                # at 3 verifications per turn.
+                for _si, (schema, path) in enumerate(_extract_schema_claims(reply)):
+                    if _si >= 3:
+                        break
+                    try:
+                        ver = await _exec("list_applied_schemas", {"prim_path": path})
+                        out = ver.get("output") if isinstance(ver, dict) else None
+                        parsed = {}
+                        if isinstance(out, str) and out.strip().startswith("{"):
+                            try: parsed = json.loads(out)
+                            except: pass
+                        applied = parsed.get("applied_schemas") or parsed.get("schemas") or []
+                        if applied and not any(schema in s for s in applied):
+                            verify_warnings.append(
+                                f"reply claims `{schema}` on `{path}`, "
+                                f"but list_applied_schemas returned {applied}"
+                            )
+                    except Exception as e:
+                        logger.debug(f"[{session_id}] verify schema({path}/{schema}) failed: {e}")
+
+                # (e) Attribute-value claims — extraction handles both
+                # path-first and attr-first phrasings, dedups, and returns
+                # short attr names. _ATTR_NAME_MAP is module-level; cap at
+                # 3 verifications per turn.
+                for _ai, (path, attr, claim) in enumerate(_extract_attr_claims(reply)):
+                    if _ai >= 3:
+                        break
+                    try:
+                        attr_name = _ATTR_NAME_MAP.get(attr, attr)
+                        ver = await _exec("get_attribute", {
+                            "prim_path": path, "attr_name": attr_name
+                        })
+                        out = ver.get("output") if isinstance(ver, dict) else None
+                        parsed = {}
+                        if isinstance(out, str) and out.strip().startswith("{"):
+                            try: parsed = json.loads(out)
+                            except: pass
+                        actual = parsed.get("value")
+                        if actual is None or parsed.get("error"):
+                            continue  # attr missing — separate class, don't over-flag
+                        try:
+                            actual_num = round(float(actual), 3)
+                        except (TypeError, ValueError):
+                            continue
+                        # 2% tolerance or 0.01 absolute, whichever larger
+                        tol = max(0.01, abs(claim) * 0.02)
+                        if abs(actual_num - claim) > tol:
+                            verify_warnings.append(
+                                f"reply claims `{path}` {attr}={claim}, "
+                                f"but get_attribute returned {actual_num}"
+                            )
+                    except Exception as e:
+                        logger.debug(f"[{session_id}] verify attr({path}/{attr}) failed: {e}")
+
+                # (f) Snapshot-diff path-substantiation check. For mutation
+                # turns (intent=patch_request/scene_diagnose) the agent's
+                # reply mentioning a /World/... path is an implicit claim
+                # that the path was relevant to the mutation. The diff tells
+                # us which paths ACTUALLY changed. Paths mentioned but not
+                # in the diff are unsubstantiated — likely fabrications.
+                #
+                # Language-agnostic by design: no verb regex, no noun-class
+                # classification. Uses intent (LLM-classified) + path regex
+                # (USD invariant) + stage diff (structural).
+                if intent in ("patch_request", "scene_diagnose"):
+                    try:
+                        from .turn_diff import (
+                            compute_diff as _compute_diff,
+                            unsubstantiated_paths as _unsub_paths,
+                        )
+                        _diff = await _compute_diff(session_id)
+                        if _diff.ok:
+                            _trace_emit(session_id, "turn_diff_computed", {
+                                "added": len(_diff.added),
+                                "removed": len(_diff.removed),
+                                "modified": len(_diff.modified),
+                                "total_changes": _diff.total_changes,
+                                # Path samples for the UI diff chip + tooltip
+                                "added_paths": list(_diff.added)[:8],
+                                "removed_paths": list(_diff.removed)[:8],
+                                "modified_paths": list(_diff.modified.keys())[:8],
+                            })
+                            # Reuse the already-computed claimed_paths from
+                            # the (a) check above. Caller extracted them
+                            # from both /World/... literals and backtick-
+                            # quoted bare names in creation contexts.
+                            _unsub = _unsub_paths(claimed_paths, _diff)
+                            for _p in _unsub[:3]:
+                                verify_warnings.append(
+                                    f"reply mentions `{_p}` but it was not "
+                                    f"added, modified, or removed this turn"
+                                )
+
+                        # Silent-robot-import check: detect the specific
+                        # robot_wizard / anchor_robot / add_reference
+                        # silent-success pattern where the tool returns
+                        # success=True but the composed prim has zero
+                        # children (asset URL 404'd at composition).
+                        # Observed 2026-04-19: agent imported Franka three
+                        # runs in a row; all three times /World/Robot ended
+                        # up as an empty Xform because the guessed asset
+                        # URL was wrong. The tool reports success, the
+                        # reply claims success, nothing else catches it.
+                        _robot_tools_called = {
+                            t.get("tool") for t in (executed_tools or [])
+                            if t.get("tool") in {
+                                "robot_wizard", "anchor_robot", "import_robot",
+                                "add_reference", "add_usd_reference",
+                            }
+                        }
+                        if _robot_tools_called:
+                            try:
+                                _robot_script = """
+import json
+import omni.usd
+from pxr import Usd, UsdPhysics
+stage = omni.usd.get_context().get_stage()
+empty_robots = []
+for prim in stage.Traverse():
+    p = prim.GetPath().pathString
+    name_low = p.lower().rsplit('/', 1)[-1]
+    has_art = 'PhysxArticulationAPI' in prim.GetAppliedSchemas() or \
+              'PhysicsArticulationRootAPI' in prim.GetAppliedSchemas()
+    is_robot_name = any(k in name_low for k in
+                        ('robot', 'franka', 'panda', 'ur5', 'ur10',
+                         'carter', 'jetbot'))
+    if has_art or is_robot_name:
+        child_count = len(list(prim.GetAllChildren()))
+        if child_count == 0:
+            empty_robots.append(p)
+print(json.dumps({'empty_robots': empty_robots}))
+"""
+                                _ex = await kit_tools.exec_sync(_robot_script, timeout=15)
+                                _out = (_ex.get('output') or '').strip()
+                                for line in reversed(_out.splitlines()):
+                                    line = line.strip()
+                                    if line.startswith('{'):
+                                        try:
+                                            _parsed = json.loads(line)
+                                        except Exception:
+                                            _parsed = {}
+                                        for _rp in (_parsed.get('empty_robots') or [])[:2]:
+                                            verify_warnings.append(
+                                                f"`{_rp}` appears to be a robot/articulation but has "
+                                                f"ZERO children — the asset reference likely 404'd at "
+                                                f"composition time despite the import tool reporting "
+                                                f"success. Check the asset URL (see /cite franka import)."
+                                            )
+                                        break
+                            except Exception as _e:
+                                logger.debug(f"[{session_id}] empty-robot check failed: {_e}")
+
+                        # Scene-lighting guard: if the turn added geometry but
+                        # the stage has no UsdLux light prim, auto-author a
+                        # DomeLight so the viewport is not black. Text cites
+                        # + dedicated add_default_light tool alone did not
+                        # reliably pull Gemini Flash into calling them for
+                        # scene-construction prompts — the agent focuses on
+                        # the "task words" (conveyor, robot, bin) and skips
+                        # ambient infrastructure. This hook only runs when
+                        # new prims were actually added this turn, so it
+                        # does not spam lights into chat-only turns.
+                        try:
+                            if _diff and _diff.ok and len(_diff.added) > 0:
+                                from .tools import kit_tools as _kit_tools
+                                _light_check = """
+import json
+import omni.usd
+stage = omni.usd.get_context().get_stage()
+has_light = False
+for prim in stage.Traverse():
+    if 'Light' in str(prim.GetTypeName()):
+        has_light = True
+        break
+print(json.dumps({'has_light': has_light}))
+"""
+                                _ex = await _kit_tools.exec_sync(_light_check, timeout=10)
+                                _out = (_ex.get('output') or '').strip()
+                                _has_light = False
+                                for line in reversed(_out.splitlines()):
+                                    line = line.strip()
+                                    if line.startswith('{'):
+                                        try:
+                                            _has_light = bool(json.loads(line).get('has_light'))
+                                        except Exception:
+                                            pass
+                                        break
+                                if not _has_light:
+                                    from .tools.tool_executor import _gen_add_default_light
+                                    _light_code = _gen_add_default_light({})
+                                    _r = await _kit_tools.exec_sync(_light_code, timeout=15)
+                                    _trace_emit(session_id, "auto_light_authored", {
+                                        "reason": "scene-construction turn produced geometry but no light was authored",
+                                        "light_path": "/World/DomeLight",
+                                        "intensity": 1000.0,
+                                        "kit_success": bool(_r.get("success")),
+                                    })
+                                    logger.info(
+                                        f"[{session_id}] auto-authored /World/DomeLight "
+                                        f"(turn had {len(_diff.added)} prims added, no light present)"
+                                    )
+                        except Exception as _e:
+                            logger.debug(f"[{session_id}] scene-light guard failed: {_e}")
+                    except Exception as e:
+                        logger.debug(f"[{session_id}] turn_diff verify failed: {e}")
+
+                if verify_warnings:
+                    logger.warning(
+                        f"[{session_id}] verify-contract mismatches: {verify_warnings[:3]}"
+                    )
+                    warn = (
+                        "\n\n⚠️ Verification mismatch — I checked my own claims against the stage and found: "
+                        + "; ".join(verify_warnings[:3])
+                        + ". Treat the summary above as provisional and re-run the failing step."
+                    )
+                    reply = reply + warn
+            except Exception as e:
+                logger.warning(f"[{session_id}] verify-contract failed: {e}")
+
+        # Anti-ModuleNotFoundError: scan inline ```python blocks in the reply
+        # for deprecated `omni.isaac.*` imports before handing to user. Prepend
+        # a visible warning if found — user was about to copy-paste broken code.
+        if reply.strip():
+            try:
+                import re as _re
+                code_blocks = _re.findall(r"```(?:python|py)?\s*\n(.*?)```", reply, _re.S)
+                from .tools.api_validator import validate_code as _api_validate
+                bad = []
+                for blk in code_blocks:
+                    _ok, issues = _api_validate(blk)
+                    for i in issues:
+                        if i.get("severity") == "deprecated":
+                            bad.append(i.get("message", "deprecated import"))
+                if bad:
+                    warn = (
+                        "\n\n⚠️ The code above uses deprecated 4.x namespaces "
+                        "and will raise ModuleNotFoundError on Isaac Sim 5.x: "
+                        + "; ".join(bad[:3])
+                        + ". Ask me to regenerate it with `isaacsim.*` modules."
+                    )
+                    reply = reply + warn
+            except Exception as e:
+                logger.warning(f"[{session_id}] inline-code validation failed: {e}")
+
         logger.info(f"[{session_id}] ASSISTANT: {reply[:200]}")
 
         # ── 6. Persist to session history ────────────────────────────────────
         history.append({"role": "user", "content": user_message})
         history.append({"role": "assistant", "content": reply})
+
+        # Trace the structured turn outcome (for /stuck, /report, debugging)
+        for _tc in executed_tools or []:
+            _payload = {
+                "tool": _tc.get("tool"),
+                "args_keys": list((_tc.get("arguments") or {}).keys()),
+                "success": (_tc.get("result") or {}).get("success"),
+            }
+            # For run_usd_script, capture the first 600 chars of emitted code so
+            # we can diagnose placement/xform bugs post-hoc without asking the
+            # user to reproduce. 600 is enough to see DefinePrim paths + xform.
+            if _tc.get("tool") == "run_usd_script":
+                _code = (_tc.get("arguments") or {}).get("code", "")
+                if _code:
+                    _payload["code_preview"] = _code[:600]
+            _trace_emit(session_id, "tool_call", _payload)
+        _trace_emit(session_id, "agent_reply", {
+            "text": reply[:500],
+            "intent": intent,
+            "tool_count": len(executed_tools or []),
+            "patch_count": len(code_patches or []),
+            # UI gates the per-bubble undo button on this — only mutating
+            # turns with a successfully captured snapshot are undoable.
+            "has_snapshot": bool(_snap_result and _snap_result.get("ok")),
+        })
 
         return {
             "intent": intent,

@@ -1,0 +1,182 @@
+# Scenario: Conveyor + Franka Pick-and-Place
+
+**Scenario ID**: `conveyor_pick_place`
+**Tier**: 1 (5-7 steps, 3-4 subsystems)
+**Date authored**: 2026-04-19
+**Last modified**: 2026-04-19 — switched primary architecture from
+cube_tracking to sensor_gated after scenario runs showed belt carried
+cubes off-station when robot couldn't keep up. Sensor-gated is the
+industrial-realistic pattern that matches real PLC-driven cells and
+eliminates the timing-race failure mode.
+**Status**: active — first industrial-style scenario
+**Primary architecture**: `sensor_gated` (industrial/PLC-equivalent). See
+persona matrix below for when to use the other three modes.
+
+## Goal (human-readable)
+
+Set up a pick-and-place cell: a conveyor belt on a table delivers small cubes to a Franka arm, which picks each cube and drops it into a bin positioned on the side of the table. The setup must use realistic industrial dimensions.
+
+## Prompt the user should send
+
+```
+Pick-and-place cell on a table: a MOVING conveyor belt carries FOUR
+small cubes toward a Franka Panda arm. The robot picks each cube from
+the belt and drops it INTO an OPEN-TOP bin sitting on the side of the
+table. Realistic industrial dimensions — the Franka must reach both
+the belt pick point and the bin.
+```
+
+Prompt-design rationale (refined 2026-04-19 after first run gave 1/5):
+- "MOVING" is explicit because the first agent created a static belt
+  without surface-velocity APIs
+- "FOUR small cubes" is explicit because "small cubes" (plural) was
+  interpreted as a single cube
+- "OPEN-TOP bin" + "drops INTO" implies a container with walls, not a
+  solid Cube labeled "Bin"
+- Specific numbers (belt length, cube size, table height, speed) are
+  still omitted — the agent must derive these from the Franka reach
+  envelope via `lookup_product_spec("franka_panda")`.
+
+## Target layout
+
+All coordinates in meters, Z-up, Y perpendicular to belt travel.
+
+| Component | Position | Dimensions | Notes |
+|---|---|---|---|
+| Table | (0, 0, 0.375) | 2.0 × 1.0 × 0.75 | Top at Z=0.75 |
+| Franka base | (0, 0, 0.75) | — | Mounted on table top, workspace sphere r=0.855 |
+| Belt | (-0.55, 0, 0.80) center | 1.9 × 0.3 × 0.1 | Top at Z=0.85, runs along -X to +X |
+| Cubes (4) | X = -1.3, -1.0, -0.7, -0.4 | 0.05 cube, mass 0.1 kg | Initial Z=0.875 (on belt) |
+| Bin | (0, 0.5, 0.80) | 0.3 × 0.3 × 0.15 | On table, open top, 4 walls + floor |
+| Dome light | (0, 0, 2.0) | — | For visibility |
+
+**Reach sanity**: pick point at (0.3, 0, 0.875) is 0.335m from Franka base → well inside 0.855m envelope. Bin drop-point at (0, 0.5, 0.95) is 0.54m away → also inside.
+
+**Belt direction**: +X (cubes travel toward robot). Speed: 0.2 m/s (slow enough for robot reaction).
+
+## Persona-driven architectures
+
+The same template is run against FOUR different controller architectures,
+each representing a real Isaac Sim user persona. **sensor_gated is the
+default** — it matches industrial practice, handles robot timing
+gracefully, and maps 1:1 to real PLC / OPC-UA cell deployments. Use the
+other modes only when explicitly warranted by persona intent.
+
+| Persona | target_source mode | Extra tools used | Sim2real-honest | When to use |
+|---|---|---|---|---|
+| **Industrial-robotics engineer (DEFAULT)** | `sensor_gated` | `add_proximity_sensor`, `teach_robot_pose` × 3 (pick/drop/home), belt_path | ✅ — binary sensor, pre-taught poses | All industrial / factory / realistic pick-place demos. Belt pauses on trigger so robot has all the time it needs. |
+| ML researcher (demo-gen / imitation) | `cube_tracking` | RmpFlow reads ground-truth cube pose each frame | ❌ — omniscient | Only when you specifically want live-pose chasing for ML demo generation. Requires robot to outpace belt. |
+| RL-trainer / research with sensing | `cube_tracking` + custom obs pipeline | Vision / contact sensors for observation | Partial | When training policies with realistic sensor inputs, but ground-truth pose is still read. |
+| Digital-twin / PLC-in-loop | `ros2_cmd` or `setup_pick_place_ros2_bridge` | External controller, OPC-UA optional | ✅ — external logic, Isaac Sim = physics only | When the real plant's PLC drives the sim via ROS2 / OPC-UA. |
+
+### Why sensor_gated is the default
+
+Previous runs with cube_tracking demonstrated the belt carried cubes past
+the pick station when the robot's planning/IK took longer than the cubes'
+transit time. That's a useful ML-research failure mode (tests robot
+throughput) but it's not representative of industrial pick-and-place
+cells. Real cells use sensors: cubes arrive, sensor triggers, belt pauses,
+robot picks without time pressure, belt resumes. That's the canonical
+pattern and what this scenario now validates by default.
+
+Per-persona checks differ — the industrial persona MUST pass C9-C11
+(sensor exists, belt pauses on trigger, resumes after release). The
+cube_tracking persona may skip C9-C11.
+
+## Required subsystems
+
+The agent must correctly orchestrate:
+
+1. **USD basics** — prim creation, xform-ops, hierarchy
+2. **PhysX collision** — table, belt, cubes, bin walls all need CollisionAPI
+3. **PhysX rigid bodies** — cubes need RigidBodyAPI (dynamic), belt needs RigidBodyAPI+kinematicEnabled (required for surface-velocity)
+4. **PhysxSurfaceVelocityAPI** — belt motion (see `/cite conveyor surface velocity`)
+5. **Robot import** — Franka loaded with ArticulationRootAPI, joints addressable
+6. **Grasp / motion control** — the `grasp_object` tool OR a custom pick-place sequence
+7. **Physics simulation lifecycle** — scene must have PhysicsScene, timeline must start
+
+## Verify-checks (8 total)
+
+Run by `scripts/qa/check_conveyor_pick_place.py` against the live Kit stage. Each check is binary pass/fail. Total score = sum(pass) / 8.
+
+### Structural checks (run pre-simulation)
+
+1. **C1 — Table exists**
+   A prim under /World/ with type in {Cube, Mesh, Xform} whose bounding-box top is between Z=0.7 and Z=0.8. (Relaxed so agent can name it /World/Table or /World/Workbench.)
+
+2. **C2 — Belt has surface-velocity combo**
+   At least one prim under /World/ has ALL THREE applied: PhysicsCollisionAPI, PhysicsRigidBodyAPI with kinematicEnabled=True, PhysxSurfaceVelocityAPI with surfaceVelocity non-zero.
+
+3. **C3 — 4 cubes on belt**
+   At least 4 prims of type Cube with world bbox bottom between Z=0.80 and Z=0.90 (on belt top), mass ≤ 0.2 kg, size ≤ 0.08m.
+
+4. **C4 — Franka imported**
+   A prim under /World/ with ArticulationRootAPI applied, whose name contains "franka" or "panda" (case-insensitive). Base translate Z between 0.7 and 0.85 (sitting on table).
+
+5. **C5 — Bin has 4 walls + floor**
+   A prim under /World/ whose name contains "bin" or "box" or "container". Has ≥5 children, all with CollisionAPI.
+
+### Dynamic checks (run after N seconds of simulation)
+
+6. **C6 — Belt moves cubes**
+   After 3 seconds simulation, at least one cube's X position has changed by ≥ 0.1m from its initial position. (Tests surface-velocity transfer.)
+
+7. **C7 — Robot reaches pick point**
+   After 10 seconds, the Franka end-effector (any prim whose name contains "panda_hand" or "tcp" or "end_effector") has been within 0.1m of any cube's position at least once. (Logged via max cross-frame distance check.)
+
+8. **C8 — ≥1 cube lands in bin**
+   After 30 seconds simulation, at least one cube is inside the bin's bbox volume. (Stretch goal — most likely to fail on first attempt.)
+
+## Anti-patterns to flag
+
+Detected by scanning all `run_usd_script` code_previews in the trace.
+
+| Pattern | Severity | Why |
+|---|---|---|
+| `CreateMeshPrimWithDefaultXform` | error | Authors mesh data on Cube TypeName → warped geometry (validator already blocks) |
+| `TransformPrimCommand` | error | Not a real command (validator blocks) |
+| `ClearXformOpOrder` | warning | Leaves orphan attrs (validator warns) |
+| `IsA(UsdLux.LightAPI)` or similar | error | Applied-API vs prim-type confusion (validator blocks) |
+| `pipeline_stage=GraphBackingType.*` | error | Enum mismatch (validator blocks) |
+| `omni.kit.commands.execute("CreateConveyor"` or similar fabricated names | error | Not a registered command |
+| Multiple `DeletePrims` + recreate on same path within one script | warning | Session-layer ghosts |
+
+## Expected tool usage
+
+These tools should appear in the trace at least once:
+
+- `lookup_product_spec` (query="franka_panda" or similar) — to discover reach envelope
+- `import_robot` (Franka) OR `add_reference` (Franka USD)
+- `create_conveyor_track` OR explicit PhysxSurfaceVelocityAPI+kinematic RigidBody combo
+- `apply_api_schema` (for physics on cubes and bin)
+- `sim_control` or timeline.play()
+- `get_world_transform` or similar read-back for verification
+
+Tools that SHOULDN'T appear:
+
+- `cloud_launch`, `launch_training` (wrong workflow)
+- `record_demo_video`, `record_trajectory` (not needed for this scenario)
+
+## Known gotchas (from 2026-04-19 smoke-tests)
+
+- Agent tends to reach for `run_usd_script` over higher-level tools. If `create_conveyor_track` isn't called, note it — agent missed tool discovery.
+- Precision-mismatch trap: existing prims have float3 scale, new AddScaleOp with Vec3d fails USD validation. Use the reuse-existing-op pattern.
+- Session-layer ghosts: deleting + recreating the same prim path within a session can compose stale attrs. Agent should verify PrimStack is clean.
+- Franka default pose has Joint_1 such that the arm is upright. Reach-check should account for this.
+
+## Scoring
+
+- **8/8 passing**: perfect run. Document what worked so other scenarios reuse the pattern.
+- **6/8 passing, all structural + belt motion**: functionally correct setup, robot orchestration is the remaining failure. Tier-1 MVP achieved.
+- **4/8 passing, structural only**: agent got geometry right but couldn't connect physics or motion. Common for first attempts.
+- **<4/8**: agent did not understand the task. Investigate thoughts + tool choices.
+
+## Iteration
+
+After each run:
+1. Copy trace summary to `workspace/scenario_results/conveyor_pick_place_{date}.json`
+2. Note which checks failed and any new anti-patterns hit
+3. If a failure class keeps repeating: add a validator rule, a cite entry, or a tool docstring nudge
+4. Re-run, compare scores over time
+
+The goal is **monotonic improvement** — each intervention should raise the score, not regress other checks.

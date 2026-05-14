@@ -1,0 +1,13 @@
+{
+  "task_id": "T-02",
+  "goal": "Produce an auditable maximum-allowable-transient-contact-force calculation for UR10e wrist impact on body region 15 (forehead) per ISO/TS 15066 Annex A, with every input traced to the standard.",
+  "tools_used": ["lookup_knowledge", "lookup_product_spec", "check_physics_health"],
+  "thoughts": "Never quote ISO numbers without verification. Region-15 transient/quasi-static limits must come from lookup_knowledge hitting the actual ISO/TS 15066 Annex A.2 table, not from memory. UR10e reduced-mode flange mass must come from lookup_product_spec against UR documentation. check_physics_health only confirms the sim substep config before any cross-check — sim never defines the limit.",
+  "code": "# The standard defines the limit. Sim checks whether the robot exceeds it.\n\n# 1. Pull the ACTUAL biomechanical table — body region 15 (forehead/skull)\nlookup_knowledge(query=\"ISO TS 15066 Annex A Table A.2 body region 15 forehead transient quasi-static limit\")\n\n# 2. Pull UR10e tool-flange mass + reduced-mode inertia from vendor docs\nlookup_product_spec(product=\"Universal Robots UR10e\", field=\"tool_flange_mass_reduced_mode\")\n\n# 3. Confirm the sim's contact-solver substep config BEFORE any cross-check\ncheck_physics_health(stage_path=\"<COBOT_CELL_USD>\")\n\n# What to produce for the hazard log — a table, not a single number:\n#   Input              | Value        | Source\n#   -----------------  | -----------  | ------------------------------\n#   Body region        | 15 (forehead)| Task statement\n#   Transient limit    | <FROM_ISO>   | ISO/TS 15066 Annex A.2 row 15\n#   Quasi-static limit | <FROM_ISO>   | ISO/TS 15066 Annex A.2 row 15\n#   Spring constant    | <FROM_ISO>   | ISO/TS 15066 Annex A.3\n#   Effective mass     | <FROM_UR>    | UR10e datasheet + payload\n#   Contact geometry   | r=10 mm tip  | Given\n# If lookup_knowledge returns no confirmed row 15 values, STOP and tell Thomas\n# the retrieval failed — do NOT paste numbers from memory.",
+  "failure_modes": [
+    "Conflating transient (higher) and quasi-static (lower) limits into one 'force limit'",
+    "Rounding region-specific limits to a whole-body average — explicitly forbidden by the standard",
+    "Using the PhysX-reported peak force as the limit instead of comparing it against the ISO limit",
+    "Fabricating ISO numbers when lookup_knowledge fails to resolve the table"
+  ]
+}

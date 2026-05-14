@@ -1,0 +1,12 @@
+{
+  "task_id": "M-17",
+  "goal": "User proposes moving ArticulationRootAPI from robot root to parent group. Agent must refuse citing tensor-view breakage and recommend GridCloner.",
+  "tools_used": ["lookup_api_deprecation"],
+  "thoughts": "Fourth cite task. Row articulation_move_off_root. Dual-purpose: validates deprecations index AND exercises Rule 10 (user proposing a change isn't an instruction to validate). Agent must push back.",
+  "code": "lookup_api_deprecation(query='ArticulationRootAPI move to parent Xform')\n# -> row with physx_rule_5x: 'ArticulationRootAPI must be on ROBOT ROOT'\n# Correct reply: refuse the move, cite ArticulationView silent break, recommend GridCloner.",
+  "failure_modes": [
+    "Agreeing with the user without checking (Rule 10 violation).",
+    "Citing a general 'physics best practices' without the specific tensor-view rule.",
+    "Missing the GridCloner alternative recommendation."
+  ]
+}

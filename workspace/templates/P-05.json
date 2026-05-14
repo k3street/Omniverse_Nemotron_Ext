@@ -1,0 +1,13 @@
+{
+  "task_id": "P-05",
+  "goal": "Set up an A/B between path-traced and RTX Real-Time rendering for SDG throughput comparison.",
+  "tools_used": ["configure_sdg", "set_render_config", "create_sdg_pipeline", "export_dataset", "benchmark_sdg"],
+  "thoughts": "RTX Real-Time uses rtx-defaults, spp is irrelevant (rasterization + RTX denoising). DLSS modes affect look/throughput. Expect 3-6x raw render speedup but it's hardware-dependent — don't promise a number. Caustics, subsurface scattering on translucent fruit differ visibly, may or may not matter for the downstream model. Tag the render mode in per-image metadata so Priya can stratify evaluation. Don't pre-judge mAP impact — that's her experiment.",
+  "code": "# 1. Path-traced variant (baseline)\nset_render_config(mode=\"path_traced\", spp=256, denoiser=\"optix\", dlss=\"off\")\npt_pipe = create_sdg_pipeline(\n    name=\"apples_pt\",\n    num_frames=<N_A_B>,\n    writer_metadata={\"render_mode\": \"path_traced\", \"spp\": 256},\n    output_dir=\"<DEST_PATH>/pt\",\n)\n\n# 2. RTX Real-Time variant\nset_render_config(mode=\"rtx_realtime\", denoiser=\"on\", dlss=\"<DLSS_MODE>\")  # e.g. balanced\nrt_pipe = create_sdg_pipeline(\n    name=\"apples_rt\",\n    num_frames=<N_A_B>,\n    writer_metadata={\"render_mode\": \"rtx_realtime\"},\n    output_dir=\"<DEST_PATH>/rt\",\n)\n\n# 3. Measure the throughput, not guess it\nbenchmark_sdg(pipeline=pt_pipe.id, duration_s=120)\nbenchmark_sdg(pipeline=rt_pipe.id, duration_s=120)\n\n# 4. Export both with render_mode tag so Priya can label-stratify during eval\nexport_dataset(pipeline=pt_pipe.id, format=\"coco\", split=\"ab_pt\")\nexport_dataset(pipeline=rt_pipe.id, format=\"coco\", split=\"ab_rt\")",
+  "failure_modes": [
+    "assistant asserts mAP will be equal across modes",
+    "assistant forgets to tag render_mode in metadata",
+    "assistant claims a fixed speedup number without benchmarking",
+    "assistant suggests running both on one GPU at once"
+  ]
+}

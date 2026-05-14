@@ -1,0 +1,12 @@
+{
+  "task_id": "S-02",
+  "goal": "Import Nova Carter, bring up ROS2 bridge, confirm expected topic set under 10 minutes.",
+  "tools_used": ["import_robot", "verify_import", "setup_ros2_bridge", "ros2_list_topics", "scene_summary"],
+  "thoughts": "Nova Carter ships as a preset in the robot catalog — no manual URDF. After import, verify_import confirms the articulation root + joints before standing up the bridge. The /odom frequency question is graph-tick vs physics-step: the OmniGraph publisher ticks at graph rate, not the 30 Hz Sarah expected unless explicitly gated. The bridge runs as an extension inside Kit — not a separate process — but only publishes while timeline is playing.",
+  "code": "# 1. Import Nova Carter from catalog preset\nrobot = import_robot(preset=\"nova_carter\", prim_path=\"/World/Carter_01\")\n\n# 2. Verify articulation is valid before wiring ROS\ncheck = verify_import(prim_path=\"/World/Carter_01\")\nif not check.articulation_valid:\n    diagnose_physics_error(prim_path=\"/World/Carter_01\")\n    apply_robot_fix_profile(profile=\"nova_carter\", prim_path=\"/World/Carter_01\")\n\n# 3. Stand up ROS2 bridge with Nova Carter defaults\nsetup_ros2_bridge(\n    robot_prim=\"/World/Carter_01\",\n    namespace=\"<NAMESPACE>\",  # empty string for default\n    topics=[\"cmd_vel\", \"odom\", \"tf\", \"front_3d_lidar\", \"front_stereo_camera\"],\n)\n\n# 4. Start sim so the bridge publishes, then list topics\nsim_control(action=\"play\")\ntopics = ros2_list_topics()\n# expect: /cmd_vel, /chassis/odom, /tf, /front_3d_lidar/point_cloud, /front_stereo_camera/*",
+  "failure_modes": [
+    "assistant types a Nucleus path by hand instead of using preset",
+    "assistant forgets that bridge only publishes while timeline plays",
+    "assistant conflates graph tick rate with physics step rate"
+  ]
+}

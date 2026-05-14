@@ -1,0 +1,13 @@
+{
+  "task_id": "M-12",
+  "goal": "Add a wrist-mounted 84x84 RGB camera on the Allegro palm_link via TiledCameraCfg with RTX RealTime, feasible at 1024 envs without replicator overhead.",
+  "tools_used": ["lookup_knowledge", "list_all_prims", "configure_camera", "create_prim", "check_physics_health"],
+  "thoughts": "TiledCameraCfg is the 5.x throughput path — one render product per tile, not per env. Plain CameraCfg at 1024 envs destroys throughput because each becomes a separate RenderProduct going through Replicator annotators. OffsetCfg convention defaults to ROS frame (X-forward, Z-up) in IsaacLab — must document which convention the authored offset uses. Unlit scenes yield all-black RGB obs and silent CNN NaN — add a dome light before training.",
+  "code": "# 1. Anchor in TiledCameraCfg patterns (not experimental in 5.x)\nlookup_knowledge(query=\"IsaacLab TiledCameraCfg OffsetCfg RTX RealTime multi-env throughput\")\n\n# 2. Confirm palm_link prim path in the scene template\nlist_all_prims(root=\"/World/envs/env_0/Robot\", name_contains=\"palm\")\n\n# 3. Ensure scene has at least one light — otherwise CNN gets black obs\ncreate_prim(\n    prim_path=\"/World/DomeLight\",\n    prim_type=\"DomeLight\",\n    attributes={\"inputs:intensity\": <DOME_INTENSITY>, \"inputs:texture:format\": \"latlong\"}\n)\n\n# 4. Wire the TiledCamera (authored in scene cfg; shown here via tool wrapper)\nconfigure_camera(\n    prim_path=\"{ENV_REGEX_NS}/Robot/palm_link/WristCam\",\n    camera_type=\"tiled\",\n    width=84, height=84,\n    data_types=[\"rgb\"],\n    offset_pos=(\"<OX>\",\"<OY>\",\"<OZ>\"),\n    offset_rot=(\"<QW>\",\"<QX>\",\"<QY>\",\"<QZ>\"),\n    offset_convention=\"ros\",\n    render_mode=\"RaytracedLighting\"\n)\n\n# 5. Obs term pseudocode:\n# def wrist_rgb(env, sensor_cfg):\n#     img = env.scene.sensors[sensor_cfg.name].data.output['rgb']  # uint8 (N,H,W,4)\n#     img = img[..., :3].float() / 255.0                           # drop alpha, normalize\n#     return img.permute(0, 3, 1, 2).contiguous()                  # BCHW for CNN\n\n# 6. Post-wire perf check\ncheck_physics_health()",
+  "failure_modes": [
+    "Plain CameraCfg at 1024 envs — renderer stalls, <1 fps effective",
+    "Unnormalized uint8 or RGBA into CNN — NaN loss at step 1",
+    "BHWC left in place — Conv2d expects BCHW, shape error surfaces late",
+    "No dome light — all-black RGB obs, CNN learns nothing and throws no error"
+  ]
+}

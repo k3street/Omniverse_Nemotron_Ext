@@ -1,0 +1,13 @@
+{
+  "task_id": "AL-02",
+  "goal": "Design multi-tenant Nucleus across 3 BUs with IP isolation and a cross-BU shared-tooling library.",
+  "tools_used": ["lookup_knowledge", "lookup_product_spec", "nucleus_browse"],
+  "thoughts": "Pure advisory. Two architectures: (A) single Nucleus with separate mounts + ACLs (simpler, still tenanted via SSO group sync); (B) one Nucleus instance per BU federated (maximal isolation, bigger ops cost). Legal termination-level risk pushes toward (B) if BU firewalls are absolute. Nucleus ACLs control access, NOT data-loss-prevention — exfil through legitimate users needs separate DLP. Shared-tooling library = its own mount, replicated read-only to each BU. No 'Nucleus Tenancy Manager' invention. ITAR is customer process, not a Nucleus certification.",
+  "code": "# Advisory — no scene mutation. Structure the Nucleus tenancy decision.\n# 1. Capabilities inventory (ground in real product)\nlookup_product_spec(product=\"Omniverse Nucleus Enterprise\")\nlookup_knowledge(query=\"nucleus mount ACL permissions group sync SSO\")\nnucleus_browse(path=\"<NUCLEUS_ROOT>\")  # to illustrate mount structure for the BU CTOs\n\n# 2. Option A: single Nucleus, 3 mounts + 1 shared mount\n#    /auto     (automotive BU, ACL: auto_group only)\n#    /aero     (aerospace BU, ACL: aero_group only)\n#    /consumer (consumer BU, ACL: consumer_group only)\n#    /shared   (read for all BU groups, write only for platform team)\n\n# 3. Option B: 3 Nucleus instances federated; /shared replicated to each\n#    Strongest isolation; operational cost = 3x patching cadence, license stance.\n\n# 4. Non-coverage disclosures (state honestly)\nlookup_knowledge(query=\"nucleus ACL limitations DLP encryption at rest KMS\")\n#    - Nucleus ACLs do NOT prevent authorized users from exfiltrating to local disk.\n#    - Per-mount KMS keys: not a shipped Nucleus feature; rely on underlying storage encryption.\n#    - ITAR: no Nucleus certification; controls live in customer's environment.\n\n# 5. Shared-tooling migration: platform team owns /shared, replicated read-only.",
+  "failure_modes": [
+    "assistant invents a 'Nucleus Tenancy Manager' feature",
+    "assistant claims Nucleus ACLs replace DLP",
+    "assistant promises ITAR compliance certification on Nucleus",
+    "assistant promises per-mount KMS that isn't shipped"
+  ]
+}

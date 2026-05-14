@@ -1,0 +1,12 @@
+{
+  "task_id": "AM-06",
+  "goal": "Get a pick-and-place demo visibly working for a Tuesday customer call using a prebuilt template.",
+  "tools_used": ["list_scene_templates", "load_scene_template", "quick_demo", "lookup_knowledge", "sim_control"],
+  "thoughts": "For a Tuesday demo, a prebuilt pick-and-place template IS the right answer -- not IK + grasp control + behavior trees on day 3. If he insists on 'his' box/robot, keep it simple: scripted joint waypoints, no RL policy. The customer cares about the pixels moving, not the provenance.",
+  "code": "templates = list_scene_templates(category=\"manipulation\", tags=[\"pick_place\"])\nload_scene_template(\n    template_name=\"<PICK_PLACE_PRESET>\",\n    target_path=\"/World\"\n)\n# or:\n# quick_demo(name=\"franka_pick_place\")\nsim_control(action=\"play\")\nkb = lookup_knowledge(\n    query=\"Isaac Sim 5.x pick and place template how it works beginner explanation\"\n)",
+  "failure_modes": [
+    "Pushing him into IK, grasp pose generators and behavior trees",
+    "Suggesting Blender-style keyframe animation when the template works out of the box",
+    "Refusing to use the preset because his robot is 'different' -- wastes the Tuesday deadline"
+  ]
+}

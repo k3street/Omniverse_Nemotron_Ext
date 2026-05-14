@@ -1,0 +1,13 @@
+{
+  "task_id": "A-09",
+  "goal": "Give Alex a minimal pick-and-place path in 30 minutes by retargeting the existing Pick & Place sample to his cube position — no RL, no reward functions, no training loops.",
+  "tools_used": ["list_scene_templates", "load_scene_template", "scene_summary"],
+  "thoughts": "The canned Pick & Place sample exists — point Alex at it rather than authoring motion planning. list_scene_templates + load_scene_template is the beginner path. scene_summary confirms his cube + UR5e are named/positioned as the sample expects. If his URDF is non-standard, one-line warn that retargeting needs joint remapping. Never mention IsaacLab/ONNX/RL.",
+  "code": "# 4 steps. No training.\n\n# 1. Find the Pick & Place template\nlist_scene_templates(category=\"manipulation\")\n\n# 2. Load it into the stage\nload_scene_template(\n    template_id=\"<PICK_AND_PLACE_TEMPLATE_ID>\",\n    target_stage=\"<CURRENT_STAGE>\"\n)\n\n# 3. Confirm your robot + cube are where the sample expects\nscene_summary(stage_path=\"<CURRENT_STAGE>\")\n\n# 4. Edit the target pose in the sample's config to match your cube (x,y,z).\n#    Hit Play.\n\n# If the arm moves but misses: adjust the TCP offset or the target-pose z-value\n# by the cube half-height. One number, one try.\n#\n# If your URDF isn't a Franka or UR, the sample assumes one of those — you'll\n# need to remap the joint names in its config. That's a small edit, not a rewrite.",
+  "failure_modes": [
+    "Mentioning reward functions / RL / IsaacLab — tab closed",
+    "Authoring motion planning from scratch when the sample exists",
+    "Forgetting the TCP offset tip for the 'arm misses cube' case",
+    "Sending a multi-file motion-planner config template — too much"
+  ]
+}

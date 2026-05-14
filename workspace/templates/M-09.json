@@ -1,0 +1,13 @@
+{
+  "task_id": "M-09",
+  "goal": "Add per-fingertip contact force magnitudes as a GPU-side observation on the Allegro hand using IsaacLab ContactSensorCfg, not a per-step CPU callback.",
+  "tools_used": ["lookup_knowledge", "list_all_prims", "setup_contact_sensors", "run_usd_script"],
+  "thoughts": "ContactSensorCfg applies PhysicsContactReportAPI under the hood and requires filtered body prims to have PhysicsCollisionAPI — else contacts silently report zero. net_forces_w is a vector per filtered body; magnitude is .norm(dim=-1). root_physx_view.get_link_incoming_joint_force is constraint reaction force, NOT contact, so wrong tool for this task. prim_path glob with '.*_tip' matches all four fingertips across envs.",
+  "code": "# 1. Anchor in real IsaacLab contact sensor API\nlookup_knowledge(query=\"IsaacLab ContactSensorCfg net_forces_w history_length track_air_time fingertip\")\n\n# 2. Confirm fingertip prims have PhysicsCollisionAPI — required for contact reports\nlist_all_prims(root=\"<ROBOT_PRIM_PATH>\", schema_filter=\"PhysicsCollisionAPI\", name_contains=\"tip\")\n\n# 3. Dump current APIs on each fingertip to catch missing CollisionAPI\nrun_usd_script(script=\"\"\"\nstage = omni.usd.get_context().get_stage()\nfor name in ['link_3.0_tip','link_7.0_tip','link_11.0_tip','link_15.0_tip']:\n    p = stage.GetPrimAtPath(f'<ROBOT_PRIM_PATH>/{name}')\n    print(name, 'applied_schemas=', p.GetAppliedSchemas() if p else 'MISSING')\n\"\"\")\n\n# 4. Wire the sensor cfg and obs term\nsetup_contact_sensors(\n    prim_path_expr=\"{ENV_REGEX_NS}/Robot/link_.*_tip\",\n    history_length=<H>,\n    track_air_time=False,\n    update_period=<DT>\n)\n\n# Obs term pseudocode (authored in mdp/observations.py):\n# def fingertip_force(env, sensor_cfg: SceneEntityCfg):\n#     sensor = env.scene.sensors[sensor_cfg.name]\n#     return torch.norm(sensor.data.net_forces_w, dim=-1)  # (N_envs, 4)",
+  "failure_modes": [
+    "Filtered fingertip prim lacks PhysicsCollisionAPI — sensor reports zeros silently",
+    "Using root_physx_view.get_link_incoming_joint_force thinking it equals contact force (it is constraint reaction)",
+    "Returning raw net_forces_w vector where an obs term expects a scalar magnitude",
+    "prim_path without {ENV_REGEX_NS} — sensor fires only on env_0"
+  ]
+}

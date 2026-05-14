@@ -1,0 +1,13 @@
+{
+  "task_id": "A-04",
+  "goal": "Give Alex an honest answer about Isaac Sim's 90 GB footprint, realistic alternatives for his hobby-arm use case, and no marketing.",
+  "tools_used": ["lookup_knowledge"],
+  "thoughts": "Alex is pre-install, not pre-commitment. Pull footprint facts via lookup_knowledge rather than quoting a number from memory. Be honest: no official 'lite' mode, Kit base is fixed. Name 1-2 real alternatives (PyBullet, MuJoCo) — not to badmouth NVIDIA, but because pretending they don't exist reads as sales copy. Under 12 lines.",
+  "code": "# Honest read, no sales pitch.\n\nlookup_knowledge(query=\"Isaac Sim 5 install size asset footprint headless streaming client minimum\")\n\n# What to tell Alex (based on retrieval, not memory):\n#\n#   Isaac Sim + the default asset cache is big. There's no official 'lite' mode;\n#   the Kit runtime is a fixed cost.\n#\n#   For 'just spin my URDF' on a 3060:\n#     - PyBullet or MuJoCo via mjpython — both install in <1 GB, run a URDF fine,\n#       no RTX. Closest match to your actual use case today.\n#     - Isaac Sim makes sense when you want RTX visuals, synthetic-data generation,\n#       or the Omniverse ecosystem — not before.\n#\n#   If you still want Isaac Sim on a constrained disk: headless mode + streaming client\n#   reduces desktop install on the workstation you stream to, but the sim host still\n#   needs the full install. So not really a footprint win for a single-box hobby setup.\n#\n#   Direct rec for your hobby arm: start with MuJoCo, jump to Isaac Sim when you\n#   need something Isaac does and MuJoCo doesn't.",
+  "failure_modes": [
+    "Reading like a sales deck — Alex tunes out",
+    "Badmouthing PyBullet/MuJoCo to defend Isaac Sim — credibility loss",
+    "Giving a comparison matrix instead of a direct recommendation",
+    "Claiming there's an official lite/trimmed install — there isn't"
+  ]
+}

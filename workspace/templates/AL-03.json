@@ -1,0 +1,13 @@
+{
+  "task_id": "AL-03",
+  "goal": "5-minute sanity audit of an exported scene package before customer handoff.",
+  "tools_used": ["run_stage_analysis", "list_references", "list_all_prims", "export_scene_package"],
+  "thoughts": "Audit must FAIL-CLOSED on absolute paths — Alessandro's been burned. Concrete checks: (1) unresolved references (any reference that won't resolve on customer's machine); (2) absolute paths containing dev usernames (/home/*, C:/Users/*); (3) foreign asset namespaces (other-client Nucleus mounts). Output as short checklist with specific prim paths, not log dump. 4 GB is reasonable for a demo cell with full materials — only 'bloated' if a single sub-asset dominates.",
+  "code": "# 1. Analyze packaged stage\nanalysis = run_stage_analysis(\n    scene_path=\"<DEST_PATH>/demo_cell.usdz\",\n    checks=[\"unresolved_refs\", \"absolute_paths\", \"foreign_namespaces\"],\n)\n\n# 2. List all reference edges for manual eyeball\nrefs = list_references(scope=\"stage\")\nprims = list_all_prims(has_reference=True)\n\n# 3. Flag classes (short, greppable)\nfor r in refs:\n    if r.path.startswith(\"/home/\") or r.path.startswith(\"C:/Users/\") or r.path.startswith(\"/Users/\"):\n        print(f\"FAIL absolute_path  {r.source_prim} -> {r.path}\")\n    elif not r.resolved:\n        print(f\"FAIL unresolved_ref {r.source_prim} -> {r.path}\")\n    elif \"<FOREIGN_CUSTOMER_PATTERN>\" in r.path:\n        print(f\"FAIL foreign_ns     {r.source_prim} -> {r.path}\")\n\n# 4. The one legitimate external ref (customer's own Nucleus mount)\n# Whitelist it explicitly in the audit config rather than generic passthrough.\n\n# 5. If audit passes, re-export canonical\nexport_scene_package(\n    source_scene=\"<SCENE_PATH>\",\n    dest=\"<DEST_PATH>/demo_cell_clean.usdz\",\n    flatten_absolute_paths=True,\n    strip_dev_metadata=True,\n)",
+  "failure_modes": [
+    "assistant says 'looks fine' without actually checking",
+    "assistant misses /home/ absolute path embedded in a nested reference",
+    "assistant blocks the legitimate customer Nucleus ref without asking",
+    "assistant signs off on unresolved references"
+  ]
+}

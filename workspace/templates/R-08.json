@@ -1,0 +1,13 @@
+{
+  "task_id": "R-08",
+  "goal": "Give Raj a forwardable email: concrete cloud-cost levers that cut training bill ~30-50% without trashing policy quality.",
+  "tools_used": ["cloud_estimate_cost", "profile_training_throughput", "launch_training"],
+  "thoughts": "Three honest levers: (1) L40 at ~$1.10/hr often beats A100 at $2.20 for cube-lift because the task is compute-light, not VRAM-heavy; (2) num_envs sweet spot is where GPU util plateaus \u2014 profile first; (3) fewer, better-chosen seeds (3 with smart init) beats 5 random. Headless with --enable_cameras=False only if policy is state-based.",
+  "code": "# Baseline: what is current run actually bottlenecked on\nprofile_training_throughput(run_id=\"<CURRENT_RUN>\")\ncloud_estimate_cost(\n    gpu_type=\"<A100_80GB>\",\n    hours=<18>,\n    parallel_seeds=<5>\n)\n\n# Lever 1: swap instance \u2014 L40 for compute-light tasks\ncloud_estimate_cost(gpu_type=\"<L40>\", hours=<22>, parallel_seeds=<5>)\n\n# Lever 2: tune num_envs to GPU-util plateau\nlaunch_training(\n    task=\"<TASK>\", num_envs=<4096>,           # down from 8192 if util <85%\n    headless=True, enable_cameras=<False>,    # only if policy is state-based\n    log_dir=\"<LOG_DIR>\"\n)\n\n# Lever 3: 3 seeds with smart init instead of 5 random\n# Email bullets: instance swap ~50%, num_envs tune ~20%, seed pruning ~40%.",
+  "failure_modes": [
+    "Disabling cameras for a vision policy \u2014 kills learning",
+    "Recommending Colab/free tier for sustained RL \u2014 session caps",
+    "Quoting fake-precision dollar savings ($312.57) instead of ranges",
+    "Suggesting L4 (24GB) for task needing 40GB+ VRAM"
+  ]
+}

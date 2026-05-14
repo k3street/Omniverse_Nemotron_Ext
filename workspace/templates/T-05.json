@@ -1,0 +1,13 @@
+{
+  "task_id": "T-05",
+  "goal": "Locate official NVIDIA documentation (page, version, heading) describing numerical accuracy bounds of the PhysX contact solver, or confirm no such published bound exists.",
+  "tools_used": ["lookup_knowledge", "check_physics_health"],
+  "thoughts": "Never fabricate a NVIDIA doc URL or tolerance number. lookup_knowledge is the only way to cite a real page — if it returns nothing, say so plainly. check_physics_health surfaces the exact setting paths (PhysxSceneAPI:solverPositionIterationCount, etc.) Thomas needs for his traceability matrix row. Solver tolerance is a convergence parameter, not an accuracy guarantee.",
+  "code": "# One citation row. Either return a real URL+heading or return 'not published'.\n\n# 1. Retrieve — do NOT paraphrase from memory\nlookup_knowledge(query=\"PhysX 5 contact solver numerical accuracy tolerance convergence Isaac Sim documentation\")\n\n# 2. Pull the actual scene solver parameter names + values\ncheck_physics_health(stage_path=\"<SCENE_USD>\")\n\n# What to tell Thomas (two valid outcomes — pick based on lookup_knowledge result):\n#\n# Outcome A — doc found:\n#   Cite: <URL_FROM_KNOWLEDGE>, section <HEADING>, Isaac Sim version <X.Y>.\n#   Note: the doc describes solver iteration + tolerance knobs, not an\n#   accuracy bound vs ground-truth physics.\n#\n# Outcome B — no doc found:\n#   \"NVIDIA does not publish a numerical accuracy bound for the PhysX\n#    contact solver. The documented parameters are:\n#      - PhysxSceneAPI:solverPositionIterationCount\n#      - PhysxSceneAPI:solverVelocityIterationCount\n#      - PhysxSceneAPI:timeStepsPerSecond\n#      - PhysxRigidBodyAPI:solverPositionIterationCount (per-body override)\n#    These are convergence controls, not accuracy guarantees.\"\n# Do NOT invent 1e-4 or any other tolerance number.",
+  "failure_modes": [
+    "Fabricating an NVIDIA doc URL when lookup_knowledge returned nothing",
+    "Giving a made-up tolerance like '1e-4' because Thomas asked for a number",
+    "Conflating solver convergence tolerance with physical accuracy",
+    "Claiming 'all physics engines have the same accuracy' — factually false"
+  ]
+}

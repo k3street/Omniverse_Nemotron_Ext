@@ -1,10 +1,6 @@
 """
 L0 tests for DATA_HANDLERS that can run without Kit RPC.
 Handlers that need Kit are mocked via the mock_kit_rpc fixture.
-
-This file restricts itself to handlers present on this branch — handlers
-introduced in later phases (cloud_*, inspect_camera, behavior_tree, etc.)
-are tested in their respective addendum branches.
 """
 import json
 import pytest
@@ -15,64 +11,17 @@ pytestmark = pytest.mark.l0
 from service.isaac_assist_service.chat.tools.tool_executor import (
     DATA_HANDLERS,
     _handle_lookup_product_spec,
-    _handle_diagnose_physics_error,
-    _handle_trace_config,
-    _handle_validate_annotations,
-    _handle_analyze_randomization,
-    _handle_diagnose_domain_gap,
-    _handle_suggest_physics_settings,
     _load_sensor_specs,
 )
 
-# These handlers may not exist on all branches — import conditionally
-try:
-    from service.isaac_assist_service.chat.tools.tool_executor import _handle_diagnose_physics_error
-except ImportError:
-    _handle_diagnose_physics_error = None
-
-try:
-    from service.isaac_assist_service.chat.tools.tool_executor import _handle_trace_config
-except ImportError:
-    _handle_trace_config = None
-
-try:
-    from service.isaac_assist_service.chat.tools.tool_executor import _handle_diagnose_ros2
-except ImportError:
-    _handle_diagnose_ros2 = None
-
 try:
     from service.isaac_assist_service.chat.tools.tool_executor import (
-        _handle_diagnose_training,
-        _handle_review_reward,
-        _handle_profile_training_throughput,
+        _handle_diagnose_physics_error,
+        _handle_trace_config,
     )
 except ImportError:
-    _handle_diagnose_training = None
-    _handle_review_reward = None
-    _handle_profile_training_throughput = None
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    _handle_diagnose_physics_error = None
+    _handle_trace_config = None
 
 class TestLookupProductSpec:
     """Test the sensor spec lookup handler."""
@@ -189,6 +138,7 @@ class TestGetRenderConfig:
         assert "renderer" in result["note"]
         assert "samples_per_pixel" in result["note"]
         assert "resolution" in result["note"]
+
 
 
 class TestCatalogSearch:

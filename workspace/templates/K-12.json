@@ -1,0 +1,12 @@
+{
+  "task_id": "K-12",
+  "goal": "Align 3 fixtures on linear rail at x=0.0, 0.2, 0.4, y=z=0. Uses teleport_prim + get_world_transform for round-trip verification.",
+  "tools_used": ["teleport_prim", "get_world_transform"],
+  "thoughts": "Classic stage-mutation HARD. Pose-claims in reply will trigger verify-contract (c) cross-check. _safe_set_translate must reset existing ops, not compound — if agent hand-rolls AddTranslateOp without reset, fixture_a ends up at (1.0, 0.5, 0.3) + (0.0, 0.0, 0.0) stacked = original pos.",
+  "code": "teleport_prim(prim_path='/World/Cell/fixture_a', position=[0.0, 0.0, 0.0])\nteleport_prim(prim_path='/World/Cell/fixture_b', position=[0.2, 0.0, 0.0])\nteleport_prim(prim_path='/World/Cell/fixture_c', position=[0.4, 0.0, 0.0])\nget_world_transform for each\n# Correct reply: 'All 3 aligned — fixture_a at (0,0,0), fixture_b at (0.2,0,0), fixture_c at (0.4,0,0).'",
+  "failure_modes": [
+    "Using run_usd_script with AddTranslateOp — stacks on existing, wrong result.",
+    "Skipping verification pass, claiming alignment without round-trip.",
+    "Tolerance drift > 10mm from non-uniform scale compound."
+  ]
+}

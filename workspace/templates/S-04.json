@@ -1,0 +1,13 @@
+{
+  "task_id": "S-04",
+  "goal": "Fix RTX LIDAR void over wet-asphalt MDL material without removing the material visually.",
+  "tools_used": ["list_all_prims", "lookup_material", "set_attribute", "lookup_knowledge", "apply_physics_material"],
+  "thoughts": "RTX LIDAR respects MDL BRDFs — highly specular surfaces at grazing angles reflect rays away from the sensor, producing real (physics-correct) voids. Two real fixes: (1) raise the LIDAR-reflectivity input on the MDL variant so more diffuse response feeds the sensor path without changing albedo for visual rendering; (2) swap the sensor model to the analytic LIDAR for Nav2 if visual fidelity is not needed on the LIDAR path. Never claim RTX LIDAR ignores MDL.",
+  "code": "# 1. Locate the wet-asphalt material prim\nmats = list_all_prims(type_filter=\"Material\", name_contains=\"wet_asphalt\")\nmat_path = mats[0].path\ninfo = lookup_material(prim_path=mat_path)\n\n# 2. Raise LIDAR-reflectivity input without touching visual albedo\nset_attribute(\n    prim_path=mat_path + \"/Shader\",\n    attribute=\"inputs:lidar_reflectance\",   # or material's MDL override name\n    value=<TARGET_REFLECTANCE_0_TO_1>,       # e.g. 0.35 for asphalt-gray analog\n)\n\n# 3. Alternative path: analytic LIDAR for Nav2 channel only\nlookup_knowledge(query=\"rtx lidar material response model analytic fallback\")\n# If approved, switch sensor type via the Carter LIDAR prim inputs\n\n# 4. Verify returns come back\nros2_subscribe_once(topic=\"/front_3d_lidar/point_cloud\", timeout_s=5)",
+  "failure_modes": [
+    "assistant claims RTX LIDAR ignores MDL materials",
+    "assistant changes albedo and breaks the demo video look",
+    "assistant suggests filtering returns<5% in Nav2 instead of fixing root cause",
+    "assistant invents a non-existent lidar_ignore_material attribute"
+  ]
+}

@@ -424,4 +424,3 @@ class TestCapturePlanOutcome:
             code="",
         )
         assert len(knowledge_base.get_entries("5.1.0")) >= ok_before
-

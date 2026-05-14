@@ -1,0 +1,13 @@
+{
+  "task_id": "T-11",
+  "goal": "Diagnose 47 PhysX warnings from a cell-qualification run, classify them, and decide whether the run is trustworthy evidence for tomorrow's design review.",
+  "tools_used": ["diagnose_physics_error", "check_physics_health", "scene_summary"],
+  "thoughts": "Warnings in a qualification run are quality indicators, not nuisances. diagnose_physics_error parses the actual log. check_physics_health surfaces current iteration counts, CCD settings, substep config. scene_summary exposes mass-ratio offenders (a 1:100 ratio is a red flag). Firm position: the run is NOT trustworthy until warnings are resolved — reruns are cheaper than a failed audit.",
+  "code": "# Warnings in a qualification run are not optional to ignore.\n\n# 1. Parse the warning log\ndiagnose_physics_error(\n    log_path=\"<KIT_LOG_PATH>\",\n    window_t_start=0.0,\n    window_t_end=60.0\n)\n\n# 2. Enumerate current solver config\ncheck_physics_health(stage_path=\"<SCENE_USD>\")\n\n# 3. Mass-ratio hunt — identify 1:100+ offenders\nscene_summary(stage_path=\"<SCENE_USD>\")\n\n# Classify warnings:\n#   \"contact-generation performance\" -> too many contact points per step.\n#       Fix: simplify collision geometry on the offending prim,\n#            or raise contact-generation buffer.\n#   \"jittery contacts on rigid body <X>\" -> insufficient solver iterations\n#       OR large mass ratio between touching bodies.\n#       Fix: raise PhysxSceneAPI:solverPositionIterationCount (try 8 -> 32),\n#            tighten collision mesh,\n#            reduce mass-ratio (the tool0 at <MASS_A> vs fixture <MASS_B>).\n#   CCD over-eagerness -> narrow CCD to only the bodies that need it.\n#\n# What to tell Thomas:\n#   \"47 PhysX warnings across 60 s makes this run unsuitable as quantitative\n#    evidence for a qualification review. Resolve warnings, rerun, present\n#    the clean run. A qualification run with known warnings is an audit finding,\n#    not an audit defense. Yes, raising iterations slows the sim. Rerunning\n#    is cheaper than re-scoping the cell.\"",
+  "failure_modes": [
+    "Accepting 'warnings aren't errors, so the result is valid' — it is not",
+    "Waving off mass-ratio 1:100 as negligible (common root cause of jitter)",
+    "Letting the run ship unfixed to meet the tomorrow deadline",
+    "Missing the CCD over-eagerness pattern and blaming only iteration count"
+  ]
+}

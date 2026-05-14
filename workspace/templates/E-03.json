@@ -1,0 +1,13 @@
+{
+  "task_id": "E-03",
+  "goal": "Unblock Tobias's KeyError 'box_3' in <20 min by scene-diffing Lena's PR (a4f2c1b -> d91e8a3), patch the env cfg with a prim-path alias, and defer the process fix.",
+  "tools_used": ["scene_diff", "list_all_prims", "lookup_knowledge", "run_usd_script"],
+  "thoughts": "No manual 600-line USD scroll. scene_diff on the two commits surfaces the rename fast. Very likely box_3 -> box_red (Lena's readability PR). Short-term: add a prim-path alias dict in the env cfg so Tobias trains today. Long-term: propose a CI check for prim-path stability — do NOT block Lena's PR retroactively. Demo risk only if the Friday demo script references box_3 directly.",
+  "code": "# 1. Diff the two stage versions mechanically\nscene_diff(\n    from_ref=\"a4f2c1b\",\n    to_ref=\"d91e8a3\",\n    scope=\"/World/Boxes\"\n)\n\n# 2. Confirm box_3 is gone and a new name exists where it used to be\nlist_all_prims(root=\"/World/Boxes\", name_contains=\"box\")\n\n# 3. Document the correct resolution pattern in IsaacLab env cfg\nlookup_knowledge(query=\"IsaacLab env cfg prim path alias rename resolution SceneEntityCfg\")\n\n# 4. Patch the env cfg with an alias table (no revert of Lena's PR)\nrun_usd_script(script=\"\"\"\n# In env cfg (allegro_pick_env_cfg.py), add translation layer:\n# PRIM_ALIASES = {'box_3': 'box_red', 'box_4': 'box_blue'}\n# def resolve(name): return PRIM_ALIASES.get(name, name)\n# targets = [resolve(n) for n in <ORIGINAL_TARGET_LIST>]\nprint('alias dict added — Tobias restart training')\n\"\"\")\n\n# 5. Demo-day impact check\n# grep demo_script for 'box_3' — if absent, Friday demo unaffected.\n# Process fix (post-demo): CI lint that fails PRs renaming prims under /World/Boxes without an alias migration.",
+  "failure_modes": [
+    "Manually scrolling the USD diff — blows the 20-min budget",
+    "Rolling back Lena's PR — political fallout, recurring problem",
+    "Hardcoding the new name in env cfg without an alias — next rename breaks training again",
+    "Forgetting to check if the Friday demo script references box_3 directly"
+  ]
+}

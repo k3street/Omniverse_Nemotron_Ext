@@ -1,0 +1,13 @@
+{
+  "task_id": "F-03",
+  "goal": "Identify the top-20 heaviest assets in a 34k-prim DC scene and produce a concrete optimization path that preserves RTX visual fidelity while making room for 64 AMRs.",
+  "tools_used": ["find_heavy_prims", "check_vram_headroom", "optimize_scene", "run_stage_analysis"],
+  "thoughts": "Numbers first, then plan. find_heavy_prims top-20 with poly + instance counts. check_vram_headroom to turn '64 AMRs?' into an actual GB estimate. optimize_scene applies instancing/LOD — never propose dropping RTX quality; the twin is her pitch. 80k-tri vendor racks can stay IF instanced across 18 aisles (one mesh, 18 instance draws). Animated belt textures are a real instancing gotcha — flag honestly. Accept her correction from 64 to 58+6 AMRs and recompute.",
+  "code": "# Numbers before recommendations.\n\n# 1. Top-20 heaviest\nfind_heavy_prims(\n    stage_path=\"<DC_STAGE>\",\n    top_n=20,\n    metric=\"triangle_count\"\n)\n\n# 2. VRAM headroom — turn '64 AMRs' into an actual GB delta\ncheck_vram_headroom(\n    stage_path=\"<DC_STAGE>\",\n    projected_additions=[\n        {\"asset\": \"omniverse://ov-prod/Library/Robots/amr_mir250.usd\", \"count\": <64>}\n    ]\n)\n\n# 3. Baseline scene analysis\nrun_stage_analysis(stage_path=\"<DC_STAGE>\")\n\n# 4. Optimize (instancing + LOD, not quality drop)\noptimize_scene(\n    stage_path=\"<DC_STAGE>\",\n    enable_instancing=True,\n    enable_lod=True,\n    preserve_rtx_quality=True\n)\n\n# Concrete levers to tell Fatima:\n#   - Rack meshes: 80k tris x 18 aisles = 1.44M tris unique. Instanced: 80k + 18\n#     transforms. Keep vendor fidelity, pay the cost once.\n#   - Conveyor loops with animated belt textures: instancing ok for geometry,\n#     but per-instance material parameters (belt phase) break GPU instancing —\n#     expect to shard per-loop, not naive replicate.\n#   - LODs on rack clutter at >30 m from camera — free perf, no visual cost.\n# If she corrects 64 -> 58+6, re-run check_vram_headroom with count=58.\n# Don't suggest lowering RTX preset. Her twin is a demo artifact.",
+  "failure_modes": [
+    "Proposing 'lower RTX quality' — her twin is a pitch to ops, fidelity matters",
+    "Missing the animated-belt-texture instancing gotcha (breaks naive GPU instancing)",
+    "Not recomputing with her 58+6 correction — feels like you weren't listening",
+    "Vague 'reduce polys' advice instead of specific instancing + LOD levers"
+  ]
+}

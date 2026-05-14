@@ -1,0 +1,13 @@
+{
+  "task_id": "AL-01",
+  "goal": "Draft a defensible reference architecture + component list for a 200-seat 3-site Isaac Sim deployment.",
+  "tools_used": ["lookup_knowledge", "lookup_product_spec", "nucleus_browse"],
+  "thoughts": "Pure advisory — no scene mutation. Components: Omniverse Nucleus Enterprise (on-prem), Isaac Sim workstation tier, optional headless farm, AD integration via LDAP/SAML. 3-site topology: one central Nucleus with cache servers at edge sites is simpler than federated Nucleus; federate only if latency or data-residency forces it. Never invent a 'Enterprise Omniverse License Server' product. Air-gapped path exists (disconnected Nucleus with offline license activation). No dollar figures — point at NVIDIA commercial for pricing.",
+  "code": "# Advisory task — no scene mutation. Outline what to tell Alessandro.\n# 1. Core components (real NVIDIA Enterprise product names)\nlookup_product_spec(product=\"Omniverse Nucleus Enterprise\")\nlookup_product_spec(product=\"Isaac Sim\")\nlookup_product_spec(product=\"Omniverse Enterprise client\")\nlookup_knowledge(query=\"omniverse enterprise reference architecture nucleus cache server\")\n\n# 2. Workstation spec tiers by workload:\n#   - Visual-heavy (scene authoring): RTX 6000 Ada, 64 GB RAM, 4+ TB NVMe\n#   - RL-heavy (IsaacLab training): multi-L40S or H100 servers, no per-user GPU\n#   - Mixed: RTX A6000 Ada + remote farm access\n\n# 3. Topology decision:\n#   Central Nucleus (Turin) + Omniverse Cache at Stuttgart and Wolfsburg.\n#   Assets resolve from cache on hit, fall through to Turin on miss.\n\n# 4. Auth: Nucleus -> AD via LDAP or SAML SSO. Groups map to Nucleus groups.\n\n# 5. Air-gap path: disconnected Nucleus, offline license activation.\nlookup_knowledge(query=\"omniverse nucleus air gapped offline license\")\n\n# 6. ROI framing: replaces {physical prototype iterations, remote-site lab time},\n# engineering hours come back in {iteration speed, parallel scene validation}.\n# DO NOT quote dollar figures — point at NVIDIA commercial channel.",
+  "failure_modes": [
+    "assistant invents a 'Enterprise Omniverse License Server' product",
+    "assistant quotes a specific $ figure",
+    "assistant skips the air-gap question",
+    "assistant recommends federated Nucleus without justifying tradeoff"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "task_id": "E-01",
+  "goal": "Give Erik a scannable demo-day risk checklist for a G1 warehouse-picking sim with no time to retrain — surface sim-to-real gaps, lighting, and contact slippage risks.",
+  "tools_used": ["scene_summary", "check_physics_health", "lookup_material", "lookup_knowledge"],
+  "thoughts": "Erik is CTO, 15 min, no retrain. Respond with 3-5 prioritized bullets, not paragraphs. Real cardboard mu is 0.3-0.6 dry, much lower oily — if the sim uses the PhysX default, grasp behavior is a lie. Lighting variance from German fluorescents is a perception risk even for scripted pick. Do NOT give a single 'safe' friction number — qualify every number. Avoid any recommendation that takes >24h.",
+  "code": "# 1. Inventory the scene Erik has NOT touched in 2 weeks\nscene_summary()\n\n# 2. Contact + solver sanity — the cardboard grasp lives or dies here\ncheck_physics_health()\n\n# 3. Look up the physics material actually bound to the box/gripper contact pair\nlookup_material(query=\"cardboard friction PhysX default vs measured values\")\n\n# 4. Ground lighting-DR guidance in docs, not vibes\nlookup_knowledge(query=\"Isaac Sim fluorescent lighting variance demo perception sim-to-real checklist\")\n\n# Output structure (Slack-ready, 3-5 bullets):\n# RED:    <e.g. mu_box_gripper = 0.8 default, likely 0.3-0.6 real -> grasp slip>\n# YELLOW: <joint torque headroom on G1 shoulder in current demo trajectory>\n# YELLOW: <lighting variance from overhead fluorescents — run one viz pass under HDRI>\n# GREEN:  <scripted reset + recovery behavior if box drops>\n# Monitor-live (no retrain): <live joint effort, live contact force peaks on fingertips>",
+  "failure_modes": [
+    "Giving a single 'safe' friction number without qualifying measurement conditions",
+    "Recommending anything that needs retraining — blows the 24h budget",
+    "Long academic explanation — Erik closes the tab within 30 seconds",
+    "Missing the fluorescent-lighting risk for the German demo room"
+  ]
+}

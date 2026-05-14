@@ -1,0 +1,12 @@
+{
+  "task_id": "D-14",
+  "goal": "Publish LIDAR to /carter/scan via OmniGraph ROS2PublishLaserScan. Graph at /World/ActionGraph with tick + ROS2Context + publisher nodes wired.",
+  "tools_used": ["setup_ros2_bridge", "list_graphs", "inspect_graph"],
+  "thoughts": "Exercises the OmniGraph ROS2-bridge pattern. setup_ros2_bridge is the composite tool; agent should not hand-roll the graph via run_usd_script unless necessary.",
+  "code": "setup_ros2_bridge(sensors=[{'type':'lidar','prim_path':'/World/Carter/Lidar','topic_name':'/carter/scan'}])\nlist_graphs()\n# Correct reply: 'Published LaserScan on /carter/scan from /World/Carter/Lidar via /World/ActionGraph.'",
+  "failure_modes": [
+    "Hand-rolled run_usd_script without namespace version detection.",
+    "Missing leading / on topic name.",
+    "Wiring publisher to /World/Carter root instead of /World/Carter/Lidar."
+  ]
+}

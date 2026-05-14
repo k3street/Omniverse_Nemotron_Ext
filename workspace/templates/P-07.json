@@ -1,0 +1,13 @@
+{
+  "task_id": "P-07",
+  "goal": "Randomize apple ripeness via MDL material params, keeping single semantic class 'apple' and avoiding scene-graph variant explosion.",
+  "tools_used": ["list_all_prims", "create_material", "assign_material", "configure_sdg", "create_sdg_pipeline", "preview_sdg", "run_usd_script"],
+  "thoughts": "Per-prim material instances are required — one shared material means all 30 apples change together. Duplicate the MDL per apple, randomize each apple's inputs (ripeness_blend) via rep.modify.material_property. Semantic class stays 'apple' since prim IDs don't change. VRAM cost at 30 instances x 100 orchards is MB-scale (shared textures), not GB. Detector splitting ripeness is a training-data-balance issue, not fixed by this change alone.",
+  "code": "# 1. Count shared material instances (all 30 apples probably share 1)\napples = list_all_prims(type_filter=\"Xform\", name_contains=\"apple_\")\nshared_mat = \"/World/Looks/apple_mat\"\n\n# 2. Per-apple material instance so each can randomize independently\nrun_usd_script(code=f\"\"\"\nfor i, apple in enumerate({[a.path for a in apples]}):\n    inst_path = f\"/World/Looks/apple_mat_{{i:03d}}\"\n    # duplicate shared material as instance inst_path\n    pass  # handled by create_material + assign_material below\n\"\"\")\n\nfor i, apple in enumerate(apples):\n    inst_path = f\"/World/Looks/apple_mat_{i:03d}\"\n    create_material(source=shared_mat, dest=inst_path, instance_of=shared_mat)\n    assign_material(prim_path=apple.path, material_path=inst_path)\n\n# 3. Randomize ripeness parameter per frame, per apple\nconfigure_sdg(\n    stage=\"materials\",\n    operation=\"modify_material_property\",\n    target_materials=[f\"/World/Looks/apple_mat_{i:03d}\" for i in range(len(apples))],\n    property=\"inputs:ripeness_blend\",\n    distribution={\"type\": \"uniform\", \"min\": 0.0, \"max\": 1.0},\n)\n\n# 4. Preview to confirm ripeness varies per-apple AND class stays 'apple'\npreview_sdg(pipeline=\"<PIPE_ID>\", frame_count=4)",
+  "failure_modes": [
+    "assistant randomizes the single shared material (all apples change together)",
+    "assistant invents rep.modify.ripeness()",
+    "assistant suggests variant-prim ripeness stages and breaks semantic class",
+    "assistant doesn't address VRAM cost of material instances"
+  ]
+}

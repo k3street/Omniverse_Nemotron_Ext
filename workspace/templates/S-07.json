@@ -1,0 +1,13 @@
+{
+  "task_id": "S-07",
+  "goal": "Stand up 8 Nova Carters with per-robot ROS2 namespaces in one sim, keeping >20 fps.",
+  "tools_used": ["clone_prim", "add_reference", "set_graph_variable", "ros2_list_topics", "check_physics_health", "diagnose_performance", "configure_camera"],
+  "thoughts": "Duplicate via reference (clone_prim with as_reference) — deep-copying full articulations is wasteful and inflates USD. Per-robot namespace is a graph VARIABLE on the bridge action graph, not a prim attribute — use set_graph_variable on topicName/namespace. All 8 share one physics scene (do NOT spawn extra scenes or processes). RTX LIDAR is the top frame-time sink; disable it on background robots via configure_camera or prim deactivation. Never start with '8 Isaac Sim processes' as answer.",
+  "code": "# 1. Clone Carter_01 as reference 7 more times\nfor i in range(2, 9):\n    clone_prim(\n        source_path=\"/World/Carter_01\",\n        dest_path=f\"/World/Carter_{i:02d}\",\n        as_reference=True,\n        translate=[<SPAWN_X_i>, <SPAWN_Y_i>, 0],\n    )\n\n# 2. Set a unique namespace on each robot's bridge graph\nfor i in range(1, 9):\n    ns = f\"/carter_{i:02d}\"\n    set_graph_variable(\n        graph_path=f\"/World/Carter_{i:02d}/ROS_ActionGraph\",\n        variable=\"namespace\",\n        value=ns,\n    )\n\n# 3. Confirm 8x topic set, no collisions\ntopics = ros2_list_topics()\n# expect /carter_01/cmd_vel ... /carter_08/cmd_vel\n\n# 4. Performance triage — disable LIDAR on background robots\nfor i in [3, 4, 5, 6, 7, 8]:\n    configure_camera(prim_path=f\"/World/Carter_{i:02d}/front_3d_lidar\", enabled=False)\n\nhealth = check_physics_health()\nperf = diagnose_performance(window_frames=200)\n# Don't promise 20fps; give Sarah the profile breakdown",
+  "failure_modes": [
+    "assistant recommends 8 Isaac Sim processes as first answer",
+    "assistant deep-copies articulation instead of referencing",
+    "assistant sets namespace as prim attribute instead of graph variable",
+    "assistant guarantees 20fps without profiling"
+  ]
+}

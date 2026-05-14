@@ -1,0 +1,13 @@
+{
+  "task_id": "A-10",
+  "goal": "Tell Alex how to save his scene so reopening tomorrow gives him the same setup, in 3 lines, no USD composition lecture.",
+  "tools_used": ["save_stage", "export_scene_package"],
+  "thoughts": "save_stage is File > Save As. That's the main answer. Warn in one sentence that moving the URDF file breaks references — keep USD + URDF in the same folder. Mention export_scene_package (flatten + archive) ONLY if Alex asks. No USD layer / payload / reference lecture.",
+  "code": "# File > Save As. Done.\n\nsave_stage(\n    stage_path=\"<CURRENT_STAGE>\",\n    save_as=\"<HOME>/projects/myarm/myarm.usd\"\n)\n\n# Tomorrow: File > Open > myarm.usd.\n# Keep the URDF file in the same folder as the .usd — if you move it, reopen breaks.\n\n# Only if Alex asks 'what about all these assets in a bundle':\nexport_scene_package(\n    stage_path=\"<CURRENT_STAGE>\",\n    output_path=\"<HOME>/projects/myarm/myarm_bundle.zip\",\n    include_referenced_assets=True\n)",
+  "failure_modes": [
+    "Explaining USD layers / payloads / references as concepts — rabbit hole",
+    "Listing all 3 save dialog options instead of picking one (Save As)",
+    "Over 8 lines of response",
+    "Omitting the 'keep URDF next to USD' warning — Alex will move the file and break it"
+  ]
+}

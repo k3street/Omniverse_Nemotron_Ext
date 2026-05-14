@@ -1,0 +1,13 @@
+{
+  "task_id": "F-02",
+  "goal": "Drive visual run/stop state of 12 conveyors from live OPC-UA tags at 1 Hz, using a real bridge pattern (asyncua client writing USD attributes), not a fabricated extension.",
+  "tools_used": ["lookup_knowledge", "list_all_prims", "create_conveyor", "run_stage_analysis"],
+  "thoughts": "No turnkey OPC-UA → USD extension exists — say so honestly. Pattern is: external asyncua client subscribes to tags, writes conveyor belt-speed (or material emissive) attributes. lookup_knowledge confirms conveyor attribute surface. list_all_prims filtered on Conveyor gives the 12 target paths. Perf: 12 writes/s is trivial; 50k tags is the real scaling question — acknowledge honestly. If her PLC is MQTT-Sparkplug not OPC-UA, the pattern is identical, just swap the client.",
+  "code": "# There is no official OPC-UA -> USD extension. The bridge is your code.\n\n# 1. Confirm conveyor attribute surface (belt speed, material emissive)\nlookup_knowledge(query=\"Isaac Sim 5 conveyor create_conveyor belt speed attribute emissive material\")\n\n# 2. Enumerate the 12 conveyor prims\nlist_all_prims(\n    stage_path=\"<DC_STAGE>\",\n    name_filter=\"CV_\",\n    type_filter=\"Conveyor\"\n)\n\n# 3. Confirm the belt-speed-edit surface actually exists\ncreate_conveyor(\n    prim_path=\"/World/Conveyors/CV_01\",\n    belt_speed=0.0,                 # dry-run: read what attribute name is written\n    dry_run=True\n)\n\n# 4. Baseline perf so she can compare after binding\nrun_stage_analysis(stage_path=\"<DC_STAGE>\")\n\n# Bridge sketch (runs OUTSIDE Kit as a helper process, writes via the Kit REST API\n# or an in-Kit extension you author):\n#\n#   from asyncua import Client\n#   async with Client(\"opc.tcp://plc-west:4840\") as plc:\n#       for n in range(1, 13):\n#           node = plc.get_node(f\"ns=2;s=CV{n:02d}.Running\")\n#           running = await node.read_value()\n#           # set belt speed or emissive via set_attribute on\n#           # /World/Conveyors/CV_{n:02d} — 1 Hz loop\n#\n# Viewport impact at 12 writes/s: negligible. At 50k tags/s: the bottleneck is\n# the attribute change notification path, not the GPU. Shard into multiple\n# bridges + batch writes; do not promise 50k @ 10 Hz.\n#\n# MQTT-Sparkplug variant: same pattern, swap asyncua for paho-mqtt or tahu.\n# Isaac Sim is not safety-rated; this bridge must not be on a control path.",
+  "failure_modes": [
+    "Inventing an 'OPC-UA connector extension' that doesn't exist",
+    "Promising 50k tags at 10 Hz without explaining the batching / sharding constraint",
+    "Pivoting poorly when she reveals MQTT-Sparkplug (same pattern — acknowledge cleanly)",
+    "Failing to flag that the bridge must not sit on a control path"
+  ]
+}

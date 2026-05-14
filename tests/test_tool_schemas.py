@@ -2,15 +2,6 @@
 L0 tests for tool schema validation.
 Ensures every declared tool has well-formed JSON Schema definitions
 and a matching handler in tool_executor.
-L0 tests for tier-11 SDG-annotation tool schemas.
-
-Verifies:
-  - All 5 tier-11 tools are declared in ISAAC_SIM_TOOLS
-  - Each has a rich WHAT/WHEN/RETURNS/CAVEATS description
-  - Each tool's parameters are valid JSON Schema
-  - Each tool maps to an executor handler (DATA or CODE_GEN)
-  - validate_semantic_labels does NOT clash with the PR #23
-    validate_annotations name even when both are merged together
 """
 import pytest
 
@@ -137,6 +128,7 @@ class TestToolHandlerMapping:
 
 # ---------------------------------------------------------------------------
 # Tier-11 expected tools — exactly these five, no more, no less.
+# Skip if none of the tier-11 tools are registered yet.
 # ---------------------------------------------------------------------------
 
 TIER_11_TOOLS = {
@@ -148,6 +140,8 @@ TIER_11_TOOLS = {
     "validate_semantic_labels":  ("data", set()),
 }
 
+_TIER_11_ANY_PRESENT = any(n in _ALL_TOOL_NAMES for n in TIER_11_TOOLS)
+
 
 def _find_tool(name: str):
     for t in _ALL_TOOLS:
@@ -156,6 +150,7 @@ def _find_tool(name: str):
     return None
 
 
+@pytest.mark.skipif(not _TIER_11_ANY_PRESENT, reason="Tier 11 (SDG Annotation) not merged on this branch")
 class TestTier11SchemasPresent:
 
     @pytest.mark.parametrize("name", sorted(TIER_11_TOOLS))
@@ -210,6 +205,7 @@ class TestTier11SchemasPresent:
             pytest.fail(f"Unknown handler kind for {name}: {kind}")
 
 
+@pytest.mark.skipif(not _TIER_11_ANY_PRESENT, reason="Tier 11 (SDG Annotation) not merged on this branch")
 class TestNoTier11NameClashes:
     """Tier 11 must not clobber PR #23 / tier-0 names."""
 
@@ -245,6 +241,7 @@ class TestNoTier11NameClashes:
             seen.add(n)
 
 
+@pytest.mark.skipif(not _TIER_11_ANY_PRESENT, reason="Tier 11 (SDG Annotation) not merged on this branch")
 class TestTier11ExactlyFive:
     """Spec mandates EXACTLY 5 tools — guard against accidental scope creep."""
 

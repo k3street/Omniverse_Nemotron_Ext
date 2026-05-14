@@ -1,0 +1,13 @@
+{
+  "task_id": "K-04",
+  "goal": "Instrument a 3-station bin-picking cell for per-station cycle time, emit CSV, render a matplotlib Gantt — acknowledging Isaac Sim has no built-in VC-style cycle time chart.",
+  "tools_used": ["lookup_knowledge", "run_usd_script", "export_scene_package"],
+  "thoughts": "Honest up-front: no VC-style Gantt chart ships with Isaac Sim 5.x. Replacement: timestamp each waypoint/station transition from the motion script, write to CSV, render in matplotlib or Plotly. Must break out robot move time (pick/transfer/place/retract), conveyor dwell, and fixture clamp — not just total. Isaac Sim is continuous-physics-first; discrete-event sim tools (VC, Plant Sim) win here natively. Do not oversell — if cycle-time alone is Kenji's job, stay in VC.",
+  "code": "# 1. Anchor the honest scope: no built-in Gantt\nlookup_knowledge(query=\"Isaac Sim cycle time event logging Gantt chart discrete event simulation gap\")\n\n# 2. Inject waypoint-transition timestamp logger (tiny, runs alongside the motion script)\nrun_usd_script(script=\"\"\"\nimport time, csv, os\nSTATIONS = ['infeed_conveyor','robot_pick','robot_transfer','robot_place','fixture_clamp','outfeed']\nLOG_PATH = '<CSV_OUT>'\ndef log_event(station, event):\n    new = not os.path.exists(LOG_PATH)\n    with open(LOG_PATH, 'a', newline='') as f:\n        w = csv.writer(f)\n        if new: w.writerow(['t','station','event'])\n        w.writerow([time.perf_counter(), station, event])\n\n# Wire log_event(station, 'enter') / log_event(station, 'exit') calls around each waypoint in\n# the motion script -- no OmniGraph needed. CSV schema: t, station, event.\nprint('logger ready -- instrument motion script at each station boundary')\n\"\"\")\n\n# 3. Post-process: CSV -> Gantt in matplotlib (50 lines)\n# import pandas as pd, matplotlib.pyplot as plt\n# df = pd.read_csv('<CSV_OUT>')\n# spans = df.pivot_table(index='station', columns='event', values='t').reset_index()\n# spans['dur'] = spans['exit'] - spans['enter']\n# plt.barh(spans['station'], spans['dur'], left=spans['enter'])\n# plt.xlabel('t (s)'); plt.title('Cycle Gantt'); plt.tight_layout(); plt.savefig('<PNG_OUT>')\n\n# 4. Bundle the cell + logger for reproducible runs\nexport_scene_package(source_stage=\"<STAGE>\", output_path=\"<BUNDLE>\")",
+  "failure_modes": [
+    "Claiming a built-in Isaac Sim Gantt chart exists — Kenji will not trust anything after",
+    "Logging only total cycle time — can't see which station is the bottleneck",
+    "Using time.time() instead of time.perf_counter() — wall-clock jumps under NTP slew",
+    "Oversell Isaac Sim for cycle-time-only jobs — arguably VC or Plant Sim wins here"
+  ]
+}

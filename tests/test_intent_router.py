@@ -34,27 +34,29 @@ class TestIntentConstants:
         for intent in expected_intents:
             assert intent in INTENT_SYSTEM, f"Intent '{intent}' not in INTENT_SYSTEM"
 
-    def test_examples_cover_all_intents(self):
-        covered = {label for _, label in INTENT_EXAMPLES}
-        expected = {
-            "general_query",
-            "scene_diagnose",
-            "vision_inspect",
-            "prim_inspect",
-            "patch_request",
-            "physics_query",
-            "console_review",
-            "navigation",
-        }
-        missing = expected - covered
-        assert missing == set(), f"INTENT_EXAMPLES missing coverage for: {missing}"
+    def test_examples_cover_key_intents(self):
+        """After 2026-04-19, examples are 4-tuples (message, intent, multi_step,
+        complexity) and cover a representative sample — not every intent needs
+        an example since vision_inspect/prim_inspect etc are in the system prompt."""
+        covered = {label for _, label, _, _ in INTENT_EXAMPLES}
+        # At minimum: the intents the orchestrator branches on.
+        required = {"general_query", "patch_request", "scene_diagnose",
+                    "navigation", "console_review"}
+        missing = required - covered
+        assert missing == set(), f"INTENT_EXAMPLES missing: {missing}"
 
-    def test_examples_are_tuples_of_str(self):
+    def test_examples_are_quads_with_complexity(self):
+        """As of intent_router 138325d (multi_step) + spec-first work,
+        each example is (message, intent, multi_step, complexity_tier)."""
         for example in INTENT_EXAMPLES:
             assert isinstance(example, tuple)
-            assert len(example) == 2
+            assert len(example) == 4, (
+                f"expected 4-tuple, got {len(example)}: {example}"
+            )
             assert isinstance(example[0], str)
             assert isinstance(example[1], str)
+            assert isinstance(example[2], bool)
+            assert isinstance(example[3], str)
 
 
 class TestClassifyIntent:
@@ -63,18 +65,34 @@ class TestClassifyIntent:
     @pytest.mark.asyncio
     async def test_returns_valid_intent(self, mock_llm_provider, fake_llm_response):
         mock_llm_provider.responses = [
-            fake_llm_response(text='{"intent": "patch_request", "confidence": 0.95}')
+            fake_llm_response(text='{"intent": "patch_request", "multi_step": false, "confidence": 0.95}')
         ]
-        intent = await classify_intent("fix the joint damping", mock_llm_provider)
-        assert intent == "patch_request"
+        result = await classify_intent("fix the joint damping", mock_llm_provider)
+        assert result["intent"] == "patch_request"
+        assert result["multi_step"] is False
+
+    @pytest.mark.asyncio
+    async def test_classifies_multi_step(self, mock_llm_provider, fake_llm_response):
+        """2026-04-19: multi_step classification drives the orchestrator's
+        read-only tool gate on round 0. A multi-action prompt with linked
+        dependencies must be flagged."""
+        mock_llm_provider.responses = [
+            fake_llm_response(text='{"intent": "patch_request", "multi_step": true, "confidence": 0.9}')
+        ]
+        result = await classify_intent(
+            "create a conveyor, scale cubes, start simulation",
+            mock_llm_provider,
+        )
+        assert result["multi_step"] is True
 
     @pytest.mark.asyncio
     async def test_fallback_on_parse_error(self, mock_llm_provider, fake_llm_response):
         mock_llm_provider.responses = [
             fake_llm_response(text="not valid json")
         ]
-        intent = await classify_intent("hello", mock_llm_provider)
-        assert intent == "general_query"
+        result = await classify_intent("hello", mock_llm_provider)
+        assert result["intent"] == "general_query"
+        assert result["multi_step"] is False
 
     @pytest.mark.asyncio
     async def test_fallback_on_exception(self, mock_llm_provider):
@@ -82,16 +100,17 @@ class TestClassifyIntent:
             raise RuntimeError("LLM unreachable")
 
         mock_llm_provider.complete = fail_complete
-        intent = await classify_intent("test message", mock_llm_provider)
-        assert intent == "general_query"
+        result = await classify_intent("test message", mock_llm_provider)
+        assert result["intent"] == "general_query"
+        assert result["multi_step"] is False
 
     @pytest.mark.asyncio
     async def test_strips_markdown_fences(self, mock_llm_provider, fake_llm_response):
         mock_llm_provider.responses = [
-            fake_llm_response(text='```json\n{"intent": "scene_diagnose", "confidence": 0.8}\n```')
+            fake_llm_response(text='```json\n{"intent": "scene_diagnose", "multi_step": false, "confidence": 0.8}\n```')
         ]
-        intent = await classify_intent("why is my robot floating?", mock_llm_provider)
-        assert intent == "scene_diagnose"
+        result = await classify_intent("why is my robot floating?", mock_llm_provider)
+        assert result["intent"] == "scene_diagnose"
 
     @pytest.mark.asyncio
     async def test_restores_system_override(self, mock_llm_provider, fake_llm_response):

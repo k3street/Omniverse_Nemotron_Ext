@@ -1,0 +1,13 @@
+{
+  "task_id": "AL-09",
+  "goal": "Licensing and entitlement model for a global OEM (850 potential users, 120 concurrent peak, 11 countries).",
+  "tools_used": ["lookup_product_spec", "lookup_knowledge"],
+  "thoughts": "Pure advisory. Sparse concurrent usage (120/850) = concurrent licenses are the obvious economic fit if available. Stay grounded in real Omniverse Enterprise structure — do NOT invent tiers. Offline grace: Enterprise licenses typically support a finite disconnect window via cached entitlement — exact duration is product-specific, have Alessandro ask NVIDIA. License-server topology: primary in central data center, standby in secondary region, clients fail over automatically. Don't quote $/seat. Prepare procurement talking points.",
+  "code": "# Advisory — no scene mutation. Structure the licensing conversation.\n# 1. Ground in real NVIDIA product structure\nlookup_product_spec(product=\"Omniverse Enterprise\")\nlookup_product_spec(product=\"Isaac Sim entitlement\")\nlookup_knowledge(query=\"omniverse enterprise concurrent named license model offline grace period\")\nlookup_knowledge(query=\"nvidia ngc enterprise license server topology failover\")\n\n# 2. Sizing for 850 users / 120 concurrent peak\n#   - If concurrent is available: size to 120 + headroom (e.g. 150).\n#   - If named-only: 850 — much larger ask, argue concurrent with NVIDIA commercial.\n\n# 3. Topology: primary + standby license server\n#   - Primary: central data center (align with Nucleus home)\n#   - Standby: secondary region\n#   - Clients configured with both; automatic failover on primary unreachable.\n\n# 4. Offline/disconnected use\n#   - Enterprise licenses support cached entitlement for a finite window.\n#   - Exact duration depends on edition — verify with NVIDIA commercial.\n#   - Work-in-progress: running simulations do NOT terminate mid-run if server\n#     becomes unreachable — entitlement is checked at startup and on refresh.\n\n# 5. Procurement talking points Alessandro can paste\n# Ask NVIDIA:\n#   (a) concurrent vs named for Isaac Sim specifically in Omniverse Enterprise\n#   (b) offline grace window, measured in hours/days\n#   (c) failover behavior when primary license server is down\n#   (d) license-server placement requirements for 11-country footprint\n#   (e) multi-region entitlement — one pool or per-region pools\n# Do NOT commit to a $/seat figure from memory.",
+  "failure_modes": [
+    "assistant quotes $/seat numbers",
+    "assistant invents license tiers that don't exist",
+    "assistant claims running simulations die on license-server unreachable (they don't)",
+    "assistant promises a specific offline-grace duration without caveats"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "task_id": "K-03",
+  "goal": "Create a TCP frame at the welding gun electrode tip on the IRB 6700, ISO 9787 compliant (Z along approach), as a child Xform under tool0 — GUI or scripted path.",
+  "tools_used": ["list_all_prims", "create_prim", "set_attribute", "lookup_knowledge", "lookup_product_spec"],
+  "thoughts": "Honest upfront: Isaac Sim has no click-on-geometry TCP widget. Two paths: (1) GUI: add child Xform under tool0, drag with the manipulator gizmo; (2) scripted: create_prim + xformOp:translate/orient. ISO 9787 requires Z-axis along tool approach. Downstream motion planners (Isaac Manipulator / Cortex) may expect a naming convention — worth checking before wiring. Do NOT put the offset in the motion script only — keep it in the scene as the single source of truth.",
+  "code": "# 1. Confirm tool0 flange path and its current children\nlist_all_prims(root=\"/World/IRB_6700/tool0\")\n\n# 2. Ground in ISO 9787 TCP convention + Isaac Sim frame semantics\nlookup_knowledge(query=\"ISO 9787 TCP convention Z-axis tool approach Isaac Sim Xform frame\")\n\n# 3. Check Isaac Manipulator / Cortex TCP naming expectations before committing\nlookup_product_spec(query=\"Isaac Manipulator Cortex TCP frame naming attribute convention\")\n\n# 4. Create tcp_welder as a child Xform (scene-level truth, not motion-script-level)\ncreate_prim(\n    prim_path=\"/World/IRB_6700/tool0/tcp_welder\",\n    prim_type=\"Xform\",\n    attributes={\n        \"xformOp:translate\":  (\"<TX_ELECTRODE>\", \"<TY_ELECTRODE>\", \"<TZ_ELECTRODE>\"),\n        \"xformOp:orient\":     (\"<QW>\", \"<QX>\", \"<QY>\", \"<QZ>\"),   # Z along approach per ISO 9787\n        \"xformOpOrder\":       [\"xformOp:translate\", \"xformOp:orient\"]\n    }\n)\n\n# 5. Alternatively, GUI path Kenji can use:\n#    - Select tool0 in Stage, right-click > Create > Xform\n#    - Rename to 'tcp_welder'\n#    - Use the translate + rotate gizmo in viewport, snap-to-vertex on the electrode tip\n#    - Verify Z-axis arrow points along the approach direction before saving\n\n# 6. Document the standard-alignment explicitly in the scene metadata\nset_attribute(\n    prim_path=\"/World/IRB_6700/tool0/tcp_welder\",\n    attribute=\"customData:standard\",\n    value=\"ISO 9787:Z-approach,X-opening\"\n)",
+  "failure_modes": [
+    "Z-axis arbitrary — downstream path planner executes rotated welds",
+    "TCP offset stuffed into the motion script only — truth fragmented across scene and code",
+    "Naming as 'tcp' clashes with Isaac Manipulator's expected attribute — silent bind failure",
+    "Promising a click-on-geometry widget that does not exist — Kenji catches the lie"
+  ]
+}

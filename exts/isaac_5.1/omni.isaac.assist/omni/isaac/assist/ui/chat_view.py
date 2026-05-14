@@ -1,723 +1,1772 @@
+"""Chat panel for the Isaac Assist extension.
+
+Phase 3 of the live-progress UI. The window streams events from the
+backend's SSE channel and renders a live strip below the chat history
+showing each tool call as it happens (verb-first phrasing, args
+preview, elapsed time, spinner glyph that cycles every 200 ms). On
+turn completion the strip clears and the assistant's reply lands in
+the chat scroll with a brief border pulse.
+
+Phases 4-7 will layer Stop button state, diff chip, undo, and text
+scaling on top of this foundation. Pre-existing functionality (New
+Scene, LiveKit Vision toggle) is preserved.
+"""
 import omni.ui as ui
 import asyncio
-from typing import Callable
-from ..service_client import AssistServiceClient
-from ..webrtc_client import ViewportWebRTCClient
 import logging
 import os
-import io
-import sys
-import contextlib
-from ..telemetry import trace_error
+import json
+import time
+from typing import Optional, Dict, List, Tuple
+
+try:
+    import carb.settings
+    HAS_CARB_SETTINGS = True
+except Exception:
+    HAS_CARB_SETTINGS = False
+
+from ..service_client import AssistServiceClient
+from ..webrtc_client import ViewportWebRTCClient
+from .verbs import verb_for
+from . import animations as anim
 
 logger = logging.getLogger(__name__)
 
-class ChatViewWindow(ui.Window):
-    def __init__(self, title: str, delegate=None, **kwargs):
-        super().__init__(title, **kwargs)
-        self.delegate = delegate
-        self.service = AssistServiceClient()
-        self.webrtc = None
-        self._auto_approve = os.environ.get("AUTO_APPROVE", "false").lower() == "true"
-        self._busy = False
-        self._cancel_event = asyncio.Event()
-        self._current_task = None
-        try:
-            self._build_ui()
-        except Exception as e:
-            logger.error(f"[IsaacAssist] _build_ui() failed: {e}", exc_info=True)
+# ── Text scaling (Phase 7) ───────────────────────────────────────────────
+# Seven discrete steps. Default = 100%. v1 scales font sizes only —
+# widget widths and heights stay fixed, which is acceptable at this
+# range (80-175%) and avoids a full UI rebuild on scale change.
+SCALE_STEPS = [0.80, 0.90, 1.00, 1.10, 1.25, 1.50, 1.75]
+SCALE_LABELS = ["80%", "90%", "100%", "110%", "125%", "150%", "175%"]
+DEFAULT_SCALE_INDEX = 2
+SCALE_SETTING_KEY = "/persistent/exts/omni.isaac.assist/text_scale_index"
 
+# ── Color palette (omni.ui ABGR: 0xAABBGGRR) ─────────────────────────────
+COL_BG_USER         = 0xFF2A2E33
+COL_BG_ASSIST       = 0xFF1E2125
+COL_BG_LIVE_STRIP   = 0xFF181A1D
+COL_TEXT            = 0xFFDDDDDD
+COL_TEXT_DIM        = 0xFF8A8E92
+COL_TEXT_SUBTLE    = 0xFF666A6E
+COL_NV_GREEN        = 0xFF00B976  # NVIDIA #76B900 → ABGR
+COL_AMBER           = 0xFF00A8FF
+COL_AMBER_DIM       = 0xFF0078B0
+COL_RED             = 0xFF4444FF
+COL_DOT_GOOD        = 0xFF00B976
+COL_DOT_WARN        = 0xFF00A8FF
+COL_DOT_BAD         = 0xFF4444FF
+COL_BORDER_PULSE    = 0xFF00B976
+COL_BORDER_NEUTRAL  = 0x00000000
+
+# ── Undo button styles (defined here so both _attach and state transitions
+# read from one source of truth — easier to retune the visual). Solid
+# backgrounds + bigger fonts so the button reads as an actual button,
+# not as decorative text in the bubble.
+UNDO_BTN_STYLE_IDLE = {
+    "font_size": 12,
+    "color": COL_TEXT,
+    "background_color": 0xFF3A3E43,  # dark grey, lighter than bubble bg
+    "border_radius": 4,
+}
+UNDO_BTN_STYLE_CONFIRM = {
+    "font_size": 13,
+    "color": 0xFF000000,             # near-black on amber for max contrast
+    "background_color": COL_AMBER,   # solid amber — "click to commit destructive"
+    "border_radius": 4,
+}
+UNDO_BTN_STYLE_PENDING = {
+    "font_size": 12,
+    "color": COL_TEXT_SUBTLE,
+    "background_color": 0xFF2A2E33,
+    "border_radius": 4,
+}
+UNDO_BTN_STYLE_FAILED = {
+    "font_size": 12,
+    "color": COL_TEXT,
+    "background_color": COL_RED,     # solid red — failure state, click to retry
+    "border_radius": 4,
+}
+
+# ── Spinner glyphs (ASCII; bundled font lacks Braille AND backslash) ───
+# Tested: "|/-\\" rendered the backslash frame as "?" in Isaac Sim 5.1's
+# font. Three-char rotation reads as smooth motion at 200 ms cadence.
+SPINNER_GLYPHS = "|/-"
+SPIN_INTERVAL_S = 0.20
+SLOW_THRESHOLD_S = 10.0
+VERY_SLOW_THRESHOLD_S = 20.0
+
+
+# ── Natural-language phrasing for live progress rows ────────────────────
+# We compose ONE phrase per tool call (e.g. "Adding Franka Panda") instead
+# of showing tool name + args separately. The technical detail (function
+# name, full arg dict) lives in the tooltip. This matches the "Thinking..."
+# style — a single readable status line.
+def _path_leaf(p: str) -> str:
+    if not p:
+        return ""
+    return p.rsplit("/", 1)[-1] if "/" in p else p
+
+
+def humanize_tool_action(tool_name: str, args: dict) -> str:
+    """Return one natural-language phrase describing what the tool is
+    about to do, using args for context. Falls back to verb_for() +
+    path leaf for tools without a special case."""
+    args = args or {}
+
+    if tool_name == "robot_wizard":
+        product = (
+            args.get("product_name") or args.get("robot") or "robot"
+        ).replace("_", " ").title()
+        return f"Adding {product}"
+
+    if tool_name == "create_prim":
+        ptype = args.get("type") or args.get("prim_type", "prim")
+        leaf = _path_leaf(args.get("prim_path") or args.get("path", ""))
+        return f"Creating {ptype} {leaf}".strip() if leaf else f"Creating {ptype}"
+
+    if tool_name == "delete_prim":
+        leaf = _path_leaf(args.get("prim_path") or args.get("path", ""))
+        return f"Removing {leaf}" if leaf else "Removing prim"
+
+    if tool_name == "duplicate_prims" or tool_name == "clone_prim":
+        leaf = _path_leaf(args.get("prim_path") or args.get("path", ""))
+        return f"Cloning {leaf}" if leaf else "Cloning prim"
+
+    if tool_name == "apply_physics_material":
+        mat = args.get("material") or args.get("preset", "physics")
+        leaf = _path_leaf(args.get("prim_path", ""))
+        return f"Adding {mat} physics to {leaf}" if leaf else f"Adding {mat} physics"
+
+    if tool_name == "apply_dr_preset":
+        preset = args.get("preset_name") or args.get("preset", "randomization")
+        return f"Applying {preset} randomization"
+
+    if tool_name == "anchor_robot":
+        anchor_leaf = _path_leaf(
+            args.get("anchor_to") or args.get("anchor_path") or args.get("target", "")
+        )
+        return f"Anchoring robot to {anchor_leaf}" if anchor_leaf else "Anchoring robot"
+
+    if tool_name == "run_usd_script":
+        desc = (args.get("description") or "").strip()
+        if desc and len(desc) < 70:
+            # First-letter-capitalize without breaking acronyms
+            return desc[0].upper() + desc[1:] if desc[0].isalpha() else desc
+        return "Running script"
+
+    if tool_name == "queue_exec_patch":
+        desc = (args.get("description") or "").strip()
+        if desc and len(desc) < 70:
+            return desc[0].upper() + desc[1:] if desc[0].isalpha() else desc
+        return "Applying patch"
+
+    if tool_name == "scatter_on_surface":
+        n = args.get("count") or args.get("num_objects", "")
+        return f"Scattering {n} objects".strip() if n else "Scattering objects"
+
+    if tool_name == "set_camera_look_at":
+        leaf = _path_leaf(args.get("target_path") or args.get("target", ""))
+        return f"Aiming camera at {leaf}" if leaf else "Aiming camera"
+
+    if tool_name == "set_attribute":
+        attr = args.get("attribute") or args.get("attr_name", "attribute")
+        leaf = _path_leaf(args.get("prim_path", ""))
+        return f"Setting {attr} on {leaf}" if leaf else f"Setting {attr}"
+
+    if tool_name == "get_attribute":
+        attr = args.get("attribute") or args.get("attr_name", "attribute")
+        leaf = _path_leaf(args.get("prim_path", ""))
+        return f"Reading {attr} of {leaf}" if leaf else f"Reading {attr}"
+
+    if tool_name in ("scene_summary", "scene_diff"):
+        return "Reading scene"
+
+    if tool_name in ("get_viewport_image", "capture_viewport"):
+        return "Capturing viewport"
+
+    if tool_name in ("lookup_knowledge", "lookup_product_spec", "lookup_material"):
+        q = args.get("query") or args.get("name") or args.get("product_name", "")
+        return f"Looking up {q}" if q else "Looking up reference"
+
+    if tool_name == "import_robot":
+        leaf = _path_leaf(args.get("urdf_path") or args.get("file_path", ""))
+        return f"Importing {leaf}" if leaf else "Importing robot"
+
+    if tool_name in ("save_delta_snapshot", "restore_delta_snapshot"):
+        return "Saving snapshot" if "save" in tool_name else "Restoring snapshot"
+
+    if tool_name == "preflight_check":
+        return "Running pre-flight checks"
+
+    if tool_name == "find_prims_by_name" or tool_name == "find_prims_by_schema":
+        q = args.get("name") or args.get("schema") or args.get("pattern", "")
+        return f"Finding {q}" if q else "Finding prims"
+
+    if tool_name == "list_all_prims":
+        return "Listing scene prims"
+
+    if tool_name == "build_stage_index":
+        return "Indexing stage"
+
+    if tool_name == "console_error_autodetect":
+        return "Checking console for errors"
+
+    if tool_name.startswith("ros2_"):
+        topic = args.get("topic") or args.get("service") or args.get("node", "")
+        action = tool_name.replace("ros2_", "").replace("_", " ")
+        return f"ROS2 {action}{(' ' + topic) if topic else ''}"
+
+    # Fallback — verbs.py + path leaf if available
+    verb = verb_for(tool_name)
+    leaf = ""
+    for k in ("prim_path", "path", "prim", "target", "target_path"):
+        v = args.get(k)
+        if v:
+            leaf = _path_leaf(str(v))
+            break
+    return f"{verb} {leaf}".strip() if leaf else verb
+
+
+class ChatViewWindow(ui.Window):
+    def __init__(self, title: str, **kwargs):
+        super().__init__(title, **kwargs)
+        self.service = AssistServiceClient()  # generates per-instance UUID
+        self.webrtc = None
+
+        # Turn lifecycle state
+        self._turn_active = False
+        self._turn_rendered_via_sse = False
+        # Wall-clock timer: clicked Send → agent_reply. Drives the
+        # "Live · 4.2s" header. None when no turn is in flight.
+        self._turn_started_at: Optional[float] = None
+
+        # Live strip rows by tc_id (plus the special "__thinking__" row
+        # placeholder shown between turn_started and the first real tool).
+        self._live_rows: Dict[str, Dict] = {}
+        self._live_strip_visible = False
+        self._spin_task: Optional[asyncio.Task] = None
+        self._destroyed = False
+
+        # Undo state (Phase 6). Bubbles eligible for undo, in
+        # chronological order. Latest entry = the only one with a visible
+        # ↶ button. SSE undo_applied pops + dims; the new latest gets
+        # the button.
+        self._undoable_bubbles: list = []
+        self._undo_progress_row = None
+        self._undo_handled_via_sse = False
+        self._clear_chat_confirm = False
+
+        # Text scaling (Phase 7). Loaded from carb settings if available,
+        # else defaults to 100%. _scaled_labels is the registry: each
+        # entry is (Label, base_font_size_int). _change_scale walks it
+        # and mutates label.style in place — no UI rebuild required.
+        self._settings = carb.settings.get_settings() if HAS_CARB_SETTINGS else None
+        self._scale_index = self._load_scale_index()
+        self._scale = SCALE_STEPS[self._scale_index]
+        self._scaled_labels: List[Tuple[ui.Label, int]] = []
+        self._scale_popup: Optional[ui.Window] = None
+        self._model_popup: Optional[ui.Window] = None
+        self._current_model_label: str = "?"
+        self._scale_lbl: Optional[ui.Label] = None
+        # Debounce: rapid A+/A- clicks coalesce into one apply task.
+        self._scale_apply_task: Optional[asyncio.Task] = None
+
+        self._build_ui()
+        self.service.start_stream(self._on_sse_event)
+        self._spin_task = asyncio.ensure_future(self._tick_loop())
+        # Pre-warm the slow paths that hit on first scale change:
+        # carb settings flush to disk + omni.ui style-mutation layout pass.
+        # Boot already takes seconds; user won't notice another ~100ms here,
+        # but they'll thank us when A+/A- responds instantly later.
+        asyncio.ensure_future(self._prewarm_scale_paths())
+
+    async def _prewarm_scale_paths(self):
+        # Yield once so widget construction finishes before we mutate.
+        await asyncio.sleep(0.0)
+        try:
+            self._save_scale_index(self._scale_index)
+            self._apply_scale_to_all()
+        except Exception:
+            pass
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Text scaling (Phase 7)
+    # ═══════════════════════════════════════════════════════════════════════
+    def _sz(self, n: int) -> int:
+        """Scale a font size by current factor; never below 1."""
+        return max(1, int(round(n * self._scale)))
+
+    def _track_label(self, label, base_font_size: int):
+        """Register a label so subsequent scale changes will update its font."""
+        self._scaled_labels.append((label, base_font_size))
+        return label
+
+    def _L(self, text: str, font_size: int = 12, **kw):
+        """Construct a Label with scale-aware font size and register it.
+
+        kw["style"] (if present) is merged with the scaled font size.
+        Returns the constructed Label.
+        """
+        style = dict(kw.pop("style", {}))
+        style["font_size"] = self._sz(font_size)
+        lbl = ui.Label(text, style=style, **kw)
+        self._track_label(lbl, font_size)
+        return lbl
+
+    def _load_scale_index(self) -> int:
+        if not self._settings:
+            return DEFAULT_SCALE_INDEX
+        try:
+            idx = self._settings.get(SCALE_SETTING_KEY)
+        except Exception:
+            return DEFAULT_SCALE_INDEX
+        if not isinstance(idx, int) or not (0 <= idx < len(SCALE_STEPS)):
+            return DEFAULT_SCALE_INDEX
+        return idx
+
+    def _save_scale_index(self, idx: int):
+        if not self._settings:
+            return
+        try:
+            self._settings.set(SCALE_SETTING_KEY, idx)
+        except Exception:
+            pass
+
+    def _change_scale(self, delta: int):
+        """delta = +1 / -1 / 0 (reset). No-op during a turn.
+
+        Click handling is split into three concerns:
+          1. State update + popup-label refresh — INSTANT, so rapid clicks
+             feel responsive even if the actual mutation is heavier.
+          2. Disk write (carb settings) — debounced behind a 100 ms timer
+             so a burst of clicks results in one disk flush.
+          3. Widget mutations — debounced + chunked + yields to the UI
+             loop between chunks so the panel stays interactive.
+        """
+        if self._turn_active:
+            return
+        if delta == 0:
+            new_idx = DEFAULT_SCALE_INDEX
+        else:
+            new_idx = max(0, min(len(SCALE_STEPS) - 1, self._scale_index + delta))
+        if new_idx == self._scale_index:
+            return
+        self._scale_index = new_idx
+        self._scale = SCALE_STEPS[new_idx]
+        # Instant feedback: popup-label updates RIGHT NOW (no I/O, no
+        # widget walk). Even if the actual font mutations take a beat,
+        # the user sees their click took effect.
+        if self._scale_lbl:
+            try:
+                self._scale_lbl.text = SCALE_LABELS[new_idx]
+            except Exception:
+                pass
+        # Debounce: cancel any in-flight apply, schedule a new one. Last
+        # click within the window wins; intermediate states are skipped.
+        if self._scale_apply_task and not self._scale_apply_task.done():
+            self._scale_apply_task.cancel()
+        self._scale_apply_task = asyncio.ensure_future(self._scale_apply_debounced())
+
+    async def _scale_apply_debounced(self):
+        try:
+            # Coalesce window — rapid clicks land here and the previous
+            # task gets cancelled before it reaches the work below.
+            await asyncio.sleep(0.10)
+            self._save_scale_index(self._scale_index)
+            await self._apply_scale_to_all_async()
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logger.warning(f"Scale apply failed: {e}")
+
+    def _apply_scale_to_all(self):
+        """Synchronous fallback (used by pre-warm and other call sites
+        that aren't async). Walks the registry once with no yields."""
+        new_size_for = self._sz
+        survivors: List[Tuple] = []
+        for lbl, base in self._scaled_labels:
+            try:
+                cur = lbl.style or {}
+                lbl.style = {**cur, "font_size": new_size_for(base)}
+                survivors.append((lbl, base))
+            except Exception:
+                pass
+        self._scaled_labels = survivors
+
+    async def _apply_scale_to_all_async(self):
+        """Same work as _apply_scale_to_all but yields to the asyncio
+        loop every CHUNK labels so omni.ui can process layout passes
+        progressively. The text grows over ~100-200 ms instead of
+        freezing the panel for the full duration."""
+        CHUNK = 4
+        new_size_for = self._sz
+        survivors: List[Tuple] = []
+        work = list(self._scaled_labels)
+        for i in range(0, len(work), CHUNK):
+            for lbl, base in work[i : i + CHUNK]:
+                try:
+                    cur = lbl.style or {}
+                    lbl.style = {**cur, "font_size": new_size_for(base)}
+                    survivors.append((lbl, base))
+                except Exception:
+                    pass
+            # Yield once after each chunk — lets omni.ui run a layout
+            # pass and lets other async tasks (spinner tick, SSE) breathe.
+            await asyncio.sleep(0)
+        self._scaled_labels = survivors
+
+    def _open_scale_popup(self):
+        """Small floating popup with [A-] [label] [A+] [Close]."""
+        # Toggle: if already visible, close it (so the Aa header button
+        # also acts as a dismiss).
+        if self._scale_popup is not None:
+            try:
+                self._scale_popup.visible = not self._scale_popup.visible
+                return
+            except Exception:
+                self._scale_popup = None
+        # Keep title bar so the OS X-button is available; user-friendly
+        # close via header button or by clicking Aa again.
+        self._scale_popup = ui.Window(
+            "Text size",
+            width=180,
+            height=110,
+            flags=ui.WINDOW_FLAGS_NO_RESIZE | ui.WINDOW_FLAGS_NO_SCROLLBAR,
+        )
+        with self._scale_popup.frame:
+            with ui.VStack(spacing=4):
+                ui.Spacer(height=4)
+                with ui.HStack(spacing=6):
+                    ui.Spacer(width=6)
+                    ui.Label(
+                        "Text size",
+                        style={"color": COL_TEXT_DIM, "font_size": self._sz(10)},
+                    )
+                    ui.Spacer()
+                with ui.HStack(spacing=6):
+                    ui.Spacer(width=6)
+                    ui.Button(
+                        "A-",
+                        width=28,
+                        clicked_fn=lambda: self._change_scale(-1),
+                        style={"font_size": self._sz(12)},
+                    )
+                    self._scale_lbl = ui.Label(
+                        SCALE_LABELS[self._scale_index],
+                        style={"color": COL_TEXT, "font_size": self._sz(12)},
+                        alignment=ui.Alignment.CENTER,
+                    )
+                    ui.Button(
+                        "A+",
+                        width=28,
+                        clicked_fn=lambda: self._change_scale(1),
+                        style={"font_size": self._sz(12)},
+                    )
+                    ui.Spacer(width=6)
+                with ui.HStack(spacing=6):
+                    ui.Spacer(width=6)
+                    ui.Button(
+                        "Reset",
+                        clicked_fn=lambda: self._change_scale(0),
+                        style={"font_size": self._sz(11)},
+                    )
+                    ui.Button(
+                        "Close",
+                        clicked_fn=self._close_scale_popup,
+                        style={"font_size": self._sz(11)},
+                    )
+                    ui.Spacer(width=6)
+                ui.Spacer(height=4)
+
+    def _close_scale_popup(self):
+        if self._scale_popup is not None:
+            try:
+                self._scale_popup.visible = False
+            except Exception:
+                pass
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Model switcher (M button)
+    # ═══════════════════════════════════════════════════════════════════════
+    # Each entry: (label_shown_to_user, llm_mode, cloud_or_local_model_name)
+    # Free / cheap options first; high-cost models last so users notice.
+    _MODEL_OPTIONS = (
+        ("Gemini 3 Flash",          "cloud",     "gemini-3-flash-preview"),
+        ("Gemini 2.5 Flash",        "cloud",     "gemini-2.5-flash"),
+        ("Gemini 2.5 Pro",          "cloud",     "gemini-2.5-pro"),
+        ("Kimi K2 (Moonshot)",      "moonshot",  "kimi-k2-0905-preview"),
+        ("Claude Opus 4.7",         "anthropic", "claude-opus-4-7"),
+        ("Claude Sonnet 4.6",       "anthropic", "claude-sonnet-4-6"),
+        ("Local Qwen3.5 35B",       "local",     "qwen3.5:35b"),
+    )
+
+    def _open_model_popup(self):
+        """Floating popup with model presets. Click → switch via /settings/."""
+        if self._model_popup is not None:
+            try:
+                self._model_popup.visible = not self._model_popup.visible
+                return
+            except Exception:
+                self._model_popup = None
+        self._model_popup = ui.Window(
+            "Model",
+            width=260,
+            height=24 + 26 * len(self._MODEL_OPTIONS) + 16,
+            flags=ui.WINDOW_FLAGS_NO_RESIZE | ui.WINDOW_FLAGS_NO_SCROLLBAR,
+        )
+        with self._model_popup.frame:
+            with ui.VStack(spacing=2):
+                ui.Spacer(height=4)
+                ui.Label(
+                    f"Current: {self._current_model_label}",
+                    style={"color": COL_TEXT_DIM, "font_size": self._sz(10)},
+                    height=14,
+                )
+                ui.Spacer(height=4)
+                for label, mode, model in self._MODEL_OPTIONS:
+                    ui.Button(
+                        label,
+                        height=22,
+                        clicked_fn=lambda m=mode, n=model, l=label: self._switch_model(m, n, l),
+                        style={"font_size": self._sz(11)},
+                    )
+
+    def _switch_model(self, mode: str, model_name: str, label: str):
+        """POST {LLM_MODE, CLOUD_MODEL_NAME or LOCAL_MODEL_NAME} to /settings/."""
+        import asyncio
+        import aiohttp
+        async def _do_switch():
+            key = "LOCAL_MODEL_NAME" if mode == "local" else "CLOUD_MODEL_NAME"
+            settings = {"LLM_MODE": mode, key: model_name}
+            url = "http://localhost:8000/api/v1/settings/"
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        url,
+                        json={"settings": settings},
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.status == 200:
+                            self._current_model_label = label
+                            self.btn_model.tooltip = f"Current: {label}"
+                        else:
+                            try:
+                                logger.warning(
+                                    f"[ModelSwitch] HTTP {resp.status}: {await resp.text()}"
+                                )
+                            except Exception: pass
+            except Exception as e:
+                logger.warning(f"[ModelSwitch] error: {e}")
+            # Close popup either way
+            if self._model_popup is not None:
+                try: self._model_popup.visible = False
+                except Exception: pass
+
+        try:
+            asyncio.ensure_future(_do_switch())
+        except Exception as e:
+            logger.warning(f"[ModelSwitch] dispatch failed: {e}")
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # UI construction
+    # ═══════════════════════════════════════════════════════════════════════
     def _build_ui(self):
         with self.frame:
-            with ui.VStack(spacing=5):
-                # Header tools
-                with ui.HStack(height=30, spacing=4):
-                    ui.Label("Isaac Assist (Local Mode)", width=0, style={"color": 0xFF888888})
+            with ui.VStack(spacing=4):
+                self._build_header()
+                self._build_chat_area()
+                self._build_live_strip()
+                self._build_chips()
+                self._build_input()
+
+    def _build_header(self):
+        with ui.HStack(height=26, spacing=6):
+            # Panel title is CHROME — does NOT scale with the text-size
+            # control (otherwise it dominates the panel at 175 %).
+            ui.Label(
+                "Isaac Assist",
+                width=0,
+                style={"color": COL_TEXT, "font_size": 13},
+            )
+            # 6 px connection-health dot. Green = SSE connected; amber =
+            # reconnecting; red = exhausted/stopped. State transitions
+            # are wired in Phase 5 polish.
+            self.conn_dot = ui.Rectangle(
+                width=6,
+                height=6,
+                style={"background_color": COL_DOT_GOOD, "border_radius": 3},
+            )
+            ui.Spacer()
+            self.btn_scale = ui.Button(
+                "Aa",
+                width=24,
+                height=22,
+                clicked_fn=self._open_scale_popup,
+                style={"font_size": 11},
+                tooltip="Text size",
+            )
+            self.btn_new = ui.Button(
+                "New",
+                width=40,
+                height=22,
+                clicked_fn=self._new_scene,
+                style={"font_size": 11},
+                tooltip="Wipe stage AND chat. Confirm required.",
+            )
+            self.btn_clear = ui.Button(
+                "Clear",
+                width=44,
+                height=22,
+                clicked_fn=self._on_clear_chat_clicked,
+                style={"font_size": 11},
+                tooltip="Clear chat history (keeps stage and undo). Confirm required.",
+            )
+            self.btn_livekit = ui.Button(
+                "Vision",
+                width=54,
+                height=22,
+                clicked_fn=self._toggle_livekit,
+                style={"font_size": 11},
+            )
+            self.btn_model = ui.Button(
+                "M",
+                width=24,
+                height=22,
+                clicked_fn=self._open_model_popup,
+                style={"font_size": 11},
+                tooltip="Switch LLM model / provider",
+            )
+
+    def _build_chat_area(self):
+        self.scroll = ui.ScrollingFrame(
+            horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_OFF,
+            vertical_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_AS_NEEDED,
+        )
+        with self.scroll:
+            self.chat_layout = ui.VStack(spacing=8)
+
+    def _build_live_strip(self):
+        # Container collapses to height=0 between turns. ZStack lets the
+        # background rectangle sit behind the row layout.
+        self.live_strip_container = ui.ZStack(height=0)
+        with self.live_strip_container:
+            ui.Rectangle(
+                style={"background_color": COL_BG_LIVE_STRIP, "border_radius": 4}
+            )
+            with ui.VStack(spacing=2):
+                ui.Spacer(height=4)
+                with ui.HStack(height=14):
+                    ui.Spacer(width=6)
+                    # Strip header — chrome (fixed size). Text mutates to
+                    # "Live · 4.2s" during a turn so the user sees total
+                    # elapsed time from clicking Send to agent_reply.
+                    self.live_header_lbl = ui.Label(
+                        "Live",
+                        width=0,
+                        style={"color": COL_TEXT_SUBTLE, "font_size": 10},
+                    )
                     ui.Spacer()
+                self.live_rows_layout = ui.VStack(spacing=2)
+                ui.Spacer(height=4)
 
-                    # New Scene — clears stage + chat history
-                    ui.Button("New Scene", width=100, clicked_fn=self._new_scene)
-                    
-                    # Settings Toggle
-                    ui.Button("Cfg", width=30, clicked_fn=self._spawn_settings_window)
-
-                    # LiveKit Stream Toggle (disabled — untested)
-                    # self.btn_livekit = ui.Button("Start Vision / Voice", width=150, clicked_fn=self._toggle_livekit)
-                    
-                ui.Spacer(height=5)
-                
-                # Chat History Area
-                self.scroll = ui.ScrollingFrame(
-                    horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_OFF,
-                    vertical_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_AS_NEEDED,
+    def _build_chips(self):
+        """Empty-state suggestion chips. Visible until first message ever
+        sent; clicking a chip fills the input field. Disappears after
+        first send and stays hidden for the window's lifetime."""
+        self.chips_container = ui.HStack(height=22, spacing=4)
+        self._chips_shown = True
+        with self.chips_container:
+            ui.Spacer(width=2)
+            for label in (
+                "Build a pick-and-place scene",
+                "Add a Franka arm",
+                "Inspect the stage",
+            ):
+                ui.Button(
+                    label,
+                    height=20,
+                    clicked_fn=lambda t=label: self._on_chip(t),
+                    style={
+                        "font_size": 10,
+                        "background_color": 0xFF2A2E33,
+                        "color": COL_TEXT_DIM,
+                    },
                 )
-                with self.scroll:
-                    self.chat_layout = ui.VStack(spacing=10)
-                        
-                ui.Spacer(height=5)
-                
-                # Input Area
-                with ui.HStack(height=30, spacing=5):
-                    self.input_field = ui.StringField(multiline=False)
-                    self.input_field.model.add_value_changed_fn(self._on_input_changed)
-                    self.send_btn = ui.Button("Send", width=60, clicked_fn=self._submit_message)
-                    self.stop_btn = ui.Button("Stop", width=40,
-                                             style={"background_color": 0xFF882222},
-                                             clicked_fn=self._cancel_request)
-                    self.stop_btn.enabled = False
 
-    def _on_input_changed(self, model):
-        # Optional placeholder logic
-        pass
+    def _build_input(self):
+        with ui.HStack(height=28, spacing=4):
+            self.input_field = ui.StringField(multiline=False, style={"font_size": 12})
+            # Enter (end-edit on a single-line StringField) submits the
+            # message — same as clicking Send. Loses focus afterwards
+            # which is the standard chat UX.
+            self.input_field.model.add_end_edit_fn(self._on_input_enter)
+            # Same button doubles as Send (idle) / Stop (turn active) /
+            # "Stopping..." (cancel sent, waiting for orchestrator return).
+            self.btn_send = ui.Button(
+                "Send",
+                width=64,
+                height=24,
+                clicked_fn=self._on_send_or_stop,
+                style={"font_size": 12},
+            )
+            self._btn_state = "idle"
 
-    def _cancel_request(self):
-        """Cancel the running async handler immediately by cancelling the task."""
-        if self._busy:
-            self._cancel_event.set()
-            if self._current_task and not self._current_task.done():
-                self._current_task.cancel()
-            self._add_chat_bubble("System", "[Stop] Cancelling...", is_user=False)
+    def _on_input_enter(self, model):
+        # Triggered by Enter key OR by focus loss. Only treat as a submit
+        # when there's actual text and we're not mid-turn — otherwise
+        # focus changes would silently submit empty / racing messages.
+        text = model.get_value_as_string().strip()
+        if not text or self._turn_active:
+            return
+        self._submit_message()
 
-    def _set_busy(self, busy: bool):
-        self._busy = busy
-        if not busy:
-            self._cancel_event.clear()
-        if hasattr(self, "send_btn"):
-            self.send_btn.enabled = not busy
-        if hasattr(self, "stop_btn"):
-            self.stop_btn.enabled = busy
+    # ═══════════════════════════════════════════════════════════════════════
+    # Send / Stop button state machine
+    # ═══════════════════════════════════════════════════════════════════════
+    def _set_button_state(self, state: str):
+        """state ∈ {idle, busy, stopping}."""
+        self._btn_state = state
+        # Track the most recent transition for the debounce in
+        # _on_send_or_stop — a stray second event right after idle→busy
+        # (double-click, queued event, Enter-then-Send) would otherwise
+        # turn the second click into an unintended cancel.
+        self._last_btn_state_change_at = time.monotonic()
+        if state == "idle":
+            self.btn_send.text = "Send"
+            self.btn_send.enabled = True
+            self.btn_send.style = {"font_size": 12}
+        elif state == "busy":
+            self.btn_send.text = "Stop"
+            self.btn_send.enabled = True
+            # Amber to read as "interruption affordance" without screaming red
+            self.btn_send.style = {"font_size": 12, "color": COL_AMBER}
+        elif state == "stopping":
+            self.btn_send.text = "Stopping..."
+            self.btn_send.enabled = False
+            self.btn_send.style = {"font_size": 12, "color": COL_TEXT_SUBTLE}
 
+    def _on_send_or_stop(self):
+        if self._btn_state == "idle":
+            self._submit_message()
+        elif self._btn_state == "busy":
+            # Debounce: a second event within 500ms of idle→busy is almost
+            # always a doubled click / Enter-then-Send race, NOT an honest
+            # stop intent. Without this guard the user types one prompt and
+            # gets "Stopped. Completed 0 steps" because the second event
+            # processes against the freshly-set busy state.
+            elapsed = time.monotonic() - getattr(self, "_last_btn_state_change_at", 0.0)
+            if elapsed < 0.5:
+                return
+            self._set_button_state("stopping")
+            asyncio.ensure_future(self.service.cancel_turn())
+        # "stopping" → button is disabled; clicks are no-ops.
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Submit / receive
+    # ═══════════════════════════════════════════════════════════════════════
     def _submit_message(self):
         text = self.input_field.model.get_value_as_string().strip()
         if not text:
             return
-
-        # Track for audit/knowledge logging
-        self._last_user_message = text
-
-        # Clear input
+        if self._turn_active:
+            return
         self.input_field.model.set_value("")
+        self._add_user_bubble(text)
+        self._scroll_to_bottom()
+        self._hide_chips()
+        self._turn_active = True
+        self._turn_rendered_via_sse = False
+        self._set_button_state("busy")
+        asyncio.ensure_future(self._handle_service_request(text))
 
-        # Capture current selection on the Kit main thread (reliable)
-        selected_prim_info = self._get_selected_prim_info()
-        selected_prim_path = selected_prim_info.get("path") if selected_prim_info else None
+    def _on_chip(self, text: str):
+        self.input_field.model.set_value(text)
 
-        # Add to UI immediately with selection chip
-        if selected_prim_path:
-            self._add_chat_bubble("You", f"[{selected_prim_path}] {text}", is_user=True)
-        else:
-            self._add_chat_bubble("You", text, is_user=True)
+    def _hide_chips(self):
+        if self._chips_shown:
+            self.chips_container.visible = False
+            self.chips_container.height = ui.Pixel(0)
+            self._chips_shown = False
 
-        # Dispatch async to service: route by prefix
-        if text.lower().startswith("pipeline:") or text.lower().startswith("pipeline "):
-            pipeline_prompt = text.split(":", 1)[1].strip() if ":" in text else text.split(" ", 1)[1].strip()
-            self._current_task = asyncio.ensure_future(self._handle_pipeline_request(pipeline_prompt))
-        elif text.lower().startswith("patch") or text.lower().startswith("fix"):
-            self._current_task = asyncio.ensure_future(self._handle_swarm_request(text))
-        else:
-            self._current_task = asyncio.ensure_future(self._handle_service_request(text, selected_prim_info=selected_prim_info))
-        self._set_busy(True)
-
-    def _get_selected_prim_path(self):
-        """Get the currently selected prim path, or None."""
+    async def _handle_service_request(self, text: str):
         try:
-            import omni.usd
-            ctx = omni.usd.get_context()
-            selection = ctx.get_selection()
-            paths = selection.get_selected_prim_paths()
-            if paths:
-                return paths[0]
-        except Exception:
-            pass
-        return None
+            response = await self.service.send_message(text)
+            if not self._turn_rendered_via_sse:
+                # SSE didn't deliver agent_reply (drop, slow); render from POST
+                self._render_assistant_from_post(response)
+                self._collapse_live_strip()
+        finally:
+            self._turn_active = False
+            self._set_button_state("idle")
 
-    def _get_selected_prim_info(self):
-        """Get full properties of the selected prim (runs on Kit main thread)."""
+    def _render_assistant_from_post(self, response: dict):
+        if "error" in response:
+            self._add_assistant_bubble(response["error"], error=True)
+            return
+        for msg in response.get("response_messages", []):
+            content = msg.get("content", "")
+            if content:
+                self._add_assistant_bubble(content)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # SSE event router
+    # ═══════════════════════════════════════════════════════════════════════
+    def _on_sse_event(self, evt_type: str, payload: dict, raw: dict):
         try:
-            from ..context.prim_properties import get_selected_prim_properties
-            info = get_selected_prim_properties()
-            if "error" not in info:
-                return info
-        except Exception:
-            pass
-        return None
+            if evt_type == "__connection__":
+                self._on_connection_state(payload.get("state"))
+            elif evt_type == "turn_started":
+                self._on_turn_started(payload)
+            elif evt_type == "tool_call_started":
+                self._on_tool_started(payload)
+            elif evt_type == "tool_call_finished":
+                self._on_tool_finished(payload)
+            elif evt_type == "retry_spam_halt":
+                self._on_spam_halt(payload)
+            elif evt_type == "cancel_acknowledged":
+                self._on_cancel_ack(payload)
+            elif evt_type == "turn_diff_computed":
+                # Stash; attach to the assistant bubble when agent_reply
+                # arrives (event order is not strictly guaranteed).
+                self._pending_diff = payload
+            elif evt_type == "agent_reply":
+                self._on_agent_reply(payload)
+            elif evt_type == "undo_started":
+                self._on_undo_started(payload)
+            elif evt_type == "undo_applied":
+                self._on_undo_applied(payload)
+            elif evt_type == "undo_failed":
+                self._on_undo_failed(payload)
+            elif evt_type == "chat_cleared":
+                pass  # UI handled it locally — server confirmation only
+        except Exception as e:
+            logger.exception(f"SSE handler failed for {evt_type}: {e}")
 
-    # LLM mode → (display label, env key used for API key, placeholder model name)
-    _LLM_MODES = [
-        ("local  — Ollama",     "local",      "LOCAL_MODEL_NAME",   "LOCAL_MODEL_NAME",    "qwen3.5:35b"),
-        ("google — Gemini",     "google",     "GEMINI_API_KEY",     "GEMINI_MODEL_NAME",   "gemini-3.1-pro-preview"),
-        ("anthropic — Claude",  "anthropic",  "ANTHROPIC_API_KEY",  "CLOUD_MODEL_NAME",    "claude-sonnet-4-6"),
-        ("openai — GPT",        "openai",     "OPENAI_API_KEY",     "CLOUD_MODEL_NAME",    "gpt-5.4"),
-        ("grok   — xAI",        "grok",       "GROK_API_KEY",       "CLOUD_MODEL_NAME",    "grok-3"),
-    ]
+    def _on_cancel_ack(self, payload):
+        """Server confirmed it has stopped issuing tool calls. Show a
+        dim "stopped" indicator in the live strip; the agent_reply event
+        that follows shortly carries the canned 'Stopped' summary."""
+        with self.live_rows_layout:
+            with ui.HStack(height=14):
+                ui.Spacer(width=10)
+                ui.Label(
+                    "[stopped by user]",
+                    style={"color": COL_TEXT_DIM, "font_size": 11},
+                )
 
-    def _spawn_settings_window(self):
-        current_mode = os.environ.get("LLM_MODE", "local").strip().lower()
-        mode_labels = [m[0] for m in self._LLM_MODES]
-        mode_keys   = [m[1] for m in self._LLM_MODES]
-        current_idx = mode_keys.index(current_mode) if current_mode in mode_keys else 0
+    # ── Turn lifecycle ───────────────────────────────────────────────────
+    def _on_turn_started(self, payload):
+        self._turn_started_at = time.monotonic()
+        self._show_live_strip()
+        self._add_thinking_row()
 
-        self._settings_window = ui.Window("Isaac Assist Settings", width=440, height=380)
-        with self._settings_window.frame:
-            with ui.VStack(spacing=10, margin=15):
-                ui.Label("Engine Configuration", style={"font_size": 16, "color": 0xFF00FF00, "font_weight": "bold"})
-                ui.Spacer(height=5)
+    def _on_tool_started(self, payload):
+        tc_id = payload.get("tc_id", f"unk_{time.time()}")
+        tool = payload.get("tool", "unknown")
+        args_preview = payload.get("args_preview", "")
+        description = payload.get("description", "")
 
-                # ── LLM Provider ─────────────────────────────────────
-                with ui.HStack(height=22):
-                    ui.Label("LLM Provider:", width=150)
-                    self.llm_mode_combo = ui.ComboBox(current_idx, *mode_labels)
+        self._remove_thinking_row()
 
-                # ── API Key (context-sensitive label) ─────────────────
-                with ui.HStack(height=22):
-                    self.api_key_label = ui.Label("API Key:", width=150)
-                    self.api_key_field = ui.StringField(password_mode=True)
-                    # Show the key for whichever mode is currently active
-                    _, _, key_env, model_env, _ = self._LLM_MODES[current_idx]
-                    self.api_key_field.model.set_value(os.environ.get(key_env, ""))
-
-                def _on_mode_changed(model, _):
-                    idx = model.get_item_value_model().as_int
-                    _, mode, key_env, model_env, placeholder = self._LLM_MODES[idx]
-                    self.api_key_label.text = f"{key_env}:"
-                    self.api_key_field.model.set_value(os.environ.get(key_env, ""))
-                    # Sync model name: use the per-mode env var, fall back to placeholder
-                    if hasattr(self, "model_field"):
-                        saved = os.environ.get(model_env, "")
-                        self.model_field.model.set_value(saved if saved else placeholder)
-
-                self.llm_mode_combo.model.add_item_changed_fn(_on_mode_changed)
-                # Fire once to sync label
-                _on_mode_changed(self.llm_mode_combo.model, None)
-
-                # ── Model name ────────────────────────────────────────
-                with ui.HStack(height=22):
-                    ui.Label("Model Name:", width=150)
-                    self.model_field = ui.StringField()
-                    _, cur_mode, _, cur_model_env, cur_placeholder = self._LLM_MODES[current_idx]
-                    saved_model = os.environ.get(cur_model_env, "")
-                    self.model_field.model.set_value(saved_model if saved_model else cur_placeholder)
-                # Fire again now that model_field exists to finish syncing
-                _on_mode_changed(self.llm_mode_combo.model, None)
-
-                # ── Ollama base (local mode only) ─────────────────────
-                with ui.HStack(height=22):
-                    ui.Label("Ollama Base URL:", width=150)
-                    self.api_base_field = ui.StringField()
-                    self.api_base_field.model.set_value(os.environ.get("OPENAI_API_BASE", "http://localhost:11434/v1"))
-
-                ui.Separator()
-
-                with ui.HStack(height=22):
-                    self.contribute_cb = ui.CheckBox()
-                    self.contribute_cb.model.set_value(os.environ.get("CONTRIBUTE_DATA", "false").lower() == "true")
-                    ui.Label("Contribute Fine-Tuning Data (Opt-In)", width=0)
-
-                with ui.HStack(height=22):
-                    self.auto_approve_cb = ui.CheckBox()
-                    self.auto_approve_cb.model.set_value(self._auto_approve)
-                    ui.Label("Auto-Approve Code Patches (skip approval dialog)", width=0)
-
-                with ui.HStack(height=22):
-                    ui.Label("Max Tool Rounds:", width=150)
-                    self.max_tool_rounds_field = ui.IntField()
-                    self.max_tool_rounds_field.model.set_value(int(os.environ.get("MAX_TOOL_ROUNDS", "10")))
-
-                ui.Spacer(height=10)
-
-                with ui.HStack(height=30, spacing=5):
-                    ui.Button("Save Settings", style={"background_color": 0xFF22AA22}, clicked_fn=self._save_settings)
-                    ui.Button("Export Training Data", clicked_fn=self._export_data)
-
-    def _save_settings(self):
-        self._auto_approve = self.auto_approve_cb.model.get_value_as_bool()
-
-        # Resolve selected mode
-        idx = self.llm_mode_combo.model.get_item_value_model().as_int
-        _, mode, key_env, model_env, _ = self._LLM_MODES[idx]
-        api_key_value = self.api_key_field.model.get_value_as_string()
-
-        payload = {
-            "LLM_MODE":  mode,
-            key_env:     api_key_value,          # write to the right env var
-            model_env:   self.model_field.model.get_value_as_string(),  # per-mode model key
-            "OPENAI_API_BASE": self.api_base_field.model.get_value_as_string(),
-            "CONTRIBUTE_DATA": "true" if self.contribute_cb.model.get_value_as_bool() else "false",
-            "AUTO_APPROVE":    "true" if self._auto_approve else "false",
-            "MAX_TOOL_ROUNDS": str(self.max_tool_rounds_field.model.get_value_as_int()),
-        }
-        self._add_chat_bubble("System", f"Switching to {mode} provider…", is_user=False)
-        asyncio.ensure_future(self._handle_save_settings(payload))
-
-    async def _handle_save_settings(self, payload: dict):
-        resp = await self.service.update_settings(payload)
-        if "error" in resp:
-            self._add_chat_bubble("System", f"Failed to save settings: {resp['error']}", is_user=False, error=True)
+        # Retry-storm compression: if the previous attempt of this same
+        # tool failed, recycle that row and bump an attempts counter
+        # rather than stacking N near-identical rows.
+        existing = self._find_recyclable_row(tool)
+        if existing is not None:
+            existing["attempts"] += 1
+            existing["spinner_lbl"].text = SPINNER_GLYPHS[0]
+            existing["spinner_lbl"].style = {"color": COL_NV_GREEN, "font_size": 13}
+            phrase = humanize_tool_action(tool, payload.get("args_full", {}))
+            existing["verb_lbl"].text = f"{phrase} (attempt {existing['attempts']})"
+            # Reset to default text colour (a previous failure may have
+            # left the label red — we're retrying, not still failing).
+            existing["verb_lbl"].style = {
+                **(existing["verb_lbl"].style or {}),
+                "color": COL_TEXT,
+            }
+            existing["state"] = "running"
+            existing["started_at"] = time.monotonic()
+            existing["tc_id"] = tc_id
+            # Re-key in the dict
+            self._live_rows[tc_id] = existing
             return
 
-        # Hot-switch the LLM provider — this reloads the orchestrator's provider
-        mode = payload.get("LLM_MODE", "")
-        if mode:
-            switch_resp = await self.service.switch_llm_mode(mode)
-            if "error" in switch_resp:
-                self._add_chat_bubble("System", f"Settings saved but provider switch failed: {switch_resp['error']}", is_user=False, error=True)
-            else:
-                model = switch_resp.get("model", "")
-                self._add_chat_bubble("System", f"Provider switched to {mode} ({model}). Ready.", is_user=False)
-        else:
-            self._add_chat_bubble("System", "Settings saved.", is_user=False)
+        self._make_live_row(tc_id, tool, args_preview, payload.get("args_full", {}), description)
 
-    def _export_data(self):
-        self._add_chat_bubble("System", "Triggering local Knowledge Base export for Fine-tuning...", is_user=False)
-        asyncio.ensure_future(self._handle_export())
-
-    async def _handle_export(self):
-        resp = await self.service.export_knowledge()
-        if "error" in resp:
-            self._add_chat_bubble("System", f"Export failed: {resp['error']}", is_user=False, error=True)
-        else:
-            msg = resp.get("message", "Export complete.")
-            self._add_chat_bubble("System", f"Export successful. {msg}", is_user=False)
-
-    async def _handle_swarm_request(self, text: str):
-        self._set_busy(True)
-        try:
-            self._add_chat_bubble("System", "Submitting query to the Coder/QA/Critic multi-agent swarm. Please wait (this can take 1-3 minutes)...", is_user=False)
-            response = await self.service.generate_plan(user_query=text)
-
-            if "error" in response:
-                self._add_chat_bubble("Agent Swarm", response["error"], is_user=False, error=True)
-            else:
-                actions = response.get("actions", [])
-                conf = response.get("overall_confidence", 0.0)
-                desc = response.get("description", "")
-
-                if not actions:
-                    self._add_chat_bubble("Agent Swarm", f"Swarm analysis completed but no code patches generated:\n{desc}", is_user=False)
-                    return
-
-                for action in actions:
-                    if self._cancel_event.is_set():
-                        self._add_chat_bubble("System", "[Stop] Halted before executing swarm patch.", is_user=False)
-                        break
-                    if self._auto_approve:
-                        script_code = action.get("new_value", "")
-                        if script_code:
-                            self._add_chat_bubble("System", f"Auto-approved swarm patch (confidence: {conf*100:.1f}%)", is_user=False)
-                            self._execute_patch(script_code)
-                    else:
-                        self._render_patch_action(action, conf)
-        except asyncio.CancelledError:
-            self._add_chat_bubble("System", "[Stop] Swarm request cancelled.", is_user=False)
-            raise
-        finally:
-            self._set_busy(False)
-
-    # -- Pipeline Executor --
-
-    async def _handle_pipeline_request(self, prompt: str):
-        """
-        Autonomous multi-phase pipeline executor.
-        1. Gets a structured plan from the service
-        2. Executes each phase sequentially with verification
-        3. On failure, asks the LLM to fix and retries once
-        """
-        self._set_busy(True)
-        try:
-            await self._run_pipeline(prompt)
-        except asyncio.CancelledError:
-            self._add_chat_bubble("System", "[Stop] Pipeline cancelled.", is_user=False)
-            raise
-        finally:
-            self._set_busy(False)
-
-    async def _run_pipeline(self, prompt: str):
-
-        self._add_chat_bubble("Pipeline", f"Generating pipeline plan for: {prompt}", is_user=False)
-        if "error" in plan:
-            self._add_chat_bubble("Pipeline", f"Planning failed: {plan['error']}", is_user=False, error=True)
+    def _on_tool_finished(self, payload):
+        tc_id = payload.get("tc_id", "")
+        row = self._live_rows.get(tc_id)
+        if not row:
             return
-
-        title = plan.get("title", "Unnamed Pipeline")
-        phases = plan.get("phases", [])
-        total = len(phases)
-        source = plan.get("source", "unknown")
-
-        self._add_chat_bubble("Pipeline",
-            f"Plan: {title}  ({total} phases, source: {source})",
-            is_user=False)
-
-        # Step 2: Execute each phase
-        results = []
-        for phase in phases:
-            phase_id = phase.get("id", "?")
-            phase_name = phase.get("name", "Unnamed")
-            phase_prompt = phase.get("prompt", "")
-            verification = phase.get("verification")
-            retry_hint = phase.get("retry_hint")
-            is_data_only = phase.get("is_data_only", False)
-
-            self._add_chat_bubble("Pipeline",
-                f"Phase {phase_id}/{total}: {phase_name}",
-                is_user=False)
-
-            # Send phase prompt to the regular chat orchestrator
-            response = await self.service.send_message(phase_prompt)
-
-            if "error" in response:
-                self._add_chat_bubble("Pipeline",
-                    f"Phase {phase_id} service error: {response['error']}",
-                    is_user=False, error=True)
-                results.append({"phase": phase_id, "name": phase_name, "status": "error"})
-                continue
-
-            # Show the LLM's reply
-            for msg in response.get("response_messages", []):
-                content = msg.get("content", "")
-                if content:
-                    self._add_chat_bubble("Isaac Assist", content, is_user=False)
-
-            # Execute code patches (if any)
-            patches = response.get("actions_to_approve") or []
-            phase_success = True
-            phase_output = []
-
-            for i, action in enumerate(patches):
-                code = action.get("code", "")
-                desc = action.get("description", "")
-                if not code:
-                    continue
-
-                self._add_chat_bubble("Pipeline",
-                    f"  Executing patch {i+1}/{len(patches)}: {desc[:80]}",
-                    is_user=False)
-
-                # Execute synchronously on main thread and capture output
-                success, output = await self._execute_patch_sync(code)
-
-                if output:
-                    self._add_chat_bubble("Script Output",
-                        output[:800] + ("..." if len(output) > 800 else ""),
-                        is_user=False)
-
-                # Log to knowledge base
+        success = payload.get("success", True)
+        elapsed_ms = payload.get("elapsed_ms", 0)
+        row["state"] = "done_ok" if success else "done_fail"
+        row["elapsed_lbl"].text = f"{elapsed_ms / 1000:.1f}s"
+        if success:
+            # ✓ U+2713 — confirmed renders OK in this font (used on Confirm Undo button)
+            row["spinner_lbl"].text = "✓"
+            spinner = row["spinner_lbl"]
+            verb = row["verb_lbl"]
+            asyncio.ensure_future(
+                anim.lerp_color(
+                    lambda c, w=spinner: w.__setattr__(
+                        "style", {**(w.style or {}), "color": c}
+                    ),
+                    COL_NV_GREEN,
+                    COL_TEXT_DIM,
+                    ms=400,
+                )
+            )
+            asyncio.ensure_future(
+                anim.lerp_color(
+                    lambda c, w=verb: w.__setattr__(
+                        "style", {**(w.style or {}), "color": c}
+                    ),
+                    COL_TEXT,
+                    COL_TEXT_DIM,
+                    ms=400,
+                )
+            )
+        else:
+            # Calm presentation while in-flight: a failed step that the
+            # agent immediately retries shouldn't read as an alarm. The
+            # row goes to a dim "retrying..." state. Only at agent_reply
+            # do we retroactively paint un-recovered failures red — see
+            # _on_agent_reply / _flag_unrecovered_failures.
+            row["spinner_lbl"].text = "."
+            row["spinner_lbl"].style = {"color": COL_TEXT_SUBTLE, "font_size": 13}
+            current = row["verb_lbl"].text
+            row["verb_lbl"].text = f"{current}  (retrying...)"
+            row["verb_lbl"].style = {
+                **(row["verb_lbl"].style or {}),
+                "color": COL_TEXT_DIM,
+            }
+            # Stash the error in the tooltip so engineers can still
+            # inspect on hover.
+            err = payload.get("error", "")
+            if err:
                 try:
-                    await self.service.log_execution(
-                        code=code, success=success,
-                        output=output[:2000], user_message=phase_prompt,
-                    )
+                    row["verb_lbl"].tooltip = f"FAILED:\n{err[:500]}"
                 except Exception:
                     pass
+        # Between rounds: if no other tools are running, the agent is
+        # back at the LLM waiting for the next round's response. Show a
+        # "Thinking..." row so the user sees the strip is still alive.
+        # _on_tool_started will remove the thinking row when the next
+        # tool fires; agent_reply collapses the whole strip.
+        any_running = any(
+            r.get("state") == "running" for r in self._live_rows.values()
+        )
+        if not any_running and "__thinking__" not in self._live_rows:
+            self._add_thinking_row()
 
-                if not success:
-                    phase_success = False
-                    phase_output.append(f"FAILED: {desc} — {output[:200]}")
-
-                    # Retry once with the error + hint
-                    if retry_hint:
-                        self._add_chat_bubble("Pipeline",
-                            f"  Retrying with fix hint...",
-                            is_user=False)
-                        retry_prompt = (
-                            f"The previous phase '{phase_name}' had an error:\n"
-                            f"{output[:500]}\n\n"
-                            f"Hint: {retry_hint}\n\n"
-                            f"Please fix the issue and regenerate the code."
-                        )
-                        retry_resp = await self.service.send_message(retry_prompt)
-                        retry_patches = retry_resp.get("actions_to_approve") or []
-                        for rp in retry_patches:
-                            rcode = rp.get("code", "")
-                            if rcode:
-                                rsuccess, routput = await self._execute_patch_sync(rcode)
-                                if rsuccess:
-                                    phase_success = True
-                                    self._add_chat_bubble("Pipeline",
-                                        f"  Retry successful!",
-                                        is_user=False)
-                                    break
-                else:
-                    phase_output.append(f"OK: {desc}")
-
-            # Verification (optional)
-            if verification and not is_data_only and phase_success:
-                self._add_chat_bubble("Pipeline",
-                    f"  Verifying: {verification[:100]}",
-                    is_user=False)
-                verify_resp = await self.service.send_message(
-                    f"Verify: {verification} Check the scene summary and report any issues."
+    def _on_spam_halt(self, payload):
+        with self.live_rows_layout:
+            with ui.HStack(height=14):
+                ui.Spacer(width=10)
+                n = payload.get("consecutive_fails", 0)
+                ui.Label(
+                    f"[!] Stopped after {n} failed attempts",
+                    style={"color": COL_AMBER, "font_size": 11},
                 )
-                for msg in verify_resp.get("response_messages", []):
-                    content = msg.get("content", "")
-                    if content:
-                        self._add_chat_bubble("Verification", content, is_user=False)
 
-            status = "ok" if phase_success else "failed"
-            status_icon = "[OK]" if phase_success else "[X]"
-            self._add_chat_bubble("Pipeline",
-                f"{status_icon} Phase {phase_id}: {phase_name} - {status}",
-                is_user=False)
-            results.append({"phase": phase_id, "name": phase_name, "status": status})
-
-            # Allow Kit to process a frame between phases
-            await asyncio.sleep(0.1)
-
-            if self._cancel_event.is_set():
-                self._add_chat_bubble("Pipeline", "[Stop] Pipeline cancelled by user.", is_user=False)
-                break
-
-        # Step 3: Summary
-        ok_count = sum(1 for r in results if r["status"] == "ok")
-        fail_count = total - ok_count
-        summary = f"Pipeline complete: {ok_count}/{total} phases succeeded"
-        if fail_count:
-            summary += f", {fail_count} failed"
-            failed_names = [r["name"] for r in results if r["status"] != "ok"]
-            summary += f" ({', '.join(failed_names)})"
-
-        self._add_chat_bubble("Pipeline", summary, is_user=False)
-
-    async def _execute_patch_sync(self, code: str) -> tuple:
-        """
-        Execute code on the main thread and return (success: bool, output: str).
-        Unlike _execute_patch_async, this does NOT trigger feedback messages —
-        the pipeline executor manages the conversation flow itself.
-        """
-        await asyncio.sleep(0)  # yield to exit any draw callback
-
-        output_buffer = io.StringIO()
-        success = False
-        try:
-            with contextlib.redirect_stdout(output_buffer), contextlib.redirect_stderr(output_buffer):
-                exec_globals = {"__builtins__": __builtins__}
-                exec(code, exec_globals)
-            success = True
-        except Exception as e:
-            output_buffer.write(f"\nRuntime Exception: {e}")
-
-        return success, output_buffer.getvalue().strip()
-
-    def _render_patch_action(self, action: dict, confidence: float):
-        script_code = action.get("new_value", "No code provided.")
-        reasoning = action.get("reasoning", "")
-        
-        with self.chat_layout:
-            with ui.ZStack():
-                ui.Rectangle(style={"background_color": 0xFF2B3A42, "border_radius": 5})
-                with ui.VStack(margin=5, spacing=4):
-                    ui.Label("SWARM EXECUTABLE PATCH", height=15, style={"color": 0xFF00FF00, "font_size": 12, "font_weight": "bold"})
-                    ui.Label(f"Confidence: {confidence*100:.1f}%", height=15, style={"color": 0xFFAAAAAA, "font_size": 11})
-                    ui.Label(f"Reasoning: {reasoning}", word_wrap=True, style={"color": 0xFFDDDDDD})
-                    
-                    ui.Spacer(height=5)
-                    # Render code block
-                    with ui.ZStack():
-                        ui.Rectangle(style={"background_color": 0xFF111111, "border_radius": 3})
-                        with ui.ScrollingFrame(height=150, horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_OFF):
-                            ui.Label(script_code, style={"color": 0xFFDDDDFF, "font_family": "Courier"})
-                            
-                    ui.Spacer(height=5)
-                    swarm_btn = ui.Button("Review & Approve Execution", height=25, style={"background_color": 0xFF22AA22}, clicked_fn=lambda: self._prompt_approval(script_code))
-                    def _on_swarm_approve(btn=swarm_btn):
-                        btn.text = "Review opened..."
-                        btn.enabled = False
-                        btn.set_style({"background_color": 0xFF666666})
-                        self._prompt_approval(script_code)
-                    swarm_btn.set_clicked_fn(_on_swarm_approve)
-
-    def _prompt_approval(self, script_code: str):
-        # Implementation of step 4: Spawn approval window
-        self._approval_window = ui.Window("Policy Approval - Execute Swarm Patch", width=600, height=400)
-        with self._approval_window.frame:
-            with ui.VStack(margin=10, spacing=10):
-                ui.Label("WARNING: The AI swarm has generated the following Python patch. Please review to ensure it is safe before executing within the Omniverse Sandbox.", word_wrap=True, style={"color": 0xFF8888FF})
-                with ui.ScrollingFrame():
-                    ui.Label(script_code, style={"color": 0xFFDDDDFF, "font_family": "Courier"})
-                with ui.HStack(height=30, spacing=10):
-                    ui.Button("EXECUTE PATCH", style={"background_color": 0xFFAA2222}, clicked_fn=lambda: self._execute_patch(script_code))
-                    ui.Button("REJECT", clicked_fn=lambda: self._close_approval_window())
-
-    def _close_approval_window(self):
-        if hasattr(self, '_approval_window') and self._approval_window:
-            self._approval_window.destroy()
-            self._approval_window = None
-
-    def _execute_patch(self, script_code: str):
-        """Defers execution to next frame to avoid omni.ui draw-callback restrictions."""
-        asyncio.ensure_future(self._execute_patch_async(script_code))
-
-    @trace_error("Swarm_Execution_Event")
-    async def _execute_patch_async(self, script_code: str):
-        self._close_approval_window()
-        await asyncio.sleep(0)  # yield to exit draw callback
-        self._add_chat_bubble("System", "Executing patch within Omniverse...", is_user=False)
-        
-        output_buffer = io.StringIO()
-        success = False
-        captured_text = ""
-        
-        try:
-            with contextlib.redirect_stdout(output_buffer), contextlib.redirect_stderr(output_buffer):
-                # Use an explicit globals dict so that functions defined in the
-                # script can see top-level imports (e.g. UsdGeom, Gf).  A bare
-                # exec(code) inside an async method puts imports into the
-                # *function* locals — inner defs can't close over those.
-                exec_globals = {"__builtins__": __builtins__}
-                exec(script_code, exec_globals)
-                
-            success = True
-            captured_text = output_buffer.getvalue().strip()
-            self._add_chat_bubble("System", "Execution Successful.", is_user=False)
-            
-        except Exception as e:
-            captured_text = output_buffer.getvalue().strip()
-            captured_text += f"\nRuntime Exception: {str(e)}"
-            self._add_chat_bubble("System", f"Execution Failed during runtime: {str(e)}", is_user=False, error=True)
-
-        # Truncate and feed back the logs silently to the Swarm!
-        if captured_text:
-            self._add_chat_bubble("Script Output", captured_text[:1500] + ("...\n[TRUNCATED]" if len(captured_text)>1500 else ""), is_user=False)
-            feedback_msg = f"System Report: The patch executed with the following output logs:\n```\n{captured_text}\n```"
-            await self._handle_service_request(feedback_msg)
-
-        # ── Log to audit trail + knowledge base ──────────────────────────
-        try:
-            user_msg = getattr(self, '_last_user_message', '')
-            await self.service.log_execution(
-                code=script_code,
-                success=success,
-                output=captured_text[:2000],
-                user_message=user_msg,
+    def _on_agent_reply(self, payload):
+        text = payload.get("text", "")
+        has_snapshot = payload.get("has_snapshot", False)
+        bubble = self._add_assistant_bubble(text)
+        # Pulse the bubble border to mark "turn complete" peripherally.
+        if bubble and "border_rect" in bubble:
+            asyncio.ensure_future(
+                anim.pulse_widget(
+                    bubble["border_rect"],
+                    "background_color",
+                    COL_BORDER_NEUTRAL,
+                    COL_BORDER_PULSE,
+                    up_ms=300,
+                    down_ms=700,
+                )
             )
-        except Exception as log_err:
-            import carb
-            carb.log_warn(f"[IsaacAssist] Failed to log execution: {log_err}")
+        # Attach the diff chip if a turn_diff_computed event preceded us.
+        diff = getattr(self, "_pending_diff", None)
+        if diff and bubble:
+            self._attach_diff_chip(bubble, diff)
+            # Undo eligibility: turn must have mutated the stage AND a
+            # snapshot must have been captured. The latest mutating
+            # bubble is the only one with a visible ↶ button.
+            if has_snapshot and diff.get("total_changes", 0) > 0:
+                self._transfer_undo_button(bubble, diff)
+            self._pending_diff = None
+        self._collapse_live_strip()
+        self._turn_rendered_via_sse = True
+        # Auto-scroll to the just-added assistant bubble so the user
+        # doesn't have to drag the chat scroll manually after every reply.
+        self._scroll_to_bottom()
 
-    async def _handle_service_request(self, text: str, selected_prim_info: dict = None):
-        self._set_busy(True)
+    def _attach_diff_chip(self, bubble: dict, diff: dict):
+        """Render a small 'Changed: +N added −N removed' chip in the
+        bubble's diff_slot. Hover shows the full path lists."""
+        if not bubble or "diff_slot" not in bubble:
+            return
+        if diff.get("total_changes", 0) == 0:
+            return
+        slot = bubble["diff_slot"]
         try:
-            context = {}
-            if selected_prim_info:
-                context["selected_prim"] = selected_prim_info
-                context["selected_prim_path"] = selected_prim_info.get("path")
-            response = await self.service.send_message(text, context=context)
+            slot.clear()
+            slot.height = ui.Pixel(20)
+        except Exception:
+            return
+        added = diff.get("added_paths", [])
+        rem = diff.get("removed_paths", [])
+        mod = diff.get("modified_paths", [])
+        parts = []
+        if added:
+            parts.append(f"+{len(added)} added")
+        if rem:
+            parts.append(f"-{len(rem)} removed")
+        if mod:
+            parts.append(f"~{len(mod)} modified")
+        full_paths = ""
+        if added:
+            full_paths += "Added:\n  " + "\n  ".join(added[:8])
+        if rem:
+            full_paths += ("\n\n" if full_paths else "") + "Removed:\n  " + "\n  ".join(rem[:8])
+        if mod:
+            full_paths += ("\n\n" if full_paths else "") + "Modified:\n  " + "\n  ".join(mod[:8])
+        with slot:
+            with ui.HStack(height=18):
+                ui.Spacer(width=8)
+                bubble["diff_chip_lbl"] = self._L(
+                    "Changed: " + " ".join(parts),
+                    font_size=10,
+                    style={"color": COL_NV_GREEN},
+                    tooltip=full_paths,
+                )
+                ui.Spacer()
 
-            if "error" in response:
-                self._add_chat_bubble("System", response["error"], is_user=False, error=True)
-            else:
-                for msg in response.get("response_messages", []):
-                    self._add_chat_bubble("Isaac Assist", msg.get("content", ""), is_user=False)
+    def _on_connection_state(self, state):
+        # Cancel any in-flight pulse before switching state, so a previous
+        # reconnecting-pulse doesn't keep mutating the dot after we go green.
+        prev_task = getattr(self, "_dot_pulse_task", None)
+        if prev_task and not prev_task.done():
+            prev_task.cancel()
+        if state == "connected":
+            self.conn_dot.style = {
+                "background_color": COL_DOT_GOOD,
+                "border_radius": 3,
+            }
+        elif state == "reconnecting":
+            # Steady amber baseline + slow pulse to amber-bright. Reads as
+            # "trying" without screaming for attention.
+            self.conn_dot.style = {
+                "background_color": COL_DOT_WARN,
+                "border_radius": 3,
+            }
+            self._dot_pulse_task = asyncio.ensure_future(
+                self._pulse_conn_dot_until_destroyed()
+            )
+        elif state in ("stopped", "error"):
+            self.conn_dot.style = {
+                "background_color": COL_DOT_BAD,
+                "border_radius": 3,
+            }
 
-                actions = response.get("actions_to_approve") or []
-                for action in actions:
-                    if self._cancel_event.is_set():
-                        self._add_chat_bubble("System", "[Stop] Halted before executing patch.", is_user=False)
-                        break
-                    code = action.get("code", "")
-                    desc = action.get("description", "")
-                    if self._auto_approve:
-                        self._add_chat_bubble("System", f"Auto-approved: {desc}", is_user=False)
-                        self._execute_patch(code)
-                    else:
-                        self._render_code_patch(code, desc)
-        except asyncio.CancelledError:
-            self._add_chat_bubble("System", "[Stop] Request cancelled.", is_user=False)
-            raise
-        finally:
-            self._set_busy(False)
+    async def _pulse_conn_dot_until_destroyed(self):
+        # ABGR amber-bright vs amber-dim
+        bright = 0xFF00C8FF
+        dim = 0xFF005A80
+        while not self._destroyed:
+            try:
+                await anim.lerp_color(
+                    lambda c: self.conn_dot.__setattr__(
+                        "style", {"background_color": c, "border_radius": 3}
+                    ),
+                    dim,
+                    bright,
+                    ms=750,
+                )
+                await anim.lerp_color(
+                    lambda c: self.conn_dot.__setattr__(
+                        "style", {"background_color": c, "border_radius": 3}
+                    ),
+                    bright,
+                    dim,
+                    ms=750,
+                )
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                return
 
-    def _add_chat_bubble(self, sender: str, text: str, is_user: bool, error: bool = False):
+    # ═══════════════════════════════════════════════════════════════════════
+    # Live strip operations
+    # ═══════════════════════════════════════════════════════════════════════
+    def _show_live_strip(self):
+        self._live_strip_visible = True
+        self._bump_strip_height()
+
+    def _collapse_live_strip(self):
+        self._live_strip_visible = False
+        self.live_strip_container.height = ui.Pixel(0)
+        self.live_rows_layout.clear()
+        self._live_rows.clear()
+        # Reset header text + stop the wall-clock timer.
+        self._turn_started_at = None
+        try:
+            if hasattr(self, "live_header_lbl") and self.live_header_lbl:
+                self.live_header_lbl.text = "Live"
+        except Exception:
+            pass
+
+    def _add_thinking_row(self):
+        """Placeholder row shown between turn_started and the first tool."""
+        with self.live_rows_layout:
+            with ui.HStack(height=18, spacing=6) as row:
+                ui.Spacer(width=6)
+                spin = self._L(
+                    SPINNER_GLYPHS[0],
+                    font_size=13,
+                    width=14,
+                    style={"color": COL_NV_GREEN},
+                )
+                lbl = self._L(
+                    "Thinking...",
+                    font_size=12,
+                    width=0,
+                    style={"color": COL_TEXT_DIM},
+                )
+        self._live_rows["__thinking__"] = {
+            "row": row,
+            "spinner_lbl": spin,
+            "verb_lbl": lbl,
+            "args_lbl": lbl,  # alias
+            "elapsed_lbl": lbl,
+            "started_at": time.monotonic(),
+            "state": "running",
+            "tool": "__thinking__",
+            "attempts": 1,
+            "tc_id": "__thinking__",
+        }
+        self._bump_strip_height()
+
+    def _remove_thinking_row(self):
+        if "__thinking__" in self._live_rows:
+            r = self._live_rows.pop("__thinking__")
+            try:
+                r["row"].visible = False
+            except Exception:
+                pass
+            self._bump_strip_height()
+
+    def _make_live_row(
+        self,
+        tc_id: str,
+        tool: str,
+        args_preview: str,
+        args_full: dict,
+        description: str = "",
+    ):
+        # ONE natural-language phrase ("Adding Franka Panda") replaces the
+        # old verb + args two-column layout. Tool-name + raw-args go to
+        # the tooltip — engineers can still inspect, normal users see only
+        # what they need. Same one-line shape as the "Thinking..." row.
+        phrase = humanize_tool_action(tool, args_full)
+        full_args_json = json.dumps(args_full, default=str)[:500]
+        tooltip_parts = []
+        if description:
+            tooltip_parts.append(description)
+        tooltip_parts.append(f"{tool}({full_args_json})")
+        phrase_tooltip = "\n\n".join(tooltip_parts)
+
+        with self.live_rows_layout:
+            with ui.HStack(height=18, spacing=6) as row:
+                ui.Spacer(width=6)
+                spinner_lbl = self._L(
+                    SPINNER_GLYPHS[0],
+                    font_size=13,
+                    width=14,
+                    style={"color": COL_NV_GREEN},
+                )
+                verb_lbl = self._L(
+                    phrase,
+                    font_size=12,
+                    width=0,
+                    style={"color": COL_TEXT},
+                    tooltip=phrase_tooltip,
+                )
+                ui.Spacer()
+                elapsed_lbl = self._L(
+                    "0.0s",
+                    font_size=10,
+                    width=40,
+                    style={"color": COL_TEXT_SUBTLE},
+                )
+                ui.Spacer(width=4)
+
+        self._live_rows[tc_id] = {
+            "row": row,
+            "spinner_lbl": spinner_lbl,
+            "verb_lbl": verb_lbl,
+            # args_lbl alias points at the same widget so the existing
+            # failure / retry-compression code paths keep working without
+            # a separate column. They mutate the visible phrase directly.
+            "args_lbl": verb_lbl,
+            "elapsed_lbl": elapsed_lbl,
+            "started_at": time.monotonic(),
+            "state": "running",
+            "tool": tool,
+            "attempts": 1,
+            "tc_id": tc_id,
+        }
+        self._bump_strip_height()
+
+    def _find_recyclable_row(self, tool: str) -> Optional[dict]:
+        candidates = [
+            r for r in self._live_rows.values()
+            if r.get("tool") == tool and r.get("state") == "done_fail"
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda r: r["started_at"])
+
+    def _bump_strip_height(self):
+        n = sum(1 for r in self._live_rows.values() if getattr(r["row"], "visible", True))
+        # 14 (header) + 18 per row + 8 padding
+        self.live_strip_container.height = ui.Pixel(14 + n * 18 + 8) if (self._live_strip_visible and n > 0) else ui.Pixel(28 if self._live_strip_visible else 0)
+
+    async def _tick_loop(self):
+        """Drive spinner glyph + elapsed time for all running rows AND
+        the wall-clock timer in the live-strip header."""
+        i = 0
+        while not self._destroyed:
+            i += 1
+            glyph = SPINNER_GLYPHS[i % len(SPINNER_GLYPHS)]
+            now = time.monotonic()
+            # Header timer: total wall-clock from turn_started → agent_reply.
+            if self._turn_started_at is not None:
+                turn_elapsed = now - self._turn_started_at
+                try:
+                    self.live_header_lbl.text = f"Live - {turn_elapsed:.1f}s"
+                except Exception:
+                    pass
+            for r in list(self._live_rows.values()):
+                if r["state"] != "running":
+                    continue
+                try:
+                    r["spinner_lbl"].text = glyph
+                    elapsed = now - r["started_at"]
+                    if r.get("elapsed_lbl") is not r.get("verb_lbl"):
+                        r["elapsed_lbl"].text = f"{elapsed:.1f}s"
+                    # Color escalation on slow tools
+                    if elapsed > VERY_SLOW_THRESHOLD_S:
+                        r["spinner_lbl"].style = {"color": COL_AMBER, "font_size": 13}
+                    elif elapsed > SLOW_THRESHOLD_S:
+                        r["spinner_lbl"].style = {"color": COL_AMBER_DIM, "font_size": 13}
+                except Exception:
+                    pass  # widget destroyed mid-tick
+            await asyncio.sleep(SPIN_INTERVAL_S)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Bubble rendering
+    # ═══════════════════════════════════════════════════════════════════════
+    def _scroll_to_bottom(self):
+        """Scroll the chat to the latest bubble. Runs after a short
+        delay so omni.ui has actually computed the new content height —
+        setting scroll_y immediately after appending a child is a no-op
+        because layout hasn't run yet. omni.ui ScrollingFrame clamps
+        scroll_y to the actual maximum, so a large value works."""
+        async def _do():
+            await asyncio.sleep(0.05)
+            try:
+                # Big number → clamped to actual max scroll position.
+                self.scroll.scroll_y = 1_000_000
+            except Exception:
+                pass
+        asyncio.ensure_future(_do())
+
+    def _add_user_bubble(self, text: str):
+        # Bubble auto-fits content height. Pattern: ZStack(height=0) over
+        # Rectangle + VStack(margin) → ZStack sizes to VStack's content,
+        # Rectangle fills the ZStack as background. Without height=0 the
+        # ZStack defaults to fractional fill and the bubble grows to
+        # consume the entire scroll area when there are few messages.
         with self.chat_layout:
-            bg_color = 0xFF444444 if is_user else 0xFF222222
-            text_color = 0xFF8888FF if error else 0xFFDDDDDD
-            
-            with ui.ZStack():
-                ui.Rectangle(style={"background_color": bg_color, "border_radius": 5})
-                with ui.VStack(margin=5):
-                    ui.Label(sender, height=15, style={"color": 0xFFAAAAAA, "font_size": 12})
-                    ui.Label(text, word_wrap=True, style={"color": text_color})
+            with ui.HStack(height=0):
+                ui.Spacer(width=24)  # right-bias so user msgs are visually distinct
+                with ui.ZStack(height=0):
+                    ui.Rectangle(
+                        style={"background_color": COL_BG_USER, "border_radius": 6}
+                    )
+                    with ui.VStack(spacing=2):
+                        ui.Spacer(height=4)
+                        with ui.HStack(height=14):
+                            ui.Spacer(width=8)
+                            self._L(
+                                "You",
+                                font_size=10,
+                                width=0,
+                                style={"color": COL_TEXT_SUBTLE},
+                            )
+                            ui.Spacer()
+                            ui.Button(
+                                "R",
+                                width=18,
+                                height=14,
+                                clicked_fn=lambda t=text: self._rerun(t),
+                                style={
+                                    "color": COL_TEXT_SUBTLE,
+                                    "font_size": 10,
+                                    "background_color": 0x00000000,
+                                },
+                                tooltip="Re-run this prompt",
+                            )
+                            ui.Spacer(width=4)
+                        with ui.HStack(height=0):
+                            ui.Spacer(width=8)
+                            self._L(
+                                text,
+                                font_size=12,
+                                word_wrap=True,
+                                style={"color": COL_TEXT},
+                            )
+                            ui.Spacer(width=8)
+                        ui.Spacer(height=4)
 
-    def _render_code_patch(self, code: str, description: str):
-        """Render a code patch card with approve/reject buttons."""
+    def _rerun(self, text: str):
+        self.input_field.model.set_value(text)
+
+    def _add_assistant_bubble(self, text: str, error: bool = False) -> Optional[Dict]:
+        # Same height=0 pattern as user bubble — fits content rather than
+        # filling the available scroll area.
+        bubble_refs: Dict = {}
         with self.chat_layout:
-            with ui.ZStack():
-                ui.Rectangle(style={"background_color": 0xFF1A2A35, "border_radius": 5})
-                with ui.VStack(margin=5, spacing=4):
-                    ui.Label("TOOL-GENERATED PATCH", height=15,
-                             style={"color": 0xFF00CCFF, "font_size": 12, "font_weight": "bold"})
-                    if description:
-                        ui.Label(description, word_wrap=True, style={"color": 0xFFBBBBBB, "font_size": 11})
-                    with ui.ZStack():
-                        ui.Rectangle(style={"background_color": 0xFF111111, "border_radius": 3})
-                        with ui.ScrollingFrame(height=120,
-                                               horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_OFF):
-                            ui.Label(code, style={"color": 0xFFDDDDFF, "font_family": "Courier"})
-                    with ui.HStack(height=25, spacing=8):
-                        approve_btn = ui.Button("Approve & Execute", style={"background_color": 0xFF22AA22},
-                                  clicked_fn=lambda c=code: self._execute_patch(c))
-                        reject_btn = ui.Button("Reject", style={"background_color": 0xFF666666},
-                                  clicked_fn=lambda: asyncio.ensure_future(self._deferred_chat_bubble("System", "Patch rejected.", is_user=False)))
-                        # Capture refs for post-click feedback
-                        def _on_approve(btn=approve_btn, rej=reject_btn, c=code):
-                            btn.text = "Executing..."
-                            btn.enabled = False
-                            btn.set_style({"background_color": 0xFF666666})
-                            rej.visible = False
-                            self._execute_patch(c)
-                        approve_btn.set_clicked_fn(_on_approve)
+            with ui.ZStack(height=0):
+                # Border rect for pulse animation (sits behind body).
+                bubble_refs["border_rect"] = ui.Rectangle(
+                    style={
+                        "background_color": COL_BORDER_NEUTRAL,
+                        "border_radius": 8,
+                    }
+                )
+                with ui.HStack(height=0):
+                    ui.Spacer(width=2)
+                    with ui.ZStack(height=0):
+                        # Inner bg — what dims when the bubble is undone (Phase 6).
+                        bubble_refs["inner_bg_rect"] = ui.Rectangle(
+                            style={
+                                "background_color": COL_BG_ASSIST,
+                                "border_radius": 6,
+                            }
+                        )
+                        with ui.VStack(spacing=2):
+                            ui.Spacer(height=4)
+                            with ui.HStack(height=14):
+                                ui.Spacer(width=8)
+                                bubble_refs["header_lbl"] = self._L(
+                                    "Isaac Assist",
+                                    font_size=10,
+                                    width=0,
+                                    style={"color": COL_TEXT_SUBTLE},
+                                )
+                                ui.Spacer()
+                            with ui.HStack(height=0):
+                                ui.Spacer(width=8)
+                                body_color = COL_RED if error else COL_TEXT
+                                bubble_refs["body_lbl"] = self._L(
+                                    text,
+                                    font_size=12,
+                                    word_wrap=True,
+                                    style={"color": body_color},
+                                )
+                                ui.Spacer(width=8)
+                            # Diff chip + undo button slot. Height grows
+                            # when populated by _attach_diff_chip.
+                            bubble_refs["diff_slot"] = ui.VStack(spacing=0, height=0)
+                            ui.Spacer(height=4)
+                    ui.Spacer(width=24)
+        return bubble_refs
 
-    async def _deferred_chat_bubble(self, sender: str, text: str, is_user: bool, error: bool = False):
-        """Defers _add_chat_bubble to next frame to avoid draw-callback restrictions."""
-        await asyncio.sleep(0)
-        self._add_chat_bubble(sender, text, is_user=is_user, error=error)
+    # ═══════════════════════════════════════════════════════════════════════
+    # Undo (per-bubble ↶, latest-only, soft-confirm)
+    # ═══════════════════════════════════════════════════════════════════════
+    # Snapshot stack lives on disk in turn_snapshot.py (auto-pruned by
+    # restore). UI just tracks which bubbles correspond to undoable
+    # turns. The latest entry has the ↶ button; on undo_applied we
+    # pop + dim, then attach the button to the new latest.
+    def _transfer_undo_button(self, new_bubble: dict, diff: dict):
+        if self._undoable_bubbles:
+            prev = self._undoable_bubbles[-1]
+            self._remove_undo_button(prev)
+        new_bubble["diff_summary"] = diff
+        new_bubble["undo_state"] = "idle"
+        self._attach_undo_button(new_bubble)
+        self._undoable_bubbles.append(new_bubble)
 
+    def _attach_undo_button(self, bubble: dict):
+        slot = bubble.get("diff_slot")
+        if not slot:
+            return
+        # Solid-background button (was transparent + dim text — read as
+        # decoration, not as an interactive control). Same row as the
+        # diff chip, right-aligned. Bigger font + padding so it actually
+        # looks like a button.
+        with slot:
+            with ui.HStack(height=26) as undo_row:
+                ui.Spacer()
+                btn = ui.Button(
+                    "Undo",
+                    width=64,
+                    height=22,
+                    clicked_fn=lambda b=bubble: self._on_undo_clicked(b),
+                    style=UNDO_BTN_STYLE_IDLE,
+                    tooltip=self._undo_tooltip(bubble.get("diff_summary", {})),
+                )
+                ui.Spacer(width=8)
+        bubble["undo_btn"] = btn
+        bubble["undo_row"] = undo_row
+        # Diff chip set slot.height = 20 (chip-only). Now we need room
+        # for a 26 px button row underneath. Without this the button
+        # gets clipped at the slot's bottom edge → user sees a partial
+        # button or it hides behind the next bubble.
+        try:
+            slot.height = ui.Pixel(20 + 26 + 4)
+        except Exception:
+            pass
+
+    def _undo_tooltip(self, diff: dict) -> str:
+        a = diff.get("added_paths", [])
+        r = diff.get("removed_paths", [])
+        m = diff.get("modified_paths", [])
+        parts = []
+        if a:
+            parts.append(f"+{len(a)} added")
+        if r:
+            parts.append(f"-{len(r)} removed")
+        if m:
+            parts.append(f"~{len(m)} modified")
+        head = (
+            "Undo this turn - will revert: " + " ".join(parts)
+            if parts
+            else "Undo this turn"
+        )
+        if a:
+            head += "\n\nAdded:\n  " + "\n  ".join(a[:8])
+        if r:
+            head += "\n\nRemoved:\n  " + "\n  ".join(r[:8])
+        if m:
+            head += "\n\nModified:\n  " + "\n  ".join(m[:8])
+        return head
+
+    def _remove_undo_button(self, bubble: dict):
+        # omni.ui has no clean "remove single child" — hide the row.
+        row = bubble.get("undo_row")
+        if row:
+            try:
+                row.visible = False
+                row.height = ui.Pixel(0)
+            except Exception:
+                pass
+
+    def _on_undo_clicked(self, bubble: dict):
+        if self._turn_active:
+            return  # never undo during a live turn
+        state = bubble.get("undo_state", "idle")
+        btn = bubble.get("undo_btn")
+        if state == "idle":
+            # Confirm state: solid amber background, bigger text, checkmark.
+            # Reads unmistakably as "click here to commit, this is a
+            # destructive action." 3-second window then revert to idle.
+            bubble["undo_state"] = "confirm"
+            btn.text = "Confirm Undo  ✓"
+            btn.style = UNDO_BTN_STYLE_CONFIRM
+            btn.width = ui.Pixel(130)
+            # Make sure the just-changed button is visible — if the bubble
+            # sits at the bottom edge of the chat scroll, the wider Confirm
+            # state would otherwise be partially hidden under the input.
+            self._scroll_to_bottom()
+            asyncio.ensure_future(self._reset_undo_after(bubble, 3.0))
+        elif state == "confirm":
+            bubble["undo_state"] = "pending"
+            btn.text = "Reverting..."
+            btn.style = UNDO_BTN_STYLE_PENDING
+            btn.enabled = False
+            asyncio.ensure_future(self._do_undo())
+
+    async def _reset_undo_after(self, bubble: dict, sec: float):
+        await asyncio.sleep(sec)
+        if bubble.get("undo_state") == "confirm":
+            bubble["undo_state"] = "idle"
+            btn = bubble.get("undo_btn")
+            if btn:
+                btn.text = "Undo"
+                btn.style = UNDO_BTN_STYLE_IDLE
+                btn.width = ui.Pixel(64)
+
+    async def _do_undo(self):
+        # Show progress in the live strip — restore can take a few seconds
+        # on large stages and the user needs to know it's working.
+        self._show_live_strip()
+        with self.live_rows_layout:
+            with ui.HStack(height=18, spacing=6) as row:
+                ui.Spacer(width=6)
+                ui.Label("⠋", width=14, style={"color": COL_AMBER, "font_size": 13})
+                ui.Label(
+                    "Reverting...",
+                    style={"color": COL_TEXT_DIM, "font_size": 12},
+                )
+        self._undo_progress_row = row
+        result = await self.service.undo_turn(steps=1)
+        # Server emits undo_applied/undo_failed via SSE; if POST returned
+        # an error and SSE didn't deliver, surface it locally.
+        if not result.get("ok") and not self._undo_handled_via_sse:
+            self._on_undo_failed({"error": result.get("error", "unknown")})
+
+    def _on_undo_started(self, payload):
+        # If undo was triggered via /undo slash command (not via the
+        # button), there's no "Reverting..." row yet. Render one.
+        if not self._undo_progress_row:
+            self._show_live_strip()
+            with self.live_rows_layout:
+                with ui.HStack(height=18, spacing=6) as row:
+                    ui.Spacer(width=6)
+                    ui.Label("⠋", width=14, style={"color": COL_AMBER, "font_size": 13})
+                    ui.Label(
+                        "Reverting...",
+                        style={"color": COL_TEXT_DIM, "font_size": 12},
+                    )
+            self._undo_progress_row = row
+
+    def _on_undo_applied(self, payload):
+        self._undo_handled_via_sse = True
+        steps = payload.get("steps", 1)
+        for _ in range(min(steps, len(self._undoable_bubbles))):
+            popped = self._undoable_bubbles.pop()
+            self._dim_bubble_as_undone(popped)
+        if self._undoable_bubbles:
+            self._attach_undo_button(self._undoable_bubbles[-1])
+        asyncio.ensure_future(self._collapse_undo_progress())
+
+    def _on_undo_failed(self, payload):
+        self._undo_handled_via_sse = True
+        err = payload.get("error", "unknown error")
+        if self._undoable_bubbles:
+            b = self._undoable_bubbles[-1]
+            b["undo_state"] = "idle"
+            btn = b.get("undo_btn")
+            if btn:
+                btn.text = "Retry Undo"
+                btn.width = ui.Pixel(96)
+                btn.enabled = True
+                btn.style = UNDO_BTN_STYLE_FAILED
+                btn.tooltip = f"Undo failed: {err}\nClick to retry."
+        if self._undo_progress_row:
+            try:
+                self._undo_progress_row.clear()
+                with self._undo_progress_row:
+                    ui.Spacer(width=6)
+                    ui.Label("✗", width=14, style={"color": COL_RED, "font_size": 13})
+                    ui.Label(
+                        f"Undo failed: {str(err)[:50]}",
+                        style={"color": COL_RED, "font_size": 12},
+                    )
+            except Exception:
+                pass
+        asyncio.ensure_future(self._collapse_undo_progress(delay=3.0))
+
+    async def _collapse_undo_progress(self, delay: float = 0.5):
+        await asyncio.sleep(delay)
+        self._collapse_live_strip()
+        self._undo_progress_row = None
+        self._undo_handled_via_sse = False
+
+    def _dim_bubble_as_undone(self, bubble: dict):
+        """Visually mark this bubble as undone: ~50% bg alpha, dim text,
+        '(undone)' header tag, recolor diff chip, remove ↶ button.
+        Bubble stays in the chat scroll as a record of what was tried."""
+        r = bubble.get("inner_bg_rect")
+        if r:
+            try:
+                r.style = {"background_color": 0x801E2125, "border_radius": 6}
+            except Exception:
+                pass
+        for key in ("body_lbl", "header_lbl"):
+            lbl = bubble.get(key)
+            if lbl:
+                try:
+                    cur = lbl.style or {}
+                    lbl.style = {**cur, "color": COL_TEXT_DIM}
+                except Exception:
+                    pass
+        hl = bubble.get("header_lbl")
+        if hl:
+            try:
+                hl.text = "Isaac Assist (undone)"
+            except Exception:
+                pass
+        chip = bubble.get("diff_chip_lbl")
+        if chip:
+            try:
+                chip.style = {"color": COL_TEXT_DIM, "font_size": 10}
+            except Exception:
+                pass
+        self._remove_undo_button(bubble)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Clear chat (soft-confirm)
+    # ═══════════════════════════════════════════════════════════════════════
+    def _on_clear_chat_clicked(self):
+        if self._turn_active:
+            return  # never clear during a live turn
+        if not self._clear_chat_confirm:
+            self._clear_chat_confirm = True
+            self.btn_clear.text = "Confirm?"
+            self.btn_clear.style = {"font_size": 11, "color": COL_AMBER}
+            asyncio.ensure_future(self._reset_clear_chat_after(3.0))
+        else:
+            self._clear_chat_confirm = False
+            self.btn_clear.text = "Clear"
+            self.btn_clear.style = {"font_size": 11}
+            asyncio.ensure_future(self._do_clear_chat())
+
+    async def _reset_clear_chat_after(self, sec: float):
+        await asyncio.sleep(sec)
+        if self._clear_chat_confirm:
+            self._clear_chat_confirm = False
+            self.btn_clear.text = "Clear"
+            self.btn_clear.style = {"font_size": 11}
+
+    async def _do_clear_chat(self):
+        try:
+            await self.service.clear_chat()
+        except Exception as e:
+            logger.warning(f"clear_chat failed: {e}")
+        self.chat_layout.clear()
+        self._undoable_bubbles = []
+        self._chips_shown = True
+        self.chips_container.visible = True
+        self.chips_container.height = ui.Pixel(22)
+        self._collapse_live_strip()
+        # Defense in depth: even if a turn is somehow stuck (server hang,
+        # missed agent_reply), Clear forcibly resets the Stop-button to
+        # idle so the user is never trapped in the "Stopping..." state.
+        self._force_reset_turn_state()
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # New scene (soft-confirm) + LiveKit toggle (existing behavior preserved)
+    # ═══════════════════════════════════════════════════════════════════════
     def _new_scene(self):
-        """Clear the stage and reset conversation history."""
-        asyncio.ensure_future(self._new_scene_async())
+        # Two-click commit pattern: first click changes the button to
+        # "Confirm?" for 3s; a second click within that window actually
+        # wipes; otherwise it reverts to "New". Avoids destroying work
+        # on accidental clicks without a heavy modal dialog.
+        if not getattr(self, "_new_scene_confirm", False):
+            self._new_scene_confirm = True
+            self.btn_new.text = "Confirm?"
+            self.btn_new.style = {"font_size": 11, "color": COL_AMBER}
+            asyncio.ensure_future(self._reset_new_scene_after(3.0))
+        else:
+            self._new_scene_confirm = False
+            self.btn_new.text = "New"
+            self.btn_new.style = {"font_size": 11}
+            asyncio.ensure_future(self._do_new_scene())
 
-    async def _new_scene_async(self):
-        # 1. Open a fresh USD stage
+    async def _reset_new_scene_after(self, sec: float):
+        await asyncio.sleep(sec)
+        if self._new_scene_confirm:
+            self._new_scene_confirm = False
+            self.btn_new.text = "New"
+            self.btn_new.style = {"font_size": 11}
+
+    async def _do_new_scene(self):
         try:
             import omni.usd
             omni.usd.get_context().new_stage()
         except Exception as e:
             logger.error(f"[IsaacAssist] new_stage failed: {e}")
-
-        # 2. Clear server-side conversation history
         try:
             resp = await self.service.reset_session()
             if "error" in resp:
                 logger.warning(f"[IsaacAssist] reset_session error: {resp['error']}")
         except Exception as e:
             logger.warning(f"[IsaacAssist] reset_session call failed: {e}")
-
-        # 3. Clear the chat UI
+        # new_stage() can block Kit's asyncio loop long enough that the SSE
+        # sock_read (30s) trips and the connection lands in a stale state
+        # that backoff-reconnect doesn't always recover from. Force a clean
+        # stop+start cycle so the live-feed is guaranteed alive after the
+        # reset. start_stream is idempotent and re-runs immediately when the
+        # task is None or already finished.
+        try:
+            self.service.stop_stream()
+            await asyncio.sleep(0)  # let the cancel propagate one tick
+        except Exception as e:
+            logger.warning(f"[IsaacAssist] stop_stream failed: {e}")
+        try:
+            self.service.start_stream(self._on_sse_event)
+        except Exception as e:
+            logger.warning(f"[IsaacAssist] start_stream failed: {e}")
         self.chat_layout.clear()
-        await asyncio.sleep(0)
-        self._add_chat_bubble("System", "New scene created. Chat history cleared.", is_user=False)
+        self._undoable_bubbles = []
+        self._collapse_live_strip()
+        # Re-show the empty-state chips after a wipe — feels like a fresh start.
+        self._chips_shown = True
+        self.chips_container.visible = True
+        self.chips_container.height = ui.Pixel(22)
+        # Defense in depth: even if a turn is mid-flight on the server,
+        # New Scene resets the local UI to idle so the user is never
+        # stuck staring at "Stopping..." that never resolves.
+        self._force_reset_turn_state()
+
+    def _force_reset_turn_state(self):
+        """Hard reset to local UI state. Does NOT touch the server.
+
+        Earlier this fired cancel_turn() with a comment claiming to 'drop
+        the lingering flag' — but cancel_turn() SETS the flag (same call
+        as the Stop button), so any New/Clear click would preemptively
+        cancel the next prompt. A conditional 'only-if-was-active' guard
+        followed but didn't survive the async race in _do_new_scene:
+        _force_reset_turn_state runs at the END of the New chain, so by
+        the time it reads _turn_active the user may have already typed
+        and submitted the next prompt — was_active reads True, cancel
+        fires, the brand-new turn gets killed at round 0. The reset
+        button then permanently nukes whatever the user typed next.
+
+        Cleaner contract: New / Clear reset local UI only. The user is
+        the one who decides to cancel a server-side turn — that's the
+        Stop button's job. If the user clicks New mid-turn the server
+        finishes the previous turn quietly, its events are dropped at
+        the UI because we cleared chat_layout.
+        """
+        self._turn_active = False
+        self._turn_rendered_via_sse = False
+        self._turn_started_at = None
+        try:
+            self._set_button_state("idle")
+        except Exception:
+            pass
 
     def _toggle_livekit(self):
         if self.webrtc and self.webrtc._streaming:
-            # Stop streaming
-            self.btn_livekit.text = "Start Vision / Voice"
+            self.btn_livekit.text = "Vision"
             asyncio.ensure_future(self.webrtc.disconnect())
-            self._add_chat_bubble("System", "Vision streaming disconnected.", is_user=False)
         else:
-            # Start streaming
-            self.btn_livekit.text = "Stop Vision"
-            
-            # Use fallback values if environment is missing
+            self.btn_livekit.text = "Stop"
             url = os.environ.get("LIVEKIT_URL", "ws://localhost:7880")
             key = os.environ.get("LIVEKIT_API_KEY", "devkey")
             secret = os.environ.get("LIVEKIT_API_SECRET", "secret")
-            
             if not self.webrtc:
                 self.webrtc = ViewportWebRTCClient(url, key, secret)
-                
             asyncio.ensure_future(self.webrtc.connect_and_publish())
-            self._add_chat_bubble("System", "Connected to LiveKit. The AI can now see your screen and talk to you.", is_user=False)
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # Lifecycle
+    # ═══════════════════════════════════════════════════════════════════════
     def destroy(self):
+        self._destroyed = True
+        if self._spin_task:
+            self._spin_task.cancel()
+        try:
+            self.service.stop_stream()
+        except Exception:
+            pass
         if self.webrtc:
             asyncio.ensure_future(self.webrtc.disconnect())
         super().destroy()

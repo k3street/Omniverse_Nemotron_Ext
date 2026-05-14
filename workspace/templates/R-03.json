@@ -1,0 +1,13 @@
+{
+  "task_id": "R-03",
+  "goal": "Import client's 6-DOF arm URDF cleanly, verify articulation, park it on the floor.",
+  "tools_used": ["import_robot", "verify_import", "run_stage_analysis"],
+  "thoughts": "Last week's floating mess = usually missing inertia + fix_base=False. Use isaacsim.asset.importer.urdf via import_robot with fix_base=True and merge_fixed_joints=True. verify_import catches dropped joint limits, bad mesh scales, base_link offset \u2014 the three gotchas that burn billable hours.",
+  "code": "import_robot(\n    urdf_path=\"<ABS_URDF_PATH>\",        # /home/raj/client_project/arm_v3.urdf\n    dest_path=\"<STAGE_PRIM_PATH>\",        # /World/ArmV3\n    fix_base=True,\n    merge_fixed_joints=True,\n    self_collision=False,\n    convex_decomposition=False\n)\n\nverify_import(prim_path=\"<STAGE_PRIM_PATH>\")\n\nrun_stage_analysis()  # confirm DOF==6, articulation rooted correctly\n\n# If sunk into floor: base_link origin \u2260 mount point. Lift with:\n# set_attribute(prim_path=\"<STAGE_PRIM_PATH>\", attr_name=\"xformOp:translate\", value=[0,0,<BASE_OFFSET>])",
+  "failure_modes": [
+    "URDF path relative or ~-expanded \u2014 kit will not resolve",
+    "Missing <inertial> tags \u2014 arm flops under gravity",
+    "Mesh scale mismatch (URDF in m, STL in mm) \u2014 giant or invisible arm",
+    "Gazebo-only tags (<gazebo>) quietly ignored \u2014 do not treat as bug"
+  ]
+}

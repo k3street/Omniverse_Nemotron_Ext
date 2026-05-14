@@ -1,0 +1,13 @@
+{
+  "task_id": "K-02",
+  "goal": "Point Kenji at the exact Nucleus path for the ABB catalog and honestly say whether IRB 6700-235/2.65 ships — if not, name the URDF import fallback.",
+  "tools_used": ["nucleus_browse", "catalog_search", "lookup_knowledge", "import_robot"],
+  "thoughts": "Kenji is a VC refugee, expects drag-and-drop. Exact path: omniverse://localhost/NVIDIA/Assets/Isaac/5.0/Isaac/Robots/ABB/. The generic IRB 6700 may ship, specific 235/2.65 variant often not — be honest, not 'check the assets'. Fallback: import ABB URDF via isaacsim.asset.importer.urdf (real 5.x importer, NOT omni.isaac.urdf). Do NOT drop Kenji straight into a Python terminal — UI-first, code-fallback.",
+  "code": "# 1. Exact catalog path — not a hand-wave\nnucleus_browse(path=\"omniverse://localhost/NVIDIA/Assets/Isaac/5.0/Isaac/Robots/ABB/\")\n\n# 2. Search the catalog for the specific variant\ncatalog_search(query=\"IRB 6700 235 2.65 variant shipped Isaac Sim 5.0\")\n\n# 3. Asset browser UI doc — this is Kenji's primary path\nlookup_knowledge(query=\"Isaac Sim asset browser drag and drop robot catalog ABB Fanuc coverage\")\n\n# 4. ONLY IF the specific variant is absent: URDF import fallback\n# Acquire URDF from ABB RobotStudio export or official ABB GitHub repo, then:\nimport_robot(\n    urdf_path=\"<ABS_PATH_TO_ABB_URDF>\",\n    dest_path=\"/World/IRB_6700\",\n    fix_base=True,\n    merge_fixed_joints=True\n)\n\n# Honest framing to Kenji:\n#  - Isaac Sim ships fewer robot variants than Visual Components today\n#  - Generic IRB 6700 likely ships; the specific 235/2.65 may not\n#  - For Fanuc R-2000iC and similar: URDF import from vendor repo, not catalog\n#  - Recommend verifying imported TCP frame vs ISO 9787 before trusting it downstream",
+  "failure_modes": [
+    "Vague 'check the Isaac assets folder' — Kenji tried that already",
+    "Promising the 235/2.65 variant is in the catalog without checking",
+    "Using the deprecated 4.x omni.isaac.urdf — silently fails on 5.x",
+    "Dropping Kenji into a Python terminal as primary path — he expected drag-and-drop"
+  ]
+}

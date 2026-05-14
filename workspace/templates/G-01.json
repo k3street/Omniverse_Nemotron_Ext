@@ -1,0 +1,13 @@
+{
+  "task_id": "G-01",
+  "goal": "Place a 1m cube centered at world coordinate (0, 0, 1) and a 0.5m-radius sphere centered at (2, 0, 1) on an empty Isaac Sim stage (Z-up meters). Verify placement with get_world_transform.",
+  "tools_used": ["create_prim", "get_world_transform"],
+  "thoughts": "Simple placement task; precision matters. Isaac Sim is Z-up meters by default. Use create_prim to place each primitive with an explicit xformOp:translate. Never use AddTranslateOp on a prim that already has xformOps — but fresh prims from create_prim don't, so a clean translate op is safe here. Verify with get_world_transform to confirm the translation took effect (catches the case where translate ops were silently dropped by a schema collision).",
+  "code": "# 1. Cube at (0, 0, 1), 1 m edge\ncreate_prim(\n    prim_path=\"/World/Cube\",\n    prim_type=\"Cube\",\n    translate=[0.0, 0.0, 1.0],\n    attributes={\"size\": 1.0}\n)\n\n# 2. Sphere at (2, 0, 1), 0.5 m radius\ncreate_prim(\n    prim_path=\"/World/Sphere\",\n    prim_type=\"Sphere\",\n    translate=[2.0, 0.0, 1.0],\n    attributes={\"radius\": 0.5}\n)\n\n# 3. Verify with world-space transforms\nget_world_transform(prim_path=\"/World/Cube\")\nget_world_transform(prim_path=\"/World/Sphere\")",
+  "failure_modes": [
+    "Placing prims at origin and promising to move them later — does not satisfy the specific-coord task.",
+    "Y-up convention assumption — Isaac Sim is Z-up by default; (0, 1, 0) places the cube in the wrong axis.",
+    "Forgetting to verify with get_world_transform — translate ops can be silently overridden by parent xformOps if the prim is nested.",
+    "Setting size/radius wrong (e.g., 0.5 diameter instead of 0.5 radius for the sphere)."
+  ]
+}

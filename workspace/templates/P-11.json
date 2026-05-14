@@ -1,0 +1,13 @@
+{
+  "task_id": "P-11",
+  "goal": "Find and fix the bottleneck in a ~3 fps SDG run with 40% GPU util — multi-factor triage.",
+  "tools_used": ["benchmark_sdg", "diagnose_performance", "find_heavy_prims", "configure_sdg", "analyze_randomization", "preview_sdg"],
+  "thoughts": "40% GPU util = something CPU-side serialized. Symptom inventory: 4 annotators, path-traced 128 spp 1024x1024, COCO writer, material randomization on 30 apples. Most likely culprits in order: (1) synchronous writer flush per frame — async queue; (2) annotator set generation — drop one during bulk capture; (3) per-prim material randomization walking scene graph every frame; (4) 128 spp path-traced may legitimately be the floor. Don't promise 10x — multi-factor tuning is compounding gains.",
+  "code": "# 1. Break down per-frame time\nprofile = benchmark_sdg(pipeline=\"<PIPE_ID>\", duration_s=60, breakdown=True)\n# Look for: render_ms, annotators_ms, writer_flush_ms, graph_step_ms\n\nperf = diagnose_performance(window_frames=200)\nheavy = find_heavy_prims(top_n=20)\n\n# 2. Fix 1 — async writer\nconfigure_sdg(stage=\"writer\", params={\"flush_mode\": \"async\", \"flush_queue_depth\": 16})\n\n# 3. Fix 2 — trim annotator set during bulk capture\n# If all 4 are training-critical, at least stop computing the unused channel per-frame:\nanalyze_randomization(pipeline=\"<PIPE_ID>\")\nconfigure_sdg(stage=\"annotators\", flags={\"compute_only_when_writer_needs\": True})\n\n# 4. Fix 3 — randomizer graph topology\n# 30 per-apple material randomizers = 30 callbacks/frame; merge into one vectorized randomizer\nconfigure_sdg(stage=\"randomizers\", operation=\"coalesce_material_randomizers\")\n\n# 5. Honest path-tracer tradeoff: 128 spp @ 1024^2 @ path-traced is expensive\n# Try rt_subframes=1 reduce, or spp=64 with denoiser; side-by-side via preview\npreview_sdg(pipeline=\"<PIPE_ID>_tuned\", frame_count=4)",
+  "failure_modes": [
+    "assistant recommends 'buy bigger GPU' as the answer",
+    "assistant promises 10x from a single knob",
+    "assistant drops an annotator Priya explicitly needs",
+    "assistant misses writer-flush serialization as the CPU culprit"
+  ]
+}

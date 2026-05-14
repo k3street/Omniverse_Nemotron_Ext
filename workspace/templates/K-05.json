@@ -1,0 +1,13 @@
+{
+  "task_id": "K-05",
+  "goal": "Verify IRB 6700 swept volume does not breach the 2.5 m ISO 10218-1 clearance to the safety fence across the trajectory — geometric check, NOT safety certification.",
+  "tools_used": ["list_all_prims", "check_collisions", "run_stage_analysis", "set_clearance_monitor", "lookup_knowledge"],
+  "thoughts": "Static collision at sampled poses is weaker than continuous swept-volume — pragmatic middle is dense sampling + inflation margin (e.g. 200 mm). Isaac Sim does NOT replace a notified-body risk assessment; be explicit. ISO 10218-2 separation-distance formula is the engineer's job to apply — the tool computes clearance, the engineer decides pass/fail. 'Just add 500 mm and call it done' is the wrong answer — give the ISO-formula-backed pipeline.",
+  "code": "# 1. Confirm fence + all robot link paths\nlist_all_prims(root=\"/World/Cell/SafetyFence\")\nlist_all_prims(root=\"/World/IRB_6700\", schema_filter=\"PhysicsCollisionAPI\")\n\n# 2. Dense-sample the trajectory for collision+clearance\ncheck_collisions(\n    scope=\"/World/IRB_6700\",\n    other=\"/World/Cell/SafetyFence\",\n    sample_along_trajectory=True,\n    sample_count=\"<N_SAMPLES>\",\n    inflation=\"<MARGIN_M>\"    # e.g. 0.2 m robot inflation\n)\n\n# 3. Geometric sanity on the fence mesh (no holes / degenerate tris invisibly)\nrun_stage_analysis(scope=\"/World/Cell/SafetyFence\")\n\n# 4. Live clearance monitor during the cycle (worst-case per segment)\nset_clearance_monitor(\n    subject=\"/World/IRB_6700\",\n    boundary=\"/World/Cell/SafetyFence\",\n    min_clearance_m=2.5,\n    log_csv=\"<CLEARANCE_CSV>\"\n)\n\n# 5. Ground the scope explicitly: sim = geometric pre-validation, NOT certification\nlookup_knowledge(query=\"ISO 10218-1 10218-2 separation distance formula robot cell safety sim verification\")\n\n# Report format (pass/fail table):\n#  waypoint_segment | worst_clearance_m | pass(>=2.5) | note\n#  1 -> 2           | 2.73              | PASS        | ok\n#  5 -> 6           | 2.41              | FAIL        | joint-2 sweep near east fence\n# CRITICAL: notified-body risk assessment is SEPARATE. This pass/fail is geometric only.",
+  "failure_modes": [
+    "Sampling only at waypoints — between waypoints the sweep can still breach",
+    "Quoting 2.5 m without inflation margin — ignores articulation link radius",
+    "Claiming the output is a SISTEMA-compatible safety report — it is not",
+    "Adding arbitrary 500 mm fudge instead of applying ISO 10218-2 formula"
+  ]
+}

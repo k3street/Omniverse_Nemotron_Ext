@@ -1,0 +1,13 @@
+{
+  "task_id": "J-05",
+  "goal": "Design one-afternoon TA onboarding: launch \u2192 template \u2192 inspect \u2192 modify \u2192 save, each with fallback.",
+  "tools_used": ["scene_aware_starter_prompts", "list_scene_templates", "load_scene_template", "run_stage_analysis", "add_reference", "save_stage"],
+  "thoughts": "TA will grade, not research \u2014 keep to supported 5.x workflow. Pedagogic spine: 5 steps, each has a 'if this fails, try...' branch. Gazebo\u2192Isaac mental model: USD composition is the biggest shift, not the physics. Do NOT drop into Python on day one; Python step is 'paste this snippet', not 'write code'.",
+  "code": "# Session plan (TA follows top-to-bottom):\n\n# (a) Launch Kit \u2014 if splash crash, check driver first\nscene_aware_starter_prompts()          # shows TA what is safe to try\n\n# (b) Load a friendly starter \u2014 tabletop manipulation, small stage\nlist_scene_templates()\nload_scene_template(template_name=\"<TABLETOP_MANIPULATION_STARTER>\")\n# Fallback: if load fails, try <WAREHOUSE_STARTER>\n\n# (c) Inspect \u2014 teach stage panel via run_stage_analysis\nrun_stage_analysis()\n# Fallback: scene_summary() if analysis output too long\n\n# (d) Modify ONE thing \u2014 add a cube, no scripting\nadd_reference(prim_path=\"/World/TestCube\", reference_path=\"<CUBE_USD>\")\n# Fallback: set_attribute on an existing prim if add_reference fails\n\n# (e) Save\nsave_stage(stage_path=\"<TA_FIRST_SCENE_USD>\")\n\n# Gazebo\u2192Isaac note: USD composition (refs + variants) is the mind-shift, not physics.",
+  "failure_modes": [
+    "Dropping TA into Python on day one \u2014 overwhelm",
+    "Skipping save step \u2014 TA loses afternoon's work",
+    "Picking a template that needs custom extension enabled \u2014 unsupported fringe",
+    "Onboarding doc references UI menu that moved in 5.1"
+  ]
+}
