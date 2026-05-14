@@ -6097,13 +6097,15 @@ ISAAC_SIM_TOOLS = [
             "type": "function",
             "function": {
                 "name": "export_policy",
-                "description": "Export GR00T checkpoint to deployment format (TensorRT bf16). Targets: Jetson AGX Orin (5.8 Hz), Jetson Orin NX (~3 Hz, no FP8), x86+RTX 4090 (~15 Hz).",
+                "description": "Export GR00T checkpoint to deployment format (TensorRT bf16). Targets: Jetson AGX Orin (5.8 Hz), Jetson Orin NX (~3 Hz, no FP8), x86+RTX 4090 (~15 Hz). For cloud-run exports supply job_id; output_dir controls where results are written.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "checkpoint": {"type": "string", "description": "Path to .pt checkpoint"},
                         "target_device": {"type": "string", "enum": ["jetson_agx_orin", "jetson_orin_nx", "x86_rtx4090", "x86_a6000"], "description": "Deployment target"},
                         "inference_budget_ms": {"type": "number", "description": "Max inference time per step in ms"},
+                        "job_id": {"type": "string", "description": "Cloud job ID to fetch results from (returned by cloud_launch)"},
+                        "output_dir": {"type": "string", "description": "Local directory to write exported policy files (default: workspace/cloud_results)"},
                     },
                     "required": ["checkpoint", "target_device"],
                 },
