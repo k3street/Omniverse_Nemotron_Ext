@@ -10,6 +10,30 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List
 
+# ---------------------------------------------------------------------------
+# Module-level named constants (extracted 2026-05-14, refactor/magic-1)
+
+# Camera defaults
+_CAM_DEFAULT_FOV_DEG: int = 60           # default horizontal field of view, degrees
+_CAM_DEFAULT_RES: list = [1280, 720]     # default resolution [width, height], pixels
+_CAM_APERTURE_MM: float = 20.955         # standard 35 mm full-frame horizontal aperture, mm
+                                          # used by USD Camera for focal-length calculation
+_CAM_CLIP_NEAR: float = 0.01             # near clip plane distance, meters
+_CAM_CLIP_FAR: float = 1000.0            # far clip plane distance, meters
+
+# Sensor geometry defaults
+_SENSOR_DEFAULT_SCAN_RADIUS_M: float = 0.05  # default barcode / NIR scan zone radius, meters
+_BARCODE_DEFAULT_POSITION: list = [0.4, 0.4, 0.835]  # default barcode sensor mount
+                                                        # [x, y, z] in meters above conveyor
+_NIR_DEFAULT_POSITION: list = [0.4, 0.4, 0.85]  # default NIR sensor mount
+                                                   # [x, y, z] in meters above conveyor
+_LIDAR_MOUNT_OFFSET_Z_M: float = 0.1    # default RTX lidar vertical mount offset, meters
+
+# Force / torque sensor defaults
+_FT_DEFAULT_THRESHOLD_N: float = 5.0    # default force threshold that triggers ftsensor:triggered, Newtons
+
+# Ray / query defaults
+_RAYCAST_DEFAULT_MAX_DISTANCE_M: float = 1000.0  # default maximum ray travel distance, meters
 
 # ---------------------------------------------------------------------------
 # Phase 6 wave 4 — camera + add_sensor + proximity
@@ -22,8 +46,8 @@ def _gen_add_sensor(args: Dict) -> str:
     sensor_type = args["sensor_type"]
 
     if sensor_type == "camera":
-        fov = args.get("fov", 60)
-        res = args.get("resolution", [1280, 720])
+        fov = args.get("fov", _CAM_DEFAULT_FOV_DEG)
+        res = args.get("resolution", _CAM_DEFAULT_RES)
         return f"""\
 import omni.usd
 from pxr import UsdGeom, Sdf, Gf
@@ -31,9 +55,9 @@ from pxr import UsdGeom, Sdf, Gf
 stage = omni.usd.get_context().get_stage()
 cam_path = '{prim_path}/Camera'
 cam = UsdGeom.Camera.Define(stage, cam_path)
-cam.GetHorizontalApertureAttr().Set(20.955)
-cam.GetFocalLengthAttr().Set(10.0 * 20.955 / (2.0 * __import__('math').tan(__import__('math').radians({fov}/2))))
-cam.GetClippingRangeAttr().Set(Gf.Vec2f(0.01, 1000.0))
+cam.GetHorizontalApertureAttr().Set({_CAM_APERTURE_MM})
+cam.GetFocalLengthAttr().Set(10.0 * {_CAM_APERTURE_MM} / (2.0 * __import__('math').tan(__import__('math').radians({fov}/2))))
+cam.GetClippingRangeAttr().Set(Gf.Vec2f({_CAM_CLIP_NEAR}, {_CAM_CLIP_FAR}))
 """
     if sensor_type == "rtx_lidar":
         return f"""\
@@ -43,7 +67,7 @@ from pxr import UsdGeom, Gf
 stage = omni.usd.get_context().get_stage()
 lidar_path = '{prim_path}/RTXLidar'
 lidar_prim = stage.DefinePrim(lidar_path, 'Camera')
-_safe_set_translate(lidar_prim, (0, 0, 0.1))
+_safe_set_translate(lidar_prim, (0, 0, {_LIDAR_MOUNT_OFFSET_Z_M}))
 
 # Configure RTX Lidar via Isaac Sim extension
 from isaacsim.sensors.rtx import LidarRtx
@@ -398,7 +422,7 @@ async def _handle_add_force_torque_sensor(args: Dict) -> Dict:
     from .. import kit_tools
     sensor_path: str = args["sensor_path"]
     parent_path: str = args["parent_path"]
-    threshold: float = float(args.get("threshold", 5.0))
+    threshold: float = float(args.get("threshold", _FT_DEFAULT_THRESHOLD_N))
     noise_std: float = float(args.get("noise_std", 0.0))
     publish_topic: str | None = args.get("publish_topic", None) or None
 
@@ -643,8 +667,8 @@ async def _handle_barcode_reader_sensor(args: Dict) -> Dict:
     """
     from .. import kit_tools
     sensor_path = args["sensor_path"]
-    position = args.get("position", [0.4, 0.4, 0.835])
-    scan_radius = float(args.get("scan_radius", 0.05))
+    position = args.get("position", _BARCODE_DEFAULT_POSITION)
+    scan_radius = float(args.get("scan_radius", _SENSOR_DEFAULT_SCAN_RADIUS_M))
 
     code = f"""\
 import omni.usd, json
@@ -759,8 +783,8 @@ async def _handle_nir_material_sensor(args: Dict) -> Dict:
     """
     from .. import kit_tools
     sensor_path = args["sensor_path"]
-    position = args.get("position", [0.4, 0.4, 0.85])
-    scan_radius = float(args.get("scan_radius", 0.05))
+    position = args.get("position", _NIR_DEFAULT_POSITION)
+    scan_radius = float(args.get("scan_radius", _SENSOR_DEFAULT_SCAN_RADIUS_M))
 
     code = f"""\
 import omni.usd, json
@@ -879,7 +903,7 @@ async def _handle_raycast(args: Dict) -> Dict:
     from .. import kit_tools
     origin = args["origin"]
     direction = args["direction"]
-    max_distance = float(args.get("max_distance", 1000.0))
+    max_distance = float(args.get("max_distance", _RAYCAST_DEFAULT_MAX_DISTANCE_M))
     code = f"""\
 import json
 
