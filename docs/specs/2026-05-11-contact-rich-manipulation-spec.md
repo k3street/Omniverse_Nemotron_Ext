@@ -789,7 +789,7 @@ the small `opus-judgment` / `opus-runtime` subset.**
 - **LOC**: ~50
 - **Blocked-by**: CRM-B2
 - **Verify**: `pytest tests/test_compliance_handlers.py::TestRelease` ≥4 tests
-- **STATUS**: pending
+- **STATUS**: done
 
 ### 18.3 Phase C — Auto-pick + bridge
 
