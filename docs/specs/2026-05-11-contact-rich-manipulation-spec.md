@@ -763,7 +763,7 @@ the small `opus-judgment` / `opus-runtime` subset.**
 - **LOC**: ~50
 - **Blocked-by**: none (independent of A1/A2)
 - **Verify**: `python -m pytest tests/test_ft_sensor_extension.py --tb=short` ≥4 tests; existing F/T sensor tests still pass.
-- **STATUS**: pending
+- **STATUS**: done — 13ee339
 
 ### 18.2 Phase B — Variants
 
