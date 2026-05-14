@@ -60,6 +60,7 @@ class OpenAICompatProvider:
     """
 
     def __init__(self, api_key: str, model: str, base_url: str):
+        """Initialise with API key, model identifier, and the full completions endpoint URL."""
         self.api_key = api_key
         self.model = model
         self.base_url = base_url
@@ -159,6 +160,7 @@ class OpenAICompatProvider:
                 return LLMResponse(text=f"Connection failed: {e}")
 
     def _parse_actions(self, text: str) -> List[Dict]:
+        """Extract fenced Python code blocks from model text as action dicts."""
         actions = []
         if text and "```python" in text:
             for block in text.split("```python")[1:]:

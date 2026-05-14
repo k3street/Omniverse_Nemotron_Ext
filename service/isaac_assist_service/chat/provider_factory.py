@@ -79,6 +79,7 @@ def get_llm_provider():
 
 
 def _require(value: str, key_name: str, mode: str):
+    """Raise ``ValueError`` if ``value`` is falsy, citing the missing env var and mode."""
     if not value:
         raise ValueError(f"LLM_MODE={mode} but {key_name} is missing from .env")
 

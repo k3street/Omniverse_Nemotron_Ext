@@ -49,6 +49,7 @@ class AnthropicProvider:
     ANTHROPIC_VERSION = "2023-06-01"
 
     def __init__(self, api_key: str, model: str = "claude-opus-4-6"):
+        """Initialise with an Anthropic API key and model identifier."""
         self.api_key = api_key
         self.model = model
 
@@ -172,6 +173,7 @@ class AnthropicProvider:
         )
 
     def _parse_actions(self, text: str) -> List[Dict]:
+        """Extract fenced Python code blocks from model text as action dicts."""
         actions = []
         if text and "```python" in text:
             for block in text.split("```python")[1:]:

@@ -48,6 +48,15 @@ logger = logging.getLogger(__name__)
 
 
 class NegotiationResult(TypedDict):
+    """Output of the intent-clarification gate.
+
+    Attributes:
+        needs_clarification: True when the assistant should ask at least one
+            question before proceeding with a complex request.
+        questions: Short, agent-ready questions — one per ambiguous dimension.
+        reasoning: One-line explanation of the decision, for telemetry / debug.
+    """
+
     needs_clarification: bool
     questions: list[str]   # one short question per missing piece, agent-ready
     reasoning: str         # one-line explanation, for telemetry / debug

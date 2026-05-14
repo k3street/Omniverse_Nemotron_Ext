@@ -29,6 +29,15 @@ logger = logging.getLogger(__name__)
 
 
 class GapReport(TypedDict):
+    """Result of comparing a spec's expected tool chain against the live registry.
+
+    Attributes:
+        matched: Tool names that resolve exactly against the registry.
+        partial: Map of expected name to closest registered alternative.
+        missing: Expected names with no plausible match in the registry.
+        notes: One-line human-readable summary for telemetry / debug logs.
+    """
+
     matched: list[str]                 # exact-match tool names
     partial: dict[str, str]            # expected_name → closest registered
     missing: list[str]                 # no plausible match

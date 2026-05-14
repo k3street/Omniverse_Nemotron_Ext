@@ -179,6 +179,7 @@ class GeminiProvider:
     with automatic retry and Gemini 3.x thought-signature round-trip.
     """
     def __init__(self, api_key: str, model: str = "gemini-robotics-er-1.6-preview"):
+        """Initialise with a Gemini API key, model name, and derived endpoint URL."""
         self.api_key = api_key
         self.model = model
         self.base_url = (
@@ -488,6 +489,7 @@ class GeminiProvider:
         return cleaned
 
     def _parse_actions(self, text: str) -> List[Dict]:
+        """Extract fenced Python code blocks from model text as action dicts."""
         actions = []
         if text and "```python" in text:
             blocks = text.split("```python")

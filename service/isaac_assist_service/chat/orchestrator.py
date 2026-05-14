@@ -601,6 +601,7 @@ class ChatOrchestrator:
     """
 
     def __init__(self):
+        """Initialise LLM provider, optional distiller provider, and empty per-session caches."""
         self.llm_provider = get_llm_provider()
         try:
             self._distiller_provider = get_distiller_provider()
@@ -665,6 +666,7 @@ class ChatOrchestrator:
         _slash = parse_slash(user_message)
         if _slash is not None:
             def _slash_emit(ev_type: str, payload: Dict[str, Any]) -> None:
+                """Thin wrapper forwarding slash-command trace events to the session tracer."""
                 _trace_emit(session_id, ev_type, payload)
 
             reply = await execute_slash(
@@ -1173,6 +1175,8 @@ class ChatOrchestrator:
         # stub object that exposes .text — keeps the existing reply-assembly
         # code path uniform without sprinkling None checks everywhere.
         class _StubResponse:
+            """Minimal stand-in for LLMResponse used when a cancel fires before the first LLM round."""
+
             text = ""
             actions = None
             tool_calls = None
