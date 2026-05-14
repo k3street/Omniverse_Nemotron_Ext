@@ -159,6 +159,29 @@ def check_no_shell_true() -> List[Dict]:
 # Q21: Honesty gate — handlers returning bare `return` / `return None`
 # ---------------------------------------------------------------------------
 
+def _direct_descendants(func: ast.AST, types: Tuple[type, ...]) -> List[ast.AST]:
+    """Find nodes of `types` whose enclosing scope is `func` — NOT a
+    nested def/async-def/lambda/comprehension.
+
+    Critical for scope-aware checks: Python `return` inside a nested
+    helper belongs to that helper, not the outer handler.
+    """
+    out: List[ast.AST] = []
+    SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+    def walk(n: ast.AST) -> None:
+        for child in ast.iter_child_nodes(n):
+            if isinstance(child, SCOPES):
+                # Stop — nested scope owns its own subtree
+                continue
+            if isinstance(child, types):
+                out.append(child)
+            walk(child)
+
+    walk(func)
+    return out
+
+
 def check_section_19_honesty() -> List[Dict]:
     hits = []
     for path in iter_py_files(HANDLERS_ROOT):
@@ -170,8 +193,8 @@ def check_section_19_honesty() -> List[Dict]:
                 continue
             if not node.name.startswith("_handle_"):
                 continue
-            returns = [s for s in ast.walk(node) if isinstance(s, ast.Return)]
-            raises = [s for s in ast.walk(node) if isinstance(s, ast.Raise)]
+            returns = _direct_descendants(node, (ast.Return,))
+            raises = _direct_descendants(node, (ast.Raise,))
             if not returns and not raises:
                 hits.append({
                     "file": rel(path),

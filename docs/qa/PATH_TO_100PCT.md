@@ -43,7 +43,23 @@ Handler count ratchet: 230 (baseline).
 
 ## Action steps
 
-Cheap-and-fast first (small surface, big PASS-rate gain), then docstring + size sweep.
+**Insight 2026-05-14:** Audit-scriptet är själv subject för "är det 100%?".
+Demonstrerad bugg: `check_section_19_honesty` walk:ar Return-noder i
+nested helper-defs och flaggar `return None` i hjälpfunktioner som
+honesty-hål. False positives = jaga fantomer.
+
+**Konsekvens:** Fas 0 nedan **måste** köras före Wave 5a fix-passes.
+
+### Fas 0 — Validera audit-scriptet (max-effort session start here)
+
+- [ ] **V1 — Skapa positive/negative fixtures per check**: `tests/qa_audit_fixtures/` med tydligt korrekt + tydligt fel kod-snippets. Kör audit på dem, assert expected hit-count per fixture.
+- [ ] **V2 — Fix `_direct_returns` scope-isolation**: använd `ast.iter_child_nodes` recursivt men stoppa vid nested `FunctionDef`/`AsyncFunctionDef`/`Lambda`. Verifiera mot V1-fixtures.
+- [ ] **V3 — Audit varje check för samma "nested scope" issue**: `check_silent_failures`, `check_no_blocking_io_in_async`, alla AST-walks som scope-överstiger.
+- [ ] **V4 — Mutation test scriptet**: medveten introducera 1 bug i varje check, verifiera att test catchar.
+- [ ] **V5 — Code review checklist**: false-positive risk, false-negative risk, scope correctness, deterministic-given-input. Bocka av per check.
+- [ ] **V6 — Definiera ratchet-tröskel per check**: vissa fails är acceptabla (e.g. 1 legitim `exec` med `# noqa: audit-Q9`-kommentar). Audit ska honor `# noqa: audit-QX`-suppressioner.
+- [ ] **V7 — Validate scriptet är 100%**: dokumentera i `docs/qa/AUDIT_VALIDATION.md` att varje check har positive fixture + negative fixture + zero known false positives/negatives.
+- [ ] **V8 — Kör validated audit → new baseline**: detta är den första pålitliga 100%-mätningen.
 
 ### Surface-level fixes (Wave 5a)
 
