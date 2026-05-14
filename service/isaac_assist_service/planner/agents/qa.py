@@ -214,6 +214,15 @@ class QAAgent(AgentBase):
         )
 
     def _run_block(self, code: str) -> SimResult:
+        """Execute a single code block in a subprocess and return the raw SimResult.
+
+        Args:
+            code (str): Python source code to run.
+
+        Returns:
+            SimResult: Execution outcome including stdout, stderr, exit code, and
+            parsed error/antipattern flags.
+        """
         from .sim_harness import run_code
         return run_code(code, mode=self.sim_mode, timeout=self.timeout)
 
@@ -221,7 +230,15 @@ class QAAgent(AgentBase):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _first_tb(sim_results: list[tuple[str, SimResult]]) -> str:
-    """Extract the first traceback found across all sim results."""
+    """Extract and shorten the first Python traceback found across all sim results.
+
+    Args:
+        sim_results (list[tuple[str, SimResult]]): Ordered list of (code, SimResult) pairs.
+
+    Returns:
+        str: The traceback text (up to 20 lines) shortened to 400 chars,
+        or an empty string if no traceback is present in any result.
+    """
     for _, sr in sim_results:
         combined = sr.stdout + "\n" + sr.stderr
         lines    = combined.splitlines()
