@@ -41,6 +41,7 @@ class Distribution(BaseModel):
     @field_validator("std")
     @classmethod
     def _std_must_be_finite(cls, v: float) -> float:
+        """Reject NaN or infinite standard-deviation values."""
         if math.isnan(v) or math.isinf(v):
             raise ValueError(f"Distribution.std must be finite, got {v!r}")
         return v
@@ -48,6 +49,7 @@ class Distribution(BaseModel):
     @field_validator("mean")
     @classmethod
     def _mean_must_be_finite(cls, v: float) -> float:
+        """Reject NaN or infinite mean values."""
         if math.isnan(v) or math.isinf(v):
             raise ValueError(f"Distribution.mean must be finite, got {v!r}")
         return v

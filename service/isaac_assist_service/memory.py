@@ -15,6 +15,7 @@ class MemoryManager:
     providing Short-Term context across service restarts.
     """
     def __init__(self, db_path: str = "memory.db"):
+        """Initialise the SQLite-backed memory manager and create the schema if absent."""
         self.db_path = os.path.join(os.path.dirname(__file__), db_path)
         self._init_db()
 

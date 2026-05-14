@@ -24,9 +24,21 @@ router = APIRouter()
 settings_manager = SettingsManager()
 
 class SettingsUpdateRequest(BaseModel):
+    """Request body for the settings ``POST /`` endpoint.
+
+    Attributes:
+        settings: Flat dict of env-var name → string value pairs to persist.
+    """
+
     settings: Dict[str, str]
 
 class ModelPullRequest(BaseModel):
+    """Request body for the ``/pull_local`` endpoint.
+
+    Attributes:
+        model_name: Ollama model tag to pull (e.g. ``"qwen2.5:7b"``).
+    """
+
     model_name: str
 
 @router.get("/")
@@ -78,6 +90,13 @@ VALID_MODES = ("local", "cloud", "anthropic", "openai", "grok", "moonshot")
 
 
 class ModeSwitchRequest(BaseModel):
+    """Request body for the ``PUT /llm_mode`` endpoint.
+
+    Attributes:
+        mode: Target LLM mode; one of ``"local"``, ``"cloud"``, ``"anthropic"``,
+            ``"openai"``, ``"grok"``, or ``"moonshot"``.
+    """
+
     mode: str
 
 

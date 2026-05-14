@@ -32,6 +32,7 @@ class SettingsManager:
     _INT_KEYS  = {"MAX_TOOL_ROUNDS"}
 
     def __init__(self):
+        """Set the target ``.env`` path (service root, alongside ``config.py``)."""
         # We target the .env located right next to the main config.py
         self.env_path = Path(os.path.dirname(os.path.dirname(__file__))) / ".env"
     

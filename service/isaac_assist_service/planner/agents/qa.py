@@ -43,6 +43,7 @@ class QAAgent(AgentBase):
         sim_mode: str = "auto",
         timeout: int = 45,
     ) -> None:
+        """Initialise the QA agent with simulation mode and per-block subprocess timeout."""
         self.sim_mode = sim_mode
         self.timeout  = timeout
 

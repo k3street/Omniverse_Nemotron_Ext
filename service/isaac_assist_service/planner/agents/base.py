@@ -61,6 +61,7 @@ class AgentResult:
 
     @property
     def passed(self) -> bool:
+        """Return True when the agent result status is ``"pass"``."""
         return self.status == "pass"
 
     @property
@@ -72,6 +73,7 @@ class AgentResult:
 
     @property
     def failed_criteria(self) -> list[Criterion]:
+        """Return only the :class:`Criterion` instances that did not pass."""
         return [c for c in self.criteria if not c.passed]
 
     # ── Serialisation ─────────────────────────────────────────────────────────

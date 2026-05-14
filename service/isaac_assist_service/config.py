@@ -31,6 +31,13 @@ class Config:
     """
 
     def __init__(self):
+        """Load .env files and populate all configuration attributes.
+
+        Env files are loaded in priority order (last wins):
+        ``.env`` (repo root) → ``service/.env`` → ``.env.local``.
+        Existing ``os.environ`` values are never overwritten so test fixtures
+        can inject values before constructing a ``Config`` instance.
+        """
         # Load env files in priority order (last loaded wins)
         # .env (root) → service .env → .env.local (highest priority, overrides all)
         for env_path in [

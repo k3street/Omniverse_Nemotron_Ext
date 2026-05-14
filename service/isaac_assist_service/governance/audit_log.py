@@ -19,6 +19,7 @@ class AuditLogger:
     """Append-only writer and reverse-chronological reader for the governance audit log."""
 
     def __init__(self, log_path: str = "workspace/audit.jsonl"):
+        """Initialise the logger, creating the log file and parent directories if absent."""
         self.log_path = Path(log_path)
         self._ensure_log_file()
 

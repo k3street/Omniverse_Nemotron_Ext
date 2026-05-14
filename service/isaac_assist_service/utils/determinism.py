@@ -97,6 +97,7 @@ class DeterminismToken:
     version: str = _TOKEN_VERSION
 
     def __post_init__(self) -> None:
+        """Validate seed range (0 ≤ seed < 2**64) and content_hash length (32 bytes)."""
         if not (0 <= self.seed < 2**64):
             raise ValueError(
                 f"seed must fit in unsigned 64-bit, got {self.seed!r}"

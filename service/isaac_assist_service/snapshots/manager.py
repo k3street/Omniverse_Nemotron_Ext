@@ -26,6 +26,7 @@ class SnapshotManager:
     """Create, list, and prune USD stage snapshots on local disk."""
 
     def __init__(self):
+        """Ensure the snapshot root directory exists."""
         os.makedirs(SNAPSHOT_ROOT, exist_ok=True)
     
     def _prune_old_snapshots(self):

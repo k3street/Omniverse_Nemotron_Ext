@@ -16,6 +16,7 @@ class DocumentIndexer:
     """Splits a raw document into paragraph chunks and writes them to FTSStore."""
 
     def __init__(self):
+        """Initialise the indexer and open a connection to the FTS5 document store."""
         self.store = FTSStore()
 
     def index_document(self, source_id: str, raw_text: str, url: str, version: str):

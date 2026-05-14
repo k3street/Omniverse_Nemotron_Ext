@@ -66,6 +66,12 @@ class SecretRedactor:
     """Uses regex patterns to prevent accidental credential leakage."""
 
     def __init__(self, config: GovernanceConfig = None):
+        """Compile config-driven and always-on extended regex patterns for redaction.
+
+        Pattern order is config-driven first, then the extended set from
+        ``EXTENDED_SECRET_PATTERNS``.  Order does not affect correctness because
+        all matches are replaced with the same ``[REDACTED_SECRET]`` placeholder.
+        """
         self.config = config or GovernanceConfig()
         # Config-driven patterns first, then the always-on extended set
         # (Phase 90). Order does not matter for correctness because every
