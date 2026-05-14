@@ -43,7 +43,7 @@ from ...multimodal.persistence import (
     MultimodalStore,
     RevisionConflictError,
 )
-from ...multimodal.ratify import ratify, RatifyResult
+from ...multimodal.ratify import ratify, RatifyResult, resolve_compliance
 from ...multimodal.types import Position, Size
 
 logger = logging.getLogger(__name__)
@@ -276,6 +276,26 @@ async def _handle_apply_layout_spec_to_scene(args: Dict[str, Any]) -> Dict[str, 
         payload["bindings"] = {
             role: {"object_id": b.object_id, "source": b.source}
             for role, b in result.bindings.items()
+        }
+        # CRM-C2 + CRM-C3 wire-in: auto-pick compliance mode from intent
+        # + role bindings, OR validate an explicit override if the
+        # LayoutSpec carries one. Result lives under "compliance_resolution"
+        # so the canonical-pipeline build path can read the resolved mode
+        # without re-running the auto-pick logic.
+        compliance = resolve_compliance(spec, result)
+        payload["compliance_resolution"] = {
+            "mode": compliance.mode,
+            "source": compliance.source,
+            "violations": [
+                {
+                    "constraint_id": getattr(v, "constraint_id", None),
+                    "severity": str(getattr(v, "severity", "")),
+                    "message": getattr(v, "message", ""),
+                }
+                for v in compliance.violations
+            ],
+            "hard_violation": compliance.hard_violation,
+            "diagnostics": list(compliance.diagnostics),
         }
         payload["next_step"] = (
             "ratified ok — caller should invoke canonical-pipeline build via "

@@ -46,8 +46,12 @@ from typing import Any, Dict, List
 
 import pytest
 
-# All tests in this file are opt-in via -m compliance_e2e.
-pytestmark = pytest.mark.compliance_e2e
+# The first four classes test structural planning invariants and do not
+# require live Kit — those run under the default l0 marker. The fifth
+# (TestKitRpcSmoke) is the only opt-in compliance_e2e class because it
+# actually pokes the running Kit RPC. Per CRM honesty audit
+# 2026-05-14 §CRM-T3 — flagged that all-opt-in left high-value pure-
+# Python assertions out of CI runs.
 
 
 # Constants — keep magic numbers out of the test body.
@@ -164,6 +168,7 @@ async def _kit_rpc_alive() -> bool:
 # Test 1 — auto-pick resolves to admittance for Franka peg-in-hole
 
 
+@pytest.mark.l0
 class TestAutopickResolvesToAdmittance:
     """Per spec §4.1: Franka + has_contact_phase + no real-robot tag → admittance."""
 
@@ -193,6 +198,7 @@ class TestAutopickResolvesToAdmittance:
 # Test 2 — admittance plan yields n_compliant > 0
 
 
+@pytest.mark.l0
 class TestAdmittancePlanHasCompliantPhase:
     """Per spec §9.3: admittance run must have at least one compliant waypoint."""
 
@@ -259,6 +265,7 @@ class TestAdmittancePlanHasCompliantPhase:
 # Test 3 — rigid baseline plan yields n_compliant == 0
 
 
+@pytest.mark.l0
 class TestRigidBaselineHasNoCompliantPhase:
     """Per spec §9.3: rigid baseline must have zero compliant waypoints."""
 
@@ -333,6 +340,7 @@ class TestRigidBaselineHasNoCompliantPhase:
 # Test 4 — admittance vs rigid comparison (the spec §9.3 invariant)
 
 
+@pytest.mark.l0
 class TestAdmittanceVsRigidComparison:
     """Spec §9.3 invariant: admittance has compliant waypoints; rigid does not."""
 
@@ -412,6 +420,7 @@ class TestAdmittanceVsRigidComparison:
 # Test 5 — live Kit RPC smoke (skipped if Kit unreachable)
 
 
+@pytest.mark.compliance_e2e
 class TestKitRpcSmoke:
     """Live Kit smoke — assert the bridge survived through to the test.
 

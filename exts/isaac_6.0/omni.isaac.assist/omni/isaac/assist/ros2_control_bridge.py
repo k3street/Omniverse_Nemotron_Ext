@@ -139,15 +139,31 @@ class Ros2ControlBridge:
     # ------------------------------------------------------------------
 
     def start(self) -> Dict[str, Any]:
-        """Spin up the rclpy node. Idempotent — second call is a no-op."""
+        """Spin up the rclpy node. Idempotent — second call is a no-op.
+
+        Returns:
+            Dict with:
+              * ``success`` (bool) — Section 19 honesty key. True when the
+                node is up after this call (whether newly created or
+                already-started). False on rclpy missing or creation error.
+              * ``available`` (bool) — rclpy importable in this process.
+              * ``started`` (bool) — node currently running.
+              * ``reason`` (str, optional) — populated on failure or no-op.
+        """
         if not _RCLPY_AVAILABLE:
             return {
+                "success": False,
                 "available": False,
                 "started": False,
                 "reason": "rclpy not importable",
             }
         if self._started:
-            return {"available": True, "started": True, "reason": "already started"}
+            return {
+                "success": True,
+                "available": True,
+                "started": True,
+                "reason": "already started",
+            }
         try:
             if not rclpy.ok():
                 rclpy.init(args=None)
@@ -158,19 +174,34 @@ class Ros2ControlBridge:
                 self._node_name,
                 self._domain_id,
             )
-            return {"available": True, "started": True}
+            return {"success": True, "available": True, "started": True}
         except Exception as exc:
             logger.exception("[ros2_control_bridge] start() failed")
             return {
+                "success": False,
                 "available": True,
                 "started": False,
                 "reason": f"rclpy node creation failed: {exc}",
             }
 
     def stop(self) -> Dict[str, Any]:
-        """Destroy publishers, subscribers, then the node. Idempotent."""
+        """Destroy publishers, subscribers, then the node. Idempotent.
+
+        Returns:
+            Dict with:
+              * ``success`` (bool) — Section 19 honesty key. True when
+                the bridge is in a stopped state after this call.
+              * ``available`` (bool) — rclpy importable.
+              * ``stopped`` (bool) — node currently torn down.
+              * ``reason`` (str, optional) — populated on no-op or failure.
+        """
         if not self._started:
-            return {"available": _RCLPY_AVAILABLE, "stopped": True, "reason": "not started"}
+            return {
+                "success": True,
+                "available": _RCLPY_AVAILABLE,
+                "stopped": True,
+                "reason": "not started",
+            }
         try:
             for pub in self._ft_publishers.values():
                 if pub.handle is not None and self._node is not None:
@@ -193,10 +224,11 @@ class Ros2ControlBridge:
                     pass
             self._node = None
             self._started = False
-            return {"available": True, "stopped": True}
+            return {"success": True, "available": True, "stopped": True}
         except Exception as exc:
             logger.exception("[ros2_control_bridge] stop() failed")
             return {
+                "success": False,
                 "available": True,
                 "stopped": False,
                 "reason": f"shutdown failed: {exc}",
