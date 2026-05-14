@@ -40,6 +40,12 @@ class GeminiVisionProvider:
         api_key: str = "",
         model: str = "",
     ):
+        """Initialise the Gemini vision provider.
+
+        Args:
+            api_key: Gemini API key; falls back to ``config.api_key_gemini``.
+            model: Gemini model name; falls back to ``config.vision_model_name``.
+        """
         self.api_key = api_key or config.api_key_gemini
         self.model = model or config.vision_model_name
         self.base_url = (
@@ -143,6 +149,7 @@ class GeminiVisionProvider:
         prompt: str,
         thinking_budget: int = 0,
     ) -> List[Dict]:
+        """Build payload, call the API, extract text, and parse the JSON array response."""
         payload = self._build_payload(image_bytes, mime_type, prompt, thinking_budget)
         data = await self._call_api(payload)
         if data is None:
@@ -157,6 +164,17 @@ class GeminiVisionProvider:
         prompt: str,
         thinking_budget: int = 0,
     ) -> Dict:
+        """Construct the Gemini ``generateContent`` request payload.
+
+        Args:
+            image_bytes: raw image data to embed as base64 inline_data
+            mime_type: MIME type of the image (e.g. "image/png")
+            prompt: text instruction to accompany the image
+            thinking_budget: token budget for Gemini thinking mode (0 = off)
+
+        Returns:
+            Dict suitable for JSON-serialization as the POST body.
+        """
         b64 = base64.b64encode(image_bytes).decode("utf-8")
         payload: Dict = {
             "contents": [{
@@ -174,6 +192,7 @@ class GeminiVisionProvider:
         return payload
 
     async def _call_api(self, payload: Dict) -> Optional[Dict]:
+        """POST payload to the Gemini REST endpoint; return parsed JSON or None on error."""
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.post(self.base_url, json=payload) as resp:
@@ -188,6 +207,7 @@ class GeminiVisionProvider:
 
     @staticmethod
     def _extract_text(data: Dict) -> str:
+        """Concatenate all text parts from the first Gemini response candidate."""
         try:
             parts = data["candidates"][0]["content"]["parts"]
             return "\n".join(p["text"] for p in parts if "text" in p)
@@ -196,6 +216,10 @@ class GeminiVisionProvider:
 
     @staticmethod
     def _parse_json_array(text: str) -> List[Dict]:
+        """Parse a JSON array from model output, tolerating markdown fencing.
+
+        Returns the parsed list, or [] on failure (with a warning log).
+        """
         text = text.strip()
         # Strip markdown code fencing if present
         if text.startswith("```"):

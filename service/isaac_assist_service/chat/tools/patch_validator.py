@@ -119,6 +119,7 @@ _RE_USE_PATH = re.compile(
 
 
 def _check_omnigraph_use_path(code: str) -> List[PatchIssue]:
+    """Flag use of ArticulationController.inputs:usePath, removed in Isaac Sim 5.1."""
     issues = []
     if _RE_USE_PATH.search(code):
         issues.append(PatchIssue(
@@ -137,6 +138,7 @@ _RE_BAD_OG_API = re.compile(
 
 
 def _check_omnigraph_bad_api(code: str) -> List[PatchIssue]:
+    """Flag calls to non-existent OmniGraph node API methods (get_node_path, etc.)."""
     issues = []
     if _RE_BAD_OG_API.search(code):
         issues.append(PatchIssue(
@@ -153,6 +155,7 @@ _RE_FLATCACHE_SHARED = re.compile(r"GRAPH_BACKING_TYPE_FLATCACHE_SHARED")
 
 
 def _check_omnigraph_backing_type(code: str) -> List[PatchIssue]:
+    """Warn when GRAPH_BACKING_TYPE_FLATCACHE_SHARED is used without a hasattr guard."""
     issues = []
     if _RE_FLATCACHE_SHARED.search(code):
         issues.append(PatchIssue(
