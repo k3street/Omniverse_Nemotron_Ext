@@ -211,8 +211,9 @@ def test_aggregator_full(store):
 
 def test_all_event_types_named():
     """Every constant has a named emitter or is at least listed."""
-    # Spec §17.1 defines 13 multimodal events; supervisor spec §9.1 adds 12.
-    assert len(tel.ALL_EVENT_TYPES) == 25
+    # Spec §17.1 defines 13 multimodal events; supervisor spec §9.1 adds 12;
+    # CRM spec §8 adds 8 compliance events (CRM-D1).
+    assert len(tel.ALL_EVENT_TYPES) == 33
 
 
 # ── Kit Supervisor aggregator dashboards (spec v2 §9.3) ────────────────────
