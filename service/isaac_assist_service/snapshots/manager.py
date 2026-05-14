@@ -3,7 +3,7 @@ import glob
 import uuid
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 from .models import Snapshot, SnapshotInitRequest
 
@@ -32,7 +32,7 @@ class SnapshotManager:
         self._prune_old_snapshots()
         
         short_id = uuid.uuid4().hex[:8]
-        ts_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        ts_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         dir_name = f"{ts_str}_{short_id}"
         snap_path = os.path.join(SNAPSHOT_ROOT, dir_name)
         
@@ -61,7 +61,7 @@ class SnapshotManager:
         # 2. Build the Model
         snap = Snapshot(
             snapshot_id=short_id,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             trigger=req.trigger,
             action_context=req.action_context,
             patch_plan_id=req.patch_plan_id,
