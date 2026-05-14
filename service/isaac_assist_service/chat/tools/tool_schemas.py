@@ -7308,18 +7308,7 @@ ISAAC_SIM_TOOLS = [
             "type": "function",
             "function": {
                 "name": "get_camera_params",
-                "description": (
-                    "Read all cinematographic attributes of a UsdGeom.Camera prim — focal length, "
-                    "horizontal/vertical aperture, clipping range, focus distance, f-stop, projection — "
-                    "and derive horizontal/vertical field-of-view from focal+aperture. "
-                    "Returns: {camera_path: str, projection: 'perspective'|'orthographic', "
-                    "focal_length_mm: float, horizontal_aperture_mm: float, vertical_aperture_mm: float, "
-                    "horizontal_fov_deg: float, vertical_fov_deg: float, clipping_range_m: [near, far], "
-                    "focus_distance_m: float, f_stop: float}. Use for: inspecting a camera before tweaking, "
-                    "verifying lens choice matches a real-world reference, computing what is in/out of frame. "
-                    "NOTE: focal/aperture are USD-native millimetres; clipping & focus distance are in scene "
-                    "units (metres by default). FoV is computed as 2*atan(aperture / (2*focal_length))."
-                ),
+                "description": "Return current values of a USD camera's intrinsic parameters (focal length, aperture, clipping, focus distance).",
                 "parameters": {
                     "type": "object",
                     "properties": {
