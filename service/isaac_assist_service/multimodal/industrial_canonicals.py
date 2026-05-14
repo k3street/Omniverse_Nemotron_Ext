@@ -62,6 +62,15 @@ INDUSTRIAL_CANONICALS: Dict[str, Dict] = {
 
 
 def get_canonical(task_id: str) -> Dict:
+    """Return the industrial canonical template for *task_id*, or ``{}`` if not found.
+
+    Args:
+        task_id (str): Template identifier, e.g. ``"IND-01"``.
+
+    Returns:
+        Dict: Template dict with ``task_id``, ``name``, ``bridge_type``, ``roles``,
+            and ``tools_used``, or an empty dict when not registered.
+    """
     for tpl in INDUSTRIAL_CANONICALS.values():
         if tpl["task_id"] == task_id:
             return tpl
@@ -69,4 +78,13 @@ def get_canonical(task_id: str) -> Dict:
 
 
 def list_canonicals_by_bridge(bridge_type: str) -> List[Dict]:
+    """Return all canonicals whose ``bridge_type`` matches *bridge_type*.
+
+    Args:
+        bridge_type (str): Bridge identifier, e.g. ``"ros2"``, ``"opcua"``,
+            ``"mqtt_sparkplug"``, or ``"modbus_tcp"``.
+
+    Returns:
+        List[Dict]: Matching template dicts (may be empty).
+    """
     return [t for t in INDUSTRIAL_CANONICALS.values() if t["bridge_type"] == bridge_type]

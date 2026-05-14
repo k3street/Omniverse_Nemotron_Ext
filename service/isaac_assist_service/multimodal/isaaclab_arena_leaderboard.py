@@ -49,6 +49,12 @@ class Leaderboard:
     """
 
     def __init__(self, path: str | os.PathLike = DEFAULT_PATH) -> None:
+        """Initialise the leaderboard with a backing JSON file path.
+
+        Args:
+            path (str | os.PathLike, optional): Path to the leaderboard JSON file.
+                Defaults to ``data/leaderboards/arena.json``.
+        """
         self._path = Path(path)
 
     # ------------------------------------------------------------------
@@ -94,7 +100,19 @@ class Leaderboard:
         agent_name: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Append a new entry and return its entry_id."""
+        """Append a new leaderboard entry and return its UUID entry_id.
+
+        The underlying JSON file is written atomically (write-tmp then rename).
+
+        Args:
+            scenario_id (str): Identifier of the benchmark scenario.
+            score (float): Agent score for this run.
+            agent_name (str): Human-readable label for the agent.
+            metadata (Dict[str, Any], optional): Arbitrary extra data. Defaults to ``{}``.
+
+        Returns:
+            str: UUID string that uniquely identifies the new entry.
+        """
         entry_id = str(uuid.uuid4())
         entry: Dict[str, Any] = {
             "entry_id": entry_id,
