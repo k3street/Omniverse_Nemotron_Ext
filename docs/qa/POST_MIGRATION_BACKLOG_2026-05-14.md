@@ -15,55 +15,46 @@ individual handlers for hygiene. This backlog catches up.
 - ✅ **Phase 92 time bug** — fda8b56. `_ref_now().timestamp()` anchoring.
 - ✅ **Orchestrator l1 mocks** — 0ade3c3. IntentClassification dict + honesty-rewrite stub.
 
-## Wave 2 — pending (this session)
+## Wave 2 — landed (2026-05-14 ~10:30–12:30 CEST)
 
-### CONC-1: Module-state concurrency locks (Opus)
-- **Source**: opus concurrency audit 2026-05-14
-- **Findings**: 2 DANGEROUS, 3 AT-RISK module-level state objects with no locks
-- **Targets**:
-  - `_INSTALLED_COMPLIANCE` (compliance.py:58) — add `threading.Lock`; wrap setup/set_params/release writes
-  - `_WORKFLOWS` (_state.py:202) — per-workflow lock OR module-level lock; wrap deep mutations
-  - `_TURN_RECORDER_SINGLETON` — double-checked locking OR eager init
-  - `_STAGE_INDEX` / `_STAGE_INDEX_META` — build_id counter for async-build coordination
-- **STATUS**: pending
+### CONC-1: Module-state concurrency locks — done — `836b277`
+- 4 lock strategies: global `_COMPLIANCE_LOCK`, per-workflow `_lock` via `setdefault`, double-checked `_TURN_RECORDER_LOCK`, build_id+building flag for `_STAGE_INDEX`
+- 11 new tests in `tests/test_concurrency_locks.py` (spec asked ≥8)
+- Known hole: `multimodal/routes.py` `_forward_workflow_approve`/`_forward_workflow_reject` do own RMW on `_WORKFLOWS[wf_id]`. Lazy-setdefault makes it safe but file wasn't touched. See Wave 3 CONC-2b.
 
-### DEPR-1: datetime.utcnow() + asyncio.get_event_loop() (Sonnet mechanical)
-- **Source**: deprecation audit 2026-05-14
-- **Targets**: 24 `datetime.utcnow()` + 6 `asyncio.get_event_loop()` call sites
-- **Files**: governance/models.py, snapshots/manager.py, chat/orchestrator.py, chat/routes.py, planner/swarm_generator.py, planner/generator.py, fingerprint/collector.py, finetune/turn_recorder.py (4×), chat/tools/handlers/scene_blueprints.py, chat/tools/handlers/robot.py, mcp_server.py (3×), exts/isaac_5.1/.../kit_rpc.py, tests/test_routes.py, tests/test_ft_sensor_extension.py
-- **Severity**: governance/models.py FAILS under `-W error::DeprecationWarning`
-- **STATUS**: pending
+### DEPR-1: datetime.utcnow() + asyncio.get_event_loop() — done — 14 commits `d5ea95d..27adfbe`
+- All 30 spec sites fixed. `governance/models.py` now passes `-W error::DeprecationWarning`.
+- Pydantic `datetime` field defaults switched to `Field(default_factory=lambda: datetime.now(timezone.utc))`.
+- 3 `get_event_loop()` calls in `mcp_server.py` consolidated to single `get_running_loop()` at top of `run_stdio()`.
+- 8 extra `utcnow()` sites found out-of-scope in `workflow.py`, `_shared.py`, `scene_blueprints.py` — see Wave 3 DEPR-2.
 
-### TYPE-1: Type hint backfill — 12 funcs (Sonnet small)
-- **Source**: type-hint audit 2026-05-14
-- **Targets**: 12 functions concentrated in `pick_place.py` (9 internal generators) + `robot.py` (2 dispatch entries + 1 partial)
-  - robot.py:4621 `_handle_setup_isaac_ros_cumotion_moveit`
-  - robot.py:5319 `_handle_setup_ros2_control_compat`
-  - robot.py:5470 `_handle_list_available_controllers`
-  - pick_place.py: 9 `_gen_pick_place_*` variants
-- **STATUS**: pending
+### TYPE-1: Type hint backfill — done — `7621d3a`, `52a98dd`
+- 3 `robot.py` handlers (`_handle_setup_isaac_ros_cumotion_moveit`, `_handle_setup_ros2_control_compat`, `_handle_list_available_controllers`) → `(args: Dict[str, Any]) -> Dict[str, Any]`
+- 9 `pick_place.py` `_gen_*` generators fully annotated → `-> str`
 
-### SCHEMA-1: Schema/handler drift (Sonnet small)
-- **Source**: schema/handler drift audit 2026-05-14
-- **Targets**:
-  - `set_physics_params` — schema declares `solver_iterations`, handler ignores. Either implement or drop from schema.
-  - `export_policy` — handler reads `job_id` + `output_dir`, schema doesn't declare. Add to schema.
-  - `configure_camera` vs `set_camera_params` — functional duplicates. Dedupe.
-  - `get_camera_params` — description text leaked from `camera_path` field. Replace.
-- **STATUS**: pending
+### SCHEMA-1: Schema/handler drift — done — `f126903`, `e978bfb`, `fafeb63`, `5a4a141`, `2dac6df`
+- S1: `set_physics_params` — removed dead `solver_iterations` from schema
+- S2: `export_policy` — added `job_id`, `output_dir` to schema
+- S3: `configure_camera` — marked deprecated, `set_camera_params` is canonical
+- S4: `get_camera_params` — description leak repaired
+- Followed by `_models.py` regen
 
-### DOCS-1: Docstring backfill (Sonnet swarm, large)
-- **Source**: docstring audit 2026-05-14
-- **Scope**: 96 MISSING + 279 THIN of 419 functions = 89% sub-standard
-- **Priority order**:
-  1. `robot.py` top 10 worst (193 lines down to 75 lines, all MISSING) — `_gen_robot_wizard`, `_gen_import_robot`, etc.
-  2. `pick_place.py` — all 11 are THIN, 4 hold 400-900 lines of logic
-  3. `training.py` — 41/44 THIN, no GOOD
-  4. `scene_authoring.py` — 29 MISSING + 49 THIN of 80
-  5. `diagnostics.py:_handle_simulate_traversal_check` — PARTIAL with 378 lines; safety-critical
-- **STATUS**: pending
+### DOCS-1: Docstring backfill Wave 1 — done — `c299c99`, `f3732b7`, `bfeb9ad` (+ 6 piggybacked on `54aa246`)
+- 10 top-priority MISSING docstrings → Args/Returns
+- GOOD count: 35 → 45 of 419
+- Note: 6 `robot.py` docstrings landed via DEPR-1's commit `54aa246` due to file overlap — DOCS-1 commits then no-op'd for those 6
 
 ## Wave 3 — deferred / low-priority
+
+### DEPR-2: Extra utcnow() sites (out-of-scope from Wave 2)
+- **Source**: DEPR-1 agent surfaced during sweep
+- **Sites**: 8 in `workflow.py`, `_shared.py`, 2 more in `scene_blueprints.py`
+- **STATUS**: pending
+
+### CONC-2b: multimodal/routes.py RMW on _WORKFLOWS
+- **Source**: CONC-1 agent surfaced; agent stayed in scope
+- **Fix**: `_forward_workflow_approve`/`_forward_workflow_reject` should `_wf_lock_for(wf)`-wrap their RMW
+- **STATUS**: pending (lazy-setdefault makes it currently safe but inconsistent)
 
 ### MAGIC-1: Magic number sweep
 - **Source**: code-quality audit 2026-05-13
@@ -101,4 +92,5 @@ individual handlers for hygiene. This backlog catches up.
 
 - Pre-Wave-1 baseline: 6529 pass, 0 fail
 - Post-Wave-1: 6529 pass, 0 fail (silent-success was additive, no behavior change)
-- Target Wave-2 completion: 6580+ pass (depends on test additions)
+- Post-Wave-2: **6540 pass, 0 fail** (+11 from CONC-1's `tests/test_concurrency_locks.py`)
+- Branch tip after Wave 2: `836b277`
