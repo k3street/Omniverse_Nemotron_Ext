@@ -69,6 +69,15 @@ class LeaderboardUploader:
         backoff_base_s: float = 1.0,
         _sleep: Callable[[float], None] = time.sleep,
     ) -> None:
+        """Initialise the uploader.
+
+        Args:
+            endpoint_url (str): URL of the arena leaderboard REST endpoint.
+            api_key (str, optional): Bearer token for authenticated requests.
+            max_retries (int): Number of extra retry attempts after the first failure.
+            backoff_base_s (float): Base delay for exponential backoff in seconds.
+            _sleep: Injectable sleep callable for testing (default: ``time.sleep``).
+        """
         self.endpoint_url = endpoint_url
         self.api_key = api_key
         self.max_retries = max_retries
@@ -80,6 +89,7 @@ class LeaderboardUploader:
     # ------------------------------------------------------------------
 
     def _build_headers(self) -> Dict[str, str]:
+        """Build the HTTP request headers, adding a Bearer token when an API key is set."""
         headers: Dict[str, str] = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"

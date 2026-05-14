@@ -67,6 +67,7 @@ class EvalRun:
     run_at: str = ""
 
     def __post_init__(self) -> None:
+        """Default ``run_at`` to the current UTC ISO-8601 time if not provided."""
         if not self.run_at:
             self.run_at = datetime.now(timezone.utc).isoformat()
 
@@ -247,6 +248,12 @@ class GrootN17EvalHarness:
         self,
         scenarios: Optional[List[EvalScenario]] = None,
     ) -> None:
+        """Initialise the harness.
+
+        Args:
+            scenarios (List[EvalScenario], optional): Custom scenario list.
+                Defaults to :data:`EVAL_SCENARIOS`.
+        """
         self._scenarios: List[EvalScenario] = (
             list(scenarios) if scenarios is not None else list(EVAL_SCENARIOS)
         )
@@ -256,7 +263,7 @@ class GrootN17EvalHarness:
     # ------------------------------------------------------------------
 
     def filter_by_category(self, category: str) -> List[EvalScenario]:
-        """Return all scenarios matching *category*."""
+        """Return all scenarios whose ``category`` field equals *category*."""
         return [s for s in self._scenarios if s.category == category]
 
     def filter_by_difficulty(self, difficulty: str) -> List[EvalScenario]:
@@ -389,6 +396,7 @@ class GrootN17EvalHarness:
         }
 
         def _bucket(runs_: List[EvalRun], key_fn: Callable[[EvalRun], str]) -> Dict[str, Any]:
+            """Group *runs_* by *key_fn* and return per-bucket success-rate stats."""
             buckets: Dict[str, List[EvalRun]] = {}
             for r in runs_:
                 k = key_fn(r)
@@ -405,10 +413,12 @@ class GrootN17EvalHarness:
             return result
 
         def _cat(r: EvalRun) -> str:
+            """Return the category string for the scenario of *r*, or ``"unknown"``."""
             sc = scenario_map.get(r.scenario_id)
             return sc.category if sc else "unknown"
 
         def _diff(r: EvalRun) -> str:
+            """Return the difficulty string for the scenario of *r*, or ``"unknown"``."""
             sc = scenario_map.get(r.scenario_id)
             return sc.difficulty if sc else "unknown"
 

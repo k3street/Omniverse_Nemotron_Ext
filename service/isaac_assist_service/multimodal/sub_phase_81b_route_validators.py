@@ -60,6 +60,7 @@ class Waypoint:
     label: str = ""
 
     def as_xyz(self) -> tuple[float, float, float]:
+        """Return the waypoint as an ``(x, y, z)`` tuple."""
         return (self.x, self.y, self.z)
 
 
@@ -129,7 +130,7 @@ class RouteValidator:
     def _check_insufficient_waypoints(
         self, route: Route
     ) -> ConstraintViolation | None:
-        """Check 3: < 2 waypoints → hard ERROR."""
+        """Return a hard ``ConstraintViolation`` when the route has fewer than 2 waypoints."""
         if len(route.waypoints) < 2:
             n = len(route.waypoints)
             return ConstraintViolation(

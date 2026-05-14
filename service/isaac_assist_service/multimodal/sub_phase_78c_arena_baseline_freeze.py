@@ -149,6 +149,12 @@ class ArenaBaselineStore:
     """
 
     def __init__(self, store_path: Path) -> None:
+        """Initialise the store pointing at *store_path*.
+
+        Args:
+            store_path (Path): Path to the JSON baseline store file.
+                The parent directory is created on first write.
+        """
         self._path = Path(store_path)
 
     # ------------------------------------------------------------------
@@ -163,7 +169,7 @@ class ArenaBaselineStore:
             return json.load(fh)
 
     def _save(self, data: Dict[str, Any]) -> None:
-        """Atomically write *data* to disk."""
+        """Atomically write *data* to disk using a temp-file + ``os.replace`` swap."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp_fd, tmp_name = tempfile.mkstemp(
             dir=self._path.parent,
