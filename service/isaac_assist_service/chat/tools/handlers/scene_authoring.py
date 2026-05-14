@@ -216,7 +216,22 @@ def _summarize_changes(changes: List[Dict]) -> str:
     return "\n".join(parts)
 
 def _score_prim_for_query(path: str, meta: Dict[str, Any], keywords: List[str]) -> int:
-    """Simple keyword scoring: count hits in path / type / schemas."""
+    """Score a prim against a keyword list for stage-index relevance ranking.
+
+    Counts how many keywords appear (case-insensitive) across the prim
+    path, type name, and applied-schema token strings.  Higher score =
+    more relevant.
+
+    Args:
+        path: USD prim path string (e.g. ``"/World/Robot/Franka"``).
+        meta: Metadata dict as stored in ``_STAGE_INDEX`` — expected keys
+            include ``type`` (str) and ``schemas`` (list[str]).
+        keywords: Search terms, each matched as a substring.
+
+    Returns:
+        Integer hit count.  0 means no keyword matched; there is no upper
+        bound (a prim with N keywords all matching scores N).
+    """
     score = 0
     haystack_parts = [path.lower(), str(meta.get("type", "")).lower()]
     for s in meta.get("schemas", []) or []:
@@ -231,7 +246,21 @@ def _score_prim_for_query(path: str, meta: Dict[str, Any], keywords: List[str]) 
     return score
 
 def _neighbour_paths(selected: str) -> List[str]:
-    """Return paths considered neighbours of `selected` — parent, siblings, direct children."""
+    """Return paths structurally adjacent to ``selected`` in the stage index.
+
+    Neighbours are the parent, immediate siblings (prims at the same depth
+    under the same parent), and direct children of ``selected``.  Used by
+    ``query_stage_index`` to inject local context even when keywords do not
+    match nearby paths.
+
+    Args:
+        selected: USD prim path string.  Empty string returns ``[]``.
+
+    Returns:
+        List of USD path strings drawn from the current ``_STAGE_INDEX``
+        keys.  Does not include ``selected`` itself.  Order is not
+        guaranteed.
+    """
     if not selected:
         return []
     selected = selected.rstrip("/")
@@ -253,10 +282,25 @@ def _neighbour_paths(selected: str) -> List[str]:
     return neighbours
 
 def _build_select_by_criteria_code(criteria: Dict[str, Any]) -> str:
-    """Generate the Kit-side query code for select_by_criteria.
+    """Generate the Kit-side query code for ``select_by_criteria``.
 
-    Split out from the handler so tests can exercise the generator
-    without a live Kit RPC.
+    Split out from the handler so tests can exercise the code generator
+    without a live Kit RPC.  The generated script traverses the stage
+    (or a subtree rooted at ``criteria["parent"]``), filters by all
+    supplied criteria simultaneously, and prints a JSON dict.
+
+    Supported criteria keys: ``type``, ``has_schema``, ``name_pattern``
+    (regex), ``path_pattern`` (regex), ``has_attribute``, ``kind``,
+    ``parent``, ``active``.
+
+    Args:
+        criteria: Dict mapping criterion names to filter values.  All
+            non-``None`` keys are applied as AND conditions.
+
+    Returns:
+        Python source string intended for ``kit_tools.queue_exec_patch``.
+        When executed, prints JSON with schema
+        ``{matches: [str], count: int, criteria: {...}}``.
     """
     return f"""\
 import omni.usd
@@ -368,7 +412,21 @@ _TEMPLATE_KEYWORDS = {
 
 
 def _detect_template(description: str) -> Optional[str]:
-    """Auto-detect the best template from a natural language description."""
+    """Auto-detect the best OmniGraph template key from a free-form description.
+
+    Scores each template in ``_TEMPLATE_KEYWORDS`` by counting how many of
+    its keywords appear as substrings of ``description`` (case-insensitive).
+    Returns the template with the highest non-zero score, or ``None`` if
+    nothing matched.
+
+    Args:
+        description: Natural-language string such as
+            ``"publish joint states over ROS2"``.
+
+    Returns:
+        Template key string (e.g. ``"ros2_joint_state"``) or ``None``
+        when no template keyword was found.
+    """
     desc_lower = description.lower()
     best_match = None
     best_score = 0
@@ -565,6 +623,38 @@ _OG_TEMPLATES = {
 
 
 def _gen_create_prim(args: Dict) -> str:
+    """Generate code that creates a typed USD prim and optionally positions it.
+
+    Validates ``prim_type`` against a known-type allowlist before emitting
+    any USD call — ``UsdStage.DefinePrim`` accepts arbitrary strings and
+    silently creates an untyped prim for unknown types, causing downstream
+    attribute setters (``GetSizeAttr``, ``GetRadiusAttr``, etc.) to no-op
+    without error.
+
+    Light prims (``DomeLight``, ``SphereLight``, etc.) automatically receive
+    a default ``inputs:intensity`` of ``_DEFAULT_LIGHT_INTENSITY`` (1000 lux)
+    when ``intensity`` is not supplied, preventing invisible dark lights.
+
+    Args:
+        args: Tool arguments dict containing:
+            - prim_path (str): Absolute USD path for the new prim.
+            - prim_type (str): USD type name, e.g. ``"Cube"``, ``"Camera"``.
+            - position (list[float] len 3, optional): World translation
+              ``[x, y, z]`` in stage units.
+            - scale (list[float] len 3, optional): Uniform or axis-aligned
+              scale ``[sx, sy, sz]``.
+            - rotation_euler (list[float] len 3, optional): Euler angles
+              ``[rx, ry, rz]`` in degrees applied via XYZ op order.
+            - size (float, optional): Cube half-size (``UsdGeom.Cube``).
+            - radius (float, optional): Radius for Sphere/Cylinder/Cone/Capsule.
+            - height (float, optional): Height for Cylinder/Cone/Capsule.
+            - intensity (float, optional): Light intensity override.
+
+    Returns:
+        Python source string for Kit exec.  Raises ``ValueError`` in Kit
+        if ``prim_type`` is unknown, ``RuntimeError`` if ``DefinePrim``
+        produces the wrong type.
+    """
     # Lazy import to avoid circular dependency at module load time;
     # _SAFE_XFORM_SNIPPET stays in tool_executor.py until Phase 8.
     from ._shared import _SAFE_XFORM_SNIPPET
@@ -653,6 +743,21 @@ def _gen_create_prim(args: Dict) -> str:
 
 
 def _gen_delete_prim(args: Dict) -> str:
+    """Generate code that removes a USD prim with pre- and post-existence checks.
+
+    ``UsdStage.RemovePrim`` returns ``False`` silently on a missing path;
+    the generated code pre-checks existence and verifies the prim is gone
+    after the call, so the tool cannot claim success on a no-op.
+
+    Args:
+        args: Tool arguments dict containing:
+            - prim_path (str): Absolute USD path of the prim to remove.
+
+    Returns:
+        Python source string for Kit exec.  Raises ``RuntimeError`` in Kit
+        if the prim does not exist before the call, or if it still exists
+        after ``RemovePrim``.
+    """
     # stage.RemovePrim returns False (not raises) on a non-existent path, and
     # the old generator threw away that return value. Agent could then claim
     # "deleted /World/Foo" when /World/Foo never existed — a classic honesty
@@ -672,6 +777,22 @@ def _gen_delete_prim(args: Dict) -> str:
 
 
 def _gen_set_attribute(args: Dict) -> str:
+    """Generate code that writes a single USD attribute value via ``attr.Set()``.
+
+    The generated script obtains the attribute by name and calls ``Set``
+    with the supplied value.  No type coercion is performed — the value
+    must be compatible with the attribute's ``SdfValueTypeName``.
+
+    Args:
+        args: Tool arguments dict containing:
+            - prim_path (str): Absolute USD path of the prim.
+            - attr_name (str): Attribute name, e.g.
+              ``"xformOp:translate"`` or ``"physics:mass"``.
+            - value: Value to write; must match the attribute's USD type.
+
+    Returns:
+        Python source string for Kit exec.
+    """
     prim_path = args["prim_path"]
     attr_name = args["attr_name"]
     value = args["value"]
@@ -689,6 +810,28 @@ def _gen_set_attribute(args: Dict) -> str:
 
 
 def _gen_add_reference(args: Dict) -> str:
+    """Generate code that adds a USD reference arc to an existing prim.
+
+    ``UsdReferences.AddReference`` accepts any URL and returns ``True``
+    regardless of whether the file exists — composition is lazy.  The
+    generated code guards against:
+    1. Missing prim (raises before the add).
+    2. Local filesystem path that does not exist
+       (``FileNotFoundError`` in Kit).
+    3. Silent composition failure: checks ``HasAuthoredReferences()``
+       after the call.
+
+    Args:
+        args: Tool arguments dict containing:
+            - prim_path (str): Absolute USD path of the target prim.
+            - reference_path (str): Asset URL (local path, ``omniverse://``,
+              ``http://``, ``https://``, or ``file://``).
+
+    Returns:
+        Python source string for Kit exec.  Raises ``RuntimeError`` if the
+        reference was not authored, ``FileNotFoundError`` for missing local
+        assets.
+    """
     # USD AddReference accepts any asset URL and returns True regardless of
     # whether the referenced file exists — composition is lazy. Without
     # post-check, a bad path produces a prim with "has references" but no
@@ -717,6 +860,20 @@ def _gen_add_reference(args: Dict) -> str:
 
 
 def _gen_assign_material(args: Dict) -> str:
+    """Generate code that binds a UsdShade.Material to a prim.
+
+    Uses ``UsdShade.MaterialBindingAPI.Bind`` with
+    ``strongerThanDescendants`` binding strength so the material takes
+    precedence over any inherited bindings further down the hierarchy.
+
+    Args:
+        args: Tool arguments dict containing:
+            - prim_path (str): Absolute USD path of the prim to bind.
+            - material_path (str): Absolute USD path of the Material prim.
+
+    Returns:
+        Python source string for Kit exec.
+    """
     return (
         "import omni.usd\n"
         "from pxr import UsdShade\n"
@@ -728,6 +885,22 @@ def _gen_assign_material(args: Dict) -> str:
 
 
 def _gen_teleport_prim(args: Dict) -> str:
+    """Generate code that moves a prim to a new world position / orientation.
+
+    Uses the same ``_safe_set_translate`` / ``_safe_set_rotate_xyz``
+    helpers as ``_gen_create_prim`` to avoid stomping existing xform ops.
+
+    Args:
+        args: Tool arguments dict containing:
+            - prim_path (str): Absolute USD path of the prim to move.
+            - position (list[float] len 3, optional): World translation
+              ``[x, y, z]`` in stage units.
+            - rotation_euler (list[float] len 3, optional): Euler angles
+              ``[rx, ry, rz]`` in degrees applied via XYZ op order.
+
+    Returns:
+        Python source string for Kit exec.
+    """
     # Lazy import — same pattern as _gen_create_prim.
     from ._shared import _SAFE_XFORM_SNIPPET
 
@@ -753,6 +926,27 @@ def _gen_teleport_prim(args: Dict) -> str:
 
 
 def _gen_apply_api_schema(args: Dict) -> str:
+    """Generate code that applies an API schema to a prim.
+
+    Two code paths:
+    - **Known schema** (entry in ``SCHEMA_MAP``): calls the pxr typed API
+      directly (e.g. ``UsdPhysics.RigidBodyAPI.Apply(prim)``), then
+      verifies ``GetAppliedSchemas()`` contains the token.
+    - **Unknown schema**: falls back to
+      ``omni.kit.commands.execute('ApplyAPISchemaCommand', ...)`` and
+      diffs ``GetAppliedSchemas()`` before/after to detect the silent
+      no-op Kit returns for unrecognised names.
+
+    Args:
+        args: Tool arguments dict containing:
+            - schema_name (str): Applied-schema token, e.g.
+              ``"PhysicsRigidBodyAPI"``, ``"PhysxContactReportAPI"``.
+            - prim_path (str): Absolute USD path of the target prim.
+
+    Returns:
+        Python source string for Kit exec.  Raises ``RuntimeError`` in
+        Kit if the schema was not applied after the call.
+    """
     schema = args['schema_name']
     prim_path = args['prim_path']
     # Map common schema names to their pxr module + class. Names without
@@ -826,6 +1020,32 @@ def _gen_apply_api_schema(args: Dict) -> str:
 
 
 def _gen_clone_prim(args: Dict) -> str:
+    """Generate code that clones a prim using the fastest strategy for the count.
+
+    Three strategies are selected based on ``count``:
+    - **count == 1**: ``Sdf.CopySpec`` (simplest, single destination).
+    - **count < 4**: ``Sdf.CopySpec`` loop with per-copy translate offset.
+    - **count >= 4**: ``isaacsim.core.cloner.GridCloner`` (GPU-batched,
+      scales to thousands of envs).  Optionally filters inter-clone
+      collisions for RL environments.
+
+    Args:
+        args: Tool arguments dict containing:
+            - source_path (str): USD path of the prim to copy.
+            - target_path (str): USD path prefix for the destination
+              prim(s).  Single clone uses exactly this path; multi-clone
+              appends ``_0``, ``_1``, … suffixes.
+            - position (list[float] len 3, optional): World translation
+              for the single-clone case.
+            - count (int, optional): Number of copies.  Defaults to 1.
+            - spacing (float, optional): Grid spacing (metres) used by
+              ``GridCloner`` and the small-count loop.  Defaults to 1.0.
+            - collision_filter (bool, optional): Apply ``GridCloner``
+              collision filtering (RL use-case).  Defaults to ``False``.
+
+    Returns:
+        Python source string for Kit exec.
+    """
     # Lazy import — same pattern as _gen_create_prim.
     from ._shared import _SAFE_XFORM_SNIPPET
 
@@ -900,6 +1120,36 @@ def _gen_clone_prim(args: Dict) -> str:
 
 
 def _gen_create_material(args: Dict) -> str:
+    """Generate code that creates a UsdShade.Material with an MDL shader.
+
+    Creates the ``Material`` prim, a child ``Shader`` prim referencing the
+    chosen MDL file, sets PBR parameters as MDL inputs, and wires the
+    shader to the material's surface/volume/displacement outputs.
+
+    Supported shader types: ``OmniPBR`` (default), or any MDL shader name
+    that follows the ``<ShaderName>.mdl`` naming convention.
+
+    Args:
+        args: Tool arguments dict containing:
+            - material_path (str): Absolute USD path for the new Material
+              prim, e.g. ``"/World/Looks/Metal"``.
+            - shader_type (str, optional): MDL sub-identifier, e.g.
+              ``"OmniPBR"``, ``"OmniGlass"``.  Defaults to
+              ``"OmniPBR"``.
+            - diffuse_color (list[float] len 3, optional): RGB values in
+              ``[0, 1]``.  Defaults to ``[0.8, 0.8, 0.8]``.
+            - metallic (float, optional): Metallic factor ``[0, 1]``.
+              Defaults to ``0.0``.
+            - roughness (float, optional): Surface roughness ``[0, 1]``.
+              Defaults to ``0.5``.
+            - opacity (float, optional): Opacity (unused in current
+              shader set call but reserved).  Defaults to ``1.0``.
+            - ior (float, optional): Index of refraction.  Defaults to
+              ``1.5``.
+
+    Returns:
+        Python source string for Kit exec.
+    """
     mat_path = args["material_path"]
     shader = args.get("shader_type", "OmniPBR")
     color = args.get("diffuse_color", [0.8, 0.8, 0.8])
@@ -945,6 +1195,30 @@ mat.CreateDisplacementOutput('mdl').ConnectToSource(shader.ConnectableAPI(), 'ou
 
 
 def _gen_create_omnigraph(args: Dict) -> str:
+    """Generate code that creates a new OmniGraph with nodes, edges, and values.
+
+    Uses ``og.Controller.edit`` with the FABRIC_SHARED backing type
+    (with a FLATCACHING fallback for older Kit builds).  Legacy node-type
+    IDs are remapped through ``_OG_NODE_TYPE_MAP`` so callers can pass
+    either the old or current namespace.
+
+    Args:
+        args: Tool arguments dict containing:
+            - graph_path (str): Absolute USD path for the graph prim.
+            - graph_type (str, optional): Evaluator hint; default
+              ``"action_graph"`` (currently unused by the emit but
+              forwarded for documentation).
+            - nodes (list[dict], optional): Each dict has ``name`` (str)
+              and ``type`` (str node-type ID).
+            - connections (list[dict], optional): Each dict has
+              ``source`` (``"node.outputs:port"``) and
+              ``target`` (``"node.inputs:port"``).
+            - values (dict, optional): ``{"node.inputs:port": value}``
+              mappings emitted as ``SET_VALUES``.
+
+    Returns:
+        Python source string for Kit exec.
+    """
     # _OG_NODE_TYPE_MAP is cross-theme (~3 callers across tool_executor.py),
     # so it stays in tool_executor.py until Phase 8's deeper shared-module
     # pass. Lazy import keeps module-load circular-free.
@@ -1021,7 +1295,38 @@ keys = og.Controller.Keys
 
 
 def _gen_batch_apply_operation(args: Dict) -> str:
-    """Generate code to apply an operation to all children of a parent prim."""
+    """Generate code that applies an operation to all children of a parent prim.
+
+    Traverses every descendant of ``target_path`` (skipping the parent
+    itself) and applies the requested operation.  The ``delete`` sub-mode
+    collects paths first to avoid mutating the stage during traversal.
+
+    Supported operations:
+    - ``apply_physics``: applies ``RigidBodyAPI`` + ``CollisionAPI``
+      (+ optionally ``MassAPI``) via ``UsdPhysics``.
+    - ``apply_collision``: applies ``UsdPhysics.CollisionAPI`` only.
+    - ``set_material``: binds the material at
+      ``parameters.material_path`` via ``UsdShade.MaterialBindingAPI``.
+    - ``delete``: removes matched descendants via ``stage.RemovePrim``.
+    - ``set_visibility``: sets ``UsdGeom.Imageable`` visibility token.
+    - ``set_attribute``: sets a named attribute to a value on each
+      matched prim.
+
+    Args:
+        args: Tool arguments dict containing:
+            - target_path (str): Parent prim path; children are operated
+              on, not the parent itself.
+            - operation (str): One of the operations listed above.
+            - parameters (dict, optional): Operation-specific params
+              (e.g. ``mass``, ``material_path``, ``visible``,
+              ``attr_name``, ``value``).
+            - filter_type (str, optional): If set, only prims with this
+              ``GetTypeName()`` value are processed.
+
+    Returns:
+        Python source string for Kit exec.  Raises ``ValueError`` in Kit
+        for unknown operations or missing required parameters.
+    """
     target_path = args["target_path"]
     operation = args["operation"]
     params = args.get("parameters", {}) or {}
@@ -1133,7 +1438,36 @@ def _gen_batch_apply_operation(args: Dict) -> str:
 
 
 def _gen_optimize_scene(args: Dict) -> str:
-    """Generate a scene optimization script that identifies bottlenecks and applies fixes."""
+    """Generate a scene optimization script that identifies and optionally fixes bottlenecks.
+
+    Runs up to four analysis passes:
+
+    1. **Collision simplify** — Mesh prims with more than
+       ``_HEAVY_MESH_VERTEX_THRESHOLD`` (10000) vertices get
+       ``UsdPhysics.MeshCollisionAPI`` set to ``convexHull`` (static)
+       or ``convexDecomposition`` (dynamic).
+    2. **Solver reduction** — Articulations with
+       ``PhysxSchema.PhysxArticulationAPI`` solver-iteration count above
+       ``_MAX_SOLVER_ITERATIONS`` (16) are reduced to
+       ``_REDUCED_SOLVER_ITERATIONS`` (4).
+    3. **CCD disable** — Large rigid bodies with CCD enabled are
+       flagged (conservative: CCD is disabled on all).
+    4. **GPU physics** (aggressive only) — Enables ``PhysxSceneAPI``
+       GPU dynamics and GPU broadphase on ``/PhysicsScene``.
+
+    Args:
+        args: Tool arguments dict containing:
+            - mode (str, optional): ``"conservative"`` (default),
+              ``"aggressive"``, or ``"analyze"`` (report only, no
+              patches applied).
+            - target_fps (int, optional): Target FPS used for reporting
+              only.  Defaults to ``_DEFAULT_TARGET_FPS`` (60).
+
+    Returns:
+        Python source string for Kit exec.  Prints JSON result with
+        keys ``mode``, ``target_fps``, ``estimated_fps_gain``,
+        ``optimizations``, ``patches_applied``.
+    """
     mode = args.get("mode", "conservative")
     target_fps = args.get("target_fps", _DEFAULT_TARGET_FPS)
 
@@ -1522,6 +1856,24 @@ print(json.dumps({{'snapshot_id': '{snapshot_id}', 'applied_layers': applied}}))
 
 
 def _gen_batch_delete_prims(args: Dict) -> str:
+    """Generate code that atomically removes a list of prims via Sdf.BatchNamespaceEdit.
+
+    ``Sdf.BatchNamespaceEdit.Apply`` is atomic — it rejects the entire
+    batch if any single path is invalid.  The generated code partitions
+    the input into present vs. missing paths, runs the edit only on
+    present paths, verifies each is gone afterwards, and reports actual
+    remove counts rather than the requested count.
+
+    Args:
+        args: Tool arguments dict containing:
+            - prim_paths (list[str]): USD prim paths to remove.
+
+    Returns:
+        Python source string for Kit exec.  Raises ``RuntimeError`` in
+        Kit if ``Apply`` fails or any prim is still present after the
+        edit.  Prints a summary line with ``removed`` / ``missing``
+        counts on success.
+    """
     import json
     paths = list(args.get("prim_paths") or [])
     if not paths:
@@ -1577,6 +1929,27 @@ if _removed == 0 and _missing:
 
 
 def _gen_batch_set_attributes(args: Dict) -> str:
+    """Generate code that sets multiple attributes across multiple prims in one Sdf.ChangeBlock.
+
+    Previous implementation had three honesty holes: silent skip on
+    missing prim, auto-create with the wrong ``SdfValueTypeName``, and
+    reporting ``N applied`` even when everything was skipped.  The
+    generated code tracks ``applied`` / ``missing_prims`` /
+    ``missing_attrs`` / ``errors`` separately and raises if nothing
+    landed.
+
+    Args:
+        args: Tool arguments dict containing:
+            - changes (list[dict]): Each entry must have
+              ``prim_path`` (str), ``attr_name`` (str), and
+              ``value``.  Attribute must already exist on the prim;
+              auto-creation is NOT performed.
+
+    Returns:
+        Python source string for Kit exec.  Raises ``RuntimeError`` in
+        Kit if 0 of N changes were applied.  Prints a summary with
+        per-category counts on success.
+    """
     import json
     changes = list(args.get("changes") or [])
     if not changes:
@@ -1651,6 +2024,25 @@ def _gen_batch_set_attributes(args: Dict) -> str:
 
 
 def _gen_add_sublayer(args: Dict) -> str:
+    """Generate code that attaches a USD sublayer to the stage's root layer.
+
+    For local filesystem paths, creates the file if it does not exist yet.
+    For remote URLs (``omniverse://``, ``http://``, ``https://``,
+    ``file://``, ``anon:``), probes ``Sdf.Layer.FindOrOpen`` before
+    attaching — an unresolvable URL would otherwise produce a dead
+    reference silently.  Inserts at position 0 (strongest below root) and
+    is idempotent if the path is already in ``subLayerPaths``.
+
+    Args:
+        args: Tool arguments dict containing:
+            - layer_path (str): Path or URL for the sublayer, e.g.
+              ``"/tmp/overrides.usda"`` or
+              ``"omniverse://server/assets/extras.usd"``.
+
+    Returns:
+        Python source string for Kit exec.  Raises ``RuntimeError`` if
+        creation or URL resolution fails.
+    """
     layer_path = args["layer_path"]
     layer_path_repr = repr(layer_path)
     return (
@@ -1696,6 +2088,23 @@ def _gen_add_sublayer(args: Dict) -> str:
 
 
 def _gen_set_edit_target(args: Dict) -> str:
+    """Generate code that changes the active USD edit target to a named layer.
+
+    Tries ``Sdf.Layer.FindOrOpen`` first; if that returns ``None``,
+    scans the stage's layer stack for a layer whose ``identifier``
+    matches exactly.  Raises if no matching layer is found so the caller
+    knows to add the sublayer first.
+
+    Args:
+        args: Tool arguments dict containing:
+            - layer_path (str): Identifier of the target layer — either
+              an absolute path or the URL that was used when the sublayer
+              was added.
+
+    Returns:
+        Python source string for Kit exec.  Raises ``RuntimeError`` if
+        the layer cannot be found in the open stack.
+    """
     layer_path = args["layer_path"]
     layer_path_repr = repr(layer_path)
     return (
@@ -1726,6 +2135,22 @@ def _gen_set_edit_target(args: Dict) -> str:
 
 
 def _gen_flatten_layers(args: Dict) -> str:
+    """Generate code that flattens all USD layers into a single file.
+
+    Calls ``UsdStage.Flatten()`` to merge all sublayer opinions into one
+    anonymous layer, then exports it to ``output_path`` via
+    ``layer.Export``.  Raises if ``Flatten`` returns ``None`` or the
+    export fails.
+
+    Args:
+        args: Tool arguments dict containing:
+            - output_path (str): Destination path for the flattened USD
+              file, e.g. ``"/tmp/scene_flat.usda"``.
+
+    Returns:
+        Python source string for Kit exec.  Raises ``RuntimeError`` if
+        flatten or export fails.
+    """
     output_path = args["output_path"]
     output_path_repr = repr(output_path)
     return (
@@ -1749,6 +2174,34 @@ def _gen_flatten_layers(args: Dict) -> str:
 
 
 def _gen_add_usd_reference(args: Dict) -> str:
+    """Generate code that adds a typed USD reference arc with optional layer offset.
+
+    More capable than ``_gen_add_reference``: supports the full
+    ``Sdf.Reference`` constructor (``usd_url``, ``ref_prim_path``,
+    ``layer_offset``), auto-creates the target prim as an Xform when it
+    does not exist, converts the caller-supplied seconds offset to USD
+    time codes, and optionally marks the prim instanceable.
+
+    Local paths are validated with ``os.path.exists`` before the call;
+    remote URLs are passed through USD's asset resolver.  Verifies
+    ``HasAuthoredReferences()`` after the add.
+
+    Args:
+        args: Tool arguments dict containing:
+            - prim_path (str): Absolute USD path of the target prim.
+            - usd_url (str): Asset URL for the referenced file.
+            - ref_prim_path (str, optional): Prim path inside the
+              referenced asset to target.
+            - layer_offset_seconds (float, optional): Time offset in
+              seconds; converted to time codes via
+              ``stage.GetTimeCodesPerSecond()``.
+            - instanceable (bool, optional): Mark the prim instanceable
+              after the reference is added.  Defaults to ``False``.
+
+    Returns:
+        Python source string for Kit exec.  Raises ``RuntimeError`` if
+        the reference was not authored.
+    """
     prim_path = args["prim_path"]
     usd_url = args["usd_url"]
     ref_prim_path = args.get("ref_prim_path")
@@ -1828,6 +2281,23 @@ def _gen_add_usd_reference(args: Dict) -> str:
 
 
 def _gen_load_payload(args: Dict) -> str:
+    """Generate code that activates (loads) a USD payload on a prim.
+
+    Checks whether the prim's path is already in the stage load set and
+    no-ops gracefully.  Uses ``stage.LoadAndUnload({path}, set(),
+    Usd.LoadWithDescendants)`` — the three-argument form that loads
+    the prim and all its children.  Falls back to the two-argument form
+    for Kit builds that predate the ``policy`` argument.
+
+    Args:
+        args: Tool arguments dict containing:
+            - prim_path (str): Absolute USD path of the prim whose
+              payload(s) should be activated.
+
+    Returns:
+        Python source string for Kit exec.  Raises ``RuntimeError`` if
+        the prim is not found.
+    """
     prim_path = args["prim_path"]
     prim_path_repr = repr(prim_path)
     return (
@@ -1870,6 +2340,26 @@ def _gen_load_payload(args: Dict) -> str:
 
 
 def _gen_save_stage(args: Dict) -> str:
+    """Generate code that saves the current stage, with filesystem pre- and post-checks.
+
+    Kit's ``ctx.save_stage`` / ``ctx.save_as_stage`` return ``True`` even
+    when the underlying write fails (async pipeline; errors are swallowed).
+    The generated code pre-checks that the parent directory exists and is
+    writable (for local paths), calls the appropriate save API, then
+    verifies the file materialised on disk before reporting success.
+
+    Args:
+        args: Tool arguments dict containing:
+            - path (str): Destination path, e.g. ``"/tmp/scene.usda"``
+              or ``"omniverse://server/path/scene.usd"``.  Remote URLs
+              skip the filesystem checks.
+
+    Returns:
+        Python source string for Kit exec.  Raises ``FileNotFoundError``
+        if the parent directory is missing, ``PermissionError`` if it is
+        not writable, and ``RuntimeError`` if the save API returned False
+        or the file is absent after the call.
+    """
     path = args["path"]
     # Live-reproduced bug: save_stage('/nonexistent/dir/scene.usd') returned
     # result=True and the tool reported 'wrote ...' — but the file wasn't
@@ -1915,6 +2405,23 @@ print(f'save_stage: confirmed write of {{target}}')
 
 
 def _gen_open_stage(args: Dict) -> str:
+    """Generate code that opens a USD stage in the current Kit UsdContext.
+
+    Validates local filesystem paths with ``os.path.exists`` before
+    calling ``ctx.open_stage``; remote URLs are passed through USD's
+    asset resolver.  ``ctx.open_stage`` returns ``False`` silently on
+    failure — the generated code treats that as an error and raises
+    ``RuntimeError`` rather than narrating "opened" to the user.
+
+    Args:
+        args: Tool arguments dict containing:
+            - path (str): USD file path or URL to open.
+
+    Returns:
+        Python source string for Kit exec.  Raises ``FileNotFoundError``
+        for missing local files, ``RuntimeError`` if
+        ``ctx.open_stage`` returns False.
+    """
     path = args["path"]
     # Two holes the old version had: (1) ctx.open_stage returns False on
     # missing file but the print said "opened {target} (ok=False)" — the word
@@ -1940,6 +2447,30 @@ print(f"open_stage: successfully opened {{target}}")
 
 
 def _gen_export_stage(args: Dict) -> str:
+    """Generate code that exports the stage to a non-USD format via async asset exporter.
+
+    The original implementation scheduled the export with
+    ``asyncio.ensure_future`` and immediately reported success — the async
+    writer was still in flight.  The generated code validates the format
+    and parent directory synchronously (so typos fail fast), then schedules
+    the async export with a separate completion log line to avoid the false
+    "wrote" implication.
+
+    Supported formats: ``usd``, ``usda``, ``usdc``, ``usdz``, ``glb``,
+    ``gltf``, ``obj``, ``fbx``, ``stl``.
+
+    Args:
+        args: Tool arguments dict containing:
+            - path (str): Destination file path or URL.
+            - format (str): Target format string (case-insensitive).
+
+    Returns:
+        Python source string for Kit exec.  Raises ``ValueError`` for
+        unsupported formats, ``FileNotFoundError`` if the parent directory
+        is missing for local paths.  Prints a "started async export"
+        line immediately and a "finished" line when the coroutine
+        completes.
+    """
     path = args["path"]
     fmt = args["format"].lower()
     # Original fire-and-forget pattern was structurally dishonest:
@@ -2414,6 +2945,25 @@ from ..tool_honesty import honesty_checked  # noqa: E402
 
 @honesty_checked(require_prim_paths=("prim_path",))
 def _gen_set_variant(args: Dict) -> str:
+    """Generate code that selects a variant on a prim's variant set.
+
+    The ``@honesty_checked`` decorator auto-prepends a prim-exists guard
+    using ``args['prim_path']``.  The generated code additionally
+    verifies that ``GetVariantSelection()`` returns the requested variant
+    name after the call — ``SetVariantSelection`` silently no-ops on
+    unknown variant names, which was a classic honesty hole.
+
+    Args:
+        args: Tool arguments dict containing:
+            - prim_path (str): Absolute USD path of the prim.
+            - variant_set (str): Name of the variant set, e.g.
+              ``"ShadingVariant"``.
+            - variant (str): Variant name to select within that set.
+
+    Returns:
+        Python source string for Kit exec.  Raises ``RuntimeError`` in
+        Kit if the selection did not take (unknown variant name).
+    """
     # Demo retrofit: @honesty_checked auto-prepends a prim-exists check
     # using args['prim_path']. Post-check: verify the variant selection
     # actually took (vsets silently no-op on unknown variant names).
@@ -2458,6 +3008,27 @@ def _gen_set_prim_metadata(args: Dict) -> str:
 
 
 def _gen_remove_semantic_label(args: Dict) -> str:
+    """Generate code that removes all Semantics.SemanticsAPI instances from a prim.
+
+    Enumerates every applied ``SemanticsAPI`` instance via
+    ``SemanticsAPI.GetAll(prim)`` and calls ``prim.RemoveAPI`` on each
+    one.  An explicit ``prim.RemoveProperty`` pass clears the
+    ``semantic:*:params:semanticType`` and ``semanticData`` attributes
+    that ``RemoveAPI`` leaves behind on some Kit versions (otherwise
+    ``HasAPI`` can still return True despite the schema token being
+    absent).  Falls back to ``prim.RemoveAppliedSchema`` on Kit builds
+    that do not expose ``RemoveAPI``.
+
+    Args:
+        args: Tool arguments dict containing:
+            - prim_path (str): Absolute USD path of the prim to
+              de-label.
+
+    Returns:
+        Python source string for Kit exec.  Prints a no-op message if no
+        semantic labels were found; otherwise reports the instance names
+        that were removed.
+    """
     prim_path = args["prim_path"]
     prim_path_repr = repr(prim_path)
     return (
@@ -2516,6 +3087,31 @@ def _gen_remove_semantic_label(args: Dict) -> str:
 
 
 def _gen_assign_class_to_children(args: Dict) -> str:
+    """Generate code that bulk-assigns a semantic class label to all renderable descendants.
+
+    Walks ``prim_path`` and every descendant via ``Usd.PrimRange``; only
+    prims that are ``UsdGeom.Mesh`` or ``UsdGeom.Gprim`` (i.e. things
+    that appear in synthetic data generation output) receive the label.
+    Pure grouping prims (Xform) are skipped to avoid redundant labels
+    that never match rendered pixels.
+
+    The label is applied via ``Semantics.SemanticsAPI.Apply(prim,
+    instance_name)`` where ``instance_name`` is derived from
+    ``semantic_type`` (e.g. ``"Semantics_class"``).
+
+    Args:
+        args: Tool arguments dict containing:
+            - prim_path (str): Root prim path; all renderable descendants
+              including the root itself are labeled.
+            - class_name (str): Semantic class string, e.g. ``"bottle"``,
+              ``"robot_arm"``.
+            - semantic_type (str, optional): Semantic type token written
+              to ``GetSemanticTypeAttr``.  Defaults to ``"class"``.
+
+    Returns:
+        Python source string for Kit exec.  Prints labeled/skipped counts
+        and the first five labeled paths.
+    """
     prim_path = args["prim_path"]
     class_name = args["class_name"]
     semantic_type = args.get("semantic_type", "class")
@@ -2573,6 +3169,23 @@ def _gen_assign_class_to_children(args: Dict) -> str:
 
 
 def _gen_merge_meshes(args: Dict) -> str:
+    """Generate code that merges multiple USD Mesh prims into one via isaacsim MeshMerger.
+
+    Auto-creates the parent Xform for ``output_path`` if it does not
+    exist.  Uses ``isaacsim.util.merge_mesh.MeshMerger`` which bakes
+    world transforms and outputs a single combined mesh suitable for
+    physics collision or export.
+
+    Args:
+        args: Tool arguments dict containing:
+            - prim_paths (list[str]): USD paths of the Mesh prims to
+              merge.
+            - output_path (str): Absolute USD path for the merged output
+              Mesh prim.
+
+    Returns:
+        Python source string for Kit exec.
+    """
     prim_paths = args["prim_paths"]
     output_path = args["output_path"]
 
@@ -2794,6 +3407,19 @@ print(f'activate_area: scope={{scope}} kept={{kept}} deactivated={{deactivated}}
 
 
 async def _handle_list_all_prims(args: Dict) -> Dict:
+    """Return the full prim tree from the current stage context.
+
+    Delegates to ``kit_tools.get_stage_context(full=True)`` which queries
+    Kit RPC for the live stage and returns the ``"stage"`` sub-dict
+    containing prim paths and metadata.
+
+    Args:
+        args: Tool arguments dict (currently unused; no parameters).
+
+    Returns:
+        Dict[str, Any] — the ``"stage"`` key from the Kit stage context
+        payload, or an empty dict if Kit is unreachable.
+    """
     from .. import kit_tools
     ctx = await kit_tools.get_stage_context(full=True)
     return ctx.get("stage", {})
@@ -3441,6 +4067,21 @@ print(json.dumps({"selected_paths": paths, "count": len(paths), "primary": prima
 
 
 async def _handle_scene_summary(args: Dict) -> Dict:
+    """Return a short human-readable summary of the current stage.
+
+    Fetches a lightweight (non-full) stage context from Kit and formats it
+    as a natural-language paragraph via
+    ``kit_tools.format_stage_context_for_llm``.  Used to give the LLM a
+    quick orientation without transmitting the full prim tree.
+
+    Args:
+        args: Tool arguments dict (currently unused; no parameters).
+
+    Returns:
+        Dict[str, Any] with keys:
+            - summary (str): Human-readable stage summary.
+            - error (str, optional): Present if Kit RPC failed.
+    """
     from .. import kit_tools
     ctx = await kit_tools.get_stage_context(full=False)
     if "error" in ctx:
@@ -4923,6 +5564,31 @@ print(json.dumps({"graphs": graphs, "count": len(graphs)}))
 
 
 async def _handle_save_delta_snapshot(args: Dict) -> Dict:
+    """Queue a Kit patch that captures dirty-layer USDA strings as a named snapshot.
+
+    Queues ``_gen_save_delta_snapshot`` as a Kit RPC patch, which reads
+    every dirty layer via ``omni.usd.get_dirty_layers`` (falling back to
+    ``layer.dirty`` iteration on older Kit builds) and prints their
+    exported USDA text as a JSON dict.  Simultaneously writes a manifest
+    JSON file to ``_DELTA_ROOT / {snapshot_id}.json`` so
+    ``restore_delta_snapshot`` has metadata even before Kit has returned
+    the dirty-layer payload.
+
+    Args:
+        args: Tool arguments dict containing:
+            - snapshot_id (str): Unique identifier for this snapshot,
+              e.g. ``"pre_physics_tweak"``.
+            - base_snapshot_id (str, optional): Parent snapshot this
+              delta builds on (informational only).
+
+    Returns:
+        Dict[str, Any] with keys:
+            - success (bool): True if the Kit patch was accepted.
+            - snapshot_id (str): Echo of the input.
+            - base_snapshot_id (str or None): Echo of the input.
+            - manifest_path (str): Filesystem path of the manifest JSON.
+            - queued (bool): True if the patch is in the Kit queue.
+    """
     from .. import kit_tools
     # _gen_save_delta_snapshot is module-local (line 1401).
     from ..tool_executor import logger
@@ -4955,6 +5621,30 @@ async def _handle_save_delta_snapshot(args: Dict) -> Dict:
 
 
 async def _handle_restore_delta_snapshot(args: Dict) -> Dict:
+    """Queue a Kit patch that replays a saved delta snapshot onto the current stage.
+
+    Reads the manifest JSON written by ``_handle_save_delta_snapshot``,
+    extracts the ``deltas`` dict (``{layer_identifier: usda_string}``),
+    and queues ``_gen_restore_delta_snapshot`` as a Kit RPC patch.  Kit
+    calls ``Sdf.Layer.ImportFromString(payload)`` on each layer that can
+    be located in the current stage.
+
+    Args:
+        args: Tool arguments dict containing:
+            - snapshot_id (str): Identifier of the snapshot to restore.
+              Must match a manifest file at
+              ``_DELTA_ROOT / {snapshot_id}.json``.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - success (bool): True if the Kit patch was accepted.
+            - snapshot_id (str): Echo of the input.
+            - base_snapshot_id (str or None): From the manifest.
+            - layer_count (int): Number of layer deltas in the manifest.
+            - queued (bool): True if the patch is in the Kit queue.
+            - error (str, optional): Present if the manifest file is
+              missing or unreadable.
+    """
     from .. import kit_tools
     # _gen_restore_delta_snapshot is module-local (line 1444).
     import json
