@@ -309,6 +309,13 @@ _SENSOR_SPECS_PATH = _WORKSPACE / "knowledge" / "sensor_specs.jsonl"
 
 @functools.lru_cache(maxsize=1)
 def _load_sensor_specs() -> List[Dict]:
+    """Load sensor product specifications from the JSONL sensor-specs file.
+
+    Returns an empty list when the file does not exist rather than raising.
+
+    Returns:
+        List[Dict]: One dict per sensor spec record loaded from the JSONL file.
+    """
     specs = []
     if _SENSOR_SPECS_PATH.exists():
         for line in _SENSOR_SPECS_PATH.read_text().splitlines():
