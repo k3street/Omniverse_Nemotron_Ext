@@ -1,3 +1,13 @@
+"""Snapshot API routes — create, list, and rollback USD stage snapshots.
+
+Exposes three endpoints under the ``/snapshots`` prefix:
+
+- ``POST /`` — capture the current USD layer state to disk (called by the Kit
+  extension UI before any LLM-generated code patch is executed).
+- ``GET /`` — return a reverse-chronological list of all persisted snapshots.
+- ``POST /{snapshot_id}/rollback`` — retrieve a snapshot's stored USDA payloads
+  so the UI can reinject them into the live stage.
+"""
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any, List
 from .models import SnapshotInitRequest
@@ -9,9 +19,20 @@ snap_manager = SnapshotManager()
 
 @router.post("")
 def create_snapshot(req: SnapshotInitRequest):
-    """
-    Called by the UI Extension right before it allows the LLM 
-    to execute a python patch against the active Isaac Scene.
+    """Persist the current USD layer state to disk as a named snapshot.
+
+    Collects an environment fingerprint via ``collect_fingerprint()`` and
+    writes all raw USD layer strings from ``req`` to
+    ``workspace/snapshots/{ts}_{id}/layers/``, along with a
+    ``manifest.json``.  Called by the Kit extension UI before the LLM is
+    allowed to execute a patch.
+
+    Args:
+        req (SnapshotInitRequest): Snapshot request containing ``trigger``,
+            ``action_context``, ``raw_usd_data``, and optional metadata.
+
+    Returns:
+        dict: Serialized ``Snapshot`` model as a flat dict.
     """
     try:
         # 1. Grab current environment state so we know exactly 
@@ -27,7 +48,12 @@ def create_snapshot(req: SnapshotInitRequest):
 
 @router.get("")
 def list_snapshots():
-    """ Returns chronology of all saved states for UI history window. """
+    """Return all persisted snapshot manifests, newest first.
+
+    Returns:
+        dict: ``{snapshots, total}`` where ``snapshots`` is a list of manifest
+        dicts and ``total`` is the count.
+    """
     try:
         return {"snapshots": snap_manager.list_snapshots(), "total": len(snap_manager.list_snapshots())}
     except Exception as e:
@@ -35,10 +61,19 @@ def list_snapshots():
 
 @router.post("/{snapshot_id}/rollback")
 def execute_rollback(snapshot_id: str):
-    """ 
-    MVP Rollback: Tell the Frontend to reload the USDA texts natively.
-    True disk-based `pxr` layer splicing requires deep OMni Kit runtime.
-    For now, returning the cached layer payloads lets the UI inject them back.
+    """Return the stored USDA layer payloads for a snapshot so the UI can restore them.
+
+    MVP implementation: reads the USDA files back from disk and instructs
+    the frontend to reload them.  True pxr-level layer splicing requires
+    the Omni Kit runtime and is deferred to a future release.
+
+    Args:
+        snapshot_id (str): Short hex ID of the snapshot to restore.
+
+    Returns:
+        dict: ``{status, action, usd_payloads}`` where ``usd_payloads`` is a
+        ``{layer_identifier: usda_text}`` dict; raises HTTP 404 if the snapshot
+        has been pruned or the ID is unknown.
     """
     # Look up snapshot
     manifests = snap_manager.list_snapshots()

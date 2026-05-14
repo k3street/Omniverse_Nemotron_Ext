@@ -1,3 +1,13 @@
+"""Credential-pattern redactor for outbound LLM messages and audit logs.
+
+Combines a user-configurable ``GovernanceConfig.secret_patterns`` list with
+an always-on ``EXTENDED_SECRET_PATTERNS`` set (Phase 90) that covers common
+credential shapes: Anthropic sk-ant keys, GCP PEM blocks, Slack webhooks,
+Stripe keys, and GitHub PATs (classic and fine-grained).
+
+The two pattern sets are merged at construction time so callers cannot
+accidentally disable the built-in patterns by overriding ``GovernanceConfig``.
+"""
 import re
 import logging
 from typing import List, Optional
