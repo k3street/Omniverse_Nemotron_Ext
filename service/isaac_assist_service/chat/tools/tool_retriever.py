@@ -79,7 +79,19 @@ def _build_index() -> None:
 
 
 def retrieve_tools(query: str, top_k: int = 15) -> List[str]:
-    """Return top_k tool NAMES semantically matching the query."""
+    """Return the top-k tool names most semantically relevant to the query.
+
+    Uses the ChromaDB all-MiniLM-L6-v2 embedding index built from tool names
+    and descriptions.  Returns an empty list when ChromaDB is unavailable or
+    the query fails.
+
+    Args:
+        query (str): User message or free-text description of the desired action.
+        top_k (int): Maximum number of tool names to return (default 15).
+
+    Returns:
+        List[str]: Ordered list of tool names (most relevant first).
+    """
     col = _get_collection()
     if col is None:
         return []
