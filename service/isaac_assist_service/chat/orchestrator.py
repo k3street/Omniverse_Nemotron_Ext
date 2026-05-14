@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from .provider_factory import get_llm_provider, get_distiller_provider
@@ -1352,7 +1352,7 @@ class ChatOrchestrator:
                 try:
                     _audit.log_entry(AuditEntry(
                         entry_id=str(uuid.uuid4()),
-                        timestamp=datetime.utcnow(),
+                        timestamp=datetime.now(timezone.utc),
                         event_type="tool_call",
                         action_id=fn_name,
                         target=json.dumps(fn_args, default=str)[:500],
