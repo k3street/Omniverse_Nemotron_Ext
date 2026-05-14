@@ -102,6 +102,7 @@ class RecalibrationLog:
     """
 
     def __init__(self, log_path: Path) -> None:
+        """Initialise with the NDJSON log file path (created on first write)."""
         self._path = Path(log_path)
 
     # ------------------------------------------------------------------

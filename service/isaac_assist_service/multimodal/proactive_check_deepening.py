@@ -71,6 +71,7 @@ class ProactiveRuleEngine:
     """
 
     def __init__(self) -> None:
+        """Initialise with an empty per-event trigger registry (insertion order preserved)."""
         # Keyed by event name, list preserves insertion order per event.
         self._rules: Dict[str, List[ProactiveTrigger]] = {}
 

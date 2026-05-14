@@ -124,6 +124,7 @@ class StageToLayoutSpecParser:
     """Parse a list of PrimRecords into LayoutEntry objects / LayoutSpec dict."""
 
     def __init__(self, classifier: Optional[StagePrimClassifier] = None) -> None:
+        """Initialise the parser with an optional prim classifier; defaults to :class:`StagePrimClassifier`."""
         self._classifier = classifier if classifier is not None else StagePrimClassifier()
 
     # ------------------------------------------------------------------
@@ -259,6 +260,7 @@ def _classify_prim(prim: Dict[str, Any]) -> Optional[str]:
 
 
 def _prim_to_typed_object(prim: Dict[str, Any], klass: str) -> Dict[str, Any]:
+    """Convert a raw prim dict and its class label into a typed layout-object dict."""
     return {
         "object_class": klass,
         "position": prim.get("position", [0.0, 0.0, 0.0]),

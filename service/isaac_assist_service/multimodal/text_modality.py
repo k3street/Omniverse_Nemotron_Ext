@@ -98,6 +98,7 @@ _FEATURE_RULES: Dict[str, List[re.Pattern]] = {
 
 
 def _detect_features(prompt: str, pattern: PatternHint) -> StructuralFeatures:
+    """Extract structural feature flags from a prompt string using ``_FEATURE_RULES``."""
     feats: Dict[str, Any] = {}
     for flag, regexes in _FEATURE_RULES.items():
         if any(r.search(prompt) for r in regexes):

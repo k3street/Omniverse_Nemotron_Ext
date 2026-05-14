@@ -98,6 +98,7 @@ class SilentSuccessFinding:
 # ---------------------------------------------------------------------------
 
 def _is_dict(v: Any) -> bool:
+    """Return True if *v* is a plain dict (used in rule lambda predicates)."""
     return isinstance(v, dict)
 
 
@@ -258,6 +259,7 @@ class HonestyDecorator:
         rules: Optional[List[SilentSuccessRule]] = None,
         raise_on_critical: bool = False,
     ) -> None:
+        """Initialise with the rule set to apply and the raise-on-critical flag."""
         self._rules: List[SilentSuccessRule] = (
             rules if rules is not None else SILENT_SUCCESS_RULES
         )
@@ -331,6 +333,7 @@ class HonestyDecorator:
 
         @functools.wraps(handler)
         def _wrapper(*args: Any, **kwargs: Any) -> Any:
+            """Invoke the wrapped handler and attach any honesty findings to its result."""
             result = handler(*args, **kwargs)
             findings = self.audit(effective_name, result)
 

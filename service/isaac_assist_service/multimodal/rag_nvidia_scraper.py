@@ -160,6 +160,7 @@ class URLFrontier:
     """
 
     def __init__(self, max_depth: int = 3) -> None:
+        """Initialise with the maximum crawl depth; deeper URLs are silently dropped."""
         self._max_depth = max_depth
         self._queue: deque[Tuple[str, int]] = deque()
         self._seen: set[str] = set()
@@ -209,6 +210,7 @@ class MockHTTPClient:
     """
 
     def __init__(self, pages: Optional[Dict[str, str]] = None) -> None:
+        """Initialise with an optional URL→HTML page map; unknown URLs return 404."""
         self._pages: Dict[str, str] = pages or {}
 
     def get(self, url: str) -> Tuple[int, str]:
@@ -255,6 +257,7 @@ class NVIDIAScraper:
         http: Optional[MockHTTPClient] = None,
         chunk_size_chars: int = 800,
     ) -> None:
+        """Initialise the scraper with a source definition, HTTP client, and chunk size."""
         self._source = source
         self._http = http if http is not None else MockHTTPClient()
         self._chunk_size = chunk_size_chars

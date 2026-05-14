@@ -120,6 +120,7 @@ class DRAGController:
     """
 
     def __init__(self, config: Optional[DRAGControllerConfig] = None) -> None:
+        """Initialise the DRAG controller with a config; defaults to ``DRAGControllerConfig()``."""
         self.config = config if config is not None else DRAGControllerConfig()
 
     # ------------------------------------------------------------------

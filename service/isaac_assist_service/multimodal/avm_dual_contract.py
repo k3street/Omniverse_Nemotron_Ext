@@ -12,6 +12,17 @@ from typing import Any, Dict, Optional
 
 @dataclass
 class DualEstimate:
+    """Paired analytical and simulated measurement for a single named dimension.
+
+    Attributes:
+        dimension: Name of the measured quantity (e.g. ``"reach_utilization"``).
+        analytical_value: Value computed analytically (no simulation).
+        simulated_value: Value measured in simulation; ``None`` if not yet run.
+        delta_abs: Absolute difference ``|analytical - simulated|``; populated by :func:`compute_delta`.
+        delta_pct: Relative difference as a fraction; populated by :func:`compute_delta`.
+        confidence: ``"high"`` / ``"medium"`` / ``"low"`` / ``"unknown"`` derived from ``delta_pct``.
+    """
+
     dimension: str
     analytical_value: float
     simulated_value: Optional[float] = None

@@ -135,6 +135,7 @@ class SuctionGripperModel:
     """
 
     def __init__(self, spec: SuctionCupSpec) -> None:
+        """Initialise the model with a :class:`SuctionCupSpec` defining cup geometry and vacuum rating."""
         self.spec = spec
 
     # ------------------------------------------------------------------

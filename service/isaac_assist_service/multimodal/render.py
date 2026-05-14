@@ -107,6 +107,7 @@ def render_layout_spec_to_png(
     cy = height_px / 2.0
 
     def w2p(x_m: float, y_m: float) -> Tuple[float, float]:
+        """Convert world-space coordinates (metres) to pixel coordinates."""
         return (cx + x_m * px_per_m, cy - y_m * px_per_m)
 
     # ── Grid ──────────────────────────────────────────────────────────

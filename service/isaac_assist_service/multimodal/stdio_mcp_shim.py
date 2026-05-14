@@ -71,6 +71,7 @@ class MCPShimError:
     data: Any = None
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a JSON-RPC error object dict, omitting ``data`` when absent."""
         d: Dict[str, Any] = {"code": self.code, "message": self.message}
         if self.data is not None:
             d["data"] = self.data
@@ -136,6 +137,7 @@ class StdioMCPShim:
         handshake_timeout_s: float = 5.0,
         max_message_bytes: int = 1024 * 1024,
     ) -> None:
+        """Initialise the shim with handshake timeout and per-message size limit."""
         self._handshake_timeout_s = handshake_timeout_s
         self._max_message_bytes = max_message_bytes
         self._state: MCPState = "uninitialized"

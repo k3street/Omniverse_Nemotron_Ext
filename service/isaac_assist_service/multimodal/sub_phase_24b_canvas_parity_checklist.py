@@ -246,6 +246,7 @@ class CanvasParityTracker:
     """Tracks status and per-criterion verification for all parity items."""
 
     def __init__(self, items: Optional[List[ParityItem]] = None) -> None:
+        """Initialise the tracker with a deep copy of the parity items list."""
         # Deep-copy items so mutations don't affect the module-level list
         src = items if items is not None else PARITY_ITEMS
         self._items: Dict[int, ParityItem] = {}

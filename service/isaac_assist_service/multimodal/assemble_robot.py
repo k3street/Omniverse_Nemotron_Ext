@@ -95,6 +95,7 @@ class AssemblyResult:
 
     @property
     def success(self) -> bool:
+        """Return True when there are no non-warning issues in the assembly result."""
         return not any(
             issue for issue in self.issues if not issue.startswith("WARN:")
         )

@@ -12,6 +12,16 @@ from typing import Any, Dict, List, Optional
 
 @dataclass
 class CritiqueFeatures:
+    """Feature flags extracted from generated code for deterministic critique scoring.
+
+    Attributes:
+        has_required_imports: True when all mandatory Isaac Sim imports are present.
+        follows_safe_xform: True when the code uses safe Xform-op patterns.
+        no_deprecated_apis: True when no deprecated USD / Isaac Sim APIs are detected.
+        sensible_prim_paths: True when generated prim paths follow project conventions.
+        extras: Additional feature flags from rule extensions.
+    """
+
     has_required_imports: bool = False
     follows_safe_xform: bool = False
     no_deprecated_apis: bool = False

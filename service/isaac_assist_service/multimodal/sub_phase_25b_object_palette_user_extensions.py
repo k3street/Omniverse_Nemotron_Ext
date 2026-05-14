@@ -66,6 +66,7 @@ class PaletteExtensionLoader:
     """
 
     def __init__(self, yaml_dir: Optional[Path] = None) -> None:
+        """Initialise the loader with the YAML extension directory (defaults to ``~/.isaac_assist/object_classes/``)."""
         self.yaml_dir: Path = yaml_dir if yaml_dir is not None else _DEFAULT_YAML_DIR
 
     # ------------------------------------------------------------------
@@ -163,6 +164,7 @@ class PaletteExtensionLoader:
 
     @staticmethod
     def _load_yaml(path: Path) -> Optional[dict]:
+        """Load and parse a YAML file; returns None on any parse error."""
         try:
             with path.open("r", encoding="utf-8") as fh:
                 return yaml.safe_load(fh)
@@ -170,6 +172,7 @@ class PaletteExtensionLoader:
             return None
 
     def _parse_file(self, path: Path) -> Optional[UserObjectClass]:
+        """Parse a single YAML file into a UserObjectClass; returns None if invalid."""
         data = self._load_yaml(path)
         if data is None:
             return None
@@ -179,6 +182,7 @@ class PaletteExtensionLoader:
 
     @staticmethod
     def _build_user_class(data: dict) -> UserObjectClass:
+        """Construct a :class:`UserObjectClass` from a validated YAML dict."""
         fp_raw = data.get("footprint_xy_m", [0.1, 0.1])
         footprint: tuple = tuple(fp_raw) if isinstance(fp_raw, (list, tuple)) else (0.1, 0.1)
         return UserObjectClass(

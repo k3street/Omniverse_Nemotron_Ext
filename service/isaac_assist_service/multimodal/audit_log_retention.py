@@ -55,6 +55,7 @@ class RetentionPolicy:
     delete_after_days: int
 
     def __post_init__(self) -> None:
+        """Validate that archive_after_days > 0 and delete_after_days > archive_after_days."""
         if self.archive_after_days <= 0:
             raise ValueError("archive_after_days must be positive")
         if self.delete_after_days <= self.archive_after_days:
@@ -72,6 +73,7 @@ class LogRetentionEnforcer:
     """
 
     def __init__(self) -> None:
+        """Initialise with an empty per-channel policy registry."""
         self._policies: Dict[str, RetentionPolicy] = {}
 
     def register_policy(self, policy: RetentionPolicy) -> None:

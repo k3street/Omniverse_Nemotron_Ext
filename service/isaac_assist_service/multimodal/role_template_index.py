@@ -346,6 +346,7 @@ class RoleTemplateIndex:
     """Inverted index over a :data:`ROLE_TEMPLATE_INDEX`-compatible list."""
 
     def __init__(self, entries: list[RoleTemplateEntry] | None = None) -> None:
+        """Initialise the index with an optional entry list; defaults to the module-level catalogue."""
         self._entries: list[RoleTemplateEntry] = (
             list(entries) if entries is not None else list(ROLE_TEMPLATE_INDEX)
         )
