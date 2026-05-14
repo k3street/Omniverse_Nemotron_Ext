@@ -1,7 +1,7 @@
 import sys
 import uuid
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any
 from pathlib import Path
 
@@ -53,7 +53,7 @@ class SwarmPlanGenerator:
         )
 
         import asyncio
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, pm.run, task)
         
         # Parse PM LoopResult
@@ -77,7 +77,7 @@ class SwarmPlanGenerator:
         # Return formatted Plan
         return PatchPlan(
             plan_id=uuid.uuid4().hex,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             trigger="swarm_agent",
             finding_ids=req.finding_ids,
             user_request=req.user_request,
