@@ -18,7 +18,22 @@ from typing import Any, Callable, Dict, List, Optional
 # Theme-local helpers (Phase 8 wave 26, 2026-05-13)
 
 def _format_component_metrics(metrics: Dict) -> str:
-    """Format per-component training metrics for the mutation prompt."""
+    """Format per-component training metrics for the mutation prompt.
+
+    Iterates the ``components`` sub-dict of a metrics blob produced by
+    ``_gen_evaluate_reward``/``evaluate_groot`` and renders each component's
+    recent mean values and convergence status as an indented multi-line string
+    suitable for embedding in an LLM prompt.
+
+    Args:
+        metrics: dict containing:
+            - components (dict, optional): maps component name to a dict with
+              ``mean`` (list[float]) and ``converged`` (bool).
+
+    Returns:
+        str: human-readable summary, one line per component, or
+        ``"No component metrics available."`` when the dict is empty.
+    """
     components = metrics.get("components", {})
     if not components:
         return "No component metrics available."
@@ -41,7 +56,31 @@ _cloud_jobs: Dict[str, Dict] = {}
 # Migrated from tool_executor.py — used only by handlers.training.
 
 def _generate_isaaclab_env_code(cfg: Dict) -> str:
-    """Generate a minimal IsaacLab ManagerBasedRLEnv config file."""
+    """Generate a minimal IsaacLab ManagerBasedRLEnv config file.
+
+    Produces a complete Python source file string that, when saved to disk,
+    provides a ``ManagerBasedRLEnvCfg`` subclass ready for ``isaaclab.train``.
+    Observation terms use ``mdp.<name>`` references; action config class is
+    auto-selected from a small map (``joint_positions`` →
+    ``JointPositionActionCfg``, ``base_velocity`` →
+    ``DifferentialInverseKinematicsActionCfg``).
+
+    Args:
+        cfg: dict containing:
+            - task_name (str): class name prefix, e.g. ``"FrankaReach"``.
+            - robot_path (str): USD articulation path for the robot asset.
+            - observation_space (list[str]): observation term names.
+            - action_space (str): action type key (``"joint_positions"`` or
+              ``"base_velocity"``).
+            - reward_terms (list[str]): reward term names.
+            - num_envs (int): parallel environment count.
+            - env_spacing (float): grid spacing between environments in metres.
+            - episode_length (int): episode length in steps.
+            - decimation (int): physics substep decimation factor.
+
+    Returns:
+        str: complete Python source for the ``*EnvCfg`` module.
+    """
     task = cfg["task_name"]
     robot = cfg["robot_path"]
     obs = cfg["observation_space"]
@@ -130,6 +169,24 @@ class {task}EnvCfg(ManagerBasedRLEnvCfg):
 '''
 
 def _build_mutation_prompt(prev_reward: str, metrics: Dict, user_feedback: Optional[str]) -> str:
+    """Compose a mutation prompt for the next Eureka reward iteration.
+
+    Embeds the previous reward source, per-component training metrics
+    (via ``_format_component_metrics``), overall task success rate, and
+    optional user feedback into a single LLM prompt string.
+
+    Args:
+        prev_reward (str): Python source of the reward function from the
+            previous Eureka iteration.
+        metrics (dict): metrics blob from ``evaluate_reward``; expected keys
+            are ``components`` (dict), ``task_success_rate`` (float), and
+            ``fitness`` (float).
+        user_feedback (str or None): free-form guidance from the user; if
+            ``None`` the feedback section is omitted.
+
+    Returns:
+        str: formatted mutation prompt ready to send to the LLM.
+    """
     prompt = f"""Previous reward function:
 {prev_reward}
 
@@ -177,7 +234,22 @@ def _read_tb_scalars(run_dir: str, tag: str) -> List[float]:
         return []
 
 def _read_checkpoint_action_std(run_dir: str) -> Optional[float]:
-    """Read mean policy action std from the latest .pt checkpoint, if any."""
+    """Read mean policy action std from the latest .pt checkpoint, if any.
+
+    Scans ``run_dir`` recursively for ``.pt`` files, loads the most recent
+    one via ``torch.load`` (weights_only=False to handle RSL-RL pickled
+    configs), and extracts the mean standard deviation of the stochastic
+    policy head.  Supports RSL-RL checkpoint keys ``std``, ``log_std``, and
+    ``action_std`` under ``model_state_dict``.
+
+    Args:
+        run_dir (str): path to an IsaacLab / RSL-RL training run directory.
+
+    Returns:
+        float: mean action std across all action dimensions, or ``None``
+        when no checkpoint is found, torch is not installed, or the std key
+        is absent.
+    """
     run_path = Path(run_dir)
     if not run_path.exists():
         return None
@@ -209,7 +281,36 @@ def _generate_actuator_net_script(
     num_epochs: int,
     output_dir: str,
 ) -> str:
-    """Generate IsaacLab ActuatorNetLSTM training script."""
+    """Generate an IsaacLab ActuatorNetLSTM training script.
+
+    Produces a self-contained Python source string that trains a small LSTM
+    to predict commanded joint torques from position error and joint velocity,
+    using real hardware trajectory data stored in an HDF5 file.  The network
+    architecture matches the IsaacLab ``ActuatorNetLSTM`` interface.
+
+    The generated script:
+    1. Loads ``(q_target, q, qd, tau)`` from the HDF5 file at
+       ``REAL_DATA_PATH``.
+    2. Constructs input features as ``[q_target - q, qd]`` per joint.
+    3. Trains with Adam + MSE loss for ``NUM_EPOCHS`` epochs.
+    4. Saves the model state dict and config to ``OUTPUT_DIR/actuator_net.pt``
+       and writes a ``result.json`` with the final loss.
+
+    Args:
+        real_data_path (str): path to the HDF5 file containing the trajectory
+            data (keys: ``joint_positions``, ``joint_velocities``,
+            ``joint_torques_commanded``).
+        articulation_path (str): USD prim path of the robot articulation (used
+            only as a label in the script header).
+        hidden_dim (int): LSTM hidden state dimensionality.
+        num_layers (int): number of LSTM layers.
+        num_epochs (int): training epochs.
+        output_dir (str): directory where ``actuator_net.pt`` and
+            ``result.json`` are written.
+
+    Returns:
+        str: complete Python source for the training script.
+    """
     return f'''"""Auto-generated ActuatorNet (LSTM) training script.
 Articulation: {articulation_path}
 Real data:    {real_data_path}
@@ -493,7 +594,28 @@ _EXPORT_TARGETS = {
 
 
 def _gen_launch_training(args: Dict) -> str:
-    """Generate code to launch an IsaacLab training run."""
+    """Generate code to launch an IsaacLab RL training run.
+
+    Produces a Python script that invokes ``isaaclab.train`` as a subprocess
+    with the appropriate algorithm runner (``rsl_rl`` for PPO/RSL-RL,
+    ``skrl`` for SAC/TD3) and writes a PID-tracked process.
+
+    Args:
+        args: tool-call args dict containing:
+            - task (str): IsaacLab task name, e.g. ``"Isaac-Reach-Franka-v0"``.
+            - algo (str, default ``"ppo"``): one of ``"ppo"``, ``"sac"``,
+              ``"td3"``, ``"rsl_rl"``.  PPO maps to the RSL-RL runner; SAC/TD3
+              map to the skrl runner.
+            - num_steps (int, default 1 000 000): total environment steps; used
+              to derive ``max_iterations``.
+            - num_envs (int, default 64): parallel environment count.
+            - checkpoint_dir (str, optional): log/checkpoint output directory.
+              Defaults to ``workspace/rl_checkpoints/<task>``.
+
+    Returns:
+        str: Python source that, when exec'd, starts the training subprocess
+        and prints its PID and log directory.
+    """
     task = args["task"]
     algo = args.get("algo", "ppo")
     num_steps = args.get("num_steps", 1_000_000)
@@ -538,7 +660,26 @@ def _gen_launch_training(args: Dict) -> str:
 
 
 def _gen_evaluate_reward(args: Dict) -> str:
-    """Generate code to evaluate a candidate reward function via short training."""
+    """Generate code to evaluate a candidate reward function via short training.
+
+    Produces a Python script that writes the reward function to a temp file,
+    launches ``isaaclab.train`` for a short rollout with the custom reward
+    (via ``--custom_reward`` flag), waits for completion, and parses a
+    ``metrics.json`` output for fitness/success-rate signals used by the
+    Eureka reward-iteration loop.
+
+    Args:
+        args: tool-call args dict containing:
+            - reward_code (str): Python source of the ``compute_reward``
+              function to evaluate.
+            - env_id (str): IsaacLab task/env ID to train against.
+            - num_steps (int, default 1000): total environment steps for the
+              short evaluation run.
+
+    Returns:
+        str: Python source that runs the evaluation and prints fitness/success
+        metrics as JSON.
+    """
     reward_code = args["reward_code"]
     env_id = args["env_id"]
     num_steps = args.get("num_steps", 1000)
@@ -616,7 +757,28 @@ print(json.dumps(results, indent=2))
 
 
 def _gen_evaluate_groot(args: Dict) -> str:
-    """Generate code to run closed-loop GR00T N1 evaluation."""
+    """Generate code to run closed-loop GR00T N1 policy evaluation.
+
+    Produces a Python script that launches the GR00T policy server as a
+    background subprocess (``gr00t.deploy.policy_server``), runs a
+    closed-loop IsaacLab evaluation harness (``gr00t.eval.isaac_lab``),
+    collects a per-task results JSON, and terminates the server.  Raises
+    ``RuntimeError`` if the eval subprocess exits without producing a results
+    file.
+
+    Args:
+        args: tool-call args dict containing:
+            - task (str): IsaacLab task identifier to evaluate.
+            - model_id (str, default ``"nvidia/GR00T-N1.6-3B"``): Hugging Face
+              model ID or local model name.
+            - num_episodes (int, default 50): number of evaluation rollouts.
+            - checkpoint (str, optional): path to a fine-tuned checkpoint; if
+              absent, the downloaded base model is used.
+
+    Returns:
+        str: Python source that runs the full evaluation pipeline and prints
+        success rate and task metrics.
+    """
     model_id = args.get("model_id", "nvidia/GR00T-N1.6-3B")
     task = args["task"]
     num_episodes = args.get("num_episodes", 50)
@@ -691,7 +853,28 @@ print(f'Policy server terminated (PID: {{server_proc.pid}})')
 
 
 def _gen_finetune_groot(args: Dict) -> str:
-    """Generate code to fine-tune GR00T N1 on demo data."""
+    """Generate code to fine-tune GR00T N1 on demonstration data.
+
+    Produces a Python script that calls ``gr00t.finetune.train`` with
+    optional LoRA configuration.  Includes a VRAM pre-check that warns when
+    detected GPU memory is below the minimum threshold (25 GB for LoRA,
+    48 GB for full fine-tuning).
+
+    Args:
+        args: tool-call args dict containing:
+            - demo_data (str): path to a LeRobot-format or HDF5 demo dataset.
+            - model_id (str, default ``"nvidia/GR00T-N1.6-3B"``): base model
+              identifier.
+            - num_steps (int, default 10 000): fine-tuning gradient steps.
+            - lora (bool, default ``True``): use LoRA rank-16 (fits 1×RTX4090)
+              rather than full fine-tuning.
+            - output_dir (str, default ``"workspace/groot_checkpoints"``):
+              checkpoint output directory.
+
+    Returns:
+        str: Python source that launches the fine-tuning subprocess and prints
+        the PID and output directory.
+    """
     model_id = args.get("model_id", "nvidia/GR00T-N1.6-3B")
     demo_data = args["demo_data"]
     num_steps = args.get("num_steps", 10000)
@@ -750,6 +933,29 @@ print(f'Fine-tuning started (PID: {{proc.pid}}). Checkpoints → {{output_dir}}'
 
 
 def _gen_clone_envs(args: Dict) -> str:
+    """Generate code to clone an IsaacSim environment prim into a GPU-ready grid.
+
+    Produces a Python script that uses ``isaacsim.core.cloner.GridCloner`` to
+    replicate ``source_path`` into ``num_envs`` copies arranged in a grid at
+    ``/World/envs``.  Physics replication (``replicate_physics=True``) is
+    always enabled to keep Isaac Sim on the optimised parallel-physics code
+    path.  Collision filtering between environment instances is generated as a
+    separate ``filter_collisions`` call when ``collision_filter`` is True.
+
+    Args:
+        args: tool-call args dict containing:
+            - source_path (str): USD prim path of the template environment to
+              clone (e.g. ``"/World/envs/env_0"``).
+            - num_envs (int): number of environment copies to generate.
+            - spacing (float, default 2.5): grid spacing between clones in
+              metres.
+            - collision_filter (bool, default ``True``): whether to add a
+              ``CollisionGroup`` that prevents cross-environment collisions.
+
+    Returns:
+        str: Python source that, when exec'd in Kit, creates the cloned grid
+        and prints a confirmation message.
+    """
     source_path = args["source_path"]
     num_envs = args["num_envs"]
     spacing = args.get("spacing", 2.5)
@@ -781,7 +987,29 @@ def _gen_clone_envs(args: Dict) -> str:
 
 
 def _gen_setup_loco_manipulation_training(args: Dict) -> str:
-    """Generate training scaffolding + reward-mixing advisor for loco-manipulation."""
+    """Generate training scaffolding and reward-mixing advisor for loco-manipulation.
+
+    Produces a Python scaffold that documents the chosen training approach
+    (``decoupled``, ``hierarchical``, or ``joint`` end-to-end RL) and embeds
+    an inline reward-mixing advisor.  When both locomotion and manipulation
+    reward weights are supplied, the advisor detects imbalanced weighting and
+    suggests a 3-phase curriculum schedule to avoid early locomotion collapse.
+
+    Args:
+        args: tool-call args dict containing:
+            - task_description (str): plain-language task description.
+            - robot (str): robot name or USD path.
+            - approach (str, default ``"decoupled"``): one of ``"decoupled"``
+              (HOVER + Pink-IK), ``"hierarchical"`` (SoFTA/FALCON dual-agent),
+              or ``"joint"`` (full end-to-end RL).
+            - reward_terms (list[dict], optional): list of reward term dicts,
+              each with ``name``, ``weight``, and ``category``
+              (``"locomotion"`` or ``"manipulation"``).
+
+    Returns:
+        str: Python source scaffold including approach comments, reward
+        weights summary, and optional imbalance warnings.
+    """
     task = args["task_description"]
     robot = args["robot"]
     approach = args.get("approach", "decoupled")
@@ -860,7 +1088,27 @@ def _gen_setup_loco_manipulation_training(args: Dict) -> str:
 
 
 def _gen_export_policy(args: Dict) -> str:
-    """Generate code to export GR00T checkpoint to TensorRT."""
+    """Generate code to export a GR00T checkpoint to a TensorRT engine.
+
+    Produces a Python script that documents the three-step export pipeline:
+    ``torch.onnx.export`` → ``trtexec`` or ``polygraphy`` → a device-specific
+    ``.engine`` file.  Looks up expected throughput and FP8 support from the
+    ``_EXPORT_TARGETS`` table.  Emits a budget-check warning when the
+    requested ``inference_budget_ms`` implies higher Hz than the device maximum.
+
+    Args:
+        args: tool-call args dict containing:
+            - checkpoint (str): path to the ``.pt`` checkpoint to export.
+            - target_device (str): one of ``"jetson_agx_orin"``,
+              ``"jetson_orin_nx"``, ``"x86_rtx4090"``, ``"x86_a6000"``.
+              Falls back to ``"x86_rtx4090"`` for unknown targets.
+            - inference_budget_ms (float, optional): maximum allowed inference
+              latency in milliseconds.
+
+    Returns:
+        str: Python source that prints export metadata and performs a budget
+        Hz check, with inline comments for the manual TensorRT steps.
+    """
     # Phase 8 wave 12 — _EXPORT_TARGETS migrated.
     checkpoint = args["checkpoint"]
     target = args["target_device"]
@@ -908,7 +1156,23 @@ if budget_ms:
 
 
 def _gen_cloud_download_results(args: Dict) -> str:
-    """Generate code to download results from a cloud instance."""
+    """Generate code to download training results from a cloud instance.
+
+    Produces a Python script that reads an IsaacAutomator deployment state
+    file (``deployments/<job_id>/state.json``) to retrieve the instance IP
+    and SSH key path, then uses ``rsync`` to download the ``/results/``
+    directory to a local output path.  When the state file is missing, the
+    script warns and sets ``instance_ip`` to a placeholder.
+
+    Args:
+        args: tool-call args dict containing:
+            - job_id (str): cloud job identifier returned by ``cloud_launch``.
+            - output_dir (str, default ``"workspace/cloud_results"``): local
+              directory to receive the downloaded results.
+
+    Returns:
+        str: Python source that runs rsync and reports success or failure.
+    """
     job_id = args["job_id"]
     output_dir = args.get("output_dir", "workspace/cloud_results")
 
@@ -953,7 +1217,29 @@ else:
 
 
 def _gen_create_calibration_experiment(args: Dict) -> str:
-    """Generate calibration grid search code."""
+    """Generate a physics parameter grid-search calibration script.
+
+    Produces a Python script that sweeps a named physics parameter (friction,
+    damping, or stiffness) across ``num_samples`` linearly-spaced values,
+    applies each value to the matching USD API attributes in the live stage,
+    runs a sim trajectory, and records a gap score.  The placeholder score
+    ``abs(value - 0.6)`` must be replaced with output from
+    ``measure_sim_real_gap`` for production use.
+
+    Args:
+        args: tool-call args dict containing:
+            - parameter (str, default ``"friction"``): physics parameter to
+              sweep; one of ``"friction"``, ``"damping"``, ``"stiffness"``.
+            - range (list[float], default ``[0.0, 1.0]``): ``[min, max]``
+              sweep bounds.
+            - num_samples (int, default 7): number of grid points.
+            - real_data_path (str, optional): path to real trajectory data for
+              gap scoring (embedded as a Python variable in the script).
+
+    Returns:
+        str: Python source for the calibration loop, including best-value
+        selection and JSON results dump.
+    """
     parameter = args.get("parameter", "friction")
     param_range = args.get("range", [0.0, 1.0])
     num_samples = args.get("num_samples", 7)
@@ -1007,7 +1293,33 @@ print(json.dumps(results, indent=2))
 
 
 def _gen_eval_harness(args: Dict) -> str:
-    """Generate a reproducible RL evaluation script."""
+    """Generate a reproducible RL policy evaluation script.
+
+    Produces a self-contained Python script that registers the target task
+    with ``gymnasium``, loads a checkpoint if available, runs
+    ``num_episodes`` deterministic rollouts (seeded by episode index), and
+    saves per-episode rewards, success flags, and episode lengths to
+    ``OUTPUT_DIR/eval_results.json``.  Optionally wraps the environment in
+    ``RecordVideo`` for visual debugging.
+
+    The checkpoint loading path is provided by the inner ``_load_policy``
+    helper which falls back to random policy on any error.  Policy forward
+    pass is a placeholder stub — callers must integrate their actor module.
+
+    Args:
+        args: tool-call args dict containing:
+            - task_name (str): gymnasium-registered task ID.
+            - num_episodes (int, default 100): rollout count.
+            - output_dir (str, optional): results directory; defaults to
+              ``workspace/eval/<task_name>``.
+            - checkpoint_path (str, optional): ``.pt`` checkpoint to load.
+            - record_video (bool, default ``False``): wrap env in
+              ``RecordVideo``.
+            - max_steps_per_episode (int, default 1000): per-episode step cap.
+
+    Returns:
+        str: complete Python source for the evaluation harness module.
+    """
     task_name = args["task_name"]
     num_episodes = int(args.get("num_episodes", 100))
     output_dir = args.get("output_dir") or f"workspace/eval/{task_name}"
@@ -1109,7 +1421,33 @@ if __name__ == "__main__":
 
 
 async def _handle_create_isaaclab_env(args: Dict) -> Dict:
-    """Generate an IsaacLab env scaffold — returns config as data for the LLM to refine."""
+    """Generate an IsaacLab RL environment scaffold.
+
+    Selects a task-type template from ``_RL_TASK_TEMPLATES`` (manipulation,
+    locomotion, navigation, or custom), merges any caller-supplied reward
+    terms, and delegates code generation to ``_generate_isaaclab_env_code``.
+    Returns both the Python source and a structured config dict so the LLM
+    can inspect or further refine the environment before training.
+
+    Args:
+        args: tool-call args dict containing:
+            - task_name (str): name for the generated env class.
+            - robot_path (str): USD articulation path of the robot.
+            - task_type (str, default ``"manipulation"``): template key;
+              one of ``"manipulation"``, ``"locomotion"``, ``"navigation"``,
+              ``"custom"``.
+            - num_envs (int, default 64): parallel environment count.
+            - env_spacing (float, default 2.0): grid spacing in metres.
+            - reward_terms (list[str], optional): overrides template rewards.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - type (str): ``"isaaclab_env"``.
+            - task_name (str): as supplied.
+            - config (dict): full environment configuration used for codegen.
+            - generated_code (str): Python source for the ``*EnvCfg`` module.
+            - instructions (str): human-readable summary for the LLM.
+    """
     # Phase 8 wave 20 — _generate_isaaclab_env_code migrated.
     task_name = args["task_name"]
     robot_path = args["robot_path"]
@@ -1154,7 +1492,31 @@ async def _handle_create_isaaclab_env(args: Dict) -> Dict:
 
 
 async def _handle_generate_reward(args: Dict) -> Dict:
-    """Generate Eureka reward configuration and initial prompt for a DirectRLEnv."""
+    """Generate Eureka reward configuration and an initial LLM prompt for a DirectRLEnv.
+
+    Reads the environment Python source from ``env_source_path`` and embeds
+    it in a structured prompt requesting ``num_candidates`` diverse
+    ``compute_reward`` candidates.  Returns an error dict if the env is a
+    ``ManagerBasedRLEnv`` (Eureka requires ``DirectRLEnv`` which exposes
+    ``compute_reward()`` directly).
+
+    Args:
+        args: tool-call args dict containing:
+            - task_description (str): plain-language description of the RL task.
+            - env_source_path (str): filesystem path to the DirectRLEnv Python
+              source file.
+            - num_candidates (int, default 4): number of diverse reward
+              candidates to request from the LLM.
+            - num_iterations (int, default 5): planned Eureka iterations.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - task_description, env_source_path, num_candidates,
+              num_iterations, env_type, initial_prompt: Eureka run config.
+            - env_source_included (bool): whether the source file was found.
+            - error (str): present only when env_source is a
+              ``ManagerBasedRLEnv``.
+    """
     from pathlib import Path
     task_description = args["task_description"]
     env_source_path = args["env_source_path"]
@@ -1210,7 +1572,29 @@ Return each candidate as a separate code block.
 
 
 async def _handle_iterate_reward(args: Dict) -> Dict:
-    """Generate a mutation prompt for the next Eureka iteration."""
+    """Generate a mutation prompt for the next Eureka reward iteration.
+
+    Delegates to ``_build_mutation_prompt`` to embed the previous reward
+    code, per-component training metrics, and optional user feedback into a
+    single LLM-ready string.
+
+    Args:
+        args: tool-call args dict containing:
+            - prev_reward_code (str): Python source of the reward function
+              from the previous iteration.
+            - metrics (dict): evaluation metrics blob with keys ``components``,
+              ``task_success_rate``, ``fitness``.
+            - user_feedback (str, optional): free-form guidance to include in
+              the prompt.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - mutation_prompt (str): formatted LLM prompt.
+            - prev_fitness: fitness score from the previous iteration.
+            - prev_success_rate: success rate from the previous iteration.
+            - components_analyzed (list[str]): component names from metrics.
+            - has_user_feedback (bool): whether user feedback was included.
+    """
     # Phase 8 wave 20 — _build_mutation_prompt migrated.
     prev_reward_code = args["prev_reward_code"]
     metrics = args["metrics"]
@@ -1303,7 +1687,28 @@ async def _handle_eureka_history(args: Dict) -> Dict:
 
 
 async def _handle_eureka_status(args: Dict) -> Dict:
-    """Return current status of a Eureka optimization run."""
+    """Return the current status of an in-memory Eureka optimization run.
+
+    Looks up the run in the process-local ``EUREKA.runs`` state dict.  For
+    persisted history across sessions, use ``_handle_eureka_history`` instead.
+
+    Args:
+        args: tool-call args dict containing:
+            - run_id (str): Eureka run identifier returned by
+              ``generate_reward``.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - run_id (str): as supplied.
+            - status (str): ``"running"``, ``"completed"``, ``"failed"``, or
+              ``"not_found"``.
+            - current_iteration (int): iterations completed so far.
+            - total_iterations (int): planned iteration count.
+            - candidates_evaluated (int): total candidate evaluations.
+            - best_fitness (float): highest fitness seen across all
+              iterations.
+            - best_reward_code (str or None): source of the best reward so far.
+    """
     from ._state import EUREKA
     _eureka_runs = EUREKA.runs
     run_id = args["run_id"]
@@ -1328,7 +1733,33 @@ async def _handle_eureka_status(args: Dict) -> Dict:
 
 
 async def _handle_load_groot_policy(args: Dict) -> Dict:
-    """Return download/launch commands for GR00T N1 policy server."""
+    """Return download and launch commands for a GR00T N1 policy server.
+
+    Resolves the embodiment configuration from ``_GROOT_EMBODIMENTS``,
+    estimates required VRAM, and generates Hugging Face snapshot-download
+    and policy-server launch commands.  Returns a VRAM check result and an
+    error key if the estimated VRAM exceeds 24 GB.
+
+    Args:
+        args: tool-call args dict containing:
+            - robot_path (str): USD prim path of the robot that will connect
+              to the policy server via gRPC.
+            - model_id (str, default ``"nvidia/GR00T-N1.6-3B"``): Hugging
+              Face model identifier.
+            - embodiment (str, default ``"custom"``): embodiment key from
+              ``_GROOT_EMBODIMENTS``; one of ``"LIBERO_PANDA"``,
+              ``"OXE_WIDOWX"``, ``"UNITREE_G1"``, ``"custom"``.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - model_id, robot_path, embodiment, embodiment_config.
+            - download_command (str): Python snippet to download the model.
+            - launch_command (str): CLI command to start the policy server.
+            - vram_required_gb (int): estimated VRAM requirement.
+            - vram_check (str): ``"ok"`` or ``"insufficient"``.
+            - error (str or None): set when VRAM check fails.
+            - instructions (str): numbered human-readable steps.
+    """
     # Phase 8 wave 13 — _GROOT_EMBODIMENTS migrated.
     model_id = args.get("model_id", "nvidia/GR00T-N1.6-3B")
     robot_path = args["robot_path"]
@@ -1370,7 +1801,27 @@ async def _handle_load_groot_policy(args: Dict) -> Dict:
 
 
 async def _handle_compare_policies(args: Dict) -> Dict:
-    """Format a comparison table from multiple GR00T policy evaluation results."""
+    """Build a formatted comparison table from multiple GR00T policy evaluation results.
+
+    Sorts policies by success rate (descending), determines all unique task
+    metric columns across results, and renders a fixed-width ASCII table with
+    column widths adapted to content.
+
+    Args:
+        args: tool-call args dict containing:
+            - results (list[dict], optional): list of evaluation result dicts,
+              each with keys ``policy_name``, ``model_id``, ``success_rate``
+              (float 0-1), ``training_data_size``, ``observation_type``, and
+              ``task_metrics`` (dict[str, float]).
+
+    Returns:
+        Dict[str, Any] with keys:
+            - comparison_table (str): ASCII table string.
+            - entries (list[dict]): sorted policy entries.
+            - count (int): number of policies compared.
+            - metric_columns (list[str]): task-metric column names.
+            - dimensions (list[str]): interpretive guidance for the LLM.
+    """
     results = args.get("results", [])
 
     if not results:
@@ -1454,7 +1905,25 @@ async def _handle_compare_policies(args: Dict) -> Dict:
 
 
 async def _handle_export_finetune_data(args: Dict) -> Dict:
-    """Export recorded turns to a provider-specific fine-tuning format."""
+    """Export recorded conversation turns to a provider-specific fine-tuning format.
+
+    Delegates to the session-level ``TurnRecorder.export()`` method.
+    Filtered by minimum quality tier; only turns at or above that tier are
+    included in the export file.
+
+    Args:
+        args: tool-call args dict containing:
+            - format (str): export format, e.g. ``"openai"``, ``"anthropic"``,
+              ``"jsonl"``.
+            - min_quality (str, default ``"approved_successful"``): minimum
+              quality tier to include.
+            - output_path (str, optional): destination file path; recorder
+              chooses a default when absent.
+
+    Returns:
+        Dict[str, Any]: result from ``TurnRecorder.export()``; typically
+        includes ``output_path``, ``count``, and ``format``.
+    """
     from ._state import get_turn_recorder
     _turn_recorder = get_turn_recorder()
     fmt = args["format"]
@@ -1468,7 +1937,19 @@ async def _handle_export_finetune_data(args: Dict) -> Dict:
 
 
 async def _handle_finetune_stats(args: Dict) -> Dict:
-    """Return aggregate statistics about recorded fine-tuning data."""
+    """Return aggregate statistics about recorded fine-tuning data.
+
+    Delegates to the session-level ``TurnRecorder.get_stats()`` method.
+    No args are consumed; stats cover all turns recorded in the current
+    session.
+
+    Args:
+        args: tool-call args dict (unused).
+
+    Returns:
+        Dict[str, Any]: result from ``TurnRecorder.get_stats()``; typically
+        includes total turn count, per-quality-tier breakdowns, and data size.
+    """
     from ._state import get_turn_recorder
     _turn_recorder = get_turn_recorder()
     return _turn_recorder.get_stats()
@@ -1557,7 +2038,26 @@ else:
 
 
 async def _handle_apply_dr_preset(args: Dict) -> Dict:
-    """Look up a DR preset by name."""
+    """Look up a named domain randomization preset from ``_DR_PRESETS``.
+
+    Available presets: ``"indoor_industrial"``, ``"outdoor_daylight"``,
+    ``"warehouse"``, ``"cleanroom"``, ``"aggressive_sim2real"``.
+
+    Args:
+        args: tool-call args dict containing:
+            - preset (str): preset name (case-insensitive, stripped).
+
+    Returns:
+        Dict[str, Any] with keys:
+            - preset (str): normalised preset name.
+            - description (str): human-readable scenario description.
+            - parameters (dict): all DR parameter ranges for this preset,
+              ready to feed into ``configure_correlated_dr`` or an IsaacLab
+              ``EventManager``.
+            - message (str): usage guidance.
+            - error (str): present with ``available`` list when preset is
+              unknown or empty.
+    """
     # Phase 8 wave 16 — _DR_PRESETS migrated.
     preset = (args.get("preset") or "").strip().lower()
     if not preset:
@@ -1577,7 +2077,38 @@ async def _handle_apply_dr_preset(args: Dict) -> Dict:
 
 
 async def _handle_detect_ood(args: Dict) -> Dict:
-    """Detect OOD via action variance/autocorrelation (Tier 1) or higher tiers."""
+    """Detect out-of-distribution (OOD) inputs via a tiered detection strategy.
+
+    Tier 1 (action-signal, no GPU):
+        Computes action variance and lag-1 autocorrelation over a supplied
+        action sequence.  High variance (>1.0) or low autocorrelation (<0.3)
+        indicates unstable/OOD behaviour.
+
+    Tier 2 (4-sample DiT variance, ~15 ms overhead):
+        Describes a Monte-Carlo dropout approach for uncertainty quantification
+        in the GR00T DiT policy head.
+
+    Tier 3 (Mahalanobis distance on vision embeddings):
+        Describes a distance-based detector pre-computed from 12th-layer
+        training embeddings.
+
+    Args:
+        args: tool-call args dict containing:
+            - tier (int, default 1): detection tier (1, 2, or 3).
+            - action_sequence (list, required for tier 1): list of action
+              vectors (or scalars), >= 2 entries.
+            - checkpoint_path (str, optional): used in tier 2 instructions.
+            - calibration_path (str, optional): used in tier 3 instructions.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - tier (int): as supplied.
+            - is_ood (bool): tier-1 verdict.
+            - max_action_variance, min_autocorrelation, thresholds: tier-1
+              metrics.
+            - method, overhead_ms, instructions: tier-2/3 guidance dicts.
+            - error (str): for invalid tier or missing action_sequence.
+    """
     tier = args.get("tier", 1)
 
     if tier == 1:
@@ -1634,7 +2165,28 @@ async def _handle_detect_ood(args: Dict) -> Dict:
 
 
 async def _handle_analyze_checkpoint(args: Dict) -> Dict:
-    """Analyze GR00T checkpoint: embodiment, drift, action stats, risk."""
+    """Analyze a GR00T checkpoint for embodiment, layer drift, and action statistics.
+
+    Verifies that the checkpoint file exists, then returns an analysis
+    template describing the expected ``torch.load`` keys, layer drift
+    interpretation thresholds (vision encoder: <0.05 Frobenius norm = frozen
+    good; dit_layers: >0.3 = well-targeted), and action statistics shape.
+    Optionally records a base model path for comparative drift computation.
+
+    Args:
+        args: tool-call args dict containing:
+            - checkpoint_path (str): path to the ``.pt`` checkpoint file.
+            - base_model_path (str, optional): path to the base pre-trained
+              model for layer-drift comparison.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - checkpoint_path (str): as supplied.
+            - instructions (list[str]): numbered analysis steps.
+            - expected_structure (dict): annotated schema of checkpoint keys.
+            - compare_against (str): present when base_model_path is supplied.
+            - error (str): present when the checkpoint file does not exist.
+    """
     from pathlib import Path
     checkpoint_path = args.get("checkpoint_path", "")
     base_path = args.get("base_model_path")
@@ -1671,7 +2223,33 @@ async def _handle_analyze_checkpoint(args: Dict) -> Dict:
 
 
 async def _handle_get_training_status(args: Dict) -> Dict:
-    """Read TensorBoard event files + subprocess state for an RL run."""
+    """Read TensorBoard event files and subprocess state for an RL training run.
+
+    Scans the log directory for ``events.out.tfevents.*`` files, attempts to
+    parse the most recent one with ``tensorboard.EventAccumulator`` to extract
+    the latest reward scalar and global step, and checks a ``launcher.pid``
+    file to determine whether the training process is still alive.  Degrades
+    gracefully when TensorBoard is not installed.
+
+    Args:
+        args: tool-call args dict containing:
+            - run_id (str): training run identifier; used to build the default
+              log directory ``workspace/rl_checkpoints/<run_id>``.
+            - log_dir (str, optional): explicit log directory path override.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - run_id (str): as supplied.
+            - log_dir (str): resolved log directory.
+            - state (str): ``"running"``, ``"finished"``, ``"starting"``,
+              ``"missing"``, or ``"unknown"``.
+            - step (int or None): last recorded global step.
+            - total_steps (int or None): planned total steps (None if unknown).
+            - latest_reward (float or None): latest reward scalar.
+            - events_found (int): number of TensorBoard event files found.
+            - pid (int): launcher PID when available.
+            - note/error (str): informational messages on degraded paths.
+    """
     import os
     from pathlib import Path
     # Phase 8 wave 24 — _WORKSPACE migrated.
@@ -1756,7 +2334,30 @@ async def _handle_get_training_status(args: Dict) -> Dict:
 
 
 async def _handle_get_env_observations(args: Dict) -> Dict:
-    """Read the observation tensor for one env in a running IsaacLab worker."""
+    """Read the observation tensor for one environment in a running IsaacLab worker.
+
+    Resolves the active training run via ``_resolve_run_id``, validates
+    ``env_id`` against the registered environment count, then sends an IPC
+    query ``{"op": "get_observations"}`` to the worker process.
+
+    Args:
+        args: tool-call args dict containing:
+            - env_id (int, optional): index of the environment to query;
+              ``None`` queries env 0.
+            - run_id (str, optional): explicit run identifier; if absent, the
+              most recently launched run is used.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - run_id, env_id (str/int): identifiers.
+            - step (int): global training step.
+            - episode_step (int): step within the current episode.
+            - observations (dict): named observation tensors.
+            - dtype (str): tensor dtype, e.g. ``"float32"``.
+            - shape (list[int]): flat observation shape.
+            - wall_time_ms (float): handler round-trip latency.
+            - error (str): present when the run is not found or IPC fails.
+    """
     import time
     from ._shared import _resolve_run_id, _validate_env_id, _query_run_ipc
     t0 = time.perf_counter()
@@ -1795,7 +2396,28 @@ async def _handle_get_env_observations(args: Dict) -> Dict:
 
 
 async def _handle_get_env_rewards(args: Dict) -> Dict:
-    """Read per-term reward breakdown for one env at the current step."""
+    """Read per-term reward breakdown for one environment at the current step.
+
+    Resolves the active run, validates the env index, and sends an IPC query
+    ``{"op": "get_rewards"}``.  Computes ``total_reward`` from the per-term
+    weighted values when the worker does not return it directly.
+
+    Args:
+        args: tool-call args dict containing:
+            - env_id (int, optional): environment index; defaults to 0.
+            - run_id (str, optional): explicit run identifier.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - run_id, env_id: identifiers.
+            - step (int): global training step.
+            - total_reward (float): sum of all weighted reward terms.
+            - terms (list[dict]): per-term breakdown, each with ``name``,
+              ``raw``, ``weight``, ``weighted``.
+            - episode_return (float): cumulative return for this episode.
+            - wall_time_ms (float): handler round-trip latency.
+            - error (str): present when the run is not found or IPC fails.
+    """
     import time
     from ._shared import _resolve_run_id, _validate_env_id, _query_run_ipc
     t0 = time.perf_counter()
@@ -1838,7 +2460,32 @@ async def _handle_get_env_rewards(args: Dict) -> Dict:
 
 
 async def _handle_get_env_termination_state(args: Dict) -> Dict:
-    """Report termination flags (success / timeout / crashed / done) for one env."""
+    """Report termination flags for one environment at the current step.
+
+    Resolves the active run, validates the env index, and sends an IPC query
+    ``{"op": "get_termination"}``.  Derives ``done``, ``success``, ``timeout``,
+    and ``crashed`` flags from both top-level keys and the ``termination_terms``
+    sub-dict for compatibility across IsaacLab versions.
+
+    Args:
+        args: tool-call args dict containing:
+            - env_id (int, optional): environment index; defaults to 0.
+            - run_id (str, optional): explicit run identifier.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - run_id, env_id: identifiers.
+            - done (bool): episode has ended by any cause.
+            - success (bool): episode ended with task success.
+            - timeout (bool): episode ended by time limit.
+            - crashed (bool): episode ended by an unexpected termination term.
+            - termination_terms (dict): raw per-term boolean flags.
+            - episode_step (int): steps in the current episode.
+            - max_episode_steps (int): episode horizon.
+            - last_reset_step (int): global step of the last reset.
+            - wall_time_ms (float): handler round-trip latency.
+            - error (str): present when the run is not found or IPC fails.
+    """
     import time
     from ._shared import _resolve_run_id, _validate_env_id, _query_run_ipc
     t0 = time.perf_counter()
@@ -1889,7 +2536,37 @@ async def _handle_get_env_termination_state(args: Dict) -> Dict:
 
 
 async def _handle_checkpoint_training(args: Dict) -> Dict:
-    """Trigger an out-of-band checkpoint save on a running training subprocess."""
+    """Trigger an out-of-band checkpoint save on a running training subprocess.
+
+    Resolves the active run, verifies it is in ``"running"`` or ``"paused"``
+    state, then sends an IPC ``{"op": "checkpoint"}`` message.  Requires the
+    worker to return a non-empty ``checkpoint_path`` in its response —
+    returns an explicit error rather than silently claiming success when
+    the path is absent (guards against disk-full / permission / policy-state
+    races).
+
+    Args:
+        args: tool-call args dict containing:
+            - run_id (str, optional): explicit run identifier.
+            - include_replay_buffer (bool, default ``False``): whether to
+              include the replay buffer in the checkpoint.
+            - tag (str, default ``"manual"``): label attached to the checkpoint
+              (used by some runners for checkpoint management).
+
+    Returns:
+        Dict[str, Any] with keys:
+            - run_id (str): resolved run identifier.
+            - checkpoint_path (str): path to the saved checkpoint file.
+            - step (int): global training step at checkpoint time.
+            - iteration (int): training iteration at checkpoint time.
+            - size_bytes (int): checkpoint file size.
+            - includes_replay_buffer (bool): whether the buffer was saved.
+            - save_duration_ms (float): time taken by the worker to write.
+            - tag (str): as supplied.
+            - wall_time_ms (float): handler round-trip latency.
+            - error (str): present on state mismatch, missing run, or IPC
+              failure.
+    """
     import time
     from ._shared import _resolve_run_id, _query_run_ipc
     t0 = time.perf_counter()
@@ -1958,7 +2635,28 @@ async def _handle_checkpoint_training(args: Dict) -> Dict:
 
 
 async def _handle_cloud_estimate_cost(args: Dict) -> Dict:
-    """Estimate cost for a cloud GPU instance over a given duration."""
+    """Estimate rental cost for a cloud GPU instance over a given duration.
+
+    Looks up the ``(provider, instance_type)`` pair in ``_CLOUD_PRICING``
+    and computes ``price_per_hour * hours``.  Returns a human-readable
+    message that includes the GPU model and hourly rate.
+
+    Args:
+        args: tool-call args dict containing:
+            - provider (str): cloud provider key, e.g. ``"aws"``, ``"gcp"``,
+              ``"azure"``.
+            - instance_type (str): instance type string, e.g.
+              ``"g5.2xlarge"``.
+            - hours (float): rental duration in hours.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - cost_usd (float or None): estimated total cost.
+            - price_per_hour (float or None): hourly rate.
+            - provider, instance_type, gpu, hours: as supplied / resolved.
+            - message (str): human-readable cost summary, or an error
+              message listing known types when the pair is not in the table.
+    """
     # Phase 8 wave 12 — _CLOUD_PRICING migrated.
     provider = args["provider"]
     instance_type = args["instance_type"]
@@ -1996,8 +2694,37 @@ async def _handle_cloud_estimate_cost(args: Dict) -> Dict:
 
 
 async def _handle_cloud_launch(args: Dict) -> Dict:
-    """Return structured deployment info for IsaacAutomator cloud launch.
-    Always requires approval regardless of auto-approve setting.
+    """Return structured deployment info for an IsaacAutomator cloud launch.
+
+    Validates the script template against the allowlist
+    (``_CLOUD_SCRIPT_ALLOWLIST``), looks up pricing, assembles an
+    IsaacAutomator CLI command, and records the job in the module-level
+    ``_cloud_jobs`` dict for subsequent status/teardown calls.  Always sets
+    ``always_require_approval=True`` — cloud spend requires explicit user
+    confirmation regardless of any auto-approve setting.
+
+    Args:
+        args: tool-call args dict containing:
+            - provider (str): ``"aws"``, ``"gcp"``, or ``"azure"``.
+            - instance_type (str): instance type, e.g. ``"g5.2xlarge"``.
+            - isaac_version (str, default ``"5.1.0"``): Isaac Sim version to
+              deploy.
+            - script_template (str, default ``"training"``): one of
+              ``"training"``, ``"sdg"``, ``"evaluation"``,
+              ``"headless_sim"``.
+            - num_gpus (int, default 1): GPU count to request.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - job_id (str): generated job identifier.
+            - deploy_command (str): IsaacAutomator CLI command to run.
+            - provider, instance_type, isaac_version, script_template,
+              num_gpus, gpu_model: as resolved.
+            - estimated_cost_per_hour (float or None): hourly rate.
+            - prerequisites (list[str]): per-provider setup checklist.
+            - always_require_approval (bool): always ``True``.
+            - message (str): human-readable summary with cost and guidance.
+            - error (str): present when script_template is not in allowlist.
     """
     # Phase 8 wave 24 — _cloud_jobs migrated.
     provider = args["provider"]
@@ -2089,7 +2816,26 @@ async def _handle_cloud_launch(args: Dict) -> Dict:
 
 
 async def _handle_cloud_status(args: Dict) -> Dict:
-    """Check the status of a cloud job."""
+    """Check the status of a tracked cloud job.
+
+    Looks up the job in the process-local ``_cloud_jobs`` dict populated by
+    ``_handle_cloud_launch``.  Does not make any remote API calls — status
+    reflects the last locally-known state.
+
+    Args:
+        args: tool-call args dict containing:
+            - job_id (str): cloud job identifier returned by ``cloud_launch``.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - job_id (str): as supplied.
+            - status (str): ``"pending_approval"``, ``"running"``,
+              ``"completed"``, ``"failed"``, or ``"not_found"``.
+            - gpu_utilization: last known GPU utilisation (or ``"N/A"``).
+            - estimated_remaining: estimated time remaining (or ``"N/A"``).
+            - cost_so_far: accumulated cost (or ``"N/A"``).
+            - message (str): present when job_id is not found.
+    """
     # Phase 8 wave 24 — _cloud_jobs migrated.
     job_id = args["job_id"]
 
@@ -2114,7 +2860,26 @@ async def _handle_cloud_status(args: Dict) -> Dict:
 
 
 async def _handle_cloud_teardown(args: Dict) -> Dict:
-    """Return teardown command for a cloud instance. Always requires approval."""
+    """Return a teardown command for a cloud instance. Always requires approval.
+
+    Looks up the job in ``_cloud_jobs``, constructs the IsaacAutomator
+    ``./destroy-<provider>`` command, and adds a cost warning when the
+    instance is still active.  Always sets ``always_require_approval=True``.
+
+    Args:
+        args: tool-call args dict containing:
+            - job_id (str): cloud job identifier returned by ``cloud_launch``.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - job_id (str): as supplied.
+            - teardown_command (str): CLI command to destroy the instance.
+            - provider (str): resolved cloud provider.
+            - always_require_approval (bool): always ``True``.
+            - cost_warning (str): non-empty when the instance is still
+              billing; empty when already stopped or unknown.
+            - message (str): human-readable action summary.
+    """
     # Phase 8 wave 24 — _cloud_jobs migrated.
     job_id = args["job_id"]
 
@@ -2149,7 +2914,37 @@ async def _handle_cloud_teardown(args: Dict) -> Dict:
 
 
 async def _handle_diagnose_training(args: Dict) -> Dict:
-    """Run all RL training diagnostics against a run directory."""
+    """Run a full suite of RL training diagnostics against a run directory.
+
+    Reads TensorBoard event files (via ``_read_tb_scalars``) and the latest
+    checkpoint (via ``_read_checkpoint_action_std``) to perform six checks:
+
+    1. **Action collapse**: policy std near zero → deterministic collapse.
+    2. **Entropy collapse**: entropy scalar dropped below 0.1 → stopped exploring.
+    3. **Reward hacking**: reward trending up but success rate flat.
+    4. **Bimodal success**: high variance across per-environment success rates.
+    5. **NaN detection**: NaN values in any TB scalar series → numerical blowup.
+    6. **Throughput**: ``Perf/total_fps`` scalar.
+
+    Each check returns a status (``"ok"``, ``"warning"``, ``"critical"``, or
+    ``"unknown"``) with a human-readable message.
+
+    Args:
+        args: tool-call args dict containing:
+            - run_dir (str): path to the RSL-RL or IsaacLab run directory
+              (must contain ``events.out.tfevents.*`` files).
+            - physics_dt (float, default ``1/120``): simulation physics
+              timestep; used in the NaN check's PD stability guidance.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - run_dir (str): as supplied.
+            - status (str): summary e.g. ``"2 issues found"``.
+            - checks (dict): per-check result dicts with ``status``,
+              ``message``, and optional numeric ``value``.
+            - suggestions (list[str]): prioritised action items.
+            - error (str): present when run_dir does not exist.
+    """
     from pathlib import Path
     from typing import List as _List
     # Phase 8 wave 20 — _read_checkpoint_action_std migrated.
@@ -2351,7 +3146,34 @@ print(json.dumps({{"robot": {robot_path!r}, "policy": {policy_path!r}, "obs_keys
 
 
 async def _handle_monitor_forgetting(args: Dict) -> Dict:
-    """Detect catastrophic forgetting via VQA regression + weight drift."""
+    """Detect catastrophic forgetting in a fine-tuned GR00T model.
+
+    Returns a structured monitoring plan describing two complementary checks:
+    (a) VQA regression benchmarks (MMMU, MMStar, RealWorldQA, MathVista,
+    AI2D) — a >20% score drop flags forgetting; (b) per-layer Frobenius norm
+    drift relative to the base model — vision encoder drift >0.05 or language
+    model drift >0.01 triggers an alert.
+
+    This handler returns instructions rather than executing the benchmarks
+    directly, as VQA evaluation is a long-running external process.
+
+    Args:
+        args: tool-call args dict containing:
+            - checkpoint_dir (str): directory containing fine-tuned
+              checkpoints to evaluate.
+            - base_model (str, optional): path to the base pre-trained model
+              for weight drift comparison.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - checkpoint_dir, base_model: as supplied.
+            - vqa_benchmarks (list[str]): benchmarks to run.
+            - instructions (list[str]): numbered monitoring steps.
+            - alert_thresholds (dict): thresholds for VQA drop and weight
+              drift.
+            - warning (str): advisory about silent forgetting risk.
+            - error (str): present when checkpoint_dir does not exist.
+    """
     from pathlib import Path
     checkpoint_dir = args.get("checkpoint_dir", "")
     base_model = args.get("base_model", "")
@@ -2379,7 +3201,32 @@ async def _handle_monitor_forgetting(args: Dict) -> Dict:
 
 
 async def _handle_pause_training(args: Dict) -> Dict:
-    """Signal a running training subprocess to pause without stopping it."""
+    """Signal a running training subprocess to pause without terminating it.
+
+    Resolves the active run and validates that it is in ``"running"`` state
+    (already-paused runs return a no-op result).  Sends an IPC
+    ``{"op": "pause"}`` message, which the worker honours by suspending its
+    gradient update loop (typically via ``SIGUSR1``).
+
+    Args:
+        args: tool-call args dict containing:
+            - run_id (str, optional): explicit run identifier; if absent, the
+              most recently launched run is used.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - run_id (str): resolved run identifier.
+            - paused (bool): ``True`` on success or no-op.
+            - previous_state (str): state before the pause request.
+            - step (int): global training step at pause time.
+            - iteration (int): training iteration at pause time.
+            - pid (int or None): launcher process ID.
+            - signal_sent (str or None): signal delivered to the worker.
+            - wall_time_ms (float): handler round-trip latency.
+            - note (str): present for already-paused no-op.
+            - error (str): present when run is not found, not running, or
+              IPC fails.
+    """
     import time
     from ._shared import _resolve_run_id, _query_run_ipc
     t0 = time.perf_counter()
@@ -2434,7 +3281,34 @@ async def _handle_pause_training(args: Dict) -> Dict:
 
 
 async def _handle_profile_training_throughput(args: Dict) -> Dict:
-    """Identify sim-bound vs train-bound RL training runs from RSL-RL perf logs."""
+    """Identify whether an RL run is sim-bound or train-bound from RSL-RL perf logs.
+
+    Reads ``Perf/collection_time`` and ``Perf/learning_time`` TensorBoard
+    scalars from the run directory.  Uses the most recent values to compute
+    each phase's fraction of the total step time.  Issues targeted suggestions
+    for each bottleneck regime.
+
+    Args:
+        args: tool-call args dict containing:
+            - run_dir (str): path to the RSL-RL run directory containing
+              ``events.out.tfevents.*`` files.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - run_dir (str): as supplied.
+            - bottleneck (str): ``"sim_bound"``, ``"train_bound"``, or
+              ``"balanced"``.
+            - collection_time_ms (float): simulation data collection time.
+            - learning_time_ms (float): GPU gradient update time.
+            - collection_fraction, learning_fraction (float): fractions of
+              total step time.
+            - total_fps (float or None): ``Perf/total_fps`` value if present.
+            - suggestion (str): actionable optimisation advice.
+            - camera_cost_ranking (str): relative cost of Isaac Sim camera
+              types for reference.
+            - error (str): present when run_dir is missing or required
+              scalars are absent.
+    """
     from pathlib import Path
     # Phase 8 wave 20 — _read_tb_scalars migrated.
     run_dir = args["run_dir"]
@@ -2502,7 +3376,22 @@ async def _handle_profile_training_throughput(args: Dict) -> Dict:
 
 
 async def _handle_redact_finetune_data(args: Dict) -> Dict:
-    """Run the redaction pipeline on an existing JSONL file."""
+    """Run the redaction pipeline on an existing fine-tuning JSONL file.
+
+    Delegates to ``TurnRecorder.redact_file()`` which scrubs PII and
+    confidential content from a JSONL fine-tuning export.
+
+    Args:
+        args: tool-call args dict containing:
+            - input_path (str): path to the JSONL file to redact.
+            - output_path (str, optional): destination path for the redacted
+              file; if absent, the recorder chooses a default (e.g.
+              ``<input>_redacted.jsonl``).
+
+    Returns:
+        Dict[str, Any]: result from ``TurnRecorder.redact_file()``; typically
+        includes ``output_path``, ``turns_redacted``, and ``turns_kept``.
+    """
     from ._state import get_turn_recorder
     _turn_recorder = get_turn_recorder()
     input_path = args["input_path"]
@@ -2514,7 +3403,39 @@ async def _handle_redact_finetune_data(args: Dict) -> Dict:
 
 
 async def _handle_review_reward(args: Dict) -> Dict:
-    """Run static checks on a reward function before training starts."""
+    """Run static analysis checks on a reward function before training starts.
+
+    Performs five regex-based / arithmetic checks on the Python source:
+
+    1. **Sparse reward**: only success/goal terms detected → training will
+       stall on < 1 % of envs.
+    2. **Dominant term**: one weight > 100x others → signal masked.
+    3. **Reward hacking risk**: alive/survival/time bonus without fall
+       termination → policy exploits the bonus.
+    4. **Scale issue**: max possible reward < 0.01 → value function starved.
+    5. **Success alignment**: success term present but no distance/progress
+       term → reward doesn't correlate with the task criterion.
+
+    Args:
+        args: tool-call args dict containing:
+            - reward_code (str): Python source of the reward function to
+              review.
+            - has_fall_termination (bool, default ``False``): whether the
+              environment already has an explicit fall/termination condition
+              (suppresses hacking-risk warnings for alive-bonus patterns).
+            - max_possible_reward (float, optional): caller-declared maximum
+              per-step reward magnitude for scale-check override.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - issues (list[dict]): list of check results, each with ``check``,
+              ``status`` (``"warning"`` or ``"info"``), and ``message``.
+            - issue_count (int): number of issues found.
+            - suggestions (list[str]): prioritised actionable advice.
+            - weights_analyzed (list[float]): all extracted weight values.
+            - has_fall_termination (bool): as supplied.
+            - error (str): present when reward_code is empty.
+    """
     # Phase 8 wave 12 — _REWARD_HACK_PATTERNS migrated.
     from typing import List as _List
     code = args.get("reward_code", "")
@@ -2611,7 +3532,33 @@ async def _handle_review_reward(args: Dict) -> Dict:
 
 
 async def _handle_suggest_data_mix(args: Dict) -> Dict:
-    """Recommend sim/real/video data ratio per NVIDIA's 1:1 recipe."""
+    """Recommend sim/real/video data ratios following NVIDIA's validated 1:1 recipe.
+
+    Applies the 1:1 real-to-sim mixing recipe (validated to give a ~40% gain
+    over real-only training).  Video demos are capped at one quarter of real
+    demos to avoid over-representation of passive observations.
+
+    Args:
+        args: tool-call args dict containing:
+            - task_type (str, default ``"tabletop pick-and-place"``): plain
+              language task description used for advice framing.
+            - available_data (dict, optional): counts of available data:
+                - real_demos (int): number of teleoperated real demos.
+                - sim_demos (int): number of simulated demos.
+                - video_demos (int): number of passive video demos.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - task_type (str): as supplied.
+            - available (dict): as supplied.
+            - recommendation (dict): ``real_demos_to_use``,
+              ``sim_demos_to_use``, ``video_demos_to_use``,
+              ``total_training_examples``.
+            - rationale (str): recipe citation.
+            - dr_priorities (list[str]): ordered DR recommendations.
+            - additional_advice (str): video diversity guidance.
+            - warnings (list[str]): present when no real demos are available.
+    """
     task_type = args.get("task_type", "tabletop pick-and-place")
     available = args.get("available_data", {})
     real_demos = available.get("real_demos", 0)
@@ -2648,7 +3595,36 @@ async def _handle_suggest_data_mix(args: Dict) -> Dict:
 
 
 async def _handle_suggest_dr_ranges(args: Dict) -> Dict:
-    """Suggest DR ranges from heuristics, optionally refined by real-data variance."""
+    """Suggest domain randomization parameter ranges for a given task and robot.
+
+    Looks up a base range set from ``_DR_TASK_DEFAULTS`` (matched by
+    substring) then applies robot-specific overrides from ``_DR_ROBOT_HINTS``
+    (e.g. Franka/Panda gripper friction, UR10 damping).  Optionally reads a
+    real sensor CSV or JSON file to replace heuristic ranges with empirical
+    min/max values derived from actual hardware data.
+
+    Args:
+        args: tool-call args dict containing:
+            - task_type (str): task description, e.g. ``"pick_and_place"``,
+              ``"locomotion"``, ``"navigation"``, ``"assembly"``.
+            - robot (str, optional): robot name for hint matching (e.g.
+              ``"franka"``, ``"ur10"``, ``"anymal"``).
+            - real_data_path (str, optional): path to a CSV or JSON file
+              with real sensor data; numeric columns become empirical range
+              overrides.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - task_type (str): as supplied.
+            - task_matched (str): matched ``_DR_TASK_DEFAULTS`` key.
+            - robot (str): as supplied.
+            - robot_matched (str or None): matched ``_DR_ROBOT_HINTS`` key.
+            - suggested_ranges (dict[str, list[float]]): parameter → [min, max].
+            - real_data_used (bool): whether empirical refinement was applied.
+            - notes (list[str]): warnings about missing files or parse errors.
+            - message (str): human-readable summary.
+            - error (str): present when task_type is empty.
+    """
     import csv
     import json
     from pathlib import Path
@@ -2738,7 +3714,37 @@ async def _handle_suggest_dr_ranges(args: Dict) -> Dict:
 
 
 async def _handle_suggest_finetune_config(args: Dict) -> Dict:
-    """Recommend layer freeze/tune strategy."""
+    """Recommend a GR00T fine-tuning layer freeze/tune strategy.
+
+    Selects a freeze profile from ``_FINETUNE_FREEZE_PROFILES`` and a
+    hardware-appropriate batch size from a lookup table, then returns the
+    combined recommendation.  Warns when the supplied demo count is below the
+    recommended minimum.
+
+    Available profiles (``task_type`` values):
+    - ``"similar_to_pretrain"``: freeze vision+language, tune DiT + connectors.
+    - ``"new_visual_domain"``: tune vision encoder too; risk of VQA regression.
+    - ``"new_embodiment"``: full LoRA fine-tuning (rank 16).
+
+    Args:
+        args: tool-call args dict containing:
+            - task_type (str, default ``"similar_to_pretrain"``): profile key.
+            - hardware (str, default ``"RTX 4090"``): GPU model for batch-size
+              selection; one of ``"A6000"``, ``"RTX 4090"``, ``"RTX 4080"``,
+              ``"H100"``.
+            - data_size (int, default 0): number of demonstration episodes.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - task_type, hardware: as supplied.
+            - freeze_layers, tune_layers (list[str]): layer groups.
+            - rationale (str): justification for the profile.
+            - recommended_batch_size (int): hardware-matched batch size.
+            - lora_rank (int): 0 for non-LoRA profiles, 16 for new_embodiment.
+            - warning (str): present for ``new_visual_domain`` VQA risk.
+            - data_warning (str): present when data_size < 50.
+            - error (str): present for unknown task_type.
+    """
     # Phase 8 wave 13 — _FINETUNE_FREEZE_PROFILES migrated.
     task_type = args.get("task_type", "similar_to_pretrain")
     hardware = args.get("hardware", "RTX 4090")
@@ -2773,7 +3779,31 @@ async def _handle_suggest_finetune_config(args: Dict) -> Dict:
 
 
 async def _handle_suggest_parameter_adjustment(args: Dict) -> Dict:
-    """Given a gap report, suggest physics parameters to adjust."""
+    """Given a sim-real gap report, suggest physics parameter adjustments.
+
+    Iterates per-joint errors in the gap report and suggests damping or
+    stiffness changes proportional to the error magnitude.  Also checks
+    end-effector drift and issues a global stiffness reduction when drift
+    exceeds 10 mm.
+
+    Args:
+        args: tool-call args dict containing:
+            - gap_report (dict): output from ``measure_sim_real_gap()`` with
+              keys:
+                - joint_errors (dict[str, dict]): maps joint name to a dict
+                  with ``mean_error_deg``.
+                - ee_error_mm (dict, optional): with key ``mean_mm``.
+                - worst_joint (str, optional): name of the worst joint.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - suggestions (list[dict]): per-joint/EE adjustment suggestions,
+              each with ``joint``, ``issue``, ``suggested_action``,
+              ``parameter``, and ``priority`` (``"high"`` or ``"medium"``).
+            - worst_joint (str or None): from the gap report.
+            - total_suggestions (int): number of suggestions generated.
+            - error (str): present when gap_report is missing or malformed.
+    """
     gap = args.get("gap_report", {})
     if not gap or "joint_errors" not in gap:
         return {"error": "Invalid gap_report — must include 'joint_errors' from measure_sim_real_gap()"}
@@ -2820,7 +3850,39 @@ async def _handle_suggest_parameter_adjustment(args: Dict) -> Dict:
 
 
 async def _handle_train_actuator_net(args: Dict) -> Dict:
-    """Generate the ActuatorNetLSTM training script and return launch command."""
+    """Generate an ActuatorNetLSTM training script and return the launch command.
+
+    Validates inputs, creates the output directory, delegates script
+    generation to ``_generate_actuator_net_script``, writes the script to
+    disk, and returns a job descriptor.  Always sets
+    ``always_require_approval=True`` because this triggers a long-running
+    subprocess.
+
+    Args:
+        args: tool-call args dict containing:
+            - real_data_path (str): path to the HDF5 real trajectory data
+              file (required).
+            - articulation_path (str): USD prim path of the robot articulation
+              (required).
+            - hidden_dim (int, default 32): LSTM hidden dimensionality.
+            - num_layers (int, default 2): LSTM layer count.
+            - num_epochs (int, default 200): training epochs.
+            - output_dir (str, optional): output directory; defaults to
+              ``workspace/calibration/<robot>_actuator_net``.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - type (str): ``"actuator_net_job"``.
+            - always_require_approval (bool): always ``True``.
+            - robot, articulation_path, real_data_path: as resolved.
+            - hidden_dim, num_layers, num_epochs: training hyperparameters.
+            - output_dir, script_path (str): output locations.
+            - launch_command (str): CLI command to start training.
+            - checkpoint_path (str): expected ``.pt`` output path.
+            - result_file (str): expected ``result.json`` output path.
+            - message (str): usage guidance.
+            - error (str): present when required args are invalid.
+    """
     from pathlib import Path
     from ._shared import _check_real_data_path, _safe_robot_name
     # Phase 8 wave 20 — _generate_actuator_net_script migrated.
