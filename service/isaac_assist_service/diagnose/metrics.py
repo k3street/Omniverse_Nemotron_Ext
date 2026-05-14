@@ -18,6 +18,7 @@ from .schema import Severity, THRESHOLDS
 
 
 def _euclid(a: List[float], b: List[float]) -> float:
+    """Return Euclidean distance between two equal-length numeric vectors."""
     return math.sqrt(sum((a[i] - b[i]) ** 2 for i in range(min(len(a), len(b)))))
 
 

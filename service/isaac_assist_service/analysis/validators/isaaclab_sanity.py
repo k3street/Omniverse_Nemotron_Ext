@@ -21,7 +21,15 @@ _ENV_SPACING_MARGIN = 0.5  # meters
 
 
 class IsaacLabSanityValidator(ValidationRule):
+    """Validator for IsaacLab RL environment stage health.
+
+    Checks physics scene presence, ground plane, articulation root, env
+    spacing, inter-env collision filtering, and per-robot joint/collision
+    mesh completeness.
+    """
+
     def __init__(self):
+        """Initialise IsaacLab sanity rule metadata."""
         super().__init__()
         self.rule_id = "isaaclab.sanity"
         self.pack = "isaaclab_sanity"

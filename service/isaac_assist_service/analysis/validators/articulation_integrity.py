@@ -16,7 +16,14 @@ from ..models import ValidationFinding, FixSuggestion, ProposedChange
 
 
 class ArticulationIntegrityValidator(ValidationRule):
+    """Validator that checks articulation chain health.
+
+    Catches zero-stiffness/damping drives, joints without limits, articulations
+    missing a root rigid body, disconnected joint targets, and absent drive APIs.
+    """
+
     def __init__(self):
+        """Initialise articulation-integrity rule metadata."""
         super().__init__()
         self.rule_id = "articulation.integrity"
         self.pack = "articulation_integrity"
@@ -171,9 +178,21 @@ class ArticulationIntegrityValidator(ValidationRule):
         return findings
 
     def auto_fixable(self) -> bool:
+        """Return True — zero-drive findings have a structured auto-fix."""
         return True
 
     def suggest_fix(self, finding: ValidationFinding):
+        """Produce a fix suggestion for zero-stiffness/damping drive findings.
+
+        Only ``articulation.zero_drive`` findings are fixable; all others
+        return None.
+
+        Args:
+            finding (ValidationFinding): The finding to fix.
+
+        Returns:
+            FixSuggestion | None: Drive-gain reset or None.
+        """
         if finding.rule_id == "articulation.zero_drive":
             return FixSuggestion(
                 description=f"Set default drive gains on '{finding.prim_path}'",

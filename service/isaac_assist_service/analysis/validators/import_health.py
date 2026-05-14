@@ -13,7 +13,16 @@ from ..models import ValidationFinding, FixSuggestion, ProposedChange
 
 
 class ImportHealthValidator(ValidationRule):
+    """Validator that checks USD asset reference and import health.
+
+    Detects broken local file references, unresolved payloads, and orphan
+    Xform prims (no geometry, children, or references).  Network paths
+    (``omniverse://``, ``http://``) are skipped because they cannot be
+    validated without a live Nucleus connection.
+    """
+
     def __init__(self):
+        """Initialise import-health rule metadata."""
         super().__init__()
         self.rule_id = "import.health"
         self.pack = "import_health"
@@ -127,9 +136,18 @@ class ImportHealthValidator(ValidationRule):
         return findings
 
     def auto_fixable(self) -> bool:
+        """Return True — orphan Xform findings can be auto-deleted."""
         return True
 
     def suggest_fix(self, finding: ValidationFinding):
+        """Produce a delete suggestion for orphan Xform findings.
+
+        Args:
+            finding (ValidationFinding): The finding to fix.
+
+        Returns:
+            FixSuggestion | None: Prim-delete change set or None.
+        """
         if finding.rule_id == "import.orphan_xform":
             return FixSuggestion(
                 description=f"Delete orphan Xform '{finding.prim_path}'",

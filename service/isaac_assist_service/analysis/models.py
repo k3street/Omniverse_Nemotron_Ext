@@ -109,6 +109,13 @@ class CausalEdge(BaseModel):
     relationship: str
 
 class CausalGraph(BaseModel):
+    """Directed graph of causal relationships between validation findings.
+
+    Attributes:
+        nodes: Named nodes, each wrapping a ``ValidationFinding``.
+        edges: Directed ``CausalEdge`` links between nodes.
+    """
+
     nodes: List[CausalNode] = []
     edges: List[CausalEdge] = []
 

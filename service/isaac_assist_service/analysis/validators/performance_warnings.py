@@ -24,7 +24,15 @@ _TOTAL_TRI_WARNING = 2_000_000       # total scene triangles
 
 
 class PerformanceWarningsValidator(ValidationRule):
+    """Validator that flags scene-level performance issues.
+
+    Checks for high-poly meshes, excessive total triangle count, too many
+    rigid bodies without GPU dynamics enabled, too many USD sublayers, and
+    excessive active light count.
+    """
+
     def __init__(self):
+        """Initialise performance-warnings rule metadata."""
         super().__init__()
         self.rule_id = "performance.warnings"
         self.pack = "performance_warnings"

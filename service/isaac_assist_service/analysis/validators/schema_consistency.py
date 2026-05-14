@@ -13,6 +13,7 @@ class SchemaConsistencyRule(ValidationRule):
     """
 
     def __init__(self):
+        """Initialise schema-consistency rule metadata."""
         super().__init__()
         self.rule_id = "schema.missing_collision"
         self.pack = "schema_consistency"

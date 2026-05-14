@@ -11,6 +11,12 @@ from typing import Any, Dict, List, Optional
 
 
 class Severity(str, Enum):
+    """Ordered severity levels used by :class:`Violation`.
+
+    Values sort INFO < WARNING < ERROR < CRITICAL and map directly to the
+    ``Verdict`` taxonomy in :func:`classify_verdict`.
+    """
+
     INFO = "INFO"
     WARNING = "WARNING"
     ERROR = "ERROR"
@@ -18,6 +24,15 @@ class Severity(str, Enum):
 
 
 class Verdict(str, Enum):
+    """Overall feasibility verdict returned by :class:`FeasibilityReport`.
+
+    Derived from the highest-severity violation present:
+    - ``FEASIBLE`` — no violations above INFO
+    - ``TIGHTLY_FEASIBLE`` — at least one WARNING
+    - ``OVERCONSTRAINED`` — at least one ERROR
+    - ``INFEASIBLE`` — at least one CRITICAL
+    """
+
     FEASIBLE = "feasible"
     TIGHTLY_FEASIBLE = "tightly_feasible"
     OVERCONSTRAINED = "overconstrained"
@@ -26,6 +41,17 @@ class Verdict(str, Enum):
 
 @dataclass
 class Violation:
+    """A single constraint violation produced by a metric check.
+
+    Attributes:
+        axis: Metric name, e.g. ``"reach_utilization"`` or ``"ik_feasible"``.
+        severity: How serious the violation is.
+        value: Measured value that triggered the violation.
+        threshold: The limit that was breached.
+        message: Human-readable description (sourced from ``messages.py``).
+        details: Optional extra context for LLM or human debugging.
+    """
+
     axis: str  # e.g. "reach_utilization", "ik_feasible", "clearance_pct"
     severity: Severity
     value: Any
@@ -34,6 +60,7 @@ class Violation:
     details: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a JSON-safe dict with ``severity`` as its string value."""
         d = asdict(self)
         d["severity"] = self.severity.value
         return d
@@ -48,11 +75,26 @@ class Alternative:
     delta: Optional[Dict[str, Any]] = None  # e.g. {"axis":"x", "shift_m": 0.05}
 
     def to_dict(self) -> Dict[str, Any]:
+        """Return a compact dict, omitting keys whose value is None."""
         return {k: v for k, v in asdict(self).items() if v is not None}
 
 
 @dataclass
 class FeasibilityReport:
+    """Aggregate feasibility result for a single or multi-robot scenario.
+
+    Attributes:
+        verdict: Overall feasibility classification.
+        metrics: Raw metric values keyed by axis name.
+        violations: List of individual :class:`Violation` instances.
+        alternatives: Suggested fixes for violations.
+        seed_used: RNG seed that produced this result (for reproducibility).
+        cache_hit: True when the result was served from cache.
+        elapsed_ms: Wall-clock time in milliseconds for the analysis.
+        per_cycle: Per-robot results for multi-robot mode.
+        aggregate: Aggregate statistics for multi-robot mode.
+    """
+
     verdict: Verdict
     metrics: Dict[str, Any]
     violations: List[Violation] = field(default_factory=list)
@@ -64,6 +106,7 @@ class FeasibilityReport:
     aggregate: Optional[Dict[str, Any]] = None        # multi-robot mode
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a JSON-safe dict; ``per_cycle`` and ``aggregate`` are omitted when None."""
         out: Dict[str, Any] = {
             "verdict": self.verdict.value,
             "metrics": self.metrics,
