@@ -25,7 +25,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from .types import LayoutSpec
+from .types import COMPLIANCE_MODE_ENUM, LayoutSpec
 from .vocabulary import StructuralTagRegistry, load_default_registry
 
 logger = logging.getLogger(__name__)
@@ -225,6 +225,34 @@ def validate_layout_spec(
                 ))
             else:
                 ids_seen[obj.id] = i
+
+    # --- CRM-C1: compliance field validation --------------------------------
+    if spec.compliance_mode is not None:
+        if spec.compliance_mode not in COMPLIANCE_MODE_ENUM:
+            issues.append(ValidationIssue(
+                severity="error",
+                code="compliance.unknown_mode",
+                message=(
+                    f"compliance_mode {spec.compliance_mode!r} is not in the "
+                    f"allowed enum {sorted(COMPLIANCE_MODE_ENUM)!r}; "
+                    "set to None for auto-pick or choose a valid mode."
+                ),
+                field_path="compliance_mode",
+            ))
+
+    if not isinstance(spec.compliance_params, dict):
+        issues.append(ValidationIssue(
+            severity="error",
+            code="compliance.params_not_dict",
+            message=(
+                f"compliance_params must be a dict; got "
+                f"{type(spec.compliance_params).__name__!r}"
+            ),
+            field_path="compliance_params",
+        ))
+
+    # compliance_handoff_at range is enforced by Pydantic (ge=0.0, le=1.0)
+    # at construction time; no secondary check needed here.
 
     # --- Rule: bindings reference valid object ids -------------------------
     if spec.bindings and spec.objects:

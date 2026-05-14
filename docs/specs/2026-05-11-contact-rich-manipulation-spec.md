@@ -836,7 +836,7 @@ the small `opus-judgment` / `opus-runtime` subset.**
 - **LOC**: ~50
 - **Blocked-by**: none
 - **Verify**: `pytest tests/test_telemetry_compliance_events.py` ≥4 tests; constants exported
-- **STATUS**: pending
+- **STATUS**: done — 4e01b9d
 
 #### CRM-D2 — Telemetry aggregators (sonnet-bounded)
 - **Files**: `scripts/qa/analyze_multimodal_usage.py` (extend)
