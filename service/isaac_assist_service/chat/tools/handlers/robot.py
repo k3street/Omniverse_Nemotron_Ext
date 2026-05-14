@@ -10,9 +10,11 @@ CODE_GEN_HANDLERS dispatch dict keeps working.
 
 Per `specs/IA_FULL_SPEC_2026-05-10.md` Phases 2 + 6.
 """
+# audit-Q17: cohesive — full robot handler domain (import, anchor, IK, motion policy, gripper, surface gripper, drive gains)
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 # ---------------------------------------------------------------------------
 # Theme-local helpers (Phase 8 wave 20, 2026-05-13)
@@ -3964,6 +3966,7 @@ print(f'Nav2 map exported: {{pgm_path}} ({{width_px}}x{{height_px}}) + {{yaml_pa
 # Phase 7 wave 7 — robot data-handlers (creates + setups + calibrate)
 
 
+@with_telemetry
 async def _handle_create_kit_tray(args: Dict) -> Dict:
     """Tier A tool — creates a tray with N labeled slots for kitting workflows.
 
@@ -4061,6 +4064,7 @@ print(json.dumps({{"created": created}}))
     }
 
 
+@with_telemetry
 async def _handle_create_articulated_joint(args: Dict) -> Dict:
     """Tier B tool — creates a USD physics joint between two prims for
     articulated mechanisms (drawers, doors, hinges, sliders).
@@ -4173,6 +4177,7 @@ print(json.dumps({{
     }
 
 
+@with_telemetry
 async def _handle_create_rotary_table(args: Dict) -> Dict:
     """Tier B tool — creates a rotating turntable (revolute joint with drive).
 
@@ -4263,6 +4268,7 @@ else:
     }
 
 
+@with_telemetry
 async def _handle_register_moving_obstacle(args: Dict) -> Dict:
     """Tier B tool — registers a dynamic obstacle on a robot for runtime
     collision avoidance. cuRobo's planning_obstacles is normally static at
@@ -4314,6 +4320,7 @@ print(json.dumps({{"robot": {robot_path!r}, "obstacle": {obstacle_path!r}, "tota
     }
 
 
+@with_telemetry
 async def _handle_create_gravity_dispenser(args: Dict) -> Dict:
     """Tier C tool — creates a gravity-fed dispenser hopper that pre-spawns
     items at a given height so they fall onto a target surface (conveyor/bin).
@@ -4370,6 +4377,7 @@ async def _handle_create_gravity_dispenser(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_create_heap_zone(args: Dict) -> Dict:
     """Tier C tool — creates a 'heap' zone where N items pile randomly.
 
@@ -4432,6 +4440,7 @@ async def _handle_create_heap_zone(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_setup_cortex_behavior(args: Dict) -> Dict:
     """Tier B tool — installs Isaac Sim Cortex framework wrapper around a robot
     + registers obstacles, then attaches a behavior_module DfNetwork.
@@ -4546,6 +4555,7 @@ print(json.dumps(result))
     return {"success": False, "error": "could not parse cortex setup output", "raw": out[-300:]}
 
 
+@with_telemetry
 async def _handle_setup_assembly_constraint(args: Dict) -> Dict:
     """Tier C tool — creates an assembly constraint (peg-into-hole) via
     UsdPhysics joint when the peg is sufficiently aligned with the hole.
@@ -4595,6 +4605,7 @@ print(json.dumps({{"hole": {hole_path!r}, "peg": {peg_path!r}, "tolerance": {tol
     }
 
 
+@with_telemetry
 async def _handle_create_recirculation_loop(args: Dict) -> Dict:
     """Tier C — creates a closed-loop conveyor (rectangular path) for recirculation
     sortation scenarios (#17 Postal Cross-Belt Sorter). Composed of 4 conveyor
@@ -4652,6 +4663,7 @@ async def _handle_create_recirculation_loop(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_create_linear_axis_robot(args: Dict) -> Dict:
     """Tier C — creates a linear-axis (gantry) wrapping for a manipulator.
     The base of the manipulator is mounted on a prismatic-jointed slider
@@ -4706,6 +4718,7 @@ async def _handle_create_linear_axis_robot(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_setup_grasp_pose_sampler(args: Dict) -> Dict:
     """Tier C — sets up an Isaac Replicator grasp-pose sampler for SDG
     scenarios (#32 GraspingWorkflow SDG).
@@ -4755,6 +4768,7 @@ print(json.dumps({{"sampler": str(prim.GetPath()), "target": {target_path!r}, "n
     }
 
 
+@with_telemetry
 async def _handle_generate_robot_description(args: Dict) -> Dict:
     """Check if a robot has pre-built motion generation configs."""
     # Phase 8 wave 16 — _MOTION_ROBOT_CONFIGS migrated.
@@ -4816,6 +4830,7 @@ async def _handle_generate_robot_description(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_apply_robot_fix_profile(args: Dict) -> Dict:
     """Look up known robot import issues and return a fix profile."""
     # Phase 8 wave 13 — _detect_robot_for_fix migrated.
@@ -4854,6 +4869,7 @@ async def _handle_apply_robot_fix_profile(args: Dict) -> Dict:
     return profile
 
 
+@with_telemetry
 async def _handle_calibrate_physics(args: Dict) -> Dict:
     """Generate a Ray-Tune+Optuna calibration script and return the launch command."""
     from pathlib import Path as _Path
@@ -4925,6 +4941,7 @@ async def _handle_calibrate_physics(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_quick_calibrate(args: Dict) -> Dict:
     """Faster calibration: only the highest-impact parameters."""
     from pathlib import Path as _Path
@@ -4986,6 +5003,7 @@ async def _handle_quick_calibrate(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_get_gripper_state(args: Dict) -> Dict:
     """Report whether a gripper is open/closed plus current grip force."""
     from .. import kit_tools
@@ -5079,6 +5097,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"get_gripper_state {articulation}")
 
 
+@with_telemetry
 async def _handle_setup_isaac_ros_cumotion_moveit(args: Dict[str, Any]) -> Dict[str, Any]:
     """Phase 6 M4: configure isaac_ros_cumotion plugin for an external MoveIt2.
 
@@ -5151,6 +5170,7 @@ async def _handle_setup_isaac_ros_cumotion_moveit(args: Dict[str, Any]) -> Dict[
 # Phase 7 wave 8 — robot data-handlers (final setup stragglers)
 
 
+@with_telemetry
 async def _handle_setup_pick_place_with_vision(args: Dict) -> Dict:
     """Composite tool — runs vision classification THEN setup_pick_place_controller.
 
@@ -5271,6 +5291,7 @@ print(json.dumps({{"applied": applied}}))
     }
 
 
+@with_telemetry
 async def _handle_track_slot_occupancy(args: Dict) -> Dict:
     """Tier A companion — check which kit-tray slots are currently occupied.
 
@@ -5342,6 +5363,7 @@ print(json.dumps(result))
     return parsed or {"error": "could not parse track_slot_occupancy output"}
 
 
+@with_telemetry
 async def _handle_setup_robot_handoff_signal(args: Dict) -> Dict:
     """Tier B tool — creates a 'handoff signal' marker prim used to coordinate
     two robots in a handoff sequence (robot A places at handoff, robot B picks
@@ -5401,6 +5423,7 @@ print(json.dumps({{"created": str(prim.GetPath()), "state": "idle"}}))
     }
 
 
+@with_telemetry
 async def _handle_setup_robot_claim_mutex(args: Dict) -> Dict:
     """Tier A tool — creates a mutex marker prim for shared-resource arbitration
     between multiple robots.
@@ -5456,6 +5479,7 @@ print(json.dumps({{"created": str(prim.GetPath()), "robots": robots, "resource":
     }
 
 
+@with_telemetry
 async def _handle_surface_gripper(args: Dict) -> Dict:
     """Tier B tool — adds suction/vacuum gripper to a robot via Isaac Sim's
     OgnSurfaceGripper OmniGraph node.
@@ -5590,6 +5614,7 @@ print(json.dumps({{
     return summary
 
 
+@with_telemetry
 async def _handle_setup_zone_partition(args: Dict) -> Dict:
     """Tier C tool — partitions a conveyor into N zones, each assigned to
     a specific robot. Used by Parallel Picking Duo (#10) for spatial
@@ -5671,6 +5696,7 @@ print(json.dumps({{"zones": zones, "conveyor_x_range": [xmin, xmax]}}))
     return {"success": False, "error": "could not parse zone_partition output"}
 
 
+@with_telemetry
 async def _handle_setup_nav_robot(args: Dict) -> Dict:
     """Tier C — wraps a wheeled robot with navigation stack (Nav2-compatible).
     Used by #31 RoboParty (mixed fleet with mobile robots).
@@ -5718,6 +5744,7 @@ print(json.dumps({{"robot": {robot_path!r}, "nav_topic": {nav_topic!r}, "odom_to
     }
 
 
+@with_telemetry
 async def _handle_visualize_behavior_tree(args: Dict) -> Dict:
     """Return a formatted text tree of a behavior network structure."""
     network_name = args.get("network_name", "unknown")
@@ -5783,6 +5810,7 @@ async def _handle_visualize_behavior_tree(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_setup_ros2_control_compat(args: Dict[str, Any]) -> Dict[str, Any]:
     """Phase 6 M1: emit OmniGraph using topic_based_ros2_control standard topic names.
 
@@ -5837,6 +5865,7 @@ else:
 # Phase 7 wave 16 — final data-handler stragglers (COMPLETES data-handler migration)
 
 
+@with_telemetry
 async def _handle_place_on_top_of(args: Dict) -> Dict:
     """Place `prim_path` on top of `target_prim_path` using authoritative
     bounding-box geometry.
@@ -5934,6 +5963,7 @@ print(json.dumps(result))
     )
 
 
+@with_telemetry
 async def _handle_list_available_controllers(args: Dict[str, Any]) -> Dict[str, Any]:
     """Probe current runtime env and report per-controller availability.
 
@@ -6012,6 +6042,7 @@ async def _handle_list_available_controllers(args: Dict[str, Any]) -> Dict[str, 
 # Phase 72 — assembly-constraint validator (pre-flight check)
 
 
+@with_telemetry
 async def _handle_validate_assembly_constraint(args: Dict) -> Dict[str, Any]:
     """Validate an AssemblyConstraint spec via the Phase 72 runtime.
 
@@ -6074,6 +6105,7 @@ async def _handle_validate_assembly_constraint(args: Dict) -> Dict[str, Any]:
 # Phase 67 — post-spawn validation for create_articulated_joint
 
 
+@with_telemetry
 async def _handle_validate_joint_post(args: Dict) -> Dict[str, Any]:
     """Run Phase 67 validator against a synthetic JointPrimState dict.
 

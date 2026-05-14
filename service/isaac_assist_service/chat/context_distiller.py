@@ -15,6 +15,7 @@ Two-stage pipeline:
   Stage 2 (orchestrator — main LLM):
       receive compact system prompt + slim tool list → generate response
 """
+# audit-Q17: cohesive — context distillation pipeline (tool selection, rule filtering, history compression, scene filtering) is a single algorithm
 from __future__ import annotations
 
 import logging

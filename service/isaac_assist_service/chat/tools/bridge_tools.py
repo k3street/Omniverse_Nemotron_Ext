@@ -12,6 +12,7 @@ The bridge itself runs OUTSIDE Kit (in main host Python) and pushes attr
 updates via Kit RPC. This avoids in-Kit threading lifecycle issues called
 out by the silent-success-audit lessons.
 """
+# audit-Q17: cohesive — full Modbus/OPC-UA/MQTT industrial bridge subsystem (attach, detach, diagnose for all three protocols) stays together by design
 from __future__ import annotations
 
 import asyncio

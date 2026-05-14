@@ -8,6 +8,7 @@ Phase 6 waves 1-5.
 
 Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 6.
 """
+# audit-Q17: cohesive — full training/RL handler domain (launch, reward eval, GR00T, env cloning, policy export, loco-manip setup)
 from __future__ import annotations
 
 import uuid
@@ -15,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from typing import Any, Callable, Dict, List, Optional
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 # ---------------------------------------------------------------------------
 # Theme-local helpers (Phase 8 wave 26, 2026-05-13)
@@ -1422,6 +1424,7 @@ if __name__ == "__main__":
 # Phase 7 wave 5 — training data-handlers (analyze + eureka + finetune + env + reward)
 
 
+@with_telemetry
 async def _handle_create_isaaclab_env(args: Dict) -> Dict:
     """Generate an IsaacLab RL environment scaffold.
 
@@ -1493,6 +1496,7 @@ async def _handle_create_isaaclab_env(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_generate_reward(args: Dict) -> Dict:
     """Generate Eureka reward configuration and an initial LLM prompt for a DirectRLEnv.
 
@@ -1593,6 +1597,7 @@ Return each candidate as a separate code block.
     return eureka_config
 
 
+@with_telemetry
 async def _handle_iterate_reward(args: Dict) -> Dict:
     """Generate a mutation prompt for the next Eureka reward iteration.
 
@@ -1683,6 +1688,7 @@ async def _handle_iterate_reward(args: Dict) -> Dict:
     return response
 
 
+@with_telemetry
 async def _handle_eureka_history(args: Dict) -> Dict:
     """Query persisted Eureka run history from the Phase 64 SQLite store.
 
@@ -1758,6 +1764,7 @@ async def _handle_eureka_history(args: Dict) -> Dict:
         store.close()
 
 
+@with_telemetry
 async def _handle_eureka_status(args: Dict) -> Dict:
     """Return the current status of an in-memory Eureka optimization run.
 
@@ -1804,6 +1811,7 @@ async def _handle_eureka_status(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_load_groot_policy(args: Dict) -> Dict:
     """Return download and launch commands for a GR00T N1 policy server.
 
@@ -1872,6 +1880,7 @@ async def _handle_load_groot_policy(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_compare_policies(args: Dict) -> Dict:
     """Build a formatted comparison table from multiple GR00T policy evaluation results.
 
@@ -1976,6 +1985,7 @@ async def _handle_compare_policies(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_export_finetune_data(args: Dict) -> Dict:
     """Export recorded conversation turns to a provider-specific fine-tuning format.
 
@@ -2008,6 +2018,7 @@ async def _handle_export_finetune_data(args: Dict) -> Dict:
     )
 
 
+@with_telemetry
 async def _handle_finetune_stats(args: Dict) -> Dict:
     """Return aggregate statistics about recorded fine-tuning data.
 
@@ -2027,6 +2038,7 @@ async def _handle_finetune_stats(args: Dict) -> Dict:
     return _turn_recorder.get_stats()
 
 
+@with_telemetry
 async def _handle_analyze_randomization(args: Dict) -> Dict:
     """Analyze domain randomization parameter distributions from an SDG run.
 
@@ -2109,6 +2121,7 @@ else:
     return {"success": bool(result.get("success", False)), "type": "data", "queued": result.get("queued", False)}
 
 
+@with_telemetry
 async def _handle_apply_dr_preset(args: Dict) -> Dict:
     """Look up a named domain randomization preset from ``_DR_PRESETS``.
 
@@ -2148,6 +2161,7 @@ async def _handle_apply_dr_preset(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_detect_ood(args: Dict) -> Dict:
     """Detect out-of-distribution (OOD) inputs via a tiered detection strategy.
 
@@ -2236,6 +2250,7 @@ async def _handle_detect_ood(args: Dict) -> Dict:
         return {"error": f"Invalid tier {tier} — must be 1, 2, or 3"}
 
 
+@with_telemetry
 async def _handle_analyze_checkpoint(args: Dict) -> Dict:
     """Analyze a GR00T checkpoint for embodiment, layer drift, and action statistics.
 
@@ -2294,6 +2309,7 @@ async def _handle_analyze_checkpoint(args: Dict) -> Dict:
     return analysis
 
 
+@with_telemetry
 async def _handle_get_training_status(args: Dict) -> Dict:
     """Read TensorBoard event files and subprocess state for an RL training run.
 
@@ -2405,6 +2421,7 @@ async def _handle_get_training_status(args: Dict) -> Dict:
     return result
 
 
+@with_telemetry
 async def _handle_get_env_observations(args: Dict) -> Dict:
     """Read the observation tensor for one environment in a running IsaacLab worker.
 
@@ -2467,6 +2484,7 @@ async def _handle_get_env_observations(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_get_env_rewards(args: Dict) -> Dict:
     """Read per-term reward breakdown for one environment at the current step.
 
@@ -2531,6 +2549,7 @@ async def _handle_get_env_rewards(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_get_env_termination_state(args: Dict) -> Dict:
     """Report termination flags for one environment at the current step.
 
@@ -2607,6 +2626,7 @@ async def _handle_get_env_termination_state(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_checkpoint_training(args: Dict) -> Dict:
     """Trigger an out-of-band checkpoint save on a running training subprocess.
 
@@ -2706,6 +2726,7 @@ async def _handle_checkpoint_training(args: Dict) -> Dict:
 # Phase 7 wave 6 — training data-handlers (cloud + suggest + diagnose_training + train_actuator)
 
 
+@with_telemetry
 async def _handle_cloud_estimate_cost(args: Dict) -> Dict:
     """Estimate rental cost for a cloud GPU instance over a given duration.
 
@@ -2765,6 +2786,7 @@ async def _handle_cloud_estimate_cost(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_cloud_launch(args: Dict) -> Dict:
     """Return structured deployment info for an IsaacAutomator cloud launch.
 
@@ -2887,6 +2909,7 @@ async def _handle_cloud_launch(args: Dict) -> Dict:
     return result
 
 
+@with_telemetry
 async def _handle_cloud_status(args: Dict) -> Dict:
     """Check the status of a tracked cloud job.
 
@@ -2931,6 +2954,7 @@ async def _handle_cloud_status(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_cloud_teardown(args: Dict) -> Dict:
     """Return a teardown command for a cloud instance. Always requires approval.
 
@@ -2985,6 +3009,7 @@ async def _handle_cloud_teardown(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_diagnose_training(args: Dict) -> Dict:
     """Run a full suite of RL training diagnostics against a run directory.
 
@@ -3172,6 +3197,7 @@ async def _handle_diagnose_training(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_load_rl_policy(args: Dict) -> Dict:
     """Tier C — registers a trained RL policy for runtime control. Used by
     #30 FrankaDrawerOpen + similar manipulation-via-RL scenarios.
@@ -3217,6 +3243,7 @@ print(json.dumps({{"robot": {robot_path!r}, "policy": {policy_path!r}, "obs_keys
     }
 
 
+@with_telemetry
 async def _handle_monitor_forgetting(args: Dict) -> Dict:
     """Detect catastrophic forgetting in a fine-tuned GR00T model.
 
@@ -3272,6 +3299,7 @@ async def _handle_monitor_forgetting(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_pause_training(args: Dict) -> Dict:
     """Signal a running training subprocess to pause without terminating it.
 
@@ -3352,6 +3380,7 @@ async def _handle_pause_training(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_profile_training_throughput(args: Dict) -> Dict:
     """Identify whether an RL run is sim-bound or train-bound from RSL-RL perf logs.
 
@@ -3447,6 +3476,7 @@ async def _handle_profile_training_throughput(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_redact_finetune_data(args: Dict) -> Dict:
     """Run the redaction pipeline on an existing fine-tuning JSONL file.
 
@@ -3474,6 +3504,7 @@ async def _handle_redact_finetune_data(args: Dict) -> Dict:
     )
 
 
+@with_telemetry
 async def _handle_review_reward(args: Dict) -> Dict:
     """Run static analysis checks on a reward function before training starts.
 
@@ -3603,6 +3634,7 @@ async def _handle_review_reward(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_suggest_data_mix(args: Dict) -> Dict:
     """Recommend sim/real/video data ratios following NVIDIA's validated 1:1 recipe.
 
@@ -3666,6 +3698,7 @@ async def _handle_suggest_data_mix(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_suggest_dr_ranges(args: Dict) -> Dict:
     """Suggest domain randomization parameter ranges for a given task and robot.
 
@@ -3785,6 +3818,7 @@ async def _handle_suggest_dr_ranges(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_suggest_finetune_config(args: Dict) -> Dict:
     """Recommend a GR00T fine-tuning layer freeze/tune strategy.
 
@@ -3850,6 +3884,7 @@ async def _handle_suggest_finetune_config(args: Dict) -> Dict:
     return result
 
 
+@with_telemetry
 async def _handle_suggest_parameter_adjustment(args: Dict) -> Dict:
     """Given a sim-real gap report, suggest physics parameter adjustments.
 
@@ -3921,6 +3956,7 @@ async def _handle_suggest_parameter_adjustment(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_train_actuator_net(args: Dict) -> Dict:
     """Generate an ActuatorNetLSTM training script and return the launch command.
 

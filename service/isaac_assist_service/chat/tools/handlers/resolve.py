@@ -11,6 +11,7 @@ working.
 
 Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 7.
 """
+# audit-Q17: cohesive — full typed-variable resolver suite (count, robot class, material, constraint, sequence, coordinate, relational, success, skill, size, prim)
 from __future__ import annotations
 
 import re as _re
@@ -45,6 +46,7 @@ _RELATIONAL_PATTERN_RE = __import__("re").compile(
 )
 
 from ._shared import _ROBOT_WIZARD_REGISTRY, _resolve_robot_asset
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 # ---------------------------------------------------------------------------
 # Theme-local constants (Phase 8 wave 8, 2026-05-13)
@@ -276,6 +278,7 @@ _SIZE_BUCKETS = {
 # Phase 7 wave 1 — resolve data-handlers (12 functions)
 
 
+@with_telemetry
 async def _handle_resolve_count_vagueness(args: Dict) -> Dict:
     """Map a vague count phrase ('a few', 'many', 'several') to a canonical
     integer. Pilot #4 of the typed-variable resolver pattern.
@@ -319,6 +322,7 @@ async def _handle_resolve_count_vagueness(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_resolve_robot_class(args: Dict) -> Dict:
     """Map a generic robot class phrase ('a manipulator', 'a wheeled robot')
     to a concrete robot_name from the robot_wizard registry. Pilot #5.
@@ -377,6 +381,7 @@ async def _handle_resolve_robot_class(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_resolve_material_properties(args: Dict) -> Dict:
     """Map a material descriptor ('metal', 'rubber', 'soft', 'deformable')
     to physics properties (density, friction, restitution, body_type).
@@ -406,6 +411,7 @@ async def _handle_resolve_material_properties(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_resolve_constraint_phrase(args: Dict) -> Dict:
     """Parse a constraint phrase ('with 5cm clearance', '10kg max weight',
     'within 2 minutes', 'no closer than 1m') into structured numeric data.
@@ -464,6 +470,7 @@ async def _handle_resolve_constraint_phrase(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_resolve_sequence_phrase(args: Dict) -> Dict:
     """Split a sequence phrase ('first X, then Y', 'after X do Y') into an
     ordered list of intent fragments.
@@ -499,6 +506,7 @@ async def _handle_resolve_sequence_phrase(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_resolve_context_reference(args: Dict) -> Dict:
     """Resolve an implicit context reference ('another one', 'the same as
     before', 'the last cube I made') by querying the stage.
@@ -562,6 +570,7 @@ print(json.dumps(result))
     return await kit_tools.queue_exec_patch(code, f"resolve_context_reference {noun_class!r}")
 
 
+@with_telemetry
 async def _handle_resolve_coordinate_reference(args: Dict) -> Dict:
     """Resolve a named coordinate reference ('origin', 'center of X',
     'top-left corner of Y', 'edge of Z') to world-space coordinates.
@@ -655,6 +664,7 @@ else:
     return await kit_tools.queue_exec_patch(code, f"resolve_coordinate_reference {landmark!r} of {ref!r}")
 
 
+@with_telemetry
 async def _handle_resolve_relational_property(args: Dict) -> Dict:
     """Resolve a relational property like 'twice the size of X' or 'same
     color as Y' or '50% of Z's height' to a concrete numeric value or
@@ -729,6 +739,7 @@ else:
     }
 
 
+@with_telemetry
 async def _handle_resolve_success_condition(args: Dict) -> Dict:
     """Extract a structured success condition from a prompt's intent.
 
@@ -799,6 +810,7 @@ async def _handle_resolve_success_condition(args: Dict) -> Dict:
     return out
 
 
+@with_telemetry
 async def _handle_resolve_skill_composition(args: Dict) -> Dict:
     """Map a skill-composition name ('pick-and-place', 'calibration', 'ros2')
     to a known tool chain. Pilot #10.
@@ -829,6 +841,7 @@ async def _handle_resolve_skill_composition(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_resolve_size_adjective(args: Dict) -> Dict:
     """Map a size adjective ('small', 'large', 'tiny') for a given object
     class to a canonical numeric extent in meters.
@@ -889,6 +902,7 @@ async def _handle_resolve_size_adjective(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_resolve_prim_reference(args: Dict) -> Dict:
     """Resolve a deictic noun phrase ('kuben', 'the cube', 'roboten') to one
     or more concrete prim paths in the current stage.
@@ -1022,6 +1036,7 @@ print(json.dumps(result))
 # Phase 20 — RoleRetriever-backed canonical-template lookup
 
 
+@with_telemetry
 async def _handle_retrieve_template_by_role(args: Dict[str, Any]) -> Dict[str, Any]:
     """Use the Phase 20 RoleRetriever to rank canonical templates against
     a user query and optional role hints.

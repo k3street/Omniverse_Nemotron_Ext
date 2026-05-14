@@ -6,9 +6,12 @@ Same migration pattern as Phase 3 / Phase 5 / Phase 6 waves 1-3.
 
 Per `specs/IA_FULL_SPEC_2026-05-10.md` Phases 2 + 6.
 """
+# audit-Q17: cohesive — full sensor handler domain (camera, lidar, contact, force/torque, proximity, IMU, barcode, NIR)
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List
+
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 # ---------------------------------------------------------------------------
 # Module-level named constants (extracted 2026-05-14, refactor/magic-1)
@@ -430,6 +433,7 @@ print(json.dumps({{
 # Phase 7 wave 9 — sensor data-handlers (force/torque, barcode, NIR, overlap/sweep, raycast, contacts)
 
 
+@with_telemetry
 async def _handle_add_force_torque_sensor(args: Dict) -> Dict:
     """Tier C tool — adds an Isaac Sim ForceSensor (force/torque) on a robot
     end-effector or articulation joint.
@@ -518,6 +522,7 @@ print(json.dumps({{"sensor_path": str(sprim.GetPath()), "parent": {parent_path!r
     }
 
 
+@with_telemetry
 async def _handle_add_vision_classifier_gate(args: Dict) -> Dict:
     """Tier A tool — build a class-routing dict by VLM vision classification.
 
@@ -677,6 +682,7 @@ print(json.dumps(positions))
     }
 
 
+@with_telemetry
 async def _handle_barcode_reader_sensor(args: Dict) -> Dict:
     """Tier B tool — creates a barcode-reader sensor at a fixed scan position.
 
@@ -726,6 +732,7 @@ print(json.dumps({{"created": str(prim.GetPath()), "position": {position!r}, "sc
     }
 
 
+@with_telemetry
 async def _handle_list_contacts(args: Dict) -> Dict:
     """Subscribe to PhysX contact reports for a body and return the pairs."""
     from .. import kit_tools
@@ -800,6 +807,7 @@ else:
     return await kit_tools.queue_exec_patch(code, f"list_contacts {prim_path}")
 
 
+@with_telemetry
 async def _handle_nir_material_sensor(args: Dict) -> Dict:
     """Tier C — Near-IR material classification sensor for recycling scenarios
     (#18). Reads cube's material:type attr (set by user pre-canonical) within
@@ -841,6 +849,7 @@ print(json.dumps({{"created": str(prim.GetPath()), "position": {position!r}, "sc
     }
 
 
+@with_telemetry
 async def _handle_overlap_box(args: Dict) -> Dict:
     """Find every collider that overlaps the given oriented box."""
     from .. import kit_tools
@@ -886,6 +895,7 @@ print(json.dumps(result, default=str))
     )
 
 
+@with_telemetry
 async def _handle_overlap_sphere(args: Dict) -> Dict:
     """Find every collider whose AABB overlaps the given sphere."""
     from .. import kit_tools
@@ -929,6 +939,7 @@ print(json.dumps(result, default=str))
     )
 
 
+@with_telemetry
 async def _handle_raycast(args: Dict) -> Dict:
     """Cast a single ray and return the closest PhysX hit."""
     from .. import kit_tools
@@ -983,6 +994,7 @@ else:
     return await kit_tools.queue_exec_patch(code, f"raycast {origin} -> {direction}")
 
 
+@with_telemetry
 async def _handle_sweep_sphere(args: Dict) -> Dict:
     """Sweep a sphere from start to end, return closest hit along the sweep."""
     from .. import kit_tools
@@ -1012,6 +1024,7 @@ else:
     direction = [dx / distance, dy / distance, dz / distance]
     try:
         from omni.physx import get_physx_scene_query_interface
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
         sqi = get_physx_scene_query_interface()
         hit = sqi.sweep_sphere(radius, start, direction, distance)
     except Exception as exc:

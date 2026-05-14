@@ -9,6 +9,7 @@ so the existing CODE_GEN_HANDLERS dispatch dict keeps working.
 
 Per `specs/IA_FULL_SPEC_2026-05-10.md` Phases 2 + 5.
 """
+# audit-Q17: cohesive — full physics handler domain (scene config, articulations, drives, joints, deformable, contact sensors, gravity dispenser)
 from __future__ import annotations
 
 import functools
@@ -16,6 +17,8 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
+
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 # ---------------------------------------------------------------------------
 # Theme-local constants + helpers (Phase 8 wave 6, 2026-05-13)
@@ -1415,6 +1418,7 @@ def _gen_compute_convex_hull(args: Dict) -> str:
 # Phase 7 wave 2 — physics getters (17 data handlers)
 
 
+@with_telemetry
 async def _handle_get_articulation_state(args: Dict) -> Dict:
     """Return the articulation's joint list via Kit RPC execution.
 
@@ -1444,6 +1448,7 @@ print(json.dumps(result))
     return await kit_tools.queue_exec_patch(code, f"Read articulation state for {prim_path}")
 
 
+@with_telemetry
 async def _handle_get_physics_errors(args: Dict) -> Dict:
     """Filter console logs for PhysX-specific errors and warnings."""
     from .. import kit_tools
@@ -1469,6 +1474,7 @@ async def _handle_get_physics_errors(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_get_joint_limits(args: Dict) -> Dict:
     """Return lower/upper limits for a named joint via Kit RPC.
 
@@ -1516,6 +1522,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"get_joint_limits {articulation}.{joint_name}")
 
 
+@with_telemetry
 async def _handle_get_contact_report(args: Dict) -> Dict:
     """Return recent contact events for a prim from the global contact buffer.
 
@@ -1561,6 +1568,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"get_contact_report {prim_path}")
 
 
+@with_telemetry
 async def _handle_get_joint_targets(args: Dict) -> Dict:
     """Read per-joint drive/velocity TARGETS (what the controller is aiming
     for), distinct from current state. Used to verify 'robot will move on
@@ -1612,6 +1620,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"get_joint_targets {articulation_path}")
 
 
+@with_telemetry
 async def _handle_get_linear_velocity(args: Dict) -> Dict:
     """Return rigid body linear velocity via UsdPhysics.RigidBodyAPI."""
     from .. import kit_tools
@@ -1650,6 +1659,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"get_linear_velocity {prim_path}")
 
 
+@with_telemetry
 async def _handle_get_angular_velocity(args: Dict) -> Dict:
     """Return rigid body angular velocity via UsdPhysics.RigidBodyAPI."""
     from .. import kit_tools
@@ -1688,6 +1698,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"get_angular_velocity {prim_path}")
 
 
+@with_telemetry
 async def _handle_get_mass(args: Dict) -> Dict:
     """Return current rigid body mass via UsdPhysics.MassAPI."""
     from .. import kit_tools
@@ -1725,6 +1736,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"get_mass {prim_path}")
 
 
+@with_telemetry
 async def _handle_get_inertia(args: Dict) -> Dict:
     """Return diagonal inertia tensor via UsdPhysics.MassAPI."""
     from .. import kit_tools
@@ -1775,6 +1787,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"get_inertia {prim_path}")
 
 
+@with_telemetry
 async def _handle_get_physics_scene_config(args: Dict) -> Dict:
     """Read the global PhysicsScene config: gravity, solver, iterations, dt, GPU."""
     from .. import kit_tools
@@ -1856,6 +1869,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, "get_physics_scene_config")
 
 
+@with_telemetry
 async def _handle_get_kinematic_state(args: Dict) -> Dict:
     """Return full kinematic state: pose + linear/angular velocity + acceleration estimate."""
     from .. import kit_tools
@@ -1934,6 +1948,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"get_kinematic_state {prim_path}")
 
 
+@with_telemetry
 async def _handle_get_joint_positions(args: Dict) -> Dict:
     """Return current position of every joint in an articulation."""
     from .. import kit_tools
@@ -1984,6 +1999,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"get_joint_positions {articulation}")
 
 
+@with_telemetry
 async def _handle_get_joint_velocities(args: Dict) -> Dict:
     """Return current velocity of every joint in an articulation."""
     from .. import kit_tools
@@ -2025,6 +2041,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"get_joint_velocities {articulation}")
 
 
+@with_telemetry
 async def _handle_get_joint_torques(args: Dict) -> Dict:
     """Return most recently applied torque/force on every joint."""
     from .. import kit_tools
@@ -2069,6 +2086,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"get_joint_torques {articulation}")
 
 
+@with_telemetry
 async def _handle_get_drive_gains(args: Dict) -> Dict:
     """Read current kp/kd from UsdPhysics.DriveAPI on a joint."""
     from .. import kit_tools
@@ -2115,6 +2133,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"get_drive_gains {joint_path}")
 
 
+@with_telemetry
 async def _handle_get_articulation_mass(args: Dict) -> Dict:
     """Sum mass of every link in the articulation."""
     from .. import kit_tools
@@ -2157,6 +2176,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"get_articulation_mass {articulation}")
 
 
+@with_telemetry
 async def _handle_get_center_of_mass(args: Dict) -> Dict:
     """Compute world-space mass-weighted center of mass of an articulation."""
     from .. import kit_tools
@@ -2165,6 +2185,7 @@ async def _handle_get_center_of_mass(args: Dict) -> Dict:
 import omni.usd
 import json
 from pxr import Usd, UsdGeom, UsdPhysics, Gf
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 stage = omni.usd.get_context().get_stage()
 art = stage.GetPrimAtPath({articulation!r})
@@ -2224,6 +2245,7 @@ print(json.dumps(result, default=str))
 # Phase 7 wave 16 — final data-handler stragglers (COMPLETES data-handler migration)
 
 
+@with_telemetry
 async def _handle_lookup_material(args: Dict) -> Dict:
     """Look up physics material properties for a material pair."""
     # Phase 8 wave 6 — _normalize_material_name migrated to module body.
@@ -2309,6 +2331,7 @@ async def _handle_lookup_material(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_suggest_physics_settings(args: Dict) -> Dict:
     """Return recommended physics settings for the given scene type."""
     # Phase 8 wave 6 — _PHYSICS_SETTINGS_PRESETS migrated to module body.

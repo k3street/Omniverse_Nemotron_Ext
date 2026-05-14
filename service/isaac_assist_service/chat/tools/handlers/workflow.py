@@ -8,6 +8,7 @@ Same pattern as Phase 3 / Phase 5 / Phase 6 / Phase 7 waves 1-11.
 
 Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 7.
 """
+# audit-Q17: cohesive — full workflow handler domain (lifecycle, async tasks, scheduled retries, queue patches, slash-command discovery)
 from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -21,6 +22,7 @@ from ._state import (
     _WORKFLOWS_REGISTRY_LOCK,
     make_workflow_lock,
 )
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 
 def _wf_lock_for(wf: Dict[str, Any]) -> threading.Lock:
@@ -260,6 +262,7 @@ _WORKFLOW_RETRY_HARD_CAP = 5
 # Phase 7 wave 12 — workflow data-handlers
 
 
+@with_telemetry
 async def _handle_record_feedback(args: Dict) -> Dict:
     """Link user feedback to a previously recorded turn."""
     from .. import tool_executor as _te  # noqa: PLC0415
@@ -278,6 +281,7 @@ async def _handle_record_feedback(args: Dict) -> Dict:
     )
 
 
+@with_telemetry
 async def _handle_watch_changes(args: Dict) -> Dict:
     """Start/stop/query live change tracking via Tf.Notice in Kit."""
     from .. import kit_tools  # noqa: PLC0415
@@ -392,6 +396,7 @@ else:
     return {"success": False, "error": f"Unknown action: {action}. Use 'start', 'stop', or 'query'."}
 
 
+@with_telemetry
 async def _handle_scene_aware_starter_prompts(args: Dict) -> Dict:
     """Generate contextual starter prompts based on scene state."""
     from .. import kit_tools  # noqa: PLC0415
@@ -479,6 +484,7 @@ async def _handle_scene_aware_starter_prompts(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_slash_command_discovery(args: Dict) -> Dict:
     """Return slash commands filtered by scene state."""
     from .. import kit_tools  # noqa: PLC0415
@@ -516,6 +522,7 @@ async def _handle_slash_command_discovery(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_post_action_suggestions(args: Dict) -> Dict:
     """Return next-step suggestions after a tool execution."""
     from .. import tool_executor as _te  # noqa: PLC0415
@@ -541,6 +548,7 @@ async def _handle_post_action_suggestions(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_queue_write_locked_patch(args: Dict) -> Dict:
     """Submit a Python patch to the write-locked queue for serialised USD edits.
 
@@ -585,6 +593,7 @@ async def _handle_queue_write_locked_patch(args: Dict) -> Dict:
     return {**outcome, "description": desc}
 
 
+@with_telemetry
 async def _handle_start_workflow(args: Dict) -> Dict:
     """Start a multi-step autonomous workflow.
 
@@ -654,6 +663,7 @@ async def _handle_start_workflow(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_edit_workflow_plan(args: Dict) -> Dict:
     """Apply user edits to a workflow's plan artifact.
 
@@ -714,6 +724,7 @@ async def _handle_edit_workflow_plan(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_approve_workflow_checkpoint(args: Dict) -> Dict:
     """Resolve a checkpoint with approve / reject / revise."""
     from .. import tool_executor as _te  # noqa: PLC0415
@@ -803,6 +814,7 @@ async def _handle_approve_workflow_checkpoint(args: Dict) -> Dict:
         }
 
 
+@with_telemetry
 async def _handle_cancel_workflow(args: Dict) -> Dict:
     """Cancel a workflow and request rollback to its pre-workflow snapshot."""
     from .. import tool_executor as _te  # noqa: PLC0415
@@ -844,6 +856,7 @@ async def _handle_cancel_workflow(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_get_workflow_status(args: Dict) -> Dict:
     """Return the current state of a workflow.
 
@@ -876,6 +889,7 @@ async def _handle_get_workflow_status(args: Dict) -> Dict:
         }
 
 
+@with_telemetry
 async def _handle_list_workflows(args: Dict) -> Dict:
     """List active (and optionally completed) workflows.
 
@@ -911,6 +925,7 @@ async def _handle_list_workflows(args: Dict) -> Dict:
     return {"ok": True, "count": len(summaries), "workflows": summaries[:limit]}
 
 
+@with_telemetry
 async def _handle_execute_with_retry(args: Dict) -> Dict:
     """Execute a code patch through the autonomous error-fix loop.
 
@@ -967,6 +982,7 @@ async def _handle_execute_with_retry(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_dispatch_async_task(args: Dict) -> Dict:
     """Register an async task and start a background worker."""
     from .. import tool_executor as _te  # noqa: PLC0415
@@ -1013,6 +1029,7 @@ async def _handle_dispatch_async_task(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_query_async_task(args: Dict) -> Dict:
     """Return current state + progress + (if done) result for a task."""
     from .. import tool_executor as _te  # noqa: PLC0415

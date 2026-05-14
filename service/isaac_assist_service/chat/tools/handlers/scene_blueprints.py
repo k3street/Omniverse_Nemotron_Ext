@@ -7,6 +7,7 @@ Phase 6 waves 1-10.
 
 Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 6.
 """
+# audit-Q17: cohesive — full scene-blueprint handler domain (build-from-blueprint, load/export/import templates)
 from __future__ import annotations
 
 import functools
@@ -17,6 +18,7 @@ from pathlib import Path
 from ....config import config
 
 from typing import Any, Callable, Dict, List, Optional
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 # ---------------------------------------------------------------------------
 # Theme-local asset-index unit (Phase 8 wave 23, 2026-05-13)
@@ -688,6 +690,7 @@ print(f'[import_template] installed {{template_id}} -> {{dest}}')
 # Phase 7 wave 13 — lookup + catalog + scene templates + scene packages
 
 
+@with_telemetry
 async def _handle_lookup_api_deprecation(args: Dict) -> Dict:
     """Deterministic keyword index over the 4.x→5.x deprecations corpus.
 
@@ -715,6 +718,7 @@ async def _handle_lookup_api_deprecation(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_lookup_knowledge(args: Dict) -> Dict:
     """Search the version-specific knowledge base for code patterns and docs."""
     from ....retrieval.context_retriever import (
@@ -754,6 +758,7 @@ async def _handle_lookup_knowledge(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_lookup_product_spec(args: Dict) -> Dict:
     """Fuzzy-match a product name against the sensor specs database."""
     # Phase 8 wave 7 — _load_sensor_specs migrated to module body.
@@ -776,6 +781,7 @@ async def _handle_lookup_product_spec(args: Dict) -> Dict:
     return {"found": False, "message": f"No sensor specs found for '{args['product_name']}'"}
 
 
+@with_telemetry
 async def _handle_catalog_search(args: Dict) -> Dict:
     """Fuzzy-match assets by name, type, and path."""
     # Phase 8 wave 23 — _build_asset_index migrated.
@@ -820,6 +826,7 @@ async def _handle_catalog_search(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_nucleus_browse(args: Dict) -> Dict:
     """Browse a Nucleus server directory via Kit RPC (omni.client inside Isaac Sim)."""
     import json as _json
@@ -885,6 +892,7 @@ print(json.dumps(payload))
     return {"success": False, "error": "Failed to parse Nucleus response", "raw_output": output[:500]}
 
 
+@with_telemetry
 async def _handle_download_asset(args: Dict) -> Dict:
     """Download asset from Nucleus to local Desktop/assets and register in catalog."""
     import json as _json
@@ -1046,6 +1054,7 @@ else:
     }
 
 
+@with_telemetry
 async def _handle_list_local_files(args: Dict) -> Dict:
     """Search the local filesystem under known asset roots for matching files.
 
@@ -1165,6 +1174,7 @@ async def _handle_list_local_files(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_filter_templates_by_hardware(args: Dict) -> Dict:
     """Filter templates by GPU VRAM + tag/category."""
     from pathlib import Path as _Path
@@ -1228,6 +1238,7 @@ async def _handle_filter_templates_by_hardware(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_list_scene_templates(args: Dict) -> Dict:
     """List available scene templates, optionally filtered by category."""
     # Phase 8 wave 7 — _SCENE_TEMPLATES migrated to module body.
@@ -1252,6 +1263,7 @@ async def _handle_list_scene_templates(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_load_scene_template(args: Dict) -> Dict:
     """Load a scene template by name. Returns a blueprint compatible with build_scene_from_blueprint."""
     # Phase 8 wave 7 — _SCENE_TEMPLATES migrated to module body.
@@ -1303,6 +1315,7 @@ async def _handle_load_scene_template(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_generate_scene_blueprint(args: Dict) -> Dict:
     """Generate a scene blueprint (data, not code). The LLM fills in the spatial layout."""
     description = args.get("description", "")
@@ -1329,6 +1342,7 @@ async def _handle_generate_scene_blueprint(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_export_scene_package(args: Dict) -> Dict:
     """Export the current session's scene setup as a reusable file package."""
     import re as _re

@@ -10,6 +10,7 @@ generates broken patches and keeps retrying the same mistakes.
 Each validator returns a list of PatchIssue objects. The caller can decide
 whether to block (severity=error) or warn (severity=warning).
 """
+# audit-Q17: cohesive — pre-flight patch validation subsystem (OmniGraph, PhysX, USD pattern checks, all validators co-located by design)
 from __future__ import annotations
 
 import re

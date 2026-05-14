@@ -28,6 +28,7 @@ load time.
 
 Per `specs/IA_FULL_SPEC_2026-05-10.md` Phase 3.
 """
+# audit-Q17: cohesive — full scene-authoring handler domain (USD prim CRUD, attributes, references, layers, materials, snapshots)
 from __future__ import annotations
 
 from pathlib import Path
@@ -2942,6 +2943,7 @@ for _s, _d in _pairs:
 # variant selection actually took. Restored here to preserve runtime
 # behavior parity with pre-move dispatch.
 from ..tool_honesty import honesty_checked  # noqa: E402
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 
 @honesty_checked(require_prim_paths=("prim_path",))
@@ -3418,6 +3420,7 @@ print(f'activate_area: scope={{scope}} kept={{kept}} deactivated={{deactivated}}
 # Phase 7 wave 3 — scene-authoring data-handlers (introspection)
 
 
+@with_telemetry
 async def _handle_list_all_prims(args: Dict) -> Dict:
     """Return the full prim tree from the current stage context.
 
@@ -3437,6 +3440,7 @@ async def _handle_list_all_prims(args: Dict) -> Dict:
     return ctx.get("stage", {})
 
 
+@with_telemetry
 async def _handle_get_attribute(args: Dict) -> Dict:
     """Read a single USD attribute value."""
     from .. import kit_tools
@@ -3473,6 +3477,7 @@ print(json.dumps(result, default=str))
 """
     return await kit_tools.queue_exec_patch(code, f"get_attribute {prim_path}.{attr_name}")
 
+@with_telemetry
 async def _handle_get_world_transform(args: Dict) -> Dict:
     """Compute world-space 4x4 transform of a prim."""
     from .. import kit_tools
@@ -3510,6 +3515,7 @@ print(json.dumps(result, default=str))
 """
     return await kit_tools.queue_exec_patch(code, f"get_world_transform {prim_path}")
 
+@with_telemetry
 async def _handle_get_bounding_box(args: Dict) -> Dict:
     """Compute world-space AABB of a prim."""
     from .. import kit_tools
@@ -3568,6 +3574,7 @@ print(json.dumps(result, default=str))
 """
     return await kit_tools.queue_exec_patch(code, f"get_bounding_box {prim_path}")
 
+@with_telemetry
 async def _handle_prim_exists(args: Dict) -> Dict:
     """Boolean check for prim presence at a path. Used by verify-contract to
     validate assistant claims like 'robot at /World/Franka is loaded'."""
@@ -3589,6 +3596,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"prim_exists {prim_path}")
 
 
+@with_telemetry
 async def _handle_list_attributes(args: Dict) -> Dict:
     """Enumerate all attributes on a prim via prim.GetAttributes()."""
     from .. import kit_tools
@@ -3617,6 +3625,7 @@ print(json.dumps(result, default=str))
 """
     return await kit_tools.queue_exec_patch(code, f"list_attributes {prim_path}")
 
+@with_telemetry
 async def _handle_list_applied_schemas(args: Dict) -> Dict:
     """Return applied API schemas on a prim via prim.GetAppliedSchemas()."""
     from .. import kit_tools
@@ -3646,6 +3655,7 @@ print(json.dumps(result, default=str))
 """
     return await kit_tools.queue_exec_patch(code, f"list_applied_schemas {prim_path}")
 
+@with_telemetry
 async def _handle_get_prim_metadata(args: Dict) -> Dict:
     """Read a single USD metadata field on a prim via prim.GetMetadata(key)."""
     from .. import kit_tools
@@ -3687,6 +3697,7 @@ print(json.dumps(result, default=str))
 """
     return await kit_tools.queue_exec_patch(code, f"get_prim_metadata {prim_path}.{key}")
 
+@with_telemetry
 async def _handle_get_prim_type(args: Dict) -> Dict:
     """Return prim.GetTypeName() (e.g. 'Mesh', 'Xform', 'Camera')."""
     from .. import kit_tools
@@ -3715,6 +3726,7 @@ print(json.dumps(result, default=str))
 """
     return await kit_tools.queue_exec_patch(code, f"get_prim_type {prim_path}")
 
+@with_telemetry
 async def _handle_find_prims_by_schema(args: Dict) -> Dict:
     """Traverse the stage and return prims where prim.HasAPI(schema) is true."""
     from .. import kit_tools
@@ -3798,6 +3810,7 @@ else:
 """
     return await kit_tools.queue_exec_patch(code, f"find_prims_by_schema {schema_name}")
 
+@with_telemetry
 async def _handle_find_prims_by_name(args: Dict) -> Dict:
     """Regex search on prim paths."""
     from .. import kit_tools
@@ -3840,6 +3853,7 @@ else:
 """
     return await kit_tools.queue_exec_patch(code, f"find_prims_by_name {pattern}")
 
+@with_telemetry
 async def _handle_get_kind(args: Dict) -> Dict:
     """Read Kind metadata via Usd.ModelAPI(prim).GetKind()."""
     from .. import kit_tools
@@ -3877,6 +3891,7 @@ print(json.dumps(result, default=str))
 """
     return await kit_tools.queue_exec_patch(code, f"get_kind {prim_path}")
 
+@with_telemetry
 async def _handle_get_semantic_label(args: Dict) -> Dict:
     """Read every Semantics.SemanticsAPI instance applied to a single prim."""
     from .. import kit_tools
@@ -3948,6 +3963,7 @@ async def _handle_get_semantic_label(args: Dict) -> Dict:
         ),
     }
 
+@with_telemetry
 async def _handle_get_asset_info(args: Dict) -> Dict:
     """Read assetInfo metadata + introducing layer + sha256 for a prim."""
     from .. import kit_tools
@@ -4058,6 +4074,7 @@ async def _handle_get_asset_info(args: Dict) -> Dict:
         ),
     }
 
+@with_telemetry
 async def _handle_get_selected_prims(args: Dict) -> Dict:
     """Return the user's current selection in the viewport / Stage panel."""
     from .. import kit_tools
@@ -4078,6 +4095,7 @@ print(json.dumps({"selected_paths": paths, "count": len(paths), "primary": prima
 # Phase 7 wave 4 — scene-authoring data-handlers (lists + queries)
 
 
+@with_telemetry
 async def _handle_scene_summary(args: Dict) -> Dict:
     """Return a short human-readable summary of the current stage.
 
@@ -4102,6 +4120,7 @@ async def _handle_scene_summary(args: Dict) -> Dict:
     return {"summary": text}
 
 
+@with_telemetry
 async def _handle_run_stage_analysis(args: Dict[str, Any]) -> Dict[str, Any]:
     """Run all (or selected) validator packs against the live stage."""
     from .. import kit_tools
@@ -4148,6 +4167,7 @@ async def _handle_run_stage_analysis(args: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+@with_telemetry
 async def _handle_scene_diff(args: Dict) -> Dict:
     """Compute a structured scene diff via Kit RPC.
 
@@ -4357,6 +4377,7 @@ else:
     return {"error": "Provide either 'since' (last_save|last_snapshot) or both 'snapshot_a' and 'snapshot_b'."}
 
 
+@with_telemetry
 async def _handle_build_stage_index(args: Dict) -> Dict:
     """Build the metadata index and populate the module-level cache.
 
@@ -4401,6 +4422,7 @@ async def _handle_build_stage_index(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_query_stage_index(args: Dict) -> Dict:
     """Return prims relevant to the keywords plus neighbours of selected_prim.
 
@@ -4470,6 +4492,7 @@ async def _handle_query_stage_index(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_count_prims_under_path(args: Dict) -> Dict:
     """Count direct or recursive children under a parent prim path, optionally
     filtered by type_name. Used to verify 'I cloned N robots' claims."""
@@ -4505,6 +4528,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"count_prims {parent_path}")
 
 
+@with_telemetry
 async def _handle_list_relationships(args: Dict) -> Dict:
     """List all relationships on a prim via prim.GetRelationships()."""
     from .. import kit_tools
@@ -4545,6 +4569,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"list_relationships {prim_path}")
 
 
+@with_telemetry
 async def _handle_list_layers(args: Dict) -> Dict:
     """Walk the current stage's layer stack and return identifiers + edit target.
 
@@ -4611,6 +4636,7 @@ except Exception as e:
     }
 
 
+@with_telemetry
 async def _handle_list_variant_sets(args: Dict) -> Dict:
     """Read every variant set declared on a prim and the current selection on each."""
     from .. import kit_tools
@@ -4661,6 +4687,7 @@ async def _handle_list_variant_sets(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_list_variants(args: Dict) -> Dict:
     """List every named variant choice inside a specific variant set on a prim."""
     from .. import kit_tools
@@ -4718,6 +4745,7 @@ async def _handle_list_variants(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_list_semantic_classes(args: Dict) -> Dict:
     """Walk the stage, collect every Semantics.SemanticsAPI label, return unique classes."""
     from .. import kit_tools
@@ -4791,6 +4819,7 @@ except Exception as e:
     }
 
 
+@with_telemetry
 async def _handle_list_references(args: Dict) -> Dict:
     """Enumerate USD reference arcs composed onto a prim."""
     from .. import kit_tools
@@ -4899,6 +4928,7 @@ async def _handle_list_references(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_list_payloads(args: Dict) -> Dict:
     """Enumerate USD payload arcs (deferred-load) on a prim."""
     from .. import kit_tools
@@ -5014,6 +5044,7 @@ async def _handle_list_payloads(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_select_by_criteria(args: Dict) -> Dict:
     """T14.3 — query USD stage for prims matching a criteria dict.
 
@@ -5049,6 +5080,7 @@ async def _handle_select_by_criteria(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_list_opened_stages(args: Dict) -> Dict:
     """List all UsdContexts and the stage URL each holds."""
     from .. import kit_tools
@@ -5101,6 +5133,7 @@ print(json.dumps({"stages": stages, "active_context": active_ctx}))
 # Phase 7 wave 15 — scene-authoring final stragglers (compute/find/graphs/snapshots)
 
 
+@with_telemetry
 async def _handle_compute_stack_placement(args: Dict) -> Dict:
     """Compute placement positions for stacking N items on top of a target prim.
 
@@ -5281,6 +5314,7 @@ print(json.dumps(result, default=str))
     )
 
 
+@with_telemetry
 async def _handle_compute_surface_area(args: Dict) -> Dict:
     """Compute surface area as sum of triangle areas (after triangulation)."""
     from .. import kit_tools
@@ -5349,6 +5383,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"compute_surface_area {prim_path}")
 
 
+@with_telemetry
 async def _handle_compute_volume(args: Dict) -> Dict:
     """Compute mesh volume via signed tetrahedra (trimesh if available)."""
     from .. import kit_tools
@@ -5427,6 +5462,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"compute_volume {prim_path}")
 
 
+@with_telemetry
 async def _handle_find_heavy_prims(args: Dict) -> Dict:
     """Traverse the stage and find meshes above a triangle-count threshold."""
     from .. import kit_tools
@@ -5465,6 +5501,7 @@ print(json.dumps({{"prims": heavy, "count": len(heavy), "threshold": {threshold}
     )
 
 
+@with_telemetry
 async def _handle_inspect_graph(args: Dict) -> Dict:
     """Return nodes, connections, and attribute values for a single graph."""
     from .. import kit_tools
@@ -5531,6 +5568,7 @@ print(json.dumps(result))
     return {"graph_path": graph_path, "raw_output": output}
 
 
+@with_telemetry
 async def _handle_list_graphs(args: Dict) -> Dict:
     """Enumerate all OmniGraph action graphs in the stage.
 
@@ -5575,6 +5613,7 @@ print(json.dumps({"graphs": graphs, "count": len(graphs)}))
     return {"success": True, "graphs": [], "count": 0, "raw_output": output}
 
 
+@with_telemetry
 async def _handle_save_delta_snapshot(args: Dict) -> Dict:
     """Queue a Kit patch that captures dirty-layer USDA strings as a named snapshot.
 
@@ -5632,6 +5671,7 @@ async def _handle_save_delta_snapshot(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_restore_delta_snapshot(args: Dict) -> Dict:
     """Queue a Kit patch that replays a saved delta snapshot onto the current stage.
 
@@ -5688,6 +5728,7 @@ async def _handle_restore_delta_snapshot(args: Dict) -> Dict:
 # Phase 66 — post-spawn validation for add_usd_reference
 
 
+@with_telemetry
 async def _handle_validate_usd_reference_post(args: Dict) -> Dict[str, Any]:
     """Run Phase 66 validator against a synthetic USDReferenceState dict.
 

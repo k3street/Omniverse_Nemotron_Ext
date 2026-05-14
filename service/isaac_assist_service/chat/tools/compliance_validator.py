@@ -49,6 +49,7 @@ all fields (``constraint_id``, ``category``, ``severity``, ``message``,
 This is asserted in the L0 test suite (see
 ``tests/test_compliance_autopick.py::TestOverride::test_round_trip``).
 """
+# audit-Q17: cohesive — CRM-C3 compliance override validator subsystem (incompatibility gate, constraint violations, ValidationResult)
 from __future__ import annotations
 
 from dataclasses import dataclass
