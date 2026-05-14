@@ -844,7 +844,7 @@ the small `opus-judgment` / `opus-runtime` subset.**
 - **LOC**: ~100
 - **Blocked-by**: CRM-D1
 - **Verify**: `pytest tests/test_compliance_aggregators.py` ≥6 tests
-- **STATUS**: pending
+- **STATUS**: done — 637b35e
 
 #### CRM-D3 — Compliance tuning guide (sonnet-mechanical)
 - **Files**: `docs/guides/compliance_tuning.md` (NEW)
