@@ -49,6 +49,7 @@ def with_telemetry(handler: Callable) -> Callable:
     if asyncio.iscoroutinefunction(handler):
         @functools.wraps(handler)
         async def async_wrapper(args: Any) -> Any:
+            """Async wrapper — times the handler, emits handler.complete/error event, re-raises on failure."""
             t0 = time.perf_counter()
             try:
                 result = await handler(args)
@@ -80,6 +81,7 @@ def with_telemetry(handler: Callable) -> Callable:
     else:
         @functools.wraps(handler)
         def sync_wrapper(args: Any) -> Any:
+            """Sync wrapper — times the handler, emits handler.complete/error event, re-raises on failure."""
             t0 = time.perf_counter()
             try:
                 result = handler(args)
