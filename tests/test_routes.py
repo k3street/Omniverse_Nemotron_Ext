@@ -109,11 +109,11 @@ class TestSnapshotEndpoints:
     async def test_create_snapshot(self, client, monkeypatch):
         from service.isaac_assist_service.snapshots.manager import SnapshotManager
         from service.isaac_assist_service.snapshots.models import Snapshot
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         fake_snap = Snapshot(
             snapshot_id="test123",
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             trigger="pre_patch",
             action_context="test",
             storage_path="/tmp/fake",
