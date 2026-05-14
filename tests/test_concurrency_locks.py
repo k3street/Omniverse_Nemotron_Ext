@@ -600,3 +600,121 @@ class TestStageIndexBuildId:
             f"build_id should reflect the latest build "
             f"(was {first_id} then {second_id})"
         )
+
+
+# ---------------------------------------------------------------------------
+# CONC-2b: multimodal/routes.py _forward_workflow_approve / _reject lock
+# ---------------------------------------------------------------------------
+
+
+class TestMultimodalRouteWorkflowForwardLocks:
+    """T11 — parallel _forward_workflow_approve calls on the same wf_id
+    serialize via the per-workflow lock, so the events list never has
+    duplicate entries written concurrently."""
+
+    def test_parallel_forward_approve_same_wf_id_serializes(self):
+        """Two threads call `_forward_workflow_approve` on the same wf_id
+        simultaneously. Both should succeed (soft-failure semantics), and
+        the final `checkpoint_decisions` list must contain exactly two
+        entries — no lost writes, no duplicates from interleaved appends.
+
+        We use the SleepingLock pattern to amplify hold time, confirming
+        that both threads wait on each other (serialized) rather than
+        overlapping (which would also work but could corrupt the list on a
+        real CPython/Cython build where list.append is not atomic across
+        multiple attribute reads).
+        """
+        from service.isaac_assist_service.chat.tools.handlers._state import (
+            _WORKFLOWS,
+            make_workflow_lock,
+        )
+        from service.isaac_assist_service.multimodal.routes import (
+            _forward_workflow_approve,
+        )
+
+        sleep_duration = 0.15
+
+        class SleepingLock:
+            """threading.Lock-compatible context manager that sleeps after
+            acquiring, amplifying lock-hold time so serialization is
+            observable by wall-clock."""
+
+            def __init__(self) -> None:
+                self._inner = threading.Lock()
+                self.acquire_count = 0
+
+            def __enter__(self):
+                self._inner.acquire()
+                self.acquire_count += 1
+                time.sleep(sleep_duration)
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                self._inner.release()
+                return False
+
+            def acquire(self, *args, **kwargs):
+                return self._inner.acquire(*args, **kwargs)
+
+            def release(self):
+                return self._inner.release()
+
+        wf_id = "wf-routes-approve-race"
+        lock = SleepingLock()
+        _WORKFLOWS[wf_id] = {
+            "id": wf_id,
+            "type": "rl_training",
+            "status": "awaiting_plan_approval",
+            "current_phase": "plan",
+            "checkpoint_decisions": [],
+            "events": [],
+            "updated_at": "2026-05-14T00:00:00Z",
+            "_lock": lock,
+        }
+
+        try:
+            barrier = threading.Barrier(2)
+            results: List[Any] = []
+
+            def call_approve(feedback: str) -> None:
+                barrier.wait()
+                result = _forward_workflow_approve(wf_id, feedback=feedback)
+                results.append(result)
+
+            t1 = threading.Thread(target=call_approve, args=("approve-A",))
+            t2 = threading.Thread(target=call_approve, args=("approve-B",))
+            start = time.perf_counter()
+            t1.start()
+            t2.start()
+            t1.join(timeout=5.0)
+            t2.join(timeout=5.0)
+            elapsed = time.perf_counter() - start
+
+            # Both calls must return None (success).
+            assert results == [None, None], (
+                f"Expected both forwards to succeed but got {results!r}"
+            )
+
+            wf = _WORKFLOWS[wf_id]
+            # Exactly two decisions recorded — no lost or duplicate writes.
+            assert len(wf["checkpoint_decisions"]) == 2, (
+                f"Expected 2 checkpoint_decisions, got {wf['checkpoint_decisions']!r}"
+            )
+            feedbacks = {d["feedback"] for d in wf["checkpoint_decisions"]}
+            assert feedbacks == {"approve-A", "approve-B"}, (
+                f"Unexpected feedbacks in decisions: {feedbacks!r}"
+            )
+
+            # The lock must have been acquired exactly twice (once per call),
+            # confirming each call entered the critical section sequentially.
+            assert lock.acquire_count == 2
+
+            # Wall-clock must be >= 2× sleep_duration because the calls
+            # serialized through the same lock.
+            assert elapsed >= sleep_duration * 1.8, (
+                f"Calls appear to have run in parallel (elapsed={elapsed:.3f}s), "
+                f"expected serialization >= {sleep_duration * 1.8:.3f}s. "
+                "The _wf_lock_for guard may not be in effect."
+            )
+        finally:
+            _WORKFLOWS.pop(wf_id, None)

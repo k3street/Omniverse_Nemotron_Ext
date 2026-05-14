@@ -207,24 +207,30 @@ def _forward_workflow_approve(
 
     Intentionally does NOT raise — a missing workflow must never block the
     canvas commit from returning a success response.
+
+    CONC-2b (2026-05-14): the read-modify-write on `wf` is protected by
+    the per-workflow lock obtained via `_wf_lock_for(wf)` so concurrent
+    approve calls on the same wf_id serialize properly.
     """
     try:
         from ..chat.tools.handlers._state import _WORKFLOWS  # noqa: PLC0415
+        from ..chat.tools.handlers.workflow import _wf_lock_for  # noqa: PLC0415
         wf = _WORKFLOWS.get(workflow_id)
         if wf is None:
             return f"workflow_id '{workflow_id}' not found in active registry"
         from datetime import datetime as _dt, timezone as _tz  # noqa: PLC0415
-        now = _dt.now(_tz.utc).isoformat()
-        decision = {
-            "phase": wf.get("current_phase", "unknown"),
-            "action": "approve",
-            "feedback": feedback,
-            "at": now,
-        }
-        wf.setdefault("checkpoint_decisions", []).append(decision)
-        wf.setdefault("events", []).append({"type": "checkpoint_decision", **decision})
-        wf["updated_at"] = now
-        wf["status"] = "approved_via_canvas"
+        with _wf_lock_for(wf):
+            now = _dt.now(_tz.utc).isoformat()
+            decision = {
+                "phase": wf.get("current_phase", "unknown"),
+                "action": "approve",
+                "feedback": feedback,
+                "at": now,
+            }
+            wf.setdefault("checkpoint_decisions", []).append(decision)
+            wf.setdefault("events", []).append({"type": "checkpoint_decision", **decision})
+            wf["updated_at"] = now
+            wf["status"] = "approved_via_canvas"
         logger.info(
             f"[canvas-commit] forwarded approve to workflow {workflow_id!r}, "
             f"phase={decision['phase']!r}"
@@ -242,24 +248,29 @@ def _forward_workflow_reject(
     """Forward a reject decision to the in-process workflow registry.
 
     Same soft-failure semantics as _forward_workflow_approve — never raises.
+
+    CONC-2b (2026-05-14): the read-modify-write on `wf` is protected by
+    the per-workflow lock obtained via `_wf_lock_for(wf)`.
     """
     try:
         from ..chat.tools.handlers._state import _WORKFLOWS  # noqa: PLC0415
+        from ..chat.tools.handlers.workflow import _wf_lock_for  # noqa: PLC0415
         wf = _WORKFLOWS.get(workflow_id)
         if wf is None:
             return f"workflow_id '{workflow_id}' not found in active registry"
         from datetime import datetime as _dt, timezone as _tz  # noqa: PLC0415
-        now = _dt.now(_tz.utc).isoformat()
-        decision = {
-            "phase": wf.get("current_phase", "unknown"),
-            "action": "reject",
-            "feedback": feedback,
-            "at": now,
-        }
-        wf.setdefault("checkpoint_decisions", []).append(decision)
-        wf.setdefault("events", []).append({"type": "checkpoint_decision", **decision})
-        wf["updated_at"] = now
-        wf["status"] = "cancelled"
+        with _wf_lock_for(wf):
+            now = _dt.now(_tz.utc).isoformat()
+            decision = {
+                "phase": wf.get("current_phase", "unknown"),
+                "action": "reject",
+                "feedback": feedback,
+                "at": now,
+            }
+            wf.setdefault("checkpoint_decisions", []).append(decision)
+            wf.setdefault("events", []).append({"type": "checkpoint_decision", **decision})
+            wf["updated_at"] = now
+            wf["status"] = "cancelled"
         logger.info(
             f"[canvas-reject] forwarded reject to workflow {workflow_id!r}, "
             f"feedback={feedback!r}"
