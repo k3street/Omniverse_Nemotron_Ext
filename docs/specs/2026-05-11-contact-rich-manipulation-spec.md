@@ -870,7 +870,7 @@ the small `opus-judgment` / `opus-runtime` subset.**
 - **LOC**: ~100
 - **Blocked-by**: CRM-A2 + CRM-A3
 - **Verify**: `pytest tests/test_compliance_under_load.py` ≥4 tests
-- **STATUS**: pending
+- **STATUS**: done
 
 #### CRM-T3 — E2E peg-insert against live Kit (opus-runtime)
 - **Files**: `tests/test_peg_insert_e2e.py` (NEW)
