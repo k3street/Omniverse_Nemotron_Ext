@@ -111,6 +111,14 @@ def _connect_sync(ip: str, port: int) -> dict:
 
 
 async def handle_ros2_connect(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Configure the rosbridge WebSocket target and verify connectivity.
+
+    Args:
+        args: {ip: str, port: int}
+
+    Returns:
+        {message, connectivity} dict from _connect_sync.
+    """
     ip = str(args.get("ip", "127.0.0.1")).strip()
     port = int(args.get("port", 9090))
     result = await _run_sync(_connect_sync, ip, port)
@@ -122,6 +130,7 @@ async def handle_ros2_connect(args: Dict[str, Any]) -> Dict[str, Any]:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _list_topics_sync() -> dict:
+    """Blocking: call /rosapi/topics and return {topics, types, topic_count}."""
     ws = _get_ws_manager()
     message = {
         "op": "call_service",
@@ -144,10 +153,12 @@ def _list_topics_sync() -> dict:
 
 
 async def handle_ros2_list_topics(_args: Dict[str, Any]) -> Dict[str, Any]:
+    """Return all active ROS2 topics and their message types."""
     return await _run_sync(_list_topics_sync)
 
 
 def _get_topic_type_sync(topic: str) -> dict:
+    """Blocking: resolve the message type of a single ROS2 topic via /rosapi/topic_type."""
     ws = _get_ws_manager()
     message = {
         "op": "call_service",
@@ -171,6 +182,14 @@ def _get_topic_type_sync(topic: str) -> dict:
 
 
 async def handle_ros2_get_topic_type(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the ROS2 message type for a given topic name.
+
+    Args:
+        args: {topic: str}
+
+    Returns:
+        {topic, type} or {error}.
+    """
     topic = args.get("topic", "")
     if not topic:
         return {"error": "topic is required"}
@@ -178,6 +197,7 @@ async def handle_ros2_get_topic_type(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _get_message_details_sync(msg_type: str) -> dict:
+    """Blocking: fetch field names+types for a ROS2 message type via /rosapi/message_details."""
     ws = _get_ws_manager()
     message = {
         "op": "call_service",
@@ -207,6 +227,14 @@ def _get_message_details_sync(msg_type: str) -> dict:
 
 
 async def handle_ros2_get_message_type(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the field structure for a ROS2 message type.
+
+    Args:
+        args: {message_type: str}
+
+    Returns:
+        {message_type, structure: {type_name: {field: type}}} or {error}.
+    """
     msg_type = args.get("message_type", "")
     if not msg_type:
         return {"error": "message_type is required"}
@@ -214,6 +242,7 @@ async def handle_ros2_get_message_type(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _subscribe_once_sync(topic: str, msg_type: str, timeout: float) -> dict:
+    """Blocking: subscribe, wait for one message, unsubscribe. Returns {topic, msg} or {error}."""
     ws = _get_ws_manager()
     sub_msg = {"op": "subscribe", "topic": topic, "type": msg_type, "queue_length": 1}
     with ws:
@@ -240,6 +269,14 @@ def _subscribe_once_sync(topic: str, msg_type: str, timeout: float) -> dict:
 
 
 async def handle_ros2_subscribe_once(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Receive a single message from a ROS2 topic then unsubscribe.
+
+    Args:
+        args: {topic: str, msg_type: str, timeout: float (default 5.0)}
+
+    Returns:
+        {topic, msg} on success, {error} on timeout or connection failure.
+    """
     topic = args.get("topic", "")
     msg_type = args.get("msg_type", "")
     timeout = float(args.get("timeout", 5.0))
@@ -249,6 +286,7 @@ async def handle_ros2_subscribe_once(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _publish_once_sync(topic: str, msg_type: str, msg: dict) -> dict:
+    """Blocking: advertise, publish one message, unadvertise. Returns {success, topic, msg_type}."""
     ws = _get_ws_manager()
     with ws:
         ws.send({"op": "advertise", "topic": topic, "type": msg_type})
@@ -270,6 +308,14 @@ def _publish_once_sync(topic: str, msg_type: str, msg: dict) -> dict:
 
 
 async def handle_ros2_publish(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Publish a single message to a ROS2 topic.
+
+    Args:
+        args: {topic: str, msg_type: str, data: dict}
+
+    Returns:
+        {success, topic, msg_type} or {error}.
+    """
     topic = args.get("topic", "")
     msg_type = args.get("msg_type", "")
     data = args.get("data", {})
@@ -285,6 +331,15 @@ def _publish_sequence_sync(
     messages: List[dict], durations: List[float],
     rate_hz: float,
 ) -> dict:
+    """Blocking: publish a timed sequence of messages at rate_hz.
+
+    Each message[i] is held for durations[i] seconds.  If rate_hz>0 the
+    message is re-published at the given rate during its hold window; if
+    rate_hz==0 it is sent once then the duration is slept.
+
+    Returns:
+        {success, published_count, total_messages, topic, msg_type, rate_hz, errors}.
+    """
     if len(messages) != len(durations):
         return {"error": "messages and durations must have the same length"}
     if any(d < 0 for d in durations):
@@ -336,6 +391,14 @@ def _publish_sequence_sync(
 
 
 async def handle_ros2_publish_sequence(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Publish a timed sequence of messages to a ROS2 topic.
+
+    Args:
+        args: {topic, msg_type, messages: list[dict], durations: list[float], rate_hz: float}
+
+    Returns:
+        {success, published_count, total_messages, errors} or {error}.
+    """
     topic = args.get("topic", "")
     msg_type = args.get("msg_type", "")
     messages = args.get("messages", [])
@@ -357,6 +420,7 @@ async def handle_ros2_publish_sequence(args: Dict[str, Any]) -> Dict[str, Any]:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _list_services_sync() -> dict:
+    """Blocking: call /rosapi/services and return {services, service_count}."""
     ws = _get_ws_manager()
     message = {
         "op": "call_service",
@@ -378,12 +442,24 @@ def _list_services_sync() -> dict:
 
 
 async def handle_ros2_list_services(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Return all available ROS2 services."""
     return await _run_sync(_list_services_sync)
 
 
 def _call_service_sync(
     service_name: str, service_type: str, request: dict, timeout: float,
 ) -> dict:
+    """Blocking: call a ROS2 service and return its response.
+
+    Args:
+        service_name: fully-qualified service path (e.g. ``/reset_simulation``)
+        service_type: ROS2 srv type string
+        request: service request payload dict
+        timeout: seconds to wait for a response
+
+    Returns:
+        {service, service_type, success, result} or {service, success, error}.
+    """
     ws = _get_ws_manager()
     message = {
         "op": "call_service",
@@ -408,6 +484,14 @@ def _call_service_sync(
 
 
 async def handle_ros2_call_service(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Call a ROS2 service and return its response payload.
+
+    Args:
+        args: {service_name, service_type, request: dict, timeout: float (default 5.0)}
+
+    Returns:
+        {service, service_type, success, result} or {error}.
+    """
     name = args.get("service_name", "")
     stype = args.get("service_type", "")
     request = args.get("request", {})
@@ -422,6 +506,7 @@ async def handle_ros2_call_service(args: Dict[str, Any]) -> Dict[str, Any]:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _list_nodes_sync() -> dict:
+    """Blocking: call /rosapi/nodes and return {nodes, node_count}."""
     ws = _get_ws_manager()
     message = {
         "op": "call_service",
@@ -443,10 +528,12 @@ def _list_nodes_sync() -> dict:
 
 
 async def handle_ros2_list_nodes(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Return all active ROS2 nodes."""
     return await _run_sync(_list_nodes_sync)
 
 
 def _get_node_details_sync(node: str) -> dict:
+    """Blocking: fetch publishers/subscribers/services for a named ROS2 node."""
     ws = _get_ws_manager()
     message = {
         "op": "call_service",
@@ -478,6 +565,14 @@ def _get_node_details_sync(node: str) -> dict:
 
 
 async def handle_ros2_get_node_details(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Return publishers, subscribers and services for a ROS2 node.
+
+    Args:
+        args: {node: str}
+
+    Returns:
+        {node, publishers, subscribers, services, *_count} or {error}.
+    """
     node = args.get("node", "")
     if not node:
         return {"error": "node name is required"}
