@@ -28,6 +28,15 @@ class ROSBridgeReadinessValidator(ValidationRule):
         )
 
     def check(self, stage_data: Dict[str, Any]) -> List[ValidationFinding]:
+        """Check ROS2 bridge configuration health and return any findings.
+
+        Args:
+            stage_data (dict): Serialized stage data from the UI extension.
+
+        Returns:
+            List[ValidationFinding]: Findings for missing clock publisher, topic
+            collisions, frame_id inconsistencies, and unconnected OmniGraph nodes.
+        """
         findings = []
         prims = stage_data.get("prims", [])
         og_nodes = stage_data.get("omnigraph_nodes", [])

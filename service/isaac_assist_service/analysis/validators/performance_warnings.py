@@ -36,6 +36,15 @@ class PerformanceWarningsValidator(ValidationRule):
         )
 
     def check(self, stage_data: Dict[str, Any]) -> List[ValidationFinding]:
+        """Check for scene performance issues and return any findings.
+
+        Args:
+            stage_data (dict): Serialized stage data from the UI extension.
+
+        Returns:
+            List[ValidationFinding]: Findings for high poly counts, excessive rigid
+            bodies, too many sublayers, or too many active lights.
+        """
         findings = []
         prims = stage_data.get("prims", [])
         sublayer_count = stage_data.get("sublayer_count", 0)

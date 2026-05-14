@@ -28,6 +28,15 @@ class SensorCompletenessValidator(ValidationRule):
         )
 
     def check(self, stage_data: Dict[str, Any]) -> List[ValidationFinding]:
+        """Check sensor wiring completeness and return any findings.
+
+        Args:
+            stage_data (dict): Serialized stage data from the UI extension.
+
+        Returns:
+            List[ValidationFinding]: Findings for cameras lacking RenderProducts,
+            LiDAR without OmniGraph ticks, and physics sensors on non-physics bodies.
+        """
         findings = []
         prims = stage_data.get("prims", [])
         prim_map = {p.get("path", ""): p for p in prims}

@@ -1,3 +1,4 @@
+"""Stage analysis orchestrator — fan out to all registered validators."""
 from typing import Dict, Any, List, Optional
 from .models import StageAnalysisResult
 import uuid
@@ -10,10 +11,18 @@ logger = logging.getLogger(__name__)
 
 
 class AnalysisOrchestrator:
+    """Runs all registered validation rules against serialized stage data.
+
+    Collects every ``ValidationFinding``, aggregates severity counts, and
+    computes per-type prim statistics into a single ``StageAnalysisResult``.
+    """
+
     def __init__(self, enabled_packs: Optional[List[str]] = None):
-        """
-        Initialize with validators from the registry.
-        If enabled_packs is None, all registered packs are loaded.
+        """Initialize with validators from the registry.
+
+        Args:
+            enabled_packs (list[str], optional): Restrict to specific validator
+                pack names. When None, all registered packs are loaded.
         """
         self.rules = create_all_validators(enabled_packs)
         packs = get_registered_validators()
@@ -22,6 +31,16 @@ class AnalysisOrchestrator:
         )
 
     def run_analysis(self, stage_data: Dict[str, Any]) -> StageAnalysisResult:
+        """Execute all loaded validators and aggregate their findings.
+
+        Args:
+            stage_data (dict): Serialized stage data from the UI extension,
+                including ``prims``, ``sublayer_count``, etc.
+
+        Returns:
+            StageAnalysisResult: Full analysis result including all findings,
+            severity counts, prim type histogram, and wall-clock duration.
+        """
         start = time.time()
         
         all_findings = []

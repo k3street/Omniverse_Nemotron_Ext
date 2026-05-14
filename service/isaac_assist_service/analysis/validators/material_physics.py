@@ -30,6 +30,15 @@ class MaterialPhysicsMismatchValidator(ValidationRule):
         )
 
     def check(self, stage_data: Dict[str, Any]) -> List[ValidationFinding]:
+        """Check for material and physics schema inconsistencies and return findings.
+
+        Args:
+            stage_data (dict): Serialized stage data from the UI extension.
+
+        Returns:
+            List[ValidationFinding]: Findings for rigid bodies missing collision,
+            visual-only meshes in physics scenes, and collision approximation issues.
+        """
         findings = []
         prims = stage_data.get("prims", [])
 

@@ -1,9 +1,17 @@
+"""Schema consistency validator — catches prims with incomplete API combinations."""
 from typing import List, Dict, Any
 from .base import ValidationRule
 from ..models import ValidationFinding
 import uuid
 
+
 class SchemaConsistencyRule(ValidationRule):
+    """Flag USD prims that have ``PhysicsRigidBodyAPI`` but are missing ``PhysicsCollisionAPI``.
+
+    A rigid body without collision geometry will fall through the floor in
+    simulation because PhysX needs a collision shape to interact with surfaces.
+    """
+
     def __init__(self):
         super().__init__()
         self.rule_id = "schema.missing_collision"
@@ -13,8 +21,17 @@ class SchemaConsistencyRule(ValidationRule):
         self.description = "Checks if a RigidBody lacks Collision geometries."
 
     def check(self, stage_data: Dict[str, Any]) -> List[ValidationFinding]:
+        """Check for incomplete physics API combinations and return any findings.
+
+        Args:
+            stage_data (dict): Serialized stage data from the UI extension.
+
+        Returns:
+            List[ValidationFinding]: One finding per prim that has
+            ``PhysicsRigidBodyAPI`` but is missing ``PhysicsCollisionAPI``.
+        """
         findings = []
-        
+
         prims = stage_data.get("prims", [])
         for prim in prims:
             schemas = prim.get("schemas", [])

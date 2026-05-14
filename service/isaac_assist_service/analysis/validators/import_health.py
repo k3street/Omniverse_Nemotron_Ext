@@ -25,6 +25,15 @@ class ImportHealthValidator(ValidationRule):
         )
 
     def check(self, stage_data: Dict[str, Any]) -> List[ValidationFinding]:
+        """Check USD reference and asset health and return any findings.
+
+        Args:
+            stage_data (dict): Serialized stage data from the UI extension.
+
+        Returns:
+            List[ValidationFinding]: Findings for broken references, missing asset
+            files, unresolved payloads, and orphan Xform prims.
+        """
         findings = []
         prims = stage_data.get("prims", [])
         prim_paths = {p.get("path") for p in prims}
