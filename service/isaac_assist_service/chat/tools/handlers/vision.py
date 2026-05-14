@@ -552,10 +552,10 @@ async def _handle_capture_camera_image(args: Dict) -> Dict:
     from .. import kit_tools
     camera_path = args.get("camera_path", "")
     if not camera_path:
-        return {"error": "camera_path is required"}
+        return {"success": False, "error": "camera_path is required"}
     import re as _re
     if not _re.match(r"^/[A-Za-z0-9_/\- ]+$", camera_path):
-        return {"error": f"Invalid camera_path: {camera_path}"}
+        return {"success": False, "error": f"Invalid camera_path: {camera_path}"}
 
     resolution = args.get("resolution") or [1280, 720]
     if (
@@ -563,7 +563,7 @@ async def _handle_capture_camera_image(args: Dict) -> Dict:
         or len(resolution) != 2
         or not all(isinstance(v, int) and v > 0 for v in resolution)
     ):
-        return {"error": "resolution must be [width, height] of positive integers"}
+        return {"success": False, "error": "resolution must be [width, height] of positive integers"}
     width, height = int(resolution[0]), int(resolution[1])
 
     code = f"""\
@@ -621,10 +621,11 @@ else:
 """
     result = await kit_tools.exec_sync(code, timeout=30)
     if not result.get("success"):
-        return {"error": f"Kit RPC /exec_sync failed: {result.get('output', 'unknown')}"}
+        return {"success": False, "error": f"Kit RPC /exec_sync failed: {result.get('output', 'unknown')}"}
     parsed = _parse_last_json_line(result.get("output", ""))
     if parsed is None:
-        return {"error": "Failed to parse capture result", "raw_output": result.get("output", "")[:500]}
+        return {"success": False, "error": "Failed to parse capture result", "raw_output": result.get("output", "")[:500]}
+    parsed.setdefault("success", not bool(parsed.get("error")))
     return parsed
 
 
@@ -852,12 +853,14 @@ print(json.dumps({'cameras': cameras, 'count': len(cameras)}))
     result = await kit_tools.exec_sync(code, timeout=10)
     if not result.get("success"):
         return {
+            "success": False,
             "error": f"Kit RPC /exec_sync failed: {result.get('output', 'unknown')}",
             "hint": "Is Isaac Sim running with the extension's Kit RPC enabled?",
         }
     parsed = _parse_last_json_line(result.get("output", ""))
     if parsed is None:
-        return {"error": "Failed to parse camera list", "raw_output": result.get("output", "")[:500]}
+        return {"success": False, "error": "Failed to parse camera list", "raw_output": result.get("output", "")[:500]}
+    parsed.setdefault("success", not bool(parsed.get("error")))
     return parsed
 
 
@@ -866,11 +869,11 @@ async def _handle_get_camera_params(args: Dict) -> Dict:
     from .. import kit_tools
     camera_path = args.get("camera_path", "")
     if not camera_path:
-        return {"error": "camera_path is required"}
+        return {"success": False, "error": "camera_path is required"}
     # Sanitize path
     import re as _re
     if not _re.match(r"^/[A-Za-z0-9_/\- ]+$", camera_path):
-        return {"error": f"Invalid camera_path: {camera_path}"}
+        return {"success": False, "error": f"Invalid camera_path: {camera_path}"}
 
     code = f"""\
 import omni.usd
@@ -916,10 +919,11 @@ else:
 """
     result = await kit_tools.exec_sync(code, timeout=10)
     if not result.get("success"):
-        return {"error": f"Kit RPC /exec_sync failed: {result.get('output', 'unknown')}"}
+        return {"success": False, "error": f"Kit RPC /exec_sync failed: {result.get('output', 'unknown')}"}
     parsed = _parse_last_json_line(result.get("output", ""))
     if parsed is None:
-        return {"error": "Failed to parse camera params", "raw_output": result.get("output", "")[:500]}
+        return {"success": False, "error": "Failed to parse camera params", "raw_output": result.get("output", "")[:500]}
+    parsed.setdefault("success", not bool(parsed.get("error")))
     return parsed
 
 
@@ -1027,6 +1031,7 @@ except Exception as e:
 """
     result = await kit_tools.queue_exec_patch(code, "Read timeline state (current/start/end/fps/playing)")
     return {
+        "success": bool(result.get("success", False)),
         "queued": result.get("queued", False),
         "patch_id": result.get("patch_id"),
         "note": (
@@ -1113,6 +1118,7 @@ async def _handle_list_keyframes(args: Dict) -> Dict:
         code, f"List keyframes for {prim_path}.{attr}"
     )
     return {
+        "success": bool(result.get("success", False)),
         "queued": result.get("queued", False),
         "patch_id": result.get("patch_id"),
         "prim_path": prim_path,
