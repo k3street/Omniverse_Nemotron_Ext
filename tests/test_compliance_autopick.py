@@ -482,3 +482,600 @@ class TestTableExtensibility:
         for rule in _COMPLIANCE_TABLE:
             assert rule.mode_for_sim in COMPLIANCE_MODE_ENUM
             assert rule.mode_for_real in COMPLIANCE_MODE_ENUM
+
+
+# ===========================================================================
+# CRM-C3 — validate_compliance_override
+#
+# Spec: docs/specs/2026-05-11-contact-rich-manipulation-spec.md §4.2.
+#
+# Coverage (per spec Section 18.3 CRM-C3 Verify row):
+# - ≥ 8 tests in TestOverride
+# - ≥ 6 distinct rule classes hit
+# - integration via Phase 11b ValidationResult round-trip
+# ===========================================================================
+
+
+from service.isaac_assist_service.chat.tools.compliance_validator import (  # noqa: E402
+    HARD_INCOMPATIBILITIES,
+    POSITION_MODE_ONLY_ROBOTS,
+    TORQUE_MODE_ROBOTS,
+    count_rules,
+    list_rule_ids,
+    rules_by_mode,
+    validate_compliance_override,
+)
+from service.isaac_assist_service.types.violations import (  # noqa: E402
+    ConstraintViolation,
+    ValidationResult,
+)
+
+
+class TestOverride:
+    """L0 tests for ``validate_compliance_override`` per spec §4.2.
+
+    Each test names the rule class it exercises so the
+    ``≥ 6 distinct rule classes`` requirement is auditable from the
+    rule_id field on the produced violations.
+    """
+
+    # ------------------------------------------------------------------
+    # 1. Happy path — known-valid combinations should produce zero
+    #    HARD violations.
+    # ------------------------------------------------------------------
+
+    def test_valid_override_admittance_ur10e_with_ft(self):
+        """admittance + ur10e + F/T sensor → valid (no violations)."""
+        r = validate_compliance_override(
+            "admittance", "ur10e", has_ft_sensor=True
+        )
+        assert isinstance(r, ValidationResult)
+        assert r.valid is True
+        assert r.n_hard == 0
+        # May produce zero soft violations on this clean combo.
+        assert r.n_soft == 0
+
+    def test_valid_override_franka_cartesian_impedance_on_franka(self):
+        """franka_cartesian_impedance + franka_panda → valid."""
+        r = validate_compliance_override(
+            "franka_cartesian_impedance",
+            "franka_panda",
+            has_ft_sensor=True,
+        )
+        assert r.valid is True
+        assert r.n_hard == 0
+
+    def test_valid_override_variable_impedance_on_franka(self):
+        """variable_impedance on torque-mode robot → valid."""
+        r = validate_compliance_override(
+            "variable_impedance",
+            "franka_panda",
+            has_ft_sensor=True,
+        )
+        assert r.valid is True
+        assert r.n_hard == 0
+
+    def test_valid_override_variable_impedance_with_explicit_schedule(self):
+        """variable_impedance on position-mode robot WITH K_schedule → valid."""
+        r = validate_compliance_override(
+            "variable_impedance",
+            "ur10e",
+            has_ft_sensor=True,
+            explicit_K_schedule=True,
+        )
+        assert r.valid is True
+        assert r.n_hard == 0
+
+    # ------------------------------------------------------------------
+    # 2. Embodiment rule class — impedance variants need torque-mode
+    # ------------------------------------------------------------------
+
+    def test_cartesian_impedance_on_ur10e_rejected(self):
+        """RULE: impedance_needs_torque_mode + impedance_on_position_only_robot.
+        cartesian_impedance + ur10e (position-only) → HARD reject.
+        """
+        r = validate_compliance_override(
+            "cartesian_impedance", "ur10e", has_ft_sensor=True
+        )
+        assert r.valid is False
+        assert r.n_hard >= 1
+        rule_ids = {v.constraint_id for v in r.violations}
+        # Three distinct rules fire on this combination; assert ≥ 1.
+        assert (
+            "compliance.impedance_needs_torque_mode" in rule_ids
+            or "compliance.impedance_on_position_only_robot" in rule_ids
+            or "compliance.torque_mode_for_position_robot_explicit" in rule_ids
+        )
+
+    @pytest.mark.parametrize(
+        "robot_class", ["ur10e", "ur5e", "ur3e", "kinova_gen3"]
+    )
+    def test_cartesian_impedance_on_position_robots_rejected(
+        self, robot_class: str
+    ):
+        """RULE: impedance variants rejected on every position-mode-only robot."""
+        r = validate_compliance_override(
+            "cartesian_impedance", robot_class, has_ft_sensor=True
+        )
+        assert r.valid is False
+        assert r.n_hard >= 1
+
+    def test_franka_cartesian_impedance_on_ur10e_rejected(self):
+        """RULE: franka_specific_mode_non_franka + ur_bans_franka_impedance.
+        franka_cartesian_impedance + ur10e → HARD reject.
+        """
+        r = validate_compliance_override(
+            "franka_cartesian_impedance", "ur10e", has_ft_sensor=True
+        )
+        assert r.valid is False
+        rule_ids = {v.constraint_id for v in r.violations}
+        # Multiple rules can fire — assert at least one of the Franka-
+        # specific rejections is present.
+        franka_rules = {
+            "compliance.franka_specific_mode_non_franka",
+            "compliance.ur_bans_franka_impedance",
+            "compliance.franka_impedance_needs_torque_mode",
+        }
+        assert rule_ids & franka_rules
+
+    def test_franka_cartesian_impedance_on_kinova_rejected(self):
+        """RULE: kinova_bans_franka_impedance.
+        franka_cartesian_impedance + kinova_gen3 → HARD reject.
+        """
+        r = validate_compliance_override(
+            "franka_cartesian_impedance",
+            "kinova_gen3",
+            has_ft_sensor=True,
+        )
+        assert r.valid is False
+        rule_ids = {v.constraint_id for v in r.violations}
+        assert "compliance.kinova_bans_franka_impedance" in rule_ids
+
+    # ------------------------------------------------------------------
+    # 3. Sensor rule class — F/T sensor required modes
+    # ------------------------------------------------------------------
+
+    def test_admittance_without_ft_rejected(self):
+        """RULE: admittance_needs_ft.
+        admittance + no F/T → HARD reject.
+        """
+        r = validate_compliance_override(
+            "admittance", "ur10e", has_ft_sensor=False
+        )
+        assert r.valid is False
+        rule_ids = {v.constraint_id for v in r.violations}
+        assert "compliance.admittance_needs_ft" in rule_ids
+
+    def test_fdcc_without_ft_rejected(self):
+        """RULE: fdcc_needs_ft.
+        cartesian_compliance_fdcc + no F/T → HARD reject.
+        """
+        r = validate_compliance_override(
+            "cartesian_compliance_fdcc",
+            "ur10e",
+            has_ft_sensor=False,
+        )
+        assert r.valid is False
+        rule_ids = {v.constraint_id for v in r.violations}
+        assert "compliance.fdcc_needs_ft" in rule_ids
+
+    def test_ft_sensor_path_inconsistent_is_soft(self):
+        """RULE: ft_sensor_path_inconsistent.
+        ft_sensor_path set but has_ft_sensor=False → SOFT advisory only.
+        """
+        # Use mode=cartesian_impedance + Franka so the only inconsistency
+        # surfacing this rule is the path/flag mismatch.
+        r = validate_compliance_override(
+            "cartesian_impedance",
+            "franka_panda",
+            has_ft_sensor=False,
+            ft_sensor_path="/World/Franka/wrist_ft",
+        )
+        rule_ids = {v.constraint_id for v in r.violations}
+        assert "compliance.ft_sensor_path_inconsistent" in rule_ids
+        path_violation = next(
+            v for v in r.violations
+            if v.constraint_id == "compliance.ft_sensor_path_inconsistent"
+        )
+        # ``ft_sensor_path_inconsistent`` is soft.
+        assert path_violation.category == "soft"
+
+    # ------------------------------------------------------------------
+    # 4. Input-shape rule class
+    # ------------------------------------------------------------------
+
+    def test_unknown_mode_rejected(self):
+        """RULE: unknown_mode.
+        "bogus" → HARD reject.
+        """
+        r = validate_compliance_override(
+            "bogus", "ur10e", has_ft_sensor=True
+        )
+        assert r.valid is False
+        rule_ids = {v.constraint_id for v in r.violations}
+        assert "compliance.unknown_mode" in rule_ids
+        # Message should mention the valid modes.
+        unknown_v = next(
+            v for v in r.violations
+            if v.constraint_id == "compliance.unknown_mode"
+        )
+        assert "admittance" in unknown_v.message
+
+    def test_empty_robot_class_rejected(self):
+        """RULE: empty_robot_class.
+        admittance + "" → HARD reject.
+        """
+        r = validate_compliance_override(
+            "admittance", "", has_ft_sensor=True
+        )
+        assert r.valid is False
+        rule_ids = {v.constraint_id for v in r.violations}
+        assert "compliance.empty_robot_class" in rule_ids
+
+    def test_whitespace_only_robot_class_rejected(self):
+        """RULE: empty_robot_class (whitespace counts as empty)."""
+        r = validate_compliance_override(
+            "admittance", "   ", has_ft_sensor=True
+        )
+        assert r.valid is False
+
+    def test_none_mode_is_noop(self):
+        """RULE: shortcircuit.
+        mode=None → ValidationResult with zero violations, valid=True.
+        """
+        r = validate_compliance_override(None, "ur10e")
+        assert r.valid is True
+        assert len(r.violations) == 0
+        assert r.n_hard == 0
+        assert r.n_soft == 0
+
+    def test_empty_string_mode_is_noop(self):
+        """RULE: shortcircuit.
+        mode='' (empty string) → no override → no-op.
+        """
+        r = validate_compliance_override("", "ur10e")
+        assert r.valid is True
+        assert len(r.violations) == 0
+
+    def test_null_mode_always_valid(self):
+        """RULE: null is unconditional rigid passthrough.
+
+        ``null`` should be valid regardless of robot or F/T state —
+        rigid passthrough places NO compliance requirements.
+        """
+        # null + no robot + no F/T → still valid
+        r = validate_compliance_override("null", "any_robot")
+        assert r.valid is True
+        assert len(r.violations) == 0
+
+        # null + unknown robot + no F/T → still valid
+        r = validate_compliance_override("null", "yaskawa_does_not_exist")
+        assert r.valid is True
+
+        # null + empty robot → still valid (no robot needed for rigid)
+        r = validate_compliance_override("null", "")
+        assert r.valid is True
+
+    def test_non_string_mode_rejected(self):
+        """RULE: mode_not_string.
+        Passing an int / list / dict for mode is type-incompatible.
+        """
+        r = validate_compliance_override(12345, "ur10e")  # type: ignore[arg-type]
+        assert r.valid is False
+        rule_ids = {v.constraint_id for v in r.violations}
+        assert "compliance.mode_not_string" in rule_ids
+
+    def test_non_string_robot_class_rejected(self):
+        """RULE: robot_class_not_string."""
+        r = validate_compliance_override("admittance", 12345)  # type: ignore[arg-type]
+        assert r.valid is False
+        rule_ids = {v.constraint_id for v in r.violations}
+        assert "compliance.robot_class_not_string" in rule_ids
+
+    # ------------------------------------------------------------------
+    # 5. Real-deployment rule class
+    # ------------------------------------------------------------------
+
+    def test_real_deployment_non_franka_impedance_rejected(self):
+        """RULE: real_deploy_non_franka_impedance.
+        real_robot_deployment tag + UR + impedance → HARD reject.
+        """
+        r = validate_compliance_override(
+            "cartesian_impedance",
+            "ur10e",
+            has_ft_sensor=True,
+            structural_tags=["real_robot_deployment"],
+        )
+        assert r.valid is False
+        rule_ids = {v.constraint_id for v in r.violations}
+        assert "compliance.real_deploy_non_franka_impedance" in rule_ids
+
+    def test_real_deployment_namespaced_tag_matches(self):
+        """Namespaced ``user:real_robot_deployment`` also triggers the rule."""
+        r = validate_compliance_override(
+            "cartesian_impedance",
+            "ur10e",
+            has_ft_sensor=True,
+            structural_tags=["user:real_robot_deployment"],
+        )
+        rule_ids = {v.constraint_id for v in r.violations}
+        assert "compliance.real_deploy_non_franka_impedance" in rule_ids
+
+    def test_real_deployment_admittance_no_ft_rejected(self):
+        """RULE: real_deploy_admittance_no_ft.
+        Real deployment + admittance + no F/T → HARD reject (no fake-FT).
+        """
+        r = validate_compliance_override(
+            "admittance",
+            "ur10e",
+            has_ft_sensor=False,
+            structural_tags=["real_robot_deployment"],
+        )
+        assert r.valid is False
+        rule_ids = {v.constraint_id for v in r.violations}
+        assert "compliance.real_deploy_admittance_no_ft" in rule_ids
+
+    # ------------------------------------------------------------------
+    # 6. Variable-impedance K_schedule branch
+    # ------------------------------------------------------------------
+
+    def test_variable_impedance_position_robot_without_schedule(self):
+        """RULE: variable_impedance_needs_torque_or_schedule.
+        variable_impedance + position-mode robot WITHOUT K_schedule → reject.
+        """
+        r = validate_compliance_override(
+            "variable_impedance",
+            "ur10e",
+            has_ft_sensor=True,
+            explicit_K_schedule=False,
+        )
+        assert r.valid is False
+        rule_ids = {v.constraint_id for v in r.violations}
+        assert (
+            "compliance.variable_impedance_needs_torque_or_schedule"
+            in rule_ids
+        )
+
+    # ------------------------------------------------------------------
+    # 7. Phase 11b round-trip — ValidationResult survives JSON
+    # ------------------------------------------------------------------
+
+    def test_round_trip_via_json(self):
+        """Phase 11b cross-ref: ValidationResult JSON round-trip preserves
+        every field including constraint_id, category, severity, message,
+        affected_paths, diagnostics, fix_hint.
+        """
+        r = validate_compliance_override(
+            "cartesian_impedance", "ur10e", has_ft_sensor=True
+        )
+        # Round-trip through JSON.
+        as_json = r.model_dump_json()
+        r2 = ValidationResult.model_validate_json(as_json)
+        assert r2 == r
+        assert r2.valid is False
+        assert r2.n_hard == r.n_hard
+        assert r2.n_soft == r.n_soft
+        assert len(r2.violations) == len(r.violations)
+        for v1, v2 in zip(r.violations, r2.violations):
+            assert isinstance(v2, ConstraintViolation)
+            assert v2.constraint_id == v1.constraint_id
+            assert v2.category == v1.category
+            assert v2.severity == v1.severity
+            assert v2.message == v1.message
+            assert v2.affected_paths == v1.affected_paths
+            assert v2.diagnostics == v1.diagnostics
+            assert v2.fix_hint == v1.fix_hint
+
+    def test_round_trip_empty_result_via_json(self):
+        """Empty (valid) ValidationResult round-trips intact."""
+        r = validate_compliance_override("null", "any_robot")
+        r2 = ValidationResult.model_validate_json(r.model_dump_json())
+        assert r2 == r
+        assert r2.valid is True
+        assert len(r2.violations) == 0
+        assert r2.n_hard == 0
+        assert r2.n_soft == 0
+
+    # ------------------------------------------------------------------
+    # 8. Soft advisory rules — should not flip ``valid``
+    # ------------------------------------------------------------------
+
+    def test_admittance_on_franka_is_soft_advisory(self):
+        """RULE: admittance_torque_mode_redundant (soft).
+
+        admittance works on Franka but cartesian_impedance is lower
+        latency.  Should emit a SOFT advisory but stay valid.
+        """
+        r = validate_compliance_override(
+            "admittance", "franka_panda", has_ft_sensor=True
+        )
+        assert r.valid is True  # soft does not flip valid
+        rule_ids = {v.constraint_id for v in r.violations}
+        assert "compliance.admittance_torque_mode_redundant" in rule_ids
+        soft_v = next(
+            v for v in r.violations
+            if v.constraint_id == "compliance.admittance_torque_mode_redundant"
+        )
+        assert soft_v.category == "soft"
+
+    def test_fdcc_on_franka_is_soft_advisory(self):
+        """RULE: fdcc_torque_mode_redundant (soft)."""
+        r = validate_compliance_override(
+            "cartesian_compliance_fdcc",
+            "franka_panda",
+            has_ft_sensor=True,
+        )
+        assert r.valid is True
+        rule_ids = {v.constraint_id for v in r.violations}
+        assert "compliance.fdcc_torque_mode_redundant" in rule_ids
+
+    def test_unknown_robot_is_soft_advisory(self):
+        """RULE: robot_class_not_in_known_table (soft).
+
+        Unknown robot class on override path → soft advisory only,
+        not a hard reject (auto-pick handles unknown via admittance).
+        """
+        # Use a valid mode+sensor combo so only the unknown-robot rule
+        # surfaces.  null is unconditionally valid so it shortcircuits;
+        # use admittance + ft + unknown.
+        r = validate_compliance_override(
+            "admittance",
+            "yaskawa_gp25_does_not_exist_yet",
+            has_ft_sensor=True,
+        )
+        rule_ids = {v.constraint_id for v in r.violations}
+        assert "compliance.robot_class_not_in_known_table" in rule_ids
+        soft_v = next(
+            v for v in r.violations
+            if v.constraint_id == "compliance.robot_class_not_in_known_table"
+        )
+        assert soft_v.category == "soft"
+        # Only this soft rule fires → result is still valid.
+        assert r.valid is True
+        assert r.n_hard == 0
+
+    # ------------------------------------------------------------------
+    # 9. Distinct rule classes — meet the ≥ 6 spec requirement
+    # ------------------------------------------------------------------
+
+    def test_at_least_six_distinct_rule_classes_covered(self):
+        """Spec §18.3 CRM-T1: ``override hard-incompat list covers ≥ 6
+        distinct rule classes``.  Bucket the rule_ids by their semantic
+        family and assert the suite exercises ≥ 6 families.
+
+        The semantic families are:
+        1. impedance-needs-torque-mode
+        2. franka-specific-non-franka (3 rules: generic + UR + Kinova)
+        3. admittance-needs-ft (2 rules: generic + position-mode external)
+        4. fdcc-needs-ft
+        5. unknown-mode
+        6. empty-robot-class
+        7. variable-impedance-needs-torque-or-schedule
+        8. real-deploy-non-franka-impedance
+        9. real-deploy-admittance-no-ft
+        10. ft-sensor-path-inconsistent (soft)
+        11. robot-class-not-in-known-table (soft)
+        12. admittance/fdcc-torque-mode-redundant (soft advisories)
+        """
+        # Run a representative case for each family and collect rule ids.
+        cases = [
+            # 1. impedance-needs-torque
+            (("cartesian_impedance", "ur10e", True), {}),
+            # 2. franka-specific-non-franka
+            (("franka_cartesian_impedance", "kinova_gen3", True), {}),
+            # 3. admittance-needs-ft
+            (("admittance", "ur10e", False), {}),
+            # 4. fdcc-needs-ft
+            (("cartesian_compliance_fdcc", "ur10e", False), {}),
+            # 5. unknown-mode
+            (("bogus_mode_xyz", "ur10e", True), {}),
+            # 6. empty-robot-class
+            (("admittance", "", True), {}),
+            # 7. variable-impedance-needs-schedule
+            (("variable_impedance", "ur10e", True),
+             {"explicit_K_schedule": False}),
+            # 8. real-deploy-non-franka-impedance
+            (("cartesian_impedance", "ur10e", True),
+             {"structural_tags": ["real_robot_deployment"]}),
+            # 9. real-deploy-admittance-no-ft
+            (("admittance", "ur10e", False),
+             {"structural_tags": ["real_robot_deployment"]}),
+        ]
+        all_rule_ids: set[str] = set()
+        for args, kwargs in cases:
+            r = validate_compliance_override(*args, **kwargs)
+            all_rule_ids.update(v.constraint_id for v in r.violations)
+
+        # Bucket into families.
+        families = {
+            "impedance-needs-torque": {
+                "compliance.impedance_needs_torque_mode",
+                "compliance.franka_impedance_needs_torque_mode",
+            },
+            "franka-specific-non-franka": {
+                "compliance.franka_specific_mode_non_franka",
+                "compliance.ur_bans_franka_impedance",
+                "compliance.kinova_bans_franka_impedance",
+            },
+            "admittance-needs-ft": {
+                "compliance.admittance_needs_ft",
+                "compliance.admittance_requires_external_ft_for_position_robot",
+            },
+            "fdcc-needs-ft": {"compliance.fdcc_needs_ft"},
+            "unknown-mode": {"compliance.unknown_mode"},
+            "empty-robot-class": {"compliance.empty_robot_class"},
+            "variable-impedance": {
+                "compliance.variable_impedance_needs_torque_or_schedule"
+            },
+            "real-deploy-impedance": {
+                "compliance.real_deploy_non_franka_impedance"
+            },
+            "real-deploy-admittance-no-ft": {
+                "compliance.real_deploy_admittance_no_ft"
+            },
+        }
+        covered_families = sum(
+            1 for ids in families.values() if ids & all_rule_ids
+        )
+        # Spec requires ≥ 6 distinct rule families covered.
+        assert covered_families >= 6, (
+            f"covered {covered_families} families: {all_rule_ids}"
+        )
+
+    # ------------------------------------------------------------------
+    # 10. Rule table introspection — meta-tests
+    # ------------------------------------------------------------------
+
+    def test_at_least_fifteen_rules_registered(self):
+        """Spec §4.2 calls for ~20 hard-incompat rules; ≥ 15 is the floor."""
+        assert count_rules() >= 15
+
+    def test_rule_ids_are_unique(self):
+        """Every rule must have a unique rule_id (so consumers can switch
+        on it)."""
+        ids = list_rule_ids()
+        assert len(ids) == len(set(ids))
+
+    def test_rule_ids_namespace_consistently(self):
+        """Every rule_id starts with ``compliance.`` so the constraint
+        registry can group them."""
+        for rid in list_rule_ids():
+            assert rid.startswith("compliance."), rid
+
+    def test_rules_by_mode_filters_correctly(self):
+        """rules_by_mode returns mode-specific + ``*``-rules only."""
+        adm_rules = rules_by_mode("admittance")
+        for r in adm_rules:
+            assert r.mode_match in ("admittance", "*")
+        # Every wildcard rule appears.
+        wild = [r.rule_id for r in HARD_INCOMPATIBILITIES if r.mode_match == "*"]
+        adm_ids = [r.rule_id for r in adm_rules]
+        for w in wild:
+            assert w in adm_ids
+
+    def test_known_robot_sets_disjoint(self):
+        """A robot can't simultaneously be torque-mode AND position-only."""
+        assert not (TORQUE_MODE_ROBOTS & POSITION_MODE_ONLY_ROBOTS)
+
+    def test_combined_franka_requirement_emits_soft(self):
+        """RULE: cartesian_impedance_combined_requirement (soft).
+
+        cartesian_impedance + franka + no F/T → torque side OK, sensor
+        side not OK → SOFT advisory (uninformative wrench feedback).
+        """
+        r = validate_compliance_override(
+            "cartesian_impedance",
+            "franka_panda",
+            has_ft_sensor=False,
+        )
+        rule_ids = {v.constraint_id for v in r.violations}
+        assert (
+            "compliance.cartesian_impedance_combined_requirement"
+            in rule_ids
+        )
+        combined_v = next(
+            v for v in r.violations
+            if v.constraint_id
+            == "compliance.cartesian_impedance_combined_requirement"
+        )
+        assert combined_v.category == "soft"
