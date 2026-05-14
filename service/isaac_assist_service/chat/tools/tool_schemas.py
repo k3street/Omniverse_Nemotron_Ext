@@ -2999,7 +2999,7 @@ ISAAC_SIM_TOOLS = [
             "type": "function",
             "function": {
                 "name": "iterate_reward",
-                "description": "Generate a mutation prompt for the next Eureka iteration. Combines the previous reward function, per-component training metrics, and optional user feedback into a structured prompt for the LLM to produce an improved reward.",
+                "description": "Generate a mutation prompt for the next Eureka iteration. Combines the previous reward function, per-component training metrics, and optional user feedback into a structured prompt for the LLM to produce an improved reward. When run_id is supplied (from generate_reward), updates the process-local Eureka run state so eureka_status reflects iteration progress and best fitness.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -3009,6 +3009,7 @@ ISAAC_SIM_TOOLS = [
                             "description": "Training metrics: { fitness: float, components: { name: { mean: [float], converged: bool } }, task_success_rate: float }",
                         },
                         "user_feedback": {"type": "string", "description": "Optional user feedback — e.g. 'it keeps dropping the handle'"},
+                        "run_id": {"type": "string", "description": "Optional Eureka run identifier returned by generate_reward. When supplied, EUREKA.runs[run_id] is updated and the response echoes back run_status / current_iteration / best_fitness."},
                     },
                     "required": ["prev_reward_code", "metrics"],
                 },
