@@ -773,7 +773,7 @@ the small `opus-judgment` / `opus-runtime` subset.**
 - **LOC**: ~120 handler + tests
 - **Blocked-by**: CRM-A2
 - **Verify**: `pytest tests/test_compliance_handlers.py::TestImpedance` ≥8 tests
-- **STATUS**: pending
+- **STATUS**: done — d637c1f
 
 #### CRM-B2 — set_compliance_params runtime mutation (sonnet-bounded)
 - **Files**: `compliance_handlers.py` (extend), test file (extend)
