@@ -826,7 +826,7 @@ the small `opus-judgment` / `opus-runtime` subset.**
 - **LOC**: ~200
 - **Blocked-by**: CRM-A2, CRM-B1, CRM-B2, CRM-B3
 - **Verify**: `pytest tests/test_trajectory_compliance_handoff.py` ≥10 tests including continuity at handoff_at
-- **STATUS**: pending
+- **STATUS**: done — 35 L0 tests pass; rigid/compliant split via `int(handoff_at * n)`; `handoff_mismatch_warning` emitted (not failure) when trajectory `lock_orientation_from` diverges by >0.01; structured "no compliance installed" error with `suggested_tool=setup_admittance_controller`; live mode raises `NotImplementedError("requires Kit RPC + ros2_control bridge")`
 
 ### 18.4 Phase D — Telemetry + docs
 
