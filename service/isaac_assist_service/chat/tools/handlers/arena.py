@@ -10,6 +10,7 @@ Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 6.
 from __future__ import annotations
 
 from typing import Any, Callable, Dict
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +242,7 @@ def _gen_run_arena_benchmark(args: Dict) -> str:
 # Phase 7 wave 16 — final data-handler stragglers (COMPLETES data-handler migration)
 
 
+@with_telemetry
 async def _handle_arena_leaderboard(args: Dict) -> Dict:
     """Format a leaderboard table from benchmark results."""
     results = args.get("results", [])

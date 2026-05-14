@@ -17,8 +17,10 @@ from service.isaac_assist_service.multimodal.execute_contact_sequence_runtime im
     ContactSequenceRuntime,
     ContactStep,
 )
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 
+@with_telemetry
 async def _handle_execute_contact_sequence_plan(args: Dict[str, Any]) -> Dict[str, Any]:
     """Dispatch handler for `execute_contact_sequence_plan` tool.
 
