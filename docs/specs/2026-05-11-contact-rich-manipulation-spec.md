@@ -817,7 +817,7 @@ the small `opus-judgment` / `opus-runtime` subset.**
 - **LOC**: ~60
 - **Blocked-by**: CRM-C2
 - **Verify**: `pytest tests/test_compliance_autopick.py::TestOverride` ≥8 tests; integration via Phase 11b `ValidationResult` round-trip
-- **STATUS**: pending
+- **STATUS**: done — 20 rules registered, 38 TestOverride tests pass, Phase 11b ValidationResult round-trip asserted
 
 #### CRM-C4 — follow_trajectory_with_compliance bridge (opus-judgment)
 - **Files**: `compliance_handlers.py` (extend), `tests/test_trajectory_compliance_handoff.py` (NEW)
