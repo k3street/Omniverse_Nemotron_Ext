@@ -587,9 +587,9 @@ async def _handle_start_workflow(args: Dict) -> Dict:
 
     plan = _wf_make_initial_plan(workflow_type, goal, args.get("params") or {})
 
-    from datetime import datetime as _wf_dt  # noqa: PLC0415
+    from datetime import datetime as _wf_dt, timezone as _wf_tz  # noqa: PLC0415
     def _wf_now_iso() -> str:
-        return _wf_dt.utcnow().isoformat() + "Z"
+        return _wf_dt.now(_wf_tz.utc).isoformat() + "Z"
 
     workflow = {
         "id": wf_id,
@@ -638,9 +638,9 @@ async def _handle_edit_workflow_plan(args: Dict) -> Dict:
     in-flight workflows protects against mid-execution drift.
     """
     from .. import tool_executor as _te  # noqa: PLC0415
-    from datetime import datetime as _wf_dt  # noqa: PLC0415
+    from datetime import datetime as _wf_dt, timezone as _wf_tz  # noqa: PLC0415
     def _wf_now_iso() -> str:
-        return _wf_dt.utcnow().isoformat() + "Z"
+        return _wf_dt.now(_wf_tz.utc).isoformat() + "Z"
 
     wf_id = args.get("workflow_id")
     edits = args.get("plan_edits") or {}
@@ -692,9 +692,9 @@ async def _handle_edit_workflow_plan(args: Dict) -> Dict:
 async def _handle_approve_workflow_checkpoint(args: Dict) -> Dict:
     """Resolve a checkpoint with approve / reject / revise."""
     from .. import tool_executor as _te  # noqa: PLC0415
-    from datetime import datetime as _wf_dt  # noqa: PLC0415
+    from datetime import datetime as _wf_dt, timezone as _wf_tz  # noqa: PLC0415
     def _wf_now_iso() -> str:
-        return _wf_dt.utcnow().isoformat() + "Z"
+        return _wf_dt.now(_wf_tz.utc).isoformat() + "Z"
 
     wf_id = args.get("workflow_id")
     phase = args.get("phase")
@@ -780,9 +780,9 @@ async def _handle_approve_workflow_checkpoint(args: Dict) -> Dict:
 async def _handle_cancel_workflow(args: Dict) -> Dict:
     """Cancel a workflow and request rollback to its pre-workflow snapshot."""
     from .. import tool_executor as _te  # noqa: PLC0415
-    from datetime import datetime as _wf_dt  # noqa: PLC0415
+    from datetime import datetime as _wf_dt, timezone as _wf_tz  # noqa: PLC0415
     def _wf_now_iso() -> str:
-        return _wf_dt.utcnow().isoformat() + "Z"
+        return _wf_dt.now(_wf_tz.utc).isoformat() + "Z"
 
     wf_id = args.get("workflow_id")
     reason = args.get("reason", "user_cancelled")
