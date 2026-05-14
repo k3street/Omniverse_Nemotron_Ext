@@ -3252,6 +3252,7 @@ async def _handle_get_semantic_label(args: Dict) -> Dict:
         code, f"Read Semantics.SemanticsAPI labels on {prim_path}"
     )
     return {
+        "success": bool(result.get("success", False)),
         "queued": result.get("queued", False),
         "patch_id": result.get("patch_id"),
         "prim_path": prim_path,
@@ -3357,6 +3358,7 @@ async def _handle_get_asset_info(args: Dict) -> Dict:
         code, f"Read asset info / origin / hash for {prim_path}"
     )
     return {
+        "success": bool(result.get("success", False)),
         "queued": result.get("queued", False),
         "patch_id": result.get("patch_id"),
         "prim_path": prim_path,
@@ -3673,6 +3675,7 @@ async def _handle_build_stage_index(args: Dict) -> Dict:
     _STAGE_INDEX_META["prim_count"] = 0
     _STAGE_INDEX_META["max_prims"] = max_prims
     return {
+        "success": bool(queued.get("success", False)) if isinstance(queued, dict) else False,
         "prim_scope": prim_scope,
         "max_prims": max_prims,
         "queued": bool(queued.get("queued", False)) if isinstance(queued, dict) else False,
@@ -3860,6 +3863,7 @@ except Exception as e:
 """
     result = await kit_tools.queue_exec_patch(code, "List USD layer stack and edit target")
     return {
+        "success": bool(result.get("success", False)),
         "queued": result.get("queued", False),
         "patch_id": result.get("patch_id"),
         "note": (
@@ -3909,6 +3913,7 @@ async def _handle_list_variant_sets(args: Dict) -> Dict:
     )
     result = await kit_tools.queue_exec_patch(code, f"List variant sets on {prim_path}")
     return {
+        "success": bool(result.get("success", False)),
         "queued": result.get("queued", False),
         "patch_id": result.get("patch_id"),
         "prim_path": prim_path,
@@ -3964,6 +3969,7 @@ async def _handle_list_variants(args: Dict) -> Dict:
         code, f"List variants in {variant_set} on {prim_path}"
     )
     return {
+        "success": bool(result.get("success", False)),
         "queued": result.get("queued", False),
         "patch_id": result.get("patch_id"),
         "prim_path": prim_path,
@@ -4036,6 +4042,7 @@ except Exception as e:
         code, "List unique semantic classes used on the current stage"
     )
     return {
+        "success": bool(result.get("success", False)),
         "queued": result.get("queued", False),
         "patch_id": result.get("patch_id"),
         "note": (
@@ -4140,6 +4147,7 @@ async def _handle_list_references(args: Dict) -> Dict:
         code, f"List USD references composed onto {prim_path}"
     )
     return {
+        "success": bool(result.get("success", False)),
         "queued": result.get("queued", False),
         "patch_id": result.get("patch_id"),
         "prim_path": prim_path,
@@ -4254,6 +4262,7 @@ async def _handle_list_payloads(args: Dict) -> Dict:
         code, f"List USD payloads (deferred-load) on {prim_path}"
     )
     return {
+        "success": bool(result.get("success", False)),
         "queued": result.get("queued", False),
         "patch_id": result.get("patch_id"),
         "prim_path": prim_path,
@@ -4290,6 +4299,7 @@ async def _handle_select_by_criteria(args: Dict) -> Dict:
     # are produced when the patch executes. Surface both so the caller can
     # either poll for the patch result or read matches from the Kit log.
     return {
+        "success": bool(result.get("success", False)),
         "queued": result.get("queued", False),
         "patch_id": result.get("patch_id"),
         "criteria": criteria,
@@ -4812,7 +4822,7 @@ print(json.dumps({"graphs": graphs, "count": len(graphs)}))
 """
     result = await kit_tools.exec_sync(code, timeout=10)
     if not result.get("success"):
-        return {"graphs": [], "count": 0, "error": result.get("output", "Kit RPC unavailable")}
+        return {"success": False, "graphs": [], "count": 0, "error": result.get("output", "Kit RPC unavailable")}
     output = result.get("output", "").strip()
     # exec_sync returns the captured stdout as a single string;
     # find the last JSON line for our payload.
@@ -4820,10 +4830,12 @@ print(json.dumps({"graphs": graphs, "count": len(graphs)}))
         line = line.strip()
         if line.startswith("{"):
             try:
-                return json.loads(line)
+                parsed = json.loads(line)
+                parsed.setdefault("success", True)
+                return parsed
             except json.JSONDecodeError:
                 continue
-    return {"graphs": [], "count": 0, "raw_output": output}
+    return {"success": True, "graphs": [], "count": 0, "raw_output": output}
 
 
 async def _handle_save_delta_snapshot(args: Dict) -> Dict:
@@ -4850,6 +4862,7 @@ async def _handle_save_delta_snapshot(args: Dict) -> Dict:
     except Exception as exc:
         logger.warning(f"[ToolExecutor] Could not write delta manifest: {exc}")
     return {
+        "success": bool(queued.get("success", False)) if isinstance(queued, dict) else False,
         "snapshot_id": snapshot_id,
         "base_snapshot_id": base_snapshot_id,
         "manifest_path": str(manifest_path),
@@ -4877,6 +4890,7 @@ async def _handle_restore_delta_snapshot(args: Dict) -> Dict:
     code = _gen_restore_delta_snapshot(snapshot_id, deltas)
     queued = await kit_tools.queue_exec_patch(code, f"Restore delta snapshot {snapshot_id}")
     return {
+        "success": bool(queued.get("success", False)) if isinstance(queued, dict) else False,
         "snapshot_id": snapshot_id,
         "base_snapshot_id": manifest.get("base_snapshot_id"),
         "layer_count": len(deltas),
