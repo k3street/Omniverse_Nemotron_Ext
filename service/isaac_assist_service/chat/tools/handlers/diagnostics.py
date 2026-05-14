@@ -2446,6 +2446,7 @@ async def _handle_check_collision_mesh(args: Dict) -> Dict:
     result = await kit_tools.exec_sync(code, timeout=20)
     if not result.get("success"):
         return {
+            "success": False,
             "error": f"Kit RPC failed: {result.get('output', 'unknown')}",
             "hint": "Is Isaac Sim running with the Kit RPC bridge on port 8001?",
         }
@@ -2454,10 +2455,12 @@ async def _handle_check_collision_mesh(args: Dict) -> Dict:
         line = line.strip()
         if line.startswith("{"):
             try:
-                return json.loads(line)
+                parsed = json.loads(line)
+                parsed.setdefault("success", not bool(parsed.get("error")))
+                return parsed
             except json.JSONDecodeError:
                 continue
-    return {"error": "Failed to parse collision-mesh response", "raw_output": output[:500]}
+    return {"success": False, "error": "Failed to parse collision-mesh response", "raw_output": output[:500]}
 
 
 async def _handle_check_collisions(args: Dict) -> Dict:
@@ -2514,10 +2517,11 @@ else:
     result = await kit_tools.exec_sync(code)
     if result.get("success") and result.get("output"):
         try:
-            return {"type": "data", **json.loads(result["output"].strip())}
+            parsed = json.loads(result["output"].strip())
+            return {"success": not bool(parsed.get("error")), "type": "data", **parsed}
         except json.JSONDecodeError:
             pass
-    return {"type": "data", "error": result.get("output", "Failed to check collisions")}
+    return {"success": False, "type": "data", "error": result.get("output", "Failed to check collisions")}
 
 
 async def _handle_check_teleop_hardware(args: Dict) -> Dict:
@@ -2778,6 +2782,7 @@ async def _handle_console_error_autodetect(args: Dict) -> Dict:
             })
 
     result = {
+        "success": True,
         "new_error_count": len(new_errors),
         "errors": new_errors[:10],  # cap at 10 to avoid flooding
         "since_timestamp": since,
@@ -2904,7 +2909,7 @@ else:
     result = await kit_tools.queue_exec_patch(
         code, f"Diagnose domain gap: {synthetic_dir} vs {real_dir}"
     )
-    return {"type": "data", "queued": result.get("queued", False)}
+    return {"success": bool(result.get("success", False)), "type": "data", "queued": result.get("queued", False)}
 
 
 async def _handle_diagnose_performance(args: Dict) -> Dict:
@@ -4152,7 +4157,7 @@ else:
     }}))
 """
     result = await kit_tools.queue_exec_patch(code, f"Validate annotations ({num_samples} samples)")
-    return {"type": "data", "queued": result.get("queued", False)}
+    return {"success": bool(result.get("success", False)), "type": "data", "queued": result.get("queued", False)}
 
 
 async def _handle_validate_calibration(args: Dict) -> Dict:
@@ -4488,6 +4493,7 @@ except Exception as e:
         code, "Validate USD-side Semantics.SemanticsAPI annotations on the stage"
     )
     return {
+        "success": bool(result.get("success", False)),
         "queued": result.get("queued", False),
         "patch_id": result.get("patch_id"),
         "note": (
