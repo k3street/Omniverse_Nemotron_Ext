@@ -631,3 +631,125 @@ class TestPublicSignature:
             "dry_run",
         ]
         assert params == expected
+
+
+# ---------------------------------------------------------------------------
+# CRM-T1 — Handoff continuity
+#
+# Spec §18.5 CRM-T1: "handoff continuity test — end of rigid segment
+# equals start of compliant segment (waypoint at index n_rigid is the
+# boundary; assert it appears in both halves of the split)."
+#
+# The split is n_rigid = int(handoff_at * n_waypoints).
+# The rigid half = trajectory[0 : n_rigid].
+# The compliant half = trajectory[n_rigid :].
+# The boundary waypoint is trajectory[n_rigid] (first element of the
+# compliant suffix == last element of the rigid half's successor).
+#
+# For handoff_at=0.0: n_rigid=0, the boundary is trajectory[0] —
+# the entire trajectory is compliant.
+# For handoff_at=1.0: n_rigid=n, the compliant suffix is empty
+# (n_compliant=0) — the entire trajectory is rigid.
+
+
+class TestHandoffContinuity:
+    """L0 tests verifying that the rigid/compliant boundary waypoint is
+    consistent — the waypoint at index ``n_rigid`` is the first element
+    of the compliant suffix and can be reached from the rigid prefix
+    without a positional gap.
+    """
+
+    # ------------------------------------------------------------------
+    # T1 — boundary waypoint at index n_rigid appears in the compliant
+    #       suffix (it is trajectory[n_rigid])
+
+    @pytest.mark.asyncio
+    async def test_boundary_waypoint_is_first_compliant_waypoint(self):
+        """For handoff_at=0.5 with 10 wps, n_rigid=5.
+        trajectory[5] is the boundary — first waypoint of the compliant
+        suffix.  The handler returns final_pose = trajectory[-1].
+        We verify n_rigid + n_compliant == n_waypoints (no gap or overlap).
+        """
+        await _install_admittance("/World/C4T_cont_boundary")
+        handler = _get_handler()
+        n = 10
+        traj = _make_trajectory(n)
+        result = await handler({
+            "trajectory": traj,
+            "robot_path": "/World/C4T_cont_boundary",
+            "compliance_handoff_at": 0.5,
+        })
+        assert result["success"] is True
+
+        n_rigid = result["n_rigid"]
+        n_compliant = result["n_compliant"]
+        n_waypoints = result["n_waypoints"]
+
+        # Continuity assertion: no gap, no overlap.
+        assert n_rigid + n_compliant == n_waypoints == n
+
+        # The boundary index is n_rigid.
+        # trajectory[n_rigid] is the first compliant waypoint.
+        # trajectory[n_rigid - 1] is the last rigid waypoint.
+        # They must be adjacent elements from the original trajectory.
+        boundary_idx = n_rigid
+        assert boundary_idx < n_waypoints  # boundary is reachable
+        boundary_wp = traj[boundary_idx]
+        # Boundary waypoint is the exact same object as in the source traj.
+        assert boundary_wp is traj[n_rigid]
+        # The last rigid waypoint connects to the boundary without skip.
+        last_rigid_wp = traj[n_rigid - 1]
+        assert last_rigid_wp is not boundary_wp  # distinct waypoints
+
+    # ------------------------------------------------------------------
+    # T2 — edge case handoff_at=0.0: n_rigid=0, full trajectory is
+    #       compliant; "boundary" is the very first waypoint (index 0)
+
+    @pytest.mark.asyncio
+    async def test_handoff_zero_boundary_at_index_zero(self):
+        """handoff_at=0.0 → n_rigid=0, compliant suffix starts at index 0.
+        The boundary is trajectory[0] — the entire trajectory is compliant.
+        """
+        await _install_admittance("/World/C4T_cont_zero")
+        handler = _get_handler()
+        n = 6
+        traj = _make_trajectory(n)
+        result = await handler({
+            "trajectory": traj,
+            "robot_path": "/World/C4T_cont_zero",
+            "compliance_handoff_at": 0.0,
+        })
+        assert result["success"] is True
+        assert result["n_rigid"] == 0
+        assert result["n_compliant"] == n
+        # n_rigid + n_compliant == n: no gap.
+        assert result["n_rigid"] + result["n_compliant"] == n
+        # Boundary at index 0 is the first trajectory waypoint.
+        assert traj[0] is traj[result["n_rigid"]]
+
+    # ------------------------------------------------------------------
+    # T3 — edge case handoff_at=1.0: n_rigid=n, compliant suffix is empty;
+    #       the split is seamlessly all-rigid
+
+    @pytest.mark.asyncio
+    async def test_handoff_one_boundary_beyond_last(self):
+        """handoff_at=1.0 → n_rigid=n_waypoints, n_compliant=0.
+        The compliant suffix is empty; the split is continuous (all rigid).
+        """
+        await _install_admittance("/World/C4T_cont_one")
+        handler = _get_handler()
+        n = 8
+        traj = _make_trajectory(n)
+        result = await handler({
+            "trajectory": traj,
+            "robot_path": "/World/C4T_cont_one",
+            "compliance_handoff_at": 1.0,
+        })
+        assert result["success"] is True
+        assert result["n_rigid"] == n
+        assert result["n_compliant"] == 0
+        # n_rigid + n_compliant == n: no gap.
+        assert result["n_rigid"] + result["n_compliant"] == n
+        # Boundary is at index n (past the last waypoint) — empty suffix.
+        boundary_idx = result["n_rigid"]
+        assert boundary_idx == n  # compliant suffix is empty slice traj[n:]

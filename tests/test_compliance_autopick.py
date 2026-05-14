@@ -1079,3 +1079,103 @@ class TestOverride:
             == "compliance.cartesian_impedance_combined_requirement"
         )
         assert combined_v.category == "soft"
+
+
+# ===========================================================================
+# CRM-T1 — TestModeConversion
+#
+# Spec §18.5 CRM-T1: mode conversion has ≥2 tests:
+#   1. admittance→impedance: the two handlers accept different arg keys
+#      (admittance uses stiffness_xyz, impedance uses Kx).
+#   2. impedance→admittance: the impedance config dict exposes null_space_*
+#      keys that are absent from an admittance config dict.
+# ===========================================================================
+
+
+class TestModeConversion:
+    """L0 tests for admittance ↔ impedance argument-key differences.
+
+    Spec §4.2 and §5.1/5.2: the two controllers share the same conceptual
+    role but expose different parameter namespaces.  These tests verify
+    that the handlers correctly populate their *own* key set and do not
+    cross-contaminate.
+    """
+
+    def _get_admittance_handler(self):
+        from service.isaac_assist_service.chat.tools.handlers.compliance import (
+            _handle_setup_admittance_controller,
+        )
+        return _handle_setup_admittance_controller
+
+    def _get_impedance_handler(self):
+        from service.isaac_assist_service.chat.tools.handlers.compliance import (
+            _handle_setup_impedance_controller,
+        )
+        return _handle_setup_impedance_controller
+
+    # ------------------------------------------------------------------
+    # T1 — admittance→impedance: the arg dicts have different keys
+    #
+    # admittance uses: stiffness_xyz, damping_xyz, mass_xyz,
+    #                  stiffness_rot, damping_rot, mass_rot
+    # impedance uses:  Kx, Kr, Dx, Dr, null_space_stiffness,
+    #                  null_space_damping
+    #
+    # Passing stiffness_xyz to the impedance handler must NOT appear in
+    # the returned config (it is an admittance-only key).  The impedance
+    # handler must expose Kx / null_space_* instead.
+
+    @pytest.mark.asyncio
+    async def test_admittance_and_impedance_have_distinct_result_keys(self):
+        """admittance config exposes stiffness_xyz; impedance config
+        exposes Kx + null_space_* — the two key sets are distinct."""
+        adm_handler = self._get_admittance_handler()
+        imp_handler = self._get_impedance_handler()
+
+        adm_result = await adm_handler({"robot_path": "/World/FrankaConvT1"})
+        imp_result = await imp_handler({"robot_path": "/World/FrankaConvT1"})
+
+        assert adm_result["success"] is True
+        assert imp_result["success"] is True
+
+        # Admittance-specific keys present in admittance, absent in impedance.
+        assert "stiffness_xyz" in adm_result
+        assert "stiffness_xyz" not in imp_result
+
+        # Impedance-specific keys present in impedance, absent in admittance.
+        assert "Kx" in imp_result
+        assert "Kx" not in adm_result
+
+        assert "null_space_stiffness" in imp_result
+        assert "null_space_stiffness" not in adm_result
+
+        assert "null_space_damping" in imp_result
+        assert "null_space_damping" not in adm_result
+
+    # ------------------------------------------------------------------
+    # T2 — impedance→admittance: switching drops null_space_* keys
+    #
+    # When a template author switches compliance_mode from "impedance" to
+    # "admittance", the null_space_stiffness / null_space_damping params
+    # simply don't apply (admittance has no null-space policy).
+    # Verify that passing null_space_* args to the admittance handler is
+    # silently ignored — the keys must NOT appear in the result.
+
+    @pytest.mark.asyncio
+    async def test_null_space_params_lost_when_switching_to_admittance(self):
+        """Passing null_space_* to setup_admittance_controller is a no-op:
+        the keys must be absent from the returned config dict because
+        admittance has no null-space policy."""
+        adm_handler = self._get_admittance_handler()
+
+        # Pass impedance-style null_space params to the admittance handler.
+        result = await adm_handler({
+            "robot_path": "/World/FrankaConvT2",
+            "null_space_stiffness": 1.5,
+            "null_space_damping": 0.8,
+        })
+
+        assert result["success"] is True
+        # Admittance config must NOT expose these impedance-only keys.
+        assert "null_space_stiffness" not in result
+        assert "null_space_damping" not in result

@@ -539,6 +539,165 @@ class TestParamMutation:
         assert "Kit RPC" in msg or "ros2_control" in msg or "bridge" in msg
 
 
+class TestSpringLawMath:
+    """L0 numerical tests for the admittance step law.
+
+    Verifies the pure-Python `_admittance_step` function against
+    hand-computed expected values per the spec formula:
+        F = K · (x_desired - x_actual) - D · v_actual + F_ext
+    """
+
+    def _get_admittance_step(self):
+        from service.isaac_assist_service.chat.tools.handlers.compliance import (
+            _admittance_step,
+        )
+        return _admittance_step
+
+    # ------------------------------------------------------------------
+    # T1 — simple spring force, no damping, no external force
+    # K=500, delta_x=0.01, D=0, v=0, F_ext=0 → F = 500 · 0.01 = 5 N
+
+    def test_spring_force_K500_dx_001(self):
+        """F = 500 · 0.01 = 5 N per axis (no damping, no F_ext)."""
+        step = self._get_admittance_step()
+        K = [500.0, 500.0, 500.0]
+        D = [0.0, 0.0, 0.0]
+        x_desired = [0.01, 0.01, 0.01]
+        x_actual  = [0.0,  0.0,  0.0]
+        v_actual  = [0.0,  0.0,  0.0]
+        result = step(K, D, x_desired, x_actual, v_actual)
+        assert len(result) == 3
+        for f in result:
+            assert abs(f - 5.0) < 1e-9, f"Expected 5.0 N, got {f}"
+
+    # ------------------------------------------------------------------
+    # T2 — spring + damping cancel exactly
+    # K=1000, delta_x=0.02, D=50, v=0.5 → F = 1000·0.02 − 50·0.5 = 20 − 25 = −5 N
+    # Wait — brief says "F = 1000·0.02 - 50·0.5 = 25 - 25 = 0N" (uses K=1000, dx=0.025)
+    # Let's match the brief exactly: K=1000, delta_x=0.025, D=50, v=0.5
+    # F = 1000·0.025 − 50·0.5 = 25 − 25 = 0 N
+
+    def test_spring_damping_cancel_to_zero(self):
+        """F = 1000·0.025 - 50·0.5 = 25 - 25 = 0 N per axis."""
+        step = self._get_admittance_step()
+        K = [1000.0, 1000.0, 1000.0]
+        D = [50.0, 50.0, 50.0]
+        x_desired = [0.025, 0.025, 0.025]
+        x_actual  = [0.0,   0.0,   0.0]
+        v_actual  = [0.5,   0.5,   0.5]
+        result = step(K, D, x_desired, x_actual, v_actual)
+        for f in result:
+            assert abs(f) < 1e-9, f"Expected 0.0 N (spring−damping cancel), got {f}"
+
+    # ------------------------------------------------------------------
+    # T3 — zero error: K · 0 = 0 regardless of K
+    # delta_x = 0, v_actual = 0 → F = 0 for any K and D
+
+    def test_zero_error_zero_velocity_zero_force(self):
+        """F = K·0 = 0 N when delta_x=0 and v_actual=0."""
+        step = self._get_admittance_step()
+        K = [800.0, 600.0, 200.0]
+        D = [80.0,  60.0,  20.0]
+        x_val = [0.5, -0.3, 1.2]
+        result = step(K, D, x_val, x_val, [0.0, 0.0, 0.0])
+        for f in result:
+            assert abs(f) < 1e-9, f"Expected 0.0 N (zero error), got {f}"
+
+
+class TestParamValidation:
+    """L0 boundary tests for compliance handler parameter validation.
+
+    Exercises the four important guard boundaries in
+    _handle_setup_admittance_controller:
+    - Negative stiffness must be rejected.
+    - Zero stiffness must be rejected (K > 0 required for stability).
+    - Negative damping must be rejected (D >= 0 required).
+    - Zero damping must be accepted (D = 0 is critically undamped but
+      physically valid).
+    """
+
+    def _get_handler(self):
+        from service.isaac_assist_service.chat.tools.handlers.compliance import (
+            _handle_setup_admittance_controller,
+        )
+        return _handle_setup_admittance_controller
+
+    # ------------------------------------------------------------------
+    # T1 — negative K rejected
+
+    @pytest.mark.asyncio
+    async def test_negative_stiffness_rejected(self):
+        """Negative stiffness_xyz returns success=False with error
+        referencing stiffness_xyz."""
+        handler = self._get_handler()
+        result = await handler({
+            "robot_path": "/World/Franka",
+            "stiffness_xyz": [-100.0, 500.0, 500.0],
+        })
+        assert result["success"] is False
+        assert "stiffness_xyz" in result.get("error", "")
+
+    # ------------------------------------------------------------------
+    # T2 — K==0 borderline: zero stiffness also rejected (not > 0)
+
+    @pytest.mark.asyncio
+    async def test_zero_stiffness_rejected(self):
+        """Zero stiffness_xyz is not > 0, so must also be rejected."""
+        handler = self._get_handler()
+        result = await handler({
+            "robot_path": "/World/Franka",
+            "stiffness_xyz": [0.0, 500.0, 500.0],
+        })
+        assert result["success"] is False
+        assert "stiffness_xyz" in result.get("error", "")
+
+    # ------------------------------------------------------------------
+    # T3 — D==0 borderline: zero damping is physically valid (accepted)
+
+    @pytest.mark.asyncio
+    async def test_zero_damping_accepted(self):
+        """Zero damping_xyz is acceptable (critically undamped but valid)."""
+        handler = self._get_handler()
+        result = await handler({
+            "robot_path": "/World/Franka",
+            "stiffness_xyz": [500.0, 500.0, 500.0],
+            "damping_xyz": [0.0, 0.0, 0.0],
+        })
+        assert result["success"] is True
+
+    # ------------------------------------------------------------------
+    # T4 — negative D rejected
+
+    @pytest.mark.asyncio
+    async def test_negative_damping_rejected(self):
+        """Negative damping_xyz (physically inadmissible) returns
+        success=False with error referencing damping_xyz."""
+        handler = self._get_handler()
+        result = await handler({
+            "robot_path": "/World/Franka",
+            "stiffness_xyz": [500.0, 500.0, 500.0],
+            "damping_xyz": [-10.0, 50.0, 50.0],
+        })
+        assert result["success"] is False
+        assert "damping_xyz" in result.get("error", "")
+
+    # ------------------------------------------------------------------
+    # T5 — mass <= 0 not directly validated by the handler, but negative
+    #       stiffness_rot boundary still applies
+
+    @pytest.mark.asyncio
+    async def test_negative_stiffness_rot_rejected(self):
+        """Negative stiffness_rot also triggers the validation guard."""
+        handler = self._get_handler()
+        result = await handler({
+            "robot_path": "/World/Franka",
+            "stiffness_xyz": [500.0, 500.0, 500.0],
+            "stiffness_rot": [-5.0, 50.0, 50.0],
+        })
+        assert result["success"] is False
+        assert "stiffness_rot" in result.get("error", "")
+
+
 class TestRelease:
     """L0 test suite for release_compliance (CRM-B3).
 
