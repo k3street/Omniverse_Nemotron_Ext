@@ -19,7 +19,7 @@ import json
 import logging
 import re
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -72,10 +72,11 @@ class TurnRecorder:
 
         Returns the path to the file the record was written to.
         """
+        now = datetime.now(timezone.utc)
         record = {
             "session_id": session_id,
             "turn_id": turn_id,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": now.isoformat() + "Z",
             "input": {
                 "user_message": user_message,
                 "selected_prim": context.get("selected_prim"),
@@ -90,7 +91,7 @@ class TurnRecorder:
         }
         record = self._redact(record)
 
-        filepath = self.output_dir / f"{datetime.utcnow().strftime('%Y-%m-%d')}.jsonl"
+        filepath = self.output_dir / f"{now.strftime('%Y-%m-%d')}.jsonl"
         with open(filepath, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, default=str) + "\n")
 
@@ -124,7 +125,7 @@ class TurnRecorder:
             "approved": approved,
             "edited": edited,
             "correction": correction,
-            "feedback_timestamp": datetime.utcnow().isoformat() + "Z",
+            "feedback_timestamp": datetime.now(timezone.utc).isoformat() + "Z",
         }
 
         # Append the updated record (consumers should use the latest entry per turn)
@@ -249,7 +250,7 @@ class TurnRecorder:
         if output_path:
             out = Path(output_path)
         else:
-            out = export_dir / f"{fmt}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.jsonl"
+            out = export_dir / f"{fmt}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.jsonl"
 
         converter = {
             "openai": self._to_openai,
