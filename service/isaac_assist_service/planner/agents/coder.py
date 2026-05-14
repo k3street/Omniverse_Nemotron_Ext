@@ -45,6 +45,14 @@ Rules:
 """
 
 def _strip_thinking(text: str) -> str:
+    """Remove <think>…</think> reasoning blocks from LLM output.
+
+    Args:
+        text (str): Raw LLM response text.
+
+    Returns:
+        str: Text with all thinking blocks removed and leading/trailing whitespace stripped.
+    """
     return _THINK_RE.sub("", text).strip()
 
 
@@ -115,6 +123,15 @@ class CoderAgent(AgentBase):
         keyword_threshold: float = 0.60,
         timeout: int = 300,
     ) -> None:
+        """Initialise the CoderAgent.
+
+        Args:
+            model_tag (str, optional): Ollama model identifier to call.
+                Defaults to "isaac-expert:v0.1.0".
+            keyword_threshold (float, optional): Minimum fraction of required keywords
+                that must appear in the response (0.0–1.0). Defaults to 0.60.
+            timeout (int, optional): LLM API request timeout in seconds. Defaults to 300.
+        """
         self.model_tag          = model_tag
         self.keyword_threshold  = keyword_threshold
         self.timeout            = timeout
@@ -126,7 +143,26 @@ class CoderAgent(AgentBase):
         qa_feedback: str = "",
         critic_feedback: str = "",
     ) -> AgentResult:
-        """Generate code for the task, optionally repairing from prior errors."""
+        """Generate code for the task, optionally repairing from prior errors.
+
+        Calls the Ollama LLM, strips thinking blocks, extracts fenced code blocks,
+        then evaluates four acceptance criteria: has_code_block, syntax_valid,
+        required_keywords, and no_fatal_antipatterns.
+
+        Args:
+            task (dict): Task payload with keys ``id``, ``category``, ``difficulty``,
+                ``prompt``, ``required_keywords``, and ``reference_apis``.
+            iteration (int, optional): 0-based loop counter. Defaults to 0.
+            qa_feedback (str, optional): Simulator error logs from the previous iteration.
+                Defaults to "".
+            critic_feedback (str, optional): Code-review issues from the Critic on the
+                previous iteration. Defaults to "".
+
+        Returns:
+            AgentResult: Status "error" if the model call fails; "pass" or "fail"
+            based on criteria otherwise. ``output`` contains ``response``,
+            ``code_blocks``, and ``latency_s``.
+        """
         prompt = _build_prompt(task, iteration, qa_feedback, critic_feedback)
         resp   = self.call_llm_api(self.model_tag, prompt, system=SYSTEM_PROMPT, max_tokens=1500, timeout=self.timeout)
 
