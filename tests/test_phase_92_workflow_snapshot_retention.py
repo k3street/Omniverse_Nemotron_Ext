@@ -260,7 +260,10 @@ def test_snapshot_without_manifest_archived(tmp_path: Path):
     snap = tmp_path / "bare_snap"
     snap.mkdir()
     (snap / "data.bin").write_bytes(b"\x00" * 16)
-    past_ts = time.time() - 10 * 86400
+    # Anchor mtime to _ref_now() — same fix as Phase 91/92 _make_file.
+    # Was: time.time() - ...; the enforcer's now=_ref_now() compares
+    # against this so they must share a clock.
+    past_ts = _ref_now().timestamp() - 10 * 86400
     os.utime(snap, (past_ts, past_ts))
 
     pruner = WorkflowSnapshotPruner()
