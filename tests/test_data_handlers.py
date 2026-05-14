@@ -20,71 +20,60 @@ class TestLookupProductSpec:
 
     @pytest.fixture(autouse=True)
     def _reset_cache(self):
-        """Reset the cached sensor specs between tests."""
-        # Phase 8 wave 7 (2026-05-13): _sensor_specs migrated from
-        # tool_executor.py to handlers/scene_blueprints.py.
+        """Reset the lru_cache between tests."""
+        # conc-2 (2026-05-14): _sensor_specs module-var replaced by
+        # lru_cache on _load_sensor_specs; clear via cache_clear().
         import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
-        old = sb._sensor_specs
-        sb._sensor_specs = None
+        sb._load_sensor_specs.cache_clear()
         yield
-        sb._sensor_specs = old
+        sb._load_sensor_specs.cache_clear()
 
     @pytest.mark.asyncio
     async def test_no_match_returns_not_found(self, monkeypatch):
-        import service.isaac_assist_service.chat.tools.tool_executor as te
-
         import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
-        monkeypatch.setattr(sb, "_sensor_specs", [])
+        monkeypatch.setattr(sb, "_load_sensor_specs", lambda: [])
         result = await _handle_lookup_product_spec({"product_name": "NonExistent9000"})
         assert result["found"] is False
 
     @pytest.mark.asyncio
     async def test_exact_match(self, monkeypatch):
-        import service.isaac_assist_service.chat.tools.tool_executor as te
-
         import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
         fake_specs = [
             {"product": "Intel RealSense D435i", "type": "camera", "fov_h": 87},
         ]
-        monkeypatch.setattr(sb, "_sensor_specs", fake_specs)
+        monkeypatch.setattr(sb, "_load_sensor_specs", lambda: fake_specs)
         result = await _handle_lookup_product_spec({"product_name": "Intel RealSense D435i"})
         assert result["found"] is True
         assert result["spec"]["fov_h"] == 87
 
     @pytest.mark.asyncio
     async def test_case_insensitive_match(self, monkeypatch):
-        import service.isaac_assist_service.chat.tools.tool_executor as te
-
         import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
         fake_specs = [
             {"product": "Velodyne VLP-16", "type": "lidar"},
         ]
-        monkeypatch.setattr(sb, "_sensor_specs", fake_specs)
+        monkeypatch.setattr(sb, "_load_sensor_specs", lambda: fake_specs)
         result = await _handle_lookup_product_spec({"product_name": "velodyne vlp-16"})
         assert result["found"] is True
 
     @pytest.mark.asyncio
     async def test_substring_match(self, monkeypatch):
-        import service.isaac_assist_service.chat.tools.tool_executor as te
-
         import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
         fake_specs = [
             {"product": "Intel RealSense D435i", "type": "camera"},
             {"product": "Intel RealSense L515", "type": "camera"},
         ]
-        monkeypatch.setattr(sb, "_sensor_specs", fake_specs)
+        monkeypatch.setattr(sb, "_load_sensor_specs", lambda: fake_specs)
         result = await _handle_lookup_product_spec({"product_name": "realsense"})
         assert result["found"] is True
 
     @pytest.mark.asyncio
     async def test_type_based_suggestion(self, monkeypatch):
-        import service.isaac_assist_service.chat.tools.tool_executor as te
-
         import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
         fake_specs = [
             {"product": "Velodyne VLP-16", "type": "lidar", "subtype": "3d"},
         ]
-        monkeypatch.setattr(sb, "_sensor_specs", fake_specs)
+        monkeypatch.setattr(sb, "_load_sensor_specs", lambda: fake_specs)
         result = await _handle_lookup_product_spec({"product_name": "lidar"})
         assert result["found"] is False
         assert "suggestions" in result
@@ -128,13 +117,18 @@ class TestNoneHandlers:
 class TestCatalogSearch:
     """catalog_search handler."""
 
-    @pytest.mark.asyncio
-    async def test_catalog_search_robots(self, monkeypatch):
-        import service.isaac_assist_service.chat.tools.tool_executor as te
-
+    @pytest.fixture(autouse=True)
+    def _reset_asset_cache(self):
+        """Clear lru_cache on _build_asset_index between tests."""
+        # conc-2 (2026-05-14): _asset_index module-var replaced by
+        # lru_cache on _build_asset_index; clear via cache_clear().
         import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
-        # Reset cached index
-        monkeypatch.setattr(sb, "_asset_index", None)
+        sb._build_asset_index.cache_clear()
+        yield
+        sb._build_asset_index.cache_clear()
+
+    @pytest.mark.asyncio
+    async def test_catalog_search_robots(self):
         handler = DATA_HANDLERS["catalog_search"]
         result = await handler({"query": "franka", "asset_type": "robot", "limit": 5})
         assert "results" in result
@@ -144,11 +138,7 @@ class TestCatalogSearch:
         assert any("franka" in n.lower() for n in names)
 
     @pytest.mark.asyncio
-    async def test_catalog_search_no_results(self, monkeypatch):
-        import service.isaac_assist_service.chat.tools.tool_executor as te
-
-        import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
-        monkeypatch.setattr(sb, "_asset_index", None)
+    async def test_catalog_search_no_results(self):
         handler = DATA_HANDLERS["catalog_search"]
         result = await handler({"query": "zzzznonexistent"})
         assert result["total_matches"] == 0
