@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import logging
 from .orchestrator import ChatOrchestrator
@@ -244,7 +244,7 @@ async def log_execution(req: LogExecutionRequest):
     # ── 1. Audit log (always) ────────────────────────────────────────────
     entry = AuditEntry(
         entry_id=str(uuid.uuid4()),
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         event_type="patch_executed",
         user_decision="approved",
         metadata={
