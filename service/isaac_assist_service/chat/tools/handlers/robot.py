@@ -3547,7 +3547,7 @@ async def _handle_create_kit_tray(args: Dict) -> Dict:
         rows, cols = 1, int(slot_layout[4:])
         n_slots = cols
     else:
-        return {"type": "error", "error": f"unsupported slot_layout: {slot_layout!r}"}
+        return {"success": False, "type": "error", "error": f"unsupported slot_layout: {slot_layout!r}"}
 
     # Build the tray prim
     await execute_tool_call("create_prim", {
@@ -3600,6 +3600,7 @@ print(json.dumps({{"created": created}}))
     res = await kit_tools.exec_sync(slot_init_code, timeout=15)
 
     return {
+        "success": bool(res.get("success", False)),
         "tray_path": tray_path,
         "slot_paths": slot_paths,
         "slot_centers": slot_centers,
@@ -3639,7 +3640,7 @@ async def _handle_create_articulated_joint(args: Dict) -> Dict:
     drive_type = args.get("drive_type")
 
     if joint_type not in ("revolute", "prismatic", "fixed", "spherical"):
-        return {"type": "error", "error": f"unsupported joint_type: {joint_type!r}"}
+        return {"success": False, "type": "error", "error": f"unsupported joint_type: {joint_type!r}"}
 
     code = f"""\
 import omni.usd, json
@@ -3709,6 +3710,7 @@ print(json.dumps({{
 """
     res = await kit_tools.exec_sync(code, timeout=15)
     return {
+        "success": bool(res.get("success", False)),
         "joint_path": joint_path,
         "joint_type": joint_type,
         "body0": body0_path,
@@ -3852,6 +3854,7 @@ print(json.dumps({{"robot": {robot_path!r}, "obstacle": {obstacle_path!r}, "tota
 """
     res = await kit_tools.exec_sync(code, timeout=10)
     return {
+        "success": bool(res.get("success", False)),
         "robot_path": robot_path,
         "obstacle_path": obstacle_path,
         "raw": (res.get("output") or "")[-200:],
@@ -4012,7 +4015,7 @@ async def _handle_setup_cortex_behavior(args: Dict) -> Dict:
     obstacles = list(args.get("obstacles") or [])
 
     if robot_kind not in ("franka", "ur10", "ur10e"):
-        return {"type": "error", "error": f"unsupported robot_kind: {robot_kind}"}
+        return {"success": False, "type": "error", "error": f"unsupported robot_kind: {robot_kind}"}
 
     code = f"""\
 import omni.usd, json
@@ -4084,7 +4087,10 @@ print(json.dumps(result))
                 break
             except Exception:
                 continue
-    return parsed or {"error": "could not parse cortex setup output", "raw": out[-300:]}
+    if parsed is not None:
+        parsed.setdefault("success", not bool(parsed.get("error")))
+        return parsed
+    return {"success": False, "error": "could not parse cortex setup output", "raw": out[-300:]}
 
 
 async def _handle_setup_assembly_constraint(args: Dict) -> Dict:
@@ -4127,6 +4133,7 @@ print(json.dumps({{"hole": {hole_path!r}, "peg": {peg_path!r}, "tolerance": {tol
 """
     res = await kit_tools.exec_sync(code, timeout=10)
     return {
+        "success": bool(res.get("success", False)),
         "peg_path": peg_path,
         "hole_path": hole_path,
         "constraint_path": constraint_path,
@@ -4286,6 +4293,7 @@ print(json.dumps({{"sampler": str(prim.GetPath()), "target": {target_path!r}, "n
 """
     res = await kit_tools.exec_sync(code, timeout=10)
     return {
+        "success": bool(res.get("success", False)),
         "sampler_path": sampler_path,
         "target_path": target_path,
         "n_samples": n_samples,
@@ -4728,11 +4736,11 @@ async def _handle_setup_pick_place_with_vision(args: Dict) -> Dict:
     destination_map = args.get("destination_map") or {}
 
     if not cube_paths:
-        return {"type": "error", "error": "cube_paths/source_paths required"}
+        return {"success": False, "type": "error", "error": "cube_paths/source_paths required"}
     if not class_labels:
-        return {"type": "error", "error": "class_labels required"}
+        return {"success": False, "type": "error", "error": "class_labels required"}
     if not destination_map:
-        return {"type": "error", "error": "destination_map required (class→bin path)"}
+        return {"success": False, "type": "error", "error": "destination_map required (class→bin path)"}
 
     # Step 1: vision classification.  Function-gate runners may inject a
     # pre-computed `vision_precomputed: {cube_path: short_class}` mapping
@@ -4802,6 +4810,7 @@ print(json.dumps({{"applied": applied}}))
     install_res = await execute_tool_call("setup_pick_place_controller", controller_args)
 
     return {
+        "success": True,
         "vision_classification": cube_to_class,
         "semantic_labels_applied": (label_res.get("output") or "")[-200:],
         "color_routing": color_routing,
@@ -5116,6 +5125,7 @@ print(json.dumps({{
             except Exception:
                 continue
     summary = {
+        "success": bool(res.get("success", False)),
         "robot_path": robot_path,
         "ee_link": ee_link,
         "force_limit": force_limit,
@@ -5124,6 +5134,7 @@ print(json.dumps({{
     }
     if parsed:
         summary.update(parsed)
+        summary.setdefault("success", not bool(parsed.get("error")))
     return summary
 
 
@@ -5153,7 +5164,7 @@ async def _handle_setup_zone_partition(args: Dict) -> Dict:
     base_path = args.get("base_path") or conveyor_path
 
     if len(robots) != n_zones:
-        return {"type": "error",
+        return {"success": False, "type": "error",
                 "error": f"robots length ({len(robots)}) must match n_zones ({n_zones})"}
 
     code = f"""\
@@ -5202,7 +5213,10 @@ print(json.dumps({{"zones": zones, "conveyor_x_range": [xmin, xmax]}}))
                 break
             except Exception:
                 continue
-    return parsed or {"error": "could not parse zone_partition output"}
+    if parsed is not None:
+        parsed.setdefault("success", not bool(parsed.get("error")))
+        return parsed
+    return {"success": False, "error": "could not parse zone_partition output"}
 
 
 async def _handle_setup_nav_robot(args: Dict) -> Dict:
@@ -5243,6 +5257,7 @@ print(json.dumps({{"robot": {robot_path!r}, "nav_topic": {nav_topic!r}, "odom_to
 """
     res = await kit_tools.exec_sync(code, timeout=10)
     return {
+        "success": bool(res.get("success", False)),
         "robot_path": robot_path,
         "nav_topic": nav_topic,
         "odom_topic": odom_topic,
