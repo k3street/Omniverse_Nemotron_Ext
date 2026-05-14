@@ -18,6 +18,27 @@ from typing import Any, Callable, Dict
 
 
 def _gen_configure_sdg(args: Dict) -> str:
+    """Generate a minimal Replicator SDG session with a BasicWriter attached.
+
+    Emits code that creates a Replicator layer, attaches the active camera to a
+    render product at the requested resolution, configures a ``BasicWriter`` with
+    the requested annotators enabled, and runs until the frame count is reached.
+
+    Args:
+        args: Tool arguments dict containing:
+            - annotators (list[str], optional): Annotator names to enable (e.g.
+              ``["rgb", "bounding_box_2d", "semantic_segmentation"]``).
+              Defaults to ``["rgb", "bounding_box_2d"]``.
+            - num_frames (int, optional): Total frames to generate. Defaults to
+              ``10``.
+            - output_dir (str, optional): Output directory for written data.
+              Defaults to ``"/tmp/sdg_output"``.
+            - resolution (list[int], optional): ``[width, height]`` render
+              resolution. Defaults to ``[1280, 720]``.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     annotators = args.get("annotators", ["rgb", "bounding_box_2d"])
     num_frames = args.get("num_frames", 10)
     output_dir = args.get("output_dir", "/tmp/sdg_output")
