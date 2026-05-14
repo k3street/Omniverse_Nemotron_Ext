@@ -808,7 +808,7 @@ the small `opus-judgment` / `opus-runtime` subset.**
 - **LOC**: ~100
 - **Blocked-by**: CRM-C1
 - **Verify**: `pytest tests/test_compliance_autopick.py` ≥12 tests covering all 6 modes + None case
-- **STATUS**: pending
+- **STATUS**: done — 14714e9
 
 #### CRM-C3 — Override validator (opus-judgment)
 - **Files**: `service/isaac_assist_service/chat/tools/compliance_validator.py` (NEW), `tests/test_compliance_autopick.py` (extend with TestOverride)
