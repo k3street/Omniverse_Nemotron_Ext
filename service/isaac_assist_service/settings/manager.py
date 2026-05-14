@@ -1,3 +1,9 @@
+"""Settings manager for Isaac Assist.
+
+Reads and writes configuration key-value pairs to the ``.env`` file adjacent
+to ``config.py``.  Also patches the live ``os.environ`` and the ``config``
+singleton so changes take effect immediately without a service restart.
+"""
 import os
 import re
 from typing import Dict, Any
@@ -9,7 +15,13 @@ logger = logging.getLogger(__name__)
 from service.isaac_assist_service.config import config
 
 class SettingsManager:
-    """Manages reading and writing configuration settings to the .env file."""
+    """Read and write Isaac Assist configuration settings to the ``.env`` file.
+
+    Exposes the union of all tunable settings as a flat ``{str: str}`` dict and
+    persists changes atomically.  Bool keys (``CONTRIBUTE_DATA``, ``AUTO_APPROVE``)
+    are converted to Python booleans when patching the live ``config`` object;
+    int keys (``MAX_TOOL_ROUNDS``) are converted to int.
+    """
 
     # Map env var names to config attribute names where they differ
     _ENV_TO_ATTR = {
@@ -24,7 +36,15 @@ class SettingsManager:
         self.env_path = Path(os.path.dirname(os.path.dirname(__file__))) / ".env"
     
     def get_settings(self) -> Dict[str, Any]:
-        """Returns the current loaded configuration settings."""
+        """Return all current configuration settings as a flat string dict.
+
+        Reads live values from the ``config`` singleton (which has already
+        consumed ``os.environ`` at startup).
+
+        Returns:
+            Dict[str, Any]: Settings keyed by env-var name (``LLM_MODE``,
+            ``CLOUD_MODEL_NAME``, etc.) with string-valued entries.
+        """
         return {
             "LLM_MODE": config.llm_mode,
             "LOCAL_MODEL_NAME": config.local_model_name,
@@ -39,9 +59,17 @@ class SettingsManager:
         }
 
     def update_settings(self, new_settings: Dict[str, str]) -> bool:
-        """
-        Updates the .env file with the given dictionary of settings.
-        Also patches the running os.environ and config module.
+        """Write new settings to ``.env`` and patch the live process state.
+
+        Updates matching lines in ``.env`` in-place; appends any key that is not
+        already present.  Simultaneously patches ``os.environ`` and the ``config``
+        singleton so the new values take effect without a restart.
+
+        Args:
+            new_settings (Dict[str, str]): Key-value pairs to persist.
+
+        Returns:
+            bool: True on success, False if an I/O or type-conversion error occurred.
         """
         try:
             if not self.env_path.exists():

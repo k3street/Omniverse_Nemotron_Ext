@@ -1,3 +1,14 @@
+"""Settings API routes for Isaac Assist.
+
+Exposes configuration read/write and LLM mode switching under the
+``/settings`` prefix:
+
+- ``GET /`` — retrieve current configuration.
+- ``POST /`` — update settings and immediately reinitialize the LLM provider.
+- ``POST /pull_local`` — kick off an Ollama model pull in the background.
+- ``GET /llm_mode`` — return current LLM mode and active model name.
+- ``PUT /llm_mode`` — hot-switch the LLM provider without restarting.
+"""
 import asyncio
 import logging
 import subprocess
