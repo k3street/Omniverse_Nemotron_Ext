@@ -1,3 +1,11 @@
+"""FastAPI application entry point for the Isaac Assist backend service.
+
+Registers all sub-module routers under ``/api/v1/`` and exposes a
+``/health`` endpoint. Run directly (``python -m …main``) or via uvicorn.
+
+LLM_MODE can be overridden at launch with ``--mode <mode>``; valid values
+are: ``local``, ``cloud``, ``anthropic``, ``openai``, ``grok``.
+"""
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -50,6 +58,11 @@ app.include_router(multimodal_canvas_router, prefix="/api/v1/canvas", tags=["Mul
 
 @app.get("/health")
 async def health_check():
+    """Return service liveness and active LLM routing information.
+
+    Returns:
+        dict: ``{status, service, llm_mode, model}``.
+    """
     from .config import config
     return {
         "status": "ok",

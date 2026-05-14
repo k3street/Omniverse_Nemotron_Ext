@@ -1,3 +1,11 @@
+"""Risk-assessment engine for patch actions.
+
+Each ``PatchAction`` proposed by the planner is evaluated against a small
+rule set: Python code that touches system paths or environment variables is
+``"high"``; any Python modification is ``"medium"``; USD/settings changes
+are ``"low"`` by default.  Low planner confidence upgrades risk toward
+``"medium"``.
+"""
 import logging
 import re
 from typing import List, Dict, Any, Tuple
@@ -14,9 +22,23 @@ class PolicyEngine:
         self.config = config or GovernanceConfig()
 
     def evaluate_action(self, action: PatchAction) -> Tuple[str, List[str]]:
-        """
-        Evaluates a single patch action and returns its risk level along with reasons.
-        Returns: (risk_level, list_of_reasons)
+        """Assess the risk level of a single patch action.
+
+        Rules applied in priority order:
+        - ``"high"`` if Python code touches ``os.environ`` / ``subprocess`` or
+          writes to ``/tmp`` / ``/var``.
+        - ``"medium"`` if the write surface is ``"python"`` (any code change) or
+          modifies network settings.
+        - ``"medium"`` upgraded from ``"low"`` when planner confidence < 0.5.
+        - ``"low"`` for standard USD / settings writes.
+
+        Args:
+            action (PatchAction): The action to evaluate.
+
+        Returns:
+            tuple[str, list[str]]: ``(risk_level, reasons)`` where ``risk_level``
+            is ``"low"`` | ``"medium"`` | ``"high"`` and ``reasons`` is a list of
+            human-readable justification strings.
         """
         risk_level = "low"
         reasons = []
@@ -51,8 +73,15 @@ class PolicyEngine:
         return risk_level, reasons
 
     def evaluate_plan(self, actions: List[PatchAction]) -> Dict[str, Any]:
-        """
-        Evaluates a full list of actions. Returns the maximum risk level.
+        """Evaluate a full list of actions and aggregate to the highest risk level.
+
+        Args:
+            actions (list[PatchAction]): All actions in a patch plan.
+
+        Returns:
+            dict: ``{overall_risk, requires_approval, action_evaluations}`` where
+            ``action_evaluations`` is a list of per-action
+            ``{action_id, risk_level, reasons}`` dicts.
         """
         highest_risk = "low"
         risk_order = {"low": 1, "medium": 2, "high": 3}

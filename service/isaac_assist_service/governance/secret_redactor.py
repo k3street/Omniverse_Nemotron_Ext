@@ -65,8 +65,13 @@ class SecretRedactor:
             self.compiled_patterns.append(re.compile(pattern, flags))
 
     def redact_text(self, text: str) -> str:
-        """
-        Replaces matched secrets in the text with a [REDACTED] placeholder.
+        """Replace all pattern-matched secrets with ``[REDACTED_SECRET]``.
+
+        Args:
+            text (str): Input string that may contain credentials.
+
+        Returns:
+            str: ``text`` with every matched secret replaced.
         """
         if not text:
             return text
@@ -80,8 +85,16 @@ class SecretRedactor:
         return redacted_text
 
     def redact_dict(self, data: dict) -> dict:
-        """
-        Recursively redact secrets from dictionary values.
+        """Recursively apply ``redact_text`` to all string values in a dict.
+
+        Handles nested dicts and lists of strings/dicts. Non-string, non-dict,
+        non-list values are passed through unchanged.
+
+        Args:
+            data (dict): Input dictionary, possibly containing credential strings.
+
+        Returns:
+            dict: New dict with secrets replaced in all string leaves.
         """
         redacted_data = {}
         for k, v in data.items():
@@ -101,8 +114,13 @@ class SecretRedactor:
         return redacted_data
 
     def has_secrets(self, text: str) -> bool:
-        """
-        Returns true if the text contains secrets.
+        """Return True if any configured pattern matches ``text``.
+
+        Args:
+            text (str): String to scan.
+
+        Returns:
+            bool: True if at least one secret pattern is found.
         """
         if not text:
             return False

@@ -1,7 +1,35 @@
+"""Service-wide configuration loaded from .env files.
+
+Priority order (last loaded wins): repo-root .env → service .env →
+.env.local (user overrides). Values from earlier files are never
+overwritten, but can be overridden by later files.
+
+Callers import the singleton:
+
+    from service.isaac_assist_service.config import config
+    print(config.llm_mode)
+"""
 import os
 
 
 class Config:
+    """Runtime configuration for Isaac Assist service.
+
+    Reads env files once at construction time, then stores all settings
+    as plain attributes. Downstream modules (``chat/``, ``settings/``,
+    ``mcp_server.py``, etc.) import the module-level ``config`` singleton
+    and read attributes directly.
+
+    Settings are grouped as:
+    - LLM routing: ``llm_mode``, ``local_model_name``, ``cloud_model_name``
+    - API keys: ``api_key_gemini``, ``api_key_anthropic``, ``api_key_openai``, etc.
+    - LiveKit bridge: ``livekit_url``, ``livekit_api_key``, ``livekit_api_secret``
+    - MCP server: ``mcp_host``, ``mcp_port``
+    - ROS bridge: ``rosbridge_host``, ``rosbridge_port``
+    - Misc: ``contribute_data``, ``auto_approve``, ``max_tool_rounds``
+    - Assets: ``assets_root_path``, ``assets_robots_subdir``
+    """
+
     def __init__(self):
         # Load env files in priority order (last loaded wins)
         # .env (root) → service .env → .env.local (highest priority, overrides all)

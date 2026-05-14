@@ -1,3 +1,9 @@
+"""Persistent conversation-history store backed by SQLite.
+
+Each message is a (session_id, role, content) row in
+``conversation_logs``. The database file lives next to this module so
+the path is deterministic regardless of the working directory.
+"""
 import sqlite3
 import json
 import os
@@ -13,6 +19,7 @@ class MemoryManager:
         self._init_db()
 
     def _init_db(self):
+        """Create the ``conversation_logs`` table if it does not already exist."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS conversation_logs (
@@ -25,6 +32,13 @@ class MemoryManager:
             ''')
 
     def add_message(self, session_id: str, role: str, content: str):
+        """Append a single message to the conversation log.
+
+        Args:
+            session_id (str): Opaque session identifier.
+            role (str): Message role, e.g. ``"user"`` or ``"assistant"``.
+            content (str): Raw message text.
+        """
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 "INSERT INTO conversation_logs (session_id, role, content) VALUES (?, ?, ?)",
@@ -32,7 +46,16 @@ class MemoryManager:
             )
 
     def get_context(self, session_id: str, limit: int = 20) -> List[Dict]:
-        """ Retrieves the most recent messages for context """
+        """Retrieve the most recent messages for a session in chronological order.
+
+        Args:
+            session_id (str): Session to query.
+            limit (int, optional): Maximum number of messages to return. Defaults to 20.
+
+        Returns:
+            list[dict]: Messages as ``[{"role": ..., "content": ...}, ...]``,
+            oldest first.
+        """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
                 "SELECT role, content FROM conversation_logs WHERE session_id = ? ORDER BY id DESC LIMIT ?",
