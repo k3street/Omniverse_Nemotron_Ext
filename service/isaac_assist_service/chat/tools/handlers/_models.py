@@ -11,8 +11,8 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-05-14T02:03:25+00:00
-Tool count: 434
+Generated: 2026-05-14T02:16:18+00:00
+Tool count: 435
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
 """
@@ -936,6 +936,19 @@ class ReleaseComplianceArgs(BaseModel):
 
     robot_path: str = Field(..., description="USD path to the robot articulation root, e.g. '/World/Franka'.")
     dry_run: Optional[bool] = Field(None, description="If true (default), release in-memory state only (no Kit calls). Set false only when Kit RPC + ros2_control bridge teardown is provisioned.")
+
+
+class FollowTrajectoryWithComplianceArgs(BaseModel):
+    """CRM-C4 — Phase 63b ↔ Layer 1 bridge. Executes a constrained trajectory with a rigid-to-compliant handoff: from t=0 to t=compliance_handoff_at, the robot follows the trajectory's waypoints as exact joi"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    trajectory: List[Dict[str, Any]] = Field(..., description="Required. Non-empty list of Phase 63b waypoint dicts produced by plan_constrained_trajectory. Each waypoint must contain at least one of 'joint_positions' or 'pose'. The first waypoint may optionally ")
+    robot_path: Optional[str] = Field(None, description="USD path to the robot articulation root, e.g. '/World/Franka'.")
+    compliance_handoff_at: Optional[float] = Field(None, description="Fraction in [0, 1] dividing the rigid prefix from the compliant suffix. Default 0.5. n_rigid = int(handoff_at * n_waypoints); n_compliant = n_waypoints - n_rigid. Should equal the trajectory's 'lock_o")
+    compliance_controller: Optional[str] = Field(None, description="Must be a member of COMPLIANCE_MODE_ENUM excluding 'null' (which means 'no compliance' and is incompatible with this bridge). Valid: 'admittance', 'cartesian_compliance_fdcc', 'cartesian_impedance', '")
+    timeout_s: Optional[float] = Field(None, description="Live-mode watchdog timeout in seconds. Must be > 0. Default 30.0.")
+    velocity_scaling: Optional[float] = Field(None, description="Multiplier on trajectory velocity. Must be > 0. Default 1.0.")
+    dry_run: Optional[bool] = Field(None, description="If true (default), return the plan dict without touching Kit or ROS2. Set false only when Kit RPC + ros2_control bridge is provisioned.")
 
 
 class SetupAssemblyConstraintArgs(BaseModel):
@@ -4027,6 +4040,7 @@ MODEL_REGISTRY = {
     "setup_impedance_controller": SetupImpedanceControllerArgs,
     "set_compliance_params": SetComplianceParamsArgs,
     "release_compliance": ReleaseComplianceArgs,
+    "follow_trajectory_with_compliance": FollowTrajectoryWithComplianceArgs,
     "setup_assembly_constraint": SetupAssemblyConstraintArgs,
     "setup_zone_partition": SetupZonePartitionArgs,
     "setup_cortex_behavior": SetupCortexBehaviorArgs,

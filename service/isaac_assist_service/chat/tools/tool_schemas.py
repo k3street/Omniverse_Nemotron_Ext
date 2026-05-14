@@ -2131,6 +2131,85 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "follow_trajectory_with_compliance",
+            "description": (
+                "CRM-C4 — Phase 63b ↔ Layer 1 bridge. Executes a constrained trajectory with a "
+                "rigid-to-compliant handoff: from t=0 to t=compliance_handoff_at, the robot follows "
+                "the trajectory's waypoints as exact joint targets; from t=compliance_handoff_at to "
+                "t=1 the compliance controller (admittance / impedance / FDCC) takes over and the "
+                "remaining waypoints become 'desired pose' references that yield to F/T feedback. "
+                "When the trajectory's first waypoint exposes a 'lock_orientation_from' field, the "
+                "bridge compares it to compliance_handoff_at and emits a structured "
+                "'handoff_mismatch_warning' (not a failure) on divergence > 0.01. "
+                "Requires a compliance controller already installed via setup_admittance_controller "
+                "(or setup_impedance_controller); otherwise returns a structured error suggesting "
+                "the setup tool. "
+                "dry_run=True (default) returns a structured plan dict (n_rigid, n_compliant, "
+                "t_handoff_observed, final_pose, ...) for offline inspection; dry_run=False raises "
+                "NotImplementedError (requires Kit RPC + ros2_control bridge). "
+                "Used by contact-rich tasks (e.g. #22 Peg-in-Hole) to splice Phase 63b's "
+                "plan_constrained_trajectory into a compliant insertion segment."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "trajectory": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": (
+                            "Required. Non-empty list of Phase 63b waypoint dicts produced by "
+                            "plan_constrained_trajectory. Each waypoint must contain at least one "
+                            "of 'joint_positions' or 'pose'. The first waypoint may optionally "
+                            "expose 'lock_orientation_from' (float in [0, 1]) which the bridge "
+                            "compares to compliance_handoff_at for seamless-transition checking."
+                        ),
+                    },
+                    "robot_path": {
+                        "type": "string",
+                        "description": "USD path to the robot articulation root, e.g. '/World/Franka'.",
+                    },
+                    "compliance_handoff_at": {
+                        "type": "number",
+                        "description": (
+                            "Fraction in [0, 1] dividing the rigid prefix from the compliant "
+                            "suffix. Default 0.5. n_rigid = int(handoff_at * n_waypoints); "
+                            "n_compliant = n_waypoints - n_rigid. Should equal the trajectory's "
+                            "'lock_orientation_from' when present to avoid handoff_mismatch_warning."
+                        ),
+                    },
+                    "compliance_controller": {
+                        "type": "string",
+                        "description": (
+                            "Must be a member of COMPLIANCE_MODE_ENUM excluding 'null' (which "
+                            "means 'no compliance' and is incompatible with this bridge). "
+                            "Valid: 'admittance', 'cartesian_compliance_fdcc', "
+                            "'cartesian_impedance', 'variable_impedance', "
+                            "'franka_cartesian_impedance'. Default 'admittance'."
+                        ),
+                    },
+                    "timeout_s": {
+                        "type": "number",
+                        "description": "Live-mode watchdog timeout in seconds. Must be > 0. Default 30.0.",
+                    },
+                    "velocity_scaling": {
+                        "type": "number",
+                        "description": "Multiplier on trajectory velocity. Must be > 0. Default 1.0.",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": (
+                            "If true (default), return the plan dict without touching Kit or ROS2. "
+                            "Set false only when Kit RPC + ros2_control bridge is provisioned."
+                        ),
+                    },
+                },
+                "required": ["trajectory"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "setup_assembly_constraint",
             "description": "Tier C — sets up assembly relationship between peg and hole. Used by #22 Peg-in-Hole. Runtime FixedJoint creation when peg aligns within tolerance is Sprint 3+.",
             "parameters": {
