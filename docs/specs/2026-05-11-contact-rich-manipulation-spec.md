@@ -799,7 +799,7 @@ the small `opus-judgment` / `opus-runtime` subset.**
 - **LOC**: ~30
 - **Blocked-by**: none
 - **Verify**: `pytest tests/test_layout_spec_compliance_field.py` ≥6 tests
-- **STATUS**: pending
+- **STATUS**: done — aa81393
 
 #### CRM-C2 — Auto-pick algorithm (opus-judgment)
 - **Files**: `service/isaac_assist_service/chat/tools/role_retriever.py` (extend), `tests/test_compliance_autopick.py` (NEW)
