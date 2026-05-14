@@ -259,14 +259,15 @@ class MCPServer:
 
 async def run_stdio(server: MCPServer) -> None:
     """Read JSON-RPC from stdin, write responses to stdout."""
+    loop = asyncio.get_running_loop()
     reader = asyncio.StreamReader()
     protocol = asyncio.StreamReaderProtocol(reader)
-    await asyncio.get_event_loop().connect_read_pipe(lambda: protocol, sys.stdin.buffer)
+    await loop.connect_read_pipe(lambda: protocol, sys.stdin.buffer)
 
-    writer_transport, writer_protocol = await asyncio.get_event_loop().connect_write_pipe(
+    writer_transport, writer_protocol = await loop.connect_write_pipe(
         asyncio.streams.FlowControlMixin, sys.stdout.buffer
     )
-    writer = asyncio.StreamWriter(writer_transport, writer_protocol, reader, asyncio.get_event_loop())
+    writer = asyncio.StreamWriter(writer_transport, writer_protocol, reader, loop)
 
     buffer = b""
     while True:
