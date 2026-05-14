@@ -388,3 +388,147 @@ class TestImpedance:
             await handler({"robot_path": "/World/Franka", "dry_run": False})
         msg = str(exc_info.value)
         assert "Kit RPC" in msg or "ros2_control" in msg or "torque-mode" in msg
+
+
+class TestParamMutation:
+    """L0 test suite for set_compliance_params (CRM-B2).
+
+    Tests runtime mutation of an already-installed compliance controller
+    via the in-memory _INSTALLED_COMPLIANCE state dict.
+    """
+
+    # ------------------------------------------------------------------
+    # Helpers
+
+    def _get_setup_handler(self):
+        from service.isaac_assist_service.chat.tools.handlers.compliance import (
+            _handle_setup_admittance_controller,
+        )
+        return _handle_setup_admittance_controller
+
+    def _get_set_handler(self):
+        from service.isaac_assist_service.chat.tools.handlers.compliance import (
+            _handle_set_compliance_params,
+        )
+        return _handle_set_compliance_params
+
+    def _get_state_dict(self):
+        from service.isaac_assist_service.chat.tools.handlers import compliance
+        return compliance._INSTALLED_COMPLIANCE
+
+    # ------------------------------------------------------------------
+    # T1 — install admittance → set new stiffness → state reflects update,
+    #       other fields unchanged
+
+    @pytest.mark.asyncio
+    async def test_stiffness_update_reflected_other_fields_unchanged(self):
+        """After admittance install, set_compliance_params with new stiffness_xyz
+        updates that field while leaving damping_xyz untouched."""
+        setup = self._get_setup_handler()
+        set_p = self._get_set_handler()
+        robot = "/World/FrankaB2T1"
+
+        install_result = await setup({
+            "robot_path": robot,
+            "stiffness_xyz": [500.0, 500.0, 500.0],
+            "damping_xyz": [50.0, 50.0, 50.0],
+        })
+        assert install_result["success"] is True
+
+        new_k = [200.0, 200.0, 200.0]
+        result = await set_p({
+            "robot_path": robot,
+            "stiffness_xyz": new_k,
+        })
+
+        assert result["success"] is True
+        assert result["stiffness_xyz"] == new_k
+        # Damping must remain unchanged
+        assert result["damping_xyz"] == [50.0, 50.0, 50.0]
+
+    # ------------------------------------------------------------------
+    # T2 — mutation with all-None args → state unchanged (no-op)
+
+    @pytest.mark.asyncio
+    async def test_all_none_args_is_noop(self):
+        """Calling set_compliance_params with no param overrides leaves the
+        state completely unchanged."""
+        setup = self._get_setup_handler()
+        set_p = self._get_set_handler()
+        robot = "/World/FrankaB2T2"
+
+        await setup({
+            "robot_path": robot,
+            "stiffness_xyz": [600.0, 600.0, 600.0],
+            "damping_xyz": [60.0, 60.0, 60.0],
+        })
+
+        result = await set_p({"robot_path": robot})
+
+        assert result["success"] is True
+        assert result["stiffness_xyz"] == [600.0, 600.0, 600.0]
+        assert result["damping_xyz"] == [60.0, 60.0, 60.0]
+
+    # ------------------------------------------------------------------
+    # T3 — set_compliance_params on robot with no installed controller → error
+
+    @pytest.mark.asyncio
+    async def test_missing_controller_returns_structured_error(self):
+        """set_compliance_params on an unregistered robot_path returns
+        success=False with error referencing the robot_path and
+        available_robots key."""
+        set_p = self._get_set_handler()
+        robot = "/World/UnknownRobotB2T3"
+
+        # Ensure this path is not in the state dict.
+        state = self._get_state_dict()
+        state.pop(robot, None)
+
+        result = await set_p({
+            "robot_path": robot,
+            "stiffness_xyz": [100.0, 100.0, 100.0],
+        })
+
+        assert result["success"] is False
+        assert robot in result.get("error", "")
+        assert "available_robots" in result
+
+    # ------------------------------------------------------------------
+    # T4 — state dict isolated between two different robot_paths
+
+    @pytest.mark.asyncio
+    async def test_state_isolated_between_robots(self):
+        """Mutating params for robot A must not affect robot B's state."""
+        setup = self._get_setup_handler()
+        set_p = self._get_set_handler()
+        robot_a = "/World/FrankaB2T4A"
+        robot_b = "/World/FrankaB2T4B"
+
+        await setup({"robot_path": robot_a, "stiffness_xyz": [500.0, 500.0, 500.0]})
+        await setup({"robot_path": robot_b, "stiffness_xyz": [500.0, 500.0, 500.0]})
+
+        # Mutate only robot_a
+        await set_p({"robot_path": robot_a, "stiffness_xyz": [100.0, 100.0, 100.0]})
+
+        # robot_b must be unaffected
+        result_b = await set_p({"robot_path": robot_b})
+        assert result_b["success"] is True
+        assert result_b["stiffness_xyz"] == [500.0, 500.0, 500.0]
+
+    # ------------------------------------------------------------------
+    # T5 — dry_run=False raises NotImplementedError
+
+    @pytest.mark.asyncio
+    async def test_live_mode_raises_not_implemented(self):
+        """set_compliance_params with dry_run=False raises NotImplementedError
+        with a message referencing Kit RPC or ros2_control bridge."""
+        setup = self._get_setup_handler()
+        set_p = self._get_set_handler()
+        robot = "/World/FrankaB2T5"
+
+        await setup({"robot_path": robot})
+
+        with pytest.raises(NotImplementedError) as exc_info:
+            await set_p({"robot_path": robot, "dry_run": False})
+        msg = str(exc_info.value)
+        assert "Kit RPC" in msg or "ros2_control" in msg or "bridge" in msg

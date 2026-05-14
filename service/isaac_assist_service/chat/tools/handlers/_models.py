@@ -11,8 +11,8 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-05-14T01:40:30+00:00
-Tool count: 432
+Generated: 2026-05-14T01:53:04+00:00
+Tool count: 433
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
 """
@@ -914,6 +914,20 @@ class SetupImpedanceControllerArgs(BaseModel):
     null_space_damping: Optional[float] = Field(None, description="Null-space damping scalar. Default 0.5.")
     torque_mode: Optional[bool] = Field(None, description="Must be true for impedance control. Set false on position-mode robots to receive an error with recommended_alternative='admittance'.")
     dry_run: Optional[bool] = Field(None, description="If true (default), return config dict without touching Kit or ROS2. Set false only when bridge + torque-mode robot is provisioned.")
+
+
+class SetComplianceParamsArgs(BaseModel):
+    """CRM-B2 — Runtime mutation of an already-installed compliance controller. Reads the in-memory state for robot_path and applies non-None param overrides (additive / pass-through semantics — None args le"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    robot_path: str = Field(..., description="USD path to the robot articulation root, e.g. '/World/Franka'.")
+    stiffness_xyz: Optional[List[float]] = Field(None, description="New translational spring stiffness per axis [N/m]. Omit to leave unchanged.")
+    damping_xyz: Optional[List[float]] = Field(None, description="New translational damping coefficient per axis [N·s/m]. Omit to leave unchanged.")
+    mass_xyz: Optional[List[float]] = Field(None, description="New virtual mass per translational axis [kg]. Omit to leave unchanged.")
+    stiffness_rot: Optional[List[float]] = Field(None, description="New rotational spring stiffness per axis [N·m/rad]. Omit to leave unchanged.")
+    damping_rot: Optional[List[float]] = Field(None, description="New rotational damping coefficient per axis [N·m·s/rad]. Omit to leave unchanged.")
+    mass_rot: Optional[List[float]] = Field(None, description="New virtual inertia per rotational axis [kg·m²]. Omit to leave unchanged.")
+    dry_run: Optional[bool] = Field(None, description="If true (default), mutate in-memory state and return merged dict. Set false only when Kit RPC + bridge is provisioned.")
 
 
 class SetupAssemblyConstraintArgs(BaseModel):
@@ -4003,6 +4017,7 @@ MODEL_REGISTRY = {
     "add_force_torque_sensor": AddForceTorqueSensorArgs,
     "setup_admittance_controller": SetupAdmittanceControllerArgs,
     "setup_impedance_controller": SetupImpedanceControllerArgs,
+    "set_compliance_params": SetComplianceParamsArgs,
     "setup_assembly_constraint": SetupAssemblyConstraintArgs,
     "setup_zone_partition": SetupZonePartitionArgs,
     "setup_cortex_behavior": SetupCortexBehaviorArgs,

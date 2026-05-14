@@ -1,8 +1,9 @@
-"""CRM-A2 / CRM-B1 — compliance handlers: setup_admittance_controller,
-setup_impedance_controller.
+"""CRM-A2 / CRM-B1 / CRM-B2 — compliance handlers.
 
-Implements `setup_admittance_controller` per CRM spec §5.1 (CRM-A2) and
-`setup_impedance_controller` per §5.2 (CRM-B1).
+Implements:
+- `setup_admittance_controller` per CRM spec §5.1 (CRM-A2)
+- `setup_impedance_controller` per §5.2 (CRM-B1)
+- `set_compliance_params` per §5.3 (CRM-B2)
 
 Admittance step law (pure Python, no Kit required for dry-run):
     F = K·(x_desired - x_actual) - D·v_actual + F_ext
@@ -15,12 +16,21 @@ controller would look like. Live mode raises NotImplementedError with a clear
 actionable message directing the caller to provision the Kit RPC +
 ros2_control bridge.
 
-Per docs/specs/2026-05-11-contact-rich-manipulation-spec.md §5.1 (CRM-A2)
-and §5.2 (CRM-B1).
+Per docs/specs/2026-05-11-contact-rich-manipulation-spec.md §5.1 (CRM-A2),
+§5.2 (CRM-B1), and §5.3 (CRM-B2).
 """
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
+
+
+# ---------------------------------------------------------------------------
+# Module-level in-memory compliance state
+# Keyed by robot_path → dict of current param values.
+# Populated by setup_admittance_controller and setup_impedance_controller
+# on dry-run success.  Read + mutated by set_compliance_params.
+
+_INSTALLED_COMPLIANCE: Dict[str, Dict[str, list]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +166,17 @@ async def _handle_setup_admittance_controller(
 
     if ft_sensor_path is not None:
         result["ft_sensor_path"] = ft_sensor_path
+
+    # Persist current params so set_compliance_params can mutate them later.
+    _INSTALLED_COMPLIANCE[robot_path] = {
+        "stiffness_xyz": stiffness_xyz,
+        "damping_xyz": damping_xyz,
+        "mass_xyz": mass_xyz,
+        "stiffness_rot": stiffness_rot,
+        "damping_rot": damping_rot,
+        "mass_rot": mass_rot,
+        "compliance_mode": "admittance",
+    }
 
     return result
 
@@ -349,6 +370,15 @@ async def _handle_setup_impedance_controller(
         "torque_mode": True,
     }
 
+    # Persist current params so set_compliance_params can mutate them later.
+    _INSTALLED_COMPLIANCE[robot_path] = {
+        "stiffness_xyz": Kx,
+        "damping_xyz": Dx,
+        "stiffness_rot": Kr,
+        "damping_rot": Dr,
+        "compliance_mode": "impedance",
+    }
+
     return result
 
 
@@ -416,6 +446,132 @@ async def setup_impedance_controller(
 
 
 # ---------------------------------------------------------------------------
+# set_compliance_params handler (CRM-B2)
+
+
+async def _handle_set_compliance_params(
+    args: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Dispatch handler for `set_compliance_params` tool.
+
+    Reads the in-memory state for robot_path and applies any non-None
+    param overrides (additive / pass-through semantics).
+
+    Args (from tool call):
+        robot_path:    USD path to the robot root — required.
+        stiffness_xyz: New translational stiffness [N/m] (3-vector) or None.
+        damping_xyz:   New translational damping [N·s/m] (3-vector) or None.
+        mass_xyz:      New virtual mass [kg] (3-vector) or None.
+        stiffness_rot: New rotational stiffness [N·m/rad] (3-vector) or None.
+        damping_rot:   New rotational damping [N·m·s/rad] (3-vector) or None.
+        mass_rot:      New rotational virtual mass [kg·m²] (3-vector) or None.
+        dry_run:       True (default) → mutate in-memory dict + return merged
+                       state. False → raises NotImplementedError.
+
+    Returns:
+        On success: {success: True, robot_path, merged params...}
+        On missing controller: {success: False, error: str, available_robots: list}
+    """
+    robot_path: str = args.get("robot_path", "")
+    if not robot_path:
+        return {
+            "success": False,
+            "error": "robot_path is required",
+        }
+
+    dry_run: bool = bool(args.get("dry_run", True))
+    if not dry_run:
+        raise NotImplementedError(
+            "runtime mutation of live ros2_control controller requires Kit RPC + bridge"
+        )
+
+    if robot_path not in _INSTALLED_COMPLIANCE:
+        return {
+            "success": False,
+            "error": f"no compliance controller installed for {robot_path}",
+            "available_robots": list(_INSTALLED_COMPLIANCE.keys()),
+        }
+
+    state = _INSTALLED_COMPLIANCE[robot_path]
+
+    # Additive update: only overwrite fields supplied by the caller.
+    _PARAM_KEYS = (
+        "stiffness_xyz",
+        "damping_xyz",
+        "mass_xyz",
+        "stiffness_rot",
+        "damping_rot",
+        "mass_rot",
+    )
+    for key in _PARAM_KEYS:
+        value = args.get(key)
+        if value is not None:
+            state[key] = list(value)
+
+    result: Dict[str, Any] = {"success": True, "robot_path": robot_path, "dry_run": True}
+    result.update(state)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Public signature (matches §5.3 exactly — used by higher-level callers)
+
+
+async def set_compliance_params(
+    robot_path: str,
+    stiffness_xyz: list[float] | None = None,
+    damping_xyz: list[float] | None = None,
+    mass_xyz: list[float] | None = None,
+    stiffness_rot: list[float] | None = None,
+    damping_rot: list[float] | None = None,
+    mass_rot: list[float] | None = None,
+    dry_run: bool = True,
+) -> dict:
+    """Mutate an already-installed compliance controller's parameters.
+
+    Used by `variable_impedance` to shift K between search-phase (low K)
+    and insertion-phase (high K) without reinstalling the controller.
+
+    Param mutation is additive: None arguments pass through unchanged.
+    The in-memory state dict (keyed by robot_path) is the authoritative
+    source — populated by setup_admittance_controller /
+    setup_impedance_controller on dry-run success.
+
+    In dry-run mode (default) mutates the in-memory dict and returns
+    the merged state. In live mode (dry_run=False) raises
+    NotImplementedError until the Kit RPC + ros2_control bridge is wired.
+
+    Args:
+        robot_path:    USD path to the robot articulation root.
+        stiffness_xyz: New translational stiffness [N/m] per axis, or None.
+        damping_xyz:   New translational damping [N·s/m] per axis, or None.
+        mass_xyz:      New virtual mass [kg] per axis, or None.
+        stiffness_rot: New rotational stiffness [N·m/rad] per axis, or None.
+        damping_rot:   New rotational damping [N·m·s/rad] per axis, or None.
+        mass_rot:      New rotational virtual mass [kg·m²] per axis, or None.
+        dry_run:       If True, mutate in-memory state + return merged dict.
+
+    Returns:
+        dict with success: True and merged controller params on success, or
+        success: False + error: str + available_robots: list when no
+        controller is installed for robot_path.
+
+    Raises:
+        NotImplementedError: when dry_run=False (bridge not yet wired).
+    """
+    return await _handle_set_compliance_params({
+        "robot_path": robot_path,
+        "stiffness_xyz": stiffness_xyz,
+        "damping_xyz": damping_xyz,
+        "mass_xyz": mass_xyz,
+        "stiffness_rot": stiffness_rot,
+        "damping_rot": damping_rot,
+        "mass_rot": mass_rot,
+        "dry_run": dry_run,
+    })
+
+
+# ---------------------------------------------------------------------------
 # Dispatch registration
 
 
@@ -426,3 +582,4 @@ def register(
     """Register compliance handlers into the dispatch table."""
     data["setup_admittance_controller"] = _handle_setup_admittance_controller
     data["setup_impedance_controller"] = _handle_setup_impedance_controller
+    data["set_compliance_params"] = _handle_set_compliance_params

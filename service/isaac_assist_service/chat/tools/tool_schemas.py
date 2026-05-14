@@ -2036,6 +2036,67 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "set_compliance_params",
+            "description": (
+                "CRM-B2 — Runtime mutation of an already-installed compliance controller. "
+                "Reads the in-memory state for robot_path and applies non-None param overrides "
+                "(additive / pass-through semantics — None args leave existing values unchanged). "
+                "Used by variable_impedance to shift K between search-phase (low K) and "
+                "insertion-phase (high K) without reinstalling the controller. "
+                "Returns the merged state dict on success, or a structured error with "
+                "available_robots when no controller is installed for robot_path. "
+                "dry_run=True (default) mutates in-memory state; dry_run=False raises "
+                "NotImplementedError (requires Kit RPC + ros2_control bridge)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {
+                        "type": "string",
+                        "description": "USD path to the robot articulation root, e.g. '/World/Franka'.",
+                    },
+                    "stiffness_xyz": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "New translational spring stiffness per axis [N/m]. Omit to leave unchanged.",
+                    },
+                    "damping_xyz": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "New translational damping coefficient per axis [N·s/m]. Omit to leave unchanged.",
+                    },
+                    "mass_xyz": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "New virtual mass per translational axis [kg]. Omit to leave unchanged.",
+                    },
+                    "stiffness_rot": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "New rotational spring stiffness per axis [N·m/rad]. Omit to leave unchanged.",
+                    },
+                    "damping_rot": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "New rotational damping coefficient per axis [N·m·s/rad]. Omit to leave unchanged.",
+                    },
+                    "mass_rot": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "New virtual inertia per rotational axis [kg·m²]. Omit to leave unchanged.",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "If true (default), mutate in-memory state and return merged dict. Set false only when Kit RPC + bridge is provisioned.",
+                    },
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "setup_assembly_constraint",
             "description": "Tier C — sets up assembly relationship between peg and hole. Used by #22 Peg-in-Hole. Runtime FixedJoint creation when peg aligns within tolerance is Sprint 3+.",
             "parameters": {
