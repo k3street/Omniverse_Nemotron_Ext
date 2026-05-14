@@ -18,6 +18,8 @@ from typing import Callable, List, Optional, Type
 
 
 class Severity(str, Enum):
+    """Severity levels for patch validation issues, ordered low→high."""
+
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
@@ -48,10 +50,15 @@ class ValidationResult:
 
     @property
     def blocking(self) -> bool:
+        """Return True if any issue has ERROR or CRITICAL severity."""
         return any(i.severity == Severity.ERROR.value
                    or i.severity == Severity.CRITICAL.value for i in self.issues)
 
     def format_for_llm(self) -> str:
+        """Render issues as a human-readable block for LLM feedback.
+
+        Returns an empty string when there are no issues.
+        """
         if not self.issues:
             return ""
         lines = ["PRE-FLIGHT VALIDATION FAILED — do NOT retry the same pattern:"]
@@ -94,6 +101,7 @@ class PipelineRunner:
     """Run all registered rules against a code patch."""
 
     def __init__(self, rules: Optional[List[Type[PatchValidatorRule]]] = None):
+        """Initialise with an explicit rule list or fall back to REGISTRY."""
         self.rules = rules if rules is not None else REGISTRY
 
     def run(self, code: str) -> ValidationResult:
