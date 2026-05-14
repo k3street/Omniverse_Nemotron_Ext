@@ -879,7 +879,7 @@ the small `opus-judgment` / `opus-runtime` subset.**
 - **LOC**: ~100
 - **Blocked-by**: CRM-A1, CRM-A2, CRM-C2, CRM-C4 (full stack must be wired)
 - **Verify**: `pytest tests/test_peg_insert_e2e.py -m compliance_e2e --tb=short` — manual run; success criterion in test body
-- **STATUS**: pending — defer until A+B+C land if no Kit available at cron time
+- **STATUS**: done — 5 tests landed under `@pytest.mark.compliance_e2e`: autopick→admittance, admittance plan has n_compliant>0, rigid baseline (handoff_at=1.0 proxy since bridge rejects `null` mode) has n_compliant==0, admittance-vs-rigid invariant, live-Kit smoke (`list_all_prims` against pid 391837 returned 14 prims; skips if Kit unreachable). Live admittance hot loop still gated behind `NotImplementedError`; this test asserts the §9.3 SHAPE invariant against `dry_run=True` plans. L3 successor needed when CRM-A1 bridge ships the live path.
 
 ### 18.6 Task summary
 
