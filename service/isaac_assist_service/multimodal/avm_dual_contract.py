@@ -21,6 +21,18 @@ class DualEstimate:
 
 
 def compute_delta(d: DualEstimate) -> DualEstimate:
+    """Fill ``delta_abs``, ``delta_pct``, and ``confidence`` on a DualEstimate in-place.
+
+    If ``simulated_value`` is ``None`` the input is returned unchanged.
+    Confidence thresholds: ``delta_pct > 0.50`` → *low*; ``0.15–0.50`` → *medium*;
+    ``< 0.15`` → *high*.
+
+    Args:
+        d (DualEstimate): Estimate with at least ``analytical_value`` set.
+
+    Returns:
+        DualEstimate: The same object with delta fields populated.
+    """
     if d.simulated_value is None:
         return d
     delta = d.simulated_value - d.analytical_value
