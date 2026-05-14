@@ -706,9 +706,9 @@ print(json.dumps({{
 """
 
 
-def _gen_pick_place_builtin(robot_path, robot_family, sensor_path, belt_path,
-                             source_paths, destination_path, drop_target,
-                             ee_offset):
+def _gen_pick_place_builtin(robot_path: str, robot_family: str, sensor_path: str, belt_path: str,
+                             source_paths: list, destination_path: str, drop_target: str,
+                             ee_offset: list) -> str:
     """Robot-agnostic pick-place using Isaac Sim's bundled per-robot controllers.
 
     Wraps NVIDIA's pre-configured PickPlaceController classes:
@@ -1505,12 +1505,12 @@ print(json.dumps({{
 """
 
 
-def _gen_pick_place_sensor_gated(robot_path, sensor_path, belt_path, pick_pose_name,
-                                  drop_pose_name, home_pose_name,
-                                  pick_target, drop_target, home_target,
-                                  grip_style, source_paths,
-                                  ee_link, fj1, fj2,
-                                  open_val, close_val):
+def _gen_pick_place_sensor_gated(robot_path: str, sensor_path: str, belt_path: str, pick_pose_name: str,
+                                  drop_pose_name: str, home_pose_name: str,
+                                  pick_target: str, drop_target: str, home_target: str,
+                                  grip_style: str, source_paths: list,
+                                  ee_link: str, fj1: str, fj2: str,
+                                  open_val: float, close_val: float) -> str:
     """Industrial-pattern controller: belt runs continuously until a proximity
     sensor triggers at a fixed pick station. On trigger, belt pauses; robot
     moves to PICK config; gripper closes; belt resumes (cube attached via
@@ -2145,11 +2145,11 @@ print(json.dumps({{
 """
 
 
-def _gen_pick_place_native(robot_path, sensor_path, belt_path,
-                           source_paths, destination_path,
-                           drop_target, ee_offset,
+def _gen_pick_place_native(robot_path: str, sensor_path: str, belt_path: str,
+                           source_paths: list, destination_path: str,
+                           drop_target: str, ee_offset: list,
                            end_effector_initial_height=None,
-                           events_dt=None):
+                           events_dt=None) -> str:
     """Canonical Isaac Sim pick-place — ports the 62-line standalone at
     `standalone_examples/api/isaacsim.robot.manipulators/franka/pick_place.py`
     into an embedded (Kit RPC) context, wrapped with sensor-gating.
@@ -2775,14 +2775,14 @@ print(json.dumps({{
 """
 
 
-def _gen_pick_place_spline(robot_path, sensor_path, belt_path,
-                           source_paths, destination_path,
-                           drop_target, ee_offset,
+def _gen_pick_place_spline(robot_path: str, sensor_path: str, belt_path: str,
+                           source_paths: list, destination_path: str,
+                           drop_target: str, ee_offset: list,
                            end_effector_initial_height=None,
                            spline_waypoint_dt=None,
-                           grip_style="friction",
+                           grip_style: str = "friction",
                            color_routing=None,
-                           mutex_path=None):
+                           mutex_path=None) -> str:
     """Deterministic CPU-only pick-place: pre-plan 6-waypoint Cartesian
     trajectory per cube, warm-start IK chain for consistent redundancy
     branch, interpolate via scipy.CubicSpline (or numpy linear fallback).
@@ -3534,20 +3534,20 @@ print(json.dumps({{
 """
 
 
-def _gen_pick_place_curobo(robot_path, sensor_path, belt_path,
-                           source_paths, destination_path,
-                           drop_target, ee_offset,
+def _gen_pick_place_curobo(robot_path: str, sensor_path: str, belt_path: str,
+                           source_paths: list, destination_path: str,
+                           drop_target: str, ee_offset: list,
                            end_effector_initial_height=None,
                            planning_obstacles=None,
                            curobo_world_yml=None,
                            color_routing=None,
                            drop_targets=None,
                            gripper_rotation=None,
-                           robot_family="franka",
-                           require_upright=False,
-                           upright_dot_threshold=0.85,
+                           robot_family: str = "franka",
+                           require_upright: bool = False,
+                           upright_dot_threshold: float = 0.85,
                            mutex_path=None,
-                           scenario_profile=None):
+                           scenario_profile=None) -> str:
     """Phase 4 POC: scenario_profile arg routes scene_cfg construction.
 
     scenario_profile:
@@ -4827,11 +4827,11 @@ print(json.dumps({{
 """
 
 
-def _gen_pick_place_diffik(robot_path, sensor_path, belt_path,
-                            source_paths, destination_path,
-                            drop_target, ee_offset,
+def _gen_pick_place_diffik(robot_path: str, sensor_path: str, belt_path: str,
+                            source_paths: list, destination_path: str,
+                            drop_target: str, ee_offset: list,
                             end_effector_initial_height=None,
-                            diffik_method="dls"):
+                            diffik_method: str = "dls") -> str:
     """Isaac Lab DifferentialIKController-based pick-place.
 
     Env-bridge: sys.path.insert(0, isaac_lab_env/site-packages) +
@@ -5351,9 +5351,9 @@ print(json.dumps({{
 """
 
 
-def _gen_pick_place_osc(robot_path, sensor_path, belt_path,
-                         source_paths, destination_path,
-                         drop_target, ee_offset):
+def _gen_pick_place_osc(robot_path: str, sensor_path: str, belt_path: str,
+                         source_paths: list, destination_path: str,
+                         drop_target: str, ee_offset: list) -> str:
     """Isaac Lab OperationalSpaceController-based pick-place.
 
     Simplified config (no inertial decoupling, no gravity comp, fixed
@@ -5834,7 +5834,7 @@ print(json.dumps({{
 """
 
 
-def _gen_pick_place_fixed_poses(robot_path, pose_sequence, cycles, ee_link, fj1, fj2):
+def _gen_pick_place_fixed_poses(robot_path: str, pose_sequence: list, cycles: int, ee_link: str, fj1: str, fj2: str) -> str:
     """Pose-sequence controller: visit each named pose in order, repeat N cycles.
     No sensor, no grasp logic — pure replay. Useful for demos or cycle-time
     measurement before adding control logic.
@@ -5916,7 +5916,7 @@ print(json.dumps({{"ok": True, "mode": "fixed_poses",
 """
 
 
-def _gen_pick_place_ros2_cmd(robot_path, target_topic, gripper_topic, ee_link, fj1, fj2):
+def _gen_pick_place_ros2_cmd(robot_path: str, target_topic: str, gripper_topic: str, ee_link: str, fj1: str, fj2: str) -> str:
     """ROS2-commanded controller stub: subscribes to external target-pose and
     gripper-command topics, applies them to the robot. State machine lives
     OUTSIDE Isaac Sim — this tool only wires the I/O.
