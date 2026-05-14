@@ -193,6 +193,47 @@ else:
 
 
 def _gen_configure_ros2_bridge(args: Dict) -> str:
+    """Build an OmniGraph that publishes sensor data to ROS2 topics.
+
+    Creates a single OmniGraph at ``/World/ROS2_Bridge`` with one node per
+    entry in ``sensors``, all clocked by a shared ``OnPlaybackTick`` node
+    and sharing a ``ROS2Context`` node.  The correct Isaac Sim namespace
+    (``isaacsim.ros2.nodes`` for 6.x, ``isaacsim.ros2.bridge`` for 5.x) is
+    detected at runtime from ``isaacsim.__version__``.
+
+    Supported sensor types and their OmniGraph node classes:
+    ``camera`` → ``ROS2CameraHelper``, ``lidar`` → ``ROS2PublishLaserScan``,
+    ``imu`` → ``ROS2PublishImu``, ``clock`` → ``ROS2PublishClock``,
+    ``joint_state`` → ``ROS2PublishJointState``.  Unknown types fall back to
+    ``ROS2Publish<Type>``.
+
+    The generated script validates ``AMENT_PREFIX_PATH`` before touching any
+    OmniGraph nodes; missing environment setup raises immediately with
+    actionable guidance rather than failing cryptically inside the bridge.
+
+    Args:
+        args: tool-call args dict. Expected keys:
+            - sensors (list[dict], required): list of sensor descriptors.
+              Each dict may contain:
+                - type (str): sensor type (see above).
+                - prim_path (str): USD prim path of the sensor / render
+                  product / articulation.
+                - topic_name (str): ROS2 topic to publish on.
+                - frame_id (str): TF frame id.
+            - ros2_domain_id (int, default 0): ROS2 domain ID set on the
+              ``ROS2Context`` node.
+
+    Returns:
+        Python source as a string.  The script, when exec'd in Kit,
+        builds the OmniGraph and prints the node count, sensor summary,
+        and domain ID.  Publishing begins when simulation is started
+        (Play).
+
+    Raises:
+        ValueError: (in generated code) if ``sensors`` is empty.
+        RuntimeError: (in generated code) if ``AMENT_PREFIX_PATH`` is not
+            set in the Kit process environment.
+    """
     sensors = args.get("sensors", [])
     domain_id = args.get("ros2_domain_id", 0)
 
