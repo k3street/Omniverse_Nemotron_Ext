@@ -4626,7 +4626,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"get_gripper_state {articulation}")
 
 
-async def _handle_setup_isaac_ros_cumotion_moveit(args):
+async def _handle_setup_isaac_ros_cumotion_moveit(args: Dict[str, Any]) -> Dict[str, Any]:
     """Phase 6 M4: configure isaac_ros_cumotion plugin for an external MoveIt2.
 
     Companion to M1's setup_ros2_control_compat. M1 wires the topic-based
@@ -5331,7 +5331,7 @@ async def _handle_visualize_behavior_tree(args: Dict) -> Dict:
     }
 
 
-async def _handle_setup_ros2_control_compat(args):
+async def _handle_setup_ros2_control_compat(args: Dict[str, Any]) -> Dict[str, Any]:
     """Phase 6 M1: emit OmniGraph using topic_based_ros2_control standard topic names.
 
     Wraps the existing ROS2 bridge profile but with the de-facto topic
@@ -5482,7 +5482,7 @@ print(json.dumps(result))
     )
 
 
-async def _handle_list_available_controllers(args) -> dict:
+async def _handle_list_available_controllers(args: Dict[str, Any]) -> Dict[str, Any]:
     """Probe current runtime env and report per-controller availability.
 
     Agent uses this before calling setup_pick_place_controller to pick
