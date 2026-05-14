@@ -37,10 +37,38 @@ from typing import Any, Callable, Dict, Optional
 # ---------------------------------------------------------------------------
 # Theme-local state caches (Phase 8 wave 22, 2026-05-13)
 # Migrated from tool_executor.py — used only by handlers.scene_authoring.
+#
+# CONC-1 (2026-05-14): the stage index uses an async fill pattern —
+# `build_stage_index` queues a Kit RPC patch and returns immediately;
+# Kit populates `_STAGE_INDEX` asynchronously some time later. A caller
+# that reads the index between the queue and the fill sees empty or
+# half-filled data with no way to distinguish "build in progress" from
+# "build complete but found nothing". We cannot place a Python lock
+# around the actual writes (they happen inside Kit, in a separate
+# process) so we use a build_id counter as a coordination signal:
+#
+#   - `build_stage_index` increments `build_id` and clears `_STAGE_INDEX`
+#     before queueing the Kit patch. `building` flips to True at the
+#     same moment.
+#   - `query_stage_index` returns the current `build_id` + `building`
+#     flag so callers can detect a stale-or-mid-build read and retry.
+#   - When Kit finishes populating the index, it (or a callback) sets
+#     `_STAGE_INDEX_META["building"] = False`. Until that happens any
+#     `_STAGE_INDEX.keys()` walk represents a snapshot in time, not a
+#     definitive answer.
+#
+# `build_id` is a Python int and reads/writes to a single int via
+# `_STAGE_INDEX_META[...] = ...` are atomic under the GIL, so no lock
+# is needed. Wraps to negative on overflow but that takes ~9×10¹⁸ builds.
 
 _STAGE_INDEX: Dict[str, Dict[str, Any]] = {}
 
-_STAGE_INDEX_META: Dict[str, Any] = {"prim_scope": None, "prim_count": 0}
+_STAGE_INDEX_META: Dict[str, Any] = {
+    "prim_scope": None,
+    "prim_count": 0,
+    "build_id": 0,
+    "building": False,
+}
 
 # ---------------------------------------------------------------------------
 # Theme-local helpers (Phase 8 wave 21, 2026-05-13)
@@ -3659,13 +3687,30 @@ else:
 
 
 async def _handle_build_stage_index(args: Dict) -> Dict:
-    """Build the metadata index and populate the module-level cache."""
+    """Build the metadata index and populate the module-level cache.
+
+    CONC-1 (2026-05-14): bumps `_STAGE_INDEX_META["build_id"]` and sets
+    `building=True` BEFORE the Kit RPC is queued + before `_STAGE_INDEX`
+    is cleared. Callers (`query_stage_index`) read these fields as a
+    coordination signal: they can detect a stale or mid-build state and
+    retry. Kit populates `_STAGE_INDEX` asynchronously; whatever code
+    runs Kit-side and signals completion must also flip `building` back
+    to False — the dispatcher that consumes the patch result is the
+    canonical place to do that (out of scope for this handler).
+    """
     from .. import kit_tools
     # _gen_build_stage_index lives in handlers/diagnostics.py (Phase 6 wave 22)
     from .diagnostics import _gen_build_stage_index
 
     prim_scope = args.get("prim_scope") or "/World"
     max_prims = int(args.get("max_prims", 50000))
+
+    # Bump build_id + flip `building` BEFORE the clear so a query that
+    # arrives between the bump and the clear still sees `building=True`
+    # and treats whatever it reads as transitional.
+    _STAGE_INDEX_META["build_id"] = int(_STAGE_INDEX_META.get("build_id", 0)) + 1
+    _STAGE_INDEX_META["building"] = True
+
     code = _gen_build_stage_index({"prim_scope": prim_scope, "max_prims": max_prims})
     queued = await kit_tools.queue_exec_patch(code, f"Build stage index under {prim_scope}")
     # Even when Kit is offline we still reset the local cache so repeated
@@ -3679,12 +3724,22 @@ async def _handle_build_stage_index(args: Dict) -> Dict:
         "prim_scope": prim_scope,
         "max_prims": max_prims,
         "queued": bool(queued.get("queued", False)) if isinstance(queued, dict) else False,
+        "build_id": int(_STAGE_INDEX_META["build_id"]),
+        "building": True,
         "note": "Kit will populate the index asynchronously via the queued patch.",
     }
 
 
 async def _handle_query_stage_index(args: Dict) -> Dict:
-    """Return prims relevant to the keywords plus neighbours of selected_prim."""
+    """Return prims relevant to the keywords plus neighbours of selected_prim.
+
+    CONC-1 (2026-05-14): surfaces the `building` flag + `build_id` from
+    `_STAGE_INDEX_META`. Callers can detect that a build is still in
+    progress (`building=True`) and either retry, fall back, or treat the
+    partial result as best-effort. `build_id` lets callers correlate
+    successive queries with the build they belong to (e.g. a result with
+    `build_id=42` is from a different build than one with `build_id=43`).
+    """
     # _STAGE_INDEX (wave 22) + _neighbour_paths (wave 21) module-local.
 
     keywords = args.get("keywords") or []
@@ -3693,11 +3748,20 @@ async def _handle_query_stage_index(args: Dict) -> Dict:
     selected_prim = args.get("selected_prim") or ""
     max_results = int(args.get("max_results", 100))
 
+    building = bool(_STAGE_INDEX_META.get("building", False))
+    build_id = int(_STAGE_INDEX_META.get("build_id", 0))
+
     if not _STAGE_INDEX:
         return {
             "results": [],
             "total_indexed": 0,
-            "note": "Stage index is empty — call build_stage_index first.",
+            "building": building,
+            "build_id": build_id,
+            "note": (
+                "Stage index is currently being rebuilt — query again "
+                "after the build completes." if building else
+                "Stage index is empty — call build_stage_index first."
+            ),
         }
 
     scored: List[Dict[str, Any]] = []
@@ -3730,6 +3794,8 @@ async def _handle_query_stage_index(args: Dict) -> Dict:
         "context_count": len(context_records),
         "keywords": keywords,
         "selected_prim": selected_prim,
+        "building": building,
+        "build_id": build_id,
     }
 
 

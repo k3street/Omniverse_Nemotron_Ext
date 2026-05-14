@@ -109,7 +109,19 @@ ASYNC_TASKS: Dict[str, Dict[str, Any]] = {}
 # Phase 8 wave 25 (2026-05-13): TURN_RECORDER singleton migrated from
 # tool_executor.py. Cross-theme: used by workflow + training.
 # Lazy-instantiated to avoid import-time side effects.
+#
+# CONC-1 (2026-05-14): The lazy double-check pattern previously here was
+# racy — two coroutines hitting `get_turn_recorder()` concurrently could
+# both observe `_TURN_RECORDER_SINGLETON is None`, both instantiate, and
+# the second instantiation would clobber the first (silently leaking the
+# first instance's file handles). `TurnRecorder.__init__` writes to disk
+# via `output_dir.mkdir(parents=True, exist_ok=True)`, so eager init at
+# module import would create a directory at import time — undesirable for
+# tests and tools that import this module without intending to record.
+# The locked double-check below preserves lazy semantics while keeping
+# the initialization race-free.
 _TURN_RECORDER_SINGLETON = None
+_TURN_RECORDER_LOCK: _threading.Lock = _threading.Lock()
 
 
 # Phase 8 wave 29 (2026-05-13): _LockedPatch + _StageWriteLockQueue
@@ -182,16 +194,30 @@ def get_turn_recorder():
     module load). We delegate to that instance so both old and new
     callers see the same recorder. A future wave can flip the
     canonical home to this module.
+
+    CONC-1 (2026-05-14): The double-check below is protected by
+    `_TURN_RECORDER_LOCK` so concurrent callers cannot race past the
+    `is None` check and create two TurnRecorder instances (each of which
+    would write to the same `workspace/finetune_data/sessions/` directory
+    but would otherwise be disjoint). The lock is held only during the
+    one-time instantiation; subsequent calls hit the fast path (no lock
+    acquisition needed because Python attribute reads are atomic).
     """
     global _TURN_RECORDER_SINGLETON
-    if _TURN_RECORDER_SINGLETON is None:
-        try:
-            from .. import tool_executor as _te
-            _TURN_RECORDER_SINGLETON = _te._turn_recorder
-        except (ImportError, AttributeError):
-            # Fallback: instantiate our own if tool_executor no longer has it.
-            from ...finetune.turn_recorder import TurnRecorder
-            _TURN_RECORDER_SINGLETON = TurnRecorder()
+    # Fast path: once initialized, no lock acquisition.
+    if _TURN_RECORDER_SINGLETON is not None:
+        return _TURN_RECORDER_SINGLETON
+    with _TURN_RECORDER_LOCK:
+        # Re-check under the lock (another waiter may have initialized
+        # while we were blocked).
+        if _TURN_RECORDER_SINGLETON is None:
+            try:
+                from .. import tool_executor as _te
+                _TURN_RECORDER_SINGLETON = _te._turn_recorder
+            except (ImportError, AttributeError):
+                # Fallback: instantiate our own if tool_executor no longer has it.
+                from ...finetune.turn_recorder import TurnRecorder
+                _TURN_RECORDER_SINGLETON = TurnRecorder()
     return _TURN_RECORDER_SINGLETON
 
 
@@ -200,6 +226,36 @@ def get_turn_recorder():
 # Phase 14 + 16 (2026-05-13): migrated from tool_executor.py.
 
 _WORKFLOWS: Dict[str, Dict[str, Any]] = {}
+
+# CONC-1 (2026-05-14): the workflow-mutation handlers in handlers/workflow.py
+# (approve_workflow_checkpoint, edit_workflow_plan, cancel_workflow, ...)
+# all perform deep read-modify-write sequences against `_WORKFLOWS[wf_id]`
+# (e.g. read `wf["status"]`, append to `wf["events"]`, write `wf["status"]`).
+# Without serialization these can interleave on the same wf_id, producing
+# inconsistent state such as missing event entries or status transitions
+# that contradict the appended decision.
+#
+# Strategy: per-workflow lock attached to each workflow dict at creation
+# time (key: "_lock"). Handlers acquire `wf["_lock"]` for the duration of
+# their RMW. This avoids global serialization across unrelated wf_ids
+# (two different wf_ids run in parallel) while still protecting deep
+# mutations on the same wf_id.
+#
+# A small companion lock guards the membership of `_WORKFLOWS` itself —
+# the get-or-create idiom needs it so two writers cannot race on the
+# initial `_WORKFLOWS[wf_id] = workflow` assignment.
+
+_WORKFLOWS_REGISTRY_LOCK: _threading.Lock = _threading.Lock()
+
+
+def make_workflow_lock() -> _threading.Lock:
+    """Create a per-workflow lock to attach at the `_lock` field.
+
+    Centralized factory so callers don't need to import `threading`
+    directly; also gives a single point to swap the implementation
+    (e.g. to RLock) if a handler ever needs re-entrant acquisition.
+    """
+    return _threading.Lock()
 
 _WORKFLOW_TEMPLATES: Dict[str, Dict[str, Any]] = {
     "rl_training": {
@@ -257,6 +313,8 @@ __all__ = [
     "WORKFLOWS",
     "_WORKFLOW_TEMPLATES",
     "_WORKFLOWS",
+    "_WORKFLOWS_REGISTRY_LOCK",
+    "make_workflow_lock",
     "EUREKA",
     "TRAINING",
     "ASYNC_TASKS",
