@@ -27,6 +27,7 @@ PHASE_STATUS = "landed"
 
 @dataclass
 class EurekaRun:
+    """Record of one Eureka reward-optimisation run."""
     run_id: str
     task_description: str
     environment_id: str
@@ -40,6 +41,7 @@ class EurekaRun:
 
 @dataclass
 class EurekaIteration:
+    """Record of one Eureka iteration (reward function candidate + evaluation result)."""
     run_id: str
     iteration_idx: int
     reward_function_text: str
@@ -95,6 +97,12 @@ class EurekaRunStateStore:
     """
 
     def __init__(self, db_path: Union[Path, str] = ":memory:") -> None:
+        """Initialise the store.
+
+        Args:
+            db_path (Union[Path, str]): Path to the SQLite file, or ``":memory:"``
+                for an ephemeral in-process database (useful in tests).
+        """
         self._db_path = str(db_path)
         self._is_memory = self._db_path == ":memory:"
         # For a file-based DB, ensure the parent directory exists.
@@ -113,6 +121,11 @@ class EurekaRunStateStore:
 
     @contextmanager
     def _conn(self) -> Generator[sqlite3.Connection, None, None]:
+        """Open a connection, commit on success, rollback on exception.
+
+        Yields the persistent in-memory connection for ``:memory:`` databases,
+        or a new file-backed connection that is closed in the finally block.
+        """
         if self._is_memory and self._mem_cx is not None:
             # Yield the persistent connection without closing it.
             try:
@@ -289,7 +302,7 @@ class EurekaRunStateStore:
         return self._row_to_iteration(row)
 
     def count_runs(self) -> int:
-        """Return total number of run rows."""
+        """Return the total number of Eureka run rows in the database."""
         with self._conn() as cx:
             result = cx.execute("SELECT COUNT(*) FROM eureka_runs").fetchone()
         return result[0]
@@ -311,6 +324,7 @@ class EurekaRunStateStore:
 
     @staticmethod
     def _row_to_run(row: sqlite3.Row) -> EurekaRun:
+        """Convert a ``sqlite3.Row`` from ``eureka_runs`` to an ``EurekaRun`` dataclass."""
         return EurekaRun(
             run_id=row["run_id"],
             task_description=row["task_description"],
@@ -325,6 +339,7 @@ class EurekaRunStateStore:
 
     @staticmethod
     def _row_to_iteration(row: sqlite3.Row) -> EurekaIteration:
+        """Convert a ``sqlite3.Row`` from ``eureka_iterations`` to an ``EurekaIteration`` dataclass."""
         return EurekaIteration(
             run_id=row["run_id"],
             iteration_idx=row["iteration_idx"],

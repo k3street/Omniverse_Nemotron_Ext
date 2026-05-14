@@ -68,6 +68,7 @@ class CPRunResult:
     run_at: str = ""
 
     def __post_init__(self) -> None:
+        """Default ``run_at`` to the current UTC ISO-8601 time if not supplied."""
         if not self.run_at:
             self.run_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -99,6 +100,7 @@ class RegressionAlert:
 # ---------------------------------------------------------------------------
 
 def _result_to_dict(r: CPRunResult) -> Dict[str, Any]:
+    """Serialise a ``CPRunResult`` to a plain dict suitable for JSON-Lines output."""
     return {
         "cp_id": r.cp_id,
         "run_idx": r.run_idx,
@@ -112,6 +114,7 @@ def _result_to_dict(r: CPRunResult) -> Dict[str, Any]:
 
 
 def _dict_to_result(d: Dict[str, Any]) -> CPRunResult:
+    """Deserialise a plain dict (from JSON-Lines) back to a ``CPRunResult``."""
     return CPRunResult(
         cp_id=d["cp_id"],
         run_idx=d["run_idx"],
@@ -158,6 +161,11 @@ class FastSweepHarness:
     """
 
     def __init__(self, test_cases: List[CPTestCase]) -> None:
+        """Initialise the harness with *test_cases* as the CP library.
+
+        Args:
+            test_cases (List[CPTestCase]): Full list of canonical prompt test cases.
+        """
         self._test_cases: List[CPTestCase] = list(test_cases)
 
     # ------------------------------------------------------------------

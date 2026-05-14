@@ -108,6 +108,7 @@ class CurvedBeltGeometry:
     """
 
     def __init__(self, spec: CurvedBeltSpec) -> None:
+        """Initialise the geometry helper from the given belt *spec*."""
         self.spec = spec
 
     # ------------------------------------------------------------------
@@ -115,7 +116,7 @@ class CurvedBeltGeometry:
     # ------------------------------------------------------------------
 
     def centerline_radius_m(self) -> float:
-        """Average of inner and outer radii."""
+        """Return the average of the inner and outer radii in metres."""
         return (self.spec.inner_radius_m + self.spec.outer_radius_m) / 2.0
 
     def arc_length_m(self) -> float:
@@ -265,6 +266,13 @@ class BeltJunction:
         incoming: CurvedBeltSpec,
         outgoing: CurvedBeltSpec,
     ) -> None:
+        """Initialise the junction with its spec and the adjacent belt specs.
+
+        Args:
+            spec (BeltJunctionSpec): Junction parameters.
+            incoming (CurvedBeltSpec): Belt feeding into this junction.
+            outgoing (CurvedBeltSpec): Belt leaving this junction.
+        """
         self.spec = spec
         self.incoming = incoming
         self.outgoing = outgoing

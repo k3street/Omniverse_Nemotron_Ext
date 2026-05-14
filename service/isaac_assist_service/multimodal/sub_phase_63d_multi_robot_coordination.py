@@ -42,6 +42,7 @@ HandoffPhase = Literal[
 
 @dataclass
 class MutexState:
+    """In-memory ownership and waiter state for one named resource."""
     resource_id: ResourceID
     owner: Optional[RobotID] = None
     waiters: List[RobotID] = field(default_factory=list)
@@ -50,6 +51,7 @@ class MutexState:
 
 @dataclass
 class HandoffToken:
+    """Lifecycle token tracking a payload handoff between two robots."""
     handoff_id: str
     source_robot: RobotID
     target_robot: RobotID
@@ -74,9 +76,11 @@ class RobotResourceMutex:
     """
 
     def __init__(self) -> None:
+        """Initialise the mutex registry with an empty locks dict."""
         self._locks: Dict[ResourceID, MutexState] = {}
 
     def _ensure(self, resource_id: ResourceID) -> MutexState:
+        """Return the ``MutexState`` for *resource_id*, creating it on first access."""
         if resource_id not in self._locks:
             self._locks[resource_id] = MutexState(resource_id=resource_id)
         return self._locks[resource_id]
@@ -128,13 +132,13 @@ class RobotResourceMutex:
         return state.waiters.pop(0)
 
     def owner_of(self, resource_id: ResourceID) -> Optional[RobotID]:
-        """Return the current owner of a resource, or None."""
+        """Return the current owner robot ID for *resource_id*, or ``None`` if unowned."""
         if resource_id not in self._locks:
             return None
         return self._locks[resource_id].owner
 
     def waiters_of(self, resource_id: ResourceID) -> List[RobotID]:
-        """Return a copy of the waiters list for a resource."""
+        """Return a copy of the waiter queue for *resource_id*."""
         if resource_id not in self._locks:
             return []
         return list(self._locks[resource_id].waiters)
@@ -171,6 +175,7 @@ class RobotResourceMutex:
         rec_stack: set[RobotID] = set()
 
         def dfs(node: RobotID, path: List[RobotID]) -> None:
+            """Recursive DFS that appends detected cycles to the outer ``cycles`` list."""
             visited.add(node)
             rec_stack.add(node)
             for neighbor in wait_for.get(node, []):
@@ -219,6 +224,7 @@ class HandoffCoordinator:
     }
 
     def __init__(self) -> None:
+        """Initialise the coordinator with an empty handoff token store."""
         self.tokens: Dict[str, HandoffToken] = {}
 
     def request_handoff(
@@ -255,7 +261,7 @@ class HandoffCoordinator:
         token.phase = target_phase
 
     def abort(self, handoff_id: str, reason: str = "") -> None:
-        """Abort a handoff from any non-terminal phase."""
+        """Abort a handoff token, setting its phase to ``"aborted"``."""
         token = self._get_token(handoff_id)
         if token.phase == "completed":
             # already complete — silently ignore or raise; spec says "any phase"
@@ -264,7 +270,7 @@ class HandoffCoordinator:
         token.phase = "aborted"
 
     def complete(self, handoff_id: str) -> None:
-        """Mark a handoff as completed and record timestamp."""
+        """Transition a handoff to ``"completed"`` and record the finish timestamp."""
         token = self._get_token(handoff_id)
         allowed = self.LEGAL_TRANSITIONS.get(token.phase, set())
         if "completed" not in allowed:
@@ -275,15 +281,16 @@ class HandoffCoordinator:
         token.completed_at = _now_iso()
 
     def active_handoffs(self) -> List[HandoffToken]:
-        """Return handoffs that are not in a terminal phase."""
+        """Return all handoff tokens that are not yet in a terminal phase (completed or aborted)."""
         terminal = {"completed", "aborted"}
         return [t for t in self.tokens.values() if t.phase not in terminal]
 
     def completed_handoffs(self) -> List[HandoffToken]:
-        """Return handoffs that reached 'completed' phase."""
+        """Return all handoff tokens that have reached the ``"completed"`` phase."""
         return [t for t in self.tokens.values() if t.phase == "completed"]
 
     def _get_token(self, handoff_id: str) -> HandoffToken:
+        """Return the ``HandoffToken`` for *handoff_id*, raising ``ValueError`` if unknown."""
         if handoff_id not in self.tokens:
             raise ValueError(f"Unknown handoff_id: {handoff_id!r}")
         return self.tokens[handoff_id]
@@ -316,4 +323,5 @@ def get_phase_metadata() -> Dict[str, Any]:
 
 
 def _now_iso() -> str:
+    """Return the current UTC time as an ISO-8601 string."""
     return datetime.now(timezone.utc).isoformat()
