@@ -1,3 +1,8 @@
+# audit-Q17: cohesive — single ChatOrchestrator class; handle_message is the
+# multi-phase loop (intent → distill → tool-call → honesty rewrite) and the
+# extracted helper functions live above it on purpose to keep the call-graph
+# discoverable from one file. Tier 3 complexity (CC=312 on handle_message)
+# is tracked separately and refactored in dedicated PRs.
 """
 orchestrator.py
 ---------------
