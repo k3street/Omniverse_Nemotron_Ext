@@ -455,28 +455,64 @@ def count_handlers() -> int:
 # ---------------------------------------------------------------------------
 
 def check_schema_handler_drift() -> List[Dict]:
-    """Compare tool_schemas.py declared tools vs handler dispatch keys.
+    """Schema-orphan = declared in tool_schemas.py but no implementation.
 
-    Lightweight: parse tool_schemas.py for `"name": "..."` and grep handlers
-    for `data["..."] = ` and `_REGISTRY[...] = `.
+    Definition: a schema is bound iff there exists ANY function in the
+    service package named `_handle_<name>` or `_gen_<name>`. This is
+    binding-pattern-agnostic — it doesn't care if dispatch goes through
+    `data[...] = _handle_*`, `handlers[...] = _handle_*`, FastAPI routes,
+    MCP tool decorators, or `if name == "...":` case statements. As long
+    as the implementation function exists somewhere in the service
+    package with the matching name, the schema is bound.
     """
-    hits = []
     schemas_path = SERVICE_ROOT / "chat" / "tools" / "tool_schemas.py"
     if not schemas_path.exists():
         return [{"missing_file": str(schemas_path)}]
     src = schemas_path.read_text()
     declared = set(re.findall(r'"name":\s*"(\w+)"', src))
 
-    bound = set()
-    for path in iter_py_files(HANDLERS_ROOT):
-        text = path.read_text()
-        bound.update(re.findall(r'data\["(\w+)"\]\s*=\s*_handle_', text))
-        bound.update(re.findall(r'codegen\["(\w+)"\]\s*=\s*_gen_', text))
+    defined = set()
+    # Pattern 3: dict-style alias bindings — `codegen["X"] = _gen_Y` or
+    # `data["X"] = _handle_Y` where the alias X differs from the suffix Y.
+    # Captured via regex because AST-level analysis would need module-eval
+    # to track which dict the assignment targets.
+    alias_pattern = re.compile(
+        r'(?:codegen|data|handlers|_REGISTRY|_HANDLERS)\["(\w+)"\]\s*=\s*'
+        r'(?:_handle_|_gen_|handle_)\w+'
+    )
+    for path in iter_py_files(SERVICE_ROOT):
+        tree = parse(path)
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            # Pattern 1: `def _handle_<name>` / `def _gen_<name>` /
+            # `def handle_<name>` (the last for ROS2 MCP-style handlers in
+            # ros_mcp_tools.py which use the no-underscore convention).
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.name.startswith("_handle_"):
+                    defined.add(node.name[len("_handle_"):])
+                elif node.name.startswith("_gen_"):
+                    defined.add(node.name[len("_gen_"):])
+                elif node.name.startswith("handle_"):
+                    defined.add(node.name[len("handle_"):])
+            # Pattern 2: `if tool_name == "<name>"` / `if name == "<name>"`
+            # — case-dispatched tools (run_usd_script, add_sensor_to_prim).
+            if isinstance(node, ast.Compare):
+                if (
+                    isinstance(node.left, ast.Name)
+                    and node.left.id in ("tool_name", "name")
+                    and len(node.ops) == 1
+                    and isinstance(node.ops[0], ast.Eq)
+                    and len(node.comparators) == 1
+                    and isinstance(node.comparators[0], ast.Constant)
+                    and isinstance(node.comparators[0].value, str)
+                ):
+                    defined.add(node.comparators[0].value)
+        # Pattern 3: dict-style alias bindings
+        defined.update(alias_pattern.findall(path.read_text()))
 
-    orphan_schemas = declared - bound
-    # Many tools are bound by codegen or other paths — only flag if neither
-    # match. We tolerate the small false-positive surface as informational.
-    return [{"orphan_schema_no_handler": sorted(orphan_schemas)}] if orphan_schemas else []
+    orphans = sorted(declared - defined)
+    return [{"orphan_schema_no_handler": orphans}] if orphans else []
 
 
 # ---------------------------------------------------------------------------

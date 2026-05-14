@@ -266,3 +266,58 @@ def test_q12_blocking_io_negative(audit_module):
     assert negative_hits == [], (
         f"Expected zero blocking-I/O hits in negative fixture, got {negative_hits}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Q14 Schema drift — binding-pattern recognition
+# ---------------------------------------------------------------------------
+
+def test_q14_binding_pattern_recognition():
+    """The Q14 audit must recognise all 6 binding patterns.
+
+    Reads schema_drift_negative.py via AST + regex like the real check
+    and asserts each pattern's name appears in the `defined` set.
+    """
+    import ast
+    import re
+
+    src = (FIXTURES_DIR / "schema_drift_negative.py").read_text()
+    tree = ast.parse(src)
+
+    defined = set()
+    alias_pattern = re.compile(
+        r'(?:codegen|data|handlers|_REGISTRY|_HANDLERS)\["(\w+)"\]\s*=\s*'
+        r'(?:_handle_|_gen_|handle_)\w+'
+    )
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name.startswith("_handle_"):
+                defined.add(node.name[len("_handle_"):])
+            elif node.name.startswith("_gen_"):
+                defined.add(node.name[len("_gen_"):])
+            elif node.name.startswith("handle_"):
+                defined.add(node.name[len("handle_"):])
+        if isinstance(node, ast.Compare):
+            if (
+                isinstance(node.left, ast.Name)
+                and node.left.id in ("tool_name", "name")
+                and len(node.ops) == 1
+                and isinstance(node.ops[0], ast.Eq)
+                and len(node.comparators) == 1
+                and isinstance(node.comparators[0], ast.Constant)
+                and isinstance(node.comparators[0].value, str)
+            ):
+                defined.add(node.comparators[0].value)
+    defined.update(alias_pattern.findall(src))
+
+    expected = {
+        "pattern_one",       # _handle_*
+        "pattern_two",       # _gen_*
+        "pattern_three",     # handle_*
+        "pattern_four",      # if tool_name ==
+        "alias_pattern_five",  # codegen["X"] = _gen_*
+        "alias_pattern_six",   # data["X"] = _handle_*
+    }
+    missing = expected - defined
+    assert not missing, f"Q14 missed binding patterns: {missing}"
