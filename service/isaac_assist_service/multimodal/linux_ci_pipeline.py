@@ -71,6 +71,7 @@ class LinuxCIMatrix:
     _SCHEDULED_ARCHS = {"aarch64"}
 
     def __init__(self) -> None:
+        """Build the full 12-entry Cartesian matrix (2 OS × 3 Python × 2 arch)."""
         self._entries: List[CIMatrixEntry] = [
             CIMatrixEntry(
                 os=os,
@@ -84,7 +85,11 @@ class LinuxCIMatrix:
         ]
 
     def expand(self) -> List[CIMatrixEntry]:
-        """Return all 12 matrix entries."""
+        """Return all 12 matrix entries (all OS × Python × arch combinations).
+
+        Returns:
+            List[CIMatrixEntry]: All 12 entries regardless of event type.
+        """
         return list(self._entries)
 
     def expand_for_event(
@@ -102,7 +107,16 @@ class LinuxCIMatrix:
         return [e for e in self._entries if not e.scheduled_only]
 
     def count(self, event: Optional[str] = None) -> int:
-        """Return entry count, optionally filtered by event name."""
+        """Return the number of matrix entries for the given event type.
+
+        Args:
+            event (str, optional): GitHub Actions event name (``"push"``,
+                ``"pull_request"``, ``"schedule"``). If ``None``, returns
+                the total unfiltered count.
+
+        Returns:
+            int: Number of matching entries.
+        """
         if event is None:
             return len(self._entries)
         return len(self.expand_for_event(event))  # type: ignore[arg-type]

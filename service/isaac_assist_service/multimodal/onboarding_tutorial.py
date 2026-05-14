@@ -24,6 +24,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
+    """Return phase identification and status for Phase 103.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -129,6 +134,7 @@ class OnboardingTracker:
     """Tracks user progress through the onboarding tutorial steps."""
 
     def __init__(self) -> None:
+        """Initialise the tracker at Step 1 with no completed steps."""
         self._current_step: int = 1
         self.completed_steps: set[int] = set()
 
@@ -138,6 +144,11 @@ class OnboardingTracker:
 
     @property
     def current_step(self) -> int:
+        """Return the step_id of the active (not-yet-completed) step.
+
+        Returns:
+            int: Current step ID; exceeds the last step ID when tutorial is complete.
+        """
         return self._current_step
 
     # ------------------------------------------------------------------
@@ -167,18 +178,32 @@ class OnboardingTracker:
     # ------------------------------------------------------------------
 
     def is_complete(self) -> bool:
-        """Return True only after every tutorial step has been completed."""
+        """Return ``True`` only after every tutorial step has been completed.
+
+        Returns:
+            bool: ``True`` when all 6 steps are in ``completed_steps``.
+        """
         return len(self.completed_steps) >= len(TUTORIAL_STEPS)
 
     def next_step(self) -> Optional[TutorialStep]:
-        """Return the first non-completed TutorialStep, or None if done."""
+        """Return the first non-completed TutorialStep, or ``None`` if done.
+
+        Returns:
+            Optional[TutorialStep]: Next pending step, or ``None`` when the tutorial
+                is finished.
+        """
         for step in TUTORIAL_STEPS:
             if step.step_id not in self.completed_steps:
                 return step
         return None
 
     def progress(self) -> Dict[str, Any]:
-        """Return a progress summary dict."""
+        """Return a progress summary dict for the current session.
+
+        Returns:
+            Dict[str, Any]: Keys ``current_step`` (int), ``completed`` (int),
+                ``total`` (int), and ``pct`` (float, 0–100).
+        """
         total = len(TUTORIAL_STEPS)
         completed = len(self.completed_steps)
         pct = round(completed / total * 100.0, 1) if total > 0 else 0.0

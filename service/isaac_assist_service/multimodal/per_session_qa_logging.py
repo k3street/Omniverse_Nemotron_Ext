@@ -58,6 +58,15 @@ class SessionQALogger:
         log_dir: Path,
         max_events: int = 10_000,
     ) -> None:
+        """Initialise the logger, opening the NDJSON file in append mode.
+
+        Args:
+            session_id (str): Opaque identifier for this QA session; used as
+                the NDJSON filename stem.
+            log_dir (Path): Directory where the log file is written; created if
+                it does not already exist.
+            max_events (int, optional): Ring-buffer capacity. Defaults to 10 000.
+        """
         self.session_id = session_id
         self.log_dir = Path(log_dir)
         self.max_events = max_events
@@ -111,7 +120,11 @@ class SessionQALogger:
         return buf_list[-n:] if n < len(buf_list) else buf_list
 
     def flush(self) -> None:
-        """Flush the underlying file handle and fsync to storage."""
+        """Flush write buffers and fsync to durable storage.
+
+        Useful before handing off a session or before process exit to ensure
+        no events are lost in OS write-back caches.
+        """
         self._fh.flush()
         os.fsync(self._fh.fileno())
 
@@ -120,12 +133,14 @@ class SessionQALogger:
     # ------------------------------------------------------------------
 
     def close(self) -> None:
-        """Flush and close the log file."""
+        """Flush and close the NDJSON log file handle."""
         self.flush()
         self._fh.close()
 
     def __enter__(self) -> "SessionQALogger":
+        """Support ``with SessionQALogger(...) as logger:`` usage."""
         return self
 
     def __exit__(self, *_: object) -> None:
+        """Close the logger on context-manager exit."""
         self.close()
