@@ -852,7 +852,7 @@ the small `opus-judgment` / `opus-runtime` subset.**
 - **LOC**: ~300 lines markdown
 - **Blocked-by**: CRM-C4 (so guide references the bridge tool by its final signature)
 - **Verify**: `python -c "p='docs/guides/compliance_tuning.md'; t=open(p).read(); assert all(s in t for s in ['admittance', 'impedance', 'FDCC', 'handoff_at', 'K_xyz'])"`
-- **STATUS**: pending
+- **STATUS**: done — 8ca9177
 
 ### 18.5 Phase T — Tests + E2E
 
