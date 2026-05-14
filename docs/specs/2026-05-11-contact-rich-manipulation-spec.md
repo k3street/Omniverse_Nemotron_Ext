@@ -862,7 +862,7 @@ the small `opus-judgment` / `opus-runtime` subset.**
 - **LOC**: +400 (mostly test bodies)
 - **Blocked-by**: CRM-A2, CRM-B1, CRM-C2, CRM-C3, CRM-C4
 - **Verify**: total compliance-related L0 tests ≥30
-- **STATUS**: pending
+- **STATUS**: done — a25cb9b; 42+84+38=164 compliance L0 tests total (≥30 gate met); 3 new classes: TestSpringLawMath (3 numerical), TestParamValidation (5 boundary), TestModeConversion (2 conversion), TestHandoffContinuity (3 continuity); TestOverride ≥6 rule-families already covered by prior CRM-C3 work
 
 #### CRM-T2 — L1 mocked integration (sonnet-bounded)
 - **Files**: `tests/test_compliance_under_load.py` (NEW)
