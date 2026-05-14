@@ -448,7 +448,7 @@ def _resolve_from_legacy(name: str):
 # These were in _LEGACY_REEXPORT_NAMES as lazy bridges; the bodies now live
 # here and consumers import via `from ._shared import _X`.
 
-from datetime import datetime as _wf_dt  # noqa: E402
+from datetime import datetime as _wf_dt, timezone as _wf_tz  # noqa: E402
 from pathlib import Path as _Path  # noqa: E402
 from typing import Tuple as _Tuple  # noqa: E402
 
@@ -482,7 +482,7 @@ def _check_real_data_path(path: str) -> Optional[str]:
     return None
 
 def _wf_now_iso() -> str:
-    return _wf_dt.utcnow().isoformat() + "Z"
+    return _wf_dt.now(_wf_tz.utc).isoformat() + "Z"
 
 def _resolve_run_id(run_id: Optional[str]) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     """Resolve a run_id (or None → most-recent active run) to its registry entry.
