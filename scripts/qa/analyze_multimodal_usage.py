@@ -266,6 +266,116 @@ def supervisor_per_cp_baselines(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     return out
 
 
+def compliance_usage_breakdown(events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate compliance controller lifecycle events (CRM spec §8).
+
+    Args:
+        events: Flat list of telemetry event dicts, each with keys
+            ``event_type``, ``payload`` (dict), and ``session_id``.
+
+    Returns:
+        A structured dict with keys:
+
+        - ``by_mode`` (dict[str, int]): count of ``compliance_installed``
+          events per compliance mode (e.g. ``admittance``, ``impedance``).
+        - ``params_updates`` (int): count of ``compliance_params_updated``
+          events.
+        - ``releases`` (int): count of ``compliance_released`` events.
+        - ``active_now`` (dict[str, str]): robot_path → mode for robots that
+          have been installed but not yet released (install minus release,
+          last-write-wins on repeated installs for the same robot_path).
+    """
+    from service.isaac_assist_service.multimodal.telemetry import (
+        EVENT_COMPLIANCE_INSTALLED,
+        EVENT_COMPLIANCE_PARAMS_UPDATED,
+        EVENT_COMPLIANCE_RELEASED,
+    )
+
+    by_mode: Counter = Counter()
+    params_updates: int = 0
+    releases: int = 0
+    # robot_path → mode for currently-installed controllers
+    active: Dict[str, str] = {}
+
+    for e in events:
+        et = e.get("event_type")
+        payload = e.get("payload") or {}
+
+        if et == EVENT_COMPLIANCE_INSTALLED:
+            mode = payload.get("mode", "unknown")
+            by_mode[mode] += 1
+            robot_path = payload.get("robot_path")
+            if robot_path:
+                active[robot_path] = mode
+
+        elif et == EVENT_COMPLIANCE_PARAMS_UPDATED:
+            params_updates += 1
+
+        elif et == EVENT_COMPLIANCE_RELEASED:
+            releases += 1
+            robot_path = payload.get("robot_path")
+            if robot_path and robot_path in active:
+                del active[robot_path]
+
+    return {
+        "by_mode": dict(by_mode),
+        "params_updates": params_updates,
+        "releases": releases,
+        "active_now": dict(active),
+    }
+
+
+def contact_phase_success_rate(events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate contact-phase and insertion outcome events (CRM spec §8).
+
+    Args:
+        events: Flat list of telemetry event dicts.
+
+    Returns:
+        A structured dict with keys:
+
+        - ``phases_entered`` (int): count of ``contact_phase_entered`` events.
+        - ``phases_exited`` (int): count of ``contact_phase_exited`` events.
+        - ``insertion_succeeded`` (int): count of ``insertion_succeeded`` events.
+        - ``insertion_failed`` (int): count of ``insertion_failed`` events.
+        - ``success_rate`` (float): ``succeeded / (succeeded + failed)``; 0.0
+          when no insertion attempts have been recorded.
+    """
+    from service.isaac_assist_service.multimodal.telemetry import (
+        EVENT_CONTACT_PHASE_ENTERED,
+        EVENT_CONTACT_PHASE_EXITED,
+        EVENT_INSERTION_SUCCEEDED,
+        EVENT_INSERTION_FAILED,
+    )
+
+    phases_entered: int = 0
+    phases_exited: int = 0
+    insertion_succeeded: int = 0
+    insertion_failed: int = 0
+
+    for e in events:
+        et = e.get("event_type")
+        if et == EVENT_CONTACT_PHASE_ENTERED:
+            phases_entered += 1
+        elif et == EVENT_CONTACT_PHASE_EXITED:
+            phases_exited += 1
+        elif et == EVENT_INSERTION_SUCCEEDED:
+            insertion_succeeded += 1
+        elif et == EVENT_INSERTION_FAILED:
+            insertion_failed += 1
+
+    total_insertions = insertion_succeeded + insertion_failed
+    success_rate = (insertion_succeeded / total_insertions) if total_insertions > 0 else 0.0
+
+    return {
+        "phases_entered": phases_entered,
+        "phases_exited": phases_exited,
+        "insertion_succeeded": insertion_succeeded,
+        "insertion_failed": insertion_failed,
+        "success_rate": round(success_rate, 3),
+    }
+
+
 def aggregate(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Run all aggregations and return one report dict."""
     return {
@@ -280,6 +390,9 @@ def aggregate(events: List[Dict[str, Any]]) -> Dict[str, Any]:
         "supervisor_health": supervisor_health_summary(events),
         "supervisor_drift_precision": supervisor_drift_precision(events),
         "supervisor_per_cp_baselines": supervisor_per_cp_baselines(events),
+        # CRM compliance dashboards (CRM spec §8)
+        "compliance_usage_breakdown": compliance_usage_breakdown(events),
+        "contact_phase_success_rate": contact_phase_success_rate(events),
     }
 
 
