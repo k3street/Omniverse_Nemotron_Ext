@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any
 from .models import PatchPlan, PatchAction, ProvenanceLink, PlanGenerationRequest
 from ..analysis.models import ValidationFinding
@@ -39,7 +39,7 @@ class PlanGenerator:
         # 2. Build Plan
         return PatchPlan(
             plan_id=uuid.uuid4().hex,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             trigger="finding",
             finding_ids=[f.get("finding_id", "unknown") for f in mock_findings],
             title="Fix Physics Collision Integrity",
