@@ -1,3 +1,10 @@
+"""Generic OpenAI-compatible chat completion provider.
+
+Supports OpenAI, xAI Grok, Moonshot (Kimi K2), and any endpoint that speaks
+the OpenAI ``/v1/chat/completions`` wire format.  Handles Kimi K2.6 edge cases
+(temperature forced to 1.0; ``reasoning_content`` fallback when ``content`` is
+empty).
+"""
 import aiohttp
 import logging
 import json
@@ -26,16 +33,30 @@ PROVIDER_URLS = {
 
 @dataclass
 class LLMResponse:
+    """Unified response container returned by all LLM provider ``complete`` calls.
+
+    Attributes:
+        text: Plain-text reply from the model (may be empty when tool_calls present).
+        actions: List of ``{"type": "code_snippet", "content": ...}`` dicts extracted
+            from fenced Python blocks in the reply text.
+        tool_calls: OpenAI-format tool-call dicts, or None if the model returned text.
+    """
     text: str
     actions: List[Dict] = field(default_factory=list)
     tool_calls: Optional[List[Dict]] = None
 
 
 class OpenAICompatProvider:
-    """
-    Generic OpenAI-compatible chat completion provider.
-    Works with OpenAI, xAI Grok, and any OpenAI-compatible endpoint.
-    Supports tool/function calling when tools are provided in context.
+    """Generic OpenAI-compatible chat completion provider.
+
+    Works with OpenAI, xAI Grok, Moonshot (Kimi K2), Ollama's OpenAI-compat
+    endpoint, and any endpoint that speaks the OpenAI ``/v1/chat/completions``
+    wire format.  Supports tool/function calling when tools are passed in context.
+
+    Attributes:
+        api_key (str): Bearer token sent in the ``Authorization`` header.
+        model (str): Model identifier forwarded in the request payload.
+        base_url (str): Full URL to the completions endpoint.
     """
 
     def __init__(self, api_key: str, model: str, base_url: str):
@@ -44,6 +65,17 @@ class OpenAICompatProvider:
         self.base_url = base_url
 
     async def complete(self, messages: List[Dict], context: Dict) -> LLMResponse:
+        """Send a conversation to the OpenAI-compatible endpoint and return the response.
+
+        Args:
+            messages (list[dict]): OpenAI-style message list.  A system message is
+                prepended if none is present.
+            context (dict): Extra options — ``tools`` is an OpenAI tool-schema list;
+                ``system_override`` replaces the default system prompt.
+
+        Returns:
+            LLMResponse: Text reply and/or tool_calls from the model.
+        """
         # Prepend system message if not already present
         if not messages or messages[0].get("role") != "system":
             system = getattr(self, "_system_override", None) or SYSTEM_PROMPT

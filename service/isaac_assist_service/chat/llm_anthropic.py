@@ -1,3 +1,10 @@
+"""LLM provider for Anthropic's Claude API.
+
+Sends OpenAI-style conversation history to the Anthropic Messages endpoint,
+translating tool_calls and tool_result messages to the Anthropic content-block
+format.  Returns an ``LLMResponse`` with text, extracted code-snippet actions,
+and any tool_calls the model requested.
+"""
 import aiohttp
 import logging
 import json
@@ -18,15 +25,25 @@ SYSTEM_PROMPT = (
 
 @dataclass
 class LLMResponse:
+    """Unified response container returned by all LLM provider ``complete`` calls.
+
+    Attributes:
+        text: Plain-text reply from the model (may be empty when tool_calls present).
+        actions: List of ``{"type": "code_snippet", "content": ...}`` dicts extracted
+            from fenced Python blocks in the reply text.
+        tool_calls: OpenAI-format tool-call dicts, or None if the model returned text.
+    """
     text: str
     actions: List[Dict] = field(default_factory=list)
     tool_calls: Optional[List[Dict]] = None
 
 
 class AnthropicProvider:
-    """
-    LLM Provider connecting to Anthropic's Claude API via REST.
-    Supports tool use / function calling.
+    """LLM provider connecting to Anthropic's Claude API via REST.
+
+    Translates the OpenAI-style conversation format (used internally by the
+    orchestrator) to Anthropic's content-block format, then maps the response
+    back to :class:`LLMResponse`.  Supports tool use / function calling.
     """
     API_URL = "https://api.anthropic.com/v1/messages"
     ANTHROPIC_VERSION = "2023-06-01"
@@ -36,6 +53,19 @@ class AnthropicProvider:
         self.model = model
 
     async def complete(self, messages: List[Dict], context: Dict) -> LLMResponse:
+        """Send a conversation to Claude and return the parsed response.
+
+        Args:
+            messages (list[dict]): OpenAI-style message list with ``role`` and
+                ``content``.  ``tool`` roles are converted to
+                ``tool_result`` content blocks.
+            context (dict): Extra options — ``system_override`` replaces the
+                default system prompt; ``tools`` is an OpenAI tool-schema list
+                that is converted to Anthropic format.
+
+        Returns:
+            LLMResponse: Text reply and/or tool_calls from the model.
+        """
         system = (
             context.get("system_override")
             or getattr(self, "_system_override", None)

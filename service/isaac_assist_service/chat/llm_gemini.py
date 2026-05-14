@@ -1,3 +1,15 @@
+"""LLM provider for Google's Gemini API.
+
+Sends conversations to Gemini's ``generateContent`` endpoint with automatic
+exponential-back-off retry on 429/500/503/504.  Translates the OpenAI-style
+message format to Gemini's ``contents`` structure (``user``/``model`` roles,
+``functionCall``/``functionResponse`` parts), including Gemini 3.x
+``thoughtSignature`` round-trip for tool calls.
+
+Track-C 9.1 instrumentation: non-200 responses are appended to
+``workspace/qa_runs/provider_incidents.jsonl`` for later payload-size /
+rate-limit analysis.
+"""
 import aiohttp
 import logging
 import json
@@ -106,6 +118,16 @@ _EXPOSE_THOUGHTS = os.environ.get("GEMINI_EXPOSE_THOUGHTS", "0") == "1"
 
 @dataclass
 class LLMResponse:
+    """Unified response container returned by all LLM provider ``complete`` calls.
+
+    Attributes:
+        text: Plain-text reply from the model (may be empty when tool_calls present).
+        actions: List of ``{"type": "code_snippet", "content": ...}`` dicts extracted
+            from fenced Python blocks in the reply text.
+        tool_calls: OpenAI-format tool-call dicts, or None if the model returned text.
+        thoughts: Gemini 3.x chain-of-thought strings (only when
+            ``GEMINI_EXPOSE_THOUGHTS=1``), else None.
+    """
     text: str
     actions: List[Dict] = field(default_factory=list)
     tool_calls: Optional[List[Dict]] = None
@@ -149,9 +171,12 @@ SYSTEM_PROMPT = (
 )
 
 class GeminiProvider:
-    """
-    LLM Provider connecting to Google's Gemini API (supports all v1beta models
-    including gemini-robotics-er-1.5). Supports tool/function calling.
+    """LLM provider connecting to Google's Gemini API.
+
+    Supports all ``v1beta`` models (e.g. ``gemini-2.0-flash``,
+    ``gemini-robotics-er-1.6-preview``).  Strips unsupported ``default``
+    keys from OpenAI tool parameter schemas.  Provides tool/function calling
+    with automatic retry and Gemini 3.x thought-signature round-trip.
     """
     def __init__(self, api_key: str, model: str = "gemini-robotics-er-1.6-preview"):
         self.api_key = api_key
@@ -162,6 +187,23 @@ class GeminiProvider:
         )
 
     async def complete(self, messages: List[Dict], context: Dict) -> LLMResponse:
+        """Send a conversation to Gemini and return the parsed response.
+
+        Retries up to 4 times with exponential back-off on transient errors
+        (429, 500, 502, 503, 504).  Returns a user-friendly error string in
+        ``LLMResponse.text`` on final failure rather than raising.
+
+        Args:
+            messages (list[dict]): OpenAI-style message list.  ``tool`` roles
+                become ``functionResponse`` user parts.  ``assistant`` roles
+                with ``tool_calls`` become ``model`` parts with ``functionCall``.
+            context (dict): Extra options — ``system_override`` replaces the
+                default system prompt; ``tools`` is an OpenAI tool-schema list
+                that is converted to Gemini ``function_declarations``.
+
+        Returns:
+            LLMResponse: Text reply and/or tool_calls from the model.
+        """
         # `context` may carry a per-call system override; fall back to instance
         # attribute (legacy) then to the default. Avoid relying on instance
         # state because concurrent requests share the provider.

@@ -1,3 +1,11 @@
+"""LLM provider factory.
+
+Reads ``LLM_MODE`` from :mod:`config` and returns the appropriate provider
+instance for the main LLM and the smaller distiller LLM.
+
+Supported modes: ``local`` (Ollama), ``cloud`` (Gemini), ``anthropic``
+(Claude), ``openai``, ``grok``, ``moonshot`` (Kimi K2).
+"""
 from .llm_ollama import OllamaProvider
 from .llm_gemini import GeminiProvider
 from .llm_anthropic import AnthropicProvider

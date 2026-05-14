@@ -1,3 +1,20 @@
+"""Chat API routes for the Isaac Assist service.
+
+Exposes the following endpoints under the ``/chat`` prefix:
+
+- ``POST /message`` — primary endpoint: classify intent, call LLM with tools,
+  execute tool calls, return structured response.
+- ``POST /reset`` — clear in-memory + persisted conversation history for a session.
+- ``GET /stream/{session_id}`` — SSE stream of live trace events.
+- ``POST /cancel`` — request cancellation of the in-flight turn.
+- ``POST /undo`` — revert the most-recent stage-mutating turn via turn snapshots.
+- ``POST /clear_chat`` — wipe in-memory history without touching the stage.
+- ``POST /log_execution`` — record a patch execution result for auto-learning.
+- ``POST /compact_knowledge`` — manually trigger knowledge-base compaction.
+- ``POST /export_scene`` — export the current session scene as a reusable package.
+- ``GET /export_scene/download`` — download a previously-exported scene file.
+- ``POST /pipeline/plan`` — generate a multi-phase pipeline plan from a prompt.
+"""
 import asyncio
 import json
 from fastapi import APIRouter, HTTPException

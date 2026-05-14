@@ -44,7 +44,15 @@ _NONTOOL_SENTINELS = {
 
 
 def _exact_lookup(name: str, registered: set[str]) -> bool:
-    """Case-sensitive then case-insensitive exact match."""
+    """Case-sensitive then case-insensitive exact match against the registered set.
+
+    Args:
+        name (str): Tool name from the spec.
+        registered (set[str]): Set of all registered tool names.
+
+    Returns:
+        bool: True if ``name`` matches an entry (case-insensitive).
+    """
     if name in registered:
         return True
     lower = name.lower()
@@ -55,7 +63,19 @@ def _exact_lookup(name: str, registered: set[str]) -> bool:
 
 
 def _semantic_closest(name: str, top_k: int = 1) -> str | None:
-    """Return the most semantically similar registered tool name, or None."""
+    """Return the most semantically similar registered tool name, or None.
+
+    Uses the ``tool_retriever`` ChromaDB index (MiniLM-384 embeddings).  The
+    name is phrased as ``"tool that <name>"`` to favour action-tools over
+    named entities during embedding matching.
+
+    Args:
+        name (str): Expected tool name from the spec (may contain underscores).
+        top_k (int): Number of candidates to retrieve (uses the first one).
+
+    Returns:
+        str | None: Best-matching registered tool name, or None on error.
+    """
     try:
         from .tools.tool_retriever import retrieve_tools
         # retrieve_tools accepts a free-text query; tool names work fine since
@@ -71,10 +91,19 @@ def _semantic_closest(name: str, top_k: int = 1) -> str | None:
 
 
 def analyze(spec_steps: list[dict], registered_tools: set[str]) -> GapReport:
-    """
-    Classify each spec step's expected_tool as matched/partial/missing.
-    `spec_steps` items must have an 'expected_tool' field (StructuredSpec
-    shape). Sentinel actions (reply, reasoning) are excluded from analysis.
+    """Classify each spec step's expected_tool as matched, partial, or missing.
+
+    Sentinel actions (``reply``, ``reasoning``, etc.) are excluded.  Exact
+    matches are checked first; partial matches use :func:`_semantic_closest`;
+    anything else is ``missing``.
+
+    Args:
+        spec_steps (list[dict]): Steps from a ``StructuredSpec`` — each must
+            have an ``expected_tool`` field.
+        registered_tools (set[str]): Set of tool names currently in the registry.
+
+    Returns:
+        GapReport: Three-tier classification with a one-line ``notes`` summary.
     """
     matched: list[str] = []
     partial: dict[str, str] = {}
