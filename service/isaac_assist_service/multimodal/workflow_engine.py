@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 
 class WorkflowPhaseStatus(str, Enum):
+    """String-valued enum of all legal workflow lifecycle states."""
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     AWAITING_APPROVAL = "awaiting_approval"
@@ -25,6 +26,7 @@ class WorkflowPhaseStatus(str, Enum):
 
 @dataclass
 class WorkflowEvent:
+    """An immutable record of one workflow lifecycle transition."""
     event_type: str
     timestamp: str
     payload: Dict[str, Any] = field(default_factory=dict)
@@ -34,6 +36,7 @@ class WorkflowEngine:
     """Typed lifecycle transitions for a workflow record."""
 
     def __init__(self) -> None:
+        """Initialise the engine with an empty event log."""
         self.events: List[WorkflowEvent] = []
 
     def transition(self, current: WorkflowPhaseStatus,

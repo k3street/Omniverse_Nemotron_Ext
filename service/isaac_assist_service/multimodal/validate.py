@@ -52,10 +52,12 @@ class ValidationResult:
 
     @property
     def errors(self) -> List[ValidationIssue]:
+        """Return only the error-severity issues (those that block the build)."""
         return [i for i in self.issues if i.severity == "error"]
 
     @property
     def warnings(self) -> List[ValidationIssue]:
+        """Return only the warning-severity issues (non-blocking)."""
         return [i for i in self.issues if i.severity == "warning"]
 
 
@@ -63,6 +65,7 @@ class LayoutSpecValidationError(Exception):
     """Raised when LayoutSpec validation finds at least one error and the
     caller used validate_layout_spec(..., raise_on_error=True)."""
     def __init__(self, result: ValidationResult):
+        """Wrap *result* in an exception with a ``"[code] message"`` summary string."""
         self.result = result
         msg = "; ".join(f"[{i.code}] {i.message}" for i in result.errors)
         super().__init__(f"LayoutSpec invalid: {msg}")

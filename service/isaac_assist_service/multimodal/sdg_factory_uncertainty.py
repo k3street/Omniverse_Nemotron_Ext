@@ -38,6 +38,11 @@ FACTORY_UNDER_UNCERTAINTY_PRESET: Dict[str, Any] = {
 
 
 def get_phase_metadata() -> Dict[str, Any]:
+    """Return phase identification and status for Phase 59.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID, "title": PHASE_TITLE, "status": PHASE_STATUS,
         "spec_ref": "specs/IA_FULL_SPEC_2026-05-10.md Phase 59",
@@ -45,4 +50,5 @@ def get_phase_metadata() -> Dict[str, Any]:
 
 
 def get_preset() -> Dict[str, Any]:
+    """Return a fresh copy of the ``factory_under_uncertainty`` DR preset dict."""
     return dict(FACTORY_UNDER_UNCERTAINTY_PRESET)

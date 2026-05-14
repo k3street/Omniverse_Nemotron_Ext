@@ -152,6 +152,7 @@ class StructuralTagRegistry:
         return tag in self.entries
 
     def get(self, tag: str) -> Optional[TagEntry]:
+        """Return the ``TagEntry`` for *tag*, or ``None`` if not registered."""
         return self.entries.get(tag)
 
     def add(self, entry: TagEntry) -> None:
@@ -189,9 +190,11 @@ class StructuralTagRegistry:
         )
 
     def list_active(self) -> List[TagEntry]:
+        """Return all currently active (non-deprecated) tag entries."""
         return [e for e in self.entries.values() if e.status == "active"]
 
     def list_deprecated(self) -> List[TagEntry]:
+        """Return all deprecated tag entries."""
         return [e for e in self.entries.values() if e.status == "deprecated"]
 
 
@@ -200,6 +203,11 @@ class StructuralTagRegistry:
 # ---------------------------------------------------------------------------
 
 def _registry_to_json(registry: StructuralTagRegistry) -> Dict:
+    """Serialise *registry* to the on-disk JSON format.
+
+    Returns:
+        Dict: JSON-serialisable dict with ``"version"`` and ``"tags"`` keys.
+    """
     return {
         "version": "1.0",
         "tags": [
@@ -217,6 +225,14 @@ def _registry_to_json(registry: StructuralTagRegistry) -> Dict:
 
 
 def _registry_from_json(data: Dict) -> StructuralTagRegistry:
+    """Deserialise a ``StructuralTagRegistry`` from the on-disk JSON format.
+
+    Args:
+        data (Dict): Parsed JSON dict with a ``"tags"`` list.
+
+    Returns:
+        StructuralTagRegistry: Registry populated from *data*.
+    """
     registry = StructuralTagRegistry()
     for raw in data.get("tags", []):
         entry = TagEntry(
@@ -274,7 +290,12 @@ def save_registry(
     registry: StructuralTagRegistry,
     path: Optional[Path] = None,
 ) -> None:
-    """Persist the registry to disk."""
+    """Persist *registry* to disk in the standard JSON format.
+
+    Args:
+        registry (StructuralTagRegistry): Registry to save.
+        path (Path, optional): Override the default registry path. Mainly for tests.
+    """
     target_path = path or _DEFAULT_REGISTRY_PATH
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(

@@ -221,11 +221,13 @@ class Source(BaseModel):
 # ---------------------------------------------------------------------------
 
 class Position(BaseModel):
+    """2-D position in drawing-space units (metres)."""
     x: float
     y: float
 
 
 class Size(BaseModel):
+    """2-D bounding-box dimensions; both ``w`` and ``h`` must be positive."""
     w: float = Field(gt=0)
     h: float = Field(gt=0)
 

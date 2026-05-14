@@ -40,6 +40,11 @@ def set_telemetry_enabled(enabled: bool) -> None:
 
 
 def get_phase_metadata() -> Dict[str, Any]:
+    """Return phase identification and status for Phase 104.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID, "title": PHASE_TITLE, "status": PHASE_STATUS,
         "spec_ref": "specs/IA_FULL_SPEC_2026-05-10.md Phase 104",
