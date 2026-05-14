@@ -147,3 +147,122 @@ def test_q4_get_event_loop_negative(audit_module):
     assert negative_hits == [], (
         f"Expected zero get_event_loop hits in negative fixture, got {len(negative_hits)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Q21b silent-failure — positive has 2 hits, negative has 0
+# ---------------------------------------------------------------------------
+
+def test_q21b_silent_failure_positive(audit_module):
+    """Positive fixture has 2 silent-failure returns."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_silent_failures()
+    positive_hits = [h for h in hits if "silent_failure_positive" in h["file"]]
+
+    assert len(positive_hits) == 2, (
+        f"Expected 2 silent-failure hits in positive fixture, got {len(positive_hits)}: "
+        f"{positive_hits}"
+    )
+
+
+def test_q21b_silent_failure_negative(audit_module):
+    """Negative fixture uses error/output/reason/message/**err — zero hits."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_silent_failures()
+    negative_hits = [h for h in hits if "silent_failure_negative" in h["file"]]
+
+    assert negative_hits == [], (
+        f"Expected zero silent-failure hits in negative fixture, got {len(negative_hits)}: "
+        f"{negative_hits}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Q9 + Q10 Security checks
+# ---------------------------------------------------------------------------
+
+def test_q9_eval_exec_positive(audit_module):
+    """Positive fixture has 1 eval + 1 exec call."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_no_eval_exec()
+    positive_hits = [h for h in hits if "security_positive" in h["file"]]
+
+    assert len(positive_hits) == 2, (
+        f"Expected 2 eval/exec hits in positive fixture, got {len(positive_hits)}: "
+        f"{positive_hits}"
+    )
+    calls = {h["call"] for h in positive_hits}
+    assert calls == {"eval", "exec"}, f"Expected both eval+exec, got {calls}"
+
+
+def test_q9_eval_exec_negative(audit_module):
+    """Negative fixture: ast.literal_eval + shadowed name — zero hits."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_no_eval_exec()
+    negative_hits = [h for h in hits if "security_negative" in h["file"]]
+
+    assert negative_hits == [], (
+        f"Expected zero eval/exec hits in negative fixture, got {negative_hits}"
+    )
+
+
+def test_q10_shell_true_positive(audit_module):
+    """Positive fixture has 2 shell=True calls."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_no_shell_true()
+    positive_hits = [h for h in hits if "security_positive" in h["file"]]
+
+    assert len(positive_hits) == 2, (
+        f"Expected 2 shell=True hits in positive fixture, got {len(positive_hits)}: "
+        f"{positive_hits}"
+    )
+
+
+def test_q10_shell_true_negative(audit_module):
+    """Negative: list-form + shell=False — zero hits."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_no_shell_true()
+    negative_hits = [h for h in hits if "security_negative" in h["file"]]
+
+    assert negative_hits == [], (
+        f"Expected zero shell=True hits in negative fixture, got {negative_hits}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Q12 Blocking I/O in async
+# ---------------------------------------------------------------------------
+
+def test_q12_blocking_io_positive(audit_module):
+    """Positive fixture has 3 blocking calls (time.sleep, requests.get, open)."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_no_blocking_io_in_async()
+    positive_hits = [h for h in hits if "blocking_io_positive" in h["file"]]
+
+    assert len(positive_hits) == 3, (
+        f"Expected 3 blocking-I/O hits in positive fixture, got {len(positive_hits)}: "
+        f"{positive_hits}"
+    )
+    calls = {h["call"] for h in positive_hits}
+    assert calls == {"time.sleep", "requests.get", "open"}, (
+        f"Expected time.sleep + requests.get + open, got {calls}"
+    )
+
+
+def test_q12_blocking_io_negative(audit_module):
+    """Negative: asyncio.sleep + aiohttp + sync-helpers — zero hits in async fns."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_no_blocking_io_in_async()
+    negative_hits = [h for h in hits if "blocking_io_negative" in h["file"]]
+
+    assert negative_hits == [], (
+        f"Expected zero blocking-I/O hits in negative fixture, got {negative_hits}"
+    )

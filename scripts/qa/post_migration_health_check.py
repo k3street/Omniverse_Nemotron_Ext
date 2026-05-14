@@ -240,23 +240,21 @@ def check_no_blocking_io_in_async() -> List[Dict]:
         for func in ast.walk(tree):
             if not isinstance(func, ast.AsyncFunctionDef):
                 continue
-            for node in ast.walk(func):
-                if not isinstance(node, ast.Call):
-                    continue
-                # bare blocking funcs (open, input)
+            # Scope-isolated walk: only inspect calls that live directly in
+            # this async fn's body. Nested defs/lambdas are separate scopes;
+            # `asyncio.to_thread(lambda: open(...))` is safe because the
+            # lambda runs in a thread pool, not in the event loop.
+            for node in _direct_descendants(func, (ast.Call,)):
                 if (
                     isinstance(node.func, ast.Name)
                     and node.func.id in BLOCKING_FUNCS
                 ):
-                    # `open` in `with open(...) as fh:` outside loops is technically blocking
-                    # but extremely common config-file reads — skip if first stmt in function
                     hits.append({
                         "file": rel(path),
                         "line": node.lineno,
                         "fn": func.name,
                         "call": node.func.id,
                     })
-                # attribute blocking (time.sleep, requests.*)
                 if isinstance(node.func, ast.Attribute) and isinstance(
                     node.func.value, ast.Name
                 ):
@@ -390,7 +388,15 @@ def check_handlers_layer_isolation() -> List[Dict]:
 # ---------------------------------------------------------------------------
 
 def check_silent_failures() -> List[Dict]:
-    """Find dict returns with success=False but no error key."""
+    """Find dict returns with success=False but no error-information.
+
+    A genuine honesty hole is `return {"success": False}` with no
+    accompanying explanation. We accept any of these as evidence the
+    caller is being told what went wrong:
+    - explicit string keys: error, output, reason, message, detail, msg
+    - dict-unpack: `**err_dict` (spread is conventionally error info)
+    """
+    ERROR_KEYS = {"error", "output", "reason", "message", "detail", "msg"}
     hits = []
     for path in iter_py_files(SERVICE_ROOT):
         tree = parse(path)
@@ -402,8 +408,13 @@ def check_silent_failures() -> List[Dict]:
             if not isinstance(node.value, ast.Dict):
                 continue
             keys = []
+            has_unpack = False
             success_false = False
             for k, v in zip(node.value.keys, node.value.values):
+                if k is None:
+                    # `**something` — spread; counts as error-info
+                    has_unpack = True
+                    continue
                 if (
                     isinstance(k, ast.Constant)
                     and isinstance(k.value, str)
@@ -415,8 +426,9 @@ def check_silent_failures() -> List[Dict]:
                         and v.value is False
                     ):
                         success_false = True
-            if success_false and "error" not in keys:
-                hits.append({"file": rel(path), "line": node.lineno})
+            if success_false and not has_unpack:
+                if not any(k in ERROR_KEYS for k in keys):
+                    hits.append({"file": rel(path), "line": node.lineno})
     return hits
 
 
