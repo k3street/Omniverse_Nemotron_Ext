@@ -11,7 +11,7 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-05-13T12:18:32+00:00
+Generated: 2026-05-14T01:13:55+00:00
 Tool count: 430
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
@@ -879,6 +879,8 @@ class AddForceTorqueSensorArgs(BaseModel):
     sensor_path: str
     parent_path: str
     threshold: Optional[float] = Field(None)
+    noise_std: Optional[float] = Field(None, description="Gaussian noise std-dev (N / N·m) added to force/torque readings for sim-to-real gap emulation. Default 0.0 = no noise.")
+    publish_topic: Optional[str] = Field(None, description="Optional ROS2-style topic name. When set, the generated code registers a publisher stub so downstream consumers can subscribe.")
 
 
 class SetupAssemblyConstraintArgs(BaseModel):

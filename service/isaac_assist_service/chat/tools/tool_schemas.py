@@ -1885,6 +1885,14 @@ ISAAC_SIM_TOOLS = [
                     "sensor_path": {"type": "string"},
                     "parent_path": {"type": "string"},
                     "threshold": {"type": "number"},
+                    "noise_std": {
+                        "type": "number",
+                        "description": "Gaussian noise std-dev (N / N·m) added to force/torque readings for sim-to-real gap emulation. Default 0.0 = no noise.",
+                    },
+                    "publish_topic": {
+                        "type": "string",
+                        "description": "Optional ROS2-style topic name. When set, the generated code registers a publisher stub so downstream consumers can subscribe.",
+                    },
                 },
                 "required": ["sensor_path", "parent_path"],
             },
