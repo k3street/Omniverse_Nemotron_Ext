@@ -95,13 +95,22 @@ def find_attribute_accesses(root: Path, names: Set[str]) -> Dict[str, Dict]:
                         data[qn]["writes"].append((rel_path, t.lineno))
                         write_nodes.add(id(t.value))
 
-        # Second pass: collect read accesses
+        # Collect Attribute nodes used as Call.func — those are method
+        # invocations (`Path.mkdir(...)`), NOT field-reads. They should be
+        # skipped to avoid the FP class found in Tier 2 first-run.
+        method_call_attrs: Set[int] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                method_call_attrs.add(id(node.func))
+
+        # Second pass: collect read accesses (skip method-call attrs)
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Attribute)
                 and isinstance(node.value, ast.Name)
                 and node.value.id in names
                 and id(node) not in write_nodes
+                and id(node) not in method_call_attrs
             ):
                 qn = f"{node.value.id}.{node.attr}"
                 data[qn]["reads"].append((rel_path, node.lineno))

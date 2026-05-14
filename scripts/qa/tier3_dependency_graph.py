@@ -50,25 +50,39 @@ def module_name_for(path: Path) -> str:
 
 
 def extract_imports(tree: ast.AST, this_mod: str) -> List[Tuple[str, str]]:
-    """Return [(imported_mod, kind)] for this module."""
+    """Return [(imported_mod, kind)] for this module.
+
+    Only top-level imports count for cycle detection. Imports inside
+    functions are explicit cycle-breakers (lazy imports) and must not be
+    treated as load-time edges.
+    """
     out = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name.startswith(PKG_PREFIX):
-                    out.append((alias.name, "absolute"))
-        elif isinstance(node, ast.ImportFrom):
-            if node.level > 0:
-                # relative: resolve against current package
-                parts = this_mod.split(".")
-                base = parts[: len(parts) - node.level]
-                if node.module:
-                    base.append(node.module)
-                resolved = ".".join(base)
-                if resolved.startswith(PKG_PREFIX):
-                    out.append((resolved, "relative"))
-            elif node.module and node.module.startswith(PKG_PREFIX):
-                out.append((node.module, "absolute"))
+    # Walk only top-level statements + their direct (non-function) children.
+    SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+
+    def walk_module(n: ast.AST):
+        for child in ast.iter_child_nodes(n):
+            if isinstance(child, SCOPES):
+                continue  # imports inside functions/classes are lazy
+            if isinstance(child, ast.Import):
+                for alias in child.names:
+                    if alias.name.startswith(PKG_PREFIX):
+                        out.append((alias.name, "absolute"))
+            elif isinstance(child, ast.ImportFrom):
+                if child.level > 0:
+                    parts = this_mod.split(".")
+                    base = parts[: len(parts) - child.level]
+                    if child.module:
+                        base.append(child.module)
+                    resolved = ".".join(base)
+                    if resolved.startswith(PKG_PREFIX):
+                        out.append((resolved, "relative"))
+                elif child.module and child.module.startswith(PKG_PREFIX):
+                    out.append((child.module, "absolute"))
+            else:
+                walk_module(child)  # walk non-scope blocks (If, Try, With)
+
+    walk_module(tree)
     return out
 
 
