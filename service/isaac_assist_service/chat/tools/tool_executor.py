@@ -306,6 +306,7 @@ async def execute_tool_call(
         })
 
     async def _inner() -> Dict[str, Any]:
+        """Dispatch the validated tool call to its handler and return the result dict."""
         # 1. Data handlers — return result directly
         if tool_name in DATA_HANDLERS:
             handler = DATA_HANDLERS[tool_name]

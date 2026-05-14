@@ -193,6 +193,7 @@ def _count_user_vs_system_prims(nodes) -> tuple[int, int]:
     system = 0
 
     def _walk(node):
+        """Recursive helper — classifies one tree node + recurses into children."""
         nonlocal user, system
         path = node.get("path", "")
         if path:
@@ -215,6 +216,18 @@ def _count_user_vs_system_prims(nodes) -> tuple[int, int]:
 
 
 def _tree_to_text(nodes, indent=0, max_nodes=40, _count=[0]) -> str:
+    """Render a prim-tree as indented text, capped at ``max_nodes`` entries.
+
+    Args:
+        nodes: List of node dicts (each has ``path``, ``type``, ``children``).
+        indent: Leading-space count for this recursion level.
+        max_nodes: Stop emitting after this many nodes; appends ``...``.
+        _count: Single-element list used as a mutable counter across recursive
+            calls (shared state via default-arg trick — do not pass explicitly).
+
+    Returns:
+        Multi-line string of ``<indent><path> (<type>)`` entries.
+    """
     lines = []
     prefix = " " * indent
     for node in nodes:
