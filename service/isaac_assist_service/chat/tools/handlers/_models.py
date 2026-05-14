@@ -11,8 +11,8 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-05-14T01:13:55+00:00
-Tool count: 430
+Generated: 2026-05-14T01:32:31+00:00
+Tool count: 431
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
 """
@@ -881,6 +881,23 @@ class AddForceTorqueSensorArgs(BaseModel):
     threshold: Optional[float] = Field(None)
     noise_std: Optional[float] = Field(None, description="Gaussian noise std-dev (N / N·m) added to force/torque readings for sim-to-real gap emulation. Default 0.0 = no noise.")
     publish_topic: Optional[str] = Field(None, description="Optional ROS2-style topic name. When set, the generated code registers a publisher stub so downstream consumers can subscribe.")
+
+
+class SetupAdmittanceControllerArgs(BaseModel):
+    """CRM-A2 — Tier C compliance tool. Configures an admittance controller for a robot using the step law F = K·(x_desired - x_actual) - D·v_actual + F_ext. dry_run=True (default) returns a config dict for"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    robot_path: str = Field(..., description="USD path to the robot articulation root, e.g. '/World/Franka'.")
+    target_frame: Optional[str] = Field(None, description="Tool/end-effector frame name used by ros2_control. Default 'tool0'.")
+    mass_xyz: Optional[List[float]] = Field(None, description="Virtual mass for each translational axis [kg]. Default [1.0, 1.0, 1.0].")
+    stiffness_xyz: Optional[List[float]] = Field(None, description="Translational spring stiffness per axis [N/m]. Must be positive. Default [500.0, 500.0, 500.0].")
+    damping_xyz: Optional[List[float]] = Field(None, description="Translational damping coefficient per axis [N·s/m]. Default [50.0, 50.0, 50.0].")
+    mass_rot: Optional[List[float]] = Field(None, description="Virtual inertia for each rotational axis [kg·m²]. Default [0.1, 0.1, 0.1].")
+    stiffness_rot: Optional[List[float]] = Field(None, description="Rotational spring stiffness per axis [N·m/rad]. Must be positive. Default [50.0, 50.0, 50.0].")
+    damping_rot: Optional[List[float]] = Field(None, description="Rotational damping coefficient per axis [N·m·s/rad]. Default [5.0, 5.0, 5.0].")
+    ft_sensor_path: Optional[str] = Field(None, description="Optional USD path to the force/torque sensor prim whose readings feed the F_ext term.")
+    chain_after: Optional[str] = Field(None, description="ros2_control controller that runs before the admittance layer. Default 'joint_trajectory_controller'.")
+    dry_run: Optional[bool] = Field(None, description="If true (default), return config dict without touching Kit or ROS2. Set false only when bridge is provisioned.")
 
 
 class SetupAssemblyConstraintArgs(BaseModel):
@@ -3968,6 +3985,7 @@ MODEL_REGISTRY = {
     "create_linear_axis_robot": CreateLinearAxisRobotArgs,
     "nir_material_sensor": NirMaterialSensorArgs,
     "add_force_torque_sensor": AddForceTorqueSensorArgs,
+    "setup_admittance_controller": SetupAdmittanceControllerArgs,
     "setup_assembly_constraint": SetupAssemblyConstraintArgs,
     "setup_zone_partition": SetupZonePartitionArgs,
     "setup_cortex_behavior": SetupCortexBehaviorArgs,

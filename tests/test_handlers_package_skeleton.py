@@ -21,8 +21,9 @@ import pytest
 pytestmark = pytest.mark.l0
 
 
-# The 17 themed modules per IA_FULL_SPEC Phase 2 + Phase 9 additions.
+# The 18 themed modules per IA_FULL_SPEC Phase 2 + Phase 9 additions.
 # Phase 9 added: animation, pick_place, rendering.
+# CRM-A2 added: compliance.
 THEMED_MODULES = (
     "scene_authoring",
     "physics",
@@ -41,6 +42,7 @@ THEMED_MODULES = (
     "animation",
     "pick_place",
     "rendering",
+    "compliance",
     "contact_sequence",
 )
 

@@ -1901,6 +1901,76 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "setup_admittance_controller",
+            "description": (
+                "CRM-A2 — Tier C compliance tool. Configures an admittance controller "
+                "for a robot using the step law F = K·(x_desired - x_actual) - D·v_actual + F_ext. "
+                "dry_run=True (default) returns a config dict for offline inspection; "
+                "dry_run=False requires the Kit RPC + ros2_control bridge (CRM-A1). "
+                "Used by #22 Peg-in-Hole Insertion and any contact-rich task needing "
+                "compliant Cartesian control."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {
+                        "type": "string",
+                        "description": "USD path to the robot articulation root, e.g. '/World/Franka'.",
+                    },
+                    "target_frame": {
+                        "type": "string",
+                        "description": "Tool/end-effector frame name used by ros2_control. Default 'tool0'.",
+                    },
+                    "mass_xyz": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Virtual mass for each translational axis [kg]. Default [1.0, 1.0, 1.0].",
+                    },
+                    "stiffness_xyz": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Translational spring stiffness per axis [N/m]. Must be positive. Default [500.0, 500.0, 500.0].",
+                    },
+                    "damping_xyz": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Translational damping coefficient per axis [N·s/m]. Default [50.0, 50.0, 50.0].",
+                    },
+                    "mass_rot": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Virtual inertia for each rotational axis [kg·m²]. Default [0.1, 0.1, 0.1].",
+                    },
+                    "stiffness_rot": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Rotational spring stiffness per axis [N·m/rad]. Must be positive. Default [50.0, 50.0, 50.0].",
+                    },
+                    "damping_rot": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Rotational damping coefficient per axis [N·m·s/rad]. Default [5.0, 5.0, 5.0].",
+                    },
+                    "ft_sensor_path": {
+                        "type": "string",
+                        "description": "Optional USD path to the force/torque sensor prim whose readings feed the F_ext term.",
+                    },
+                    "chain_after": {
+                        "type": "string",
+                        "description": "ros2_control controller that runs before the admittance layer. Default 'joint_trajectory_controller'.",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "If true (default), return config dict without touching Kit or ROS2. Set false only when bridge is provisioned.",
+                    },
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "setup_assembly_constraint",
             "description": "Tier C — sets up assembly relationship between peg and hole. Used by #22 Peg-in-Hole. Runtime FixedJoint creation when peg aligns within tolerance is Sprint 3+.",
             "parameters": {

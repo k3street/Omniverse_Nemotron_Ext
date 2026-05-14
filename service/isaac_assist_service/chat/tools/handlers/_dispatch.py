@@ -17,6 +17,7 @@ from typing import Any, Awaitable, Callable, Dict
 from . import (
     animation,
     arena,
+    compliance,
     contact_sequence,
     diagnostics,
     physics,
@@ -57,6 +58,7 @@ _THEME_MODULES = (
     rendering,
     animation,
     pick_place,
+    compliance,
     contact_sequence,
     workflow,
     resolve,

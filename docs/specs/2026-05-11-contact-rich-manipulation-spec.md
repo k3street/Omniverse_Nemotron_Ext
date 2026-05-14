@@ -755,7 +755,7 @@ the small `opus-judgment` / `opus-runtime` subset.**
 - **LOC**: ~150 handler + 100 tests
 - **Blocked-by**: CRM-A1
 - **Verify**: `python -m pytest tests/test_compliance_handlers.py::TestAdmittance --tb=short` ≥8 tests pass; `python -c "import asyncio; from service.isaac_assist_service.chat.tools import tool_executor as te; r=asyncio.run(te.execute_tool_call('setup_admittance_controller', {'robot_path':'/W/R'})); assert 'error' not in r or 'dry_run' in r"`
-- **STATUS**: pending
+- **STATUS**: pending_commit
 
 #### CRM-A3 — F/T sensor harmonization (sonnet-mechanical)
 - **Files**: existing handler at `service/isaac_assist_service/chat/tools/handlers/sensors.py` (locate via grep for `_handle_add_force_torque_sensor` or the codegen); `service/isaac_assist_service/chat/tools/tool_schemas.py` (update existing add_force_torque_sensor schema at ~line 1880)
