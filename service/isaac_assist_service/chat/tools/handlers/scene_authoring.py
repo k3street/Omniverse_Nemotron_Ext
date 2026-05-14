@@ -35,6 +35,24 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 # ---------------------------------------------------------------------------
+# Module-level named constants (extracted 2026-05-14, refactor/magic-1)
+
+# Light creation defaults
+_DEFAULT_LIGHT_INTENSITY: float = 1000.0  # lux; applied when a Light prim is created without
+                                            # explicit intensity — unset reads as None/0 in some renderers
+
+# Scene optimisation thresholds (used in _gen_optimize_scene)
+_HEAVY_MESH_VERTEX_THRESHOLD: int = 10000   # vertex count above which a CollisionMesh is "heavy" and
+                                              # should be replaced with convexHull / convexDecomposition
+_MAX_SOLVER_ITERATIONS: int = 16             # articulation solver iterations above this → over-iterated
+_REDUCED_SOLVER_ITERATIONS: int = 4          # target iteration count after reduction
+_DEFAULT_TARGET_FPS: int = 60               # default rendering target for optimize_scene mode
+
+# Result / payload caps
+_SCENE_ANALYSIS_FINDINGS_CAP: int = 50      # max findings returned per run to avoid huge JSON payloads
+_PRIM_LIST_CAP: int = 200                   # max prim paths returned by count_prims / list_all_prims
+
+# ---------------------------------------------------------------------------
 # Theme-local state caches (Phase 8 wave 22, 2026-05-13)
 # Migrated from tool_executor.py — used only by handlers.scene_authoring.
 #
@@ -625,7 +643,7 @@ def _gen_create_prim(args: Dict) -> str:
     _LIGHT_TYPES = {"DomeLight", "DistantLight", "SphereLight", "RectLight",
                     "DiskLight", "CylinderLight"}
     if prim_type in _LIGHT_TYPES:
-        _i = float(intensity) if intensity is not None else 1000.0
+        _i = float(intensity) if intensity is not None else _DEFAULT_LIGHT_INTENSITY
         lines.append("from pxr import Sdf as _Sdf")
         lines.append("_ia = prim.GetAttribute('inputs:intensity')")
         lines.append("if not _ia or not _ia.IsDefined():")
@@ -1117,7 +1135,7 @@ def _gen_batch_apply_operation(args: Dict) -> str:
 def _gen_optimize_scene(args: Dict) -> str:
     """Generate a scene optimization script that identifies bottlenecks and applies fixes."""
     mode = args.get("mode", "conservative")
-    target_fps = args.get("target_fps", 60)
+    target_fps = args.get("target_fps", _DEFAULT_TARGET_FPS)
 
     analyze_only = "True" if mode == "analyze" else "False"
     apply_aggressive = "True" if mode == "aggressive" else "False"
@@ -1135,14 +1153,14 @@ apply_aggressive = {apply_aggressive}
 optimizations = []
 patches_applied = 0
 
-# ── Step 1: Find heavy collision meshes (vertex count > 10000) ──
+# ── Step 1: Find heavy collision meshes (vertex count > {_HEAVY_MESH_VERTEX_THRESHOLD}) ──
 heavy_prims = []
 for prim in stage.Traverse():
     if prim.HasAPI(UsdPhysics.CollisionAPI):
         mesh = UsdGeom.Mesh(prim)
         if mesh:
             pts = mesh.GetPointsAttr().Get()
-            if pts and len(pts) > 10000:
+            if pts and len(pts) > {_HEAVY_MESH_VERTEX_THRESHOLD}:
                 is_static = not prim.HasAPI(UsdPhysics.RigidBodyAPI)
                 heavy_prims.append({{
                     'path': str(prim.GetPath()),
@@ -1168,13 +1186,13 @@ if heavy_prims:
         'details': [h['path'] for h in heavy_prims],
     }})
 
-# ── Step 2: Reduce over-iterated articulations (threshold > 16) ──
+# ── Step 2: Reduce over-iterated articulations (threshold > {_MAX_SOLVER_ITERATIONS}) ──
 over_iterated = []
 for prim in stage.Traverse():
     if prim.HasAPI(PhysxSchema.PhysxArticulationAPI):
         api = PhysxSchema.PhysxArticulationAPI(prim)
         iters_attr = api.GetSolverPositionIterationCountAttr()
-        if iters_attr and iters_attr.Get() is not None and iters_attr.Get() > 16:
+        if iters_attr and iters_attr.Get() is not None and iters_attr.Get() > {_MAX_SOLVER_ITERATIONS}:
             over_iterated.append({{
                 'path': str(prim.GetPath()),
                 'current_iterations': iters_attr.Get(),
@@ -1184,7 +1202,7 @@ if over_iterated and not analyze_only:
     for info in over_iterated:
         p = stage.GetPrimAtPath(info['path'])
         api = PhysxSchema.PhysxArticulationAPI(p)
-        api.GetSolverPositionIterationCountAttr().Set(4)
+        api.GetSolverPositionIterationCountAttr().Set({_REDUCED_SOLVER_ITERATIONS})
         patches_applied += 1
 
 if over_iterated:
@@ -3472,8 +3490,8 @@ async def _handle_run_stage_analysis(args: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "total_findings": len(results),
         "summary": summary,
-        "findings": results[:50],  # cap to avoid huge payloads
-        "truncated": len(results) > 50,
+        "findings": results[:_SCENE_ANALYSIS_FINDINGS_CAP],  # cap to avoid huge payloads
+        "truncated": len(results) > _SCENE_ANALYSIS_FINDINGS_CAP,
     }
 
 
@@ -3827,8 +3845,8 @@ else:
     if {type_filter!r}:
         prims = [p for p in prims if str(p.GetTypeName()) == {type_filter!r}]
     result['count'] = len(prims)
-    result['paths'] = [str(p.GetPath()) for p in prims[:200]]
-    result['truncated'] = len(prims) > 200
+    result['paths'] = [str(p.GetPath()) for p in prims[:{_PRIM_LIST_CAP}]]
+    result['truncated'] = len(prims) > {_PRIM_LIST_CAP}
 print(json.dumps(result, default=str))
 """
     return await kit_tools.queue_exec_patch(code, f"count_prims {parent_path}")
