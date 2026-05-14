@@ -127,6 +127,7 @@ class BlueprintValidator:
     def _check_required_fields(
         self, blueprint: Dict[str, Any]
     ) -> List[ConstraintViolation]:
+        """Return hard violations for every required top-level field absent from *blueprint*."""
         vs: List[ConstraintViolation] = []
         for field in _REQUIRED_FIELDS:
             if field not in blueprint:
@@ -152,6 +153,7 @@ class BlueprintValidator:
     def _check_unknown_object_class(
         self, blueprint: Dict[str, Any]
     ) -> List[ConstraintViolation]:
+        """Return hard violations for each object whose ``asset_name`` is not in PALETTE."""
         vs: List[ConstraintViolation] = []
         objects = blueprint.get("objects", [])
         if not isinstance(objects, list):
@@ -190,6 +192,7 @@ class BlueprintValidator:
     def _check_aabb_overlap(
         self, blueprint: Dict[str, Any]
     ) -> List[ConstraintViolation]:
+        """Return soft violations for pairs of objects whose XY-footprint AABBs overlap."""
         vs: List[ConstraintViolation] = []
         objects = blueprint.get("objects", [])
         if not isinstance(objects, list):
@@ -244,6 +247,7 @@ class BlueprintValidator:
     def _check_room_bounds(
         self, blueprint: Dict[str, Any]
     ) -> List[ConstraintViolation]:
+        """Return soft violations for objects that extend outside the declared room dims."""
         vs: List[ConstraintViolation] = []
         room_dims = blueprint.get("room_dims")
         if room_dims is None:

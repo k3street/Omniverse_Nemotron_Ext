@@ -172,6 +172,7 @@ class PatchRiskClassifier:
     )
 
     def __init__(self) -> None:
+        """Initialise the risk scorer (no instance state; all data is class-level)."""
         pass
 
     # ------------------------------------------------------------------
@@ -328,6 +329,14 @@ class PatchSandbox:
     )
 
     def __init__(self, policy: SandboxPolicy, dry_run: bool = True) -> None:
+        """Initialise the executor with a sandbox policy.
+
+        Args:
+            policy (SandboxPolicy): Policy object defining network, filesystem,
+                subprocess, and resource-limit restrictions.
+            dry_run (bool): When ``True`` (default), patch execution is simulated
+                rather than actually applied.
+        """
         self._policy = policy
         self._dry_run = dry_run
 

@@ -55,7 +55,7 @@ class EvalScenario:
 
 @dataclass
 class EvalRun:
-    """Result of evaluating a single scenario."""
+    """Pass/fail result record for a single GR00T-N1.7 scenario evaluation run."""
 
     scenario_id: str
     model_version: str

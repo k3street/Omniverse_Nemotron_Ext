@@ -160,6 +160,13 @@ class ContactReachabilityValidator:
     """
 
     def __init__(self, reach_margin_m: float = 0.05) -> None:
+        """Initialise the reachability validator.
+
+        Args:
+            reach_margin_m (float): Safety margin (m) subtracted/added from the
+                reach envelope bounds.  Contacts at exactly ``max_reach_m`` are
+                rejected.  Defaults to 0.05 m (5 cm).
+        """
         self.reach_margin_m = reach_margin_m
 
     # ------------------------------------------------------------------
@@ -168,7 +175,7 @@ class ContactReachabilityValidator:
 
     @staticmethod
     def distance(a: Vec3, b: Vec3) -> float:
-        """Euclidean distance between two 3-D points."""
+        """Return the Euclidean distance between two 3-D points *a* and *b*."""
         dx = b[0] - a[0]
         dy = b[1] - a[1]
         dz = b[2] - a[2]

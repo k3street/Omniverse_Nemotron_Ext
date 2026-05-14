@@ -35,7 +35,7 @@ TagStatus = Literal["active", "deprecated"]
 
 @dataclass(frozen=True)
 class TagEntry:
-    """One entry in the structural-tags registry."""
+    """Immutable record for one tag in the structural-tags vocabulary registry."""
     tag: str
     status: TagStatus
     description: str
@@ -134,7 +134,7 @@ _DEFAULT_TAGS: List[TagEntry] = [
 
 @dataclass
 class StructuralTagRegistry:
-    """In-memory registry of accepted structural_tags."""
+    """In-memory registry of accepted structural_tag vocabulary entries."""
     entries: Dict[str, TagEntry] = field(default_factory=dict)
 
     def is_active(self, tag: str) -> bool:
@@ -194,7 +194,7 @@ class StructuralTagRegistry:
         return [e for e in self.entries.values() if e.status == "active"]
 
     def list_deprecated(self) -> List[TagEntry]:
-        """Return all deprecated tag entries."""
+        """Return all tag entries whose status is ``"deprecated"``."""
         return [e for e in self.entries.values() if e.status == "deprecated"]
 
 

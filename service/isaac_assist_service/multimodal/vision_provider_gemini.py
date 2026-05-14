@@ -97,7 +97,7 @@ PROMPT_TEMPLATES: Dict[str, str] = {
 
 @dataclass
 class VisionRequest:
-    """Input to any VisionProvider method."""
+    """Image and task parameters passed as input to any VisionProvider method."""
     image_bytes: bytes
     prompt: str
     task: Literal["scene_analyze", "bounding_boxes", "detect_objects", "plan_trajectory"]
@@ -108,7 +108,7 @@ class VisionRequest:
 
 @dataclass
 class BoundingBox:
-    """A single detected bounding box."""
+    """A single labelled bounding box returned by an object-detection inference."""
     label: str
     confidence: float
     x_min: float
@@ -119,7 +119,7 @@ class BoundingBox:
 
 @dataclass
 class VisionResponse:
-    """Output from any VisionProvider method."""
+    """Structured output returned by any VisionProvider method call."""
     task: str
     text: Optional[str] = None
     bounding_boxes: List[BoundingBox] = field(default_factory=list)
@@ -134,7 +134,7 @@ class VisionResponse:
 # ---------------------------------------------------------------------------
 
 class VisionProvider(Protocol):
-    """Protocol that every vision provider must satisfy."""
+    """Structural protocol that every concrete vision provider must satisfy."""
 
     def analyze_scene(self, req: VisionRequest) -> VisionResponse:
         """Analyse the overall scene composition and describe object placement."""
@@ -224,24 +224,28 @@ class GeminiVisionProvider:
     # ------------------------------------------------------------------
 
     def analyze_scene(self, req: VisionRequest) -> VisionResponse:  # noqa: ARG002
+        """Raise ``NotImplementedError``; requires GEMINI_API_KEY in opus-runtime mode."""
         raise NotImplementedError(
             "GeminiVisionProvider.analyze_scene: real API call — "
             "set GEMINI_API_KEY and run in opus-runtime mode"
         )
 
     def detect_objects(self, req: VisionRequest) -> VisionResponse:  # noqa: ARG002
+        """Raise ``NotImplementedError``; requires GEMINI_API_KEY in opus-runtime mode."""
         raise NotImplementedError(
             "GeminiVisionProvider.detect_objects: real API call — "
             "set GEMINI_API_KEY and run in opus-runtime mode"
         )
 
     def bounding_boxes(self, req: VisionRequest) -> VisionResponse:  # noqa: ARG002
+        """Raise ``NotImplementedError``; requires GEMINI_API_KEY in opus-runtime mode."""
         raise NotImplementedError(
             "GeminiVisionProvider.bounding_boxes: real API call — "
             "set GEMINI_API_KEY and run in opus-runtime mode"
         )
 
     def plan_trajectory(self, req: VisionRequest) -> VisionResponse:  # noqa: ARG002
+        """Raise ``NotImplementedError``; requires GEMINI_API_KEY in opus-runtime mode."""
         raise NotImplementedError(
             "GeminiVisionProvider.plan_trajectory: real API call — "
             "set GEMINI_API_KEY and run in opus-runtime mode"

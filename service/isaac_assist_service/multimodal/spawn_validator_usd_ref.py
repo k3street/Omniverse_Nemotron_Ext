@@ -140,6 +140,16 @@ class USDReferenceValidator:
         max_depth: int = 8,
         max_size_mb: int = 500,
     ) -> None:
+        """Initialise the USD-reference validator.
+
+        Args:
+            strict (bool): When ``True``, warnings are promoted to errors.
+                Defaults to ``False``.
+            max_depth (int): Maximum permitted reference nesting depth before an
+                error finding is emitted.  Defaults to 8.
+            max_size_mb (int): Maximum permitted asset size in MB before a
+                warning finding is emitted.  Defaults to 500.
+        """
         self.strict = strict
         self.max_depth = max_depth
         self.max_size_mb = max_size_mb

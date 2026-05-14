@@ -250,7 +250,7 @@ class ViewportHashCache:
         return sum(e.size_bytes for e in self._store.values())
 
     def stats(self) -> CacheStats:
-        """Return a snapshot of current cache statistics."""
+        """Return a point-in-time snapshot of current cache hit/miss statistics."""
         total = self._hits + self._misses
         hit_rate = self._hits / total if total > 0 else 0.0
         return CacheStats(
@@ -263,7 +263,7 @@ class ViewportHashCache:
         )
 
     def clear(self) -> None:
-        """Drop all entries (counters are preserved)."""
+        """Drop all cached entries (hit/miss/eviction counters are preserved)."""
         self._store.clear()
 
     def __len__(self) -> int:

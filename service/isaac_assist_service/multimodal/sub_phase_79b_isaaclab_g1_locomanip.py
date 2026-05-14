@@ -36,7 +36,7 @@ def get_phase_metadata() -> Dict[str, Any]:
 
 @dataclass
 class G1HardwareSpec:
-    """Unitree G1 humanoid hardware specification."""
+    """Physical joint and DOF specification for the Unitree G1 humanoid robot."""
 
     joint_count: int = 23
     arm_dof_per_side: int = 5

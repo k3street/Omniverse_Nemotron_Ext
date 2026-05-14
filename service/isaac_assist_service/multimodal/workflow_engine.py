@@ -36,7 +36,7 @@ class WorkflowEngine:
     """Typed lifecycle transitions for a workflow record."""
 
     def __init__(self) -> None:
-        """Initialise the engine with an empty event log."""
+        """Initialise the workflow engine with an empty :class:`WorkflowEvent` log."""
         self.events: List[WorkflowEvent] = []
 
     def transition(self, current: WorkflowPhaseStatus,

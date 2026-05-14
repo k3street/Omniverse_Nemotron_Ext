@@ -40,7 +40,7 @@ def get_phase_metadata() -> Dict[str, Any]:
 
 @dataclass
 class BinSpec:
-    """Specification for a single industrial bin SKU."""
+    """Physical specification for a single industrial bin SKU (exterior, interior, payload)."""
 
     sku: str
     name: str

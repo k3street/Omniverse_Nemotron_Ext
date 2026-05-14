@@ -30,7 +30,7 @@ CheckStatus = Literal["pass", "fail", "skipped"]
 
 @dataclass
 class CheckResult:
-    """Result of a single verifier check."""
+    """Outcome of a single verifier check, with status, diagnostics, and issues."""
 
     status: CheckStatus
     diagnostics: List[str] = field(default_factory=list)
@@ -39,21 +39,21 @@ class CheckResult:
     data: Dict[str, Any] = field(default_factory=dict)
 
     def is_pass(self) -> bool:
-        """Return ``True`` when this check passed."""
+        """Return ``True`` when this check's status is ``"pass"``."""
         return self.status == "pass"
 
     def is_fail(self) -> bool:
-        """Return ``True`` when this check failed."""
+        """Return ``True`` when this check's status is ``"fail"``."""
         return self.status == "fail"
 
     def is_skipped(self) -> bool:
-        """Return ``True`` when this check was skipped."""
+        """Return ``True`` when this check's status is ``"skipped"``."""
         return self.status == "skipped"
 
 
 @dataclass
 class VerifierCheck:
-    """A single feature-dispatched verifier check."""
+    """A single feature-dispatched verifier check (form gate or function gate)."""
 
     id: str  # namespaced: "verify:reach", "simulate:upright_at_rest"
     applies_when: Callable[[StructuralFeatures], bool]
@@ -152,7 +152,7 @@ class VerifierRegistry:
         return list(self._function_checks)
 
     def form_check_ids(self) -> List[str]:
-        """Return the ordered list of form_gate check IDs."""
+        """Return the ordered list of registered form_gate check IDs."""
         return [c.id for c in self._form_checks]
 
     def function_check_ids(self) -> List[str]:

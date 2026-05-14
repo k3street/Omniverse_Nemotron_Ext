@@ -52,7 +52,7 @@ def get_phase_metadata() -> Dict[str, Any]:
 
 @dataclass
 class Waypoint:
-    """A single point on a route."""
+    """A single named point on a route in 3-D space (x, y, z)."""
 
     x: float
     y: float
@@ -60,7 +60,7 @@ class Waypoint:
     label: str = ""
 
     def as_xyz(self) -> tuple[float, float, float]:
-        """Return the waypoint as an ``(x, y, z)`` tuple."""
+        """Return the waypoint coordinates as a plain ``(x, y, z)`` tuple."""
         return (self.x, self.y, self.z)
 
 

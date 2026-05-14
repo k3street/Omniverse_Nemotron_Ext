@@ -25,7 +25,7 @@ Vec3 = tuple[float, float, float]
 
 @dataclass
 class BSplineConfig:
-    """Configuration for B-spline curve generation."""
+    """Configuration parameters for cuRobo B-spline trajectory generation."""
     degree: int = 3
     num_control_points: int = 8
     knot_vector: list[float] = field(default_factory=list)
@@ -43,7 +43,7 @@ class TSDFConfig:
 
 @dataclass
 class ConstraintSpec:
-    """Specification for a single planning constraint."""
+    """Specification for a single cuRobo motion-planning constraint."""
     name: str
     kind: Literal["joint_limit", "obstacle", "orientation", "velocity", "jerk"]
     threshold: float

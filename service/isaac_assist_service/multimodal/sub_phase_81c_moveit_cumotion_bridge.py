@@ -277,6 +277,13 @@ class MoveItCuMotionBridge:
     """
 
     def __init__(self, config: BridgeConfig, dry_run: bool = True) -> None:
+        """Initialise the bridge.
+
+        Args:
+            config (BridgeConfig): MoveIt / cuMotion bridge configuration.
+            dry_run (bool): When ``True`` (default) all planner interactions
+                are mocked rather than sent to the real cuMotion plugin.
+        """
         self.config = config
         self.dry_run = dry_run
 

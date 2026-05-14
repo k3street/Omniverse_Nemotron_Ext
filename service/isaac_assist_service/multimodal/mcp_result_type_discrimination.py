@@ -49,13 +49,13 @@ MCPResultKind = Literal["data", "code_patch", "error", "stream_chunk", "stream_e
 # ---------------------------------------------------------------------------
 
 class MCPDataResult(BaseModel):
-    """A plain data payload returned by a tool handler."""
+    """A plain structured data payload returned by a tool handler."""
     kind: Literal["data"] = "data"
     data: Dict[str, Any]
 
 
 class MCPCodePatchResult(BaseModel):
-    """A code patch produced by a code-generation tool."""
+    """A queued code patch produced by a code-generation tool handler."""
     kind: Literal["code_patch"] = "code_patch"
     code: str
     description: str
@@ -63,21 +63,21 @@ class MCPCodePatchResult(BaseModel):
 
 
 class MCPErrorResult(BaseModel):
-    """An error returned when a tool handler fails."""
+    """An error result returned when a tool handler fails or is blocked."""
     kind: Literal["error"] = "error"
     error: str
     validation_blocked: bool = False
 
 
 class MCPStreamChunkResult(BaseModel):
-    """One chunk in a streaming tool response."""
+    """One partial-payload chunk in a streaming tool response."""
     kind: Literal["stream_chunk"] = "stream_chunk"
     chunk_id: int
     partial_payload: Dict[str, Any]
 
 
 class MCPStreamEndResult(BaseModel):
-    """Terminal marker for a streaming tool response."""
+    """Terminal end-result marker carrying the final payload of a stream."""
     kind: Literal["stream_end"] = "stream_end"
     final_payload: Dict[str, Any]
 
