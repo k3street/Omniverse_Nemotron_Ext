@@ -125,6 +125,20 @@ _NAV2_BRIDGE_PROFILES = {
 
 
 def _gen_show_tf_tree(args: Dict) -> str:
+    """Generate Python that prints the live ROS2 TF tree from Isaac Sim.
+
+    Creates a ``ROS2PublishTransformTree`` OmniGraph node if one is not already
+    present, then acquires transform data through the transform listener
+    interface and prints the tree indented from the requested root frame.
+
+    Args:
+        args: Tool arguments dict containing:
+            - root_frame (str, optional): TF frame name to use as the tree
+              root. Defaults to ``"world"``.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     root_frame = args.get("root_frame", "world")
     return f'''\
 import os
