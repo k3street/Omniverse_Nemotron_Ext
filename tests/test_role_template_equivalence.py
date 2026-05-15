@@ -67,7 +67,7 @@ def _load(task_id: str) -> Dict[str, Any]:
     return json.loads(path.read_text())
 
 
-@pytest.mark.parametrize("task_id", ["CP-01", "CP-02", "CP-03", "CP-04", "CP-05", "CP-09", "CP-10", "CP-11", "CP-12", "CP-13", "CP-14", "CP-15", "CP-16", "CP-17", "CP-18", "CP-19", "CP-21", "CP-23", "CP-24", "CP-26", "CP-27", "CP-28", "CP-29", "CP-30", "CP-31", "CP-32", "CP-33", "CP-34", "CP-36", "CP-38", "CP-39", "CP-41", "CP-42", "CP-43", "CP-44", "CP-45", "CP-47", "CP-49", "CP-54", "CP-56", "CP-50", "CP-55", "CP-63", "CP-64", "CP-66", "CP-69", "CP-70", "CP-71", "CP-72", "CP-75", "CP-77", "CP-78", "CP-79", "CP-81", "CP-82", "CP-83", "CP-86"])
+@pytest.mark.parametrize("task_id", ["CP-01", "CP-02", "CP-03", "CP-04", "CP-05", "CP-09", "CP-10", "CP-11", "CP-12", "CP-13", "CP-14", "CP-15", "CP-16", "CP-17", "CP-18", "CP-19", "CP-21", "CP-23", "CP-24", "CP-26", "CP-27", "CP-28", "CP-29", "CP-30", "CP-31", "CP-32", "CP-33", "CP-34", "CP-36", "CP-38", "CP-39", "CP-41", "CP-42", "CP-43", "CP-44", "CP-45", "CP-47", "CP-49", "CP-54", "CP-56", "CP-50", "CP-55", "CP-63", "CP-64", "CP-66", "CP-69", "CP-70", "CP-71", "CP-72", "CP-75", "CP-77", "CP-78", "CP-79", "CP-81", "CP-82", "CP-83", "CP-86", "CP-NEW-inspect-reject", "CP-NEW-dr-curriculum", "CP-NEW-multi-cam-triangulation", "CP-NEW-cad-revision-drift", "CP-NEW-controller-shootout-cp", "CP-NEW-y-merge-singulation", "CP-NEW-3station-oee", "CP-NEW-plc-fixture"])
 def test_code_template_equivalent_to_legacy_code(task_id: str):
     """code_template + role_defaults produces same captured tool calls as
     legacy code field."""
