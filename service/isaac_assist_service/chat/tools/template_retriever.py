@@ -53,11 +53,42 @@ def _get_collection():
             # _build_index would otherwise never trigger. Rebuild defensively.
             logger.warning("[TemplateRetriever] Collection found but empty — rebuilding index")
             _build_index()
+        else:
+            # Persistent-index load: ChromaDB has the embeddings, but
+            # `_template_cache` is not populated (only `_build_index` does
+            # that). Rehydrate from disk so `filter_templates_by_intent` and
+            # any other cache-dependent paths work correctly.
+            _rehydrate_cache()
         logger.info(f"[TemplateRetriever] Loaded collection ({_collection.count()} templates)")
     except Exception:
         _collection = _client.create_collection(_COLLECTION_NAME)
         _build_index()
     return _collection
+
+
+def _rehydrate_cache() -> None:
+    """Populate `_template_cache` from disk without touching ChromaDB.
+
+    Called when an existing persistent index is loaded — `_build_index` is
+    not invoked in that path, so `_template_cache` would otherwise remain
+    empty and `filter_templates_by_intent` would silently return nothing.
+
+    Reads every ``workspace/templates/*.json`` file and inserts it into
+    `_template_cache` keyed by ``task_id`` (falling back to ``stem``).
+    Files that fail to parse are skipped with a warning (mirrors
+    `_build_index` behaviour).
+    """
+    loaded = 0
+    for tf in sorted(_TEMPLATES_DIR.glob("*.json")):
+        try:
+            t = json.loads(tf.read_text())
+        except Exception as e:
+            logger.warning(f"[TemplateRetriever] Skipping bad template {tf.name}: {e}")
+            continue
+        tid = t.get("task_id", tf.stem)
+        _template_cache[tid] = t
+        loaded += 1
+    logger.info(f"[TemplateRetriever] Rehydrated cache with {loaded} templates")
 
 
 def _build_index() -> None:
