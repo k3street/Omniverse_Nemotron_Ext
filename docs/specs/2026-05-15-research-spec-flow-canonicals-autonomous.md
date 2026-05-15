@@ -214,11 +214,23 @@ mechanically?
 
 ### Q5. Gemini as tool-consumer (end-user LLM integration)
 
-**Important clarification:** Gemini is NOT a research helper in this
-plan. Gemini is meant to **use** Isaac Assist's tools as an
-end-user LLM consumer — same role Claude plays today via the
-agentic chat loop. The 1000 SEK GCloud credits fund the integration
-+ end-to-end tests where Gemini drives the tool.
+**Important clarifications (2026-05-15):**
+
+1. Gemini is NOT a research helper. Gemini is meant to **use**
+   Isaac Assist's tools as an end-user LLM consumer — same role
+   Claude plays today via the agentic chat loop.
+2. **Use a weaker model deliberately.** Gemini Flash (current) is
+   weaker than Claude Sonnet. That's the point — running a weaker
+   model through the same tool surface pressure-tests the
+   **harness** and **determinism** of our tools. Bugs that Claude
+   masks via judgment surface clearly when Flash hits them.
+3. New Gemini model releases next week (~2026-05-22). Plan should
+   accommodate model swap mid-test: existing tests re-run on the
+   new model to measure "did our harness improvements help, or
+   did the model just get smarter?"
+
+The 1000 SEK GCloud credits fund the integration + end-to-end
+tests where Gemini drives the tool.
 
 **Question:** How do we integrate Gemini as a tool-consumer + what
 does the end-to-end test look like?
@@ -261,8 +273,14 @@ does the end-to-end test look like?
 - End-to-end test plan: N prompts × cost per cycle = burn rate
   fitting 1000 SEK in 10 days
 - Day-by-day burndown plan
-- List of Gemini-specific bugs we expect to find (so we measure
-  whether we found them)
+- **Harness + determinism stress-test plan**: which specific
+  brittleness aspects we expect Flash to expose (ambiguous tool
+  descriptions, error messages that assume context, schemas
+  with implicit constraints, retry semantics) and how we measure
+  the find-rate
+- **Mid-stream model swap**: protocol for re-running the same
+  test corpus on next-week's new Gemini, measuring delta
+  attributable to harness changes vs model improvements
 - Decision: is Gemini a permanent supported driver, or only a
   stress-test sample?
 
