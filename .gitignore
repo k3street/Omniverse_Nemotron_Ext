@@ -29,6 +29,7 @@ logs/
 
 # Brainstorming notes (local only)
 brainstorm/
+.local-research/
 
 # IDEs
 .idea/
