@@ -67,7 +67,7 @@ def _load(task_id: str) -> Dict[str, Any]:
     return json.loads(path.read_text())
 
 
-@pytest.mark.parametrize("task_id", ["CP-01", "CP-02", "CP-03", "CP-04", "CP-05", "CP-09", "CP-10", "CP-11", "CP-12", "CP-13", "CP-14", "CP-15", "CP-16", "CP-17", "CP-18"])
+@pytest.mark.parametrize("task_id", ["CP-01", "CP-02", "CP-03", "CP-04", "CP-05", "CP-09", "CP-10", "CP-11", "CP-12", "CP-13", "CP-14", "CP-15", "CP-16", "CP-17", "CP-18", "CP-19", "CP-21", "CP-23", "CP-24", "CP-26", "CP-27", "CP-28"])
 def test_code_template_equivalent_to_legacy_code(task_id: str):
     """code_template + role_defaults produces same captured tool calls as
     legacy code field."""
