@@ -1,0 +1,308 @@
+{
+  "version": "1.0",
+  "created": "2026-05-15",
+  "description": "30-prompt retrieval benchmark for Isaac Assist template retriever. Ground truth verified against workspace/templates/ on 2026-05-15. Thresholds: sim>=0.45 AND margin>=0.20 for hard-instantiate.",
+  "categories": ["pick_place", "sort", "reorient", "palletize", "navigate", "sensor_setup", "ros2_bridge", "rl_training", "amr_navigation", "contact_rich", "multi_robot", "vision", "industrial_bridge", "no_match"],
+  "prompts": [
+    {
+      "id": "B01",
+      "prompt": "Build a Franka pick-place cell with a conveyor belt and a single bin",
+      "category": "pick_place",
+      "complexity": "atomic",
+      "ground_truth": ["CP-01"],
+      "acceptable_alternatives": [],
+      "expected_action": "hard_instantiate",
+      "notes": "Canonical single-robot pick-place. Close phrasing to the calibration points. CP-01 should rank clearly above CP-02 (two-robot) if thoughts tokens work."
+    },
+    {
+      "id": "B02",
+      "prompt": "Set up a two-robot assembly line where cubes pass from robot 1 to robot 2 via a second conveyor",
+      "category": "multi_robot",
+      "complexity": "multi",
+      "ground_truth": ["CP-02"],
+      "acceptable_alternatives": [],
+      "expected_action": "hard_instantiate",
+      "notes": "Multi-station two-robot chain. The explicit 'robot 1 to robot 2' phrasing and 'second conveyor' should match CP-02 thoughts tokens over CP-01/CP-51."
+    },
+    {
+      "id": "B03",
+      "prompt": "Sort red and blue cubes into color-matched bins using a Franka arm",
+      "category": "sort",
+      "complexity": "atomic",
+      "ground_truth": ["CP-03"],
+      "acceptable_alternatives": ["CP-16"],
+      "expected_action": "few_shot",
+      "notes": "2-color sort. CP-03 is the canonical; CP-16 (4-color) is also a reasonable alternative. Margin may collapse between the two since their goals are very similar."
+    },
+    {
+      "id": "B04",
+      "prompt": "Create a compact pick-and-place cell that fits within a 2x2 meter footprint",
+      "category": "pick_place",
+      "complexity": "atomic",
+      "ground_truth": ["CP-04"],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "notes": "Footprint constraint is the key discriminator. CP-04 goal mentions '2x2 m footprint' explicitly. Sim tends to be lower due to sparse vocabulary."
+    },
+    {
+      "id": "B05",
+      "prompt": "Build a reorient-and-deliver station where cubes start on their side and a flip-wall tips them upright before pick",
+      "category": "reorient",
+      "complexity": "atomic",
+      "ground_truth": ["CP-05"],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "notes": "Unique to CP-05. 'flip-wall', 'on its side', 'upright' are very specific discriminating tokens present in CP-05 goal."
+    },
+    {
+      "id": "B06",
+      "prompt": "Franka arm picks cubes from belt and drops into bin, using cuRobo for trajectory planning",
+      "category": "pick_place",
+      "complexity": "atomic",
+      "ground_truth": ["CP-01"],
+      "acceptable_alternatives": ["CP-04", "CP-22", "CP-23"],
+      "expected_action": "few_shot",
+      "notes": "Paraphrase of CP-01 with explicit cuRobo mention. Should retrieve CP-01 or close variants. Alternative phrasing test."
+    },
+    {
+      "id": "B07",
+      "prompt": "UR10 picks colored cubes off a conveyor and routes them to color-matched bins",
+      "category": "sort",
+      "complexity": "atomic",
+      "ground_truth": ["CP-82"],
+      "acceptable_alternatives": ["CP-85", "CP-86"],
+      "expected_action": "few_shot",
+      "notes": "UR10-specific color-routing. CP-82 is the two-cube cuRobo version. CP-85 (single-cube builtin) is also valid. The UR10 token is a strong discriminator vs Franka-family."
+    },
+    {
+      "id": "B08",
+      "prompt": "Build a 3-station serial pick-place line with per-station OEE logging",
+      "category": "pick_place",
+      "complexity": "multi",
+      "ground_truth": ["CP-NEW-3station-oee"],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "notes": "Very specific. 'OEE', '3-station serial' are unique to CP-NEW-3station-oee. Sim likely above 0.35 but margin may be low."
+    },
+    {
+      "id": "B09",
+      "prompt": "Build a parallel-robot mutual-exclusion pick-place where two Frankas share one conveyor and one bin",
+      "category": "multi_robot",
+      "complexity": "multi",
+      "ground_truth": ["CP-52"],
+      "acceptable_alternatives": ["CP-53"],
+      "expected_action": "hard_instantiate",
+      "notes": "CP-52 has 'parallel-picking duo' + 'setup_robot_claim_mutex' — unique enough to score high. Observed sim ~0.62 in spot checks."
+    },
+    {
+      "id": "B10",
+      "prompt": "Vision-classify cubes on a conveyor and route them to bins based on detected color",
+      "category": "vision",
+      "complexity": "atomic",
+      "ground_truth": ["CP-47"],
+      "acceptable_alternatives": ["CP-48", "CP-50"],
+      "expected_action": "few_shot",
+      "notes": "CP-47 is the canonical vision-sorter. CP-48 (inspect-reject) and CP-50 (vision-kitting) are reasonable alternatives."
+    },
+    {
+      "id": "B11",
+      "prompt": "Navigate a Nova Carter AMR to dock at a pick station, load a cube from a Franka arm, then depart",
+      "category": "amr_navigation",
+      "complexity": "multi",
+      "ground_truth": ["CP-NEW-amr-pickup-handoff"],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "notes": "AMR pickup handoff is specific. 'Nova Carter', 'dock', 'depart' are strong discriminating tokens."
+    },
+    {
+      "id": "B12",
+      "prompt": "Coordinate 3 AMRs navigating a shared corridor with obstacle avoidance",
+      "category": "amr_navigation",
+      "complexity": "multi",
+      "ground_truth": ["CP-NEW-multi-amr-corridor"],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "notes": "Multi-AMR corridor navigation. Unique enough that only CP-NEW-multi-amr-corridor should match."
+    },
+    {
+      "id": "B13",
+      "prompt": "Train an RL policy with 64 parallel Franka environments using IsaacLab and RSL-RL",
+      "category": "rl_training",
+      "complexity": "multi",
+      "ground_truth": ["CP-NEW-rl-clone-env"],
+      "acceptable_alternatives": ["M-08"],
+      "expected_action": "few_shot",
+      "notes": "RL training with clone_envs. CP-NEW-rl-clone-env has '64 parallel Franka-reach envs cloned via clone_envs'. M-08 (IsaacLab Allegro) is adjacent but different task."
+    },
+    {
+      "id": "B14",
+      "prompt": "Set up ROS2 MoveIt2 bridge for a Franka arm with joint state topics",
+      "category": "ros2_bridge",
+      "complexity": "atomic",
+      "ground_truth": ["CP-87"],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "notes": "CP-87 goal explicitly mentions 'ROS2-MoveIt2 Franka pick-place' and '/isaac_joint_states + /isaac_joint_commands'. Observed sim ~0.43 — may fall below threshold."
+    },
+    {
+      "id": "B15",
+      "prompt": "Stand up 8 Nova Carters each with their own ROS2 namespace",
+      "category": "ros2_bridge",
+      "complexity": "multi",
+      "ground_truth": ["S-07"],
+      "acceptable_alternatives": [],
+      "expected_action": "hard_instantiate",
+      "notes": "S-07 goal is 'Stand up 8 Nova Carters with per-robot ROS2 namespaces in one sim'. Very specific phrasing; observed sim ~0.53."
+    },
+    {
+      "id": "B16",
+      "prompt": "Import a robot URDF into Isaac Sim and check its collision meshes",
+      "category": "sensor_setup",
+      "complexity": "atomic",
+      "ground_truth": ["M-01"],
+      "acceptable_alternatives": ["R-03"],
+      "expected_action": "few_shot",
+      "notes": "M-01 is URDF import + collision audit. R-03 is a different prefix but adjacent. 'Import URDF' + 'collision meshes' are strong signals."
+    },
+    {
+      "id": "B17",
+      "prompt": "Anchor the Franka robot base so it doesn't float when simulation starts",
+      "category": "sensor_setup",
+      "complexity": "atomic",
+      "ground_truth": ["FX-01"],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "notes": "FX-01 is 'Anchor a Franka articulation... so its base does not free-fall on Play'. 'anchor', 'float', 'simulation' are discriminating. Observed sim ~0.28-0.34."
+    },
+    {
+      "id": "B18",
+      "prompt": "Generate 10k COCO-format synthetic images for apple detection with stable annotation IDs",
+      "category": "sensor_setup",
+      "complexity": "multi",
+      "ground_truth": ["P-01"],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "notes": "P-01 goal is 'Generate 10k COCO apple-detection images where annotation IDs stay stable'. Very specific — 'COCO', 'apple', 'annotation IDs' distinguish from CP-NEW-defect-sdg."
+    },
+    {
+      "id": "B19",
+      "prompt": "Build an IsaacLab task from scratch: Allegro hand with cube reorientation, InteractiveSceneCfg, no GUI",
+      "category": "rl_training",
+      "complexity": "multi",
+      "ground_truth": ["M-08"],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "notes": "M-08 goal matches verbatim on 'Allegro hand', 'InteractiveSceneCfg', 'no GUI'. High specificity. Observed sim ~0.46."
+    },
+    {
+      "id": "B20",
+      "prompt": "Set up a Carter wheeled robot for autonomous navigation using Nav2",
+      "category": "navigate",
+      "complexity": "atomic",
+      "ground_truth": ["CP-64"],
+      "acceptable_alternatives": [],
+      "expected_action": "hard_instantiate",
+      "notes": "CP-64 is 'mobile robot with Nav2 navigation config: a Carter wheeled robot via setup_nav_robot'. Very specific. Observed sim ~0.64."
+    },
+    {
+      "id": "B21",
+      "prompt": "pick and place",
+      "category": "no_match",
+      "complexity": "none",
+      "ground_truth": [null],
+      "acceptable_alternatives": [],
+      "expected_action": "fallback",
+      "notes": "Too generic. No template should fire hard-instantiate. Expected: sim < 0.45 for all top-K."
+    },
+    {
+      "id": "B22",
+      "prompt": "Franka and conveyor",
+      "category": "no_match",
+      "complexity": "none",
+      "ground_truth": [null],
+      "acceptable_alternatives": [],
+      "expected_action": "fallback",
+      "notes": "Ambiguous: both CP-01 and CP-02 are plausible. Expected: low margin (< 0.20) even if sim is moderate, so few-shot fallback fires."
+    },
+    {
+      "id": "B23",
+      "prompt": "sort items into bins",
+      "category": "no_match",
+      "complexity": "none",
+      "ground_truth": [null],
+      "acceptable_alternatives": [],
+      "expected_action": "fallback",
+      "notes": "Vague sort request. Missing color/count/robot info. Expected: sim < 0.40 or margin < 0.20 for all candidates."
+    },
+    {
+      "id": "B24",
+      "prompt": "I need help with Isaac Sim",
+      "category": "no_match",
+      "complexity": "none",
+      "ground_truth": [null],
+      "acceptable_alternatives": [],
+      "expected_action": "fallback",
+      "notes": "Completely generic help request. Expected: sim near 0 for all templates. Graceful no-match."
+    },
+    {
+      "id": "B25",
+      "prompt": "my robot isn't moving what's wrong",
+      "category": "no_match",
+      "complexity": "none",
+      "ground_truth": [null],
+      "acceptable_alternatives": [],
+      "expected_action": "fallback",
+      "notes": "Diagnostic question, no build intent. Expected: low sim across board. AD-series templates exist but are unlikely to surface with confidence."
+    },
+    {
+      "id": "B26",
+      "prompt": "palletize boxes",
+      "category": "palletize",
+      "complexity": "none",
+      "ground_truth": [null],
+      "acceptable_alternatives": ["CP-08", "CP-10", "CP-25", "CP-30", "CP-46"],
+      "expected_action": "few_shot",
+      "notes": "Ambiguous — many palletizer templates exist (2x2, 3x3, 4x4, 6-cube, brick-layer). No single canonical should dominate with margin >= 0.20. Expected: few-shot fallback is correct."
+    },
+    {
+      "id": "B27",
+      "prompt": "build a contact-rich peg insertion task with force sensing and 5mm clearance",
+      "category": "contact_rich",
+      "complexity": "multi",
+      "ground_truth": ["CP-58"],
+      "acceptable_alternatives": ["CP-NEW-peg-in-hole-single"],
+      "expected_action": "few_shot",
+      "notes": "CP-58 is the peg-in-hole array canonical. CP-NEW-peg-in-hole-single is the single-peg variant. 'force sensing', '5mm clearance' are discriminating. Expect sim ~0.38."
+    },
+    {
+      "id": "B28",
+      "prompt": "OPC-UA bridge connecting 12 conveyors to external PLC",
+      "category": "industrial_bridge",
+      "complexity": "atomic",
+      "ground_truth": ["CP-NEW-opcua-12conveyors"],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "notes": "CP-NEW-opcua-12conveyors is very specific. 'OPC-UA', '12 conveyors', 'PLC' are strong tokens. Observed sim ~0.39."
+    },
+    {
+      "id": "B29",
+      "prompt": "UR5e arm picks cubes off a stationary feeder platform and fills a bin",
+      "category": "pick_place",
+      "complexity": "atomic",
+      "ground_truth": ["CP-01"],
+      "acceptable_alternatives": ["CP-75", "CP-71"],
+      "expected_action": "few_shot",
+      "notes": "UR5e is listed in CP-01 roles.primary_robot.constraints. The stationary feeder pattern matches CP-75 (UR10 static-cube) too. Tests robot-name aliasing — UR5e is not the primary training phrasing."
+    },
+    {
+      "id": "B30",
+      "prompt": "drawer opening station: robot pulls open a cabinet drawer using a prismatic joint",
+      "category": "contact_rich",
+      "complexity": "atomic",
+      "ground_truth": ["CP-55"],
+      "acceptable_alternatives": ["CP-NEW-drawer-open"],
+      "expected_action": "few_shot",
+      "notes": "CP-55 is the drawer-open station canonical. CP-NEW-drawer-open is the draft variant. 'prismatic joint', 'cabinet drawer' are strong discriminators. Observed sim ~0.59."
+    }
+  ]
+}

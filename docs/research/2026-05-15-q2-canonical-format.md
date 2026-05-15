@@ -790,3 +790,121 @@ their `intent` can inherit from the parent template's pattern.
 | `service/isaac_assist_service/multimodal/migrations/__init__.py` | Forward-migration framework (currently no active migrations) |
 | `tests/test_role_template_equivalence.py:70-104` | Equivalence gate for CP-01..05 — model for Phase 3 |
 | `tests/test_role_based_templates.py` | Phase 20 retriever tests |
+
+---
+
+## 8. Lint Baseline 2026-05-15
+
+**Script:** `scripts/lint_canonical_templates.py` (reads schema from `scripts/canonical_schema.py`)
+**Run date:** 2026-05-15
+**Templates scanned:** 321
+
+### 8.1 Summary Counts
+
+| Level | Count | Description |
+|-------|-------|-------------|
+| OK | 212 | No issues |
+| ERROR | 17 | Must fix before merging |
+| WARN | 26 | Recommended fixes; do not block merge yet |
+| INFO | 208 | Migration-pending signals (role fields absent) |
+
+### 8.2 Error Breakdown by Rule
+
+| Rule | Count | Meaning |
+|------|-------|---------|
+| `DEP_FIELD_PRESENT` | 10 | Deprecated one-off field present (see Q4 §2) |
+| `C1_EMPTY_CORE_FIELD` | 2 | Core field present but empty (AD-03, AD-04: empty `tools_used`) |
+| `C3_TOOLS_USED_EMPTY` | 2 | `tools_used` is an empty list (same templates) |
+| `T1_MISSING_FIELD` | 1 | CP template missing T1-mandatory `diagnose_args` (CP-07) |
+| `R1_BAD_DESTINATION_KIND` | 1 | `intent.structural_features.destination_kind` has value `'color_routed'` (not in valid set); CP-03 |
+
+**Note:** The original schema spec required `cube_path` in `simulate_args`, but 25 templates legitimately
+use `cube_paths` (plural list) for multi-cube scenarios. The lint rule was corrected to accept either
+`cube_path` or `cube_paths`. This reduced the ERROR count from 42 to 17.
+
+### 8.3 Warn Breakdown by Rule
+
+| Rule | Count | Meaning |
+|------|-------|---------|
+| `T1_MISSING_SETTLE_STATE` | 24 | CP templates missing `settle_state` — all are CP-NEW-* (22) plus CP-06 and CP-87 |
+| `T1_NOTES_NO_EXTENDS` | 2 | `extension_notes` present but `extends` absent (CP-06, CP-07) |
+
+### 8.4 Info Breakdown by Rule
+
+| Rule | Count | Meaning |
+|------|-------|---------|
+| `R1_MISSING_INTENT` | 104 | CP templates without `intent` field (migration pending) |
+| `R2_MISSING_ROLE_FIELDS` | 104 | CP templates without `roles`/`role_defaults`/`code_template` trio |
+
+### 8.5 Example Paths per Error Type
+
+**`DEP_FIELD_PRESENT` (10 errors across 6 files):**
+- `workspace/templates/CP-01.json` — `benchmark_vs_alternatives`, `verified_date`, `verified_metrics`
+- `workspace/templates/CP-06.json` — `delivery`, `cube_path`
+- `workspace/templates/CP-NEW-multi-amr-corridor.json` — `extends_notes`
+
+**`C1_EMPTY_CORE_FIELD` / `C3_TOOLS_USED_EMPTY` (2 errors each):**
+- `workspace/templates/AD-03.json` — `tools_used: []`
+- `workspace/templates/AD-04.json` — `tools_used: []`
+
+**`R1_BAD_DESTINATION_KIND` (1 error):**
+- `workspace/templates/CP-03.json` — `destination_kind: 'color_routed'` (valid values: `single_bin`, `n_bins_routed`, `shelf`, `fixture`)
+
+**`T1_MISSING_SETTLE_STATE` (24 warns — sample):**
+- `workspace/templates/CP-87.json`
+- `workspace/templates/CP-NEW-brick-stacking.json`
+- `workspace/templates/CP-NEW-amr-pickup-handoff.json`
+
+### 8.6 Action Priority
+
+1. **Immediate (block CI):** Fix `AD-03`/`AD-04` empty `tools_used` (2 files).
+2. **Short-term:** Remove deprecated fields from CP-01, CP-02, CP-06, CP-07, CP-08, CP-NEW-multi-amr-corridor (6 files, mechanical).
+3. **Medium-term:** Fix CP-03 invalid `destination_kind` value; add `diagnose_args` to CP-07.
+4. **Migration backlog:** 104 CP templates need `intent` + `roles` + `role_defaults` + `code_template` (per §4 migration plan); 24 need `settle_state`.
+
+## 9. Motion-Controller Compatibility Field (added 2026-05-15)
+
+A `motion_controllers` field was added to the canonical schema after
+Anton flagged that canonicals use different planners (cuRobo, RMPflow,
+admittance/impedance, MoveIt2, etc.) and the library needs to record
+which ones each canonical has been verified-compatible with.
+
+**Shape:**
+
+```json
+{
+  "motion_controllers": {
+    "verified": ["curobo@1.8.2", "rmpflow"],
+    "failed":   {"admittance": "physx_instability_at_contact"},
+    "untested": ["moveit2"]
+  }
+}
+```
+
+**Lint rules added** (see `scripts/canonical_schema.py` and
+`scripts/lint_canonical_templates.py`):
+
+- `T1_MC_MISSING` (WARN) — T1 template's `tools_used` contains a
+  motion-planning tool (`plan_trajectory`, `move_to_pose`,
+  `setup_admittance_controller`, etc.) but no `motion_controllers`
+  declared. Fires on **109 templates** in the current baseline.
+- `T1_MC_MISSING_INFO` (INFO) — T1 template with no motion-planning
+  tools and no `motion_controllers` declared. Fires on **17 templates**.
+- `T1_MC_TYPE` (ERROR) — field present but not a dict.
+- `T1_MC_UNKNOWN_NAME` (WARN) — controller name not in
+  `VALID_MOTION_CONTROLLER_NAMES` (typo guard).
+- `T1_MC_FAILED_REASON` (ERROR) — `failed` entry missing reason string.
+
+**Honesty rule:** `verified` means an actual successful run exists;
+absence means untested (not "works"); `failed` requires a non-empty
+reason. Version-pin syntax `name@version` is supported because
+controller versions matter (Warp 1.8.2 → 1.11.0 changed behavior).
+
+**Baseline impact:** counts shifted from `212 OK / 17 ERROR / 26 WARN /
+208 INFO` to `210 OK / 17 ERROR / 118 WARN / 225 INFO`. ERROR count
+unchanged.
+
+**Migration approach:** populated mechanically per-canonical during the
+Track B migration pass, derived from `verified_status` notes and
+function-gate run history. Conservative default: leave absent rather
+than guess.

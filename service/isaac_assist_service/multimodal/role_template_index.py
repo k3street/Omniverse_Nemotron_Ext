@@ -37,9 +37,12 @@ class RoleTemplateEntry:
 ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
     # ------------------------------------------------------------------
     # welder (4 entries)
+    # Remapped 2026-05-15: no TP-WLD-* files exist; remapped to closest
+    # existing CPs that demonstrate fixture-hold / precision industrial
+    # manipulation. Track F backlog: author dedicated weld-cell templates.
     # ------------------------------------------------------------------
     RoleTemplateEntry(
-        template_id="TP-WLD-01",
+        template_id="CP-76",  # dual-robot fixture hold — closest industrial precision cell
         role="welder",
         sub_role="spot_welder",
         robot_class="fanuc_arc_mate",
@@ -48,7 +51,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="Single-spot resistance welding on sheet-metal panels.",
     ),
     RoleTemplateEntry(
-        template_id="TP-WLD-02",
+        template_id="CP-02",  # multi-station assembly line — industrial multi-robot workflow
         role="welder",
         sub_role="mig_welder",
         robot_class="kuka_kr16",
@@ -57,7 +60,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="MIG welding for structural steel frames.",
     ),
     RoleTemplateEntry(
-        template_id="TP-WLD-03",
+        template_id="CP-24",  # narrow-slot insertion — precision placement analog
         role="welder",
         sub_role="tig_welder",
         robot_class="yaskawa_gp8",
@@ -66,7 +69,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="TIG welding for stainless-steel food-grade enclosures.",
     ),
     RoleTemplateEntry(
-        template_id="TP-WLD-04",
+        template_id="CP-69",  # UR10 cuRobo — ur10e robot class match; collaborative scale
         role="welder",
         sub_role="robotic_arm_welder",
         robot_class="ur10e",
@@ -76,9 +79,10 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
     ),
     # ------------------------------------------------------------------
     # picker (4 entries)
+    # Remapped 2026-05-15: TP-PCK-* files never existed.
     # ------------------------------------------------------------------
     RoleTemplateEntry(
-        template_id="TP-PCK-01",
+        template_id="CP-01",  # canonical Franka bin-pick from conveyor, parallel jaw
         role="picker",
         sub_role="bin_picker",
         robot_class="franka_panda",
@@ -87,7 +91,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="Bin-picking from disordered totes using depth-camera pose estimation.",
     ),
     RoleTemplateEntry(
-        template_id="TP-PCK-02",
+        template_id="CP-54",  # Franka surface_gripper (suction) pick, closest to suction_cup_array
         role="picker",
         sub_role="mixed_sku",
         robot_class="ur5e",
@@ -96,7 +100,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="Mixed-SKU order fulfillment with vision-based SKU classification.",
     ),
     RoleTemplateEntry(
-        template_id="TP-PCK-03",
+        template_id="CP-35",  # industrial sortation cell, 8 SKUs, barcode_reader + color_routing
         role="picker",
         sub_role="parcel_sorter",
         robot_class="fanuc_m20id",
@@ -105,7 +109,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="Parcel sorting from conveyor with barcode-guided destination bins.",
     ),
     RoleTemplateEntry(
-        template_id="TP-PCK-04",
+        template_id="CP-08",  # 2×2 grid palletizer — closest depalletizing analog
         role="picker",
         sub_role="pallet_picker",
         robot_class="kuka_kr120",
@@ -115,9 +119,10 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
     ),
     # ------------------------------------------------------------------
     # assembler (3 entries)
+    # Remapped 2026-05-15: TP-ASM-* files never existed.
     # ------------------------------------------------------------------
     RoleTemplateEntry(
-        template_id="TP-ASM-01",
+        template_id="CP-24",  # narrow-slot insertion, ±precision placement — closest PCB analog [REVIEW]
         role="assembler",
         sub_role="pcb_assembler",
         robot_class="scara_r6",
@@ -126,7 +131,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="PCB component placement with ±0.05 mm repeatability.",
     ),
     RoleTemplateEntry(
-        template_id="TP-ASM-02",
+        template_id="CP-02",  # multi-station assembly line with two robots and transfer conveyor
         role="assembler",
         sub_role="panel_assembler",
         robot_class="ur10e",
@@ -135,7 +140,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="Sheet-metal panel assembly with magnetic pick for thin stock.",
     ),
     RoleTemplateEntry(
-        template_id="TP-ASM-03",
+        template_id="CP-58",  # peg-in-hole insertion array — bolt/clip/snap-fit analog
         role="assembler",
         sub_role="sub_assembly",
         robot_class="franka_panda",
@@ -145,9 +150,10 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
     ),
     # ------------------------------------------------------------------
     # inspector (3 entries)
+    # Remapped 2026-05-15: TP-INS-* files never existed.
     # ------------------------------------------------------------------
     RoleTemplateEntry(
-        template_id="TP-INS-01",
+        template_id="CP-18",  # inspect-and-reject station, semantic good/defect labeling
         role="inspector",
         sub_role="surface_inspector",
         robot_class="fanuc_lrmate200id",
@@ -156,7 +162,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="Surface scan for scratches, dents, and coating defects.",
     ),
     RoleTemplateEntry(
-        template_id="TP-INS-02",
+        template_id="CP-18",  # same station; dimensional checks share inspect-reject workflow [REVIEW]
         role="inspector",
         sub_role="dimensional_inspector",
         robot_class="ur5e",
@@ -165,7 +171,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="Go/no-go dimensional checks against CAD tolerance bands.",
     ),
     RoleTemplateEntry(
-        template_id="TP-INS-03",
+        template_id="CP-48",  # TRUE runtime-vision inspect-reject, AI anomaly classifier
         role="inspector",
         sub_role="vision_inspector",
         robot_class="kuka_kr6_r900",
@@ -175,9 +181,10 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
     ),
     # ------------------------------------------------------------------
     # palletizer (3 entries)
+    # Remapped 2026-05-15: TP-PAL-* files never existed.
     # ------------------------------------------------------------------
     RoleTemplateEntry(
-        template_id="TP-PAL-01",
+        template_id="CP-08",  # 2×2 grid palletizer — single-layer grid stacking
         role="palletizer",
         sub_role="bag_palletizer",
         robot_class="fanuc_m410ib",
@@ -186,7 +193,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="50 kg bag palletizing with clam-shell gripper.",
     ),
     RoleTemplateEntry(
-        template_id="TP-PAL-02",
+        template_id="CP-10",  # 3×3 grid palletizer — layer pattern
         role="palletizer",
         sub_role="box_palletizer",
         robot_class="kuka_kr120",
@@ -195,7 +202,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="Mixed-height box palletizing with optimised layer-pattern.",
     ),
     RoleTemplateEntry(
-        template_id="TP-PAL-03",
+        template_id="CP-12",  # mixed-SKU palletizer — 3 different cube sizes
         role="palletizer",
         sub_role="mixed_palletizer",
         robot_class="yaskawa_mv1000",
@@ -205,9 +212,12 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
     ),
     # ------------------------------------------------------------------
     # machine_tender (3 entries)
+    # Remapped 2026-05-15: TP-MCT-* files never existed; no dedicated
+    # machine-tending CPs exist. Mapped to closest load/unload analogs.
+    # Track F backlog: author CNC/lathe/press tending templates.
     # ------------------------------------------------------------------
     RoleTemplateEntry(
-        template_id="TP-MCT-01",
+        template_id="CP-31",  # pick-from-pile — closest load/unload cycle analog [REVIEW]
         role="machine_tender",
         sub_role="cnc_loader",
         robot_class="fanuc_m10ia",
@@ -216,7 +226,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="CNC machine tending: raw-stock loading + finished-part unloading.",
     ),
     RoleTemplateEntry(
-        template_id="TP-MCT-02",
+        template_id="CP-69",  # UR10 cuRobo — ur10e robot class match; single-pick cycle
         role="machine_tender",
         sub_role="lathe_tender",
         robot_class="ur10e",
@@ -225,7 +235,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="Collaborative lathe tending with door-interlock safety logic.",
     ),
     RoleTemplateEntry(
-        template_id="TP-MCT-03",
+        template_id="CP-76",  # dual-robot fixture hold — fixture-interaction closest to press loading [REVIEW]
         role="machine_tender",
         sub_role="press_operator",
         robot_class="kuka_kr16",
@@ -235,9 +245,10 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
     ),
     # ------------------------------------------------------------------
     # packer (3 entries)
+    # Remapped 2026-05-15: TP-PKR-* files never existed.
     # ------------------------------------------------------------------
     RoleTemplateEntry(
-        template_id="TP-PKR-01",
+        template_id="CP-57",  # parcel-singulation-from-heap — high-speed pick and place
         role="packer",
         sub_role="bagger",
         robot_class="delta_robot_ir800",
@@ -246,7 +257,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="High-speed delta robot bagging for snack foods.",
     ),
     RoleTemplateEntry(
-        template_id="TP-PKR-02",
+        template_id="CP-77",  # nested-box packer with lid seal — cartoning analog
         role="packer",
         sub_role="cartoner",
         robot_class="fanuc_m1ia",
@@ -255,7 +266,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="Pharmaceutical cartoning with tamper-evident seal verification.",
     ),
     RoleTemplateEntry(
-        template_id="TP-PKR-03",
+        template_id="CP-49",  # kitting station, 4-slot tray, BOM-driven pick — kit-pack analog
         role="packer",
         sub_role="kit_packer",
         robot_class="franka_panda",
@@ -265,9 +276,10 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
     ),
     # ------------------------------------------------------------------
     # AMR_driver (3 entries)
+    # Remapped 2026-05-15: TP-AMR-* files never existed.
     # ------------------------------------------------------------------
     RoleTemplateEntry(
-        template_id="TP-AMR-01",
+        template_id="CP-64",  # Carter Nav2 mobile robot — tugger / intralogistics navigation
         role="AMR_driver",
         sub_role="tugger",
         robot_class="mir250",
@@ -276,7 +288,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="Tugger AMR pulling cart trains between production cells.",
     ),
     RoleTemplateEntry(
-        template_id="TP-AMR-02",
+        template_id="CP-NEW-amr-pickup-handoff",  # Nova Carter docks + Franka handoff — bin transport
         role="AMR_driver",
         sub_role="bin_mover",
         robot_class="otto_1500",
@@ -285,7 +297,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="Autonomous bin transport with dynamic obstacle avoidance.",
     ),
     RoleTemplateEntry(
-        template_id="TP-AMR-03",
+        template_id="CP-NEW-multi-amr-corridor",  # 3 Nova Carters navigate + handoff — mobile manip [REVIEW]
         role="AMR_driver",
         sub_role="mobile_manip",
         robot_class="mir250_franka",
@@ -295,9 +307,12 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
     ),
     # ------------------------------------------------------------------
     # dispenser (2 entries)
+    # Remapped 2026-05-15: TP-DSP-* files never existed; no dedicated
+    # dispensing CPs exist. Mapped to closest precision-path analogs.
+    # Track F backlog: author glue/sealant dispensing templates.
     # ------------------------------------------------------------------
     RoleTemplateEntry(
-        template_id="TP-DSP-01",
+        template_id="CP-58",  # peg-in-hole precision placement — closest controlled-path analog [REVIEW]
         role="dispenser",
         sub_role="glue_dispenser",
         robot_class="fanuc_lrmate200id",
@@ -306,7 +321,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="Precision bead dispensing for structural adhesive bonding.",
     ),
     RoleTemplateEntry(
-        template_id="TP-DSP-02",
+        template_id="CP-69",  # UR10 cuRobo — ur10e robot class match; automotive scale [REVIEW]
         role="dispenser",
         sub_role="sealant_dispenser",
         robot_class="ur10e",
@@ -316,9 +331,10 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
     ),
     # ------------------------------------------------------------------
     # kitter (2 entries)
+    # Remapped 2026-05-15: TP-KIT-* files never existed.
     # ------------------------------------------------------------------
     RoleTemplateEntry(
-        template_id="TP-KIT-01",
+        template_id="CP-49",  # kitting station, 4-slot kit tray, JIT sequenced pick
         role="kitter",
         sub_role="parts_to_tray",
         robot_class="ur5e",
@@ -327,7 +343,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="Part-to-tray kitting for sequenced JIT delivery to assembly.",
     ),
     RoleTemplateEntry(
-        template_id="TP-KIT-02",
+        template_id="CP-50",  # vision-driven kitting, 2-color BOM routing into kit tray
         role="kitter",
         sub_role="kit_assembly",
         robot_class="franka_panda",
