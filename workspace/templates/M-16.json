@@ -1,12 +1,15 @@
 {
   "task_id": "M-16",
   "goal": "Migrate omni.isaac.core imports to isaacsim.core. Agent must cite SingleArticulation + api.World replacements verbatim, flag class renames.",
-  "tools_used": ["lookup_api_deprecation"],
-  "thoughts": "Third cite task validating the deprecations index. Row isaac_core_namespace — class rename trap (Articulation → SingleArticulation) distinguishes naive prefix-replace from full migration knowledge.",
+  "tools_used": [
+    "lookup_api_deprecation"
+  ],
+  "thoughts": "Third cite task validating the deprecations index. Row isaac_core_namespace \u2014 class rename trap (Articulation \u2192 SingleArticulation) distinguishes naive prefix-replace from full migration knowledge.",
   "code": "lookup_api_deprecation(query='omni.isaac.core articulations migration')\n# -> row with tool_5x: 'isaacsim.core.api.World / isaacsim.core.prims.SingleArticulation'\n# Correct reply: cite both exact class names, flag the rename pattern.",
   "failure_modes": [
-    "Prefix-only replace: claims isaacsim.core.articulations.Articulation (wrong — renamed).",
+    "Prefix-only replace: claims isaacsim.core.articulations.Articulation (wrong \u2014 renamed).",
     "Generic 'use isaacsim.core.*' without specific class names.",
     "Mentions only one of the two replacement paths."
-  ]
+  ],
+  "qa_status": "dialogue_canonical; structurally complete; not exercised in QA; classified 2026-05-15"
 }

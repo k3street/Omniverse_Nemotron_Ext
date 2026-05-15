@@ -19,6 +19,7 @@ import time as _time
 from ._state import (
     ASYNC_TASKS as _ASYNC_TASKS,
     ASYNC_TASKS_LOCK as _ASYNC_TASKS_LOCK,
+    _WORKFLOW_TEMPLATES,
     _WORKFLOWS_REGISTRY_LOCK,
     make_workflow_lock,
 )
