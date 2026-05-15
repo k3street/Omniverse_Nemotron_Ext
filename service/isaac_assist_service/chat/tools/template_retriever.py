@@ -16,6 +16,7 @@ Uses the same ChromaDB instance as `tool_retriever`, separate collection.
 from __future__ import annotations
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -201,13 +202,101 @@ def format_for_prompt(templates: List[Dict]) -> str:
     return "\n".join(lines)
 
 
-def retrieve_templates_with_scores(query: str, top_k: int = 3) -> List[Dict]:
+# ---------------------------------------------------------------------------
+# Motion-controller filter helpers (Round 11, 2026-05-15)
+# ---------------------------------------------------------------------------
+# ENV: RETRIEVAL_MC_FILTER=on enables the filter; default off.
+# Post-filter applied after similarity retrieval so ChromaDB index is unchanged.
+# ---------------------------------------------------------------------------
+
+def _mc_filter_enabled() -> bool:
+    """Return True when the motion-controller filter is activated via env var."""
+    return os.environ.get("RETRIEVAL_MC_FILTER", "off").lower() in ("on", "true", "1", "yes")
+
+
+def _parse_mc_base_name(controller_name: str) -> str:
+    """Strip optional version suffix: 'curobo@1.8.2' → 'curobo'."""
+    return controller_name.split("@", 1)[0].strip().lower()
+
+
+def _apply_motion_controller_filter(
+    entries: List[Dict],
+    constraint: Dict,
+) -> List[Dict]:
+    """Post-filter a list of scored entries by motion_controller_constraint.
+
+    Args:
+        entries: list of {template, task_id, distance, similarity} dicts
+        constraint: dict with optional keys:
+            must_verified   — template.motion_controllers.verified must contain ALL (base-name match)
+            must_not_failed — template.motion_controllers.failed must NOT contain ANY (base-name match)
+
+    Templates with NO motion_controllers field are INCLUDED regardless (don't
+    penalize unmigrated templates).
+    """
+    must_verified = [
+        _parse_mc_base_name(c) for c in (constraint.get("must_verified") or [])
+    ]
+    must_not_failed = [
+        _parse_mc_base_name(c) for c in (constraint.get("must_not_failed") or [])
+    ]
+
+    if not must_verified and not must_not_failed:
+        return entries  # constraint is a no-op
+
+    filtered: List[Dict] = []
+    for entry in entries:
+        t = entry.get("template", {})
+        mc = t.get("motion_controllers")
+        if mc is None:
+            # No field → include (unmigrated template, benefit of the doubt)
+            filtered.append(entry)
+            continue
+
+        # verified is a list; parse each entry's base name
+        verified_bases = {
+            _parse_mc_base_name(v) for v in (mc.get("verified") or [])
+        }
+        # failed is a dict keyed by controller name; keys are the names
+        failed_bases = {
+            _parse_mc_base_name(k) for k in (mc.get("failed") or {}).keys()
+        }
+
+        # Check must_verified: all required controllers must be in verified_bases
+        if must_verified and not all(c in verified_bases for c in must_verified):
+            continue
+
+        # Check must_not_failed: none of the excluded controllers may be in failed_bases
+        if must_not_failed and any(c in failed_bases for c in must_not_failed):
+            continue
+
+        filtered.append(entry)
+    return filtered
+
+
+def retrieve_templates_with_scores(
+    query: str,
+    top_k: int = 3,
+    motion_controller_constraint: Optional[Dict] = None,
+) -> List[Dict]:
     """Like retrieve_templates but each entry includes ChromaDB distance +
     a normalized similarity score in [0, 1] (1 = perfect match).
 
     Returns list of dicts: [{template, task_id, distance, similarity}, ...]
 
     Used by hard-instantiate path to gate on canonical-match confidence.
+
+    Args:
+        query: user message or structural fingerprint for similarity search
+        top_k: number of candidates to retrieve from ChromaDB
+        motion_controller_constraint: optional post-filter dict with keys:
+            must_verified   — list of controller names (base-name matched);
+                              template.motion_controllers.verified must include ALL
+            must_not_failed — list of controller names; template must NOT have
+                              any of these in motion_controllers.failed
+            Only honored when env var RETRIEVAL_MC_FILTER=on.
+            Templates without the motion_controllers field are always included.
+            When None, behavior is byte-identical to the no-filter baseline.
     """
     col = _get_collection()
     if col is None:
@@ -235,6 +324,11 @@ def retrieve_templates_with_scores(query: str, top_k: int = 3) -> List[Dict]:
                 "distance": d,
                 "similarity": similarity,
             })
+
+        # Apply motion-controller post-filter when env gate is on
+        if motion_controller_constraint is not None and _mc_filter_enabled():
+            out = _apply_motion_controller_filter(out, motion_controller_constraint)
+
         logger.info(
             f"[TemplateRetriever] '{query[:60]}' → "
             + ", ".join(f"{x['task_id']}({x['similarity']:.2f})" for x in out)
