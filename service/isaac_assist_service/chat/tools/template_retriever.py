@@ -520,12 +520,14 @@ def retrieve_with_intent_filter(
     top_k: int = 3,
     count_tolerance: int = 0,
     fallback_to_embedding_only: bool = True,
+    original_query: Optional[str] = None,
 ) -> List[Dict]:
     """Structural-filter-first retrieval per spec §8.1.
 
     Stage 1: hard structural filter via `filter_templates_by_intent`.
-    Stage 2: embedding similarity over canonical structural fingerprint
-        among Stage-1 candidates only.
+    Stage 2: embedding similarity over the ORIGINAL user prompt among
+        Stage-1 candidates only. (The fingerprint is for metadata filtering,
+        not for embedding queries — see R14 root-cause analysis.)
     Stage 3: returns same shape as `retrieve_templates_with_scores`
         ({template, task_id, distance, similarity}) for downstream
         tier-classification compatibility.
@@ -533,8 +535,20 @@ def retrieve_with_intent_filter(
     If Stage 1 returns no candidates (e.g., no templates have intent fields
     yet — Block 1B not landed), and `fallback_to_embedding_only=True`
     (default), the function falls back to embedding-similarity over the
-    fingerprint without structural filtering. This makes the function
-    useful immediately and progressively stricter as templates add intent.
+    ORIGINAL USER PROMPT (not the fingerprint) against the full corpus.
+    This makes the function useful immediately and progressively stricter
+    as templates add intent.
+
+    Args:
+        spec_intent: structured intent dict (Intent.model_dump())
+        top_k: max results to return
+        count_tolerance: relaxes count-match tolerance in Stage 1
+        fallback_to_embedding_only: when True, fall back to full-corpus
+            embedding search if Stage 1 returns no candidates
+        original_query: the original user prompt string. When provided,
+            used as the embedding query for Stage 2 AND for the fallback
+            path. When None, the fingerprint is used (legacy behaviour,
+            kept for backward compatibility but produces semantic mismatch).
 
     Returns: list of {template, task_id, distance, similarity} dicts,
     most-similar first.
@@ -542,23 +556,29 @@ def retrieve_with_intent_filter(
     candidates = filter_templates_by_intent(spec_intent, count_tolerance)
 
     fingerprint = canonical_structural_fingerprint(spec_intent)
+    # Bug fix (R15): use original_query for embedding when available.
+    # The fingerprint is a structured fact string; ChromaDB was indexed on
+    # natural-language goal+thoughts+tools. Querying with the fingerprint
+    # yields near-random rankings (~0.4 sim vs ~0.7 for the prompt).
+    embed_query = original_query if original_query else fingerprint
 
     if not candidates:
         if not fallback_to_embedding_only:
             return []
-        # Fallback: embedding-only over the fingerprint, against the full
-        # template set (legacy mode, pre-Block-1B). Same return shape.
+        # Fallback: embedding-only over the full template set using the
+        # ORIGINAL user prompt (not the fingerprint). Same return shape.
+        # Bug fix (R15, Failure Mode B): was retrieve_templates_with_scores(fingerprint, ...)
         logger.info(
             "[TemplateRetriever] structural-filter found no candidates; "
             "falling back to embedding-only retrieval over full set"
         )
-        return retrieve_templates_with_scores(fingerprint, top_k=top_k)
+        return retrieve_templates_with_scores(embed_query, top_k=top_k)
 
     # Stage 2: embed similarity over candidates only.
     # We restrict the ChromaDB query to the candidate IDs via the `where`
-    # filter (chromadb supports `$in`). The query text is the structural
-    # fingerprint — embedding similarity over facts about the spec, not
-    # natural-language prose.
+    # filter (chromadb supports `$in`). The query text is the original user
+    # prompt (or fingerprint if no prompt was passed — legacy fallback).
+    # Bug fix (R15, Failure Mode A): was query_texts=[fingerprint].
     col = _get_collection()
     if col is None:
         # Without ChromaDB, return all candidates in arbitrary order
@@ -571,7 +591,7 @@ def retrieve_with_intent_filter(
     candidate_ids = [t.get("task_id") for t in candidates if t.get("task_id")]
     try:
         res = col.query(
-            query_texts=[fingerprint],
+            query_texts=[embed_query],
             n_results=min(top_k, len(candidate_ids)),
             where={"task_id": {"$in": candidate_ids}} if candidate_ids else None,
         )

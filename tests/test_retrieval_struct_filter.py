@@ -38,7 +38,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 _BENCHMARK_DIR = _REPO_ROOT / "workspace" / "benchmarks"
 _CORPUS_FILE = _BENCHMARK_DIR / "retrieval_30prompts.json"
-_RESULTS_FILE = _BENCHMARK_DIR / "retrieval_30prompts_struct_on_2026-05-15.json"
+_RESULTS_FILE = _BENCHMARK_DIR / "retrieval_30prompts_struct_on_post_r15_2026-05-15.json"
 _BASELINE_FILE = _BENCHMARK_DIR / "retrieval_30prompts_baseline_2026-05-15.json"
 
 _CANONICAL_MIN_SIM = 0.45
@@ -67,10 +67,10 @@ def _run_struct_retrieval(prompt: str, top_k: int = 3) -> tuple[List[Dict], floa
     spec = produce_layout_spec_from_text(prompt)
     intent_dump = spec.intent.model_dump(mode="json")
 
-    # retrieve_with_intent_filter has fallback_to_embedding_only=True by default:
-    # if Stage 1 (structural filter) returns 0 candidates, it falls back to
-    # embedding-only over the full corpus using the fingerprint as query.
-    scored = retrieve_with_intent_filter(intent_dump, top_k=top_k)
+    # retrieve_with_intent_filter has fallback_to_embedding_only=True by default.
+    # R15 fix: pass original_query=prompt so Stage 2 and fallback use the
+    # user prompt for embedding (not the structured fingerprint).
+    scored = retrieve_with_intent_filter(intent_dump, top_k=top_k, original_query=prompt)
 
     # Determine which path was actually used — proxy: if struct filter candidates
     # exist (intent-matched), it was struct; otherwise fallback.
@@ -186,7 +186,7 @@ def run():
     n_with_intent = sum(1 for t in _template_cache.values() if t.get("intent"))
 
     print(f"\n{'='*70}")
-    print("Isaac Assist Retrieval Benchmark — Round 14 STRUCT FILTER ON")
+    print("Isaac Assist Retrieval Benchmark — Round 15 STRUCT FILTER ON (prompt-query fix)")
     print(f"Path: retrieve_with_intent_filter (structural-filter-first)")
     print(f"Coverage: {n_with_intent}/{n_indexed} templates have intent field")
     print(f"Thresholds: sim>={_CANONICAL_MIN_SIM}, margin>={_CANONICAL_MIN_MARGIN}")
@@ -281,7 +281,7 @@ def run():
     output = {
         "benchmark": "retrieval_30prompts_struct_filter",
         "date": "2026-05-15",
-        "round": 14,
+        "round": 15,
         "retrieval_path": "retrieve_with_intent_filter (struct-first, fallback to embedding)",
         "env_flag": "MULTIMODAL_TEXT_INTENT=on (equivalent)",
         "coverage": {
