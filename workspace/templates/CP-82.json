@@ -55,6 +55,86 @@
       "/World/Cube_2"
     ]
   },
+  "intent": {
+    "pattern_hint": "sort",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "n_bins_routed",
+      "uses_conveyor_transport": false,
+      "routing_axis": "color"
+    },
+    "structural_tags": [
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:robot.ur10",
+      "isaac:source.static_pedestal",
+      "isaac:routing.color"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["ur10e", "ur10"],
+      "expected_count": 1,
+      "required": true
+    },
+    "primary_destination": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "destinations": {
+      "constraints": ["bin"],
+      "min": 2,
+      "max": 2,
+      "unordered": true
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 2,
+      "max": 2,
+      "unordered": false
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/UR10",
+      "class": "ur10e",
+      "position": [0, 0, 0.75]
+    },
+    "primary_destination": {
+      "path": "/World/Bin_red",
+      "position": [0.5, -0.30, 0.75],
+      "size": [0.20, 0.20, 0.15]
+    },
+    "destinations": [
+      {
+        "path": "/World/Bin_red",
+        "position": [0.5, -0.30, 0.75],
+        "size": [0.20, 0.20, 0.15],
+        "color_key": "red"
+      },
+      {
+        "path": "/World/Bin_blue",
+        "position": [0.5, -0.55, 0.75],
+        "size": [0.20, 0.20, 0.15],
+        "color_key": "blue"
+      }
+    ],
+    "workpieces": [
+      {
+        "path": "/World/Cube_1",
+        "position": [-0.5, 0.55, 0.975],
+        "color_label": "red"
+      },
+      {
+        "path": "/World/Cube_2",
+        "position": [-0.5, 0.25, 0.975],
+        "color_label": "blue"
+      }
+    ]
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.7, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path={{primary_robot.path}}, prim_type=\"Xform\")\nadd_reference(prim_path={{primary_robot.path}}, reference_path=\"/mnt/shared_data/isaac-sim-assets-complete-5.0.0/Assets/Isaac/5.0/Collected_Robots/ur10.usd\")\nteleport_prim(prim_path={{primary_robot.path}}, position={{primary_robot.position}})\n\ncreate_prim(prim_path=\"/World/Pedestal_1\", prim_type=\"Cube\", position=[-0.5, 0.55, 0.875], scale=[0.06, 0.06, 0.075])\napply_api_schema(prim_path=\"/World/Pedestal_1\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Pedestal_2\", prim_type=\"Cube\", position=[-0.5, 0.25, 0.875], scale=[0.06, 0.06, 0.075])\napply_api_schema(prim_path=\"/World/Pedestal_2\", schema_name=\"PhysicsCollisionAPI\")\n\n# Red cube\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\nbulk_set_attribute(prim_paths=[{{workpieces[0].path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path={{workpieces[0].path}}, material_name=\"rubber\")\nset_semantic_label(prim_path={{workpieces[0].path}}, semantic_type=\"color\", class_name=\"red\")\n\n# Blue cube\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\nbulk_set_attribute(prim_paths=[{{workpieces[1].path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path={{workpieces[1].path}}, material_name=\"rubber\")\nset_semantic_label(prim_path={{workpieces[1].path}}, semantic_type=\"color\", class_name=\"blue\")\n\ncreate_bin(prim_path={{destinations[0].path}}, position={{destinations[0].position}}, size={{destinations[0].size}})\ncreate_bin(prim_path={{destinations[1].path}}, position={{destinations[1].position}}, size={{destinations[1].size}})\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    robot_family=\"ur10\",\n    target_source=\"curobo\",\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}],\n    destination_path={{primary_destination.path}},\n    color_routing={\"red\": {{destinations[0].path}}, \"blue\": {{destinations[1].path}}},\n    end_effector_offset=[0.0, 0.0, 0.02],\n)",
   "extends": "CP-81",
   "extension_notes": "CP-82 = converted from builtin to cuRobo. cuRobo handler implements _destination_path_for via Semantics_color lookup; builtin handler doesn't.",
   "failure_modes": [
