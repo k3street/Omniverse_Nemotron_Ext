@@ -32,5 +32,10 @@
     "Numerical explosion in V1 6-brick variant \u2014 single-brick V0 avoids by uniform drop_target z=0.81",
     "Brick rolling off baseplate edge \u2014 baseplate widened to 0.20x0.10 (was 0.18x0.06)"
   ],
-  "verified_status": "build-spec-2026-05-10; build OK but stable_fail \u2014 persistent PhysX numerical explosion when gripper grasps brick (cube velocity blows to >200k m/s). 3 variants tried (drop_z, y-position, planning_obstacles). Needs gripper-force or collision-detection deeper fix."
+  "verified_status": "build-spec-2026-05-10; build OK but stable_fail \u2014 persistent PhysX numerical explosion when gripper grasps brick (cube velocity blows to >200k m/s). 3 variants tried (drop_z, y-position, planning_obstacles). Needs gripper-force or collision-detection deeper fix.",
+  "migration_deferred": {
+    "reason": "draft",
+    "details": "Brick-stacking baseplate; reorient pattern partial but baseplate placement logic not yet in role schema; zero QA runs",
+    "added_date": "2026-05-15"
+  }
 }

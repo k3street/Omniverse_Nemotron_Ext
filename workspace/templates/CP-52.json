@@ -127,5 +127,10 @@
     "upper": 0.7812,
     "evidence_date": "2026-05-15",
     "evidence_source": "workspace/baselines aggregate"
+  },
+  "migration_deferred": {
+    "reason": "draft",
+    "details": "Parallel-picking duo (2 Frankas on shared conveyor); pick_place pattern fits but multi-robot coordination role schema not defined",
+    "added_date": "2026-05-15"
   }
 }

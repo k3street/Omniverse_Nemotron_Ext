@@ -86,5 +86,10 @@
       -0.3,
       0.75
     ]
+  },
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "UR10 + Cortex behavior-tree demo_ur10_conveyor canonical; Cortex execution model distinct from role-based patterns",
+    "added_date": "2026-05-15"
   }
 }

@@ -31,5 +31,10 @@
     "launch_training requires rsl_rl pip-installed; falls back if missing",
     "GPU dynamics + 64 instances exceed RTX 5070 12GB VRAM \u2014 pre-flight via check_vram_headroom recommended"
   ],
-  "verified_status": "build-spec-2026-05-10; BUILD_OK 15/18; 3 errors on clone_envs/launch_training (need rsl_rl)"
+  "verified_status": "build-spec-2026-05-10; BUILD_OK 15/18; 3 errors on clone_envs/launch_training (need rsl_rl)",
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "64-parallel RL training scaffold; RL env clone is a training infrastructure task, not a manipulation pattern",
+    "added_date": "2026-05-15"
+  }
 }

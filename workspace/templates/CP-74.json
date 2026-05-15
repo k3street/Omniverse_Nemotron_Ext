@@ -71,5 +71,10 @@
       -0.4,
       0.75
     ]
+  },
+  "migration_deferred": {
+    "reason": "draft",
+    "details": "UR10 native PickPlaceController variant (same scene as CP-73); pick_place pattern fits but UR10 articulation-link surface gripper bug not resolved; zero QA runs",
+    "added_date": "2026-05-15"
   }
 }

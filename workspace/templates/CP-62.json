@@ -102,5 +102,10 @@
     "upper": 0.2039,
     "evidence_date": "2026-05-15",
     "evidence_source": "workspace/baselines aggregate"
+  },
+  "migration_deferred": {
+    "reason": "draft",
+    "details": "Surface-gripper linear-axis gantry; surface_gripper role type not yet defined; zero QA runs",
+    "added_date": "2026-05-15"
   }
 }

@@ -41,5 +41,10 @@
     "Belt-on-belt physics may launch cubes vertically (PhysX surfaceVelocity stack)",
     "8 chutes with target_path=Chute_1: gate only checks Chute_1; multi-cube semantics give success if ANY cube reaches there"
   ],
-  "verified_status": "build-spec-2026-05-10; build OK, gate stable_fail (no robot scene, cubes fall through belt-to-belt junctions)"
+  "verified_status": "build-spec-2026-05-10; build OK, gate stable_fail (no robot scene, cubes fall through belt-to-belt junctions)",
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "8-chute cross-belt sorter; conveyor topology + divert logic has no match in {pick_place, sort, reorient, navigate}",
+    "added_date": "2026-05-15"
+  }
 }

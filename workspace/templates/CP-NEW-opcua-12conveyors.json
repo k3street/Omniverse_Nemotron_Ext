@@ -29,5 +29,10 @@
     "Wrong node_map (e.g. ns=2;i=99) \u2192 bridge alive but errors logged per-node",
     "Mock server doesn't define 12 nodes \u2192 some attrs missing in attrs map"
   ],
-  "verified_status": "build-spec-2026-05-10; BUILD_OK; plumbing-only (no cube delivery, no simulate_args)"
+  "verified_status": "build-spec-2026-05-10; BUILD_OK; plumbing-only (no cube delivery, no simulate_args)",
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "OPC-UA live-tag driven 12-conveyor control; industrial bridge integration is not a manipulation pattern",
+    "added_date": "2026-05-15"
+  }
 }

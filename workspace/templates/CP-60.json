@@ -83,5 +83,10 @@
     "upper": 0.2153,
     "evidence_date": "2026-05-15",
     "evidence_source": "workspace/baselines aggregate"
+  },
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "Recirculation-loop conveyor demo; closed-loop multi-segment conveyor with no pick/sort \u2014 no pattern_hint covers conveyor topology",
+    "added_date": "2026-05-15"
   }
 }

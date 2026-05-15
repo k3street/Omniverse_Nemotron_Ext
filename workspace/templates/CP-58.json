@@ -89,5 +89,10 @@
       0.0,
       0.75
     ]
+  },
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "Peg-in-hole insertion array; precision insertion with 5mm clearance is fundamentally different from pick_place \u2014 requires force/compliance role",
+    "added_date": "2026-05-15"
   }
 }

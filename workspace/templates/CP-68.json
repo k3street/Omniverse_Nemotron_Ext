@@ -117,5 +117,10 @@
     "upper": 0.6105,
     "evidence_date": "2026-05-15",
     "evidence_source": "workspace/baselines aggregate"
+  },
+  "migration_deferred": {
+    "reason": "draft",
+    "details": "Robot-to-robot handoff with dynamic obstacle awareness (extends CP-51); handoff role + obstacle role not yet defined; zero QA runs",
+    "added_date": "2026-05-15"
   }
 }

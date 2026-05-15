@@ -104,5 +104,10 @@
     "upper": 0.4138,
     "evidence_date": "2026-05-15",
     "evidence_source": "workspace/baselines aggregate"
+  },
+  "migration_deferred": {
+    "reason": "draft",
+    "details": "Obstacle-avoidance pick_place station; pick_place pattern fits but obstacle role type not yet defined; zero QA runs",
+    "added_date": "2026-05-15"
   }
 }

@@ -29,5 +29,10 @@
     "compare_sim_real_video requires camera frames to be timestamp-aligned \u2014 sim camera capture rate must match real",
     "joint_pos_rmse computation assumes joint name parity between sim Franka and real Franka URDF"
   ],
-  "verified_status": "build-spec-2026-05-10; BUILD_OK 17/18; 1 error on replay_rosbag (needs real rosbag asset)"
+  "verified_status": "build-spec-2026-05-10; BUILD_OK 17/18; 1 error on replay_rosbag (needs real rosbag asset)",
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "Sim-to-real gap measurement via rosbag replay; measurement/diagnostic task \u2014 no manipulation pattern applies",
+    "added_date": "2026-05-15"
+  }
 }

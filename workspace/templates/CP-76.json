@@ -137,5 +137,10 @@
     "upper": 0.1487,
     "evidence_date": "2026-05-15",
     "evidence_source": "workspace/baselines aggregate"
+  },
+  "migration_deferred": {
+    "reason": "draft",
+    "details": "Dual-robot dynamic fixture hold; fixture-hold role not yet defined; zero QA runs",
+    "added_date": "2026-05-15"
   }
 }

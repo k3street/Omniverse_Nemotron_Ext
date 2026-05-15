@@ -71,5 +71,10 @@
       -0.4,
       0.75
     ]
+  },
+  "migration_deferred": {
+    "reason": "draft",
+    "details": "UR10 elevated-conveyor variant of CP-78; pick_place pattern fits but UR10 belt-pause-from-callback bug remains unresolved",
+    "added_date": "2026-05-15"
   }
 }

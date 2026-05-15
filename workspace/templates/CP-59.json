@@ -88,5 +88,10 @@
       0,
       0.75
     ]
+  },
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "Vision-gated bin-picking duo; vision classifier gate + dual-robot coordination \u2014 no existing pattern covers both",
+    "added_date": "2026-05-15"
   }
 }

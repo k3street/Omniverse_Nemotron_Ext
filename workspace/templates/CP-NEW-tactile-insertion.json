@@ -32,5 +32,10 @@
     "Peg drops with 4mm+ lateral error from drop_target \u2014 usual peg-in-hole physics issue",
     "Slow approach trajectory may not be triggered without contact-aware controller mode"
   ],
-  "verified_status": "build-spec-2026-05-10; build OK, gate stable_fail (PhysX numerical instability during grip \u2014 cube velocity blows to >200km/s)"
+  "verified_status": "build-spec-2026-05-10; build OK, gate stable_fail (PhysX numerical instability during grip \u2014 cube velocity blows to >200km/s)",
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "Tactile-feedback insertion with TacEncode sensor; tactile sensing + insertion is a novel pattern with no current match",
+    "added_date": "2026-05-15"
+  }
 }

@@ -12,9 +12,9 @@
     "hit_at_3": 0.9333,
     "mode_accuracy": 0.7,
     "hard_instantiate_rate": 0.1667,
-    "avg_latency_ms": 98.04,
-    "latency_p50_ms": 96.79,
-    "latency_p95_ms": 99.84
+    "avg_latency_ms": 106.58,
+    "latency_p50_ms": 105.96,
+    "latency_p95_ms": 109.09
   },
   "category_breakdown": {
     "amr_navigation": {
@@ -271,7 +271,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": false,
-      "latency_ms": 129.17,
+      "latency_ms": 133.78,
       "top3": [
         {
           "task_id": "CP-77",
@@ -308,7 +308,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 98.89,
+      "latency_ms": 106.73,
       "top3": [
         {
           "task_id": "CP-51",
@@ -347,7 +347,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 99.68,
+      "latency_ms": 105.55,
       "top3": [
         {
           "task_id": "CP-16",
@@ -384,7 +384,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 99.31,
+      "latency_ms": 105.92,
       "top3": [
         {
           "task_id": "CP-04",
@@ -421,7 +421,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 96.59,
+      "latency_ms": 105.83,
       "top3": [
         {
           "task_id": "CP-05",
@@ -462,7 +462,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 94.8,
+      "latency_ms": 107.47,
       "top3": [
         {
           "task_id": "CP-07",
@@ -502,7 +502,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 95.61,
+      "latency_ms": 102.44,
       "top3": [
         {
           "task_id": "CP-82",
@@ -539,7 +539,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 95.98,
+      "latency_ms": 106.07,
       "top3": [
         {
           "task_id": "CP-NEW-3station-oee",
@@ -578,7 +578,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 95.97,
+      "latency_ms": 104.37,
       "top3": [
         {
           "task_id": "CP-52",
@@ -618,7 +618,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": true,
-      "latency_ms": 95.87,
+      "latency_ms": 104.56,
       "top3": [
         {
           "task_id": "CP-34",
@@ -655,7 +655,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 97.4,
+      "latency_ms": 104.72,
       "top3": [
         {
           "task_id": "CP-NEW-amr-pickup-handoff",
@@ -692,7 +692,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 94.87,
+      "latency_ms": 103.84,
       "top3": [
         {
           "task_id": "CP-NEW-multi-amr-corridor",
@@ -731,7 +731,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 95.41,
+      "latency_ms": 107.84,
       "top3": [
         {
           "task_id": "CP-NEW-rl-clone-env",
@@ -768,7 +768,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 96.6,
+      "latency_ms": 109.09,
       "top3": [
         {
           "task_id": "CP-87",
@@ -805,7 +805,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 97.09,
+      "latency_ms": 107.73,
       "top3": [
         {
           "task_id": "S-07",
@@ -844,7 +844,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 97.8,
+      "latency_ms": 105.96,
       "top3": [
         {
           "task_id": "M-01",
@@ -881,7 +881,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 95.89,
+      "latency_ms": 106.46,
       "top3": [
         {
           "task_id": "FX-01",
@@ -918,7 +918,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 97.43,
+      "latency_ms": 107.07,
       "top3": [
         {
           "task_id": "P-01",
@@ -955,7 +955,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 96.21,
+      "latency_ms": 106.7,
       "top3": [
         {
           "task_id": "M-08",
@@ -992,7 +992,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 96.94,
+      "latency_ms": 104.58,
       "top3": [
         {
           "task_id": "CP-64",
@@ -1029,7 +1029,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 95.21,
+      "latency_ms": 102.19,
       "top3": [
         {
           "task_id": "A-09",
@@ -1066,7 +1066,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 97.46,
+      "latency_ms": 102.92,
       "top3": [
         {
           "task_id": "CP-07",
@@ -1103,7 +1103,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 96.79,
+      "latency_ms": 102.01,
       "top3": [
         {
           "task_id": "CP-35",
@@ -1140,7 +1140,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 99.43,
+      "latency_ms": 105.33,
       "top3": [
         {
           "task_id": "F-08",
@@ -1177,7 +1177,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 98.79,
+      "latency_ms": 105.8,
       "top3": [
         {
           "task_id": "A-02",
@@ -1220,7 +1220,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 96.12,
+      "latency_ms": 107.52,
       "top3": [
         {
           "task_id": "CP-25",
@@ -1259,7 +1259,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 96.19,
+      "latency_ms": 105.97,
       "top3": [
         {
           "task_id": "CP-NEW-peg-in-hole-single",
@@ -1296,7 +1296,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 99.84,
+      "latency_ms": 106.36,
       "top3": [
         {
           "task_id": "F-02",
@@ -1336,7 +1336,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 97.3,
+      "latency_ms": 106.72,
       "top3": [
         {
           "task_id": "CP-71",
@@ -1375,7 +1375,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 96.46,
+      "latency_ms": 105.78,
       "top3": [
         {
           "task_id": "CP-55",

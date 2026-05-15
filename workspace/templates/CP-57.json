@@ -106,5 +106,10 @@
     "upper": 0.495,
     "evidence_date": "2026-05-15",
     "evidence_source": "workspace/baselines aggregate"
+  },
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "Parcel-singulation-from-heap; heap zone + singulation logic has no match in {pick_place, sort, reorient, navigate}",
+    "added_date": "2026-05-15"
   }
 }

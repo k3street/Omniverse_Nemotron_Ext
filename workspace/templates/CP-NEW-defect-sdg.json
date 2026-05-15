@@ -31,5 +31,10 @@
     "Domain randomizer materials need to be valid Mdl; create_material with simple color may not satisfy SDG",
     "GPU output dir disk usage may exceed available space if 100 frames at full res"
   ],
-  "verified_status": "build-spec-2026-05-10; BUILD_OK 93/115 with material_path arg fix; 22 errors remaining are SDG handlers (configure_sdg/preview_sdg may not exist)"
+  "verified_status": "build-spec-2026-05-10; BUILD_OK 93/115 with material_path arg fix; 22 errors remaining are SDG handlers (configure_sdg/preview_sdg may not exist)",
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "Defect-introduction SDG pipeline; synthetic data generation is not a manipulation task \u2014 no pattern_hint applies",
+    "added_date": "2026-05-15"
+  }
 }

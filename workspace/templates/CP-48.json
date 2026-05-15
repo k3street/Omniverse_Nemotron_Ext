@@ -112,5 +112,10 @@
     "upper": 0.2806,
     "evidence_date": "2026-05-15",
     "evidence_source": "workspace/baselines aggregate"
+  },
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "Runtime vision inspect-and-reject; requires vision-gated conditional routing \u2014 no existing pattern_hint covers vision classifier dispatch",
+    "added_date": "2026-05-15"
   }
 }

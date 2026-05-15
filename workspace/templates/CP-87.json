@@ -67,5 +67,10 @@
     "rosbridge:9090 not running \u2192 precheck flags",
     "ROS2 topic name mismatch \u2192 external MoveIt2 sees no /joint_states"
   ],
-  "verified_status": "draft"
+  "verified_status": "draft",
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "ROS2-MoveIt2 Franka pick-place via topic_based_ros2_control; ROS2 bridge integration is a distinct execution backend with no current pattern_hint",
+    "added_date": "2026-05-15"
+  }
 }

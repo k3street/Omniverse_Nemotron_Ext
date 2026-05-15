@@ -29,5 +29,10 @@
     "pymodbus not installed \u2192 bridge worker fails to start; diagnose log_tail shows ImportError",
     "Wrong register_map \u2192 bridge alive but n_register_updates=0 with errors logged"
   ],
-  "verified_status": "build-spec-2026-05-10; BUILD_OK; plumbing-only (no cube delivery, no simulate_args)"
+  "verified_status": "build-spec-2026-05-10; BUILD_OK; plumbing-only (no cube delivery, no simulate_args)",
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "PLC-in-the-loop conveyor station via Modbus/OPC-UA; industrial bridge integration is not a manipulation pattern",
+    "added_date": "2026-05-15"
+  }
 }

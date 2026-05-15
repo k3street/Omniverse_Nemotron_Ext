@@ -126,5 +126,10 @@
     "upper": 0.3331,
     "evidence_date": "2026-05-15",
     "evidence_source": "workspace/baselines aggregate"
+  },
+  "migration_deferred": {
+    "reason": "enumerate_loop",
+    "details": "8-cube industrial sortation with 4 colors; sort pattern fits but 8-item enumerate loop not yet supported in role schema",
+    "added_date": "2026-05-15"
   }
 }

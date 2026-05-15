@@ -35,5 +35,10 @@
     "Force-torque threshold doesn't gate insertion \u2014 controller doesn't yet read FT sensor. Insertion happens by trajectory, not force.",
     "Peg orientation: cylindrical, no need for orientation-gating. Multi-peg array (CP-58) would need orientation per hole."
   ],
-  "verified_status": "build-spec-2026-05-10; build OK, gate stable_fail (PhysX numerical instability during grip \u2014 cube velocity blows to >200km/s)"
+  "verified_status": "build-spec-2026-05-10; build OK, gate stable_fail (PhysX numerical instability during grip \u2014 cube velocity blows to >200km/s)",
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "Single-peg precision insertion (5mm clearance); force-compliance insertion has no match in {pick_place, sort, reorient, navigate}",
+    "added_date": "2026-05-15"
+  }
 }

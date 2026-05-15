@@ -32,5 +32,10 @@
     "Mass too low \u2192 drawer flies open from light contact; mass too high \u2192 robot wrist torque saturates",
     "Sensor=handle path treats handle as movable cube \u2014 pick-place controller may try to LIFT handle vertically instead of pulling horizontally"
   ],
-  "verified_status": "build-spec-2026-05-10; build OK, gate stable_fail (pick-place controller cannot drive PrismaticJoint; needs constraint-aware controller)"
+  "verified_status": "build-spec-2026-05-10; build OK, gate stable_fail (pick-place controller cannot drive PrismaticJoint; needs constraint-aware controller)",
+  "migration_deferred": {
+    "reason": "asset_blocked",
+    "details": "Requires kitchen-cabinet drawer USD from Nucleus (NVIDIA Isaac assets); not available locally",
+    "added_date": "2026-05-15"
+  }
 }

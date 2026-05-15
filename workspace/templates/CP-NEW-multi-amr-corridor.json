@@ -28,5 +28,10 @@
     "navigate_to without ROS2 nav2 may use simple Vector-to-goal (collision unaware)",
     "AMR fleet coordination \u2014 without claim mutex, AMRs may collide in narrow corridor"
   ],
-  "verified_status": "build-spec-2026-05-10; BUILD_OK 21/21 with target_position+drive_type+wheel_radius+wheel_base args; no simulate_args (AMR nav not cube delivery)"
+  "verified_status": "build-spec-2026-05-10; BUILD_OK 21/21 with target_position+drive_type+wheel_radius+wheel_base args; no simulate_args (AMR nav not cube delivery)",
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "3-AMR multi-robot corridor navigation; navigate pattern partial but multi-robot collision avoidance has no current role schema",
+    "added_date": "2026-05-15"
+  }
 }

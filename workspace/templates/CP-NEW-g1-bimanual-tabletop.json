@@ -36,5 +36,10 @@
     "Bimanual coordination: cuRobo/WBC may not parallelize arms; one-arm-at-a-time fallback",
     "G1 hand frame name conventions vary (left_hand vs L_hand_link); template may need name fixup"
   ],
-  "verified_status": "build-spec-2026-05-10; build 20/21 (G1 SimReady asset missing on local Nucleus); gate stable_fail (no controller engagement without WBC stub)"
+  "verified_status": "build-spec-2026-05-10; build 20/21 (G1 SimReady asset missing on local Nucleus); gate stable_fail (no controller engagement without WBC stub)",
+  "migration_deferred": {
+    "reason": "asset_blocked",
+    "details": "Requires Unitree G1 humanoid USD from Nucleus (NVIDIA robot assets); not available locally",
+    "added_date": "2026-05-15"
+  }
 }

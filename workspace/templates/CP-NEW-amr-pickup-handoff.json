@@ -33,5 +33,10 @@
     "AMR bin attached as child of Carter \u2014 Franka's drop_target world coord shifts if Carter moves; for V0 with Carter fixed this is OK",
     "Carter as planning obstacle may cause cuRobo to refuse plan (Carter is large)"
   ],
-  "verified_status": "build-spec-2026-05-10; build \u2713 20/20 with create_wheeled_robot+navigate_to fixed; gate stable_fail (controller plans 30x but cube never picked)"
+  "verified_status": "build-spec-2026-05-10; build \u2713 20/20 with create_wheeled_robot+navigate_to fixed; gate stable_fail (controller plans 30x but cube never picked)",
+  "migration_deferred": {
+    "reason": "novel_pattern",
+    "details": "Nova Carter AMR + Franka handoff; navigate pattern partial but AMR docking + robot handoff composition has no coverage",
+    "added_date": "2026-05-15"
+  }
 }
