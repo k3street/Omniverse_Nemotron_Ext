@@ -76,6 +76,99 @@
     "1 Gemini API call per build."
   ],
   "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + xy_tol=0.15 + rest_speed=10 \u2014 Cube_4 delivered to RedTray)",
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "n_bins_routed",
+      "uses_conveyor_transport": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:routing.vision_color",
+      "isaac:destination.kit_tray"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true
+    },
+    "input_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "pick_sensor": {
+      "constraints": ["proximity_sensor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 4,
+      "max": 4,
+      "unordered": false
+    },
+    "destinations": {
+      "constraints": ["kit_tray"],
+      "min": 2,
+      "max": 2,
+      "unordered": false
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [0.0, 0.4, 0.78],
+      "size": [3.0, 0.4, 0.05],
+      "surface_velocity": [0.2, 0, 0]
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [0.4, 0.4, 0.835],
+      "size": [0.06, 0.06, 0.06]
+    },
+    "workpieces": [
+      {"path": "/World/Cube_1", "position": [-1.0, 0.4, 0.835], "color": "Red"},
+      {"path": "/World/Cube_2", "position": [-0.7, 0.4, 0.835], "color": "Blue"},
+      {"path": "/World/Cube_3", "position": [-0.4, 0.4, 0.835], "color": "Red"},
+      {"path": "/World/Cube_4", "position": [-0.1, 0.4, 0.835], "color": "Blue"}
+    ],
+    "destinations": [
+      {"path": "/World/RedTray",  "position": [-0.3, -0.4, 0.775], "routing_key": "red"},
+      {"path": "/World/BlueTray", "position": [0.3,  -0.4, 0.775], "routing_key": "blue"}
+    ]
+  },
+  "code_template": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1500.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\ncreate_material(material_path=\"/World/Materials/Red\",  shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.0, 0.0])\ncreate_material(material_path=\"/World/Materials/Blue\", shader_type=\"OmniPBR\", diffuse_color=[0.0, 0.0, 1.0])\n\n# Cubes \u2014 2 red + 2 blue, alternating positions\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\nassign_material(prim_path={{workpieces[0].path}}, material_path=\"/World/Materials/Red\")\n\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\nassign_material(prim_path={{workpieces[1].path}}, material_path=\"/World/Materials/Blue\")\n\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cube\", position={{workpieces[2].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[2].path}}, schema_name=api)\nassign_material(prim_path={{workpieces[2].path}}, material_path=\"/World/Materials/Red\")\n\ncreate_prim(prim_path={{workpieces[3].path}}, prim_type=\"Cube\", position={{workpieces[3].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[3].path}}, schema_name=api)\nassign_material(prim_path={{workpieces[3].path}}, material_path=\"/World/Materials/Blue\")\n\nbulk_set_attribute(\n    prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Two kit trays \u2014 top row and bottom row\ncreate_kit_tray(\n    tray_path={{destinations[0].path}},\n    position={{destinations[0].position}},\n    tray_size=[0.20, 0.10, 0.05],\n    slot_layout=\"row_2\",\n    slot_size=0.05,\n    slot_spacing=0.08,\n)\ncreate_kit_tray(\n    tray_path={{destinations[1].path}},\n    position={{destinations[1].position}},\n    tray_size=[0.20, 0.10, 0.05],\n    slot_layout=\"row_2\",\n    slot_size=0.05,\n    slot_spacing=0.08,\n)\nassign_material(prim_path={{destinations[0].path}}, material_path=\"/World/Materials/Red\")\nassign_material(prim_path={{destinations[1].path}}, material_path=\"/World/Materials/Blue\")\n\n# Camera + viewport\ncreate_prim(prim_path=\"/World/Cam\", prim_type=\"Camera\", position=[0, 1.5, 1.5])\nset_camera_look_at(camera_path=\"/World/Cam\", target=[0, 0, 0.8])\n\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\nsetup_pick_place_with_vision(\n    robot_path={{primary_robot.path}},\n    cube_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}],\n    class_labels=[\"red cube\", \"blue cube\"],\n    camera_path=\"/World/Cam\",\n    destination_map={\"red\": {{destinations[0].path}}, \"blue\": {{destinations[1].path}}},\n    destination_path={{destinations[0].path}},\n    sensor_path={{pick_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{destinations[0].path}}, {{destinations[1].path}}],\n)",
+  "verify_args_template": {
+    "stages": [
+      {
+        "robot_path": "{{primary_robot.path}}",
+        "pick_path": "{{input_conveyor.path}}",
+        "place_path": "{{destinations[0].path}}",
+        "robot_kind": "{{primary_robot.class}}"
+      }
+    ],
+    "cube_path": "{{workpieces[0].path}}"
+  },
+  "simulate_args_template": {
+    "cube_path": "{{workpieces[0].path}}",
+    "target_path": "{{destinations[0].path}}",
+    "duration_s": 240,
+    "xy_tolerance": 0.15,
+    "rest_speed_threshold": 10.0
+  },
   "diagnose_args": {
     "robot_path": "/World/Franka",
     "robot_base": [
