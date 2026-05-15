@@ -92,7 +92,10 @@
     "cube_path": "/World/Cube_r1"
   },
   "simulate_args": {
-    "cube_paths": ["/World/Cube_r1", "/World/Cube_r2"],
+    "cube_paths": [
+      "/World/Cube_r1",
+      "/World/Cube_r2"
+    ],
     "target_path": "/World/RedBin",
     "duration_s": 240
   },
@@ -104,7 +107,7 @@
     "Defective cube color (grey) matches no semantic class \u2192 fall-through to RejectBin (destination_path). Tested in CP-18.",
     "Function-gate would take ~10 cubes \u00d7 7s/cycle = 70+ seconds to fully process all cubes. Long sim."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending",
+  "verified_status": "draft; passes=1 n=13 wilson_lower=0.0137; was form-gate-pending; demoted 2026-05-15",
   "diagnose_args": {
     "robot_path": "/World/Franka",
     "sensor_path": "/World/PickSensor",
@@ -113,5 +116,15 @@
       0.0,
       0.75
     ]
+  },
+  "verified_wilson_lower": 0.0137,
+  "verified_runs": {
+    "passes": 1,
+    "n": 13,
+    "z": 1.96,
+    "lower": 0.0137,
+    "upper": 0.3331,
+    "evidence_date": "2026-05-15",
+    "evidence_source": "workspace/baselines aggregate"
   }
 }

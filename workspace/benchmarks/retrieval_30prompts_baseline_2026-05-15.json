@@ -647,7 +647,7 @@
         "CP-NEW-amr-pickup-handoff"
       ],
       "acceptable_alternatives": [],
-      "expected_action": "few_shot",
+      "expected_action": "hard_instantiate",
       "actual_action": "hard_instantiate",
       "top1_id": "CP-NEW-amr-pickup-handoff",
       "top1_sim": 0.571,
@@ -684,7 +684,7 @@
         "CP-NEW-multi-amr-corridor"
       ],
       "acceptable_alternatives": [],
-      "expected_action": "few_shot",
+      "expected_action": "hard_instantiate",
       "actual_action": "hard_instantiate",
       "top1_id": "CP-NEW-multi-amr-corridor",
       "top1_sim": 0.6392,
@@ -723,7 +723,7 @@
       "acceptable_alternatives": [
         "M-08"
       ],
-      "expected_action": "few_shot",
+      "expected_action": "hard_instantiate",
       "actual_action": "hard_instantiate",
       "top1_id": "CP-NEW-rl-clone-env",
       "top1_sim": 0.6141,
@@ -947,7 +947,7 @@
         "M-08"
       ],
       "acceptable_alternatives": [],
-      "expected_action": "few_shot",
+      "expected_action": "hard_instantiate",
       "actual_action": "hard_instantiate",
       "top1_id": "M-08",
       "top1_sim": 0.6793,

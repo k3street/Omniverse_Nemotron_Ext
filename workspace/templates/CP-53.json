@@ -82,7 +82,7 @@
     "Rack at y=-0.3 \u2014 within both robots' reach. Mutex prim at same location.",
     "Same physics gotchas as CP-51."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending",
+  "verified_status": "draft; passes=9 n=21 wilson_lower=0.2447; was form-gate-pending; demoted 2026-05-15",
   "diagnose_args": {
     "cycles": [
       {
@@ -116,5 +116,15 @@
       0,
       0.75
     ]
+  },
+  "verified_wilson_lower": 0.2447,
+  "verified_runs": {
+    "passes": 9,
+    "n": 21,
+    "z": 1.96,
+    "lower": 0.2447,
+    "upper": 0.6345,
+    "evidence_date": "2026-05-15",
+    "evidence_source": "workspace/baselines aggregate"
   }
 }

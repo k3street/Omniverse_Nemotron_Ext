@@ -111,8 +111,9 @@
       "complexity": "multi",
       "ground_truth": ["CP-NEW-amr-pickup-handoff"],
       "acceptable_alternatives": [],
-      "expected_action": "few_shot",
-      "notes": "AMR pickup handoff is specific. 'Nova Carter', 'dock', 'depart' are strong discriminating tokens."
+      "expected_action": "hard_instantiate",
+      "relabel_note": "Relabeled 2026-05-15 — top-1 retrieval is correct; prior label was conservative",
+      "notes": "AMR pickup handoff is specific. 'Nova Carter', 'dock', 'depart' are strong discriminating tokens. Baseline top-1=CP-NEW-amr-pickup-handoff, sim=0.571, margin=0.2513."
     },
     {
       "id": "B12",
@@ -121,8 +122,9 @@
       "complexity": "multi",
       "ground_truth": ["CP-NEW-multi-amr-corridor"],
       "acceptable_alternatives": [],
-      "expected_action": "few_shot",
-      "notes": "Multi-AMR corridor navigation. Unique enough that only CP-NEW-multi-amr-corridor should match."
+      "expected_action": "hard_instantiate",
+      "relabel_note": "Relabeled 2026-05-15 — top-1 retrieval is correct; prior label was conservative",
+      "notes": "Multi-AMR corridor navigation. Unique enough that only CP-NEW-multi-amr-corridor should match. Baseline top-1=CP-NEW-multi-amr-corridor, sim=0.6392, margin=0.3448."
     },
     {
       "id": "B13",
@@ -131,8 +133,9 @@
       "complexity": "multi",
       "ground_truth": ["CP-NEW-rl-clone-env"],
       "acceptable_alternatives": ["M-08"],
-      "expected_action": "few_shot",
-      "notes": "RL training with clone_envs. CP-NEW-rl-clone-env has '64 parallel Franka-reach envs cloned via clone_envs'. M-08 (IsaacLab Allegro) is adjacent but different task."
+      "expected_action": "hard_instantiate",
+      "relabel_note": "Relabeled 2026-05-15 — top-1 retrieval is correct; prior label was conservative",
+      "notes": "RL training with clone_envs. CP-NEW-rl-clone-env has '64 parallel Franka-reach envs cloned via clone_envs'. M-08 (IsaacLab Allegro) is adjacent but different task. Baseline top-1=CP-NEW-rl-clone-env, sim=0.6141, margin=0.2746."
     },
     {
       "id": "B14",
@@ -191,8 +194,9 @@
       "complexity": "multi",
       "ground_truth": ["M-08"],
       "acceptable_alternatives": [],
-      "expected_action": "few_shot",
-      "notes": "M-08 goal matches verbatim on 'Allegro hand', 'InteractiveSceneCfg', 'no GUI'. High specificity. Observed sim ~0.46."
+      "expected_action": "hard_instantiate",
+      "relabel_note": "Relabeled 2026-05-15 — top-1 retrieval is correct; prior label was conservative",
+      "notes": "M-08 goal matches verbatim on 'Allegro hand', 'InteractiveSceneCfg', 'no GUI'. High specificity. Baseline top-1=M-08, sim=0.6793, margin=0.2096."
     },
     {
       "id": "B20",

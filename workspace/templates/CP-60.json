@@ -66,12 +66,22 @@
     "Verify_args is approximate \u2014 recirculation loop isn't a typical pick-place flow.",
     "Loop dimensions: 2.0\u00d70.6m. Adjust for canonical scale needs."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending",
+  "verified_status": "stable_fail; passes=0 n=14 wilson_lower=0.0; was form-gate-pending; demoted 2026-05-15",
   "diagnose_args": {
     "pick_pose": [
       0,
       0.3,
       0.835
     ]
+  },
+  "verified_wilson_lower": 0.0,
+  "verified_runs": {
+    "passes": 0,
+    "n": 14,
+    "z": 1.96,
+    "lower": 0.0,
+    "upper": 0.2153,
+    "evidence_date": "2026-05-15",
+    "evidence_source": "workspace/baselines aggregate"
   }
 }

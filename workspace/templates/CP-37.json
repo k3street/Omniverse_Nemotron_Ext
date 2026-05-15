@@ -77,7 +77,7 @@
     "Pillar too tall (0.40m height pillar) makes h1=1.30 needed, near Franka's vertical reach limit (1.5m at base+0.85). Acceptable.",
     "Same physics gotchas as CP-01."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending",
+  "verified_status": "draft; passes=17 n=59 wilson_lower=0.1884; was form-gate-pending; demoted 2026-05-15",
   "diagnose_args": {
     "robot_path": "/World/Franka",
     "obstacles": [
@@ -94,5 +94,15 @@
       -0.4,
       0.75
     ]
+  },
+  "verified_wilson_lower": 0.1884,
+  "verified_runs": {
+    "passes": 17,
+    "n": 59,
+    "z": 1.96,
+    "lower": 0.1884,
+    "upper": 0.4138,
+    "evidence_date": "2026-05-15",
+    "evidence_source": "workspace/baselines aggregate"
   }
 }

@@ -76,7 +76,7 @@
     "Same multi-robot Kit RPC limit as CP-51/CP-65 \u2014 single-tenant, can't run two parallel direct_eval against the same scene.",
     "HoldPedestal collision via PhysicsCollisionAPI alone (no RigidBody) \u2014 static, won't move. Workpiece falls to it via gravity if drop is approximate."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending",
+  "verified_status": "stable_fail; passes=0 n=22 wilson_lower=0.0; was form-gate-pending; demoted 2026-05-15",
   "diagnose_args": {
     "cycles": [
       {
@@ -127,5 +127,15 @@
       -0.5,
       0.75
     ]
+  },
+  "verified_wilson_lower": 0.0,
+  "verified_runs": {
+    "passes": 0,
+    "n": 22,
+    "z": 1.96,
+    "lower": 0.0,
+    "upper": 0.1487,
+    "evidence_date": "2026-05-15",
+    "evidence_source": "workspace/baselines aggregate"
   }
 }

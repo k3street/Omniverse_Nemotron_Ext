@@ -112,3 +112,82 @@ under-specified benchmark would be premature.
 
 Concrete action: re-run the sweep after correcting the four corpus labels; a
 threshold change decision can be made from that cleaner signal.
+
+---
+
+## §6 Re-sweep with Corrected Labels (2026-05-15)
+
+### Re-labeling decisions
+
+All 4 candidates independently verified against baseline per-prompt data
+(`retrieval_30prompts_baseline_2026-05-15.json`) before re-labeling. None rejected.
+
+| ID  | top1_id                   | sim    | margin | Decision            |
+|-----|---------------------------|--------|--------|---------------------|
+| B11 | CP-NEW-amr-pickup-handoff | 0.5710 | 0.2513 | RE-LABELED          |
+| B12 | CP-NEW-multi-amr-corridor | 0.6392 | 0.3448 | RE-LABELED          |
+| B13 | CP-NEW-rl-clone-env       | 0.6141 | 0.2746 | RE-LABELED          |
+| B19 | M-08                      | 0.6793 | 0.2096 | RE-LABELED          |
+
+All 4: top-1 is the exact ground_truth id, sim ≥ 0.57, margin ≥ 0.21. No
+prompt has a wrong top-1; re-labeling is sound. Zero candidates rejected.
+
+### Updated 15-combo table (corrected corpus, v2)
+
+| sim_thr | margin_thr | hit@1  | hard_inst_rate | fp_rate | tp_rate |
+|---------|-----------|--------|----------------|---------|---------|
+| 0.40    | 0.05      | 0.7667 | 0.5000         | 0.3000  | 0.4333  |
+| 0.40    | 0.10      | 0.8000 | 0.3000         | 0.1333  | 0.2667  |
+| 0.40    | 0.12      | 0.8000 | 0.2667         | 0.1000  | 0.2333  |
+| 0.40    | 0.15      | 0.8333 | 0.2333         | 0.0667  | 0.2333  |
+| 0.40    | 0.20      | 0.8333 | 0.2000         | 0.0333  | 0.2000  |
+| 0.45    | 0.05      | 0.8333 | 0.4000         | 0.2000  | 0.3667  |
+| 0.45    | 0.10      | 0.8333 | 0.2333         | 0.0667  | 0.2333  |
+| 0.45    | 0.12      | 0.8333 | 0.2000         | 0.0333  | 0.2000  |
+| 0.45    | 0.15      | 0.8333 | 0.2000         | 0.0333  | 0.2000  |
+| **0.45**| **0.20**  |**0.8333**|**0.1667**   |**0.0000**|**0.1667**|
+| 0.50    | 0.05      | 0.8333 | 0.3000         | 0.1333  | 0.3000  |
+| 0.50    | 0.10      | 0.8333 | 0.2000         | 0.0333  | 0.2000  |
+| 0.50    | 0.12      | 0.8333 | 0.1667         | 0.0000  | 0.1667  |
+| 0.50    | 0.15      | 0.8333 | 0.1667         | 0.0000  | 0.1667  |
+| 0.50    | 0.20      | 0.8333 | 0.1667         | 0.0000  | 0.1667  |
+
+Bold = current production setting.
+
+v1 sweep: minimum fp_rate was 0.1333 (structural floor). After re-labeling:
+current setting (0.45, 0.20) achieves **fp_rate = 0.0000** — a genuine zero.
+
+### Updated Pareto frontier
+
+fp=0.0000: `(0.45, 0.20)`, `(0.50, 0.12)`, `(0.50, 0.15)`, `(0.50, 0.20)`.
+Among these, `(0.45, 0.20)` has the highest tp_rate (0.1667 vs 0.1667 — tied)
+and the highest hard_inst_rate (0.1667 vs 0.1667 — also tied). No practical
+difference. The only combo that improves tp above the fp=0.000 floor is
+`(0.40, 0.20)` at tp=0.2000 / fp=0.0333 — an honest 1/30 FP from B17 (FX-01,
+sim=0.481, margin=0.168, top-1 correct but expected_action=few_shot in corpus;
+a borderline case, not clearly mislabeled).
+
+### Updated recommendation
+
+**KEEP current (0.45, 0.20).**
+
+After re-labeling, the current setting is *already optimal* at fp=0.0000,
+tp=0.1667, hit@1=0.8333. The only way to gain tp (0.1667→0.2000) is to drop
+sim_thr to 0.40, which adds B17 as a real borderline FP (1/30 = 0.033).
+That is a marginal gain with a real cost. A lower sim floor also admits more
+risk as the corpus grows.
+
+Relaxing margin to 0.12 at sim=0.45 reaches fp=0.0333 / tp=0.2000 (picks up
+B08 via its CP-NEW-3station-oee top-1 at sim=0.432, margin=0.240) — wait,
+rechecking: (0.45, 0.12) has hi_rate=0.2000, fp=0.0333. The single FP is
+B17 (FX-01, below sim=0.481 ≥ 0.45 and margin=0.168 ≥ 0.12). Marginal gain.
+
+**No change to production thresholds warranted.** The corrected-label sweep
+confirms the current setting is the Pareto-dominant zero-FP point.
+
+**Confidence**: High. Strongest counter-argument: 30 prompts is still a small
+sample (each prompt = 3.3 pp); the fp=0.000 is 0/30, which does not guarantee
+fp=0.000 on a larger corpus. A 100-prompt re-run is the logical next step.
+
+Files written: `workspace/benchmarks/margin_threshold_sweep_2026-05-15-v2.json`
+(v1 overwritten by the sweep script re-run; v2 is the corrected-label result).

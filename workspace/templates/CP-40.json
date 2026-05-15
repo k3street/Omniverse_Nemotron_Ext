@@ -71,7 +71,7 @@
     "Slower cycle means cubes pile up on conveyor if input rate exceeds robot's pick rate.",
     "Same physics gotchas as CP-01."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending",
+  "verified_status": "draft; passes=1 n=14 wilson_lower=0.0127; was form-gate-pending; demoted 2026-05-15",
   "diagnose_args": {
     "robot_path": "/World/Franka",
     "sensor_path": "/World/PickSensor",
@@ -85,5 +85,15 @@
       -0.4,
       0.75
     ]
+  },
+  "verified_wilson_lower": 0.0127,
+  "verified_runs": {
+    "passes": 1,
+    "n": 14,
+    "z": 1.96,
+    "lower": 0.0127,
+    "upper": 0.3147,
+    "evidence_date": "2026-05-15",
+    "evidence_source": "workspace/baselines aggregate"
   }
 }
