@@ -117,7 +117,10 @@ VALID_PATTERN_HINTS = {"pick_place", "sort", "reorient", "navigate"}
 VALID_DESTINATION_KINDS = {"single_bin", "n_bins_routed", "shelf", "fixture"}
 
 # intent.structural_features.routing_axis valid values
-VALID_ROUTING_AXES = {"color", "size", "shape", "label"}
+# Added 2026-05-15: semantic_class for inspect-and-reject patterns where
+# routing decision is based on a classifier output (good vs defective,
+# defect-type categories, etc.) rather than a raw geometric property.
+VALID_ROUTING_AXES = {"color", "size", "shape", "label", "semantic_class"}
 
 # verified_status is free-text (not enum-constrained) — the values are too diverse.
 # We do not validate its content, only its presence (for T1).

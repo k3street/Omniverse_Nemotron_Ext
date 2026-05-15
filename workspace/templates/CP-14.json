@@ -62,6 +62,117 @@
   },
   "extends": "CP-13",
   "extension_notes": "CP-14 combines CP-02's multi-robot architecture with CP-13's drop_targets stack pattern. Each robot has independent source_paths + drop_targets. Two _curobo_pp_sub_<TAG> subscriptions coexist. Future variants: 3+ robots cooperative stacking; alternating-color pallet (robot A places red, robot B places blue); mirror-pose paired-pick.",
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 2,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": true,
+      "has_stacking": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.multi_station",
+      "isaac:stack.column"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "smaller_x_first"
+    },
+    "secondary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "larger_x_first"
+    },
+    "input_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "primary_destination": {
+      "constraints": ["platform", "pallet"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 2,
+      "max": 2,
+      "param_name": "n_cubes",
+      "unordered": false
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/FrankaA",
+      "class": "franka_panda",
+      "position": [-0.6, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "secondary_robot": {
+      "path": "/World/FrankaB",
+      "class": "franka_panda",
+      "position": [0.6, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [0.0, 0.4, 0.78],
+      "size": [3.0, 0.4, 0.05],
+      "surface_velocity": [0.2, 0, 0]
+    },
+    "primary_destination": {
+      "path": "/World/PalletBase",
+      "position": [0, -0.4, 0.775],
+      "scale": [0.075, 0.075, 0.025]
+    },
+    "primary_sensor": {
+      "path": "/World/SensorA",
+      "position": [-0.2, 0.4, 0.835],
+      "size": [0.06, 0.06, 0.06]
+    },
+    "secondary_sensor": {
+      "path": "/World/SensorB",
+      "position": [0.2, 0.4, 0.835],
+      "size": [0.06, 0.06, 0.06]
+    },
+    "workpieces": [
+      {"path": "/World/Cube_1", "position": [-1.4, 0.4, 0.835], "drop_target": [0.0, -0.4, 0.825]},
+      {"path": "/World/Cube_2", "position": [-0.8, 0.4, 0.835], "drop_target": [0.0, -0.4, 0.875]}
+    ]
+  },
+  "code_template": "# DomeLight + Ground + parent Xform\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Wider table for 2 robots\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Robot A — left side\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n# Robot B — right side\nrobot_wizard(\n    robot_name={{secondary_robot.class}},\n    dest_path={{secondary_robot.path}},\n    position={{secondary_robot.position}},\n    orientation={{secondary_robot.orientation}},\n)\n\n# Single conveyor in front of both robots (y=0.4)\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\nfor path in [{{workpieces[0].path}}, {{workpieces[1].path}}]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Shared pallet — between the two robots, in their reach\ncreate_prim(prim_path={{primary_destination.path}}, prim_type=\"Cube\", position={{primary_destination.position}}, scale={{primary_destination.scale}})\napply_api_schema(prim_path={{primary_destination.path}}, schema_name=\"PhysicsCollisionAPI\")\n\n# Per-robot pick sensors\nadd_proximity_sensor(sensor_path={{primary_sensor.path}}, position={{primary_sensor.position}}, size={{primary_sensor.size}})\nadd_proximity_sensor(sensor_path={{secondary_sensor.path}}, position={{secondary_sensor.position}}, size={{secondary_sensor.size}})\n\n# Robot A controller — picks Cube_1, places at base layer (z=0.825)\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{primary_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=[{{workpieces[0].path}}],\n    destination_path={{primary_destination.path}},\n    drop_targets={\n        {{workpieces[0].path}}: {{workpieces[0].drop_target}},\n    },\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{primary_destination.path}}],\n)\n\n# Robot B controller — picks Cube_2, places at top layer (z=0.875)\nsetup_pick_place_controller(\n    robot_path={{secondary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{secondary_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=[{{workpieces[1].path}}],\n    destination_path={{primary_destination.path}},\n    drop_targets={\n        {{workpieces[1].path}}: {{workpieces[1].drop_target}},\n    },\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{primary_destination.path}}],\n)",
+  "verify_args_template": {
+    "stages": [
+      {
+        "robot_path": "{{primary_robot.path}}",
+        "pick_path": "{{input_conveyor.path}}",
+        "place_path": "{{primary_destination.path}}",
+        "robot_kind": "{{primary_robot.class}}"
+      },
+      {
+        "robot_path": "{{secondary_robot.path}}",
+        "pick_path": "{{input_conveyor.path}}",
+        "place_path": "{{primary_destination.path}}",
+        "robot_kind": "{{secondary_robot.class}}"
+      }
+    ],
+    "cube_path": "{{workpieces[0].path}}"
+  },
+  "simulate_args_template": {
+    "cube_path": "{{workpieces[0].path}}",
+    "target_path": "{{primary_destination.path}}",
+    "duration_s": 180,
+    "xy_tolerance": 0.15,
+    "rest_speed_threshold": 100.0
+  },
   "failure_modes": [
     "Both robots try to pick same cube — source_paths scoping prevents this. Robot A only sees Cube_1, Robot B only sees Cube_2.",
     "Robot B picks before Robot A finishes — they're independent. Robot B may pick Cube_2 at the same time A is transit. Could cause collision over the shared PalletBase. CP-02's solution: planning_obstacles include each others' bodies, but cuRobo doesn't dynamically include robot links. Acceptable for v1 — robots are 1.2m apart, transit doesn't cross.",
