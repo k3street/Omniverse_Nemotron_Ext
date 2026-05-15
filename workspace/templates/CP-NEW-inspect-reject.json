@@ -14,7 +14,7 @@
   ],
   "thoughts": [
     "5 cubes: 4 good (green), 1 defective (red dye). Vision classifier returns class per cube.",
-    "Robot routes by class: green \u2192 PassBin, red \u2192 RejectBin via color_routing arg.",
+    "Robot routes by class: green → PassBin, red → RejectBin via color_routing arg.",
     "configure_camera mounted above belt at z=1.20. Looks straight down. vision_detect_objects returns class per visible cube.",
     "Already partially demonstrated by CP-48; this is the QA-engineer-flavored variant with explicit Reject path."
   ],
@@ -38,5 +38,14 @@
     "color_routing dispatch needs class-label registry; rolls back to destination_path if classifier errors",
     "Red cube (Cube_3) reach RejectBin: not validated by gate (gate only checks PassBin); need separate test for reject path"
   ],
-  "verified_status": "build-spec-2026-05-10; smoke-test \u2713 1/1 (52s); vision-gated routing"
+  "verified_status": "build-spec-2026-05-10; smoke-test ✓ 1/1 (52s); vision-gated routing",
+  "motion_controllers": {
+    "verified": [
+      "curobo"
+    ],
+    "untested": [
+      "rmpflow",
+      "moveit2"
+    ]
+  }
 }

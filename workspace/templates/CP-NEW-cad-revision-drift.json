@@ -29,8 +29,17 @@
   "extension_notes": "CAD-engineer canonical. Variant set on /World/Fixture allows toggling between rev_a/rev_b. Direct-eval runs against both; gap reveals controller robustness. For canonical-build, rev_a is default.",
   "failure_modes": [
     "create_arena_variant may not exist as expected handler",
-    "Variant geometry too similar \u2014 controller can't distinguish; gate passes both rev_a and rev_b",
-    "Bin position 0.85 above fixture is too close \u2014 bin floats"
+    "Variant geometry too similar — controller can't distinguish; gate passes both rev_a and rev_b",
+    "Bin position 0.85 above fixture is too close — bin floats"
   ],
-  "verified_status": "build-spec-2026-05-10; smoke-test \u2713 1/1 (33s); fixture variant scaffold"
+  "verified_status": "build-spec-2026-05-10; smoke-test ✓ 1/1 (33s); fixture variant scaffold",
+  "motion_controllers": {
+    "verified": [
+      "curobo"
+    ],
+    "untested": [
+      "rmpflow",
+      "moveit2"
+    ]
+  }
 }

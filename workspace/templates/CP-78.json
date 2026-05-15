@@ -1,6 +1,6 @@
 {
   "task_id": "CP-78",
-  "goal": "UR10 builtin pick-place with cube ON A PEDESTAL \u2014 testing whether the CP-75 descent gap is due to UR10's reach being marginal at near-base z=0.825 (only 7.5cm above the 0.75m base). Cube here sits on a 15cm pedestal at z=0.975, putting the cube center 22.5cm above the robot base \u2014 well within UR10's reachable workspace. If function-gate succeeds here but fails on CP-75, the gap is reach geometry, not the controller stack.",
+  "goal": "UR10 builtin pick-place with cube ON A PEDESTAL — testing whether the CP-75 descent gap is due to UR10's reach being marginal at near-base z=0.825 (only 7.5cm above the 0.75m base). Cube here sits on a 15cm pedestal at z=0.975, putting the cube center 22.5cm above the robot base — well within UR10's reachable workspace. If function-gate succeeds here but fails on CP-75, the gap is reach geometry, not the controller stack.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -13,8 +13,8 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six elevated-cube specifics for CP-78 (CP-75 ablation):\n1) UR10 base at world (0, 0, 0.75) \u2014 same as CP-75. Mirror home pose [\u03c0/2, -\u03c0/2, \u03c0/2, -\u03c0/2, -\u03c0/2, 0].\n2) Cube on a 15cm-tall fixed pedestal at xy=(-0.5, 0.4). Pedestal top at z=0.95; cube center at z=0.975 (top + 0.025).\n3) Bin on the table at world (0.5, -0.4, 0.75) \u2014 bin opening at z=0.825. Drop position similar to CP-75.\n4) Pedestal is a static Cube prim with PhysicsCollisionAPI but NO RigidBody \u2014 won't move during sim.\n5) Cube center is 22.5cm above the robot base; pedestal puts it within UR10's 'comfortable reach' band. RmpFlow's descent should converge.\n6) If THIS function-gate passes but CP-75 doesn't, the diagnosis is unambiguous: UR10 reach at z=0.825 is marginal. Either raise the table (universal solution) or accept that small/short canonical scenes need taller pedestals.",
-  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# UR10 base on table\ncreate_prim(prim_path=\"/World/UR10\", prim_type=\"Xform\")\nadd_reference(prim_path=\"/World/UR10\", reference_path=\"/mnt/shared_data/isaac-sim-assets-complete-5.0.0/Assets/Isaac/5.0/Collected_Robots/ur10.usd\")\nteleport_prim(prim_path=\"/World/UR10\", position=[0, 0, 0.75])\n\n# Pedestal \u2014 15cm tall fixed support beneath cube\ncreate_prim(prim_path=\"/World/Pedestal\", prim_type=\"Cube\", position=[-0.5, 0.4, 0.875], scale=[0.06, 0.06, 0.075])\napply_api_schema(prim_path=\"/World/Pedestal\", schema_name=\"PhysicsCollisionAPI\")\n\n# Cube on top of pedestal (pedestal top at z=0.95; cube center at 0.975)\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-0.5, 0.4, 0.975], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\n\n# Output bin\ncreate_bin(prim_path=\"/World/Bin\", position=[0.5, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\n# UR10 builtin PickPlaceController\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    robot_family=\"ur10\",\n    target_source=\"builtin\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    end_effector_offset=[0.0, 0.0, 0.02],\n)",
+  "thoughts": "Six elevated-cube specifics for CP-78 (CP-75 ablation):\n1) UR10 base at world (0, 0, 0.75) — same as CP-75. Mirror home pose [π/2, -π/2, π/2, -π/2, -π/2, 0].\n2) Cube on a 15cm-tall fixed pedestal at xy=(-0.5, 0.4). Pedestal top at z=0.95; cube center at z=0.975 (top + 0.025).\n3) Bin on the table at world (0.5, -0.4, 0.75) — bin opening at z=0.825. Drop position similar to CP-75.\n4) Pedestal is a static Cube prim with PhysicsCollisionAPI but NO RigidBody — won't move during sim.\n5) Cube center is 22.5cm above the robot base; pedestal puts it within UR10's 'comfortable reach' band. RmpFlow's descent should converge.\n6) If THIS function-gate passes but CP-75 doesn't, the diagnosis is unambiguous: UR10 reach at z=0.825 is marginal. Either raise the table (universal solution) or accept that small/short canonical scenes need taller pedestals.",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# UR10 base on table\ncreate_prim(prim_path=\"/World/UR10\", prim_type=\"Xform\")\nadd_reference(prim_path=\"/World/UR10\", reference_path=\"/mnt/shared_data/isaac-sim-assets-complete-5.0.0/Assets/Isaac/5.0/Collected_Robots/ur10.usd\")\nteleport_prim(prim_path=\"/World/UR10\", position=[0, 0, 0.75])\n\n# Pedestal — 15cm tall fixed support beneath cube\ncreate_prim(prim_path=\"/World/Pedestal\", prim_type=\"Cube\", position=[-0.5, 0.4, 0.875], scale=[0.06, 0.06, 0.075])\napply_api_schema(prim_path=\"/World/Pedestal\", schema_name=\"PhysicsCollisionAPI\")\n\n# Cube on top of pedestal (pedestal top at z=0.95; cube center at 0.975)\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-0.5, 0.4, 0.975], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\n\n# Output bin\ncreate_bin(prim_path=\"/World/Bin\", position=[0.5, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\n# UR10 builtin PickPlaceController\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    robot_family=\"ur10\",\n    target_source=\"builtin\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    end_effector_offset=[0.0, 0.0, 0.02],\n)",
   "settle_state": {
     "cubes": {
       "/World/Cube_1": [
@@ -42,14 +42,14 @@
     "duration_s": 90
   },
   "extends": "CP-75",
-  "extension_notes": "CP-78 = CP-75 with the cube raised by 15cm via a static pedestal. Tests the hypothesis that CP-75's RmpFlow descent gap is reach-geometry, not the controller stack. Function-gate result is the diagnostic: pass \u2192 CP-75 needs tighter geometry; fail \u2192 controller stack still has issues even with comfortable reach.",
+  "extension_notes": "CP-78 = CP-75 with the cube raised by 15cm via a static pedestal. Tests the hypothesis that CP-75's RmpFlow descent gap is reach-geometry, not the controller stack. Function-gate result is the diagnostic: pass → CP-75 needs tighter geometry; fail → controller stack still has issues even with comfortable reach.",
   "failure_modes": [
     "UR10 ee_suction_link is at +0.162m in URDF's ee_link local +X. RmpFlow plans for ee_suction_link to reach the cube; the actual /World/UR10/ee_link USD prim ends ~0.16m offset from where the cube is.",
-    "PickPlaceController hardcodes end_effector_orientation = [0, \u03c0/2, 0] euler. Different USD vs URDF frame conventions \u2014 gripper-down direction may not align.",
+    "PickPlaceController hardcodes end_effector_orientation = [0, π/2, 0] euler. Different USD vs URDF frame conventions — gripper-down direction may not align.",
     "Pedestal collision: UR10 may path through pedestal during transit phase. RmpFlow has no scene obstacle awareness in this config.",
-    "Same UR10 init quirks as CP-75 \u2014 articulation re-init fallback, mirror home pose."
+    "Same UR10 init quirks as CP-75 — articulation re-init fallback, mirror home pose."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2713 (UR10 builtin pedestal \u2014 first reproducible UR10 delivery via raycast workaround)",
+  "verified_status": "build-spec-2026-05-08; form-gate ✓; function-gate ✓ (UR10 builtin pedestal — first reproducible UR10 delivery via raycast workaround)",
   "diagnose_args": {
     "robot_path": "/World/UR10",
     "obstacles": [
@@ -64,6 +64,14 @@
       0.5,
       -0.4,
       0.75
+    ]
+  },
+  "motion_controllers": {
+    "verified": [
+      "direct_joint"
+    ],
+    "untested": [
+      "curobo"
     ]
   }
 }
