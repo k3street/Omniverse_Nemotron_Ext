@@ -11,7 +11,7 @@
 
 - Total TP-* IDs in registry before this patch: **30**  
 - Remapped to existing CP/CP-NEW templates: **30** (0 deleted — all kept to satisfy test minimums)  
-- Flagged [REVIEW] for human follow-up: **7**  
+- Flagged [REVIEW] for human follow-up: **10** (8 original + TP-WLD-02 + TP-WLD-03 added by Round 3 patch C)  
 - Tests passing after patch: **53/53**  
 
 No registry entries were deleted. The `test_phase_21_role_template_index.py` enforces minimum role counts
@@ -28,8 +28,8 @@ One row per original TP-* ID.
 | Original ID | Role | Sub-role | Remap Target | Justification | Flag |
 |-------------|------|----------|--------------|---------------|------|
 | TP-WLD-01 | welder | spot_welder | **CP-76** | Dual-robot fixture hold — only CP with industrial precision fixture interaction; no weld-cell CP exists | [REVIEW] |
-| TP-WLD-02 | welder | mig_welder | **CP-02** | Multi-station assembly line; closest multi-robot industrial workflow | |
-| TP-WLD-03 | welder | tig_welder | **CP-24** | Narrow-slot insertion, ±precision placement — closest path-precision analog | |
+| TP-WLD-02 | welder | mig_welder | **CP-02** | Multi-station assembly line; closest multi-robot industrial workflow | [REVIEW] |
+| TP-WLD-03 | welder | tig_welder | **CP-24** | Narrow-slot insertion, ±precision placement — closest path-precision analog | [REVIEW] |
 | TP-WLD-04 | welder | robotic_arm_welder | **CP-69** | UR10 cuRobo; `robot_class=ur10e` exact match; collaborative scale | |
 | TP-PCK-01 | picker | bin_picker | **CP-01** | Canonical Franka parallel-jaw bin-pick from conveyor; exact robot+gripper match | |
 | TP-PCK-02 | picker | mixed_sku | **CP-54** | Franka surface_gripper (suction) pick; closest suction_cup_array analog | |
@@ -62,12 +62,15 @@ One row per original TP-* ID.
 
 ## [REVIEW] Ambiguous Entries — Human Follow-up Required
 
-These 7 entries have semantically weak remap targets. The current remap prevents silent-failure but a human
+These 10 entries have semantically weak remap targets. The current remap prevents silent-failure but a human
 should author dedicated templates for Track F.
+(Round 3 patch C added TP-WLD-02 and TP-WLD-03 — same logic as TP-DSP-02 applied consistently.)
 
 | Entry | Remap Target | Weakness |
 |-------|-------------|---------|
 | TP-WLD-01 (spot_welder) | CP-76 | CP-76 is a fixture-hold task, not a welding cell; no arc/torch in scene |
+| TP-WLD-02 (mig_welder) | CP-02 | CP-02 is multi-station conveyor pick-place; no MIG torch, no weld bead, no seam tracking |
+| TP-WLD-03 (tig_welder) | CP-24 | CP-24 is narrow-slot insertion; no TIG torch, no shielding gas, no weld puddle |
 | TP-ASM-01 (pcb_assembler) | CP-24 | CP-24 is narrow-slot insertion; no SCARA or PCB geometry |
 | TP-INS-02 (dimensional_inspector) | CP-18 | CP-18 uses semantic labels, not laser profilometer metrology |
 | TP-MCT-01 (cnc_loader) | CP-31 | CP-31 is heap-pick; no CNC machine or door-interlock |

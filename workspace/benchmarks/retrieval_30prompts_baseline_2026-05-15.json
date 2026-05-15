@@ -10,18 +10,18 @@
   "aggregate": {
     "hit_at_1": 0.8333,
     "hit_at_3": 0.9333,
-    "mode_accuracy": 0.5667,
+    "mode_accuracy": 0.7,
     "hard_instantiate_rate": 0.1667,
-    "avg_latency_ms": 101.28,
-    "latency_p50_ms": 102.51,
-    "latency_p95_ms": 126.59
+    "avg_latency_ms": 105.07,
+    "latency_p50_ms": 103.86,
+    "latency_p95_ms": 110.32
   },
   "category_breakdown": {
     "amr_navigation": {
       "n": 2,
       "hit_at_1": 1.0,
       "hit_at_3": 1.0,
-      "mode_correct": 0.0,
+      "mode_correct": 1.0,
       "avg_top1_sim": 0.605
     },
     "contact_rich": {
@@ -84,7 +84,7 @@
       "n": 2,
       "hit_at_1": 1.0,
       "hit_at_3": 1.0,
-      "mode_correct": 0.0,
+      "mode_correct": 1.0,
       "avg_top1_sim": 0.647
     },
     "ros2_bridge": {
@@ -271,7 +271,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": false,
-      "latency_ms": 126.59,
+      "latency_ms": 132.78,
       "top3": [
         {
           "task_id": "CP-77",
@@ -308,7 +308,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 95.87,
+      "latency_ms": 104.97,
       "top3": [
         {
           "task_id": "CP-51",
@@ -347,7 +347,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 93.35,
+      "latency_ms": 101.51,
       "top3": [
         {
           "task_id": "CP-16",
@@ -384,7 +384,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 93.01,
+      "latency_ms": 107.35,
       "top3": [
         {
           "task_id": "CP-04",
@@ -421,7 +421,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 94.69,
+      "latency_ms": 103.29,
       "top3": [
         {
           "task_id": "CP-05",
@@ -462,7 +462,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 94.58,
+      "latency_ms": 101.47,
       "top3": [
         {
           "task_id": "CP-07",
@@ -502,7 +502,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 94.33,
+      "latency_ms": 100.75,
       "top3": [
         {
           "task_id": "CP-82",
@@ -539,7 +539,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 95.16,
+      "latency_ms": 104.25,
       "top3": [
         {
           "task_id": "CP-NEW-3station-oee",
@@ -578,7 +578,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 103.98,
+      "latency_ms": 104.3,
       "top3": [
         {
           "task_id": "CP-52",
@@ -618,7 +618,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": true,
-      "latency_ms": 103.51,
+      "latency_ms": 104.31,
       "top3": [
         {
           "task_id": "CP-34",
@@ -654,8 +654,8 @@
       "margin": 0.2513,
       "hit_at_1": true,
       "hit_at_3": true,
-      "mode_correct": false,
-      "latency_ms": 104.66,
+      "mode_correct": true,
+      "latency_ms": 103.81,
       "top3": [
         {
           "task_id": "CP-NEW-amr-pickup-handoff",
@@ -673,7 +673,7 @@
           "distance": 1.047
         }
       ],
-      "notes": "AMR pickup handoff is specific. 'Nova Carter', 'dock', 'depart' are strong discriminating tokens."
+      "notes": "AMR pickup handoff is specific. 'Nova Carter', 'dock', 'depart' are strong discriminating tokens. Baseline top-1=CP-NEW-amr-pickup-handoff, sim=0.571, margin=0.2513."
     },
     {
       "id": "B12",
@@ -691,8 +691,8 @@
       "margin": 0.3448,
       "hit_at_1": true,
       "hit_at_3": true,
-      "mode_correct": false,
-      "latency_ms": 103.13,
+      "mode_correct": true,
+      "latency_ms": 102.7,
       "top3": [
         {
           "task_id": "CP-NEW-multi-amr-corridor",
@@ -710,7 +710,7 @@
           "distance": 1.1384
         }
       ],
-      "notes": "Multi-AMR corridor navigation. Unique enough that only CP-NEW-multi-amr-corridor should match."
+      "notes": "Multi-AMR corridor navigation. Unique enough that only CP-NEW-multi-amr-corridor should match. Baseline top-1=CP-NEW-multi-amr-corridor, sim=0.6392, margin=0.3448."
     },
     {
       "id": "B13",
@@ -730,8 +730,8 @@
       "margin": 0.2746,
       "hit_at_1": true,
       "hit_at_3": true,
-      "mode_correct": false,
-      "latency_ms": 103.77,
+      "mode_correct": true,
+      "latency_ms": 103.87,
       "top3": [
         {
           "task_id": "CP-NEW-rl-clone-env",
@@ -749,7 +749,7 @@
           "distance": 1.0169
         }
       ],
-      "notes": "RL training with clone_envs. CP-NEW-rl-clone-env has '64 parallel Franka-reach envs cloned via clone_envs'. M-08 (IsaacLab Allegro) is adjacent but different task."
+      "notes": "RL training with clone_envs. CP-NEW-rl-clone-env has '64 parallel Franka-reach envs cloned via clone_envs'. M-08 (IsaacLab Allegro) is adjacent but different task. Baseline top-1=CP-NEW-rl-clone-env, sim=0.6141, margin=0.2746."
     },
     {
       "id": "B14",
@@ -768,7 +768,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.94,
+      "latency_ms": 102.77,
       "top3": [
         {
           "task_id": "CP-87",
@@ -805,7 +805,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 102.02,
+      "latency_ms": 103.3,
       "top3": [
         {
           "task_id": "S-07",
@@ -844,7 +844,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 102.63,
+      "latency_ms": 103.68,
       "top3": [
         {
           "task_id": "M-01",
@@ -881,7 +881,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 102.51,
+      "latency_ms": 105.41,
       "top3": [
         {
           "task_id": "FX-01",
@@ -918,7 +918,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 102.69,
+      "latency_ms": 102.6,
       "top3": [
         {
           "task_id": "P-01",
@@ -954,8 +954,8 @@
       "margin": 0.2096,
       "hit_at_1": true,
       "hit_at_3": true,
-      "mode_correct": false,
-      "latency_ms": 104.3,
+      "mode_correct": true,
+      "latency_ms": 110.32,
       "top3": [
         {
           "task_id": "M-08",
@@ -973,7 +973,7 @@
           "distance": 0.9581
         }
       ],
-      "notes": "M-08 goal matches verbatim on 'Allegro hand', 'InteractiveSceneCfg', 'no GUI'. High specificity. Observed sim ~0.46."
+      "notes": "M-08 goal matches verbatim on 'Allegro hand', 'InteractiveSceneCfg', 'no GUI'. High specificity. Baseline top-1=M-08, sim=0.6793, margin=0.2096."
     },
     {
       "id": "B20",
@@ -992,7 +992,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 102.64,
+      "latency_ms": 103.3,
       "top3": [
         {
           "task_id": "CP-64",
@@ -1029,7 +1029,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 104.02,
+      "latency_ms": 103.01,
       "top3": [
         {
           "task_id": "A-09",
@@ -1066,7 +1066,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 127.91,
+      "latency_ms": 108.94,
       "top3": [
         {
           "task_id": "CP-07",
@@ -1103,7 +1103,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 95.27,
+      "latency_ms": 103.26,
       "top3": [
         {
           "task_id": "CP-35",
@@ -1140,7 +1140,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 93.72,
+      "latency_ms": 102.39,
       "top3": [
         {
           "task_id": "F-08",
@@ -1177,7 +1177,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 93.51,
+      "latency_ms": 104.35,
       "top3": [
         {
           "task_id": "A-02",
@@ -1220,7 +1220,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 92.64,
+      "latency_ms": 104.5,
       "top3": [
         {
           "task_id": "CP-25",
@@ -1259,7 +1259,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 95.02,
+      "latency_ms": 103.73,
       "top3": [
         {
           "task_id": "CP-NEW-peg-in-hole-single",
@@ -1296,7 +1296,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.44,
+      "latency_ms": 105.26,
       "top3": [
         {
           "task_id": "F-02",
@@ -1336,7 +1336,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 102.35,
+      "latency_ms": 106.02,
       "top3": [
         {
           "task_id": "CP-71",
@@ -1375,7 +1375,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 102.11,
+      "latency_ms": 103.86,
       "top3": [
         {
           "task_id": "CP-55",

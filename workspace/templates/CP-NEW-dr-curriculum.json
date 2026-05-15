@@ -38,10 +38,9 @@
   ],
   "verified_status": "build-spec-2026-05-10; smoke-test ✓ 1/1 (34s); DR Stage 2 of 4",
   "motion_controllers": {
-    "verified": [
-      "curobo"
-    ],
+    "verified": [],
     "untested": [
+      "curobo",
       "rmpflow",
       "moveit2"
     ]

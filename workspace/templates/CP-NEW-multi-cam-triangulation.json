@@ -35,10 +35,9 @@
   ],
   "verified_status": "build-spec-2026-05-10; smoke-test ✓ 1/1 (21s); 3-camera scene",
   "motion_controllers": {
-    "verified": [
-      "curobo"
-    ],
+    "verified": [],
     "untested": [
+      "curobo",
       "rmpflow",
       "moveit2"
     ]

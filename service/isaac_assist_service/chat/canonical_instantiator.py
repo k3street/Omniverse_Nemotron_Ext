@@ -498,8 +498,17 @@ async def execute_template_canonical(
         DATA_HANDLERS, CODE_GEN_HANDLERS, execute_tool_call,
     )
 
-    raw_code = template.get("code") or ""
     task_id = template.get("task_id", "?")
+
+    # Route to role-based path when template carries all three role fields.
+    # Backward-compat: templates without code_template/roles/role_defaults fall
+    # through to the legacy `code` field path below.
+    if template.get("code_template") and template.get("roles") and template.get("role_defaults"):
+        logger.debug(f"[CanonicalInst] {task_id} using role-based code_template path")
+        raw_code = instantiate_role_based_code(template)
+    else:
+        raw_code = template.get("code") or ""
+
     if not raw_code.strip():
         return {
             "task_id": task_id, "n_calls": 0, "executed": [], "errors": ["empty code field"],

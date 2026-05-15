@@ -80,9 +80,10 @@
     ]
   },
   "motion_controllers": {
-    "verified": [
-      "cortex"
-    ],
-    "untested": []
+    "verified": [],
+    "untested": [],
+    "failed": {
+      "cortex": "build-only verification 2026-05-08; form-gate expected to fail (Cortex does not install pick-place controller — uses RmpFlowCortex internally; no function-gate or form-gate run passed)"
+    }
   }
 }
