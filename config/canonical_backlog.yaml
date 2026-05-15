@@ -1,0 +1,1705 @@
+# canonical_backlog.yaml — Sourced, prioritized backlog for Isaac Assist canonical expansion
+# Generated: 2026-05-15  |  Target: 500-1000 canonicals via cron pipeline
+# Schema version: 1.1 (includes motion_controller_preference per 2026-05-15 schema update)
+# DO NOT edit status field manually — cron pipeline owns it
+
+# ──────────────────────────────────────────────────────────────────────────────
+# YRKESROLL (~30 entries)  — occupation-anchored, industry-representative
+# ──────────────────────────────────────────────────────────────────────────────
+
+- id: yrkesroll-inspector-reject-divert-001
+  source: industrial-asset
+  category: yrkesroll
+  title: "Vision inspector — defect-based divert to reject bin"
+  description: >
+    Franka with wrist camera inspects arriving cubes on conveyor; items with
+    simulated defect label are diverted to a reject bin, good items to accept bin.
+    Exercises vision-gate pattern and dual-bin routing.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: ["Franka", "conveyor_primitives", "omni.replicator"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: sort
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: yrkesroll-inspector-defect-sdg-001
+  source: industrial-asset
+  category: yrkesroll
+  title: "Defect-surface SDG dataset generation"
+  description: >
+    Replicator pipeline generates randomized surface-defect textures on cube
+    meshes; renders multi-camera RGB+depth frames with segmentation masks.
+    Exercises omni.replicator SDG authoring workflow.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: ["omni.replicator", "Franka"]
+  blockers: ["material_path_variants_need_audit"]
+  motion_controller_preference: none
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: yrkesroll-palletizer-layer-stack-001
+  source: ONET
+  category: yrkesroll
+  title: "Palletizer — 2×3 layer stack on pallet"
+  description: >
+    UR10 robot picks boxes from infeed conveyor and places them in a 2×3 grid
+    on a pallet, layer by layer. Uses compute_stack_placement for offset math.
+    ONET SOC 51-2091 Palletizers.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: ["UR10", "conveyor_primitives"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: yrkesroll-palletizer-mixed-sku-002
+  source: ONET
+  category: yrkesroll
+  title: "Palletizer — mixed-SKU sorted layers"
+  description: >
+    Extension of layer-stack: two box types arrive interleaved; palletizer
+    sorts by SKU into separate pallet zones. Exercises n_bins_routed pattern.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["UR10", "conveyor_primitives"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: sort
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: yrkesroll-welder-mig-tack-001
+  source: ONET
+  category: yrkesroll
+  title: "MIG welder — tack-weld sequence on T-joint fixture"
+  description: >
+    Yaskawa-class robot arm follows a 4-point tack-weld trajectory on a T-joint
+    fixture; torch path defined via record_waypoints and replayed with
+    follow_trajectory_with_compliance. ONET SOC 51-4121.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Yaskawa_GP25_USD", "fixture_primitive"]
+  blockers: ["nucleus_only_asset"]
+  motion_controller_preference: rmpflow
+  pattern_hint: other
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: yrkesroll-welder-seam-track-002
+  source: ONET
+  category: yrkesroll
+  title: "Seam-tracking welder — adaptive path correction"
+  description: >
+    Robot welder uses wrist force-torque sensor feedback to maintain seam
+    contact during a curved weld pass; admittance control adjusts position.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["Yaskawa_GP25_USD", "force_torque_sensor"]
+  blockers: ["nucleus_only_asset", "physx_instability"]
+  motion_controller_preference: admittance
+  pattern_hint: compliance
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: yrkesroll-kit-prep-operator-001
+  source: ONET
+  category: yrkesroll
+  title: "Kit-prep operator — 5-part kitting from bins to tray"
+  description: >
+    Franka picks five distinct part types from separate source bins and places
+    them into a labelled kit tray. Exercises multi-source pick_place with
+    per-slot targeting. ONET SOC 51-2098.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: yrkesroll-kit-prep-vision-gate-002
+  source: ONET
+  category: yrkesroll
+  title: "Kit-prep — vision-verified completeness check"
+  description: >
+    After kitting, overhead camera verifies all 5 slots are occupied; missing
+    part triggers re-pick. Exercises setup_pick_place_with_vision and
+    validate_annotations.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka", "omni.replicator"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: yrkesroll-assembler-peg-bushing-001
+  source: ONET
+  category: yrkesroll
+  title: "Assembler — peg-into-bushing insertion with force limit"
+  description: >
+    Franka inserts a cylindrical peg into a bushing using impedance control;
+    insertion force capped at 20 N to avoid damage. ONET SOC 51-2028.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka", "force_torque_sensor"]
+  blockers: ["physx_instability"]
+  motion_controller_preference: impedance
+  pattern_hint: compliance
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: yrkesroll-assembler-snap-fit-002
+  source: ONET
+  category: yrkesroll
+  title: "Assembler — snap-fit housing closure"
+  description: >
+    Robot presses two housing halves together until snap-fit engages; contact
+    sensor confirms closure. Uses apply_force with threshold detection.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["Franka", "contact_sensor"]
+  blockers: ["physx_instability"]
+  motion_controller_preference: direct_joint
+  pattern_hint: compliance
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: yrkesroll-machine-tender-load-unload-001
+  source: ONET
+  category: yrkesroll
+  title: "Machine tender — CNC load/unload cycle"
+  description: >
+    UR10 picks raw blank from infeed conveyor, loads it into a CNC machine
+    fixture prim, waits for simulated machining cycle, then unloads finished
+    part to outfeed conveyor. ONET SOC 51-3093.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["UR10", "conveyor_primitives"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: yrkesroll-machine-tender-door-interlock-002
+  source: ONET
+  category: yrkesroll
+  title: "Machine tender — machine-door interlock with OPC-UA signal"
+  description: >
+    Extends load/unload: robot reads OPC-UA door-closed signal before
+    inserting blank; door-open guard suspends motion. Exercises opcua_bridge_attach.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["UR10", "opcua_bridge"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: other
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: yrkesroll-forklift-amr-pallet-001
+  source: ONET
+  category: yrkesroll
+  title: "AMR forklift — pallet pickup and rack deposit"
+  description: >
+    Carter-class AMR navigates warehouse aisle, picks pallet from floor slot,
+    deposits in rack. Exercises navigate_to, grasp_object, place_on_top_of.
+    ONET SOC 53-7051.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Carter_USD"]
+  blockers: ["nucleus_only_asset"]
+  motion_controller_preference: rmpflow
+  pattern_hint: navigate
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: yrkesroll-packer-box-seal-001
+  source: ONET
+  category: yrkesroll
+  title: "Packer — flap-fold and tape-seal sequence"
+  description: >
+    Franka folds cardboard box flaps in sequence using waypoint replay, then
+    simulates tape-seal pass. Exercises follow_trajectory_with_compliance
+    on a deformable-mesh box. ONET SOC 53-7064.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["Franka", "deformable_mesh"]
+  blockers: ["physx_instability"]
+  motion_controller_preference: admittance
+  pattern_hint: compliance
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: yrkesroll-sorter-color-3lane-001
+  source: industrial-asset
+  category: yrkesroll
+  title: "Sorter — 3-lane color-based divert"
+  description: >
+    Vision-based color classification diverts cubes from main conveyor to
+    one of three lanes (red/green/blue). Exercises sort pattern with
+    add_vision_classifier_gate and conveyor branching.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: ["conveyor_primitives", "omni.replicator"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: sort
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: yrkesroll-sorter-size-weight-002
+  source: industrial-asset
+  category: yrkesroll
+  title: "Sorter — size+weight dual-criteria divert"
+  description: >
+    Two sensor stages: proximity sensor measures bounding box, force sensor
+    measures weight; item routed to bin based on combined rule. Exercises
+    add_proximity_sensor + add_force_torque_sensor logic gates.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["conveyor_primitives"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: sort
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: yrkesroll-paint-sprayer-trajectory-001
+  source: ONET
+  category: yrkesroll
+  title: "Paint sprayer — surface-following spray trajectory"
+  description: >
+    Fanuc-class robot follows parameterized surface-coverage path over a
+    car-door panel prim; coverage map tracked via proximity sensor. ONET SOC 51-4193.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["FANUC_M710_USD"]
+  blockers: ["nucleus_only_asset"]
+  motion_controller_preference: rmpflow
+  pattern_hint: other
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: yrkesroll-dr-curriculum-trainer-001
+  source: industrial-asset
+  category: yrkesroll
+  title: "Domain-randomization curriculum for pick-place training"
+  description: >
+    Progressive DR curriculum: Stage 1 fixed lighting, Stage 2 random lighting,
+    Stage 3 random textures + lighting. Exercises add_domain_randomizer and
+    analyze_randomization with multi-env cloning.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: rl-train
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: yrkesroll-controller-benchmark-shootout-001
+  source: industrial-asset
+  category: yrkesroll
+  title: "Controller shootout — cuRobo vs RMPflow vs direct_joint timing"
+  description: >
+    Runs the same pick-place task three times with different motion planners,
+    records cycle time and success rate for each. Exercises compare_policies.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: yrkesroll-3station-oee-cell-001
+  source: industrial-asset
+  category: yrkesroll
+  title: "3-station OEE logging production cell"
+  description: >
+    Three Frankas in series: station 1 picks, station 2 inspects, station 3
+    packs. OEE metrics (availability, performance, quality) emitted via ROS2
+    topic. Exercises multi-robot handoff and metric logging.
+  priority_tier: 1
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: yrkesroll-y-merge-singulation-001
+  source: industrial-asset
+  category: yrkesroll
+  title: "Y-merge conveyor singulation"
+  description: >
+    Two input conveyors merge via Y-junction; gap controller ensures single-file
+    output stream. Exercises create_conveyor_track with merge geometry and
+    gap-timing logic.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: ["conveyor_primitives"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: yrkesroll-multi-cam-triangulation-001
+  source: industrial-asset
+  category: yrkesroll
+  title: "Multi-camera pose triangulation"
+  description: >
+    Three cameras observe the same workspace; pixel_to_world triangulates cube
+    6-DOF pose from multi-view detections. Exercises configure_camera ×3 and
+    pixel_to_world with baseline geometry.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: []
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: other
+  estimated_agent_minutes: 30
+  status: queued
+
+- id: yrkesroll-sim2real-gap-measure-001
+  source: industrial-asset
+  category: yrkesroll
+  title: "Sim-to-real gap measurement — rosbag vs sim trajectory"
+  description: >
+    Replays a recorded real rosbag trajectory in sim, computes per-joint
+    position error and wrench divergence, generates gap report.
+    Exercises measure_sim_real_gap and replay_rosbag.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["rosbag_file"]
+  blockers: ["data_dependency_real_rosbag"]
+  motion_controller_preference: ros2_control
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: yrkesroll-cloned-env-rl-scaffold-001
+  source: industrial-asset
+  category: yrkesroll
+  title: "Cloned-env RL scaffold — 8-parallel Franka pick-place"
+  description: >
+    clone_envs creates 8 identical Franka pick-place environments for parallel
+    RL rollout; RSL-RL bridge collects observations. Exercises clone_envs API
+    and get_env_observations.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka", "rsl_rl_package"]
+  blockers: ["rsl_rl_not_installed"]
+  motion_controller_preference: direct_joint
+  pattern_hint: rl-train
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: yrkesroll-multi-amr-corridor-001
+  source: industrial-asset
+  category: yrkesroll
+  title: "Multi-AMR corridor — 2 Carters bidirectional with collision avoidance"
+  description: >
+    Two Carter AMRs navigate opposite ends of a shared corridor; register_moving_obstacle
+    ensures neither blocks the other. Exercises multi-AMR collision avoidance.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Carter_USD"]
+  blockers: ["nucleus_only_asset"]
+  motion_controller_preference: rmpflow
+  pattern_hint: navigate
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: yrkesroll-ergonomics-lift-assist-001
+  source: ONET
+  category: yrkesroll
+  title: "Cobot lift-assist — operator ergonomic support"
+  description: >
+    Franka acts as cobot: human requests lift via ROS2 service, robot stabilizes
+    heavy part while operator repositions. Exercises start_teaching_mode and
+    setup_admittance_controller. ONET SOC 49-9071.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["Franka", "OperatorAvatar_USD"]
+  blockers: ["nucleus_only_asset"]
+  motion_controller_preference: admittance
+  pattern_hint: compliance
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: yrkesroll-barcode-scanner-divert-001
+  source: industrial-asset
+  category: yrkesroll
+  title: "Barcode-scanner divert — SKU-based lane routing"
+  description: >
+    barcode_reader_sensor reads SKU from passing item on conveyor; item diverted
+    to correct lane per routing table. Exercises barcode_reader_sensor and
+    conveyor gating.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["conveyor_primitives"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: sort
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: yrkesroll-gripper-vacuum-pick-001
+  source: industrial-asset
+  category: yrkesroll
+  title: "Vacuum-cup gripper pick of flat-sheet part"
+  description: >
+    Surface gripper (suction cup model) picks thin flat sheets from a stack;
+    exercises surface_gripper tool with seal-check and overlap_sphere detection.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: yrkesroll-teaching-mode-pose-replay-001
+  source: industrial-asset
+  category: yrkesroll
+  title: "Teaching-mode pose capture and replay"
+  description: >
+    Operator teaches robot 6 waypoints via start_teaching_mode; robot replays
+    recorded trajectory via record_waypoints + replay_trajectory. Exercises
+    teach_robot_pose and teleop workflow.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: yrkesroll-deformable-bag-place-001
+  source: industrial-asset
+  category: yrkesroll
+  title: "Deformable bag place — soft-body pouch into box"
+  description: >
+    Franka places a deformable-mesh pouch into an open box without rupture;
+    exercises create_deformable_mesh + admittance control force limits.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: ["physx_instability"]
+  motion_controller_preference: admittance
+  pattern_hint: pick_place
+  estimated_agent_minutes: 240
+  status: queued
+
+# ──────────────────────────────────────────────────────────────────────────────
+# INDUSTRIAL (~20 entries)  — production-cell and factory-automation patterns
+# ──────────────────────────────────────────────────────────────────────────────
+
+- id: industrial-bin-picking-random-pose-001
+  source: industrial-asset
+  category: industrial
+  title: "Bin picking — random-pose cube from unstructured bin"
+  description: >
+    Franka picks cubes tumbled into a bin at random orientations; cuRobo
+    plans grasp from overlap_sphere candidate set. Exercises overlap_sphere +
+    define_grasp_pose + setup_grasp_pose_sampler.
+  priority_tier: 1
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: industrial-conveyor-recirculation-loop-001
+  source: industrial-asset
+  category: industrial
+  title: "Recirculation conveyor loop — overflow return path"
+  description: >
+    Items that miss their pick window are recirculated on a return conveyor
+    and re-queued. Exercises create_recirculation_loop and conveyor gating.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["conveyor_primitives"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: industrial-assembly-line-4robot-handoff-001
+  source: industrial-asset
+  category: industrial
+  title: "4-robot assembly line — sequential handoff with mutex"
+  description: >
+    Four Frankas in series pass a subassembly down the line; setup_robot_claim_mutex
+    prevents simultaneous grab. Exercises robot_handoff_signal and multi-robot
+    claim sequencing.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: industrial-kitting-station-6sku-001
+  source: industrial-asset
+  category: industrial
+  title: "6-SKU kitting station — parallel pick from carousel"
+  description: >
+    Rotary table carousel presents 6 bins sequentially; UR10 picks one from
+    each and assembles a kit tray. Exercises create_rotary_table + pick_place
+    with carousel indexing.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["UR10"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: industrial-gravity-dispenser-feeder-001
+  source: industrial-asset
+  category: industrial
+  title: "Gravity dispenser — bulk-part singulation feed"
+  description: >
+    create_gravity_dispenser drops parts one at a time onto a vibratory conveyor;
+    downstream robot picks each. Exercises gravity dispenser + proximity sensor
+    as part-present detector.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka", "conveyor_primitives"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: industrial-heap-zone-unstack-001
+  source: industrial-asset
+  category: industrial
+  title: "Heap zone unstacking — random-height pile destacking"
+  description: >
+    create_heap_zone spawns a random pile; robot iteratively picks top item
+    using bounding-box height query. Exercises create_heap_zone + get_bounding_box
+    for height-based grasp selection.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: reorient
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: industrial-sortation-sbend-001
+  source: industrial-asset
+  category: industrial
+  title: "S-bend sortation — high-speed divert at merge point"
+  description: >
+    High-speed conveyor S-bend: items arrive from two sources, merged and then
+    sorted by arrival lane ID into output bins. Exercises conveyor track
+    geometry + zone-partition collision avoidance.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["conveyor_primitives"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: sort
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: industrial-plc-conveyor-io-001
+  source: industrial-asset
+  category: industrial
+  title: "PLC-conveyor — OpenPLC I/O loop with conveyor start/stop"
+  description: >
+    OpenPLC runtime controls conveyor start/stop via ladder logic; Isaac Sim
+    reads coil state via Modbus bridge. Exercises openplc_runtime_attach +
+    modbus_tcp_bridge_attach. Plumbing-only (no pick-place delivery gate).
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["conveyor_primitives", "openplc_runtime"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: other
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: industrial-vision-pick-depalletize-001
+  source: industrial-asset
+  category: industrial
+  title: "Vision-guided depalletization — layer-by-layer pallet breakdown"
+  description: >
+    Overhead camera detects top-layer box positions; robot depallettizes row by
+    row. Exercises vision_detect_objects + compute_stack_placement for layer geometry.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka", "omni.replicator"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: industrial-zone-partition-safety-001
+  source: industrial-asset
+  category: industrial
+  title: "Zone-partition safety — robot stops when human enters zone"
+  description: >
+    setup_zone_partition defines robot work cell; proximity sensor detects
+    human entry and triggers safety stop via ROS2. Exercises zone-based
+    motion inhibit and teleop_safety_config.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: ros2_control
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: industrial-multi-rate-sensor-fusion-001
+  source: industrial-asset
+  category: industrial
+  title: "Multi-rate sensor fusion — 30 Hz camera + 1 kHz force"
+  description: >
+    setup_multi_rate configures camera at 30 Hz and force-torque sensor at
+    1 kHz; fusion node aligns timestamps and triggers grasp decision. Exercises
+    multi-rate ROS2 integration.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: ros2_control
+  pattern_hint: other
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: industrial-ik-singularity-avoidance-001
+  source: industrial-asset
+  category: industrial
+  title: "IK singularity avoidance — constrained path near joint limits"
+  description: >
+    Robot follows a path that passes near a wrist singularity; check_singularity
+    triggers replanning. Exercises solve_ik + check_singularity + cuRobo
+    constraint-aware planning.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["UR10"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: other
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: industrial-conveyor-tracking-moving-pick-001
+  source: industrial-asset
+  category: industrial
+  title: "Moving-conveyor pick — synchronised grab from belt"
+  description: >
+    Robot picks items from a moving conveyor belt by matching belt velocity;
+    exercises interpolate_trajectory with belt velocity feed-forward.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka", "conveyor_primitives"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: industrial-assembly-constraint-verify-001
+  source: industrial-asset
+  category: industrial
+  title: "Assembly constraint verification — joint clearance check"
+  description: >
+    After robot assembles two parts, setup_assembly_constraint + validate_assembly_constraint
+    verifies tolerances. Exercises assembly constraint API end-to-end.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: industrial-nim-barcode-track-001
+  source: industrial-asset
+  category: industrial
+  title: "NIR material sensor — material classification divert"
+  description: >
+    nir_material_sensor classifies passing items by simulated material signature;
+    PLC reads result and activates appropriate divert gate.
+  priority_tier: 3
+  complexity: medium
+  asset_dependencies: ["conveyor_primitives"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: sort
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: industrial-forklift-handoff-arm-001
+  source: industrial-asset
+  category: industrial
+  title: "AMR-to-arm handoff — Carter delivers pallet, Franka picks item"
+  description: >
+    Carter AMR deposits pallet at handoff station; Franka arm picks individual
+    items. Exercises setup_robot_handoff_signal + robot_claim_mutex for
+    AMR↔arm coordination.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["Carter_USD", "Franka"]
+  blockers: ["nucleus_only_asset"]
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: industrial-liquid-pouring-tilt-001
+  source: industrial-asset
+  category: industrial
+  title: "Liquid pouring — tilt-controlled fill with force feedback"
+  description: >
+    Robot tilts a container to pour liquid into a vessel; fill level monitored
+    via proximity sensor; tilt angle controlled by admittance loop.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: ["physx_instability"]
+  motion_controller_preference: admittance
+  pattern_hint: compliance
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: industrial-scene-sdg-full-pipeline-001
+  source: industrial-asset
+  category: industrial
+  title: "Full SDG pipeline — scene randomization + COCO export"
+  description: >
+    create_sdg_pipeline with DR + configure_coco_yolo_writer produces annotated
+    training dataset in COCO format for downstream YOLOv8 training.
+    Exercises SDG pipeline end-to-end.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka", "omni.replicator"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: other
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: industrial-occupancy-map-nav-001
+  source: industrial-asset
+  category: industrial
+  title: "Occupancy-map navigation — warehouse floor plan export"
+  description: >
+    generate_occupancy_map from warehouse scene; export_nav2_map produces
+    Nav2-compatible PGM; Carter navigates using produced map.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Carter_USD"]
+  blockers: ["nucleus_only_asset"]
+  motion_controller_preference: moveit2
+  pattern_hint: navigate
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: industrial-convex-hull-collision-opt-001
+  source: industrial-asset
+  category: industrial
+  title: "Collision mesh optimization — convex-hull simplification"
+  description: >
+    compute_convex_hull + simplify_collision reduces complex mesh to efficient
+    collision proxy; check_collision_mesh verifies no gaps. Exercises mesh
+    optimization pipeline.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: []
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: other
+  estimated_agent_minutes: 30
+  status: queued
+
+# ──────────────────────────────────────────────────────────────────────────────
+# RESEARCH BENCHMARKS (~15 entries)  — specific named tasks from open datasets
+# ──────────────────────────────────────────────────────────────────────────────
+
+- id: research-rtx-pick-place-sponge-001
+  source: RT-X
+  category: research
+  title: "RT-X: pick up the sponge and place it in the bowl"
+  description: >
+    Directly maps the RT-1 / Open X-Embodiment task 'pick up the sponge and
+    place it in the bowl' (OXE episode class) to Isaac Sim pick_place canonical.
+    Source: arxiv.org/abs/2310.08864, task index 0042.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: research-rtx-drawer-open-close-001
+  source: RT-X
+  category: research
+  title: "RT-X: open the top drawer and put the object inside"
+  description: >
+    Maps RT-1 drawer-open task to Isaac Sim articulated-joint canonical.
+    Blocked by prismatic joint inference (Phase 72b). Source: OXE episode class
+    drawer_manipulation. arxiv.org/abs/2310.08864.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["Franka", "articulated_drawer_USD"]
+  blockers: ["physx_instability", "prismatic_joint_inference_phase72b"]
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: research-robohive-door-open-001
+  source: RoboHive
+  category: research
+  title: "RoboHive: ADROIT door-open task"
+  description: >
+    ADROIT door-open from RoboHive benchmark: 24-DOF hand + door latch.
+    Maps to Isaac Sim via create_articulated_joint + admittance control.
+    Source: github.com/vikashplus/robohive ADROIT suite.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["ADROIT_hand_USD", "door_USD"]
+  blockers: ["nucleus_only_asset", "physx_instability"]
+  motion_controller_preference: admittance
+  pattern_hint: compliance
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: research-robohive-relocate-pen-001
+  source: RoboHive
+  category: research
+  title: "RoboHive: ADROIT relocate-pen dexterous manipulation"
+  description: >
+    ADROIT relocate: 24-DOF hand picks pen from fixed pose and places at target.
+    Maps to Isaac Sim with surface_gripper approximation. Source: RoboHive ADROIT.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["ADROIT_hand_USD"]
+  blockers: ["nucleus_only_asset"]
+  motion_controller_preference: direct_joint
+  pattern_hint: pick_place
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: research-maniskill-pick-cube-001
+  source: ManiSkill
+  category: research
+  title: "ManiSkill2: PickCube-v0 tabletop pick"
+  description: >
+    ManiSkill2 PickCube-v0: Panda arm picks 5 cm cube from table surface.
+    Maps directly to Isaac Sim Franka pick_place canonical; serves as
+    cross-benchmark parity check. Source: github.com/haosulab/ManiSkill.
+  priority_tier: 1
+  complexity: simple
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 30
+  status: queued
+
+- id: research-maniskill-stack-cube-001
+  source: ManiSkill
+  category: research
+  title: "ManiSkill2: StackCube-v0 — stack two cubes"
+  description: >
+    ManiSkill2 StackCube-v0: Panda picks cube B and places atop cube A which
+    is already on the table. Exercises reorient + precision placement.
+    Source: github.com/haosulab/ManiSkill.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: reorient
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: research-maniskill-peg-insertion-001
+  source: ManiSkill
+  category: research
+  title: "ManiSkill2: PegInsertionSide-v0"
+  description: >
+    ManiSkill2 peg-in-hole side insertion. Blocked by PhysX numerical
+    instability during contact. Maps to impedance control canonical when
+    contact-aware planner available. Source: github.com/haosulab/ManiSkill.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: ["physx_instability"]
+  motion_controller_preference: impedance
+  pattern_hint: compliance
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: research-isaaclab-franka-cabinet-001
+  source: RT-X
+  category: research
+  title: "Isaac Lab: FrankaCabinet-v0 articulated cabinet"
+  description: >
+    Isaac Lab built-in FrankaCabinet task: open cabinet drawer with Franka.
+    Maps to create_articulated_joint + admittance canonical. Locally runnable
+    if Isaac Lab installed. Source: github.com/isaac-sim/IsaacLabEvalTasks.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka", "IsaacLab"]
+  blockers: ["isaac_lab_install_required"]
+  motion_controller_preference: admittance
+  pattern_hint: compliance
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: research-isaaclab-humanoid-locomotion-001
+  source: RT-X
+  category: research
+  title: "Isaac Lab: Humanoid locomotion flat terrain"
+  description: >
+    Isaac Lab humanoid flat-terrain locomotion task with RL policy eval.
+    Exercises load_rl_policy + get_env_observations. Requires Isaac Lab + G1 USD.
+    Source: github.com/isaac-sim/IsaacLabEvalTasks.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["G1_USD", "IsaacLab"]
+  blockers: ["nucleus_only_asset", "isaac_lab_install_required"]
+  motion_controller_preference: direct_joint
+  pattern_hint: rl-train
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: research-roco-bimanual-assembly-001
+  source: RoboArena
+  category: research
+  title: "RoCo: bimanual bolt-and-nut assembly"
+  description: >
+    RoCo Challenge AAAI 2026 bimanual assembly task: two robot arms cooperate
+    to insert bolt and turn nut. Maps to Isaac Sim dual-Franka setup with
+    assemble_robot + setup_assembly_constraint. Source: arxiv.org/html/2603.15469.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: ["physx_instability"]
+  motion_controller_preference: curobo
+  pattern_hint: other
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: research-vlabench-pour-water-001
+  source: RoboHive
+  category: research
+  title: "VLABench: pour water into glass — long-horizon"
+  description: >
+    VLABench (ICCV 2025) pouring task: robot picks bottle, tilts to pour into
+    glass, monitors fill level. Maps to Isaac Sim tilt + admittance canonical.
+    Source: openaccess.thecvf.com/content/ICCV2025 VLABench paper.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: ["physx_instability"]
+  motion_controller_preference: admittance
+  pattern_hint: compliance
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: research-isaaclab-arena-lego-001
+  source: RoboArena
+  category: research
+  title: "Isaac Lab-Arena: Lego-block composable benchmark"
+  description: >
+    Isaac Lab-Arena composable benchmark: Object+Scene+Embodiment+Task Lego
+    blocks. Exercises build_scene_from_blueprint with Arena composable spec.
+    Source: github.com/isaac-sim/IsaacLab-Arena.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["IsaacLab"]
+  blockers: ["isaac_lab_install_required"]
+  motion_controller_preference: curobo
+  pattern_hint: other
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: research-rtx-fold-cloth-001
+  source: RT-X
+  category: research
+  title: "RT-X: fold the cloth — deformable textile task"
+  description: >
+    Open X-Embodiment cloth-folding task (OXE episode class fold_cloth).
+    Maps to Isaac Sim create_deformable_mesh + robot end-effector contacts.
+    High physics risk. Source: arxiv.org/abs/2310.08864.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: ["physx_instability"]
+  motion_controller_preference: admittance
+  pattern_hint: compliance
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: research-maniskill-turn-faucet-001
+  source: ManiSkill
+  category: research
+  title: "ManiSkill2: TurnFaucet-v0 — rotate articulated handle"
+  description: >
+    ManiSkill2 TurnFaucet-v0: Panda rotates faucet handle to target angle.
+    Exercises create_articulated_joint (revolute) + get_joint_positions for
+    angle feedback. Source: github.com/haosulab/ManiSkill.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: research-oxe-sweep-into-dustpan-001
+  source: RT-X
+  category: research
+  title: "RT-X: sweep the object into the dustpan"
+  description: >
+    OXE sweep task: robot pushes objects into dustpan using constrained
+    end-effector contact. Exercises follow_trajectory_with_compliance +
+    contact-force limiting for non-grasp manipulation.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: ["physx_instability"]
+  motion_controller_preference: admittance
+  pattern_hint: compliance
+  estimated_agent_minutes: 240
+  status: queued
+
+# ──────────────────────────────────────────────────────────────────────────────
+# RL-TRAINING (~15 entries)  — Eureka, Isaac Lab RL, sim2real, curriculum
+# ──────────────────────────────────────────────────────────────────────────────
+
+- id: rl-eureka-reward-pick-place-001
+  source: retrieval-miss
+  category: rl-training
+  title: "Eureka reward shaping — automated pick-place reward function"
+  description: >
+    generate_reward + iterate_reward + evaluate_reward loop for Franka pick-place;
+    Eureka agent iterates reward over 10 generations, logging history.
+    Exercises full Eureka reward-design workflow.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: rl-train
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: rl-eureka-locomotion-reward-001
+  source: retrieval-miss
+  category: rl-training
+  title: "Eureka reward — humanoid locomotion velocity tracking"
+  description: >
+    Eureka designs reward for bipedal locomotion velocity tracking in Isaac Lab.
+    Exercises generate_reward conditioned on velocity-error observation.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["G1_USD", "IsaacLab"]
+  blockers: ["nucleus_only_asset"]
+  motion_controller_preference: direct_joint
+  pattern_hint: rl-train
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: rl-isaaclab-ppo-franka-001
+  source: retrieval-miss
+  category: rl-training
+  title: "Isaac Lab PPO training — Franka reach task end-to-end"
+  description: >
+    launch_training with Isaac Lab PPO on FrankaReach; checkpoint_training every
+    1000 epochs; export_policy on completion. Exercises full RL training pipeline.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka", "IsaacLab"]
+  blockers: ["isaac_lab_install_required"]
+  motion_controller_preference: direct_joint
+  pattern_hint: rl-train
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: rl-sim2real-domain-rand-transfer-001
+  source: retrieval-miss
+  category: rl-training
+  title: "Sim2real transfer — DR-trained policy real robot eval"
+  description: >
+    Train with add_domain_randomizer on 16 parallel envs; measure_sim_real_gap
+    after transfer; diagnose_domain_gap if gap exceeds threshold. Exercises
+    full sim2real transfer audit pipeline.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka", "rosbag_file"]
+  blockers: ["data_dependency_real_rosbag"]
+  motion_controller_preference: direct_joint
+  pattern_hint: rl-train
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: rl-parallel-env-scaling-32-001
+  source: retrieval-miss
+  category: rl-training
+  title: "Parallel env scaling — 32-env throughput benchmark"
+  description: >
+    clone_envs(32) pick-place environments; benchmark_sdg measures throughput;
+    profile_training_throughput records GPU utilization. Exercises scaling
+    diagnostics.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: rl-train
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: rl-actuator-net-training-001
+  source: retrieval-miss
+  category: rl-training
+  title: "Actuator net training — motor model from torque data"
+  description: >
+    train_actuator_net from recorded joint-torque trajectories; inject trained
+    model back into simulation physics. Exercises train_actuator_net workflow.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: rl-train
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: rl-curriculum-object-complexity-001
+  source: retrieval-miss
+  category: rl-training
+  title: "Curriculum — progressive object complexity for pick-place"
+  description: >
+    Stage 1: cube pick; Stage 2: sphere pick; Stage 3: irregular mesh pick.
+    DR texture/lighting added at each stage. Exercises multi-stage curriculum
+    with analyze_randomization gate between stages.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: rl-train
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: rl-detect-ood-distribution-shift-001
+  source: retrieval-miss
+  category: rl-training
+  title: "OOD detection — distribution shift alarm during inference"
+  description: >
+    detect_ood monitors inference-time observation embeddings; triggers
+    alert when shift exceeds threshold. Exercises detect_ood + monitor_forgetting
+    in a live policy loop.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: rl-train
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: rl-loco-manip-whole-body-001
+  source: retrieval-miss
+  category: rl-training
+  title: "Loco-manipulation — whole-body control mobile arm"
+  description: >
+    setup_loco_manipulation_training for mobile robot with mounted arm;
+    setup_whole_body_control coordinates base + arm RL. Exercises Phase 15
+    whole-body control pipeline.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["G1_USD"]
+  blockers: ["nucleus_only_asset"]
+  motion_controller_preference: direct_joint
+  pattern_hint: rl-train
+  estimated_agent_minutes: 240
+  status: queued
+
+- id: rl-compare-policies-ab-001
+  source: retrieval-miss
+  category: rl-training
+  title: "Policy A/B comparison — cuRobo vs RL-trained on same task"
+  description: >
+    compare_policies runs cuRobo motion planner and a trained RL policy on
+    identical pick-place task; reports success rate, cycle time, jerk.
+    Exercises policy comparison workflow.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: rl-train
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: rl-isaaclab-cartpole-baseline-001
+  source: retrieval-miss
+  category: rl-training
+  title: "Isaac Lab CartPole baseline — sanity check RL loop"
+  description: >
+    Simplest Isaac Lab RL task: CartPole balance. Confirms RL pipeline plumbing
+    is functional before investing in complex tasks. Locally runnable.
+    Source: github.com/isaac-sim/IsaacLab.
+  priority_tier: 1
+  complexity: simple
+  asset_dependencies: ["IsaacLab"]
+  blockers: ["isaac_lab_install_required"]
+  motion_controller_preference: direct_joint
+  pattern_hint: rl-train
+  estimated_agent_minutes: 30
+  status: queued
+
+- id: rl-reward-review-iterate-001
+  source: retrieval-miss
+  category: rl-training
+  title: "Reward review loop — human-in-loop Eureka validation"
+  description: >
+    review_reward presents Eureka-proposed reward function to operator;
+    record_feedback annotates issues; iterate_reward applies feedback.
+    Exercises human-in-loop reward curation.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: []
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: rl-train
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: rl-groot-eval-harness-001
+  source: retrieval-miss
+  category: rl-training
+  title: "GR00T eval harness — automated N-task evaluation"
+  description: >
+    generate_eval_harness for GR00T-N17 policy; runs 10 canonical tasks in
+    sequence; reports success rate per task. Exercises evaluate_groot pipeline.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka", "groot_policy"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: rl-train
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: rl-calibrate-physics-actuator-001
+  source: retrieval-miss
+  category: rl-training
+  title: "Physics calibration — sim actuator model vs real joint"
+  description: >
+    calibrate_physics runs joint-step experiments; quick_calibrate adjusts
+    damping/stiffness until sim trajectory matches real recording.
+    Exercises physics calibration pipeline.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: rl-train
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: rl-checkpoint-resume-001
+  source: retrieval-miss
+  category: rl-training
+  title: "Checkpoint resume — interrupted training recovery"
+  description: >
+    checkpoint_training mid-run; kill training process; resume from checkpoint;
+    verify loss continuity. Exercises checkpoint_training + analyze_checkpoint
+    recovery workflow.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["IsaacLab"]
+  blockers: ["isaac_lab_install_required"]
+  motion_controller_preference: direct_joint
+  pattern_hint: rl-train
+  estimated_agent_minutes: 60
+  status: queued
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GR00T FINETUNE (~10 entries)  — finetune, evaluate, monitor, data workflows
+# ──────────────────────────────────────────────────────────────────────────────
+
+- id: groot-finetune-n10-demos-001
+  source: retrieval-miss
+  category: gr00t-finetune
+  title: "GR00T finetune on 10 teleoperated demos"
+  description: >
+    finetune_groot with 10 record_teleop_demo episodes; suggest_finetune_config
+    selects hyperparameters; finetune_stats tracks loss curve.
+    Exercises standard GR00T finetuning workflow.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: ["Franka", "groot_base_checkpoint"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: finetune
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: groot-monitor-forgetting-001
+  source: retrieval-miss
+  category: gr00t-finetune
+  title: "GR00T forgetting monitor — catastrophic forgetting detection"
+  description: >
+    After finetuning on new task, monitor_forgetting evaluates on original
+    task set; alerts if accuracy drops >5%. Exercises forgetting-detection
+    safety gate for continual learning.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka", "groot_policy"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: finetune
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: groot-suggest-config-001
+  source: retrieval-miss
+  category: gr00t-finetune
+  title: "GR00T suggest-finetune-config — auto hyperparameter selection"
+  description: >
+    suggest_finetune_config analyzes demo count, diversity, task complexity
+    and recommends learning rate, batch size, epochs. Exercises config suggestion
+    pipeline standalone.
+  priority_tier: 2
+  complexity: simple
+  asset_dependencies: []
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: finetune
+  estimated_agent_minutes: 30
+  status: queued
+
+- id: groot-redact-finetune-data-001
+  source: retrieval-miss
+  category: gr00t-finetune
+  title: "GR00T data redaction — remove sensitive demo frames"
+  description: >
+    redact_finetune_data removes frames where operator face is visible or
+    proprietary geometry is exposed before dataset export. Exercises privacy
+    filter on teleop demo dataset.
+  priority_tier: 2
+  complexity: simple
+  asset_dependencies: []
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: finetune
+  estimated_agent_minutes: 30
+  status: queued
+
+- id: groot-export-dataset-hdf5-001
+  source: retrieval-miss
+  category: gr00t-finetune
+  title: "GR00T export dataset — HDF5 format for training pipeline"
+  description: >
+    export_finetune_data packages teleop demos into HDF5 format compatible
+    with Isaac Lab training; export_dataset adds metadata and checksums.
+    Exercises dataset export pipeline.
+  priority_tier: 2
+  complexity: simple
+  asset_dependencies: []
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: finetune
+  estimated_agent_minutes: 30
+  status: queued
+
+- id: groot-teleop-demo-record-001
+  source: retrieval-miss
+  category: gr00t-finetune
+  title: "GR00T teleop demo recording — SpaceMouse 5-demo session"
+  description: >
+    start_teleop_session with SpaceMouse; record_teleop_demo × 5 pick-place
+    episodes; validate_teleop_demo quality gate; summarize_teleop_session.
+    Exercises teleop recording workflow end-to-end.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: ["Franka", "SpaceMouse"]
+  blockers: ["hardware_spacemouse"]
+  motion_controller_preference: direct_joint
+  pattern_hint: finetune
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: groot-data-mix-suggest-001
+  source: retrieval-miss
+  category: gr00t-finetune
+  title: "GR00T data mix suggestion — multi-task training balance"
+  description: >
+    suggest_data_mix analyzes per-task demo counts and recommends sampling
+    weights for mixed-task finetune. Exercises data-mix strategy for continual
+    learning scenarios.
+  priority_tier: 3
+  complexity: simple
+  asset_dependencies: []
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: finetune
+  estimated_agent_minutes: 30
+  status: queued
+
+- id: groot-rsi-from-demos-001
+  source: retrieval-miss
+  category: gr00t-finetune
+  title: "RSI from demos — robot skill imitation setup"
+  description: >
+    setup_rsi_from_demos infers skill boundaries from demo trajectories;
+    exports per-skill motion primitive library. Exercises skill segmentation
+    from raw demos.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["Franka", "groot_policy"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: finetune
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: groot-attention-maps-visualize-001
+  source: retrieval-miss
+  category: gr00t-finetune
+  title: "GR00T attention map visualization — policy interpretability"
+  description: >
+    extract_attention_maps from GR00T policy during inference; overlay on
+    captured viewport image for interpretability debugging. Exercises
+    attention extraction pipeline.
+  priority_tier: 3
+  complexity: medium
+  asset_dependencies: ["groot_policy"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: finetune
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: groot-load-policy-eval-live-001
+  source: retrieval-miss
+  category: gr00t-finetune
+  title: "GR00T load policy + live evaluation in Kit"
+  description: >
+    load_groot_policy then run evaluate_groot on live Kit session with
+    function-gate cube delivery. Verifies end-to-end policy→action→sim loop.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: ["Franka", "groot_policy"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: finetune
+  estimated_agent_minutes: 60
+  status: queued
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ROS2 / MIDDLEWARE (~10 entries)  — bridge variants, multi-rate, OPC-UA, etc.
+# ──────────────────────────────────────────────────────────────────────────────
+
+- id: ros2-bridge-setup-franka-001
+  source: retrieval-miss
+  category: ros2-bridge
+  title: "ROS2 bridge setup — Franka joint state + command topics"
+  description: >
+    setup_ros2_bridge publishes /joint_states and subscribes /joint_commands
+    for Franka; configure_ros2_time synchronizes sim clock. Exercises basic
+    ROS2 bridge bring-up.
+  priority_tier: 1
+  complexity: simple
+  asset_dependencies: ["Franka", "ROS2"]
+  blockers: []
+  motion_controller_preference: ros2_control
+  pattern_hint: other
+  estimated_agent_minutes: 30
+  status: queued
+
+- id: ros2-moveit2-franka-001
+  source: retrieval-miss
+  category: ros2-bridge
+  title: "MoveIt2 — Franka motion planning via ROS2 bridge"
+  description: >
+    setup_isaac_ros_cumotion_moveit bridges MoveIt2 planning requests to Isaac
+    Sim; exercises ros2_control compat layer and emit_ros2_control_yaml.
+    Full MoveIt2 pipeline integration.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka", "ROS2", "MoveIt2"]
+  blockers: []
+  motion_controller_preference: moveit2
+  pattern_hint: other
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: ros2-opcua-conveyor-12-001
+  source: industrial-asset
+  category: ros2-bridge
+  title: "OPC-UA bridge — 12-conveyor cell with live tag read"
+  description: >
+    opcua_bridge_attach connects to OPC-UA server; reads 12 conveyor speed
+    tags and updates simulation conveyor velocities. Exercises opcua_bridge
+    at production scale (12 nodes).
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["conveyor_primitives", "opcua_server"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: other
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: ros2-modbus-plc-fixture-001
+  source: industrial-asset
+  category: ros2-bridge
+  title: "Modbus TCP bridge — PLC fixture control I/O"
+  description: >
+    modbus_tcp_bridge_attach maps PLC coil addresses to Isaac Sim prim
+    visibility toggles; diagnose_modbus_bridge verifies connectivity.
+    Exercises Modbus integration with fixture simulation.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["modbus_plc_emulator"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: ros2-mqtt-sparkplug-001
+  source: industrial-asset
+  category: ros2-bridge
+  title: "MQTT Sparkplug-B bridge — industrial IoT data feed"
+  description: >
+    mqtt_sparkplug_bridge_attach connects to MQTT broker using Sparkplug-B
+    encoding; robot state published as NDATA payload. Exercises MQTT bridge
+    diagnostics and diagnose_mqtt_sparkplug_bridge.
+  priority_tier: 3
+  complexity: complex
+  asset_dependencies: ["mqtt_broker"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: other
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: ros2-multi-rate-setup-001
+  source: retrieval-miss
+  category: ros2-bridge
+  title: "Multi-rate ROS2 — 30Hz camera + 1kHz joint state"
+  description: >
+    setup_multi_rate configures two ROS2 publication rates: 30 Hz camera and
+    1 kHz joint state. configure_ros2_bridge verifies no missed cycles.
+    Exercises multi-rate bridge architecture.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka", "ROS2"]
+  blockers: []
+  motion_controller_preference: ros2_control
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: ros2-zmq-stream-viz-001
+  source: retrieval-miss
+  category: ros2-bridge
+  title: "ZMQ stream — high-bandwidth point-cloud publisher"
+  description: >
+    configure_zmq_stream publishes 30 Hz LiDAR point cloud over ZMQ socket;
+    downstream Python subscriber converts to Open3D for visualization.
+    Exercises ZMQ bridge for non-ROS consumers.
+  priority_tier: 3
+  complexity: medium
+  asset_dependencies: []
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: ros2-rosbag-replay-001
+  source: retrieval-miss
+  category: ros2-bridge
+  title: "ROS2 rosbag replay — joint trajectory playback in sim"
+  description: >
+    replay_rosbag injects recorded real-robot joint trajectory into Isaac Sim;
+    compare_sim_real_video aligns sim render with real video. Exercises rosbag
+    replay + sim/real video alignment.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka", "ROS2", "rosbag_file"]
+  blockers: ["data_dependency_real_rosbag"]
+  motion_controller_preference: ros2_control
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+
+- id: ros2-nav2-integration-001
+  source: retrieval-miss
+  category: ros2-bridge
+  title: "Nav2 integration — Carter navigates with ROS2 Nav2 stack"
+  description: >
+    setup_nav_robot + configure_ros2_bridge; Nav2 stack sends goal poses via
+    /navigate_to_pose; Carter executes. Exercises full Nav2 integration with
+    Isaac Sim.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Carter_USD", "ROS2", "Nav2"]
+  blockers: ["nucleus_only_asset"]
+  motion_controller_preference: moveit2
+  pattern_hint: navigate
+  estimated_agent_minutes: 120
+  status: queued
+
+- id: ros2-ros2control-compat-001
+  source: retrieval-miss
+  category: ros2-bridge
+  title: "ros2_control compat layer — hardware interface mock"
+  description: >
+    setup_ros2_control_compat registers Isaac Sim articulation as ros2_control
+    hardware interface; MoveIt2 plans and executes via the compat layer.
+    Exercises emit_ros2_control_yaml + compat bridge.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka", "ROS2"]
+  blockers: []
+  motion_controller_preference: ros2_control
+  pattern_hint: other
+  estimated_agent_minutes: 120
+  status: queued
