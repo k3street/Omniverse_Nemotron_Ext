@@ -23,7 +23,7 @@
       "n_handoffs": 0,
       "destination_kind": "single_bin",
       "uses_conveyor_transport": true,
-      "has_footprint_constraint": true
+      "has_bounded_footprint": true
     },
     "structural_tags": [
       "isaac:transport.conveyor",

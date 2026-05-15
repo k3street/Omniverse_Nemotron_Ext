@@ -42,12 +42,13 @@
   ],
   "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (drawer extends + Drawer prim is target \u2014 odd self-reference but criteria met)",
   "intent": {
-    "pattern_hint": "reorient",
+    "pattern_hint": "pick_place",
     "structural_features": {
       "n_robot_stations": 1,
       "n_handoffs": 0,
       "destination_kind": "fixture",
-      "uses_conveyor_transport": false
+      "uses_conveyor_transport": false,
+      "has_articulated_mechanism": true
     },
     "structural_tags": [
       "isaac:robot.fixed_base.arm",

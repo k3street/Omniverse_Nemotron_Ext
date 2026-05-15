@@ -435,9 +435,19 @@ def _features_compatible(
       doesn't require X (X=False or absent) ⇒ template can have either.
     - Numeric features: if spec sets a value, template must match. If spec
       leaves null, template can have any value.
+    - destination_kind="single_bin": treated as the schema default / "any" —
+      the rule-based extractor always emits "single_bin" when it cannot infer
+      destination type. Requiring exact match blocks templates with "fixture"
+      or "n_bins_routed" that the extractor cannot detect from text alone.
+      Fix (R15b): skip destination_kind comparison when spec value is the
+      generic default "single_bin".
     - Strict mode: also requires template-set features to be matched by spec.
       Default off — we want broad-to-narrow matches.
     """
+    # Fields that carry schema defaults and should not block template admission
+    # when the spec emits only the default value (meaning "unset / unconstrained").
+    _UNCONSTRAINED_DEFAULTS: Dict = {"destination_kind": "single_bin"}
+
     for key, spec_v in spec_features.items():
         if isinstance(spec_v, bool):
             if spec_v and not template_features.get(key, False):
@@ -445,6 +455,10 @@ def _features_compatible(
         elif spec_v is None:
             continue  # spec doesn't constrain this field
         else:
+            # Skip comparison when spec holds the unconstrained default for
+            # this field — the extractor couldn't determine a real value.
+            if _UNCONSTRAINED_DEFAULTS.get(key) == spec_v:
+                continue
             template_v = template_features.get(key)
             if template_v is None:
                 # Template doesn't declare; can't violate

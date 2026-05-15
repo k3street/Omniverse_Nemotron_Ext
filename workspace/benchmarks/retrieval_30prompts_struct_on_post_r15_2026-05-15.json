@@ -14,19 +14,19 @@
     "margin_min": 0.2
   },
   "aggregate": {
-    "hit_at_1": 0.6,
-    "hit_at_3": 0.6333,
-    "mode_accuracy": 0.6333,
-    "hard_instantiate_rate": 0.1,
+    "hit_at_1": 0.6667,
+    "hit_at_3": 0.7,
+    "mode_accuracy": 0.6,
+    "hard_instantiate_rate": 0.1333,
     "struct_filter_path_count": 16,
     "fallback_embedding_count": 14,
-    "latency_p50_ms": 103.93,
-    "latency_p95_ms": 163.37
+    "latency_p50_ms": 105.31,
+    "latency_p95_ms": 111.64
   },
   "baseline_delta": {
-    "hit_at_1": -0.2333,
-    "hit_at_3": -0.3,
-    "mode_accuracy": -0.0667
+    "hit_at_1": -0.1666,
+    "hit_at_3": -0.2333,
+    "mode_accuracy": -0.1
   },
   "category_breakdown": {
     "amr_navigation": {
@@ -38,10 +38,10 @@
     },
     "contact_rich": {
       "n": 2,
-      "hit_at_1": 0.0,
-      "hit_at_3": 0.0,
-      "mode_correct": 1.0,
-      "avg_top1_sim": 0.232
+      "hit_at_1": 0.5,
+      "hit_at_3": 0.5,
+      "mode_correct": 0.5,
+      "avg_top1_sim": 0.477
     },
     "industrial_bridge": {
       "n": 1,
@@ -80,10 +80,10 @@
     },
     "pick_place": {
       "n": 5,
-      "hit_at_1": 0.4,
-      "hit_at_3": 0.4,
+      "hit_at_1": 0.6,
+      "hit_at_3": 0.6,
       "mode_correct": 0.8,
-      "avg_top1_sim": 0.337
+      "avg_top1_sim": 0.397
     },
     "reorient": {
       "n": 1,
@@ -111,7 +111,7 @@
       "hit_at_1": 0.333,
       "hit_at_3": 0.333,
       "mode_correct": 1.0,
-      "avg_top1_sim": 0.271
+      "avg_top1_sim": 0.279
     },
     "sort": {
       "n": 2,
@@ -146,7 +146,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": false,
-      "latency_ms": 125.4,
+      "latency_ms": 142.74,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -183,7 +183,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": false,
-      "latency_ms": 167.37,
+      "latency_ms": 104.2,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -222,7 +222,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.93,
+      "latency_ms": 105.32,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -253,15 +253,20 @@
       "acceptable_alternatives": [],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "CP-11",
-      "top1_sim": 0.0542,
-      "margin": 0.0542,
-      "hit_at_1": false,
-      "hit_at_3": false,
+      "top1_id": "CP-04",
+      "top1_sim": 0.2722,
+      "margin": 0.2181,
+      "hit_at_1": true,
+      "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 109.55,
+      "latency_ms": 103.42,
       "path_taken": "struct_filter",
       "top3": [
+        {
+          "task_id": "CP-04",
+          "similarity": 0.2722,
+          "distance": 1.0917
+        },
         {
           "task_id": "CP-11",
           "similarity": 0.0542,
@@ -286,7 +291,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 163.37,
+      "latency_ms": 105.92,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -327,7 +332,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 93.89,
+      "latency_ms": 106.92,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -367,7 +372,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 91.35,
+      "latency_ms": 108.98,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -398,15 +403,20 @@
       "acceptable_alternatives": [],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "CP-44",
-      "top1_sim": 0.1105,
-      "margin": 0.001,
+      "top1_id": "CP-49",
+      "top1_sim": 0.192,
+      "margin": 0.0816,
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": true,
-      "latency_ms": 92.68,
+      "latency_ms": 103.76,
       "path_taken": "struct_filter",
       "top3": [
+        {
+          "task_id": "CP-49",
+          "similarity": 0.192,
+          "distance": 1.2119
+        },
         {
           "task_id": "CP-44",
           "similarity": 0.1105,
@@ -416,11 +426,6 @@
           "task_id": "CP-NEW-y-merge-singulation",
           "similarity": 0.1095,
           "distance": 1.3358
-        },
-        {
-          "task_id": "CP-31",
-          "similarity": 0.0562,
-          "distance": 1.4157
         }
       ]
     },
@@ -443,7 +448,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 96.58,
+      "latency_ms": 106.77,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -483,7 +488,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": true,
-      "latency_ms": 105.32,
+      "latency_ms": 111.42,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -520,7 +525,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 115.5,
+      "latency_ms": 104.5,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -557,7 +562,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 100.75,
+      "latency_ms": 103.73,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -592,11 +597,11 @@
       "actual_action": "few_shot",
       "top1_id": "CP-NEW-dr-curriculum",
       "top1_sim": 0.2994,
-      "margin": 0.1662,
+      "margin": 0.1574,
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": false,
-      "latency_ms": 104.65,
+      "latency_ms": 105.31,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -605,14 +610,14 @@
           "distance": 1.0509
         },
         {
+          "task_id": "CP-50",
+          "similarity": 0.142,
+          "distance": 1.287
+        },
+        {
           "task_id": "CP-77",
           "similarity": 0.1332,
           "distance": 1.3002
-        },
-        {
-          "task_id": "CP-72",
-          "similarity": 0.1178,
-          "distance": 1.3233
         }
       ]
     },
@@ -633,7 +638,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 102.61,
+      "latency_ms": 105.12,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -670,7 +675,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 102.93,
+      "latency_ms": 111.64,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -709,7 +714,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 101.29,
+      "latency_ms": 100.62,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -740,15 +745,20 @@
       "acceptable_alternatives": [],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "CP-78",
-      "top1_sim": 0.2113,
-      "margin": 0.0072,
+      "top1_id": "CP-36",
+      "top1_sim": 0.2337,
+      "margin": 0.0224,
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": true,
-      "latency_ms": 101.57,
+      "latency_ms": 106.39,
       "path_taken": "struct_filter",
       "top3": [
+        {
+          "task_id": "CP-36",
+          "similarity": 0.2337,
+          "distance": 1.1494
+        },
         {
           "task_id": "CP-78",
           "similarity": 0.2113,
@@ -758,11 +768,6 @@
           "task_id": "CP-05",
           "similarity": 0.2041,
           "distance": 1.1939
-        },
-        {
-          "task_id": "CP-NEW-dr-curriculum",
-          "similarity": 0.1901,
-          "distance": 1.2149
         }
       ]
     },
@@ -777,29 +782,29 @@
       "acceptable_alternatives": [],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "CP-63",
-      "top1_sim": 0.0257,
-      "margin": 0.0257,
+      "top1_id": "CP-16",
+      "top1_sim": 0.0286,
+      "margin": 0.0029,
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": true,
-      "latency_ms": 102.41,
+      "latency_ms": 105.74,
       "path_taken": "struct_filter",
       "top3": [
+        {
+          "task_id": "CP-16",
+          "similarity": 0.0286,
+          "distance": 1.4571
+        },
         {
           "task_id": "CP-63",
           "similarity": 0.0257,
           "distance": 1.4615
         },
         {
-          "task_id": "CP-75",
-          "similarity": 0.0,
-          "distance": 1.5881
-        },
-        {
-          "task_id": "CP-21",
-          "similarity": 0.0,
-          "distance": 1.5997
+          "task_id": "CP-66",
+          "similarity": 0.0225,
+          "distance": 1.4662
         }
       ]
     },
@@ -820,7 +825,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": false,
-      "latency_ms": 105.41,
+      "latency_ms": 104.66,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -834,9 +839,9 @@
           "distance": 1.1614
         },
         {
-          "task_id": "CP-72",
-          "similarity": 0.2021,
-          "distance": 1.1969
+          "task_id": "CP-55",
+          "similarity": 0.2156,
+          "distance": 1.1766
         }
       ]
     },
@@ -857,7 +862,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.29,
+      "latency_ms": 104.38,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -894,7 +899,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 116.58,
+      "latency_ms": 106.05,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -931,7 +936,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 102.33,
+      "latency_ms": 104.37,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -962,19 +967,29 @@
       "acceptable_alternatives": [],
       "expected_action": "fallback",
       "actual_action": "few_shot",
-      "top1_id": "CP-86",
+      "top1_id": "CP-32",
       "top1_sim": 0.0,
       "margin": 0.0,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 113.86,
+      "latency_ms": 108.05,
       "path_taken": "struct_filter",
       "top3": [
         {
-          "task_id": "CP-86",
+          "task_id": "CP-32",
           "similarity": 0.0,
-          "distance": 1.9167
+          "distance": 1.5468
+        },
+        {
+          "task_id": "CP-82",
+          "similarity": 0.0,
+          "distance": 1.5732
+        },
+        {
+          "task_id": "CP-34",
+          "similarity": 0.0,
+          "distance": 1.6349
         }
       ]
     },
@@ -995,7 +1010,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 106.45,
+      "latency_ms": 104.78,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -1032,7 +1047,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 107.05,
+      "latency_ms": 104.73,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -1075,7 +1090,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.01,
+      "latency_ms": 105.36,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -1089,9 +1104,9 @@
           "distance": 1.0805
         },
         {
-          "task_id": "CP-10",
-          "similarity": 0.199,
-          "distance": 1.2015
+          "task_id": "CP-19",
+          "similarity": 0.2756,
+          "distance": 1.0866
         }
       ]
     },
@@ -1114,7 +1129,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": true,
-      "latency_ms": 110.05,
+      "latency_ms": 105.79,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -1151,7 +1166,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.33,
+      "latency_ms": 104.24,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -1191,7 +1206,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.55,
+      "latency_ms": 103.39,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -1223,16 +1238,21 @@
         "CP-NEW-drawer-open"
       ],
       "expected_action": "few_shot",
-      "actual_action": "few_shot",
-      "top1_id": "CP-27",
-      "top1_sim": 0.2765,
-      "margin": 0.0009,
-      "hit_at_1": false,
-      "hit_at_3": false,
-      "mode_correct": true,
-      "latency_ms": 103.14,
+      "actual_action": "hard_instantiate",
+      "top1_id": "CP-55",
+      "top1_sim": 0.7663,
+      "margin": 0.4899,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": false,
+      "latency_ms": 104.99,
       "path_taken": "struct_filter",
       "top3": [
+        {
+          "task_id": "CP-55",
+          "similarity": 0.7663,
+          "distance": 0.3505
+        },
         {
           "task_id": "CP-27",
           "similarity": 0.2765,
@@ -1242,11 +1262,6 @@
           "task_id": "CP-04",
           "similarity": 0.2756,
           "distance": 1.0866
-        },
-        {
-          "task_id": "CP-05",
-          "similarity": 0.2501,
-          "distance": 1.1249
         }
       ]
     }
