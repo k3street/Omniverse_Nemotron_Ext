@@ -169,14 +169,6 @@
     "Cube path collision with conveyor surfaces during transit: cuRobo without scene-collision (Warp 1.8 limitation) can route arm through belt geometry. Mitigated by mid-height waypoints in handler's _build_segments \u2014 they force near-vertical pick/drop.",
     "Forgetting to apply PhysxRigidBodyAPI to cube before bulk_set_attribute on physxRigidBody:sleepThreshold \u2192 attribute exists but PhysX doesn't read it without the typed schema \u2192 cube falls asleep on paused belt \u2192 never moves when belt resumes."
   ],
-  "verified_date": "2026-05-06",
-  "verified_metrics": {
-    "controllers": "two cuRobo controllers, per-robot subscription names",
-    "delivery": "Cube_1 traverses Conv1 \u2192 Robot 1 \u2192 Conv2 \u2192 Robot 2 \u2192 Bin end-to-end",
-    "drop_clearance_above_belt_top": "10mm (industrial sweet spot for gripper-pick-place with 5cm cubes)",
-    "tools_only": "no run_usd_script \u2014 pure tool calls verified end-to-end",
-    "open_known_issues": "test-harness builtins cleanup between repeat runs uses a kit_tools.exec_sync \u2014 not part of canonical pattern (agent starts fresh)"
-  },
   "extends": "CP-01",
   "extension_notes": "CP-02 reuses CP-01's pick-place mechanics (cuRobo controller, settling state, mid-waypoints, friction material, sleepThreshold=0) but adds two architectural requirements: (a) per-robot subscription naming so multiple cuRobo controllers coexist, (b) explicit drop_target when destination's bbox center is out of robot's reach. Both landed in the 2026-05-06 commits.",
   "verify_args": {

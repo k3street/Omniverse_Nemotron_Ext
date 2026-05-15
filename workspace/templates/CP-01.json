@@ -143,43 +143,6 @@
     "Setting EE_INITIAL_HEIGHT manually below robot base \u2192 IK target below base \u2192 arm folds. Auto-compute is correct.",
     "Using target_source='spline' on a GPU-equipped machine \u2014 older default; cuRobo gives smoother motion."
   ],
-  "verified_date": "2026-05-06",
-  "verified_metrics": {
-    "controller": "curobo",
-    "cubes_delivered": "4/4 verified twice end-to-end",
-    "pick_success_rate_steady": "~90% per attempt over 10 trials",
-    "belt_motion": "visible between picks (cubes start outside reach, belt carries each into pick zone)",
-    "motion_quality": "smooth, mid-waypoints prevent wrist-cube collisions on descent",
-    "cycle_time_per_cube": "~5-7s",
-    "home_return": "robot returns to HOME_Q after all cubes processed",
-    "tools_only": "no run_usd_script \u2014 pure tool calls verified end-to-end",
-    "open_known_issues": "small inter-run variance in trajectory path (cuRobo seed randomness with num_ik_seeds=4); occasional grip slip ~10% of attempts"
-  },
-  "benchmark_vs_alternatives": {
-    "curobo": {
-      "status": "verified-2026-05-06",
-      "cubes_delivered": "4/4",
-      "note": "Best motion quality. CUDA-graph build can hang ~90s on cold CUDA driver state \u2014 reboot fixes."
-    },
-    "spline": {
-      "cubes_in_bin_mean": 3.0,
-      "runs": 2,
-      "note": "Older fallback. 3/4 deterministic but jerky joint-space splines."
-    },
-    "native": {
-      "cubes_in_bin_mean": 0.0,
-      "runs": 2,
-      "note": "RmpFlow PickPlaceController. Catastrophic motion when cube z-range hardcode rejected table-top cubes; fix lands in 2026-05-06 commit."
-    },
-    "diffik": {
-      "status": "blocked",
-      "reason": "isaaclab not in Kit python. Stub-only."
-    },
-    "osc": {
-      "status": "blocked",
-      "reason": "isaaclab not in Kit python. Stub-only (experimental anyway)."
-    }
-  },
   "verify_args": {
     "stages": [
       {
@@ -197,6 +160,10 @@
     "duration_s": 180
   },
   "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (with 180s sim \u2014 duration_s=60 was too short for cuRobo + 4-cube conveyor cycle. cube_final=(-0.004, -0.46, 0.835) inside Bin)",
+  "motion_controllers": {
+    "verified": ["curobo"],
+    "untested": ["rmpflow", "moveit2", "admittance"]
+  },
   "diagnose_args": {
     "robot_path": "/World/Franka",
     "sensor_path": "/World/PickSensor",

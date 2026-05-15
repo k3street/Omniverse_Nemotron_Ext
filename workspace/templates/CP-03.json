@@ -24,7 +24,8 @@
     "structural_features": {
       "n_robot_stations": 1,
       "n_handoffs": 0,
-      "destination_kind": "color_routed",
+      "destination_kind": "n_bins_routed",
+      "routing_axis": "color",
       "uses_conveyor_transport": true,
       "has_color_routing": true
     },

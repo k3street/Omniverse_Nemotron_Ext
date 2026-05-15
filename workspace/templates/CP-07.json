@@ -145,7 +145,11 @@
     "Same physics gotchas as CP-01: GPU dynamics disabled, sleepThreshold=0, rubber on cubes."
   ],
   "extension_notes": "CP-07 stress-tests multi-robot scoping infrastructure. Each cuRobo install creates _curobo_pp_sub_<robot_tag>; cleanup logic must not kill other robots' subs (verified in commit 755effb stale-sub-cleanup). Future variants: 8\u00d7 parallel for IsaacLab GPU-batched training; mixed robot families (2\u00d7 Franka + 2\u00d7 UR10) for fleet-coexistence test. Form-gate verifies stage 0 only \u2014 other 3 stations replicate the same pattern but verify_pickplace_pipeline treats stages as relay (place_i\u2192pick_{i+1}); independent-station verification mode is a future verifier extension.",
-  "delivery": "All 16 cubes (4 per Franka \u00d7 4) delivered to their respective bins",
-  "cube_path": "/World/Cube_0_1",
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 60s too short. simulate_traversal_check success=True at cube_final=(-0.11, -3.50, 0.785) \u2014 cube ended far from origin but criteria met)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 60s too short. simulate_traversal_check success=True at cube_final=(-0.11, -3.50, 0.785) \u2014 cube ended far from origin but criteria met)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka0",
+    "sensor_path": "/World/Sensor0",
+    "robot_base": [0.0, -3.0, 0.75],
+    "drop_pose": [0, -3.4, 0.75]
+  }
 }

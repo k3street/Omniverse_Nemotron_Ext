@@ -22,7 +22,6 @@
   "simulate_args": null,
   "diagnose_args": null,
   "extends": "phase10-yrkesroll-#16",
-  "extends_notes": "Multi-AMR canonical. Tests fleet coordination via register_moving_obstacle.",
   "extension_notes": "Multi-AMR canonical. Tests fleet coordination via register_moving_obstacle. Function-gate N/A \u2014 AMR navigation, not cube delivery. Validation = each Carter reaches its goal_position within 30s.",
   "failure_modes": [
     "create_wheeled_robot for 3 instances may exhaust GPU memory if Carter is heavy mesh",
