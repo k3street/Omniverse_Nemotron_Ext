@@ -1,0 +1,135 @@
+{
+  "task_id": "CP-NEW-conveyor-recirculation-overflow",
+  "goal": "Build a recirculation-overflow conveyor station: cubes arrive on a main belt; a Franka at the pick station picks cubes within a sensor window. Cubes that miss the pick window overflow onto a return belt (create_recirculation_loop) and are re-queued to the main belt inlet. Exercises create_recirculation_loop + conveyor gating + add_proximity_sensor overflow routing. Validates industrial-conveyor-recirculation-loop-001.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "create_conveyor",
+    "create_recirculation_loop",
+    "create_bin",
+    "add_proximity_sensor",
+    "robot_wizard",
+    "setup_pick_place_controller",
+    "bulk_set_attribute"
+  ],
+  "thoughts": [
+    "Main belt runs +X at 0.25 m/s. Franka mounted at mid-belt, picks cubes in a 0.12m sensor window.",
+    "Cubes that are NOT picked (window miss) continue +X off the main belt onto the return segment of the recirculation loop.",
+    "Recirculation loop: 2.0 x 0.6m rectangle centered off the end of the main belt. Loop carries cubes back to inlet position (re-queue).",
+    "pick_window sensor positioned at /World/PickSensor, belts pause during pick via belt_path.",
+    "No robot on return loop — purely conveyor-driven recirculation.",
+    "Distinct from CP-60 (pure closed-loop demo) — this adds a robot station, overflow detection, and re-queue geometry.",
+    "Function-gate: simulate_args checks ANY cube delivered to /World/AcceptBin."
+  ],
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Main infeed belt — cubes travel +X\ncreate_conveyor(\n    prim_path=\"/World/MainBelt\",\n    position=[-0.75, 0.0, 0.78],\n    size=[2.5, 0.35, 0.05],\n    surface_velocity=[0.25, 0, 0],\n)\n\n# Recirculation return loop — captures overflow cubes, returns to inlet\ncreate_recirculation_loop(\n    loop_path=\"/World/ReturnLoop\",\n    center=[1.6, 0.0, 0.78],\n    length=1.2,\n    width=0.5,\n    velocity=0.20,\n)\n\n# Accept bin at robot drop zone\ncreate_bin(prim_path=\"/World/AcceptBin\", position=[0.0, -0.55, 0.75], size=[0.30, 0.25, 0.15])\n\n# Proximity sensor at pick window on main belt\nadd_proximity_sensor(\n    sensor_path=\"/World/PickSensor\",\n    position=[0.0, 0.0, 0.835],\n    size=[0.08, 0.08, 0.06],\n)\n\n# Franka robot at pick station\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0.0, -0.45, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Spawn 5 cubes staggered on main belt\nfor i in range(5):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[-1.8 + i*0.35, 0.0, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(5)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\n# Pick-place controller — sensor gated, belt pauses on pick\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/MainBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(5)],\n    destination_path=\"/World/AcceptBin\",\n    planning_obstacles=[\"/World/MainBelt\", \"/World/AcceptBin\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [-1.80, 0.0, 0.835],
+      "/World/Cube_2": [-1.45, 0.0, 0.835],
+      "/World/Cube_3": [-1.10, 0.0, 0.835],
+      "/World/Cube_4": [-0.75, 0.0, 0.835],
+      "/World/Cube_5": [-0.40, 0.0, 0.835]
+    },
+    "conveyors": {
+      "/World/MainBelt": [0.25, 0, 0],
+      "/World/ReturnLoop/Top": [0.20, 0, 0],
+      "/World/ReturnLoop/Right": [0, -0.20, 0],
+      "/World/ReturnLoop/Bottom": [-0.20, 0, 0],
+      "/World/ReturnLoop/Left": [0, 0.20, 0]
+    }
+  },
+  "verify_args": null,
+  "simulate_args": {
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4",
+      "/World/Cube_5"
+    ],
+    "target_path": "/World/AcceptBin",
+    "duration_s": 240
+  },
+  "diagnose_args": null,
+  "failure_modes": [
+    "Belt-to-loop junction gap: cube travels off main belt but doesn't land on ReturnLoop/Top — falls to floor instead",
+    "ReturnLoop re-queue geometry: cubes exiting Left segment may not reach MainBelt inlet at [-1.8, 0, 0.835] — gap between loop and belt",
+    "curobo planner may miss cubes arriving fast at PickSensor — increase belt_pause duration or reduce belt speed",
+    "5 simultaneous cubes may overload PhysX at narrow belt width — reduce to 3 if instability observed",
+    "Loop corner transitions: 90-degree velocity change causes cube momentum to overshoot corner segment"
+  ],
+  "extends": "CP-60",
+  "extension_notes": "Extends CP-60 (pure recirculation loop) by adding main infeed belt, robot pick station, sensor gating, and overflow-to-return-loop routing. Industrial-conveyor-recirculation-loop-001 from backlog. Distinct from CP-60: robot actor + sensor gate + main belt + overflow path.",
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": true,
+      "uses_recirculation_loop": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:transport.recirculation_loop",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:topology.overflow_requeue",
+      "isaac:integration.sensor_gated_pick"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e"],
+      "expected_count": 1,
+      "required": true
+    },
+    "main_belt": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "return_loop": {
+      "constraints": ["recirculation_loop"],
+      "expected_count": 1,
+      "required": true
+    },
+    "accept_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "position": [0.0, -0.45, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "main_belt": {
+      "path": "/World/MainBelt",
+      "position": [-0.75, 0.0, 0.78],
+      "size": [2.5, 0.35, 0.05],
+      "surface_velocity": [0.25, 0, 0]
+    },
+    "return_loop": {
+      "path": "/World/ReturnLoop",
+      "center": [1.6, 0.0, 0.78],
+      "length": 1.2,
+      "width": 0.5,
+      "velocity": 0.20
+    },
+    "accept_bin": {
+      "path": "/World/AcceptBin",
+      "position": [0.0, -0.55, 0.75],
+      "size": [0.30, 0.25, 0.15]
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_conveyor(\n    prim_path={{main_belt.path}},\n    position={{main_belt.position}},\n    size={{main_belt.size}},\n    surface_velocity={{main_belt.surface_velocity}},\n)\n\ncreate_recirculation_loop(\n    loop_path={{return_loop.path}},\n    center={{return_loop.center}},\n    length={{return_loop.length}},\n    width={{return_loop.width}},\n    velocity={{return_loop.velocity}},\n)\n\ncreate_bin(prim_path={{accept_bin.path}}, position={{accept_bin.position}}, size={{accept_bin.size}})\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.0, 0.0, 0.835], size=[0.08, 0.08, 0.06])\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\nfor i in range(5):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[-1.8 + i*0.35, 0.0, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(5)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path={{main_belt.path}},\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(5)],\n    destination_path={{accept_bin.path}},\n    planning_obstacles=[{{main_belt.path}}, {{accept_bin.path}}],\n)",
+  "motion_controllers": {
+    "curobo": "untested"
+  },
+  "verified_status": "draft-2026-05-16; build-spec only; not yet executed"
+}

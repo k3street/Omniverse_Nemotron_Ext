@@ -574,10 +574,12 @@
   complexity: medium
   asset_dependencies: ["conveyor_primitives"]
   blockers: []
-  motion_controller_preference: none
-  pattern_hint: other
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-conveyor-recirculation-overflow.json
+  drafted_date: "2026-05-16"
 
 - id: industrial-assembly-line-4robot-handoff-001
   source: industrial-asset
