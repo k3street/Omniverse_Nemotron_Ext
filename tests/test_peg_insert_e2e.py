@@ -74,8 +74,8 @@ def _build_peg_insert_trajectory(n: int) -> List[Dict[str, Any]]:
     that mirrors that shape without depending on Phase 63b being live.  The
     trajectory descends from above the hole (z=0.95) to the hole z (0.82)
     along a straight line — emulating an APPROACH→ALIGN→INSERT path that
-    a real planner would produce for the CP-NEW-peg-in-hole-single
-    template (hole at [0, -0.4, 0.825]).
+    a real planner would produce for the CP-58 peg-in-hole template
+    (hole at [0, -0.4, 0.825]).
 
     Args:
         n: Number of waypoints (5-10 per CRM-T3 brief).
