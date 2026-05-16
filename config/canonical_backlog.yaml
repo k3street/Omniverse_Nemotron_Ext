@@ -22,7 +22,9 @@
   motion_controller_preference: curobo
   pattern_hint: sort
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-inspect-reject.json
+  drafted_date: "2026-05-10"
 
 - id: yrkesroll-inspector-defect-sdg-001
   source: industrial-asset
@@ -195,7 +197,9 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-machine-tender-load-unload.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-machine-tender-door-interlock-002
   source: ONET
@@ -332,7 +336,9 @@
   motion_controller_preference: curobo
   pattern_hint: other
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-controller-shootout-cp.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-3station-oee-cell-001
   source: industrial-asset
@@ -349,7 +355,9 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-3station-oee.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-y-merge-singulation-001
   source: industrial-asset
@@ -366,7 +374,9 @@
   motion_controller_preference: none
   pattern_hint: other
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-y-merge-singulation.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-multi-cam-triangulation-001
   source: industrial-asset
@@ -383,7 +393,9 @@
   motion_controller_preference: none
   pattern_hint: other
   estimated_agent_minutes: 30
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-multi-cam-triangulation.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-sim2real-gap-measure-001
   source: industrial-asset
