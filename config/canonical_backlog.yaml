@@ -788,7 +788,9 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-moving-conveyor-pick.json
+  drafted_date: "2026-05-16"
 
 - id: industrial-assembly-constraint-verify-001
   source: industrial-asset
