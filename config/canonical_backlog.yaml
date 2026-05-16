@@ -784,10 +784,14 @@
   complexity: complex
   asset_dependencies: ["UR10"]
   blockers: []
-  motion_controller_preference: curobo
+  motion_controller_preference: lula_rrt
   pattern_hint: other
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-ik-singularity-avoidance.json
+  drafted_date: "2026-05-16"
+  drafted_by: A55
+  draft_notes: "A55; form-gate 1 OK 0 ERROR 0 WARN (--validate-tool-calls); first library use of check_singularity; 3-waypoint conditional-replan pattern (safe→lula_rrt→rmpflow); function-gate pending live Kit + UR10 USD"
 
 - id: industrial-conveyor-tracking-moving-pick-001
   source: industrial-asset
