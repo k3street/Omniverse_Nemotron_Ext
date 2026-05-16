@@ -2457,3 +2457,348 @@
   success_criterion: "Parts with width >= tolerance arrive in reject bin; parts within tolerance arrive in accept bin (10 trials)."
   notes: "ONET SOC 17-3026 quality-control technician; raycast-gauge pattern is novel; reuses dual-bin divert from inspector canonical."
 
+- id: inspection-weld-seam-vision-ndt-001
+  source: F.0-ext-2
+  category: industrial
+  title: "Weld-seam vision NDT — coverage scan across a seam without welding"
+  description: >
+    UR10 follows a pre-recorded seam path while a wrist camera captures
+    frames; vision_detect_objects scores each frame for 'defect' class;
+    coverage map (frames-per-cm) is computed from get_world_transform
+    samples. Vision-only NDT canonical, no arc/heat physics.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["UR10"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Capture wrist-camera frames along a 200 mm seam and produce a coverage map plus per-frame defect scores."
+  key_tools: ["plan_trajectory", "capture_camera_image", "vision_detect_objects", "get_world_transform", "configure_camera"]
+  success_criterion: "Coverage map reports >= 10 frames per cm of seam and defect scores produced for every frame."
+  notes: "Distinct from yrkesroll-welder-seam-track-002 (which DOES weld); this is NDT-only, no arc/heat physics or compliance."
+
+- id: industrial-triple-arm-cell-handoff-001
+  source: F.0-ext-2
+  category: industrial
+  title: "Three-arm cell — A→B→C sequential handoff with mutex synchronization"
+  description: >
+    Three Frankas share a workpiece via setup_robot_handoff_signal + claim
+    mutexes. Arm A picks from infeed, hands to B at midstation, B hands to
+    C at outstation. Exercises triple-stage chained handoff with claim
+    semaphores.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 90
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Move a cube from arm A's infeed through arm B's midstation to arm C's outstation via two ordered handoffs."
+  key_tools: ["setup_robot_handoff_signal", "setup_robot_claim_mutex", "setup_pick_place_controller", "grasp_object", "get_world_transform"]
+  success_criterion: "Cube arrives in arm C's outstation AABB and exactly two handoff signals fire in A->B then B->C order."
+  notes: "Distinct from industrial-assembly-line-4robot-handoff-001 (4 arms parallel handoffs); this enforces strict A->B->C ordering via mutexes."
+
+- id: industrial-tool-changer-swap-001
+  source: F.0-ext-2
+  category: industrial
+  title: "Automatic tool changer — gripper -> vacuum swap at tool-stand"
+  description: >
+    UR10 approaches a tool-stand prim, releases the parallel gripper to a
+    cradle, drives to a vacuum end-effector cradle, picks up the vacuum
+    via surface_gripper attach, then verifies the swap by attempting a
+    suction pick. Exercises EOAT swap with attach/detach semantics.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["UR10"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: other
+  estimated_agent_minutes: 90
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Swap parallel gripper for a vacuum end-effector at a tool-stand and then perform one suction pick to verify the swap."
+  key_tools: ["surface_gripper", "create_gripper", "grasp_object", "set_joint_targets", "get_gripper_state"]
+  success_criterion: "Robot returns with vacuum gripper attached, parallel gripper resting in cradle, and a test object lifted via suction."
+  notes: "No existing tool-changer template; closest is yrkesroll-gripper-vacuum-pick which uses a fixed vacuum. Pure attach/detach geometry, no Nucleus."
+
+- id: industrial-adaptive-3finger-gripper-001
+  source: F.0-ext-2
+  category: industrial
+  title: "Adaptive 3-finger gripper — cylindrical vs spherical grasp modes"
+  description: >
+    A 3-finger gripper proxy (3 prismatic + 3 revolute via create_articulated_joint)
+    closes in two modes: cylindrical (parallel fingers) for a tube, spherical
+    (curled fingers) for a sphere. setup_grasp_pose_sampler chooses the
+    mode by object class.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["UR10"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 90
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Grasp a tube using cylindrical mode and a sphere using spherical mode with the same adaptive 3-finger gripper."
+  key_tools: ["create_articulated_joint", "setup_grasp_pose_sampler", "grasp_object", "set_joint_targets", "get_gripper_state"]
+  success_criterion: "Both objects lifted >= 50 mm with the correct mode chosen per object class."
+  notes: "Robotiq-style adaptive gripper modeled with articulated primitives; no real Robotiq URDF (Nucleus-free)."
+
+- id: industrial-6dof-pose-estimate-pick-001
+  source: F.0-ext-2
+  category: industrial
+  title: "6-DOF pose estimate -> IK pick on randomly oriented part"
+  description: >
+    Overhead camera + vision_detect_objects yields a 6-DOF pose proposal;
+    solve_ik computes a grasp from the pose; setup_pick_place_with_vision
+    executes the pick. Part is spawned at a random orientation (within
+    [-30, +30] deg about Z) each trial. Exercises pose-to-IK pipeline.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Detect a randomly oriented part, estimate its 6-DOF pose, and pick it with an IK-derived grasp."
+  key_tools: ["vision_detect_objects", "solve_ik", "setup_pick_place_with_vision", "grasp_object", "get_world_transform"]
+  success_criterion: "Across 5 trials with random Z-rotation, at least 4 picks land the part in the deposit bin."
+  notes: "Distinct from industrial-bin-picking-random-pose-001 (which uses random XY layout); this varies orientation explicitly and exercises 6-DOF pose-to-IK."
+
+- id: industrial-spc-sensor-stream-001
+  source: F.0-ext-2
+  category: industrial
+  title: "SPC sensor stream — log force readings and trigger out-of-control alert"
+  description: >
+    Force-torque sensor on wrist publishes during a press operation;
+    monitor_joint_effort streams readings; a custom omnigraph computes
+    rolling mean +/- 3-sigma; samples outside the band raise an alert
+    flag. Exercises statistical-process-control instrumentation.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Stream wrist force readings during 30 press cycles and raise an alert when a sample exceeds rolling +/- 3-sigma."
+  key_tools: ["add_force_torque_sensor", "monitor_joint_effort", "create_omnigraph", "set_graph_variable", "get_contact_report"]
+  success_criterion: "Alert fires for an injected anomalous press cycle and stays silent for 29 nominal cycles."
+  notes: "SPC pattern not yet in library; uses force-torque sensor + omnigraph rolling stats; no Nucleus dependency."
+
+- id: calibration-hand-eye-camera-robot-001
+  source: F.0-ext-2
+  category: industrial
+  title: "Hand-eye calibration — wrist camera vs robot base via fiducial poses"
+  description: >
+    Robot moves wrist camera to 10 preset poses around a static fiducial
+    cube; capture_camera_image at each pose; create_calibration_experiment
+    fits the camera-to-wrist transform; validate_calibration checks
+    re-projection RMS error.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Calibrate wrist-camera to robot-base transform from 10 fiducial views and report re-projection RMS error."
+  key_tools: ["create_calibration_experiment", "validate_calibration", "capture_camera_image", "configure_camera", "set_joint_targets"]
+  success_criterion: "validate_calibration reports re-projection RMS <= 2 px after fitting from 10 views."
+  notes: "Companion to sim2real-actuator-net-calibration-001 (which calibrates joint dynamics, not optics). Distinct from sdg-multi-cam-correlated-dr (rendering, not calibration)."
+
+- id: industrial-pcb-flash-test-fixture-001
+  source: F.0-ext-2
+  category: industrial
+  title: "PCB flash-test station — vision-locate PCB, lower probe-head fixture"
+  description: >
+    Conveyor brings a PCB-like flat plate under an overhead camera;
+    vision_detect_objects + raycast confirm flat-side-up; a 4-DOF gantry
+    proxy lowers a probe-head fixture; contact sensors verify all 4
+    test pins touch. Electronics-vertical canonical.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["conveyor_primitives"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: insert
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Position a PCB under a probe-head fixture and verify all 4 test pins make contact within tolerance."
+  key_tools: ["vision_detect_objects", "raycast", "setup_contact_sensors", "get_contact_report", "create_linear_axis_robot"]
+  success_criterion: "All 4 contact sensors report active simultaneously for >= 0.5 simulated seconds at lower position."
+  notes: "Electronics vertical; uses linear axis robot proxy (no exotic gantry); pin contact via setup_contact_sensors."
+
+- id: industrial-pharma-vial-kitting-001
+  source: F.0-ext-2
+  category: industrial
+  title: "Pharma vial kitting — sort 3 vial sizes into tray slots"
+  description: >
+    Three vial-proxy cylinders (S/M/L) arrive on conveyor; vision classifies
+    by height; UR10 places each into a kit_tray slot matching its size.
+    create_kit_tray with 3 SKU slots; track_slot_occupancy verifies the
+    final layout.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["UR10", "conveyor_primitives"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: sort
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Sort 3 vial sizes into matching kit-tray slots and verify slot occupancy."
+  key_tools: ["create_kit_tray", "track_slot_occupancy", "vision_detect_objects", "setup_pick_place_controller", "get_bounding_box"]
+  success_criterion: "Each vial lands in the slot matching its size class across 3 trials."
+  notes: "Pharma vertical (no cleanroom physics — purely vial geometry); distinct from industrial-kitting-station-6sku (mixed parts, not size-classified)."
+
+- id: planning-10step-retry-on-failure-001
+  source: F.0-ext-2
+  category: industrial
+  title: "Long-horizon 10-step plan with retry-on-failure sub-goal verification"
+  description: >
+    Plan a 10-step pick-place-stack sequence; after each step, check_collisions
+    + get_world_transform verify the sub-goal. If a sub-goal is missed,
+    plan_trajectory retries from the previous checkpoint. Exercises retry
+    semantics with sub-goal verification.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 90
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Execute a 10-step plan with per-step verification and at least one successful retry after an injected failure."
+  key_tools: ["plan_trajectory", "check_collisions", "get_world_transform", "setup_pick_place_controller", "approve_workflow_checkpoint"]
+  success_criterion: "Plan completes all 10 sub-goals after exactly one retry triggered by injected failure on step 4."
+  notes: "No existing long-horizon canonical with retry; closest is research-vlabench-pour-water but that is open-loop. This is closed-loop with sub-goal gates."
+
+- id: industrial-multi-sensor-fusion-rgb-depth-imu-001
+  source: F.0-ext-2
+  category: industrial
+  title: "Tri-modal fusion — RGB + depth + IMU pose estimate"
+  description: >
+    Cube on a tilting platform; an overhead RGB camera, a depth camera,
+    and an IMU on the platform all stream pose estimates; a fusion node
+    in create_omnigraph averages them. Compare per-modality variance vs
+    fused variance.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Fuse RGB-pose, depth-pose, and IMU-pose into a single estimate and show fused variance below each modality alone."
+  key_tools: ["configure_camera", "create_omnigraph", "add_sensor_to_prim", "vision_detect_objects", "get_world_transform"]
+  success_criterion: "Fused-pose variance over 100 samples is at least 20% lower than any single modality variance."
+  notes: "Distinct from industrial-multi-rate-sensor-fusion-001 (which is sample-rate focus); this is modality fusion. No Nucleus."
+
+- id: logistics-order-pick-route-001
+  source: F.0-ext-2
+  category: industrial
+  title: "Order-pick route — wheeled robot picks 4 SKUs in shortest-path order"
+  description: >
+    create_wheeled_robot in a 3x3 grid of pallet locations; given a pick
+    list of 4 SKUs, compute pick order minimizing total path; navigate_to
+    each in sequence; verify all 4 picked. Exercises route planning over
+    a warehouse-like map.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["wheeled_primitives"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: navigate
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Pick 4 SKUs from a 3x3 pallet grid in shortest-path order and confirm all are loaded onto the robot."
+  key_tools: ["create_wheeled_robot", "navigate_to", "setup_nav_robot", "generate_occupancy_map", "get_world_transform"]
+  success_criterion: "Robot visits all 4 pallets and total path length within 10% of optimal for that pick list."
+  notes: "Distinct from yrkesroll-multi-amr-corridor (multi-AMR avoidance) and yrkesroll-forklift-amr-pallet (single pallet). This is route-optimization, single AMR."
+
+- id: realtime-control-1khz-jitter-001
+  source: F.0-ext-2
+  category: ros2-bridge
+  title: "1 kHz control jitter — measure end-to-end latency budget"
+  description: >
+    configure_ros2_time at 1 ms tick; a publisher emits 5000 joint-target
+    messages; a custom omnigraph timestamps each and computes
+    received-vs-published delta. Histogram of jitter is exported.
+    Exercises real-time RT-control latency measurement.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka", "ROS2"]
+  blockers: []
+  motion_controller_preference: ros2_control
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Measure end-to-end latency over 5000 ROS2 messages at 1 kHz and report the 99th-percentile jitter."
+  key_tools: ["configure_ros2_time", "configure_ros2_bridge", "ros2_publish", "create_omnigraph", "add_latency_randomization"]
+  success_criterion: "99th-percentile measured jitter reported and within a configurable budget (default <= 2 ms)."
+  notes: "Distinct from ros2-multi-rate-setup-001 (which is multi-rate, not jitter measurement). Latency-budget is the verification target."
+
+- id: industrial-narrow-clearance-insertion-001
+  source: F.0-ext-2
+  category: industrial
+  title: "Narrow-clearance insertion — peg-in-hole with 0.5 mm radial clearance"
+  description: >
+    Peg radius 9.75 mm, hole radius 10 mm (0.5 mm diametral, 0.25 mm
+    radial clearance). setup_impedance_controller with low stiffness;
+    follow_trajectory_with_compliance handles the insertion. Exercises
+    tight tolerance edge case where rigid-IK alone fails.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: impedance
+  pattern_hint: insert
+  estimated_agent_minutes: 90
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Insert a 19.5 mm peg into a 20 mm bore (0.5 mm diametral clearance) with compliant control."
+  key_tools: ["setup_impedance_controller", "follow_trajectory_with_compliance", "set_compliance_params", "get_contact_report", "release_compliance"]
+  success_criterion: "Peg seated to >= 90% insertion depth without any reported physics_health error."
+  notes: "Distinct from industrial-peg-bushing-impedance (3 mm clearance) and industrial-tactile-insertion (tactile-driven). This is tight-tolerance compliance edge case."
+
+- id: safety-iso10218-speed-separation-001
+  source: ISO-10218
+  category: safety
+  title: "ISO 10218 speed-and-separation — scale TCP speed by human-proxy distance"
+  description: >
+    Moving human-proxy sphere; set_clearance_monitor with two bands
+    (warn at 1.0 m, stop at 0.3 m); custom omnigraph scales joint
+    velocity limit linearly between the bands; sphere transit verifies
+    speed reductions occur at correct distances. ISO 10218-1:2011 SSM.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: other
+  estimated_agent_minutes: 90
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Scale TCP speed linearly between 1.0 m (full speed) and 0.3 m (stop) as a human-proxy approaches."
+  key_tools: ["set_clearance_monitor", "register_moving_obstacle", "set_joint_velocity_limit", "create_omnigraph", "visualize_clearance"]
+  success_criterion: "Measured joint velocity is full at >= 1.0 m, zero at <= 0.3 m, and linearly interpolated between (within 10%)."
+  notes: "ISO 10218-1:2011 speed-and-separation monitoring; distinct from safety-clearance-monitor-stop-001 (binary stop) and the existing dual zone (A65/A68). This is graded SSM."
+
