@@ -618,7 +618,10 @@
   motion_controller_preference: curobo
   pattern_hint: reorient
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-heap-zone-unstack.json
+  drafted_date: "2026-05-16"
+  drafted_by: A8
 
 - id: industrial-sortation-sbend-001
   source: industrial-asset

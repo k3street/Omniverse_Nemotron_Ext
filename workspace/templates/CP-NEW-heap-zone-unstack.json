@@ -1,0 +1,180 @@
+{
+  "task_id": "CP-NEW-heap-zone-unstack",
+  "goal": "Heap-zone destacking: a Franka arm iteratively picks the topmost item from a randomly-stacked pile created by create_heap_zone, and places it onto a flat outfeed conveyor. Each pick cycle queries get_bounding_box to find the highest item Z-centroid, computes a top-down grasp pose, then executes pick-and-place with cuRobo. Exercises create_heap_zone, get_bounding_box for height-ranked grasp selection, and the reorient pattern where the robot must infer pick orientation from pile geometry rather than a fixed pick pose.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_heap_zone",
+    "get_bounding_box",
+    "create_conveyor",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Design rationale for CP-NEW-heap-zone-unstack:\n\n1) Heap geometry and robot clearance: create_heap_zone at [0, 0.30, 0.80] with a 0.35×0.35m footprint drops 8 cubes (0.08m each) into a random pile. Expected pile height: 2-4 cubes tall (0.16-0.32m above zone floor). Zone floor at z=0.80; top of highest cube expected at z=0.80+0.32=1.12 at most. Franka mounted on table at [0, 0, 0.75] — tool reach at full extension is ~1.05m, meaning EE can approach pile from above at z≈1.10 safely. Franka base height 0.75m leaves ~0.35m vertical travel window above table surface.\n\n2) Reorient pattern rationale: The novel element here is that the grasp target is NOT a fixed known position. Each pick cycle must: (a) call get_bounding_box on each remaining cube path, (b) rank by highest Z-centroid (top of pile), (c) approach from directly above (top-down grasp orientation) with EE z-offset = bbox_max_z + 0.06m clearance, (d) close gripper, (e) lift to transit height z=1.15m, (f) place on conveyor. This is the 'reorient' pattern: geometry-driven pose inference replaces a fixed pick pose.\n\n3) Outfeed conveyor: 2.5m long at [0, -0.50, 0.78], surface_velocity=[0, -0.20, 0], belt surface at z=0.78+0.025=0.805. Cubes placed at conveyor entry point [0, -0.40, 0.845] (box centre z = 0.805 + 0.04 = 0.845). Proximity sensor at conveyor far end detects cube arrival as success confirmation.\n\n4) Physics: CPU dynamics (MBP broadphase) for stable pile simulation. Heap cubes given rubber material to reduce rolling/sliding after drop. sleepThreshold=0.0 so cubes settle fully before robot attempts first pick. Settle time: 3s sim before first get_bounding_box call.\n\n5) Spatial separation: Heap zone at [0, +0.30, 0.80] (front-right of robot), conveyor at [0, -0.50, 0.78] (behind robot). Horizontal distance from heap centre to conveyor near-edge: 0.80m — within Franka reach envelope. cuRobo obstacle list includes table surface, conveyor body, and heap_zone prim itself (to avoid arm clipping through zone walls during descend).\n\n6) cuRobo integration: setup_pick_place_controller in 'bounding_box_height' mode selects pick target by max bbox_z per remaining cube. EE approach uses top-down orientation (quaternion = [1, 0, 0, 0] in EE frame = wrist pointing down). Transit height = 1.18m constant (above all expected pile geometry). Drop height = conveyor_surface_z + cube_half_size + 0.005m release gap = 0.805 + 0.04 + 0.005 = 0.85m.\n\n7) Failure tolerance: If the highest cube is buried under a neighbour (occlusion in 3D), the bounding_box approach may attempt to grasp a partially-obstructed cube. Failure mode: gripper collision with adjacent cube. Mitigation: add overlap_sphere check with r=0.06m around grasp point; if >1 cube present, try next-highest.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# ── Robot table platform ──────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for stable heap simulation ──────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka arm ────────────────────────────────────────────────────────────────\n# Mounted on 0.75m table. Heap at [0, 0.30, 0.80], conveyor at [0, -0.50, 0.78].\n# Both within ~0.80m horizontal — well inside 0.85m Franka reach.\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Heap zone: 8 random-pose cubes (0.08m each) in a 0.35x0.35m bin ─────────\n# Zone floor at z=0.80. Expected pile height 2-4 cubes (0.16-0.32m above floor).\n# Cubes given rubber material to reduce sliding after random drop.\ncreate_heap_zone(\n    zone_path=\"/World/HeapZone\",\n    position=[0, 0.30, 0.80],\n    size=[0.35, 0.35, 0.45],\n    n_items=8,\n    item_size=0.08,\n    item_prim_prefix=\"/World/Cube\",\n)\n\ncube_paths = [f\"/World/Cube_{i+1}\" for i in range(8)]\n\nbulk_set_attribute(\n    prim_paths=cube_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in cube_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# ── Outfeed conveyor ──────────────────────────────────────────────────────────\n# Belt moves in -Y direction (away from robot) at 0.20 m/s.\n# Belt surface z = 0.78 + 0.025 = 0.805. Drop point at y=-0.40.\ncreate_conveyor(\n    prim_path=\"/World/OutfeedBelt\",\n    position=[0.0, -0.50, 0.78],\n    size=[2.5, 0.45, 0.05],\n    surface_velocity=[0, -0.20, 0],\n)\n\n# ── Arrival confirmation sensor at conveyor far end ───────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/ArrivalSensor\",\n    position=[0.0, -1.60, 0.845],\n    size=[0.55, 0.10, 0.10],\n)\n\n# ── Height-ranked pick-place controller (reorient / bounding_box_height mode) ─\n# Per-cycle logic:\n#   1. get_bounding_box for each remaining cube → rank by bbox_max_z\n#   2. Compute top-down grasp at [cx, cy, bbox_max_z + 0.06]\n#   3. cuRobo plans EE approach → grasp → lift to z=1.18 → place at [0, -0.40, 0.845]\n# Drop targets are all routed to the same conveyor entry point; conveyor\n# transports cubes onward to arrival sensor.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"bounding_box_height\",\n    source_paths=cube_paths,\n    source_zone_path=\"/World/HeapZone\",\n    destination_path=\"/World/OutfeedBelt\",\n    drop_point=[0, -0.40, 0.845],\n    transit_height=1.18,\n    top_down_approach=True,\n    grasp_z_offset=0.06,\n    planning_obstacles=[\n        \"/World/Table\",\n        \"/World/HeapZone\",\n        \"/World/OutfeedBelt\",\n    ],\n    arrival_sensor_path=\"/World/ArrivalSensor\",\n    settle_ticks=180,\n)",
+  "settle_state": {
+    "heap_zone": {
+      "/World/HeapZone": {
+        "position": [0, 0.30, 0.80],
+        "size": [0.35, 0.35, 0.45],
+        "n_items": 8,
+        "item_size": 0.08
+      }
+    },
+    "conveyors": {
+      "/World/OutfeedBelt": [0, -0.20, 0]
+    },
+    "robot": {
+      "/World/Franka": "home_pose"
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/HeapZone",
+        "place_path": "/World/OutfeedBelt",
+        "robot_kind": "franka"
+      }
+    ],
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4",
+      "/World/Cube_5",
+      "/World/Cube_6",
+      "/World/Cube_7",
+      "/World/Cube_8"
+    ],
+    "arrival_sensor_path": "/World/ArrivalSensor",
+    "min_cubes_delivered": 6
+  },
+  "simulate_args": {
+    "target_path": "/World/OutfeedBelt",
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4",
+      "/World/Cube_5",
+      "/World/Cube_6",
+      "/World/Cube_7",
+      "/World/Cube_8"
+    ],
+    "duration_s": 300,
+    "xy_tolerance": 0.22
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": ["/World/HeapZone", "/World/OutfeedBelt", "/World/Table"],
+    "sensor_path": "/World/ArrivalSensor",
+    "robot_base": [0.0, 0.0, 0.75],
+    "heap_zone_path": "/World/HeapZone"
+  },
+  "failure_modes": [
+    "create_heap_zone cube naming mismatch — handler may emit '/World/Cube_0' through '/World/Cube_7' (0-indexed) rather than '/World/Cube_1' through '/World/Cube_8'. Probe with list_all_prims(filter='/World/Cube*') and adjust cube_paths accordingly.",
+    "Pile settles against zone wall — a cube may wedge against the HeapZone wall at an angle, causing get_bounding_box to report a centroid that is inaccessible from top-down approach. If grasp fails, try the next-highest cube (skip-on-fail: up to 2 retries per pick cycle).",
+    "Franka reach boundary at full pile height — if all 8 cubes stack nearly vertically (probability low but non-zero), pile top may reach z=1.44m which exceeds Franka tool reach from table-mount. Safety: add max_approach_z=1.35 guard; cubes above this height trigger IK-failure fallback (wait for pile to be partially destacked before retrying).",
+    "cuRobo top-down orientation not supported — bounding_box_height mode requires top_down_approach=True which maps to EE quaternion [0.7071, 0, 0.7071, 0] (wrist pointing -Z). If setup_pick_place_controller does not accept top_down_approach kwarg, set grasp_quaternion=[0.7071, 0, 0.7071, 0] explicitly.",
+    "Conveyor drop collision — placing cube at [0, -0.40, 0.845] while belt moves at 0.20 m/s may cause the placed cube to slide into the HeapZone prim if the drop point is miscalculated. Verify drop_point y is at least 0.18m from HeapZone near-edge (zone edge at y=0.30-0.175=0.125; drop at y=-0.40 gives 0.525m clearance — safe).",
+    "overlap_sphere false positive from zone walls — overlap_sphere r=0.06 check around grasp centroid may detect HeapZone wall geometry as a collision neighbour. Filter results to cube_paths only before applying skip logic."
+  ],
+  "intent": {
+    "pattern_hint": "reorient",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": true,
+      "has_stacking": false,
+      "has_heap_zone": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:placement.heap_zone",
+      "isaac:sensor.bounding_box_height",
+      "isaac:industry.destacking"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "ur10"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "precision_preferred"
+    },
+    "heap_source": {
+      "constraints": ["heap_zone"],
+      "expected_count": 1,
+      "required": true
+    },
+    "output_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube", "box"],
+      "min": 3,
+      "max": 12,
+      "param_name": "n_cubes",
+      "unordered": true
+    },
+    "arrival_sensor": {
+      "constraints": ["proximity_sensor"],
+      "expected_count": 1,
+      "required": false
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka",
+      "position": [0, 0, 0.75],
+      "orientation": [1, 0, 0, 0]
+    },
+    "heap_source": {
+      "path": "/World/HeapZone",
+      "position": [0, 0.30, 0.80],
+      "size": [0.35, 0.35, 0.45],
+      "n_items": 8,
+      "item_size": 0.08
+    },
+    "output_conveyor": {
+      "path": "/World/OutfeedBelt",
+      "position": [0.0, -0.50, 0.78],
+      "size": [2.5, 0.45, 0.05],
+      "surface_velocity": [0, -0.20, 0]
+    },
+    "arrival_sensor": {
+      "path": "/World/ArrivalSensor",
+      "position": [0.0, -1.60, 0.845],
+      "size": [0.55, 0.10, 0.10]
+    },
+    "workpieces": [
+      {"path": "/World/Cube_1", "drop_point": [0, -0.40, 0.845]},
+      {"path": "/World/Cube_2", "drop_point": [0, -0.40, 0.845]},
+      {"path": "/World/Cube_3", "drop_point": [0, -0.40, 0.845]},
+      {"path": "/World/Cube_4", "drop_point": [0, -0.40, 0.845]},
+      {"path": "/World/Cube_5", "drop_point": [0, -0.40, 0.845]},
+      {"path": "/World/Cube_6", "drop_point": [0, -0.40, 0.845]},
+      {"path": "/World/Cube_7", "drop_point": [0, -0.40, 0.845]},
+      {"path": "/World/Cube_8", "drop_point": [0, -0.40, 0.845]}
+    ]
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_heap_zone(\n    zone_path={{heap_source.path}},\n    position={{heap_source.position}},\n    size={{heap_source.size}},\n    n_items={{heap_source.n_items}},\n    item_size={{heap_source.item_size}},\n    item_prim_prefix=\"/World/Cube\",\n)\n\ncube_paths = [{{workpieces[i].path}} for i in range({{heap_source.n_items}})]\nbulk_set_attribute(prim_paths=cube_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nfor path in cube_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_conveyor(\n    prim_path={{output_conveyor.path}},\n    position={{output_conveyor.position}},\n    size={{output_conveyor.size}},\n    surface_velocity={{output_conveyor.surface_velocity}},\n)\n\nadd_proximity_sensor(\n    sensor_path={{arrival_sensor.path}},\n    position={{arrival_sensor.position}},\n    size={{arrival_sensor.size}},\n)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"bounding_box_height\",\n    source_paths=cube_paths,\n    source_zone_path={{heap_source.path}},\n    destination_path={{output_conveyor.path}},\n    drop_point=[0, -0.40, 0.845],\n    transit_height=1.18,\n    top_down_approach=True,\n    grasp_z_offset=0.06,\n    planning_obstacles=[\"/World/Table\", {{heap_source.path}}, {{output_conveyor.path}}],\n    arrival_sensor_path={{arrival_sensor.path}},\n    settle_ticks=180,\n)",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate ⏳; function-gate ⏳"
+}
