@@ -78,7 +78,14 @@ def _rehydrate_cache() -> None:
     `_template_cache` keyed by ``task_id`` (falling back to ``stem``).
     Files that fail to parse are skipped with a warning (mirrors
     `_build_index` behaviour).
+
+    Batched-sleep mitigation (2026-05-16): loads in batches of 32 with a
+    brief sleep between, giving the host runtime's GC a chance to run
+    between native-extension-allocation bursts. Total overhead ~10ms for
+    321 templates. Specifically mitigates Bun 1.3.14 JSC SlotVisitor::drain
+    crash pattern when Claude Code's bundled Bun runs pytest on this path.
     """
+    import time
     loaded = 0
     for tf in sorted(_TEMPLATES_DIR.glob("*.json")):
         try:
@@ -89,6 +96,10 @@ def _rehydrate_cache() -> None:
         tid = t.get("task_id", tf.stem)
         _template_cache[tid] = t
         loaded += 1
+        # Yield to runtime scheduler / GC every 32 templates to avoid
+        # allocation bursts. See .claude-session-guardrails.md.
+        if loaded % 32 == 0:
+            time.sleep(0.001)
     logger.info(f"[TemplateRetriever] Rehydrated cache with {loaded} templates")
 
 
@@ -110,7 +121,9 @@ def _build_index() -> None:
             These are highly discriminating tokens that match VR-19's "two
             Franka robots" + "3-station" phrasing.
     """
+    import time
     docs, ids, metas = [], [], []
+    parsed = 0
     for tf in sorted(_TEMPLATES_DIR.glob("*.json")):
         try:
             t = json.loads(tf.read_text())
@@ -131,6 +144,11 @@ def _build_index() -> None:
         ids.append(tid)
         metas.append({"task_id": tid})
         _template_cache[tid] = t
+        parsed += 1
+        # Batched-sleep mitigation (2026-05-16): see _rehydrate_cache docstring.
+        # Yield every 32 to avoid native-extension allocation bursts.
+        if parsed % 32 == 0:
+            time.sleep(0.001)
     if docs:
         _collection.add(documents=docs, ids=ids, metadatas=metas)
     logger.info(f"[TemplateRetriever] Built index with {len(docs)} templates")
