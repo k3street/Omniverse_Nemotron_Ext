@@ -798,7 +798,11 @@
   motion_controller_preference: direct_joint
   pattern_hint: other
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-assembly-constraint-verify.json
+  drafted_date: "2026-05-16"
+  drafted_by: A30
+  draft_notes: "A30 milestone; form-gate 1 OK 0 ERROR 0 WARN; first use of setup_assembly_constraint + validate_assembly_constraint in library; no robot arm required; function-gate pending live Kit"
 
 - id: industrial-nim-barcode-track-001
   source: industrial-asset
