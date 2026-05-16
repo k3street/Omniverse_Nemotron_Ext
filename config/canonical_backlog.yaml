@@ -141,7 +141,7 @@
   description: >
     After kitting, overhead camera verifies all 5 slots are occupied; missing
     part triggers re-pick. Exercises setup_pick_place_with_vision and
-    validate_annotations.
+    add_vision_classifier_gate with overhead nadir camera.
   priority_tier: 2
   complexity: complex
   asset_dependencies: ["Franka", "omni.replicator"]
@@ -149,7 +149,9 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-kit-prep-vision-gate.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-assembler-peg-bushing-001
   source: ONET
