@@ -14,19 +14,19 @@
     "margin_min": 0.2
   },
   "aggregate": {
-    "hit_at_1": 0.6667,
-    "hit_at_3": 0.7,
-    "mode_accuracy": 0.6,
-    "hard_instantiate_rate": 0.1333,
+    "hit_at_1": 0.8667,
+    "hit_at_3": 0.9,
+    "mode_accuracy": 0.7,
+    "hard_instantiate_rate": 0.1667,
     "struct_filter_path_count": 16,
     "fallback_embedding_count": 14,
-    "latency_p50_ms": 105.31,
-    "latency_p95_ms": 111.64
+    "latency_p50_ms": 99.77,
+    "latency_p95_ms": 108.77
   },
   "baseline_delta": {
-    "hit_at_1": -0.1666,
-    "hit_at_3": -0.2333,
-    "mode_accuracy": -0.1
+    "hit_at_1": 0.0334,
+    "hit_at_3": -0.0333,
+    "mode_accuracy": 0.0
   },
   "category_breakdown": {
     "amr_navigation": {
@@ -38,10 +38,10 @@
     },
     "contact_rich": {
       "n": 2,
-      "hit_at_1": 0.5,
-      "hit_at_3": 0.5,
-      "mode_correct": 0.5,
-      "avg_top1_sim": 0.477
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
+      "mode_correct": 1.0,
+      "avg_top1_sim": 0.654
     },
     "industrial_bridge": {
       "n": 1,
@@ -69,21 +69,21 @@
       "hit_at_1": 1.0,
       "hit_at_3": 1.0,
       "mode_correct": 0.0,
-      "avg_top1_sim": 0.109
+      "avg_top1_sim": 0.212
     },
     "palletize": {
       "n": 1,
       "hit_at_1": 1.0,
       "hit_at_3": 1.0,
       "mode_correct": 1.0,
-      "avg_top1_sim": 0.293
+      "avg_top1_sim": 0.416
     },
     "pick_place": {
       "n": 5,
-      "hit_at_1": 0.6,
-      "hit_at_3": 0.6,
+      "hit_at_1": 0.8,
+      "hit_at_3": 0.8,
       "mode_correct": 0.8,
-      "avg_top1_sim": 0.397
+      "avg_top1_sim": 0.445
     },
     "reorient": {
       "n": 1,
@@ -94,10 +94,10 @@
     },
     "rl_training": {
       "n": 2,
-      "hit_at_1": 0.0,
-      "hit_at_3": 0.0,
-      "mode_correct": 0.0,
-      "avg_top1_sim": 0.286
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
+      "mode_correct": 1.0,
+      "avg_top1_sim": 0.647
     },
     "ros2_bridge": {
       "n": 2,
@@ -108,10 +108,10 @@
     },
     "sensor_setup": {
       "n": 3,
-      "hit_at_1": 0.333,
-      "hit_at_3": 0.333,
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
       "mode_correct": 1.0,
-      "avg_top1_sim": 0.279
+      "avg_top1_sim": 0.489
     },
     "sort": {
       "n": 2,
@@ -146,7 +146,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": false,
-      "latency_ms": 142.74,
+      "latency_ms": 135.4,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -183,7 +183,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": false,
-      "latency_ms": 104.2,
+      "latency_ms": 103.3,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -222,7 +222,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.32,
+      "latency_ms": 98.93,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -259,7 +259,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.42,
+      "latency_ms": 103.3,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -291,7 +291,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.92,
+      "latency_ms": 101.73,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -332,7 +332,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.92,
+      "latency_ms": 102.45,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -372,7 +372,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 108.98,
+      "latency_ms": 98.01,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -403,29 +403,29 @@
       "acceptable_alternatives": [],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "CP-49",
-      "top1_sim": 0.192,
-      "margin": 0.0816,
-      "hit_at_1": false,
-      "hit_at_3": false,
+      "top1_id": "CP-NEW-3station-oee",
+      "top1_sim": 0.4323,
+      "margin": 0.2403,
+      "hit_at_1": true,
+      "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.76,
+      "latency_ms": 98.1,
       "path_taken": "struct_filter",
       "top3": [
+        {
+          "task_id": "CP-NEW-3station-oee",
+          "similarity": 0.4323,
+          "distance": 0.8515
+        },
         {
           "task_id": "CP-49",
           "similarity": 0.192,
           "distance": 1.2119
         },
         {
-          "task_id": "CP-44",
-          "similarity": 0.1105,
-          "distance": 1.3343
-        },
-        {
-          "task_id": "CP-NEW-y-merge-singulation",
-          "similarity": 0.1095,
-          "distance": 1.3358
+          "task_id": "K-04",
+          "similarity": 0.1565,
+          "distance": 1.2653
         }
       ]
     },
@@ -448,7 +448,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 106.77,
+      "latency_ms": 99.77,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -488,7 +488,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": true,
-      "latency_ms": 111.42,
+      "latency_ms": 98.65,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -525,7 +525,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.5,
+      "latency_ms": 97.47,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -562,7 +562,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.73,
+      "latency_ms": 96.9,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -594,30 +594,30 @@
         "M-08"
       ],
       "expected_action": "hard_instantiate",
-      "actual_action": "few_shot",
-      "top1_id": "CP-NEW-dr-curriculum",
-      "top1_sim": 0.2994,
-      "margin": 0.1574,
-      "hit_at_1": false,
-      "hit_at_3": false,
-      "mode_correct": false,
-      "latency_ms": 105.31,
+      "actual_action": "hard_instantiate",
+      "top1_id": "CP-NEW-rl-clone-env",
+      "top1_sim": 0.6141,
+      "margin": 0.2746,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 99.33,
       "path_taken": "struct_filter",
       "top3": [
         {
-          "task_id": "CP-NEW-dr-curriculum",
-          "similarity": 0.2994,
-          "distance": 1.0509
+          "task_id": "CP-NEW-rl-clone-env",
+          "similarity": 0.6141,
+          "distance": 0.5789
         },
         {
-          "task_id": "CP-50",
-          "similarity": 0.142,
-          "distance": 1.287
+          "task_id": "M-13",
+          "similarity": 0.3395,
+          "distance": 0.9907
         },
         {
-          "task_id": "CP-77",
-          "similarity": 0.1332,
-          "distance": 1.3002
+          "task_id": "M-11",
+          "similarity": 0.3221,
+          "distance": 1.0169
         }
       ]
     },
@@ -638,7 +638,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.12,
+      "latency_ms": 97.33,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -675,7 +675,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 111.64,
+      "latency_ms": 100.34,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -714,7 +714,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 100.62,
+      "latency_ms": 100.15,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -745,29 +745,29 @@
       "acceptable_alternatives": [],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "CP-36",
-      "top1_sim": 0.2337,
-      "margin": 0.0224,
-      "hit_at_1": false,
-      "hit_at_3": false,
+      "top1_id": "FX-01",
+      "top1_sim": 0.4814,
+      "margin": 0.168,
+      "hit_at_1": true,
+      "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.39,
+      "latency_ms": 98.28,
       "path_taken": "struct_filter",
       "top3": [
+        {
+          "task_id": "FX-01",
+          "similarity": 0.4814,
+          "distance": 0.7778
+        },
+        {
+          "task_id": "CP-NEW-brick-stacking",
+          "similarity": 0.3135,
+          "distance": 1.0298
+        },
         {
           "task_id": "CP-36",
           "similarity": 0.2337,
           "distance": 1.1494
-        },
-        {
-          "task_id": "CP-78",
-          "similarity": 0.2113,
-          "distance": 1.1831
-        },
-        {
-          "task_id": "CP-05",
-          "similarity": 0.2041,
-          "distance": 1.1939
         }
       ]
     },
@@ -782,29 +782,29 @@
       "acceptable_alternatives": [],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "CP-16",
-      "top1_sim": 0.0286,
-      "margin": 0.0029,
-      "hit_at_1": false,
-      "hit_at_3": false,
+      "top1_id": "P-01",
+      "top1_sim": 0.4098,
+      "margin": 0.0053,
+      "hit_at_1": true,
+      "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.74,
+      "latency_ms": 99.62,
       "path_taken": "struct_filter",
       "top3": [
         {
-          "task_id": "CP-16",
-          "similarity": 0.0286,
-          "distance": 1.4571
+          "task_id": "P-01",
+          "similarity": 0.4098,
+          "distance": 0.8853
         },
         {
-          "task_id": "CP-63",
-          "similarity": 0.0257,
-          "distance": 1.4615
+          "task_id": "CP-NEW-defect-sdg",
+          "similarity": 0.4045,
+          "distance": 0.8932
         },
         {
-          "task_id": "CP-66",
-          "similarity": 0.0225,
-          "distance": 1.4662
+          "task_id": "E-06",
+          "similarity": 0.3084,
+          "distance": 1.0374
         }
       ]
     },
@@ -818,30 +818,30 @@
       ],
       "acceptable_alternatives": [],
       "expected_action": "hard_instantiate",
-      "actual_action": "few_shot",
-      "top1_id": "CP-01",
-      "top1_sim": 0.2724,
-      "margin": 0.0466,
-      "hit_at_1": false,
-      "hit_at_3": false,
-      "mode_correct": false,
-      "latency_ms": 104.66,
+      "actual_action": "hard_instantiate",
+      "top1_id": "M-08",
+      "top1_sim": 0.6793,
+      "margin": 0.2096,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 106.04,
       "path_taken": "struct_filter",
       "top3": [
         {
-          "task_id": "CP-01",
-          "similarity": 0.2724,
-          "distance": 1.0914
+          "task_id": "M-08",
+          "similarity": 0.6793,
+          "distance": 0.4811
         },
         {
-          "task_id": "CP-05",
-          "similarity": 0.2258,
-          "distance": 1.1614
+          "task_id": "M-04",
+          "similarity": 0.4697,
+          "distance": 0.7955
         },
         {
-          "task_id": "CP-55",
-          "similarity": 0.2156,
-          "distance": 1.1766
+          "task_id": "A-03",
+          "similarity": 0.3612,
+          "distance": 0.9581
         }
       ]
     },
@@ -862,7 +862,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.38,
+      "latency_ms": 108.77,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -893,29 +893,29 @@
       "acceptable_alternatives": [],
       "expected_action": "fallback",
       "actual_action": "few_shot",
-      "top1_id": "CP-27",
-      "top1_sim": 0.079,
-      "margin": 0.0206,
+      "top1_id": "A-09",
+      "top1_sim": 0.1774,
+      "margin": 0.0012,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 106.05,
+      "latency_ms": 99.78,
       "path_taken": "struct_filter",
       "top3": [
         {
-          "task_id": "CP-27",
-          "similarity": 0.079,
-          "distance": 1.3814
+          "task_id": "A-09",
+          "similarity": 0.1774,
+          "distance": 1.234
         },
         {
-          "task_id": "CP-75",
-          "similarity": 0.0584,
-          "distance": 1.4123
+          "task_id": "AM-06",
+          "similarity": 0.1762,
+          "distance": 1.2358
         },
         {
-          "task_id": "CP-31",
-          "similarity": 0.0506,
-          "distance": 1.4242
+          "task_id": "CP-NEW-3station-oee",
+          "similarity": 0.1205,
+          "distance": 1.3192
         }
       ]
     },
@@ -936,7 +936,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 104.37,
+      "latency_ms": 95.05,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -973,7 +973,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 108.05,
+      "latency_ms": 97.03,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -1004,29 +1004,29 @@
       "acceptable_alternatives": [],
       "expected_action": "fallback",
       "actual_action": "few_shot",
-      "top1_id": "CP-NEW-dr-curriculum",
-      "top1_sim": 0.1037,
-      "margin": 0.0908,
+      "top1_id": "F-08",
+      "top1_sim": 0.4205,
+      "margin": 0.1311,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 104.78,
+      "latency_ms": 100.8,
       "path_taken": "struct_filter",
       "top3": [
         {
-          "task_id": "CP-NEW-dr-curriculum",
-          "similarity": 0.1037,
-          "distance": 1.3445
+          "task_id": "F-08",
+          "similarity": 0.4205,
+          "distance": 0.8692
         },
         {
-          "task_id": "CP-01",
-          "similarity": 0.0129,
-          "distance": 1.4806
+          "task_id": "AL-01",
+          "similarity": 0.2894,
+          "distance": 1.0659
         },
         {
-          "task_id": "CP-75",
-          "similarity": 0.0,
-          "distance": 1.6177
+          "task_id": "R-01",
+          "similarity": 0.2771,
+          "distance": 1.0843
         }
       ]
     },
@@ -1041,29 +1041,29 @@
       "acceptable_alternatives": [],
       "expected_action": "fallback",
       "actual_action": "few_shot",
-      "top1_id": "CP-56",
-      "top1_sim": 0.1916,
-      "margin": 0.0425,
+      "top1_id": "A-02",
+      "top1_sim": 0.2906,
+      "margin": 0.0135,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 104.73,
+      "latency_ms": 100.72,
       "path_taken": "struct_filter",
       "top3": [
         {
-          "task_id": "CP-56",
-          "similarity": 0.1916,
-          "distance": 1.2126
+          "task_id": "A-02",
+          "similarity": 0.2906,
+          "distance": 1.0641
         },
         {
-          "task_id": "CP-23",
-          "similarity": 0.149,
-          "distance": 1.2764
+          "task_id": "FX-01",
+          "similarity": 0.2771,
+          "distance": 1.0844
         },
         {
-          "task_id": "CP-45",
-          "similarity": 0.1459,
-          "distance": 1.2812
+          "task_id": "AM-02",
+          "similarity": 0.2323,
+          "distance": 1.1515
         }
       ]
     },
@@ -1084,29 +1084,29 @@
       ],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "CP-42",
-      "top1_sim": 0.2929,
-      "margin": 0.0132,
+      "top1_id": "CP-25",
+      "top1_sim": 0.4161,
+      "margin": 0.0733,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.36,
+      "latency_ms": 100.22,
       "path_taken": "struct_filter",
       "top3": [
         {
-          "task_id": "CP-42",
-          "similarity": 0.2929,
-          "distance": 1.0607
+          "task_id": "CP-25",
+          "similarity": 0.4161,
+          "distance": 0.8759
         },
         {
-          "task_id": "CP-30",
-          "similarity": 0.2796,
-          "distance": 1.0805
+          "task_id": "CP-20",
+          "similarity": 0.3428,
+          "distance": 0.9858
         },
         {
-          "task_id": "CP-19",
-          "similarity": 0.2756,
-          "distance": 1.0866
+          "task_id": "CP-46",
+          "similarity": 0.297,
+          "distance": 1.0545
         }
       ]
     },
@@ -1123,29 +1123,29 @@
       ],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "CP-04",
-      "top1_sim": 0.1876,
-      "margin": 0.0165,
-      "hit_at_1": false,
-      "hit_at_3": false,
+      "top1_id": "CP-NEW-peg-in-hole-single",
+      "top1_sim": 0.5422,
+      "margin": 0.0614,
+      "hit_at_1": true,
+      "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.79,
+      "latency_ms": 99.86,
       "path_taken": "struct_filter",
       "top3": [
         {
-          "task_id": "CP-04",
-          "similarity": 0.1876,
-          "distance": 1.2186
+          "task_id": "CP-NEW-peg-in-hole-single",
+          "similarity": 0.5422,
+          "distance": 0.6866
         },
         {
-          "task_id": "CP-41",
-          "similarity": 0.1711,
-          "distance": 1.2433
+          "task_id": "CP-58",
+          "similarity": 0.4808,
+          "distance": 0.7787
         },
         {
-          "task_id": "CP-44",
-          "similarity": 0.1612,
-          "distance": 1.2582
+          "task_id": "CP-NEW-tactile-insertion",
+          "similarity": 0.4175,
+          "distance": 0.8737
         }
       ]
     },
@@ -1166,7 +1166,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.24,
+      "latency_ms": 98.66,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -1206,7 +1206,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.39,
+      "latency_ms": 98.34,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -1238,14 +1238,14 @@
         "CP-NEW-drawer-open"
       ],
       "expected_action": "few_shot",
-      "actual_action": "hard_instantiate",
+      "actual_action": "few_shot",
       "top1_id": "CP-55",
       "top1_sim": 0.7663,
-      "margin": 0.4899,
+      "margin": 0.0764,
       "hit_at_1": true,
       "hit_at_3": true,
-      "mode_correct": false,
-      "latency_ms": 104.99,
+      "mode_correct": true,
+      "latency_ms": 98.36,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -1254,14 +1254,14 @@
           "distance": 0.3505
         },
         {
-          "task_id": "CP-27",
-          "similarity": 0.2765,
-          "distance": 1.0853
+          "task_id": "CP-NEW-drawer-open",
+          "similarity": 0.6899,
+          "distance": 0.4651
         },
         {
-          "task_id": "CP-04",
-          "similarity": 0.2756,
-          "distance": 1.0866
+          "task_id": "A-03",
+          "similarity": 0.2941,
+          "distance": 1.0589
         }
       ]
     }

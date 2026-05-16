@@ -529,6 +529,57 @@ def filter_templates_by_intent(
     return candidates
 
 
+def _spec_is_null_signal(spec_intent: Dict) -> bool:
+    """Return True when the intent dict carries no real extractor signal.
+
+    The rule-based extractor in text_modality.py defaults to
+    ``pattern_hint="pick_place"`` when NO keyword rule fires. That default
+    spec (all booleans False, all counts 0, destination_kind="single_bin")
+    is indistinguishable from a genuine minimal pick_place prompt by Stage 1
+    alone — yet it causes catastrophic mis-routing for prompts that are NOT
+    pick_place tasks (RL training, contact-rich insertion, etc.).
+
+    A spec is "null signal" when all four conditions hold:
+      1. pattern_hint is "pick_place" (the extractor default catchall)
+      2. all entity counts are 0 (no robots/conveyors/bins/cubes/sensors/humans detected)
+      3. all boolean structural features are False (no feature keyword fired)
+      4. no structural_tags
+
+    In this state the spec tells us nothing reliable about the task domain;
+    Stage 1 filtering against it produces a large false-positive set of
+    pick_place templates that crowds out the true ground truth.  The correct
+    behaviour is to skip Stage 1 entirely and fall through to full-corpus
+    embedding retrieval.
+
+    Fix (R15c): called at the top of retrieve_with_intent_filter before
+    filter_templates_by_intent.  When True, we short-circuit to fallback.
+    """
+    # Schema-default numeric/string values that the rule-based extractor
+    # always emits when it cannot infer the real value from the prompt.
+    # These are NOT evidence of real extractor signal; treat them as noise.
+    _NUMERIC_DEFAULTS: Dict = {"n_robot_stations": 1, "n_handoffs": 0, "n_destinations": 1}
+    _STRING_DEFAULTS: Dict = {"destination_kind": "single_bin"}
+
+    if spec_intent.get("pattern_hint") != "pick_place":
+        return False  # Non-default pattern → extractor found real signal
+    counts = spec_intent.get("counts") or {}
+    if any(v for v in counts.values()):
+        return False  # At least one entity-count > 0 → real signal
+    features = spec_intent.get("structural_features") or {}
+    # Boolean-True flags indicate a feature keyword matched
+    for k, v in features.items():
+        if isinstance(v, bool) and v:
+            return False  # Feature keyword fired
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v:
+            if _NUMERIC_DEFAULTS.get(k) != v:
+                return False  # Non-default numeric feature set
+        if isinstance(v, str) and v and _STRING_DEFAULTS.get(k) != v:
+            return False  # Non-default string feature
+    if spec_intent.get("structural_tags"):
+        return False  # Tags were populated
+    return True
+
+
 def retrieve_with_intent_filter(
     spec_intent: Dict,
     top_k: int = 3,
@@ -553,6 +604,15 @@ def retrieve_with_intent_filter(
     This makes the function useful immediately and progressively stricter
     as templates add intent.
 
+    Additionally (R15c fix): if the spec carries no real extractor signal
+    (``_spec_is_null_signal`` returns True), Stage 1 is bypassed entirely
+    and we fall through to fallback immediately. This handles prompts that
+    don't match ANY extractor keyword and receive the default
+    ``pick_place`` pattern_hint — e.g., "Allegro hand IsaacLab task" or
+    "peg insertion with force sensing". Without this bypass, Stage 1 would
+    filter in ~53 false-positive pick_place templates, excluding all
+    non-intent templates (like M-08 and CP-58) and returning wrong results.
+
     Args:
         spec_intent: structured intent dict (Intent.model_dump())
         top_k: max results to return
@@ -567,14 +627,28 @@ def retrieve_with_intent_filter(
     Returns: list of {template, task_id, distance, similarity} dicts,
     most-similar first.
     """
-    candidates = filter_templates_by_intent(spec_intent, count_tolerance)
-
     fingerprint = canonical_structural_fingerprint(spec_intent)
     # Bug fix (R15): use original_query for embedding when available.
     # The fingerprint is a structured fact string; ChromaDB was indexed on
     # natural-language goal+thoughts+tools. Querying with the fingerprint
     # yields near-random rankings (~0.4 sim vs ~0.7 for the prompt).
     embed_query = original_query if original_query else fingerprint
+
+    # R15c fix: bypass Stage 1 when the spec has no real extractor signal.
+    # A null-signal spec (all-defaults, no keywords fired) routes every
+    # prompt to the ~53-template pick_place candidate set, excluding all
+    # intent-less templates from ranking. Full-corpus embedding is strictly
+    # better in this case.
+    if _spec_is_null_signal(spec_intent):
+        logger.info(
+            "[TemplateRetriever] spec is null-signal (all defaults); "
+            "bypassing Stage 1, falling back to full-corpus embedding"
+        )
+        if not fallback_to_embedding_only:
+            return []
+        return retrieve_templates_with_scores(embed_query, top_k=top_k)
+
+    candidates = filter_templates_by_intent(spec_intent, count_tolerance)
 
     if not candidates:
         if not fallback_to_embedding_only:
