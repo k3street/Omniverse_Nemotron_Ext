@@ -33,8 +33,9 @@
   ],
   "verified_status": "build-spec-2026-05-10; BUILD_OK 93/115 with material_path arg fix; 22 errors remaining are SDG handlers (configure_sdg/preview_sdg may not exist)",
   "migration_deferred": {
-    "reason": "novel_pattern",
-    "details": "Defect-introduction SDG pipeline; synthetic data generation is not a manipulation task \u2014 no pattern_hint applies",
-    "added_date": "2026-05-15"
+    "reason": "train_pattern_no_robot",
+    "details": "pattern_hint=train is now valid (R12). However, this template has no robot \u2014 it is a pure SDG data-generation pipeline (configure_sdg + add_domain_randomizer + create_sdg_pipeline). Role-based schema requires primary_robot. Structurally unmigratable: no roles, no simulate_args, no delivery criterion. Would need a dedicated SDG template schema.",
+    "added_date": "2026-05-15",
+    "updated_date": "2026-05-16"
   }
 }

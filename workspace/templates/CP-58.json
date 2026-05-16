@@ -90,9 +90,103 @@
       0.75
     ]
   },
-  "migration_deferred": {
-    "reason": "novel_pattern",
-    "details": "Peg-in-hole insertion array; precision insertion with 5mm clearance is fundamentally different from pick_place \u2014 requires force/compliance role",
-    "added_date": "2026-05-15"
-  }
+  "intent": {
+    "pattern_hint": "insert",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:insert.peg_in_hole",
+      "isaac:sensor.force_torque",
+      "isaac:sensor.assembly_constraint"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "smaller_x_first"
+    },
+    "input_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "hole_panel": {
+      "constraints": ["panel"],
+      "expected_count": 1,
+      "required": true
+    },
+    "pick_sensor": {
+      "constraints": ["proximity_sensor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "ft_sensor": {
+      "constraints": ["force_torque_sensor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cylinder"],
+      "min": 4,
+      "max": 4,
+      "unordered": false
+    },
+    "hole_markers": {
+      "constraints": ["xform"],
+      "min": 4,
+      "max": 4,
+      "unordered": false
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [0.0, 0.4, 0.78],
+      "size": [3.0, 0.4, 0.05],
+      "surface_velocity": [0.2, 0, 0]
+    },
+    "hole_panel": {
+      "path": "/World/HolePanel",
+      "position": [0, -0.4, 0.775],
+      "scale": [0.3, 0.1, 0.025]
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [0.4, 0.4, 0.835],
+      "size": [0.06, 0.06, 0.06]
+    },
+    "ft_sensor": {
+      "path": "/World/Franka/FtSensor",
+      "parent_path": "/World/Franka/panda_hand",
+      "threshold": 5.0
+    },
+    "workpieces": [
+      {"path": "/World/Peg_1", "position": [-1.4, 0.4, 0.835]},
+      {"path": "/World/Peg_2", "position": [-1.15, 0.4, 0.835]},
+      {"path": "/World/Peg_3", "position": [-0.9, 0.4, 0.835]},
+      {"path": "/World/Peg_4", "position": [-0.65, 0.4, 0.835]}
+    ],
+    "hole_markers": [
+      {"path": "/World/Hole_1", "position": [-0.15, -0.4, 0.825], "drop_target": [-0.15, -0.4, 0.825]},
+      {"path": "/World/Hole_2", "position": [-0.05, -0.4, 0.825], "drop_target": [-0.05, -0.4, 0.825]},
+      {"path": "/World/Hole_3", "position": [0.05, -0.4, 0.825], "drop_target": [0.05, -0.4, 0.825]},
+      {"path": "/World/Hole_4", "position": [0.15, -0.4, 0.825], "drop_target": [0.15, -0.4, 0.825]}
+    ]
+  },
+  "code_template": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\n# Pegs (cylindrical) on conveyor\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cylinder\", position={{workpieces[0].position}}, radius=0.02, height=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cylinder\", position={{workpieces[1].position}}, radius=0.02, height=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cylinder\", position={{workpieces[2].position}}, radius=0.02, height=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[2].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[3].path}}, prim_type=\"Cylinder\", position={{workpieces[3].position}}, radius=0.02, height=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[3].path}}, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Hole panel + 4 hole markers\ncreate_prim(prim_path={{hole_panel.path}}, prim_type=\"Cube\", position={{hole_panel.position}}, scale={{hole_panel.scale}})\napply_api_schema(prim_path={{hole_panel.path}}, schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path={{hole_markers[0].path}}, prim_type=\"Xform\", position={{hole_markers[0].position}})\nsetup_assembly_constraint(peg_path={{workpieces[0].path}}, hole_path={{hole_markers[0].path}}, tolerance=0.005)\ncreate_prim(prim_path={{hole_markers[1].path}}, prim_type=\"Xform\", position={{hole_markers[1].position}})\nsetup_assembly_constraint(peg_path={{workpieces[1].path}}, hole_path={{hole_markers[1].path}}, tolerance=0.005)\ncreate_prim(prim_path={{hole_markers[2].path}}, prim_type=\"Xform\", position={{hole_markers[2].position}})\nsetup_assembly_constraint(peg_path={{workpieces[2].path}}, hole_path={{hole_markers[2].path}}, tolerance=0.005)\ncreate_prim(prim_path={{hole_markers[3].path}}, prim_type=\"Xform\", position={{hole_markers[3].position}})\nsetup_assembly_constraint(peg_path={{workpieces[3].path}}, hole_path={{hole_markers[3].path}}, tolerance=0.005)\n\n# Force/torque sensor on robot hand\nadd_force_torque_sensor(\n    sensor_path={{ft_sensor.path}},\n    parent_path={{ft_sensor.parent_path}},\n    threshold={{ft_sensor.threshold}},\n)\n\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\n# Controller drops each peg at its hole position\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}],\n    destination_path={{hole_panel.path}},\n    drop_targets={\n        {{workpieces[0].path}}: {{hole_markers[0].drop_target}},\n        {{workpieces[1].path}}: {{hole_markers[1].drop_target}},\n        {{workpieces[2].path}}: {{hole_markers[2].drop_target}},\n        {{workpieces[3].path}}: {{hole_markers[3].drop_target}},\n    },\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{hole_panel.path}}],\n)"
 }

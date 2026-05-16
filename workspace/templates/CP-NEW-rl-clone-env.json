@@ -33,8 +33,9 @@
   ],
   "verified_status": "build-spec-2026-05-10; BUILD_OK 15/18; 3 errors on clone_envs/launch_training (need rsl_rl)",
   "migration_deferred": {
-    "reason": "novel_pattern",
-    "details": "64-parallel RL training scaffold; RL env clone is a training infrastructure task, not a manipulation pattern",
-    "added_date": "2026-05-15"
+    "reason": "train_pattern_no_delivery_criterion",
+    "details": "pattern_hint=train is now valid (R12). However, role-based schema requires a delivery success criterion (robot + source + destination + simulate_args). This template has no delivery: success = reward curve trends upward over 60s, not cube-at-destination. simulate_args is null. No roles structure applies. Unmigratable until a train-specific verify_args schema is defined.",
+    "added_date": "2026-05-15",
+    "updated_date": "2026-05-16"
   }
 }

@@ -37,8 +37,10 @@
   ],
   "verified_status": "build-spec-2026-05-10; build OK, gate stable_fail (PhysX numerical instability during grip \u2014 cube velocity blows to >200km/s)",
   "migration_deferred": {
-    "reason": "novel_pattern",
-    "details": "Single-peg precision insertion (5mm clearance); force-compliance insertion has no match in {pick_place, sort, reorient, navigate}",
-    "added_date": "2026-05-15"
+    "reason": "duplicate_of_cp58",
+    "details": "Structural duplicate of CP-58 (same peg-in-hole scene, same PhysX stable_fail). verify_args is null. Keep as equivalence-test evidence for CP-58 insert pattern; do not migrate until CP-58 function-gate passes or this template is explicitly deleted.",
+    "added_date": "2026-05-15",
+    "updated_date": "2026-05-16",
+    "recommendation": "Delete — confirmed strict duplicate of CP-58. No distinct scenario coverage. Deletion decision deferred to user per R12b procedure."
   }
 }
