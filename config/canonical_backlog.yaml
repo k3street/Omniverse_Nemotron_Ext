@@ -630,7 +630,11 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-gravity-dispenser-feeder.json
+  drafted_date: "2026-05-16"
+  drafted_by: A24
+  draft_notes: "A24; form-gate 1 OK, 0 ERROR, 0 WARN, 0 INFO; first use of create_gravity_dispenser in library; function-gate pending live Kit"
 
 - id: industrial-heap-zone-unstack-001
   source: industrial-asset

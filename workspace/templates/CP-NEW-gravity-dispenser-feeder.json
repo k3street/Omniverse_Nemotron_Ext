@@ -1,0 +1,168 @@
+{
+  "task_id": "CP-NEW-gravity-dispenser-feeder",
+  "goal": "Gravity-dispenser bulk-part singulation feed: create_gravity_dispenser drops parts one at a time onto a vibratory conveyor; a proximity sensor at the singulation point detects each part-present event and gates a Franka arm to pick and transfer the part to an output bin. Exercises create_gravity_dispenser (first use in library), add_proximity_sensor as part-present detector, belt-gated setup_pick_place_controller (sensor_gated mode), and the pick_place pattern where workpieces arrive asynchronously rather than from a fixed source path.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_gravity_dispenser",
+    "create_conveyor",
+    "create_bin",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Design rationale for CP-NEW-gravity-dispenser-feeder:\n\n1) Dispenser geometry: create_gravity_dispenser at path /World/Dispenser, target_xy=[0.0, 0.0] (drop zone on belt), drop_height=1.20m above belt surface (belt surface z=0.78; dispenser mouth at z=0.78+1.20=1.98). n_items=10 parts (0.06m cubes). Parts pre-spawned stacked vertically inside the dispenser tube; released one by one via physics gate. item_size=0.06m chosen so parts land on belt without bouncing far off.\n\n2) Infeed conveyor: 1.5m long, oriented in +Y. Position [0.0, 0.0, 0.78], size [0.35, 1.5, 0.05]. surface_velocity=[0, 0.15, 0] carries each dropped part toward the singulation sensor at y=0.65.\n\n3) Singulation sensor: add_proximity_sensor at /World/SingulationSensor, position [0.0, 0.65, 0.845], size [0.38, 0.08, 0.10]. Watches /World path pattern. When part enters this volume the sensor triggers; setup_pick_place_controller (sensor_gated mode) pauses belt, picks part, drops in bin, resumes belt.\n\n4) Franka arm: mounted on table at [0.55, 0.40, 0.75]. Pick station: singulation sensor centroid projected onto belt surface z=0.805 → pick_target=[0.0, 0.65, 0.845]. Bin at [0.55, 0.40, 0.78] (beside robot). drop_target=[0.55, 0.40, 0.90] (above bin). home_target=[0.55, 0.20, 1.05] (clear of belt).\n\n5) Physics: CPU MBP dynamics to stabilise dispenser drops. sleepThreshold default (parts should remain active while on belt). Belt speed low (0.15 m/s) to prevent parts overshooting sensor before pickup.\n\n6) Output bin: create_bin at /World/OutputBin, position=[0.40, 0.40, 0.78], size=[0.25, 0.25, 0.18]. Bin on separate table at robot right side.\n\n7) Controller mode: sensor_gated + coord-IK (pick_target / drop_target / home_target). belt_path=/World/InfeedBelt so belt pauses during pick. grip_style=fixed_joint for stability.\n\n8) Success criterion: 8 of 10 parts arrive in bin (verified via overlap_sphere on bin volume or list_contacts). Sensor gates prevent double-picks.",
+  "code": "# ── Lighting and ground ──────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU MBP for stable gravity-dispenser drop ───────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Infeed conveyor (carries dropped parts to singulation sensor) ─────────────\n# Belt surface z = 0.78 + 0.025 = 0.805. Parts settle at ~z=0.835 (half size 0.03).\ncreate_conveyor(\n    prim_path=\"/World/InfeedBelt\",\n    position=[0.0, 0.0, 0.78],\n    size=[0.35, 1.5, 0.05],\n    surface_velocity=[0, 0.15, 0],\n)\n\n# ── Gravity dispenser: 10 parts, 0.06m cubes, dropped onto belt ───────────────\n# drop_height is height of dispenser mouth above belt surface.\ncreate_gravity_dispenser(\n    dispenser_path=\"/World/Dispenser\",\n    target_xy=[0.0, -0.55],\n    drop_height=1.20,\n    n_items=10,\n    item_size=0.06,\n)\n\n# ── Singulation sensor at belt far end ────────────────────────────────────────\n# Triggers when a part enters the pickup zone at y=0.65.\nadd_proximity_sensor(\n    sensor_path=\"/World/SingulationSensor\",\n    position=[0.0, 0.65, 0.845],\n    size=[0.38, 0.08, 0.10],\n    watched_path_pattern=\"/World/Dispenser\",\n)\n\n# ── Robot work table and Franka arm ──────────────────────────────────────────\ncreate_prim(prim_path=\"/World/RobotTable\", prim_type=\"Cube\", position=[0.55, 0.40, 0.375], scale=[0.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/RobotTable\", schema_name=\"PhysicsCollisionAPI\")\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0.55, 0.40, 0.75],\n)\n\n# ── Output bin (beside robot) ─────────────────────────────────────────────────\ncreate_bin(\n    prim_path=\"/World/OutputBin\",\n    position=[0.40, 0.40, 0.78],\n    size=[0.25, 0.25, 0.18],\n)\n\n# ── Sensor-gated pick-place controller ───────────────────────────────────────\n# Waits for SingulationSensor trigger, pauses belt, picks part at sensor position,\n# places in OutputBin, resumes belt. Cycles until dispenser empties.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/SingulationSensor\",\n    belt_path=\"/World/InfeedBelt\",\n    pick_target=[0.0, 0.65, 0.845],\n    drop_target=[0.40, 0.40, 0.97],\n    home_target=[0.55, 0.20, 1.05],\n    grip_style=\"fixed_joint\",\n    planning_obstacles=[\"/World/RobotTable\", \"/World/InfeedBelt\", \"/World/OutputBin\"],\n)",
+  "settle_state": {
+    "conveyors": {
+      "/World/InfeedBelt": [0, 0.15, 0]
+    },
+    "dispensers": {
+      "/World/Dispenser": {
+        "target_xy": [0.0, -0.55],
+        "n_items": 10,
+        "item_size": 0.06
+      }
+    },
+    "robot": {
+      "/World/Franka": "home_pose"
+    },
+    "bins": {
+      "/World/OutputBin": {"position": [0.40, 0.40, 0.78]}
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Dispenser",
+        "pick_sensor": "/World/SingulationSensor",
+        "place_path": "/World/OutputBin",
+        "robot_kind": "franka"
+      }
+    ],
+    "dispenser_path": "/World/Dispenser",
+    "bin_path": "/World/OutputBin",
+    "min_parts_delivered": 8
+  },
+  "simulate_args": {
+    "target_path": "/World/OutputBin",
+    "cube_paths": [
+      "/World/Dispenser/Item_1",
+      "/World/Dispenser/Item_2",
+      "/World/Dispenser/Item_3",
+      "/World/Dispenser/Item_4",
+      "/World/Dispenser/Item_5",
+      "/World/Dispenser/Item_6",
+      "/World/Dispenser/Item_7",
+      "/World/Dispenser/Item_8",
+      "/World/Dispenser/Item_9",
+      "/World/Dispenser/Item_10"
+    ],
+    "n_items_total": 10,
+    "min_items_delivered": 8,
+    "duration_s": 240,
+    "xy_tolerance": 0.13
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": ["/World/RobotTable", "/World/InfeedBelt", "/World/OutputBin"],
+    "sensor_path": "/World/SingulationSensor",
+    "dispenser_path": "/World/Dispenser",
+    "robot_base": [0.55, 0.40, 0.75]
+  },
+  "failure_modes": [
+    "Part bounce on drop: dispenser drop_height=1.20m may cause 0.06m cubes to bounce off belt and miss the singulation sensor. Mitigation: lower drop_height to 0.60m, or add physics_material rubber to dispenser items to dampen bounce.",
+    "Belt overshoots sensor: part slides past SingulationSensor at y=0.65 before robot can pick. Mitigation: reduce surface_velocity to 0.08 m/s, or widen sensor volume in Y to 0.15m.",
+    "Double-dispense: if dispenser releases two parts in rapid succession, second part enters sensor before robot completes first pick cycle, triggering double-pick attempt. Mitigation: belt_path pause prevents second part advancing; verify dispenser release interval is >= pick cycle time.",
+    "cuRobo reach from robot_base=[0.55, 0.40, 0.75] to pick_target=[0.0, 0.65, 0.845]: lateral distance ~0.63m, delta-Z ~0.095m — within Franka 0.85m reach. Confirm IK succeeds; if not, shift robot_base to [0.45, 0.50, 0.75].",
+    "OutputBin at [0.40, 0.40, 0.78] drop_target z=0.97 — bin floor at 0.78+0.01=0.79, walls at 0.78+0.18=0.96. drop_target z=0.97 is 0.01m above bin rim; adjust to 0.95 if parts miss bin interior.",
+    "dispenser_path watched_path_pattern mismatch: items emitted by create_gravity_dispenser may appear under a path other than /World/Dispenser. Probe with list_all_prims(filter='/World/Dispenser*') and update watched_path_pattern accordingly."
+  ],
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": true,
+      "has_gravity_dispenser": true,
+      "has_sensor_gate": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:feeder.gravity_dispenser",
+      "isaac:sensor.proximity_singulation",
+      "isaac:industry.bulk_feeding"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "precision_preferred"
+    },
+    "infeed_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "dispenser": {
+      "constraints": ["gravity_dispenser"],
+      "expected_count": 1,
+      "required": true
+    },
+    "singulation_sensor": {
+      "constraints": ["proximity_sensor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "output_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka",
+      "position": [0.55, 0.40, 0.75]
+    },
+    "infeed_conveyor": {
+      "path": "/World/InfeedBelt",
+      "position": [0.0, 0.0, 0.78],
+      "size": [0.35, 1.5, 0.05],
+      "surface_velocity": [0, 0.15, 0]
+    },
+    "dispenser": {
+      "path": "/World/Dispenser",
+      "target_xy": [0.0, -0.55],
+      "drop_height": 1.20,
+      "n_items": 10,
+      "item_size": 0.06
+    },
+    "singulation_sensor": {
+      "path": "/World/SingulationSensor",
+      "position": [0.0, 0.65, 0.845],
+      "size": [0.38, 0.08, 0.10]
+    },
+    "output_bin": {
+      "path": "/World/OutputBin",
+      "position": [0.40, 0.40, 0.78],
+      "size": [0.25, 0.25, 0.18]
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_conveyor(\n    prim_path={{infeed_conveyor.path}},\n    position={{infeed_conveyor.position}},\n    size={{infeed_conveyor.size}},\n    surface_velocity={{infeed_conveyor.surface_velocity}},\n)\n\ncreate_gravity_dispenser(\n    dispenser_path={{dispenser.path}},\n    target_xy={{dispenser.target_xy}},\n    drop_height={{dispenser.drop_height}},\n    n_items={{dispenser.n_items}},\n    item_size={{dispenser.item_size}},\n)\n\nadd_proximity_sensor(\n    sensor_path={{singulation_sensor.path}},\n    position={{singulation_sensor.position}},\n    size={{singulation_sensor.size}},\n    watched_path_pattern={{dispenser.path}},\n)\n\ncreate_prim(prim_path=\"/World/RobotTable\", prim_type=\"Cube\", position=[0.55, 0.40, 0.375], scale=[0.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/RobotTable\", schema_name=\"PhysicsCollisionAPI\")\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n)\n\ncreate_bin(\n    prim_path={{output_bin.path}},\n    position={{output_bin.position}},\n    size={{output_bin.size}},\n)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{singulation_sensor.path}},\n    belt_path={{infeed_conveyor.path}},\n    pick_target=[0.0, 0.65, 0.845],\n    drop_target=[0.40, 0.40, 0.97],\n    home_target=[0.55, 0.20, 1.05],\n    grip_style=\"fixed_joint\",\n    planning_obstacles=[\"/World/RobotTable\", {{infeed_conveyor.path}}, {{output_bin.path}}],\n)",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16-A24; form-gate pending"
+}
