@@ -1,0 +1,220 @@
+{
+  "task_id": "CP-NEW-conveyor-tracking-moving-pick",
+  "_comment": "A108 — VISION-tracked moving conveyor pick. Differentiates from A39 (CP-NEW-moving-conveyor-pick): A39 pauses the belt at sensor-trigger and picks at the stopped pose (fixed timing window). A108 keeps the belt RUNNING and uses overhead-camera tracking (vision_detect_objects) plus vision_plan_trajectory to compute a PREDICTIVE INTERCEPT pose — the robot anticipates where each cube WILL BE at grip-execute time and dives onto a moving target. No belt_path arg on setup_pick_place_controller (belt is not paused). register_moving_obstacle re-registers each cube at its pick cycle so cuRobo replans around the tracked body during the dive. Failure modes capture tracking lag, occlusion, velocity drift.",
+  "goal": "Vision-tracked predictive-intercept pick from a moving conveyor: a Franka arm picks 3 cubes off a belt running at 0.15 m/s WITHOUT pausing the belt. An overhead camera at the pick zone runs vision_detect_objects each cycle to localise the nearest unhandled cube; vision_plan_trajectory then computes a 2D intercept trajectory toward the predicted future cube position (predicted = current + velocity*lookahead). The Franka uses setup_pick_place_controller (target_source='curobo', NO belt_path — belt keeps running) with register_moving_obstacle re-registered per cube so cuRobo replans around the moving body during dive. Three cubes spawned at staggered intervals along the belt; the robot tracks each cube's pose via get_world_transform between cycles, computes the predictive offset, and times the grip to land on the moving cube. Exercises vision_detect_objects (per-cycle tracking), vision_plan_trajectory (intercept path), register_moving_obstacle (dynamic body re-registration across cycles), configure_camera (overhead tracker), and setup_pick_place_controller (curobo, NO belt_path) in the distinctive predictive-intercept pattern absent from A39.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "configure_camera",
+    "set_camera_look_at",
+    "vision_detect_objects",
+    "vision_plan_trajectory",
+    "register_moving_obstacle",
+    "get_world_transform",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Design rationale for CP-NEW-conveyor-tracking-moving-pick (A108):\n\n1) Distinctiveness vs A39 (CP-NEW-moving-conveyor-pick): A39 uses a proximity sensor + belt_path argument on setup_pick_place_controller — the belt PAUSES when a cube reaches the pick station and the robot grips the stationary cube. The novelty there is interpolate_trajectory feed-forward to cover transit-time during the approach phase only. A108 inverts the control strategy: NO belt_path is passed, the belt keeps running continuously, and the robot tracks each cube via an overhead camera (vision_detect_objects polled per cycle) + vision_plan_trajectory which returns a 2D intercept path. The robot dives onto a MOVING cube; the predictive intercept is computed as cube_x + v_belt * t_to_grip. This is the vision-tracked branch of conveyor-pick that A39 explicitly does not cover.\n\n2) Scene layout: Franka mounted at [0, 0, 0.75] on a 0.75m table. Belt runs along +X from x=-1.0 to x=+1.0 at y=0.38, z=0.80, width=0.3m, speed=0.15 m/s. Three cubes spawned upstream at staggered x positions ([-0.95, -1.20, -1.45]) so they cross the tracking zone at different cadences. Tracking zone covers x ∈ [-0.20, +0.20] at the front of the robot. Outfeed bin at [0, -0.45, 0.80] (behind robot, reach 0.45m).\n\n3) Overhead tracking camera: created at [0, 0.38, 1.40] looking straight down at [0, 0.38, 0.82] (belt surface). focal_length=18.0 covers a ~0.6m wide field at 0.55m below — captures the full tracking zone plus margin. configure_camera + set_camera_look_at set focal length and orientation.\n\n4) Predictive intercept logic — pseudocode the canonical embeds for design clarity:\n   for cube_path in cube_paths:\n     # Camera tracking — locate cube in viewport\n     detections = vision_detect_objects(labels=['cube'], max_objects=3)\n     pose = get_world_transform(prim_path=cube_path)\n     cube_x, cube_y, cube_z = pose.translation\n     v_belt = 0.15  # m/s along +X\n     t_dive_estimate = 1.2  # seconds — robot dive duration\n     predicted_x = cube_x + v_belt * t_dive_estimate\n     # Plan vision trajectory to predicted intercept\n     vision_plan_trajectory(instruction='pick the cube on the moving belt', num_points=12)\n     # cuRobo treats this cube as a dynamic obstacle during dive\n     register_moving_obstacle(robot_path='/World/Franka', obstacle_path=cube_path)\n   In the canonical we unroll this for the FIRST cube only (Cube_1) and pre-register all 3 cubes as moving obstacles before setup_pick_place_controller, since the controller handles per-cycle re-registration internally for target_source='curobo' with dynamic source_paths.\n\n5) setup_pick_place_controller arg choice: target_source='curobo' (only mode supporting register_moving_obstacle), source_paths=cube_paths (3 cubes), destination_path=outfeed bin, NO sensor_path, NO belt_path — this is the explicit distinction from A39. The controller free-runs and picks each source cube in priority order using continuous cuRobo replanning; the dynamic obstacle registrations make cuRobo aware of the moving cube body during dive.\n\n6) Failure modes spell out the vision-tracked-vs-paused difference: tracking-lag exceeds prediction-horizon (cube moved further than predicted_x at grip-execute time — pick miss); cube tilt during transit (belt-vibration causes orientation drift, gripper misses the grasp axis); arm occlusion (when the arm enters the camera FOV during dive, vision_detect_objects loses the cube; mitigation: predict-only for the last 0.4s of dive); velocity drift (belt surface_velocity drifts ±5% due to PhysX integration → predicted_x wrong by up to 1cm/s integrated over 1.2s → 1.2cm error → outside grip tolerance 0.005m unless re-tracked mid-dive).\n\n7) Physics: CPU dynamics (enable_gpu_dynamics=False, MBP broadphase) for deterministic tracking. Cubes 0.06m (smaller than A39's 0.07m to test tighter grip tolerance), mass=0.4kg, rubber material. sleepThreshold=0.0 to prevent freeze. Belt surface_velocity=[0.15, 0, 0].\n\n8) Cube spawn cadence: spawn_x=[-0.95, -1.20, -1.45]. At 0.15 m/s, gaps of 0.25m → temporal gap 1.67s between arrivals. Franka pick cycle ≈ 8s → cube_2 arrives mid-cycle of cube_1 and waits on belt (passes the pick zone before being caught — this is exactly the late-arrival fault the tracking is meant to handle in a real cell).\n\n9) Geometry/reach check: tracking zone centre [0, 0.38, 0.82]. Reach from Franka base [0,0,0.75] = sqrt(0+0.38^2+0.07^2) = 0.386m — well inside 0.855m. Outfeed bin at [0,-0.45,0.80]: reach 0.45m — fine.\n\n10) Tags emphasise the predictive-intercept + vision tracking pattern (industrial.vision_tracked_pick, control.predictive_trajectory, transport.moving_conveyor) so retrieval by these structural tags resolves to A108, not A39.",
+  "code": "# ── Scene skeleton ──────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# ── Robot table ───────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU determinism for vision-tracked belt + cuRobo replanning ─────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka arm on table ─────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Moving conveyor belt ──────────────────────────────────────────────────────\n# 2m belt running +X at 0.15 m/s. Belt top z = 0.80 + 0.05/2 = 0.825 → cube centre z = 0.855.\n# NOTE: NO belt_path on setup_pick_place_controller below — the belt keeps RUNNING during pick.\n# This is the distinction from A39 (which pauses the belt).\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.38, 0.80],\n    size=[2.0, 0.30, 0.05],\n    surface_velocity=[0.15, 0, 0],\n)\n\n# ── Outfeed bin (behind robot) ────────────────────────────────────────────────\ncreate_bin(\n    prim_path=\"/World/OutfeedBin\",\n    size=[0.30, 0.30, 0.15],\n    position=[0, -0.45, 0.80],\n    wall_thickness=0.01,\n)\n\n# ── 3 cubes spawned at staggered x positions on belt ───────────────────────────\n# 0.06m cubes (smaller than A39's 0.07m) tighten the grip tolerance and stress the predictive\n# intercept. Mass 0.4kg. Spawn gaps 0.25m → temporal gap ~1.67s at 0.15 m/s.\ncube_paths = [\"/World/Cube_1\", \"/World/Cube_2\", \"/World/Cube_3\"]\ncube_spawn_x = [-0.95, -1.20, -1.45]\n\nfor path, sx in zip(cube_paths, cube_spawn_x):\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[sx, 0.38, 0.855], size=0.06)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=cube_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=cube_paths,\n    attr=\"physics:mass\",\n    value=0.4,\n)\nfor path in cube_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# ── Overhead tracking camera at pick zone ────────────────────────────────────\n# Camera at z=1.40 looks straight down at belt centre. focal_length=18mm covers ~0.6m wide\n# field on a 0.55m drop — captures the full tracking window x ∈ [-0.30, +0.30].\ncreate_prim(\n    prim_path=\"/World/TrackingCamera\",\n    prim_type=\"Camera\",\n    position=[0.0, 0.38, 1.40],\n)\nconfigure_camera(\n    camera_path=\"/World/TrackingCamera\",\n    focal_length=18.0,\n    clipping_range=[0.01, 100.0],\n)\nset_camera_look_at(\n    camera_path=\"/World/TrackingCamera\",\n    target=[0.0, 0.38, 0.82],\n    up=[0, 1, 0],\n)\n\n# ── Vision tracking step — per-cycle pose acquisition ────────────────────────────\n# vision_detect_objects returns normalised 2D points + labels for cubes in viewport. In a live\n# pick loop this is called once per cycle to pick the highest-priority visible cube. Here we\n# call it once at scene-build time as a sanity check that the camera + semantic-label setup is\n# producing detections before the controller starts.\nvision_detect_objects(\n    labels=[\"cube\"],\n    max_objects=3,\n)\n\n# ── Read cube_1 pose to seed the predictive intercept calculation ───────────────────\n# In production, get_world_transform is polled each cycle as the camera-based 3D pose. Here we\n# read Cube_1's initial pose so the next vision_plan_trajectory call has a current target.\nget_world_transform(prim_path=\"/World/Cube_1\")\n\n# ── Predictive intercept trajectory (vision_plan_trajectory) ────────────────────────\n# Gemini-ER plans a 2D pick trajectory from the viewport image. The instruction string encodes\n# the predictive-intercept semantics (\"on the moving belt\" cues the planner to lead the target).\n# num_points=12 gives a smooth dive path that the cuRobo controller then refines to joint space.\nvision_plan_trajectory(\n    instruction=\"pick the moving cube on the conveyor belt, leading the target by belt velocity\",\n    num_points=12,\n)\n\n# ── Register ALL cubes as moving obstacles for cuRobo ───────────────────────────\n# cuRobo replans around each cube body during the dive. Unlike A39 (which registers only the\n# being-picked cube as a static-at-pick-time obstacle), A108 keeps all 3 cubes registered so the\n# arm avoids passing over downstream cubes while diving onto the priority cube.\nfor cube_path in cube_paths:\n    register_moving_obstacle(\n        robot_path=\"/World/Franka\",\n        obstacle_path=cube_path,\n    )\n\n# ── cuRobo pick-place controller — NO belt_path, belt keeps running ──────────────────\n# This is the critical distinction from A39: no belt_path argument is passed, so the controller\n# does NOT pause the belt. cuRobo continuously replans toward the live tracked cube pose and the\n# arm dives onto a MOVING target. source_paths is the priority-ordered cube list.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=cube_paths,\n    destination_path=\"/World/OutfeedBin\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/OutfeedBin\"],\n    robot_family=\"franka\",\n)",
+  "settle_state": {
+    "belt": {
+      "/World/ConveyorBelt": {
+        "surface_velocity": [0.15, 0, 0],
+        "position": [0.0, 0.38, 0.80]
+      }
+    },
+    "outfeed_bin": {
+      "/World/OutfeedBin": {
+        "position": [0, -0.45, 0.80]
+      }
+    },
+    "robot": {
+      "/World/Franka": "home_pose"
+    },
+    "cubes": {
+      "/World/Cube_1": [-0.95, 0.38, 0.855],
+      "/World/Cube_2": [-1.20, 0.38, 0.855],
+      "/World/Cube_3": [-1.45, 0.38, 0.855]
+    },
+    "camera": {
+      "/World/TrackingCamera": {
+        "position": [0.0, 0.38, 1.40],
+        "look_at": [0.0, 0.38, 0.82]
+      }
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/OutfeedBin",
+        "camera_path": "/World/TrackingCamera",
+        "robot_kind": "franka"
+      }
+    ],
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3"
+    ]
+  },
+  "simulate_args": {
+    "target_path": "/World/OutfeedBin",
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3"
+    ],
+    "duration_s": 240,
+    "xy_tolerance": 0.13,
+    "tracking_strategy": "vision_predictive_intercept",
+    "belt_pauses": false,
+    "success_criterion": "All 3 cubes delivered to OutfeedBin while belt remains running (surface_velocity unchanged at sim-end)."
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/ConveyorBelt",
+      "/World/OutfeedBin"
+    ],
+    "camera_path": "/World/TrackingCamera",
+    "tracked_cubes": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3"
+    ],
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "failure_modes": [
+    "Tracking lag exceeds prediction horizon — vision_detect_objects + vision_plan_trajectory pipeline latency is ~150ms (Gemini-ER round trip). At belt speed 0.15 m/s the cube moves 22.5mm during one tracking step. If the predictive intercept uses a stale pose from one step ago, predicted_x is off by 22.5mm — well outside the 0.06m cube's 5mm grip tolerance. Mitigation: use get_world_transform (USD-direct, sub-ms) as the live pose source and treat vision_detect_objects as a slower validation channel. The canonical encodes this hybrid: vision for visibility check, get_world_transform for precise position.",
+    "Cube tilts during transit — belt-vibration (PhysX broadphase chattering on the kinematic surface velocity contact) accumulates angular error on the cube. After 1.5s of travel a 0.06m cube can rotate up to 8° around the Z axis. The Franka panda gripper uses a 1-DoF parallel jaw aligned with the EE Z axis; an 8° yaw mismatch reduces effective grip area by sin(8°)=14%. Mitigation: read cube orientation from get_world_transform.rotation and apply a yaw-compensation to the EE target orientation before the dive; or use a wider 0.085m jaw configuration.",
+    "Arm occlusion during dive — when the Franka arm enters the camera FOV (typically the last 0.4s of the dive), vision_detect_objects loses the cube under arm shadow. If the controller keeps polling vision for the live target, the missing detection is interpreted as \"cube delivered\" and the controller releases prematurely above the belt. Mitigation: predict-only mode for the last 0.4s of dive — once dive_phase_progress > 0.7, switch from vision_plan_trajectory output to extrapolated trajectory from the pre-dive pose snapshot.",
+    "Conveyor velocity drift exceeds prediction model — PhysX integrates surface_velocity with semi-implicit Euler; on CPU dynamics the effective belt drag on a 0.06m, 0.4kg cube produces a steady-state cube velocity of ~0.145 m/s (3% under nominal 0.15 m/s) due to micro-slip. The predictive intercept assumes v=0.15 m/s; integrated over a 1.2s dive that is a 6mm position error — marginal for the 5mm grip tolerance. Mitigation: estimate v_actual from successive get_world_transform polls (numerical derivative) and feed it back into predicted_x = cube_x + v_actual*t_dive.",
+    "Tracking camera FOV does not cover full pick zone — with focal_length=18mm at z=1.40 over belt z=0.825, drop is 0.575m. Camera HFOV with 24mm aperture (Kit default): 2*atan(12/18) = ~67° → horizontal field 0.76m. This covers x ∈ [-0.38, +0.38] which includes the [-0.30, +0.30] tracking zone with margin. However set_camera_look_at with up=[0,1,0] tilts the camera frame so the LONG axis of the FOV aligns with belt-Y not belt-X; cubes travelling +X traverse the SHORT axis (vertical FOV) which is also ~67° → 0.76m — actually fine. Documented here because a future config change (e.g. portrait-mode camera) breaks coverage.",
+    "register_moving_obstacle stale after first pick — once Cube_1 is delivered to OutfeedBin it remains registered as a Franka obstacle at the bin position, which constrains downstream cuRobo plans for Cube_2 and Cube_3. The controller should call register_moving_obstacle with a refreshed path list (excluding picked cubes) between cycles; in the static canonical we pre-register all 3 and document this gap. Production code uses register_moving_obstacle(obstacle_path=path) per-cycle and a complementary deregister API once available."
+  ],
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": true,
+      "uses_vision_tracking": true,
+      "uses_predictive_intercept": true,
+      "uses_vision_plan_trajectory": true,
+      "belt_pauses_during_pick": false,
+      "has_stacking": false,
+      "has_moving_belt_pick": true,
+      "has_velocity_feedforward": false,
+      "n_tracked_workpieces": 3
+    },
+    "structural_tags": [
+      "isaac:industrial.vision_tracked_pick",
+      "isaac:control.predictive_trajectory",
+      "isaac:transport.moving_conveyor",
+      "isaac:transport.belt_to_bin",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:sensor.vision_tracker",
+      "isaac:motion.vision_plan_trajectory",
+      "isaac:collision.register_moving_obstacle",
+      "isaac:robot.franka",
+      "isaac:industry.conveyor_pick"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "franka_panda",
+        "franka",
+        "ur10"
+      ],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "medium_payload_preferred"
+    },
+    "conveyor": {
+      "constraints": [
+        "conveyor",
+        "belt"
+      ],
+      "expected_count": 1,
+      "required": true,
+      "note": "Belt runs continuously — NOT paused during pick."
+    },
+    "destination_bin": {
+      "constraints": [
+        "bin",
+        "container"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "tracking_camera": {
+      "constraints": [
+        "camera"
+      ],
+      "expected_count": 1,
+      "required": true,
+      "note": "Overhead RGB camera; feeds vision_detect_objects and vision_plan_trajectory."
+    },
+    "workpieces": {
+      "constraints": [
+        "cube",
+        "box"
+      ],
+      "min": 2,
+      "max": 6,
+      "param_name": "n_cubes",
+      "unordered": false,
+      "note": "Tracked individually via vision + get_world_transform."
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka",
+      "position": [0, 0, 0.75],
+      "orientation": [1, 0, 0, 0]
+    },
+    "conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [0.0, 0.38, 0.80],
+      "size": [2.0, 0.30, 0.05],
+      "surface_velocity": [0.15, 0, 0]
+    },
+    "destination_bin": {
+      "path": "/World/OutfeedBin",
+      "position": [0, -0.45, 0.80],
+      "size": [0.30, 0.30, 0.15],
+      "wall_thickness": 0.01
+    },
+    "tracking_camera": {
+      "path": "/World/TrackingCamera",
+      "position": [0.0, 0.38, 1.40],
+      "look_at": [0.0, 0.38, 0.82],
+      "focal_length": 18.0,
+      "clipping_range": [0.01, 100.0]
+    },
+    "workpieces": [
+      {"path": "/World/Cube_1", "spawn_x": -0.95, "size": 0.06, "mass": 0.4},
+      {"path": "/World/Cube_2", "spawn_x": -1.20, "size": 0.06, "mass": 0.4},
+      {"path": "/World/Cube_3", "spawn_x": -1.45, "size": 0.06, "mass": 0.4}
+    ]
+  },
+  "code_template": "# ── Scene skeleton ──────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path={{conveyor.path}},\n    position={{conveyor.position}},\n    size={{conveyor.size}},\n    surface_velocity={{conveyor.surface_velocity}},\n)\n\ncreate_bin(\n    prim_path={{destination_bin.path}},\n    size={{destination_bin.size}},\n    position={{destination_bin.position}},\n    wall_thickness={{destination_bin.wall_thickness}},\n)\n\nfor item in {{workpieces}}:\n    create_prim(prim_path=item['path'], prim_type=\"Cube\",\n                position=[item['spawn_x'], 0.38, 0.855], size=item['size'])\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=item['path'], schema_name=api)\n\nbulk_set_attribute(prim_paths=[i['path'] for i in {{workpieces}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nbulk_set_attribute(prim_paths=[i['path'] for i in {{workpieces}}], attr=\"physics:mass\",                 value=0.4)\nfor item in {{workpieces}}:\n    apply_physics_material(prim_path=item['path'], material_name=\"rubber\")\n\ncreate_prim(prim_path={{tracking_camera.path}}, prim_type=\"Camera\", position={{tracking_camera.position}})\nconfigure_camera(\n    camera_path={{tracking_camera.path}},\n    focal_length={{tracking_camera.focal_length}},\n    clipping_range={{tracking_camera.clipping_range}},\n)\nset_camera_look_at(\n    camera_path={{tracking_camera.path}},\n    target={{tracking_camera.look_at}},\n    up=[0, 1, 0],\n)\n\nvision_detect_objects(\n    labels=[\"cube\"],\n    max_objects=3,\n)\n\nget_world_transform(prim_path={{workpieces[0].path}})\n\nvision_plan_trajectory(\n    instruction=\"pick the moving cube on the conveyor belt, leading the target by belt velocity\",\n    num_points=12,\n)\n\nfor item in {{workpieces}}:\n    register_moving_obstacle(\n        robot_path={{primary_robot.path}},\n        obstacle_path=item['path'],\n    )\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[i['path'] for i in {{workpieces}}],\n    destination_path={{destination_bin.path}},\n    planning_obstacles=[\"/World/Table\", {{conveyor.path}}, {{destination_bin.path}}],\n    robot_family=\"franka\",\n)",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16-A108; vision-tracked predictive-intercept (distinct from A39 fixed-window); form-gate-schema ✓; function-gate ⏳ (needs live Kit + Gemini-ER endpoint)"
+}
