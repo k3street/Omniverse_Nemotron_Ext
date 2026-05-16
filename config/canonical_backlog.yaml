@@ -1542,7 +1542,11 @@
   motion_controller_preference: none
   pattern_hint: finetune
   estimated_agent_minutes: 30
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-groot-export-dataset-hdf5.json
+  drafted_date: "2026-05-16"
+  drafted_by: A35
+  draft_notes: "A35; form-gate 1 OK, 0 ERROR, 0 WARN, 0 INFO (--validate-tool-calls); first standalone use of finetune_stats + redact_finetune_data + export_finetune_data + export_dataset in data-export pipeline; no GPU/weights required; function-gate pending live Kit"
 
 - id: groot-teleop-demo-record-001
   source: retrieval-miss
