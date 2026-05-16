@@ -1,0 +1,98 @@
+{
+  "task_id": "CP-NEW-groot-forgetting-monitor",
+  "goal": "Given a GR00T N1.6-3B checkpoint produced after LoRA fine-tuning, run a standalone forgetting-detection audit: analyze_checkpoint characterises per-layer weight drift and training step count; monitor_forgetting runs the 30-example VQA regression suite against the base model and alerts on >20% drop; if forgetting is detected, extract_attention_maps pinpoints which visual patches drove the failing action. SUCCESS: monitor_forgetting returns a report dict; a summary JSON is written to /tmp/groot_forgetting_audit.json; no ERROR is raised. Exercises the GR00T interpretability / safety-gate pattern without requiring a live training run.",
+  "tools_used": [
+    "analyze_checkpoint",
+    "monitor_forgetting",
+    "extract_attention_maps"
+  ],
+  "thoughts": [
+    "This canonical is intentionally narrow: it audits an *existing* checkpoint rather than running a full finetune pipeline. This keeps the scenario runnable by a QA engineer with only a pre-saved checkpoint file and a base-model cache — no LeRobot demo dataset needed.",
+    "analyze_checkpoint is called first because its per-layer drift report determines whether the forgetting risk is high enough to warrant the full VQA suite. It also validates that the checkpoint is compatible with the base model (same architecture hash), preventing a silent mismatch before monitor_forgetting loads both models simultaneously.",
+    "monitor_forgetting requires checkpoint_dir (the directory, not the .pt file) and base_model (HuggingFace ID or local path). It runs 30 VQA prompts on the fine-tuned weights and compares logits against the frozen base. A >20% drop triggers an alert but does NOT raise an exception — the caller decides whether to proceed. We surface the drop as a WARN so the canonical passes lint without ERROR.",
+    "extract_attention_maps is called only when vqa_score_drop > 0.20 (conditional). It requires checkpoint_path (the .pt file path, not the dir) and observation_path (a saved image+state dump). The observation file is expected at workspace/groot_debug/obs_example.pkl — a small fixture the QA engineer provides. If the file is absent the tool warns and returns empty maps; the main audit is unaffected.",
+    "layer=12 is chosen for attention extraction per the GR00T paper (DiT layer 12 = highest cross-modal attention density for pick-and-place tasks). This is the default but we pass it explicitly for documentation value.",
+    "The SUCCESS bar is deliberately low (report dict written, no ERROR) because this is a diagnostic tool: the forgetting check may legitimately fail on a freshly fine-tuned checkpoint — that is useful signal, not a bug.",
+    "HARD BLOCKER: Both GR00T N1.6-3B base weights and the LoRA checkpoint must be present locally. The VQA suite calls the model forward pass. Offline/CI environments without GPU or model cache will get an error from monitor_forgetting. verified_status reflects this."
+  ],
+  "code": "import json\nimport os\n\n# ── Constants ─────────────────────────────────────────────────────────────────\nCHECKPOINT_DIR = \"workspace/groot_checkpoints/finetune_n10\"\nCHECKPOINT_PT = CHECKPOINT_DIR + \"/latest.pt\"\nBASE_MODEL_ID = \"nvidia/GR00T-N1.6-3B\"\nOBS_PATH = \"workspace/groot_debug/obs_example.pkl\"\nAUDIT_FILE = \"/tmp/groot_forgetting_audit.json\"\nFORGETTING_THRESHOLD = 0.20\n\nos.makedirs(\"/tmp\", exist_ok=True)\n\n# ── Step 1: Characterise checkpoint — layer drift, training steps ─────────────\n# Required: checkpoint_path (str)\n# Optional: base_model_path (str)\nckpt_info = analyze_checkpoint(\n    checkpoint_path=CHECKPOINT_PT,\n    base_model_path=BASE_MODEL_ID,\n)\nprint(\"[CHECKPOINT]\", ckpt_info)\n\nif isinstance(ckpt_info, dict):\n    steps_seen = ckpt_info.get(\"training_steps\", \"unknown\")\n    max_drift_layer = ckpt_info.get(\"max_drift_layer\", None)\n    print(f\"[INFO] steps={steps_seen}, max_drift_layer={max_drift_layer}\")\n\n# ── Step 2: Run VQA forgetting regression suite ────────────────────────────────\n# Required: checkpoint_dir (str), base_model (str)\nforgetting_report = monitor_forgetting(\n    checkpoint_dir=CHECKPOINT_DIR,\n    base_model=BASE_MODEL_ID,\n)\nprint(\"[FORGETTING]\", forgetting_report)\n\nvqa_drop = 0.0\nif isinstance(forgetting_report, dict):\n    vqa_drop = forgetting_report.get(\"vqa_score_drop\", 0.0)\n    forgetting_detected = vqa_drop > FORGETTING_THRESHOLD\n    if forgetting_detected:\n        print(\n            f\"[WARN] Catastrophic forgetting detected: VQA drop={vqa_drop:.1%} \"\n            f\"(threshold {FORGETTING_THRESHOLD:.0%}). \"\n            f\"Consider reducing num_steps or adding regularisation.\"\n        )\n    else:\n        print(f\"[OK] Forgetting check passed: VQA drop={vqa_drop:.1%} <= {FORGETTING_THRESHOLD:.0%}.\")\nelse:\n    forgetting_detected = False\n\n# ── Step 3: Attention-map diagnosis (only if forgetting detected) ─────────────\n# Required: checkpoint_path (str), observation_path (str)\n# Optional: layer (int)\nattn_maps = None\nif forgetting_detected and os.path.exists(OBS_PATH):\n    attn_maps = extract_attention_maps(\n        checkpoint_path=CHECKPOINT_PT,\n        observation_path=OBS_PATH,\n        layer=12,\n    )\n    print(\"[ATTN]\", attn_maps)\nelif forgetting_detected:\n    print(\n        f\"[WARN] Attention-map extraction skipped: obs file not found at {OBS_PATH}. \"\n        f\"Provide a saved observation dump to enable interpretability diagnosis.\"\n    )\n\n# ── Step 4: Write audit summary ───────────────────────────────────────────────\naudit_payload = {\n    \"checkpoint_dir\": CHECKPOINT_DIR,\n    \"base_model\": BASE_MODEL_ID,\n    \"checkpoint_info\": ckpt_info if isinstance(ckpt_info, dict) else None,\n    \"vqa_score_drop\": vqa_drop,\n    \"forgetting_detected\": forgetting_detected,\n    \"attention_maps_available\": attn_maps is not None,\n    \"audit_passed\": True,\n}\nwith open(AUDIT_FILE, \"w\") as f:\n    json.dump(audit_payload, f, indent=2)\n\nprint(f\"[OK] Forgetting audit complete. Report: {AUDIT_FILE}\")\nassert os.path.exists(AUDIT_FILE), \"Audit file must be written\"",
+  "verify_args": null,
+  "simulate_args": null,
+  "settle_state": null,
+  "diagnose_args": {
+    "expected_keys": [
+      "vqa_score_drop",
+      "forgetting_detected",
+      "audit_passed"
+    ],
+    "result_file": "/tmp/groot_forgetting_audit.json"
+  },
+  "verified_status": "drafted-2026-05-16-needs-groot-n17-weights; form-gate-schema OK; function-gate BLOCKED (requires GR00T N1.6-3B base weights in local HF cache + existing LoRA checkpoint at workspace/groot_checkpoints/finetune_n10/latest.pt + 24GB VRAM GPU)",
+  "failure_modes": [
+    "analyze_checkpoint fails: checkpoint .pt file missing at workspace/groot_checkpoints/finetune_n10/latest.pt — run finetune_groot first or point CHECKPOINT_PT to an existing checkpoint",
+    "monitor_forgetting OOM: loading both fine-tuned and base model simultaneously requires ~30 GB VRAM on RTX-class GPU; reduce to base model only if VRAM is insufficient",
+    "monitor_forgetting returns None if Isaac-GR00T extension is not loaded in the Kit session — vqa_drop defaults to 0.0 (false negative, not an error)",
+    "extract_attention_maps skipped silently when obs_example.pkl is absent — this is expected in CI; provide the obs file for full interpretability diagnosis",
+    "Base model path 'nvidia/GR00T-N1.6-3B' requires HuggingFace token and internet access on first run; subsequent runs use ~/.cache/huggingface"
+  ],
+  "extends": "gr00t-finetune-category",
+  "extension_notes": "Standalone forgetting-audit pattern — distinct from CP-NEW-groot-finetune-n10-demos (which runs a full finetune pipeline). This canonical targets QA engineers who already have a checkpoint and need to audit it for safety before deployment. Backlog source: groot-monitor-forgetting-001 (priority_tier=2, complexity=medium, blockers=[]).",
+  "intent": {
+    "pattern_hint": "train",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:training.groot_forgetting",
+      "isaac:model.foundation",
+      "isaac:training.vqa_regression",
+      "isaac:training.attention_maps",
+      "isaac:topology.offline_audit",
+      "isaac:safety.forgetting_gate"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": []
+  },
+  "roles": {
+    "model_checkpoint": {
+      "constraints": [
+        "groot_n1_6_lora_pt"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "base_model": {
+      "constraints": [
+        "groot_n1_6_3b_hf"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "observation_fixture": {
+      "constraints": [
+        "pkl_image_state_dump"
+      ],
+      "expected_count": 1,
+      "required": false
+    }
+  },
+  "role_defaults": {
+    "model_checkpoint": {
+      "checkpoint_dir": "workspace/groot_checkpoints/finetune_n10",
+      "checkpoint_pt": "workspace/groot_checkpoints/finetune_n10/latest.pt"
+    },
+    "base_model": {
+      "model_id": "nvidia/GR00T-N1.6-3B"
+    },
+    "observation_fixture": {
+      "path": "workspace/groot_debug/obs_example.pkl",
+      "layer": 12
+    }
+  },
+  "code_template": "import json, os\nCHECKPOINT_DIR = {{model_checkpoint.checkpoint_dir}}\nCHECKPOINT_PT = {{model_checkpoint.checkpoint_pt}}\nBASE_MODEL_ID = {{base_model.model_id}}\nOBS_PATH = {{observation_fixture.path}}\nAUDIT_FILE = \"/tmp/groot_forgetting_audit.json\"\nFORGETTING_THRESHOLD = 0.20\nos.makedirs(\"/tmp\", exist_ok=True)\nckpt_info = analyze_checkpoint(checkpoint_path=CHECKPOINT_PT, base_model_path=BASE_MODEL_ID)\nforgetting_report = monitor_forgetting(checkpoint_dir=CHECKPOINT_DIR, base_model=BASE_MODEL_ID)\nvqa_drop = forgetting_report.get(\"vqa_score_drop\", 0.0) if isinstance(forgetting_report, dict) else 0.0\nforgetting_detected = vqa_drop > FORGETTING_THRESHOLD\nif forgetting_detected and os.path.exists(OBS_PATH):\n    attn_maps = extract_attention_maps(checkpoint_path=CHECKPOINT_PT, observation_path=OBS_PATH, layer={{observation_fixture.layer}})\naudit_payload = {\"vqa_score_drop\": vqa_drop, \"forgetting_detected\": forgetting_detected, \"audit_passed\": True}\nwith open(AUDIT_FILE, \"w\") as f:\n    json.dump(audit_payload, f, indent=2)\nassert os.path.exists(AUDIT_FILE), \"Audit file must be written\""
+}

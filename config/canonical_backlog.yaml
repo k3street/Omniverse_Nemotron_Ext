@@ -1514,7 +1514,9 @@
   motion_controller_preference: direct_joint
   pattern_hint: finetune
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-groot-forgetting-monitor.json
+  drafted_date: "2026-05-16"
 
 - id: groot-suggest-config-001
   source: retrieval-miss
