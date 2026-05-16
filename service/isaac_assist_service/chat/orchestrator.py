@@ -41,6 +41,57 @@ _COMPRESS_OUTPUT_MAX_CHARS = int(os.environ.get("COMPRESS_OUTPUT_MAX_CHARS", "60
 _TRUNCATION_MARKER = "...[truncated"  # Marker in already-compressed content
 
 
+# ---------------------------------------------------------------------------
+# Motion-controller retrieval filter (Round 11b, 2026-05-16)
+# ---------------------------------------------------------------------------
+# Reads RETRIEVAL_MC_FILTER env-var and returns a motion_controller_constraint
+# dict for propagation into all template-retrieval call sites.
+#
+# Env-var semantics:
+#   unset / ""            → None (no filter; default; backward-compatible)
+#   "curobo"              → {must_verified: ["curobo"]}
+#   "curobo,rmpflow"      → {must_verified: ["curobo", "rmpflow"]}
+#   "!admittance"         → {must_not_failed: ["admittance"]}
+#   "curobo,!moveit2"     → {must_verified: ["curobo"], must_not_failed: ["moveit2"]}
+#
+# The filter is honoured only when RETRIEVAL_MC_FILTER is also in ("on",
+# "true", "1", "yes") OR contains a constraint expression (any non-empty,
+# non-on/off value is treated as a constraint expression that also activates
+# the filter gate automatically).
+# ---------------------------------------------------------------------------
+
+def _parse_mc_filter_env() -> Optional[Dict]:
+    """Parse RETRIEVAL_MC_FILTER env-var into a motion_controller_constraint dict.
+
+    Returns None when the env-var is unset, empty, or a plain on/off flag.
+    Returns a constraint dict for any expression that contains controller names.
+
+    The dict has the shape expected by retrieve_templates_with_scores and the
+    two intent-filter wrappers:
+        {"must_verified": [...], "must_not_failed": [...]}
+    Either key may be absent if no tokens of that kind were found.
+    """
+    raw = os.environ.get("RETRIEVAL_MC_FILTER", "").strip()
+    if not raw or raw.lower() in ("on", "off", "true", "false", "1", "0", "yes", "no"):
+        return None
+    must_verified: List[str] = []
+    must_not_failed: List[str] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if token.startswith("!"):
+            must_not_failed.append(token[1:])
+        else:
+            must_verified.append(token)
+    result: Dict = {}
+    if must_verified:
+        result["must_verified"] = must_verified
+    if must_not_failed:
+        result["must_not_failed"] = must_not_failed
+    return result if result else None
+
+
 def _compress_tool_result_content(content_str: str, max_output_chars: int = _COMPRESS_OUTPUT_MAX_CHARS) -> str:
     """Compress a JSON-stringified tool result. Drop the verbose `code`
     field (generated patch source), truncate `output` to max_output_chars,
@@ -908,6 +959,12 @@ class ChatOrchestrator:
             _multimodal_text = _intent_mode in ("on", "true", "1", "yes", "soft", "hard")
             _use_soft_filter = _intent_mode in ("on", "true", "1", "yes", "soft")
 
+            # Motion-controller constraint (R11b): parse RETRIEVAL_MC_FILTER
+            # env-var into a constraint dict and pass it to every retrieval
+            # path so production queries honour the filter end-to-end.
+            # None when env-var is unset / empty / plain on/off flag.
+            _mc_filter = _parse_mc_filter_env()
+
             scored = None
             if _multimodal_text:
                 try:
@@ -918,11 +975,13 @@ class ChatOrchestrator:
                         scored = retrieve_with_intent_soft_filter(
                             intent_dump, top_k=_template_top_k,
                             original_query=user_message,
+                            motion_controller_constraint=_mc_filter,
                         )
                         _filter_path = "soft_filter"
                     else:
                         scored = retrieve_with_intent_filter(
                             intent_dump, top_k=_template_top_k,
+                            motion_controller_constraint=_mc_filter,
                         )
                         _filter_path = "hard_filter"
                     logger.info(
@@ -931,6 +990,7 @@ class ChatOrchestrator:
                         f"pattern={spec.intent.pattern_hint} "
                         f"n_robots={spec.intent.counts.robots} "
                         f"hits={len(scored)}"
+                        + (f" mc_filter={_mc_filter}" if _mc_filter else "")
                     )
                 except Exception as e:
                     logger.warning(
@@ -939,7 +999,10 @@ class ChatOrchestrator:
                     )
                     scored = None
             if scored is None:
-                scored = retrieve_templates_with_scores(user_message, top_k=_template_top_k)
+                scored = retrieve_templates_with_scores(
+                    user_message, top_k=_template_top_k,
+                    motion_controller_constraint=_mc_filter,
+                )
             top_sim = scored[0]["similarity"] if scored else 0.0
             second_sim = scored[1]["similarity"] if len(scored) > 1 else 0.0
             margin = top_sim - second_sim

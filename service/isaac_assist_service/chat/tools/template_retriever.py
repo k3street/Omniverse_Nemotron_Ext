@@ -604,6 +604,7 @@ def retrieve_with_intent_filter(
     count_tolerance: int = 0,
     fallback_to_embedding_only: bool = True,
     original_query: Optional[str] = None,
+    motion_controller_constraint: Optional[Dict] = None,
 ) -> List[Dict]:
     """Structural-filter-first retrieval per spec §8.1.
 
@@ -641,6 +642,11 @@ def retrieve_with_intent_filter(
             used as the embedding query for Stage 2 AND for the fallback
             path. When None, the fingerprint is used (legacy behaviour,
             kept for backward compatibility but produces semantic mismatch).
+        motion_controller_constraint: optional post-filter dict (same shape as
+            retrieve_templates_with_scores). Propagated to all internal
+            retrieve_templates_with_scores calls and applied inline to
+            Stage-2 results. Only active when RETRIEVAL_MC_FILTER env gate
+            is on.
 
     Returns: list of {template, task_id, distance, similarity} dicts,
     most-similar first.
@@ -664,7 +670,10 @@ def retrieve_with_intent_filter(
         )
         if not fallback_to_embedding_only:
             return []
-        return retrieve_templates_with_scores(embed_query, top_k=top_k)
+        return retrieve_templates_with_scores(
+            embed_query, top_k=top_k,
+            motion_controller_constraint=motion_controller_constraint,
+        )
 
     candidates = filter_templates_by_intent(spec_intent, count_tolerance)
 
@@ -678,7 +687,10 @@ def retrieve_with_intent_filter(
             "[TemplateRetriever] structural-filter found no candidates; "
             "falling back to embedding-only retrieval over full set"
         )
-        return retrieve_templates_with_scores(embed_query, top_k=top_k)
+        return retrieve_templates_with_scores(
+            embed_query, top_k=top_k,
+            motion_controller_constraint=motion_controller_constraint,
+        )
 
     # Stage 2: embed similarity over candidates only.
     # We restrict the ChromaDB query to the candidate IDs via the `where`
@@ -688,11 +700,14 @@ def retrieve_with_intent_filter(
     col = _get_collection()
     if col is None:
         # Without ChromaDB, return all candidates in arbitrary order
-        return [
+        out_no_db = [
             {"template": t, "task_id": t.get("task_id", "?"),
              "distance": 0.0, "similarity": 1.0}
             for t in candidates[:top_k]
         ]
+        if motion_controller_constraint is not None and _mc_filter_enabled():
+            out_no_db = _apply_motion_controller_filter(out_no_db, motion_controller_constraint)
+        return out_no_db
 
     candidate_ids = [t.get("task_id") for t in candidates if t.get("task_id")]
     try:
@@ -719,6 +734,9 @@ def retrieve_with_intent_filter(
                 "distance": d,
                 "similarity": similarity,
             })
+        # Apply motion-controller post-filter when env gate is on
+        if motion_controller_constraint is not None and _mc_filter_enabled():
+            out = _apply_motion_controller_filter(out, motion_controller_constraint)
         logger.info(
             f"[TemplateRetriever] structural-filter retrieved "
             f"{len(out)}/{len(candidates)} of {len(candidate_ids)} candidates: "
@@ -728,11 +746,14 @@ def retrieve_with_intent_filter(
     except Exception as e:
         logger.warning(f"[TemplateRetriever] Stage-2 query failed: {e}")
         # Conservative fallback: return all candidates in arbitrary order
-        return [
+        fallback_out = [
             {"template": t, "task_id": t.get("task_id", "?"),
              "distance": 0.0, "similarity": 1.0}
             for t in candidates[:top_k]
         ]
+        if motion_controller_constraint is not None and _mc_filter_enabled():
+            fallback_out = _apply_motion_controller_filter(fallback_out, motion_controller_constraint)
+        return fallback_out
 
 
 # ---------------------------------------------------------------------------
@@ -767,6 +788,7 @@ def retrieve_with_intent_soft_filter(
     original_query: Optional[str] = None,
     boost: float = 1.15,
     oversample: int = 3,
+    motion_controller_constraint: Optional[Dict] = None,
 ) -> List[Dict]:
     """Soft-filter hybrid retrieval (R15d).
 
@@ -788,6 +810,11 @@ def retrieve_with_intent_soft_filter(
             spec_is_null_signal returns True.
         oversample: full-corpus fetch multiplier. Fetches top_k * oversample
             candidates before re-ranking and trimming to top_k.
+        motion_controller_constraint: optional post-filter dict (same shape as
+            retrieve_templates_with_scores). Passed through to the inner
+            retrieve_templates_with_scores call so MC filtering is applied
+            before boost re-ranking. Only active when RETRIEVAL_MC_FILTER env
+            gate is on.
 
     Returns: list of {template, task_id, distance, similarity,
         similarity_boosted, boost_applied} dicts, most-similar first.
@@ -797,9 +824,15 @@ def retrieve_with_intent_soft_filter(
     fingerprint = canonical_structural_fingerprint(spec_intent)
     embed_query = original_query if original_query else fingerprint
 
-    # Fetch extended candidate set from full corpus
+    # Fetch extended candidate set from full corpus.
+    # Pass motion_controller_constraint so the MC post-filter is applied
+    # before boost ranking — avoids boosting templates that would be
+    # filtered anyway.
     n_fetch = top_k * oversample
-    full_results = retrieve_templates_with_scores(embed_query, top_k=n_fetch)
+    full_results = retrieve_templates_with_scores(
+        embed_query, top_k=n_fetch,
+        motion_controller_constraint=motion_controller_constraint,
+    )
 
     # Determine which templates are eligible for boost
     # Null-signal spec: no boost applied to anyone (mirrors baseline exactly)
