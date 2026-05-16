@@ -838,7 +838,9 @@
   motion_controller_preference: moveit2
   pattern_hint: navigate
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-occupancy-map-nav.json
+  drafted_date: "2026-05-16"
 
 - id: industrial-convex-hull-collision-opt-001
   source: industrial-asset
