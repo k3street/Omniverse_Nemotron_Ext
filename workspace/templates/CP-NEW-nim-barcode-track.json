@@ -1,0 +1,191 @@
+{
+  "task_id": "CP-NEW-nim-barcode-track",
+  "goal": "Build a NIM-driven barcode tracking pipeline: 4 cubes carrying distinct barcode-pattern semantic labels travel on a conveyor under an overhead camera. Each frame is conceptually streamed to an external NVIDIA Inference Microservice (NIM) which returns the decoded barcode string per detected item; the in-sim `barcode_reader_sensor` MOCKS the NIM response (no live cloud call). Each item is logged into a tracking record (barcode_id, first_seen_xform, last_seen_xform) as it traverses the camera FOV. Distinct from A24 (CP-NEW-barcode-scanner-divert) which performs internal barcode-sensor-driven 3-lane routing via Franka pick-place: A99 is a pure NIM-inference + tracking pipeline canonical, no robot, no routing. ONET-adjacent: warehouse parcel-tracking / distribution-centre track-and-trace operator.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "create_material",
+    "assign_material",
+    "apply_physics_material",
+    "set_semantic_label",
+    "create_conveyor",
+    "configure_camera",
+    "set_camera_params",
+    "set_camera_look_at",
+    "barcode_reader_sensor",
+    "get_world_transform",
+    "bulk_set_attribute"
+  ],
+  "thoughts": "Design rationale for CP-NEW-nim-barcode-track:\n\n1) NIM framing — NIM = NVIDIA Inference Microservice, a containerised vision-inference endpoint hosted externally (cloud / on-prem GPU server). In a deployed track-and-trace system, an overhead camera streams frames to the NIM container which returns decoded barcode strings + bounding boxes per detected item; the orchestrator then matches each detection to a tracked entity ID and updates a tracking record. In simulation we MOCK the NIM response via `barcode_reader_sensor` reading the cube's pre-assigned `Semantics_class` label — the sensor handler is the in-sim stand-in for the NIM HTTP round-trip. This is honest mocking: the canonical declares it `mock_data_not_real_inference` in failure_modes and the structural tag `isaac:ai_service.nim` flags that production would replace the sensor with an actual NIM client.\n\n2) DIFFERENTIATION FROM A24 (CP-NEW-barcode-scanner-divert) — both use barcode_reader_sensor + conveyor + 4-cube barcode-labelled scene, but the SHAPE of the pipeline differs:\n   - A24: pattern_hint='sort'. Sensor reads SKU, Franka diverts into 3 lane bins by routing table. Success = item in correct lane.\n   - A99: pattern_hint='other'. Sensor mocks NIM inference, tracking record logs item identity + pose at multiple sample points along the belt. NO robot, NO routing. Success = tracking_record contains a non-empty entry for every cube + every cube's last_seen_xform is downstream of its first_seen_xform.\n   The discriminator at retrieval is the AI-service tag (`isaac:ai_service.nim`) + sensor.barcode_reader + industry.barcode_tracking; A24's discriminator is routing.barcode_sku_divert + 3-lane topology. Both legitimately use barcode_reader_sensor as the in-sim sensor primitive.\n\n3) Pattern_hint = 'other' — chosen over 'sort' because the foundational intent here is the *tracking pipeline shape* (camera → NIM → record), not routing. The 'other' bucket is the documented home for novel patterns whose success criterion is shape-specific (`tracking_record_complete` here, not `workpiece_in_destination`). structural_tags carry the discriminating signal at retrieval time.\n\n4) Scene geometry:\n   - No robot (pure tracking pipeline).\n   - Long conveyor belt: 4.0m length, 0.40m width, top surface z=0.78 + 0.025 = 0.805.\n   - 4 cubes at x = [-1.80, -1.20, -0.60, 0.00], y = 0.0 (belt centre), z = 0.855 (cube centre = belt_top + cube_size/2).\n   - Overhead tracking camera at [0.0, 0.0, 1.60] looking down at the belt centre; focal_length 24mm + horizontal_aperture 20.955mm gives ~46° FOV ≈ 1.36m wide at z=1.60 - 0.855 = 0.745m below camera, comfortably covering the camera FOV zone x∈[-0.68, +0.68].\n   - Barcode-reader mock sensor at [0.0, 0.0, 1.20], scan_radius=0.50 — covers the same volume the NIM would see, so a cube entering the camera FOV is simultaneously detected by the mock.\n   - Belt velocity 0.10 m/s → at this speed a cube traverses the 1.36m camera FOV in ~13.6s; 4 cubes spaced 0.60m apart take ~24s to all pass through the FOV.\n\n5) Barcode patterns — 4 distinct barcode strings: 'BC_A1B2', 'BC_C3D4', 'BC_E5F6', 'BC_G7H8'. set_semantic_label with semantic_type='class' assigns each barcode string as the cube's class so the mock barcode_reader_sensor returns the corresponding string when the cube enters the scan volume. In a deployed system the NIM would decode the printed barcode pattern on the cube's surface texture; in sim we use semantic-label round-trip.\n\n6) Tracking record concept — get_world_transform is invoked once per cube at the start (first_seen) and once per cube at the end (last_seen) of the FOV traversal. The pair (cube_path, first_seen, last_seen, decoded_barcode) constitutes one tracking record entry. In a real system the record would be persisted to a database; in this canonical we simply emit the get_world_transform calls so the harness can verify pose deltas in simulate_args / verify_args.\n\n7) Materials — 4 distinctly tinted cubes (red, green, blue, yellow) to give visual differentiation in the camera viewport. Real barcodes would be a black-on-white printed pattern; here the colour stands in for visual class. The barcode_reader_sensor reads the semantic label, not the colour, so the sort is deterministic.\n\n8) Physics — CPU determinism (enable_gpu_dynamics=False, MBP broadphase) so the cube positions at sample time are repeatable. Rubber physics material on cubes prevents slipping during settle.\n\n9) Failure modes (production-realistic, distinct from A24 routing-mode failures):\n   - NIM service unreachable (network timeout / 503) — handler must declare an offline fallback path; documented in failure_modes. The canonical itself runs against the mock sensor so this is a deployment concern surfaced for honesty.\n   - Barcode quality too low for read (false read) — mock returns a non-matching class; tracking record carries the wrong barcode_id forward. Failure_modes documents the threshold-and-rescan mitigation.\n   - Tracking ID lost when item leaves camera FOV between frames — frame interval > traversal time causes a gap; canonical declares the relationship between belt velocity and frame rate.\n   - barcode_reader_sensor returns MOCK data not real inference — explicit honesty disclosure; structural_tags carry `isaac:ai_service.nim` so retrieval knows the canonical is a pipeline stub.\n\n10) Motion-controller honesty — no motion planning tool in tools_used, no motion-controller declaration required (this canonical is sensor-only). The motion_controllers field is present with empty arrays as defensive boilerplate.\n\n11) verify_args / simulate_args — verify_args declares the 4-cube tracking sample, the camera path, and the expected barcode_id per cube. simulate_args sets duration_s=60 (sufficient for 4 cubes at 0.10 m/s to traverse the ~2.4m belt span from start to end of FOV); cube_paths is a list (multi-cube), no robot target_path so we use target_path=/World/ConveyorBelt as the 'arrival destination' for harness compatibility. duration_s=60 keeps the function-gate run short.\n\n12) Structural tags — `isaac:industry.barcode_tracking` (new tag, complements A24's `isaac:routing.barcode_sku_divert`), `isaac:ai_service.nim` (new tag — first canonical declaring NIM dependency; future NIM-backed canonicals will share this), `isaac:sensor.barcode_reader` (shared with A24), `isaac:transport.conveyor`, `isaac:topology.tracking_pipeline`, `isaac:pattern.other` (long-tail bucket).",
+  "code": "# -- Scene skeleton --------------------------------------------------------\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# -- Physics: CPU determinism ---------------------------------------------\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# -- Tracking conveyor (no robot; pure tracking pipeline) -----------------\n# Belt top z = 0.78 + 0.025 = 0.805; cube centre z = 0.855.\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.0, 0.78],\n    size=[4.0, 0.40, 0.05],\n    surface_velocity=[0.10, 0, 0],\n)\n\n# -- Materials: 4 distinctly-tinted cubes for visual class differentiation\ncreate_material(material_path=\"/World/Materials/BarcodeRed\",    shader_type=\"OmniPBR\", diffuse_color=[0.95, 0.15, 0.15])\ncreate_material(material_path=\"/World/Materials/BarcodeGreen\",  shader_type=\"OmniPBR\", diffuse_color=[0.15, 0.85, 0.20])\ncreate_material(material_path=\"/World/Materials/BarcodeBlue\",   shader_type=\"OmniPBR\", diffuse_color=[0.15, 0.30, 0.95])\ncreate_material(material_path=\"/World/Materials/BarcodeYellow\", shader_type=\"OmniPBR\", diffuse_color=[0.95, 0.90, 0.15])\n\n# -- 4 cubes with distinct barcode-pattern semantic labels ----------------\n# Spaced 0.60m apart; belt velocity 0.10 m/s -> ~6s gap between cubes at\n# the camera FOV centre. Barcode strings are pre-assigned via set_semantic_label\n# and the mock barcode_reader_sensor reads them when each cube enters scan.\n_item_specs = [\n    {\"path\": \"/World/Item_1\", \"x\": -1.80, \"barcode\": \"BC_A1B2\", \"material\": \"/World/Materials/BarcodeRed\"},\n    {\"path\": \"/World/Item_2\", \"x\": -1.20, \"barcode\": \"BC_C3D4\", \"material\": \"/World/Materials/BarcodeGreen\"},\n    {\"path\": \"/World/Item_3\", \"x\": -0.60, \"barcode\": \"BC_E5F6\", \"material\": \"/World/Materials/BarcodeBlue\"},\n    {\"path\": \"/World/Item_4\", \"x\":  0.00, \"barcode\": \"BC_G7H8\", \"material\": \"/World/Materials/BarcodeYellow\"},\n]\nitem_paths = [s[\"path\"] for s in _item_specs]\n\nfor spec in _item_specs:\n    p = spec[\"path\"]\n    create_prim(prim_path=p, prim_type=\"Cube\", position=[spec[\"x\"], 0.0, 0.855], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=p, schema_name=api)\n    assign_material(prim_path=p, material_path=spec[\"material\"])\n    # Barcode string is the cube's semantic class; mock barcode_reader_sensor\n    # reads this and returns it as the 'decoded' barcode string.\n    set_semantic_label(prim_path=p, class_name=spec[\"barcode\"], semantic_type=\"class\")\n    apply_physics_material(prim_path=p, material_name=\"rubber\")\n\nbulk_set_attribute(prim_paths=item_paths, attr=\"physics:mass\", value=0.30)\nbulk_set_attribute(prim_paths=item_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\n\n# -- Overhead tracking camera (NIM frame source in production) ------------\n# At z=1.60 looking straight down at belt centre. Focal_length 24mm +\n# horizontal_aperture 20.955mm => HFOV ~46deg => ~0.63m half-width at z=0.745m\n# below the camera, covering x in [-0.63, +0.63]. Cubes spaced 0.60m means at\n# any instant ~2-3 cubes are visible simultaneously, matching a realistic\n# NIM frame batch.\ncreate_prim(prim_path=\"/World/NimCamera\", prim_type=\"Camera\")\nconfigure_camera(\n    camera_path=\"/World/NimCamera\",\n    focal_length=24.0,\n    horizontal_aperture=20.955,\n    clipping_range=[0.01, 100.0],\n)\nset_camera_params(\n    camera_path=\"/World/NimCamera\",\n    params={\"focal_length\": 24.0, \"horizontal_aperture\": 20.955},\n)\nset_camera_look_at(\n    camera_path=\"/World/NimCamera\",\n    target=[0.0, 0.0, 0.78],\n    eye=[0.0, 0.0, 1.60],\n)\n\n# -- Barcode-reader sensor (NIM inference MOCK) ---------------------------\n# In production, frames from /World/NimCamera would be POSTed to the NIM\n# barcode-decoder microservice (e.g. nv-cv-barcode:1.0) which returns\n# decoded barcode strings + bbox per detected item. In simulation we mock\n# that with barcode_reader_sensor reading the semantic class label of each\n# cube within scan_radius. The structural tag isaac:ai_service.nim flags\n# this canonical as a NIM-pipeline stub for retrieval.\nbarcode_reader_sensor(\n    sensor_path=\"/World/NimBarcodeMock\",\n    position=[0.0, 0.0, 1.20],\n    scan_radius=0.50,\n)\n\n# -- Tracking record: sample each cube's pose at start (first_seen) ------\n# In production the orchestrator would correlate NIM detections frame-to-frame\n# to maintain a tracking record. Here we sample the world transform at the\n# beginning so the harness can verify first_seen pose; settle_state encodes\n# the expected start positions.\nfor p in item_paths:\n    get_world_transform(prim_path=p)\n",
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\ncreate_conveyor(\n    prim_path={{tracking_conveyor.path}},\n    position={{tracking_conveyor.position}},\n    size={{tracking_conveyor.size}},\n    surface_velocity={{tracking_conveyor.surface_velocity}},\n)\ncreate_material(material_path=\"/World/Materials/BarcodeRed\",    shader_type=\"OmniPBR\", diffuse_color=[0.95, 0.15, 0.15])\ncreate_material(material_path=\"/World/Materials/BarcodeGreen\",  shader_type=\"OmniPBR\", diffuse_color=[0.15, 0.85, 0.20])\ncreate_material(material_path=\"/World/Materials/BarcodeBlue\",   shader_type=\"OmniPBR\", diffuse_color=[0.15, 0.30, 0.95])\ncreate_material(material_path=\"/World/Materials/BarcodeYellow\", shader_type=\"OmniPBR\", diffuse_color=[0.95, 0.90, 0.15])\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\napply_api_schema(prim_path={{workpieces[0].path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{workpieces[0].path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{workpieces[0].path}}, schema_name=\"PhysicsMassAPI\")\nassign_material(prim_path={{workpieces[0].path}}, material_path={{workpieces[0].material}})\nset_semantic_label(prim_path={{workpieces[0].path}}, class_name={{workpieces[0].barcode}}, semantic_type=\"class\")\napply_physics_material(prim_path={{workpieces[0].path}}, material_name=\"rubber\")\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size=0.05)\napply_api_schema(prim_path={{workpieces[1].path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{workpieces[1].path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{workpieces[1].path}}, schema_name=\"PhysicsMassAPI\")\nassign_material(prim_path={{workpieces[1].path}}, material_path={{workpieces[1].material}})\nset_semantic_label(prim_path={{workpieces[1].path}}, class_name={{workpieces[1].barcode}}, semantic_type=\"class\")\napply_physics_material(prim_path={{workpieces[1].path}}, material_name=\"rubber\")\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cube\", position={{workpieces[2].position}}, size=0.05)\napply_api_schema(prim_path={{workpieces[2].path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{workpieces[2].path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{workpieces[2].path}}, schema_name=\"PhysicsMassAPI\")\nassign_material(prim_path={{workpieces[2].path}}, material_path={{workpieces[2].material}})\nset_semantic_label(prim_path={{workpieces[2].path}}, class_name={{workpieces[2].barcode}}, semantic_type=\"class\")\napply_physics_material(prim_path={{workpieces[2].path}}, material_name=\"rubber\")\ncreate_prim(prim_path={{workpieces[3].path}}, prim_type=\"Cube\", position={{workpieces[3].position}}, size=0.05)\napply_api_schema(prim_path={{workpieces[3].path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{workpieces[3].path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{workpieces[3].path}}, schema_name=\"PhysicsMassAPI\")\nassign_material(prim_path={{workpieces[3].path}}, material_path={{workpieces[3].material}})\nset_semantic_label(prim_path={{workpieces[3].path}}, class_name={{workpieces[3].barcode}}, semantic_type=\"class\")\napply_physics_material(prim_path={{workpieces[3].path}}, material_name=\"rubber\")\nbulk_set_attribute(prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}], attr=\"physics:mass\", value=0.30)\nbulk_set_attribute(prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\ncreate_prim(prim_path={{nim_camera.path}}, prim_type=\"Camera\")\nconfigure_camera(\n    camera_path={{nim_camera.path}},\n    focal_length={{nim_camera.focal_length}},\n    horizontal_aperture=20.955,\n    clipping_range=[0.01, 100.0],\n)\nset_camera_params(\n    camera_path={{nim_camera.path}},\n    params={\"focal_length\": {{nim_camera.focal_length}}, \"horizontal_aperture\": 20.955},\n)\nset_camera_look_at(\n    camera_path={{nim_camera.path}},\n    target={{nim_camera.target}},\n    eye={{nim_camera.position}},\n)\nbarcode_reader_sensor(\n    sensor_path={{nim_barcode_mock.path}},\n    position={{nim_barcode_mock.position}},\n    scan_radius={{nim_barcode_mock.scan_radius}},\n)\nget_world_transform(prim_path={{workpieces[0].path}})\nget_world_transform(prim_path={{workpieces[1].path}})\nget_world_transform(prim_path={{workpieces[2].path}})\nget_world_transform(prim_path={{workpieces[3].path}})",
+  "failure_modes": [
+    "NIM service unreachable (network timeout / 503) — in production the orchestrator POSTs camera frames to the NIM container; transient unreachability (DNS failure, container restart, GPU OOM on the NIM host) causes the inference call to time out. The canonical itself uses the in-sim barcode_reader_sensor mock so this failure mode does not manifest during simulation, but a deployed system MUST declare an offline fallback path: either cache the last good detection per tracked entity, or use a CPU-side barcode-decoder library (zbar/pyzbar) as a degraded fallback. The canonical surfaces this honestly in structural_tags via isaac:ai_service.nim so retrieval knows the production deployment carries a network dependency.",
+    "Barcode quality too low for read — printed barcode pattern is partially occluded, glare obscures bars, or the angle is too oblique for NIM to decode confidently. The NIM endpoint returns a low-confidence detection or no detection; the orchestrator's tracking record gets a None entry. The canonical mock cannot reproduce this (semantic label always reads cleanly), but the production deployment must enforce a min_confidence threshold + a rescan policy (re-trigger a second NIM call on the next frame if confidence < 0.7).",
+    "Tracking ID lost when item leaves camera FOV between frames — if the NIM frame rate is too low relative to belt velocity, an item can fully traverse the FOV between two consecutive frames and the orchestrator loses correlation between the start-of-FOV detection and the next sighting downstream. Mitigation: frame_rate >= 2 * (FOV_length / belt_velocity)^-1. With FOV ~1.36m and belt 0.10 m/s, traversal time ~13.6s, so a 1Hz NIM call is sufficient. Faster belts (>0.50 m/s) need >2Hz inference or a CPU-side Kalman-predictor between NIM calls.",
+    "barcode_reader_sensor returns MOCK data, not real NIM inference — the in-sim sensor reads the cube's pre-assigned Semantics_class string and returns it deterministically. The canonical EXPLICITLY declares this in tools_used + structural_tags (isaac:ai_service.nim flags pipeline-stub status). When migrating this canonical to a production deployment, the barcode_reader_sensor call must be replaced with an HTTP client call to the NIM endpoint; the semantic label can be retained for validation but should not drive the routing logic. Retrieval consumers should be aware: this canonical proves the pipeline shape, not the NIM accuracy.",
+    "Camera FOV does not cover full belt width — at z=1.60 with focal_length=24mm + horizontal_aperture=20.955mm the HFOV is ~46deg, giving ~0.63m half-width at z=0.745m below the camera. The belt is 0.40m wide and centred at y=0, so the FOV easily covers it in y, but the VFOV at the same aspect ratio is narrower and the cube enters the FOV ~0.63m before x=0 and exits ~0.63m after. If a future scenario_profile widens the belt beyond 0.80m the camera height must increase or focal_length must shorten. Verify by intersecting the camera frustum with the belt extent at build time.",
+    "set_semantic_label semantic_type mismatch — barcode_reader_sensor reads the Semantics_class USD instance (semantic_type='class'). If a future patch changes semantic_type to 'label' or 'barcode', the sensor returns None and the tracking record carries empty barcode_id values. Always set semantic_type='class' when the sensor is the canonical barcode_reader_sensor.",
+    "Cube spacing too tight for unique tracking — at 0.60m spacing and 0.10 m/s belt, cubes are ~6s apart at the FOV centre. If spacing drops below the camera FOV diameter (~1.26m here) ALL cubes are visible in a single frame, and the orchestrator must run a multi-object tracker (SORT / DeepSORT) to maintain per-cube identity across frames. The canonical assumes single-object-per-frame for simplicity; multi-object tracking is a scenario_profile extension."
+  ],
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": true,
+      "uses_overhead_camera": true,
+      "uses_nim_inference": true,
+      "has_routing": false,
+      "n_workpieces": 4,
+      "tracking_pipeline": true
+    },
+    "structural_tags": [
+      "isaac:industry.barcode_tracking",
+      "isaac:ai_service.nim",
+      "isaac:sensor.barcode_reader",
+      "isaac:sensor.overhead_camera",
+      "isaac:transport.conveyor",
+      "isaac:topology.tracking_pipeline",
+      "isaac:pattern.other",
+      "isaac:no_robot"
+    ]
+  },
+  "roles": {
+    "tracking_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "nim_camera": {
+      "constraints": ["camera"],
+      "expected_count": 1,
+      "required": true
+    },
+    "nim_barcode_mock": {
+      "constraints": ["barcode_reader_sensor"],
+      "expected_count": 1,
+      "required": true,
+      "note": "In-sim mock of the NIM barcode-decoder inference endpoint; replace with HTTP client call to NIM in production deployment."
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 2,
+      "max": 12,
+      "param_name": "n_cubes",
+      "unordered": false,
+      "note": "Each cube carries a distinct barcode-pattern semantic class label that the mock barcode_reader_sensor returns."
+    }
+  },
+  "role_defaults": {
+    "tracking_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [0.0, 0.0, 0.78],
+      "size": [4.0, 0.40, 0.05],
+      "surface_velocity": [0.10, 0, 0]
+    },
+    "nim_camera": {
+      "path": "/World/NimCamera",
+      "position": [0.0, 0.0, 1.60],
+      "target": [0.0, 0.0, 0.78],
+      "focal_length": 24.0,
+      "horizontal_aperture": 20.955
+    },
+    "nim_barcode_mock": {
+      "path": "/World/NimBarcodeMock",
+      "position": [0.0, 0.0, 1.20],
+      "scan_radius": 0.50
+    },
+    "workpieces": [
+      {"path": "/World/Item_1", "position": [-1.80, 0.0, 0.855], "barcode": "BC_A1B2", "material": "/World/Materials/BarcodeRed",    "color": "red",    "mass": 0.30},
+      {"path": "/World/Item_2", "position": [-1.20, 0.0, 0.855], "barcode": "BC_C3D4", "material": "/World/Materials/BarcodeGreen",  "color": "green",  "mass": 0.30},
+      {"path": "/World/Item_3", "position": [-0.60, 0.0, 0.855], "barcode": "BC_E5F6", "material": "/World/Materials/BarcodeBlue",   "color": "blue",   "mass": 0.30},
+      {"path": "/World/Item_4", "position": [ 0.00, 0.0, 0.855], "barcode": "BC_G7H8", "material": "/World/Materials/BarcodeYellow", "color": "yellow", "mass": 0.30}
+    ],
+    "operator_role": {
+      "yrkesroll": "track_and_trace_operator",
+      "title": "Warehouse Track-and-Trace / Parcel Tracking Operator",
+      "responsibilities": [
+        "monitor_nim_inference_feed",
+        "verify_tracking_record_completeness",
+        "investigate_lost_track_events",
+        "handle_low_confidence_detections"
+      ],
+      "ai_service_dependency": {
+        "service": "NVIDIA Inference Microservice (NIM)",
+        "endpoint_role": "barcode_decoder",
+        "container_hint": "nv-cv-barcode:1.0",
+        "production_call": "HTTP POST frame -> {barcode_string, bbox, confidence}",
+        "sim_mock": "barcode_reader_sensor reading set_semantic_label(class_name=barcode) per cube"
+      }
+    }
+  },
+  "settle_state": {
+    "items_initial": {
+      "/World/Item_1": [-1.80, 0.0, 0.855],
+      "/World/Item_2": [-1.20, 0.0, 0.855],
+      "/World/Item_3": [-0.60, 0.0, 0.855],
+      "/World/Item_4": [ 0.00, 0.0, 0.855]
+    },
+    "expected_barcodes": {
+      "/World/Item_1": "BC_A1B2",
+      "/World/Item_2": "BC_C3D4",
+      "/World/Item_3": "BC_E5F6",
+      "/World/Item_4": "BC_G7H8"
+    },
+    "camera": {
+      "/World/NimCamera": [0.0, 0.0, 1.60],
+      "look_at": [0.0, 0.0, 0.78],
+      "focal_length": 24.0
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.10, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": null,
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/ConveyorBelt",
+        "robot_kind": "none",
+        "tracking_sample_paths": ["/World/Item_1", "/World/Item_2", "/World/Item_3", "/World/Item_4"]
+      }
+    ],
+    "cube_paths": ["/World/Item_1", "/World/Item_2", "/World/Item_3", "/World/Item_4"],
+    "camera_path": "/World/NimCamera",
+    "sensor_path": "/World/NimBarcodeMock",
+    "expected_barcodes": {
+      "/World/Item_1": "BC_A1B2",
+      "/World/Item_2": "BC_C3D4",
+      "/World/Item_3": "BC_E5F6",
+      "/World/Item_4": "BC_G7H8"
+    }
+  },
+  "simulate_args": {
+    "cube_paths": ["/World/Item_1", "/World/Item_2", "/World/Item_3", "/World/Item_4"],
+    "target_path": "/World/ConveyorBelt",
+    "duration_s": 60,
+    "success_criterion": "tracking_record_complete",
+    "expected_displacement_min_m": 0.50,
+    "notes": "Success = each cube traversed at least 0.50m in +x along the belt during the 60s window AND barcode_reader_sensor returned the expected barcode_id for each. No routing target; cubes remain on the belt after FOV traversal."
+  },
+  "diagnose_args": {
+    "sensor_path": "/World/NimBarcodeMock",
+    "camera_path": "/World/NimCamera",
+    "tracking_pipeline_paths": ["/World/Item_1", "/World/Item_2", "/World/Item_3", "/World/Item_4"],
+    "obstacles": ["/World/ConveyorBelt"]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "untested": [],
+    "failed": {},
+    "note": "No motion-planning tools in tools_used; canonical is a pure sensor + tracking pipeline. motion_controllers field present as defensive boilerplate."
+  },
+  "verified_status": "drafted-2026-05-16-A99; form-gate pending; function-gate pending — NIM mock via barcode_reader_sensor, production deployment requires HTTP client to NIM endpoint",
+  "extends": "CP-NEW-barcode-scanner-divert",
+  "extension_notes": "Sister canonical to A24 (CP-NEW-barcode-scanner-divert). Both use barcode_reader_sensor + conveyor + 4-cube barcode-labelled scene. DISTINCT pipeline shape: A24 = internal sensor-driven 3-lane routing via Franka pick-place (pattern_hint='sort'); A99 = external NIM-inference + tracking pipeline, no robot, no routing (pattern_hint='other'). Retrieval discrimination via structural_tags isaac:ai_service.nim + isaac:industry.barcode_tracking + isaac:topology.tracking_pipeline (A99) vs isaac:routing.barcode_sku_divert (A24). Scenario-profile extensions: (a) plug a real NIM HTTP client in place of barcode_reader_sensor — declare nim_endpoint_url + auth_token; (b) add a multi-object tracker (SORT/DeepSORT) for tight-spaced cubes; (c) extend to multi-camera coverage with handoff between FOVs; (d) wire into a routing stage by appending a setup_pick_place_controller downstream of the tracking record (this would transition the canonical back toward A24's pattern_hint='sort')."
+}
