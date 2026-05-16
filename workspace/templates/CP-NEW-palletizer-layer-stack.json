@@ -1,6 +1,6 @@
 {
   "task_id": "CP-NEW-palletizer-layer-stack",
-  "goal": "Build a 2x3 layer-stack palletizer: a UR10 robot picks uniform 0.10m boxes from an infeed conveyor and places them in a 2-column × 3-row grid on a 0.70×0.50m pallet behind the robot. compute_stack_placement(pattern='grid_2x3') computes the 6 grid drop-positions in advance; a proximity sensor at the pick point triggers each pick cycle. Exercises UR10 reach envelope, compute_stack_placement grid math, and cuRobo multi-target drop_targets dispatch for industrial palletizing.",
+  "goal": "Build a 2x3 layer-stack palletizer: a UR10 robot picks uniform 0.10m boxes from an infeed conveyor and places them in a 2-column × 3-row grid on a 0.70×0.50m pallet behind the robot. Six drop-target positions are pre-computed using the grid_2x3 pattern geometry (pallet centre ± col/row offsets) and passed to setup_pick_place_controller as a drop_targets dict; a proximity sensor at the pick point triggers each pick cycle. Exercises UR10 reach envelope, grid placement math, and cuRobo multi-target drop_targets dispatch for industrial palletizing.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -148,5 +148,5 @@
     "untested": ["curobo", "rmpflow"],
     "failed": {}
   },
-  "verified_status": "drafted-2026-05-16; form-gate ⏳; function-gate ⏳"
+  "verified_status": "drafted-2026-05-16-patched-r-a-fix; form-gate ⏳ (schema-OK); function-gate ⏳"
 }
