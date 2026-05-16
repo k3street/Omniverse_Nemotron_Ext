@@ -314,7 +314,9 @@
   motion_controller_preference: curobo
   pattern_hint: rl-train
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-dr-curriculum-trainer.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-controller-benchmark-shootout-001
   source: industrial-asset
