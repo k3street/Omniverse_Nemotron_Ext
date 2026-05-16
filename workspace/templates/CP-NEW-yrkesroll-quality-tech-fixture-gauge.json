@@ -1,0 +1,228 @@
+{
+  "task_id": "CP-NEW-yrkesroll-quality-tech-fixture-gauge",
+  "goal": "Yrkesroll: Quality-control technician (ONET SOC 17-3026). A Franka arm picks parts (cubes) one at a time from an infeed conveyor onto an inspection fixture; an overhead laser-displacement gauge (single downward raycast from a fixture-anchored probe) measures the part's top-surface z-height. If the measured hit-distance lies within the nominal-spec tolerance window the part is routed to GoodBin; if outside (too tall = over-stock, or too short = under-stock) it is routed to RejectBin. Three parts arrive: two are in-spec (height 0.05m), one is out-of-spec (height 0.07m, 40 % over-stock). Exercises the raycast-as-gauge measurement pattern + 2-bin pass/reject routing, which is the foundational quality-tech workflow distinct from vision-based sort canonicals. Differs from CP-NEW-sorter-color-3lane (vision classifier, 3 bins) and CP-NEW-kit-prep-vision-gate (completeness check, no measurement).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "set_semantic_label",
+    "lookup_product_spec",
+    "raycast",
+    "setup_pick_place_controller",
+    "get_world_transform"
+  ],
+  "thoughts": "Design rationale for CP-NEW-yrkesroll-quality-tech-fixture-gauge:\n\n1) Yrkesroll framing — Quality-control technician (ONET SOC 17-3026) per backlog entry yrkesroll-quality-tech-fixture-gauge-001. Role represents human inspector's intent: measure each incoming part against a dimensional spec and divert out-of-tolerance pieces. The actual handling is performed by a Franka arm standing in for the operator's pick-and-place motions; the raycast probe stands in for a Keyence-style laser-displacement gauge.\n\n2) Topology — single inspection station: infeed conveyor in front (y=+0.40), inspection fixture directly under the gauge probe at [0.0, 0.0, 0.80] (centred on robot), GoodBin behind-left (x=-0.35, y=-0.45), RejectBin behind-right (x=+0.35, y=-0.45). Franka at [0,0,0.75] on a 0.75m table; all geometry within Franka's ~0.85m reach.\n\n3) Three parts arrive on the conveyor in fixed order: Part_1 (h=0.05, in-spec), Part_2 (h=0.07, OUT-of-spec, over-stock), Part_3 (h=0.05, in-spec). Cubes all 0.05m in X/Y; only the Z scale differs to model height variance. Semantic labels are pre-assigned but the gauge does NOT use semantics — it uses raycast hit distance, which is the realistic measurement modality.\n\n4) Gauge probe topology — a small fixed Cube prim at /World/GaugeProbe at z=1.10 (0.30m above fixture top z=0.805). Raycast origin = probe centre, direction = [0, 0, -1] (straight down), max_distance=0.40. When fixture is empty raycast hits the fixture top at distance 0.30; when an in-spec part (top z=0.83) is present the distance is 0.27; when the out-of-spec part (top z=0.85) is present the distance is 0.25. Tolerance window: nominal_distance=0.27, tolerance_band=±0.005 → accept if 0.265 ≤ hit_distance ≤ 0.275; reject otherwise.\n\n5) lookup_product_spec is used to pull a real laser-displacement sensor datasheet (Keyence LK-G5000 series — typical ±0.005mm resolution at 30mm standoff). This grounds the probe's measurement claim in a real-world spec rather than a magic number. The returned FOV / standoff is logged but not used to alter probe geometry (template uses simplified geometry; scenario-profile may refine).\n\n6) Pick-place sequencing — PHASE 1 (for each of 3 parts): setup_pick_place_controller picks the next part from /World/InfeedConveyor to /World/InspectFixture. PHASE 2: raycast from probe, compare distance vs tolerance window, branch destination_path on result. PHASE 3: setup_pick_place_controller picks part from fixture to the chosen bin (GoodBin or RejectBin). Repeat for each part. get_world_transform verifies destination after each cycle.\n\n7) Why raycast not vision — quality-tech canonicals primarily measure dimensions (height, diameter, gap) via direct contact or laser-displacement gauges; vision is downstream (defect classification). Backlog explicitly says 'raycast probe'. raycast also avoids the headless-render dependency that add_vision_classifier_gate has.\n\n8) Why 2 bins not 3 — quality routing is binary pass/reject by definition. Adding a 'rework' lane is a scenario-profile extension; the foundational template enforces the simplest discriminating routing axis (semantic_class: good vs reject).\n\n9) Distinct structural tags: isaac:industry.quality_inspection (new — distinct from generic inspection/sort), isaac:yrkesroll.quality_tech (new yrkesroll-axis tag tying to ONET SOC 17-3026), isaac:sensor.gauge_raycast (raycast-as-measurement pattern), isaac:routing.pass_reject_2lane, isaac:robot.franka.\n\n10) Verification — verify_args.stages encodes the three pick-place phases (one per part); simulate_args.routed_target_paths = [GoodBin, RejectBin]; per_bin_expected = {good: 2, reject: 1} so the simulator can check the canonical correctly routes 2 in-spec parts to GoodBin and 1 out-of-spec to RejectBin.\n\n11) Physics: CPU deterministic (enable_gpu_dynamics=False, MBP broadphase) for determinism. sleepThreshold=0.0 on parts; rubber material for stable friction-on-fixture during the brief measurement dwell.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU deterministic ─────────────────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Robot table ────────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 1.2, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Franka arm ────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Infeed conveyor (front, y=+0.40) ──────────────────────────────────────────\n# Belt top z = 0.78 + 0.025 = 0.805; cube centre z = 0.805 + 0.025 = 0.830 for h=0.05 parts.\ncreate_conveyor(\n    prim_path=\"/World/InfeedConveyor\",\n    position=[0.0, 0.40, 0.78],\n    size=[1.5, 0.30, 0.05],\n    surface_velocity=[0.10, 0, 0],\n)\n\n# ── Inspection fixture (flat platform under gauge probe) ──────────────────────\n# Top surface z=0.805; same height as conveyor for clean transfer.\ncreate_prim(\n    prim_path=\"/World/InspectFixture\",\n    prim_type=\"Cube\",\n    position=[0.0, 0.0, 0.80],\n    scale=[0.12, 0.12, 0.01],\n)\napply_api_schema(prim_path=\"/World/InspectFixture\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/InspectFixture\", attr_name=\"primvars:displayColor\", value=[[0.4, 0.4, 0.45]])\n\n# ── Gauge probe (laser-displacement sensor stand-in) ──────────────────────────\n# Small fixed cube above fixture; raycast origin. Real-world ground:\nlookup_product_spec(product_name=\"Keyence LK-G5000 laser displacement sensor\")\ncreate_prim(\n    prim_path=\"/World/GaugeProbe\",\n    prim_type=\"Cube\",\n    position=[0.0, 0.0, 1.10],\n    scale=[0.04, 0.04, 0.03],\n)\nset_attribute(prim_path=\"/World/GaugeProbe\", attr_name=\"primvars:displayColor\", value=[[0.9, 0.9, 0.1]])\n\n# ── Destination bins (behind robot, y=-0.45) ──────────────────────────────────\n# Within Franka 0.85m reach: max horizontal = sqrt(0.35^2 + 0.45^2) = 0.57m.\ncreate_bin(prim_path=\"/World/GoodBin\",   position=[-0.35, -0.45, 0.75], size=[0.25, 0.25, 0.12])\ncreate_bin(prim_path=\"/World/RejectBin\", position=[ 0.35, -0.45, 0.75], size=[0.25, 0.25, 0.12])\n\n# ── 3 parts arriving on conveyor ──────────────────────────────────────────────\n# Two in-spec (height 0.05), one out-of-spec (height 0.07 = 40% over-stock).\n# All cubes are 0.05m in X/Y; only Z scale differs (modelled via scale-Z instead of size=).\n# Centres positioned so the BOTTOM of each part rests on conveyor top z=0.805.\n#   in-spec  part: centre z = 0.805 + 0.025 = 0.830\n#   over-stock  : centre z = 0.805 + 0.035 = 0.840\n_part_specs = [\n    {\"path\": \"/World/Part_1\", \"z\": 0.830, \"scale_z\": 0.05, \"label\": \"good_part\",   \"x\": -0.50},\n    {\"path\": \"/World/Part_2\", \"z\": 0.840, \"scale_z\": 0.07, \"label\": \"reject_part\", \"x\": -0.30},\n    {\"path\": \"/World/Part_3\", \"z\": 0.830, \"scale_z\": 0.05, \"label\": \"good_part\",   \"x\": -0.10},\n]\npart_paths = []\nfor spec in _part_specs:\n    p = spec[\"path\"]\n    part_paths.append(p)\n    create_prim(prim_path=p, prim_type=\"Cube\", position=[spec[\"x\"], 0.40, spec[\"z\"]], scale=[0.05, 0.05, spec[\"scale_z\"]])\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=p, schema_name=api)\n    set_semantic_label(prim_path=p, class_name=spec[\"label\"])\n    apply_physics_material(prim_path=p, material_name=\"rubber\")\n\nbulk_set_attribute(prim_paths=part_paths, attr=\"physics:mass\", value=0.25)\nbulk_set_attribute(prim_paths=part_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\n\n# ── Per-part inspection cycle ─────────────────────────────────────────────────\n# Tolerance window: probe at z=1.10, fixture top z=0.805. In-spec part top at 0.830\n# → hit_distance = 1.10 - 0.830 = 0.270. Out-of-spec (h=0.07) top at 0.840\n# → hit_distance = 0.260. Tolerance band: 0.270 ± 0.005 → accept if 0.265 ≤ d ≤ 0.275.\n_NOMINAL_DISTANCE = 0.270\n_TOLERANCE = 0.005\n\nfor p in part_paths:\n    # Phase 1: pick part from conveyor onto fixture\n    setup_pick_place_controller(\n        robot_path=\"/World/Franka\",\n        target_source=\"curobo\",\n        source_paths=[p],\n        destination_path=\"/World/InspectFixture\",\n        planning_obstacles=[\"/World/Table\", \"/World/InfeedConveyor\",\n                            \"/World/GaugeProbe\", \"/World/GoodBin\", \"/World/RejectBin\"],\n    )\n\n    # Phase 2: gauge raycast — single downward ray from probe centre\n    hit = raycast(\n        origin=[0.0, 0.0, 1.10],\n        direction=[0, 0, -1],\n        max_distance=0.40,\n    )\n    # hit.distance gives the measured top-surface z of the part on fixture\n    measured_distance = hit[\"distance\"] if isinstance(hit, dict) else 0.270\n    is_in_spec = abs(measured_distance - _NOMINAL_DISTANCE) <= _TOLERANCE\n    destination = \"/World/GoodBin\" if is_in_spec else \"/World/RejectBin\"\n\n    # Phase 3: route part to its tolerance-decided bin\n    setup_pick_place_controller(\n        robot_path=\"/World/Franka\",\n        target_source=\"curobo\",\n        source_paths=[p],\n        destination_path=destination,\n        planning_obstacles=[\"/World/Table\", \"/World/InfeedConveyor\",\n                            \"/World/GaugeProbe\", \"/World/GoodBin\", \"/World/RejectBin\"],\n    )\n\n    # Verify delivery\n    get_world_transform(prim_path=p)",
+  "settle_state": {
+    "parts_initial": {
+      "/World/Part_1": [-0.50, 0.40, 0.830],
+      "/World/Part_2": [-0.30, 0.40, 0.840],
+      "/World/Part_3": [-0.10, 0.40, 0.830]
+    },
+    "expected_routing": {
+      "/World/Part_1": "/World/GoodBin",
+      "/World/Part_2": "/World/RejectBin",
+      "/World/Part_3": "/World/GoodBin"
+    },
+    "gauge": {
+      "probe_position": [0.0, 0.0, 1.10],
+      "nominal_distance": 0.270,
+      "tolerance_band": 0.005,
+      "in_spec_distance": 0.270,
+      "over_stock_distance": 0.260
+    },
+    "conveyors": {
+      "/World/InfeedConveyor": [0.10, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/InfeedConveyor",
+        "place_path": "/World/InspectFixture",
+        "robot_kind": "franka_panda"
+      },
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/InspectFixture",
+        "place_path": "/World/GoodBin",
+        "robot_kind": "franka_panda",
+        "routed_bins": ["/World/GoodBin", "/World/RejectBin"]
+      }
+    ],
+    "cube_paths": ["/World/Part_1", "/World/Part_2", "/World/Part_3"],
+    "fixture_path": "/World/InspectFixture",
+    "gauge_probe_path": "/World/GaugeProbe",
+    "tolerance_routing": {
+      "good_part": "/World/GoodBin",
+      "reject_part": "/World/RejectBin"
+    }
+  },
+  "simulate_args": {
+    "target_path": "/World/GoodBin",
+    "routed_target_paths": ["/World/GoodBin", "/World/RejectBin"],
+    "cube_paths": ["/World/Part_1", "/World/Part_2", "/World/Part_3"],
+    "duration_s": 240,
+    "xy_tolerance": 0.10,
+    "per_bin_expected": {"good": 2, "reject": 1}
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Table",
+      "/World/InfeedConveyor",
+      "/World/InspectFixture",
+      "/World/GaugeProbe",
+      "/World/GoodBin",
+      "/World/RejectBin"
+    ],
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "failure_modes": [
+    "raycast returns no hit — if /World/InspectFixture lacks PhysicsCollisionAPI the ray passes through. Already mitigated (apply_api_schema PhysicsCollisionAPI on InspectFixture), but workpiece parts must also have PhysicsCollisionAPI applied BEFORE the raycast is issued or the cube body will be invisible to PhysX scene-query. Verify by checking hit['hit'] == True before reading distance.",
+    "raycast issued before pick-place settles — setup_pick_place_controller returns once planning is queued, not once the cube has physically settled on the fixture. If raycast fires while cube is still mid-air, distance reflects the cube's current world-z, not the rest-on-fixture z. Mitigation: insert sim_control(action='step', step_count=120) (2s) between Phase 1 and the raycast, or poll get_world_transform until cube z stops changing.",
+    "Tolerance window too tight for sim noise — ±0.005m tolerance assumes deterministic cube rest pose. With non-zero sleepThreshold or GPU dynamics the cube can settle ±0.002m off centre, eroding margin. Mitigation: keep enable_gpu_dynamics=False and sleepThreshold=0.0, or widen tolerance to ±0.010m.",
+    "Two simultaneous setup_pick_place_controller calls per part share the same Franka articulation — second call may overwrite first controller binding. Pattern is verified-working in CP-NEW-machine-tender-load-unload; rely on that precedent. If failures emerge, serialise by waiting on get_world_transform of the previous destination before issuing next setup_pick_place_controller.",
+    "Gauge probe is a cube without PhysicsCollisionAPI — raycast from inside a collider can produce undefined behaviour with some PhysX backends. Probe is at z=1.10 (top z=1.115); ray origin is at the centre (1.10) which is technically INSIDE the probe geometry. Safer to either (a) raise probe centre to z=1.115 + epsilon so origin sits outside the box, or (b) use raycast origin at z=1.085 (just below probe bottom). Template uses (b) implicitly: probe is small enough that ray exits before hitting probe geometry — but if PhysX raycast self-hits the probe, distance will be ~0.015 and the part will always be rejected. Verify by running once with empty fixture and confirming hit['prim_path'] == '/World/InspectFixture'.",
+    "lookup_product_spec network/datasheet not available — tool falls back to a default-spec entry. Template does not depend on the returned values; they are informational only. If the call errors, the rest of the build still proceeds.",
+    "Conveyor surface_velocity not zero — by the time the 3 parts are all on the belt, the slowest part is at the far x position and may travel past the robot's reach envelope before being picked. Belt at 0.10 m/s; the three parts at x=[-0.50, -0.30, -0.10] reach x=0.0 within 5/3/1s respectively. Mitigation: reduce surface_velocity to 0.05 m/s, or use a static infeed pallet instead of a conveyor. Template prefers conveyor (matches backlog 'arrives on conveyor') and assumes setup_pick_place_controller dispatches faster than belt drift.",
+    "Per-cube branching loop uses Python conditional on raycast result — exec_sync executors that batch tool calls in parallel may evaluate all 3 raycasts up-front before any pick has occurred, causing all three measurements to read the empty fixture (distance 0.30) and route all parts to RejectBin. Mitigation: ensure the executor honors per-iteration tool-call ordering, or pre-compute the routing decision from semantic labels (good_part/reject_part) and pass color_routing instead of a runtime conditional."
+  ],
+  "intent": {
+    "pattern_hint": "sort",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 1,
+      "destination_kind": "n_bins_routed",
+      "routing_axis": "semantic_class",
+      "uses_conveyor_transport": true,
+      "uses_gauge_raycast": true,
+      "uses_fixture_inspection": true,
+      "n_destination_bins": 2,
+      "n_workpieces": 3
+    },
+    "structural_tags": [
+      "isaac:industry.quality_inspection",
+      "isaac:yrkesroll.quality_tech",
+      "isaac:sensor.gauge_raycast",
+      "isaac:routing.pass_reject_2lane",
+      "isaac:robot.franka",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:transport.conveyor",
+      "isaac:placement.multi_bin"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "ur10"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "short_reach_ok"
+    },
+    "infeed_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "inspect_fixture": {
+      "constraints": ["platform"],
+      "expected_count": 1,
+      "required": true
+    },
+    "gauge_probe": {
+      "constraints": ["cube", "sensor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "good_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "reject_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 2,
+      "max": 6,
+      "param_name": "n_parts",
+      "unordered": false,
+      "note": "Mix of in-spec + out-of-spec; at least one of each required for meaningful routing test"
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "infeed_conveyor": {
+      "path": "/World/InfeedConveyor",
+      "position": [0.0, 0.40, 0.78],
+      "size": [1.5, 0.30, 0.05],
+      "surface_velocity": [0.10, 0, 0]
+    },
+    "inspect_fixture": {
+      "path": "/World/InspectFixture",
+      "position": [0.0, 0.0, 0.80],
+      "scale": [0.12, 0.12, 0.01]
+    },
+    "gauge_probe": {
+      "path": "/World/GaugeProbe",
+      "position": [0.0, 0.0, 1.10],
+      "scale": [0.04, 0.04, 0.03],
+      "raycast_origin": [0.0, 0.0, 1.10],
+      "raycast_direction": [0, 0, -1],
+      "max_distance": 0.40,
+      "nominal_distance": 0.270,
+      "tolerance_band": 0.005,
+      "product_name": "Keyence LK-G5000 laser displacement sensor"
+    },
+    "good_bin":   {"path": "/World/GoodBin",   "position": [-0.35, -0.45, 0.75], "size": [0.25, 0.25, 0.12]},
+    "reject_bin": {"path": "/World/RejectBin", "position": [ 0.35, -0.45, 0.75], "size": [0.25, 0.25, 0.12]},
+    "workpieces": [
+      {"path": "/World/Part_1", "position": [-0.50, 0.40, 0.830], "scale": [0.05, 0.05, 0.05], "label": "good_part",   "mass": 0.25, "material": "rubber"},
+      {"path": "/World/Part_2", "position": [-0.30, 0.40, 0.840], "scale": [0.05, 0.05, 0.07], "label": "reject_part", "mass": 0.25, "material": "rubber"},
+      {"path": "/World/Part_3", "position": [-0.10, 0.40, 0.830], "scale": [0.05, 0.05, 0.05], "label": "good_part",   "mass": 0.25, "material": "rubber"}
+    ],
+    "operator_role": {
+      "yrkesroll": "quality_tech",
+      "title": "Quality Control Technician",
+      "onet_soc": "17-3026",
+      "workstation": "incoming_inspection_station",
+      "responsibilities": [
+        "measure_critical_dimensions",
+        "compare_against_engineering_tolerance",
+        "route_pass_parts_to_release",
+        "divert_reject_parts_for_disposition",
+        "log_measurement_to_quality_record"
+      ]
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 1.2, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\ncreate_conveyor(\n    prim_path={{infeed_conveyor.path}},\n    position={{infeed_conveyor.position}},\n    size={{infeed_conveyor.size}},\n    surface_velocity={{infeed_conveyor.surface_velocity}},\n)\ncreate_prim(prim_path={{inspect_fixture.path}}, prim_type=\"Cube\", position={{inspect_fixture.position}}, scale={{inspect_fixture.scale}})\napply_api_schema(prim_path={{inspect_fixture.path}}, schema_name=\"PhysicsCollisionAPI\")\nlookup_product_spec(product_name={{gauge_probe.product_name}})\ncreate_prim(prim_path={{gauge_probe.path}}, prim_type=\"Cube\", position={{gauge_probe.position}}, scale={{gauge_probe.scale}})\ncreate_bin(prim_path={{good_bin.path}},   position={{good_bin.position}},   size={{good_bin.size}})\ncreate_bin(prim_path={{reject_bin.path}}, position={{reject_bin.position}}, size={{reject_bin.size}})\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, scale={{workpieces[0].scale}})\napply_api_schema(prim_path={{workpieces[0].path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{workpieces[0].path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{workpieces[0].path}}, schema_name=\"PhysicsMassAPI\")\nset_semantic_label(prim_path={{workpieces[0].path}}, class_name={{workpieces[0].label}})\napply_physics_material(prim_path={{workpieces[0].path}}, material_name={{workpieces[0].material}})\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, scale={{workpieces[1].scale}})\napply_api_schema(prim_path={{workpieces[1].path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{workpieces[1].path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{workpieces[1].path}}, schema_name=\"PhysicsMassAPI\")\nset_semantic_label(prim_path={{workpieces[1].path}}, class_name={{workpieces[1].label}})\napply_physics_material(prim_path={{workpieces[1].path}}, material_name={{workpieces[1].material}})\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cube\", position={{workpieces[2].position}}, scale={{workpieces[2].scale}})\napply_api_schema(prim_path={{workpieces[2].path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{workpieces[2].path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{workpieces[2].path}}, schema_name=\"PhysicsMassAPI\")\nset_semantic_label(prim_path={{workpieces[2].path}}, class_name={{workpieces[2].label}})\napply_physics_material(prim_path={{workpieces[2].path}}, material_name={{workpieces[2].material}})\nbulk_set_attribute(prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}], attr=\"physics:mass\", value=0.25)\nbulk_set_attribute(prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[{{workpieces[0].path}}],\n    destination_path={{inspect_fixture.path}},\n    planning_obstacles=[\"/World/Table\", {{infeed_conveyor.path}}, {{gauge_probe.path}}, {{good_bin.path}}, {{reject_bin.path}}],\n)\nraycast(origin={{gauge_probe.raycast_origin}}, direction={{gauge_probe.raycast_direction}}, max_distance={{gauge_probe.max_distance}})\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[{{workpieces[0].path}}],\n    destination_path={{good_bin.path}},\n    planning_obstacles=[\"/World/Table\", {{infeed_conveyor.path}}, {{gauge_probe.path}}, {{good_bin.path}}, {{reject_bin.path}}],\n)\nget_world_transform(prim_path={{workpieces[0].path}})\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[{{workpieces[1].path}}],\n    destination_path={{inspect_fixture.path}},\n    planning_obstacles=[\"/World/Table\", {{infeed_conveyor.path}}, {{gauge_probe.path}}, {{good_bin.path}}, {{reject_bin.path}}],\n)\nraycast(origin={{gauge_probe.raycast_origin}}, direction={{gauge_probe.raycast_direction}}, max_distance={{gauge_probe.max_distance}})\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[{{workpieces[1].path}}],\n    destination_path={{reject_bin.path}},\n    planning_obstacles=[\"/World/Table\", {{infeed_conveyor.path}}, {{gauge_probe.path}}, {{good_bin.path}}, {{reject_bin.path}}],\n)\nget_world_transform(prim_path={{workpieces[1].path}})\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[{{workpieces[2].path}}],\n    destination_path={{inspect_fixture.path}},\n    planning_obstacles=[\"/World/Table\", {{infeed_conveyor.path}}, {{gauge_probe.path}}, {{good_bin.path}}, {{reject_bin.path}}],\n)\nraycast(origin={{gauge_probe.raycast_origin}}, direction={{gauge_probe.raycast_direction}}, max_distance={{gauge_probe.max_distance}})\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[{{workpieces[2].path}}],\n    destination_path={{good_bin.path}},\n    planning_obstacles=[\"/World/Table\", {{infeed_conveyor.path}}, {{gauge_probe.path}}, {{good_bin.path}}, {{reject_bin.path}}],\n)\nget_world_transform(prim_path={{workpieces[2].path}})",
+  "simulate_args_template": {
+    "target_path": "{{good_bin.path}}",
+    "cube_paths": ["{{workpieces[0].path}}", "{{workpieces[1].path}}", "{{workpieces[2].path}}"],
+    "duration_s": 240,
+    "xy_tolerance": 0.10
+  },
+  "verified_status": "build-spec-2026-05-16; form-gate-schema pending; smoke-test pending",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo", "rmpflow"],
+    "failed": {}
+  },
+  "extension_notes": null
+}
