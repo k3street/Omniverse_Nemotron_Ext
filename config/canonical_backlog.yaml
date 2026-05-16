@@ -219,7 +219,9 @@
   motion_controller_preference: curobo
   pattern_hint: other
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-machine-tender-door-interlock.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-forklift-amr-pallet-001
   source: ONET
