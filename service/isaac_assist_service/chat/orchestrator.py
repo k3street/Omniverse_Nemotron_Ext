@@ -890,18 +890,23 @@ class ChatOrchestrator:
 
             # Block 2 (multimodal foundation spec §7.3): text-prompt
             # modality → LayoutSpec.intent → structural-filter retrieval.
-            # OFF by default (R17 revert: 100-prompt benchmark showed
-            # hard-filter regresses both hit@1 0.820→0.790 AND hit@3
-            # 0.950→0.890 due to Stage-1 pool restriction + ChromaDB $in
-            # truncation).
             #
-            # Three modes via MULTIMODAL_TEXT_INTENT env-var:
-            #   off  (default) — embedding-only baseline
-            #   soft           — R15d soft-filter hybrid (boost matching templates)
-            #   on             — legacy hard-filter (Stage-1 restrict + $in query)
-            _intent_mode = os.environ.get("MULTIMODAL_TEXT_INTENT", "off").lower().strip()
-            _multimodal_text = _intent_mode in ("on", "true", "1", "yes", "soft")
-            _use_soft_filter = _intent_mode == "soft"
+            # SOFT by default (R17b 2026-05-16: 100-prompt benchmark
+            # shows soft-filter beats embedding-only on hit@1 0.820→0.840
+            # and reaches parity on hit@3 0.950→0.940, with slightly
+            # faster latency p50 102→98ms).
+            #
+            # Modes via MULTIMODAL_TEXT_INTENT env-var:
+            #   off / false / 0 / no    — embedding-only baseline (legacy)
+            #   soft (default)          — R15d soft-filter hybrid
+            #   on / true / 1 / yes     — alias for soft (safe interpretation
+            #                             of "enable struct-filter")
+            #   hard                    — legacy hard-filter (regresses; kept
+            #                             for experiments and reproducing R17)
+            #   anything else           — falls through to disabled (safe)
+            _intent_mode = os.environ.get("MULTIMODAL_TEXT_INTENT", "soft").lower().strip()
+            _multimodal_text = _intent_mode in ("on", "true", "1", "yes", "soft", "hard")
+            _use_soft_filter = _intent_mode in ("on", "true", "1", "yes", "soft")
 
             scored = None
             if _multimodal_text:
