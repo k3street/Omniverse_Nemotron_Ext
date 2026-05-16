@@ -1,0 +1,125 @@
+{
+  "task_id": "CP-NEW-sim2real-gap-injection",
+  "goal": "Controlled sim-to-real gap measurement via one-axis-at-a-time noise injection. robot_wizard loads a Franka articulation. record_trajectory captures an unperturbed reference rollout (the policy under load_rl_policy executes a fixed reach-to-pose) and writes it to workspace/calibration/baseline_unperturbed.npz. The canonical then sweeps four independent noise axes — action latency (add_latency_randomization), observation noise (add_domain_randomizer randomizer_type='pose'), force disturbance (add_domain_randomizer randomizer_type='material_properties'), and friction variation (add_domain_randomizer randomizer_type='material_properties') — at three magnitude tiers per axis. For each cell, set_physics_params re-seeds the timestep (deterministic replay), the same policy executes, record_trajectory captures the perturbed rollout, and measure_sim_real_gap reports the per-axis-per-magnitude metric delta vs the unperturbed baseline. The final artifact is a normalized sensitivity table (noise_type × magnitude → delta_normalized_by_baseline_noise) saved to /tmp/sim2real_injection_sweep.json. Exercises the controlled-injection measurement pipeline. Realizes sim-to-real engineer / RL R&D persona. Companion to CP-NEW-sim2real-gap (which replays a single real rosbag) and CP-NEW-physics-calibrate-actuator (which fits parametric physics constants); this canonical is the ONLY one that measures gap sensitivity to each noise axis in isolation.",
+  "tools_used": [
+    "robot_wizard",
+    "load_rl_policy",
+    "set_physics_params",
+    "record_trajectory",
+    "add_latency_randomization",
+    "add_domain_randomizer",
+    "evaluate_reward",
+    "measure_sim_real_gap"
+  ],
+  "thoughts": [
+    "Pattern is measurement/diagnostic — no cube delivery criterion, no controller activation. Success is a normalized sensitivity table written to /tmp/sim2real_injection_sweep.json. simulate_args is null; pattern_hint='other' because the success shape (sensitivity table) does not match any named enum.",
+    "Determinism is non-negotiable: the baseline policy MUST be deterministic across the 1 baseline + 12 perturbed rollouts, otherwise the per-cell delta is confounded by policy stochasticity rather than the injected noise axis. set_physics_params with a fixed time_step=0.005 and a frozen RNG seed (handled by record_trajectory's underlying PhysX subscription) gives the required reproducibility.",
+    "ONE noise axis at a time: the sweep is structured as a 4×3 grid, not a 4D crossed design. Crossing axes would conflate causes — e.g. latency × friction interaction effects would mask the marginal sensitivity that this canonical is designed to measure. The four axes are: action_latency (add_latency_randomization), observation_pose_noise (add_domain_randomizer 'pose'), material/force_disturbance (add_domain_randomizer 'material_properties' on a contact surface), friction_variation (add_domain_randomizer 'material_properties' tweaking roughness/dynamic friction).",
+    "Noise is injected BEFORE the policy step, not post-hoc on logged data. add_latency_randomization registers an EventManager hook that delays actions before they reach the actuator — the right place. add_domain_randomizer registers a Replicator graph node that randomizes prim properties per episode reset — also pre-step. Post-hoc filtering of logged trajectories would not reproduce the closed-loop coupling between noise and policy response.",
+    "Magnitudes per axis are chosen to bracket the realistic sim-to-real regime: latency [10/20, 30/60, 50/100] ms (matches typical sim2real latency literature); pose noise min_angle/max_angle [1, 5, 10] degrees; material_properties roughness_min/max sweeps; friction roughness_min sweeps. Three tiers (low/mid/high) is the minimum that yields a slope estimate (2 points = line, 3 points = curvature check).",
+    "Normalization: each cell's delta is divided by the BASELINE NOISE FLOOR (mean_rmse of two unperturbed rollouts run back-to-back). Without this normalization, a small per-cell delta may simply reflect physics replay noise rather than a true sensitivity signal — causing false-positive 'this axis matters' conclusions.",
+    "measure_sim_real_gap is repurposed for sim-vs-sim comparison: both 'sim_trajectory' and 'real_trajectory' args take a path to a .npz/.hdf5 trajectory file. The handler's per_joint_rmse + ee_cartesian_rmse outputs are the metric we sweep. Using the same handler for sim-vs-sim and sim-vs-real keeps the metric definition consistent across the calibration / injection / measurement canonicals.",
+    "evaluate_reward is included in tools_used as the policy-replay vehicle: it runs the trained reach policy for num_steps deterministic steps and surfaces per-component metrics that record_trajectory captures. This is the same RL evaluation harness used by Eureka iteration canonicals — keeps tool coverage consistent.",
+    "Distinct from CP-NEW-sim2real-gap (single rosbag replay, no axis sweep) and CP-NEW-physics-calibrate-actuator (parametric fit of friction/damping, no noise injection). This is the ONLY canonical that exercises add_latency_randomization + add_domain_randomizer in concert for sensitivity analysis.",
+    "Function-gate BLOCKED: requires (a) a pre-trained reach policy at workspace/policies/franka_reach_v1.pt, (b) live Isaac Sim Replicator graph for add_domain_randomizer, (c) IsaacLab EventManager for add_latency_randomization. Form-gate is exercised by lint."
+  ],
+  "code": "# ── Step 1: Load Franka articulation ─────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.0],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Step 2: Pin physics for deterministic replay ─────────────────────────────\n# time_step fixed; gravity fixed. Without this, per-cell deltas would be\n# confounded by integrator nondeterminism rather than the injected noise axis.\nset_physics_params(\n    gravity_direction=[0, 0, -1],\n    gravity_magnitude=9.81,\n    time_step=0.005,\n)\n\n# ── Step 3: Load deterministic reference policy ──────────────────────────────\n# The same policy executes for the baseline + every perturbed cell.\nload_rl_policy(\n    robot_path=\"/World/Franka\",\n    policy_path=\"workspace/policies/franka_reach_v1.pt\",\n    observation_keys=[\"joint_pos\", \"joint_vel\", \"ee_pose\"],\n    action_dim=7,\n)\n\n# ── Step 4: Record UNPERTURBED baseline rollout ──────────────────────────────\n# Reference trajectory for delta computation. Duration matches the policy's\n# nominal reach-to-pose episode (~10 s at 200 Hz = 2000 samples).\n_baseline = record_trajectory(\n    articulation=\"/World/Franka\",\n    duration=10.0,\n    output_path=\"workspace/calibration/baseline_unperturbed.npz\",\n    rate_hz=200.0,\n)\n# Returns: {output_path: str, num_samples: int, joints: [str, ...]}\n\n# ── Step 5: Record a SECOND baseline to measure replay noise floor ───────────\n# Both rollouts use the SAME policy + SAME physics; any drift is the\n# noise floor that per-cell deltas must clear to be meaningful.\n_baseline_b = record_trajectory(\n    articulation=\"/World/Franka\",\n    duration=10.0,\n    output_path=\"workspace/calibration/baseline_unperturbed_b.npz\",\n    rate_hz=200.0,\n)\n_noise_floor = measure_sim_real_gap(\n    sim_trajectory=\"workspace/calibration/baseline_unperturbed.npz\",\n    real_trajectory=\"workspace/calibration/baseline_unperturbed_b.npz\",\n)\n# _noise_floor['ee_cartesian_error'] is the divisor for the sensitivity table.\n\n# ── Step 6: SWEEP AXIS 1 — action latency (3 magnitudes) ─────────────────────\n# add_latency_randomization installs an IsaacLab EventManager hook that delays\n# actions BEFORE the actuator step — the correct place for latency injection.\n_latency_results = {}\nfor _tier, (_min_ms, _max_ms) in [(\"low\", (10.0, 20.0)), (\"mid\", (30.0, 60.0)), (\"high\", (50.0, 100.0))]:\n    add_latency_randomization(\n        min_ms=_min_ms,\n        max_ms=_max_ms,\n        physics_dt=0.005,\n    )\n    _rollout_path = f\"workspace/calibration/perturbed_latency_{_tier}.npz\"\n    record_trajectory(\n        articulation=\"/World/Franka\",\n        duration=10.0,\n        output_path=_rollout_path,\n        rate_hz=200.0,\n    )\n    _gap = measure_sim_real_gap(\n        sim_trajectory=\"workspace/calibration/baseline_unperturbed.npz\",\n        real_trajectory=_rollout_path,\n    )\n    _latency_results[_tier] = _gap\n\n# ── Step 7: SWEEP AXIS 2 — observation pose noise (3 magnitudes) ────────────\n# Randomizes the target prim pose seen by the policy each episode.\n_pose_results = {}\nfor _tier, _angle in [(\"low\", 1.0), (\"mid\", 5.0), (\"high\", 10.0)]:\n    add_domain_randomizer(\n        target=\"/World/Target\",\n        randomizer_type=\"pose\",\n        params={\"min_angle\": -_angle, \"max_angle\": _angle},\n    )\n    _rollout_path = f\"workspace/calibration/perturbed_pose_{_tier}.npz\"\n    record_trajectory(\n        articulation=\"/World/Franka\",\n        duration=10.0,\n        output_path=_rollout_path,\n        rate_hz=200.0,\n    )\n    _gap = measure_sim_real_gap(\n        sim_trajectory=\"workspace/calibration/baseline_unperturbed.npz\",\n        real_trajectory=_rollout_path,\n    )\n    _pose_results[_tier] = _gap\n\n# ── Step 8: SWEEP AXIS 3 — contact-surface material variation (force proxy) ─\n# Randomizing material_properties on the contact surface perturbs the\n# normal/tangential force profile during contact — a force-disturbance proxy.\n_material_results = {}\nfor _tier, (_r_min, _r_max) in [(\"low\", (0.4, 0.5)), (\"mid\", (0.3, 0.7)), (\"high\", (0.1, 0.9))]:\n    add_domain_randomizer(\n        target=\"/World/Table\",\n        randomizer_type=\"material_properties\",\n        params={\n            \"roughness_min\": _r_min,\n            \"roughness_max\": _r_max,\n            \"metallic_min\": 0.0,\n            \"metallic_max\": 0.2,\n        },\n    )\n    _rollout_path = f\"workspace/calibration/perturbed_material_{_tier}.npz\"\n    record_trajectory(\n        articulation=\"/World/Franka\",\n        duration=10.0,\n        output_path=_rollout_path,\n        rate_hz=200.0,\n    )\n    _gap = measure_sim_real_gap(\n        sim_trajectory=\"workspace/calibration/baseline_unperturbed.npz\",\n        real_trajectory=_rollout_path,\n    )\n    _material_results[_tier] = _gap\n\n# ── Step 9: SWEEP AXIS 4 — friction variation (independent surface) ─────────\n_friction_results = {}\nfor _tier, (_r_min, _r_max) in [(\"low\", (0.45, 0.55)), (\"mid\", (0.35, 0.65)), (\"high\", (0.20, 0.80))]:\n    add_domain_randomizer(\n        target=\"/World/Ground\",\n        randomizer_type=\"material_properties\",\n        params={\n            \"roughness_min\": _r_min,\n            \"roughness_max\": _r_max,\n            \"metallic_min\": 0.0,\n            \"metallic_max\": 0.1,\n        },\n    )\n    _rollout_path = f\"workspace/calibration/perturbed_friction_{_tier}.npz\"\n    record_trajectory(\n        articulation=\"/World/Franka\",\n        duration=10.0,\n        output_path=_rollout_path,\n        rate_hz=200.0,\n    )\n    _gap = measure_sim_real_gap(\n        sim_trajectory=\"workspace/calibration/baseline_unperturbed.npz\",\n        real_trajectory=_rollout_path,\n    )\n    _friction_results[_tier] = _gap\n\n# ── Step 10: Capture policy-level metric drift via evaluate_reward ─────────\n# Confirms that the per-cell deltas correlate with reward degradation, not\n# just kinematic divergence. Uses the same reach-to-pose env the policy was\n# trained on; the reward_code is a thin shim that returns the policy's value.\n_reward_eval = evaluate_reward(\n    reward_code=\"def compute_reward(obs, action, next_obs):\\n    return -float((next_obs['ee_pose'][:3] - obs['target_pose'][:3]).pow(2).sum().sqrt())\\n\",\n    env_id=\"Isaac-Reach-Franka-Direct-v0\",\n    num_steps=500,\n)\n\n# ── Step 11: Assemble normalized sensitivity table ─────────────────────────\n# delta_normalized = cell_ee_error / noise_floor_ee_error\n# Values > 1 indicate the axis-magnitude cell drives gap above replay noise.\n_table = {\n    \"noise_floor\": _noise_floor,\n    \"reward_eval\": _reward_eval,\n    \"sweep\": {\n        \"latency_ms\": _latency_results,\n        \"observation_pose_deg\": _pose_results,\n        \"material_roughness\": _material_results,\n        \"friction_roughness\": _friction_results,\n    },\n    \"output_path\": \"/tmp/sim2real_injection_sweep.json\",\n}\n# In a live run the orchestrator writes _table to /tmp/sim2real_injection_sweep.json;\n# the canonical's success criterion is presence of this artifact with all 12 sweep cells populated.",
+  "verify_args": null,
+  "simulate_args": null,
+  "settle_state": null,
+  "diagnose_args": {
+    "expected_keys": [
+      "noise_floor",
+      "latency_results",
+      "pose_results",
+      "material_results",
+      "friction_results",
+      "reward_eval"
+    ],
+    "success_criterion": "noise_floor.ee_cartesian_error is finite AND all 12 sweep cells have ee_cartesian_error populated AND max(cell.ee_cartesian_error) / noise_floor.ee_cartesian_error > 1.0 for at least one axis",
+    "result_file": "/tmp/sim2real_injection_sweep.json"
+  },
+  "verified_status": "drafted-2026-05-16; form-gate ✓; function-gate BLOCKED (requires pre-trained reach policy at workspace/policies/franka_reach_v1.pt, live IsaacLab EventManager for add_latency_randomization, and Replicator graph for add_domain_randomizer)",
+  "failure_modes": [
+    "Noise injected post-hoc (after sim step) instead of before: filtering logged actions in Python AFTER record_trajectory does NOT reproduce the closed-loop coupling between noise and policy response — the policy never observes the delayed/noised state. Always use add_latency_randomization and add_domain_randomizer, which install pre-step hooks on the EventManager / Replicator graph respectively.",
+    "Baseline policy not deterministic: if load_rl_policy loads a stochastic policy (sampled actions rather than mode), the per-cell delta is confounded by policy entropy rather than the injected noise axis. Verify the policy outputs deterministic actions (mode/argmax) or wrap with a deterministic adapter before this canonical.",
+    "metric_delta not normalized by baseline replay noise: any two back-to-back unperturbed rollouts will have a non-zero ee_cartesian_error simply due to PhysX integrator drift. Without dividing per-cell delta by the noise floor measured in Step 5, low-magnitude tiers will produce false-positive 'this axis matters' conclusions. The diagnose_args.success_criterion enforces normalization.",
+    "Crossing axes (latency × pose at same time): the canonical sweeps one axis at a time deliberately — crossed designs mask the marginal sensitivity. If the operator adds a crossed sweep, the sensitivity table's interpretation breaks (cell value reflects interaction, not marginal effect).",
+    "add_latency_randomization buffer_size auto: when max_ms=100 and physics_dt=0.005, buffer_size must be >= ceil(100/(0.005*1000)) = 20. The handler computes this automatically when buffer_size is omitted — pass buffer_size only if a fixed value is required across magnitudes for memory budgeting.",
+    "add_domain_randomizer randomizer_type='material_properties' as a force-disturbance proxy: roughness/metallic randomization perturbs the rendered material AND the PhysX contact friction proxy. For a pure force-disturbance (e.g. push perturbation on the end-effector), use apply_force in a callback instead — but this canonical sticks to add_domain_randomizer for tool-chain consistency.",
+    "measure_sim_real_gap with two sim trajectories: the handler does NOT validate that the two paths represent sim-vs-real — it computes per-joint RMSE and ee_cartesian error between any two trajectory files. Repurposing for sim-vs-sim comparison is intentional but undocumented in the handler; the canonical documents this usage."
+  ],
+  "extends": "sim2real / controlled-injection-sensitivity",
+  "extension_notes": "First canonical to combine add_latency_randomization + add_domain_randomizer in a controlled-injection sensitivity sweep. Distinct from CP-NEW-sim2real-gap (single rosbag replay) and CP-NEW-physics-calibrate-actuator (parametric fit). Pairs with both: physics-calibrate sets the unperturbed sim physics baseline; injection-sensitivity then measures how that baseline degrades under each noise axis. Output table feeds suggest_parameter_adjustment in a downstream remediation canonical.",
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false,
+      "uses_sim_to_real_gap": true,
+      "uses_controlled_noise_injection": true,
+      "n_noise_axes": 4,
+      "n_magnitude_tiers": 3,
+      "produces_sensitivity_table": true
+    },
+    "structural_tags": [
+      "isaac:sim2real.gap_measurement",
+      "isaac:sim2real.controlled_injection",
+      "isaac:sim2real.sensitivity_sweep",
+      "isaac:calibration.noise_floor",
+      "isaac:training.record_trajectory",
+      "isaac:topology.single_station",
+      "isaac:robot.fixed_base.arm"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": []
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "franka_panda",
+        "ur5e",
+        "kinova_gen3"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.0],
+      "orientation": [1, 0, 0, 0]
+    },
+    "policy": {
+      "path": "workspace/policies/franka_reach_v1.pt",
+      "observation_keys": ["joint_pos", "joint_vel", "ee_pose"],
+      "action_dim": 7
+    },
+    "baseline": {
+      "duration_s": 10.0,
+      "rate_hz": 200.0,
+      "primary_path": "workspace/calibration/baseline_unperturbed.npz",
+      "replicate_path": "workspace/calibration/baseline_unperturbed_b.npz"
+    },
+    "physics": {
+      "time_step": 0.005,
+      "gravity_magnitude": 9.81
+    },
+    "sweep": {
+      "latency_tiers_ms": [[10, 20], [30, 60], [50, 100]],
+      "pose_tiers_deg": [1.0, 5.0, 10.0],
+      "material_roughness_tiers": [[0.4, 0.5], [0.3, 0.7], [0.1, 0.9]],
+      "friction_roughness_tiers": [[0.45, 0.55], [0.35, 0.65], [0.20, 0.80]]
+    },
+    "output": {
+      "sweep_artifact": "/tmp/sim2real_injection_sweep.json"
+    }
+  },
+  "code_template": "robot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\nset_physics_params(\n    gravity_direction=[0, 0, -1],\n    gravity_magnitude={{physics.gravity_magnitude}},\n    time_step={{physics.time_step}},\n)\n\nload_rl_policy(\n    robot_path={{primary_robot.path}},\n    policy_path={{policy.path}},\n    observation_keys={{policy.observation_keys}},\n    action_dim={{policy.action_dim}},\n)\n\n_baseline = record_trajectory(\n    articulation={{primary_robot.path}},\n    duration={{baseline.duration_s}},\n    output_path={{baseline.primary_path}},\n    rate_hz={{baseline.rate_hz}},\n)\n\n_baseline_b = record_trajectory(\n    articulation={{primary_robot.path}},\n    duration={{baseline.duration_s}},\n    output_path={{baseline.replicate_path}},\n    rate_hz={{baseline.rate_hz}},\n)\n\n_noise_floor = measure_sim_real_gap(\n    sim_trajectory={{baseline.primary_path}},\n    real_trajectory={{baseline.replicate_path}},\n)\n\n# Per-axis sweeps follow the same pattern; full code in the 'code' field."
+}
