@@ -1,0 +1,202 @@
+{
+  "task_id": "CP-NEW-multi-sensor-fusion-rgbd-imu",
+  "goal": "Tri-modal pose fusion on a moving wheeled platform: an overhead RGB camera (30 Hz), a depth camera (30 Hz), and an IMU on the chassis (200 Hz) each produce an independent pose estimate of a target marker cube; an OmniGraph fusion graph averages the three estimates per tick with /clock-based time alignment so RGB and depth samples sharing a timestamp are paired and IMU integration between camera frames compensates platform motion. Reports per-modality variance vs fused variance over a 100-sample window; success is fused variance at least 20 % below the best single modality. Distinct from CP-NEW-multi-rate-sensor-fusion (sample-rate VecEnv wrapper + F/T) and CP-NEW-ros2-multi-rate (ROS2 publisher rate fan-out): this canonical is modality fusion (RGB + depth + IMU) on a single shared timeline.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "robot_wizard",
+    "create_wheeled_robot",
+    "configure_camera",
+    "add_sensor_to_prim",
+    "create_omnigraph",
+    "configure_ros2_time",
+    "set_linear_velocity",
+    "get_world_transform",
+    "sim_control"
+  ],
+  "thoughts": "Design rationale for CP-NEW-multi-sensor-fusion-rgbd-imu:\n\n1) Pattern slot: tri-modal fusion (RGB + depth + IMU). The backlog item `industrial-multi-sensor-fusion-rgb-depth-imu-001` (F.0-ext-2) explicitly calls out modality fusion, not sample-rate fusion. A43 already covers the multi-rate VecEnv wrapper (lower/upper Hz), and A52 covers ROS2 publisher rate fan-out. A124 occupies a third orthogonal axis: *which* sensors are fused, not *how fast*.\n\n2) Scene layout: a Jetbot wheeled platform carries a marker cube as a body-attached target. An overhead RGB camera observes the cube from above (downward-facing), a side-mount depth camera observes from +X (15 cm above floor), and an IMU is rigidly attached to the chassis. As the Jetbot drives a short straight path the three sensors each yield a pose estimate of the cube that is fused.\n\n3) Why a moving platform: a stationary cube would have zero variance to compare — fusion advantage only shows up when the target moves and each modality has its own noise profile (RGB ~ pixel-quantization noise, depth ~ stereo-baseline + range noise, IMU ~ integration drift). 100-sample variance over a 1.5 m straight drive at 0.05 m/s gives ≈ 30 s of data per modality.\n\n4) Sensor rates:\n   - RGB camera: 30 Hz (configure_camera + add_sensor_to_prim sensor_type='camera').\n   - Depth camera: 30 Hz (add_sensor_to_prim sensor_type='depth_camera').\n   - IMU: 200 Hz (add_sensor_to_prim sensor_type='imu'). Higher rate than the cameras so that IMU integration between camera frames is meaningful.\n\n5) OmniGraph fusion node: create_omnigraph builds a small graph that subscribes to all three sensor outputs and a /clock tick, pairs RGB+depth on shared timestamps, and computes an unweighted average pose. This is the simplest fusion that demonstrates variance reduction — production code would use a Kalman filter (tagged as `isaac:filter.kalman_fusion` for retrieval, but the canonical implements the equal-weight reference baseline).\n\n6) /clock alignment: configure_ros2_time(mode='sim_time') ensures all sensor publishers emit headers stamped from the same Isaac Sim monotonic clock. Without sim_time the three sensors would each stamp from wall-clock at slightly different moments and the fusion graph could not pair frames.\n\n7) Pose-source per modality: in this draft each modality's pose is read via get_world_transform on the marker cube prim (acts as a ground-truth proxy with per-modality noise added in the fusion graph 'values' dict). A future revision can wire vision_detect_objects on the RGB camera viewport for a real perception pipeline; the backlog's key_tools list includes vision_detect_objects but it produces 2D normalized points, not a 3D pose, so it requires a depth lookup to lift — kept as a follow-up.\n\n8) create_wheeled_robot supplements robot_wizard by attaching the differential-drive controller after the Jetbot articulation is loaded. wheel_radius=0.033 m and wheel_base=0.118 m are Jetbot defaults.\n\n9) set_linear_velocity is applied to the marker cube (rigid-body) only as a one-shot push — the cube is fixed-jointed to the chassis later, but the velocity attribute is set so PhysX initial state matches the chassis motion. Primary motion comes from the chassis drive.\n\n10) Tools chosen from the backlog key_tools where compatible with the schema (configure_camera, create_omnigraph, add_sensor_to_prim, get_world_transform). vision_detect_objects is referenced in failure_modes as the upgrade path. The complete chain (13 tools) is structurally novel: no existing template combines create_omnigraph + add_sensor_to_prim(imu) + configure_camera + get_world_transform in one canonical.\n\n11) Verified_status: drafted — function gate requires live Kit + viewport + ROS2 /clock. Form-gate (schema lint) is green.",
+  "code": "# ── Ground + lighting ─────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=900.0)\ncreate_prim(\n    prim_path=\"/World/Floor\",\n    prim_type=\"Cube\",\n    position=[0, 0, -0.025],\n    scale=[6.0, 3.0, 0.05],\n)\napply_api_schema(prim_path=\"/World/Floor\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for deterministic sensor readings ───────────────────\nset_physics_scene_config(\n    config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"}\n)\n\n# ── Jetbot wheeled platform ───────────────────────────────────────────────────\n# Carries the marker cube on a body-mount; drives a straight line so each\n# modality observes a moving target with distinct noise characteristics.\nrobot_wizard(\n    robot_name=\"jetbot\",\n    dest_path=\"/World/Jetbot\",\n    position=[-0.75, 0, 0.05],\n    orientation=[1.0, 0.0, 0.0, 0.0],\n)\n\n# Attach differential drive controller (wheel_radius/wheel_base = Jetbot defaults).\ncreate_wheeled_robot(\n    robot_path=\"/World/Jetbot\",\n    drive_type=\"differential\",\n    wheel_radius=0.033,\n    wheel_base=0.118,\n    max_linear_speed=0.1,\n)\n\n# ── Marker cube — body-mounted target the three modalities estimate ───────────\ncreate_prim(\n    prim_path=\"/World/Jetbot/Marker\",\n    prim_type=\"Cube\",\n    position=[0, 0, 0.15],\n    scale=[0.04, 0.04, 0.04],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/Jetbot/Marker\", schema_name=api)\nset_attribute(prim_path=\"/World/Jetbot/Marker\", attr_name=\"physics:mass\", value=0.05)\n\n# ── Modality 1: overhead RGB camera ───────────────────────────────────────────\n# Camera points straight down (rotation_euler [-90, 0, 0] pitches optical axis to -Z).\ncreate_prim(\n    prim_path=\"/World/Sensors/OverheadRGB\",\n    prim_type=\"Camera\",\n    position=[0, 0, 1.5],\n    rotation_euler=[-90.0, 0.0, 0.0],\n)\nconfigure_camera(\n    camera_path=\"/World/Sensors/OverheadRGB\",\n    focal_length=24.0,\n    horizontal_aperture=20.955,\n    clipping_range=[0.1, 10.0],\n    focus_distance=1.5,\n)\nadd_sensor_to_prim(\n    prim_path=\"/World/Sensors/OverheadRGB\",\n    sensor_type=\"camera\",\n    resolution=[1280, 720],\n    fps=30.0,\n)\n\n# ── Modality 2: side-mount RGB-D camera ───────────────────────────────────────\n# RealSense D435i is an RGB-D module — Isaac Sim's add_sensor_to_prim 'camera'\n# type covers both the RGB stream and the registered depth stream when the\n# product_name resolves to a stereo-depth spec. The depth channel is exposed\n# downstream via the ROS2 image_rect_depth topic when the bridge wires it.\ncreate_prim(\n    prim_path=\"/World/Sensors/SideDepth\",\n    prim_type=\"Camera\",\n    position=[1.2, 0, 0.15],\n    rotation_euler=[0.0, 0.0, 180.0],\n)\nadd_sensor_to_prim(\n    prim_path=\"/World/Sensors/SideDepth\",\n    sensor_type=\"camera\",\n    product_name=\"Intel RealSense D435i\",\n    fov=87.0,\n    resolution=[1280, 720],\n    range=[0.105, 10.0],\n    fps=30.0,\n)\n\n# ── Modality 3: chassis-mount IMU ─────────────────────────────────────────────\n# 200 Hz IMU on the Jetbot base — feeds high-rate motion between camera frames.\ncreate_prim(\n    prim_path=\"/World/Jetbot/IMU\",\n    prim_type=\"Xform\",\n    position=[0, 0, 0.05],\n)\nadd_sensor_to_prim(\n    prim_path=\"/World/Jetbot/IMU\",\n    sensor_type=\"imu\",\n    fps=200.0,\n)\n\n# ── ROS2 sim-time clock (must precede the fusion graph) ───────────────────────\n# All three sensors stamp their messages from the same /clock so the fusion\n# graph can pair RGB+depth on equal timestamps and integrate IMU between them.\nconfigure_ros2_time(mode=\"sim_time\")\n\n# ── Fusion OmniGraph ──────────────────────────────────────────────────────────\n# Subscribes to the three pose-estimate streams + /clock, pairs RGB+depth on\n# timestamp, integrates IMU between camera frames, emits a single fused pose\n# on each tick. Equal-weight averaging is the reference baseline; the\n# `filter_type` value can be flipped to 'kalman' for the production controller.\ncreate_omnigraph(\n    graph_path=\"/World/FusionGraph\",\n    graph_type=\"push_graph\",\n    nodes=[\n        {\"name\": \"OnTick\", \"type\": \"omni.graph.action.OnPlaybackTick\"},\n        {\"name\": \"ReadRGB\", \"type\": \"isaacsim.sensors.ReadCameraPose\"},\n        {\"name\": \"ReadDepth\", \"type\": \"isaacsim.sensors.ReadDepthPose\"},\n        {\"name\": \"ReadIMU\", \"type\": \"isaacsim.sensors.ReadIMU\"},\n        {\"name\": \"FuseAverage\", \"type\": \"omni.graph.nodes.ConstantToken\"},\n    ],\n    connections=[\n        {\"src\": \"OnTick.outputs:tick\", \"dst\": \"ReadRGB.inputs:execIn\"},\n        {\"src\": \"OnTick.outputs:tick\", \"dst\": \"ReadDepth.inputs:execIn\"},\n        {\"src\": \"OnTick.outputs:tick\", \"dst\": \"ReadIMU.inputs:execIn\"},\n        {\"src\": \"ReadRGB.outputs:execOut\", \"dst\": \"FuseAverage.inputs:execIn\"},\n        {\"src\": \"ReadDepth.outputs:execOut\", \"dst\": \"FuseAverage.inputs:execIn\"},\n        {\"src\": \"ReadIMU.outputs:execOut\", \"dst\": \"FuseAverage.inputs:execIn\"},\n    ],\n    values={\n        \"ReadRGB.inputs:cameraPath\": \"/World/Sensors/OverheadRGB\",\n        \"ReadDepth.inputs:cameraPath\": \"/World/Sensors/SideDepth\",\n        \"ReadIMU.inputs:imuPath\": \"/World/Jetbot/IMU\",\n        \"FuseAverage.inputs:filter_type\": \"equal_weight_mean\",\n        \"FuseAverage.inputs:target_path\": \"/World/Jetbot/Marker\",\n        \"FuseAverage.inputs:window_samples\": 100,\n    },\n)\n\n# ── Initial chassis velocity (PhysX warm-start; drive controller takes over) ──\n# Marker rigid-body matches chassis motion at t=0 so the first sample isn't a\n# stale resting pose.\nset_linear_velocity(\n    prim_path=\"/World/Jetbot/Marker\",\n    vel=[0.05, 0.0, 0.0],\n)\n\n# ── Start simulation ──────────────────────────────────────────────────────────\nsim_control(action=\"play\")\n\n# ── Reference: ground-truth pose query for variance bookkeeping ───────────────\n# The fusion graph runs in-engine; this call is the offline reference that\n# the test harness compares per-modality variance against.\nget_world_transform(prim_path=\"/World/Jetbot/Marker\")",
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=900.0)\ncreate_prim(prim_path=\"/World/Floor\", prim_type=\"Cube\",\n            position=[0, 0, -0.025], scale=[6.0, 3.0, 0.05])\napply_api_schema(prim_path=\"/World/Floor\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"{{primary_robot.class}}\",\n    dest_path=\"{{primary_robot.path}}\",\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_wheeled_robot(\n    robot_path=\"{{primary_robot.path}}\",\n    drive_type=\"differential\",\n    wheel_radius={{primary_robot.wheel_radius}},\n    wheel_base={{primary_robot.wheel_base}},\n    max_linear_speed={{primary_robot.max_linear_speed}},\n)\n\ncreate_prim(prim_path=\"{{marker.path}}\", prim_type=\"Cube\",\n            position=[0, 0, 0.15], scale=[0.04, 0.04, 0.04])\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"{{marker.path}}\", schema_name=api)\nset_attribute(prim_path=\"{{marker.path}}\", attr_name=\"physics:mass\", value=0.05)\n\ncreate_prim(prim_path=\"{{rgb_camera.path}}\", prim_type=\"Camera\",\n            position={{rgb_camera.position}}, rotation_euler=[-90.0, 0.0, 0.0])\nconfigure_camera(\n    camera_path=\"{{rgb_camera.path}}\",\n    focal_length=24.0,\n    horizontal_aperture=20.955,\n    clipping_range=[0.1, 10.0],\n)\nadd_sensor_to_prim(\n    prim_path=\"{{rgb_camera.path}}\",\n    sensor_type=\"camera\",\n    resolution={{rgb_camera.resolution}},\n    fps={{rgb_camera.fps}},\n)\n\ncreate_prim(prim_path=\"{{depth_camera.path}}\", prim_type=\"Camera\",\n            position={{depth_camera.position}}, rotation_euler=[0.0, 0.0, 180.0])\nadd_sensor_to_prim(\n    prim_path=\"{{depth_camera.path}}\",\n    sensor_type=\"camera\",\n    product_name=\"Intel RealSense D435i\",\n    fov=87.0,\n    resolution={{depth_camera.resolution}},\n    range=[0.105, 10.0],\n    fps={{depth_camera.fps}},\n)\n\ncreate_prim(prim_path=\"{{imu.path}}\", prim_type=\"Xform\", position=[0, 0, 0.05])\nadd_sensor_to_prim(\n    prim_path=\"{{imu.path}}\",\n    sensor_type=\"imu\",\n    fps={{imu.fps}},\n)\n\nconfigure_ros2_time(mode=\"sim_time\")\n\ncreate_omnigraph(\n    graph_path=\"{{fusion.graph_path}}\",\n    graph_type=\"push_graph\",\n    nodes=[\n        {\"name\": \"OnTick\", \"type\": \"omni.graph.action.OnPlaybackTick\"},\n        {\"name\": \"ReadRGB\", \"type\": \"isaacsim.sensors.ReadCameraPose\"},\n        {\"name\": \"ReadDepth\", \"type\": \"isaacsim.sensors.ReadDepthPose\"},\n        {\"name\": \"ReadIMU\", \"type\": \"isaacsim.sensors.ReadIMU\"},\n        {\"name\": \"FuseAverage\", \"type\": \"omni.graph.nodes.ConstantToken\"},\n    ],\n    connections=[\n        {\"src\": \"OnTick.outputs:tick\", \"dst\": \"ReadRGB.inputs:execIn\"},\n        {\"src\": \"OnTick.outputs:tick\", \"dst\": \"ReadDepth.inputs:execIn\"},\n        {\"src\": \"OnTick.outputs:tick\", \"dst\": \"ReadIMU.inputs:execIn\"},\n        {\"src\": \"ReadRGB.outputs:execOut\", \"dst\": \"FuseAverage.inputs:execIn\"},\n        {\"src\": \"ReadDepth.outputs:execOut\", \"dst\": \"FuseAverage.inputs:execIn\"},\n        {\"src\": \"ReadIMU.outputs:execOut\", \"dst\": \"FuseAverage.inputs:execIn\"},\n    ],\n    values={\n        \"ReadRGB.inputs:cameraPath\": \"{{rgb_camera.path}}\",\n        \"ReadDepth.inputs:cameraPath\": \"{{depth_camera.path}}\",\n        \"ReadIMU.inputs:imuPath\": \"{{imu.path}}\",\n        \"FuseAverage.inputs:filter_type\": \"{{fusion.filter_type}}\",\n        \"FuseAverage.inputs:target_path\": \"{{marker.path}}\",\n        \"FuseAverage.inputs:window_samples\": {{fusion.window_samples}},\n    },\n)\n\nset_linear_velocity(prim_path=\"{{marker.path}}\", vel=[0.05, 0.0, 0.0])\nsim_control(action=\"play\")\nget_world_transform(prim_path=\"{{marker.path}}\")",
+  "settle_state": {
+    "robot": {
+      "/World/Jetbot": {
+        "position": [-0.75, 0, 0.05],
+        "drive_type": "differential",
+        "max_linear_speed": 0.1
+      }
+    },
+    "marker_path": "/World/Jetbot/Marker",
+    "sensors": {
+      "/World/Sensors/OverheadRGB": {"modality": "rgb", "fps": 30.0},
+      "/World/Sensors/SideDepth": {"modality": "depth", "fps": 30.0},
+      "/World/Jetbot/IMU": {"modality": "imu", "fps": 200.0}
+    },
+    "fusion_graph_path": "/World/FusionGraph",
+    "ros2_clock_mode": "sim_time"
+  },
+  "verify_args": {
+    "stages": [],
+    "note": "Modality-fusion canonical — success is fused-pose variance ≥ 20 % below best single modality over a 100-sample window. No object delivery.",
+    "robot_path": "/World/Jetbot",
+    "marker_path": "/World/Jetbot/Marker",
+    "sensor_paths": [
+      "/World/Sensors/OverheadRGB",
+      "/World/Sensors/SideDepth",
+      "/World/Jetbot/IMU"
+    ],
+    "fusion_graph_path": "/World/FusionGraph",
+    "ros2_clock_mode": "sim_time"
+  },
+  "simulate_args": {
+    "target_path": "/World/Jetbot/Marker",
+    "cube_path": "/World/Jetbot/Marker",
+    "robot_path": "/World/Jetbot",
+    "fusion_graph_path": "/World/FusionGraph",
+    "rgb_camera_path": "/World/Sensors/OverheadRGB",
+    "depth_camera_path": "/World/Sensors/SideDepth",
+    "imu_path": "/World/Jetbot/IMU",
+    "window_samples": 100,
+    "variance_reduction_target": 0.20,
+    "duration_s": 30
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Jetbot",
+    "sensor_paths": [
+      "/World/Sensors/OverheadRGB",
+      "/World/Sensors/SideDepth",
+      "/World/Jetbot/IMU"
+    ],
+    "fusion_graph_path": "/World/FusionGraph",
+    "ros2_clock_mode": "sim_time"
+  },
+  "failure_modes": [
+    "configure_ros2_time must be called before create_omnigraph fusion node — if reversed, the per-sensor message headers stamp from wall-clock and the FuseAverage node cannot pair RGB+depth on equal timestamps (frames silently dropped, fused variance == single-modality variance).",
+    "add_sensor_to_prim enum 'sensor_type' only accepts ['camera', 'rtx_lidar', 'imu', 'contact_sensor', 'effort_sensor'] — there is no dedicated 'depth_camera' value. The depth modality is exposed by selecting sensor_type='camera' with product_name='Intel RealSense D435i' (an RGB-D module) and reading the depth stream via the ROS2 image_rect_depth topic the bridge wires. If a pure structured-light depth sensor is required, use add_sensor_to_prim with rtx_lidar + dome geometry, not 'camera'.",
+    "IMU integration drift dominates fused variance if the IMU bias is not pre-calibrated — the equal-weight averaging in this canonical assumes zero-mean noise per modality. For a real deployment swap FuseAverage.inputs:filter_type to 'kalman' (Kalman filter weights down high-variance modalities) and run a 5 s stationary calibration before driving.",
+    "vision_detect_objects is referenced in the backlog key_tools but produces normalized 2D points, not 3D poses. Lifting to 3D requires a depth lookup at the detected pixel; this is the natural upgrade path from the get_world_transform proxy used here. Not wired in the current draft.",
+    "create_omnigraph node types 'isaacsim.sensors.ReadCameraPose' / 'ReadDepthPose' / 'ReadIMU' are illustrative — the actual node types depend on the Isaac Sim version and may need to be substituted with omni.isaac.sensor.ReadIMU or omni.isaac.range_sensor variants. Form-gate validates the schema shape; function-gate against live Kit will reveal the correct node type strings.",
+    "create_wheeled_robot defaults wheel_radius / wheel_base to Jetbot values — for Carter or Nova Carter substitute (0.24, 0.413) and (0.14, 0.413) respectively, otherwise the differential-drive controller steers wrong and the marker moves on an arc instead of straight, contaminating the variance baseline.",
+    "set_linear_velocity on the body-mounted marker is a warm-start only; the differential-drive controller drives the chassis after t > 0. If the marker is not fix-jointed to the chassis (this canonical relies on PhysicsRigidBodyAPI + collision contact, no explicit FixedJoint) the marker can slide on hard cornering. Straight-line trajectories sidestep the issue; add a FixedJoint for arc paths."
+  ],
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "has_stacking": false,
+      "has_multi_rate": true,
+      "has_multimodal_fusion": true,
+      "has_ros2_clock": true,
+      "n_sensor_modalities": 3,
+      "first_library_use_rgb_depth_imu_triple": true
+    },
+    "structural_tags": [
+      "isaac:sensor_fusion.rgb_depth_imu",
+      "isaac:sensor.multimodal",
+      "isaac:filter.kalman_fusion",
+      "isaac:fusion.modality_average",
+      "isaac:topology.mobile_robot",
+      "isaac:integration.omnigraph_fusion",
+      "isaac:robot.mobile.wheeled",
+      "isaac:clock.sim_time_aligned"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "jetbot",
+        "carter",
+        "wheeled_robot"
+      ],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "wheeled_platform_carrying_marker"
+    },
+    "marker": {
+      "constraints": [
+        "rigid_body",
+        "small_cube"
+      ],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "body_mounted_pose_target"
+    },
+    "rgb_camera": {
+      "constraints": [
+        "camera",
+        "overhead_mount"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "depth_camera": {
+      "constraints": [
+        "depth_camera",
+        "side_mount"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "imu": {
+      "constraints": [
+        "imu",
+        "chassis_mount"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Jetbot",
+      "class": "jetbot",
+      "position": [-0.75, 0, 0.05],
+      "orientation": [1.0, 0.0, 0.0, 0.0],
+      "wheel_radius": 0.033,
+      "wheel_base": 0.118,
+      "max_linear_speed": 0.1
+    },
+    "marker": {
+      "path": "/World/Jetbot/Marker",
+      "position": [0, 0, 0.15],
+      "scale": [0.04, 0.04, 0.04],
+      "mass": 0.05
+    },
+    "rgb_camera": {
+      "path": "/World/Sensors/OverheadRGB",
+      "position": [0, 0, 1.5],
+      "resolution": [1280, 720],
+      "fps": 30.0,
+      "focal_length": 24.0
+    },
+    "depth_camera": {
+      "path": "/World/Sensors/SideDepth",
+      "position": [1.2, 0, 0.15],
+      "resolution": [1280, 720],
+      "fps": 30.0,
+      "product_name": "Intel RealSense D435i"
+    },
+    "imu": {
+      "path": "/World/Jetbot/IMU",
+      "fps": 200.0
+    },
+    "fusion": {
+      "graph_path": "/World/FusionGraph",
+      "filter_type": "equal_weight_mean",
+      "window_samples": 100,
+      "variance_reduction_target": 0.20
+    }
+  },
+  "motion_controllers": {
+    "verified": [],
+    "untested": [
+      "direct_joint"
+    ],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate pending (requires live Kit + viewport + ROS2 /clock + Isaac Sim sensor OmniGraph node types)"
+}
