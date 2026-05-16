@@ -1,0 +1,84 @@
+{
+  "task_id": "CP-NEW-ros2-moveit2-franka",
+  "goal": "Configure a Franka Panda arm for MoveIt2 + isaac_ros_cumotion motion planning through Isaac Sim's ROS2 bridge. Step 1: precheck_ros2_environment to confirm rclpy + rosbridge port 9090 reachable. Step 2: robot_wizard to load Franka. Step 3: setup_ros2_control_compat to wire /isaac_joint_states + /isaac_joint_commands topics (franka_panda controller type). Step 4: emit_ros2_control_yaml to write the ros2_control YAML a downstream colcon workspace needs. Step 5: setup_isaac_ros_cumotion_moveit to emit the MoveIt2 planning_pipeline YAML with the cumotion plugin (planner_id='cuMotion', max_planning_time=5.0). Step 6: setup_ros2_bridge profile=franka_moveit2 to build the OmniGraph that binds joint-state publisher, trajectory subscriber, TF, and clock. Step 7: configure_ros2_time to lock sim clock to /clock at 1000 Hz. Step 8: ros2_list_topics to verify /isaac_joint_states, /isaac_joint_commands, /clock are live. Step 9: diagnose_ros2 to confirm QoS health. Exercises the full Phase 6 M1+M4 MoveIt2 integration path — distinct from CP-NEW-ros2-bridge-franka which validates basic topic plumbing only.",
+  "tools_used": [
+    "precheck_ros2_environment",
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "setup_ros2_control_compat",
+    "emit_ros2_control_yaml",
+    "setup_isaac_ros_cumotion_moveit",
+    "setup_ros2_bridge",
+    "configure_ros2_time",
+    "ros2_list_topics",
+    "diagnose_ros2"
+  ],
+  "thoughts": "Design rationale for CP-NEW-ros2-moveit2-franka:\n\n1) Why distinct from CP-NEW-ros2-bridge-franka: The existing bridge template exercises setup_ros2_bridge + configure_ros2_time + emit_ros2_control_yaml and stops at topic-existence verification. This template exercises the M1+M4 planning pipeline: setup_ros2_control_compat (topic renaming for ros2_control compatibility) + setup_isaac_ros_cumotion_moveit (MoveIt2 YAML with cumotion plugin). These two tools do not appear in any other canonical.\n\n2) Tool chain order matters: precheck_ros2_environment must fire before any bridge setup; configure_ros2_time must fire before setup_ros2_bridge (clock=0 edge case in existing bridge template); setup_ros2_control_compat before emit_ros2_control_yaml so topic names are consistent; setup_isaac_ros_cumotion_moveit after robot_wizard (needs articulation path to find joint names).\n\n3) cumotion planner config: planner_id='cuMotion', max_planning_time=5.0s, goal_tolerance_pos_m=0.001, goal_tolerance_orient_rad=0.01. These are MoveIt2-side configs — they go into the emitted YAML, not into cuRobo directly.\n\n4) Physics: CPU dynamics (MBP, no GPU) for deterministic joint-state output. Franka at [0,0,0.75] on table. Scene is minimal — the focus is middleware, not manipulation.\n\n5) Verification strategy: ros2_list_topics checks topic existence; diagnose_ros2 checks QoS and DDS domain. No sim_control play needed — bridge is middleware-only; physical simulation not required for topic verification.\n\n6) Roles: single Franka arm, no workpieces or conveyors. Motion controller = ros2_control (external MoveIt2 node).",
+  "code": "# ── Preflight: ROS2 environment check ────────────────────────────────────────\nprecheck_ros2_environment(rosbridge_port=9090)\n\n# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Robot mount table\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU determinism ──────────────────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka Panda ──────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── M1: ros2_control topic compatibility ─────────────────────────────────────\n# Maps Isaac Sim bridge to ros2_control-standard topic names that MoveIt2 expects.\nsetup_ros2_control_compat(\n    robot_path=\"/World/Franka\",\n    joint_states_topic=\"/isaac_joint_states\",\n    joint_commands_topic=\"/isaac_joint_commands\",\n    controller_type=\"joint_trajectory_controller\",\n)\n\n# ── M1: emit ros2_control YAML for downstream colcon workspace ────────────────\nemit_ros2_control_yaml(\n    robot_path=\"/World/Franka\",\n    controller_type=\"joint_trajectory_controller\",\n    output_path=\"/tmp/franka_ros2_control.yaml\",\n    joint_states_topic=\"/isaac_joint_states\",\n    joint_commands_topic=\"/isaac_joint_commands\",\n    update_rate_hz=1000,\n)\n\n# ── M4: MoveIt2 planning_pipeline YAML with cumotion plugin ──────────────────\nsetup_isaac_ros_cumotion_moveit(\n    robot_path=\"/World/Franka\",\n    output_dir=\"/tmp/franka_moveit2_config\",\n    planner_id=\"cuMotion\",\n    max_planning_time=5.0,\n    goal_tolerance_pos_m=0.001,\n    goal_tolerance_orient_rad=0.01,\n)\n\n# ── ROS2 clock — must precede OmniGraph bridge build ─────────────────────────\nconfigure_ros2_time(mode=\"sim_time\")\n\n# ── OmniGraph bridge: franka_moveit2 profile ─────────────────────────────────\n# Builds joint-state publisher, trajectory subscriber, TF, and clock nodes.\nsetup_ros2_bridge(\n    profile=\"franka_moveit2\",\n    robot_path=\"/World/Franka\",\n    graph_path=\"/World/ROS2_MoveIt2_Bridge\",\n)\n\n# ── Verification: topic presence ─────────────────────────────────────────────\nros2_list_topics()\n\n# ── Verification: QoS + DDS health ───────────────────────────────────────────\ndiagnose_ros2()",
+  "failure_modes": [
+    "ROS2 environment not sourced before Kit launch — precheck_ros2_environment returns ok=False; source /opt/ros/humble/setup.bash then restart Kit.",
+    "setup_ros2_control_compat called before robot_wizard — no articulation at /World/Franka yet; joint name discovery returns empty list; always call robot_wizard first.",
+    "configure_ros2_time called after setup_ros2_bridge — /clock messages emit timestamp=0 for first N sim steps; always call configure_ros2_time before setup_ros2_bridge.",
+    "setup_isaac_ros_cumotion_moveit output_dir not writable — YAML not written but no exception raised; downstream MoveIt2 launch will fail to find planning_pipeline config.",
+    "QoS mismatch: bridge publishes RELIABLE on /isaac_joint_states, MoveIt2 subscriber set to BEST_EFFORT — diagnose_ros2 reports qos_mismatch; fix MoveIt2 QoS override in its node params.",
+    "franka_moveit2 bridge profile not found — setup_ros2_bridge raises KeyError if Isaac Sim version predates Phase 6 graph templates; fall back to manual configure_ros2_bridge."
+  ],
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false,
+      "uses_moveit2": true,
+      "uses_cumotion_plugin": true,
+      "ros2_profile": "franka_moveit2"
+    },
+    "structural_tags": [
+      "isaac:bridge.ros2",
+      "isaac:integration.moveit2_cumotion",
+      "isaac:integration.ros2_control_compat",
+      "isaac:topology.single_station",
+      "isaac:robot.fixed_base.arm",
+      "isaac:middleware.motion_planning"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    }
+  },
+  "code_template": "precheck_ros2_environment(rosbridge_port=9090)\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\nsetup_ros2_control_compat(\n    robot_path={{primary_robot.path}},\n    joint_states_topic=\"/isaac_joint_states\",\n    joint_commands_topic=\"/isaac_joint_commands\",\n    controller_type=\"joint_trajectory_controller\",\n)\nemit_ros2_control_yaml(\n    robot_path={{primary_robot.path}},\n    controller_type=\"joint_trajectory_controller\",\n    output_path=\"/tmp/franka_ros2_control.yaml\",\n    joint_states_topic=\"/isaac_joint_states\",\n    joint_commands_topic=\"/isaac_joint_commands\",\n    update_rate_hz=1000,\n)\nsetup_isaac_ros_cumotion_moveit(\n    robot_path={{primary_robot.path}},\n    output_dir=\"/tmp/franka_moveit2_config\",\n    planner_id=\"cuMotion\",\n    max_planning_time=5.0,\n    goal_tolerance_pos_m=0.001,\n    goal_tolerance_orient_rad=0.01,\n)\nconfigure_ros2_time(mode=\"sim_time\")\nsetup_ros2_bridge(profile=\"franka_moveit2\", robot_path={{primary_robot.path}}, graph_path=\"/World/ROS2_MoveIt2_Bridge\")\nros2_list_topics()\ndiagnose_ros2()",
+  "settle_state": {},
+  "verify_args": {
+    "stages": [],
+    "expected_topics": ["/isaac_joint_states", "/isaac_joint_commands", "/clock"],
+    "robot_path": "/World/Franka"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Franka",
+    "target_path": "/World/Franka",
+    "duration_s": 5
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka"
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": ["ros2_control", "moveit2"]
+  },
+  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate pending"
+}
