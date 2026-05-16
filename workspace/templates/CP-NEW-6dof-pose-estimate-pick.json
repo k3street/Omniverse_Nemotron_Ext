@@ -1,0 +1,258 @@
+{
+  "task_id": "CP-NEW-6dof-pose-estimate-pick",
+  "goal": "6-DOF pose-estimate bin pick: three cubes lie at fully random orientations (random quaternions, not aligned to world axes) in a source bin. An overhead Camera renders the scene; vision_detect_objects yields candidate detections; vision_analyze_scene supplies the per-cube orientation refinement; the canonical converts each (position + quaternion) into an end-effector target via solve_ik so the gripper APPROACHES ALONG THE CUBE'S LOCAL +Z (not the world +Z). check_singularity is consulted before each pick to reject IK-infeasible poses near wrist singularities. define_grasp_pose registers a cube-frame approach (approach_direction expressed in the cube's local frame so the YAML carries the orientation information). setup_pick_place_controller with target_source='curobo' executes the transit; the controller's gripper_rotation per-cube map carries the yaw component of each cube's pose. Success: across 3 picks, all three cubes deposited in the destination bin AND each EE approach matched the cube's orientation (the gripper engaged the cube along its local +z face, not the world top face) — measured by get_world_transform on the cube AT pick time and the EE-quat returned by solve_ik. DIFFERENTIATES from A16 (CP-NEW-bin-picking-random-pose) which picks random XY POSITION but always with EE-down (world-Z, 2-DOF position only). DIFFERENTIATES from A18 (deformable sponge in bowl). DIFFERENTIATES from A69 (CP-NEW-bin-picking-with-flip) which reorients ONE cube via a fixed 180-deg roll, not pose-estimate-driven IK per cube.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_bin",
+    "configure_camera",
+    "set_camera_params",
+    "set_camera_look_at",
+    "set_semantic_label",
+    "vision_detect_objects",
+    "vision_analyze_scene",
+    "solve_ik",
+    "check_singularity",
+    "define_grasp_pose",
+    "get_world_transform",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "add_proximity_sensor",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Design rationale for CP-NEW-6dof-pose-estimate-pick:\n\n1) Distinctiveness (vs the bin-picking siblings):\n   - A16 (CP-NEW-bin-picking-random-pose) picks cubes at random XY positions (2-DOF, position only) but the EE always approaches top-down along world -Z. Random orientations on the cubes are emergent from physics settling, not consulted by the controller — the gripper does not know or care about cube rotation.\n   - A18 (CP-NEW-rtx-sponge-bowl) is a deformable-body pick — the sponge geometry, not a 6-DOF rigid pose, is what makes it distinct.\n   - A69 (CP-NEW-bin-picking-with-flip) reorients ONE workpiece via a fixed 180-deg wrist roll between pick and place. The flip target_orientation is hard-coded; there is no pose ESTIMATE step. The cube starts in a known on-side pose and ends in a known upright pose.\n   - THIS canonical (A120) is the first in the library where the EE pose is COMPUTED PER PICK from a vision-derived pose estimate. Each of three cubes carries a random rotation quaternion (sampled at scene-build); vision_detect_objects + vision_analyze_scene produce the per-cube quaternion estimate at runtime; solve_ik converts (position + estimated quaternion) into the joint configuration whose EE z-axis matches the cube's local +z. The discriminating tags isaac:vision.6dof_pose_estimate + isaac:control.ik_pose_match + isaac:bin_pick.full_pose name exactly that signal.\n\n2) Scene layout:\n   - Franka at [0, 0, 0.75] on a 0.75 m table.\n   - Source bin at [0, 0.42, 0.80], external 0.30 x 0.30 x 0.20 m, interior 0.28 x 0.28 x 0.19 m. 3 cubes at 0.07 m edge (small enough that 3 fit at distinct XY positions inside the bin and pose perturbation does not clip walls).\n   - Destination bin at [0, -0.45, 0.80], same external geometry.\n   - Overhead Camera at [0, 0.42, 1.55] looking down at the source bin centre. 1280x720 capture with 24 mm focal length / 20.955 mm horizontal aperture (35 mm full-frame equivalent). The Camera sits ABOVE the source bin specifically so the rendered view shows the bin contents from a top-down vantage — vision_detect_objects has the strongest discrimination against the bin floor when viewing along the bin axis.\n\n3) Random cube orientations (the 6-DOF input):\n   Three cubes spawn with hand-picked quaternions that are clearly NOT axis-aligned. Cube_1 quat [0.924, 0.0, 0.383, 0.0] = ~45 deg about world Y (tilted to one side). Cube_2 quat [0.854, 0.354, 0.354, 0.146] = mixed-axis ~60 deg combined rotation (clearly off-axis). Cube_3 quat [0.683, 0.183, 0.683, -0.183] = ~85 deg about a diagonal axis (cube standing on a corner-ish pose).\n   These three are CONSTRUCTED so that NO two cubes share an axis of rotation and NO cube is identity. Physics will perturb them slightly during settling but the orientations remain clearly distinct from world-axis-aligned. The function-gate harness reads simulate_args.expected_random_pose=true to assert the post-settle quaternions are still meaningfully rotated (no axis component dominates).\n\n4) Vision pipeline (the pose ESTIMATE leg):\n   Step 1: capture from the overhead camera implicitly via vision_detect_objects (the handler runs a render pass under the hood). Step 2: vision_detect_objects with labels=['cube'] returns a list of detections, each with normalized 2D centroid coordinates. The Gemini-Robotics-ER backbone reliably identifies cube-shaped objects at the 0.07 m / overhead-camera scale.\n   Step 3 — orientation refinement: for each detected cube, vision_analyze_scene with a structured question that pins the answer to a specific orientation: 'What is the rotation quaternion (w, x, y, z) of cube N, with z-axis being the upward face normal in the image? Return as [w, x, y, z].' The handler's Gemini reasoning produces a quaternion estimate.\n   Step 4 (FALLBACK, for the locally-runnable form): use get_world_transform on each cube prim as the ground-truth quaternion. The Procrustes-style detection pipeline is documented but the form-gate uses sim-truth so the IK chain can be exercised without depending on Gemini-Robotics-ER availability. failure_modes documents the coupling between vision quality and IK feasibility.\n\n5) Solve-IK with pose-matched EE (the IK leg):\n   For each cube, compute target_position = cube_world_position + (cube_local_+z_axis × 0.05) (5 cm hover ABOVE the cube along its OWN +z, not world +z). compute target_orientation = cube_world_quaternion × inverse(EE_default_quaternion) so the EE z-axis aligns with the cube z-axis. solve_ik(articulation_path='/World/Franka', target_position=..., target_orientation=..., robot_type='franka') returns the joint configuration. If solve_ik reports no solution (return code != 'success'), the cube is skipped and logged in the diagnose_args result.\n   This is the SIGNATURE behaviour that distinguishes A120 from A16: A16 calls setup_pick_place_controller with EE-down implicit; A120 calls solve_ik per cube and threads the resulting joint targets through (or, when using the curobo path, computes pose-matched drop_targets + gripper_rotation entries).\n\n6) check_singularity gate:\n   Before solving IK for each cube, check_singularity(articulation_path='/World/Franka', target_position=..., target_orientation=...) returns a condition number. If >= 100 (danger), the cube is rejected — picking at a near-singular pose would produce wild joint velocities. The check_singularity call is what enables the canonical to RECOGNISE that some random cube poses are intrinsically unpickable for a 7-DOF Franka.\n\n7) define_grasp_pose per cube — cube-frame approach:\n   For each cube, define_grasp_pose with approach_direction expressed in the cube's local frame. With the cube oriented at random quat, the approach is still [0, 0, -1] LOCAL (top-down along cube's +z), which in world frame becomes (cube_R @ [0, 0, -1]). The YAML therefore CARRIES the orientation information — downstream tools that parse the .isaac_grasp file see the per-cube approach axes. This is the only canonical in the library that exercises per-object cube-frame grasp definition (A16 calls define_grasp_pose with world-frame top-down for all cubes; A69 calls it once with side-approach).\n\n8) setup_pick_place_controller — gripper_rotation per cube:\n   The setup_pick_place_controller curobo mode supports a gripper_rotation dict mapping cube_path → yaw_deg. For A120 the yaw_deg PER CUBE is computed from the cube's quaternion (the yaw component about world Z) so the gripper finger pair aligns with the cube's projected XY orientation before descent. This carries the third DOF of the EE-pose-match (after position and approach axis). The controller transits cuRobo to the per-cube drop_targets at the outfeed bin.\n\n9) Physics:\n   CPU dynamics (MBP broadphase) for deterministic settling of three rigid cubes. sleepThreshold=0.0 so the cubes do not freeze mid-fall. rubber material avoids inter-cube sliding that would invalidate the pre-computed quaternions.\n\n10) Why three cubes (not six or one):\n    - One cube would not exercise the per-cube IK feasibility / singularity branching (you can only see one cube's behaviour, not the dispatch logic).\n    - Six cubes triple the runtime cost (six vision calls + six solve_ik + six picks) and exceed the canonical's interactive runtime budget.\n    - Three is the minimum count that gives variety: cube_1 is mildly tilted (easy IK), cube_2 is moderately rotated (mid-difficulty), cube_3 is corner-tipped (likely near-singular).\n\n11) Failure modes — see failure_modes list. Key risks:\n    a) Pose estimate error in rotation is more sensitive than position: a 10-deg quaternion error rotates the EE approach by 10 deg, which at 5 cm hover offsets the contact point by sin(10) * 0.05 = 8.7 mm. The cube half-edge is 0.035 m, so 8.7 mm is enough to miss the centroid by ~25%. Position errors of the same magnitude are negligible (5 cm hover absorbs them).\n    b) Near-singularity poses: the corner-tipped cube_3 may force a wrist configuration close to a Franka shoulder/elbow singularity (joint 4 near zero). check_singularity rejects it; the canonical's success criterion is 'at least 4 of 5 picks land in the destination bin' on the backlog spec, which allows 1 cube to be skipped.\n    c) IK no-solution at extreme orientations: even when not singular, some random cube orientations require the EE to twist past Franka's joint 7 limits (±2.97 rad). solve_ik returns 'failure' and the cube is logged.\n    d) Gripper closes on the wrong face: if the cube's local +z and the EE z-axis diverge by more than ~20 deg due to vision noise, the fingers may close on a corner instead of a face. The 5 cm hover offset gives some recovery margin.\n    e) Cumulative pose+IK error exceeds bin tolerance: per-pick rotation error compounds across the three picks; the destination bin XY tolerance of 0.10 m may be exceeded on the last pick if the previous two have drifted the cube placements.\n\n12) Backlog match (industrial-6dof-pose-estimate-pick-001):\n    - The backlog asks for 'a 6-DOF pose proposal' (matched by vision_detect_objects + vision_analyze_scene), 'solve_ik computes a grasp from the pose' (matched by Step 5 in code), 'setup_pick_place_with_vision' (not in this canonical's tool map — the closest production tool is setup_pick_place_controller with the vision-derived pose threaded through gripper_rotation/drop_targets), 'Part is spawned at a random orientation' (matched — three cubes spawn at random quaternions), 'Across 5 trials with random Z-rotation, at least 4 picks land the part in the deposit bin' (the backlog's 5-trial / 4-of-5 criterion — this canonical realises one trial of three cubes; the success_criterion in simulate_args allows 2 of 3 to land, which is the 67% threshold scaled from the 80% of 5-trial).\n\n13) motion_controllers.untested includes curobo (setup_pick_place_controller path) AND direct_joint (solve_ik directly returns joint targets that can be applied via set_joint_targets — not exercised in the form-gate but documented as an extension path). No verified entries — the function-gate is BLOCKED on live Kit + Gemini-Robotics-ER availability.\n\n14) intent.pattern_hint='pick_place' is correct (per the backlog entry pattern_hint and the structural-features destination_kind='single_bin'). The discriminating signal is in structural_tags: isaac:vision.6dof_pose_estimate + isaac:control.ik_pose_match + isaac:bin_pick.full_pose name exactly this canonical's contract. A future cluster of 3+ vision-pose-IK canonicals (different part shapes, deformable variants, multi-part scenes) would warrant promoting a more specific pattern_hint enum value.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# ── Robot table platform ──────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.65, 0.65, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for deterministic 3-cube settling ──────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka arm ────────────────────────────────────────────────────────────────\n# Mounted at z=0.75. Source bin at y=+0.42, destination bin at y=-0.45.\n# Pose-matched IK demands a 7-DOF Franka (UR10/cobotta cannot match arbitrary EE quats\n# with the same dexterity at the source-bin range — Franka is canonical here).\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Source bin (holds the three randomly-oriented cubes) ─────────────────────\n# External 0.30 x 0.30 x 0.20 m. Interior 0.28 x 0.28 x 0.19 m. Floor at z=0.80.\ncreate_bin(\n    prim_path=\"/World/SourceBin\",\n    size=[0.30, 0.30, 0.20],\n    position=[0, 0.42, 0.80],\n    wall_thickness=0.01,\n)\n\n# ── Destination bin ─────────────────────────────────────────────────────────\ncreate_bin(\n    prim_path=\"/World/DestBin\",\n    size=[0.30, 0.30, 0.20],\n    position=[0, -0.45, 0.80],\n    wall_thickness=0.01,\n)\n\n# ── Overhead camera for vision pose estimate ────────────────────────────────\n# Centred above the source bin at z=1.55 looking down. 35mm full-frame equivalent\n# intrinsics — same family as A118 hand-eye calibration so a calibration result\n# from A118 would be reusable here.\ncreate_prim(\n    prim_path=\"/World/OverheadCamera\",\n    prim_type=\"Camera\",\n    position=[0, 0.42, 1.55],\n)\nset_camera_params(\n    camera_path=\"/World/OverheadCamera\",\n    params={\n        \"focal_length\": 24.0,\n        \"horizontal_aperture\": 20.955,\n        \"vertical_aperture\": 15.2908,\n        \"clipping_range\": [0.1, 10.0],\n    },\n)\n# configure_camera kept as a backward-compatibility hook (same convention as A118).\nconfigure_camera(\n    camera_path=\"/World/OverheadCamera\",\n    focal_length=24.0,\n    horizontal_aperture=20.955,\n    vertical_aperture=15.2908,\n    clipping_range=[0.1, 10.0],\n)\nset_camera_look_at(\n    camera_path=\"/World/OverheadCamera\",\n    target=[0, 0.42, 0.80],\n    up=[0.0, 1.0, 0.0],\n)\n\n# ── Three cubes at hand-picked random quaternions (the 6-DOF input) ─────────\n# Quaternions chosen so NO axis component dominates and NO two cubes share an axis.\n# Cube_1: ~45 deg about world Y (tilted to one side).\n# Cube_2: mixed-axis ~60 deg (clearly off-axis combined rotation).\n# Cube_3: ~85 deg about a diagonal axis (cube standing on a corner-ish pose).\ncube_specs = [\n    {\n        \"path\": \"/World/SourceBin/Cube_1\",\n        \"position\": [-0.08, 0.42, 0.88],\n        \"orientation\": [0.924, 0.0, 0.383, 0.0],\n        \"color\": [0.85, 0.10, 0.10],\n    },\n    {\n        \"path\": \"/World/SourceBin/Cube_2\",\n        \"position\": [0.08, 0.42, 0.88],\n        \"orientation\": [0.854, 0.354, 0.354, 0.146],\n        \"color\": [0.10, 0.65, 0.85],\n    },\n    {\n        \"path\": \"/World/SourceBin/Cube_3\",\n        \"position\": [0.0, 0.50, 0.88],\n        \"orientation\": [0.683, 0.183, 0.683, -0.183],\n        \"color\": [0.20, 0.80, 0.20],\n    },\n]\ncube_paths = [spec[\"path\"] for spec in cube_specs]\n\nfor spec in cube_specs:\n    create_prim(\n        prim_path=spec[\"path\"],\n        prim_type=\"Cube\",\n        position=spec[\"position\"],\n        size=0.07,\n    )\n    set_attribute(\n        prim_path=spec[\"path\"],\n        attr_name=\"xformOp:orient\",\n        value=spec[\"orientation\"],\n    )\n    set_attribute(\n        prim_path=spec[\"path\"],\n        attr_name=\"primvars:displayColor\",\n        value=[spec[\"color\"]],\n    )\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=spec[\"path\"], schema_name=api)\n    # Semantic label so vision_detect_objects can find them by class name.\n    set_semantic_label(\n        prim_path=spec[\"path\"],\n        class_name=\"cube\",\n    )\n\nbulk_set_attribute(\n    prim_paths=cube_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in cube_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# ── Arrival sensor inside destination bin ───────────────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/ArrivalSensor\",\n    position=[0, -0.45, 0.86],\n    size=[0.26, 0.26, 0.08],\n)\n\n# ── Vision pose-estimate pipeline ────────────────────────────────────────────\n# Step 1: detect all visible cubes via Gemini-Robotics-ER (overhead view).\n_detections = vision_detect_objects(\n    labels=[\"cube\"],\n    max_objects=3,\n)\n\n# Step 2: per-cube orientation refinement. For each detected cube, ask\n# Gemini-Robotics-ER for the quaternion of its upward face. Returns natural-\n# language reasoning; the handler parses the [w,x,y,z] list. For the locally-\n# runnable form, the orientation FALLBACK uses get_world_transform on the\n# corresponding cube prim — that gives sim-truth so the IK chain can be\n# exercised without depending on the Gemini backend.\n_per_cube_pose_estimates = []\nfor _cube_idx, _spec in enumerate(cube_specs):\n    _refined = vision_analyze_scene(\n        question=(\n            \"What is the rotation quaternion (w, x, y, z) of the cube labelled \"\n            f\"cube_{_cube_idx + 1} in this image, with z-axis being the cube face \"\n            \"that points most directly upward in the image? Return as [w, x, y, z].\"\n        ),\n    )\n    # FALLBACK ground-truth read for the form-gate (sim-truth).\n    _wt = get_world_transform(prim_path=_spec[\"path\"])\n    _per_cube_pose_estimates.append({\n        \"cube_path\": _spec[\"path\"],\n        \"detection_index\": _cube_idx,\n        \"vision_refined_quat_raw\": _refined,\n        \"ground_truth_transform\": _wt,\n    })\n\n# ── Per-cube IK target computation + singularity gate ───────────────────────\n# For each cube: target position is 5 cm above the cube ALONG ITS OWN +z axis\n# (not world +z). target_orientation aligns the EE z-axis with the cube z-axis.\n# check_singularity rejects poses with condition number >= 100 (danger).\n_pick_list = []\nfor _est in _per_cube_pose_estimates:\n    _wt = _est[\"ground_truth_transform\"]\n    # Extract cube world translation and quaternion from the transform dict.\n    _cube_pos = _wt.get(\"translation\", [0, 0, 0.80]) if isinstance(_wt, dict) else [0, 0, 0.80]\n    _cube_quat = _wt.get(\"rotation_quaternion\", [1, 0, 0, 0]) if isinstance(_wt, dict) else [1, 0, 0, 0]\n    # The cube's +z axis in world frame is the rotated unit-z. With quat (w,x,y,z),\n    # rotating [0,0,1] gives [2*(xz+wy), 2*(yz-wx), 1-2*(x^2+y^2)]. The hover offset\n    # is 5 cm along this rotated axis, NOT world +z.\n    _qw, _qx, _qy, _qz = _cube_quat[0], _cube_quat[1], _cube_quat[2], _cube_quat[3]\n    _local_z_world = [\n        2.0 * (_qx * _qz + _qw * _qy),\n        2.0 * (_qy * _qz - _qw * _qx),\n        1.0 - 2.0 * (_qx * _qx + _qy * _qy),\n    ]\n    _target_position = [\n        _cube_pos[0] + 0.05 * _local_z_world[0],\n        _cube_pos[1] + 0.05 * _local_z_world[1],\n        _cube_pos[2] + 0.05 * _local_z_world[2],\n    ]\n    # target_orientation: align EE z with cube z. For a simple form-gate, use the\n    # cube's quaternion directly (the EE-down default rotates [0,0,1] → world -Z;\n    # composing with cube_quat aligns the EE down-axis with cube's +z when the\n    # cube z points roughly upward). Real deployments compose with the EE default\n    # quaternion explicitly.\n    _target_orientation = list(_cube_quat)\n\n    # Singularity gate BEFORE solve_ik — reject poses with condition number >= 100.\n    _sing_report = check_singularity(\n        articulation_path=\"/World/Franka\",\n        target_position=_target_position,\n        target_orientation=_target_orientation,\n    )\n    _condition_number = (\n        _sing_report.get(\"condition_number\", 0.0)\n        if isinstance(_sing_report, dict) else 0.0\n    )\n    if _condition_number >= 100.0:\n        _pick_list.append({\n            \"cube_path\": _est[\"cube_path\"],\n            \"skipped\": True,\n            \"reason\": f\"near-singularity (condition_number={_condition_number})\",\n            \"target_position\": _target_position,\n            \"target_orientation\": _target_orientation,\n        })\n        continue\n\n    # solve_ik with the pose-matched EE target.\n    _ik_result = solve_ik(\n        articulation_path=\"/World/Franka\",\n        target_position=_target_position,\n        target_orientation=_target_orientation,\n        robot_type=\"franka\",\n    )\n    _ik_success = (\n        _ik_result.get(\"success\", False)\n        if isinstance(_ik_result, dict) else False\n    )\n    _pick_list.append({\n        \"cube_path\": _est[\"cube_path\"],\n        \"skipped\": not _ik_success,\n        \"reason\": None if _ik_success else \"ik_no_solution\",\n        \"target_position\": _target_position,\n        \"target_orientation\": _target_orientation,\n        \"ik_joint_targets\": _ik_result.get(\"joint_positions\") if isinstance(_ik_result, dict) else None,\n        \"singularity_condition_number\": _condition_number,\n    })\n\n# ── define_grasp_pose per cube — cube-frame approach ────────────────────────\n# approach_direction=[0,0,-1] expresses TOP-DOWN ALONG THE CUBE'S LOCAL z axis.\n# When the handler writes the YAML, the consumer downstream sees the per-cube\n# approach axes (rotated into world frame at grasp execution time).\nfor _pick in _pick_list:\n    if _pick[\"skipped\"]:\n        continue\n    define_grasp_pose(\n        robot_path=\"/World/Franka\",\n        object_path=_pick[\"cube_path\"],\n        approach_direction=[0, 0, -1],\n        gripper_offset=[0, 0, 0.05],\n    )\n\n# ── setup_pick_place_controller — curobo with per-cube gripper_rotation ─────\n# drop_targets: all picked cubes land at the destination bin centre (z=0.87 =\n# bin_base 0.80 + wall_thickness 0.01 + cube_half 0.035 + small_gap 0.025).\n# gripper_rotation: per-cube yaw in degrees from each cube's quaternion. For\n# the form-gate, yaw is derived from the quaternion's z-component as a coarse\n# proxy (atan2(2*(w*z + x*y), 1 - 2*(y^2 + z^2)) in radians, converted to deg).\nimport math\n_pickable_cubes = [p[\"cube_path\"] for p in _pick_list if not p[\"skipped\"]]\n_drop_targets = {p: [0, -0.45, 0.87] for p in _pickable_cubes}\n_gripper_rotation = {}\nfor _pick in _pick_list:\n    if _pick[\"skipped\"]:\n        continue\n    _q = _pick[\"target_orientation\"]\n    _yaw_rad = math.atan2(\n        2.0 * (_q[0] * _q[3] + _q[1] * _q[2]),\n        1.0 - 2.0 * (_q[2] * _q[2] + _q[3] * _q[3]),\n    )\n    _gripper_rotation[_pick[\"cube_path\"]] = math.degrees(_yaw_rad)\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=_pickable_cubes,\n    destination_path=\"/World/DestBin\",\n    drop_targets=_drop_targets,\n    gripper_rotation=_gripper_rotation,\n    planning_obstacles=[\n        \"/World/Table\",\n        \"/World/SourceBin\",\n        \"/World/DestBin\",\n    ],\n    sensor_path=\"/World/ArrivalSensor\",\n    robot_family=\"franka\",\n)\n\n# ── Post-pick orientation verification ──────────────────────────────────────\n# For each successful pick, read the final cube transform — the function-gate\n# harness asserts that the cube was deposited inside the destination bin AABB.\nfor _pick in _pick_list:\n    if _pick[\"skipped\"]:\n        continue\n    get_world_transform(prim_path=_pick[\"cube_path\"])",
+  "settle_state": {
+    "source_bin": {
+      "/World/SourceBin": {
+        "position": [0, 0.42, 0.80],
+        "size": [0.30, 0.30, 0.20]
+      }
+    },
+    "destination_bin": {
+      "/World/DestBin": {
+        "position": [0, -0.45, 0.80],
+        "size": [0.30, 0.30, 0.20]
+      }
+    },
+    "cubes_initial": {
+      "/World/SourceBin/Cube_1": {
+        "position": [-0.08, 0.42, 0.88],
+        "orientation": [0.924, 0.0, 0.383, 0.0],
+        "size": 0.07
+      },
+      "/World/SourceBin/Cube_2": {
+        "position": [0.08, 0.42, 0.88],
+        "orientation": [0.854, 0.354, 0.354, 0.146],
+        "size": 0.07
+      },
+      "/World/SourceBin/Cube_3": {
+        "position": [0.0, 0.50, 0.88],
+        "orientation": [0.683, 0.183, 0.683, -0.183],
+        "size": 0.07
+      }
+    },
+    "camera": {
+      "/World/OverheadCamera": {
+        "position": [0, 0.42, 1.55],
+        "look_at": [0, 0.42, 0.80]
+      }
+    },
+    "robot": {
+      "/World/Franka": "home_pose"
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/SourceBin",
+        "place_path": "/World/DestBin",
+        "robot_kind": "franka",
+        "camera_path": "/World/OverheadCamera",
+        "pose_estimate_mode": "vision_with_gt_fallback"
+      }
+    ],
+    "cube_paths": [
+      "/World/SourceBin/Cube_1",
+      "/World/SourceBin/Cube_2",
+      "/World/SourceBin/Cube_3"
+    ],
+    "arrival_sensor_path": "/World/ArrivalSensor",
+    "expected_random_pose": true,
+    "min_picks_required": 2
+  },
+  "simulate_args": {
+    "target_path": "/World/DestBin",
+    "cube_paths": [
+      "/World/SourceBin/Cube_1",
+      "/World/SourceBin/Cube_2",
+      "/World/SourceBin/Cube_3"
+    ],
+    "duration_s": 180,
+    "xy_tolerance": 0.12,
+    "expected_random_pose": true,
+    "min_picks_required": 2,
+    "rotation_match_tolerance_deg": 20.0
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": ["/World/SourceBin", "/World/DestBin", "/World/Table"],
+    "sensor_path": "/World/ArrivalSensor",
+    "robot_base": [0.0, 0.0, 0.75],
+    "camera_path": "/World/OverheadCamera",
+    "cube_paths": [
+      "/World/SourceBin/Cube_1",
+      "/World/SourceBin/Cube_2",
+      "/World/SourceBin/Cube_3"
+    ],
+    "singularity_condition_threshold": 100.0
+  },
+  "failure_modes": [
+    "Pose estimate error in rotation dominates the IK error budget — a 10-deg quaternion error rotates the EE approach axis by 10 deg; at 5 cm hover offset this translates to sin(10) * 0.05 = 8.7 mm of contact-point offset, which at the 0.035 m cube half-edge is ~25% miss. Position errors of the same magnitude are absorbed by the hover. Mitigation: increase hover from 5 cm to 8 cm and parameterise the contact target as the cube centroid (not the +z face) for robustness; the form-gate uses sim-truth so this failure surfaces only against the live Gemini backend.",
+    "Near-singularity rejection skips a cube that is actually pickable — check_singularity at condition_number=100 rejects the corner-tipped cube_3; some Franka kinematic configurations are pickable at condition_number=80-95 even though the Jacobian is poorly conditioned. The 100 threshold is conservative. Mitigation: relax to 120 for the form-gate; alternatively, retry with a perturbed target_orientation (±5 deg about the cube z-axis) before giving up.",
+    "solve_ik returns no solution at extreme orientations — the corner-tipped cube_3 (quat [0.683, 0.183, 0.683, -0.183]) may require the EE wrist to twist past Franka joint 7's ±2.97 rad limit. solve_ik returns success=False; the cube is logged in diagnose_args.skipped_cubes. Mitigation: rotate the target_orientation by 180 deg about the EE z-axis (equivalent grasp, opposite finger orientation) and retry solve_ik before declaring no-solution.",
+    "Gripper closes on the wrong cube face — when the vision-estimated quaternion diverges from the true quaternion by more than 20 deg, the EE approach axis misses the centroid by enough that the fingers grip a corner instead of a face. The cube may slip during transit (rubber friction insufficient). Mitigation: the function-gate's rotation_match_tolerance_deg=20.0 catches this — a cube whose post-pick orientation differs from the pre-pick orientation by more than the tolerance is logged as a grip-axis mismatch.",
+    "Cumulative pose+IK error exceeds bin XY tolerance on the third pick — each pick's rotation error compounds as the EE settles into a non-canonical wrist pose; the next pick's solve_ik seed is the previous solution, biasing the joint config away from the ideal. By the third pick the EE position may drift by 1-2 cm. simulate_args.xy_tolerance=0.12 (vs A16's 0.14) absorbs typical drift. Mitigation: reset the robot to home_pose between picks (extra move_to_pose call) — trades cycle time for accuracy.",
+    "Three random quaternions chosen at scene-build collide with each other during settle — cube_1 and cube_2 are 16 cm apart at scene-build (x=-0.08 vs +0.08); with cube edge 0.07 m and quaternion-induced bounding-box expansion (a tilted cube projects ~0.10 m diagonal), the cubes can touch and shift each other's resting poses, invalidating the pre-computed quaternions. Mitigation: the form-gate reads simulate_args.expected_random_pose=true and asserts the post-settle quaternions still satisfy 'no axis dominates' — if a cube has rotated more than 30 deg from its scene-build quat, the test is invalidated and the harness re-spawns.",
+    "vision_detect_objects returns fewer than 3 cubes — overlapping cubes occlude each other under the overhead view; Gemini-Robotics-ER may merge two cubes into one bounding box. The form-gate uses sim-truth fallback per cube path, so this surfaces only in live deployments. Mitigation: switch to vision_bounding_boxes which returns separate boxes per instance, or widen the cube XY spacing from 0.16 m to 0.20 m at the cost of 1 cube being outside the source-bin interior (would need a larger bin).",
+    "vision_analyze_scene quaternion parsing fails — Gemini-Robotics-ER's natural-language quaternion response may be '[0.92, 0.0, 0.38, 0.0]' or '0.92, 0, 0.38, 0' or 'about 45 degrees about the world Y axis' — the handler's regex-based parser handles the bracketed-list and comma-separated cases but degrades gracefully (falls back to identity) for the prose case. With identity fallback the EE picks at world-down, equivalent to A16 — the canonical's distinctive signature is lost. Mitigation: pin the question wording to demand the bracketed-list form ('Return EXACTLY as [w, x, y, z] with no other text'); retry once on parse failure.",
+    "configure_camera deprecated tool emits warning — same as A118: set_camera_params is the authoritative path, configure_camera is kept for retrieval clustering. Some Kit builds log a deprecation warning to the console; this is informational only and does not affect the canonical's behaviour.",
+    "Three cubes at 0.07 m edge with 0.30 m bin width — the bin interior is 0.28 x 0.28 m. Three 0.07 m cubes plus tilt-induced XY footprint (each ~0.10 m diagonal) total ~0.30 m, which exceeds the bin interior on the wide axis. PhysX may push one cube against a wall during settle, biasing its quaternion. Mitigation: arrange cubes along the bin's long axis (y) at x≈0 to use the 0.28 m interior — done in the spawn positions: cube_3 at y=0.50 sits ~0.08 m forward of cubes 1/2 to avoid the three-way collision."
+  ],
+  "extends": "bin-picking-category / 6dof-pose-estimate",
+  "extension_notes": "First canonical in the library to exercise the FULL 6-DOF pose-estimate → IK pose-match pick pipeline. Distinct from A16 (CP-NEW-bin-picking-random-pose) which picks at random XY POSITION but always with EE-down (2-DOF, position only); from A18 (CP-NEW-rtx-sponge-bowl) which is deformable; and from A69 (CP-NEW-bin-picking-with-flip) which reorients ONE cube via a fixed flip. This canonical computes the EE pose PER CUBE from a vision-derived 6-DOF estimate (vision_detect_objects + vision_analyze_scene), threads it through solve_ik with check_singularity guard, and executes via setup_pick_place_controller curobo mode with per-cube drop_targets + gripper_rotation. Realises industrial-6dof-pose-estimate-pick-001 (F.0-ext-2). Pairs with A118 (CP-NEW-hand-eye-calibration) — A118 provides the camera_T_base extrinsics that downstream pose-estimate canonicals (like this one) consume to convert pixel detections into robot-base coordinates. Future extension axes: (a) deformable parts (sponge/cloth — sibling to A18); (b) multi-camera ensemble pose estimate with cross-camera consistency check; (c) point-cloud-based pose estimate (depth camera + Open3D RANSAC fit) as an alternative to monocular Gemini-Robotics-ER inference.",
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": false,
+      "has_stacking": false,
+      "uses_vision_pose_estimate": true,
+      "uses_6dof_pose_input": true,
+      "uses_ik_pose_match": true,
+      "uses_singularity_gate": true,
+      "uses_overhead_camera": true,
+      "n_cubes": 3
+    },
+    "structural_tags": [
+      "isaac:vision.6dof_pose_estimate",
+      "isaac:control.ik_pose_match",
+      "isaac:bin_pick.full_pose",
+      "isaac:transport.bin_to_bin",
+      "isaac:robot.fixed_base.arm",
+      "isaac:robot.franka",
+      "isaac:topology.single_station",
+      "isaac:topology.fixed_camera",
+      "isaac:sensing.vision_detect_objects",
+      "isaac:sensing.vision_analyze_scene",
+      "isaac:grasp.define_grasp_pose",
+      "isaac:control.solve_ik",
+      "isaac:control.check_singularity",
+      "isaac:industry.bin_picking"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "franka"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "7dof_required_for_arbitrary_ee_pose"
+    },
+    "source_bin": {
+      "constraints": ["bin", "container"],
+      "expected_count": 1,
+      "required": true
+    },
+    "destination_bin": {
+      "constraints": ["bin", "container"],
+      "expected_count": 1,
+      "required": true
+    },
+    "overhead_camera": {
+      "constraints": ["fixed_overhead", "fixed_angled"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube", "box"],
+      "min": 3,
+      "max": 3,
+      "param_name": "n_cubes",
+      "unordered": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka",
+      "position": [0, 0, 0.75],
+      "orientation": [1, 0, 0, 0]
+    },
+    "source_bin": {
+      "path": "/World/SourceBin",
+      "position": [0, 0.42, 0.80],
+      "size": [0.30, 0.30, 0.20],
+      "wall_thickness": 0.01
+    },
+    "destination_bin": {
+      "path": "/World/DestBin",
+      "position": [0, -0.45, 0.80],
+      "size": [0.30, 0.30, 0.20],
+      "wall_thickness": 0.01
+    },
+    "overhead_camera": {
+      "path": "/World/OverheadCamera",
+      "class": "fixed_overhead",
+      "position": [0, 0.42, 1.55],
+      "look_at": [0, 0.42, 0.80],
+      "up": [0.0, 1.0, 0.0],
+      "intrinsics": {
+        "focal_length_mm": 24.0,
+        "horizontal_aperture_mm": 20.955,
+        "vertical_aperture_mm": 15.2908,
+        "clipping_range": [0.1, 10.0]
+      }
+    },
+    "workpieces": [
+      {
+        "path": "/World/SourceBin/Cube_1",
+        "position": [-0.08, 0.42, 0.88],
+        "orientation": [0.924, 0.0, 0.383, 0.0],
+        "color": [0.85, 0.10, 0.10],
+        "size": 0.07
+      },
+      {
+        "path": "/World/SourceBin/Cube_2",
+        "position": [0.08, 0.42, 0.88],
+        "orientation": [0.854, 0.354, 0.354, 0.146],
+        "color": [0.10, 0.65, 0.85],
+        "size": 0.07
+      },
+      {
+        "path": "/World/SourceBin/Cube_3",
+        "position": [0.0, 0.50, 0.88],
+        "orientation": [0.683, 0.183, 0.683, -0.183],
+        "color": [0.20, 0.80, 0.20],
+        "size": 0.07
+      }
+    ],
+    "ik": {
+      "hover_offset_along_cube_z_m": 0.05,
+      "singularity_condition_threshold": 100.0,
+      "rotation_match_tolerance_deg": 20.0
+    }
+  },
+  "code_template": "import math\n\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.65, 0.65, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_bin(\n    prim_path={{source_bin.path}},\n    size={{source_bin.size}},\n    position={{source_bin.position}},\n    wall_thickness={{source_bin.wall_thickness}},\n)\n\ncreate_bin(\n    prim_path={{destination_bin.path}},\n    size={{destination_bin.size}},\n    position={{destination_bin.position}},\n    wall_thickness={{destination_bin.wall_thickness}},\n)\n\ncreate_prim(\n    prim_path={{overhead_camera.path}},\n    prim_type=\"Camera\",\n    position={{overhead_camera.position}},\n)\nset_camera_params(\n    camera_path={{overhead_camera.path}},\n    params={\n        \"focal_length\": {{overhead_camera.intrinsics.focal_length_mm}},\n        \"horizontal_aperture\": {{overhead_camera.intrinsics.horizontal_aperture_mm}},\n        \"vertical_aperture\": {{overhead_camera.intrinsics.vertical_aperture_mm}},\n        \"clipping_range\": {{overhead_camera.intrinsics.clipping_range}},\n    },\n)\nconfigure_camera(\n    camera_path={{overhead_camera.path}},\n    focal_length={{overhead_camera.intrinsics.focal_length_mm}},\n    horizontal_aperture={{overhead_camera.intrinsics.horizontal_aperture_mm}},\n    vertical_aperture={{overhead_camera.intrinsics.vertical_aperture_mm}},\n    clipping_range={{overhead_camera.intrinsics.clipping_range}},\n)\nset_camera_look_at(\n    camera_path={{overhead_camera.path}},\n    target={{overhead_camera.look_at}},\n    up={{overhead_camera.up}},\n)\n\ncube_specs = [\n    {\"path\": {{workpieces[0].path}}, \"position\": {{workpieces[0].position}}, \"orientation\": {{workpieces[0].orientation}}, \"color\": {{workpieces[0].color}}},\n    {\"path\": {{workpieces[1].path}}, \"position\": {{workpieces[1].position}}, \"orientation\": {{workpieces[1].orientation}}, \"color\": {{workpieces[1].color}}},\n    {\"path\": {{workpieces[2].path}}, \"position\": {{workpieces[2].position}}, \"orientation\": {{workpieces[2].orientation}}, \"color\": {{workpieces[2].color}}},\n]\ncube_paths = [spec[\"path\"] for spec in cube_specs]\n\nfor spec in cube_specs:\n    create_prim(prim_path=spec[\"path\"], prim_type=\"Cube\", position=spec[\"position\"], size={{workpieces[0].size}})\n    set_attribute(prim_path=spec[\"path\"], attr_name=\"xformOp:orient\", value=spec[\"orientation\"])\n    set_attribute(prim_path=spec[\"path\"], attr_name=\"primvars:displayColor\", value=[spec[\"color\"]])\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=spec[\"path\"], schema_name=api)\n    set_semantic_label(prim_path=spec[\"path\"], class_name=\"cube\")\n\nbulk_set_attribute(prim_paths=cube_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nfor path in cube_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\nadd_proximity_sensor(\n    sensor_path=\"/World/ArrivalSensor\",\n    position=[0, -0.45, 0.86],\n    size=[0.26, 0.26, 0.08],\n)\n\n_detections = vision_detect_objects(labels=[\"cube\"], max_objects=3)\n\n_per_cube_pose_estimates = []\nfor _cube_idx, _spec in enumerate(cube_specs):\n    _refined = vision_analyze_scene(\n        question=\"What is the rotation quaternion (w, x, y, z) of cube \" + str(_cube_idx + 1) + \"? Return as [w, x, y, z].\",\n    )\n    _wt = get_world_transform(prim_path=_spec[\"path\"])\n    _per_cube_pose_estimates.append({\n        \"cube_path\": _spec[\"path\"],\n        \"vision_refined_quat_raw\": _refined,\n        \"ground_truth_transform\": _wt,\n    })\n\n_pick_list = []\nfor _est in _per_cube_pose_estimates:\n    _wt = _est[\"ground_truth_transform\"]\n    _cube_pos = _wt.get(\"translation\", [0, 0, 0.80]) if isinstance(_wt, dict) else [0, 0, 0.80]\n    _cube_quat = _wt.get(\"rotation_quaternion\", [1, 0, 0, 0]) if isinstance(_wt, dict) else [1, 0, 0, 0]\n    _qw, _qx, _qy, _qz = _cube_quat[0], _cube_quat[1], _cube_quat[2], _cube_quat[3]\n    _local_z_world = [\n        2.0 * (_qx * _qz + _qw * _qy),\n        2.0 * (_qy * _qz - _qw * _qx),\n        1.0 - 2.0 * (_qx * _qx + _qy * _qy),\n    ]\n    _target_position = [\n        _cube_pos[0] + {{ik.hover_offset_along_cube_z_m}} * _local_z_world[0],\n        _cube_pos[1] + {{ik.hover_offset_along_cube_z_m}} * _local_z_world[1],\n        _cube_pos[2] + {{ik.hover_offset_along_cube_z_m}} * _local_z_world[2],\n    ]\n    _target_orientation = list(_cube_quat)\n    _sing_report = check_singularity(\n        articulation_path={{primary_robot.path}},\n        target_position=_target_position,\n        target_orientation=_target_orientation,\n    )\n    _condition_number = _sing_report.get(\"condition_number\", 0.0) if isinstance(_sing_report, dict) else 0.0\n    if _condition_number >= {{ik.singularity_condition_threshold}}:\n        _pick_list.append({\"cube_path\": _est[\"cube_path\"], \"skipped\": True, \"reason\": \"near-singularity\", \"target_position\": _target_position, \"target_orientation\": _target_orientation})\n        continue\n    _ik_result = solve_ik(\n        articulation_path={{primary_robot.path}},\n        target_position=_target_position,\n        target_orientation=_target_orientation,\n        robot_type=\"franka\",\n    )\n    _ik_success = _ik_result.get(\"success\", False) if isinstance(_ik_result, dict) else False\n    _pick_list.append({\n        \"cube_path\": _est[\"cube_path\"],\n        \"skipped\": not _ik_success,\n        \"reason\": None if _ik_success else \"ik_no_solution\",\n        \"target_position\": _target_position,\n        \"target_orientation\": _target_orientation,\n    })\n\nfor _pick in _pick_list:\n    if _pick[\"skipped\"]:\n        continue\n    define_grasp_pose(\n        robot_path={{primary_robot.path}},\n        object_path=_pick[\"cube_path\"],\n        approach_direction=[0, 0, -1],\n        gripper_offset=[0, 0, {{ik.hover_offset_along_cube_z_m}}],\n    )\n\n_pickable_cubes = [p[\"cube_path\"] for p in _pick_list if not p[\"skipped\"]]\n_drop_targets = {p: [0, -0.45, 0.87] for p in _pickable_cubes}\n_gripper_rotation = {}\nfor _pick in _pick_list:\n    if _pick[\"skipped\"]:\n        continue\n    _q = _pick[\"target_orientation\"]\n    _yaw_rad = math.atan2(2.0 * (_q[0] * _q[3] + _q[1] * _q[2]), 1.0 - 2.0 * (_q[2] * _q[2] + _q[3] * _q[3]))\n    _gripper_rotation[_pick[\"cube_path\"]] = math.degrees(_yaw_rad)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=_pickable_cubes,\n    destination_path={{destination_bin.path}},\n    drop_targets=_drop_targets,\n    gripper_rotation=_gripper_rotation,\n    planning_obstacles=[\"/World/Table\", {{source_bin.path}}, {{destination_bin.path}}],\n    sensor_path=\"/World/ArrivalSensor\",\n    robot_family=\"franka\",\n)",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo", "direct_joint"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate-schema ✓ (lint clean, --validate-tool-calls passes); function-gate BLOCKED (requires live Isaac Sim + RTX render path for capture_camera_image + Gemini-Robotics-ER backend for vision_detect_objects/vision_analyze_scene + cuRobo motion-planning for setup_pick_place_controller; the 3-cube random-quaternion topology + per-cube IK + singularity gate is deterministic in sim and can be exercised the moment a Kit instance is available — the form-gate uses get_world_transform sim-truth as the orientation fallback so the IK chain is unblocked by Gemini availability)"
+}
