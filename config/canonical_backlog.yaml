@@ -1334,7 +1334,11 @@
   motion_controller_preference: curobo
   pattern_hint: rl-train
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-curriculum-object-complexity.json
+  drafted_date: "2026-05-16"
+  drafted_by: A50
+  draft_notes: "A50 milestone; form-gate 1 OK 0 ERROR 1 WARN (settle_state absent — expected for rl-train non-delivery canonical); first use of multi-object-class shape curriculum (cube+sphere+cylinder) + 5x add_domain_randomizer in one sequence; function-gate BLOCKED (requires IsaacLab install; DR authoring through preview_dr smokeable without it)"
 
 - id: rl-detect-ood-distribution-shift-001
   source: retrieval-miss
