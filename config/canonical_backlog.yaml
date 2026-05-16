@@ -1400,7 +1400,10 @@
   motion_controller_preference: direct_joint
   pattern_hint: finetune
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  drafted_date: "2026-05-16"
+  template_id: "CP-NEW-groot-finetune-n10-demos"
+  draft_notes: "A12; form-gate 0 ERROR (1 WARN settle_state); function-gate BLOCKED (GR00T N1.6-3B weights ~50GB + HF token + 24GB VRAM + LeRobot v2 demo dataset required)"
 
 - id: groot-monitor-forgetting-001
   source: retrieval-miss
