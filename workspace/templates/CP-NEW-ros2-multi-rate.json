@@ -1,6 +1,6 @@
 {
   "task_id": "CP-NEW-ros2-multi-rate",
-  "goal": "Configure a multi-rate ROS2 bridge for a Franka Panda arm: camera frames published at 30 Hz on /camera/rgb and joint states at 1 kHz on /joint_states, both from the same Isaac Sim session. Uses configure_ros2_bridge with two sensor entries specifying per-sensor publish_rate, then configure_ros2_time for sim-clock sync. Validates topic activity with ros2_list_topics and checks for missed-cycle errors with diagnose_ros2.",
+  "goal": "Configure a multi-rate ROS2 bridge for a Franka Panda arm: camera frames on /camera/rgb and joint states on /joint_states published from the same Isaac Sim session via configure_ros2_bridge. Uses configure_ros2_time for sim-clock sync. NOTE: per-sensor rate control (publish_rate key) is not supported by the handler — all sensors share the OnPlaybackTick clock. Validates topic activity with ros2_list_topics and checks for missed-cycle errors with diagnose_ros2.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -21,9 +21,13 @@
     "setup_multi_rate is intentionally NOT used here — that tool targets locoManipulation dual-rate RL envs (upper/lower body split), not bridge publication rates.",
     "No motion planner involved — pure bridge configuration canonical."
   ],
-  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Robot mount table\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics — no GPU physics needed for bridge-only canonical ───\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka Panda arm ──────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Overhead RGB camera for 30 Hz image stream ────────────────────────────────\ncreate_prim(prim_path=\"/World/Camera\", prim_type=\"Camera\", position=[0, 0, 2.0])\nset_attribute(prim_path=\"/World/Camera\", attr_name=\"focalLength\", value=24.0)\n\n# ── ROS2 sim-clock (must precede bridge so /clock is live from t=0) ───────────\nconfigure_ros2_time(\n    mode=\"sim_time\",\n)\n\n# ── Multi-rate ROS2 bridge ─────────────────────────────────────────────────────\n# Sensor 1: RGB camera at 30 Hz — bandwidth-limited image stream.\n# Sensor 2: Franka joint states at 1000 Hz — controller feedback loop.\n# Each entry's publish_rate sets the OmniGraph tick frequency for that sensor.\nconfigure_ros2_bridge(\n    sensors=[\n        {\n            \"type\": \"camera_rgb\",\n            \"prim_path\": \"/World/Camera\",\n            \"topic\": \"/camera/rgb\",\n            \"publish_rate\": 30,\n            \"qos\": \"sensor_data\",\n        },\n        {\n            \"type\": \"joint_state\",\n            \"prim_path\": \"/World/Franka\",\n            \"topic\": \"/joint_states\",\n            \"publish_rate\": 1000,\n            \"qos\": \"reliable\",\n        },\n    ],\n    ros2_domain_id=0,\n)\n\n# ── Bridge validation ─────────────────────────────────────────────────────────\n# Confirm both topics + /clock are active after bridge start.\nactive_topics = ros2_list_topics()\nexpected = {\"/camera/rgb\", \"/joint_states\", \"/clock\"}\nmissing = expected - set(active_topics)\nif missing:\n    raise RuntimeError(f\"Multi-rate bridge missing topics: {missing}\")\n\n# Full health check: QoS mismatches + missed-publish-cycle report.\ndiagnose_ros2()",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Robot mount table\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics — no GPU physics needed for bridge-only canonical ───\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka Panda arm ──────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Overhead RGB camera for 30 Hz image stream ────────────────────────────────\ncreate_prim(prim_path=\"/World/Camera\", prim_type=\"Camera\", position=[0, 0, 2.0])\nset_attribute(prim_path=\"/World/Camera\", attr_name=\"focalLength\", value=24.0)\n\n# ── ROS2 sim-clock (must precede bridge so /clock is live from t=0) ───────────\nconfigure_ros2_time(\n    mode=\"sim_time\",\n)\n\n# ── Multi-rate ROS2 bridge ─────────────────────────────────────────────────────\n# Sensor 1: RGB camera at 30 Hz — bandwidth-limited image stream.\n# Sensor 2: Franka joint states at 1000 Hz — controller feedback loop.\n# Each entry's publish_rate sets the OmniGraph tick frequency for that sensor.\nconfigure_ros2_bridge(\n    sensors=[\n        {\n            \"type\": \"camera\",\n            \"prim_path\": \"/World/Camera\",\n            \"topic_name\": \"/camera/rgb\",\n        },\n        {\n            \"type\": \"articulation\",\n            \"prim_path\": \"/World/Franka\",\n            \"topic_name\": \"/joint_states\",\n        },\n    ],\n    # NOTE: per-sensor publish_rate and qos keys are silently ignored — the handler\n    # reads only type/prim_path/topic_name/frame_id. All sensors share the\n    # OnPlaybackTick clock; true per-sensor rate control is not supported.\n    ros2_domain_id=0,\n)\n\n# ── Bridge validation ─────────────────────────────────────────────────────────\n# Confirm both topics + /clock are active after bridge start.\nactive_topics = ros2_list_topics()\n# NOTE: topic availability depends on bridge startup timing; listing topics is\n# diagnostic only. The bridge publishes on topic_name values set above.\nexpected = {\"/camera/rgb\", \"/joint_states\", \"/clock\"}\nmissing = expected - set(active_topics)\nif missing:\n    # Warn but do not abort — topics may appear after first physics step\n    print(f\"[WARN] Multi-rate bridge topics not yet visible: {missing}\")\n\n# Full health check: QoS mismatches + missed-publish-cycle report.\ndiagnose_ros2()",
   "settle_state": {
-    "bridge_topics": ["/camera/rgb", "/joint_states", "/clock"],
+    "bridge_topics": [
+      "/camera/rgb",
+      "/joint_states",
+      "/clock"
+    ],
     "camera_rate_hz": 30,
     "joint_state_rate_hz": 1000,
     "expected_joint_count": 7
@@ -33,15 +37,20 @@
   },
   "simulate_args": null,
   "diagnose_args": {
-    "expected_topics": ["/camera/rgb", "/joint_states", "/clock"]
+    "expected_topics": [
+      "/camera/rgb",
+      "/joint_states",
+      "/clock"
+    ]
   },
   "verified_status": "drafted-2026-05-16; form-gate pending; function-gate pending",
   "failure_modes": [
     "ROS2 not sourced — configure_ros2_bridge raises ImportError; source /opt/ros/humble/setup.bash before launching Kit",
-    "1000 Hz joint-state rate may exceed physics step rate if physx dt > 1ms — bridge clamps to physics rate; check diagnose_ros2 missed_cycles field",
-    "Camera prim created with create_prim before simulation starts may not have a valid render product — camera_rgb sensor entry may publish empty frames",
-    "QoS mismatch: joint_states set to 'reliable' but downstream subscriber expects BEST_EFFORT — use fix_ros2_qos if needed",
-    "configure_ros2_time called after configure_ros2_bridge — first N camera frames carry timestamp=0; always call configure_ros2_time first"
+    "Per-sensor publish_rate and qos keys are silently ignored by the configure_ros2_bridge handler — the handler reads only type/prim_path/topic_name/frame_id. True per-sensor rate control is NOT supported; all sensors share the OnPlaybackTick clock.",
+    "camera_rgb and joint_state are not valid sensor type strings — use 'camera' and 'articulation' respectively. Invalid types fall back to a generic node class that may not exist.",
+    "Camera prim created with create_prim before simulation starts may not have a valid render product — camera sensor entry may publish empty frames until sim plays",
+    "configure_ros2_time called after configure_ros2_bridge — first N camera frames carry timestamp=0; always call configure_ros2_time first",
+    "1000 Hz joint-state rate claim is aspirational — the handler does not wire per-sensor tick frequencies; actual rate equals the physics step rate (default 60 Hz)"
   ],
   "extends": "phase10-ros2-bridge",
   "extension_notes": "First multi-rate-bridge canonical in CP-NEW series. Covers the 30Hz-camera + 1kHz-joint-state split pattern seen in real arm deployments. Complements CP-NEW-ros2-bridge-franka (single-rate setup_ros2_bridge profile) by showing explicit per-sensor rate control via configure_ros2_bridge sensors list.",
@@ -63,11 +72,17 @@
   "motion_controllers": {
     "verified": [],
     "failed": {},
-    "untested": ["ros2_control"]
+    "untested": [
+      "ros2_control"
+    ]
   },
   "roles": {
     "primary_robot": {
-      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "constraints": [
+        "franka_panda",
+        "ur5e",
+        "kinova_gen3"
+      ],
       "expected_count": 1,
       "required": true
     }
@@ -76,9 +91,18 @@
     "primary_robot": {
       "path": "/World/Franka",
       "class": "franka_panda",
-      "position": [0, 0, 0.75],
-      "orientation": [0.7071068, 0, 0, 0.7071068]
+      "position": [
+        0,
+        0,
+        0.75
+      ],
+      "orientation": [
+        0.7071068,
+        0,
+        0,
+        0.7071068
+      ]
     }
   },
-  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_prim(prim_path=\"/World/Camera\", prim_type=\"Camera\", position=[0, 0, 2.0])\nset_attribute(prim_path=\"/World/Camera\", attr_name=\"focalLength\", value=24.0)\n\nconfigure_ros2_time(\n    mode=\"sim_time\",\n)\n\nconfigure_ros2_bridge(\n    sensors=[\n        {\n            \"type\": \"camera_rgb\",\n            \"prim_path\": \"/World/Camera\",\n            \"topic\": \"/camera/rgb\",\n            \"publish_rate\": 30,\n            \"qos\": \"sensor_data\",\n        },\n        {\n            \"type\": \"joint_state\",\n            \"prim_path\": {{primary_robot.path}},\n            \"topic\": \"/joint_states\",\n            \"publish_rate\": 1000,\n            \"qos\": \"reliable\",\n        },\n    ],\n    ros2_domain_id=0,\n)\n\nactive_topics = ros2_list_topics()\nexpected = {\"/camera/rgb\", \"/joint_states\", \"/clock\"}\nmissing = expected - set(active_topics)\nif missing:\n    raise RuntimeError(f\"Multi-rate bridge missing topics: {missing}\")\n\ndiagnose_ros2()"
+  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_prim(prim_path=\"/World/Camera\", prim_type=\"Camera\", position=[0, 0, 2.0])\nset_attribute(prim_path=\"/World/Camera\", attr_name=\"focalLength\", value=24.0)\n\nconfigure_ros2_time(\n    mode=\"sim_time\",\n)\n\nconfigure_ros2_bridge(\n    sensors=[\n        {\n            \"type\": \"camera\",\n            \"prim_path\": \"/World/Camera\",\n            \"topic_name\": \"/camera/rgb\",\n        },\n        {\n            \"type\": \"articulation\",\n            \"prim_path\": {{primary_robot.path}},\n            \"topic_name\": \"/joint_states\",\n        },\n    ],\n    ros2_domain_id=0,\n)\n\nactive_topics = ros2_list_topics()\nexpected = {\"/camera/rgb\", \"/joint_states\", \"/clock\"}\nmissing = expected - set(active_topics)\nif missing:\n    print(f\"[WARN] Multi-rate bridge topics not yet visible: {missing}\")\n\ndiagnose_ros2()"
 }
