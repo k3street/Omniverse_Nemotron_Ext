@@ -195,7 +195,10 @@
     },
     "operator_role": {
       "yrkesroll": "machinist",
+      "title": "CNC Machinist / Machine Tender",
       "onet_soc": "51-4011",
+      "onet_soc_title": "Machinists",
+      "onet_soc_note": "51-4011 (Machinists) is the direct ONET match for hands-on CNC load/unload + cycle-trigger work; no substitution needed. Adjacent code 51-4012 (Computer Numerically Controlled Tool Operators) is also valid and may be preferred when the workflow emphasises NC-program execution over fixture-loading; 51-4011 is the broader 'machinist' code used here for the load/unload-centric workflow.",
       "workstation": "cnc_machining_center",
       "responsibilities": [
         "load_raw_stock",

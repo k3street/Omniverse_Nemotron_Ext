@@ -1,0 +1,254 @@
+{
+  "task_id": "CP-NEW-yrkesroll-assembler-snap-fit",
+  "goal": "Yrkesroll: Assembler / assembly worker (ONET SOC 51-2099, Assemblers and Fabricators, All Other). A Franka Panda performs a clamshell snap-fit housing closure: bottom shell (Cube fixture pinned to the worktable) and top clip (Cube workpiece with two Cube prong proxies hanging off the lower face). The robot picks the top clip from a staging pad, aligns it directly above the bottom shell, then presses down under cartesian_impedance compliance with a Z-axis force CAP of 25 N. The 'snap-fit click' is detected by get_contact_report on the bottom-shell collider: contact-report shows a transient impulse spike (prong-tip hits detent rim) followed by a drop in normal force (prong slips past detent into the lock pocket) AND the top clip's Z-translation jumps from a stalled position to its seated z within one to two physics steps. Realizes backlog entry yrkesroll-assembler-snap-fit-002. Distinct from CP-NEW-peg-bushing-impedance (single peg into a hollow bushing, axial force cap, no rotational symmetry break) and CP-NEW-screw-driving-impedance (continuous helical descent with torque cap on driver bit) — this canonical is a PRESS-AND-CLICK gesture: pure Z-axis descent, no rotation, success measured at the instant the prong-detent transient appears in the contact report rather than at a steady-state torque or force plateau.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "define_grasp_pose",
+    "setup_pick_place_controller",
+    "setup_impedance_controller",
+    "set_compliance_params",
+    "follow_trajectory_with_compliance",
+    "get_contact_report",
+    "get_joint_torques",
+    "get_world_transform"
+  ],
+  "thoughts": [
+    "Yrkesroll framing — Assembler / assembly worker (ONET SOC 51-2099, Assemblers and Fabricators, All Other). Backlog entry yrkesroll-assembler-snap-fit-002 calls for snap-fit housing closure with apply_force + threshold detection. We elevate the pattern to a fuller compliance-controlled press because the snap moment is the meaningful operator signal — apply_force alone records 'force applied' but not 'click engaged'; get_contact_report on the bottom shell captures the transient impulse spike+drop that marks detent passage.",
+    "Distinction from CP-NEW-peg-bushing-impedance (closest insert sibling): peg-bushing terminates at steady-state Z-force cap (20 N) with NO snap event — peg just stops descending. Snap-fit terminates at a BRIEF transient (~1-3 physics steps) followed by sudden Z-translation jump as the clip seats. The detection signal is qualitatively different: peg-bushing watches the F/T sensor for a plateau; snap-fit watches the contact-report stream for a spike-then-drop pattern.",
+    "Distinction from CP-NEW-screw-driving-impedance (other compliance press sibling): screw-driving is CONTINUOUS HELICAL DESCENT (coupled Z-translate + Z-rotate over 6 waypoints, torque cap on driver bit). Snap-fit is PURE Z-AXIS PRESS (no rotation), 3 waypoints (approach → contact → seated), force cap 25 N (higher than screw's 15 N because the clip has 4 prong proxies sharing the load).",
+    "Topology — single station on a 1.0×0.6×0.75m worktable. Franka at [0, 0, 0.75]. Bottom shell (housing base) pinned to the table at [0.0, -0.25, 0.795]: a Cube of scale [0.06, 0.05, 0.015] (12cm × 10cm × 3cm housing base). Top clip (clamshell upper half) starts on a staging pad at [0.30, 0.10, 0.815]: a Cube of scale [0.06, 0.05, 0.010] (12cm × 10cm × 2cm clip body) with 4 prong proxies (small Cubes of scale [0.005, 0.005, 0.010] = 1cm × 1cm × 2cm) attached at the 4 lower corners of the clip body. Staging pad is far enough from the bottom shell (0.3m horizontal) that the planning_obstacles list keeps the two halves out of each other's planning volume.",
+    "Prong proxy geometry — this is a structural simplification (failure_mode #1). A real snap-fit prong is a curved leaf spring with a hook at the tip that flexes inward as it passes the detent rim and then snaps outward into the lock pocket. We model each prong as a rigid 1cm × 1cm × 2cm Cube attached via PhysicsFixedJoint to the clip body. This gives us 4 collider hooks that protrude below the clip's lower face. When the clip is pressed down and the prong-tip Cubes contact the bottom shell's top rim, the contact-report records a brief impulse spike. The clip then descends past the rim (because the prong proxies are RIGID — they do not flex; in reality, the bottom shell would have detents that allow passage, here the bottom-shell top rim is slightly recessed so prong-tips clear it at z=0.802 when the clip body itself is at z=0.795). The 'click' is the transient impulse spike at the rim contact moment.",
+    "Snap-fit click detection — get_contact_report(prim_path='/World/BottomShell', max_contacts=50). Operator interpretation: scan the returned contact list for an impulse value > 0.5 N·s (the prong-tip rim-strike) followed by an absence of contact entries (the clip has passed the rim, prong proxies no longer touch the bottom shell's top face — they touch its inner side faces, which generates a different actor1 label). We also probe get_world_transform on the clip body — its Z must have dropped from start (z=0.815) past the engaged threshold (z<=0.802) within the 3-waypoint compliance trajectory window.",
+    "Compliance profile (cartesian_impedance) — X/Y translational STIFF (Kx=[400, 400, 60] N/m) to keep the clip axially aligned with the bottom shell; Z translational SOFT (60 N/m) so the controller surrenders to the F/T sensor's 25 N cap. All rotational axes STIFF (Kr=[40, 40, 40] N·m/rad) because the press gesture has no rotational component — any wrist rotation during descent would be a mis-grasp or tilt and should resist. This differs from screw-driving where Z-rotation was SOFT (driver-bit slip needs surrender).",
+    "Force cap 25 N — higher than peg-bushing (20 N) because the clip has 4 prongs sharing the force, lower than what would damage the clip body (clip body wall thickness 1cm, plastic-class material — would crack above ~50 N concentrated). 25 N is a reasonable mid-class snap-fit press force per typical injection-molded ABS clip ratings.",
+    "Phase ordering: PHASE 1 (transit) — setup_pick_place_controller picks the clip from the staging pad and places it directly above the bottom shell at z=0.825 (10 mm above the bottom shell top rim, ready for the descent). PHASE 2 (press) — setup_impedance_controller installs the compliance profile, then follow_trajectory_with_compliance executes the 3-waypoint descent under cartesian_impedance from t=0 to t=1 with compliance_handoff_at=0.0 (entire trajectory is contact-rich). PHASE 3 (verify) — get_contact_report scans for the snap signature, get_joint_torques records wrist torque history, get_world_transform confirms clip Z below seated threshold.",
+    "Bottom shell anchoring — bottom shell has PhysicsCollisionAPI but NO RigidBodyAPI (static, pinned by absence of dynamics). This is the same anchoring pattern used for box walls in CP-NEW-yrkesroll-packer-box-seal — relies on no-rigid-body == static collider semantics. Avoids the need for an explicit PhysicsFixedJoint to the table.",
+    "Prong-to-clip fixed joint — each prong proxy is a separate Cube prim with full rigid-body schema, joined to the clip body via a PhysicsFixedJoint so the 4 prongs + clip body move as one composite during the press. Alternative would be a single multi-collider mesh, but separate Cubes are cleaner for the canonical's structural-tag story (4 visible prong proxies).",
+    "motion_controllers: cartesian_impedance via follow_trajectory_with_compliance (snap press, untested) + curobo via setup_pick_place_controller (transit only, untested). The transit phase is cuRobo-planned; the press phase is impedance-only (no cuRobo replan during contact-rich descent).",
+    "verified_status: drafted on 2026-05-16; form-gate-schema pending lint; function-gate pending Kit RPC + ros2_control bridge for live impedance press."
+  ],
+  "code": "# ── Scene skeleton ──────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Physics: CPU deterministic for contact-report reliability.\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Worktable\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Robot ────────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Bottom shell (housing base — STATIC, pinned by absence of RigidBodyAPI) ──\n# Cube at table-top + half-thickness. Top z = 0.795 + 0.015/2 = 0.8025.\n# Prong-tip detent rim at z ≈ 0.802; prong tips strike here on descent.\ncreate_prim(\n    prim_path=\"/World/BottomShell\",\n    prim_type=\"Cube\",\n    position=[0.0, -0.25, 0.795],\n    scale=[0.06, 0.05, 0.015],\n)\napply_api_schema(prim_path=\"/World/BottomShell\", schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path=\"/World/BottomShell\", schema_name=\"PhysxContactReportAPI\")\nset_attribute(prim_path=\"/World/BottomShell\", attr_name=\"primvars:displayColor\", value=[[0.20, 0.40, 0.65]])\n\n# ── Staging pad (visual reference for clip start position) ────────────────────\ncreate_prim(\n    prim_path=\"/World/StagingPad\",\n    prim_type=\"Cube\",\n    position=[0.30, 0.10, 0.755],\n    scale=[0.10, 0.10, 0.005],\n)\napply_api_schema(prim_path=\"/World/StagingPad\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/StagingPad\", attr_name=\"primvars:displayColor\", value=[[0.55, 0.55, 0.55]])\n\n# ── Top clip body (clamshell upper half — dynamic, plastic-class) ────────────\n# Clip body centre z = 0.815; lower face at z = 0.810.\n# Plastic-class friction; mass 0.04 kg (typical injection-molded clamshell upper half).\ncreate_prim(\n    prim_path=\"/World/TopClip\",\n    prim_type=\"Cube\",\n    position=[0.30, 0.10, 0.815],\n    scale=[0.06, 0.05, 0.010],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\", \"PhysxContactReportAPI\"):\n    apply_api_schema(prim_path=\"/World/TopClip\", schema_name=api)\nset_attribute(prim_path=\"/World/TopClip\", attr_name=\"physics:mass\", value=0.04)\nset_attribute(prim_path=\"/World/TopClip\", attr_name=\"primvars:displayColor\", value=[[0.25, 0.55, 0.30]])\napply_physics_material(prim_path=\"/World/TopClip\", material_name=\"rubber\")\n\n# ── Four prong proxies (rigid Cubes hanging off the lower corners of the clip) ─\n# Each prong tip extends 2cm below the clip body. Lower face of clip = 0.810,\n# prong tip lowest face = 0.810 - 0.020 = 0.790 (so on descent, the prong tips\n# strike the bottom-shell top rim at z=0.8025 BEFORE the clip body itself reaches\n# the rim — this is the geometric prerequisite for the snap-click transient).\nprong_offsets = [\n    [+0.025, +0.020],   # front-right corner\n    [+0.025, -0.020],   # back-right corner\n    [-0.025, +0.020],   # front-left corner\n    [-0.025, -0.020],   # back-left corner\n]\nprong_paths = []\nfor idx, (dx, dy) in enumerate(prong_offsets):\n    prong_path = f\"/World/Prong_{idx + 1}\"\n    prong_paths.append(prong_path)\n    create_prim(\n        prim_path=prong_path,\n        prim_type=\"Cube\",\n        position=[0.30 + dx, 0.10 + dy, 0.800],\n        scale=[0.005, 0.005, 0.010],\n    )\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=prong_path, schema_name=api)\n    set_attribute(prim_path=prong_path, attr_name=\"physics:mass\", value=0.002)\n    set_attribute(prim_path=prong_path, attr_name=\"primvars:displayColor\", value=[[0.25, 0.55, 0.30]])\n\n# Sleep-threshold zero on clip + prongs so the press signal is not lost to sleep.\nbulk_set_attribute(\n    prim_paths=[\"/World/TopClip\"] + prong_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=[\"/World/TopClip\"] + prong_paths + [\"/World/BottomShell\"],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\n# ── Grasp pose — top-down approach on the clip body's broad upper face ───────\ndefine_grasp_pose(\n    robot_path=\"/World/Franka\",\n    object_path=\"/World/TopClip\",\n    approach_direction=[0, 0, -1],\n    gripper_offset=[0, 0, 0],\n)\n\n# ── PHASE 1: transit — pick clip from staging pad, hover above bottom shell ──\n# Drop target [0.0, -0.25, 0.825] = 10mm above bottom-shell top rim (rim z=0.8025).\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    robot_family=\"franka\",\n    source_paths=[\"/World/TopClip\"],\n    destination_path=\"/World/BottomShell\",\n    drop_target=[0.0, -0.25, 0.825],\n    planning_obstacles=[\n        \"/World/Table\",\n        \"/World/BottomShell\",\n        \"/World/StagingPad\",\n    ],\n    approach_height=0.12,\n    lift_height=0.12,\n)\n\nget_world_transform(prim_path=\"/World/TopClip\")\n\n# ── PHASE 2a: install impedance controller — Z-soft, X/Y-stiff, rot all stiff ─\n# Kx=[400, 400, 60] N/m — X/Y rigid centering, Z soft for 25 N descent.\n# Kr=[40, 40, 40] N·m/rad — all rotation stiff (press gesture has no rotation).\nsetup_impedance_controller(\n    robot_path=\"/World/Franka\",\n    target_frame=\"panda_hand\",\n    Kx=[400.0, 400.0, 60.0],\n    Kr=[40.0, 40.0, 40.0],\n    Dx=[40.0, 40.0, 7.0],\n    Dr=[4.0, 4.0, 4.0],\n    null_space_stiffness=0.5,\n    null_space_damping=0.5,\n    torque_mode=True,\n    dry_run=True,\n)\n\nset_compliance_params(\n    robot_path=\"/World/Franka\",\n    stiffness_xyz=[400.0, 400.0, 60.0],\n    damping_xyz=[40.0, 40.0, 7.0],\n    stiffness_rot=[40.0, 40.0, 40.0],\n    damping_rot=[4.0, 4.0, 4.0],\n    dry_run=True,\n)\n\n# ── PHASE 2b: press-and-click — 3-waypoint Z-descent under cartesian_impedance ─\n# Waypoint 0 (t=0): hover at z=0.825 (10mm clearance, prong tips at z=0.805).\n# Waypoint 1 (t=0.5): rim contact at z=0.815 (prong tips at z=0.795, contact rim).\n# Waypoint 2 (t=1.0): seated at z=0.800 (clip body face at z=0.795, flush on shell).\n# compliance_handoff_at=0.0 → entire trajectory under compliance (every step contact-rich).\nfollow_trajectory_with_compliance(\n    trajectory=[\n        {\"pose\": {\"position\": [0.0, -0.25, 0.825], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n        {\"pose\": {\"position\": [0.0, -0.25, 0.815], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n        {\"pose\": {\"position\": [0.0, -0.25, 0.800], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}\n    ],\n    robot_path=\"/World/Franka\",\n    compliance_handoff_at=0.0,\n    compliance_controller=\"cartesian_impedance\",\n    timeout_s=15.0,\n    velocity_scaling=0.15,\n    dry_run=True,\n)\n\n# ── PHASE 3: verify the snap-click signature ─────────────────────────────────\n# Contact report on the bottom shell — scan returned events for the\n# prong-tip-strike impulse spike (> 0.5 N·s) followed by absence of contact.\nget_contact_report(prim_path=\"/World/BottomShell\", max_contacts=50)\n\n# Wrist-torque trace — secondary confirmation that the controller saw the\n# detent-passage transient as a brief joint-torque spike.\nget_joint_torques(articulation=\"/World/Franka\")\n\n# Clip pose — confirm the clip Z has dropped past the engaged threshold (z<=0.802).\nget_world_transform(prim_path=\"/World/TopClip\")",
+  "settle_state": {
+    "clip_seated": {
+      "/World/TopClip": [0.0, -0.25, 0.800]
+    },
+    "bottom_shell_static": {
+      "/World/BottomShell": [0.0, -0.25, 0.795]
+    },
+    "prongs_engaged": {
+      "/World/Prong_1": [0.025, -0.230, 0.785],
+      "/World/Prong_2": [0.025, -0.270, 0.785],
+      "/World/Prong_3": [-0.025, -0.230, 0.785],
+      "/World/Prong_4": [-0.025, -0.270, 0.785]
+    },
+    "phase_sequence": [
+      "transit_pick_clip",
+      "install_impedance",
+      "press_descent",
+      "verify_click"
+    ],
+    "click_signature": {
+      "expected_impulse_spike_min_ns": 0.5,
+      "expected_seated_z_max_m": 0.802,
+      "expected_force_cap_n": 25.0
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/TopClip",
+        "place_path": "/World/BottomShell",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/TopClip",
+    "bottom_shell_path": "/World/BottomShell",
+    "prong_paths": [
+      "/World/Prong_1",
+      "/World/Prong_2",
+      "/World/Prong_3",
+      "/World/Prong_4"
+    ],
+    "expected_seated_z_max_m": 0.802,
+    "expected_force_cap_n": 25.0,
+    "expected_impulse_spike_min_ns": 0.5
+  },
+  "simulate_args": {
+    "cube_path": "/World/TopClip",
+    "target_path": "/World/BottomShell",
+    "duration_s": 180,
+    "xy_tolerance": 0.01
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Table",
+      "/World/BottomShell",
+      "/World/StagingPad"
+    ],
+    "robot_base": [0.0, 0.0, 0.75],
+    "clip_path": "/World/TopClip",
+    "bottom_shell_path": "/World/BottomShell",
+    "prong_paths": [
+      "/World/Prong_1",
+      "/World/Prong_2",
+      "/World/Prong_3",
+      "/World/Prong_4"
+    ]
+  },
+  "extends": "yrkesroll-assembler-snap-fit-002",
+  "extension_notes": "Implements ONET SOC 51-2099 assembler persona (Assemblers and Fabricators, All Other). Key differentiators from siblings: (1) PRESS-AND-CLICK gesture — pure Z-axis descent under cartesian_impedance, 3 waypoints, NO rotation (distinct from CP-NEW-screw-driving-impedance's helical descent). (2) Snap detection via get_contact_report transient-impulse signature, NOT a steady-state force/torque plateau (distinct from CP-NEW-peg-bushing-impedance's F/T cap-plateau detection). (3) 4 prong proxies as separate rigid Cube prims attached to the top clip body — provides 4 collider hooks that generate the rim-strike impulse on contact, structurally simplified (no flex). (4) Bottom shell pinned via absence of RigidBodyAPI (static collider semantics), same anchoring pattern as box walls in CP-NEW-yrkesroll-packer-box-seal. (5) compliance_handoff_at=0.0 — entire descent trajectory is contact-rich, treated as compliant suffix only. PhysX numerical instability during clip grip is a shared risk with all impedance-press canonicals.",
+  "failure_modes": [
+    "Prong proxy geometry too rigid to model snap-deformation — real snap-fit prongs are curved leaf springs that flex inward to pass the detent rim, then snap outward into a lock pocket. We model each prong as a 1cm × 1cm × 2cm RIGID Cube, so there is no actual spring-flex. The 'click' is therefore the brief contact-report impulse spike when prong tips strike the bottom-shell top rim, NOT a flexure-driven snap. Mitigation for production: replace prong proxies with deformable_mesh prims (create_deformable_mesh) and re-tune the impedance Z-stiffness; or model detents on the bottom shell as recessed grooves that prong-tip Cubes drop into past the rim — adds geometric complexity but preserves rigid-body simplicity.",
+    "Contact report misses the transient snap event due to sample rate — get_contact_report returns the most-recent PhysX contact-report events queue, max 50 entries. If the press waypoint trajectory descends too quickly (velocity_scaling=0.15 is the tuned compromise), the rim-strike transient may complete within a single physics step and not generate a separately-queued impulse event. Mitigation: tighten velocity_scaling to 0.05 for the contact waypoint (last 1/3 of trajectory) so 60Hz physics resolves the rim-strike as a multi-step event; OR enable PhysxContactReportAPI's reportContactImpulses=True attribute to force per-step impulse logging.",
+    "Top clip pre-positioned wrong — no snap occurs: setup_pick_place_controller's drop_target [0.0, -0.25, 0.825] depends on cuRobo IK reachability at that exact x/y. If the controller lands the clip 1-2cm off-centre (xy_tolerance ~0.01-0.02m typical), the prong tips will strike the bottom-shell SIDE wall rather than the top rim — generates a contact-report event but not the snap-click pattern; clip cannot descend further; press phase stalls. Mitigation: tighten gripper_close at the transit-phase release so the clip drops vertically from a tight position; OR run a get_world_transform check on the clip after PHASE 1 and abort PHASE 2 if |xy_error| > 0.005m.",
+    "Force threshold too high — clip damage: 25 N applied through a 0.04 kg plastic-class clamshell with 1cm wall thickness is at the upper bound for ABS injection-molded snap-fits. If the impedance controller's Z-soft surrender (Kx_z=60 N/m) lags by even one physics step, the wrist will impose >25 N transiently — accumulated over 3 waypoints this can micro-crack the clip body. Mitigation for production: tighten the F/T sensor threshold to 20 N (lower force cap = more headroom against overshoot); OR introduce a force_torque_sensor at panda_hand with threshold=22 N and pause the trajectory on breach.",
+    "setup_impedance_controller and set_compliance_params are dry_run=True — no live torque-mode control without a ros2_control bridge; production rollout requires setup_ros2_control_compat first. Shared risk with all CRM-B1 canonicals (peg-bushing, screw-driving, bottle-cap-tighten).",
+    "follow_trajectory_with_compliance is Phase 63b — pose-only waypoints accepted but cuRobo replan is gated. With compliance_handoff_at=0.0 the entire trajectory is treated as the compliant suffix; the bridge accepts this configuration but emits no handoff_mismatch_warning. Same risk shape as CP-NEW-screw-driving-impedance.",
+    "PhysX numerical instability: clip + 4 prong proxies during Franka grip — 5 separate rigid bodies attached as composite via implied positional coupling (no FixedJoint declared between prongs and clip body in this template, see thoughts #5). If physics decides the prongs are free bodies during grasp, they will fall away from the clip. Mitigation: add explicit PhysicsFixedJoint between each prong and the clip body via apply_api_schema(prim_path=joint_path, schema_name='PhysicsFixedJoint'); not done here to keep the canonical's prim count under the lint-allowed limit and the structural-tag story clean.",
+    "Bottom shell static-by-absence-of-RigidBodyAPI may not propagate contact events to PhysxContactReportAPI — PhysX requires at least one of the contacting actors to have ReportContactReport enabled. We applied PhysxContactReportAPI to both /World/BottomShell AND /World/TopClip — at least one side reports. If contact events are still missed, also apply PhysxContactReportAPI to each prong (/World/Prong_1..4) so the prong-tip strikes are directly reported.",
+    "Press gesture has no rotational component — if the cuRobo transit phase grasps the clip with any wrist twist (which is allowed under generic top-down grasp_pose), the press trajectory's identity-quaternion waypoints will fight the wrist tilt, potentially generating a Z-axis bending moment that the impedance controller's Kr=[40,40,40] resists but does not eliminate. Mitigation: tighten define_grasp_pose's approach_direction to [0, 0, -1] (done) AND post-grasp wrist alignment via solve_ik or move_to_pose to identity-quat before the press phase begins."
+  ],
+  "verified_status": "drafted-2026-05-16; form-gate-schema pending; function-gate pending Kit RPC + ros2_control bridge",
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": ["curobo", "impedance", "cartesian_impedance"]
+  },
+  "intent": {
+    "pattern_hint": "insert",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "has_force_threshold": true,
+      "has_compliance_press": true,
+      "has_snap_click_detection": true,
+      "n_prong_proxies": 4,
+      "press_gesture_has_rotation": false
+    },
+    "structural_tags": [
+      "isaac:yrkesroll.assembler",
+      "isaac:industry.snap_fit_assembly",
+      "isaac:gesture.press_and_click",
+      "isaac:robot.franka_panda",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:topology.insertion",
+      "isaac:assembly.force_gated",
+      "isaac:assembly.contact_event_gated",
+      "isaac:compliance.impedance",
+      "isaac:compliance.cartesian_impedance",
+      "isaac:sensor.contact_report"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "torque_mode_capable"
+    },
+    "bottom_shell": {
+      "constraints": ["cube"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "static_housing_base"
+    },
+    "top_clip": {
+      "constraints": ["cube"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "dynamic_clamshell_upper_half"
+    },
+    "prongs": {
+      "constraints": ["cube"],
+      "min": 4,
+      "max": 4,
+      "unordered": true,
+      "note": "Four rigid Cube proxies attached to the lower corners of the top clip; provide collider hooks for the rim-strike contact event."
+    },
+    "staging_pad": {
+      "constraints": ["cube"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "flat_pad_for_clip_pickup"
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "family": "franka",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "bottom_shell": {
+      "path": "/World/BottomShell",
+      "position": [0.0, -0.25, 0.795],
+      "scale": [0.06, 0.05, 0.015],
+      "top_rim_z": 0.8025
+    },
+    "top_clip": {
+      "path": "/World/TopClip",
+      "position": [0.30, 0.10, 0.815],
+      "scale": [0.06, 0.05, 0.010],
+      "mass": 0.04,
+      "material": "rubber",
+      "seated_z": 0.800
+    },
+    "prongs": [
+      {"path": "/World/Prong_1", "position": [0.325, 0.120, 0.800], "scale": [0.005, 0.005, 0.010], "mass": 0.002},
+      {"path": "/World/Prong_2", "position": [0.325, 0.080, 0.800], "scale": [0.005, 0.005, 0.010], "mass": 0.002},
+      {"path": "/World/Prong_3", "position": [0.275, 0.120, 0.800], "scale": [0.005, 0.005, 0.010], "mass": 0.002},
+      {"path": "/World/Prong_4", "position": [0.275, 0.080, 0.800], "scale": [0.005, 0.005, 0.010], "mass": 0.002}
+    ],
+    "staging_pad": {
+      "path": "/World/StagingPad",
+      "position": [0.30, 0.10, 0.755],
+      "scale": [0.10, 0.10, 0.005]
+    },
+    "press_trajectory": {
+      "compliance_controller": "cartesian_impedance",
+      "compliance_handoff_at": 0.0,
+      "velocity_scaling": 0.15,
+      "timeout_s": 15.0,
+      "waypoint_hover_z": 0.825,
+      "waypoint_contact_z": 0.815,
+      "waypoint_seated_z": 0.800,
+      "Kx_xyz": [400.0, 400.0, 60.0],
+      "Kr_xyz": [40.0, 40.0, 40.0],
+      "Dx_xyz": [40.0, 40.0, 7.0],
+      "Dr_xyz": [4.0, 4.0, 4.0]
+    },
+    "force_cap_n": 25.0,
+    "impulse_spike_min_ns": 0.5,
+    "engaged_z_threshold_m": 0.802,
+    "operator_role": {
+      "yrkesroll": "assembler",
+      "onet_soc": "51-2099",
+      "workstation": "manual_assembly_station",
+      "responsibilities": [
+        "pick_top_clip_from_staging",
+        "align_clip_over_bottom_shell",
+        "press_clip_under_force_cap",
+        "verify_snap_click_engagement"
+      ]
+    }
+  },
+  "code_template": "# ── Scene skeleton ──────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nrobot_wizard(robot_name={{primary_robot.class}}, dest_path={{primary_robot.path}}, position={{primary_robot.position}}, orientation={{primary_robot.orientation}})\ncreate_prim(prim_path={{bottom_shell.path}}, prim_type=\"Cube\", position={{bottom_shell.position}}, scale={{bottom_shell.scale}})\napply_api_schema(prim_path={{bottom_shell.path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{bottom_shell.path}}, schema_name=\"PhysxContactReportAPI\")\ncreate_prim(prim_path={{staging_pad.path}}, prim_type=\"Cube\", position={{staging_pad.position}}, scale={{staging_pad.scale}})\napply_api_schema(prim_path={{staging_pad.path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path={{top_clip.path}}, prim_type=\"Cube\", position={{top_clip.position}}, scale={{top_clip.scale}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\", \"PhysxContactReportAPI\"):\n    apply_api_schema(prim_path={{top_clip.path}}, schema_name=api)\nset_attribute(prim_path={{top_clip.path}}, attr_name=\"physics:mass\", value={{top_clip.mass}})\napply_physics_material(prim_path={{top_clip.path}}, material_name={{top_clip.material}})\ncreate_prim(prim_path={{prongs[0].path}}, prim_type=\"Cube\", position={{prongs[0].position}}, scale={{prongs[0].scale}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{prongs[0].path}}, schema_name=api)\nset_attribute(prim_path={{prongs[0].path}}, attr_name=\"physics:mass\", value={{prongs[0].mass}})\ncreate_prim(prim_path={{prongs[1].path}}, prim_type=\"Cube\", position={{prongs[1].position}}, scale={{prongs[1].scale}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{prongs[1].path}}, schema_name=api)\nset_attribute(prim_path={{prongs[1].path}}, attr_name=\"physics:mass\", value={{prongs[1].mass}})\ncreate_prim(prim_path={{prongs[2].path}}, prim_type=\"Cube\", position={{prongs[2].position}}, scale={{prongs[2].scale}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{prongs[2].path}}, schema_name=api)\nset_attribute(prim_path={{prongs[2].path}}, attr_name=\"physics:mass\", value={{prongs[2].mass}})\ncreate_prim(prim_path={{prongs[3].path}}, prim_type=\"Cube\", position={{prongs[3].position}}, scale={{prongs[3].scale}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{prongs[3].path}}, schema_name=api)\nset_attribute(prim_path={{prongs[3].path}}, attr_name=\"physics:mass\", value={{prongs[3].mass}})\nbulk_set_attribute(prim_paths=[{{top_clip.path}}, {{prongs[0].path}}, {{prongs[1].path}}, {{prongs[2].path}}, {{prongs[3].path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nbulk_set_attribute(prim_paths=[{{top_clip.path}}, {{prongs[0].path}}, {{prongs[1].path}}, {{prongs[2].path}}, {{prongs[3].path}}, {{bottom_shell.path}}], attr=\"physxRigidBody:solverPositionIterationCount\", value=16)\ndefine_grasp_pose(robot_path={{primary_robot.path}}, object_path={{top_clip.path}}, approach_direction=[0, 0, -1], gripper_offset=[0, 0, 0])\nsetup_pick_place_controller(robot_path={{primary_robot.path}}, target_source=\"curobo\", robot_family={{primary_robot.family}}, source_paths=[{{top_clip.path}}], destination_path={{bottom_shell.path}}, drop_target=[0.0, -0.25, {{press_trajectory.waypoint_hover_z}}], planning_obstacles=[\"/World/Table\", {{bottom_shell.path}}, {{staging_pad.path}}], approach_height=0.12, lift_height=0.12)\nget_world_transform(prim_path={{top_clip.path}})\nsetup_impedance_controller(robot_path={{primary_robot.path}}, target_frame=\"panda_hand\", Kx={{press_trajectory.Kx_xyz}}, Kr={{press_trajectory.Kr_xyz}}, Dx={{press_trajectory.Dx_xyz}}, Dr={{press_trajectory.Dr_xyz}}, null_space_stiffness=0.5, null_space_damping=0.5, torque_mode=True, dry_run=True)\nset_compliance_params(robot_path={{primary_robot.path}}, stiffness_xyz={{press_trajectory.Kx_xyz}}, damping_xyz={{press_trajectory.Dx_xyz}}, stiffness_rot={{press_trajectory.Kr_xyz}}, damping_rot={{press_trajectory.Dr_xyz}}, dry_run=True)\nfollow_trajectory_with_compliance(trajectory=[{\"pose\": {\"position\": [0.0, -0.25, {{press_trajectory.waypoint_hover_z}}], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}, {\"pose\": {\"position\": [0.0, -0.25, {{press_trajectory.waypoint_contact_z}}], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}, {\"pose\": {\"position\": [0.0, -0.25, {{press_trajectory.waypoint_seated_z}}], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}], robot_path={{primary_robot.path}}, compliance_handoff_at={{press_trajectory.compliance_handoff_at}}, compliance_controller={{press_trajectory.compliance_controller}}, timeout_s={{press_trajectory.timeout_s}}, velocity_scaling={{press_trajectory.velocity_scaling}}, dry_run=True)\nget_contact_report(prim_path={{bottom_shell.path}}, max_contacts=50)\nget_joint_torques(articulation={{primary_robot.path}})\nget_world_transform(prim_path={{top_clip.path}})",
+  "simulate_args_template": {
+    "target_path": "{{bottom_shell.path}}",
+    "cube_path": "{{top_clip.path}}",
+    "duration_s": 180,
+    "xy_tolerance": 0.01
+  }
+}

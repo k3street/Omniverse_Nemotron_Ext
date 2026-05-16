@@ -1351,6 +1351,7 @@ class IterateRewardArgs(BaseModel):
     prev_reward_code: str = Field(..., description="Previous iteration's reward function code")
     metrics: Dict[str, Any] = Field(..., description="Training metrics: { fitness: float, components: { name: { mean: [float], converged: bool } }, task_success_rate: float }")
     user_feedback: Optional[str] = Field(None, description="Optional user feedback — e.g. 'it keeps dropping the handle'")
+    run_id: Optional[str] = Field(None, description="Optional Eureka run identifier — threads iteration state through EUREKA.runs[run_id] so eureka_status / eureka_history reflect the iter_count increment. Without it the handler still runs the mutation but the run-state bookkeeping does not advance.")
 
 
 class EurekaStatusArgs(BaseModel):
@@ -2913,6 +2914,7 @@ class SetSemanticLabelArgs(BaseModel):
     prim_path: str = Field(..., description="USD path to the prim to label")
     class_name: str = Field(..., description="Semantic class name, e.g. 'cube', 'robot', 'table'")
     semantic_type: Optional[str] = Field(None, description="Semantic type token. Default: 'class'")
+    label: Optional[str] = Field(None, description="Optional per-instance label string for finer-grained metadata alongside the broader class_name (e.g. class_name='pack_item' + label='consumable_tube'). The class is what Replicator emits; label is bookkeeping metadata.")
 
 
 class GetJointLimitsArgs(BaseModel):

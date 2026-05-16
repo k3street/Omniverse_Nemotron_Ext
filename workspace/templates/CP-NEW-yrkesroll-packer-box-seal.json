@@ -213,7 +213,10 @@
     ],
     "operator_role": {
       "yrkesroll": "packer",
+      "title": "Manual Packer / Box-Sealer",
       "onet_soc": "53-7064",
+      "onet_soc_title": "Packers and Packagers, Hand",
+      "onet_soc_note": "53-7064 (Packers and Packagers, Hand) is the direct ONET match for manual-pack-into-box + lid-seal workflows; no substitution needed. Adjacent code 51-9111 (Packaging and Filling Machine Operators and Tenders) is preferred when the workflow is automated machine-tending (filler / capper); 53-7064 used here for the hand-pack workflow with robot assist.",
       "workstation": "manual_packing_station",
       "responsibilities": [
         "pick_items_from_infeed",
