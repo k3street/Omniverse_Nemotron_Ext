@@ -1663,7 +1663,11 @@
   motion_controller_preference: none
   pattern_hint: finetune
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-groot-attention-maps.json
+  drafted_date: "2026-05-16"
+  drafted_by: A57
+  draft_notes: "A57; form-gate 0 ERROR 0 WARN; first GR00T interpretability canonical; function-gate BLOCKED (requires groot_policy checkpoint + live Kit)"
 
 - id: groot-load-policy-eval-live-001
   source: retrieval-miss
@@ -1742,7 +1746,11 @@
   motion_controller_preference: none
   pattern_hint: other
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-opcua-12conveyors.json
+  drafted_date: "2026-05-10"
+  drafted_by: prior-session
+  draft_notes: "Template existed as CP-NEW-opcua-12conveyors.json (built 2026-05-10); backlog entry retroactively marked drafted by A57 audit"
 
 - id: ros2-modbus-plc-fixture-001
   source: industrial-asset
