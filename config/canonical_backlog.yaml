@@ -762,7 +762,11 @@
   motion_controller_preference: ros2_control
   pattern_hint: other
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-multi-rate-sensor-fusion.json
+  drafted_date: "2026-05-16"
+  drafted_by: A44
+  draft_notes: "A44; form-gate 1 OK 0 ERROR 0 WARN (--validate-tool-calls); first library use of setup_multi_rate; dual-rate VecEnv + F/T sensor fusion + ROS2 sim_time bridge pattern; function-gate pending live Kit + ROS2"
 
 - id: industrial-ik-singularity-avoidance-001
   source: industrial-asset
