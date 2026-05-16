@@ -1,0 +1,139 @@
+{
+  "task_id": "CP-NEW-safety-clearance-monitor-stop",
+  "goal": "Configure a Franka mid-trajectory motion with a clearance monitor armed at a 0.5 m wrist envelope. A moving human-proxy sphere (registered as a moving obstacle for cuRobo replanning) translates into the envelope. When the proxy breaches the threshold the clearance monitor fires and sim_control pauses the timeline, driving joint velocities to zero within 1 simulated second. visualize_clearance renders the safety envelope for debug. Exercises the ISO-15066 speed-and-separation safety-stop pattern — structurally distinct from zone-partition (which uses an exclusion volume + watchdog) by anchoring the threshold on robot link clearance (not zone overlap) and by halting via timeline pause (not teleop watchdog).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "robot_wizard",
+    "set_clearance_monitor",
+    "visualize_clearance",
+    "register_moving_obstacle",
+    "move_to_pose",
+    "get_world_transform",
+    "set_linear_velocity",
+    "sim_control"
+  ],
+  "thoughts": "Design rationale for CP-NEW-safety-clearance-monitor-stop:\n\n1) Pattern gap: this is the FIRST canonical to anchor a safety-stop on clearance-to-robot-links rather than on a static exclusion zone (CP-NEW-zone-partition-safety) or corridor collision-avoidance (CP-NEW-multi-amr-corridor). It targets the ISO-15066 speed-and-separation monitoring (SSM) story where the stop threshold scales with proximity to ANY robot link, not a pre-authored volume.\n\n2) Scene geometry:\n   - Franka base at [0, 0, 0.75] (on table). Wrist envelope radius 0.5 m per backlog spec.\n   - Human-proxy: Sphere at /World/HumanProxy initial position [1.2, 0, 0.95] (well outside 0.5 m envelope from any Franka link).\n   - Proxy moves toward robot with linear velocity [-0.30, 0, 0] m/s; at ~2.3 s of sim time it enters the 0.5 m wrist envelope and triggers the stop.\n\n3) set_clearance_monitor:\n   - articulation_path = /World/Franka (monitor evaluates min-distance from each link to target_prims).\n   - clearance_mm = 500 (0.5 m hard stop — matches backlog spec).\n   - warning_mm = 750 (0.75 m warning band for telemetry).\n   - target_prims = [/World/HumanProxy] only (Table is static and inside the cell, would false-trigger).\n\n4) Motion: move_to_pose drives the wrist along a forward reach trajectory toward [0.5, 0, 1.10]. This puts the wrist in the path of the incoming proxy so the breach happens during active motion (not at rest) — exercising the 'pause didn't take effect because trajectory was buffered' failure mode.\n\n5) Halt mechanism: clearance monitor fires sim_control(action=\"pause\") on threshold breach. Pausing the timeline stops physics; joint velocity targets remain but no integration advances, so velocities effectively go to zero from the world frame. Distinct from the watchdog approach in CP-NEW-zone-partition-safety which zeroes velocity TARGETS but keeps physics running.\n\n6) register_moving_obstacle: ties the proxy into cuRobo's dynamic-obstacle set so replanning during the breach window avoids the proxy (defensive — even if the human is the one moving, cuRobo treats it as a moving obstacle).\n\n7) visualize_clearance: mode='envelope' renders the 0.5 m sphere around the wrist link. For headless runs, fall back to mode='heatmap' which only writes annotations.\n\n8) Physics: CPU dynamics for determinism (clearance evaluation is per-step; GPU broadphase can race with USD-attribute reads in the monitor callback).\n\n9) get_world_transform on /World/Franka/panda_hand and /World/HumanProxy is used by the diagnose path to verify the actual clearance distance at the moment of breach (instrument-first; do not guess from velocity alone).\n\n10) Verified_status: drafted; function gate requires Kit RPC round-trip to confirm timeline actually pauses on breach (sim_control inside the monitor callback is the risky integration point — see failure_modes).",
+  "code": "# ── Ground and lighting ─────────────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=900.0)\ncreate_prim(\n    prim_path=\"/World/Ground\",\n    prim_type=\"Cube\",\n    position=[0, 0, -0.5],\n    scale=[20, 20, 1],\n)\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for deterministic clearance evaluation ────────────────────────────\nset_physics_scene_config(\n    config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"}\n)\n\n# ── Robot mounting table ────────────────────────────────────────────────────────────────────\ncreate_prim(\n    prim_path=\"/World/Table\",\n    prim_type=\"Cube\",\n    position=[0, 0, 0.375],\n    scale=[0.7, 0.7, 0.375],\n)\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Franka arm ──────────────────────────────────────────────────────────────────────────────\n# Base at z=0.75 (table top). Default orientation faces +X.\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1.0, 0, 0, 0],\n)\n\n# ── Human-proxy sphere (simulated intruder) ─────────────────────────────────────────────────\n# 0.20 m radius sphere starts at [1.2, 0, 0.95] — outside the 0.5 m wrist envelope.\n# Will be moved by setting linear_velocity toward the robot wrist to trigger breach.\ncreate_prim(\n    prim_path=\"/World/HumanProxy\",\n    prim_type=\"Sphere\",\n    position=[1.2, 0, 0.95],\n)\nset_attribute(prim_path=\"/World/HumanProxy\", attr_name=\"radius\", value=0.20)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/HumanProxy\", schema_name=api)\nset_attribute(\n    prim_path=\"/World/HumanProxy\",\n    attr_name=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n# Disable gravity on the proxy so it tracks the commanded linear velocity cleanly.\nset_attribute(\n    prim_path=\"/World/HumanProxy\",\n    attr_name=\"physxRigidBody:disableGravity\",\n    value=True,\n)\n\n# ── Register proxy as a moving obstacle for cuRobo replanning ───────────────────────────────\nregister_moving_obstacle(\n    robot_path=\"/World/Franka\",\n    obstacle_path=\"/World/HumanProxy\",\n)\n\n# ── Clearance monitor — 0.5 m wrist envelope, 0.75 m warning band ───────────────────────────\n# Monitors min-distance between any Franka link and HumanProxy. On breach the monitor\n# fires sim_control(action=\"pause\") via its on-trigger callback (configured in the\n# Kit-side handler bound to this canonical's settle_state).\nset_clearance_monitor(\n    articulation_path=\"/World/Franka\",\n    clearance_mm=500.0,\n    warning_mm=750.0,\n    target_prims=[\"/World/HumanProxy\"],\n)\n\n# ── Visualize the safety envelope (debug rendering) ─────────────────────────────────────────\nvisualize_clearance(\n    articulation_path=\"/World/Franka\",\n    mode=\"zones\",\n    target_prims=[\"/World/HumanProxy\"],\n    clearance_mm=500.0,\n    warning_mm=750.0,\n)\n\n# ── Start simulation and command a forward reach trajectory ─────────────────────────────────\nsim_control(action=\"play\")\n\n# Drive the wrist forward to position [0.5, 0, 1.10] (extended along +X, table-plane height).\n# The trajectory is buffered to physics; the clearance monitor runs every step and will\n# fire sim_control(\"pause\") when the proxy crosses the 0.5 m envelope.\nmove_to_pose(\n    articulation_path=\"/World/Franka\",\n    target_position=[0.5, 0.0, 1.10],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n    planner=\"rmpflow\",\n)\n\n# ── Move the human-proxy into the wrist envelope ────────────────────────────────────────────\n# At v=[-0.30, 0, 0] m/s, the proxy travels 0.30 m/s × 2.33 s ≈ 0.70 m before crossing the\n# 0.5 m envelope around the wrist (initial separation ≈ 1.2 m, wrist forward 0.5 m).\nset_linear_velocity(\n    prim_path=\"/World/HumanProxy\",\n    vel=[-0.30, 0, 0],\n)\n\n# ── Diagnose-path hooks — read clearance at the breach moment, do not guess ─────────────────\nget_world_transform(prim_path=\"/World/Franka/panda_hand\")\nget_world_transform(prim_path=\"/World/HumanProxy\")",
+  "code_template": "# ── Ground and lighting ─────────────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=900.0)\ncreate_prim(\n    prim_path=\"/World/Ground\",\n    prim_type=\"Cube\",\n    position=[0, 0, -0.5],\n    scale=[20, 20, 1],\n)\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for deterministic clearance evaluation ────────────────────────────\nset_physics_scene_config(\n    config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"}\n)\n\n# ── Robot mounting table ────────────────────────────────────────────────────────────────────\ncreate_prim(\n    prim_path=\"/World/Table\",\n    prim_type=\"Cube\",\n    position=[0, 0, 0.375],\n    scale=[0.7, 0.7, 0.375],\n)\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Robot arm ───────────────────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"{{primary_robot.class}}\",\n    dest_path=\"{{primary_robot.path}}\",\n    position={{primary_robot.position}},\n    orientation=[1.0, 0, 0, 0],\n)\n\n# ── Human-proxy sphere ──────────────────────────────────────────────────────────────────────\ncreate_prim(\n    prim_path=\"{{human_proxy.path}}\",\n    prim_type=\"Sphere\",\n    position={{human_proxy.initial_position}},\n)\nset_attribute(prim_path=\"{{human_proxy.path}}\", attr_name=\"radius\", value=0.20)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"{{human_proxy.path}}\", schema_name=api)\nset_attribute(prim_path=\"{{human_proxy.path}}\", attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\nset_attribute(prim_path=\"{{human_proxy.path}}\", attr_name=\"physxRigidBody:disableGravity\", value=True)\n\n# ── Register proxy as a moving obstacle ─────────────────────────────────────────────────────\nregister_moving_obstacle(\n    robot_path=\"{{primary_robot.path}}\",\n    obstacle_path=\"{{human_proxy.path}}\",\n)\n\n# ── Clearance monitor — wrist envelope ──────────────────────────────────────────────────────\nset_clearance_monitor(\n    articulation_path=\"{{primary_robot.path}}\",\n    clearance_mm=500.0,\n    warning_mm=750.0,\n    target_prims=[\"{{human_proxy.path}}\"],\n)\n\n# ── Visualize clearance envelope ────────────────────────────────────────────────────────────\nvisualize_clearance(\n    articulation_path=\"{{primary_robot.path}}\",\n    mode=\"zones\",\n    target_prims=[\"{{human_proxy.path}}\"],\n    clearance_mm=500.0,\n    warning_mm=750.0,\n)\n\n# ── Play, command reach, and translate intruder into envelope ───────────────────────────────\nsim_control(action=\"play\")\nmove_to_pose(\n    articulation_path=\"{{primary_robot.path}}\",\n    target_position=[0.5, 0.0, 1.10],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n    planner=\"rmpflow\",\n)\nset_linear_velocity(\n    prim_path=\"{{human_proxy.path}}\",\n    vel=[-0.30, 0, 0],\n)\nget_world_transform(prim_path=\"{{primary_robot.path}}/panda_hand\")\nget_world_transform(prim_path=\"{{human_proxy.path}}\")",
+  "settle_state": {
+    "robot_path": "/World/Franka",
+    "human_proxy_initial": [1.2, 0, 0.95],
+    "human_proxy_velocity": [-0.30, 0, 0],
+    "clearance_mm": 500.0,
+    "warning_mm": 750.0,
+    "expected_pause_within_s": 1.0
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/HumanProxy",
+        "place_path": "/World/Franka/panda_hand",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "human_proxy_path": "/World/HumanProxy",
+    "clearance_monitor_armed": true,
+    "clearance_mm": 500.0,
+    "warning_mm": 750.0,
+    "expected_pause_on_breach": true
+  },
+  "simulate_args": {
+    "target_path": "/World/Franka/panda_hand",
+    "cube_path": "/World/HumanProxy",
+    "duration_s": 8,
+    "human_proxy_path": "/World/HumanProxy",
+    "robot_path": "/World/Franka",
+    "clearance_mm": 500.0,
+    "check_robot_velocity_zero_after_breach": true,
+    "velocity_zero_within_s": 1.0
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "wrist_link_path": "/World/Franka/panda_hand",
+    "human_proxy_path": "/World/HumanProxy",
+    "clearance_mm": 500.0,
+    "warning_mm": 750.0,
+    "obstacles": ["/World/HumanProxy"],
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "failure_modes": [
+    "set_clearance_monitor not subscribed before sim_control(\"play\") — if the monitor's per-step callback is bound after physics starts, the first few steps may slip through and the breach moment is missed. Order: arm monitor, then play.",
+    "clearance_mm too tight (e.g. 100 mm) gives false positives from Franka's own joint mesh self-distance evaluation. 500 mm matches ISO-15066 SSM minimum separation and stays clear of self-collision noise.",
+    "Pause didn't take effect because trajectory was already buffered to physics: move_to_pose with cuRobo enqueues a full waypoint stream into the articulation drive; sim_control(\"pause\") halts integration but the buffered targets remain — on resume the arm completes the buffered motion. Mitigation: pair the pause with set_joint_targets(current_positions) to flush the buffer.",
+    "HumanProxy with gravity enabled falls and the breach happens at the table plane, not at wrist height — disableGravity=True keeps the proxy at z=0.95.",
+    "visualize_clearance mode='envelope' requires render context — headless runs should use mode='heatmap' which only writes annotation attributes.",
+    "register_moving_obstacle silently no-ops if cuRobo planner state has not been initialised (no prior plan_trajectory/move_to_pose call). Call move_to_pose at least once before register_moving_obstacle to force planner init.",
+    "Choosing target_prims=[/World/Table, /World/HumanProxy] in set_clearance_monitor false-triggers immediately because the Franka base is bolted to the table (~0 mm clearance to its own mounting surface). Keep target_prims scoped to the dynamic intruder only."
+  ],
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "has_stacking": false,
+      "has_safety_zone": false,
+      "has_human_proxy": true,
+      "has_clearance_monitor": true,
+      "has_moving_obstacle": true,
+      "halt_mechanism": "timeline_pause"
+    },
+    "structural_tags": [
+      "isaac:safety.clearance_monitor",
+      "isaac:safety.speed_separation_monitoring",
+      "isaac:safety.iso_15066",
+      "isaac:coordination.moving_obstacle",
+      "isaac:robot.arm.franka"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "franka_panda",
+        "ur10",
+        "ur5e"
+      ],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "any_arm_with_curobo_motion_planning_support"
+    },
+    "human_proxy": {
+      "constraints": [
+        "Sphere",
+        "Capsule"
+      ],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "rigid_body_intruder_prim_no_gravity"
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [1.0, 0, 0, 0]
+    },
+    "human_proxy": {
+      "path": "/World/HumanProxy",
+      "shape": "Sphere",
+      "radius": 0.20,
+      "initial_position": [1.2, 0, 0.95],
+      "velocity": [-0.30, 0, 0]
+    }
+  },
+  "motion_controllers": {
+    "verified": [],
+    "untested": [
+      "rmpflow",
+      "curobo"
+    ],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; first safety-clearance-monitor canonical (ISO-15066 SSM); form-gate-schema pending lint; function-gate ⏳ (requires Kit RPC to confirm timeline pause fires within 1 sim-second of envelope breach)"
+}
