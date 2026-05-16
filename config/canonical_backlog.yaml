@@ -1633,7 +1633,11 @@
   motion_controller_preference: none
   pattern_hint: finetune
   estimated_agent_minutes: 30
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-groot-data-mix-multitask.json
+  drafted_date: "2026-05-16"
+  drafted_by: A59
+  draft_notes: "A59; form-gate 1 OK 0 ERROR 0 WARN (--validate-tool-calls); first library canonical making suggest_data_mix primary×3 (one call per task); multi-task continual-learning balance pattern; pure advisory, no robot, no stage; function-gate BLOCKED (requires groot advisor extension + live MCP)"
 
 - id: groot-rsi-from-demos-001
   source: retrieval-miss
