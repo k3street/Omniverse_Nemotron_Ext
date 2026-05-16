@@ -1,0 +1,212 @@
+{
+  "task_id": "CP-NEW-triple-arm-cell-handoff",
+  "goal": "Three-arm circular workcell with strict-order Alpha->Beta->Gamma sequential handoff. Three Franka arms are arranged around a workcell center at 120-degree spacing on a 0.55m-radius circle, each facing the center. A workpiece (Cube_workpiece, 0.06m) starts on the InfeedPad (north of Alpha) and must traverse the cell via two intermediate stations before reaching the OutfeedBin: (1) ArmAlpha picks workpiece from InfeedPad and places it on Station1 (between Alpha and Beta); (2) ArmBeta picks from Station1 and places on Station2 (between Beta and Gamma) — Beta cannot start until Alpha has released, gated by setup_robot_handoff_signal SignalAB; (3) ArmGamma picks from Station2 and delivers to OutfeedBin — Gamma cannot start until Beta has released, gated by SignalBC. setup_robot_claim_mutex on each shared station prim enforces that only one arm at a time may grasp from or place onto Station1/Station2. Success = workpiece at OutfeedBin AABB after both handoff signals fired in strict A->B->C order. Distinct from CP-NEW-assembly-line-4robot-handoff (linear bench, 4 arms, ROS2-coordinated parallel pipeline) and CP-NEW-roco-bimanual-assembly (2 cooperating arms holding the same workpiece). pattern_hint=pick_place (success: workpiece reaches OutfeedBin after passing through 3 arms in strict order).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "bulk_set_attribute",
+    "apply_physics_material",
+    "robot_wizard",
+    "check_collisions",
+    "get_world_transform",
+    "define_grasp_pose",
+    "setup_robot_claim_mutex",
+    "setup_robot_handoff_signal",
+    "setup_pick_place_controller",
+    "create_bin"
+  ],
+  "thoughts": "Design rationale for 3-arm strict-order circular cell:\n\n1) Topology: three Franka arms placed at 120-degree spacing on a circle of radius 0.55m around the workcell center (origin). Each arm is mounted on a 0.75m pedestal and oriented to face the workcell center (yaw = arm_angle + 180deg). This gives every arm full sweep into the shared center workspace where the handoff stations sit, while keeping arm bases far enough apart (0.55m radial spacing → 0.95m chord distance between adjacent bases) that adjacent arms do not collide at their own bases.\n\n2) Arm placements (angles measured CCW from +X axis, like math convention):\n   - ArmAlpha at angle 90deg (north): position (0.0, 0.55, 0.75), faces -Y → quaternion [0, 0, 0, 1] (yaw=180deg).\n   - ArmBeta  at angle 210deg (SW):   position (-0.476, -0.275, 0.75), faces yaw=30deg → quaternion [0.965926, 0, 0, 0.258819].\n   - ArmGamma at angle 330deg (SE):   position (0.476, -0.275, 0.75), faces yaw=150deg → quaternion [0.258819, 0, 0, 0.965926].\n\n3) Station placements (smaller radius 0.30m, midway between adjacent arms):\n   - InfeedPad (in front of Alpha):  angle 90deg, radius 0.30: (0.0, 0.30, 0.785). Workpiece spawns here.\n   - Station1 (between Alpha+Beta): angle 150deg, radius 0.30: (-0.260, 0.150, 0.78). Alpha places here, Beta picks here.\n   - Station2 (between Beta+Gamma): angle 270deg, radius 0.30: (0.0, -0.30, 0.78). Beta places here, Gamma picks here.\n   - OutfeedBin (after Gamma):      angle 30deg, radius 0.30: (0.260, 0.150, 0.78). Final destination AABB.\n\n4) Reach check: Franka nominal reach ~0.85m. Each arm to each of its 2 reachable stations:\n   - Alpha → InfeedPad: dist=0.25m. Alpha → Station1: sqrt(0.260^2 + 0.400^2) = 0.477m.\n   - Beta → Station1:  sqrt(0.216^2 + 0.425^2) = 0.477m. Beta → Station2: sqrt(0.476^2 + 0.025^2) = 0.477m.\n   - Gamma → Station2: 0.477m. Gamma → OutfeedBin: 0.477m.\n   All distances ≤ 0.48m → 0.85m max reach gives ample margin (~44% utilisation). Symmetric design.\n\n5) Strict-order handoff via setup_robot_handoff_signal:\n   - SignalAB at Station1 position: robot_a=Alpha (placer), robot_b=Beta (picker). Beta cannot start until SignalAB fires.\n   - SignalBC at Station2 position: robot_a=Beta (placer), robot_b=Gamma (picker). Gamma cannot start until SignalBC fires.\n   Two signals total (n_handoffs=2) — one fewer than 4-robot line (n_handoffs=3) because we have 3 arms not 4.\n\n6) Mutex on shared stations via setup_robot_claim_mutex:\n   - MutexStation1: resource=/World/Station1, robots=[Alpha, Beta]. Only one of those two may claim Station1 at a time.\n   - MutexStation2: resource=/World/Station2, robots=[Beta, Gamma]. Only Beta or Gamma may claim Station2 at a time.\n   - Beta participates in BOTH mutexes (it picks from Station1 AND places on Station2) — this is the strict-order chain.\n\n7) Single-tenant Kit RPC (memory `kit-concurrency`): exec_sync cannot drive 3 articulations in parallel. The orchestrator runs the 3 setup_pick_place_controller installs sequentially. Mutex/handoff markers are advisory at controller-install time and the runtime ordering is enforced by sequential execution (Alpha finishes first, then Beta, then Gamma) rather than by true concurrent mutex contention. This is consistent with how the 4-robot line and bimanual canonicals execute today.\n\n8) check_collisions on all 3 articulations as a pre-flight pass — confirms each Franka has valid collision meshes before pick-place install. get_world_transform on all 3 bases is a diagnostic asymmetry check: if any base is misplaced (e.g. wrong angle), the function-gate sequence cannot complete.\n\n9) define_grasp_pose per arm-object pair (3 total): Alpha→workpiece (from InfeedPad), Beta→workpiece (from Station1), Gamma→workpiece (from Station2). All top-down approach [0,0,-1].\n\n10) Physics: CPU dynamics (broadphase MBP, gpu_dynamics=False) for determinism. Workpiece is a 0.06m cube, mass 0.3kg, rubber material for grip stability. Stations are static cube prims with PhysicsCollisionAPI (no rigid body — workpiece rests on them).\n\n11) Failure modes captured: arms collide in shared center workspace, handoff signal race (Beta tries to pick before Alpha releases), Station1 instability (workpiece slides off small platform during second arm approach), workspace asymmetry (one arm farther from its assigned stations than the others), Franka reach margin at the workcell center, and the single-tenant Kit-RPC constraint that prevents true parallel arm motion.\n\n12) yrkesroll: N/A. This is a research-tier benchmark canonical exploring multi-robot coordination shapes (distinct from production yrkesroll templates). structural_tags identify it via isaac:topology.triple_arm, isaac:coordination.strict_order_handoff, isaac:multi_robot.three_arm_cell.\n\n13) motion_controllers.untested=['curobo']: first triple-Franka cuRobo install; verification pending under function-gate.\n\n14) verify_args.stages has 3 entries (one per arm) per the schema requirement that multi-stage handoff templates enumerate each pick→place leg. simulate_args target_path=OutfeedBin, cube_path=workpiece, duration_s=240 (3 stages * ~60s each + 60s planner margin).",
+  "code": "# ── Scene skeleton ─────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for determinism ─────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Shared circular workcell platform (1.5m diameter, 0.75m tall pedestal ring) \n# A single round-ish bench under all three robots. USD Cube is the cheap stand-in;\n# half-extents = scale for the 2m unit cube.\ncreate_prim(\n    prim_path=\"/World/Workcell\",\n    prim_type=\"Cube\",\n    position=[0, 0, 0.375],\n    scale=[0.85, 0.85, 0.375],\n)\napply_api_schema(prim_path=\"/World/Workcell\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── 3 Franka arms at 120-degree spacing on a 0.55m-radius circle ─────────────\n# Each arm faces the workcell center (yaw = arm_angle + 180deg).\n# ArmAlpha @ 90deg  (north): faces -Y, yaw=180deg → quat [0, 0, 0, 1]\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaAlpha\",\n    position=[0.0, 0.55, 0.75],\n    orientation=[0.0, 0.0, 0.0, 1.0],\n)\n# ArmBeta @ 210deg (SW): faces yaw=30deg → quat [cos15, 0, 0, sin15]\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaBeta\",\n    position=[-0.476, -0.275, 0.75],\n    orientation=[0.965926, 0.0, 0.0, 0.258819],\n)\n# ArmGamma @ 330deg (SE): faces yaw=150deg → quat [cos75, 0, 0, sin75]\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaGamma\",\n    position=[0.476, -0.275, 0.75],\n    orientation=[0.258819, 0.0, 0.0, 0.965926],\n)\n\n# ── Pre-flight collision-mesh validation on all 3 articulations ──────────────\ncheck_collisions(prim_path=\"/World/FrankaAlpha\")\ncheck_collisions(prim_path=\"/World/FrankaBeta\")\ncheck_collisions(prim_path=\"/World/FrankaGamma\")\n\n# ── Diagnostic: world transforms of all 3 arm bases (asymmetry check) ────────\nget_world_transform(prim_path=\"/World/FrankaAlpha\")\nget_world_transform(prim_path=\"/World/FrankaBeta\")\nget_world_transform(prim_path=\"/World/FrankaGamma\")\n\n# ── Infeed pad (workpiece spawn) — in front of Alpha at radius 0.30 ──────────\n# Position (0, 0.30, 0.785). 0.20x0.20x0.04m platform → scale [0.10, 0.10, 0.02].\ncreate_prim(\n    prim_path=\"/World/InfeedPad\",\n    prim_type=\"Cube\",\n    position=[0.0, 0.30, 0.785],\n    scale=[0.10, 0.10, 0.02],\n)\napply_api_schema(prim_path=\"/World/InfeedPad\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Station1 (Alpha→Beta handoff) — between Alpha and Beta at radius 0.30 ────\n# Position (-0.260, 0.150, 0.78). Slightly larger 0.22x0.22m platform.\ncreate_prim(\n    prim_path=\"/World/Station1\",\n    prim_type=\"Cube\",\n    position=[-0.260, 0.150, 0.78],\n    scale=[0.11, 0.11, 0.02],\n)\napply_api_schema(prim_path=\"/World/Station1\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Station2 (Beta→Gamma handoff) — between Beta and Gamma at radius 0.30 ────\n# Position (0, -0.30, 0.78). Same 0.22x0.22m platform.\ncreate_prim(\n    prim_path=\"/World/Station2\",\n    prim_type=\"Cube\",\n    position=[0.0, -0.30, 0.78],\n    scale=[0.11, 0.11, 0.02],\n)\napply_api_schema(prim_path=\"/World/Station2\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Outfeed bin (final destination, after Gamma) at radius 0.30, angle 30deg ─\ncreate_bin(\n    prim_path=\"/World/OutfeedBin\",\n    position=[0.260, 0.150, 0.78],\n    size=[0.25, 0.25, 0.12],\n)\n\n# ── Workpiece (0.06m cube, mass 0.3 kg) starts on InfeedPad ──────────────────\ncreate_prim(\n    prim_path=\"/World/Cube_workpiece\",\n    prim_type=\"Cube\",\n    position=[0.0, 0.30, 0.825],\n    size=0.06,\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_workpiece\", schema_name=api)\nbulk_set_attribute(\n    prim_paths=[\"/World/Cube_workpiece\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nset_attribute(prim_path=\"/World/Cube_workpiece\", attr_name=\"physics:mass\", value=0.3)\napply_physics_material(prim_path=\"/World/Cube_workpiece\", material_name=\"rubber\")\n\n# ── Grasp poses for all 3 arm-workpiece pairs (top-down approach) ────────────\ndefine_grasp_pose(\n    robot_path=\"/World/FrankaAlpha\",\n    object_path=\"/World/Cube_workpiece\",\n    approach_direction=[0, 0, -1],\n)\ndefine_grasp_pose(\n    robot_path=\"/World/FrankaBeta\",\n    object_path=\"/World/Cube_workpiece\",\n    approach_direction=[0, 0, -1],\n)\ndefine_grasp_pose(\n    robot_path=\"/World/FrankaGamma\",\n    object_path=\"/World/Cube_workpiece\",\n    approach_direction=[0, 0, -1],\n)\n\n# ── Claim mutexes on shared stations ──────────────────────────────────────────\n# Station1 is shared between Alpha (placer) and Beta (picker). Station2 between\n# Beta (placer) and Gamma (picker). Mutexes serialise grasp/place access; under\n# single-tenant Kit RPC they are advisory and the sequential controller order\n# enforces correctness at runtime (memory `kit-concurrency`).\nsetup_robot_claim_mutex(\n    mutex_path=\"/World/MutexStation1\",\n    resource_path=\"/World/Station1\",\n    robots=[\"/World/FrankaAlpha\", \"/World/FrankaBeta\"],\n)\nsetup_robot_claim_mutex(\n    mutex_path=\"/World/MutexStation2\",\n    resource_path=\"/World/Station2\",\n    robots=[\"/World/FrankaBeta\", \"/World/FrankaGamma\"],\n)\n\n# ── Handoff signals — enforce strict A→B→C ordering ──────────────────────────\n# SignalAB at Station1 position: Alpha places, Beta picks.\n# SignalBC at Station2 position: Beta  places, Gamma picks.\nsetup_robot_handoff_signal(\n    handoff_path=\"/World/SignalAB\",\n    robot_a=\"/World/FrankaAlpha\",\n    robot_b=\"/World/FrankaBeta\",\n    position=[-0.260, 0.150, 0.83],\n)\nsetup_robot_handoff_signal(\n    handoff_path=\"/World/SignalBC\",\n    robot_a=\"/World/FrankaBeta\",\n    robot_b=\"/World/FrankaGamma\",\n    position=[0.0, -0.30, 0.83],\n)\n\n# ── Per-arm pick-place controllers ────────────────────────────────────────────\n# setup_pick_place_controller does not currently accept handoff_signal /\n# claim_mutex kwargs (not in schema) — gating is advisory via the markers above.\n# Each controller treats the other 2 arms + workcell + relevant stations as\n# planning_obstacles so cuRobo plans around them.\n\n# Alpha: InfeedPad → Station1\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaAlpha\",\n    target_source=\"curobo\",\n    source_paths=[\"/World/Cube_workpiece\"],\n    destination_path=\"/World/Station1\",\n    planning_obstacles=[\n        \"/World/Workcell\",\n        \"/World/FrankaBeta\",\n        \"/World/FrankaGamma\",\n        \"/World/InfeedPad\",\n        \"/World/Station1\",\n        \"/World/Station2\",\n    ],\n)\n\n# Beta: Station1 → Station2\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaBeta\",\n    target_source=\"curobo\",\n    source_paths=[\"/World/Station1\"],\n    destination_path=\"/World/Station2\",\n    planning_obstacles=[\n        \"/World/Workcell\",\n        \"/World/FrankaAlpha\",\n        \"/World/FrankaGamma\",\n        \"/World/Station1\",\n        \"/World/Station2\",\n        \"/World/OutfeedBin\",\n    ],\n)\n\n# Gamma: Station2 → OutfeedBin\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaGamma\",\n    target_source=\"curobo\",\n    source_paths=[\"/World/Station2\"],\n    destination_path=\"/World/OutfeedBin\",\n    planning_obstacles=[\n        \"/World/Workcell\",\n        \"/World/FrankaAlpha\",\n        \"/World/FrankaBeta\",\n        \"/World/Station1\",\n        \"/World/Station2\",\n        \"/World/OutfeedBin\",\n    ],\n)",
+  "settle_state": {
+    "workpieces": {
+      "/World/Cube_workpiece": [0.0, 0.30, 0.825]
+    },
+    "stations_clear": ["/World/Station1", "/World/Station2"],
+    "robots_home": ["/World/FrankaAlpha", "/World/FrankaBeta", "/World/FrankaGamma"]
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/FrankaAlpha",
+        "pick_path": "/World/InfeedPad",
+        "place_path": "/World/Station1",
+        "robot_kind": "franka_panda",
+        "arm_role": "infeed_picker"
+      },
+      {
+        "robot_path": "/World/FrankaBeta",
+        "pick_path": "/World/Station1",
+        "place_path": "/World/Station2",
+        "robot_kind": "franka_panda",
+        "arm_role": "mid_relay"
+      },
+      {
+        "robot_path": "/World/FrankaGamma",
+        "pick_path": "/World/Station2",
+        "place_path": "/World/OutfeedBin",
+        "robot_kind": "franka_panda",
+        "arm_role": "outfeed_placer"
+      }
+    ],
+    "cube_path": "/World/Cube_workpiece",
+    "strict_order": true,
+    "handoff_signals_required": ["/World/SignalAB", "/World/SignalBC"]
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_workpiece",
+    "target_path": "/World/OutfeedBin",
+    "duration_s": 240,
+    "xy_tolerance": 0.12
+  },
+  "diagnose_args": {
+    "robots": ["/World/FrankaAlpha", "/World/FrankaBeta", "/World/FrankaGamma"],
+    "stations": ["/World/Station1", "/World/Station2"],
+    "infeed": "/World/InfeedPad",
+    "outfeed_bin": "/World/OutfeedBin",
+    "mutexes": ["/World/MutexStation1", "/World/MutexStation2"],
+    "signals": ["/World/SignalAB", "/World/SignalBC"]
+  },
+  "extends": "industrial-triple-arm-cell-handoff-001",
+  "extension_notes": "First triple-Franka strict-order canonical (F.0-ext-2 backlog item industrial-triple-arm-cell-handoff-001). Distinct in coordination shape from CP-NEW-assembly-line-4robot-handoff (linear pass-through, 4 arms, n_handoffs=3) and CP-NEW-roco-bimanual-assembly (2 arms cooperating on same workpiece, 0 handoffs — true bimanual hold-and-fasten). Here we have 3 arms in a circular cell with strict A→B→C ordering enforced via 2 handoff signals + 2 station mutexes. Each arm performs a distinct operation on the same workpiece in sequence. Single-tenant Kit RPC (memory `kit-concurrency`) means the 3 controllers execute sequentially — true concurrent contention on the mutexes is not exercised at runtime today; the markers are advisory and the strict ordering is structurally implicit in the sequential install order. To exercise true mutex contention would require a multi-tenant Kit deployment or a hand-rolled state machine that polls handoff:state / mutex:claimed_by between phys-step callbacks.",
+  "failure_modes": [
+    "Shared center-workspace collision: with 3 arms reaching into the same ~0.5m-radius central zone, planning_obstacles snapshots at install time may miss future motion of the other 2 arms. Mitigated by sequential execution (Alpha completes before Beta installs, etc.) and by listing the other 2 arms as planning_obstacles per controller. Workaround if cuRobo plans through another arm: re-install Beta/Gamma controllers after the previous arm has returned to home, refreshing the obstacle snapshot.",
+    "Handoff signal race: if Beta begins its pick from Station1 before Alpha's place phase has fully settled (workpiece still being lowered), Beta's grasp can fail or knock the workpiece off the station. Mitigation: add a settle delay between stage transitions; the canonical-time setup_robot_handoff_signal marker is advisory and currently NOT polled by setup_pick_place_controller. A future handler extension can gate Beta's first physics-step on handoff:state==released.",
+    "Station1 / Station2 instability: 0.22×0.22m platforms with a 0.06m cube on top — placement precision must be better than ~0.07m or the cube can slide off the edge during the next arm's approach swirl. cuRobo typical place accuracy is 0.01-0.02m so this is comfortable, but if the function-gate observes drift on Station1, increase station scale to [0.13, 0.13, 0.02] (0.26m platform).",
+    "Workspace asymmetry: all three arms must be at exactly 120-degree spacing on the 0.55m circle for the symmetric reach budget to hold. If a base is misplaced (e.g. ArmGamma at the wrong angle), one of its 2 stations becomes unreachable. Diagnostic get_world_transform on all 3 bases surfaces this; the world-x and world-y of each base should sit on the 0.55m circle within 0.01m.",
+    "Single-tenant Kit RPC (memory `kit-concurrency`): the 3 articulations cannot run concurrently — exec_sync serialises them via the stage-state mutex. Total wall-clock time is roughly 3× a single Franka pick-place (~60s each → 180s+ for 3 stages), so duration_s=240 leaves only 60s of planner-retry margin. If the first stage's cuRobo plan fails and retries, the whole pipeline may exceed budget; consider raising duration_s to 300 for first verification runs.",
+    "Franka reach margin at 0.85m max vs measured 0.477m worst-case is comfortable (~44% utilisation), but yaw orientations matter — at the workcell center the wrist may flip undesirably between Alpha and Beta. If IK fails on any approach, try setting target_source='spline' as a fallback (no collision-aware planning but more permissive on wrist orientation)."
+  ],
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 3,
+      "n_handoffs": 2,
+      "n_workpieces": 1,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": false,
+      "has_claim_mutex": true,
+      "has_handoff_signals": true,
+      "handoff_signals_advisory_only": true,
+      "is_serial_pipeline": true,
+      "is_circular_cell": true,
+      "shared_workspace": true,
+      "strict_order_handoff": true
+    },
+    "structural_tags": [
+      "isaac:topology.triple_arm",
+      "isaac:topology.multi_robot",
+      "isaac:topology.circular_cell",
+      "isaac:coordination.strict_order_handoff",
+      "isaac:coordination.claim_mutex",
+      "isaac:coordination.handoff_signal",
+      "isaac:multi_robot.three_arm_cell",
+      "isaac:robot.fixed_base.arm",
+      "isaac:robot.franka_panda",
+      "isaac:robot.triple_franka",
+      "isaac:industry.assembly",
+      "isaac:n_stations.3",
+      "isaac:research.multi_robot_coordination"
+    ]
+  },
+  "roles": {
+    "arm_alpha": {
+      "constraints": ["franka_panda"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "infeed_picker_first_in_order"
+    },
+    "arm_beta": {
+      "constraints": ["franka_panda"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "mid_relay_second_in_order"
+    },
+    "arm_gamma": {
+      "constraints": ["franka_panda"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "outfeed_placer_third_in_order"
+    },
+    "infeed_pad": {
+      "constraints": ["platform"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "workpiece_spawn_location"
+    },
+    "handoff_stations": {
+      "constraints": ["platform"],
+      "expected_count": 2,
+      "required": true
+    },
+    "outfeed_destination": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpiece": {
+      "constraints": ["cube"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "traverses_all_three_arms_in_strict_order"
+    },
+    "workcell": {
+      "constraints": ["table", "platform"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "arm_alpha": {
+      "path": "/World/FrankaAlpha",
+      "class": "franka_panda",
+      "position": [0.0, 0.55, 0.75],
+      "orientation": [0.0, 0.0, 0.0, 1.0]
+    },
+    "arm_beta": {
+      "path": "/World/FrankaBeta",
+      "class": "franka_panda",
+      "position": [-0.476, -0.275, 0.75],
+      "orientation": [0.965926, 0.0, 0.0, 0.258819]
+    },
+    "arm_gamma": {
+      "path": "/World/FrankaGamma",
+      "class": "franka_panda",
+      "position": [0.476, -0.275, 0.75],
+      "orientation": [0.258819, 0.0, 0.0, 0.965926]
+    },
+    "infeed_pad": {
+      "path": "/World/InfeedPad",
+      "position": [0.0, 0.30, 0.785],
+      "scale": [0.10, 0.10, 0.02]
+    },
+    "handoff_stations": [
+      {"path": "/World/Station1", "position": [-0.260, 0.150, 0.78], "scale": [0.11, 0.11, 0.02]},
+      {"path": "/World/Station2", "position": [0.0, -0.30, 0.78], "scale": [0.11, 0.11, 0.02]}
+    ],
+    "outfeed_destination": {
+      "path": "/World/OutfeedBin",
+      "position": [0.260, 0.150, 0.78],
+      "size": [0.25, 0.25, 0.12]
+    },
+    "workpiece": {
+      "path": "/World/Cube_workpiece",
+      "position": [0.0, 0.30, 0.825],
+      "size": 0.06,
+      "mass_kg": 0.3
+    },
+    "workcell": {
+      "path": "/World/Workcell",
+      "position": [0, 0, 0.375],
+      "scale": [0.85, 0.85, 0.375]
+    }
+  },
+  "code_template": "# ── Scene skeleton ─────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path={{workcell.path}}, prim_type=\"Cube\", position={{workcell.position}}, scale={{workcell.scale}})\napply_api_schema(prim_path={{workcell.path}}, schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(robot_name={{arm_alpha.class}}, dest_path={{arm_alpha.path}}, position={{arm_alpha.position}}, orientation={{arm_alpha.orientation}})\nrobot_wizard(robot_name={{arm_beta.class}},  dest_path={{arm_beta.path}},  position={{arm_beta.position}},  orientation={{arm_beta.orientation}})\nrobot_wizard(robot_name={{arm_gamma.class}}, dest_path={{arm_gamma.path}}, position={{arm_gamma.position}}, orientation={{arm_gamma.orientation}})\n\ncheck_collisions(prim_path={{arm_alpha.path}})\ncheck_collisions(prim_path={{arm_beta.path}})\ncheck_collisions(prim_path={{arm_gamma.path}})\nget_world_transform(prim_path={{arm_alpha.path}})\nget_world_transform(prim_path={{arm_beta.path}})\nget_world_transform(prim_path={{arm_gamma.path}})\n\ncreate_prim(prim_path={{infeed_pad.path}}, prim_type=\"Cube\", position={{infeed_pad.position}}, scale={{infeed_pad.scale}})\napply_api_schema(prim_path={{infeed_pad.path}}, schema_name=\"PhysicsCollisionAPI\")\n\nfor station in [{{handoff_stations[0]}}, {{handoff_stations[1]}}]:\n    create_prim(prim_path=station['path'], prim_type='Cube', position=station['position'], scale=station['scale'])\n    apply_api_schema(prim_path=station['path'], schema_name='PhysicsCollisionAPI')\n\ncreate_bin(prim_path={{outfeed_destination.path}}, position={{outfeed_destination.position}}, size={{outfeed_destination.size}})\n\ncreate_prim(prim_path={{workpiece.path}}, prim_type=\"Cube\", position={{workpiece.position}}, size={{workpiece.size}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpiece.path}}, schema_name=api)\nbulk_set_attribute(prim_paths=[{{workpiece.path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nset_attribute(prim_path={{workpiece.path}}, attr_name=\"physics:mass\", value={{workpiece.mass_kg}})\napply_physics_material(prim_path={{workpiece.path}}, material_name=\"rubber\")\n\ndefine_grasp_pose(robot_path={{arm_alpha.path}}, object_path={{workpiece.path}}, approach_direction=[0, 0, -1])\ndefine_grasp_pose(robot_path={{arm_beta.path}},  object_path={{workpiece.path}}, approach_direction=[0, 0, -1])\ndefine_grasp_pose(robot_path={{arm_gamma.path}}, object_path={{workpiece.path}}, approach_direction=[0, 0, -1])\n\nsetup_robot_claim_mutex(mutex_path=\"/World/MutexStation1\", resource_path={{handoff_stations[0].path}}, robots=[{{arm_alpha.path}}, {{arm_beta.path}}])\nsetup_robot_claim_mutex(mutex_path=\"/World/MutexStation2\", resource_path={{handoff_stations[1].path}}, robots=[{{arm_beta.path}}, {{arm_gamma.path}}])\n\nsetup_robot_handoff_signal(handoff_path=\"/World/SignalAB\", robot_a={{arm_alpha.path}}, robot_b={{arm_beta.path}},  position=[-0.260, 0.150, 0.83])\nsetup_robot_handoff_signal(handoff_path=\"/World/SignalBC\", robot_a={{arm_beta.path}},  robot_b={{arm_gamma.path}}, position=[0.0, -0.30, 0.83])\n\nsetup_pick_place_controller(robot_path={{arm_alpha.path}}, target_source=\"curobo\", source_paths=[{{workpiece.path}}], destination_path={{handoff_stations[0].path}}, planning_obstacles=[{{workcell.path}}, {{arm_beta.path}}, {{arm_gamma.path}}, {{infeed_pad.path}}, {{handoff_stations[0].path}}, {{handoff_stations[1].path}}])\nsetup_pick_place_controller(robot_path={{arm_beta.path}},  target_source=\"curobo\", source_paths=[{{handoff_stations[0].path}}], destination_path={{handoff_stations[1].path}}, planning_obstacles=[{{workcell.path}}, {{arm_alpha.path}}, {{arm_gamma.path}}, {{handoff_stations[0].path}}, {{handoff_stations[1].path}}, {{outfeed_destination.path}}])\nsetup_pick_place_controller(robot_path={{arm_gamma.path}}, target_source=\"curobo\", source_paths=[{{handoff_stations[1].path}}], destination_path={{outfeed_destination.path}}, planning_obstacles=[{{workcell.path}}, {{arm_alpha.path}}, {{arm_beta.path}}, {{handoff_stations[0].path}}, {{handoff_stations[1].path}}, {{outfeed_destination.path}}])",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; first-triple-arm-canonical (F.0-ext-2 industrial-triple-arm-cell-handoff-001); form-gate-schema ⏳ (awaiting lint); function-gate ⏳ (single-tenant Kit RPC means 3 arms execute sequentially, not in parallel; strict A→B→C ordering implicit in install order — handoff signal markers advisory)"
+}
