@@ -889,11 +889,12 @@ class ChatOrchestrator:
 
             # Block 2 (multimodal foundation spec §7.3): text-prompt
             # modality → LayoutSpec.intent → structural-filter-first
-            # retrieval. Off by default during ramp; enable via env flag.
-            # When disabled, falls back to legacy similarity-only retrieval.
+            # retrieval. ON by default (R16: struct-filter beats baseline,
+            # hit@1 0.867 vs 0.833). Set MULTIMODAL_TEXT_INTENT=off to
+            # disable and fall back to legacy similarity-only retrieval.
             _multimodal_text = (
-                os.environ.get("MULTIMODAL_TEXT_INTENT", "off").lower()
-                in ("on", "true", "1", "yes")
+                os.environ.get("MULTIMODAL_TEXT_INTENT", "on").lower()
+                not in ("off", "false", "0", "no")
             )
             scored = None
             if _multimodal_text:
