@@ -1,0 +1,228 @@
+{
+  "task_id": "CP-NEW-planning-10step-retry",
+  "goal": "Long-horizon 10-step pick-place-stack plan with per-step sub-goal verification and retry-on-failure semantics. A single Franka Panda assembles a 3-block tower from three source bins, performs intermediate stack-height sub-goal checks, then transports the assembled stack to an outfeed bin. After each pick or place step the orchestrator calls get_world_transform + check_collisions to verify the sub-goal; if the sub-goal threshold is missed, execute_with_retry is invoked (max_retries=2 per step) to replay the same code patch with the LLM autonomous fix loop. The 10 sequenced steps are: (1) pick block A from bin1, (2) place block A on station, (3) pick block B from bin2, (4) place block B on top of A, (5) sub-goal stack-height check after step 4, (6) pick block C from bin3, (7) place block C on top of B, (8) sub-goal 3-block-stack stability check, (9) pick the assembled stack from station, (10) place stack in outfeed bin. Distinct from CP-NEW-assembly-line-4robot-handoff (multi-robot serial pipeline, no retry) and CP-NEW-yrkesroll-packer-box-seal (single-phase pack + lid, no retry) — this template is the FIRST canonical to exercise long-horizon orchestration with structured retry-on-failure.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_bin",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "define_grasp_pose",
+    "setup_pick_place_controller",
+    "execute_with_retry",
+    "get_world_transform",
+    "check_collisions",
+    "sim_control"
+  ],
+  "thoughts": "Design rationale for CP-NEW-planning-10step-retry — first long-horizon canonical with per-step retry-on-failure:\n\n1) Topology — single Franka Panda at [0, 0, 0.75] on a 1.2×0.8×0.75m work table. Three source bins arranged in an arc in front of the robot: Bin1 (block A) at [0.30, 0.40, 0.775], Bin2 (block B) at [0.45, 0.20, 0.775], Bin3 (block C) at [0.45, -0.20, 0.775]. Station (stack platform) at [-0.10, 0.30, 0.775] — flat Cube target for the 3-block tower. Outfeed bin at [-0.30, -0.30, 0.775]. All workspace inside Franka 0.85m reach (max horizontal distance 0.54m).\n\n2) Three blocks — 0.05m cubes, mass 0.1 kg, rubber material for stable friction-stacking. BlockA in Bin1 at z=0.835, BlockB in Bin2 at z=0.835, BlockC in Bin3 at z=0.835. Station top z = 0.775 + 0.005 (platform thickness) = 0.780. Stack heights after each placement: BlockA on station → centre z=0.805 (top z=0.830). BlockB on A → centre z=0.855 (top z=0.880). BlockC on B → centre z=0.905 (top z=0.930). Sub-goal #1 (after step 4): top of stack must be within [0.870, 0.890] (i.e. 2-block tower height). Sub-goal #2 (after step 8): top of stack within [0.920, 0.940] (3-block tower height) AND check_collisions on /World/Station reports stable contact between the three blocks.\n\n3) Step-by-step plan (10 steps, with implicit sub-goal verification after each):\n   Step 1 — pick BlockA from Bin1 (setup_pick_place_controller with source_paths=[/World/BlockA], destination_path=/World/Station). Sub-goal: BlockA transform z within [0.795, 0.815] AND xy within [-0.13, -0.07] × [0.27, 0.33].\n   Step 2 — place BlockA on station (handled inside the same setup_pick_place_controller call — step 1 and 2 are the two sub-phases of a single pick_place controller invocation). Sub-goal: same as step 1.\n   Step 3 — pick BlockB from Bin2 (second setup_pick_place_controller call).\n   Step 4 — place BlockB on top of BlockA. Sub-goal: BlockB transform z within [0.845, 0.865]; 2-block stack-height check via get_world_transform on /World/BlockB compared to /World/BlockA.\n   Step 5 — explicit sub-goal verification: get_world_transform(/World/BlockB), assert z within tolerance; if FAIL, invoke execute_with_retry to replay the place-B-on-A patch.\n   Step 6 — pick BlockC from Bin3 (third setup_pick_place_controller call).\n   Step 7 — place BlockC on top of BlockB. Sub-goal: BlockC transform z within [0.895, 0.915].\n   Step 8 — 3-block stability check: get_world_transform(/World/BlockC) + check_collisions(/World/BlockC) AND check_collisions(/World/BlockB). Sub-goal: BlockC z within tolerance AND check_collisions reports steady contact (no fall-through). If FAIL, execute_with_retry the stack-C-on-B patch.\n   Step 9 — pick the assembled stack from station (treat /World/BlockA as the grasp target — Franka grasps the bottom block to lift the whole tower; the stack moves as a unit because rubber friction + low velocity keeps blocks adhered).\n   Step 10 — place stack in /World/OutfeedBin. Sub-goal: all three blocks within outfeed bin footprint (xy tolerance 0.12m, z within bin).\n\n4) Retry-on-failure mechanism — execute_with_retry is the primary retry tool. Pattern: for each step that performs a physical action, the orchestrator first executes the action via setup_pick_place_controller, then verifies the sub-goal via get_world_transform/check_collisions. If verification fails, the orchestrator calls execute_with_retry(code=<replay patch>, description=<step name>, max_retries=2). The autonomous fix loop reads any error from the previous attempt, asks the LLM for a fix, and replays. Retry counter is RESET between steps — step 4's retries do not eat step 7's budget. After 2 retries exhaust, the canonical reports per-step success/retry-count and the final outcome (success / partial-success-at-step-N / total-failure).\n\n5) Partial-progress recovery — the template intentionally does NOT restart from step 1 on a step-N failure. Each retry replays only the failed step's code patch (e.g. step 4 retry replays the place-B-on-A pick_place call), not the upstream picks. This is the 'resume from failed step' semantics. The trade-off (documented in failure_modes #4): if the failure was caused by upstream state corruption (e.g. BlockA shifted during step 3 reach-over), retrying step 4 alone will hit the same failure. The mitigation is that an LLM-driven fix in execute_with_retry can detect this and emit a fix that includes a corrective re-place of BlockA before retrying step 4.\n\n6) Sub-goal threshold tuning — z-tolerance ±0.010m per block stack height. Tighter tolerances (e.g. ±0.005m) would cause frequent false-positive retries on legitimate placements that wobble during settle; looser tolerances (±0.020m) would let unstable stacks pass verification and fail downstream at step 9. The ±0.010m threshold is calibrated to Franka cuRobo drop precision (~5-8mm) plus 1-2mm settle wobble. Documented as failure_mode #2.\n\n7) Sim-control settle pauses — between each step's pick_place and the next step's sub-goal check, insert sim_control(action='step', step_count=60) (~1s sim-time at 60Hz) so the block has time to settle before its z-position is read. Without this, get_world_transform returns the position at gripper-release moment, before gravity has finished pulling the block onto the stack — false-negative sub-goal failure. Documented as failure_mode #3.\n\n8) Physics — CPU dynamics (enable_gpu_dynamics=False) for determinism. Rubber material on all three blocks + station platform maximises friction-stacking. sleepThreshold=0.0 keeps blocks simulated through the full 10-step plan. Station platform is static (PhysicsCollisionAPI only, no RigidBodyAPI). All three blocks have full physics (RigidBody + Collision + Mass + PhysxRigidBody).\n\n9) Verification — verify_args.stages encodes the four pick-place phases (step1-2: A→station; step3-4: B→A; step6-7: C→B; step9-10: stack→outfeed). simulate_args.target_path = /World/OutfeedBin; simulate_args.cube_paths = all three blocks. settle_state records the final 3-block stack in outfeed plus the per-step retry counters (all 0 on nominal-success run).\n\n10) Structural tags — isaac:planning.long_horizon (new — first canonical for long-horizon plans), isaac:planning.retry_on_failure (new — exercises retry semantics), isaac:orchestration.10_step_sequence (new — explicit step-count tag for retrieval), isaac:robot.franka_panda, isaac:robot.fixed_base.arm, isaac:topology.single_station, isaac:pattern.stack_then_transport. pattern_hint='other' because long-horizon planning is not a primitive pick_place pattern — the discriminating signal is structural_tags.planning.*.\n\n11) Comparison to siblings:\n   - vs CP-NEW-assembly-line-4robot-handoff: that template has 4 robots in serial pipeline (3 hand-offs); this template has 1 robot doing 10 sequential steps (no hand-offs).\n   - vs CP-NEW-yrkesroll-packer-box-seal: that template has 2 pick_place phases (pack + seal); this template has 4 pick_place phases (A, B, C placements + final transport) plus retry verification gates.\n   - vs CP-NEW-yrkesroll-machinist-cnc-load: that template uses sim_control as a machining-cycle dwell; this template uses sim_control as a between-step settle pause for sub-goal verification.\n\n12) Function-gate — simulate_args measures the end-state: BlockA, BlockB, BlockC all inside /World/OutfeedBin after duration_s=400 (long horizon: ~4 pick-place phases × ~75s each + retry slack).",
+  "code": "# -- Scene skeleton --------------------------------------------------------\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Robot work table (1.2 x 0.8 x 0.75m)\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.4, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# -- Physics scene: CPU dynamics for determinism ---------------------------\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# -- Franka Panda robot ----------------------------------------------------\n# Reach ~0.85m. Bins/station/outfeed within 0.55m horizontal.\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# -- Three source bins (one per block) -------------------------------------\ncreate_bin(\n    prim_path=\"/World/Bin1\",\n    position=[0.30, 0.40, 0.775],\n    size=[0.12, 0.12, 0.04],\n)\ncreate_bin(\n    prim_path=\"/World/Bin2\",\n    position=[0.45, 0.20, 0.775],\n    size=[0.12, 0.12, 0.04],\n)\ncreate_bin(\n    prim_path=\"/World/Bin3\",\n    position=[0.45, -0.20, 0.775],\n    size=[0.12, 0.12, 0.04],\n)\n\n# -- Stack station (flat platform where the 3-block tower assembles) -------\ncreate_prim(\n    prim_path=\"/World/Station\",\n    prim_type=\"Cube\",\n    position=[-0.10, 0.30, 0.775],\n    scale=[0.08, 0.08, 0.005],\n)\napply_api_schema(prim_path=\"/World/Station\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/Station\", attr_name=\"primvars:displayColor\", value=[[0.35, 0.40, 0.45]])\n\n# -- Outfeed bin (final destination for the assembled stack) ---------------\ncreate_bin(\n    prim_path=\"/World/OutfeedBin\",\n    position=[-0.30, -0.30, 0.775],\n    size=[0.20, 0.20, 0.04],\n)\n\n# -- Three blocks (A, B, C) inside their respective bins -------------------\n# 0.05m cubes, mass 0.1 kg, rubber material for friction-stacking.\nblock_specs = [\n    (\"/World/BlockA\", [0.30, 0.40, 0.835], [[0.9, 0.2, 0.2]]),  # red\n    (\"/World/BlockB\", [0.45, 0.20, 0.835], [[0.2, 0.7, 0.3]]),  # green\n    (\"/World/BlockC\", [0.45, -0.20, 0.835], [[0.2, 0.3, 0.9]]),  # blue\n]\nblock_paths = [spec[0] for spec in block_specs]\n\nfor path, pos, color in block_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\", position=pos, size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    set_attribute(prim_path=path, attr_name=\"primvars:displayColor\", value=color)\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\nbulk_set_attribute(\n    prim_paths=block_paths,\n    attr=\"physics:mass\",\n    value=0.1,\n)\nbulk_set_attribute(\n    prim_paths=block_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\n# Top-down grasp pose for each block (Franka parallel-jaw approach from above).\nfor path in block_paths:\n    define_grasp_pose(\n        robot_path=\"/World/Franka\",\n        object_path=path,\n        approach_direction=[0, 0, -1],\n        gripper_offset=[0, 0, 0],\n    )\n\n# -- STEPS 1+2: pick BlockA from Bin1, place on Station --------------------\n# Both phases (pick + place) handled inside a single setup_pick_place_controller call.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    robot_family=\"franka\",\n    source_paths=[\"/World/BlockA\"],\n    destination_path=\"/World/Station\",\n    drop_targets={\"/World/BlockA\": [-0.10, 0.30, 0.805]},\n    planning_obstacles=[\"/World/Table\", \"/World/Bin1\", \"/World/Bin2\", \"/World/Bin3\", \"/World/Station\", \"/World/OutfeedBin\"],\n)\n\n# Settle 1s sim-time before sub-goal verification.\nsim_control(action=\"step\", step_count=60)\n\n# Sub-goal #0 after step 2: BlockA z within [0.795, 0.815]. If fails, retry.\nget_world_transform(prim_path=\"/World/BlockA\")\ncheck_collisions(prim_path=\"/World/BlockA\")\n\nexecute_with_retry(\n    code=\"setup_pick_place_controller(robot_path='/World/Franka', target_source='curobo', robot_family='franka', source_paths=['/World/BlockA'], destination_path='/World/Station', drop_targets={'/World/BlockA': [-0.10, 0.30, 0.805]}, planning_obstacles=['/World/Table', '/World/Bin1', '/World/Bin2', '/World/Bin3', '/World/Station', '/World/OutfeedBin'])\",\n    description=\"Step 1+2 retry: re-place BlockA on Station if sub-goal z-tolerance failed\",\n    max_retries=2,\n)\n\n# -- STEPS 3+4: pick BlockB from Bin2, place on top of BlockA --------------\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    robot_family=\"franka\",\n    source_paths=[\"/World/BlockB\"],\n    destination_path=\"/World/Station\",\n    drop_targets={\"/World/BlockB\": [-0.10, 0.30, 0.855]},\n    planning_obstacles=[\"/World/Table\", \"/World/Bin1\", \"/World/Bin2\", \"/World/Bin3\", \"/World/Station\", \"/World/OutfeedBin\"],\n)\n\nsim_control(action=\"step\", step_count=60)\n\n# Step 5 — explicit sub-goal verification: 2-block stack height check.\nget_world_transform(prim_path=\"/World/BlockB\")\ncheck_collisions(prim_path=\"/World/BlockB\")\n\nexecute_with_retry(\n    code=\"setup_pick_place_controller(robot_path='/World/Franka', target_source='curobo', robot_family='franka', source_paths=['/World/BlockB'], destination_path='/World/Station', drop_targets={'/World/BlockB': [-0.10, 0.30, 0.855]}, planning_obstacles=['/World/Table', '/World/Bin1', '/World/Bin2', '/World/Bin3', '/World/Station', '/World/OutfeedBin'])\",\n    description=\"Step 3+4 retry: re-place BlockB on BlockA if 2-block stack-height sub-goal failed\",\n    max_retries=2,\n)\n\n# -- STEPS 6+7: pick BlockC from Bin3, place on top of BlockB --------------\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    robot_family=\"franka\",\n    source_paths=[\"/World/BlockC\"],\n    destination_path=\"/World/Station\",\n    drop_targets={\"/World/BlockC\": [-0.10, 0.30, 0.905]},\n    planning_obstacles=[\"/World/Table\", \"/World/Bin1\", \"/World/Bin2\", \"/World/Bin3\", \"/World/Station\", \"/World/OutfeedBin\"],\n)\n\nsim_control(action=\"step\", step_count=60)\n\n# Step 8 — 3-block stack stability check: z + collision-state on B and C.\nget_world_transform(prim_path=\"/World/BlockC\")\ncheck_collisions(prim_path=\"/World/BlockC\")\ncheck_collisions(prim_path=\"/World/BlockB\")\n\nexecute_with_retry(\n    code=\"setup_pick_place_controller(robot_path='/World/Franka', target_source='curobo', robot_family='franka', source_paths=['/World/BlockC'], destination_path='/World/Station', drop_targets={'/World/BlockC': [-0.10, 0.30, 0.905]}, planning_obstacles=['/World/Table', '/World/Bin1', '/World/Bin2', '/World/Bin3', '/World/Station', '/World/OutfeedBin'])\",\n    description=\"Step 6+7 retry: re-place BlockC on BlockB if 3-block stack stability sub-goal failed\",\n    max_retries=2,\n)\n\n# -- STEPS 9+10: pick the assembled stack (grasp BlockA), place in OutfeedBin\n# Grasping the bottom block lifts the whole tower because rubber friction +\n# low approach velocity keeps blocks adhered as a unit.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    robot_family=\"franka\",\n    source_paths=[\"/World/BlockA\"],\n    destination_path=\"/World/OutfeedBin\",\n    drop_targets={\"/World/BlockA\": [-0.30, -0.30, 0.805]},\n    planning_obstacles=[\"/World/Table\", \"/World/Bin1\", \"/World/Bin2\", \"/World/Bin3\", \"/World/Station\", \"/World/OutfeedBin\"],\n)\n\nsim_control(action=\"step\", step_count=60)\n\n# Final verification: all three blocks inside OutfeedBin footprint.\nget_world_transform(prim_path=\"/World/BlockA\")\nget_world_transform(prim_path=\"/World/BlockB\")\nget_world_transform(prim_path=\"/World/BlockC\")\ncheck_collisions(prim_path=\"/World/BlockA\")\n\nexecute_with_retry(\n    code=\"setup_pick_place_controller(robot_path='/World/Franka', target_source='curobo', robot_family='franka', source_paths=['/World/BlockA'], destination_path='/World/OutfeedBin', drop_targets={'/World/BlockA': [-0.30, -0.30, 0.805]}, planning_obstacles=['/World/Table', '/World/Bin1', '/World/Bin2', '/World/Bin3', '/World/Station', '/World/OutfeedBin'])\",\n    description=\"Step 9+10 retry: re-transport assembled stack to OutfeedBin if final-placement sub-goal failed\",\n    max_retries=2,\n)",
+  "settle_state": {
+    "blocks_in_outfeed": {
+      "/World/BlockA": [-0.30, -0.30, 0.805],
+      "/World/BlockB": [-0.30, -0.30, 0.855],
+      "/World/BlockC": [-0.30, -0.30, 0.905]
+    },
+    "station_empty_after_transport": ["/World/Station"],
+    "step_sequence": [
+      "step1_pick_blockA_from_bin1",
+      "step2_place_blockA_on_station",
+      "step3_pick_blockB_from_bin2",
+      "step4_place_blockB_on_blockA",
+      "step5_subgoal_2block_stack_height",
+      "step6_pick_blockC_from_bin3",
+      "step7_place_blockC_on_blockB",
+      "step8_subgoal_3block_stack_stability",
+      "step9_pick_assembled_stack_from_station",
+      "step10_place_stack_in_outfeed"
+    ],
+    "subgoal_thresholds": {
+      "block_z_tolerance_m": 0.010,
+      "stack_xy_tolerance_m": 0.020,
+      "outfeed_xy_tolerance_m": 0.120,
+      "settle_steps_between_phases": 60
+    },
+    "retry_budget_per_step": 2,
+    "retry_counter_resets_between_steps": true,
+    "expected_retry_counts_nominal": {
+      "step_2": 0,
+      "step_4": 0,
+      "step_7": 0,
+      "step_10": 0
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Bin1",
+        "place_path": "/World/Station",
+        "robot_kind": "franka_panda"
+      },
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Bin2",
+        "place_path": "/World/Station",
+        "robot_kind": "franka_panda"
+      },
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Bin3",
+        "place_path": "/World/Station",
+        "robot_kind": "franka_panda"
+      },
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Station",
+        "place_path": "/World/OutfeedBin",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/BlockA",
+    "stack_blocks": ["/World/BlockA", "/World/BlockB", "/World/BlockC"],
+    "station_path": "/World/Station",
+    "subgoal_z_tolerance": 0.010,
+    "retry_budget_per_step": 2
+  },
+  "simulate_args": {
+    "target_path": "/World/OutfeedBin",
+    "cube_path": "/World/BlockA",
+    "cube_paths": ["/World/BlockA", "/World/BlockB", "/World/BlockC"],
+    "duration_s": 400,
+    "xy_tolerance": 0.12,
+    "expected_phases": 4,
+    "expected_total_steps": 10
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Table",
+      "/World/Bin1",
+      "/World/Bin2",
+      "/World/Bin3",
+      "/World/Station",
+      "/World/OutfeedBin"
+    ],
+    "robot_base": [0.0, 0.0, 0.75],
+    "subgoal_check_prims": ["/World/BlockA", "/World/BlockB", "/World/BlockC"],
+    "retry_tool": "execute_with_retry"
+  },
+  "failure_modes": [
+    "Retry on physics-rooted failure simply repeats failure — if BlockB topples off BlockA because the stack-orientation drifted by >1 degree during release, replaying the same place-B-on-A code patch will produce the same toppled-stack outcome. The execute_with_retry autonomous fix loop must detect the underlying cause (e.g. read the post-failure transform of BlockA, compute the orientation drift, and emit a corrective re-place of BlockA before retrying step 4). Mitigation: provide context_hints=['stack-topple detection: read get_world_transform of bottom block; if rotation>1deg, re-place bottom block before retry'] to the execute_with_retry call.",
+    "Sub-goal threshold too tight — ±0.010m z-tolerance assumes cuRobo drop precision of 5-8mm + 1-2mm settle wobble. If the rubber-on-rubber friction coefficient causes a 3-5mm settle bounce (occasionally observed at low solver iter counts), valid placements will trigger false-positive retries. Mitigation: monitor settle_state.expected_retry_counts_nominal during smoke-test runs; if retries fire on >5% of nominal-success runs, loosen subgoal_z_tolerance to 0.015m.",
+    "Retry counter not reset between steps — the code calls execute_with_retry separately per step, so each call has its own max_retries=2 budget. However, if a future variant wraps the whole 10-step plan in a single execute_with_retry envelope (treating the whole plan as one patch), the retry counter would aggregate and a step-4 failure could exhaust the budget before step 7 even runs. The current per-step pattern is the correct shape; documented here to prevent regression during refactor.",
+    "Partial-progress recovery not handled — each retry replays only the failed step, not the upstream picks. If the failure was caused by upstream state corruption (e.g. BlockA shifted during the step-3 reach-over because the Franka swept too close to the station while approaching Bin2), retrying step 4 alone will hit the same failure. The LLM fix loop must detect this from get_world_transform output. Mitigation: in the execute_with_retry context_hints, instruct the fix loop to read transforms of ALL prior-placed blocks and emit corrective re-places when transforms have drifted >0.020m from the expected stack-coordinate.",
+    "Long-horizon timing budget — duration_s=400 covers 4 pick-place phases (~75s each cuRobo plan + execution) + 4 sub-goal settle pauses (4×1s) + retry slack (~80s = 2 retries × ~40s avg). If a single phase exceeds 80s due to cuRobo solver stalls, the canonical may exceed the 400s budget. Mitigation: extend duration_s to 600 for first-time runs; reduce after baseline timing established.",
+    "Block-on-block stacking precision — z drop targets are computed by stacking 0.05m blocks: BlockA at 0.805 (centre), BlockB at 0.855 (centre = A_top + B/2 = 0.830 + 0.025), BlockC at 0.905. cuRobo drop heights add a small approach offset (~0.005-0.010m) which is absorbed by the rubber friction and settle gravity, but a calibration drift in the cuRobo gripper-tip frame can produce a 0.005-0.010m systematic z-error that compounds across the stack. Mitigation: after step 4, compare BlockB.z to BlockA.z+0.050; if delta > 0.060m, the gripper-tip frame is mis-calibrated — emit a re-calibration step before continuing.",
+    "Step 9 'pick the assembled stack' relies on rubber friction holding the 3-block tower together during lift — Franka grasps BlockA (bottom) and the other two ride along. If acceleration during lift exceeds friction × g, BlockC may slide off the top during transport. Verified shape: low-velocity lift with cuRobo default trapezoidal profile, max acceleration ~2 m/s², friction coefficient rubber-on-rubber ~1.2 → friction force >> gravity → stack holds. If a future variant uses higher-velocity profile, BlockC will slide; add an explicit set_motion_policy(robot_path, max_accel=1.0) before step 9.",
+    "Bin-arc layout reach margin — Bin2/Bin3 at horizontal distance sqrt(0.45^2+0.20^2)=0.49m and Outfeed at sqrt(0.30^2+0.30^2)=0.42m, all well within Franka 0.85m reach. Station at sqrt(0.10^2+0.30^2)=0.32m is the closest. No tight-margin risks; documented for completeness.",
+    "execute_with_retry semantics — max_retries=2 means the system attempts the patch up to 3 times total (1 initial + 2 retries). If a step succeeds on retry 1 or 2, the canonical continues to the next step. If all retries exhaust, the canonical reports the per-step failure but does NOT auto-abort — downstream steps still execute (best-effort continuation). This is intentional: it lets the function-gate observe partial-progress outcomes. If a stricter abort-on-step-failure semantics is wanted, wrap each execute_with_retry call in a guard that calls cancel_workflow when the retry budget exhausts."
+  ],
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_blocks": 3,
+      "n_source_bins": 3,
+      "destination_kind": "single_bin",
+      "uses_retry": true,
+      "retry_tool": "execute_with_retry",
+      "max_retries_per_step": 2,
+      "n_total_steps": 10,
+      "n_pick_place_phases": 4,
+      "n_subgoal_checks": 4,
+      "is_long_horizon": true
+    },
+    "structural_tags": [
+      "isaac:planning.long_horizon",
+      "isaac:planning.retry_on_failure",
+      "isaac:orchestration.10_step_sequence",
+      "isaac:robot.franka_panda",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:pattern.stack_then_transport",
+      "isaac:industry.assembly"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur10", "ur10e"],
+      "expected_count": 1,
+      "required": true
+    },
+    "source_bins": {
+      "constraints": ["bin"],
+      "expected_count": 3,
+      "required": true,
+      "param_name": "n_source_bins"
+    },
+    "stack_station": {
+      "constraints": ["platform"],
+      "expected_count": 1,
+      "required": true
+    },
+    "outfeed_destination": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "blocks": {
+      "constraints": ["cube"],
+      "min": 3,
+      "max": 3,
+      "param_name": "n_blocks",
+      "unordered": false
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [1, 0, 0, 0]
+    },
+    "source_bins": [
+      {"path": "/World/Bin1", "position": [0.30, 0.40, 0.775], "size": [0.12, 0.12, 0.04]},
+      {"path": "/World/Bin2", "position": [0.45, 0.20, 0.775], "size": [0.12, 0.12, 0.04]},
+      {"path": "/World/Bin3", "position": [0.45, -0.20, 0.775], "size": [0.12, 0.12, 0.04]}
+    ],
+    "stack_station": {
+      "path": "/World/Station",
+      "position": [-0.10, 0.30, 0.775],
+      "scale": [0.08, 0.08, 0.005]
+    },
+    "outfeed_destination": {
+      "path": "/World/OutfeedBin",
+      "position": [-0.30, -0.30, 0.775],
+      "size": [0.20, 0.20, 0.04]
+    },
+    "blocks": [
+      {"path": "/World/BlockA", "position": [0.30, 0.40, 0.835], "size": 0.05, "color": [0.9, 0.2, 0.2], "stack_z": 0.805},
+      {"path": "/World/BlockB", "position": [0.45, 0.20, 0.835], "size": 0.05, "color": [0.2, 0.7, 0.3], "stack_z": 0.855},
+      {"path": "/World/BlockC", "position": [0.45, -0.20, 0.835], "size": 0.05, "color": [0.2, 0.3, 0.9], "stack_z": 0.905}
+    ],
+    "planning_metadata": {
+      "n_total_steps": 10,
+      "n_pick_place_phases": 4,
+      "max_retries_per_step": 2,
+      "subgoal_z_tolerance_m": 0.010,
+      "settle_steps_between_phases": 60,
+      "retry_tool": "execute_with_retry"
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.4, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\nrobot_wizard(robot_name={{primary_robot.class}}, dest_path={{primary_robot.path}}, position={{primary_robot.position}}, orientation={{primary_robot.orientation}})\ncreate_bin(prim_path={{source_bins[0].path}}, position={{source_bins[0].position}}, size={{source_bins[0].size}})\ncreate_bin(prim_path={{source_bins[1].path}}, position={{source_bins[1].position}}, size={{source_bins[1].size}})\ncreate_bin(prim_path={{source_bins[2].path}}, position={{source_bins[2].position}}, size={{source_bins[2].size}})\ncreate_prim(prim_path={{stack_station.path}}, prim_type=\"Cube\", position={{stack_station.position}}, scale={{stack_station.scale}})\napply_api_schema(prim_path={{stack_station.path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_bin(prim_path={{outfeed_destination.path}}, position={{outfeed_destination.position}}, size={{outfeed_destination.size}})\ncreate_prim(prim_path={{blocks[0].path}}, prim_type=\"Cube\", position={{blocks[0].position}}, size={{blocks[0].size}})\napply_api_schema(prim_path={{blocks[0].path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{blocks[0].path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{blocks[0].path}}, schema_name=\"PhysicsMassAPI\")\napply_physics_material(prim_path={{blocks[0].path}}, material_name=\"rubber\")\ncreate_prim(prim_path={{blocks[1].path}}, prim_type=\"Cube\", position={{blocks[1].position}}, size={{blocks[1].size}})\napply_api_schema(prim_path={{blocks[1].path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{blocks[1].path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{blocks[1].path}}, schema_name=\"PhysicsMassAPI\")\napply_physics_material(prim_path={{blocks[1].path}}, material_name=\"rubber\")\ncreate_prim(prim_path={{blocks[2].path}}, prim_type=\"Cube\", position={{blocks[2].position}}, size={{blocks[2].size}})\napply_api_schema(prim_path={{blocks[2].path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{blocks[2].path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{blocks[2].path}}, schema_name=\"PhysicsMassAPI\")\napply_physics_material(prim_path={{blocks[2].path}}, material_name=\"rubber\")\nbulk_set_attribute(prim_paths=[{{blocks[0].path}}, {{blocks[1].path}}, {{blocks[2].path}}], attr=\"physics:mass\", value=0.1)\nbulk_set_attribute(prim_paths=[{{blocks[0].path}}, {{blocks[1].path}}, {{blocks[2].path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\ndefine_grasp_pose(robot_path={{primary_robot.path}}, object_path={{blocks[0].path}}, approach_direction=[0, 0, -1], gripper_offset=[0, 0, 0])\ndefine_grasp_pose(robot_path={{primary_robot.path}}, object_path={{blocks[1].path}}, approach_direction=[0, 0, -1], gripper_offset=[0, 0, 0])\ndefine_grasp_pose(robot_path={{primary_robot.path}}, object_path={{blocks[2].path}}, approach_direction=[0, 0, -1], gripper_offset=[0, 0, 0])\nsetup_pick_place_controller(robot_path={{primary_robot.path}}, target_source=\"curobo\", robot_family=\"franka\", source_paths=[{{blocks[0].path}}], destination_path={{stack_station.path}}, drop_targets={{'{'}}{{blocks[0].path}}: [-0.10, 0.30, 0.805]{{'}'}}, planning_obstacles=[\"/World/Table\", {{source_bins[0].path}}, {{source_bins[1].path}}, {{source_bins[2].path}}, {{stack_station.path}}, {{outfeed_destination.path}}])\nsim_control(action=\"step\", step_count=60)\nget_world_transform(prim_path={{blocks[0].path}})\ncheck_collisions(prim_path={{blocks[0].path}})\nexecute_with_retry(code=\"setup_pick_place_controller(robot_path='/World/Franka', target_source='curobo', robot_family='franka', source_paths=['/World/BlockA'], destination_path='/World/Station', drop_targets={'/World/BlockA': [-0.10, 0.30, 0.805]})\", description=\"Step 1+2 retry\", max_retries=2)\nsetup_pick_place_controller(robot_path={{primary_robot.path}}, target_source=\"curobo\", robot_family=\"franka\", source_paths=[{{blocks[1].path}}], destination_path={{stack_station.path}}, drop_targets={{'{'}}{{blocks[1].path}}: [-0.10, 0.30, 0.855]{{'}'}}, planning_obstacles=[\"/World/Table\", {{source_bins[0].path}}, {{source_bins[1].path}}, {{source_bins[2].path}}, {{stack_station.path}}, {{outfeed_destination.path}}])\nsim_control(action=\"step\", step_count=60)\nget_world_transform(prim_path={{blocks[1].path}})\ncheck_collisions(prim_path={{blocks[1].path}})\nexecute_with_retry(code=\"setup_pick_place_controller(robot_path='/World/Franka', target_source='curobo', robot_family='franka', source_paths=['/World/BlockB'], destination_path='/World/Station', drop_targets={'/World/BlockB': [-0.10, 0.30, 0.855]})\", description=\"Step 3+4 retry\", max_retries=2)\nsetup_pick_place_controller(robot_path={{primary_robot.path}}, target_source=\"curobo\", robot_family=\"franka\", source_paths=[{{blocks[2].path}}], destination_path={{stack_station.path}}, drop_targets={{'{'}}{{blocks[2].path}}: [-0.10, 0.30, 0.905]{{'}'}}, planning_obstacles=[\"/World/Table\", {{source_bins[0].path}}, {{source_bins[1].path}}, {{source_bins[2].path}}, {{stack_station.path}}, {{outfeed_destination.path}}])\nsim_control(action=\"step\", step_count=60)\nget_world_transform(prim_path={{blocks[2].path}})\ncheck_collisions(prim_path={{blocks[2].path}})\ncheck_collisions(prim_path={{blocks[1].path}})\nexecute_with_retry(code=\"setup_pick_place_controller(robot_path='/World/Franka', target_source='curobo', robot_family='franka', source_paths=['/World/BlockC'], destination_path='/World/Station', drop_targets={'/World/BlockC': [-0.10, 0.30, 0.905]})\", description=\"Step 6+7 retry\", max_retries=2)\nsetup_pick_place_controller(robot_path={{primary_robot.path}}, target_source=\"curobo\", robot_family=\"franka\", source_paths=[{{blocks[0].path}}], destination_path={{outfeed_destination.path}}, drop_targets={{'{'}}{{blocks[0].path}}: [-0.30, -0.30, 0.805]{{'}'}}, planning_obstacles=[\"/World/Table\", {{source_bins[0].path}}, {{source_bins[1].path}}, {{source_bins[2].path}}, {{stack_station.path}}, {{outfeed_destination.path}}])\nsim_control(action=\"step\", step_count=60)\nget_world_transform(prim_path={{blocks[0].path}})\nget_world_transform(prim_path={{blocks[1].path}})\nget_world_transform(prim_path={{blocks[2].path}})\nexecute_with_retry(code=\"setup_pick_place_controller(robot_path='/World/Franka', target_source='curobo', robot_family='franka', source_paths=['/World/BlockA'], destination_path='/World/OutfeedBin', drop_targets={'/World/BlockA': [-0.30, -0.30, 0.805]})\", description=\"Step 9+10 retry\", max_retries=2)",
+  "simulate_args_template": {
+    "target_path": "{{outfeed_destination.path}}",
+    "cube_path": "{{blocks[0].path}}",
+    "duration_s": 400,
+    "xy_tolerance": 0.12
+  },
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; first long-horizon canonical with execute_with_retry per-step retry; form-gate ⏳; function-gate ⏳"
+}
