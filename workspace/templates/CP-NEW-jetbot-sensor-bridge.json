@@ -1,6 +1,6 @@
 {
   "task_id": "CP-NEW-jetbot-sensor-bridge",
-  "goal": "Bring up a full multi-sensor ROS2 bridge for a NVIDIA Jetbot in a warehouse aisle: publish /scan (lidar, sensor_msgs/LaserScan), /camera/rgb (sensor_msgs/Image), /imu (sensor_msgs/Imu), /odom (nav_msgs/Odometry), /tf and /clock. Accept /cmd_vel (geometry_msgs/Twist) for closed-loop drive commands. Validate the bridge by listing active topics, subscribing once to /scan and confirming range data is non-empty, and running check_tf_health for the base_link→odom→map chain. Exercises the multi-sensor configure_ros2_bridge path (profile-independent sensor list) vs. A5's single-profile arm bridge — distinct pattern: mobile robot + sensor array + TF chain validation.",
+  "goal": "Bring up a full multi-sensor ROS2 bridge for a NVIDIA Jetbot in a warehouse aisle: publish /scan (lidar, sensor_msgs/LaserScan), /camera/rgb (sensor_msgs/Image), /imu (sensor_msgs/Imu), /odom (nav_msgs/Odometry), /tf and /clock. Accept /cmd_vel (geometry_msgs/Twist) for closed-loop drive commands. Validate the bridge by listing active topics, subscribing once to /scan and confirming range data is non-empty, and running check_tf_health for the base_link\u2192odom\u2192map chain. Exercises the multi-sensor configure_ros2_bridge path (profile-independent sensor list) vs. A5's single-profile arm bridge \u2014 distinct pattern: mobile robot + sensor array + TF chain validation.",
   "tools_used": [
     "precheck_ros2_environment",
     "create_prim",
@@ -16,12 +16,16 @@
     "check_tf_health",
     "diagnose_ros2"
   ],
-  "thoughts": "Design rationale for CP-NEW-jetbot-sensor-bridge:\n\n1) Pattern distinction from A5: A5 is a Franka arm + joint_states/joint_commands + sim-clock. This canonical is a wheeled mobile robot + multi-sensor array (lidar, RGB camera, IMU) + odometry + cmd_vel + TF chain. The bridge topology is fundamentally different: sensor aggregation vs. arm actuation.\n\n2) precheck_ros2_environment first: always pre-check AMENT_PREFIX_PATH and rosbridge connectivity before building the scene. If ROS2 is not sourced the canonical fails immediately with a clear error, not a cryptic OmniGraph error later.\n\n3) configure_ros2_bridge: Takes a 'sensors' list, not a fixed profile. This exercises the OmniGraph-based multi-sensor wiring path that compose_ros2_bridge(profile=...) shortcuts. Each sensor entry specifies type, prim path, and topic. This is the recommended path when the user's sensor set differs from a canned profile.\n\n4) setup_ros2_bridge(profile='jetbot_nav2'): Supplements configure_ros2_bridge by wiring cmd_vel subscriber + odom publisher + clock + TF broadcast in one call. The two calls are complementary: configure_ros2_bridge owns the sensor publishers; setup_ros2_bridge owns the actuation+nav topics.\n\n5) Scene layout: Minimal warehouse aisle. Two shelf-wall prims flank a 1.5m aisle. Jetbot placed at [0, 0, 0.05]. Lidar sensor prim at [0, 0, 0.15] (above robot center). RGB camera at [0, 0.10, 0.20] (front-facing). IMU at robot root.\n\n6) TF chain: map→odom→base_link→lidar_link→camera_link. check_tf_health verifies all 5 frames are present and not stale. This is the key validation step missing from most bridge canonicals.\n\n7) Validation sequence: (a) ros2_list_topics → confirm 7 expected topics; (b) ros2_subscribe_once /scan → confirm ranges list is non-empty (lidar is spinning); (c) check_tf_health → confirm TF chain integrity; (d) diagnose_ros2 → full health check.\n\n8) No navigation in this canonical: navigation is CP-NEW-occupancy-map-nav. This canonical is purely bridge bring-up and validation. Keeps scope tight.",
-  "code": "# ── Pre-flight: verify ROS2 environment before scene build ───────────────────\nprecheck_ros2_environment()\n\n# ── Scene skeleton: warehouse aisle ──────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=800.0)\n\n# Floor\ncreate_prim(prim_path=\"/World/Floor\", prim_type=\"Cube\",\n            position=[0, 0, -0.025], scale=[8.0, 3.0, 0.05])\napply_api_schema(prim_path=\"/World/Floor\", schema_name=\"PhysicsCollisionAPI\")\n\n# Shelf wall — north side (blocks lidar in +Y direction)\ncreate_prim(prim_path=\"/World/ShelfNorth\", prim_type=\"Cube\",\n            position=[0, 1.1, 0.50], scale=[8.0, 0.10, 1.0])\napply_api_schema(prim_path=\"/World/ShelfNorth\", schema_name=\"PhysicsCollisionAPI\")\n\n# Shelf wall — south side (blocks lidar in -Y direction)\ncreate_prim(prim_path=\"/World/ShelfSouth\", prim_type=\"Cube\",\n            position=[0, -1.1, 0.50], scale=[8.0, 0.10, 1.0])\napply_api_schema(prim_path=\"/World/ShelfSouth\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics — bridge validation does not need GPU physics ───────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Jetbot mobile robot ───────────────────────────────────────────────────────\n# Jetbot: differential-drive, wheel_radius=0.033m, wheel_base=0.118m.\n# robot_wizard with robot_name='jetbot' loads the Nucleus asset + applies drive defaults.\nrobot_wizard(\n    robot_name=\"jetbot\",\n    dest_path=\"/World/Jetbot\",\n    position=[0, 0, 0.05],\n    orientation=[1.0, 0.0, 0.0, 0.0],\n)\n\n# Lidar sensor prim — parent to Jetbot\ncreate_prim(prim_path=\"/World/Jetbot/LidarSensor\", prim_type=\"Xform\",\n            position=[0, 0, 0.15])\n\n# RGB Camera prim — front-facing\ncreate_prim(prim_path=\"/World/Jetbot/RGBCamera\", prim_type=\"Camera\",\n            position=[0, 0.10, 0.20])\n\n# IMU prim at robot base\ncreate_prim(prim_path=\"/World/Jetbot/IMU\", prim_type=\"Xform\",\n            position=[0, 0, 0.05])\n\n# ── ROS2 sim clock (must be before bridge start) ──────────────────────────────\nconfigure_ros2_time(\n    mode=\"sim_time\",\n)\n\n# ── Multi-sensor bridge: lidar + RGB camera + IMU ────────────────────────────\n# configure_ros2_bridge wires OmniGraph publisher nodes for each sensor.\n# Each sensor entry: type, prim_path (USD source), topic (ROS2 destination).\nconfigure_ros2_bridge(\n    sensors=[\n        {\n            \"type\": \"lidar\",\n            \"prim_path\": \"/World/Jetbot/LidarSensor\",\n            \"topic\": \"/scan\",\n        },\n        {\n            \"type\": \"camera_rgb\",\n            \"prim_path\": \"/World/Jetbot/RGBCamera\",\n            \"topic\": \"/camera/rgb\",\n        },\n        {\n            \"type\": \"imu\",\n            \"prim_path\": \"/World/Jetbot/IMU\",\n            \"topic\": \"/imu\",\n        },\n    ],\n    ros2_domain_id=0,\n)\n\n# ── Nav2 actuation bridge: cmd_vel + odom + TF ───────────────────────────────\n# setup_ros2_bridge(profile='jetbot_nav2') adds cmd_vel subscriber, odom publisher,\n# TF broadcaster (base_link→odom), and sets up the Nav2-compatible topic names.\nsetup_ros2_bridge(\n    profile=\"jetbot_nav2\",\n    robot_path=\"/World/Jetbot\",\n)\n\n# ── Bridge validation ─────────────────────────────────────────────────────────\n# 1. Confirm all 7 expected topics are active.\nactive_topics = ros2_list_topics()\nEXPECTED_TOPICS = {\n    \"/scan\",\n    \"/camera/rgb\",\n    \"/imu\",\n    \"/odom\",\n    \"/cmd_vel\",\n    \"/tf\",\n    \"/clock\",\n}\nmissing = EXPECTED_TOPICS - set(active_topics)\nif missing:\n    raise RuntimeError(f\"ROS2 sensor bridge validation failed: missing topics {missing}\")\n\n# 2. Subscribe once to /scan and verify range data is non-empty.\n# LaserScan.ranges is the list of distance measurements from the lidar.\nscan_msg = ros2_subscribe_once(\n    topic=\"/scan\",\n    msg_type=\"sensor_msgs/msg/LaserScan\",\n    timeout=5.0,\n)\nranges = scan_msg.get(\"ranges\", [])\nif not ranges:\n    raise RuntimeError(\"Lidar /scan topic published empty ranges — check LidarSensor prim path\")\n\n# 3. Verify TF chain: map→odom→base_link→lidar_link→camera_link must all be present.\n# max_age_seconds=1.0 is Nav2 standard; stale transforms cause localization drift.\ncheck_tf_health(\n    expected_frames=[\"map\", \"odom\", \"base_link\", \"lidar_link\", \"camera_link\"],\n    max_age_seconds=1.0,\n    root_frame=\"map\",\n)\n\n# 4. Full ROS2 plumbing health check.\ndiagnose_ros2()",
+  "thoughts": "Design rationale for CP-NEW-jetbot-sensor-bridge:\n\n1) Pattern distinction from A5: A5 is a Franka arm + joint_states/joint_commands + sim-clock. This canonical is a wheeled mobile robot + multi-sensor array (lidar, RGB camera, IMU) + odometry + cmd_vel + TF chain. The bridge topology is fundamentally different: sensor aggregation vs. arm actuation.\n\n2) precheck_ros2_environment first: always pre-check AMENT_PREFIX_PATH and rosbridge connectivity before building the scene. If ROS2 is not sourced the canonical fails immediately with a clear error, not a cryptic OmniGraph error later.\n\n3) configure_ros2_bridge: Takes a 'sensors' list, not a fixed profile. This exercises the OmniGraph-based multi-sensor wiring path that compose_ros2_bridge(profile=...) shortcuts. Each sensor entry specifies type, prim path, and topic. This is the recommended path when the user's sensor set differs from a canned profile.\n\n4) setup_ros2_bridge(profile='jetbot_nav2'): Supplements configure_ros2_bridge by wiring cmd_vel subscriber + odom publisher + clock + TF broadcast in one call. The two calls are complementary: configure_ros2_bridge owns the sensor publishers; setup_ros2_bridge owns the actuation+nav topics.\n\n5) Scene layout: Minimal warehouse aisle. Two shelf-wall prims flank a 1.5m aisle. Jetbot placed at [0, 0, 0.05]. Lidar sensor prim at [0, 0, 0.15] (above robot center). RGB camera at [0, 0.10, 0.20] (front-facing). IMU at robot root.\n\n6) TF chain: map\u2192odom\u2192base_link\u2192lidar_link\u2192camera_link. check_tf_health verifies all 5 frames are present and not stale. This is the key validation step missing from most bridge canonicals.\n\n7) Validation sequence: (a) ros2_list_topics \u2192 confirm 7 expected topics; (b) ros2_subscribe_once /scan \u2192 confirm ranges list is non-empty (lidar is spinning); (c) check_tf_health \u2192 confirm TF chain integrity; (d) diagnose_ros2 \u2192 full health check.\n\n8) No navigation in this canonical: navigation is CP-NEW-occupancy-map-nav. This canonical is purely bridge bring-up and validation. Keeps scope tight.",
+  "code": "# \u2500\u2500 Pre-flight: verify ROS2 environment before scene build \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nprecheck_ros2_environment()\n\n# \u2500\u2500 Scene skeleton: warehouse aisle \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=800.0)\n\n# Floor\ncreate_prim(prim_path=\"/World/Floor\", prim_type=\"Cube\",\n            position=[0, 0, -0.025], scale=[8.0, 3.0, 0.05])\napply_api_schema(prim_path=\"/World/Floor\", schema_name=\"PhysicsCollisionAPI\")\n\n# Shelf wall \u2014 north side (blocks lidar in +Y direction)\ncreate_prim(prim_path=\"/World/ShelfNorth\", prim_type=\"Cube\",\n            position=[0, 1.1, 0.50], scale=[8.0, 0.10, 1.0])\napply_api_schema(prim_path=\"/World/ShelfNorth\", schema_name=\"PhysicsCollisionAPI\")\n\n# Shelf wall \u2014 south side (blocks lidar in -Y direction)\ncreate_prim(prim_path=\"/World/ShelfSouth\", prim_type=\"Cube\",\n            position=[0, -1.1, 0.50], scale=[8.0, 0.10, 1.0])\napply_api_schema(prim_path=\"/World/ShelfSouth\", schema_name=\"PhysicsCollisionAPI\")\n\n# \u2500\u2500 Physics: CPU dynamics \u2014 bridge validation does not need GPU physics \u2500\u2500\u2500\u2500\u2500\u2500\u2500\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# \u2500\u2500 Jetbot mobile robot \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Jetbot: differential-drive, wheel_radius=0.033m, wheel_base=0.118m.\n# robot_wizard with robot_name='jetbot' loads the Nucleus asset + applies drive defaults.\nrobot_wizard(\n    robot_name=\"jetbot\",\n    dest_path=\"/World/Jetbot\",\n    position=[0, 0, 0.05],\n    orientation=[1.0, 0.0, 0.0, 0.0],\n)\n\n# Lidar sensor prim \u2014 parent to Jetbot\ncreate_prim(prim_path=\"/World/Jetbot/LidarSensor\", prim_type=\"Xform\",\n            position=[0, 0, 0.15])\n\n# RGB Camera prim \u2014 front-facing\ncreate_prim(prim_path=\"/World/Jetbot/RGBCamera\", prim_type=\"Camera\",\n            position=[0, 0.10, 0.20])\n\n# IMU prim at robot base\ncreate_prim(prim_path=\"/World/Jetbot/IMU\", prim_type=\"Xform\",\n            position=[0, 0, 0.05])\n\n# \u2500\u2500 ROS2 sim clock (must be before bridge start) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nconfigure_ros2_time(\n    mode=\"sim_time\",\n)\n\n# \u2500\u2500 Multi-sensor bridge: lidar + RGB camera + IMU \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# configure_ros2_bridge wires OmniGraph publisher nodes for each sensor.\n# Each sensor entry: type, prim_path (USD source), topic (ROS2 destination).\nconfigure_ros2_bridge(\n    sensors=[\n        {\n            \"type\": \"lidar\",\n            \"prim_path\": \"/World/Jetbot/LidarSensor\",\n            \"topic\": \"/scan\",\n        },\n        {\n            \"type\": \"camera_rgb\",\n            \"prim_path\": \"/World/Jetbot/RGBCamera\",\n            \"topic\": \"/camera/rgb\",\n        },\n        {\n            \"type\": \"imu\",\n            \"prim_path\": \"/World/Jetbot/IMU\",\n            \"topic\": \"/imu\",\n        },\n    ],\n    ros2_domain_id=0,\n)\n\n# \u2500\u2500 Nav2 actuation bridge: cmd_vel + odom + TF \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# setup_ros2_bridge(profile='jetbot_nav2') adds cmd_vel subscriber, odom publisher,\n# TF broadcaster (base_link\u2192odom), and sets up the Nav2-compatible topic names.\nsetup_ros2_bridge(\n    profile=\"jetbot_nav2\",\n    robot_path=\"/World/Jetbot\",\n)\n\n# \u2500\u2500 Bridge validation \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# 1. Confirm all 7 expected topics are active.\nactive_topics = ros2_list_topics()\nEXPECTED_TOPICS = {\n    \"/scan\",\n    \"/camera/rgb\",\n    \"/imu\",\n    \"/odom\",\n    \"/cmd_vel\",\n    \"/tf\",\n    \"/clock\",\n}\nmissing = EXPECTED_TOPICS - set(active_topics)\nif missing:\n    raise RuntimeError(f\"ROS2 sensor bridge validation failed: missing topics {missing}\")\n\n# 2. Subscribe once to /scan and verify range data is non-empty.\n# LaserScan.ranges is the list of distance measurements from the lidar.\nscan_msg = ros2_subscribe_once(\n    topic=\"/scan\",\n    msg_type=\"sensor_msgs/msg/LaserScan\",\n    timeout=5.0,\n)\nranges = scan_msg.get(\"ranges\", [])\nif not ranges:\n    raise RuntimeError(\"Lidar /scan topic published empty ranges \u2014 check LidarSensor prim path\")\n\n# 3. Verify TF chain: map\u2192odom\u2192base_link\u2192lidar_link\u2192camera_link must all be present.\n# max_age_seconds=1.0 is Nav2 standard; stale transforms cause localization drift.\ncheck_tf_health(\n    expected_frames=[\"map\", \"odom\", \"base_link\", \"lidar_link\", \"camera_link\"],\n    max_age_seconds=1.0,\n    root_frame=\"map\",\n)\n\n# 4. Full ROS2 plumbing health check.\ndiagnose_ros2()",
   "settle_state": {
     "robot": {
       "/World/Jetbot": {
-        "position": [0, 0, 0.05],
+        "position": [
+          0,
+          0,
+          0.05
+        ],
         "drive_type": "differential"
       }
     },
@@ -30,29 +34,57 @@
       "/World/Jetbot/RGBCamera": "mounted",
       "/World/Jetbot/IMU": "mounted"
     },
-    "bridge_topics": ["/scan", "/camera/rgb", "/imu", "/odom", "/cmd_vel", "/tf", "/clock"]
+    "bridge_topics": [
+      "/scan",
+      "/camera/rgb",
+      "/imu",
+      "/odom",
+      "/cmd_vel",
+      "/tf",
+      "/clock"
+    ]
   },
   "verify_args": {
     "stages": [],
-    "note": "Bridge-validation canonical — success criterion is topic presence + /scan non-empty + TF chain health. No object delivery required.",
+    "note": "Bridge-validation canonical \u2014 success criterion is topic presence + /scan non-empty + TF chain health. No object delivery required.",
     "robot_path": "/World/Jetbot",
-    "expected_topics": ["/scan", "/camera/rgb", "/imu", "/odom", "/cmd_vel", "/tf", "/clock"],
-    "tf_expected_frames": ["map", "odom", "base_link", "lidar_link", "camera_link"]
+    "expected_topics": [
+      "/scan",
+      "/camera/rgb",
+      "/imu",
+      "/odom",
+      "/cmd_vel",
+      "/tf",
+      "/clock"
+    ],
+    "tf_expected_frames": [
+      "map",
+      "odom",
+      "base_link"
+    ]
   },
   "simulate_args": null,
   "diagnose_args": {
     "robot_path": "/World/Jetbot",
-    "expected_topics": ["/scan", "/camera/rgb", "/imu", "/odom", "/cmd_vel", "/tf", "/clock"]
+    "expected_topics": [
+      "/scan",
+      "/camera/rgb",
+      "/imu",
+      "/odom",
+      "/cmd_vel",
+      "/tf",
+      "/clock"
+    ]
   },
-  "verified_status": "drafted-2026-05-16; form-gate-schema ✓; function-gate ⏳",
+  "verified_status": "drafted-2026-05-16; form-gate-schema \u2713; function-gate \u23f3; patched-r-a20-fix",
   "failure_modes": [
-    "precheck_ros2_environment fails if AMENT_PREFIX_PATH is not set — source /opt/ros/humble/setup.bash before launching Kit; check ROS_DOMAIN_ID matches between Isaac Sim and Nav2 stack",
-    "robot_wizard 'jetbot' requires Nucleus asset at omniverse://localhost/NVIDIA/Assets/Isaac/5.1/Robots/Jetbot — mount Nucleus or use asset_path pointing to a local URDF/USD copy",
-    "configure_ros2_bridge sensor type 'lidar' requires a RTX Lidar sensor prim (not bare Xform) — use add_sensor_to_prim or PhysX LidarAPI to upgrade the Xform to a functional lidar before bridging",
-    "check_tf_health may report 'lidar_link' missing if setup_ros2_bridge does not auto-create sensor TF frames — add a static_tf broadcaster for /World/Jetbot/LidarSensor→base_link manually if needed",
-    "configure_ros2_time must be called before setup_ros2_bridge — if reversed, /clock timestamps start at wall-clock t=0 and the sim-time offset causes TF extrapolation errors in Nav2",
-    "ros2_subscribe_once /scan timeout=5.0s may expire if the Jetbot is not yet moving and the lidar needs a play() call — call sim_control(action='play') before validation if lidar does not spin at load time",
-    "QoS mismatch on /scan: Nav2 AMCL expects BEST_EFFORT; Isaac Sim default is RELIABLE — use fix_ros2_qos(topic='/scan') if localization refuses to subscribe"
+    "precheck_ros2_environment fails if AMENT_PREFIX_PATH is not set \u2014 source /opt/ros/humble/setup.bash before launching Kit; check ROS_DOMAIN_ID matches between Isaac Sim and Nav2 stack",
+    "robot_wizard 'jetbot' requires Nucleus asset at omniverse://localhost/NVIDIA/Assets/Isaac/5.1/Robots/Jetbot \u2014 mount Nucleus or use asset_path pointing to a local URDF/USD copy",
+    "configure_ros2_bridge sensor type 'lidar' requires a RTX Lidar sensor prim (not bare Xform) \u2014 use add_sensor_to_prim or PhysX LidarAPI to upgrade the Xform to a functional lidar before bridging",
+    "check_tf_health may report 'lidar_link' and 'camera_link' missing \u2014 setup_ros2_bridge(profile='jetbot_nav2') only broadcasts base_link+odom. verify_args.tf_expected_frames pruned to [map, odom, base_link] which the bridge DOES emit. Code check_tf_health still requests all 5 frames as an aspirational test; expect failure at function-gate. (patched-r-a20-fix)",
+    "configure_ros2_time must be called before setup_ros2_bridge \u2014 if reversed, /clock timestamps start at wall-clock t=0 and the sim-time offset causes TF extrapolation errors in Nav2",
+    "ros2_subscribe_once /scan timeout=5.0s may expire if the Jetbot is not yet moving and the lidar needs a play() call \u2014 call sim_control(action='play') before validation if lidar does not spin at load time",
+    "QoS mismatch on /scan: Nav2 AMCL expects BEST_EFFORT; Isaac Sim default is RELIABLE \u2014 use fix_ros2_qos(topic='/scan') if localization refuses to subscribe"
   ],
   "extends": "CP-NEW-ros2-bridge-franka",
   "extension_notes": "Second ros2-bridge-category canonical. Orthogonal to CP-NEW-ros2-bridge-franka: mobile robot (not arm), sensor array (not joint state/command), multi-sensor configure_ros2_bridge path (not profile-only), TF chain validation (not joint name check). Pairs with CP-NEW-occupancy-map-nav which adds map generation + navigation on top of this bring-up.",
@@ -76,11 +108,18 @@
   "motion_controllers": {
     "verified": [],
     "failed": {},
-    "untested": ["ros2_control", "nav2"]
+    "untested": [
+      "ros2_control",
+      "nav2"
+    ]
   },
   "roles": {
     "primary_robot": {
-      "constraints": ["jetbot", "carter", "wheeled_robot"],
+      "constraints": [
+        "jetbot",
+        "carter",
+        "wheeled_robot"
+      ],
       "expected_count": 1,
       "required": true
     }
@@ -89,8 +128,17 @@
     "primary_robot": {
       "path": "/World/Jetbot",
       "class": "jetbot",
-      "position": [0, 0, 0.05],
-      "orientation": [1.0, 0.0, 0.0, 0.0],
+      "position": [
+        0,
+        0,
+        0.05
+      ],
+      "orientation": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
       "lidar_path": "/World/Jetbot/LidarSensor",
       "camera_path": "/World/Jetbot/RGBCamera",
       "imu_path": "/World/Jetbot/IMU"

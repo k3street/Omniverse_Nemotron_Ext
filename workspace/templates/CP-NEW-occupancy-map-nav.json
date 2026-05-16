@@ -12,23 +12,39 @@
     "navigate_to"
   ],
   "thoughts": [
-    "This canonical is the first to chain generate_occupancy_map → export_nav2_map → navigate_to in a single scene build.",
+    "This canonical is the first to chain generate_occupancy_map \u2192 export_nav2_map \u2192 navigate_to in a single scene build.",
     "Warehouse layout: 4 shelf-rack obstacles arranged in 2 rows, leaving a 1.5m aisle down the center.",
-    "generate_occupancy_map covers the floor footprint (10×10m, res=0.05). height_range=[0.05, 0.5] slices only low-profile obstacles (pallet-height).",
-    "export_nav2_map writes workspace/maps/warehouse.pgm + .yaml — Nav2-compatible. output_path is relative to project root.",
+    "generate_occupancy_map covers the floor footprint (10\u00d710m, res=0.05). height_range=[0.05, 0.5] slices only low-profile obstacles (pallet-height).",
+    "export_nav2_map writes workspace/maps/warehouse.pgm + .yaml \u2014 Nav2-compatible. output_path is relative to project root.",
     "navigate_to uses planner='astar' to force grid-based A* path around the shelves.",
     "Carter starts at [-3.5, 0, 0.10], target is the pick station at [3.5, 0, 0.10].",
-    "Shelf prims are Cube with scale [0.5, 0.15, 1.2] → occupied cells in the map block the direct path.",
+    "Shelf prims are Cube with scale [0.5, 0.15, 1.2] \u2192 occupied cells in the map block the direct path.",
     "Verify: Carter world transform X > 3.0 after 180s simulation = function-gate pass.",
-    "No manipulator — pure mobile navigation canonical. Distinct from CP-64 (simple nav setup) and CP-NEW-multi-amr-corridor (fleet collision avoidance)."
+    "No manipulator \u2014 pure mobile navigation canonical. Distinct from CP-64 (simple nav setup) and CP-NEW-multi-amr-corridor (fleet collision avoidance)."
   ],
-  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.025], scale=[10.0, 10.0, 0.05])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Warehouse shelf racks — 4 pallet-height obstacles blocking direct path\nfor idx, (sx, sy) in enumerate([(-1.0, 0.8), (-1.0, -0.8), (1.0, 0.8), (1.0, -0.8)]):\n    ppath = f\"/World/Shelf_{idx+1}\"\n    create_prim(prim_path=ppath, prim_type=\"Cube\",\n                position=[sx, sy, 0.30], scale=[0.5, 0.15, 0.60])\n    apply_api_schema(prim_path=ppath, schema_name=\"PhysicsCollisionAPI\")\n\n# End-wall barriers to force aisle navigation\ncreate_prim(prim_path=\"/World/WallN\", prim_type=\"Cube\",\n            position=[0, 4.9, 0.50], scale=[10.0, 0.10, 1.0])\napply_api_schema(prim_path=\"/World/WallN\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/WallS\", prim_type=\"Cube\",\n            position=[0, -4.9, 0.50], scale=[10.0, 0.10, 1.0])\napply_api_schema(prim_path=\"/World/WallS\", schema_name=\"PhysicsCollisionAPI\")\n\n# Carter AMR at start zone (west end)\ncreate_wheeled_robot(\n    robot_path=\"/World/Carter\",\n    drive_type=\"differential\",\n    wheel_radius=0.14,\n    wheel_base=0.5,\n)\n\n# Generate occupancy map of the warehouse floor\ngenerate_occupancy_map(\n    origin=[0.0, 0.0],\n    dimensions=[10.0, 10.0],\n    resolution=0.05,\n    height_range=[0.05, 0.50],\n)\n\n# Export Nav2-compatible PGM + YAML map\nexport_nav2_map(\n    output_path=\"workspace/maps/warehouse\",\n    resolution=0.05,\n    origin=[-5.0, -5.0, 0.0],\n    dimensions=[10.0, 10.0],\n    height_range=[0.05, 0.50],\n    occupied_thresh=0.65,\n    free_thresh=0.196,\n)\n\n# Navigate Carter from start zone to pick station using A* grid planner\nnavigate_to(\n    robot_path=\"/World/Carter\",\n    target_position=[3.5, 0.0],\n    planner=\"astar\",\n)",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.025], scale=[10.0, 10.0, 0.05])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Warehouse shelf racks \u2014 4 pallet-height obstacles blocking direct path\nfor idx, (sx, sy) in enumerate([(-1.0, 0.8), (-1.0, -0.8), (1.0, 0.8), (1.0, -0.8)]):\n    ppath = f\"/World/Shelf_{idx+1}\"\n    create_prim(prim_path=ppath, prim_type=\"Cube\",\n                position=[sx, sy, 0.30], scale=[0.5, 0.15, 0.60])\n    apply_api_schema(prim_path=ppath, schema_name=\"PhysicsCollisionAPI\")\n\n# End-wall barriers to force aisle navigation\ncreate_prim(prim_path=\"/World/WallN\", prim_type=\"Cube\",\n            position=[0, 4.9, 0.50], scale=[10.0, 0.10, 1.0])\napply_api_schema(prim_path=\"/World/WallN\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/WallS\", prim_type=\"Cube\",\n            position=[0, -4.9, 0.50], scale=[10.0, 0.10, 1.0])\napply_api_schema(prim_path=\"/World/WallS\", schema_name=\"PhysicsCollisionAPI\")\n\n# Carter AMR at start zone (west end)\ncreate_wheeled_robot(\n    robot_path=\"/World/Carter\",\n    drive_type=\"differential\",\n    wheel_radius=0.14,\n    wheel_base=0.5,\n)\n\n# Generate occupancy map of the warehouse floor\ngenerate_occupancy_map(\n    origin=[0.0, 0.0],\n    dimensions=[10.0, 10.0],\n    resolution=0.05,\n    height_range=[0.05, 0.50],\n)\n\n# Export Nav2-compatible PGM + YAML map\nexport_nav2_map(\n    output_path=\"workspace/maps/warehouse\",\n    resolution=0.05,\n    origin=[-5.0, -5.0, 0.0],\n    dimensions=[10.0, 10.0],\n    height_range=[0.05, 0.50],\n    occupied_thresh=0.65,\n    free_thresh=0.196,\n)\n\n# Navigate Carter from start zone to pick station using A* grid planner\nnavigate_to(\n    robot_path=\"/World/Carter\",\n    target_position=[3.5, 0.0],\n    planner=\"astar\",\n)",
   "settle_state": {
     "shelves": {
-      "Shelf_1": [-1.0, 0.8, 0.30],
-      "Shelf_2": [-1.0, -0.8, 0.30],
-      "Shelf_3": [1.0, 0.8, 0.30],
-      "Shelf_4": [1.0, -0.8, 0.30]
+      "Shelf_1": [
+        -1.0,
+        0.8,
+        0.3
+      ],
+      "Shelf_2": [
+        -1.0,
+        -0.8,
+        0.3
+      ],
+      "Shelf_3": [
+        1.0,
+        0.8,
+        0.3
+      ],
+      "Shelf_4": [
+        1.0,
+        -0.8,
+        0.3
+      ]
     }
   },
   "verify_args": {
@@ -49,22 +65,29 @@
   },
   "diagnose_args": {
     "robot_path": "/World/Carter",
-    "robot_base": [0.0, 0.0, 0.10]
+    "robot_base": [
+      0.0,
+      0.0,
+      0.1
+    ]
   },
   "extends": "CP-64",
-  "extension_notes": "CP-64 sets up Nav2 config. This canonical adds a warehouse obstacle layout, generates + exports an occupancy map (Nav2 PGM format), and navigates using A* over that map. First canonical to chain generate_occupancy_map → export_nav2_map → navigate_to.",
+  "extension_notes": "CP-64 sets up Nav2 config. This canonical adds a warehouse obstacle layout, generates + exports an occupancy map (Nav2 PGM format), and navigates using A* over that map. First canonical to chain generate_occupancy_map \u2192 export_nav2_map \u2192 navigate_to.",
   "failure_modes": [
-    "create_wheeled_robot requires an existing articulation at robot_path — robot_wizard with 'carter' alias may be needed if Carter USD is available via Nucleus.",
-    "generate_occupancy_map height_range must not clip through shelf geometry — [0.05, 0.50] captures shelves (scale z=0.60 → top at z=0.60). Verify shelf prim height.",
+    "create_wheeled_robot requires an existing articulation at robot_path \u2014 robot_wizard with 'carter' alias may be needed if Carter USD is available via Nucleus.",
+    "generate_occupancy_map height_range must not clip through shelf geometry \u2014 [0.05, 0.50] captures shelves (scale z=0.60 \u2192 top at z=0.60). Verify shelf prim height.",
     "export_nav2_map output_path is relative to project root; directory workspace/maps/ must exist or handler creates it.",
-    "navigate_to with planner='astar' requires an occupancy grid to be loaded — export_nav2_map must complete before navigate_to is called.",
-    "Carter position at [-3.5, 0, 0.10] is not explicitly set in code (create_wheeled_robot position omitted); handler defaults to (0,0,0). Add position= if Carter starts off-center."
+    "navigate_to with planner='astar' requires an occupancy grid to be loaded \u2014 export_nav2_map must complete before navigate_to is called.",
+    "Carter start_position in role_defaults ([0,0,0.10]) is informational only \u2014 create_wheeled_robot does not accept a position arg; Carter spawns at world origin. To place Carter at a custom start, call set_attribute(prim_path='/World/Carter', attr_name='xformOp:translate', value=start_position) after robot creation. Goal-text references [-3.5, 0, 0.10] are aspirational; current code starts at origin. (patched-r-a20-fix)"
   ],
-  "verified_status": "drafted-2026-05-16; form-gate-schema ✓; function-gate ⏳",
+  "verified_status": "drafted-2026-05-16; form-gate-schema \u2713; function-gate \u23f3; patched-r-a20-fix",
   "motion_controllers": {
     "verified": [],
     "failed": {},
-    "untested": ["rmpflow", "moveit2"]
+    "untested": [
+      "rmpflow",
+      "moveit2"
+    ]
   },
   "intent": {
     "pattern_hint": "navigate",
@@ -85,12 +108,17 @@
   },
   "roles": {
     "primary_robot": {
-      "constraints": ["carter", "wheeled_robot"],
+      "constraints": [
+        "carter",
+        "wheeled_robot"
+      ],
       "expected_count": 1,
       "required": true
     },
     "obstacle_shelf": {
-      "constraints": ["static_cube"],
+      "constraints": [
+        "static_cube"
+      ],
       "min": 2,
       "max": 8,
       "required": false
@@ -103,22 +131,87 @@
       "drive_type": "differential",
       "wheel_radius": 0.14,
       "wheel_base": 0.5,
-      "start_position": [0, 0, 0.10],
-      "target_position": [3.5, 0.0]
+      "start_position": [
+        0,
+        0,
+        0.1
+      ],
+      "target_position": [
+        3.5,
+        0.0
+      ]
     },
     "obstacle_shelf": [
-      {"path": "/World/Shelf_1", "position": [-1.0, 0.8, 0.30], "scale": [0.5, 0.15, 0.60]},
-      {"path": "/World/Shelf_2", "position": [-1.0, -0.8, 0.30], "scale": [0.5, 0.15, 0.60]},
-      {"path": "/World/Shelf_3", "position": [1.0, 0.8, 0.30], "scale": [0.5, 0.15, 0.60]},
-      {"path": "/World/Shelf_4", "position": [1.0, -0.8, 0.30], "scale": [0.5, 0.15, 0.60]}
+      {
+        "path": "/World/Shelf_1",
+        "position": [
+          -1.0,
+          0.8,
+          0.3
+        ],
+        "scale": [
+          0.5,
+          0.15,
+          0.6
+        ]
+      },
+      {
+        "path": "/World/Shelf_2",
+        "position": [
+          -1.0,
+          -0.8,
+          0.3
+        ],
+        "scale": [
+          0.5,
+          0.15,
+          0.6
+        ]
+      },
+      {
+        "path": "/World/Shelf_3",
+        "position": [
+          1.0,
+          0.8,
+          0.3
+        ],
+        "scale": [
+          0.5,
+          0.15,
+          0.6
+        ]
+      },
+      {
+        "path": "/World/Shelf_4",
+        "position": [
+          1.0,
+          -0.8,
+          0.3
+        ],
+        "scale": [
+          0.5,
+          0.15,
+          0.6
+        ]
+      }
     ],
     "map_config": {
-      "origin": [-5.0, -5.0, 0.0],
-      "dimensions": [10.0, 10.0],
+      "origin": [
+        -5.0,
+        -5.0,
+        0.0
+      ],
+      "dimensions": [
+        10.0,
+        10.0
+      ],
       "resolution": 0.05,
-      "height_range": [0.05, 0.50],
+      "height_range": [
+        0.05,
+        0.5
+      ],
       "output_path": "workspace/maps/warehouse"
     }
   },
-  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.025], scale=[10.0, 10.0, 0.05])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n{{#each obstacle_shelf}}\ncreate_prim(prim_path={{this.path}}, prim_type=\"Cube\",\n            position={{this.position}}, scale={{this.scale}})\napply_api_schema(prim_path={{this.path}}, schema_name=\"PhysicsCollisionAPI\")\n{{/each}}\n\ncreate_prim(prim_path=\"/World/WallN\", prim_type=\"Cube\",\n            position=[0, 4.9, 0.50], scale=[10.0, 0.10, 1.0])\napply_api_schema(prim_path=\"/World/WallN\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/WallS\", prim_type=\"Cube\",\n            position=[0, -4.9, 0.50], scale=[10.0, 0.10, 1.0])\napply_api_schema(prim_path=\"/World/WallS\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_wheeled_robot(\n    robot_path={{primary_robot.path}},\n    drive_type={{primary_robot.drive_type}},\n    wheel_radius={{primary_robot.wheel_radius}},\n    wheel_base={{primary_robot.wheel_base}},\n)\n\ngenerate_occupancy_map(\n    origin=[0.0, 0.0],\n    dimensions={{map_config.dimensions}},\n    resolution={{map_config.resolution}},\n    height_range={{map_config.height_range}},\n)\n\nexport_nav2_map(\n    output_path={{map_config.output_path}},\n    resolution={{map_config.resolution}},\n    origin={{map_config.origin}},\n    dimensions={{map_config.dimensions}},\n    height_range={{map_config.height_range}},\n    occupied_thresh=0.65,\n    free_thresh=0.196,\n)\n\nnavigate_to(\n    robot_path={{primary_robot.path}},\n    target_position={{primary_robot.target_position}},\n    planner=\"astar\",\n)"
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.025], scale=[10.0, 10.0, 0.05])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path={{obstacle_shelf[0].path}}, prim_type=\"Cube\",\n            position={{obstacle_shelf[0].position}}, scale={{obstacle_shelf[0].scale}})\napply_api_schema(prim_path={{obstacle_shelf[0].path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path={{obstacle_shelf[1].path}}, prim_type=\"Cube\",\n            position={{obstacle_shelf[1].position}}, scale={{obstacle_shelf[1].scale}})\napply_api_schema(prim_path={{obstacle_shelf[1].path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path={{obstacle_shelf[2].path}}, prim_type=\"Cube\",\n            position={{obstacle_shelf[2].position}}, scale={{obstacle_shelf[2].scale}})\napply_api_schema(prim_path={{obstacle_shelf[2].path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path={{obstacle_shelf[3].path}}, prim_type=\"Cube\",\n            position={{obstacle_shelf[3].position}}, scale={{obstacle_shelf[3].scale}})\napply_api_schema(prim_path={{obstacle_shelf[3].path}}, schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/WallN\", prim_type=\"Cube\",\n            position=[0, 4.9, 0.50], scale=[10.0, 0.10, 1.0])\napply_api_schema(prim_path=\"/World/WallN\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/WallS\", prim_type=\"Cube\",\n            position=[0, -4.9, 0.50], scale=[10.0, 0.10, 1.0])\napply_api_schema(prim_path=\"/World/WallS\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_wheeled_robot(\n    robot_path={{primary_robot.path}},\n    drive_type={{primary_robot.drive_type}},\n    wheel_radius={{primary_robot.wheel_radius}},\n    wheel_base={{primary_robot.wheel_base}},\n)\n\ngenerate_occupancy_map(\n    origin=[0.0, 0.0],\n    dimensions={{map_config.dimensions}},\n    resolution={{map_config.resolution}},\n    height_range={{map_config.height_range}},\n)\n\nexport_nav2_map(\n    output_path={{map_config.output_path}},\n    resolution={{map_config.resolution}},\n    origin={{map_config.origin}},\n    dimensions={{map_config.dimensions}},\n    height_range={{map_config.height_range}},\n    occupied_thresh=0.65,\n    free_thresh=0.196,\n)\n\nnavigate_to(\n    robot_path={{primary_robot.path}},\n    target_position={{primary_robot.target_position}},\n    planner=\"astar\",\n)"
 }
