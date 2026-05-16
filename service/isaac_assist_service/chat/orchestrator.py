@@ -889,12 +889,14 @@ class ChatOrchestrator:
 
             # Block 2 (multimodal foundation spec §7.3): text-prompt
             # modality → LayoutSpec.intent → structural-filter-first
-            # retrieval. ON by default (R16: struct-filter beats baseline,
-            # hit@1 0.867 vs 0.833). Set MULTIMODAL_TEXT_INTENT=off to
-            # disable and fall back to legacy similarity-only retrieval.
+            # retrieval. OFF by default (R17 revert: 100-prompt benchmark
+            # showed struct-filter regresses both hit@1 0.820→0.790 AND
+            # hit@3 0.950→0.890 due to Stage-1 pool restriction + ChromaDB
+            # $in truncation; R15d soft-filter hybrid is the proposed fix).
+            # Set MULTIMODAL_TEXT_INTENT=on to opt back in for experiments.
             _multimodal_text = (
-                os.environ.get("MULTIMODAL_TEXT_INTENT", "on").lower()
-                not in ("off", "false", "0", "no")
+                os.environ.get("MULTIMODAL_TEXT_INTENT", "off").lower()
+                in ("on", "true", "1", "yes")
             )
             scored = None
             if _multimodal_text:
