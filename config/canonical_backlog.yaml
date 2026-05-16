@@ -56,7 +56,9 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-palletizer-layer-stack.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-palletizer-mixed-sku-002
   source: ONET
