@@ -1,0 +1,201 @@
+{
+  "task_id": "CP-NEW-label-applicator-pose",
+  "goal": "Tight-tolerance label-applicator pose canonical: a Franka arm equipped with an OgnSurfaceGripper vacuum cup picks a thin flat label (0.05 x 0.03 x 0.002 m Cube prim) from a feeder tray, transports it across the cell, and presses it onto a fixed workpiece (0.20 x 0.20 x 0.08 m Cube box) at a specified target pose with tight tolerances (±2 mm position, ±2° orientation). The label is too thin for a parallel-jaw gripper — surface_gripper (vacuum suction) is the only valid pickup modality. drop_targets is used to specify the exact world-space placement pose of the label centre on the workpiece top face, gripper_rotation pins the yaw alignment so the label is not rotated during placement, and a proximity sensor at the target pose triggers an arrival confirmation. get_world_transform is then called on the label and the workpiece to verify post-place pose-delta against the spec. Exercises vacuum-style label handling + tight-tolerance pose targeting as a pick_place pattern with destination_kind='fixture' (the workpiece IS the fixture). ONET role: labelling / packaging-line applicator operator.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "surface_gripper",
+    "define_grasp_pose",
+    "create_bin",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "assign_material",
+    "create_material",
+    "setup_pick_place_controller",
+    "get_world_transform"
+  ],
+  "thoughts": "Design rationale for CP-NEW-label-applicator-pose:\n\n1) Distinctiveness: this canonical exercises tight-tolerance pose-critical placement of a thin flat label using vacuum pickup. Differs from CP-NEW-vacuum-gripper-sheet-pick (which is destination_kind='fixture' tray with 3 slots and loose 0.20m xy_tolerance) by enforcing a SINGLE specified target pose with ±2mm position and ±2° orientation tolerance. The workpiece is the fixture; the label centre must land at a designated target on the workpiece top face. This is the canonical exemplar for label-applicator and similar pose-critical pick_place patterns (packaging, marking, decal application).\n\n2) Pattern_hint='pick_place' with destination_kind='fixture': pick_place is the correct shape (label moves from feeder to workpiece, success when label rests on workpiece). The workpiece (box) is the fixture, not a bin. Tight pose constraints are enforced via drop_targets (exact world xyz) and gripper_rotation (yaw alignment).\n\n3) Scene geometry: Franka on 0.75m table at [0, 0, 0.75]. Feeder tray (LabelFeeder) at [+0.45, 0.0, 0.78] holding the label flat. Label (/World/Label_1) is a thin Cube 0.05 x 0.03 x 0.002m, centre z = feeder_top(0.80) + 0.001 = 0.801. Workpiece (/World/Workpiece) is a Cube 0.20 x 0.20 x 0.08m at [-0.35, 0.0, 0.79], top face at z = 0.83. Target label pose on the workpiece top: position=[-0.35, 0.0, 0.832] (centre + 2mm above for label thickness midpoint), orientation aligned with workpiece (yaw=0°). Feeder + workpiece both within Franka 0.855m reach (0.45m and 0.35m).\n\n4) Why surface_gripper: a 2mm-thick label cannot be reliably grasped by Franka's parallel-jaw fingers (finger gap closes to 0mm at full close, but the precision needed to centre on a flat 2mm edge is impractical; the cup-based vacuum end-effector picks the label by surface contact on the top face, which is exactly how real label applicators work). grip_threshold=0.003m (3mm) tolerates the label thickness; force_limit=20.0N is well above the ~0.02kg label weight requirement.\n\n5) Tight tolerance via drop_targets + gripper_rotation: setup_pick_place_controller with target_source='curobo' supports drop_targets (dict mapping cube_path → explicit [x,y,z]) and gripper_rotation (dict mapping cube_path → yaw_deg around world Z). We pin drop_targets={/World/Label_1: [-0.35, 0.0, 0.832]} so the label centre lands at the target spot, and gripper_rotation={/World/Label_1: 0.0} so the label is yaw-aligned with the workpiece. The ±2mm / ±2° tolerance is then verified post-place by get_world_transform on the label vs the target.\n\n6) Arrival sensor at target: add_proximity_sensor at /World/PlaceArrivalSensor positioned at the target pose [-0.35, 0.0, 0.832] with a small detection volume [0.06, 0.04, 0.01] (slightly larger than the label's 0.05x0.03 footprint but tight in z so only a settled label triggers). This sensor's isaac_sensor:triggered flips True when the label arrives.\n\n7) define_grasp_pose: invoked on (Franka, Label_1) with gripper_offset=[0, 0, 0.001] (centre of label top face) and approach_direction=[0, 0, -1] (vertical descent). This pre-defines the suction grasp point so the controller can compute a clean approach trajectory.\n\n8) Physics: CPU dynamics (enable_gpu_dynamics=False, MBP broadphase) for deterministic settling. Label has enableCCD=True to prevent tunnelling at high transit speed; sleepThreshold=0.0 keeps it active during placement. Label mass=0.02kg (typical paper label). Workpiece is static (no RigidBodyAPI, only CollisionAPI) — it's the fixture, world-fixed.\n\n9) Why curobo: tight-tolerance placement requires deterministic Cartesian targeting at the drop point. cuRobo's collision-aware Cartesian planner places the EE at exactly drop_targets[label_path] with the yaw fixed by gripper_rotation, whereas native spline mode samples bin-top + 0.05m clearance and cannot enforce explicit yaw. RmpFlow lacks collision-aware obstacle avoidance, which matters because the EE must approach the workpiece face without clipping its sides.\n\n10) Post-place verification: get_world_transform(/World/Label_1) reads the label's world pose after settle. The handler/diagnose pipeline compares this against simulate_args.target_pose [-0.35, 0.0, 0.832] and target_orient [1, 0, 0, 0] (identity quaternion) to verify the ±2mm / ±2° tolerance.\n\n11) Failure modes (see failure_modes block) capture the dominant risks: label sticks to gripper after intended release (no air-blow modeled in OgnSurfaceGripper; the gripper opens by signal but adhesion is binary), label rotates during transport (CCD jitter on thin body), label placed on wrong face (workpiece is symmetric in xy; only top is the valid face), pose drift from off-centre vacuum grip (label tilts during transport if grasp point is not directly above centre of mass).",
+  "code": "# ── Scene skeleton ───────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# ── Work table ────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.9, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU determinism, CCD for thin label ───────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka Panda ───────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Surface gripper (vacuum cup on panda_hand) ───────────────────────────────\n# grip_threshold=0.003m: vacuum cup seals onto label within 3 mm proximity.\n# force_limit=20N: ample for ~0.02 kg paper label; low enough to be physically plausible.\nsurface_gripper(\n    robot_path=\"/World/Franka\",\n    ee_link=\"/World/Franka/panda_hand\",\n    grip_threshold=0.003,\n    force_limit=20.0,\n    torque_limit=10.0,\n    graph_path=\"/World/Franka/SuctionGraph\",\n)\n\n# ── Label feeder tray (open-top container, label rests on its floor) ───────────────\n# Feeder is a shallow tray on the table. Top floor surface at z=0.80.\ncreate_bin(\n    prim_path=\"/World/LabelFeeder\",\n    size=[0.10, 0.06, 0.02],\n    position=[0.45, 0.0, 0.78],\n    wall_thickness=0.003,\n)\n\n# ── Label (thin flat Cube prim) ──────────────────────────────────────────────\n# Dimensions: 0.05 x 0.03 x 0.002 m. Centre on feeder floor (z=0.80 + 0.001 = 0.801).\n# Default Cube prim has edge 1; scale halves give half-extents. 0.05m = scale 0.025; 0.002m = scale 0.001.\ncreate_prim(\n    prim_path=\"/World/Label_1\",\n    prim_type=\"Cube\",\n    position=[0.45, 0.0, 0.801],\n    scale=[0.025, 0.015, 0.001],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Label_1\", schema_name=api)\nset_attribute(prim_path=\"/World/Label_1\", attr_name=\"physics:mass\", value=0.02)\nset_attribute(prim_path=\"/World/Label_1\", attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\nset_attribute(prim_path=\"/World/Label_1\", attr_name=\"physxRigidBody:enableCCD\", value=True)\napply_physics_material(prim_path=\"/World/Label_1\", material_name=\"rubber\")\n\n# Bulk-set retained for symmetry with other label-batch templates (single label here, but future-proof).\nbulk_set_attribute(\n    prim_paths=[\"/World/Label_1\"],\n    attr=\"physxRigidBody:enableCCD\",\n    value=True,\n)\n\n# ── Workpiece (the fixture — label-application target box) ──────────────────────\n# Static box at [-0.35, 0.0, 0.79], 0.20x0.20x0.08m, top face at z=0.83.\n# No RigidBodyAPI — it is world-fixed (the fixture).\ncreate_prim(\n    prim_path=\"/World/Workpiece\",\n    prim_type=\"Cube\",\n    position=[-0.35, 0.0, 0.79],\n    scale=[0.10, 0.10, 0.04],\n)\napply_api_schema(prim_path=\"/World/Workpiece\", schema_name=\"PhysicsCollisionAPI\")\n\n# Visual tint on workpiece so the label is visually distinguishable.\ncreate_material(\n    material_path=\"/World/Materials/WorkpieceGrey\",\n    shader_type=\"OmniPBR\",\n    diffuse_color=[0.55, 0.55, 0.58],\n)\nassign_material(\n    prim_path=\"/World/Workpiece\",\n    material_path=\"/World/Materials/WorkpieceGrey\",\n)\n\n# Label visual tint (white paper).\ncreate_material(\n    material_path=\"/World/Materials/LabelWhite\",\n    shader_type=\"OmniPBR\",\n    diffuse_color=[0.95, 0.95, 0.92],\n)\nassign_material(\n    prim_path=\"/World/Label_1\",\n    material_path=\"/World/Materials/LabelWhite\",\n)\n\n# ── Define grasp pose for label (top-down, centre of top face) ────────────────────\n# gripper_offset = [0, 0, 0.001]: 1 mm above label centre (top face).\n# approach_direction = [0, 0, -1]: pure vertical descent for vacuum contact.\ndefine_grasp_pose(\n    robot_path=\"/World/Franka\",\n    object_path=\"/World/Label_1\",\n    gripper_offset=[0.0, 0.0, 0.001],\n    approach_direction=[0.0, 0.0, -1.0],\n)\n\n# ── Arrival sensor at target pose on workpiece top face ─────────────────────────\n# Tight detection volume: just larger than the label footprint, thin in z.\n# Position is exactly at the target label-centre pose.\nadd_proximity_sensor(\n    sensor_path=\"/World/PlaceArrivalSensor\",\n    position=[-0.35, 0.0, 0.832],\n    size=[0.06, 0.04, 0.01],\n)\n\n# ── cuRobo pick-place controller with explicit pose target + yaw alignment ─────────────\n# drop_targets pins label centre to [-0.35, 0.0, 0.832] (workpiece top + 2mm clearance for\n# half-label thickness 0.001m, leaving 1mm contact margin).\n# gripper_rotation=0° holds the label yaw-aligned with the workpiece edges.\n# approach_height=0.05: 50 mm clearance above target before vertical placement — small enough\n# for tight tolerance, large enough that cuRobo can plan a collision-free descent.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=[\"/World/Label_1\"],\n    destination_path=\"/World/Workpiece\",\n    drop_targets={\n        \"/World/Label_1\": [-0.35, 0.0, 0.832],\n    },\n    gripper_rotation={\n        \"/World/Label_1\": 0.0,\n    },\n    approach_height=0.05,\n    planning_obstacles=[\n        \"/World/Table\",\n        \"/World/LabelFeeder\",\n        \"/World/Workpiece\",\n    ],\n    sensor_path=\"/World/PlaceArrivalSensor\",\n)\n\n# ── Post-place pose verification handles ───────────────────────────────────────\n# These calls give the diagnose pipeline a snapshot of label and workpiece world poses\n# so the ±2mm / ±2° tolerance can be checked downstream.\nget_world_transform(prim_path=\"/World/Label_1\")\nget_world_transform(prim_path=\"/World/Workpiece\")",
+  "code_template": "# ── Scene skeleton ───────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.9, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\nsurface_gripper(\n    robot_path={{primary_robot.path}},\n    ee_link=\"{{primary_robot.path}}/panda_hand\",\n    grip_threshold=0.003,\n    force_limit=20.0,\n    torque_limit=10.0,\n    graph_path=\"{{primary_robot.path}}/SuctionGraph\",\n)\n\ncreate_bin(\n    prim_path={{feeder.path}},\n    size={{feeder.size}},\n    position={{feeder.position}},\n    wall_thickness=0.003,\n)\n\ncreate_prim(\n    prim_path={{label.path}},\n    prim_type=\"Cube\",\n    position={{label.position}},\n    scale={{label.scale}},\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{label.path}}, schema_name=api)\nset_attribute(prim_path={{label.path}}, attr_name=\"physics:mass\", value={{label.mass_kg}})\nset_attribute(prim_path={{label.path}}, attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\nset_attribute(prim_path={{label.path}}, attr_name=\"physxRigidBody:enableCCD\", value=True)\napply_physics_material(prim_path={{label.path}}, material_name=\"rubber\")\n\nbulk_set_attribute(prim_paths=[{{label.path}}], attr=\"physxRigidBody:enableCCD\", value=True)\n\ncreate_prim(\n    prim_path={{workpiece.path}},\n    prim_type=\"Cube\",\n    position={{workpiece.position}},\n    scale={{workpiece.scale}},\n)\napply_api_schema(prim_path={{workpiece.path}}, schema_name=\"PhysicsCollisionAPI\")\n\ncreate_material(material_path=\"/World/Materials/WorkpieceGrey\", shader_type=\"OmniPBR\", diffuse_color=[0.55, 0.55, 0.58])\nassign_material(prim_path={{workpiece.path}}, material_path=\"/World/Materials/WorkpieceGrey\")\ncreate_material(material_path=\"/World/Materials/LabelWhite\", shader_type=\"OmniPBR\", diffuse_color=[0.95, 0.95, 0.92])\nassign_material(prim_path={{label.path}}, material_path=\"/World/Materials/LabelWhite\")\n\ndefine_grasp_pose(\n    robot_path={{primary_robot.path}},\n    object_path={{label.path}},\n    gripper_offset=[0.0, 0.0, 0.001],\n    approach_direction=[0.0, 0.0, -1.0],\n)\n\nadd_proximity_sensor(\n    sensor_path={{arrival_sensor.path}},\n    position={{target_pose.position}},\n    size={{arrival_sensor.size}},\n)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[{{label.path}}],\n    destination_path={{workpiece.path}},\n    drop_targets={ {{label.path}}: {{target_pose.position}} },\n    gripper_rotation={ {{label.path}}: {{target_pose.yaw_deg}} },\n    approach_height=0.05,\n    planning_obstacles=[\"/World/Table\", {{feeder.path}}, {{workpiece.path}}],\n    sensor_path={{arrival_sensor.path}},\n)\n\nget_world_transform(prim_path={{label.path}})\nget_world_transform(prim_path={{workpiece.path}})",
+  "settle_state": {
+    "label": {
+      "/World/Label_1": {
+        "position": [0.45, 0.0, 0.801],
+        "scale": [0.025, 0.015, 0.001]
+      }
+    },
+    "workpiece": {
+      "/World/Workpiece": {
+        "position": [-0.35, 0.0, 0.79],
+        "scale": [0.10, 0.10, 0.04]
+      }
+    },
+    "feeder": {
+      "/World/LabelFeeder": {
+        "position": [0.45, 0.0, 0.78],
+        "size": [0.10, 0.06, 0.02]
+      }
+    },
+    "robot": {
+      "/World/Franka": "home_pose"
+    },
+    "target_pose": {
+      "position": [-0.35, 0.0, 0.832],
+      "orientation_quat_wxyz": [1.0, 0.0, 0.0, 0.0],
+      "yaw_deg": 0.0,
+      "tolerance_position_m": 0.002,
+      "tolerance_orientation_deg": 2.0
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/LabelFeeder",
+        "place_path": "/World/Workpiece",
+        "robot_kind": "franka",
+        "gripper_type": "surface_gripper"
+      }
+    ],
+    "label_path": "/World/Label_1",
+    "workpiece_path": "/World/Workpiece",
+    "target_pose_position": [-0.35, 0.0, 0.832],
+    "target_pose_orientation_quat_wxyz": [1.0, 0.0, 0.0, 0.0],
+    "tolerance_position_m": 0.002,
+    "tolerance_orientation_deg": 2.0
+  },
+  "simulate_args": {
+    "target_path": "/World/Workpiece",
+    "cube_path": "/World/Label_1",
+    "duration_s": 90,
+    "xy_tolerance": 0.002,
+    "target_pose_position": [-0.35, 0.0, 0.832],
+    "target_pose_orientation_quat_wxyz": [1.0, 0.0, 0.0, 0.0],
+    "tolerance_orientation_deg": 2.0
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": ["/World/LabelFeeder", "/World/Workpiece"],
+    "sensor_path": "/World/PlaceArrivalSensor",
+    "robot_base": [0.0, 0.0, 0.75],
+    "label_path": "/World/Label_1",
+    "workpiece_path": "/World/Workpiece",
+    "target_pose_position": [-0.35, 0.0, 0.832],
+    "target_pose_orientation_quat_wxyz": [1.0, 0.0, 0.0, 0.0]
+  },
+  "failure_modes": [
+    "Label sticks to gripper after release — OgnSurfaceGripper has no air-blow / active-detach modelling; once the close signal goes low the attachment FixedJoint is removed but the cup geometry can still drag the thin label on retreat. Mitigation: raise approach_height to 0.06 so the controller's retreat phase lifts straight up before lateral motion, minimising drag.",
+    "Label rotates during transport — the vacuum cup creates a single-point attachment at panda_hand; any wrist torque during transit rotates the label around the cup axis. Mitigation: gripper_rotation locks the yaw at the placement waypoint, but mid-trajectory rotation is not constrained. Increase home_target distance from feeder + workpiece line so the controller plans a smoother yaw trajectory, or use a lower max joint velocity.",
+    "Label placed on wrong face of workpiece — workpiece is symmetric in x and y; only the top face (+z) is the valid label substrate. drop_targets pins xy and z explicitly so this should not happen, but if drop_targets[z] is mis-set below workpiece.top (z=0.83) the controller would attempt to push the label INTO the workpiece. Always set drop_targets z = workpiece_top_z + half_label_thickness (here 0.83 + 0.001 = 0.831; we use 0.832 for a 1mm air-contact margin).",
+    "Pose drift from off-centre vacuum grip — if the panda_hand approach point is not directly above the label centre of mass, the label tilts when lifted (gravity torque around the cup axis). define_grasp_pose with gripper_offset=[0, 0, 0.001] (centre of top face, 1mm above) ensures the cup contacts the geometric centre, which equals the centre of mass for a uniform-density cube. Asymmetric labels (real-world barcode + text) would need calibration.",
+    "approach_height too small for cuRobo — 0.05m clearance over a 0.83m workpiece top means cuRobo plans a tight descent through a narrow corridor between feeder (at +x) and workpiece (at -x). If cuRobo IK fails with 'no collision-free plan', raise approach_height to 0.08 (cost: ~0.5s longer cycle), or remove /World/Table from planning_obstacles since the workpiece sits above it and table collision is irrelevant during the placement descent.",
+    "Tolerance check uses world pose, not relative pose — get_world_transform returns the label's pose in /World frame. The diagnose pipeline computes pose_delta = world_label_pose - target_pose_position (both in world). If the workpiece itself were dynamic (not the case here — we made it static), the workpiece could shift and the world-frame check would still pass even if relative pose drifted. Static workpiece ensures world-frame check equals workpiece-relative check."
+  ],
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "has_stacking": false,
+      "has_runtime_candidate_discovery": false,
+      "gripper_type": "surface_gripper",
+      "has_pose_critical_placement": true,
+      "tolerance_position_m": 0.002,
+      "tolerance_orientation_deg": 2.0,
+      "has_pose_verification": true
+    },
+    "structural_tags": [
+      "isaac:industrial.label_apply",
+      "isaac:operation.pose_critical",
+      "isaac:robot.fixed_base.arm",
+      "isaac:robot.franka",
+      "isaac:topology.single_station",
+      "isaac:gripper.surface_gripper",
+      "isaac:gripper.vacuum_cup",
+      "isaac:workpiece.thin_flat",
+      "isaac:workpiece.label",
+      "isaac:placement.pose_tolerance_2mm_2deg",
+      "isaac:verification.world_transform_delta"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "franka", "ur5e"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "surface_gripper_compatible"
+    },
+    "feeder": {
+      "constraints": ["tray", "bin", "feeder"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "label_source_open_top_tray"
+    },
+    "workpiece": {
+      "constraints": ["cube", "box", "fixture"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "static_label_application_target"
+    },
+    "label": {
+      "constraints": ["cube", "label", "thin_flat_part"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "thin_flat_dynamic_workpiece"
+    },
+    "arrival_sensor": {
+      "constraints": ["proximity_sensor"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka",
+      "position": [0, 0, 0.75],
+      "orientation": [1, 0, 0, 0]
+    },
+    "feeder": {
+      "path": "/World/LabelFeeder",
+      "position": [0.45, 0.0, 0.78],
+      "size": [0.10, 0.06, 0.02]
+    },
+    "workpiece": {
+      "path": "/World/Workpiece",
+      "position": [-0.35, 0.0, 0.79],
+      "scale": [0.10, 0.10, 0.04],
+      "top_face_z": 0.83
+    },
+    "label": {
+      "path": "/World/Label_1",
+      "position": [0.45, 0.0, 0.801],
+      "scale": [0.025, 0.015, 0.001],
+      "mass_kg": 0.02,
+      "dimensions_m": [0.05, 0.03, 0.002]
+    },
+    "arrival_sensor": {
+      "path": "/World/PlaceArrivalSensor",
+      "size": [0.06, 0.04, 0.01]
+    },
+    "target_pose": {
+      "position": [-0.35, 0.0, 0.832],
+      "orientation_quat_wxyz": [1.0, 0.0, 0.0, 0.0],
+      "yaw_deg": 0.0,
+      "tolerance_position_m": 0.002,
+      "tolerance_orientation_deg": 2.0
+    }
+  },
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate-schema ⏳; function-gate ⏳ Kit RPC"
+}
