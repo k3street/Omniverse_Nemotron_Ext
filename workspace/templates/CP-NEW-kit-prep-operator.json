@@ -1,0 +1,146 @@
+{
+  "task_id": "CP-NEW-kit-prep-operator",
+  "goal": "Build a 5-part kitting station: a Franka Panda picks one part from each of 5 labeled source bins and places each into its dedicated slot in a 5-slot kit tray. Parts are distinct (PCB, screw, housing, label, bracket — each a 0.05m cube with a unique semantic label). No conveyor: the robot visits each bin in sequence guided by hardcoded pick-order, then drops into the matching tray slot. Exercises Franka reach geometry across a radial bin arrangement, create_kit_tray with slot_layout='linear_5', and setup_pick_place_controller with a per-source-to-slot drop_targets map. ONET SOC 51-2098 kit-prep operator.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_kit_tray",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "set_semantic_label",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Design rationale for CP-NEW-kit-prep-operator:\n\n1) Robot and reach geometry: Franka Panda reach ~0.85m. Mounted on a 0.75m table. Table at origin. Bins arranged in a fan: 3 bins in front (y=+0.35) at x=-0.40, 0.0, +0.40; 2 bins behind-left/right (x=±0.30, y=-0.30). All bin centres within 0.50m horizontal of robot base — safely inside reach. Bin size 0.10×0.10×0.05m (tray-like shallow box). Part (0.05m cube) centre z = table_top(0.75) + bin_height(0.05) + part_size/2(0.025) = 0.825.\n\n2) Kit tray: placed at [0, -0.52, 0.775] (behind robot, 0.52m from base). tray_size=[0.55, 0.10, 0.03]. slot_layout='linear_5', slot_size=0.05, slot_spacing=0.10 → 5 slots at x = -0.20, -0.10, 0.00, +0.10, +0.20, y=-0.52, z_top=0.805, part drop_z = 0.805 + 0.025 = 0.830. Maximum distance from robot base to tray far slot (x=±0.20, y=-0.52): sqrt(0.20^2 + 0.52^2) = 0.557m — inside 0.85m reach.\n\n3) Part semantic labels: PCB → Part_1, screw → Part_2, housing → Part_3, label → Part_4, bracket → Part_5. set_semantic_label gives each part a distinct class so retrieve-by-class queries work.\n\n4) No conveyor: parts start inside bins at rest. pick_order sequence: Part_1→slot_1, Part_2→slot_2, ..., Part_5→slot_5. setup_pick_place_controller called with source_paths=part_paths and drop_targets mapping each part path to its slot centre. proximity sensor at each bin is not needed (parts are static); a single per-part trigger is implicit in the pick sequence.\n\n5) Physics: CPU dynamics (enable_gpu_dynamics=False, broadphase_type=MBP). Part mass default 0.2 kg each. rubber material reduces slide on tray surface. sleepThreshold=0.0 keeps parts simulated through verify phase.\n\n6) Franka vs UR10: Franka gripper is parallel-jaw, grasps 0.05m cubes cleanly. UR10 from A1 (palletizer) handles 0.10m boxes on conveyor. This canonical's 0.05m parts and static-bin configuration is a natural Franka domain.\n\n7) Slot positions for linear_5 at tray origin [0, -0.52, 0.775]: tray half-extent x = 0.55/2 = 0.275. Slots at x offsets [-0.20, -0.10, 0.00, +0.10, +0.20], y = -0.52, drop_z = 0.775 + 0.03 + 0.025 = 0.830.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# Robot work table (1.0 × 0.8 × 0.75m)\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.5, 0.4, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics scene: CPU dynamics for determinism ───────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka Panda robot ────────────────────────────────────────────────────────\n# Reach ~0.85m; all bins within 0.50m horizontal — well inside envelope.\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── 5 source bins (shallow tray-like boxes on table surface) ─────────────────\n# 3 front bins at y=+0.35; 2 rear bins at y=-0.30\n# Bin top z = table_top(0.75) + bin_height(0.05) = 0.80\n# Part centre z = 0.75 + 0.05 + 0.025 = 0.825\nbin_positions = [\n    [-0.40, 0.35, 0.775],   # Bin_1 (PCB)    — front-left\n    [ 0.00, 0.35, 0.775],   # Bin_2 (screw)  — front-centre\n    [ 0.40, 0.35, 0.775],   # Bin_3 (housing)— front-right\n    [-0.30,-0.30, 0.775],   # Bin_4 (label)  — rear-left\n    [ 0.30,-0.30, 0.775],   # Bin_5 (bracket)— rear-right\n]\n\nfor i, pos in enumerate(bin_positions):\n    bin_path = f\"/World/Bin_{i+1}\"\n    create_prim(\n        prim_path=bin_path,\n        prim_type=\"Cube\",\n        position=pos,\n        scale=[0.055, 0.055, 0.025],  # 0.11×0.11×0.05m shallow bin\n    )\n    apply_api_schema(prim_path=bin_path, schema_name=\"PhysicsCollisionAPI\")\n\n# ── 5 distinct parts (0.05m cubes with unique semantic labels) ────────────────\n# Each part sits inside its source bin at rest.\npart_labels = [\"PCB\", \"screw\", \"housing\", \"label\", \"bracket\"]\npart_positions = [\n    [-0.40, 0.35, 0.825],   # Part_1 in Bin_1\n    [ 0.00, 0.35, 0.825],   # Part_2 in Bin_2\n    [ 0.40, 0.35, 0.825],   # Part_3 in Bin_3\n    [-0.30,-0.30, 0.825],   # Part_4 in Bin_4\n    [ 0.30,-0.30, 0.825],   # Part_5 in Bin_5\n]\n\npart_paths = [f\"/World/Part_{i+1}\" for i in range(5)]\n\nfor i, (path, pos, label) in enumerate(zip(part_paths, part_positions, part_labels)):\n    create_prim(prim_path=path, prim_type=\"Cube\", position=pos, size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    set_semantic_label(prim_path=path, label=label, class_name=\"kit_part\")\n\nbulk_set_attribute(\n    prim_paths=part_paths,\n    attr=\"physics:mass\",\n    value=0.2,\n)\nbulk_set_attribute(\n    prim_paths=part_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in part_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# ── Kit tray (5-slot linear arrangement) ─────────────────────────────────────\n# Tray behind robot at [0, -0.52, 0.775]. linear_5: 5 slots at\n# x = -0.20, -0.10, 0.00, +0.10, +0.20, y=-0.52, z_top=0.805.\n# Drop z = tray_top(0.805) + part_size/2(0.025) = 0.830.\ncreate_kit_tray(\n    tray_path=\"/World/KitTray\",\n    position=[0, -0.52, 0.775],\n    tray_size=[0.55, 0.10, 0.03],\n    slot_layout=\"linear_5\",\n    slot_size=0.05,\n    slot_spacing=0.10,\n)\n\n# ── Pre-computed slot drop targets ───────────────────────────────────────────\n# linear_5 with slot_size=0.05, slot_spacing=0.10 → slots at x offsets:\n# slot_1=-0.20, slot_2=-0.10, slot_3=0.00, slot_4=+0.10, slot_5=+0.20\n# All at y=-0.52, z=0.830\ndrop_targets = {\n    \"/World/Part_1\": [-0.20, -0.52, 0.830],\n    \"/World/Part_2\": [-0.10, -0.52, 0.830],\n    \"/World/Part_3\": [ 0.00, -0.52, 0.830],\n    \"/World/Part_4\": [ 0.10, -0.52, 0.830],\n    \"/World/Part_5\": [ 0.20, -0.52, 0.830],\n}\n\n# ── cuRobo pick-place controller ──────────────────────────────────────────────\n# No conveyor; source_paths are bins (static parts). sensor_path=None.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=part_paths,\n    destination_path=\"/World/KitTray\",\n    drop_targets=drop_targets,\n    planning_obstacles=[\"/World/Table\", \"/World/KitTray\",\n                        \"/World/Bin_1\", \"/World/Bin_2\", \"/World/Bin_3\",\n                        \"/World/Bin_4\", \"/World/Bin_5\"],\n)",
+  "failure_modes": [
+    "Franka gripper too wide for 0.05m part — default ParallelGripper finger width may need adjustment; set gripper_width=0.04 in setup_pick_place_controller if grasps fail.",
+    "Bin wall collision during pick — bin walls are 0.055m half-extents; part at bin centre has 0.025m clearance per side. If cuRobo path clips bin, widen bin scale to [0.07, 0.07, 0.025] and recheck.",
+    "linear_5 slot_layout not recognised by create_kit_tray — fallback: replace create_kit_tray with manual Xform/slot creation using create_prim for each slot and explicit drop_targets dict (already present here).",
+    "Rear bin reach margin — Bin_4 at [-0.30, -0.30] and Bin_5 at [+0.30, -0.30] are 0.424m from robot base. Franka reach is 0.85m so margin is large; however wrist-orientation for low parts may hit joint limits — add 'joint_limit_avoidance=True' if cuRobo reports IK failures.",
+    "KitTray slots overlap kit parts after placement — 0.05m parts in 0.10m-spaced slots have 0.05m clearance; PhysX contact between adjacent placed parts is possible. Increase slot_spacing to 0.12 (tray_size to [0.59, 0.10, 0.03]) if adjacent-part collision is observed."
+  ],
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "has_multi_source_bins": true,
+      "n_source_bins": 5
+    },
+    "structural_tags": [
+      "isaac:robot.fixed_base.arm",
+      "isaac:robot.franka_panda",
+      "isaac:topology.single_station",
+      "isaac:source.multi_bin",
+      "isaac:destination.kit_tray",
+      "isaac:industry.kitting",
+      "isaac:semantics.part_labels"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "short_reach_preferred"
+    },
+    "source_bins": {
+      "constraints": ["bin", "tray"],
+      "expected_count": 5,
+      "required": true,
+      "param_name": "n_bins"
+    },
+    "kit_tray": {
+      "constraints": ["kit_tray", "fixture"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube", "part"],
+      "min": 1,
+      "max": 5,
+      "param_name": "n_parts",
+      "unordered": false,
+      "note": "Part order matches slot order; Part_N → slot_N"
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "source_bins": [
+      {"path": "/World/Bin_1", "position": [-0.40, 0.35, 0.775], "scale": [0.055, 0.055, 0.025]},
+      {"path": "/World/Bin_2", "position": [ 0.00, 0.35, 0.775], "scale": [0.055, 0.055, 0.025]},
+      {"path": "/World/Bin_3", "position": [ 0.40, 0.35, 0.775], "scale": [0.055, 0.055, 0.025]},
+      {"path": "/World/Bin_4", "position": [-0.30,-0.30, 0.775], "scale": [0.055, 0.055, 0.025]},
+      {"path": "/World/Bin_5", "position": [ 0.30,-0.30, 0.775], "scale": [0.055, 0.055, 0.025]}
+    ],
+    "kit_tray": {
+      "path": "/World/KitTray",
+      "position": [0, -0.52, 0.775],
+      "tray_size": [0.55, 0.10, 0.03],
+      "slot_layout": "linear_5",
+      "slot_size": 0.05,
+      "slot_spacing": 0.10
+    },
+    "workpieces": [
+      {"path": "/World/Part_1", "position": [-0.40, 0.35, 0.825], "label": "PCB",     "drop_target": [-0.20, -0.52, 0.830]},
+      {"path": "/World/Part_2", "position": [ 0.00, 0.35, 0.825], "label": "screw",   "drop_target": [-0.10, -0.52, 0.830]},
+      {"path": "/World/Part_3", "position": [ 0.40, 0.35, 0.825], "label": "housing", "drop_target": [ 0.00, -0.52, 0.830]},
+      {"path": "/World/Part_4", "position": [-0.30,-0.30, 0.825], "label": "label",   "drop_target": [ 0.10, -0.52, 0.830]},
+      {"path": "/World/Part_5", "position": [ 0.30,-0.30, 0.825], "label": "bracket", "drop_target": [ 0.20, -0.52, 0.830]}
+    ]
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.5, 0.4, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\nfor bin_role in [{{source_bins[0]}}, {{source_bins[1]}}, {{source_bins[2]}}, {{source_bins[3]}}, {{source_bins[4]}}]:\n    create_prim(prim_path=bin_role['path'], prim_type=\"Cube\", position=bin_role['position'], scale=bin_role['scale'])\n    apply_api_schema(prim_path=bin_role['path'], schema_name=\"PhysicsCollisionAPI\")\n\npart_paths = [{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}]\npart_labels = [{{workpieces[0].label}}, {{workpieces[1].label}}, {{workpieces[2].label}}, {{workpieces[3].label}}, {{workpieces[4].label}}]\npart_positions = [{{workpieces[0].position}}, {{workpieces[1].position}}, {{workpieces[2].position}}, {{workpieces[3].position}}, {{workpieces[4].position}}]\n\nfor path, pos, label in zip(part_paths, part_positions, part_labels):\n    create_prim(prim_path=path, prim_type=\"Cube\", position=pos, size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    set_semantic_label(prim_path=path, label=label, class_name=\"kit_part\")\n\nbulk_set_attribute(prim_paths=part_paths, attr=\"physics:mass\", value=0.2)\nbulk_set_attribute(prim_paths=part_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nfor path in part_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_kit_tray(\n    tray_path={{kit_tray.path}},\n    position={{kit_tray.position}},\n    tray_size={{kit_tray.tray_size}},\n    slot_layout={{kit_tray.slot_layout}},\n    slot_size={{kit_tray.slot_size}},\n    slot_spacing={{kit_tray.slot_spacing}},\n)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=part_paths,\n    destination_path={{kit_tray.path}},\n    drop_targets={\n        {{workpieces[0].path}}: {{workpieces[0].drop_target}},\n        {{workpieces[1].path}}: {{workpieces[1].drop_target}},\n        {{workpieces[2].path}}: {{workpieces[2].drop_target}},\n        {{workpieces[3].path}}: {{workpieces[3].drop_target}},\n        {{workpieces[4].path}}: {{workpieces[4].drop_target}},\n    },\n    planning_obstacles=[\"/World/Table\", {{kit_tray.path}},\n                        {{source_bins[0].path}}, {{source_bins[1].path}}, {{source_bins[2].path}},\n                        {{source_bins[3].path}}, {{source_bins[4].path}}],\n)",
+  "settle_state": {
+    "parts": {
+      "/World/Part_1": [-0.40, 0.35, 0.825],
+      "/World/Part_2": [ 0.00, 0.35, 0.825],
+      "/World/Part_3": [ 0.40, 0.35, 0.825],
+      "/World/Part_4": [-0.30,-0.30, 0.825],
+      "/World/Part_5": [ 0.30,-0.30, 0.825]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Bin_1",
+        "place_path": "/World/KitTray",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/Part_1"
+  },
+  "simulate_args": {
+    "target_path": "/World/KitTray",
+    "cube_paths": [
+      "/World/Part_1",
+      "/World/Part_2",
+      "/World/Part_3",
+      "/World/Part_4",
+      "/World/Part_5"
+    ],
+    "duration_s": 200,
+    "xy_tolerance": 0.04
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": ["/World/KitTray", "/World/Bin_1", "/World/Bin_2", "/World/Bin_3", "/World/Bin_4", "/World/Bin_5"],
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo", "rmpflow"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate ⏳; function-gate ⏳"
+}
