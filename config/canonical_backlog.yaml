@@ -1773,7 +1773,9 @@
   motion_controller_preference: ros2_control
   pattern_hint: other
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-ros2-multi-rate.json
+  drafted_date: "2026-05-16"
 
 - id: ros2-zmq-stream-viz-001
   source: retrieval-miss
