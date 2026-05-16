@@ -42,17 +42,38 @@ def _get_corpus_path() -> Path:
     return _BENCHMARK_DIR / "retrieval_100prompts.json"
 
 
-def _get_struct_flag() -> bool:
-    """Return True if struct-filter mode is active (default ON)."""
+def _get_intent_mode() -> str:
+    """Return the intent mode: 'off', 'soft', or 'on' (hard-filter).
+
+    MULTIMODAL_TEXT_INTENT=off  → embedding-only baseline
+    MULTIMODAL_TEXT_INTENT=soft → R15d soft-filter hybrid
+    MULTIMODAL_TEXT_INTENT=on   → legacy hard-filter (struct-first + $in)
+    Default: 'on' (for backward compat when running struct benchmarks directly).
+    """
     val = os.environ.get("MULTIMODAL_TEXT_INTENT", "on").lower().strip()
-    return val not in ("off", "0", "false", "no")
+    if val in ("off", "0", "false", "no"):
+        return "off"
+    if val == "soft":
+        return "soft"
+    return "on"
+
+
+def _get_struct_flag() -> bool:
+    """Return True if any struct-filter mode is active (default ON)."""
+    return _get_intent_mode() != "off"
 
 
 def _get_results_path(struct_on: bool) -> Path:
     env = os.environ.get("RESULTS_FILE")
     if env:
         return Path(env)
-    suffix = "struct" if struct_on else "baseline"
+    mode = _get_intent_mode()
+    if mode == "soft":
+        suffix = "soft"
+    elif struct_on:
+        suffix = "struct"
+    else:
+        suffix = "baseline"
     return _BENCHMARK_DIR / f"retrieval_100prompts_{suffix}_{_TODAY}.json"
 
 
@@ -68,7 +89,7 @@ def _load_corpus(path: Path) -> List[Dict]:
 
 
 def _run_struct_retrieval(prompt: str, top_k: int = 3) -> tuple[List[Dict], float, str]:
-    """Run struct-filter-first retrieval. Returns (scored_list, latency_ms, path_taken)."""
+    """Run struct-filter-first retrieval (hard). Returns (scored_list, latency_ms, path_taken)."""
     from service.isaac_assist_service.multimodal.text_modality import produce_layout_spec_from_text
     from service.isaac_assist_service.chat.tools.template_retriever import (
         retrieve_with_intent_filter,
@@ -81,6 +102,29 @@ def _run_struct_retrieval(prompt: str, top_k: int = 3) -> tuple[List[Dict], floa
     scored = retrieve_with_intent_filter(intent_dump, top_k=top_k, original_query=prompt)
     candidates = filter_templates_by_intent(intent_dump, count_tolerance=0)
     path_taken = "struct_filter" if candidates else "fallback_embedding"
+    latency_ms = (time.perf_counter() - t0) * 1000.0
+    return scored, latency_ms, path_taken
+
+
+def _run_soft_filter_retrieval(
+    prompt: str, top_k: int = 3, boost: float = 1.15, oversample: int = 3,
+) -> tuple[List[Dict], float, str]:
+    """Run R15d soft-filter hybrid retrieval. Returns (scored_list, latency_ms, path_taken)."""
+    from service.isaac_assist_service.multimodal.text_modality import produce_layout_spec_from_text
+    from service.isaac_assist_service.chat.tools.template_retriever import (
+        retrieve_with_intent_soft_filter,
+        _spec_is_null_signal,
+    )
+
+    t0 = time.perf_counter()
+    spec = produce_layout_spec_from_text(prompt)
+    intent_dump = spec.intent.model_dump(mode="json")
+    scored = retrieve_with_intent_soft_filter(
+        intent_dump, top_k=top_k, original_query=prompt,
+        boost=boost, oversample=oversample,
+    )
+    is_null = _spec_is_null_signal(intent_dump)
+    path_taken = "soft_filter_null" if is_null else "soft_filter"
     latency_ms = (time.perf_counter() - t0) * 1000.0
     return scored, latency_ms, path_taken
 
@@ -110,7 +154,14 @@ def _evaluate_prompt(entry: Dict, struct_on: bool) -> Dict:
     gt_ids = {g for g in ground_truth_ids if g is not None}
     all_acceptable = gt_ids | set(acceptable_alts)
 
-    if struct_on:
+    mode = _get_intent_mode()
+    if mode == "soft":
+        # R15d soft-filter: use boost from SOFT_FILTER_BOOST env var (default 1.15)
+        _boost = float(os.environ.get("SOFT_FILTER_BOOST", "1.15"))
+        scored, latency_ms, path_taken = _run_soft_filter_retrieval(
+            prompt_text, top_k=3, boost=_boost
+        )
+    elif struct_on:
         scored, latency_ms, path_taken = _run_struct_retrieval(prompt_text, top_k=3)
     else:
         scored, latency_ms, path_taken = _run_embedding_retrieval(prompt_text, top_k=3)
@@ -247,7 +298,13 @@ def run():
     results_path = _get_results_path(struct_on)
     baseline_path = _get_baseline_path()
 
-    mode_label = "STRUCT-FILTER ON" if struct_on else "EMBEDDING-ONLY BASELINE"
+    _mode = _get_intent_mode()
+    if _mode == "soft":
+        mode_label = f"SOFT-FILTER (R15d, boost={os.environ.get('SOFT_FILTER_BOOST', '1.15')})"
+    elif struct_on:
+        mode_label = "HARD STRUCT-FILTER ON"
+    else:
+        mode_label = "EMBEDDING-ONLY BASELINE"
     print(f"\n{'='*70}")
     print(f"Isaac Assist Retrieval Benchmark — Round 17  [{mode_label}]")
     print(f"Corpus: {corpus_path}")
@@ -389,13 +446,24 @@ def run():
             "mode_accuracy": round(mode_accuracy - b_agg["mode_accuracy"], 4),
         }
 
+    _mode_out = _get_intent_mode()
+    if _mode_out == "soft":
+        _mode_label_out = "soft_filter"
+        _path_label_out = f"retrieve_with_intent_soft_filter (boost={os.environ.get('SOFT_FILTER_BOOST','1.15')})"
+    elif struct_on:
+        _mode_label_out = "struct_filter"
+        _path_label_out = "retrieve_with_intent_filter (struct-first, fallback to embedding)"
+    else:
+        _mode_label_out = "embedding_only_baseline"
+        _path_label_out = "retrieve_templates_with_scores (embedding-only)"
+
     output = {
         "benchmark": "retrieval_100prompts",
         "date": _TODAY,
-        "round": 17,
-        "mode": "struct_filter" if struct_on else "embedding_only_baseline",
-        "retrieval_path": "retrieve_with_intent_filter (struct-first, fallback to embedding)" if struct_on else "retrieve_templates_with_scores (embedding-only)",
-        "env_flag": f"MULTIMODAL_TEXT_INTENT={'on' if struct_on else 'off'}",
+        "round": "15d",
+        "mode": _mode_label_out,
+        "retrieval_path": _path_label_out,
+        "env_flag": f"MULTIMODAL_TEXT_INTENT={_mode_out}",
         "coverage": {
             "n_templates_with_intent": n_with_intent,
             "n_templates_total": n_indexed,

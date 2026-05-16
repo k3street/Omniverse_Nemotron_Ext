@@ -715,3 +715,115 @@ def retrieve_with_intent_filter(
              "distance": 0.0, "similarity": 1.0}
             for t in candidates[:top_k]
         ]
+
+
+# ---------------------------------------------------------------------------
+# Soft-filter hybrid retrieval — R15d (2026-05-16)
+# ---------------------------------------------------------------------------
+# Replaces the hard Stage-1 restrict + Stage-2 $in query with a softer
+# hybrid that preserves full-corpus recall while using structural intent as
+# a ranking boost rather than a hard gate.
+#
+# Algorithm:
+#   1. Query full corpus for top_k * oversample candidates (full recall).
+#   2. Build a set of "boosted" task_ids: templates whose intent.pattern_hint
+#      matches spec_intent["pattern_hint"], AND spec is not null-signal.
+#   3. For each candidate: if task_id in boosted_set → similarity *= boost.
+#   4. Re-sort by boosted_similarity descending, return top_k.
+#
+# Key properties:
+#   - Bypasses ChromaDB $in truncation entirely (full-corpus query only).
+#   - Templates NOT in Stage-1 can still appear if baseline similarity is
+#     sufficient — recall preserved.
+#   - Stage-1 candidates get a nudge that improves their rank without making
+#     them exclusive.
+#   - Null-signal specs (all-default pick_place) skip the boost entirely,
+#     behaving identically to the embedding-only baseline.
+#   - Controlled by MULTIMODAL_TEXT_INTENT=soft env-var.
+# ---------------------------------------------------------------------------
+
+
+def retrieve_with_intent_soft_filter(
+    spec_intent: Dict,
+    top_k: int = 3,
+    original_query: Optional[str] = None,
+    boost: float = 1.15,
+    oversample: int = 3,
+) -> List[Dict]:
+    """Soft-filter hybrid retrieval (R15d).
+
+    Queries the full corpus for ``top_k * oversample`` candidates, applies a
+    similarity boost multiplier to templates whose ``intent.pattern_hint``
+    matches ``spec_intent["pattern_hint"]``, re-sorts, and returns top_k.
+
+    This avoids the ChromaDB ``$in`` truncation bug and preserves recall vs
+    the hard-filter path while still using structural intent as a ranking
+    signal.
+
+    Args:
+        spec_intent: structured intent dict (Intent.model_dump())
+        top_k: number of results to return
+        original_query: the original user prompt string. Used as the embedding
+            query against the full corpus. Falls back to fingerprint when None.
+        boost: similarity multiplier applied to pattern_hint-matching
+            candidates. Default 1.15 (15% boost). No boost is applied when
+            spec_is_null_signal returns True.
+        oversample: full-corpus fetch multiplier. Fetches top_k * oversample
+            candidates before re-ranking and trimming to top_k.
+
+    Returns: list of {template, task_id, distance, similarity,
+        similarity_boosted, boost_applied} dicts, most-similar first.
+        ``similarity_boosted`` is the post-boost score used for sorting;
+        ``boost_applied`` is True when the multiplier was applied.
+    """
+    fingerprint = canonical_structural_fingerprint(spec_intent)
+    embed_query = original_query if original_query else fingerprint
+
+    # Fetch extended candidate set from full corpus
+    n_fetch = top_k * oversample
+    full_results = retrieve_templates_with_scores(embed_query, top_k=n_fetch)
+
+    # Determine which templates are eligible for boost
+    # Null-signal spec: no boost applied to anyone (mirrors baseline exactly)
+    is_null = _spec_is_null_signal(spec_intent)
+    spec_pattern = spec_intent.get("pattern_hint") if not is_null else None
+
+    # Build boost set: task_ids whose intent.pattern_hint matches spec_pattern
+    boost_set: set = set()
+    if spec_pattern:
+        # We can walk _template_cache directly (guaranteed populated by
+        # retrieve_templates_with_scores → _get_collection above).
+        for tid, tmpl in _template_cache.items():
+            t_intent = tmpl.get("intent")
+            if t_intent and t_intent.get("pattern_hint") == spec_pattern:
+                boost_set.add(tid)
+
+    # Apply boost and tag each result
+    reranked = []
+    for entry in full_results:
+        tid = entry["task_id"]
+        sim = entry["similarity"]
+        apply_boost = (tid in boost_set) and (spec_pattern is not None)
+        sim_boosted = sim * boost if apply_boost else sim
+        reranked.append({
+            **entry,
+            "similarity_boosted": sim_boosted,
+            "boost_applied": apply_boost,
+        })
+
+    # Re-sort by boosted similarity descending
+    reranked.sort(key=lambda x: x["similarity_boosted"], reverse=True)
+    top = reranked[:top_k]
+
+    logger.info(
+        f"[TemplateRetriever] soft-filter: pattern={spec_pattern} "
+        f"boost_set={len(boost_set)} null_signal={is_null} "
+        f"fetched={len(full_results)} → "
+        + ", ".join(
+            f"{x['task_id']}({x['similarity']:.2f}"
+            + (f"→{x['similarity_boosted']:.2f}" if x.get('boost_applied') else "")
+            + ")"
+            for x in top
+        )
+    )
+    return top

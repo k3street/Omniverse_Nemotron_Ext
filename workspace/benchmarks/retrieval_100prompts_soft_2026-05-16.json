@@ -2,9 +2,9 @@
   "benchmark": "retrieval_100prompts",
   "date": "2026-05-16",
   "round": "15d",
-  "mode": "struct_filter",
-  "retrieval_path": "retrieve_with_intent_filter (struct-first, fallback to embedding)",
-  "env_flag": "MULTIMODAL_TEXT_INTENT=on",
+  "mode": "soft_filter",
+  "retrieval_path": "retrieve_with_intent_soft_filter (boost=1.10)",
+  "env_flag": "MULTIMODAL_TEXT_INTENT=soft",
   "coverage": {
     "n_templates_with_intent": 70,
     "n_templates_total": 321,
@@ -15,19 +15,19 @@
     "margin_min": 0.2
   },
   "aggregate": {
-    "hit_at_1": 0.79,
-    "hit_at_3": 0.89,
-    "mode_accuracy": 0.7,
-    "hard_instantiate_rate": 0.18,
-    "struct_filter_path_count": 59,
-    "fallback_embedding_count": 41,
-    "latency_p50_ms": 105.79,
-    "latency_p95_ms": 109.23
+    "hit_at_1": 0.84,
+    "hit_at_3": 0.94,
+    "mode_accuracy": 0.72,
+    "hard_instantiate_rate": 0.16,
+    "struct_filter_path_count": 0,
+    "fallback_embedding_count": 0,
+    "latency_p50_ms": 98.58,
+    "latency_p95_ms": 104.03
   },
   "baseline_delta": {
-    "hit_at_1": -0.03,
-    "hit_at_3": -0.06,
-    "mode_accuracy": -0.02
+    "hit_at_1": 0.02,
+    "hit_at_3": -0.01,
+    "mode_accuracy": 0.0
   },
   "category_breakdown": {
     "amr_navigation": {
@@ -42,21 +42,21 @@
       "hit_at_1": 1.0,
       "hit_at_3": 1.0,
       "mode_correct": 1.0,
-      "avg_top1_sim": 0.57
+      "avg_top1_sim": 0.585
     },
     "industrial_bridge": {
       "n": 3,
       "hit_at_1": 0.667,
       "hit_at_3": 1.0,
-      "mode_correct": 0.333,
-      "avg_top1_sim": 0.471
+      "mode_correct": 0.667,
+      "avg_top1_sim": 0.488
     },
     "multi_robot": {
       "n": 3,
-      "hit_at_1": 0.333,
-      "hit_at_3": 0.333,
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
       "mode_correct": 0.333,
-      "avg_top1_sim": 0.496
+      "avg_top1_sim": 0.606
     },
     "navigate": {
       "n": 2,
@@ -70,21 +70,21 @@
       "hit_at_1": 1.0,
       "hit_at_3": 1.0,
       "mode_correct": 0.0,
-      "avg_top1_sim": 0.297
+      "avg_top1_sim": 0.315
     },
     "palletize": {
       "n": 7,
       "hit_at_1": 0.857,
-      "hit_at_3": 1.0,
+      "hit_at_3": 0.857,
       "mode_correct": 0.857,
       "avg_top1_sim": 0.56
     },
     "pick_place": {
       "n": 30,
-      "hit_at_1": 0.667,
-      "hit_at_3": 0.833,
+      "hit_at_1": 0.733,
+      "hit_at_3": 0.9,
       "mode_correct": 0.867,
-      "avg_top1_sim": 0.521
+      "avg_top1_sim": 0.527
     },
     "reorient": {
       "n": 1,
@@ -116,17 +116,17 @@
     },
     "sort": {
       "n": 7,
-      "hit_at_1": 0.714,
+      "hit_at_1": 0.571,
       "hit_at_3": 1.0,
-      "mode_correct": 0.857,
-      "avg_top1_sim": 0.479
+      "mode_correct": 1.0,
+      "avg_top1_sim": 0.489
     },
     "vision": {
       "n": 5,
-      "hit_at_1": 0.4,
-      "hit_at_3": 0.4,
+      "hit_at_1": 0.8,
+      "hit_at_3": 0.8,
       "mode_correct": 1.0,
-      "avg_top1_sim": 0.51
+      "avg_top1_sim": 0.603
     }
   },
   "pattern_hint_breakdown": {
@@ -135,7 +135,7 @@
       "hit_at_1": 1.0,
       "hit_at_3": 1.0,
       "mode_correct": 1.0,
-      "avg_top1_sim": 0.504
+      "avg_top1_sim": 0.525
     },
     "navigate": {
       "n": 6,
@@ -148,22 +148,22 @@
       "n": 30,
       "hit_at_1": 0.9,
       "hit_at_3": 0.967,
-      "mode_correct": 0.4,
-      "avg_top1_sim": 0.426
+      "mode_correct": 0.433,
+      "avg_top1_sim": 0.436
     },
     "pick_place": {
       "n": 43,
-      "hit_at_1": 0.698,
-      "hit_at_3": 0.837,
+      "hit_at_1": 0.791,
+      "hit_at_3": 0.907,
       "mode_correct": 0.791,
-      "avg_top1_sim": 0.517
+      "avg_top1_sim": 0.529
     },
     "sort": {
       "n": 12,
-      "hit_at_1": 0.583,
-      "hit_at_3": 0.75,
-      "mode_correct": 0.917,
-      "avg_top1_sim": 0.492
+      "hit_at_1": 0.667,
+      "hit_at_3": 0.917,
+      "mode_correct": 1.0,
+      "avg_top1_sim": 0.537
     },
     "train": {
       "n": 6,
@@ -183,38 +183,38 @@
       "base_hit_at_3": false,
       "struct_top3": [
         "CP-44",
-        "CP-NEW-y-merge-singulation",
-        "CP-77"
-      ],
-      "base_top3": [
-        "CP-44",
-        "CP-NEW-y-merge-singulation",
-        "CP-77"
-      ],
-      "struct_top1": "CP-77",
-      "base_top1": "CP-77",
-      "struct_path": "fallback_embedding"
-    },
-    {
-      "id": "B02",
-      "category_change": "LOST_AT_3",
-      "struct_hit_at_1": false,
-      "base_hit_at_1": false,
-      "struct_hit_at_3": false,
-      "base_hit_at_3": true,
-      "struct_top3": [
-        "CP-45",
-        "CP-44",
+        "CP-77",
         "CP-NEW-y-merge-singulation"
       ],
       "base_top3": [
-        "CP-51",
-        "CP-14",
-        "CP-02"
+        "CP-44",
+        "CP-77",
+        "CP-NEW-y-merge-singulation"
       ],
-      "struct_top1": "CP-45",
+      "struct_top1": "CP-77",
+      "base_top1": "CP-77",
+      "struct_path": "soft_filter"
+    },
+    {
+      "id": "B02",
+      "category_change": "GAINED_AT_1",
+      "struct_hit_at_1": true,
+      "base_hit_at_1": false,
+      "struct_hit_at_3": true,
+      "base_hit_at_3": true,
+      "struct_top3": [
+        "CP-14",
+        "CP-02",
+        "CP-51"
+      ],
+      "base_top3": [
+        "CP-14",
+        "CP-02",
+        "CP-51"
+      ],
+      "struct_top1": "CP-02",
       "base_top1": "CP-51",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B03",
@@ -235,27 +235,28 @@
       ],
       "struct_top1": "CP-16",
       "base_top1": "CP-16",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B04",
-      "category_change": "TOP1_SAME_TOP3_DIFF",
+      "category_change": "IDENTICAL_TOP3",
       "struct_hit_at_1": true,
       "base_hit_at_1": true,
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-04",
-        "CP-11"
+        "CP-65",
+        "CP-15",
+        "CP-04"
       ],
       "base_top3": [
-        "CP-04",
         "CP-65",
-        "CP-15"
+        "CP-15",
+        "CP-04"
       ],
       "struct_top1": "CP-04",
       "base_top1": "CP-04",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B05",
@@ -265,18 +266,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-05",
         "CP-31",
+        "CP-05",
         "CP-56"
       ],
       "base_top3": [
-        "CP-05",
         "CP-31",
+        "CP-05",
         "CP-56"
       ],
       "struct_top1": "CP-05",
       "base_top1": "CP-05",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B06",
@@ -286,39 +287,39 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-43",
-        "CP-38",
+        "CP-83",
+        "CP-07",
         "CP-01"
       ],
       "base_top3": [
         "CP-07",
-        "CP-01",
-        "CP-06"
+        "CP-06",
+        "CP-01"
       ],
       "struct_top1": "CP-01",
       "base_top1": "CP-07",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B07",
-      "category_change": "IDENTICAL_TOP3",
-      "struct_hit_at_1": true,
+      "category_change": "LOST_AT_1",
+      "struct_hit_at_1": false,
       "base_hit_at_1": true,
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-85",
         "CP-03",
+        "CP-16",
         "CP-82"
       ],
       "base_top3": [
-        "CP-85",
         "CP-03",
+        "CP-85",
         "CP-82"
       ],
-      "struct_top1": "CP-82",
+      "struct_top1": "CP-03",
       "base_top1": "CP-82",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B08",
@@ -328,18 +329,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "K-04",
         "CP-49",
-        "CP-NEW-3station-oee"
+        "CP-NEW-3station-oee",
+        "K-04"
       ],
       "base_top3": [
-        "K-04",
         "CP-49",
-        "CP-NEW-3station-oee"
+        "CP-NEW-3station-oee",
+        "K-04"
       ],
       "struct_top1": "CP-NEW-3station-oee",
       "base_top1": "CP-NEW-3station-oee",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "B09",
@@ -360,28 +361,28 @@
       ],
       "struct_top1": "CP-52",
       "base_top1": "CP-52",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B10",
-      "category_change": "IDENTICAL_TOP3",
+      "category_change": "TOP1_SAME_TOP3_DIFF",
       "struct_hit_at_1": false,
       "base_hit_at_1": false,
       "struct_hit_at_3": false,
       "base_hit_at_3": false,
       "struct_top3": [
-        "CP-03",
-        "CP-32",
-        "CP-34"
+        "CP-34",
+        "CP-33",
+        "CP-32"
       ],
       "base_top3": [
         "CP-03",
-        "CP-32",
-        "CP-34"
+        "CP-34",
+        "CP-32"
       ],
       "struct_top1": "CP-34",
       "base_top1": "CP-34",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B11",
@@ -391,18 +392,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
+        "CP-31",
         "CP-NEW-amr-pickup-handoff",
-        "CP-75",
-        "CP-31"
+        "CP-75"
       ],
       "base_top3": [
+        "CP-31",
         "CP-NEW-amr-pickup-handoff",
-        "CP-75",
-        "CP-31"
+        "CP-75"
       ],
       "struct_top1": "CP-NEW-amr-pickup-handoff",
       "base_top1": "CP-NEW-amr-pickup-handoff",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B12",
@@ -412,18 +413,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-NEW-amr-pickup-handoff",
         "CP-NEW-multi-amr-corridor",
-        "CP-68"
+        "CP-68",
+        "CP-NEW-amr-pickup-handoff"
       ],
       "base_top3": [
-        "CP-NEW-amr-pickup-handoff",
         "CP-NEW-multi-amr-corridor",
-        "CP-68"
+        "CP-68",
+        "CP-NEW-amr-pickup-handoff"
       ],
       "struct_top1": "CP-NEW-multi-amr-corridor",
       "base_top1": "CP-NEW-multi-amr-corridor",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B13",
@@ -433,18 +434,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "M-11",
+        "M-13",
         "CP-NEW-rl-clone-env",
-        "M-13"
+        "M-11"
       ],
       "base_top3": [
-        "M-11",
+        "M-13",
         "CP-NEW-rl-clone-env",
-        "M-13"
+        "M-11"
       ],
       "struct_top1": "CP-NEW-rl-clone-env",
       "base_top1": "CP-NEW-rl-clone-env",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B14",
@@ -454,18 +455,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "D-12",
         "CP-87",
+        "D-12",
         "E-07"
       ],
       "base_top3": [
-        "D-12",
         "CP-87",
+        "D-12",
         "E-07"
       ],
       "struct_top1": "CP-87",
       "base_top1": "CP-87",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B15",
@@ -475,18 +476,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "S-10",
         "S-02",
+        "S-10",
         "S-07"
       ],
       "base_top3": [
-        "S-10",
         "S-02",
+        "S-10",
         "S-07"
       ],
       "struct_top1": "S-07",
       "base_top1": "S-07",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B16",
@@ -496,18 +497,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "M-01",
+        "A-01",
         "AM-08",
-        "A-01"
+        "M-01"
       ],
       "base_top3": [
-        "M-01",
+        "A-01",
         "AM-08",
-        "A-01"
+        "M-01"
       ],
       "struct_top1": "M-01",
       "base_top1": "M-01",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B17",
@@ -528,7 +529,7 @@
       ],
       "struct_top1": "FX-01",
       "base_top1": "FX-01",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "B18",
@@ -549,7 +550,7 @@
       ],
       "struct_top1": "P-01",
       "base_top1": "P-01",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "B19",
@@ -559,18 +560,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "M-08",
+        "M-04",
         "A-03",
-        "M-04"
+        "M-08"
       ],
       "base_top3": [
-        "M-08",
+        "M-04",
         "A-03",
-        "M-04"
+        "M-08"
       ],
       "struct_top1": "M-08",
       "base_top1": "M-08",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "B20",
@@ -591,7 +592,7 @@
       ],
       "struct_top1": "CP-64",
       "base_top1": "CP-64",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B21",
@@ -602,59 +603,59 @@
       "base_hit_at_3": true,
       "struct_top3": [
         "A-09",
-        "CP-NEW-3station-oee",
-        "AM-06"
+        "AM-06",
+        "CP-NEW-3station-oee"
       ],
       "base_top3": [
         "A-09",
-        "CP-NEW-3station-oee",
-        "AM-06"
+        "AM-06",
+        "CP-NEW-3station-oee"
       ],
       "struct_top1": "A-09",
       "base_top1": "A-09",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "B22",
-      "category_change": "OTHER_DIFF",
+      "category_change": "IDENTICAL_TOP3",
       "struct_hit_at_1": true,
       "base_hit_at_1": true,
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-45",
-        "CP-NEW-y-merge-singulation",
-        "CP-77"
+        "CP-07",
+        "CP-77",
+        "CP-NEW-y-merge-singulation"
       ],
       "base_top3": [
         "CP-07",
-        "CP-NEW-y-merge-singulation",
-        "CP-77"
+        "CP-77",
+        "CP-NEW-y-merge-singulation"
       ],
       "struct_top1": "CP-77",
       "base_top1": "CP-07",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B23",
-      "category_change": "OTHER_DIFF",
+      "category_change": "IDENTICAL_TOP3",
       "struct_hit_at_1": true,
       "base_hit_at_1": true,
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-32",
-        "CP-82",
-        "CP-34"
+        "CP-16",
+        "CP-35",
+        "CP-57"
       ],
       "base_top3": [
-        "CP-57",
         "CP-16",
-        "CP-35"
+        "CP-35",
+        "CP-57"
       ],
-      "struct_top1": "CP-32",
+      "struct_top1": "CP-35",
       "base_top1": "CP-35",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B24",
@@ -664,18 +665,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "R-01",
         "AL-01",
+        "R-01",
         "F-08"
       ],
       "base_top3": [
-        "R-01",
         "AL-01",
+        "R-01",
         "F-08"
       ],
       "struct_top1": "F-08",
       "base_top1": "F-08",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "B25",
@@ -685,18 +686,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "FX-01",
         "AM-02",
+        "FX-01",
         "A-02"
       ],
       "base_top3": [
-        "FX-01",
         "AM-02",
+        "FX-01",
         "A-02"
       ],
       "struct_top1": "A-02",
       "base_top1": "A-02",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "B26",
@@ -707,37 +708,38 @@
       "base_hit_at_3": true,
       "struct_top3": [
         "CP-25",
-        "CP-20",
-        "CP-46"
+        "CP-46",
+        "CP-20"
       ],
       "base_top3": [
         "CP-25",
-        "CP-20",
-        "CP-46"
+        "CP-46",
+        "CP-20"
       ],
       "struct_top1": "CP-25",
       "base_top1": "CP-25",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "B27",
-      "category_change": "OTHER_DIFF",
+      "category_change": "IDENTICAL_TOP3",
       "struct_hit_at_1": true,
       "base_hit_at_1": true,
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-NEW-tactile-insertion",
-        "CP-58"
+        "CP-NEW-peg-in-hole-single",
+        "CP-58",
+        "CP-NEW-tactile-insertion"
       ],
       "base_top3": [
         "CP-NEW-peg-in-hole-single",
-        "CP-NEW-tactile-insertion",
-        "CP-58"
+        "CP-58",
+        "CP-NEW-tactile-insertion"
       ],
-      "struct_top1": "CP-58",
+      "struct_top1": "CP-NEW-peg-in-hole-single",
       "base_top1": "CP-NEW-peg-in-hole-single",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B28",
@@ -747,18 +749,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-NEW-opcua-12conveyors",
+        "F-02",
         "CP-NEW-plc-fixture",
-        "F-02"
+        "CP-NEW-opcua-12conveyors"
       ],
       "base_top3": [
-        "CP-NEW-opcua-12conveyors",
+        "F-02",
         "CP-NEW-plc-fixture",
-        "F-02"
+        "CP-NEW-opcua-12conveyors"
       ],
-      "struct_top1": "F-02",
+      "struct_top1": "CP-NEW-plc-fixture",
       "base_top1": "F-02",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B29",
@@ -768,18 +770,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
+        "CP-31",
         "CP-57",
-        "CP-71",
-        "CP-31"
+        "CP-71"
       ],
       "base_top3": [
+        "CP-31",
         "CP-57",
-        "CP-71",
-        "CP-31"
+        "CP-71"
       ],
       "struct_top1": "CP-71",
       "base_top1": "CP-71",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "B30",
@@ -789,30 +791,30 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "A-03",
+        "CP-55",
         "CP-NEW-drawer-open",
-        "CP-55"
+        "A-03"
       ],
       "base_top3": [
-        "A-03",
+        "CP-55",
         "CP-NEW-drawer-open",
-        "CP-55"
+        "A-03"
       ],
       "struct_top1": "CP-55",
       "base_top1": "CP-55",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N01",
-      "category_change": "IDENTICAL_TOP3",
+      "category_change": "LOST_AT_3",
       "struct_hit_at_1": false,
       "base_hit_at_1": false,
-      "struct_hit_at_3": true,
+      "struct_hit_at_3": false,
       "base_hit_at_3": true,
       "struct_top3": [
         "CP-25",
-        "CP-19",
-        "CP-08"
+        "CP-20",
+        "CP-19"
       ],
       "base_top3": [
         "CP-25",
@@ -821,19 +823,19 @@
       ],
       "struct_top1": "CP-19",
       "base_top1": "CP-19",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N02",
-      "category_change": "TOP1_SAME_TOP3_DIFF",
+      "category_change": "IDENTICAL_TOP3",
       "struct_hit_at_1": true,
       "base_hit_at_1": true,
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
         "CP-25",
-        "CP-42",
-        "CP-10"
+        "CP-10",
+        "CP-08"
       ],
       "base_top3": [
         "CP-25",
@@ -842,7 +844,7 @@
       ],
       "struct_top1": "CP-10",
       "base_top1": "CP-10",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N03",
@@ -853,17 +855,17 @@
       "base_hit_at_3": true,
       "struct_top3": [
         "CP-25",
-        "CP-11",
-        "CP-42"
+        "CP-42",
+        "CP-11"
       ],
       "base_top3": [
         "CP-25",
-        "CP-11",
-        "CP-42"
+        "CP-42",
+        "CP-11"
       ],
       "struct_top1": "CP-11",
       "base_top1": "CP-11",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N04",
@@ -873,18 +875,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-13",
         "CP-31",
+        "CP-13",
         "CP-15"
       ],
       "base_top3": [
-        "CP-13",
         "CP-31",
+        "CP-13",
         "CP-15"
       ],
       "struct_top1": "CP-31",
       "base_top1": "CP-31",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N05",
@@ -895,17 +897,17 @@
       "base_hit_at_3": true,
       "struct_top3": [
         "CP-25",
-        "CP-20",
-        "CP-42"
+        "CP-42",
+        "CP-20"
       ],
       "base_top3": [
         "CP-25",
-        "CP-20",
-        "CP-42"
+        "CP-42",
+        "CP-20"
       ],
       "struct_top1": "CP-20",
       "base_top1": "CP-20",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N06",
@@ -915,18 +917,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-02",
         "CP-07",
-        "CP-52"
+        "CP-52",
+        "CP-02"
       ],
       "base_top3": [
-        "CP-02",
         "CP-07",
-        "CP-52"
+        "CP-52",
+        "CP-02"
       ],
       "struct_top1": "CP-07",
       "base_top1": "CP-07",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N07",
@@ -947,28 +949,28 @@
       ],
       "struct_top1": "CP-77",
       "base_top1": "CP-77",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N08",
-      "category_change": "LOST_AT_1",
-      "struct_hit_at_1": false,
+      "category_change": "IDENTICAL_TOP3",
+      "struct_hit_at_1": true,
       "base_hit_at_1": true,
-      "struct_hit_at_3": false,
+      "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-45",
-        "CP-13",
-        "CP-NEW-y-merge-singulation"
+        "CP-14",
+        "CP-65",
+        "CP-51"
       ],
       "base_top3": [
-        "CP-51",
         "CP-14",
-        "CP-65"
+        "CP-65",
+        "CP-51"
       ],
-      "struct_top1": "CP-13",
+      "struct_top1": "CP-14",
       "base_top1": "CP-14",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N09",
@@ -978,60 +980,60 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
+        "CP-17",
         "CP-16",
-        "CP-35",
-        "CP-17"
+        "CP-35"
       ],
       "base_top3": [
+        "CP-17",
         "CP-16",
-        "CP-35",
-        "CP-17"
+        "CP-35"
       ],
       "struct_top1": "CP-35",
       "base_top1": "CP-35",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N10",
-      "category_change": "TOP1_SAME_TOP3_DIFF",
+      "category_change": "IDENTICAL_TOP3",
       "struct_hit_at_1": false,
       "base_hit_at_1": false,
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-21",
         "CP-18",
+        "CP-NEW-inspect-reject",
         "CP-35"
       ],
       "base_top3": [
         "CP-18",
-        "CP-35",
-        "CP-NEW-inspect-reject"
+        "CP-NEW-inspect-reject",
+        "CP-35"
       ],
       "struct_top1": "CP-35",
       "base_top1": "CP-35",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N11",
-      "category_change": "LOST_AT_3",
-      "struct_hit_at_1": false,
+      "category_change": "GAINED_AT_1",
+      "struct_hit_at_1": true,
       "base_hit_at_1": false,
-      "struct_hit_at_3": false,
+      "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-21",
+        "CP-51",
         "CP-45",
-        "CP-NEW-y-merge-singulation"
+        "CP-26"
       ],
       "base_top3": [
-        "CP-51",
         "CP-26",
-        "CP-NEW-cross-belt-sorter"
+        "CP-NEW-cross-belt-sorter",
+        "CP-51"
       ],
-      "struct_top1": "CP-45",
+      "struct_top1": "CP-26",
       "base_top1": "CP-51",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N12",
@@ -1041,18 +1043,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-04",
         "CP-27",
-        "CP-56"
+        "CP-56",
+        "CP-04"
       ],
       "base_top3": [
-        "CP-04",
         "CP-27",
-        "CP-56"
+        "CP-56",
+        "CP-04"
       ],
       "struct_top1": "CP-27",
       "base_top1": "CP-27",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N13",
@@ -1063,17 +1065,17 @@
       "base_hit_at_3": true,
       "struct_top3": [
         "CP-25",
-        "CP-20",
-        "CP-46"
+        "CP-46",
+        "CP-20"
       ],
       "base_top3": [
         "CP-25",
-        "CP-20",
-        "CP-46"
+        "CP-46",
+        "CP-20"
       ],
       "struct_top1": "CP-25",
       "base_top1": "CP-25",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N14",
@@ -1094,7 +1096,7 @@
       ],
       "struct_top1": "CP-19",
       "base_top1": "CP-19",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N15",
@@ -1104,18 +1106,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-44",
         "CP-41",
+        "CP-44",
         "CP-12"
       ],
       "base_top3": [
-        "CP-44",
         "CP-41",
+        "CP-44",
         "CP-12"
       ],
       "struct_top1": "CP-44",
       "base_top1": "CP-44",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N16",
@@ -1125,18 +1127,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
+        "CP-43",
         "CP-45",
-        "CP-44",
-        "CP-43"
+        "CP-44"
       ],
       "base_top3": [
+        "CP-43",
         "CP-45",
-        "CP-44",
-        "CP-43"
+        "CP-44"
       ],
       "struct_top1": "CP-44",
       "base_top1": "CP-44",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N17",
@@ -1147,38 +1149,38 @@
       "base_hit_at_3": true,
       "struct_top3": [
         "CP-45",
-        "CP-51",
-        "CP-44"
+        "CP-44",
+        "CP-51"
       ],
       "base_top3": [
         "CP-45",
-        "CP-51",
-        "CP-44"
+        "CP-44",
+        "CP-51"
       ],
       "struct_top1": "CP-44",
       "base_top1": "CP-44",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N18",
-      "category_change": "TOP1_SAME_TOP3_DIFF",
+      "category_change": "IDENTICAL_TOP3",
       "struct_hit_at_1": true,
       "base_hit_at_1": true,
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
+        "CP-31",
         "CP-05",
-        "CP-21",
-        "CP-13"
+        "CP-21"
       ],
       "base_top3": [
+        "CP-31",
         "CP-05",
-        "CP-21",
-        "CP-31"
+        "CP-21"
       ],
       "struct_top1": "CP-21",
       "base_top1": "CP-21",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N19",
@@ -1188,18 +1190,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
+        "CP-24",
         "CP-45",
-        "CP-44",
-        "CP-24"
+        "CP-44"
       ],
       "base_top3": [
+        "CP-24",
         "CP-45",
-        "CP-44",
-        "CP-24"
+        "CP-44"
       ],
       "struct_top1": "CP-24",
       "base_top1": "CP-24",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N20",
@@ -1209,18 +1211,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-49",
         "CP-50",
+        "CP-49",
         "CP-77"
       ],
       "base_top3": [
-        "CP-49",
         "CP-50",
+        "CP-49",
         "CP-77"
       ],
       "struct_top1": "CP-49",
       "base_top1": "CP-49",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N21",
@@ -1241,7 +1243,7 @@
       ],
       "struct_top1": "CP-56",
       "base_top1": "CP-56",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N22",
@@ -1251,39 +1253,39 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-13",
+        "CP-31",
         "CP-57",
-        "CP-31"
+        "CP-13"
       ],
       "base_top3": [
-        "CP-13",
+        "CP-31",
         "CP-57",
-        "CP-31"
+        "CP-13"
       ],
       "struct_top1": "CP-31",
       "base_top1": "CP-31",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N23",
-      "category_change": "TOP1_SAME_TOP3_DIFF",
+      "category_change": "IDENTICAL_TOP3",
       "struct_hit_at_1": true,
       "base_hit_at_1": true,
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-45",
-        "CP-04",
-        "CP-36"
+        "CP-31",
+        "CP-36",
+        "CP-45"
       ],
       "base_top3": [
-        "CP-45",
         "CP-31",
-        "CP-36"
+        "CP-36",
+        "CP-45"
       ],
       "struct_top1": "CP-36",
       "base_top1": "CP-36",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N24",
@@ -1293,37 +1295,39 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-67",
         "FX-01",
+        "CP-67",
         "CP-23"
       ],
       "base_top3": [
-        "CP-67",
         "FX-01",
+        "CP-67",
         "CP-23"
       ],
       "struct_top1": "CP-23",
       "base_top1": "CP-23",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N25",
-      "category_change": "LOST_AT_1",
-      "struct_hit_at_1": false,
+      "category_change": "IDENTICAL_TOP3",
+      "struct_hit_at_1": true,
       "base_hit_at_1": true,
-      "struct_hit_at_3": false,
+      "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-05"
-      ],
-      "base_top3": [
-        "CP-05",
         "CP-45",
+        "CP-05",
         "CP-23"
       ],
-      "struct_top1": "CP-05",
+      "base_top3": [
+        "CP-45",
+        "CP-05",
+        "CP-23"
+      ],
+      "struct_top1": "CP-45",
       "base_top1": "CP-45",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N26",
@@ -1344,7 +1348,7 @@
       ],
       "struct_top1": "CP-77",
       "base_top1": "CP-77",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N27",
@@ -1355,36 +1359,38 @@
       "base_hit_at_3": true,
       "struct_top3": [
         "CP-16",
-        "CP-66",
-        "CP-35"
+        "CP-35",
+        "CP-66"
       ],
       "base_top3": [
         "CP-16",
-        "CP-66",
-        "CP-35"
+        "CP-35",
+        "CP-66"
       ],
       "struct_top1": "CP-66",
       "base_top1": "CP-66",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N28",
-      "category_change": "OTHER_DIFF",
+      "category_change": "IDENTICAL_TOP3",
       "struct_hit_at_1": true,
       "base_hit_at_1": true,
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-03"
+        "CP-03",
+        "CP-16",
+        "CP-35"
       ],
       "base_top3": [
         "CP-03",
         "CP-16",
         "CP-35"
       ],
-      "struct_top1": "CP-03",
+      "struct_top1": "CP-16",
       "base_top1": "CP-16",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N29",
@@ -1394,37 +1400,39 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
+        "CP-34",
         "CP-33",
-        "CP-32",
-        "CP-34"
+        "CP-32"
       ],
       "base_top3": [
+        "CP-34",
         "CP-33",
-        "CP-32",
-        "CP-34"
+        "CP-32"
       ],
       "struct_top1": "CP-32",
       "base_top1": "CP-32",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N30",
-      "category_change": "LOST_AT_1",
-      "struct_hit_at_1": false,
+      "category_change": "IDENTICAL_TOP3",
+      "struct_hit_at_1": true,
       "base_hit_at_1": true,
-      "struct_hit_at_3": false,
+      "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-03"
+        "CP-34",
+        "CP-33",
+        "CP-32"
       ],
       "base_top3": [
+        "CP-34",
         "CP-33",
-        "CP-32",
-        "CP-34"
+        "CP-32"
       ],
-      "struct_top1": "CP-03",
+      "struct_top1": "CP-32",
       "base_top1": "CP-32",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N31",
@@ -1434,39 +1442,39 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
+        "CP-34",
         "CP-47",
-        "CP-50",
-        "CP-34"
+        "CP-50"
       ],
       "base_top3": [
+        "CP-34",
         "CP-47",
-        "CP-50",
-        "CP-34"
+        "CP-50"
       ],
       "struct_top1": "CP-50",
       "base_top1": "CP-50",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N32",
-      "category_change": "LOST_AT_1",
-      "struct_hit_at_1": false,
+      "category_change": "IDENTICAL_TOP3",
+      "struct_hit_at_1": true,
       "base_hit_at_1": true,
-      "struct_hit_at_3": false,
+      "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-45",
-        "CP-18",
-        "CP-23"
+        "CP-NEW-inspect-reject",
+        "CP-33",
+        "CP-34"
       ],
       "base_top3": [
         "CP-NEW-inspect-reject",
         "CP-33",
         "CP-34"
       ],
-      "struct_top1": "CP-18",
+      "struct_top1": "CP-NEW-inspect-reject",
       "base_top1": "CP-NEW-inspect-reject",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N33",
@@ -1477,38 +1485,38 @@
       "base_hit_at_3": true,
       "struct_top3": [
         "CP-75",
-        "CP-78",
-        "CP-81"
+        "CP-81",
+        "CP-78"
       ],
       "base_top3": [
         "CP-75",
-        "CP-78",
-        "CP-81"
+        "CP-81",
+        "CP-78"
       ],
       "struct_top1": "CP-75",
       "base_top1": "CP-75",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N34",
-      "category_change": "TOP1_SAME_TOP3_DIFF",
+      "category_change": "IDENTICAL_TOP3",
       "struct_hit_at_1": false,
       "base_hit_at_1": false,
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
+        "CP-38",
         "CP-69",
-        "CP-24",
-        "CP-38"
+        "CP-83"
       ],
       "base_top3": [
-        "CP-69",
         "CP-38",
+        "CP-69",
         "CP-83"
       ],
       "struct_top1": "CP-38",
       "base_top1": "CP-38",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N35",
@@ -1519,17 +1527,17 @@
       "base_hit_at_3": true,
       "struct_top3": [
         "CP-57",
-        "CP-71",
-        "CP-77"
+        "CP-77",
+        "CP-71"
       ],
       "base_top3": [
         "CP-57",
-        "CP-71",
-        "CP-77"
+        "CP-77",
+        "CP-71"
       ],
       "struct_top1": "CP-71",
       "base_top1": "CP-71",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N36",
@@ -1540,37 +1548,38 @@
       "base_hit_at_3": true,
       "struct_top3": [
         "CP-54",
-        "CP-44",
-        "CP-70"
+        "CP-70",
+        "CP-44"
       ],
       "base_top3": [
         "CP-54",
-        "CP-44",
-        "CP-70"
+        "CP-70",
+        "CP-44"
       ],
       "struct_top1": "CP-70",
       "base_top1": "CP-70",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N37",
-      "category_change": "TOP1_SAME_TOP3_DIFF",
+      "category_change": "IDENTICAL_TOP3",
       "struct_hit_at_1": true,
       "base_hit_at_1": true,
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-NEW-tactile-insertion",
-        "CP-58"
+        "CP-NEW-peg-in-hole-single",
+        "CP-58",
+        "CP-NEW-tactile-insertion"
       ],
       "base_top3": [
-        "CP-NEW-tactile-insertion",
+        "CP-NEW-peg-in-hole-single",
         "CP-58",
-        "CP-NEW-peg-in-hole-single"
+        "CP-NEW-tactile-insertion"
       ],
       "struct_top1": "CP-NEW-tactile-insertion",
       "base_top1": "CP-NEW-tactile-insertion",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N38",
@@ -1581,17 +1590,17 @@
       "base_hit_at_3": true,
       "struct_top3": [
         "CP-NEW-peg-in-hole-single",
-        "CP-NEW-tactile-insertion",
-        "CP-58"
+        "CP-58",
+        "CP-NEW-tactile-insertion"
       ],
       "base_top3": [
         "CP-NEW-peg-in-hole-single",
-        "CP-NEW-tactile-insertion",
-        "CP-58"
+        "CP-58",
+        "CP-NEW-tactile-insertion"
       ],
       "struct_top1": "CP-58",
       "base_top1": "CP-58",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N39",
@@ -1601,18 +1610,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-NEW-amr-pickup-handoff",
         "CP-NEW-multi-amr-corridor",
+        "CP-NEW-amr-pickup-handoff",
         "S-08"
       ],
       "base_top3": [
-        "CP-NEW-amr-pickup-handoff",
         "CP-NEW-multi-amr-corridor",
+        "CP-NEW-amr-pickup-handoff",
         "S-08"
       ],
       "struct_top1": "CP-NEW-amr-pickup-handoff",
       "base_top1": "CP-NEW-amr-pickup-handoff",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N40",
@@ -1633,7 +1642,7 @@
       ],
       "struct_top1": "CP-NEW-multi-amr-corridor",
       "base_top1": "CP-NEW-multi-amr-corridor",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N41",
@@ -1643,18 +1652,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-NEW-amr-pickup-handoff",
         "S-06",
+        "CP-NEW-amr-pickup-handoff",
         "CP-64"
       ],
       "base_top3": [
-        "CP-NEW-amr-pickup-handoff",
         "S-06",
+        "CP-NEW-amr-pickup-handoff",
         "CP-64"
       ],
       "struct_top1": "CP-64",
       "base_top1": "CP-64",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N42",
@@ -1664,18 +1673,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-NEW-rl-clone-env",
         "S-07",
+        "CP-NEW-rl-clone-env",
         "R-04"
       ],
       "base_top3": [
-        "CP-NEW-rl-clone-env",
         "S-07",
+        "CP-NEW-rl-clone-env",
         "R-04"
       ],
       "struct_top1": "CP-NEW-rl-clone-env",
       "base_top1": "CP-NEW-rl-clone-env",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N43",
@@ -1685,18 +1694,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
+        "CP-NEW-dr-curriculum",
         "J-08",
-        "J-04",
-        "CP-NEW-dr-curriculum"
+        "J-04"
       ],
       "base_top3": [
+        "CP-NEW-dr-curriculum",
         "J-08",
-        "J-04",
-        "CP-NEW-dr-curriculum"
+        "J-04"
       ],
       "struct_top1": "CP-NEW-dr-curriculum",
       "base_top1": "CP-NEW-dr-curriculum",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N44",
@@ -1706,18 +1715,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "D-12",
         "CP-87",
+        "D-12",
         "E-07"
       ],
       "base_top3": [
-        "D-12",
         "CP-87",
+        "D-12",
         "E-07"
       ],
       "struct_top1": "CP-87",
       "base_top1": "CP-87",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N45",
@@ -1738,7 +1747,7 @@
       ],
       "struct_top1": "CP-87",
       "base_top1": "CP-87",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N46",
@@ -1748,18 +1757,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "M-01",
+        "A-01",
         "R-03",
-        "A-01"
+        "M-01"
       ],
       "base_top3": [
-        "M-01",
+        "A-01",
         "R-03",
-        "A-01"
+        "M-01"
       ],
       "struct_top1": "R-03",
       "base_top1": "R-03",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N47",
@@ -1780,7 +1789,7 @@
       ],
       "struct_top1": "FX-01",
       "base_top1": "FX-01",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N48",
@@ -1791,38 +1800,38 @@
       "base_hit_at_3": true,
       "struct_top3": [
         "CP-NEW-defect-sdg",
-        "P-03",
-        "E-06"
+        "E-06",
+        "P-03"
       ],
       "base_top3": [
         "CP-NEW-defect-sdg",
-        "P-03",
-        "E-06"
+        "E-06",
+        "P-03"
       ],
       "struct_top1": "E-06",
       "base_top1": "E-06",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N49",
-      "category_change": "OTHER_DIFF",
+      "category_change": "IDENTICAL_TOP3",
       "struct_hit_at_1": true,
       "base_hit_at_1": true,
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-45",
-        "CP-NEW-y-merge-singulation",
+        "CP-NEW-plc-conveyor",
+        "F-08",
         "CP-NEW-plc-fixture"
       ],
       "base_top3": [
         "CP-NEW-plc-conveyor",
-        "CP-NEW-plc-fixture",
-        "F-08"
+        "F-08",
+        "CP-NEW-plc-fixture"
       ],
-      "struct_top1": "CP-NEW-plc-fixture",
+      "struct_top1": "CP-NEW-plc-conveyor",
       "base_top1": "CP-NEW-plc-conveyor",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N50",
@@ -1843,28 +1852,28 @@
       ],
       "struct_top1": "CP-NEW-plc-fixture",
       "base_top1": "CP-NEW-plc-fixture",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N51",
-      "category_change": "TOP1_SAME_TOP3_DIFF",
+      "category_change": "IDENTICAL_TOP3",
       "struct_hit_at_1": true,
       "base_hit_at_1": true,
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-21",
-        "CP-45",
-        "CP-NEW-y-merge-singulation"
+        "CP-NEW-cross-belt-sorter",
+        "CP-NEW-y-merge-singulation",
+        "CP-60"
       ],
       "base_top3": [
-        "CP-60",
+        "CP-NEW-cross-belt-sorter",
         "CP-NEW-y-merge-singulation",
-        "CP-NEW-cross-belt-sorter"
+        "CP-60"
       ],
       "struct_top1": "CP-NEW-y-merge-singulation",
       "base_top1": "CP-NEW-y-merge-singulation",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N52",
@@ -1875,17 +1884,17 @@
       "base_hit_at_3": true,
       "struct_top3": [
         "CP-NEW-multi-cam-triangulation",
-        "CP-32",
-        "CP-34"
+        "CP-34",
+        "CP-32"
       ],
       "base_top3": [
         "CP-NEW-multi-cam-triangulation",
-        "CP-32",
-        "CP-34"
+        "CP-34",
+        "CP-32"
       ],
       "struct_top1": "CP-NEW-multi-cam-triangulation",
       "base_top1": "CP-NEW-multi-cam-triangulation",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N53",
@@ -1895,18 +1904,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "AL-10",
+        "L-09",
         "CP-NEW-sim2real-gap",
-        "L-09"
+        "AL-10"
       ],
       "base_top3": [
-        "AL-10",
+        "L-09",
         "CP-NEW-sim2real-gap",
-        "L-09"
+        "AL-10"
       ],
       "struct_top1": "CP-NEW-sim2real-gap",
       "base_top1": "CP-NEW-sim2real-gap",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N54",
@@ -1917,17 +1926,17 @@
       "base_hit_at_3": true,
       "struct_top3": [
         "CP-NEW-defect-sdg",
-        "CP-63",
-        "CP-NEW-inspect-reject"
+        "CP-NEW-inspect-reject",
+        "CP-63"
       ],
       "base_top3": [
         "CP-NEW-defect-sdg",
-        "CP-63",
-        "CP-NEW-inspect-reject"
+        "CP-NEW-inspect-reject",
+        "CP-63"
       ],
       "struct_top1": "CP-NEW-defect-sdg",
       "base_top1": "CP-NEW-defect-sdg",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N55",
@@ -1937,18 +1946,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-NEW-g1-bimanual-tabletop",
         "CP-55",
-        "CP-NEW-drawer-open"
+        "CP-NEW-drawer-open",
+        "CP-NEW-g1-bimanual-tabletop"
       ],
       "base_top3": [
-        "CP-NEW-g1-bimanual-tabletop",
         "CP-55",
-        "CP-NEW-drawer-open"
+        "CP-NEW-drawer-open",
+        "CP-NEW-g1-bimanual-tabletop"
       ],
       "struct_top1": "CP-NEW-g1-bimanual-tabletop",
       "base_top1": "CP-NEW-g1-bimanual-tabletop",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N56",
@@ -1958,18 +1967,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-63",
+        "AM-06",
         "A-03",
-        "AM-06"
+        "CP-63"
       ],
       "base_top3": [
-        "CP-63",
+        "AM-06",
         "A-03",
-        "AM-06"
+        "CP-63"
       ],
       "struct_top1": "CP-63",
       "base_top1": "CP-63",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N57",
@@ -1979,18 +1988,18 @@
       "struct_hit_at_3": false,
       "base_hit_at_3": false,
       "struct_top3": [
+        "CP-43",
         "CP-45",
-        "CP-44",
-        "CP-43"
+        "CP-44"
       ],
       "base_top3": [
+        "CP-43",
         "CP-45",
-        "CP-44",
-        "CP-43"
+        "CP-44"
       ],
       "struct_top1": "CP-45",
       "base_top1": "CP-45",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N58",
@@ -2000,18 +2009,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
+        "E-04",
         "CP-39",
-        "CP-10",
         "CP-01"
       ],
       "base_top3": [
-        "CP-01",
         "E-04",
-        "CP-06"
+        "CP-06",
+        "CP-01"
       ],
       "struct_top1": "CP-01",
       "base_top1": "CP-01",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N59",
@@ -2021,18 +2030,18 @@
       "struct_hit_at_3": false,
       "base_hit_at_3": false,
       "struct_top3": [
+        "CP-26",
         "CP-67",
-        "CP-NEW-y-merge-singulation",
-        "CP-26"
+        "CP-NEW-y-merge-singulation"
       ],
       "base_top3": [
+        "CP-26",
         "CP-67",
-        "CP-NEW-y-merge-singulation",
-        "CP-26"
+        "CP-NEW-y-merge-singulation"
       ],
       "struct_top1": "CP-NEW-y-merge-singulation",
       "base_top1": "CP-NEW-y-merge-singulation",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N60",
@@ -2053,7 +2062,7 @@
       ],
       "struct_top1": "CP-03",
       "base_top1": "CP-03",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N61",
@@ -2063,18 +2072,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "J-07",
         "CP-NEW-rl-clone-env",
-        "R-04"
+        "R-04",
+        "J-07"
       ],
       "base_top3": [
-        "J-07",
         "CP-NEW-rl-clone-env",
-        "R-04"
+        "R-04",
+        "J-07"
       ],
       "struct_top1": "CP-NEW-rl-clone-env",
       "base_top1": "CP-NEW-rl-clone-env",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N62",
@@ -2084,18 +2093,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
+        "CP-67",
         "A-03",
-        "Y-08",
-        "CP-67"
+        "Y-08"
       ],
       "base_top3": [
+        "CP-67",
         "A-03",
-        "Y-08",
-        "CP-67"
+        "Y-08"
       ],
       "struct_top1": "Y-08",
       "base_top1": "Y-08",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N63",
@@ -2105,18 +2114,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-67",
         "CP-31",
+        "CP-67",
         "CP-56"
       ],
       "base_top3": [
-        "CP-67",
         "CP-31",
+        "CP-67",
         "CP-56"
       ],
       "struct_top1": "CP-31",
       "base_top1": "CP-31",
-      "struct_path": "fallback_embedding"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N64",
@@ -2126,18 +2135,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "A-04",
         "AL-01",
+        "A-04",
         "F-08"
       ],
       "base_top3": [
-        "A-04",
         "AL-01",
+        "A-04",
         "F-08"
       ],
       "struct_top1": "F-08",
       "base_top1": "F-08",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N65",
@@ -2158,18 +2167,18 @@
       ],
       "struct_top1": "CP-NEW-multi-amr-corridor",
       "base_top1": "CP-NEW-multi-amr-corridor",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N66",
-      "category_change": "TOP1_SAME_TOP3_DIFF",
+      "category_change": "IDENTICAL_TOP3",
       "struct_hit_at_1": true,
       "base_hit_at_1": true,
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "CP-45",
         "CP-21",
+        "CP-60",
         "CP-NEW-y-merge-singulation"
       ],
       "base_top3": [
@@ -2179,7 +2188,7 @@
       ],
       "struct_top1": "CP-NEW-y-merge-singulation",
       "base_top1": "CP-NEW-y-merge-singulation",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter"
     },
     {
       "id": "N67",
@@ -2189,18 +2198,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "D-09",
         "S-10",
-        "CP-87"
+        "CP-87",
+        "D-09"
       ],
       "base_top3": [
-        "D-09",
         "S-10",
-        "CP-87"
+        "CP-87",
+        "D-09"
       ],
       "struct_top1": "CP-87",
       "base_top1": "CP-87",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N68",
@@ -2210,18 +2219,18 @@
       "struct_hit_at_3": true,
       "base_hit_at_3": true,
       "struct_top3": [
-        "A-07",
         "AL-01",
+        "A-07",
         "F-08"
       ],
       "base_top3": [
-        "A-07",
         "AL-01",
+        "A-07",
         "F-08"
       ],
       "struct_top1": "F-08",
       "base_top1": "F-08",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N69",
@@ -2242,7 +2251,7 @@
       ],
       "struct_top1": "CP-02",
       "base_top1": "CP-02",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     },
     {
       "id": "N70",
@@ -2253,17 +2262,17 @@
       "base_hit_at_3": true,
       "struct_top3": [
         "CP-42",
-        "CP-NEW-g1-bimanual-tabletop",
-        "FX-01"
+        "FX-01",
+        "CP-NEW-g1-bimanual-tabletop"
       ],
       "base_top3": [
         "CP-42",
-        "CP-NEW-g1-bimanual-tabletop",
-        "FX-01"
+        "FX-01",
+        "CP-NEW-g1-bimanual-tabletop"
       ],
       "struct_top1": "CP-42",
       "base_top1": "CP-42",
-      "struct_path": "struct_filter"
+      "struct_path": "soft_filter_null"
     }
   ],
   "per_prompt": [
@@ -2285,8 +2294,8 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": false,
-      "latency_ms": 126.02,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 131.28,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-77",
@@ -2317,29 +2326,29 @@
       "acceptable_alternatives": [],
       "expected_action": "hard_instantiate",
       "actual_action": "few_shot",
-      "top1_id": "CP-45",
-      "top1_sim": 0.4688,
-      "margin": 0.0002,
-      "hit_at_1": false,
-      "hit_at_3": false,
+      "top1_id": "CP-02",
+      "top1_sim": 0.517,
+      "margin": -0.0309,
+      "hit_at_1": true,
+      "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 104.72,
-      "path_taken": "struct_filter",
+      "latency_ms": 86.12,
+      "path_taken": "soft_filter",
       "top3": [
         {
-          "task_id": "CP-45",
-          "similarity": 0.4688,
-          "distance": 0.7968
+          "task_id": "CP-02",
+          "similarity": 0.517,
+          "distance": 0.7245
         },
         {
-          "task_id": "CP-NEW-y-merge-singulation",
-          "similarity": 0.4686,
-          "distance": 0.7971
+          "task_id": "CP-51",
+          "similarity": 0.5479,
+          "distance": 0.6781
         },
         {
-          "task_id": "CP-44",
-          "similarity": 0.3774,
-          "distance": 0.9338
+          "task_id": "CP-14",
+          "similarity": 0.4947,
+          "distance": 0.758
         }
       ]
     },
@@ -2363,8 +2372,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.93,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 84.77,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-16",
@@ -2397,12 +2406,12 @@
       "actual_action": "few_shot",
       "top1_id": "CP-04",
       "top1_sim": 0.2722,
-      "margin": 0.2181,
+      "margin": 0.0596,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.69,
-      "path_taken": "struct_filter",
+      "latency_ms": 87.5,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-04",
@@ -2410,9 +2419,14 @@
           "distance": 1.0917
         },
         {
-          "task_id": "CP-11",
-          "similarity": 0.0542,
-          "distance": 1.4188
+          "task_id": "CP-65",
+          "similarity": 0.2126,
+          "distance": 1.181
+        },
+        {
+          "task_id": "CP-15",
+          "similarity": 0.1643,
+          "distance": 1.2535
         }
       ]
     },
@@ -2434,8 +2448,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.5,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 86.52,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-05",
@@ -2472,12 +2486,12 @@
       "actual_action": "few_shot",
       "top1_id": "CP-01",
       "top1_sim": 0.5758,
-      "margin": 0.0831,
+      "margin": -0.0027,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.76,
-      "path_taken": "struct_filter",
+      "latency_ms": 84.03,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-01",
@@ -2485,14 +2499,14 @@
           "distance": 0.6363
         },
         {
-          "task_id": "CP-43",
-          "similarity": 0.4927,
-          "distance": 0.7609
+          "task_id": "CP-07",
+          "similarity": 0.5785,
+          "distance": 0.6322
         },
         {
-          "task_id": "CP-38",
-          "similarity": 0.4618,
-          "distance": 0.8073
+          "task_id": "CP-83",
+          "similarity": 0.5158,
+          "distance": 0.7264
         }
       ]
     },
@@ -2511,29 +2525,29 @@
       ],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "CP-82",
-      "top1_sim": 0.5583,
-      "margin": 0.0061,
-      "hit_at_1": true,
+      "top1_id": "CP-03",
+      "top1_sim": 0.5521,
+      "margin": 0.0258,
+      "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.06,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 134.11,
+      "path_taken": "soft_filter",
       "top3": [
-        {
-          "task_id": "CP-82",
-          "similarity": 0.5583,
-          "distance": 0.6626
-        },
         {
           "task_id": "CP-03",
           "similarity": 0.5521,
           "distance": 0.6718
         },
         {
-          "task_id": "CP-85",
-          "similarity": 0.5437,
-          "distance": 0.6845
+          "task_id": "CP-16",
+          "similarity": 0.5263,
+          "distance": 0.7105
+        },
+        {
+          "task_id": "CP-82",
+          "similarity": 0.5583,
+          "distance": 0.6626
         }
       ]
     },
@@ -2555,8 +2569,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.43,
-      "path_taken": "struct_filter",
+      "latency_ms": 89.27,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-NEW-3station-oee",
@@ -2595,8 +2609,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 99.76,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 99.3,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-52",
@@ -2636,8 +2650,8 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": true,
-      "latency_ms": 97.39,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 144.47,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-34",
@@ -2650,9 +2664,9 @@
           "distance": 0.6692
         },
         {
-          "task_id": "CP-03",
-          "similarity": 0.5176,
-          "distance": 0.7236
+          "task_id": "CP-33",
+          "similarity": 0.5081,
+          "distance": 0.7378
         }
       ]
     },
@@ -2674,8 +2688,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 91.83,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 100.81,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-NEW-amr-pickup-handoff",
@@ -2712,8 +2726,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 95.89,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 97.41,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-NEW-multi-amr-corridor",
@@ -2752,8 +2766,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 95.01,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 99.17,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-NEW-rl-clone-env",
@@ -2790,8 +2804,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 110.51,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 98.24,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-87",
@@ -2828,8 +2842,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 106.05,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 97.7,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "S-07",
@@ -2868,8 +2882,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.2,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 96.92,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "M-01",
@@ -2906,8 +2920,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.39,
-      "path_taken": "struct_filter",
+      "latency_ms": 98.37,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "FX-01",
@@ -2944,8 +2958,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.18,
-      "path_taken": "struct_filter",
+      "latency_ms": 97.29,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "P-01",
@@ -2982,8 +2996,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.25,
-      "path_taken": "struct_filter",
+      "latency_ms": 95.92,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "M-08",
@@ -3020,8 +3034,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.14,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 101.76,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-64",
@@ -3058,8 +3072,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 102.99,
-      "path_taken": "struct_filter",
+      "latency_ms": 101.8,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "A-09",
@@ -3096,8 +3110,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 106.92,
-      "path_taken": "struct_filter",
+      "latency_ms": 101.35,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-77",
@@ -3110,9 +3124,9 @@
           "distance": 1.2483
         },
         {
-          "task_id": "CP-45",
-          "similarity": 0.1298,
-          "distance": 1.3054
+          "task_id": "CP-07",
+          "similarity": 0.1756,
+          "distance": 1.2365
         }
       ]
     },
@@ -3128,29 +3142,29 @@
       "acceptable_alternatives": [],
       "expected_action": "fallback",
       "actual_action": "few_shot",
-      "top1_id": "CP-32",
-      "top1_sim": 0.0,
-      "margin": 0.0,
+      "top1_id": "CP-35",
+      "top1_sim": 0.2529,
+      "margin": 0.1123,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 105.68,
-      "path_taken": "struct_filter",
+      "latency_ms": 100.94,
+      "path_taken": "soft_filter",
       "top3": [
         {
-          "task_id": "CP-32",
-          "similarity": 0.0,
-          "distance": 1.5468
+          "task_id": "CP-35",
+          "similarity": 0.2529,
+          "distance": 1.1207
         },
         {
-          "task_id": "CP-82",
-          "similarity": 0.0,
-          "distance": 1.5732
+          "task_id": "CP-16",
+          "similarity": 0.1405,
+          "distance": 1.2892
         },
         {
-          "task_id": "CP-34",
-          "similarity": 0.0,
-          "distance": 1.6349
+          "task_id": "CP-57",
+          "similarity": 0.1405,
+          "distance": 1.2892
         }
       ]
     },
@@ -3172,8 +3186,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 104.92,
-      "path_taken": "struct_filter",
+      "latency_ms": 101.08,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "F-08",
@@ -3210,8 +3224,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 105.79,
-      "path_taken": "struct_filter",
+      "latency_ms": 100.77,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "A-02",
@@ -3254,8 +3268,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.49,
-      "path_taken": "struct_filter",
+      "latency_ms": 99.72,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-25",
@@ -3288,15 +3302,20 @@
       ],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "CP-58",
-      "top1_sim": 0.4808,
-      "margin": 0.0633,
+      "top1_id": "CP-NEW-peg-in-hole-single",
+      "top1_sim": 0.5422,
+      "margin": 0.0614,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 108.53,
-      "path_taken": "struct_filter",
+      "latency_ms": 99.37,
+      "path_taken": "soft_filter",
       "top3": [
+        {
+          "task_id": "CP-NEW-peg-in-hole-single",
+          "similarity": 0.5422,
+          "distance": 0.6866
+        },
         {
           "task_id": "CP-58",
           "similarity": 0.4808,
@@ -3321,24 +3340,24 @@
       "acceptable_alternatives": [],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "F-02",
-      "top1_sim": 0.3088,
-      "margin": 0.0279,
+      "top1_id": "CP-NEW-plc-fixture",
+      "top1_sim": 0.2809,
+      "margin": -0.0279,
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.4,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 96.18,
+      "path_taken": "soft_filter",
       "top3": [
-        {
-          "task_id": "F-02",
-          "similarity": 0.3088,
-          "distance": 1.0368
-        },
         {
           "task_id": "CP-NEW-plc-fixture",
           "similarity": 0.2809,
           "distance": 1.0787
+        },
+        {
+          "task_id": "F-02",
+          "similarity": 0.3088,
+          "distance": 1.0368
         },
         {
           "task_id": "CP-NEW-opcua-12conveyors",
@@ -3368,8 +3387,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 107.76,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 95.68,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-71",
@@ -3408,8 +3427,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 107.17,
-      "path_taken": "struct_filter",
+      "latency_ms": 97.44,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-55",
@@ -3444,12 +3463,12 @@
       "actual_action": "few_shot",
       "top1_id": "CP-19",
       "top1_sim": 0.581,
-      "margin": 0.0415,
+      "margin": 0.0558,
       "hit_at_1": false,
-      "hit_at_3": true,
+      "hit_at_3": false,
       "mode_correct": true,
-      "latency_ms": 106.22,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 96.21,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-19",
@@ -3457,14 +3476,14 @@
           "distance": 0.6285
         },
         {
-          "task_id": "CP-08",
-          "similarity": 0.5395,
-          "distance": 0.6907
-        },
-        {
           "task_id": "CP-25",
           "similarity": 0.5252,
           "distance": 0.7122
+        },
+        {
+          "task_id": "CP-20",
+          "similarity": 0.5227,
+          "distance": 0.716
         }
       ]
     },
@@ -3482,12 +3501,12 @@
       "actual_action": "few_shot",
       "top1_id": "CP-10",
       "top1_sim": 0.5218,
-      "margin": 0.0918,
+      "margin": 0.0015,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.24,
-      "path_taken": "struct_filter",
+      "latency_ms": 95.93,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-10",
@@ -3495,14 +3514,14 @@
           "distance": 0.7173
         },
         {
+          "task_id": "CP-08",
+          "similarity": 0.5203,
+          "distance": 0.7195
+        },
+        {
           "task_id": "CP-25",
           "similarity": 0.43,
           "distance": 0.855
-        },
-        {
-          "task_id": "CP-42",
-          "similarity": 0.4257,
-          "distance": 0.8615
         }
       ]
     },
@@ -3524,8 +3543,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.48,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 100.64,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-11",
@@ -3564,8 +3583,8 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 108.17,
-      "path_taken": "struct_filter",
+      "latency_ms": 104.08,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-31",
@@ -3602,8 +3621,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.73,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 103.55,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-20",
@@ -3640,8 +3659,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.51,
-      "path_taken": "struct_filter",
+      "latency_ms": 102.82,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-07",
@@ -3678,8 +3697,8 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.07,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 102.02,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-77",
@@ -3710,29 +3729,29 @@
       "acceptable_alternatives": [],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "CP-13",
-      "top1_sim": 0.4042,
-      "margin": 0.0722,
-      "hit_at_1": false,
-      "hit_at_3": false,
+      "top1_id": "CP-14",
+      "top1_sim": 0.6858,
+      "margin": 0.1257,
+      "hit_at_1": true,
+      "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.77,
-      "path_taken": "struct_filter",
+      "latency_ms": 100.45,
+      "path_taken": "soft_filter",
       "top3": [
         {
-          "task_id": "CP-13",
-          "similarity": 0.4042,
-          "distance": 0.8937
+          "task_id": "CP-14",
+          "similarity": 0.6858,
+          "distance": 0.4712
         },
         {
-          "task_id": "CP-45",
-          "similarity": 0.332,
-          "distance": 1.002
+          "task_id": "CP-51",
+          "similarity": 0.5601,
+          "distance": 0.6598
         },
         {
-          "task_id": "CP-NEW-y-merge-singulation",
-          "similarity": 0.3066,
-          "distance": 1.0401
+          "task_id": "CP-65",
+          "similarity": 0.5203,
+          "distance": 0.7196
         }
       ]
     },
@@ -3754,8 +3773,8 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.99,
-      "path_taken": "struct_filter",
+      "latency_ms": 101.02,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-35",
@@ -3794,8 +3813,8 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 107.04,
-      "path_taken": "struct_filter",
+      "latency_ms": 99.83,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-35",
@@ -3808,9 +3827,9 @@
           "distance": 1.1366
         },
         {
-          "task_id": "CP-21",
-          "similarity": 0.1844,
-          "distance": 1.2234
+          "task_id": "CP-NEW-inspect-reject",
+          "similarity": 0.2279,
+          "distance": 1.1582
         }
       ]
     },
@@ -3826,29 +3845,29 @@
       "acceptable_alternatives": [],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "CP-45",
-      "top1_sim": 0.4923,
-      "margin": 0.0001,
-      "hit_at_1": false,
-      "hit_at_3": false,
+      "top1_id": "CP-26",
+      "top1_sim": 0.5465,
+      "margin": -0.0124,
+      "hit_at_1": true,
+      "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.09,
-      "path_taken": "struct_filter",
+      "latency_ms": 99.58,
+      "path_taken": "soft_filter",
       "top3": [
+        {
+          "task_id": "CP-26",
+          "similarity": 0.5465,
+          "distance": 0.6802
+        },
+        {
+          "task_id": "CP-51",
+          "similarity": 0.5589,
+          "distance": 0.6616
+        },
         {
           "task_id": "CP-45",
           "similarity": 0.4923,
           "distance": 0.7615
-        },
-        {
-          "task_id": "CP-21",
-          "similarity": 0.4923,
-          "distance": 0.7616
-        },
-        {
-          "task_id": "CP-NEW-y-merge-singulation",
-          "similarity": 0.4717,
-          "distance": 0.7924
         }
       ]
     },
@@ -3870,8 +3889,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 108.73,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 96.05,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-27",
@@ -3904,12 +3923,12 @@
       "actual_action": "hard_instantiate",
       "top1_id": "CP-25",
       "top1_sim": 0.709,
-      "margin": 0.2169,
+      "margin": 0.2315,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 106.54,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 98.75,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-25",
@@ -3917,14 +3936,14 @@
           "distance": 0.4365
         },
         {
-          "task_id": "CP-46",
-          "similarity": 0.4921,
-          "distance": 0.7618
-        },
-        {
           "task_id": "CP-20",
           "similarity": 0.4775,
           "distance": 0.7837
+        },
+        {
+          "task_id": "CP-46",
+          "similarity": 0.4921,
+          "distance": 0.7618
         }
       ]
     },
@@ -3946,8 +3965,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.51,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 98.09,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-19",
@@ -3984,8 +4003,8 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 108.07,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 97.34,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-44",
@@ -4022,8 +4041,8 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 110.8,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 101.72,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-44",
@@ -4056,12 +4075,12 @@
       "actual_action": "few_shot",
       "top1_id": "CP-44",
       "top1_sim": 0.6308,
-      "margin": 0.1235,
+      "margin": 0.1354,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.45,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 103.21,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-44",
@@ -4069,14 +4088,14 @@
           "distance": 0.5538
         },
         {
-          "task_id": "CP-51",
-          "similarity": 0.5073,
-          "distance": 0.7391
-        },
-        {
           "task_id": "CP-45",
           "similarity": 0.4953,
           "distance": 0.757
+        },
+        {
+          "task_id": "CP-51",
+          "similarity": 0.5073,
+          "distance": 0.7391
         }
       ]
     },
@@ -4094,12 +4113,12 @@
       "actual_action": "few_shot",
       "top1_id": "CP-21",
       "top1_sim": 0.6486,
-      "margin": 0.1784,
+      "margin": 0.138,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 107.0,
-      "path_taken": "struct_filter",
+      "latency_ms": 101.88,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-21",
@@ -4107,14 +4126,14 @@
           "distance": 0.5272
         },
         {
+          "task_id": "CP-31",
+          "similarity": 0.5106,
+          "distance": 0.7341
+        },
+        {
           "task_id": "CP-05",
           "similarity": 0.4701,
           "distance": 0.7948
-        },
-        {
-          "task_id": "CP-13",
-          "similarity": 0.4687,
-          "distance": 0.797
         }
       ]
     },
@@ -4136,8 +4155,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.0,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 101.93,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-24",
@@ -4176,8 +4195,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.74,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 102.07,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-49",
@@ -4214,8 +4233,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 107.15,
-      "path_taken": "struct_filter",
+      "latency_ms": 101.15,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-56",
@@ -4252,8 +4271,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.78,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 100.83,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-31",
@@ -4290,8 +4309,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.5,
-      "path_taken": "struct_filter",
+      "latency_ms": 100.43,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-36",
@@ -4304,9 +4323,9 @@
           "distance": 0.888
         },
         {
-          "task_id": "CP-04",
-          "similarity": 0.3815,
-          "distance": 0.9278
+          "task_id": "CP-31",
+          "similarity": 0.3888,
+          "distance": 0.9168
         }
       ]
     },
@@ -4328,8 +4347,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 105.63,
-      "path_taken": "struct_filter",
+      "latency_ms": 99.55,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-23",
@@ -4360,15 +4379,25 @@
       "acceptable_alternatives": [],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "CP-05",
-      "top1_sim": 0.4197,
-      "margin": 0.4197,
-      "hit_at_1": false,
-      "hit_at_3": false,
+      "top1_id": "CP-45",
+      "top1_sim": 0.5373,
+      "margin": 0.0898,
+      "hit_at_1": true,
+      "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.03,
-      "path_taken": "struct_filter",
+      "latency_ms": 98.99,
+      "path_taken": "soft_filter",
       "top3": [
+        {
+          "task_id": "CP-45",
+          "similarity": 0.5373,
+          "distance": 0.694
+        },
+        {
+          "task_id": "CP-23",
+          "similarity": 0.4475,
+          "distance": 0.8287
+        },
         {
           "task_id": "CP-05",
           "similarity": 0.4197,
@@ -4394,8 +4423,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.02,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 99.58,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-77",
@@ -4432,8 +4461,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.36,
-      "path_taken": "struct_filter",
+      "latency_ms": 97.32,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-66",
@@ -4465,16 +4494,26 @@
         "CP-03"
       ],
       "expected_action": "few_shot",
-      "actual_action": "hard_instantiate",
-      "top1_id": "CP-03",
-      "top1_sim": 0.58,
-      "margin": 0.58,
+      "actual_action": "few_shot",
+      "top1_id": "CP-16",
+      "top1_sim": 0.6621,
+      "margin": 0.0813,
       "hit_at_1": true,
       "hit_at_3": true,
-      "mode_correct": false,
-      "latency_ms": 106.14,
-      "path_taken": "struct_filter",
+      "mode_correct": true,
+      "latency_ms": 97.86,
+      "path_taken": "soft_filter",
       "top3": [
+        {
+          "task_id": "CP-16",
+          "similarity": 0.6621,
+          "distance": 0.5069
+        },
+        {
+          "task_id": "CP-35",
+          "similarity": 0.5808,
+          "distance": 0.6288
+        },
         {
           "task_id": "CP-03",
           "similarity": 0.58,
@@ -4502,8 +4541,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 107.62,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 101.95,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-32",
@@ -4537,19 +4576,29 @@
       ],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "CP-03",
-      "top1_sim": 0.4403,
-      "margin": 0.4403,
-      "hit_at_1": false,
-      "hit_at_3": false,
+      "top1_id": "CP-32",
+      "top1_sim": 0.7207,
+      "margin": 0.1041,
+      "hit_at_1": true,
+      "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 109.02,
-      "path_taken": "struct_filter",
+      "latency_ms": 103.46,
+      "path_taken": "soft_filter",
       "top3": [
         {
-          "task_id": "CP-03",
-          "similarity": 0.4403,
-          "distance": 0.8395
+          "task_id": "CP-32",
+          "similarity": 0.7207,
+          "distance": 0.4189
+        },
+        {
+          "task_id": "CP-33",
+          "similarity": 0.6166,
+          "distance": 0.5751
+        },
+        {
+          "task_id": "CP-34",
+          "similarity": 0.5966,
+          "distance": 0.6051
         }
       ]
     },
@@ -4573,8 +4622,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.89,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 104.03,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-50",
@@ -4607,29 +4656,29 @@
       ],
       "expected_action": "few_shot",
       "actual_action": "few_shot",
-      "top1_id": "CP-18",
-      "top1_sim": 0.2733,
-      "margin": 0.0139,
-      "hit_at_1": false,
-      "hit_at_3": false,
+      "top1_id": "CP-NEW-inspect-reject",
+      "top1_sim": 0.459,
+      "margin": 0.0289,
+      "hit_at_1": true,
+      "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.9,
-      "path_taken": "struct_filter",
+      "latency_ms": 102.4,
+      "path_taken": "soft_filter",
       "top3": [
         {
-          "task_id": "CP-18",
-          "similarity": 0.2733,
-          "distance": 1.09
+          "task_id": "CP-NEW-inspect-reject",
+          "similarity": 0.459,
+          "distance": 0.8114
         },
         {
-          "task_id": "CP-23",
-          "similarity": 0.2594,
-          "distance": 1.1109
+          "task_id": "CP-34",
+          "similarity": 0.4302,
+          "distance": 0.8548
         },
         {
-          "task_id": "CP-45",
-          "similarity": 0.2592,
-          "distance": 1.1112
+          "task_id": "CP-33",
+          "similarity": 0.3859,
+          "distance": 0.9212
         }
       ]
     },
@@ -4653,8 +4702,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.64,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 101.02,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-75",
@@ -4691,8 +4740,8 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 109.33,
-      "path_taken": "struct_filter",
+      "latency_ms": 103.51,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-38",
@@ -4705,9 +4754,9 @@
           "distance": 0.7291
         },
         {
-          "task_id": "CP-24",
-          "similarity": 0.5025,
-          "distance": 0.7462
+          "task_id": "CP-83",
+          "similarity": 0.5101,
+          "distance": 0.7348
         }
       ]
     },
@@ -4725,12 +4774,12 @@
       "actual_action": "hard_instantiate",
       "top1_id": "CP-71",
       "top1_sim": 0.6972,
-      "margin": 0.2753,
+      "margin": 0.2893,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 106.22,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 103.8,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-71",
@@ -4738,14 +4787,14 @@
           "distance": 0.4542
         },
         {
-          "task_id": "CP-57",
-          "similarity": 0.4219,
-          "distance": 0.8671
-        },
-        {
           "task_id": "CP-77",
           "similarity": 0.4078,
           "distance": 0.8883
+        },
+        {
+          "task_id": "CP-57",
+          "similarity": 0.4219,
+          "distance": 0.8671
         }
       ]
     },
@@ -4767,8 +4816,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.94,
-      "path_taken": "struct_filter",
+      "latency_ms": 102.1,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-70",
@@ -4803,17 +4852,22 @@
       "actual_action": "few_shot",
       "top1_id": "CP-NEW-tactile-insertion",
       "top1_sim": 0.5166,
-      "margin": 0.1685,
+      "margin": 0.1061,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.25,
-      "path_taken": "struct_filter",
+      "latency_ms": 98.58,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-NEW-tactile-insertion",
           "similarity": 0.5166,
           "distance": 0.7251
+        },
+        {
+          "task_id": "CP-NEW-peg-in-hole-single",
+          "similarity": 0.4105,
+          "distance": 0.8842
         },
         {
           "task_id": "CP-58",
@@ -4842,8 +4896,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.58,
-      "path_taken": "struct_filter",
+      "latency_ms": 94.89,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-58",
@@ -4880,8 +4934,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.39,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 98.03,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-NEW-amr-pickup-handoff",
@@ -4918,8 +4972,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 103.9,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 97.43,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-NEW-multi-amr-corridor",
@@ -4956,8 +5010,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 107.07,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 94.9,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-64",
@@ -4996,8 +5050,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.73,
-      "path_taken": "struct_filter",
+      "latency_ms": 91.39,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-NEW-rl-clone-env",
@@ -5034,8 +5088,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.57,
-      "path_taken": "struct_filter",
+      "latency_ms": 92.25,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-NEW-dr-curriculum",
@@ -5072,8 +5126,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 109.09,
-      "path_taken": "struct_filter",
+      "latency_ms": 90.98,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-87",
@@ -5110,8 +5164,8 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": false,
-      "latency_ms": 103.82,
-      "path_taken": "struct_filter",
+      "latency_ms": 91.35,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-87",
@@ -5150,8 +5204,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.29,
-      "path_taken": "struct_filter",
+      "latency_ms": 89.54,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "R-03",
@@ -5188,8 +5242,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 108.55,
-      "path_taken": "struct_filter",
+      "latency_ms": 95.63,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "FX-01",
@@ -5228,8 +5282,8 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 108.2,
-      "path_taken": "struct_filter",
+      "latency_ms": 89.9,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "E-06",
@@ -5261,30 +5315,30 @@
         "CP-NEW-plc-fixture"
       ],
       "expected_action": "few_shot",
-      "actual_action": "hard_instantiate",
-      "top1_id": "CP-NEW-plc-fixture",
-      "top1_sim": 0.4895,
-      "margin": 0.34,
+      "actual_action": "few_shot",
+      "top1_id": "CP-NEW-plc-conveyor",
+      "top1_sim": 0.5683,
+      "margin": 0.0788,
       "hit_at_1": true,
       "hit_at_3": true,
-      "mode_correct": false,
-      "latency_ms": 106.67,
-      "path_taken": "struct_filter",
+      "mode_correct": true,
+      "latency_ms": 89.55,
+      "path_taken": "soft_filter",
       "top3": [
+        {
+          "task_id": "CP-NEW-plc-conveyor",
+          "similarity": 0.5683,
+          "distance": 0.6476
+        },
         {
           "task_id": "CP-NEW-plc-fixture",
           "similarity": 0.4895,
           "distance": 0.7658
         },
         {
-          "task_id": "CP-NEW-y-merge-singulation",
-          "similarity": 0.1495,
-          "distance": 1.2758
-        },
-        {
-          "task_id": "CP-45",
-          "similarity": 0.0914,
-          "distance": 1.363
+          "task_id": "F-08",
+          "similarity": 0.2739,
+          "distance": 1.0891
         }
       ]
     },
@@ -5306,8 +5360,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 105.57,
-      "path_taken": "struct_filter",
+      "latency_ms": 88.72,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-NEW-plc-fixture",
@@ -5340,12 +5394,12 @@
       "actual_action": "hard_instantiate",
       "top1_id": "CP-NEW-y-merge-singulation",
       "top1_sim": 0.569,
-      "margin": 0.3597,
+      "margin": 0.2337,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 104.73,
-      "path_taken": "struct_filter",
+      "latency_ms": 87.44,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-NEW-y-merge-singulation",
@@ -5353,14 +5407,14 @@
           "distance": 0.6465
         },
         {
-          "task_id": "CP-45",
-          "similarity": 0.2093,
-          "distance": 1.186
+          "task_id": "CP-NEW-cross-belt-sorter",
+          "similarity": 0.3353,
+          "distance": 0.997
         },
         {
-          "task_id": "CP-21",
-          "similarity": 0.191,
-          "distance": 1.2135
+          "task_id": "CP-60",
+          "similarity": 0.306,
+          "distance": 1.041
         }
       ]
     },
@@ -5382,8 +5436,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 108.37,
-      "path_taken": "struct_filter",
+      "latency_ms": 86.14,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-NEW-multi-cam-triangulation",
@@ -5420,8 +5474,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.38,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 85.43,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-NEW-sim2real-gap",
@@ -5460,8 +5514,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.87,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 83.47,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-NEW-defect-sdg",
@@ -5498,8 +5552,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 105.06,
-      "path_taken": "struct_filter",
+      "latency_ms": 87.33,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-NEW-g1-bimanual-tabletop",
@@ -5536,8 +5590,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 106.05,
-      "path_taken": "struct_filter",
+      "latency_ms": 91.17,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-63",
@@ -5576,8 +5630,8 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": true,
-      "latency_ms": 105.1,
-      "path_taken": "struct_filter",
+      "latency_ms": 91.62,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-45",
@@ -5613,12 +5667,12 @@
       "actual_action": "few_shot",
       "top1_id": "CP-01",
       "top1_sim": 0.351,
-      "margin": 0.1357,
+      "margin": 0.1087,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.33,
-      "path_taken": "struct_filter",
+      "latency_ms": 92.76,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-01",
@@ -5626,14 +5680,14 @@
           "distance": 0.9735
         },
         {
+          "task_id": "E-04",
+          "similarity": 0.2423,
+          "distance": 1.1365
+        },
+        {
           "task_id": "CP-39",
           "similarity": 0.2153,
           "distance": 1.1771
-        },
-        {
-          "task_id": "CP-10",
-          "similarity": 0.2072,
-          "distance": 1.1892
         }
       ]
     },
@@ -5653,12 +5707,12 @@
       "actual_action": "few_shot",
       "top1_id": "CP-NEW-y-merge-singulation",
       "top1_sim": 0.3992,
-      "margin": 0.0082,
+      "margin": 0.0364,
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": true,
-      "latency_ms": 104.36,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 90.07,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-NEW-y-merge-singulation",
@@ -5666,14 +5720,14 @@
           "distance": 0.9012
         },
         {
-          "task_id": "CP-67",
-          "similarity": 0.3909,
-          "distance": 0.9136
-        },
-        {
           "task_id": "CP-26",
           "similarity": 0.3628,
           "distance": 0.9558
+        },
+        {
+          "task_id": "CP-67",
+          "similarity": 0.3909,
+          "distance": 0.9136
         }
       ]
     },
@@ -5699,8 +5753,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.7,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 89.53,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-03",
@@ -5739,8 +5793,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.03,
-      "path_taken": "struct_filter",
+      "latency_ms": 91.15,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-NEW-rl-clone-env",
@@ -5777,8 +5831,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 104.84,
-      "path_taken": "struct_filter",
+      "latency_ms": 101.28,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "Y-08",
@@ -5811,12 +5865,12 @@
       "actual_action": "few_shot",
       "top1_id": "CP-31",
       "top1_sim": 0.4066,
-      "margin": 0.0623,
+      "margin": 0.0714,
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 105.84,
-      "path_taken": "fallback_embedding",
+      "latency_ms": 102.02,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-31",
@@ -5824,14 +5878,14 @@
           "distance": 0.8901
         },
         {
-          "task_id": "CP-67",
-          "similarity": 0.3443,
-          "distance": 0.9836
-        },
-        {
           "task_id": "CP-56",
           "similarity": 0.3352,
           "distance": 0.9972
+        },
+        {
+          "task_id": "CP-67",
+          "similarity": 0.3443,
+          "distance": 0.9836
         }
       ]
     },
@@ -5853,8 +5907,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 106.65,
-      "path_taken": "struct_filter",
+      "latency_ms": 103.65,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "F-08",
@@ -5894,8 +5948,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 106.29,
-      "path_taken": "struct_filter",
+      "latency_ms": 100.0,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-NEW-multi-amr-corridor",
@@ -5932,8 +5986,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 107.76,
-      "path_taken": "struct_filter",
+      "latency_ms": 98.28,
+      "path_taken": "soft_filter",
       "top3": [
         {
           "task_id": "CP-NEW-y-merge-singulation",
@@ -5946,9 +6000,9 @@
           "distance": 0.9023
         },
         {
-          "task_id": "CP-45",
-          "similarity": 0.3331,
-          "distance": 1.0003
+          "task_id": "CP-60",
+          "similarity": 0.3894,
+          "distance": 0.9159
         }
       ]
     },
@@ -5970,8 +6024,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 105.62,
-      "path_taken": "struct_filter",
+      "latency_ms": 99.82,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-87",
@@ -6008,8 +6062,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 106.87,
-      "path_taken": "struct_filter",
+      "latency_ms": 96.45,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "F-08",
@@ -6050,8 +6104,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 106.2,
-      "path_taken": "struct_filter",
+      "latency_ms": 95.6,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-02",
@@ -6094,8 +6148,8 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 109.23,
-      "path_taken": "struct_filter",
+      "latency_ms": 103.06,
+      "path_taken": "soft_filter_null",
       "top3": [
         {
           "task_id": "CP-42",

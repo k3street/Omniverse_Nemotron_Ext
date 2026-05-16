@@ -880,6 +880,7 @@ class ChatOrchestrator:
             from .tools.template_retriever import (
                 retrieve_templates_with_scores, format_for_prompt,
                 retrieve_with_intent_filter,
+                retrieve_with_intent_soft_filter,
             )
             # top_k tradeoff: higher k → more gap signal for confidence, but
             # more attention dilution + larger system prompt. 3 is the
@@ -888,27 +889,40 @@ class ChatOrchestrator:
             _template_top_k = int(os.environ.get("TEMPLATE_TOP_K", "3"))
 
             # Block 2 (multimodal foundation spec §7.3): text-prompt
-            # modality → LayoutSpec.intent → structural-filter-first
-            # retrieval. OFF by default (R17 revert: 100-prompt benchmark
-            # showed struct-filter regresses both hit@1 0.820→0.790 AND
-            # hit@3 0.950→0.890 due to Stage-1 pool restriction + ChromaDB
-            # $in truncation; R15d soft-filter hybrid is the proposed fix).
-            # Set MULTIMODAL_TEXT_INTENT=on to opt back in for experiments.
-            _multimodal_text = (
-                os.environ.get("MULTIMODAL_TEXT_INTENT", "off").lower()
-                in ("on", "true", "1", "yes")
-            )
+            # modality → LayoutSpec.intent → structural-filter retrieval.
+            # OFF by default (R17 revert: 100-prompt benchmark showed
+            # hard-filter regresses both hit@1 0.820→0.790 AND hit@3
+            # 0.950→0.890 due to Stage-1 pool restriction + ChromaDB $in
+            # truncation).
+            #
+            # Three modes via MULTIMODAL_TEXT_INTENT env-var:
+            #   off  (default) — embedding-only baseline
+            #   soft           — R15d soft-filter hybrid (boost matching templates)
+            #   on             — legacy hard-filter (Stage-1 restrict + $in query)
+            _intent_mode = os.environ.get("MULTIMODAL_TEXT_INTENT", "off").lower().strip()
+            _multimodal_text = _intent_mode in ("on", "true", "1", "yes", "soft")
+            _use_soft_filter = _intent_mode == "soft"
+
             scored = None
             if _multimodal_text:
                 try:
                     from ..multimodal import produce_layout_spec_from_text
                     spec = produce_layout_spec_from_text(user_message)
                     intent_dump = spec.intent.model_dump(mode="json")
-                    scored = retrieve_with_intent_filter(
-                        intent_dump, top_k=_template_top_k,
-                    )
+                    if _use_soft_filter:
+                        scored = retrieve_with_intent_soft_filter(
+                            intent_dump, top_k=_template_top_k,
+                            original_query=user_message,
+                        )
+                        _filter_path = "soft_filter"
+                    else:
+                        scored = retrieve_with_intent_filter(
+                            intent_dump, top_k=_template_top_k,
+                        )
+                        _filter_path = "hard_filter"
                     logger.info(
-                        f"[{session_id}] multimodal text-intent retrieval: "
+                        f"[{session_id}] multimodal text-intent retrieval "
+                        f"({_filter_path}): "
                         f"pattern={spec.intent.pattern_hint} "
                         f"n_robots={spec.intent.counts.robots} "
                         f"hits={len(scored)}"

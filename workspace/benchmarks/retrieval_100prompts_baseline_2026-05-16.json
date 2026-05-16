@@ -1,7 +1,7 @@
 {
   "benchmark": "retrieval_100prompts",
   "date": "2026-05-16",
-  "round": 17,
+  "round": "15d",
   "mode": "embedding_only_baseline",
   "retrieval_path": "retrieve_templates_with_scores (embedding-only)",
   "env_flag": "MULTIMODAL_TEXT_INTENT=off",
@@ -21,8 +21,8 @@
     "hard_instantiate_rate": 0.16,
     "struct_filter_path_count": 0,
     "fallback_embedding_count": 100,
-    "latency_p50_ms": 102.03,
-    "latency_p95_ms": 106.0
+    "latency_p50_ms": 107.57,
+    "latency_p95_ms": 114.7
   },
   "baseline_delta": null,
   "category_breakdown": {
@@ -189,7 +189,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": false,
-      "latency_ms": 278.11,
+      "latency_ms": 126.5,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -227,7 +227,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 93.44,
+      "latency_ms": 103.2,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -267,7 +267,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 93.03,
+      "latency_ms": 98.54,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -305,7 +305,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 92.83,
+      "latency_ms": 99.6,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -343,7 +343,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 91.58,
+      "latency_ms": 97.99,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -385,7 +385,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 108.14,
+      "latency_ms": 112.87,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -426,7 +426,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 92.25,
+      "latency_ms": 113.63,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -464,7 +464,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 93.25,
+      "latency_ms": 108.82,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -504,7 +504,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 93.54,
+      "latency_ms": 107.71,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -545,7 +545,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": true,
-      "latency_ms": 99.75,
+      "latency_ms": 105.31,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -583,7 +583,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 92.51,
+      "latency_ms": 109.64,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -621,7 +621,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 95.41,
+      "latency_ms": 113.61,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -661,7 +661,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 90.91,
+      "latency_ms": 114.74,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -699,7 +699,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 91.49,
+      "latency_ms": 111.67,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -737,7 +737,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 95.56,
+      "latency_ms": 111.9,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -777,7 +777,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 90.23,
+      "latency_ms": 109.56,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -815,7 +815,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 91.0,
+      "latency_ms": 107.94,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -853,7 +853,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 91.86,
+      "latency_ms": 109.7,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -891,7 +891,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 90.22,
+      "latency_ms": 106.93,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -929,7 +929,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 91.6,
+      "latency_ms": 107.07,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -967,7 +967,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 94.18,
+      "latency_ms": 106.77,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1005,7 +1005,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 103.15,
+      "latency_ms": 109.9,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1043,7 +1043,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 100.48,
+      "latency_ms": 116.91,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1081,7 +1081,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 104.76,
+      "latency_ms": 116.22,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1119,7 +1119,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 101.19,
+      "latency_ms": 114.7,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1163,7 +1163,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.78,
+      "latency_ms": 112.09,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1203,7 +1203,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 108.07,
+      "latency_ms": 106.88,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1241,7 +1241,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.71,
+      "latency_ms": 107.72,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1282,7 +1282,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.91,
+      "latency_ms": 109.18,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1322,7 +1322,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.67,
+      "latency_ms": 108.69,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1362,7 +1362,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 102.07,
+      "latency_ms": 107.23,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1400,7 +1400,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 105.95,
+      "latency_ms": 103.72,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1438,7 +1438,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.77,
+      "latency_ms": 105.58,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1478,7 +1478,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 101.24,
+      "latency_ms": 106.28,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1516,7 +1516,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 101.24,
+      "latency_ms": 107.31,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1554,7 +1554,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 101.99,
+      "latency_ms": 108.05,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1592,7 +1592,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 100.95,
+      "latency_ms": 108.17,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1630,7 +1630,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 100.96,
+      "latency_ms": 106.88,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1668,7 +1668,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.88,
+      "latency_ms": 107.05,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1708,7 +1708,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 101.75,
+      "latency_ms": 107.58,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1746,7 +1746,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.31,
+      "latency_ms": 106.73,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1784,7 +1784,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 99.74,
+      "latency_ms": 107.32,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1822,7 +1822,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 100.97,
+      "latency_ms": 111.68,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1860,7 +1860,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 102.12,
+      "latency_ms": 108.84,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1898,7 +1898,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.92,
+      "latency_ms": 106.78,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1936,7 +1936,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 258.59,
+      "latency_ms": 107.07,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -1974,7 +1974,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.71,
+      "latency_ms": 109.52,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2012,7 +2012,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 101.95,
+      "latency_ms": 107.67,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2050,7 +2050,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.56,
+      "latency_ms": 108.79,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2090,7 +2090,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.5,
+      "latency_ms": 107.07,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2128,7 +2128,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 100.71,
+      "latency_ms": 106.41,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2166,7 +2166,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 101.65,
+      "latency_ms": 109.67,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2204,7 +2204,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 100.98,
+      "latency_ms": 106.53,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2242,7 +2242,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 102.93,
+      "latency_ms": 106.89,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2280,7 +2280,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 101.9,
+      "latency_ms": 106.52,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2318,7 +2318,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 100.84,
+      "latency_ms": 107.08,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2356,7 +2356,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 102.19,
+      "latency_ms": 107.36,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2396,7 +2396,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 102.31,
+      "latency_ms": 107.04,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2436,7 +2436,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 100.35,
+      "latency_ms": 105.66,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2477,7 +2477,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 101.42,
+      "latency_ms": 110.04,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2517,7 +2517,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.07,
+      "latency_ms": 109.94,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2557,7 +2557,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.59,
+      "latency_ms": 107.54,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2597,7 +2597,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.77,
+      "latency_ms": 106.35,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2635,7 +2635,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 104.96,
+      "latency_ms": 109.43,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2673,7 +2673,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 101.2,
+      "latency_ms": 107.53,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2711,7 +2711,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 102.35,
+      "latency_ms": 109.05,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2751,7 +2751,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 102.4,
+      "latency_ms": 107.05,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2791,7 +2791,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 100.73,
+      "latency_ms": 107.28,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2829,7 +2829,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 101.81,
+      "latency_ms": 107.57,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2867,7 +2867,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 102.19,
+      "latency_ms": 108.73,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2905,7 +2905,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 101.6,
+      "latency_ms": 107.9,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2945,7 +2945,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 101.48,
+      "latency_ms": 109.08,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -2983,7 +2983,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.81,
+      "latency_ms": 106.5,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3021,7 +3021,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 102.09,
+      "latency_ms": 102.45,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3059,7 +3059,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": false,
-      "latency_ms": 103.09,
+      "latency_ms": 103.37,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3099,7 +3099,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 101.26,
+      "latency_ms": 99.11,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3137,7 +3137,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.01,
+      "latency_ms": 110.64,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3177,7 +3177,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.0,
+      "latency_ms": 113.72,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3217,7 +3217,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.7,
+      "latency_ms": 108.19,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3255,7 +3255,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 104.96,
+      "latency_ms": 107.84,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3293,7 +3293,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 103.53,
+      "latency_ms": 108.97,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3331,7 +3331,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 101.43,
+      "latency_ms": 107.57,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3369,7 +3369,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 102.67,
+      "latency_ms": 109.96,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3409,7 +3409,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 101.89,
+      "latency_ms": 106.12,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3447,7 +3447,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 101.13,
+      "latency_ms": 108.09,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3485,7 +3485,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 102.03,
+      "latency_ms": 106.71,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3525,7 +3525,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": true,
-      "latency_ms": 102.72,
+      "latency_ms": 106.35,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3566,7 +3566,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 100.71,
+      "latency_ms": 106.83,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3606,7 +3606,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": true,
-      "latency_ms": 103.83,
+      "latency_ms": 106.84,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3648,7 +3648,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 101.24,
+      "latency_ms": 107.02,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3688,7 +3688,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.51,
+      "latency_ms": 106.46,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3726,7 +3726,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 104.06,
+      "latency_ms": 106.73,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3764,7 +3764,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 101.72,
+      "latency_ms": 102.85,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3802,7 +3802,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 101.01,
+      "latency_ms": 108.45,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3843,7 +3843,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 102.68,
+      "latency_ms": 107.57,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3881,7 +3881,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 102.23,
+      "latency_ms": 108.59,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3919,7 +3919,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 103.4,
+      "latency_ms": 108.07,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3957,7 +3957,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 102.82,
+      "latency_ms": 106.2,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -3999,7 +3999,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 102.27,
+      "latency_ms": 105.92,
       "path_taken": "embedding_only",
       "top3": [
         {
@@ -4043,7 +4043,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 105.66,
+      "latency_ms": 108.15,
       "path_taken": "embedding_only",
       "top3": [
         {
