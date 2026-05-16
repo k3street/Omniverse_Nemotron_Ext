@@ -29,9 +29,7 @@
     "tf_root_frame": "panda_link0",
     "max_transform_age_s": 1.0
   },
-  "verify_args": {
-    "stages": []
-  },
+  "verify_args": null,
   "simulate_args": null,
   "diagnose_args": {
     "robot_path": "/World/Franka",

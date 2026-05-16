@@ -85,7 +85,24 @@
       "class": "franka_panda",
       "position": [0, 0, 0.0],
       "orientation": [1, 0, 0, 0]
+    },
+    "excitation": {
+      "duration_s": 120.0,
+      "data_path": "workspace/calibration/franka_excitation.npz",
+      "record_rate_hz": 200.0
+    },
+    "training": {
+      "hidden_dim": 32,
+      "num_layers": 2,
+      "num_epochs": 200,
+      "output_dir": "workspace/calibration/franka_actuator_net"
+    },
+    "checkpoint": {
+      "tag": "post_actuator_net"
+    },
+    "policy": {
+      "action_dim": 7
     }
   },
-  "code_template": "robot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\n_traj_result = record_trajectory(\n    articulation={{primary_robot.path}},\n    duration={{excitation_duration_s}},\n    output_path={{excitation_data_path}},\n    rate_hz={{record_rate_hz}},\n)\n\n_torques = get_joint_torques(\n    articulation={{primary_robot.path}},\n)\n\n_train_result = train_actuator_net(\n    real_data_path={{excitation_data_path}},\n    articulation_path={{primary_robot.path}},\n    hidden_dim={{hidden_dim}},\n    num_layers={{num_layers}},\n    num_epochs={{num_epochs}},\n    output_dir={{actuator_net_output_dir}},\n)\n\ncheckpoint_training(\n    tag={{checkpoint_tag}},\n)\n\nload_rl_policy(\n    robot_path={{primary_robot.path}},\n    policy_path=_train_result[\"checkpoint_path\"],\n    observation_keys=[\"joint_pos\", \"joint_vel\", \"joint_effort\"],\n    action_dim={{action_dim}},\n)"
+  "code_template": "robot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\n_traj_result = record_trajectory(\n    articulation={{primary_robot.path}},\n    duration={{excitation.duration_s}},\n    output_path={{excitation.data_path}},\n    rate_hz={{excitation.record_rate_hz}},\n)\n\n_torques = get_joint_torques(\n    articulation={{primary_robot.path}},\n)\n\n_train_result = train_actuator_net(\n    real_data_path={{excitation.data_path}},\n    articulation_path={{primary_robot.path}},\n    hidden_dim={{training.hidden_dim}},\n    num_layers={{training.num_layers}},\n    num_epochs={{training.num_epochs}},\n    output_dir={{training.output_dir}},\n)\n\ncheckpoint_training(\n    tag={{checkpoint.tag}},\n)\n\nload_rl_policy(\n    robot_path={{primary_robot.path}},\n    policy_path=_train_result[\"checkpoint_path\"],\n    observation_keys=[\"joint_pos\", \"joint_vel\", \"joint_effort\"],\n    action_dim={{policy.action_dim}},\n)"
 }
