@@ -1,0 +1,91 @@
+{
+  "task_id": "CP-NEW-groot-suggest-config",
+  "goal": "Auto-select GR00T fine-tuning hyperparameters for a table-top pick-and-place task (similar_to_pretrain similarity) on an RTX 5070 workstation with 10 real demos: (1) suggest_finetune_config returns a recommended layer-freeze/tune strategy, learning rate, batch size, and epoch count; (2) suggest_data_mix recommends the sim/real/video ratio given the available corpus; (3) finetune_stats audits any previously recorded turns. SUCCESS criterion: suggest_finetune_config returns a non-empty dict containing at least 'learning_rate' and 'freeze_layers' keys, written to /tmp/groot_suggest_config_result.json.",
+  "tools_used": [
+    "suggest_finetune_config",
+    "suggest_data_mix",
+    "finetune_stats"
+  ],
+  "thoughts": [
+    "Pure advisory pipeline \u2014 no robot, no physics. suggest_finetune_config is the primary tool: required args are task_type (str) and hardware (str); optional data_size (int).",
+    "suggest_data_mix complements the config by recommending sim/real/video ratios. Required: task_type (str) and available_data (dict with real_demos, sim_demos, video_demos keys).",
+    "finetune_stats is called last to audit any existing recorded turn corpus \u2014 it takes no required args (FinetuneStatsArgs has pass body). Result is informational.",
+    "SUCCESS is purely structural: suggest_finetune_config must return a dict with 'learning_rate' and 'freeze_layers' present. This is a concrete dict-key assertion, not subjective.",
+    "hardware='RTX 5070' is the lab workstation GPU. task_type='similar_to_pretrain' is the correct enum value when the new task closely resembles GR00T pretraining distribution (pick-and-place is canonical GR00T).",
+    "data_size=10 represents the minimal real-demo scenario \u2014 the 'small data' regime that triggers aggressive freeze strategy in the handler.",
+    "result file /tmp/groot_suggest_config_result.json records both suggest_finetune_config and suggest_data_mix outputs for human inspection."
+  ],
+  "code": "import json\nimport os\n\n# \u2500\u2500 Step 1: Suggest fine-tuning config \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Required: task_type (str), hardware (str). Optional: data_size (int).\nconfig_result = suggest_finetune_config(\n    task_type=\"similar_to_pretrain\",\n    hardware=\"RTX 5070\",\n    data_size=10,\n)\n\n# \u2500\u2500 Step 2: Suggest sim/real/video data mix \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Required: task_type (str), available_data (dict).\nmix_result = suggest_data_mix(\n    task_type=\"tabletop pick-and-place\",\n    available_data={\n        \"real_demos\": 10,\n        \"sim_demos\": 0,\n        \"video_demos\": 0,\n    },\n)\n\n# \u2500\u2500 Step 3: Audit existing corpus (informational) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# FinetuneStatsArgs requires no fields \u2014 call with no args.\nstats_result = finetune_stats()\n\n# \u2500\u2500 Persist results \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nos.makedirs(\"/tmp\", exist_ok=True)\nresult_payload = {\n    \"suggest_finetune_config\": config_result if isinstance(config_result, dict) else {},\n    \"suggest_data_mix\": mix_result if isinstance(mix_result, dict) else {},\n    \"finetune_stats\": stats_result if isinstance(stats_result, dict) else {},\n}\nwith open(\"/tmp/groot_suggest_config_result.json\", \"w\") as f:\n    json.dump(result_payload, f, indent=2)\n\n# \u2500\u2500 Success gate \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncfg = result_payload[\"suggest_finetune_config\"]\nmissing_keys = [k for k in (\"learning_rate\", \"freeze_layers\") if k not in cfg]\nif missing_keys:\n    print(\n        f\"[WARN] suggest_finetune_config result missing expected keys: {missing_keys}. \"\n        f\"Got keys: {list(cfg.keys())}\"\n    )\nelse:\n    print(\n        f\"[OK] GR00T config suggested: lr={cfg['learning_rate']}, \"\n        f\"freeze={cfg['freeze_layers']}. Result: /tmp/groot_suggest_config_result.json\"\n    )\n\nassert os.path.exists(\"/tmp/groot_suggest_config_result.json\"), \"Result file must exist\"",
+  "verify_args": null,
+  "simulate_args": null,
+  "settle_state": null,
+  "diagnose_args": {
+    "expected_keys": [
+      "learning_rate",
+      "freeze_layers"
+    ],
+    "success_condition": "suggest_finetune_config returns dict with learning_rate and freeze_layers",
+    "result_file": "/tmp/groot_suggest_config_result.json"
+  },
+  "verified_status": "drafted-2026-05-16-A36; form-gate-schema pending",
+  "failure_modes": [
+    "suggest_finetune_config returns None: GR00T advisor extension not loaded; enable omni.isaac.groot or check extension list",
+    "suggest_finetune_config returns dict without 'learning_rate' key: handler schema may use different key names (e.g. 'lr', 'base_lr'); add a key-alias fallback",
+    "suggest_data_mix raises TypeError on available_data dict: ensure all three keys (real_demos, sim_demos, video_demos) are present as integers",
+    "finetune_stats returns None: no recorded chat turns in the session database; treat as informational empty result, not a failure",
+    "hardware string 'RTX 5070' not in handler's known GPU lookup table: fall back to 'RTX 4090' as the closest known high-end consumer GPU"
+  ],
+  "extends": "gr00t-finetune-category",
+  "extension_notes": "First groot-finetune canonical focused on pre-training advisory tooling (config + data-mix suggestion) rather than training execution. Distinct from CP-NEW-groot-finetune-n10-demos (runs LoRA training), CP-NEW-groot-export-dataset-hdf5 (data pipeline), and CP-NEW-groot-load-eval-live (policy evaluation). Backlog source: groot-suggest-config-001 (priority_tier=2, no blockers, simple complexity).",
+  "intent": {
+    "pattern_hint": "train",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:training.groot_config",
+      "isaac:model.foundation_vla",
+      "isaac:topology.advisory_only",
+      "isaac:training.hyperparameter_suggestion"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": []
+  },
+  "roles": {
+    "config_advisor": {
+      "constraints": [
+        "suggest_finetune_config"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "data_mix_advisor": {
+      "constraints": [
+        "suggest_data_mix"
+      ],
+      "expected_count": 1,
+      "required": false
+    }
+  },
+  "role_defaults": {
+    "config_advisor": {
+      "task_type": "similar_to_pretrain",
+      "hardware": "RTX 5070",
+      "data_size": 10
+    },
+    "data_mix_advisor": {
+      "task_type": "tabletop pick-and-place",
+      "available_data": {
+        "real_demos": 10,
+        "sim_demos": 0,
+        "video_demos": 0
+      }
+    }
+  },
+  "code_template": "import json, os\nconfig_result = suggest_finetune_config(\n    task_type=\"similar_to_pretrain\",\n    hardware={{config_advisor.hardware}},\n    data_size={{config_advisor.data_size}},\n)\nmix_result = suggest_data_mix(\n    task_type={{data_mix_advisor.task_type}},\n    available_data={{data_mix_advisor.available_data}},\n)\nstats_result = finetune_stats()\nwith open(\"/tmp/groot_suggest_config_result.json\", \"w\") as f:\n    json.dump({\"suggest_finetune_config\": config_result or {}, \"suggest_data_mix\": mix_result or {}}, f, indent=2)\ncfg = config_result if isinstance(config_result, dict) else {}\nassert \"learning_rate\" in cfg and \"freeze_layers\" in cfg, f\"Missing keys in config result: {list(cfg.keys())}\""
+}
