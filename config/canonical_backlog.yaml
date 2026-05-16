@@ -1569,7 +1569,11 @@
   motion_controller_preference: direct_joint
   pattern_hint: finetune
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-groot-load-eval-live.json
+  drafted_date: "2026-05-16"
+  drafted_by: A18
+  draft_notes: "A18; form-gate 0 ERROR 0 WARN (both passes); function-gate BLOCKED (requires GR00T-N1.6-3B weights ~50 GB + HF token + 12 GB free VRAM + omni.isaac.groot extension)"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ROS2 / MIDDLEWARE (~10 entries)  — bridge variants, multi-rate, OPC-UA, etc.
