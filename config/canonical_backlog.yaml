@@ -1540,7 +1540,9 @@
   motion_controller_preference: none
   pattern_hint: finetune
   estimated_agent_minutes: 30
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-groot-redact-finetune.json
+  drafted_date: "2026-05-16"
 
 - id: groot-export-dataset-hdf5-001
   source: retrieval-miss
