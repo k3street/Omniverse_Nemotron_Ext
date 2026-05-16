@@ -56,6 +56,7 @@ VALID_MOTION_CONTROLLER_NAMES = {
     "isaac_ros_cumotion",  # NVIDIA Isaac ROS cuMotion wrapper
     "admittance",       # ros2_control admittance controller (compliance)
     "impedance",        # ros2_control impedance controller (compliance)
+    "cartesian_impedance",  # Cartesian-space impedance controller (compliance, from COMPLIANCE_MODE_ENUM)
     "ros2_control",     # generic ros2_control trajectory controller
     "isaac_lcm",        # Isaac LULA controller manager
     "pinocchio",        # Pinocchio dynamics-based control
