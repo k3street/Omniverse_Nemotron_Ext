@@ -1443,7 +1443,11 @@
   motion_controller_preference: direct_joint
   pattern_hint: rl-train
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-groot-eval-harness-ntask.json
+  drafted_date: "2026-05-16"
+  drafted_by: A51
+  draft_notes: "A51; form-gate 0 ERROR 1 WARN (settle_state absent — expected for train canonical with no delivery criterion); function-gate BLOCKED (GR00T weights + omni.isaac.groot ext)"
 
 - id: rl-calibrate-physics-actuator-001
   source: retrieval-miss
