@@ -1,0 +1,222 @@
+{
+  "task_id": "CP-NEW-yrkesroll-machinist-cnc-load",
+  "goal": "Yrkesroll: CNC machinist (ONET SOC 51-4011). A UR10 picks a raw stock blank from an infeed pallet, opens the CNC machine door (sliding-door proxy via set_attribute on translate axis), places the blank into a fixture (clamp-jaw stand-in cube) directly beneath a spindle (cylinder above fixture), closes the door, triggers a mock machining cycle (sim_control step 300 = 5s sim-time at 60Hz), opens the door again, picks the finished part, and places it on the outfeed pallet. Exercises the full machinist work cycle: blank → door-open → fixture-load → door-close → cycle-dwell → door-open → unload → outfeed. Distinct from CP-NEW-machine-tender-load-unload (which has no door cycle) and CP-NEW-machine-tender-door-interlock (which uses OPC-UA bridge for safety guard, not machinist work cycle).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_bin",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller",
+    "sim_control",
+    "get_world_transform"
+  ],
+  "thoughts": "Design rationale for CP-NEW-yrkesroll-machinist-cnc-load:\n\n1) Yrkesroll framing — CNC machinist (ONET SOC 51-4011) per backlog entry yrkesroll-machinist-cnc-load-001. Role represents human operator's intent; the actual scene work is performed by a UR10 standing in for the machinist's load/unload motions while the CNC executes the cut. Differs from generic machine-tender by explicitly cycling the door open/close and including a spindle prim as visual reference for the machining cut.\n\n2) Topology — single station: infeed pallet (bin) at y=+0.50, outfeed pallet (bin) at y=-0.50, CNC body (Cube housing) at x=+0.60, fixture (Cube clamp-jaw stand-in) at [0.40, 0.0, 0.80] directly beneath the spindle, door (sliding Cube) flush against the CNC body opening, robot UR10 at [0, 0, 0.75] on a 0.75m table. All within UR10 reach (~1.3m).\n\n3) Door as sliding-door proxy — a thin Cube prim parented under /World/CNCBody/Door. Door open/close modelled by set_attribute on xformOp:translate. Closed pose: [0.40, 0.0, 0.95] (door covers CNC opening). Open pose: [0.40, 0.0, 1.30] (door slid upward 0.35m, clearing the working volume). Color toggled via primvars:displayColor to visually signal state (red=open, green=closed). No revolute joint — translate-axis is simpler and avoids articulation root binding conflicts with UR10.\n\n4) Fixture as clamp-jaw stand-in — a flat Cube at [0.40, 0.0, 0.80] (top z = 0.81); workpiece centre z = 0.81 + 0.025 = 0.835 (blank is 0.05m cube). No real clamp constraint (failure mode #4 documents this); during the mock machining cycle the workpiece is held in place by gravity + friction against the fixture surface. Adequate for short 5s sim-time dwell.\n\n5) Spindle — a Cylinder prim at [0.40, 0.0, 1.10] of radius 0.03m, length 0.20m, vertical axis. Visual-only: not animated, not part of physics. Documents the cut location and provides a planning-obstacle clue for the robot (avoid the spindle column on approach).\n\n6) Machining cycle — modelled as sim_control(action='step', step_count=300) (5s sim-time at 60Hz). This is sequential to the load and prior to the unload. The cube is held by gravity-on-fixture during this window; mass=0.5 kg, friction='rubber' material to maximise hold (no clamp). Failure mode #4 calls out that real machining would require a fixed-joint clamp or attach_to_articulation, but the mock cycle is short enough to survive without it.\n\n7) Pick-place sequencing — PHASE 1: setup_pick_place_controller picks blank from infeed bin, places onto fixture. PHASE 2 (after sim_control dwell): second setup_pick_place_controller picks finished part from fixture, places onto outfeed bin. Each phase has its own door-open / door-close set_attribute calls before and after to model the work-cycle.\n\n8) Verification — verify_args.stages encodes the two pick-place phases; simulate_args.target_path = outfeed pallet; diagnose_args includes door, fixture, spindle as obstacles. door_state field in settle_state tracks open→closed→open→closed→open transitions (5 toggles total: open-for-load, close-for-cycle, open-for-unload).\n\n9) Distinct structural tags: isaac:industry.cnc_tending (new — distinct from generic machine_tending), isaac:yrkesroll.machinist (new yrkesroll-axis tag tying to ONET SOC 51-4011), isaac:robot.ur10, isaac:robot.fixed_base.arm, isaac:topology.single_station, isaac:pattern.door_cycle.",
+  "code": "# -- Scene skeleton --------------------------------------------------------\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Robot table\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 1.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# -- Physics: CPU deterministic --------------------------------------------\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# -- UR10 robot ------------------------------------------------------------\nrobot_wizard(\n    robot_name=\"ur10\",\n    dest_path=\"/World/UR10\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# -- CNC machine body (visual housing) -------------------------------------\n# Cube housing at x=+0.60 (right of robot). Contains the spindle and the fixture\n# behind a sliding door. Visual-only; planning-obstacle.\ncreate_prim(\n    prim_path=\"/World/CNCBody\",\n    prim_type=\"Cube\",\n    position=[0.60, 0.0, 1.05],\n    scale=[0.35, 0.45, 0.30],\n)\napply_api_schema(prim_path=\"/World/CNCBody\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/CNCBody\", attr_name=\"primvars:displayColor\", value=[[0.5, 0.55, 0.60]])\n\n# -- CNC sliding door (translate-axis proxy) -------------------------------\n# Closed pose (initial): z=0.95 covers opening.\n# Open pose: z=1.30 slid upward 0.35m, clearing the working volume.\ncreate_prim(\n    prim_path=\"/World/CNCBody/Door\",\n    prim_type=\"Cube\",\n    position=[0.40, 0.0, 0.95],\n    scale=[0.02, 0.40, 0.25],\n)\napply_api_schema(prim_path=\"/World/CNCBody/Door\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/CNCBody/Door\", attr_name=\"primvars:displayColor\", value=[[0.2, 0.7, 0.2]])  # green=closed\n\n# -- CNC fixture (clamp-jaw stand-in) --------------------------------------\n# Flat platform at [0.40, 0.0, 0.80]; top z = 0.81; blank centre z = 0.835.\ncreate_prim(\n    prim_path=\"/World/CNCFixture\",\n    prim_type=\"Cube\",\n    position=[0.40, 0.0, 0.80],\n    scale=[0.10, 0.12, 0.01],\n)\napply_api_schema(prim_path=\"/World/CNCFixture\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/CNCFixture\", attr_name=\"primvars:displayColor\", value=[[0.3, 0.3, 0.35]])\n\n# -- Spindle (visual cylinder above fixture) -------------------------------\ncreate_prim(\n    prim_path=\"/World/Spindle\",\n    prim_type=\"Cylinder\",\n    position=[0.40, 0.0, 1.10],\n    scale=[0.03, 0.03, 0.20],\n)\nset_attribute(prim_path=\"/World/Spindle\", attr_name=\"primvars:displayColor\", value=[[0.8, 0.8, 0.85]])\n\n# -- Infeed pallet (raw stock source) --------------------------------------\ncreate_bin(\n    prim_path=\"/World/InfeedPallet\",\n    position=[0.40, 0.50, 0.80],\n    size=[0.25, 0.25, 0.04],\n)\n\n# -- Outfeed pallet (finished part destination) ----------------------------\ncreate_bin(\n    prim_path=\"/World/OutfeedPallet\",\n    position=[0.40, -0.50, 0.80],\n    size=[0.25, 0.25, 0.04],\n)\n\n# -- Raw stock blank on infeed pallet --------------------------------------\n# Single 0.05m cube. Mass 0.5 kg, rubber material for friction-on-fixture.\ncreate_prim(prim_path=\"/World/RawStock\", prim_type=\"Cube\", position=[0.40, 0.50, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/RawStock\", schema_name=api)\nset_attribute(prim_path=\"/World/RawStock\", attr_name=\"physics:mass\", value=0.5)\napply_physics_material(prim_path=\"/World/RawStock\", material_name=\"rubber\")\nbulk_set_attribute(\n    prim_paths=[\"/World/RawStock\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\n# -- PHASE 1: open door, load blank into fixture ---------------------------\n# Slide door upward (open): translate z 0.95 -> 1.30\nset_attribute(prim_path=\"/World/CNCBody/Door\", attr_name=\"xformOp:translate\", value=[0.40, 0.0, 1.30])\nset_attribute(prim_path=\"/World/CNCBody/Door\", attr_name=\"primvars:displayColor\", value=[[0.9, 0.2, 0.2]])  # red=open\n\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    target_source=\"curobo\",\n    robot_family=\"ur10\",\n    source_paths=[\"/World/RawStock\"],\n    destination_path=\"/World/CNCFixture\",\n    planning_obstacles=[\"/World/Table\", \"/World/CNCBody\", \"/World/Spindle\", \"/World/InfeedPallet\", \"/World/OutfeedPallet\"],\n)\n\n# Verify blank reached fixture\nget_world_transform(prim_path=\"/World/RawStock\")\n\n# -- PHASE 2: close door, trigger mock machining cycle ---------------------\nset_attribute(prim_path=\"/World/CNCBody/Door\", attr_name=\"xformOp:translate\", value=[0.40, 0.0, 0.95])\nset_attribute(prim_path=\"/World/CNCBody/Door\", attr_name=\"primvars:displayColor\", value=[[0.2, 0.7, 0.2]])  # green=closed\n\n# Mock machining cycle: 5s sim-time @ 60Hz = 300 steps\nsim_control(action=\"step\", step_count=300)\n\n# -- PHASE 3: open door, unload finished part to outfeed -------------------\nset_attribute(prim_path=\"/World/CNCBody/Door\", attr_name=\"xformOp:translate\", value=[0.40, 0.0, 1.30])\nset_attribute(prim_path=\"/World/CNCBody/Door\", attr_name=\"primvars:displayColor\", value=[[0.9, 0.2, 0.2]])  # red=open\n\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    target_source=\"curobo\",\n    robot_family=\"ur10\",\n    source_paths=[\"/World/RawStock\"],\n    destination_path=\"/World/OutfeedPallet\",\n    planning_obstacles=[\"/World/Table\", \"/World/CNCBody\", \"/World/Spindle\", \"/World/InfeedPallet\", \"/World/OutfeedPallet\"],\n)\n\n# Verify finished part reached outfeed\nget_world_transform(prim_path=\"/World/RawStock\")\n\n# Close door after work cycle complete (return to safe state)\nset_attribute(prim_path=\"/World/CNCBody/Door\", attr_name=\"xformOp:translate\", value=[0.40, 0.0, 0.95])\nset_attribute(prim_path=\"/World/CNCBody/Door\", attr_name=\"primvars:displayColor\", value=[[0.2, 0.7, 0.2]])  # green=closed",
+  "settle_state": {
+    "workpiece": {
+      "/World/RawStock": [0.40, 0.50, 0.835]
+    },
+    "door_state_sequence": [
+      "closed",
+      "open_for_load",
+      "closed_for_cycle",
+      "open_for_unload",
+      "closed_safe"
+    ],
+    "fixture": {
+      "/World/CNCFixture": [0.40, 0.0, 0.80]
+    },
+    "spindle": {
+      "/World/Spindle": [0.40, 0.0, 1.10]
+    },
+    "door_closed_pos": [0.40, 0.0, 0.95],
+    "door_open_pos": [0.40, 0.0, 1.30]
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/UR10",
+        "pick_path": "/World/InfeedPallet",
+        "place_path": "/World/CNCFixture",
+        "robot_kind": "ur10"
+      },
+      {
+        "robot_path": "/World/UR10",
+        "pick_path": "/World/CNCFixture",
+        "place_path": "/World/OutfeedPallet",
+        "robot_kind": "ur10"
+      }
+    ],
+    "cube_path": "/World/RawStock",
+    "fixture_path": "/World/CNCFixture",
+    "door_path": "/World/CNCBody/Door",
+    "door_open_translate": [0.40, 0.0, 1.30],
+    "door_closed_translate": [0.40, 0.0, 0.95]
+  },
+  "simulate_args": {
+    "target_path": "/World/OutfeedPallet",
+    "cube_path": "/World/RawStock",
+    "duration_s": 180,
+    "xy_tolerance": 0.12,
+    "expected_door_cycles": 2
+  },
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "obstacles": [
+      "/World/Table",
+      "/World/CNCBody",
+      "/World/CNCBody/Door",
+      "/World/CNCFixture",
+      "/World/Spindle",
+      "/World/InfeedPallet",
+      "/World/OutfeedPallet"
+    ],
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "failure_modes": [
+    "Door not open when robot reaches for fixture — collision: if the set_attribute(xformOp:translate) door-open call has not advanced one render frame before setup_pick_place_controller begins planning, cuRobo will see the door in closed pose and either fail IK or report collision. Mitigation: insert sim_control(action='step', step_count=2) between door-open and pick-place-controller setup.",
+    "Gripper releases at wrong height — drop: setup_pick_place_controller's drop_target for fixture is computed from destination_path (CNCFixture) top surface. If the controller mis-estimates the surface z (fixture top = 0.81), the blank may be released too high and bounce off the fixture. Mitigation: pass explicit drop_targets={'/World/RawStock': [0.40, 0.0, 0.835]} for tighter z-control.",
+    "CNC cycle didn't complete before door opened: sim_control(action='step', step_count=300) is sequential, so phase ordering is enforced in code; but a runtime exec_sync executor that schedules tool calls in parallel could re-order phase-2 door-close before phase-1 pick completion. Mitigation: ensure exec_sync handlers wait for setup_pick_place_controller to return before issuing subsequent set_attribute and sim_control calls.",
+    "Fixture clamp not modeled — workpiece flies during simulated cycle: without a real PhysicsFixedJoint locking RawStock to CNCFixture, the cube relies on gravity + rubber friction. At 5s sim-time + 60Hz this is usually stable, but vibration from neighbouring articulation steps can knock it loose. Future work: add apply_api_schema(prim_path=joint_path, schema_name='PhysicsFixedJoint') between RawStock and CNCFixture during the cycle dwell window, then remove before phase 3.",
+    "Door translate via xformOp:translate may not animate visually if the prim lacks an xformOp:translate op stack ordering. create_prim defaults to standard XformOp ordering, but if the door's xformOpOrder is not '[xformOp:translate]' the set_attribute call writes to a non-applied op. Mitigation: confirm by listing list_attributes(/World/CNCBody/Door) and checking xformOpOrder before relying on translate-anim.",
+    "Dual setup_pick_place_controller calls share the UR10 articulation — second call may overwrite the first controller binding. Pattern is verified-working in CP-NEW-machine-tender-load-unload (same shape); rely on that precedent.",
+    "Spindle as Cylinder prim: planning_obstacles=[/World/Spindle] will only block IK if the cylinder has a PhysicsCollisionAPI. This template does NOT apply that schema (spindle is visual-only) — if cuRobo collision-checks against geometry mesh rather than physics colliders, the spindle still serves as obstacle; otherwise the robot may swing through it. Acceptable for static template; tune at scenario-profile level."
+  ],
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 2,
+      "destination_kind": "fixture",
+      "uses_door_cycle": true,
+      "has_machining_dwell": true,
+      "n_door_toggles": 4,
+      "n_workpieces": 1
+    },
+    "structural_tags": [
+      "isaac:industry.cnc_tending",
+      "isaac:yrkesroll.machinist",
+      "isaac:robot.ur10",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:pattern.door_cycle"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["ur10", "ur10e", "franka_panda"],
+      "expected_count": 1,
+      "required": true
+    },
+    "cnc_body": {
+      "constraints": ["cube"],
+      "expected_count": 1,
+      "required": true
+    },
+    "cnc_door": {
+      "constraints": ["cube"],
+      "expected_count": 1,
+      "required": true
+    },
+    "cnc_fixture": {
+      "constraints": ["platform"],
+      "expected_count": 1,
+      "required": true
+    },
+    "spindle": {
+      "constraints": ["cylinder"],
+      "expected_count": 1,
+      "required": true
+    },
+    "infeed_pallet": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "outfeed_pallet": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpiece": {
+      "constraints": ["cube"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/UR10",
+      "class": "ur10",
+      "position": [0, 0, 0.75],
+      "orientation": [1, 0, 0, 0]
+    },
+    "cnc_body": {
+      "path": "/World/CNCBody",
+      "position": [0.60, 0.0, 1.05],
+      "scale": [0.35, 0.45, 0.30]
+    },
+    "cnc_door": {
+      "path": "/World/CNCBody/Door",
+      "closed_translate": [0.40, 0.0, 0.95],
+      "open_translate": [0.40, 0.0, 1.30],
+      "scale": [0.02, 0.40, 0.25]
+    },
+    "cnc_fixture": {
+      "path": "/World/CNCFixture",
+      "position": [0.40, 0.0, 0.80],
+      "scale": [0.10, 0.12, 0.01]
+    },
+    "spindle": {
+      "path": "/World/Spindle",
+      "position": [0.40, 0.0, 1.10],
+      "scale": [0.03, 0.03, 0.20]
+    },
+    "infeed_pallet": {
+      "path": "/World/InfeedPallet",
+      "position": [0.40, 0.50, 0.80],
+      "size": [0.25, 0.25, 0.04]
+    },
+    "outfeed_pallet": {
+      "path": "/World/OutfeedPallet",
+      "position": [0.40, -0.50, 0.80],
+      "size": [0.25, 0.25, 0.04]
+    },
+    "workpiece": {
+      "path": "/World/RawStock",
+      "position": [0.40, 0.50, 0.835],
+      "size": 0.05,
+      "mass": 0.5,
+      "material": "rubber"
+    },
+    "operator_role": {
+      "yrkesroll": "machinist",
+      "onet_soc": "51-4011",
+      "workstation": "cnc_machining_center",
+      "responsibilities": [
+        "load_raw_stock",
+        "trigger_cycle",
+        "unload_finished_part",
+        "operate_door_safety"
+      ]
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 1.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\nrobot_wizard(robot_name={{primary_robot.class}}, dest_path={{primary_robot.path}}, position={{primary_robot.position}}, orientation={{primary_robot.orientation}})\ncreate_prim(prim_path={{cnc_body.path}}, prim_type=\"Cube\", position={{cnc_body.position}}, scale={{cnc_body.scale}})\napply_api_schema(prim_path={{cnc_body.path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path={{cnc_door.path}}, prim_type=\"Cube\", position={{cnc_door.closed_translate}}, scale={{cnc_door.scale}})\napply_api_schema(prim_path={{cnc_door.path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path={{cnc_fixture.path}}, prim_type=\"Cube\", position={{cnc_fixture.position}}, scale={{cnc_fixture.scale}})\napply_api_schema(prim_path={{cnc_fixture.path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path={{spindle.path}}, prim_type=\"Cylinder\", position={{spindle.position}}, scale={{spindle.scale}})\ncreate_bin(prim_path={{infeed_pallet.path}}, position={{infeed_pallet.position}}, size={{infeed_pallet.size}})\ncreate_bin(prim_path={{outfeed_pallet.path}}, position={{outfeed_pallet.position}}, size={{outfeed_pallet.size}})\ncreate_prim(prim_path={{workpiece.path}}, prim_type=\"Cube\", position={{workpiece.position}}, size={{workpiece.size}})\napply_api_schema(prim_path={{workpiece.path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{workpiece.path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{workpiece.path}}, schema_name=\"PhysicsMassAPI\")\nset_attribute(prim_path={{workpiece.path}}, attr_name=\"physics:mass\", value={{workpiece.mass}})\napply_physics_material(prim_path={{workpiece.path}}, material_name={{workpiece.material}})\nset_attribute(prim_path={{cnc_door.path}}, attr_name=\"xformOp:translate\", value={{cnc_door.open_translate}})\nsetup_pick_place_controller(robot_path={{primary_robot.path}}, target_source=\"curobo\", robot_family={{primary_robot.class}}, source_paths=[{{workpiece.path}}], destination_path={{cnc_fixture.path}}, planning_obstacles=[\"/World/Table\", {{cnc_body.path}}, {{spindle.path}}, {{infeed_pallet.path}}, {{outfeed_pallet.path}}])\nget_world_transform(prim_path={{workpiece.path}})\nset_attribute(prim_path={{cnc_door.path}}, attr_name=\"xformOp:translate\", value={{cnc_door.closed_translate}})\nsim_control(action=\"step\", step_count=300)\nset_attribute(prim_path={{cnc_door.path}}, attr_name=\"xformOp:translate\", value={{cnc_door.open_translate}})\nsetup_pick_place_controller(robot_path={{primary_robot.path}}, target_source=\"curobo\", robot_family={{primary_robot.class}}, source_paths=[{{workpiece.path}}], destination_path={{outfeed_pallet.path}}, planning_obstacles=[\"/World/Table\", {{cnc_body.path}}, {{spindle.path}}, {{infeed_pallet.path}}, {{outfeed_pallet.path}}])\nget_world_transform(prim_path={{workpiece.path}})\nset_attribute(prim_path={{cnc_door.path}}, attr_name=\"xformOp:translate\", value={{cnc_door.closed_translate}})",
+  "simulate_args_template": {
+    "target_path": "{{outfeed_pallet.path}}",
+    "cube_path": "{{workpiece.path}}",
+    "duration_s": 180,
+    "xy_tolerance": 0.12
+  },
+  "verified_status": "build-spec-2026-05-16; form-gate-schema pending; smoke-test pending",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo", "rmpflow"],
+    "failed": {}
+  },
+  "extension_notes": null
+}
