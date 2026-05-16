@@ -111,7 +111,9 @@
   motion_controller_preference: admittance
   pattern_hint: compliance
   estimated_agent_minutes: 240
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-welder-seam-track.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-kit-prep-operator-001
   source: ONET
