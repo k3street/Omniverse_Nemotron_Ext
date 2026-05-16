@@ -20,8 +20,8 @@
     "hard_instantiate_rate": 0.1667,
     "struct_filter_path_count": 16,
     "fallback_embedding_count": 14,
-    "latency_p50_ms": 99.77,
-    "latency_p95_ms": 108.77
+    "latency_p50_ms": 105.69,
+    "latency_p95_ms": 110.13
   },
   "baseline_delta": {
     "hit_at_1": 0.0334,
@@ -146,7 +146,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": false,
-      "latency_ms": 135.4,
+      "latency_ms": 136.16,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -183,7 +183,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": false,
-      "latency_ms": 103.3,
+      "latency_ms": 97.89,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -222,7 +222,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 98.93,
+      "latency_ms": 96.83,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -259,7 +259,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 103.3,
+      "latency_ms": 94.56,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -291,7 +291,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 101.73,
+      "latency_ms": 95.37,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -332,7 +332,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 102.45,
+      "latency_ms": 96.09,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -372,7 +372,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 98.01,
+      "latency_ms": 95.18,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -409,7 +409,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 98.1,
+      "latency_ms": 94.99,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -448,7 +448,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 99.77,
+      "latency_ms": 96.17,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -488,7 +488,7 @@
       "hit_at_1": false,
       "hit_at_3": false,
       "mode_correct": true,
-      "latency_ms": 98.65,
+      "latency_ms": 92.96,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -525,7 +525,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 97.47,
+      "latency_ms": 95.41,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -562,7 +562,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 96.9,
+      "latency_ms": 92.98,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -601,7 +601,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 99.33,
+      "latency_ms": 110.13,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -638,7 +638,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 97.33,
+      "latency_ms": 105.37,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -675,7 +675,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 100.34,
+      "latency_ms": 109.32,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -714,7 +714,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 100.15,
+      "latency_ms": 106.99,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -751,7 +751,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 98.28,
+      "latency_ms": 107.9,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -788,7 +788,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 99.62,
+      "latency_ms": 107.44,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -825,7 +825,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 106.04,
+      "latency_ms": 108.37,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -862,7 +862,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 108.77,
+      "latency_ms": 105.93,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -899,7 +899,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 99.78,
+      "latency_ms": 106.62,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -936,7 +936,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 95.05,
+      "latency_ms": 106.5,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -973,7 +973,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 97.03,
+      "latency_ms": 105.25,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -1010,7 +1010,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 100.8,
+      "latency_ms": 108.33,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -1047,7 +1047,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": false,
-      "latency_ms": 100.72,
+      "latency_ms": 105.69,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -1090,7 +1090,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 100.22,
+      "latency_ms": 107.5,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -1129,7 +1129,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 99.86,
+      "latency_ms": 107.61,
       "path_taken": "struct_filter",
       "top3": [
         {
@@ -1166,7 +1166,7 @@
       "hit_at_1": false,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 98.66,
+      "latency_ms": 105.72,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -1206,7 +1206,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 98.34,
+      "latency_ms": 105.57,
       "path_taken": "fallback_embedding",
       "top3": [
         {
@@ -1245,7 +1245,7 @@
       "hit_at_1": true,
       "hit_at_3": true,
       "mode_correct": true,
-      "latency_ms": 98.36,
+      "latency_ms": 105.41,
       "path_taken": "struct_filter",
       "top3": [
         {
