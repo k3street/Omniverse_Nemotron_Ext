@@ -1131,7 +1131,11 @@
   motion_controller_preference: direct_joint
   pattern_hint: rl-train
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_id: CP-NEW-eureka-pick-place-reward
+  drafted_date: "2026-05-16"
+  drafted_by: A7
+  success_criterion: "evaluate_reward score >= 0.50 (numeric float from handler return dict)"
 
 - id: rl-eureka-locomotion-reward-001
   source: retrieval-miss
