@@ -887,7 +887,11 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-rtx-sponge-bowl.json
+  drafted_date: "2026-05-16"
+  drafted_by: A17
+  draft_notes: "A17; form-gate 0 ERROR 0 WARN (both passes); function-gate ⏳ (requires Franka USD + cuRobo + PhysX live Kit)"
 
 - id: research-rtx-drawer-open-close-001
   source: RT-X

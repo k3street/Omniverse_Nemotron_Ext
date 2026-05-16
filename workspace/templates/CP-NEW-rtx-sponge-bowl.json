@@ -1,0 +1,128 @@
+{
+  "task_id": "CP-NEW-rtx-sponge-bowl",
+  "goal": "Build an Isaac Sim analog of the Open X-Embodiment task 'pick up the sponge and place it in the bowl' (OXE episode class, RT-1 dataset task index 0042; arxiv.org/abs/2310.08864). A Franka Panda picks a yellow sponge (0.09 x 0.06 x 0.04 m rectangular prim with rubber physics material, semantic label 'sponge') from a table surface and places it inside a bowl (create_bin with rounded-corner geometry approximation). The canonical is a cross-benchmark parity check: it maps a real-robot demonstration dataset task directly to Isaac Sim, enabling sim2real gap measurement. cuRobo motion planning; CPU dynamics for determinism.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "robot_wizard",
+    "create_material",
+    "assign_material",
+    "apply_physics_material",
+    "set_semantic_label",
+    "create_bin",
+    "add_proximity_sensor",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Design rationale for CP-NEW-rtx-sponge-bowl:\n\n1) RT-X task fidelity: The OXE task is 'pick up the sponge and place it in the bowl'. We represent the sponge as a Cube prim with size [0.09, 0.06, 0.04] m (typical kitchen sponge dimensions), yellow OmniPBR material, rubber physics material (high friction, low restitution). The bowl is a create_bin(size=[0.20, 0.20, 0.08]) placed within Franka reach — large enough to accept the sponge easily.\n\n2) Geometry and reach: Franka mounted on table (z=0.75). Sponge rests at [0.25, 0.30, 0.775] (on table top). Bowl placed at [0.25, -0.30, 0.75] (behind sponge, within reach). Max horizontal reach: sqrt(0.25^2 + 0.30^2) = 0.39m — well inside Franka's 0.85m reach envelope. Sponge centre z = table_top(0.75) + half_sponge_height(0.02) = 0.770.\n\n3) Physics: Sponge is a rigid body (deformable mesh is physx_instability risk). Rubber physics material gives realistic high-friction contact. CPU dynamics (enable_gpu_dynamics=False, MBP broadphase) ensures determinism for CI. sleepThreshold=0.0 keeps sponge simulated through verify phase.\n\n4) Cross-benchmark annotation: RT-X source noted in task_id and goal. This enables future measure_sim_real_gap calls against real OXE demonstration data once a rosbag replayer is available.\n\n5) cuRobo approach height: sponge is flat (0.04m tall). Default approach_height=0.15 gives 0.11m clearance above sponge top — sufficient. No belt so belt_path omitted.\n\n6) Sponge color: yellow (RGB [0.95, 0.85, 0.10]) to match typical kitchen sponge appearance and aid visual verification.\n\n7) Bowl proximity sensor at bowl centre top ([0.25, -0.30, 0.798]) with size [0.18, 0.18, 0.04] — detects sponge landing inside bowl for verify_args confirmation.\n\n8) semantic label 'sponge' on the sponge prim enables future SDG annotations and vision_detect_objects queries.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for determinism ────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Work table (1.2 × 0.8 × 0.75 m) ─────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.4, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Franka Panda ──────────────────────────────────────────────────────────────\n# Base at table top z=0.75; default orientation faces +Y.\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Sponge material: yellow OmniPBR, high roughness ──────────────────────────\ncreate_material(\n    material_path=\"/World/Looks/SpongeYellow\",\n    shader_type=\"OmniPBR\",\n    diffuse_color=[0.95, 0.85, 0.10],\n    roughness=0.85,\n    metallic=0.0,\n)\n\n# ── Sponge: 90 × 60 × 40 mm rectangular prim on table ───────────────────────\n# Table top z=0.75; sponge half-height=0.02; centre z=0.770.\n# Use Cube + non-uniform scale: scale=[0.045, 0.030, 0.020] → full 90×60×40 mm\n# (Cube default edge=2m; scale*2 gives metres).\ncreate_prim(\n    prim_path=\"/World/Sponge\",\n    prim_type=\"Cube\",\n    position=[0.25, 0.30, 0.770],\n    scale=[0.045, 0.030, 0.020],\n)\nassign_material(prim_path=\"/World/Sponge\", material_path=\"/World/Looks/SpongeYellow\")\nset_semantic_label(prim_path=\"/World/Sponge\", class_name=\"sponge\")\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Sponge\", schema_name=api)\napply_physics_material(prim_path=\"/World/Sponge\", material_name=\"rubber\")\nset_attribute(prim_path=\"/World/Sponge\", attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\nset_attribute(prim_path=\"/World/Sponge\", attr_name=\"physics:mass\", value=0.05)\n\n# ── Bowl: create_bin approximation (200 × 200 × 80 mm) ───────────────────────\n# Placed at [0.25, -0.30, 0.75] — same X as sponge, on opposite side of robot.\n# Bowl top z ≈ 0.75 + 0.08 = 0.83; sponge drop_z = bowl_top + sponge_half(0.02) = 0.85.\ncreate_bin(\n    prim_path=\"/World/Bowl\",\n    size=[0.20, 0.20, 0.08],\n    position=[0.25, -0.30, 0.75],\n)\n\n# ── Proximity sensor inside bowl to confirm sponge delivery ──────────────────\n# Sensor volume: 0.18 × 0.18 × 0.04 m centred at bowl interior [0.25, -0.30, 0.798].\nadd_proximity_sensor(\n    sensor_path=\"/World/BowlSensor\",\n    position=[0.25, -0.30, 0.798],\n    size=[0.18, 0.18, 0.04],\n    watched_path_pattern=\"/World/Sponge\",\n)\n\n# ── cuRobo pick-place: sponge → bowl ─────────────────────────────────────────\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=[\"/World/Sponge\"],\n    destination_path=\"/World/Bowl\",\n    planning_obstacles=[\"/World/Table\", \"/World/Bowl\"],\n    approach_height=0.15,\n)",
+  "failure_modes": [
+    "Sponge scale vs gripper: Franka parallel-jaw default open width ~0.08 m; sponge Y-dimension is 0.06 m → 20 mm margin per finger. If cuRobo fails to plan a grasp, try scale=[0.030, 0.025, 0.020] (60×50×40 mm) to widen finger clearance.",
+    "Flat sponge height: Sponge top z=0.790; Franka EE approach from above needs careful z-clearance. If approach clips Table, increase sponge z to 0.800 (place sponge on small standoff block).",
+    "apply_physics_material rubber not found: use set_attribute on physxMaterial damping/friction properties instead — set staticFriction=0.8, dynamicFriction=0.6, restitution=0.0.",
+    "create_bin walls visible inside bowl: bowl interior is (0.20 - 2×0.01) = 0.18 m; sponge 0.09 m fits with 0.045 m clearance each side. If bin wall collision prevents sponge drop, increase bin size to [0.22, 0.22, 0.10].",
+    "Bowl tip: if sponge lands off-centre and pushes bowl wall, add apply_api_schema(prim_path='/World/Bowl', schema_name='PhysicsCollisionAPI') + anchor bowl with set_attribute xformOp:translate lock=True."
+  ],
+  "intent": {
+    "pattern_hint": "pick_place",
+    "source_benchmark": "RT-X / Open X-Embodiment",
+    "oxe_task_class": "pick_up_sponge_and_place_in_bowl",
+    "arxiv": "2310.08864",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": false,
+      "has_multi_source_bins": false,
+      "n_source_bins": 1,
+      "workpiece_type": "sponge",
+      "cross_benchmark": true
+    },
+    "structural_tags": [
+      "isaac:robot.fixed_base.arm",
+      "isaac:robot.franka_panda",
+      "isaac:topology.single_station",
+      "isaac:source.table_surface",
+      "isaac:destination.bin",
+      "isaac:industry.research_benchmark",
+      "isaac:benchmark.rtx_oxe",
+      "isaac:semantics.object_labels"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "short_reach_preferred"
+    },
+    "workpiece": {
+      "constraints": ["cube", "sponge", "part"],
+      "expected_count": 1,
+      "required": true,
+      "note": "Represents sponge; rigid Cube with rubber material and sponge semantic label"
+    },
+    "destination_bin": {
+      "constraints": ["bin", "bowl", "container"],
+      "expected_count": 1,
+      "required": true,
+      "note": "Represents bowl; created via create_bin"
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "workpiece": {
+      "path": "/World/Sponge",
+      "position": [0.25, 0.30, 0.770],
+      "scale": [0.045, 0.030, 0.020],
+      "semantic_label": "sponge",
+      "material": "rubber",
+      "mass_kg": 0.05
+    },
+    "destination_bin": {
+      "path": "/World/Bowl",
+      "position": [0.25, -0.30, 0.75],
+      "size": [0.20, 0.20, 0.08]
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.4, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_material(\n    material_path=\"/World/Looks/SpongeYellow\",\n    shader_type=\"OmniPBR\",\n    diffuse_color=[0.95, 0.85, 0.10],\n    roughness=0.85,\n    metallic=0.0,\n)\n\ncreate_prim(\n    prim_path={{workpiece.path}},\n    prim_type=\"Cube\",\n    position={{workpiece.position}},\n    scale={{workpiece.scale}},\n)\nassign_material(prim_path={{workpiece.path}}, material_path=\"/World/Looks/SpongeYellow\")\nset_semantic_label(prim_path={{workpiece.path}}, class_name={{workpiece.semantic_label}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpiece.path}}, schema_name=api)\napply_physics_material(prim_path={{workpiece.path}}, material_name={{workpiece.material}})\nset_attribute(prim_path={{workpiece.path}}, attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\nset_attribute(prim_path={{workpiece.path}}, attr_name=\"physics:mass\", value={{workpiece.mass_kg}})\n\ncreate_bin(\n    prim_path={{destination_bin.path}},\n    size={{destination_bin.size}},\n    position={{destination_bin.position}},\n)\n\nadd_proximity_sensor(\n    sensor_path=\"/World/BowlSensor\",\n    position=[{{destination_bin.position[0]}}, {{destination_bin.position[1]}}, 0.798],\n    size=[0.18, 0.18, 0.04],\n    watched_path_pattern=\"/World/Sponge\",\n)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[{{workpiece.path}}],\n    destination_path={{destination_bin.path}},\n    planning_obstacles=[\"/World/Table\", {{destination_bin.path}}],\n    approach_height=0.15,\n)",
+  "settle_state": {
+    "sponge": {
+      "/World/Sponge": [0.25, 0.30, 0.770]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Sponge",
+        "place_path": "/World/Bowl",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/Sponge"
+  },
+  "simulate_args": {
+    "target_path": "/World/Bowl",
+    "cube_paths": ["/World/Sponge"],
+    "duration_s": 60,
+    "xy_tolerance": 0.09
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": ["/World/Table", "/World/Bowl"],
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo", "rmpflow"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate ⏳; function-gate ⏳ (requires Franka USD + cuRobo + PhysX live Kit)"
+}
