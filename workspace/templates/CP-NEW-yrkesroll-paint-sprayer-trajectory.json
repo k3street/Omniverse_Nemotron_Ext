@@ -1,0 +1,189 @@
+{
+  "task_id": "CP-NEW-yrkesroll-paint-sprayer-trajectory",
+  "goal": "Yrkesroll: spray painter (ONET SOC 51-9123 — Painting, Coating, and Decorating Workers; backlog also cites adjacent 51-4193 plating-machine code). A UR10 picks a rigid spray-gun proxy (vertical Cylinder body + Cone nozzle joined by a FixedJoint) from a wall mount, then traces a boustrophedon raster across a target Cube panel (0.50 x 0.30 x 0.02 m) while maintaining a ~0.10 m standoff between nozzle tip and panel surface. Linear speed ~0.20 m/s along each raster line. No paint particles are simulated — coverage is verified by recording the TCP trajectory (record_trajectory) and checking that the planar projection of TCP positions visits ≥80% of a discretized panel grid within the allotted simulation window. Distinguishes from CP-NEW-welder-seam-track (single 1-D seam follow, compliance-driven contact) and CP-NEW-oxe-sweep-into-dustpan (debris-push gesture, no parametric coverage). Realizes yrkesroll-paint-sprayer-trajectory-001.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "define_grasp_pose",
+    "setup_pick_place_controller",
+    "move_to_pose",
+    "get_world_transform",
+    "record_trajectory"
+  ],
+  "thoughts": [
+    "Pattern: coverage trajectory (boustrophedon raster) over a planar workpiece. NOT pick_place (the panel never moves), NOT sort (no class routing), NOT insert (no compliance contact), NOT navigate (fixed-base arm). pattern_hint='other'. Discriminating structural_tags: isaac:gesture.coverage_raster + isaac:trajectory.boustrophedon + isaac:yrkesroll.painter + isaac:industry.paint_spray.",
+    "Robot: UR10 chosen for reach (~1.3 m) — a 0.50 x 0.30 m panel + 0.10 m standoff + raster envelope requires Cartesian span ~0.60 m at near-constant Z, which is comfortable in the UR10 upper-arm regime but marginal for Franka (0.855 m reach). UR10 base on the ground at [0, 0, 0] keeps the panel within shoulder height.",
+    "Panel orientation: HORIZONTAL (panel top face at z=0.85, top-down spray). This is the simplest geometry for a constant-standoff raster — TCP just sweeps in the panel-XY plane at z=panel_top+standoff. failure_modes note that a tilted panel (e.g. car door at 30°) would require per-waypoint Z-adjustment from a panel-surface normal lookup, not a constant Z.",
+    "Spray-gun proxy: composite under /World/SprayGun with two rigid children — Body_ (Cylinder, 0.04 m radius, 0.18 m length, vertical) at [0.50, 0.50, 1.20] and Nozzle_ (Cone, 0.025 m radius, 0.06 m length, pointing -Z) at [0.50, 0.50, 1.08]. Joined by PhysicsFixedJointAPI on the Body so the gripper drags both as one rigid composite. Nozzle tip is at z=1.05 — when held by EE at z≈1.20, the tip stands off ~0.10 m above the panel top (z=0.85+0.10=0.95). End-effector_offset in setup_pick_place_controller compensates for the 0.15 m TCP-to-nozzle-tip offset along the gripper Z axis.",
+    "Boustrophedon raster: panel covers x ∈ [0.45, 0.95], y ∈ [-0.15, 0.15]. Line spacing 0.05 m → 7 raster lines along x (y = -0.15, -0.10, -0.05, 0.00, 0.05, 0.10, 0.15) connected by U-turns at alternating ends. Code emits 14 move_to_pose calls (one per raster endpoint) + 2 entry/exit waypoints = 16 waypoints total. Each waypoint at z=panel_top+standoff=0.95, gripper orientation [1,0,0,0] (gun pointing down).",
+    "Initial spray-gun pickup: setup_pick_place_controller with target_source='native' performs the pick phase on /World/SprayGun/Body. drop_targets points to the raster start pose so the controller's release height stays well above the panel — but, like in CP-NEW-oxe-sweep-into-dustpan, the canonical relies on the controller's pick phase completing before the move_to_pose raster chain executes (failure_modes #3 documents the gripper-release-mid-raster risk).",
+    "Speed control: move_to_pose has no native velocity field; speed is approximated by waypoint spacing — adjacent raster endpoints 0.50 m apart at 0.20 m/s = 2.5 s per line. Total raster duration ~7 lines × 2.5 s + 6 U-turns × 1.0 s = ~24 s. The Kit RPC executor scales waypoint dwell internally; explicit velocity scaling is left to a future scenario-profile override (see motion_controllers honesty note).",
+    "Coverage verification: record_trajectory captures UR10 joint trajectory for the full raster duration (30 s). Offline post-processing applies forward kinematics to recover TCP (x,y,z) per frame, projects onto the panel plane (x ∈ [0.45, 0.95], y ∈ [-0.15, 0.15]), discretizes into a 10 x 6 cell grid (5 cm cells), and counts cells whose centre is within ≤0.025 m of any TCP sample. Pass = ≥48/60 cells visited (=80%). get_world_transform on a probe link (/World/UR10/tool0) at raster start and end records the bounding TCP envelope as a smoke check.",
+    "motion_controllers: rmpflow is the preferred planner for raster waypoints — reactive jacobian-based control handles the constant-Z Cartesian sweep cleanly without global re-plans at each U-turn. curobo is untested for this canonical because the planar coverage geometry doesn't exercise its scene-collision strengths. direct_joint is untested. impedance is NOT used (no contact force regulation — the spray gun is stand-off from the panel)."
+  ],
+  "code": "# ── Scene skeleton ──────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1200.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Paint booth fixture (panel sits on this) ─────────────────────────────────\ncreate_prim(prim_path=\"/World/PaintTable\", prim_type=\"Cube\",\n            position=[0.70, 0.0, 0.40], scale=[0.80, 0.50, 0.40])\napply_api_schema(prim_path=\"/World/PaintTable\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Target panel (horizontal, top face at z=0.85) ────────────────────────────\n# Panel footprint x ∈ [0.45, 0.95], y ∈ [-0.15, 0.15], top z = 0.85.\ncreate_prim(prim_path=\"/World/Panel\", prim_type=\"Cube\",\n            position=[0.70, 0.0, 0.84], scale=[0.50, 0.30, 0.02])\napply_api_schema(prim_path=\"/World/Panel\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/Panel\", attr_name=\"primvars:semanticLabel\", value=\"paint_target\")\nset_attribute(prim_path=\"/World/Panel\", attr_name=\"primvars:displayColor\", value=[[0.85, 0.85, 0.85]])\n\n# ── UR10 robot on the ground at origin ───────────────────────────────────────\nrobot_wizard(\n    robot_name=\"ur10\",\n    dest_path=\"/World/UR10\",\n    position=[0, 0, 0],\n    orientation=[1, 0, 0, 0],\n)\nbulk_set_attribute(\n    prim_paths=[\"/World/UR10\"],\n    attr=\"physxArticulation:solverPositionIterationCount\",\n    value=16,\n)\n\n# ── Spray-gun composite (Body cylinder + Nozzle cone, FixedJoint-unified) ────\n# Mounted in the gun rack at [0.50, 0.50, 1.20]. Nozzle tip points -Z to z=1.05.\ncreate_prim(prim_path=\"/World/SprayGun\", prim_type=\"Xform\")\ncreate_prim(\n    prim_path=\"/World/SprayGun/Body\",\n    prim_type=\"Cylinder\",\n    position=[0.50, 0.50, 1.20],\n    scale=[0.04, 0.04, 0.18],\n)\ncreate_prim(\n    prim_path=\"/World/SprayGun/Nozzle\",\n    prim_type=\"Cone\",\n    position=[0.50, 0.50, 1.08],\n    scale=[0.025, 0.025, 0.06],\n)\nfor _part in (\"/World/SprayGun/Body\", \"/World/SprayGun/Nozzle\"):\n    for _api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=_part, schema_name=_api)\nbulk_set_attribute(prim_paths=[\"/World/SprayGun/Body\", \"/World/SprayGun/Nozzle\"], attr=\"physics:mass\", value=0.30)\nbulk_set_attribute(prim_paths=[\"/World/SprayGun/Body\", \"/World/SprayGun/Nozzle\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nbulk_set_attribute(prim_paths=[\"/World/SprayGun/Body\", \"/World/SprayGun/Nozzle\"], attr=\"physxRigidBody:enableCCD\", value=True)\napply_physics_material(prim_path=\"/World/SprayGun/Body\", material_name=\"rubber\")\n# Unify the spray-gun parts into a rigid composite via FixedJoint on the Body.\napply_api_schema(prim_path=\"/World/SprayGun/Body\", schema_name=\"PhysicsFixedJointAPI\")\nset_attribute(prim_path=\"/World/SprayGun/Body\", attr_name=\"primvars:displayColor\", value=[[0.2, 0.2, 0.25]])\nset_attribute(prim_path=\"/World/SprayGun/Nozzle\", attr_name=\"primvars:displayColor\", value=[[0.85, 0.7, 0.1]])\n\n# ── Grasp pose on the spray-gun body (top-down) ──────────────────────────────\ndefine_grasp_pose(\n    robot_path=\"/World/UR10\",\n    object_path=\"/World/SprayGun/Body\",\n    gripper_offset=[0.0, 0.0, 0.0],\n    approach_direction=[0.0, 0.0, -1.0],\n)\n\n# ── Pick-place controller — grasp the spray gun from the rack ────────────────\n# Pick phase grabs the spray gun; drop_targets steers the release point far above\n# the panel so the controller does not fire its release sequence mid-raster.\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    target_source=\"native\",\n    robot_family=\"ur10\",\n    source_paths=[\"/World/SprayGun/Body\"],\n    destination_path=\"/World/Panel\",\n    drop_targets={\"/World/SprayGun/Body\": [0.70, 0.0, 1.50]},\n    end_effector_offset=[0.0, 0.0, 0.15],\n)\n\n# ── Raster trajectory: boustrophedon over the panel ──────────────────────────\n# Panel x ∈ [0.45, 0.95], y ∈ [-0.15, 0.15]. Line spacing 0.05 m → 7 raster lines.\n# Standoff 0.10 m: panel top z=0.85 → TCP z=0.95.\n# Entry waypoint above raster start\nmove_to_pose(\n    articulation_path=\"/World/UR10\",\n    target_position=[0.45, -0.15, 1.10],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"ur10\",\n)\n# Raster line 1 (y=-0.15)\nmove_to_pose(articulation_path=\"/World/UR10\", target_position=[0.45, -0.15, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type=\"ur10\")\nmove_to_pose(articulation_path=\"/World/UR10\", target_position=[0.95, -0.15, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type=\"ur10\")\n# Raster line 2 (y=-0.10, return)\nmove_to_pose(articulation_path=\"/World/UR10\", target_position=[0.95, -0.10, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type=\"ur10\")\nmove_to_pose(articulation_path=\"/World/UR10\", target_position=[0.45, -0.10, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type=\"ur10\")\n# Raster line 3 (y=-0.05, forward)\nmove_to_pose(articulation_path=\"/World/UR10\", target_position=[0.45, -0.05, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type=\"ur10\")\nmove_to_pose(articulation_path=\"/World/UR10\", target_position=[0.95, -0.05, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type=\"ur10\")\n# Raster line 4 (y=0.00, return)\nmove_to_pose(articulation_path=\"/World/UR10\", target_position=[0.95, 0.00, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type=\"ur10\")\nmove_to_pose(articulation_path=\"/World/UR10\", target_position=[0.45, 0.00, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type=\"ur10\")\n# Raster line 5 (y=0.05, forward)\nmove_to_pose(articulation_path=\"/World/UR10\", target_position=[0.45, 0.05, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type=\"ur10\")\nmove_to_pose(articulation_path=\"/World/UR10\", target_position=[0.95, 0.05, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type=\"ur10\")\n# Raster line 6 (y=0.10, return)\nmove_to_pose(articulation_path=\"/World/UR10\", target_position=[0.95, 0.10, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type=\"ur10\")\nmove_to_pose(articulation_path=\"/World/UR10\", target_position=[0.45, 0.10, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type=\"ur10\")\n# Raster line 7 (y=0.15, forward)\nmove_to_pose(articulation_path=\"/World/UR10\", target_position=[0.45, 0.15, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type=\"ur10\")\nmove_to_pose(articulation_path=\"/World/UR10\", target_position=[0.95, 0.15, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type=\"ur10\")\n# Exit waypoint above raster end\nmove_to_pose(\n    articulation_path=\"/World/UR10\",\n    target_position=[0.95, 0.15, 1.10],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"ur10\",\n)\n\n# ── Record TCP trajectory for offline coverage analysis ──────────────────────\nrecord_trajectory(\n    articulation=\"/World/UR10\",\n    duration=30.0,\n    output_path=\"workspace/trajectories/paint_sprayer_raster.npz\",\n    rate_hz=60.0,\n)\n\n# ── Smoke check: TCP world transform at raster start/end ────────────────────\nget_world_transform(prim_path=\"/World/UR10/tool0\")\nget_world_transform(prim_path=\"/World/SprayGun/Nozzle\")",
+  "settle_state": {
+    "static_prims": ["/World/Panel", "/World/PaintTable"],
+    "spray_gun": {
+      "/World/SprayGun/Body": [0.50, 0.50, 1.20],
+      "/World/SprayGun/Nozzle": [0.50, 0.50, 1.08]
+    },
+    "panel": {
+      "/World/Panel": [0.70, 0.0, 0.84],
+      "scale": [0.50, 0.30, 0.02],
+      "top_z": 0.85
+    },
+    "raster_params": {
+      "standoff_m": 0.10,
+      "line_spacing_m": 0.05,
+      "linear_speed_mps": 0.20,
+      "n_raster_lines": 7,
+      "panel_x_range": [0.45, 0.95],
+      "panel_y_range": [-0.15, 0.15]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/UR10",
+        "pick_path": "/World/SprayGun/Body",
+        "place_path": "/World/Panel",
+        "robot_kind": "ur10"
+      }
+    ],
+    "cube_path": "/World/SprayGun/Body",
+    "panel_path": "/World/Panel",
+    "spray_gun_paths": ["/World/SprayGun/Body", "/World/SprayGun/Nozzle"],
+    "trajectory_path": "workspace/trajectories/paint_sprayer_raster.npz",
+    "coverage_grid": [10, 6],
+    "min_coverage_fraction": 0.80
+  },
+  "simulate_args": {
+    "target_path": "/World/Panel",
+    "cube_path": "/World/SprayGun/Body",
+    "duration_s": 60,
+    "xy_tolerance": 0.05
+  },
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "obstacles": ["/World/PaintTable", "/World/Panel", "/World/SprayGun"],
+    "robot_base": [0.0, 0.0, 0.0]
+  },
+  "extends": "yrkesroll-paint-sprayer-trajectory-001",
+  "extension_notes": "Implements yrkesroll-paint-sprayer-trajectory-001 with rigid-spray-gun + horizontal-panel simplifications. Backlog cites ONET 51-4193 (Plating Machine Setters/Operators); the realised yrkesroll uses 51-9123 (Painting, Coating, and Decorating Workers) which is the cleaner ONET match for hand-spray + raster-coverage work. The backlog asset_dependency 'FANUC_M710_USD' is replaced by a generic UR10 (kept in-tree; FANUC asset blocked on Nucleus). 'nucleus_only_asset' blocker is downgraded by the substitution — note the structural difference (UR10 has 0.855 m elbow-up reach vs FANUC M710 1.45 m) and re-tune raster bounds if FANUC is ever wired in. Backlog 'motion_controller_preference: rmpflow' is honored.",
+  "failure_modes": [
+    "STRUCTURAL SIMPLIFICATION: real spray painting models the spray cone, paint particle dynamics, and surface accumulation. This canonical models the spray gun as a rigid composite (Cylinder Body + Cone Nozzle joined by PhysicsFixedJointAPI) and verifies coverage via TCP trajectory ONLY — no particle simulation, no paint texture accumulation, no overspray. Consumers requiring true spray-physics should NOT retrieve this canonical.",
+    "STRUCTURAL SIMPLIFICATION 2: real automotive paint panels are curved (car door, hood, fender). This canonical uses a flat horizontal panel with constant-Z raster. A tilted or curved panel would require per-waypoint Z-adjustment from a surface-normal lookup (e.g. raycast against the panel mesh, project standoff along the normal). Mitigation: add a vision_plan_trajectory or pixel_to_world pass to extract panel-frame waypoints before constructing the raster.",
+    "Gripper releases mid-raster — setup_pick_place_controller may fire its release phase after reaching drop_targets, dropping the spray gun on the panel. Mitigation #1: set drop_targets to a Z far above panel (here z=1.50, panel_top=0.85). Mitigation #2: explicitly hold gripper closed via set_joint_targets on the UR10 gripper joints (if a gripper is mounted) before the raster move_to_pose chain begins. Mitigation #3: switch to a custom Cortex behavior that owns the gripper state across the full raster.",
+    "FixedJoint between Body and Nozzle via PhysicsFixedJointAPI — if the schema is not honored, the nozzle separates from the body during gripper drag and the standoff geometry breaks. Mitigation: switch to a single Xform with PhysicsRigidBodyAPI on the parent and shape children as a composite rigid body; loses the explicit FixedJoint metadata but keeps the parts together for the controller.",
+    "Standoff not maintained — if the raster Z (0.95) is too low, the nozzle drags on the panel; if too high, real-world spray pattern would be too diffuse (here only coverage geometry matters). Default standoff 0.10 m matches typical industrial HVLP gun spec. Tune via raster_params.standoff_m in settle_state.",
+    "Line spacing too wide — at line_spacing=0.05 m on a 0.30 m panel width, we get 7 lines × 0.05 m = 0.30 m exactly; coverage is dense. If spacing is widened to 0.08 m or more, gaps appear in the discretized coverage grid and the 80% threshold fails. Tune via raster_params.line_spacing_m.",
+    "U-turn overshoot — at sharp end-of-line turns, rmpflow's reactive jacobian control may overshoot the panel edge before doubling back. Mitigation: add intermediate sub-waypoints 0.02 m beyond the panel edge so the reversal happens off-panel; or reduce velocity_scaling at U-turn waypoints (not directly supported in current move_to_pose schema — would need a future per-waypoint speed override).",
+    "Panel orientation: code assumes horizontal panel (Z-normal). A vertical or 30°-tilted panel changes the raster geometry: the constant-Z plane misses the surface. failure_modes #2 covers the curved-panel case; for tilted-flat panels, swap target_position[2] for a panel-frame-projected coordinate computed offline.",
+    "move_to_pose has no native velocity parameter — 'linear speed ~0.20 m/s' is approximate, determined by Kit RPC executor's internal dwell scaling between waypoints. Real industrial paint robots use ros2_control trajectory streams with explicit per-segment velocities. Future work: implement velocity_scaling on a per-waypoint basis or stream the raster as a follow_trajectory_with_compliance trajectory with explicit pose timings.",
+    "record_trajectory captures joint trajectory, not TCP — coverage verification requires forward kinematics offline to recover (x,y,z)_TCP per frame. Output .npz contains joint positions/velocities/efforts; the consumer (verify pass) must run UR10 FK against the recorded joints. If the consumer skips FK and uses joint values directly, the coverage check is meaningless.",
+    "Spray-gun pickup race — if the pick_place_controller's pick phase has not completed (gripper not closed on Body) before the first move_to_pose fires, the gun is left in the rack and the raster sweeps an empty TCP through air. Mitigation: insert sim_control(action='step', step_count=60) (1 s) between setup_pick_place_controller and the first raster waypoint to allow the pick phase to settle."
+  ],
+  "verified_status": "drafted-2026-05-16; form-gate-schema ⏳ pending-lint; function-gate ⏳ Kit RPC; structural-simplifications-noted (rigid spray-gun, flat horizontal panel, no particle physics)",
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": ["rmpflow", "curobo", "direct_joint"]
+  },
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "uses_tool_proxy": true,
+      "has_coverage_trajectory": true,
+      "n_raster_lines": 7,
+      "raster_spacing_m": 0.05,
+      "standoff_m": 0.10
+    },
+    "structural_tags": [
+      "isaac:yrkesroll.painter",
+      "isaac:industry.paint_spray",
+      "isaac:gesture.coverage_raster",
+      "isaac:trajectory.boustrophedon",
+      "isaac:robot.fixed_base.arm",
+      "isaac:robot.ur10",
+      "isaac:topology.single_station",
+      "isaac:tool_use.spray_gun",
+      "isaac:workpiece.panel"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["ur10", "ur10e", "ur5e", "franka_panda"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "reach_geq_1m_for_panel_raster"
+    },
+    "spray_gun": {
+      "constraints": ["spray_gun", "tool", "composite_rigid"],
+      "expected_count": 1,
+      "required": true,
+      "note": "Composite Xform: Body (Cylinder) + Nozzle (Cone) unified by FixedJoint"
+    },
+    "panel": {
+      "constraints": ["cube", "panel", "flat_surface"],
+      "expected_count": 1,
+      "required": true,
+      "note": "Horizontal target panel; top face is the coverage surface"
+    },
+    "paint_table": {
+      "constraints": ["cube", "fixture"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/UR10",
+      "class": "ur10",
+      "position": [0, 0, 0],
+      "orientation": [1, 0, 0, 0]
+    },
+    "spray_gun": {
+      "path": "/World/SprayGun",
+      "body_path": "/World/SprayGun/Body",
+      "nozzle_path": "/World/SprayGun/Nozzle",
+      "body_position": [0.50, 0.50, 1.20],
+      "nozzle_position": [0.50, 0.50, 1.08]
+    },
+    "panel": {
+      "path": "/World/Panel",
+      "position": [0.70, 0.0, 0.84],
+      "scale": [0.50, 0.30, 0.02],
+      "top_z": 0.85
+    },
+    "paint_table": {
+      "path": "/World/PaintTable",
+      "position": [0.70, 0.0, 0.40],
+      "scale": [0.80, 0.50, 0.40]
+    },
+    "operator_role": {
+      "yrkesroll": "spray_painter",
+      "title": "Spray Painter / Coating Operator",
+      "onet_soc": "51-9123",
+      "onet_soc_title": "Painting, Coating, and Decorating Workers",
+      "onet_soc_note": "51-9123 is the direct ONET match for hand-spray + raster-coverage work. Backlog yrkesroll-paint-sprayer-trajectory-001 cites 51-4193 (Plating Machine Setters/Operators), which is a less precise sibling code; 51-9123 covers manual-spray with operator-controlled gun trajectory and is preferred here. Adjacent 51-9121 (Coating, Painting, and Spraying Machine Setters, Operators, and Tenders) is also acceptable when the workflow emphasises automated tending of a machine-controlled spray cycle.",
+      "workstation": "paint_booth",
+      "responsibilities": [
+        "load_spray_gun",
+        "follow_coverage_trajectory",
+        "maintain_standoff_distance",
+        "verify_coverage_completion"
+      ]
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1200.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\ncreate_prim(prim_path={{paint_table.path}}, prim_type=\"Cube\", position={{paint_table.position}}, scale={{paint_table.scale}})\napply_api_schema(prim_path={{paint_table.path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path={{panel.path}}, prim_type=\"Cube\", position={{panel.position}}, scale={{panel.scale}})\napply_api_schema(prim_path={{panel.path}}, schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path={{panel.path}}, attr_name=\"primvars:semanticLabel\", value=\"paint_target\")\nrobot_wizard(robot_name={{primary_robot.class}}, dest_path={{primary_robot.path}}, position={{primary_robot.position}}, orientation={{primary_robot.orientation}})\ncreate_prim(prim_path={{spray_gun.path}}, prim_type=\"Xform\")\ncreate_prim(prim_path={{spray_gun.body_path}}, prim_type=\"Cylinder\", position={{spray_gun.body_position}}, scale=[0.04, 0.04, 0.18])\ncreate_prim(prim_path={{spray_gun.nozzle_path}}, prim_type=\"Cone\", position={{spray_gun.nozzle_position}}, scale=[0.025, 0.025, 0.06])\nfor _part in ({{spray_gun.body_path}}, {{spray_gun.nozzle_path}}):\n    for _api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=_part, schema_name=_api)\nbulk_set_attribute(prim_paths=[{{spray_gun.body_path}}, {{spray_gun.nozzle_path}}], attr=\"physics:mass\", value=0.30)\nbulk_set_attribute(prim_paths=[{{spray_gun.body_path}}, {{spray_gun.nozzle_path}}], attr=\"physxRigidBody:enableCCD\", value=True)\napply_physics_material(prim_path={{spray_gun.body_path}}, material_name=\"rubber\")\napply_api_schema(prim_path={{spray_gun.body_path}}, schema_name=\"PhysicsFixedJointAPI\")\ndefine_grasp_pose(robot_path={{primary_robot.path}}, object_path={{spray_gun.body_path}}, gripper_offset=[0.0, 0.0, 0.0], approach_direction=[0.0, 0.0, -1.0])\nsetup_pick_place_controller(robot_path={{primary_robot.path}}, target_source=\"native\", robot_family={{primary_robot.class}}, source_paths=[{{spray_gun.body_path}}], destination_path={{panel.path}}, drop_targets={{{spray_gun.body_path}}: [0.70, 0.0, 1.50]}, end_effector_offset=[0.0, 0.0, 0.15])\nmove_to_pose(articulation_path={{primary_robot.path}}, target_position=[0.45, -0.15, 1.10], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type={{primary_robot.class}})\nmove_to_pose(articulation_path={{primary_robot.path}}, target_position=[0.45, -0.15, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type={{primary_robot.class}})\nmove_to_pose(articulation_path={{primary_robot.path}}, target_position=[0.95, -0.15, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type={{primary_robot.class}})\nmove_to_pose(articulation_path={{primary_robot.path}}, target_position=[0.95, 0.15, 0.95], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type={{primary_robot.class}})\nmove_to_pose(articulation_path={{primary_robot.path}}, target_position=[0.95, 0.15, 1.10], target_orientation=[1.0, 0.0, 0.0, 0.0], planner=\"rmpflow\", robot_type={{primary_robot.class}})\nrecord_trajectory(articulation={{primary_robot.path}}, duration=30.0, output_path=\"workspace/trajectories/paint_sprayer_raster.npz\", rate_hz=60.0)\nget_world_transform(prim_path={{spray_gun.nozzle_path}})"
+}
