@@ -1,0 +1,191 @@
+{
+  "task_id": "CP-NEW-sorter-color-3lane",
+  "goal": "Build a 3-lane color sorter: a Franka arm picks cubes from an infeed conveyor and routes them to one of three destination bins (RedBin, GreenBin, BlueBin) based on cube color. Nine cubes arrive in a repeating red/green/blue pattern (3 of each); semantic labels are applied so add_vision_classifier_gate can classify each cube by color. setup_pick_place_controller with color_routing dispatches to the correct bin. An overhead camera is positioned above the pick station for vision classification. Exercises the 3-way color_routing pattern — the minimum distinguishing step beyond the 2-bin inspect/reject canonical.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "robot_wizard",
+    "create_conveyor",
+    "create_material",
+    "assign_material",
+    "set_semantic_label",
+    "create_bin",
+    "set_camera_look_at",
+    "add_proximity_sensor",
+    "add_vision_classifier_gate",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Design rationale for CP-NEW-sorter-color-3lane:\n\n1) Three-bin routing distinguishes this from the 2-bin inspect/reject template (CP-NEW-inspect-reject). color_routing dict now has 3 keys: {'red': '/World/RedBin', 'green': '/World/GreenBin', 'blue': '/World/BlueBin'}. The extra bin changes geometry constraints — three bins must fit within Franka's 0.85m reach envelope.\n\n2) Bin geometry: bins are 0.28×0.28×0.15m placed at y=-0.45 (behind robot), equally spaced in X:\n   RedBin   x=-0.40, GreenBin x=0.00, BlueBin x=+0.40.\n   Maximum horizontal distance = sqrt(0.40^2 + 0.45^2) = 0.60m — inside 0.85m reach. Robot base at [0,0,0.75].\n\n3) Conveyor in front at y=+0.40, belt top z=0.805. 9 cubes (0.06m) at z_centre=0.835, spaced 0.20m apart starting at x=-1.60. Belt speed 0.12 m/s; pick sensor at [x=0.30, y=0.40, z=0.835].\n\n4) Cube color pattern: repeating red/green/blue × 3. Materials use OmniPBR shader_type with RGB diffuse. Semantic labels ('red cube', 'green cube', 'blue cube') enable vision classification.\n\n5) Overhead classification camera placed at [0, 0.40, 1.30], looking at [0, 0.40, 0.835]. Used by add_vision_classifier_gate with class_labels=['red cube','green cube','blue cube'] and destination_map.\n\n6) add_vision_classifier_gate returns cube_to_destination which feeds color_routing. In code we pass the destination_map directly so the gate builds the mapping at runtime; setup_pick_place_controller receives color_routing as the returned dict.\n\n7) Physics: CPU dynamics (enable_gpu_dynamics=False, MBP broadphase) for determinism on small scenes. sleepThreshold=0.0 on all cubes.\n\n8) cuRobo plans for Franka naturally; planning_obstacles include table, conveyor, and all three bins.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=1200.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for determinism ────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Robot table ───────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 1.0, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Franka arm ────────────────────────────────────────────────────────────────\n# Mounted on table top (z=0.75); faces +Y (conveyor). Reach ~0.85m.\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Infeed conveyor (front, y=+0.40) ─────────────────────────────────────────\n# Belt top z = 0.78 + 0.025 = 0.805; cube centre z = 0.805 + 0.03 = 0.835.\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.40, 0.78],\n    size=[3.0, 0.3, 0.05],\n    surface_velocity=[0.12, 0, 0],\n)\n\n# ── Materials (OmniPBR, one per color) ───────────────────────────────────────\ncreate_material(material_path=\"/World/Looks/MatRed\",   shader_type=\"OmniPBR\", diffuse_color=[0.9, 0.05, 0.05])\ncreate_material(material_path=\"/World/Looks/MatGreen\", shader_type=\"OmniPBR\", diffuse_color=[0.05, 0.80, 0.05])\ncreate_material(material_path=\"/World/Looks/MatBlue\",  shader_type=\"OmniPBR\", diffuse_color=[0.05, 0.15, 0.90])\n\n# ── 9 cubes: 3 red, 3 green, 3 blue in repeating pattern ─────────────────────\n# cube size=0.06m; centre z=0.835; spaced 0.20m apart starting at x=-1.60.\n_cube_colors = [\"red\", \"green\", \"blue\", \"red\", \"green\", \"blue\", \"red\", \"green\", \"blue\"]\n_mat_map = {\"red\": \"/World/Looks/MatRed\", \"green\": \"/World/Looks/MatGreen\", \"blue\": \"/World/Looks/MatBlue\"}\n_label_map = {\"red\": \"red cube\", \"green\": \"green cube\", \"blue\": \"blue cube\"}\ncube_paths = []\n\nfor i, color in enumerate(_cube_colors):\n    path = f\"/World/Cube_{i+1}\"\n    cube_paths.append(path)\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[-1.60 + i * 0.20, 0.40, 0.835], size=0.06)\n    assign_material(prim_path=path, material_path=_mat_map[color])\n    set_semantic_label(prim_path=path, class_name=_label_map[color])\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    set_attribute(prim_path=path, attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\n\n# ── Three destination bins (behind robot, y=-0.45) ────────────────────────────\n# Equally spaced in X: RedBin x=-0.40, GreenBin x=0.00, BlueBin x=+0.40.\n# Maximum horizontal reach = sqrt(0.40^2+0.45^2) = 0.60m < 0.85m Franka reach.\ncreate_bin(prim_path=\"/World/RedBin\",   position=[-0.40, -0.45, 0.75], size=[0.28, 0.28, 0.15])\ncreate_bin(prim_path=\"/World/GreenBin\", position=[ 0.00, -0.45, 0.75], size=[0.28, 0.28, 0.15])\ncreate_bin(prim_path=\"/World/BlueBin\",  position=[ 0.40, -0.45, 0.75], size=[0.28, 0.28, 0.15])\n\n# ── Overhead classification camera ───────────────────────────────────────────\n# Positioned above pick station, looking down at conveyor pick point.\ncreate_prim(prim_path=\"/World/SortCamera\", prim_type=\"Camera\", position=[0, 0.40, 1.30])\nset_camera_look_at(\n    camera_path=\"/World/SortCamera\",\n    target=[0, 0.40, 0.835],\n    up=[0, 0, 1],\n)\n\n# ── Proximity sensor at pick station (x=0.30, y=0.40) ───────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/PickSensor\",\n    position=[0.30, 0.40, 0.835],\n    size=[0.07, 0.07, 0.07],\n    watched_path_pattern=\"/World/Cube_\",\n)\n\n# ── Vision classifier gate ────────────────────────────────────────────────────\n# Classifies each cube when it enters the pick sensor; builds cube_to_destination\n# mapping consumed by setup_pick_place_controller color_routing.\nadd_vision_classifier_gate(\n    cube_paths=cube_paths,\n    class_labels=[\"red cube\", \"green cube\", \"blue cube\"],\n    camera_path=\"/World/SortCamera\",\n    destination_map={\n        \"red cube\":   \"/World/RedBin\",\n        \"green cube\": \"/World/GreenBin\",\n        \"blue cube\":  \"/World/BlueBin\",\n    },\n)\n\n# ── cuRobo pick-place controller with 3-way color routing ────────────────────\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=cube_paths,\n    destination_path=\"/World/GreenBin\",\n    color_routing={\n        \"red cube\":   \"/World/RedBin\",\n        \"green cube\": \"/World/GreenBin\",\n        \"blue cube\":  \"/World/BlueBin\",\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\",\n                        \"/World/RedBin\", \"/World/GreenBin\", \"/World/BlueBin\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [-1.60, 0.40, 0.835],
+      "/World/Cube_2": [-1.40, 0.40, 0.835],
+      "/World/Cube_3": [-1.20, 0.40, 0.835],
+      "/World/Cube_4": [-1.00, 0.40, 0.835],
+      "/World/Cube_5": [-0.80, 0.40, 0.835],
+      "/World/Cube_6": [-0.60, 0.40, 0.835],
+      "/World/Cube_7": [-0.40, 0.40, 0.835],
+      "/World/Cube_8": [-0.20, 0.40, 0.835],
+      "/World/Cube_9": [ 0.00, 0.40, 0.835]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.12, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/GreenBin",
+        "robot_kind": "franka",
+        "routed_bins": ["/World/RedBin", "/World/GreenBin", "/World/BlueBin"]
+      }
+    ],
+    "cube_paths": [
+      "/World/Cube_1", "/World/Cube_2", "/World/Cube_3",
+      "/World/Cube_4", "/World/Cube_5", "/World/Cube_6",
+      "/World/Cube_7", "/World/Cube_8", "/World/Cube_9"
+    ],
+    "color_routing": {
+      "red cube":   "/World/RedBin",
+      "green cube": "/World/GreenBin",
+      "blue cube":  "/World/BlueBin"
+    }
+  },
+  "simulate_args": {
+    "target_path": "/World/GreenBin",
+    "routed_target_paths": ["/World/RedBin", "/World/GreenBin", "/World/BlueBin"],
+    "cube_paths": [
+      "/World/Cube_1", "/World/Cube_2", "/World/Cube_3",
+      "/World/Cube_4", "/World/Cube_5", "/World/Cube_6",
+      "/World/Cube_7", "/World/Cube_8", "/World/Cube_9"
+    ],
+    "duration_s": 270,
+    "xy_tolerance": 0.09,
+    "per_bin_expected": {"red": 3, "green": 3, "blue": 3}
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": ["/World/RedBin", "/World/GreenBin", "/World/BlueBin", "/World/ConveyorBelt"],
+    "sensor_path": "/World/PickSensor",
+    "camera_path": "/World/SortCamera",
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "failure_modes": [
+    "color_routing class_name mismatch — add_vision_classifier_gate returns class labels like 'red cube'; setup_pick_place_controller color_routing keys must EXACTLY match (space-separated 'red cube', not 'red'). Verify both dicts use the same strings.",
+    "Vision classification fails in headless mode — add_vision_classifier_gate captures viewport which requires a render context; in headless Kit, ensure --/renderer/enabled=true and --/app/window/hideUi=false, or pre-classify by querying Semantics directly.",
+    "RedBin / BlueBin out of reach if robot stiffness low — at x=±0.40, y=-0.45 the reach is 0.60m; acceptable for Franka. If using a shorter arm (UR5e 0.85m reach) ensure bins are pulled inward: x=±0.30.",
+    "Belt too fast for pick cadence — 9 cubes at 0.12 m/s × 0.20m spacing → 0.6s inter-arrival time. If cuRobo cycle time exceeds 0.6s, reduce surface_velocity to 0.08 m/s to avoid missed-pick starvation.",
+    "Three-bin conveyor layout: conveyor at y=+0.40 and bins at y=-0.45 have 0.85m center-to-center Y gap which is within Franka nominal workspace depth (0.95m). If replanning fails on BlueBin at x=+0.40, add gripper_rotation=[0,0,90] for side approach.",
+    "create_bin wall-collision artifacts — three bins at 0.28m width with 0.12m X gaps between them; if PhysX reports wall-to-wall contacts at settle reduce bin size to [0.24, 0.28, 0.15] (increases gap to 0.16m)."
+  ],
+  "intent": {
+    "pattern_hint": "sort",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "n_bins_routed",
+      "uses_conveyor_transport": true,
+      "has_stacking": false,
+      "has_grid_placement": false,
+      "n_destination_bins": 3,
+      "uses_color_routing": true,
+      "uses_vision_classifier_gate": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:placement.multi_bin",
+      "isaac:robot.franka",
+      "isaac:industry.sorting",
+      "isaac:sensor.vision_classifier",
+      "isaac:routing.color_3lane"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur10", "ur5e"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "shorter_reach_ok_if_bins_inward"
+    },
+    "input_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "red_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "green_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "blue_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 3,
+      "max": 9,
+      "param_name": "n_cubes",
+      "unordered": false,
+      "note": "Must be a multiple of 3 for balanced 3-class color split"
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [0.0, 0.40, 0.78],
+      "size": [3.0, 0.3, 0.05],
+      "surface_velocity": [0.12, 0, 0]
+    },
+    "red_bin":   {"path": "/World/RedBin",   "position": [-0.40, -0.45, 0.75], "size": [0.28, 0.28, 0.15]},
+    "green_bin": {"path": "/World/GreenBin", "position": [ 0.00, -0.45, 0.75], "size": [0.28, 0.28, 0.15]},
+    "blue_bin":  {"path": "/World/BlueBin",  "position": [ 0.40, -0.45, 0.75], "size": [0.28, 0.28, 0.15]},
+    "sort_camera": {
+      "path": "/World/SortCamera",
+      "position": [0, 0.40, 1.30],
+      "look_at": [0, 0.40, 0.835]
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [0.30, 0.40, 0.835],
+      "size": [0.07, 0.07, 0.07]
+    },
+    "workpieces": [
+      {"path": "/World/Cube_1", "color": "red",   "position": [-1.60, 0.40, 0.835]},
+      {"path": "/World/Cube_2", "color": "green", "position": [-1.40, 0.40, 0.835]},
+      {"path": "/World/Cube_3", "color": "blue",  "position": [-1.20, 0.40, 0.835]},
+      {"path": "/World/Cube_4", "color": "red",   "position": [-1.00, 0.40, 0.835]},
+      {"path": "/World/Cube_5", "color": "green", "position": [-0.80, 0.40, 0.835]},
+      {"path": "/World/Cube_6", "color": "blue",  "position": [-0.60, 0.40, 0.835]},
+      {"path": "/World/Cube_7", "color": "red",   "position": [-0.40, 0.40, 0.835]},
+      {"path": "/World/Cube_8", "color": "green", "position": [-0.20, 0.40, 0.835]},
+      {"path": "/World/Cube_9", "color": "blue",  "position": [ 0.00, 0.40, 0.835]}
+    ]
+  },
+  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=1200.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 1.0, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\ncreate_material(material_path=\"/World/Looks/MatRed\",   shader_type=\"OmniPBR\", diffuse_color=[0.9, 0.05, 0.05])\ncreate_material(material_path=\"/World/Looks/MatGreen\", shader_type=\"OmniPBR\", diffuse_color=[0.05, 0.80, 0.05])\ncreate_material(material_path=\"/World/Looks/MatBlue\",  shader_type=\"OmniPBR\", diffuse_color=[0.05, 0.15, 0.90])\n\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.06)\nassign_material(prim_path={{workpieces[0].path}}, material_path=\"/World/Looks/MatRed\")\nset_semantic_label(prim_path={{workpieces[0].path}}, class_name=\"red cube\")\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\nset_attribute(prim_path={{workpieces[0].path}}, attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\n\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size=0.06)\nassign_material(prim_path={{workpieces[1].path}}, material_path=\"/World/Looks/MatGreen\")\nset_semantic_label(prim_path={{workpieces[1].path}}, class_name=\"green cube\")\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\nset_attribute(prim_path={{workpieces[1].path}}, attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\n\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cube\", position={{workpieces[2].position}}, size=0.06)\nassign_material(prim_path={{workpieces[2].path}}, material_path=\"/World/Looks/MatBlue\")\nset_semantic_label(prim_path={{workpieces[2].path}}, class_name=\"blue cube\")\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[2].path}}, schema_name=api)\nset_attribute(prim_path={{workpieces[2].path}}, attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\n\ncreate_bin(prim_path={{red_bin.path}},   position={{red_bin.position}},   size={{red_bin.size}})\ncreate_bin(prim_path={{green_bin.path}}, position={{green_bin.position}}, size={{green_bin.size}})\ncreate_bin(prim_path={{blue_bin.path}},  position={{blue_bin.position}},  size={{blue_bin.size}})\n\ncreate_prim(prim_path={{sort_camera.path}}, prim_type=\"Camera\", position={{sort_camera.position}})\nset_camera_look_at(\n    camera_path={{sort_camera.path}},\n    target={{sort_camera.look_at}},\n    up=[0, 0, 1],\n)\n\nadd_proximity_sensor(\n    sensor_path={{pick_sensor.path}},\n    position={{pick_sensor.position}},\n    size={{pick_sensor.size}},\n    watched_path_pattern=\"/World/Cube_\",\n)\n\nadd_vision_classifier_gate(\n    cube_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}],\n    class_labels=[\"red cube\", \"green cube\", \"blue cube\"],\n    camera_path={{sort_camera.path}},\n    destination_map={\n        \"red cube\":   {{red_bin.path}},\n        \"green cube\": {{green_bin.path}},\n        \"blue cube\":  {{blue_bin.path}},\n    },\n)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}],\n    destination_path={{green_bin.path}},\n    color_routing={\n        \"red cube\":   {{red_bin.path}},\n        \"green cube\": {{green_bin.path}},\n        \"blue cube\":  {{blue_bin.path}},\n    },\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{red_bin.path}}, {{green_bin.path}}, {{blue_bin.path}}],\n)",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo", "rmpflow"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate-schema ✓; function-gate ⏳"
+}

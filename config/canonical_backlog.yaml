@@ -259,7 +259,9 @@
   motion_controller_preference: none
   pattern_hint: sort
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-sorter-color-3lane.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-sorter-size-weight-002
   source: industrial-asset
