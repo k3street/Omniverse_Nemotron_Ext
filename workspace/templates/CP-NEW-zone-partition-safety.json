@@ -1,0 +1,113 @@
+{
+  "task_id": "CP-NEW-zone-partition-safety",
+  "goal": "Configure a Franka work cell with a safety zone partition: setup_zone_partition defines an exclusion volume around the robot work area; add_proximity_sensor detects a simulated human-entry prim entering that volume; teleop_safety_config sets watchdog timeout and joint-velocity cap; set_clearance_monitor arms a near-miss alert on the robot links. When the human prim crosses the zone boundary the robot motion inhibit fires and velocity targets zero. Exercises the safety-stop / zone-inhibit pattern — structurally distinct from all sort, pick-place, rl-train, and SDG canonicals.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "robot_wizard",
+    "setup_zone_partition",
+    "add_proximity_sensor",
+    "teleop_safety_config",
+    "set_clearance_monitor",
+    "visualize_clearance",
+    "register_moving_obstacle",
+    "sim_control"
+  ],
+  "thoughts": "Design rationale for CP-NEW-zone-partition-safety:\n\n1) Pattern gap: no existing canonical exercises the zone-inhibit safety workflow. setup_zone_partition + teleop_safety_config + set_clearance_monitor is a distinct 3-tool chain unused elsewhere in the library.\n\n2) Scene geometry:\n   - Robot base at [0, 0, 0.75] (on table). Franka reach ~0.85m.\n   - Zone exclusion volume: 1.0m cube centred at [0, 0, 1.15] — covers the full robot work envelope.\n   - Zone boundary for conveyor side is y=+0.45; human entry prim starts at [0, 1.0, 0.9] (outside) and moves to [0, 0.40, 0.9] (inside zone) to trigger stop.\n\n3) setup_zone_partition in _models.py takes conveyor_path, n_zones, robots — here we repurpose n_zones=1 (single exclusion zone for one robot). The zone is the whole cell; n_zones=1 means one zone, one robot.\n\n4) teleop_safety_config: watchdog_timeout_ms=200 (aggressive for safety demo), max_joint_velocity=0.5 rad/s, workspace_limits aligned with zone volume.\n\n5) set_clearance_monitor: clearance_mm=80 (warning zone 150 mm). target_prims include the human prim and any furniture in the cell.\n\n6) register_moving_obstacle registers the human prim so cuRobo replanning avoids it dynamically.\n\n7) visualize_clearance mode='zones' creates visible trigger volumes for debug rendering.\n\n8) Human entry prim is a simple Capsule (/World/HumanProxy) with a RigidBody so physics moves it. We animate entry by setting linear_velocity toward the zone at sim_control step.\n\n9) Physics: CPU dynamics for determinism. sleepThreshold=0.0 on HumanProxy.\n\n10) Verified_status: drafted only — function gate requires Kit RPC round-trip to confirm inhibit fires.",
+  "code": "# ── Ground and lighting ───────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=900.0)\ncreate_prim(\n    prim_path=\"/World/Ground\",\n    prim_type=\"Cube\",\n    position=[0, 0, -0.5],\n    scale=[20, 20, 1],\n)\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for determinism ─────────────────────────────────────\nset_physics_scene_config(\n    config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"}\n)\n\n# ── Robot mounting table ───────────────────────────────────────────────────────\ncreate_prim(\n    prim_path=\"/World/Table\",\n    prim_type=\"Cube\",\n    position=[0, 0, 0.375],\n    scale=[0.7, 0.7, 0.375],\n)\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Franka arm ────────────────────────────────────────────────────────────────\n# Base at z=0.75 (table top). Faces +Y.\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Safety zone partition ─────────────────────────────────────────────────────\n# n_zones=1: one exclusion zone for the Franka cell.\n# conveyor_path reused as cell_boundary prim; robots list ties zone to Franka.\nsetup_zone_partition(\n    conveyor_path=\"/World/Table\",\n    n_zones=1,\n    robots=[\"/World/Franka\"],\n)\n\n# ── Human-proxy prim (simulated intruder) ─────────────────────────────────────\n# Capsule 1.75m tall, starts OUTSIDE the zone at y=1.0m.\n# Will be moved into zone (y=0.40) to trigger safety stop.\ncreate_prim(\n    prim_path=\"/World/HumanProxy\",\n    prim_type=\"Capsule\",\n    position=[0, 1.0, 0.9],\n)\nset_attribute(\n    prim_path=\"/World/HumanProxy\",\n    attr_name=\"height\",\n    value=1.75,\n)\nset_attribute(\n    prim_path=\"/World/HumanProxy\",\n    attr_name=\"radius\",\n    value=0.25,\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/HumanProxy\", schema_name=api)\nset_attribute(\n    prim_path=\"/World/HumanProxy\",\n    attr_name=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\n# ── Proximity sensor — zone boundary ─────────────────────────────────────────\n# 1.0m cube volume centred at [0, 0.45, 1.15]; any HumanProxy overlap triggers.\nadd_proximity_sensor(\n    sensor_path=\"/World/ZoneBoundarySensor\",\n    position=[0, 0.45, 1.15],\n    size=[1.0, 0.10, 1.5],\n    watched_path_pattern=\"/World/HumanProxy\",\n)\n\n# ── Register human proxy as moving obstacle for cuRobo replanning ─────────────\nregister_moving_obstacle(\n    robot_path=\"/World/Franka\",\n    obstacle_path=\"/World/HumanProxy\",\n)\n\n# ── Safety configuration ──────────────────────────────────────────────────────\n# watchdog_timeout_ms=200: robot zeroes velocity 200 ms after last command.\n# max_joint_velocity=0.5 rad/s: conservative cap during human-present operation.\n# workspace_limits: AABB centred on robot, ±0.9m X/Y, 0.75–1.70m Z.\nteleop_safety_config(\n    robot_path=\"/World/Franka\",\n    watchdog_timeout_ms=200,\n    max_joint_velocity=0.5,\n    workspace_limits={\n        \"x_min\": -0.90, \"x_max\": 0.90,\n        \"y_min\": -0.90, \"y_max\": 0.90,\n        \"z_min\":  0.75, \"z_max\": 1.70,\n    },\n)\n\n# ── Clearance monitor on robot links ─────────────────────────────────────────\n# Warning zone 150 mm; stop zone 80 mm. target_prims: human proxy + table.\nset_clearance_monitor(\n    articulation_path=\"/World/Franka\",\n    clearance_mm=80.0,\n    warning_mm=150.0,\n    target_prims=[\"/World/HumanProxy\", \"/World/Table\"],\n)\n\n# ── Visualize clearance zones (debug rendering) ───────────────────────────────\nvisualize_clearance(\n    articulation_path=\"/World/Franka\",\n    mode=\"zones\",\n    target_prims=[\"/World/HumanProxy\", \"/World/Table\"],\n    clearance_mm=80.0,\n    warning_mm=150.0,\n)\n\n# ── Start simulation; human proxy walks into zone to trigger stop ─────────────\nsim_control(action=\"play\")\n# Move human proxy toward robot zone: set velocity toward y=0.40 (inside zone).\nset_linear_velocity(\n    prim_path=\"/World/HumanProxy\",\n    velocity=[0, -0.30, 0],\n)\n# At ~2 s the proxy crosses y=0.45 boundary. ZoneBoundarySensor fires;\n# teleop_safety_config watchdog causes Franka velocity targets to zero.",
+  "code_template": "# ── Ground and lighting ───────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=900.0)\ncreate_prim(\n    prim_path=\"/World/Ground\",\n    prim_type=\"Cube\",\n    position=[0, 0, -0.5],\n    scale=[20, 20, 1],\n)\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for determinism ─────────────────────────────────────\nset_physics_scene_config(\n    config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"}\n)\n\n# ── Robot mounting table ───────────────────────────────────────────────────────\ncreate_prim(\n    prim_path=\"/World/Table\",\n    prim_type=\"Cube\",\n    position=[0, 0, 0.375],\n    scale=[0.7, 0.7, 0.375],\n)\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Robot arm ─────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"{{primary_robot.class}}\",\n    dest_path=\"{{primary_robot.path}}\",\n    position={{primary_robot.position}},\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Safety zone partition ─────────────────────────────────────────────────────\nsetup_zone_partition(\n    conveyor_path=\"/World/Table\",\n    n_zones=1,\n    robots=[\"{{primary_robot.path}}\"],\n)\n\n# ── Human-proxy prim (simulated intruder) ─────────────────────────────────────\ncreate_prim(\n    prim_path=\"{{human_proxy.path}}\",\n    prim_type=\"Capsule\",\n    position={{human_proxy.initial_position}},\n)\nset_attribute(prim_path=\"{{human_proxy.path}}\", attr_name=\"height\", value=1.75)\nset_attribute(prim_path=\"{{human_proxy.path}}\", attr_name=\"radius\",  value=0.25)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"{{human_proxy.path}}\", schema_name=api)\nset_attribute(prim_path=\"{{human_proxy.path}}\", attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\n\n# ── Proximity sensor — zone boundary ─────────────────────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/ZoneBoundarySensor\",\n    position=[0, 0.45, 1.15],\n    size=[1.0, 0.10, 1.5],\n    watched_path_pattern=\"{{human_proxy.path}}\",\n)\n\n# ── Register human proxy as moving obstacle ───────────────────────────────────\nregister_moving_obstacle(\n    robot_path=\"{{primary_robot.path}}\",\n    obstacle_path=\"{{human_proxy.path}}\",\n)\n\n# ── Safety configuration ──────────────────────────────────────────────────────\nteleop_safety_config(\n    robot_path=\"{{primary_robot.path}}\",\n    watchdog_timeout_ms=200,\n    max_joint_velocity=0.5,\n    workspace_limits={\n        \"x_min\": -0.90, \"x_max\": 0.90,\n        \"y_min\": -0.90, \"y_max\": 0.90,\n        \"z_min\":  0.75, \"z_max\": 1.70,\n    },\n)\n\n# ── Clearance monitor on robot links ─────────────────────────────────────────\nset_clearance_monitor(\n    articulation_path=\"{{primary_robot.path}}\",\n    clearance_mm=80.0,\n    warning_mm=150.0,\n    target_prims=[\"{{human_proxy.path}}\", \"/World/Table\"],\n)\n\n# ── Visualize clearance zones ─────────────────────────────────────────────────\nvisualize_clearance(\n    articulation_path=\"{{primary_robot.path}}\",\n    mode=\"zones\",\n    target_prims=[\"{{human_proxy.path}}\", \"/World/Table\"],\n    clearance_mm=80.0,\n    warning_mm=150.0,\n)\n\n# ── Play and trigger entry ─────────────────────────────────────────────────────\nsim_control(action=\"play\")\nset_linear_velocity(\n    prim_path=\"{{human_proxy.path}}\",\n    velocity=[0, -0.30, 0],\n)",
+  "settle_state": {
+    "robot_path": "/World/Franka",
+    "human_proxy_initial": [0, 1.0, 0.9],
+    "human_proxy_entry_y": 0.45,
+    "zone_trigger_path": "/World/ZoneBoundarySensor",
+    "safety_config": {
+      "watchdog_timeout_ms": 200,
+      "max_joint_velocity": 0.5
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ZoneBoundarySensor",
+        "place_path": "/World/HumanProxy",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "zone_sensor_path": "/World/ZoneBoundarySensor",
+    "human_proxy_path": "/World/HumanProxy",
+    "expected_stop_on_entry": true,
+    "clearance_mm": 80.0
+  },
+  "simulate_args": {
+    "target_path": "/World/ZoneBoundarySensor",
+    "cube_path": "/World/HumanProxy",
+    "duration_s": 10,
+    "check_robot_velocity_zero_after_entry": true,
+    "human_proxy_path": "/World/HumanProxy",
+    "robot_path": "/World/Franka",
+    "entry_trigger_y": 0.45
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": ["/World/HumanProxy", "/World/Table"],
+    "sensor_path": "/World/ZoneBoundarySensor",
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "failure_modes": [
+    "setup_zone_partition conveys conveyor_path — the schema uses conveyor_path as cell boundary anchor; pass a rigid-body prim (Table) that exists before the call, not the robot path itself.",
+    "teleop_safety_config only active during a teleop session — if no start_teleop_session was called first, watchdog has no effect; for pure sim safety use set_clearance_monitor event alone.",
+    "HumanProxy capsule may tunnel through zone boundary at high velocity — keep velocity <= 0.5 m/s and step dt small (default 1/60 s is fine).",
+    "register_moving_obstacle requires cuRobo planner to be initialised first — ensure setup_pick_place_controller or equivalent was called before registering the obstacle.",
+    "visualize_clearance mode='zones' requires render context — headless runs should skip or use mode='heatmap' which only tags attributes without rendering."
+  ],
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "has_stacking": false,
+      "has_safety_zone": true,
+      "has_human_proxy": true,
+      "has_clearance_monitor": true
+    }
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur10", "ur5e"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "any_arm_with_teleop_safety_config_support"
+    },
+    "human_proxy": {
+      "constraints": ["Capsule", "Sphere"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "rigid_body_intruder_prim"
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "human_proxy": {
+      "path": "/World/HumanProxy",
+      "shape": "Capsule",
+      "initial_position": [0, 1.0, 0.9]
+    }
+  },
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["rmpflow"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate-schema ✓; function-gate ⏳"
+}

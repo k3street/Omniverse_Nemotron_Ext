@@ -714,7 +714,10 @@
   motion_controller_preference: ros2_control
   pattern_hint: other
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-zone-partition-safety.json
+  drafted_date: "2026-05-16"
+  drafted_by: A22
 
 - id: industrial-multi-rate-sensor-fusion-001
   source: industrial-asset
