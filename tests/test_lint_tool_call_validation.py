@@ -3,6 +3,11 @@ test_lint_tool_call_validation.py — Unit tests for the --validate-tool-calls l
 
 All tests use small inline fixtures; no dependency on live workspace templates.
 Tests are marked l0 (fast, no network, no Kit RPC).
+
+Extended (R-A30-fix) to cover three new JSONSchema-based rule codes:
+  TC_BAD_ENUM_VALUE   — string literal not in JSONSchema enum
+  TC_BAD_NESTED_KEY   — dict literal has key(s) not in JSONSchema properties
+  TC_BAD_NESTED_ITEM  — list-of-dicts item missing JSONSchema items.required key
 """
 
 import json
@@ -300,4 +305,151 @@ def test_include_code_template_false_skips_template(tool_map):
     err_rules = _error_rules(issues)
     assert "TC_REQUIRED_MISSING" not in err_rules, (
         "code_template should not be checked when include_code_template=False"
+    )
+
+
+# ── JSONSchema guard ──────────────────────────────────────────────────────────
+
+@pytest.fixture(scope="module")
+def jsonschema_map():
+    m = schema.get_tool_jsonschema_map()
+    if not m:
+        pytest.skip("Tool JSONSchema map unavailable (tool_schemas.py not importable)")
+    return m
+
+
+# ── Test 16: TC_BAD_ENUM_VALUE — invalid enum string literal → ERROR ───���──────
+
+def test_bad_enum_value_emits_error(tool_map, jsonschema_map):
+    """
+    validate_assembly_constraint(type='cylindrical_fit', ...) — 'cylindrical_fit'
+    is not in the JSONSchema enum for that parameter → TC_BAD_ENUM_VALUE ERROR.
+    """
+    data = {
+        "code": (
+            "validate_assembly_constraint(\n"
+            "    name='test', type='cylindrical_fit',\n"
+            "    target_a={'prim_path': '/World/A'},\n"
+            "    target_b={'prim_path': '/World/B'},\n"
+            ")\n"
+        ),
+    }
+    issues = lint_tool_calls(_fake_path(), data)
+    err_rules = _error_rules(issues)
+    assert "TC_BAD_ENUM_VALUE" in err_rules, (
+        f"Expected TC_BAD_ENUM_VALUE for 'cylindrical_fit', got errors: {err_rules}"
+    )
+
+
+def test_valid_enum_value_no_error(tool_map, jsonschema_map):
+    """
+    validate_assembly_constraint(type='concentric', ...) — 'concentric' IS
+    in the enum → no TC_BAD_ENUM_VALUE error.
+    """
+    data = {
+        "code": (
+            "validate_assembly_constraint(\n"
+            "    name='test', type='concentric',\n"
+            "    target_a={'prim_path': '/World/A'},\n"
+            "    target_b={'prim_path': '/World/B'},\n"
+            ")\n"
+        ),
+    }
+    issues = lint_tool_calls(_fake_path(), data)
+    enum_errs = [i for i in issues if i.rule == "TC_BAD_ENUM_VALUE"]
+    assert not enum_errs, (
+        f"'concentric' is a valid enum value; unexpected TC_BAD_ENUM_VALUE: {enum_errs}"
+    )
+
+
+# ── Test 17: TC_BAD_NESTED_KEY — dict with unknown keys → ERROR ───────────────
+
+def test_bad_nested_key_emits_error(tool_map, jsonschema_map):
+    """
+    teleop_safety_config(workspace_limits={'x_min': -0.9, 'x_max': 0.9, ...})
+    uses flat key names that don't exist in the JSONSchema properties
+    (which defines {'min': [...], 'max': [...]}) → TC_BAD_NESTED_KEY ERROR.
+    """
+    data = {
+        "code": (
+            "teleop_safety_config(\n"
+            "    robot_path='/World/Robot',\n"
+            "    workspace_limits={'x_min': -0.9, 'x_max': 0.9,\n"
+            "                      'y_min': -0.9, 'y_max': 0.9,\n"
+            "                      'z_min': 0.0,  'z_max': 2.0},\n"
+            ")\n"
+        ),
+    }
+    issues = lint_tool_calls(_fake_path(), data)
+    err_rules = _error_rules(issues)
+    assert "TC_BAD_NESTED_KEY" in err_rules, (
+        f"Expected TC_BAD_NESTED_KEY for x_min/x_max keys, got errors: {err_rules}"
+    )
+
+
+def test_valid_nested_key_no_error(tool_map, jsonschema_map):
+    """
+    teleop_safety_config(workspace_limits={'min': [...], 'max': [...]})
+    uses correct keys → no TC_BAD_NESTED_KEY error.
+    """
+    data = {
+        "code": (
+            "teleop_safety_config(\n"
+            "    robot_path='/World/Robot',\n"
+            "    workspace_limits={'min': [-0.9, -0.9, 0.0], 'max': [0.9, 0.9, 2.0]},\n"
+            ")\n"
+        ),
+    }
+    issues = lint_tool_calls(_fake_path(), data)
+    nested_errs = [i for i in issues if i.rule == "TC_BAD_NESTED_KEY"]
+    assert not nested_errs, (
+        f"'min'/'max' are valid nested keys; unexpected TC_BAD_NESTED_KEY: {nested_errs}"
+    )
+
+
+# ── Test 18: TC_BAD_NESTED_ITEM — list-of-dicts missing required item key → ERROR
+
+def test_bad_nested_item_emits_error(tool_map, jsonschema_map):
+    """
+    interpolate_trajectory(waypoints=[{'pose_name': 'home'}, ...]) — each item
+    is missing the required 'joint_positions' key → TC_BAD_NESTED_ITEM ERROR.
+    """
+    data = {
+        "code": (
+            "interpolate_trajectory(\n"
+            "    articulation_path='/World/Robot',\n"
+            "    waypoints=[{'pose_name': 'home'}, {'pose_name': 'pick'}],\n"
+            "    method='cubic',\n"
+            ")\n"
+        ),
+    }
+    issues = lint_tool_calls(_fake_path(), data)
+    err_rules = _error_rules(issues)
+    assert "TC_BAD_NESTED_ITEM" in err_rules, (
+        f"Expected TC_BAD_NESTED_ITEM for missing 'joint_positions', "
+        f"got errors: {err_rules}"
+    )
+
+
+def test_valid_nested_item_no_error(tool_map, jsonschema_map):
+    """
+    interpolate_trajectory(waypoints=[{'joint_positions': [0.0, ...]}, ...])
+    provides the required key → no TC_BAD_NESTED_ITEM error.
+    """
+    data = {
+        "code": (
+            "interpolate_trajectory(\n"
+            "    articulation_path='/World/Robot',\n"
+            "    waypoints=[\n"
+            "        {'joint_positions': [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]},\n"
+            "        {'joint_positions': [0.45, -0.50, -0.20, -2.10, 0.10, 1.70, 1.10]},\n"
+            "    ],\n"
+            "    method='cubic',\n"
+            ")\n"
+        ),
+    }
+    issues = lint_tool_calls(_fake_path(), data)
+    item_errs = [i for i in issues if i.rule == "TC_BAD_NESTED_ITEM"]
+    assert not item_errs, (
+        f"'joint_positions' is the required key; unexpected TC_BAD_NESTED_ITEM: {item_errs}"
     )

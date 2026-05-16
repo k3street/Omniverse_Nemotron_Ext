@@ -106,16 +106,17 @@ def _sanitize_template_vars(code: str) -> str:
     return _TEMPLATE_VAR_RE.sub(_TEMPLATE_SENTINEL, code)
 
 
-def _extract_tool_calls(code: str) -> list[tuple[str, set[str], bool, int]]:
+def _extract_tool_calls(code: str) -> "list[tuple[str, set[str], bool, int, ast.Call]]":
     """
     AST-parse *code* and return all top-level and nested tool calls.
 
-    Returns a list of (tool_name, kwargs_set, has_star_kwargs, lineno).
+    Returns a list of (tool_name, kwargs_set, has_star_kwargs, lineno, call_node).
     Only calls whose function name matches a known tool in the model map are
     included; unrecognised function names are reported separately.
 
     ``has_star_kwargs`` is True if the call contains ``**kwargs`` unpacking —
     in that case required-field checks are skipped (dynamic dispatch).
+    ``call_node`` is the raw ``ast.Call`` node for deeper argument inspection.
     """
     try:
         tree = ast.parse(code)
@@ -135,8 +136,60 @@ def _extract_tool_calls(code: str) -> list[tuple[str, set[str], bool, int]]:
 
         kwargs = {kw.arg for kw in node.keywords if kw.arg is not None}
         has_star = any(kw.arg is None for kw in node.keywords)
-        results.append((fn, kwargs, has_star, node.lineno))
+        results.append((fn, kwargs, has_star, node.lineno, node))
     return results
+
+
+def _extract_kw_ast_values(
+    call_node: "ast.Call",
+) -> "dict[str, ast.expr]":
+    """Return a mapping from kwarg name → AST value node for a call node."""
+    result = {}
+    for kw in call_node.keywords:
+        if kw.arg is not None:
+            result[kw.arg] = kw.value
+    return result
+
+
+def _ast_string_value(node: "ast.expr") -> "str | None":
+    """If *node* is a string literal AST node, return the string; else None."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _ast_dict_keys(node: "ast.expr") -> "list[str] | None":
+    """
+    If *node* is a dict literal with all string-constant keys, return those
+    key strings.  Returns None if node is not a dict literal or has
+    non-constant keys (e.g. variable-key dicts).
+    """
+    if not isinstance(node, ast.Dict):
+        return None
+    keys = []
+    for k in node.keys:
+        s = _ast_string_value(k)
+        if s is None:
+            return None  # non-constant key — skip validation
+        keys.append(s)
+    return keys
+
+
+def _ast_list_of_dicts_keys(node: "ast.expr") -> "list[list[str]] | None":
+    """
+    If *node* is a list literal (or list comp) containing at least one dict
+    literal with all-constant string keys, return a list-of-lists of those
+    key sets.  Returns None if node is not a list literal.
+    Skips non-dict items and dicts with non-constant keys.
+    """
+    if not isinstance(node, ast.List):
+        return None
+    result = []
+    for elt in node.elts:
+        keys = _ast_dict_keys(elt)
+        if keys is not None:
+            result.append(keys)
+    return result if result else None
 
 
 def lint_tool_calls(
@@ -146,7 +199,8 @@ def lint_tool_calls(
 ) -> "list[Issue]":
     """
     Validate tool call kwargs in the template ``code`` (and optionally
-    ``code_template``) fields against the Pydantic models in _models.py.
+    ``code_template``) fields against the Pydantic models in _models.py
+    and the JSONSchema definitions in tool_schemas.py.
 
     Rule codes emitted:
       TC_MODEL_UNAVAILABLE   WARN  — _models.py could not be imported; skipping
@@ -154,6 +208,9 @@ def lint_tool_calls(
       TC_UNKNOWN_TOOL        WARN  — tool name not found in model map
       TC_REQUIRED_MISSING    ERROR — required field(s) absent from call
       TC_UNKNOWN_KWARG       WARN  — kwarg not in model (extra='allow' absorbed it)
+      TC_BAD_ENUM_VALUE      ERROR — string literal does not match the JSONSchema enum
+      TC_BAD_NESTED_KEY      ERROR — dict literal contains key(s) not in JSONSchema properties
+      TC_BAD_NESTED_ITEM     ERROR — list-of-dicts item is missing JSONSchema items.required key(s)
 
     Returns a list of Issue objects.
     """
@@ -174,6 +231,9 @@ def lint_tool_calls(
             "skipping tool-call validation",
         )
         return issues
+
+    # Obtain JSONSchema map for enum / nested-key / nested-item checks
+    jsonschema_map = schema.get_tool_jsonschema_map()
 
     fields_to_check: list[tuple[str, str]] = [("code", "code")]
     if include_code_template:
@@ -204,7 +264,7 @@ def lint_tool_calls(
         # Collect calls whose function name IS in the model map
         # (unknown-name calls get WARN but no ERROR)
         seen_unknown: set[str] = set()
-        for fn, kwargs, has_star, lineno in call_sites:
+        for fn, kwargs, has_star, lineno, call_node in call_sites:
             if fn not in tool_map:
                 # Only warn once per unknown tool name per field
                 if fn not in seen_unknown:
@@ -245,12 +305,81 @@ def lint_tool_calls(
                 # In code_template, template sentinel values become strings —
                 # the KWARG itself may still be a legitimate field that just
                 # receives a template-var value. Flag as WARN not ERROR.
-                level = "WARN"
                 warn(
                     "TC_UNKNOWN_KWARG",
                     f"{display_name}:line {lineno} — "
                     f"{fn} unknown kwargs: {unknown}",
                 )
+
+            # ── JSONSchema-based deep checks ─────────────────────��────────────
+            # Only run when JSONSchema is available for this tool.
+            param_schemas = jsonschema_map.get(fn)
+            if not param_schemas:
+                continue
+
+            kw_values = _extract_kw_ast_values(call_node)
+
+            for param_name, value_node in kw_values.items():
+                param_schema = param_schemas.get(param_name)
+                if not param_schema:
+                    continue
+
+                # ── TC_BAD_ENUM_VALUE ─────────────��───────────────────────────
+                # When param schema has an 'enum' list and the call passes a
+                # string literal, verify the literal is in the enum.
+                enum_values = param_schema.get("enum")
+                if enum_values and isinstance(enum_values, list):
+                    literal = _ast_string_value(value_node)
+                    if literal is not None and literal not in enum_values:
+                        err(
+                            "TC_BAD_ENUM_VALUE",
+                            f"{display_name}:line {lineno} — "
+                            f"{fn}.{param_name}={literal!r} is not in the "
+                            f"allowed enum: {enum_values}",
+                        )
+
+                # ── TC_BAD_NESTED_KEY ─────────────────────────��───────────────
+                # When param schema has 'properties' (object type) and the call
+                # passes a dict literal, verify keys are in properties.
+                prop_schema = param_schema.get("properties")
+                if prop_schema and isinstance(prop_schema, dict):
+                    # Only applies when param_schema type is "object" or implied.
+                    dict_keys = _ast_dict_keys(value_node)
+                    if dict_keys is not None:
+                        allowed_keys = set(prop_schema.keys())
+                        bad_keys = sorted(set(dict_keys) - allowed_keys)
+                        if bad_keys:
+                            err(
+                                "TC_BAD_NESTED_KEY",
+                                f"{display_name}:line {lineno} — "
+                                f"{fn}.{param_name} dict has unrecognised "
+                                f"key(s) {bad_keys}; allowed: "
+                                f"{sorted(allowed_keys)}",
+                            )
+
+                # ── TC_BAD_NESTED_ITEM ──────────────────────────────────���─────
+                # When param schema type is "array" with items.required, and
+                # the call passes a list literal of dicts, verify each dict
+                # contains the required item keys.
+                items_schema = param_schema.get("items")
+                if items_schema and isinstance(items_schema, dict):
+                    items_required = items_schema.get("required")
+                    if items_required and isinstance(items_required, list):
+                        list_of_key_lists = _ast_list_of_dicts_keys(value_node)
+                        if list_of_key_lists is not None:
+                            for idx, item_keys in enumerate(list_of_key_lists):
+                                item_keys_set = set(item_keys)
+                                missing_item = sorted(
+                                    set(items_required) - item_keys_set
+                                )
+                                if missing_item:
+                                    err(
+                                        "TC_BAD_NESTED_ITEM",
+                                        f"{display_name}:line {lineno} — "
+                                        f"{fn}.{param_name}[{idx}] missing "
+                                        f"required item key(s) {missing_item}; "
+                                        f"required: {items_required}",
+                                    )
 
     return issues
 

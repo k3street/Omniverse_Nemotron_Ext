@@ -241,3 +241,54 @@ def get_tool_model_map() -> "dict[str, type]":
     if _TOOL_MODEL_MAP is None:
         _TOOL_MODEL_MAP = build_tool_model_map()
     return _TOOL_MODEL_MAP
+
+
+# ── JSONSchema tool map ───────────────────────────────────────────────────────
+# Provides per-parameter enum lists, nested-object property names, and
+# nested-array per-item required fields from tool_schemas.py ISAAC_SIM_TOOLS.
+
+def build_tool_jsonschema_map() -> "dict[str, dict]":
+    """
+    Return a mapping of tool_name → {param_name: param_schema_dict}.
+
+    Loaded from ISAAC_SIM_TOOLS in tool_schemas.py.  Each value is the
+    JSON Schema ``properties`` dict for that tool's parameters object.
+    Returns an empty dict if the module cannot be imported.
+    """
+    import importlib
+    import sys as _sys
+
+    _scripts_dir = Path(__file__).parent
+    _repo_root = _scripts_dir.parent
+    _service_root = str(_repo_root / "service")
+
+    if _service_root not in _sys.path:
+        _sys.path.insert(0, _service_root)
+
+    try:
+        mod = importlib.import_module(
+            "isaac_assist_service.chat.tools.tool_schemas"
+        )
+    except ImportError:
+        return {}
+
+    tool_map: dict[str, dict] = {}
+    for entry in getattr(mod, "ISAAC_SIM_TOOLS", []):
+        fn = entry.get("function", {})
+        name = fn.get("name")
+        params = fn.get("parameters", {})
+        props = params.get("properties", {})
+        if name and props:
+            tool_map[name] = props
+    return tool_map
+
+
+_TOOL_JSONSCHEMA_MAP: "dict[str, dict] | None" = None
+
+
+def get_tool_jsonschema_map() -> "dict[str, dict]":
+    """Return (and cache) the tool-name → JSONSchema properties map."""
+    global _TOOL_JSONSCHEMA_MAP
+    if _TOOL_JSONSCHEMA_MAP is None:
+        _TOOL_JSONSCHEMA_MAP = build_tool_jsonschema_map()
+    return _TOOL_JSONSCHEMA_MAP
