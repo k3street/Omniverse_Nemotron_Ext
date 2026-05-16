@@ -30,9 +30,250 @@
     "Mock server doesn't define 12 nodes \u2192 some attrs missing in attrs map"
   ],
   "verified_status": "build-spec-2026-05-10; BUILD_OK; plumbing-only (no cube delivery, no simulate_args)",
-  "migration_deferred": {
-    "reason": "novel_pattern",
-    "details": "OPC-UA live-tag driven 12-conveyor control; industrial bridge integration is not a manipulation pattern",
-    "added_date": "2026-05-15"
-  }
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": true
+    },
+    "structural_tags": [
+      "isaac:bridge.opcua",
+      "isaac:integration.live_tag_control",
+      "isaac:topology.no_robot",
+      "isaac:transport.conveyor",
+      "isaac:topology.industrial_bridge_validation"
+    ]
+  },
+  "roles": {
+    "conveyor_grid": {
+      "constraints": [
+        "conveyor"
+      ],
+      "min": 12,
+      "max": 12,
+      "unordered": true
+    }
+  },
+  "role_defaults": {
+    "conveyor_grid": [
+      {
+        "path": "/World/Conveyors/CV_01",
+        "position": [
+          -2.25,
+          -0.6,
+          0.78
+        ],
+        "size": [
+          1.2,
+          0.4,
+          0.05
+        ],
+        "surface_velocity": [
+          0.2,
+          0,
+          0
+        ]
+      },
+      {
+        "path": "/World/Conveyors/CV_02",
+        "position": [
+          -0.75,
+          -0.6,
+          0.78
+        ],
+        "size": [
+          1.2,
+          0.4,
+          0.05
+        ],
+        "surface_velocity": [
+          0.2,
+          0,
+          0
+        ]
+      },
+      {
+        "path": "/World/Conveyors/CV_03",
+        "position": [
+          0.75,
+          -0.6,
+          0.78
+        ],
+        "size": [
+          1.2,
+          0.4,
+          0.05
+        ],
+        "surface_velocity": [
+          0.2,
+          0,
+          0
+        ]
+      },
+      {
+        "path": "/World/Conveyors/CV_04",
+        "position": [
+          2.25,
+          -0.6,
+          0.78
+        ],
+        "size": [
+          1.2,
+          0.4,
+          0.05
+        ],
+        "surface_velocity": [
+          0.2,
+          0,
+          0
+        ]
+      },
+      {
+        "path": "/World/Conveyors/CV_05",
+        "position": [
+          -2.25,
+          0.0,
+          0.78
+        ],
+        "size": [
+          1.2,
+          0.4,
+          0.05
+        ],
+        "surface_velocity": [
+          0.2,
+          0,
+          0
+        ]
+      },
+      {
+        "path": "/World/Conveyors/CV_06",
+        "position": [
+          -0.75,
+          0.0,
+          0.78
+        ],
+        "size": [
+          1.2,
+          0.4,
+          0.05
+        ],
+        "surface_velocity": [
+          0.2,
+          0,
+          0
+        ]
+      },
+      {
+        "path": "/World/Conveyors/CV_07",
+        "position": [
+          0.75,
+          0.0,
+          0.78
+        ],
+        "size": [
+          1.2,
+          0.4,
+          0.05
+        ],
+        "surface_velocity": [
+          0.2,
+          0,
+          0
+        ]
+      },
+      {
+        "path": "/World/Conveyors/CV_08",
+        "position": [
+          2.25,
+          0.0,
+          0.78
+        ],
+        "size": [
+          1.2,
+          0.4,
+          0.05
+        ],
+        "surface_velocity": [
+          0.2,
+          0,
+          0
+        ]
+      },
+      {
+        "path": "/World/Conveyors/CV_09",
+        "position": [
+          -2.25,
+          0.6,
+          0.78
+        ],
+        "size": [
+          1.2,
+          0.4,
+          0.05
+        ],
+        "surface_velocity": [
+          0.2,
+          0,
+          0
+        ]
+      },
+      {
+        "path": "/World/Conveyors/CV_10",
+        "position": [
+          -0.75,
+          0.6,
+          0.78
+        ],
+        "size": [
+          1.2,
+          0.4,
+          0.05
+        ],
+        "surface_velocity": [
+          0.2,
+          0,
+          0
+        ]
+      },
+      {
+        "path": "/World/Conveyors/CV_11",
+        "position": [
+          0.75,
+          0.6,
+          0.78
+        ],
+        "size": [
+          1.2,
+          0.4,
+          0.05
+        ],
+        "surface_velocity": [
+          0.2,
+          0,
+          0
+        ]
+      },
+      {
+        "path": "/World/Conveyors/CV_12",
+        "position": [
+          2.25,
+          0.6,
+          0.78
+        ],
+        "size": [
+          1.2,
+          0.4,
+          0.05
+        ],
+        "surface_velocity": [
+          0.2,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\nfor i in range(1, 13):\n    row = (i - 1) // 4\n    col = (i - 1) % 4\n    create_conveyor(prim_path=f\"/World/Conveyors/CV_{i:02d}\", position=[col*1.5 - 2.25, row*0.6 - 0.6, 0.78], size=[1.2, 0.4, 0.05], surface_velocity=[0.2, 0, 0])\nopcua_bridge_attach(url=\"opc.tcp://127.0.0.1:4840\", node_map={f\"/World/Conveyors/CV_{i:02d}/run_command\": f\"ns=2;i={i+1}\" for i in range(1, 13)}, rate_hz=1.0)"
 }

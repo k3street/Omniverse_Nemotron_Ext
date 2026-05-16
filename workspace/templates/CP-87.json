@@ -68,9 +68,81 @@
     "ROS2 topic name mismatch \u2192 external MoveIt2 sees no /joint_states"
   ],
   "verified_status": "draft",
-  "migration_deferred": {
-    "reason": "novel_pattern",
-    "details": "ROS2-MoveIt2 Franka pick-place via topic_based_ros2_control; ROS2 bridge integration is a distinct execution backend with no current pattern_hint",
-    "added_date": "2026-05-15"
-  }
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:bridge.ros2_control",
+      "isaac:execution.external_moveit2",
+      "isaac:robot.fixed_base.arm",
+      "isaac:integration.topic_based_ros2",
+      "isaac:topology.single_station"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "franka_panda"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpiece": {
+      "constraints": [
+        "cube"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "output_bin": {
+      "constraints": [
+        "bin"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [
+        0,
+        0,
+        0.75
+      ]
+    },
+    "workpiece": {
+      "path": "/World/Cube",
+      "position": [
+        0.45,
+        0,
+        0.78
+      ],
+      "scale": [
+        0.025,
+        0.025,
+        0.025
+      ]
+    },
+    "output_bin": {
+      "path": "/World/Bin",
+      "position": [
+        0,
+        0.4,
+        0.78
+      ],
+      "size": [
+        0.15,
+        0.15,
+        0.1
+      ]
+    }
+  },
+  "code_template": "precheck_ros2_environment()\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nrobot_wizard(robot_name={{primary_robot.class}}, dest_path={{primary_robot.path}}, position={{primary_robot.position}})\ncreate_prim(prim_path={{workpiece.path}}, prim_type=\"Cube\", position={{workpiece.position}}, scale={{workpiece.scale}})\napply_api_schema(prim_path={{workpiece.path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{workpiece.path}}, schema_name=\"PhysicsCollisionAPI\")\nbulk_set_attribute(\n    prim_paths=[{{workpiece.path}}],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=[{{workpiece.path}}],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=32,\n)\n\ncreate_bin(prim_path={{output_bin.path}}, position={{output_bin.position}}, size={{output_bin.size}})\nsetup_pick_place_controller(robot_path={{primary_robot.path}}, source_paths=[{{workpiece.path}}], destination_path={{output_bin.path}}, target_source=\"ros2_cmd\")\nsetup_ros2_control_compat(robot_path={{primary_robot.path}}, controller_type=\"joint_trajectory_controller\")\nsetup_ros2_bridge(profile=\"franka_moveit2\", robot_path={{primary_robot.path}})\nemit_ros2_control_yaml(robot_path={{primary_robot.path}}, controller_type=\"joint_trajectory_controller\", output_path=\"/tmp/cp87_ros2_control.yaml\")"
 }

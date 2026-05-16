@@ -113,9 +113,218 @@
     "evidence_date": "2026-05-15",
     "evidence_source": "workspace/baselines aggregate"
   },
-  "migration_deferred": {
-    "reason": "novel_pattern",
-    "details": "Runtime vision inspect-and-reject; requires vision-gated conditional routing \u2014 no existing pattern_hint covers vision classifier dispatch",
-    "added_date": "2026-05-15"
-  }
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "n_bins_routed",
+      "uses_conveyor_transport": true
+    },
+    "structural_tags": [
+      "isaac:perception.vision_classifier",
+      "isaac:robot.fixed_base.arm",
+      "isaac:transport.conveyor",
+      "isaac:routing.color_based_reject",
+      "isaac:topology.inspect_and_reject",
+      "isaac:sensor.camera"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "franka_panda",
+        "ur5e"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "input_conveyor": {
+      "constraints": [
+        "conveyor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "good_bin": {
+      "constraints": [
+        "bin"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "reject_bin": {
+      "constraints": [
+        "bin"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "camera": {
+      "constraints": [
+        "camera"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "pick_sensor": {
+      "constraints": [
+        "proximity_sensor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "good_cubes": {
+      "constraints": [
+        "cube"
+      ],
+      "min": 4,
+      "max": 4,
+      "unordered": false
+    },
+    "bad_cube": {
+      "constraints": [
+        "cube"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [
+        0,
+        0,
+        0.75
+      ],
+      "orientation": [
+        0.7071068,
+        0,
+        0,
+        0.7071068
+      ]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [
+        0.0,
+        0.4,
+        0.78
+      ],
+      "size": [
+        3.0,
+        0.4,
+        0.05
+      ],
+      "surface_velocity": [
+        0.2,
+        0,
+        0
+      ]
+    },
+    "good_bin": {
+      "path": "/World/GoodBin",
+      "position": [
+        -0.3,
+        -0.4,
+        0.75
+      ],
+      "size": [
+        0.25,
+        0.25,
+        0.15
+      ],
+      "material_path": "/World/Materials/Green"
+    },
+    "reject_bin": {
+      "path": "/World/RejectBin",
+      "position": [
+        0.3,
+        -0.4,
+        0.75
+      ],
+      "size": [
+        0.25,
+        0.25,
+        0.15
+      ],
+      "material_path": "/World/Materials/Red",
+      "drop_target": [
+        0.3,
+        -0.4,
+        0.95
+      ]
+    },
+    "camera": {
+      "path": "/World/Cam",
+      "position": [
+        0,
+        1.5,
+        1.5
+      ],
+      "look_at": [
+        0,
+        0,
+        0.8
+      ]
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [
+        0.4,
+        0.4,
+        0.835
+      ],
+      "size": [
+        0.06,
+        0.06,
+        0.06
+      ]
+    },
+    "good_cubes": [
+      {
+        "path": "/World/Cube_g1",
+        "position": [
+          -1.0,
+          0.4,
+          0.835
+        ]
+      },
+      {
+        "path": "/World/Cube_g2",
+        "position": [
+          -0.7,
+          0.4,
+          0.835
+        ]
+      },
+      {
+        "path": "/World/Cube_g3",
+        "position": [
+          -0.4,
+          0.4,
+          0.835
+        ]
+      },
+      {
+        "path": "/World/Cube_g4",
+        "position": [
+          -0.1,
+          0.4,
+          0.835
+        ]
+      }
+    ],
+    "bad_cube": {
+      "path": "/World/Cube_bad",
+      "position": [
+        0.2,
+        0.4,
+        0.835
+      ]
+    }
+  },
+  "code_template": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1500.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\n# Materials \u2014 green for good, red for defective\ncreate_material(material_path=\"/World/Materials/Green\", shader_type=\"OmniPBR\", diffuse_color=[0.0, 1.0, 0.0])\ncreate_material(material_path=\"/World/Materials/Red\",   shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.0, 0.0])\n\n# 4 green cubes (good)\n{{#each good_cubes}}\ncreate_prim(prim_path={{this.path}}, prim_type=\"Cube\", position={{this.position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{this.path}}, schema_name=api)\nassign_material(prim_path={{this.path}}, material_path=\"/World/Materials/Green\")\n{{/each}}\n\n# 1 red cube (defective)\ncreate_prim(prim_path={{bad_cube.path}}, prim_type=\"Cube\", position={{bad_cube.position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{bad_cube.path}}, schema_name=api)\nassign_material(prim_path={{bad_cube.path}}, material_path=\"/World/Materials/Red\")\n\nall_cubes = [{{good_cubes[0].path}}, {{good_cubes[1].path}}, {{good_cubes[2].path}}, {{good_cubes[3].path}}, {{bad_cube.path}}]\nbulk_set_attribute(prim_paths=all_cubes, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nfor c in all_cubes:\n    apply_physics_material(prim_path=c, material_name=\"rubber\")\n\n# Two bins\ncreate_bin(prim_path={{good_bin.path}},   position={{good_bin.position}}, size={{good_bin.size}})\nassign_material(prim_path={{good_bin.path}}, material_path=\"/World/Materials/Green\")\ncreate_bin(prim_path={{reject_bin.path}}, position={{reject_bin.position}}, size={{reject_bin.size}})\nassign_material(prim_path={{reject_bin.path}}, material_path=\"/World/Materials/Red\")\n\n# Camera + viewport\ncreate_prim(prim_path={{camera.path}}, prim_type=\"Camera\", position={{camera.position}})\nset_camera_look_at(camera_path={{camera.path}}, target={{camera.look_at}})\n\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\n# Composite vision-driven setup\nsetup_pick_place_with_vision(\n    robot_path={{primary_robot.path}},\n    cube_paths=all_cubes,\n    class_labels=[\"green cube\", \"red cube\"],\n    camera_path={{camera.path}},\n    destination_map={\"green\": {{good_bin.path}}, \"red\": {{reject_bin.path}}},\n    destination_path={{reject_bin.path}},\n    sensor_path={{pick_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    drop_target={{reject_bin.drop_target}},\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{good_bin.path}}, {{reject_bin.path}}],\n    vision_precomputed={\n        {{good_cubes[0].path}}: \"green\",\n        {{good_cubes[1].path}}: \"green\",\n        {{good_cubes[2].path}}: \"green\",\n        {{good_cubes[3].path}}: \"green\",\n        {{bad_cube.path}}: \"red\",\n    },\n)"
 }

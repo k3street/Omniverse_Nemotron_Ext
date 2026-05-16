@@ -86,9 +86,126 @@
       "cortex": "build-only verification 2026-05-08; form-gate expected to fail (Cortex does not install pick-place controller \u2014 uses RmpFlowCortex internally; no function-gate or form-gate run passed)"
     }
   },
-  "migration_deferred": {
-    "reason": "novel_pattern",
-    "details": "Cortex-Franka block-stacking; CortexFranka behavior-tree wrapping is a distinct execution model from role-based pick_place",
-    "added_date": "2026-05-15"
-  }
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": true
+    },
+    "structural_tags": [
+      "isaac:execution.cortex_behavior_tree",
+      "isaac:robot.fixed_base.arm",
+      "isaac:transport.conveyor",
+      "isaac:topology.single_station",
+      "isaac:coordination.moving_obstacle"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "franka_panda"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "input_conveyor": {
+      "constraints": [
+        "conveyor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "stack_bin": {
+      "constraints": [
+        "bin"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": [
+        "cube"
+      ],
+      "min": 3,
+      "max": 3,
+      "unordered": false
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [
+        0,
+        0,
+        0.75
+      ],
+      "orientation": [
+        0.7071068,
+        0,
+        0,
+        0.7071068
+      ]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [
+        0.0,
+        0.4,
+        0.78
+      ],
+      "size": [
+        3.0,
+        0.4,
+        0.05
+      ],
+      "surface_velocity": [
+        0.2,
+        0,
+        0
+      ]
+    },
+    "stack_bin": {
+      "path": "/World/StackBin",
+      "position": [
+        0,
+        -0.4,
+        0.75
+      ],
+      "size": [
+        0.2,
+        0.2,
+        0.15
+      ]
+    },
+    "workpieces": [
+      {
+        "path": "/World/Cube_1",
+        "position": [
+          -1.4,
+          0.4,
+          0.835
+        ]
+      },
+      {
+        "path": "/World/Cube_2",
+        "position": [
+          -1.15,
+          0.4,
+          0.835
+        ]
+      },
+      {
+        "path": "/World/Cube_3",
+        "position": [
+          -0.9,
+          0.4,
+          0.835
+        ]
+      }
+    ]
+  },
+  "code_template": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\n{{#each workpieces}}\ncreate_prim(prim_path={{this.path}}, prim_type=\"Cube\", position={{this.position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{this.path}}, schema_name=api)\n{{/each}}\n\nbulk_set_attribute(prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\n{{#each workpieces}}\napply_physics_material(prim_path={{this.path}}, material_name=\"rubber\")\n{{/each}}\n\ncreate_bin(prim_path={{stack_bin.path}}, position={{stack_bin.position}}, size={{stack_bin.size}})\n\n# Cortex framework wrapper\nsetup_cortex_behavior(\n    robot_path={{primary_robot.path}},\n    robot_kind=\"franka\",\n    behavior_module=\"isaacsim.cortex.behaviors.franka.peck_demo\",\n    obstacles=[\"/World/Table\", {{stack_bin.path}}],\n)\n\n# Register cubes as dynamic obstacles for runtime collision avoidance\n{{#each workpieces}}\nregister_moving_obstacle(\n    robot_path={{primary_robot.path}},\n    obstacle_path={{this.path}},\n)\n{{/each}}"
 }

@@ -89,9 +89,241 @@
       0.75
     ]
   },
-  "migration_deferred": {
-    "reason": "novel_pattern",
-    "details": "Vision-gated bin-picking duo; vision classifier gate + dual-robot coordination \u2014 no existing pattern covers both",
-    "added_date": "2026-05-15"
-  }
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 2,
+      "n_handoffs": 0,
+      "destination_kind": "n_bins_routed",
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:perception.vision_classifier",
+      "isaac:topology.dual_robot",
+      "isaac:coordination.mutex",
+      "isaac:workpiece.heap_zone",
+      "isaac:routing.color_based_sort",
+      "isaac:sensor.camera"
+    ]
+  },
+  "roles": {
+    "robot_a": {
+      "constraints": [
+        "franka_panda"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "robot_b": {
+      "constraints": [
+        "franka_panda"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "heap_surface": {
+      "constraints": [
+        "conveyor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "red_bin": {
+      "constraints": [
+        "bin"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "blue_bin": {
+      "constraints": [
+        "bin"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "camera": {
+      "constraints": [
+        "camera"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "sensor_a": {
+      "constraints": [
+        "proximity_sensor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "sensor_b": {
+      "constraints": [
+        "proximity_sensor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": [
+        "cube"
+      ],
+      "min": 4,
+      "max": 4,
+      "unordered": false
+    }
+  },
+  "role_defaults": {
+    "robot_a": {
+      "path": "/World/FrankaA",
+      "class": "franka_panda",
+      "position": [
+        -0.5,
+        0,
+        0.75
+      ],
+      "orientation": [
+        0.7071068,
+        0,
+        0,
+        0.7071068
+      ]
+    },
+    "robot_b": {
+      "path": "/World/FrankaB",
+      "class": "franka_panda",
+      "position": [
+        0.5,
+        0,
+        0.75
+      ],
+      "orientation": [
+        0.7071068,
+        0,
+        0,
+        0.7071068
+      ]
+    },
+    "heap_surface": {
+      "path": "/World/HeapSurface",
+      "position": [
+        0,
+        0.3,
+        0.78
+      ],
+      "size": [
+        0.3,
+        0.3,
+        0.05
+      ],
+      "surface_velocity": [
+        0.001,
+        0,
+        0
+      ]
+    },
+    "red_bin": {
+      "path": "/World/RedBin",
+      "position": [
+        -0.5,
+        -0.5,
+        0.75
+      ],
+      "size": [
+        0.2,
+        0.2,
+        0.15
+      ]
+    },
+    "blue_bin": {
+      "path": "/World/BlueBin",
+      "position": [
+        0.5,
+        -0.5,
+        0.75
+      ],
+      "size": [
+        0.2,
+        0.2,
+        0.15
+      ]
+    },
+    "camera": {
+      "path": "/World/Cam",
+      "position": [
+        0,
+        0.3,
+        1.5
+      ],
+      "look_at": [
+        0,
+        0.3,
+        0.85
+      ]
+    },
+    "sensor_a": {
+      "path": "/World/SensorA",
+      "position": [
+        -0.2,
+        0.3,
+        0.85
+      ],
+      "size": [
+        0.1,
+        0.2,
+        0.06
+      ]
+    },
+    "sensor_b": {
+      "path": "/World/SensorB",
+      "position": [
+        0.2,
+        0.3,
+        0.85
+      ],
+      "size": [
+        0.1,
+        0.2,
+        0.06
+      ]
+    },
+    "workpieces": [
+      {
+        "path": "/World/Cube_r1",
+        "position": [
+          -0.15,
+          0.3,
+          0.86
+        ],
+        "material": "Red"
+      },
+      {
+        "path": "/World/Cube_b1",
+        "position": [
+          0.15,
+          0.3,
+          0.86
+        ],
+        "material": "Blue"
+      },
+      {
+        "path": "/World/Cube_r2",
+        "position": [
+          -0.1,
+          0.45,
+          0.86
+        ],
+        "material": "Red"
+      },
+      {
+        "path": "/World/Cube_b2",
+        "position": [
+          0.1,
+          0.15,
+          0.86
+        ],
+        "material": "Blue"
+      }
+    ]
+  },
+  "code_template": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1500.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{robot_a.class}},\n    dest_path={{robot_a.path}},\n    position={{robot_a.position}},\n    orientation={{robot_a.orientation}},\n)\nrobot_wizard(\n    robot_name={{robot_b.class}},\n    dest_path={{robot_b.path}},\n    position={{robot_b.position}},\n    orientation={{robot_b.orientation}},\n)\n\n# Stationary surface under heap (verifier needs bridge)\ncreate_conveyor(\n    prim_path={{heap_surface.path}},\n    position={{heap_surface.position}},\n    size={{heap_surface.size}},\n    surface_velocity={{heap_surface.surface_velocity}},\n)\n\ncreate_material(material_path=\"/World/Materials/Red\",  shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.0, 0.0])\ncreate_material(material_path=\"/World/Materials/Blue\", shader_type=\"OmniPBR\", diffuse_color=[0.0, 0.0, 1.0])\n\ncolor_specs = [\n    ({{workpieces[0].path}}, {{workpieces[0].position}}, {{workpieces[0].material}}),\n    ({{workpieces[1].path}}, {{workpieces[1].position}}, {{workpieces[1].material}}),\n    ({{workpieces[2].path}}, {{workpieces[2].position}}, {{workpieces[2].material}}),\n    ({{workpieces[3].path}}, {{workpieces[3].position}}, {{workpieces[3].material}}),\n]\nfor path, pos, mat in color_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\", position=pos, size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    assign_material(prim_path=path, material_path=f\"/World/Materials/{mat}\")\n\nbulk_set_attribute(\n    prim_paths=[c[0] for c in color_specs],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor c in color_specs:\n    apply_physics_material(prim_path=c[0], material_name=\"rubber\")\n\n# Bins on each side\ncreate_bin(prim_path={{red_bin.path}},  position={{red_bin.position}}, size={{red_bin.size}})\nassign_material(prim_path={{red_bin.path}}, material_path=\"/World/Materials/Red\")\ncreate_bin(prim_path={{blue_bin.path}}, position={{blue_bin.position}}, size={{blue_bin.size}})\nassign_material(prim_path={{blue_bin.path}}, material_path=\"/World/Materials/Blue\")\n\n# Mutex on heap\nsetup_robot_claim_mutex(\n    mutex_path=\"/World/HeapMutex\",\n    resource_path={{heap_surface.path}},\n    robots=[{{robot_a.path}}, {{robot_b.path}}],\n)\n\ncreate_prim(prim_path={{camera.path}}, prim_type=\"Camera\", position={{camera.position}})\nset_camera_look_at(camera_path={{camera.path}}, target={{camera.look_at}})\n\nadd_proximity_sensor(sensor_path={{sensor_a.path}}, position={{sensor_a.position}}, size={{sensor_a.size}})\nadd_proximity_sensor(sensor_path={{sensor_b.path}}, position={{sensor_b.position}}, size={{sensor_b.size}})\n\n# Robot A \u2014 vision-gated, picks red cubes only\nsetup_pick_place_with_vision(\n    robot_path={{robot_a.path}},\n    cube_paths=[c[0] for c in color_specs],\n    class_labels=[\"red cube\", \"blue cube\"],\n    camera_path={{camera.path}},\n    destination_map={\"red\": {{red_bin.path}}},\n    destination_path={{red_bin.path}},\n    sensor_path={{sensor_a.path}},\n    belt_path={{heap_surface.path}},\n    planning_obstacles=[\"/World/Table\", {{heap_surface.path}}, {{red_bin.path}}, {{blue_bin.path}}],\n    vision_precomputed={\n        {{workpieces[0].path}}: \"red\",\n        {{workpieces[1].path}}: \"blue\",\n        {{workpieces[2].path}}: \"red\",\n        {{workpieces[3].path}}: \"blue\",\n    },\n)"
 }
