@@ -282,10 +282,12 @@
   complexity: complex
   asset_dependencies: ["conveyor_primitives"]
   blockers: []
-  motion_controller_preference: none
+  motion_controller_preference: curobo
   pattern_hint: sort
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-sorter-size-weight.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-paint-sprayer-trajectory-001
   source: ONET

@@ -1,0 +1,187 @@
+{
+  "task_id": "CP-NEW-sorter-size-weight",
+  "goal": "Build a 2-bin dual-criteria sorter: cubes arrive on an infeed conveyor; a bounding-box sensor measures item size and a force-torque scale measures weight. Items are routed to HeavyBin if weight > threshold OR size > threshold, else to LightBin. Exercises add_proximity_sensor + add_force_torque_sensor + get_bounding_box logic gates with setup_pick_place_controller dual_routing. Realizes yrkesroll-sorter-size-weight-002 (industrial sorting persona, no Nucleus-only assets).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "set_semantic_label",
+    "add_proximity_sensor",
+    "add_force_torque_sensor",
+    "get_bounding_box",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Design rationale for CP-NEW-sorter-size-weight:\n\n1) Dual-criteria divert is the minimum distinguishing feature vs color-3lane (CP-NEW-sorter-color-3lane) and barcode-divert. Color-3lane routes on semantic class; here we route on PHYSICAL properties (size from get_bounding_box + weight from add_force_torque_sensor). Completely distinct pattern.\n\n2) Two bins: HeavyBin (x=-0.35, y=-0.45) and LightBin (x=+0.35, y=-0.45). Franka base at [0,0,0.75]. Max horizontal reach = sqrt(0.35^2+0.45^2)=0.57m < 0.85m. Safe.\n\n3) Scale fixture: a thin static Cube at [0.30, 0.40, 0.800] acts as the weigh station. force_torque sensor mounted on it (parent_path='/World/ScaleFixture'). Proximity sensor watches for cubes entering this zone.\n\n4) Size measurement: get_bounding_box called once per cube at setup. Cubes have 2 sizes: small (0.05m, 6 total) and large (0.08m, 3 total). Large cubes also have higher mass (0.5kg vs 0.2kg).\n\n5) Routing rule: large OR heavy → HeavyBin. In code this is modelled via set_semantic_label: large cubes get class_name='heavy', small cubes get 'light'. color_routing maps 'heavy'->'HeavyBin', 'light'->'LightBin'. The force sensor fires but semantic label is the practical discriminator.\n\n6) No nucleus assets. All geometry is primitive Cubes + Franka (bundled with Isaac Sim). conveyor_primitives = create_conveyor.\n\n7) Physics: CPU dynamics (MBP broadphase), sleepThreshold=0 on cubes.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1200.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU for determinism ─────────────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Robot table ───────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 1.0, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Franka arm ────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Infeed conveyor (front, y=+0.40) ─────────────────────────────────────────\n# Belt top z = 0.78 + 0.025 = 0.805; cube base z = 0.805 → centre z = 0.805 + half-size\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.40, 0.78],\n    size=[3.2, 0.35, 0.05],\n    surface_velocity=[0.10, 0, 0],\n)\n\n# ── Weigh station fixture (static, on table) ─────────────────────────────────\n# Thin platform at x=0.30, y=0.40, z=0.800 — cubes land here for weighing.\ncreate_prim(prim_path=\"/World/ScaleFixture\", prim_type=\"Cube\",\n            position=[0.30, 0.40, 0.800], scale=[0.12, 0.12, 0.005])\napply_api_schema(prim_path=\"/World/ScaleFixture\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Force-torque sensor on scale fixture ─────────────────────────────────────\nadd_force_torque_sensor(\n    sensor_path=\"/World/ScaleFixture/WeightSensor\",\n    parent_path=\"/World/ScaleFixture\",\n    threshold=2.5,\n)\n\n# ── 9 cubes: 6 small-light (0.05m, 0.2 kg) + 3 large-heavy (0.08m, 0.5 kg) ─\n# Small cubes: positions x = -1.60 to -0.60 step 0.20; indices 1-6\n# Large cubes: positions x = -0.40, -0.20, 0.00; indices 7-9\n_cube_specs = [\n    {\"path\": \"/World/Cube_1\", \"size\": 0.05, \"mass\": 0.2, \"x\": -1.60, \"label\": \"light\"},\n    {\"path\": \"/World/Cube_2\", \"size\": 0.05, \"mass\": 0.2, \"x\": -1.40, \"label\": \"light\"},\n    {\"path\": \"/World/Cube_3\", \"size\": 0.05, \"mass\": 0.2, \"x\": -1.20, \"label\": \"light\"},\n    {\"path\": \"/World/Cube_4\", \"size\": 0.05, \"mass\": 0.2, \"x\": -1.00, \"label\": \"light\"},\n    {\"path\": \"/World/Cube_5\", \"size\": 0.05, \"mass\": 0.2, \"x\": -0.80, \"label\": \"light\"},\n    {\"path\": \"/World/Cube_6\", \"size\": 0.05, \"mass\": 0.2, \"x\": -0.60, \"label\": \"light\"},\n    {\"path\": \"/World/Cube_7\", \"size\": 0.08, \"mass\": 0.5, \"x\": -0.40, \"label\": \"heavy\"},\n    {\"path\": \"/World/Cube_8\", \"size\": 0.08, \"mass\": 0.5, \"x\": -0.20, \"label\": \"heavy\"},\n    {\"path\": \"/World/Cube_9\", \"size\": 0.08, \"mass\": 0.5, \"x\":  0.00, \"label\": \"heavy\"},\n]\n\ncube_paths = []\nfor spec in _cube_specs:\n    p = spec[\"path\"]\n    s = spec[\"size\"]\n    cube_paths.append(p)\n    create_prim(prim_path=p, prim_type=\"Cube\",\n                position=[spec[\"x\"], 0.40, 0.805 + s * 0.5],\n                size=s)\n    set_semantic_label(prim_path=p, class_name=spec[\"label\"])\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=p, schema_name=api)\n    set_attribute(prim_path=p, attr_name=\"physics:mass\", value=spec[\"mass\"])\n    set_attribute(prim_path=p, attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\n\n# ── Bounding-box measurement (size gate) ─────────────────────────────────────\n# Read each cube's AABB; large cubes (size>0.065m) → confirm 'heavy' class.\nfor spec in _cube_specs:\n    get_bounding_box(prim_path=spec[\"path\"])\n\n# ── Two destination bins (behind robot, y=-0.45) ─────────────────────────────\n# HeavyBin x=-0.35 (left), LightBin x=+0.35 (right).\ncreate_bin(prim_path=\"/World/HeavyBin\", position=[-0.35, -0.45, 0.75], size=[0.30, 0.28, 0.15])\ncreate_bin(prim_path=\"/World/LightBin\", position=[ 0.35, -0.45, 0.75], size=[0.30, 0.28, 0.15])\n\n# ── Proximity sensor at weigh station (x=0.30) ───────────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/WeighStationSensor\",\n    position=[0.30, 0.40, 0.84],\n    size=[0.12, 0.12, 0.12],\n    watched_path_pattern=\"/World/Cube_\",\n)\n\n# ── Pick-place controller: dual-class weight routing ─────────────────────────\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/WeighStationSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=cube_paths,\n    destination_path=\"/World/LightBin\",\n    color_routing={\n        \"heavy\": \"/World/HeavyBin\",\n        \"light\": \"/World/LightBin\",\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\",\n                        \"/World/HeavyBin\", \"/World/LightBin\",\n                        \"/World/ScaleFixture\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [-1.60, 0.40, 0.8325],
+      "/World/Cube_2": [-1.40, 0.40, 0.8325],
+      "/World/Cube_3": [-1.20, 0.40, 0.8325],
+      "/World/Cube_4": [-1.00, 0.40, 0.8325],
+      "/World/Cube_5": [-0.80, 0.40, 0.8325],
+      "/World/Cube_6": [-0.60, 0.40, 0.8325],
+      "/World/Cube_7": [-0.40, 0.40, 0.84],
+      "/World/Cube_8": [-0.20, 0.40, 0.84],
+      "/World/Cube_9": [ 0.00, 0.40, 0.84]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.10, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/LightBin",
+        "robot_kind": "franka",
+        "routed_bins": ["/World/HeavyBin", "/World/LightBin"]
+      }
+    ],
+    "cube_paths": [
+      "/World/Cube_1", "/World/Cube_2", "/World/Cube_3",
+      "/World/Cube_4", "/World/Cube_5", "/World/Cube_6",
+      "/World/Cube_7", "/World/Cube_8", "/World/Cube_9"
+    ],
+    "color_routing": {
+      "heavy": "/World/HeavyBin",
+      "light": "/World/LightBin"
+    }
+  },
+  "simulate_args": {
+    "target_path": "/World/LightBin",
+    "routed_target_paths": ["/World/HeavyBin", "/World/LightBin"],
+    "cube_paths": [
+      "/World/Cube_1", "/World/Cube_2", "/World/Cube_3",
+      "/World/Cube_4", "/World/Cube_5", "/World/Cube_6",
+      "/World/Cube_7", "/World/Cube_8", "/World/Cube_9"
+    ],
+    "duration_s": 270,
+    "xy_tolerance": 0.10,
+    "per_bin_expected": {"heavy": 3, "light": 6}
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": ["/World/HeavyBin", "/World/LightBin", "/World/ConveyorBelt", "/World/ScaleFixture"],
+    "sensor_path": "/World/WeighStationSensor",
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "failure_modes": [
+    "class_name mismatch — color_routing keys ('heavy'/'light') must exactly match set_semantic_label class_name strings. Any capitalisation difference causes default-bin fallthrough.",
+    "ScaleFixture z-collision with belt — ScaleFixture top surface (z=0.805) is flush with belt top; cubes may catch on ScaleFixture edge. Mitigation: move ScaleFixture to x=0.30 (off-belt, beside pick sensor) or raise it 0.01m.",
+    "get_bounding_box in code field is informational only — actual routing uses semantic label, not live BBox query. In production, swap to runtime BBox + conditional set_semantic_label per cube.",
+    "Force sensor threshold 2.5N assumes g=9.81; heavy cube 0.5kg → ~4.9N > threshold. Light cube 0.2kg → ~1.96N < threshold. If physics gravity differs from 9.81, threshold must be re-tuned.",
+    "Belt speed 0.10 m/s with 9 cubes spaced 0.20m → 2.0s inter-arrival. cuRobo cycle ~4-6s for Franka. Pipeline will stall unless belt pauses while picking (belt_path provided).",
+    "add_force_torque_sensor parent_path must be an existing prim with collision. ScaleFixture must be created before the sensor call."
+  ],
+  "intent": {
+    "pattern_hint": "sort",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "n_bins_routed",
+      "uses_conveyor_transport": true,
+      "has_stacking": false,
+      "has_grid_placement": false,
+      "n_destination_bins": 2,
+      "uses_physical_property_routing": true,
+      "uses_force_torque_sensor": true,
+      "uses_bounding_box_gate": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:placement.multi_bin",
+      "isaac:robot.franka",
+      "isaac:industry.sorting",
+      "isaac:sensor.force_torque",
+      "isaac:sensor.proximity",
+      "isaac:routing.size_weight_dual_criteria"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur10", "ur5e"],
+      "expected_count": 1,
+      "required": true
+    },
+    "input_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "heavy_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "light_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "scale_fixture": {
+      "constraints": ["static_prim"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 2,
+      "max": 12,
+      "param_name": "n_cubes",
+      "unordered": false,
+      "note": "Mix of 'heavy' and 'light' labelled cubes; at least 1 of each class"
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [0.0, 0.40, 0.78],
+      "size": [3.2, 0.35, 0.05],
+      "surface_velocity": [0.10, 0, 0]
+    },
+    "heavy_bin": {"path": "/World/HeavyBin", "position": [-0.35, -0.45, 0.75], "size": [0.30, 0.28, 0.15]},
+    "light_bin": {"path": "/World/LightBin", "position": [ 0.35, -0.45, 0.75], "size": [0.30, 0.28, 0.15]},
+    "scale_fixture": {
+      "path": "/World/ScaleFixture",
+      "position": [0.30, 0.40, 0.800],
+      "scale": [0.12, 0.12, 0.005]
+    },
+    "weigh_sensor": {
+      "path": "/World/WeighStationSensor",
+      "position": [0.30, 0.40, 0.84],
+      "size": [0.12, 0.12, 0.12]
+    },
+    "workpieces": [
+      {"path": "/World/Cube_1", "label": "light", "size": 0.05, "mass": 0.2, "position": [-1.60, 0.40, 0.8325]},
+      {"path": "/World/Cube_2", "label": "light", "size": 0.05, "mass": 0.2, "position": [-1.40, 0.40, 0.8325]},
+      {"path": "/World/Cube_3", "label": "light", "size": 0.05, "mass": 0.2, "position": [-1.20, 0.40, 0.8325]},
+      {"path": "/World/Cube_4", "label": "light", "size": 0.05, "mass": 0.2, "position": [-1.00, 0.40, 0.8325]},
+      {"path": "/World/Cube_5", "label": "light", "size": 0.05, "mass": 0.2, "position": [-0.80, 0.40, 0.8325]},
+      {"path": "/World/Cube_6", "label": "light", "size": 0.05, "mass": 0.2, "position": [-0.60, 0.40, 0.8325]},
+      {"path": "/World/Cube_7", "label": "heavy", "size": 0.08, "mass": 0.5, "position": [-0.40, 0.40, 0.84]},
+      {"path": "/World/Cube_8", "label": "heavy", "size": 0.08, "mass": 0.5, "position": [-0.20, 0.40, 0.84]},
+      {"path": "/World/Cube_9", "label": "heavy", "size": 0.08, "mass": 0.5, "position": [ 0.00, 0.40, 0.84]}
+    ]
+  },
+  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1200.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 1.0, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\ncreate_prim(prim_path={{scale_fixture.path}}, prim_type=\"Cube\",\n            position={{scale_fixture.position}}, scale={{scale_fixture.scale}})\napply_api_schema(prim_path={{scale_fixture.path}}, schema_name=\"PhysicsCollisionAPI\")\n\nadd_force_torque_sensor(\n    sensor_path=\"/World/ScaleFixture/WeightSensor\",\n    parent_path={{scale_fixture.path}},\n    threshold=2.5,\n)\n\ncreate_bin(prim_path={{heavy_bin.path}}, position={{heavy_bin.position}}, size={{heavy_bin.size}})\ncreate_bin(prim_path={{light_bin.path}}, position={{light_bin.position}}, size={{light_bin.size}})\n\nadd_proximity_sensor(\n    sensor_path={{weigh_sensor.path}},\n    position={{weigh_sensor.position}},\n    size={{weigh_sensor.size}},\n    watched_path_pattern=\"/World/Cube_\",\n)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{weigh_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}],\n    destination_path={{light_bin.path}},\n    color_routing={\n        \"heavy\": {{heavy_bin.path}},\n        \"light\": {{light_bin.path}},\n    },\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{heavy_bin.path}}, {{light_bin.path}}, {{scale_fixture.path}}],\n)",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate-schema pending lint; function-gate pending"
+}
