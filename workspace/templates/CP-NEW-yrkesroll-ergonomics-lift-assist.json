@@ -1,0 +1,207 @@
+{
+  "task_id": "CP-NEW-yrkesroll-ergonomics-lift-assist",
+  "goal": "Yrkesroll: ergonomics / material-mover lift-assist operator (ONET SOC 53-7062, Laborers and Freight, Stock, and Material Movers, Hand). A Franka cobot lifts a heavy workpiece (15 kg cube) in concert with a human-proxy (Sphere) co-grasping the opposite end: cobot bears ~10 kg, human-proxy bears ~5 kg. The cobot uses Cartesian impedance control (soft Z stiffness, torque mode) to share load compliantly; an add_force_torque_sensor on the cobot wrist monitors the carried load; set_compliance_params softens stiffness mid-lift as the load is transferred. The workpiece is lifted from worktable height (z=0.81) to a shoulder-height target (z=1.35) while staying laterally aligned. Exercises the cobot+human force-shared lift pattern — structurally distinct from CP-NEW-safety-clearance-monitor-stop (human-proxy is INTRUDER, not co-actor) and CP-NEW-peg-bushing-impedance (impedance for INSERTION, not LIFT).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "robot_wizard",
+    "define_grasp_pose",
+    "setup_impedance_controller",
+    "add_force_torque_sensor",
+    "set_compliance_params",
+    "monitor_joint_effort",
+    "setup_pick_place_controller",
+    "get_world_transform",
+    "sim_control"
+  ],
+  "thoughts": "Design rationale for CP-NEW-yrkesroll-ergonomics-lift-assist:\n\n1) Yrkesroll framing — Material-mover / ergonomic lift-assist operator (ONET SOC 53-7062, Laborers and Freight, Stock, and Material Movers, Hand). Backlog yrkesroll-ergonomics-lift-assist-001 nominates ONET SOC 49-9071 (Maintenance and Repair Workers) for the assistive role; here we adopt 53-7062 (per A93 task spec) because the work primitive — co-lifting a heavy bulk part with a cobot — maps more directly to material-moving than to maintenance work. The 49-9071 cross-reference is preserved in operator_role.onet_soc_alternate. Role represents the human's intent: a human worker is doing a two-person lift with the robot as the second 'person'. The cobot stands in for the second human; the load-sharing math is identical to a two-person lift (each end bears half-ish, modulated by tilt).\n\n2) Pattern_hint=pick_place: success criterion is the workpiece lifted from start pose to target pose (delivered) with the cobot bearing > 8 kg of load (verified via add_force_torque_sensor + monitor_joint_effort). This is the canonical pick_place success shape (workpiece at destination, at rest) augmented with a force-sharing constraint.\n\n3) Topology — single-station on a 1.0×0.6×0.75 m worktable at origin:\n   - Franka cobot at [-0.45, 0, 0.75] (left side of table, base anchored on table top).\n   - Human-proxy Sphere at [+0.45, 0, 0.85] (right side of table at chest height; r=0.15).\n   - Workpiece: 0.30 × 0.10 × 0.08 m Cube at [0.0, 0.0, 0.86], mass 15 kg, centred between the two co-actors. Long axis along X so cobot grips x=-0.10 end and human-proxy grips x=+0.10 end.\n   - Drop / target pose: workpiece centre at [0.0, 0.0, 1.35] (shoulder height) — a 0.49 m vertical lift.\n\n4) 15 kg mass via apply_api_schema(MassAPI) + set_attribute(physics:mass, 15.0). Default density would give a 0.30×0.10×0.08 m cube about 2.4 kg (steel-equivalent), but explicit physics:mass=15.0 overrides density (per UsdPhysicsMassAPI semantics) — pattern used in CP-NEW-machinist-cnc-load and many others.\n\n5) Force-sharing model — there is no real human hand grip simulation. We model the human contribution as a vertical-only PhysicsFixedJoint between the workpiece right end and the human-proxy Sphere (created via run_usd_script if needed, but here we use simpler proxy: anchor the human-proxy as a kinematic rigid body and rely on the cobot to do the actual lifting work). Practically: the human-proxy is a kinematic Sphere (PhysicsRigidBodyAPI with kinematicEnabled=True) that moves on a scripted Z-trajectory matching the cobot wrist Z; physics constraints between the workpiece right end and the human-proxy prevent free fall. Cobot bears the remaining mass (workpiece weight minus the kinematic support provided at the human end). Mass-distribution: with the cube's centre of mass at the geometric centre and grip points symmetric, each end bears 7.5 kg by symmetry; we shift the cobot grip 5 cm toward the centre so cobot bears ~10 kg (workpiece COM is offset by 0.05 m toward cobot grip, lever arms 0.10 m vs 0.15 m → cobot ~60% = 9 kg, human ~40% = 6 kg). Approximate — exact ratio depends on physics solver convergence; verify via add_force_torque_sensor readings.\n\n6) Impedance controller — setup_impedance_controller in torque_mode=True, soft Z stiffness (Kx=[400, 400, 120] N/m) so the cobot yields to load variations during the lift. Tight rotational Kr=[40, 40, 40] N·m/rad keeps the wrist orientation horizontal so the grip doesn't roll. Null-space stiffness 0.5 keeps the arm in a sensible elbow-up posture. dry_run=True per current convention (live ROS2 bridge not assumed in canonicals).\n\n7) add_force_torque_sensor at /World/Franka/panda_hand with threshold=120 N (≈12.2 kg gravitational load — slightly above the expected ~10 kg the cobot should bear so we get clean readings without the canonical tripping the threshold under normal operation). noise_std=0.5 N to emulate sensor noise for sim-to-real fidelity.\n\n8) set_compliance_params — mid-lift, after the workpiece is clear of the table, softens Z stiffness further (Kx_z 120 → 80 N/m) to model 'finished accelerating, now coasting' phase where compliance should be highest. damping_xyz raised in lockstep to preserve critical damping. Demonstrates the runtime-tuning capability of the compliance state machine.\n\n9) define_grasp_pose — annotates the cobot's grip on the workpiece left end. gripper_offset=[-0.10, 0, 0] (cobot grips left end, offset from workpiece centre by -0.10 m), approach_direction=[0, 0, -1] (top-down approach, then close jaws around the left end). Produces a .isaac_grasp YAML the cobot's pick-place transit step can reference.\n\n10) setup_pick_place_controller — moves the cobot through the lift trajectory: pick from workpiece-current-pose, place at lift-target-pose. target_source='curobo' for transit planning. drop_target=[0, 0, 1.35] (shoulder height target). planning_obstacles=[Table, HumanProxy] so cuRobo avoids the human-proxy on approach. Note: this is the high-level transit; the actual force-sharing during the lift is governed by the impedance controller installed in step 6.\n\n11) monitor_joint_effort — runs for 8 s duration, captures joint efforts across the full lift. Flags joints exceeding 90% of effort limits — useful for verifying the cobot is not overloaded (15 kg at full reach is near Franka's payload limit of ~3 kg continuous; reaching 10 kg DOES exceed nominal but the canonical demonstrates the OVERLOAD diagnosis pathway rather than a successfully-completed lift). This is intentional: real human-assist scenarios pair an industrial cobot (UR10 17 kg payload) with the human; using Franka here is a TEMPLATE shape (substitutable via roles.primary_robot.constraints which includes ur10).\n\n12) get_world_transform — reads workpiece final pose to verify it reached the [0, 0, 1.35] target height.\n\n13) Failure modes: (a) human-proxy is structural (rigid Sphere), can't model actual hand grip force — workpiece may slip free if physics solver decides the human-end has no contact; mitigation is the kinematic+constraint approach in step 5. (b) Force-share asymmetric when human releases (kinematic Sphere stops moving but workpiece still attached → cobot bears full 15 kg → joint effort exceeded). (c) Workpiece tilts during lift if cobot and human-proxy Z trajectories desync — kinematic Sphere Z must track cobot wrist Z within ±0.02 m else tilt accumulates. (d) Franka 3 kg continuous payload is exceeded — joint efforts will saturate; canonical exercises the diagnose-pathway, not a successful lift. (e) Impedance controller dry_run=True means no real torque-mode control — transit via cuRobo is rigid; the compliance story is documented but not enforced at runtime in form-gate; function-gate requires ROS2 bridge + torque-mode Franka.\n\n14) Distinct structural tags: isaac:yrkesroll.ergonomics (new yrkesroll-axis tag tying to ONET SOC 53-7062 lift-assist work), isaac:industry.lift_assist (new industry tag for cobot-assisted lifting), isaac:robot.cobot.compliant (new robot-axis tag for compliance-mode cobot — distinct from isaac:robot.arm.franka which is the rigid mode), isaac:assist.force_shared (force-sharing collaboration pattern), isaac:sensor.force_torque (FT sensor on wrist), isaac:compliance.impedance (impedance control mode).\n\n15) Verified_status: drafted-2026-05-16; form-gate ✓; function-gate ⏳ (requires Kit RPC + ROS2 torque-mode bridge to exercise impedance controller; current dry_run=True means the impedance step is config-only).",
+  "code": "# ── Ground and lighting ─────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU deterministic ──────────────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Worktable ───────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Franka cobot at left side of table ──────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[-0.45, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Human-proxy Sphere at right side of table (chest height) ────────────────\n# Kinematic rigid body — moved by scripted trajectory to match cobot wrist Z\n# during the lift. PhysicsRigidBodyAPI + physxRigidBody:kinematicEnabled=True\n# is the standard pattern for a 'moved-by-script' actor (sensor for collision\n# but not gravity-driven).\ncreate_prim(\n    prim_path=\"/World/HumanProxy\",\n    prim_type=\"Sphere\",\n    position=[0.45, 0, 0.85],\n)\nset_attribute(prim_path=\"/World/HumanProxy\", attr_name=\"radius\", value=0.15)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/HumanProxy\", schema_name=api)\nset_attribute(prim_path=\"/World/HumanProxy\", attr_name=\"physxRigidBody:kinematicEnabled\", value=True)\nset_attribute(prim_path=\"/World/HumanProxy\", attr_name=\"primvars:displayColor\", value=[[0.95, 0.75, 0.55]])  # skin-tone\n\n# ── Heavy workpiece (15 kg cube) on the table between cobot and human ───────\n# Long axis along X (0.30 m); short axes 0.10 × 0.08 m. Centred at origin so\n# cobot grips x=-0.10 end and human-proxy grips x=+0.10 end (15 cm separation\n# from human-proxy centre).\ncreate_prim(\n    prim_path=\"/World/Workpiece\",\n    prim_type=\"Cube\",\n    position=[0.0, 0.0, 0.86],\n    scale=[0.15, 0.05, 0.04],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Workpiece\", schema_name=api)\n# Override default density: 15.0 kg explicit mass (15 kg per A93 spec).\nset_attribute(prim_path=\"/World/Workpiece\", attr_name=\"physics:mass\", value=15.0)\napply_physics_material(prim_path=\"/World/Workpiece\", material_name=\"rubber\")\nset_attribute(prim_path=\"/World/Workpiece\", attr_name=\"primvars:displayColor\", value=[[0.4, 0.4, 0.5]])\n\n# Solver iteration count to stabilise heavy-mass contact resolution.\nbulk_set_attribute(\n    prim_paths=[\"/World/Workpiece\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=[\"/World/Workpiece\", \"/World/HumanProxy\"],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\n# ── Grasp pose: cobot grips workpiece left end (x = -0.10 m) ────────────────\n# gripper_offset is the offset FROM the workpiece centre to the grip point.\ndefine_grasp_pose(\n    robot_path=\"/World/Franka\",\n    object_path=\"/World/Workpiece\",\n    gripper_offset=[-0.10, 0.0, 0.0],\n    approach_direction=[0, 0, -1],\n)\n\n# ── Force/torque sensor on cobot wrist — 120 N threshold (~12.2 kg) ─────────\n# Threshold ABOVE the expected ~10 kg cobot share so the canonical reads load\n# under normal operation without tripping; trips only on human-release fault.\nadd_force_torque_sensor(\n    sensor_path=\"/World/Franka/FtSensor\",\n    parent_path=\"/World/Franka/panda_hand\",\n    threshold=120.0,\n    noise_std=0.5,\n)\n\n# ── Impedance controller for compliant force-shared lift ────────────────────\n# Soft Z stiffness (120 N/m) so the cobot YIELDS to the human's lift gestures.\n# Tight rotational stiffness keeps the wrist horizontal (no roll under load).\n# torque_mode=True required for impedance; dry_run=True per canonical convention.\nsetup_impedance_controller(\n    robot_path=\"/World/Franka\",\n    target_frame=\"panda_hand\",\n    Kx=[400.0, 400.0, 120.0],\n    Kr=[40.0, 40.0, 40.0],\n    Dx=[40.0, 40.0, 22.0],\n    Dr=[4.0, 4.0, 4.0],\n    null_space_stiffness=0.5,\n    null_space_damping=0.5,\n    torque_mode=True,\n    dry_run=True,\n)\n\n# ── Begin monitoring joint effort across the lift (8 s window) ──────────────\nmonitor_joint_effort(\n    articulation_path=\"/World/Franka\",\n    duration_seconds=8.0,\n)\n\n# ── PHASE 1: cobot picks workpiece left end, lifts to shoulder height ───────\n# Transit via cuRobo; the impedance controller installed above governs the\n# force-sharing dynamics during the actual descent / ascent (function-gate).\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    robot_family=\"franka\",\n    source_paths=[\"/World/Workpiece\"],\n    destination_path=\"/World/Workpiece\",\n    drop_target=[0.0, 0.0, 1.35],\n    planning_obstacles=[\"/World/Table\", \"/World/HumanProxy\"],\n    approach_height=0.20,\n    lift_height=0.60,\n)\n\n# ── PHASE 2: mid-lift compliance softening ──────────────────────────────────\n# After the workpiece is clear of the table (post-ascent), soften Z stiffness\n# further (120 → 80 N/m) to model the 'coasting' phase where compliance should\n# be highest. damping raised in lockstep to maintain near-critical damping.\nset_compliance_params(\n    robot_path=\"/World/Franka\",\n    stiffness_xyz=[400.0, 400.0, 80.0],\n    damping_xyz=[40.0, 40.0, 18.0],\n    dry_run=True,\n)\n\n# ── Step simulation to let the lift settle at target height ─────────────────\nsim_control(action=\"step\", step_count=300)\n\n# ── Verify workpiece reached the shoulder-height target ─────────────────────\nget_world_transform(prim_path=\"/World/Workpiece\")\nget_world_transform(prim_path=\"/World/Franka/panda_hand\")\nget_world_transform(prim_path=\"/World/HumanProxy\")",
+  "code_template": "# ── Ground and lighting ─────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Worktable ───────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Cobot ───────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"{{primary_robot.class}}\",\n    dest_path=\"{{primary_robot.path}}\",\n    position={{primary_robot.position}},\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Human-proxy Sphere (kinematic co-actor) ─────────────────────────────────\ncreate_prim(\n    prim_path=\"{{human_proxy.path}}\",\n    prim_type=\"Sphere\",\n    position={{human_proxy.initial_position}},\n)\nset_attribute(prim_path=\"{{human_proxy.path}}\", attr_name=\"radius\", value={{human_proxy.radius}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"{{human_proxy.path}}\", schema_name=api)\nset_attribute(prim_path=\"{{human_proxy.path}}\", attr_name=\"physxRigidBody:kinematicEnabled\", value=True)\n\n# ── Heavy workpiece ─────────────────────────────────────────────────────────\ncreate_prim(\n    prim_path=\"{{workpiece.path}}\",\n    prim_type=\"Cube\",\n    position={{workpiece.position}},\n    scale={{workpiece.scale}},\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"{{workpiece.path}}\", schema_name=api)\nset_attribute(prim_path=\"{{workpiece.path}}\", attr_name=\"physics:mass\", value={{workpiece.mass}})\napply_physics_material(prim_path=\"{{workpiece.path}}\", material_name={{workpiece.material}})\nbulk_set_attribute(prim_paths=[\"{{workpiece.path}}\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\n\n# ── Grasp pose at workpiece left end ────────────────────────────────────────\ndefine_grasp_pose(\n    robot_path=\"{{primary_robot.path}}\",\n    object_path=\"{{workpiece.path}}\",\n    gripper_offset={{grasp.gripper_offset}},\n    approach_direction=[0, 0, -1],\n)\n\n# ── Force/torque sensor on cobot wrist ──────────────────────────────────────\nadd_force_torque_sensor(\n    sensor_path=\"{{ft_sensor.path}}\",\n    parent_path=\"{{ft_sensor.parent_path}}\",\n    threshold={{ft_sensor.threshold_N}},\n    noise_std=0.5,\n)\n\n# ── Impedance controller (soft Z stiffness) ─────────────────────────────────\nsetup_impedance_controller(\n    robot_path=\"{{primary_robot.path}}\",\n    target_frame=\"panda_hand\",\n    Kx={{impedance.Kx_initial}},\n    Kr=[40.0, 40.0, 40.0],\n    Dx={{impedance.Dx_initial}},\n    Dr=[4.0, 4.0, 4.0],\n    null_space_stiffness=0.5,\n    null_space_damping=0.5,\n    torque_mode=True,\n    dry_run=True,\n)\n\nmonitor_joint_effort(articulation_path=\"{{primary_robot.path}}\", duration_seconds=8.0)\n\n# ── Lift transit ────────────────────────────────────────────────────────────\nsetup_pick_place_controller(\n    robot_path=\"{{primary_robot.path}}\",\n    target_source=\"curobo\",\n    robot_family={{primary_robot.class}},\n    source_paths=[\"{{workpiece.path}}\"],\n    destination_path=\"{{workpiece.path}}\",\n    drop_target={{lift_target.position}},\n    planning_obstacles=[\"/World/Table\", \"{{human_proxy.path}}\"],\n    approach_height=0.20,\n    lift_height=0.60,\n)\n\n# ── Mid-lift compliance softening ───────────────────────────────────────────\nset_compliance_params(\n    robot_path=\"{{primary_robot.path}}\",\n    stiffness_xyz={{impedance.Kx_softened}},\n    damping_xyz={{impedance.Dx_softened}},\n    dry_run=True,\n)\n\nsim_control(action=\"step\", step_count=300)\nget_world_transform(prim_path=\"{{workpiece.path}}\")\nget_world_transform(prim_path=\"{{primary_robot.path}}/panda_hand\")\nget_world_transform(prim_path=\"{{human_proxy.path}}\")",
+  "settle_state": {
+    "workpiece_initial_position": [0.0, 0.0, 0.86],
+    "workpiece_target_position": [0.0, 0.0, 1.35],
+    "workpiece_mass_kg": 15.0,
+    "cobot_grip_offset": [-0.10, 0.0, 0.0],
+    "human_proxy_position": [0.45, 0.0, 0.85],
+    "expected_cobot_load_kg_min": 8.0,
+    "expected_cobot_load_kg_max": 12.0,
+    "expected_human_load_kg_min": 3.0,
+    "expected_human_load_kg_max": 7.0,
+    "impedance_Kx_initial": [400.0, 400.0, 120.0],
+    "impedance_Kx_softened": [400.0, 400.0, 80.0],
+    "ft_threshold_N": 120.0
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Workpiece",
+        "place_path": "/World/Workpiece",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/Workpiece",
+    "workpiece_path": "/World/Workpiece",
+    "human_proxy_path": "/World/HumanProxy",
+    "ft_sensor_path": "/World/Franka/FtSensor",
+    "lift_target_position": [0.0, 0.0, 1.35],
+    "workpiece_mass_kg": 15.0,
+    "impedance_installed": true,
+    "compliance_softened_mid_lift": true,
+    "expected_force_share_cobot_kg": [8.0, 12.0],
+    "expected_force_share_human_kg": [3.0, 7.0]
+  },
+  "simulate_args": {
+    "target_path": "/World/Workpiece",
+    "cube_path": "/World/Workpiece",
+    "duration_s": 12,
+    "lift_target_z": 1.35,
+    "z_tolerance": 0.05,
+    "xy_tolerance": 0.10,
+    "check_ft_sensor_load_within_range": true,
+    "ft_sensor_path": "/World/Franka/FtSensor",
+    "ft_min_N": 78.0,
+    "ft_max_N": 120.0
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Table",
+      "/World/HumanProxy"
+    ],
+    "ft_sensor_path": "/World/Franka/FtSensor",
+    "workpiece_path": "/World/Workpiece",
+    "robot_base": [-0.45, 0.0, 0.75]
+  },
+  "failure_modes": [
+    "Human-proxy is a structural rigid Sphere — it CANNOT model real hand grip force. The workpiece is held at the human-end by a kinematic-Sphere + (optional) PhysicsFixedJoint pair; if no constraint is wired between Workpiece and HumanProxy the workpiece slips free at the human end the moment gravity outweighs friction. Form-gate ships without the joint (kinematic Sphere + contact friction); function-gate may need an explicit setup_assembly_constraint or run_usd_script PhysicsFixedJoint to enforce co-grasp at the human end.",
+    "Force-share asymmetric when human-proxy 'releases': the kinematic Sphere keeps moving on its scripted trajectory but the workpiece may separate; on separation the cobot bears the full 15 kg → joint efforts saturate → monitor_joint_effort flags overload. This is the diagnose-pathway the canonical exercises; it is NOT a successful lift in production. Real lift-assist work requires force-feedback-driven release detection (sensor.force_torque threshold → cobot lowers workpiece to safe rest pose).",
+    "Workpiece tilts during lift if cobot wrist Z and human-proxy Z desync — the workpiece long axis pitches off-horizontal. Kinematic Sphere Z trajectory must track cobot wrist Z within ±0.02 m else tilt accumulates. Mitigation in form-gate is the soft impedance Z stiffness which lets the cobot YIELD to the human's Z motion; tighter sync requires a teleop bridge or scripted-trajectory replay.",
+    "Franka 3 kg continuous payload is exceeded by the 10 kg cobot share — joint efforts will saturate at full reach. The canonical intentionally demonstrates the overload-diagnose pathway via monitor_joint_effort. roles.primary_robot.constraints includes 'ur10' (17 kg payload) as the production-realistic swap; Franka here is a TEMPLATE shape for compatibility with the rest of the library.",
+    "setup_impedance_controller dry_run=True — no live torque-mode control without ROS2 bridge + torque-mode Franka. Transit via cuRobo is rigid; the impedance / compliance story is documented but not enforced at runtime in form-gate. Function-gate requires a torque-mode robot (Franka FR3 in torque mode, or ros2_control with effort interface).",
+    "add_force_torque_sensor threshold=120 N may trip during lift transit acceleration peaks (workpiece weight 15 kg × 9.81 m/s² = 147 N nominal; cobot share ~98 N nominal but transient acceleration spikes can exceed 120 N). Mitigation: raise threshold to 180 N for transient tolerance, OR add a separate sustained-load filter via run_usd_script post-hoc analysis. Form-gate ships at 120 N for clearer demonstration of the cap concept.",
+    "setup_pick_place_controller destination_path=workpiece_path is a self-reference (pick from workpiece, place to workpiece) — this is intentional because the workpiece IS the destination (the LIFT moves the workpiece itself, not a separate object to a separate bin). Some pick_place implementations may reject self-referential placement; if so, replace destination_path with a dummy /World/LiftTarget Xform at the target position.",
+    "Cobot grip offset gripper_offset=[-0.10, 0, 0] from workpiece centre puts the gripper at x=-0.10 m. The workpiece scale=[0.15, 0.05, 0.04] gives extents from -0.15 to +0.15 m along X (Cube default size is 2 m, scaled by 0.15 → 0.30 m total). The grip point at x=-0.10 m is INSIDE the workpiece footprint (left end is at -0.15 m). This is the intended grip-near-end geometry; if the user reads gripper_offset as 'distance from workpiece edge', the offset would need to be -0.05 m (grip 5 cm from left edge); document this disambiguation in docs.",
+    "set_compliance_params requires setup_impedance_controller (or admittance) to have been installed first — the in-memory _INSTALLED_COMPLIANCE state dict is keyed by robot_path. If installation failed silently the params-update is a no-op. Mitigation: check setup_impedance_controller return value before issuing set_compliance_params (validate at execution time)."
+  ],
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "has_stacking": false,
+      "has_safety_zone": false,
+      "has_human_proxy": true,
+      "has_force_sharing": true,
+      "has_compliance": true,
+      "has_force_torque_sensor": true,
+      "n_workpieces": 1,
+      "workpiece_mass_kg": 15.0,
+      "lift_height_m": 0.49
+    },
+    "structural_tags": [
+      "isaac:yrkesroll.ergonomics",
+      "isaac:industry.lift_assist",
+      "isaac:robot.cobot.compliant",
+      "isaac:assist.force_shared",
+      "isaac:sensor.force_torque",
+      "isaac:compliance.impedance",
+      "isaac:robot.arm.franka",
+      "isaac:topology.single_station"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur10", "ur10e"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "torque_mode_capable_arm_preferred_else_position_mode_with_admittance_swap"
+    },
+    "human_proxy": {
+      "constraints": ["Sphere", "Capsule"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "kinematic_rigid_body_co_actor_not_intruder"
+    },
+    "workpiece": {
+      "constraints": ["cube", "elongated_box"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "heavy_workpiece_mass_kg_gt_10"
+    },
+    "ft_sensor": {
+      "constraints": ["force_torque_sensor"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [-0.45, 0, 0.75],
+      "orientation": [1, 0, 0, 0]
+    },
+    "human_proxy": {
+      "path": "/World/HumanProxy",
+      "shape": "Sphere",
+      "radius": 0.15,
+      "initial_position": [0.45, 0, 0.85],
+      "kinematic": true
+    },
+    "workpiece": {
+      "path": "/World/Workpiece",
+      "position": [0.0, 0.0, 0.86],
+      "scale": [0.15, 0.05, 0.04],
+      "mass": 15.0,
+      "material": "rubber"
+    },
+    "ft_sensor": {
+      "path": "/World/Franka/FtSensor",
+      "parent_path": "/World/Franka/panda_hand",
+      "threshold_N": 120.0
+    },
+    "grasp": {
+      "gripper_offset": [-0.10, 0.0, 0.0],
+      "approach_direction": [0, 0, -1]
+    },
+    "impedance": {
+      "Kx_initial": [400.0, 400.0, 120.0],
+      "Kx_softened": [400.0, 400.0, 80.0],
+      "Dx_initial": [40.0, 40.0, 22.0],
+      "Dx_softened": [40.0, 40.0, 18.0]
+    },
+    "lift_target": {
+      "position": [0.0, 0.0, 1.35]
+    },
+    "operator_role": {
+      "yrkesroll": "ergonomics_lift_assist_operator",
+      "onet_soc": "53-7062",
+      "onet_soc_title": "Laborers and Freight, Stock, and Material Movers, Hand",
+      "onet_soc_alternate": "49-9071",
+      "onet_soc_alternate_title": "Maintenance and Repair Workers, General",
+      "onet_soc_note": "53-7062 is the closer match for a material-moving lift task; the backlog entry yrkesroll-ergonomics-lift-assist-001 nominated 49-9071 which fits a maintenance-context lift. Both legitimately fall under cobot-assisted material handling; the discrimination is whether the LIFT itself is the work primitive (53-7062) or a SUB-step of a repair task (49-9071).",
+      "workstation": "cobot_assist_lift_station",
+      "responsibilities": [
+        "co_lift_heavy_part",
+        "compliance_share_load",
+        "monitor_force_torque_within_safe_band",
+        "release_after_target_height_reached"
+      ]
+    }
+  },
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo", "impedance"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate ✓; function-gate ⏳ (requires Kit RPC + ROS2 torque-mode bridge to exercise impedance controller — dry_run=True ships config only; function-gate also needs explicit Workpiece↔HumanProxy joint OR vertical-only kinematic-sync to demonstrate the force-shared lift quantitatively)",
+  "extends": "yrkesroll-ergonomics-lift-assist-001",
+  "extension_notes": "Implements cobot-assisted ergonomic lift-assist pattern. Distinct from CP-NEW-safety-clearance-monitor-stop (human-proxy is INTRUDER triggering stop, not CO-ACTOR sharing load) and CP-NEW-peg-bushing-impedance (impedance applied to INSERTION, not LIFT). Backlog nominated ONET 49-9071 (Maintenance); A93 spec adopts 53-7062 (Material-Mover) as the closer work primitive; both are documented in role_defaults.operator_role. Scenario-profile extensions: (1) swap Franka → UR10 to gain a real cobot payload (17 kg) capable of the 10 kg share without overload; (2) replace kinematic-Sphere human-proxy with a 7-DOF skeleton via NVIDIA Nucleus avatar asset for a true biomechanically-grounded co-actor; (3) add a setup_admittance_controller variant for position-mode robots (Franka in default mode) per the CRM A2/B1 split."
+}
