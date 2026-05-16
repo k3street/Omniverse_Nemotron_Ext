@@ -1,0 +1,197 @@
+{
+  "task_id": "CP-NEW-oxe-sweep-into-dustpan",
+  "goal": "Open-X-Embodiment household-cleanup parity: a Franka arm grasps a rigid broom proxy (vertical handle + flat bristle plate) staged on the table, then drags the broom along the floor through a debris cluster (4 small Cube proxies) toward a low-walled dustpan, sweeping the debris into the pan. Success criterion: ≥3 of 4 debris items have their (x, y) position inside the dustpan footprint at sim end. Exercises gesture-based tool use — the controller does not pick-and-place each debris item individually; it pushes them en masse with the broom plate. Builds on OXE 'sweep-into-dustpan' research episode (https://robotics-transformer-x.github.io) with rigid-tool simplification (no deformable bristles).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "create_bin",
+    "define_grasp_pose",
+    "setup_pick_place_controller",
+    "move_to_pose",
+    "get_world_transform",
+    "get_bounding_box",
+    "count_prims_under_path"
+  ],
+  "thoughts": [
+    "Pattern: gesture-based tool use — NOT pick_place (no per-debris transport), NOT sort (no class routing), NOT insert (no compliance), NOT reorient (no orientation flip), NOT navigate (fixed-base). pattern_hint='other'. The discriminating signal is the broom drag-trajectory through a debris cluster, which structural_tags isaac:gesture.sweep + isaac:tool_use.broom expose at retrieval time.",
+    "Robot reaches floor: Franka is mounted on a 0.20 m pedestal (not a 0.75 m table) so the EE can reach z≈0.02 m floor level while sweeping. With broom length 0.40 m and handle pose vertical, EE at z≈0.42 m holds the bristle plate at z≈0.02 m. This keeps the sweep stroke inside the 0.855 m reach envelope.",
+    "Broom geometry: composite Xform /World/Broom with two rigid Cube children — Handle_ (0.025 × 0.025 × 0.40 m vertical) at z=0.22 and BristlePlate_ (0.25 × 0.04 × 0.02 m horizontal) at z=0.02. They are unified by a FixedJoint authored via apply_api_schema(PhysicsFixedJointAPI) so the parallel-jaw gripper grasping the handle drags the bristle plate as one rigid body. (PhysX-stable; no deformable cloth/wire physics.)",
+    "Why parallel-jaw + native pick to grab broom: setup_pick_place_controller with target_source='native' picks the handle Cube as if it were any tabletop part (define_grasp_pose specifies the grasp on Handle_ at handle midpoint, top-down approach). Once gripped, the controller releases over the same drop target as the broom origin — but we override drop_targets to keep the broom in-hand and instead chain into move_to_pose for the sweep stroke. (In practice the controller's release phase is skipped by setting drop_height to a very high value; if that's not honored, the canonical instead relies on the user-driven move_to_pose calls executed after the controller's pick phase completes.)",
+    "Sweep trajectory (three move_to_pose calls): (1) pre-sweep — bristle plate at floor level, positioned 0.20 m upstream of the debris cluster centroid, oriented so plate normal faces sweep direction; (2) drag — bristle plate at floor level, advanced through and past the debris cluster, ending just inside the dustpan mouth; (3) lift — broom lifted vertically 0.20 m to clear the dustpan after debris funnels in. Each waypoint uses world XYZ + quaternion [1,0,0,0] (gripper down). move_to_pose planner='rmpflow' (no obstacle planning needed — floor is the only constraint and the controller's compliance handles small bumps).",
+    "Debris cluster: 4 small Cubes 0.025 m, mass 0.02 kg each, scattered in a 0.20 × 0.10 m patch at floor level upstream of the dustpan. Cubes given 'rubber' physics material so they slide rather than roll/tumble; sleepThreshold=0.0 ensures they remain dynamic. CCD enabled to prevent tunnel-through-floor during sweep impact.",
+    "Dustpan: built with create_bin (open-top container) at floor level. Footprint 0.25 × 0.18 × 0.04 m with thin wall_thickness 0.005 m. The bin's open side faces the debris cluster — implemented by treating the bin as a 4-wall box and accepting that the wall closest to debris will block 1-2 items (failure_mode notes this). A more faithful dustpan model would require a custom 3-wall + ramp mesh; for canonical-coverage purposes the create_bin approximation is accepted.",
+    "Verification: get_world_transform on each debris item after sim. Read the dustpan AABB via get_bounding_box(/World/Dustpan), then for each debris item check whether translation.x,y falls inside the AABB.min/max .xy ranges. Success = ≥3 of 4 inside. count_prims_under_path('/World/Debris') confirms all 4 debris items still exist (the broom sweep should not destroy any via tunneling — a CCD-failure honesty check).",
+    "motion_controllers: rmpflow (used for move_to_pose sweep waypoints — reactive, fast, no global planning needed). curobo untested for this canonical because the sweep is a primarily floor-plane Cartesian drag — rmpflow's reactive jacobian-based control is the natural fit. direct_joint untested."
+  ],
+  "code": "# ── Scene skeleton ──────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Low robot pedestal so EE can reach floor (0.20m tall) ─────────────────────\ncreate_prim(prim_path=\"/World/Pedestal\", prim_type=\"Cube\", position=[0, 0, 0.10], scale=[0.30, 0.30, 0.10])\napply_api_schema(prim_path=\"/World/Pedestal\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Franka arm on 0.20m pedestal (low mount → floor-reachable EE) ─────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.20],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Broom proxy: vertical handle + horizontal bristle plate as composite ─────\n# Handle staged at [0.35, 0.30, 0.22] — within Franka reach for top-down grasp.\n# BristlePlate hangs off the bottom at [0.35, 0.30, 0.02] (floor level).\n# Apply PhysicsFixedJointAPI to unify them as one rigid body during sweep.\ncreate_prim(prim_path=\"/World/Broom\", prim_type=\"Xform\")\ncreate_prim(\n    prim_path=\"/World/Broom/Handle\",\n    prim_type=\"Cube\",\n    position=[0.35, 0.30, 0.22],\n    scale=[0.0125, 0.0125, 0.20],\n)\ncreate_prim(\n    prim_path=\"/World/Broom/BristlePlate\",\n    prim_type=\"Cube\",\n    position=[0.35, 0.30, 0.025],\n    scale=[0.125, 0.02, 0.01],\n)\nfor _broom_part in (\"/World/Broom/Handle\", \"/World/Broom/BristlePlate\"):\n    for _api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=_broom_part, schema_name=_api)\nbulk_set_attribute(prim_paths=[\"/World/Broom/Handle\", \"/World/Broom/BristlePlate\"], attr=\"physics:mass\", value=0.10)\nbulk_set_attribute(prim_paths=[\"/World/Broom/Handle\", \"/World/Broom/BristlePlate\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nbulk_set_attribute(prim_paths=[\"/World/Broom/Handle\", \"/World/Broom/BristlePlate\"], attr=\"physxRigidBody:enableCCD\", value=True)\napply_physics_material(prim_path=\"/World/Broom/BristlePlate\", material_name=\"rubber\")\n# Unify broom parts into a rigid composite via FixedJoint between handle and plate.\napply_api_schema(prim_path=\"/World/Broom/Handle\", schema_name=\"PhysicsFixedJointAPI\")\n\n# ── Debris cluster: 4 small cubes scattered upstream of dustpan ──────────────\n# Cluster centroid at [0.55, 0.30, 0.0125]. 0.20 x 0.10m patch.\ncreate_prim(prim_path=\"/World/Debris\", prim_type=\"Xform\")\ndebris_positions = [\n    [0.50, 0.27, 0.0125],\n    [0.55, 0.32, 0.0125],\n    [0.60, 0.28, 0.0125],\n    [0.55, 0.33, 0.0125],\n]\ndebris_paths = [f\"/World/Debris/Item_{i+1}\" for i in range(4)]\nfor _i, _path in enumerate(debris_paths):\n    create_prim(\n        prim_path=_path,\n        prim_type=\"Cube\",\n        position=debris_positions[_i],\n        scale=[0.0125, 0.0125, 0.0125],\n    )\n    for _api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=_path, schema_name=_api)\nbulk_set_attribute(prim_paths=debris_paths, attr=\"physics:mass\", value=0.02)\nbulk_set_attribute(prim_paths=debris_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nbulk_set_attribute(prim_paths=debris_paths, attr=\"physxRigidBody:enableCCD\", value=True)\nfor _path in debris_paths:\n    apply_physics_material(prim_path=_path, material_name=\"rubber\")\n\n# ── Dustpan: open-top low-walled container at floor level ────────────────────\n# Footprint 0.25 x 0.18m, walls 0.04m tall. Mouth faces -X (debris direction).\ncreate_bin(\n    prim_path=\"/World/Dustpan\",\n    size=[0.25, 0.18, 0.04],\n    position=[0.78, 0.30, 0.0],\n    wall_thickness=0.005,\n)\n\n# ── Define grasp pose on broom handle (top-down) ─────────────────────────────\ndefine_grasp_pose(\n    robot_path=\"/World/Franka\",\n    object_path=\"/World/Broom/Handle\",\n    gripper_offset=[0.0, 0.0, 0.0],\n    approach_direction=[0.0, 0.0, -1.0],\n)\n\n# ── Pick-place controller (native mode) to grasp broom handle ────────────────\n# We use the controller's pick phase to close the gripper on the handle, then\n# rely on move_to_pose calls below for the sweep stroke. drop_targets points\n# above the dustpan mouth so the controller does not release the broom prematurely\n# inside the debris cluster.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"native\",\n    source_paths=[\"/World/Broom/Handle\"],\n    destination_path=\"/World/Dustpan\",\n    drop_targets={\"/World/Broom/Handle\": [0.78, 0.30, 0.50]},\n    end_effector_offset=[0.0, 0.005, 0.0],\n)\n\n# ── Sweep trajectory: three Cartesian waypoints via move_to_pose ─────────────\n# Waypoint 1: pre-sweep — bristle plate just above floor, 0.20m upstream of debris\nmove_to_pose(\n    articulation_path=\"/World/Franka\",\n    target_position=[0.35, 0.30, 0.22],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"franka\",\n)\n# Waypoint 2: drag — bristle plate at floor through debris into dustpan mouth\nmove_to_pose(\n    articulation_path=\"/World/Franka\",\n    target_position=[0.72, 0.30, 0.22],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"franka\",\n)\n# Waypoint 3: lift — clear broom from dustpan so debris settles\nmove_to_pose(\n    articulation_path=\"/World/Franka\",\n    target_position=[0.72, 0.30, 0.42],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"franka\",\n)\n\n# ── Verification: dustpan AABB + per-debris world transform + survival count ─\ndustpan_bbox = get_bounding_box(prim_path=\"/World/Dustpan\")\nfor _path in debris_paths:\n    get_world_transform(prim_path=_path)\ncount_prims_under_path(parent_path=\"/World/Debris\", type_filter=\"Cube\")\n# Success criterion (checked offline by verify pass):\n#   For each debris item D, let (x,y) = world translation of D.\n#   Inside-dustpan := dustpan_bbox.min.x <= x <= dustpan_bbox.max.x AND\n#                     dustpan_bbox.min.y <= y <= dustpan_bbox.max.y.\n#   Pass := count(inside-dustpan) >= 3 out of 4.",
+  "settle_state": {
+    "broom": {
+      "/World/Broom/Handle": [0.35, 0.30, 0.22],
+      "/World/Broom/BristlePlate": [0.35, 0.30, 0.025]
+    },
+    "debris": {
+      "/World/Debris/Item_1": [0.50, 0.27, 0.0125],
+      "/World/Debris/Item_2": [0.55, 0.32, 0.0125],
+      "/World/Debris/Item_3": [0.60, 0.28, 0.0125],
+      "/World/Debris/Item_4": [0.55, 0.33, 0.0125]
+    },
+    "dustpan": {
+      "/World/Dustpan": {
+        "position": [0.78, 0.30, 0.0],
+        "size": [0.25, 0.18, 0.04]
+      }
+    },
+    "robot": {
+      "/World/Franka": "home_pose"
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Broom/Handle",
+        "place_path": "/World/Dustpan",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "debris_paths": [
+      "/World/Debris/Item_1",
+      "/World/Debris/Item_2",
+      "/World/Debris/Item_3",
+      "/World/Debris/Item_4"
+    ],
+    "dustpan_path": "/World/Dustpan",
+    "min_debris_in_dustpan": 3,
+    "broom_paths": ["/World/Broom/Handle", "/World/Broom/BristlePlate"]
+  },
+  "simulate_args": {
+    "target_path": "/World/Dustpan",
+    "cube_paths": [
+      "/World/Debris/Item_1",
+      "/World/Debris/Item_2",
+      "/World/Debris/Item_3",
+      "/World/Debris/Item_4"
+    ],
+    "duration_s": 90,
+    "xy_tolerance": 0.12
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": ["/World/Pedestal", "/World/Dustpan"],
+    "robot_base": [0.0, 0.0, 0.20],
+    "broom_path": "/World/Broom"
+  },
+  "extends": "research-oxe-sweep-into-dustpan-001",
+  "extension_notes": "Implements research-oxe-sweep-into-dustpan-001 with rigid-broom + open-top-bin simplifications. Backlog classifies this entry under 'physics instability (contact-rich)'; this canonical avoids the unstable regime by (a) using a rigid composite broom (no deformable bristles), (b) using a 4-wall create_bin dustpan (no thin-shell mesh), (c) reducing debris count to 4 small cubes with CCD + rubber friction so sweep contact stays in PhysX-stable regime. Backlog 'cable physics required: false' equivalent here is 'deformable bristles required: false'. record_waypoints + move_to_pose substitute for the OXE-recorded EE trajectory.",
+  "failure_modes": [
+    "STRUCTURAL SIMPLIFICATION: real brooms have deformable bristles that conform to floor + debris. This canonical models the broom as a rigid composite (Handle + BristlePlate joined by PhysicsFixedJointAPI). Consumers requiring true deformable-bristle behaviour should NOT retrieve this canonical.",
+    "STRUCTURAL SIMPLIFICATION 2: a real dustpan has 3 walls + an inclined entry ramp so debris funnels in. create_bin produces a 4-wall open-top box; the wall closest to the debris cluster (-X side of the dustpan at x=0.78-0.125=0.655) can block 1-2 items from entering. Mitigation #1: drop the -X wall by editing the BinWall_NegX prim's z-scale to 0 after create_bin. Mitigation #2: accept the limitation and tune drag waypoint #2 x-coord to 0.72 (well past the wall, plate centred inside the pan) so debris ride the plate over the wall.",
+    "FixedJoint between Handle and BristlePlate via PhysicsFixedJointAPI — if the schema is not honored (older Kit/PhysX versions), the two parts separate when the gripper drags the handle and the plate falls onto the floor. Mitigation: switch to a single Xform with PhysicsRigidBodyAPI on the parent and shape children (composite rigid body) — but this loses the FixedJoint metadata and the children won't render as a rigid composite under setup_pick_place_controller (which assumes the grasp target is a single rigid body).",
+    "Gripper opens at end of move_to_pose call — if RMPflow or the controller's release-phase fires after the final lift waypoint, the broom falls out of the gripper INSIDE the dustpan, potentially scattering already-swept debris. Mitigation: explicitly hold gripper closed via set_joint_targets on panda_finger_joint1/joint2 = 0.0 before move_to_pose chain; OR set the controller's drop_height very high so its release phase never triggers within sim duration.",
+    "Pedestal-mounted Franka (z=0.20m) reaches floor z=0.02m via EE at z≈0.22m — this is near the bottom of the workspace envelope. If RMPflow IK fails at a waypoint, increase pedestal height to 0.30m AND raise floor waypoints to z=0.32m correspondingly (keeps relative geometry intact but moves whole stack up).",
+    "Debris CCD tunnelling — sweep stroke at ~0.5 m/s with bristle plate moving 0.40 m in ≤1 s. Without enableCCD, small (0.025m) debris cubes may pass through the bristle plate or dustpan wall. CCD is set to True per-cube and per-broom-part; ensure set_physics_scene_config does not silently disable CCD (CCD requires CPU dynamics + MBP broadphase, both set above).",
+    "move_to_pose target_position is floor-level (z=0.22m for EE = z=0.02m for bristle plate). If the plate is offset from the EE by something other than 0.20m (e.g. handle scale changed), the plate hits the floor or hovers above. Adjust target_position[2] by the actual delta = EE_z - plate_z observed via get_world_transform after pick.",
+    "Sweep direction vs dustpan orientation — drag waypoint moves +X from x=0.35 to x=0.72 (debris cluster centroid x=0.55 is mid-stroke). Dustpan at x=0.78 is downstream. If the dustpan is rotated or repositioned, update drag waypoint #2 x-coord accordingly.",
+    "Verification depends on dustpan AABB being computed AFTER physics settles — get_bounding_box on /World/Dustpan returns the static prim bounds correctly; per-debris get_world_transform reads dynamic positions. Run both AFTER the final lift waypoint plus 1-2 seconds of sim settle time."
+  ],
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": false,
+      "has_stacking": false,
+      "uses_tool_proxy": true,
+      "has_gesture_trajectory": true,
+      "n_debris_items": 4
+    },
+    "structural_tags": [
+      "isaac:research.oxe",
+      "isaac:gesture.sweep",
+      "isaac:tool_use.broom",
+      "isaac:household.cleanup",
+      "isaac:robot.fixed_base.arm",
+      "isaac:robot.franka_panda",
+      "isaac:topology.single_station",
+      "isaac:workpiece.small_debris",
+      "isaac:trajectory.cartesian_drag"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "franka", "ur5e"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "parallel_jaw_floor_reach"
+    },
+    "broom_tool": {
+      "constraints": ["broom", "tool", "composite_rigid"],
+      "expected_count": 1,
+      "required": true,
+      "note": "Composite Xform with Handle + BristlePlate child cubes unified by FixedJoint"
+    },
+    "dustpan": {
+      "constraints": ["bin", "tray", "open_top_container"],
+      "expected_count": 1,
+      "required": true,
+      "note": "create_bin approximation; mouth faces debris (-X side)"
+    },
+    "debris_items": {
+      "constraints": ["cube", "small_box"],
+      "min": 3,
+      "max": 6,
+      "param_name": "n_debris",
+      "unordered": true
+    },
+    "pedestal": {
+      "constraints": ["cube", "support"],
+      "expected_count": 1,
+      "required": true,
+      "note": "Low 0.20m mount so EE can reach floor"
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.20],
+      "orientation": [1, 0, 0, 0]
+    },
+    "broom_tool": {
+      "path": "/World/Broom",
+      "handle_path": "/World/Broom/Handle",
+      "bristle_path": "/World/Broom/BristlePlate",
+      "handle_position": [0.35, 0.30, 0.22],
+      "bristle_position": [0.35, 0.30, 0.025]
+    },
+    "dustpan": {
+      "path": "/World/Dustpan",
+      "position": [0.78, 0.30, 0.0],
+      "size": [0.25, 0.18, 0.04]
+    },
+    "pedestal": {
+      "path": "/World/Pedestal",
+      "position": [0, 0, 0.10],
+      "scale": [0.30, 0.30, 0.10]
+    },
+    "debris_items": [
+      {"path": "/World/Debris/Item_1", "position": [0.50, 0.27, 0.0125]},
+      {"path": "/World/Debris/Item_2", "position": [0.55, 0.32, 0.0125]},
+      {"path": "/World/Debris/Item_3", "position": [0.60, 0.28, 0.0125]},
+      {"path": "/World/Debris/Item_4", "position": [0.55, 0.33, 0.0125]}
+    ]
+  },
+  "code_template": "# ── Scene skeleton ──────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Pedestal ─────────────────────────────────────────────────────────────────\ncreate_prim(\n    prim_path={{pedestal.path}},\n    prim_type=\"Cube\",\n    position={{pedestal.position}},\n    scale={{pedestal.scale}},\n)\napply_api_schema(prim_path={{pedestal.path}}, schema_name=\"PhysicsCollisionAPI\")\n\n# ── Robot ────────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\n# ── Broom composite ──────────────────────────────────────────────────────────\ncreate_prim(prim_path={{broom_tool.path}}, prim_type=\"Xform\")\ncreate_prim(\n    prim_path={{broom_tool.handle_path}},\n    prim_type=\"Cube\",\n    position={{broom_tool.handle_position}},\n    scale=[0.0125, 0.0125, 0.20],\n)\ncreate_prim(\n    prim_path={{broom_tool.bristle_path}},\n    prim_type=\"Cube\",\n    position={{broom_tool.bristle_position}},\n    scale=[0.125, 0.02, 0.01],\n)\nfor _part in ({{broom_tool.handle_path}}, {{broom_tool.bristle_path}}):\n    for _api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=_part, schema_name=_api)\nbulk_set_attribute(prim_paths=[{{broom_tool.handle_path}}, {{broom_tool.bristle_path}}], attr=\"physics:mass\", value=0.10)\nbulk_set_attribute(prim_paths=[{{broom_tool.handle_path}}, {{broom_tool.bristle_path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nbulk_set_attribute(prim_paths=[{{broom_tool.handle_path}}, {{broom_tool.bristle_path}}], attr=\"physxRigidBody:enableCCD\", value=True)\napply_physics_material(prim_path={{broom_tool.bristle_path}}, material_name=\"rubber\")\napply_api_schema(prim_path={{broom_tool.handle_path}}, schema_name=\"PhysicsFixedJointAPI\")\n\n# ── Debris cluster ───────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Debris\", prim_type=\"Xform\")\nfor _d in {{debris_items}}:\n    create_prim(\n        prim_path=_d[\"path\"],\n        prim_type=\"Cube\",\n        position=_d[\"position\"],\n        scale=[0.0125, 0.0125, 0.0125],\n    )\n    for _api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=_d[\"path\"], schema_name=_api)\n_debris_paths = [_d[\"path\"] for _d in {{debris_items}}]\nbulk_set_attribute(prim_paths=_debris_paths, attr=\"physics:mass\", value=0.02)\nbulk_set_attribute(prim_paths=_debris_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nbulk_set_attribute(prim_paths=_debris_paths, attr=\"physxRigidBody:enableCCD\", value=True)\nfor _p in _debris_paths:\n    apply_physics_material(prim_path=_p, material_name=\"rubber\")\n\n# ── Dustpan ──────────────────────────────────────────────────────────────────\ncreate_bin(\n    prim_path={{dustpan.path}},\n    size={{dustpan.size}},\n    position={{dustpan.position}},\n    wall_thickness=0.005,\n)\n\n# ── Grasp pose on broom handle ───────────────────────────────────────────────\ndefine_grasp_pose(\n    robot_path={{primary_robot.path}},\n    object_path={{broom_tool.handle_path}},\n    gripper_offset=[0.0, 0.0, 0.0],\n    approach_direction=[0.0, 0.0, -1.0],\n)\n\n# ── Pick-place controller — grasp the broom handle ──────────────────────────\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"native\",\n    source_paths=[{{broom_tool.handle_path}}],\n    destination_path={{dustpan.path}},\n    drop_targets={{{broom_tool.handle_path}}: [0.78, 0.30, 0.50]},\n    end_effector_offset=[0.0, 0.005, 0.0],\n)\n\n# ── Sweep trajectory via three move_to_pose waypoints ───────────────────────\nmove_to_pose(\n    articulation_path={{primary_robot.path}},\n    target_position=[0.35, 0.30, 0.22],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"franka\",\n)\nmove_to_pose(\n    articulation_path={{primary_robot.path}},\n    target_position=[0.72, 0.30, 0.22],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"franka\",\n)\nmove_to_pose(\n    articulation_path={{primary_robot.path}},\n    target_position=[0.72, 0.30, 0.42],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"franka\",\n)\n\n# ── Verify ───────────────────────────────────────────────────────────────────\nget_bounding_box(prim_path={{dustpan.path}})\nfor _d in {{debris_items}}:\n    get_world_transform(prim_path=_d[\"path\"])\ncount_prims_under_path(parent_path=\"/World/Debris\", type_filter=\"Cube\")\n",
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": ["rmpflow", "curobo", "direct_joint"]
+  },
+  "verified_status": "drafted-2026-05-16; form-gate-schema ⏳ pending-lint; function-gate ⏳ Kit RPC; structural-simplifications-noted (rigid broom, 4-wall bin)"
+}
