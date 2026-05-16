@@ -1,0 +1,169 @@
+{
+  "task_id": "CP-NEW-sdg-multi-cam-correlated-dr",
+  "goal": "Generate a 200-frame Synthetic Data Generation (SDG) dataset across 4 cameras (left, right, overhead, front) with CORRELATED domain randomization on lighting parameters and INDEPENDENT per-scene object pose randomization. Scene: 4 labelled cubes on a table under a randomized DomeLight, observed simultaneously by 4 cameras with overlapping fields of view. configure_correlated_dr declares a single parameter group {intensity, color_r, color_g, color_b} with method='copula' and correlation=0.85 so that the four lighting axes vary together (a 'warm dim' frame stays warm and dim across all 4 cameras; a 'cool bright' frame stays cool and bright across all 4 cameras). sample_correlated_dr draws one synchronized lighting sample per frame and applies it BEFORE the four render products step, so every camera observes the same illuminant on the same frame. add_domain_randomizer applies per-frame OBJECT pose jitter (uncorrelated with lighting, but consistent across cameras within a frame because the scene is shared). configure_coco_yolo_writer registers all 4 cameras with id_offset namespacing so per-camera image-IDs do not collide. create_sdg_pipeline + export_dataset writes the 200-frame batch (200 frames × 4 cameras = 800 images). validate_annotations cross-checks COCO output for bounding-box integrity AND per-camera distribution (each camera should produce ≈200 frames). SUCCESS: /tmp/sdg_multi_cam/annotations/instances.json contains entries from all 4 camera namespaces (image-id offsets 1_000_000, 2_000_000, 3_000_000, 4_000_000) AND validate_annotations reports zero bounding-box bound violations across ≥30 sampled frames. Exercises create_prim, apply_api_schema, set_semantic_label, configure_camera (×4 with overlapping FOV), set_camera_params, configure_correlated_dr, sample_correlated_dr, add_domain_randomizer (pose), configure_coco_yolo_writer (multi-camera namespacing), create_sdg_pipeline, preview_sdg, export_dataset, validate_annotations. Realizes sdg-multi-cam-correlated-dr-001 (sdg category, tier-2-locally-runnable).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_semantic_label",
+    "set_physics_scene_config",
+    "configure_camera",
+    "set_camera_params",
+    "configure_correlated_dr",
+    "sample_correlated_dr",
+    "add_domain_randomizer",
+    "configure_coco_yolo_writer",
+    "create_sdg_pipeline",
+    "preview_sdg",
+    "export_dataset",
+    "validate_annotations"
+  ],
+  "thoughts": [
+    "Pattern: other (multi-camera correlated SDG — no robot motion, no pick-place delivery criterion; success is shape of the output dataset and per-frame correlation of lighting metadata).",
+    "Four cameras rationale: left (-x perspective), right (+x perspective), overhead (top-down), front (-y eye-level). All four FOVs intersect on the table centre, so each frame produces 4 views of the same scene state. This is the canonical multi-view stereo / NeRF training-data shape. Three cameras would suffice topologically but four matches the backlog spec and gives one orthogonal pair (left/right) + one bird's-eye + one human-eye-level — the standard rig for sim-to-real bin-picking.",
+    "CORRELATED DR semantics: configure_correlated_dr.parameter_groups = [{params: ['intensity','color_r','color_g','color_b'], ranges: {intensity: [400, 2200], color_r: [0.7, 1.0], color_g: [0.7, 1.0], color_b: [0.7, 1.0]}, correlation: 0.85, method: 'copula'}]. A Gaussian copula with rho=0.85 means a 'high intensity' frame is highly correlated with a 'warm color' frame (or whatever the joint distribution shape is). The correlation budget is shared across the 4 axes by the copula construction.",
+    "Per-frame sync mechanism: sample_correlated_dr(preset='sensor_camera', n_samples=200, seed=42) draws 200 joint samples ONCE. Each frame index k consumes sample k and applies it to /World/DomeLight BEFORE the 4 render products step. Because all 4 cameras step within the SAME orchestrator.step() call, they all see the same illuminant for frame k — this is the 'correlated across cameras' axis that the backlog calls out.",
+    "Pose DR is INDEPENDENT per frame (add_domain_randomizer randomizer_type='pose') but CONSISTENT across the 4 cameras of a single frame, because all 4 render products observe the same scene state at the same simulation time. So the multi-view correspondence is preserved frame-by-frame even as objects jitter — exactly what multi-view object-detection training needs.",
+    "configure_coco_yolo_writer cameras=4 → handler must produce a SINGLE merged COCO instances.json with per-camera image-IDs namespaced by id_offset. id_offset=1000000 (default) means camera_0 gets image_ids 1_000_000..1_000_199, camera_1 gets 2_000_000..2_000_199, etc. The shared category map (categories=['cube']) is preserved so a downstream YOLOv8 ingestor sees one class across all cameras.",
+    "create_sdg_pipeline(annotators=['rgb','bounding_box_2d'], output_format='coco', num_frames=200) registers ONE pipeline that fans out to all 4 cameras. Total image count = 200 × 4 = 800. The pipeline must respect the writer's camera list — passing num_frames=200 should yield 200 multi-camera frames, NOT 50 (the handler must NOT collapse to num_frames/num_cameras).",
+    "preview_sdg(num_samples=4) generates ONE preview frame per camera so the operator can confirm lighting is synchronized (all 4 previews should share the same illuminant warmth/intensity) before committing to the full 200-frame run.",
+    "validate_annotations(num_samples=30) reads back the merged COCO file and confirms: (a) bounding boxes within image bounds (per-image, since cameras have different intrinsics), (b) no zero-area boxes, (c) each declared class ('cube') is represented in samples from each camera namespace.",
+    "Distinct from CP-NEW-scene-sdg-full-pipeline (single camera, 4-axis DR, 200 frames). Distinct from CP-NEW-sdg-class-balance-rebalance (single camera, multi-class with retry loop). Distinct from CP-NEW-multi-cam-triangulation (geometric calibration, no DR, no COCO output). This canonical is the ONLY one that combines correlated-DR + multi-camera namespacing + synchronized illuminant application within a single SDG run.",
+    "motion_controllers: none — pure data generation, no arm motion in this workflow.",
+    "BLOCKER: omni.replicator must be enabled. configure_correlated_dr + sample_correlated_dr handlers must be present in the running build (Phase 7B SDG addendum). configure_coco_yolo_writer with len(cameras)>1 must be tested — if the writer collapses multi-camera output into a single namespace, image-IDs collide and the COCO file is corrupted."
+  ],
+  "code": "# ── Scene skeleton ─────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1200.0)\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:color\", value=[1.0, 1.0, 1.0])\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Table surface ───────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.7, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── 4 labelled cubes arranged on the table ────────────────────────────────\nfor i in range(4):\n    col = i % 2\n    row = i // 2\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(\n        prim_path=path,\n        prim_type=\"Cube\",\n        position=[col * 0.20 - 0.10, row * 0.20 - 0.10, 0.81],\n        size=0.07,\n    )\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    set_semantic_label(prim_path=path, class_name=\"cube\")\n\n# ── 4 cameras with overlapping FOV around the table centre (0,0,0.75) ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n_camera_specs = [\n    (\"/World/Cam_Left\",     [-1.20,  0.0,  0.95], [0, 0, 0.75]),\n    (\"/World/Cam_Right\",    [ 1.20,  0.0,  0.95], [0, 0, 0.75]),\n    (\"/World/Cam_Overhead\", [ 0.0,   0.0,  1.80], [0, 0, 0.75]),\n    (\"/World/Cam_Front\",    [ 0.0,  -1.20, 0.95], [0, 0, 0.75]),\n]\nfor cam_path, cam_pos, cam_look in _camera_specs:\n    configure_camera(\n        camera_path=cam_path,\n        focal_length=35.0,\n        horizontal_aperture=20.955,\n        vertical_aperture=15.2908,\n        clipping_range=[0.01, 10.0],\n    )\n    # Position is set on the prim transform; set_camera_params handles intrinsics only.\n    set_attribute(prim_path=cam_path, attr_name=\"xformOp:translate\", value=cam_pos)\n    set_camera_params(\n        camera_path=cam_path,\n        params={\"focal_length\": 35.0, \"horizontal_aperture\": 20.955, \"vertical_aperture\": 15.2908},\n    )\n\n# ── Correlated DR on lighting (intensity + RGB color jointly sampled) ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\nconfigure_correlated_dr(\n    parameter_groups=[\n        {\n            \"params\": [\"intensity\", \"color_r\", \"color_g\", \"color_b\"],\n            \"ranges\": {\n                \"intensity\": [400.0, 2200.0],\n                \"color_r\":   [0.70, 1.00],\n                \"color_g\":   [0.70, 1.00],\n                \"color_b\":   [0.70, 1.00],\n            },\n            \"correlation\": 0.85,\n            \"method\": \"copula\",\n        }\n    ],\n    target_path=\"/World/DomeLight\",\n    seed=42,\n)\n\n# Draw 200 synchronized lighting samples up front (one per frame; same draw applies to all 4 cameras of that frame)\n_lighting_samples = sample_correlated_dr(\n    axes=[\n        {\"name\": \"intensity\", \"mean\": 1300.0, \"std\": 450.0},\n        {\"name\": \"color_r\",   \"mean\": 0.85,   \"std\": 0.08},\n        {\"name\": \"color_g\",   \"mean\": 0.85,   \"std\": 0.08},\n        {\"name\": \"color_b\",   \"mean\": 0.85,   \"std\": 0.08},\n    ],\n    correlations=[\n        {\"axis_a\": \"intensity\", \"axis_b\": \"color_r\", \"rho\": 0.85},\n        {\"axis_a\": \"intensity\", \"axis_b\": \"color_g\", \"rho\": 0.85},\n        {\"axis_a\": \"intensity\", \"axis_b\": \"color_b\", \"rho\": 0.85},\n    ],\n    n_samples=200,\n    seed=42,\n    name=\"multi_cam_lighting\",\n)\n\n# ── Per-frame OBJECT pose jitter (independent of lighting; consistent across the 4 cameras of a frame) ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\nadd_domain_randomizer(\n    target=\"/World/Cube_.*\",\n    randomizer_type=\"pose\",\n    params={\"min_angle\": -0.40, \"max_angle\": 0.40, \"surface_prim\": \"/World/Table\"},\n)\n\n# ── Configure multi-camera COCO writer (per-camera image-ID namespacing via id_offset) ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\nconfigure_coco_yolo_writer(\n    output_dir=\"/tmp/sdg_multi_cam\",\n    cameras=[\n        \"/World/Cam_Left\",\n        \"/World/Cam_Right\",\n        \"/World/Cam_Overhead\",\n        \"/World/Cam_Front\",\n    ],\n    format=\"coco\",\n    categories=[\"cube\"],\n    id_offset=1000000,\n)\n\n# ── Build SDG pipeline (200 multi-camera frames → 800 images total) ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\ncreate_sdg_pipeline(\n    annotators=[\"rgb\", \"bounding_box_2d\"],\n    output_format=\"coco\",\n    num_frames=200,\n    output_dir=\"/tmp/sdg_multi_cam\",\n    camera_position=[0, 0, 1.80],\n    camera_look_at=[0, 0, 0.75],\n    resolution=[1280, 720],\n)\n\n# ── Preview: 4 frames (one per camera) to verify lighting is synchronized across all 4 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\npreview_sdg(num_samples=4)\n\n# ── Full export: 200 multi-camera frames → 800 annotated images ──────────────────────────────────────\nexport_dataset(\n    output_dir=\"/tmp/sdg_multi_cam\",\n    num_frames=200,\n    step_batch=10,\n)\n\n# ── Validate annotations: bbox bounds + per-camera coverage ──────────────────────────────────────────────\nvalidate_annotations(num_samples=30)",
+  "verify_args": null,
+  "simulate_args": null,
+  "diagnose_args": {
+    "expected_output_dir": "/tmp/sdg_multi_cam",
+    "expected_cameras": [
+      "/World/Cam_Left",
+      "/World/Cam_Right",
+      "/World/Cam_Overhead",
+      "/World/Cam_Front"
+    ],
+    "expected_n_cameras": 4,
+    "expected_frames_per_camera": 200,
+    "expected_total_images": 800,
+    "expected_coco_classes": ["cube"],
+    "expected_annotation_file": "/tmp/sdg_multi_cam/annotations/instances.json",
+    "correlated_dr_method": "copula",
+    "correlated_dr_correlation": 0.85,
+    "correlated_dr_params": ["intensity", "color_r", "color_g", "color_b"],
+    "id_offset": 1000000,
+    "validate_annotations_num_samples": 30,
+    "expected_bbox_bound_violations": 0,
+    "expected_per_camera_distribution_tolerance": 0.10
+  },
+  "verified_status": "drafted-2026-05-16-A80; form-gate-schema TBD; function-gate BLOCKED (requires omni.replicator extension + Phase 7B SDG addendum handlers for configure_correlated_dr, sample_correlated_dr, configure_coco_yolo_writer with multi-camera namespacing)",
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": []
+  },
+  "failure_modes": [
+    "omni.replicator not enabled: enable_extension('omni.replicator.core') must be called before create_sdg_pipeline; the handler may auto-enable it but Kit must have been launched with the extension available",
+    "configure_correlated_dr parameter_groups: a typo in params (e.g. 'color_R' vs 'color_r') silently drops that axis from the correlated set, so it falls back to independent uniform sampling and the correlation guarantee is violated WITHOUT raising — verify with sample_correlated_dr inspection before exporting",
+    "sample_correlated_dr n_samples < num_frames: if fewer samples than frames are drawn, the export loop reuses samples and the 'one synchronized sample per frame' invariant breaks. n_samples MUST equal num_frames (200 here)",
+    "configure_coco_yolo_writer cameras list ordering: the order of the cameras list determines id_offset multiplier (cam[0]→1×offset, cam[1]→2×offset, etc.). If a downstream consumer expects a specific camera→ID mapping (e.g. 'overhead is always namespace 3'), the cameras list MUST be ordered to match — reordering after the fact corrupts ID continuity",
+    "configure_coco_yolo_writer multi-camera collapse bug: some writer implementations attach to only the FIRST camera and silently drop the rest. Verify by checking that instances.json contains images with image_id >= 2_000_000 (cam_2 namespace); if all images have id < 2_000_000 only one camera was actually written",
+    "create_sdg_pipeline num_frames semantics: handler may interpret num_frames as 'frames per camera' (yielding 800 total images) OR 'total images' (yielding 200 ÷ 4 = 50 per camera). The diagnose_args assume per-frame×4-cameras semantics; if the handler diverges adjust num_frames to 200 explicitly per camera or num_frames=50 if total-images semantics apply",
+    "add_domain_randomizer pose surface_prim='/World/Table': Table must have PhysicsCollisionAPI so PhysX can report its surface; missing API causes pose jitter to project cubes through the table and out of all 4 camera FOVs simultaneously",
+    "configure_camera vs set_camera_params: configure_camera is marked DEPRECATED in the handler — set_camera_params is the canonical path. Both are called here for backward compat, but if the deprecated handler is removed, only set_camera_params will set intrinsics. xformOp:translate is set via set_attribute to position the camera",
+    "preview_sdg(num_samples=4) with 4 cameras: handler may produce 4 frames total (1 per camera at the same time-step) OR 4 frames per camera (16 total). The lighting-sync verification needs the former; if the latter is observed, the previews still verify sync but the visual grid is larger",
+    "validate_annotations num_samples=30 across 800 images: with random sampling, ~7-8 samples land in each camera's namespace. The 'each declared class present in each camera namespace' check needs all 4 namespaces to be sampled at least once — if only 2 cameras' worth of samples are drawn, raise num_samples to 60 to increase per-camera coverage",
+    "Output dir /tmp/sdg_multi_cam must be writable; 800 frames at 1280x720 RGB ≈ 240 MB. On shared servers /tmp may be small — use workspace/sdg_output/multi_cam/ if /tmp fills",
+    "configure_correlated_dr.target_path='/World/DomeLight': the correlated DR sample is applied to a single light. If the scene later adds a second light (e.g. a key/fill rig), the second light's intensity is NOT in the correlated set and breaks the multi-camera lighting-sync invariant — single-DomeLight scenes only for this canonical"
+  ],
+  "extends": "sdg-category / CP-NEW-scene-sdg-full-pipeline",
+  "extension_notes": "First canonical in library to combine configure_correlated_dr + multi-camera configure_coco_yolo_writer + per-frame synchronized lighting application within a single SDG run. CP-NEW-scene-sdg-full-pipeline is single-camera and uses independent (not correlated) DR. CP-NEW-multi-cam-triangulation uses multiple cameras for geometric calibration but no DR and no COCO export. CP-NEW-dr-curriculum has a configure_correlated_dr call but uses speculative arg names (correlation_groups instead of parameter_groups) and only one camera. This template uses the verified _models.py signature (parameter_groups: List[Dict]) and exercises the multi-camera-ID namespacing path of configure_coco_yolo_writer. Backlog source: sdg-multi-cam-correlated-dr-001 (priority_tier=2, category=sdg, tier=tier-1-locally-runnable, blockers=[]). Note: backlog spec mentions 4 cameras and uses 'seed-shared lighting' as the correlation construct; this template implements that as a Gaussian copula with rho=0.85 over {intensity, color_r, color_g, color_b}, which is a stronger guarantee than seed-sharing (a seed-shared sampler could still produce uncorrelated marginals if drawn independently). If seed-sharing is the desired construct instead, replace configure_correlated_dr with add_domain_randomizer + a shared seed parameter — but the current implementation matches the 'correlated DR for stereo/multi-view consistency' notes in the backlog description.",
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false,
+      "n_cameras": 4,
+      "n_dr_axes": 5,
+      "uses_correlated_dr": true,
+      "correlation_method": "copula",
+      "uses_sdg_pipeline": true,
+      "sdg_output_format": "coco",
+      "sdg_n_frames": 200,
+      "sdg_total_images": 800,
+      "n_object_classes": 1,
+      "uses_annotation_validation": true,
+      "uses_multi_camera_namespacing": true
+    },
+    "structural_tags": [
+      "isaac:sdg.multi_camera",
+      "isaac:sdg.correlated_dr",
+      "isaac:sdg.coco_writer",
+      "isaac:sdg.annotation_validation",
+      "isaac:sdg.multi_view",
+      "isaac:sdg.n_frames_200",
+      "isaac:sdg.n_cameras_4",
+      "isaac:sdg.id_namespacing",
+      "isaac:dr.lighting",
+      "isaac:dr.pose_jitter",
+      "isaac:dr.correlated_copula",
+      "isaac:dr.synchronized_per_frame",
+      "isaac:topology.no_robot",
+      "isaac:topology.multi_camera_rig",
+      "isaac:training.object_detection",
+      "isaac:training.multi_view"
+    ]
+  },
+  "roles": {
+    "scene_objects": {
+      "constraints": ["cube"],
+      "min": 1,
+      "max": 8,
+      "param_name": "n_cubes",
+      "unordered": true
+    },
+    "cameras": {
+      "constraints": ["camera"],
+      "min": 2,
+      "max": 8,
+      "param_name": "n_cameras",
+      "unordered": false
+    },
+    "scatter_surface": {
+      "constraints": ["mesh", "surface"],
+      "expected_count": 1,
+      "required": true
+    },
+    "scene_light": {
+      "constraints": ["dome_light"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "scene_objects": [
+      {"path": "/World/Cube_1", "position": [-0.10, -0.10, 0.81]},
+      {"path": "/World/Cube_2", "position": [ 0.10, -0.10, 0.81]},
+      {"path": "/World/Cube_3", "position": [-0.10,  0.10, 0.81]},
+      {"path": "/World/Cube_4", "position": [ 0.10,  0.10, 0.81]}
+    ],
+    "cameras": [
+      {"path": "/World/Cam_Left",     "position": [-1.20,  0.0,  0.95], "look_at": [0, 0, 0.75]},
+      {"path": "/World/Cam_Right",    "position": [ 1.20,  0.0,  0.95], "look_at": [0, 0, 0.75]},
+      {"path": "/World/Cam_Overhead", "position": [ 0.0,   0.0,  1.80], "look_at": [0, 0, 0.75]},
+      {"path": "/World/Cam_Front",    "position": [ 0.0,  -1.20, 0.95], "look_at": [0, 0, 0.75]}
+    ],
+    "scatter_surface": {
+      "path": "/World/Table",
+      "position": [0, 0, 0.375],
+      "scale": [1.0, 0.7, 0.375]
+    },
+    "scene_light": {
+      "path": "/World/DomeLight",
+      "intensity": 1200.0,
+      "color": [1.0, 1.0, 1.0]
+    }
+  },
+  "code_template": "create_prim(prim_path={{scene_light.path}}, prim_type=\"DomeLight\")\nset_attribute(prim_path={{scene_light.path}}, attr_name=\"inputs:intensity\", value={{scene_light.intensity}})\nset_attribute(prim_path={{scene_light.path}}, attr_name=\"inputs:color\", value={{scene_light.color}})\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path={{scatter_surface.path}}, prim_type=\"Cube\", position={{scatter_surface.position}}, scale={{scatter_surface.scale}})\napply_api_schema(prim_path={{scatter_surface.path}}, schema_name=\"PhysicsCollisionAPI\")\n\nfor wp in {{scene_objects}}:\n    create_prim(prim_path=wp[\"path\"], prim_type=\"Cube\", position=wp[\"position\"], size=0.07)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\"):\n        apply_api_schema(prim_path=wp[\"path\"], schema_name=api)\n    set_semantic_label(prim_path=wp[\"path\"], class_name=\"cube\")\n\nfor cam in {{cameras}}:\n    configure_camera(\n        camera_path=cam[\"path\"],\n        focal_length=35.0,\n        horizontal_aperture=20.955,\n        vertical_aperture=15.2908,\n        clipping_range=[0.01, 10.0],\n    )\n    set_attribute(prim_path=cam[\"path\"], attr_name=\"xformOp:translate\", value=cam[\"position\"])\n    set_camera_params(\n        camera_path=cam[\"path\"],\n        params={\"focal_length\": 35.0, \"horizontal_aperture\": 20.955, \"vertical_aperture\": 15.2908},\n    )\n\nconfigure_correlated_dr(\n    parameter_groups=[\n        {\n            \"params\": [\"intensity\", \"color_r\", \"color_g\", \"color_b\"],\n            \"ranges\": {\"intensity\": [400.0, 2200.0], \"color_r\": [0.70, 1.00], \"color_g\": [0.70, 1.00], \"color_b\": [0.70, 1.00]},\n            \"correlation\": 0.85,\n            \"method\": \"copula\",\n        }\n    ],\n    target_path={{scene_light.path}},\n    seed=42,\n)\n\n_lighting_samples = sample_correlated_dr(\n    axes=[\n        {\"name\": \"intensity\", \"mean\": 1300.0, \"std\": 450.0},\n        {\"name\": \"color_r\",   \"mean\": 0.85,   \"std\": 0.08},\n        {\"name\": \"color_g\",   \"mean\": 0.85,   \"std\": 0.08},\n        {\"name\": \"color_b\",   \"mean\": 0.85,   \"std\": 0.08},\n    ],\n    correlations=[\n        {\"axis_a\": \"intensity\", \"axis_b\": \"color_r\", \"rho\": 0.85},\n        {\"axis_a\": \"intensity\", \"axis_b\": \"color_g\", \"rho\": 0.85},\n        {\"axis_a\": \"intensity\", \"axis_b\": \"color_b\", \"rho\": 0.85},\n    ],\n    n_samples=200,\n    seed=42,\n    name=\"multi_cam_lighting\",\n)\n\nadd_domain_randomizer(\n    target=\"/World/Cube_.*\",\n    randomizer_type=\"pose\",\n    params={\"min_angle\": -0.40, \"max_angle\": 0.40, \"surface_prim\": {{scatter_surface.path}}},\n)\n\nconfigure_coco_yolo_writer(\n    output_dir=\"/tmp/sdg_multi_cam\",\n    cameras=[cam[\"path\"] for cam in {{cameras}}],\n    format=\"coco\",\n    categories=[\"cube\"],\n    id_offset=1000000,\n)\n\ncreate_sdg_pipeline(\n    annotators=[\"rgb\", \"bounding_box_2d\"],\n    output_format=\"coco\",\n    num_frames=200,\n    output_dir=\"/tmp/sdg_multi_cam\",\n    camera_position=[0, 0, 1.80],\n    camera_look_at=[0, 0, 0.75],\n    resolution=[1280, 720],\n)\n\npreview_sdg(num_samples=4)\n\nexport_dataset(\n    output_dir=\"/tmp/sdg_multi_cam\",\n    num_frames=200,\n    step_batch=10,\n)\n\nvalidate_annotations(num_samples=30)"
+}
