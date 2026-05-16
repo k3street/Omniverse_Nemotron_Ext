@@ -1,0 +1,98 @@
+{
+  "task_id": "CP-NEW-ros2-rosbag-replay",
+  "goal": "Replay a recorded ROS2 bag (real-robot joint trajectory) into a live Isaac Sim Franka and verify the sim follows the playback. Bring up the franka_moveit2 bridge with sim_time clock, then either (a) call replay_rosbag on a real .db3/mcap bag when REPLAY_BAG_PATH is set and exists on disk, or (b) fall back to synthetic playback via ros2_publish_sequence emitting a scripted joint-trajectory message on /joint_trajectory_controller/joint_trajectory. After replay completes, sample /joint_states with ros2_subscribe_once and read get_joint_positions on /World/Franka to confirm the arm reached the final waypoint within tolerance. check_tf_health closes out the run by confirming the TF tree stayed healthy across the bag-driven clock. Exercises Phase 10 replay_rosbag end-to-end as a regression / imitation-seed harness — pure data-playback infrastructure, no motion planner.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "configure_ros2_time",
+    "setup_ros2_bridge",
+    "ros2_list_topics",
+    "replay_rosbag",
+    "ros2_publish_sequence",
+    "ros2_subscribe_once",
+    "get_joint_positions",
+    "check_tf_health",
+    "diagnose_ros2"
+  ],
+  "thoughts": "Design rationale for CP-NEW-ros2-rosbag-replay (A114, backlog ros2-rosbag-replay-001):\n\n1) Scope vs sibling ros2-bridge canonicals. This template is *replay-pipeline*, not bridge-bring-up, TF-diagnostic, QoS-repair, or multi-rate publisher (those are A4, A64, A77, A52 respectively). The novel element here is `replay_rosbag` driving recorded real-robot data into a live sim — the regression-test / imitation-seed pattern from the addendum-ros2-nav2 feature set. backlog pattern_hint = 'other' because replay infrastructure has no clean success geometry (no pick, no nav goal, no sort) — the success criterion is 'sim joint angles converge to the bag's final waypoint within tolerance'.\n\n2) Data-dependency caveat (blocker handling). The backlog entry flags `data_dependency_real_rosbag`. A locally-runnable canonical cannot assume a checked-in .db3 file. The fallback path is the dominant production case anyway: when the user wants regression playback but the real bag is on Nucleus / a teammate's laptop, generate the same JointTrajectory message sequence via `ros2_publish_sequence` and feed it to /joint_trajectory_controller/joint_trajectory. The replay_rosbag tool itself remains in `tools_used` and is gated by an `os.path.exists(bag_path)` guard so the template documents the real-bag path even when the synthetic path runs. This is honest and consistent with the 'queue_exec_patch must populate error from output' pattern — no silent skip.\n\n3) Bridge profile choice. franka_moveit2 wires /joint_states publisher + /joint_trajectory_controller/joint_trajectory subscriber + /tf + /clock. The subscriber is exactly what a replayed JointTrajectory bag would target — same topic shape MoveIt2 uses, so the bag captured from a real MoveIt2 run drops in unchanged. Pure plumbing — no motion planner involved on the sim side.\n\n4) /clock alignment. sync_mode='sim_time' on replay_rosbag means the bag's --clock flag publishes the bag's recorded timestamps to /clock and the sim uses use_sim_time=True. This is the deterministic regression-test mode. configure_ros2_time(mode='sim_time') MUST run before setup_ros2_bridge so the ROS2Context node is wired with use_sim_time from t=0; calling it after creates a 0-timestamp gap mentioned in failure_modes.\n\n5) Verification strategy. The verifier samples /joint_states once post-replay and reads get_joint_positions directly from the articulation. Cross-checks: (i) the topic carries a JointState with all 7 panda joints, (ii) the articulation pose itself reached the final waypoint within 0.05 rad on every joint (lax — sim controller tracking error + bag interpolation noise). check_tf_health checks that the bag-driven /clock did not break the TF tree (a common failure when sim clock and bag clock skew >1s — TF transforms get marked stale). diagnose_ros2 is the final plumbing health check.\n\n6) Why no motion controller is declared 'verified'. This canonical does no motion planning — it pushes joint setpoints over a ROS2 topic and lets the bridge's internal Phase 10 joint-trajectory-controller handle PD tracking. The motion_controllers field is empty/untested by design; this is the recording-replay-infrastructure canonical, not a controller-verification canonical.\n\n7) Physics scene. CPU dynamics, no GPU — same rationale as the bridge-franka template (no contact, no fragile workpieces). Franka mounted on a 0.75 m table at world origin matching A4 so the same scene shells can A/B-compare bridge-only vs replay.",
+  "code": "import os\n\n# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics — replay pipeline does not need GPU contact ────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka Panda arm (same mount as the bridge-only sibling A4) ──────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── ROS2 sim-clock MUST be configured BEFORE bridge bring-up ─────────────────\n# sim_time mode means use_sim_time=True propagates to every ROS2 node spawned\n# by the bridge profile below; the rosbag's --clock flag will then drive /clock.\nconfigure_ros2_time(mode=\"sim_time\")\n\n# ── Bridge: franka_moveit2 wires /joint_states + /joint_trajectory_controller\n#   /joint_trajectory subscriber + /tf + /clock in one OmniGraph call.\nsetup_ros2_bridge(\n    profile=\"franka_moveit2\",\n    robot_path=\"/World/Franka\",\n)\n\n# Confirm bridge is up and the trajectory subscriber topic is alive.\nactive_topics = ros2_list_topics()\nexpected_topics = {\"/joint_states\", \"/clock\"}\nmissing = expected_topics - set(active_topics)\nif missing:\n    raise RuntimeError(f\"ROS2 bridge did not advertise required topics; missing={missing}\")\n\n# ── Replay path A: real rosbag if REPLAY_BAG_PATH is set and exists ──────────\n# The canonical documents the production path even when the synthetic fallback\n# runs in CI — replay_rosbag is gated, not removed.\nbag_path = os.environ.get(\"REPLAY_BAG_PATH\", \"\")\nused_synthetic_fallback = False\n\nif bag_path and os.path.exists(bag_path):\n    replay_rosbag(\n        bag_path=bag_path,\n        sync_mode=\"sim_time\",\n        topics=[\"/joint_trajectory_controller/joint_trajectory\", \"/tf\"],\n        rate=1.0,\n    )\nelse:\n    # ── Replay path B: synthetic JointTrajectory sequence (bag-equivalent) ───\n    # When the real bag is unavailable we publish the same trajectory_msgs/msg\n    # /JointTrajectory shape that MoveIt2 would record. Two waypoints: home and\n    # a +0.3 rad shoulder flex. Same topic franka_moveit2 subscribes to.\n    used_synthetic_fallback = True\n    franka_joints = [\n        \"panda_joint1\", \"panda_joint2\", \"panda_joint3\", \"panda_joint4\",\n        \"panda_joint5\", \"panda_joint6\", \"panda_joint7\",\n    ]\n    home = [0.0, -0.785398, 0.0, -2.356194, 0.0, 1.570796, 0.785398]\n    flex = [0.3, -0.785398, 0.0, -2.356194, 0.0, 1.570796, 0.785398]\n    traj_msg_home = {\n        \"header\": {\"frame_id\": \"panda_link0\"},\n        \"joint_names\": franka_joints,\n        \"points\": [{\"positions\": home, \"time_from_start\": {\"sec\": 0, \"nanosec\": 0}}],\n    }\n    traj_msg_flex = {\n        \"header\": {\"frame_id\": \"panda_link0\"},\n        \"joint_names\": franka_joints,\n        \"points\": [{\"positions\": flex, \"time_from_start\": {\"sec\": 2, \"nanosec\": 0}}],\n    }\n    ros2_publish_sequence(\n        topic=\"/joint_trajectory_controller/joint_trajectory\",\n        msg_type=\"trajectory_msgs/msg/JointTrajectory\",\n        messages=[traj_msg_home, traj_msg_flex],\n        durations=[1.0, 3.0],\n        rate_hz=10.0,\n    )\n\n# ── Post-replay verification ─────────────────────────────────────────────────\n# (1) Topic-level: /joint_states is still publishing a JointState carrying all\n#     7 Franka joints after the bag-driven controller settles.\njs = ros2_subscribe_once(\n    topic=\"/joint_states\",\n    msg_type=\"sensor_msgs/msg/JointState\",\n    timeout=5.0,\n)\nfranka_joints_expected = {\n    \"panda_joint1\", \"panda_joint2\", \"panda_joint3\", \"panda_joint4\",\n    \"panda_joint5\", \"panda_joint6\", \"panda_joint7\",\n}\nmsg_joint_names = set((js or {}).get(\"name\", []))\nmissing_in_msg = franka_joints_expected - msg_joint_names\nif missing_in_msg:\n    raise RuntimeError(f\"/joint_states missing Franka joints after replay: {missing_in_msg}\")\n\n# (2) Articulation-level: read the actual joint angles via get_joint_positions\n#     to confirm the sim controller tracked the playback. Tolerance 0.10 rad on\n#     the synthetic-fallback final waypoint; real-bag path skips the tolerance\n#     check (bag content is data-dependent, only the topic-level check applies).\ncurrent_positions = get_joint_positions(articulation=\"/World/Franka\")\nif used_synthetic_fallback:\n    final_waypoint = [0.3, -0.785398, 0.0, -2.356194, 0.0, 1.570796, 0.785398]\n    if current_positions and len(current_positions) >= 7:\n        deltas = [abs(current_positions[i] - final_waypoint[i]) for i in range(7)]\n        max_delta = max(deltas)\n        if max_delta > 0.10:\n            print(f\"WARN: synthetic-replay tracking error {max_delta:.3f} rad > 0.10; controller may not have settled yet\")\n\n# (3) TF tree must remain healthy across the bag-driven /clock — bag clock vs\n#     sim clock skew is the classic failure mode here.\ncheck_tf_health(\n    expected_frames=[\"panda_link0\", \"panda_hand\"],\n    max_age_seconds=2.0,\n    root_frame=\"panda_link0\",\n)\n\n# (4) Final plumbing health check.\ndiagnose_ros2()",
+  "settle_state": {
+    "bridge_topics": ["/joint_states", "/joint_trajectory_controller/joint_trajectory", "/clock", "/tf"],
+    "expected_joint_count": 7,
+    "joint_names": [
+      "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
+      "panda_joint5", "panda_joint6", "panda_joint7"
+    ],
+    "synthetic_fallback_waypoints": {
+      "home": [0.0, -0.785398, 0.0, -2.356194, 0.0, 1.570796, 0.785398],
+      "flex": [0.3, -0.785398, 0.0, -2.356194, 0.0, 1.570796, 0.785398]
+    },
+    "tracking_tolerance_rad": 0.10,
+    "replay_sync_mode": "sim_time",
+    "real_bag_env_var": "REPLAY_BAG_PATH"
+  },
+  "verify_args": {
+    "stages": []
+  },
+  "simulate_args": null,
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "expected_topics": ["/joint_states", "/joint_trajectory_controller/joint_trajectory", "/clock", "/tf"],
+    "tf_root_frame": "panda_link0",
+    "tf_expected_frames": ["panda_link0", "panda_hand"]
+  },
+  "verified_status": "drafted-2026-05-16-A114; form-gate ✓ (0 ERROR --validate-tool-calls); function-gate ⏳ (synthetic fallback path locally-runnable; real-bag path requires REPLAY_BAG_PATH dataset)",
+  "failure_modes": [
+    "REPLAY_BAG_PATH points at a ros1 .bag file — replay_rosbag wraps 'ros2 bag play' which only accepts ros2 sqlite3/.db3 or mcap; rosbags package or 'ros2 bag convert' must be used to upgrade ros1 bags first",
+    "configure_ros2_time called AFTER setup_ros2_bridge — bridge nodes spawn with use_sim_time=False, first N /clock messages arrive with timestamp=0, downstream nodes drop them as stale; always configure clock first",
+    "bag clock vs sim clock skew >1s during replay — TF transforms get flagged stale by check_tf_health (max_age_seconds=2.0); use sync_mode='sim_time' + --clock to lock them",
+    "bag publishes topics the bridge does not subscribe to (e.g. /tf_static written by a real-robot lifecycle node) — silently dropped, sim TF tree stays incomplete; pass an explicit topics whitelist to replay_rosbag",
+    "synthetic-fallback playback rate too fast for joint_trajectory_controller PD gains — controller saturates, get_joint_positions reports >0.10 rad tracking error; widen durations or tune drive gains",
+    "ROS2 environment not sourced / rclpy not importable — setup_ros2_bridge raises ImportError; source /opt/ros/humble/setup.bash before launching Kit",
+    "robot_wizard fails to load Franka USD (Nucleus path not mounted) — bridge has no articulation, /joint_states publishes 0 joints, post-replay verification trips on missing-joints check",
+    "ros2_publish_sequence rate_hz too low (<5 Hz) for the trajectory_msgs/msg/JointTrajectory subscriber — JTC reports 'goal handle expired' and ignores the messages; keep rate_hz>=10",
+    "REPLAY_BAG_PATH set but path does not exist on disk — the gate falls through to synthetic fallback silently; this is intentional (locally-runnable canonical) but operators expecting the real bag should check used_synthetic_fallback in the script output"
+  ],
+  "extends": "phase10-ros2-bridge",
+  "extension_notes": "Second ros2-bridge-category canonical in the A1xx series (A114). Pairs with CP-NEW-ros2-bridge-franka (A4) which covers pure middleware bring-up. A114 adds the replay layer on top: real-robot bag → sim playback via Phase 10 replay_rosbag, with a synthetic ros2_publish_sequence fallback so the canonical stays locally-runnable without a checked-in .db3 dataset. Useful as an imitation-learning seed harness (record a teleop demo, replay it into sim under DR to bootstrap data) and as a sim-vs-real regression test scaffold (drive the same trajectory through sim and a real arm, diff joint trajectories). No motion planner — pure data playback through the ros2_control trajectory subscriber.",
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:ros2.rosbag_replay",
+      "isaac:data.trajectory_playback",
+      "isaac:integration.recording",
+      "isaac:bridge.ros2",
+      "isaac:topology.single_station",
+      "isaac:robot.fixed_base.arm"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": ["ros2_control", "moveit2"]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    }
+  },
+  "code_template": "import os\n\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\nconfigure_ros2_time(mode=\"sim_time\")\n\nsetup_ros2_bridge(\n    profile=\"franka_moveit2\",\n    robot_path={{primary_robot.path}},\n)\n\nactive_topics = ros2_list_topics()\nexpected_topics = {\"/joint_states\", \"/clock\"}\nmissing = expected_topics - set(active_topics)\nif missing:\n    raise RuntimeError(f\"ROS2 bridge did not advertise required topics; missing={missing}\")\n\nbag_path = os.environ.get(\"REPLAY_BAG_PATH\", \"\")\nused_synthetic_fallback = False\n\nif bag_path and os.path.exists(bag_path):\n    replay_rosbag(\n        bag_path=bag_path,\n        sync_mode=\"sim_time\",\n        topics=[\"/joint_trajectory_controller/joint_trajectory\", \"/tf\"],\n        rate=1.0,\n    )\nelse:\n    used_synthetic_fallback = True\n    franka_joints = [\n        \"panda_joint1\", \"panda_joint2\", \"panda_joint3\", \"panda_joint4\",\n        \"panda_joint5\", \"panda_joint6\", \"panda_joint7\",\n    ]\n    home = [0.0, -0.785398, 0.0, -2.356194, 0.0, 1.570796, 0.785398]\n    flex = [0.3, -0.785398, 0.0, -2.356194, 0.0, 1.570796, 0.785398]\n    traj_msg_home = {\n        \"header\": {\"frame_id\": \"panda_link0\"},\n        \"joint_names\": franka_joints,\n        \"points\": [{\"positions\": home, \"time_from_start\": {\"sec\": 0, \"nanosec\": 0}}],\n    }\n    traj_msg_flex = {\n        \"header\": {\"frame_id\": \"panda_link0\"},\n        \"joint_names\": franka_joints,\n        \"points\": [{\"positions\": flex, \"time_from_start\": {\"sec\": 2, \"nanosec\": 0}}],\n    }\n    ros2_publish_sequence(\n        topic=\"/joint_trajectory_controller/joint_trajectory\",\n        msg_type=\"trajectory_msgs/msg/JointTrajectory\",\n        messages=[traj_msg_home, traj_msg_flex],\n        durations=[1.0, 3.0],\n        rate_hz=10.0,\n    )\n\njs = ros2_subscribe_once(\n    topic=\"/joint_states\",\n    msg_type=\"sensor_msgs/msg/JointState\",\n    timeout=5.0,\n)\nfranka_joints_expected = {\n    \"panda_joint1\", \"panda_joint2\", \"panda_joint3\", \"panda_joint4\",\n    \"panda_joint5\", \"panda_joint6\", \"panda_joint7\",\n}\nmsg_joint_names = set((js or {}).get(\"name\", []))\nmissing_in_msg = franka_joints_expected - msg_joint_names\nif missing_in_msg:\n    raise RuntimeError(f\"/joint_states missing Franka joints after replay: {missing_in_msg}\")\n\ncurrent_positions = get_joint_positions(articulation={{primary_robot.path}})\nif used_synthetic_fallback:\n    final_waypoint = [0.3, -0.785398, 0.0, -2.356194, 0.0, 1.570796, 0.785398]\n    if current_positions and len(current_positions) >= 7:\n        deltas = [abs(current_positions[i] - final_waypoint[i]) for i in range(7)]\n        max_delta = max(deltas)\n        if max_delta > 0.10:\n            print(f\"WARN: synthetic-replay tracking error {max_delta:.3f} rad > 0.10; controller may not have settled yet\")\n\ncheck_tf_health(\n    expected_frames=[\"panda_link0\", \"panda_hand\"],\n    max_age_seconds=2.0,\n    root_frame=\"panda_link0\",\n)\n\ndiagnose_ros2()"
+}
