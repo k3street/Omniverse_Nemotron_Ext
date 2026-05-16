@@ -958,7 +958,11 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 30
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-maniskill-pick-cube.json
+  drafted_date: "2026-05-16"
+  drafted_by: A19
+  draft_notes: "A19; form-gate 0 ERROR (both passes); run_arena_benchmark + arena_leaderboard first use in library"
 
 - id: research-maniskill-stack-cube-001
   source: ManiSkill
