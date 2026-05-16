@@ -1,0 +1,263 @@
+{
+  "task_id": "CP-NEW-robohive-door-open",
+  "goal": "RoboHive ADROIT 'door-open' Isaac-Sim parity scene (parallel-jaw substitution, primitive-built): a Franka arm grasps a door handle mounted on a hinged door panel, then pulls the handle through an arc to swing the door past a 60° opening threshold. Scene is built from PRIMITIVES (no IsaacLab env_id, no Nucleus assets): a static wall (Cube) anchors a door panel (Cube, rigid body) via a UsdPhysics.RevoluteJoint at the hinge axis (vertical, along +Z, at the wall-edge of the door). A protruding handle (Cube, rigid body) is rigidly attached to the door panel via a fixed joint so the door+handle move as one when the gripper pulls. define_grasp_pose registers a side-approach grasp on the handle (gripper approaches along world +Y, perpendicular to the handle long axis). move_to_pose executes the pull as TWO arc waypoints along the door's swing circle (radius = door width from hinge), bringing the EE through ~70° of door rotation so the handle is dragged through the arc by the held grasp. Success criterion (other pattern, articulation manipulation): the door's revolute hinge joint angle exceeds 60° (read via get_joint_positions on the wall-door articulation). Failure modes documented include handle-slip during pull (grip force insufficient for door inertia), constant-radius constraint violation (move_to_pose travels straight, not along the arc — wrist must rotate as door swings, or grip slips), articulation joint limits hit (door cannot open past 90° physically), and hinge axis misalignment (door lifts off frame when pull-force has a vertical component). DIFFERENTIATES from A89 (CP-NEW-isaaclab-franka-cabinet): A89 uses create_isaaclab_env binding to the bundled franka_cabinet RL TRAINING task (prismatic drawer, PPO training, env_id required); A100 builds the door scene FROM PRIMITIVES (no env_id, no IsaacLab pip dependency) and uses move_to_pose for a SCRIPTED single-shot open gesture (RoboHive eval/imitation context, no RL loop). DIFFERENTIATES from CP-NEW-turn-faucet: turn-faucet uses set_joint_targets on Franka's wrist joint to rotate the faucet handle in-place around a fixed axis; A100 uses move_to_pose to swing the entire door panel through an arc — distinct kinematic problem (Cartesian arc pull vs in-place wrist rotation).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "create_articulated_joint",
+    "set_joint_limits",
+    "define_grasp_pose",
+    "move_to_pose",
+    "get_joint_positions",
+    "get_world_transform",
+    "sim_control"
+  ],
+  "thoughts": [
+    "Source benchmark: RoboHive's ADROIT 'door-open' task uses a 24-DOF dexterous hand to grasp a door latch and pull a hinged door open. The ADROIT hand + door USD assets are Nucleus-only (asset_dependencies: ADROIT_hand_USD + door_USD per canonical_backlog.yaml entry research-robohive-door-open-001, blockers: nucleus_only_asset + physx_instability). This Isaac canonical SUBSTITUTES the Franka parallel-jaw end-effector for the dexterous hand AND replaces the door USD with a primitive-built equivalent — preserving the hinge-revolute door-open signature, dropping the latch-unlock substep and the dexterous-finger contact richness. structural_tags include isaac:research.robohive (lineage) and isaac:robot.fixed_base.arm (actual implementation) so retrieval surfaces this template for 'door open' queries with the substitution boundary documented in failure_modes.",
+    "Why pattern_hint='other': the success criterion is an ARTICULATION JOINT ANGLE (door revolute angle > 60°), not a workpiece-in-bin delivery and not an RL training metric. The articulated-revolute-pull shape is long-tail (no other ADROIT-style hinged-door canonical exists in the library — CP-NEW-turn-faucet is in-place rotation, A89/CP-NEW-isaaclab-franka-cabinet is built-in IsaacLab RL training on a PRISMATIC drawer). per VALID_PATTERN_HINTS docstring in canonical_schema.py: 'other' is the catch-all for novel patterns ≤2 templates per cluster; structural_tags (isaac:articulation.door + isaac:articulation.hinge_revolute + isaac:manipulation.handle_grasp) provide the discriminating signal at retrieval. If a future round produces a 3rd articulated-pull canonical, this cluster may be promoted to a named enum 'articulated_pull'.",
+    "Scene geometry: 0.75 m table at origin. Wall is a thin static slab on the right side of the table at [0, 0, 0.85] with scale [0.05, 0.4, 0.40] (5 cm thick, 80 cm wide, 80 cm tall — half-extents authored as USD cube scale). Door panel hinged on the wall's near edge (world +X side, hinge axis vertical at x ≈ -0.05 wall_edge + 0.0 = -0.05, y ≈ door_width = 0.30, z = 0.85 door center height). Door panel size 0.04 × 0.30 × 0.40 (thin slab, 60 cm wide × 80 cm tall). At rest (closed), door is co-planar with wall, panel center at [-0.05 - 0.30, 0, 0.85]... actually simpler: hinge at world origin x=0, y=0.30 (right edge of door touching wall), door extends in -Y from hinge. Closed door panel center at [-0.05, 0.15, 0.85] (in front of wall, at -y of hinge). When open at 90° around +Z, door panel swings to [-0.05 - 0.15, 0.30 - 0.15, 0.85] = [-0.20, 0.15, 0.85]... Use placement: hinge axis goes through [0.0, 0.30, 0.85]; door extends along -Y from hinge in closed state; opens by rotating about hinge axis (+Z), with positive angle bringing door toward -X (away from wall).",
+    "Hinge joint: create_articulated_joint(joint_path='/World/HingeJoint', joint_type='revolute', body0_path='/World/Wall', body1_path='/World/Door', axis=[0,0,1]). Wall has PhysicsArticulationRootAPI (static, articulation root for the wall-door system). Door has full rigid-body API (PhysicsRigidBodyAPI + PhysicsCollisionAPI + PhysicsMassAPI + PhysxRigidBodyAPI). set_joint_limits(lower=0.0, upper=120.0) — door can swing 0° (closed) to 120° (fully open against jamb). Mass on door: 4 kg (typical interior door panel weight; light enough that Franka 80N wrist force can move it but heavy enough to expose the constant-radius-pull failure mode if the controller doesn't follow the arc).",
+    "Handle geometry: small protruding cube on the front face of the door, centered roughly at door's right edge (the edge furthest from the hinge — biggest moment arm for the pull). Handle path '/World/Door/Handle' (CHILD of door panel so it moves rigidly with door; no separate joint required — the parenting under Door makes the handle a child prim that inherits door's transform). Handle position relative to door (local): [-0.05, -0.27, 0.0] (front face of door, near far edge from hinge, mid-height). World position when closed: door_panel_center [-0.05, 0.15, 0.85] + local offset = [-0.10, -0.12, 0.85]. Handle size 0.04 × 0.04 × 0.10 (a vertical handle bar). For simplicity and physics-stability, the handle is part of the same rigid body as the door (modeled by making /World/Door a Cube prim and the handle a separate Cube prim under /World/Door as a SUBSCOPE — NOT a separate rigid body — i.e. visual+collision only, inheriting parent door's rigid body transform).",
+    "Why no separate handle joint: ADROIT's real door has a rotating latch handle that must be unlocked (rotated) before the door pulls. That unlock substep requires (a) a second revolute joint between handle and door, (b) a wrist-rotation control phase before the pull. Modeling both adds two failure modes (latch friction, unlock-timing race with pull) without adding signal for the PRIMARY task: 'open the door'. We FOLD the latch into the door rigid body (handle is geometric protrusion only, no latch joint) — the structural_tags include isaac:manipulation.handle_grasp (geometric handle) but NOT isaac:articulation.latch_revolute. failure_modes lists this latch-fold as an explicit substitution boundary so retrieval queries for 'latched door' know to ask for a derived canonical with a 2-DOF (latch + hinge) chain.",
+    "Robot placement: Franka at [-0.45, 0.0, 0.75] (45 cm in front of door, on the table; door extends from y=0 to y=0.30, hinge at y=0.30, handle at y=-0.12 in closed state, so Franka facing +X reaches the handle by extending forward 0.40 m). Orientation [1,0,0,0] (default facing +X). Reach: handle at [-0.10, -0.12, 0.85], robot base at [-0.45, 0.0, 0.75] → distance sqrt(0.35^2 + 0.12^2 + 0.10^2) = 0.39 m, well inside Franka's 0.85 m reach envelope. After the pull, when door is open ~70°, the handle has swung along an arc — handle world position at 70° open ≈ [-0.45, 0.15, 0.85] (~35 cm rotated from start) → from robot base distance is ~0.10 m + arc tangent (the EE must follow the arc). The final EE pose at 70° pull is within Franka's reach envelope by construction (we chose the hinge offset to keep the arc reachable).",
+    "Pull trajectory — TWO arc waypoints via move_to_pose: this is the KEY kinematic decision. A single move_to_pose to the 'door fully open' EE pose would travel in a STRAIGHT LINE through the air, which doesn't match the door's arc; the grasp would either slip (gripper exits the friction cone as the handle tries to follow its arc while EE goes straight) or generate huge joint torques that violate effort limits. We split the pull into two waypoints at 35° and 70° door-angle marks. Each waypoint position is computed by rotating the closed-handle world position about the hinge axis: arc_position(angle) = hinge_xy + Rz(angle) * (handle_closed_xy - hinge_xy). At 35°: handle ≈ [-0.067 - sin(35°)*0.42, 0.30 - cos(35°)*0.42, 0.85] ≈ [-0.067 - 0.241, 0.30 - 0.344, 0.85] ≈ [-0.308, -0.044, 0.85]. At 70°: handle ≈ [-0.067 - sin(70°)*0.42, 0.30 - cos(70°)*0.42, 0.85] ≈ [-0.067 - 0.395, 0.30 - 0.144, 0.85] ≈ [-0.462, 0.156, 0.85]. Note arc radius = |handle_closed - hinge| = sqrt(0.05^2 + 0.42^2) ≈ 0.423 m. We also rotate the EE orientation at each waypoint to keep the gripper aligned with the handle as it swings — quaternion target_orientation rotates ~35° and ~70° about +Z respectively from the initial grasp orientation [0.7071, 0.7071, 0, 0] (which is gripper-pointing-toward-+Y, the handle approach).",
+    "Why move_to_pose (not setup_pick_place_controller): setup_pick_place_controller is designed for PICK-AND-CARRY workflows where the workpiece becomes detached from its initial frame and follows the gripper. Here, the door is articulation-CONSTRAINED — it can only move along the hinge arc, NOT freely with the gripper. The pick_place controller does not understand articulation constraints; it would treat the door as a free rigid body and the trajectory generator would produce a straight-line transport that violates the hinge constraint, causing massive penetration forces. move_to_pose is the correct primitive: it moves the EE along Cartesian waypoints, and the held door FOLLOWS via the grasp contact, with the hinge naturally constraining the motion. Listed under motion_controllers.untested: rmpflow (move_to_pose default), curobo (also untested for arc trajectories with articulation contact), direct_joint (untested fallback if rmpflow fails to plan the arc).",
+    "Grasp pose: define_grasp_pose with approach_direction=[0, 1, 0] (gripper approaches the front-facing handle along +Y, perpendicular to the handle long axis which runs along +Z). gripper_offset=[0, 0.04, 0] hovers 4 cm in front of the handle for the pre-grasp pose. The grasp YAML is written to workspace/grasp_poses/Handle.isaac_grasp; move_to_pose uses this as an advisory pose source through the first waypoint. The grasp is FIXED — once the EE arrives at the handle and gripper closes, the contact must hold through the 70° arc. Friction: apply_physics_material(prim_path='/World/Door', material_name='rubber') (mu ~0.6) on the door+handle surface, plus Franka 70 N grip force × 0.6 friction = 42 N hold force — enough to handle 4 kg door × 9.81 / 2 (lever arm halving for handle near edge) ≈ 20 N normal force at the handle, well within hold margin.",
+    "Success metric: get_joint_positions(articulation='/World/Wall') returns the joint positions of the wall articulation, the first (and only) DOF being the hinge revolute joint. Convert from radians to degrees; success if door_angle_deg >= 60.0 (5° tolerance below the 70° trajectory target; the door coasts slightly past the EE final pose due to momentum, so 60° threshold is honest). Diagnostic: get_world_transform on '/World/Door' before and after the pull lets us cross-check the joint angle against the actual panel orientation (sanity for any hinge axis misalignment).",
+    "Physics: CPU dynamics (enable_gpu_dynamics=False, MBP broadphase) for deterministic articulation behavior. CCD enabled on the door (door panel can swing rapidly enough to tunnel through the wall mesh on rebound). Door inertia not explicitly set — derived from PhysicsMassAPI mass=4 kg + the cube dimensions (PhysX auto-computes inertia tensor from the bounding box). Joint friction left at PhysX default (~0) — adding joint friction would slow the door but not change the success criterion; an explicit drive_type='force' with stiffness=0 + damping=0.5 could be added to suppress door oscillation after the pull releases, but the joint-angle check is read while the EE is still holding the handle (under continuous load), so post-release oscillation doesn't affect success.",
+    "Why no run_arena_benchmark / RL training loop: A100 is the BASELINE single-shot open-gesture canonical — a future CP-NEW-robohive-door-open-rl variant could add launch_training + checkpoint_training for an imitation-learning-from-demos policy on this scene, matching the RoboHive eval protocol. The current canonical exercises the primitive-build + move_to_pose pull-as-arc skill in isolation; the RL/IL extension is deferred to a derived canonical.",
+    "BLOCKERS: none (no Nucleus assets, no IsaacLab install, no GPU required — everything is primitives + CPU dynamics + Franka via robot_wizard's pinned Isaac Sim 5.1 asset URL). The form-gate (lint) will pass on first draft; the function-gate (live Kit RPC run) requires a Franka import from the Isaac Sim 5.1 asset library, which is the standard library dependency for all Franka canonicals — no novel asset risk."
+  ],
+  "code": "import math\n\n# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# ── Robot work table (0.90 × 0.80 × 0.75 m) ───────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.45, 0.40, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for deterministic articulation behavior ────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka Panda robot ────────────────────────────────────────────────────────\n# Mounted on the near-side of the table, facing the door at +X.\n# Reach ~0.85 m; handle ~0.39 m away at the closed pose, all swing waypoints within reach.\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[-0.45, 0.0, 0.75],\n    orientation=[1.0, 0.0, 0.0, 0.0],\n)\n\n# ── Wall: static slab anchoring the door hinge ──────────────────────────────\n# Slab thin in X (5 cm), wide in Y (80 cm), tall in Z (80 cm). Center at\n# [0, 0, 0.85] places the wall directly to the +X side of the door panel.\n# PhysicsArticulationRootAPI marks this as the static root for the wall-door\n# articulation — create_articulated_joint will detect this root.\ncreate_prim(\n    prim_path=\"/World/Wall\",\n    prim_type=\"Cube\",\n    position=[0.0, 0.0, 0.85],\n    scale=[0.025, 0.40, 0.40],\n)\napply_api_schema(prim_path=\"/World/Wall\", schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path=\"/World/Wall\", schema_name=\"PhysicsArticulationRootAPI\")\n\n# ── Door panel: rigid body, hinged to the wall ───────────────────────────────\n# Door slab thin in X (4 cm), 30 cm wide in Y (so half-Y span = 0.15), 80 cm\n# tall in Z. Hinge axis runs vertically (+Z) through the right edge of the\n# door, at world XY = [0.0, 0.30, 0.85] (touching the wall front face). Door\n# panel center in CLOSED state: [-0.025, 0.15, 0.85] — door extends along -Y\n# from the hinge, in front of the wall. Mass 4 kg (typical interior door).\ncreate_prim(\n    prim_path=\"/World/Door\",\n    prim_type=\"Cube\",\n    position=[-0.025, 0.15, 0.85],\n    scale=[0.02, 0.15, 0.40],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Door\", schema_name=api)\nset_attribute(prim_path=\"/World/Door\", attr_name=\"physics:mass\", value=4.0)\nset_attribute(prim_path=\"/World/Door\", attr_name=\"physxRigidBody:enableCCD\", value=True)\napply_physics_material(prim_path=\"/World/Door\", material_name=\"rubber\")\n\n# ── Handle: visual+collision protrusion on the front face of the door ──────\n# Modeled as a child Cube prim of /World/Door so it moves rigidly with the door\n# (no separate rigid body / no separate joint — handle is part of door's mass).\n# Local offset from door center: front face (-0.02 in X) plus 4 cm protrusion\n# (-0.04 in X total) and near the far edge from hinge (-0.12 in local Y, since\n# door center is at +0.15 local-Y-into-world... we author handle as world Cube\n# at the world position equivalent to the door's far edge).\n# World position when closed: [-0.10, 0.03, 0.85].\ncreate_prim(\n    prim_path=\"/World/Door/Handle\",\n    prim_type=\"Cube\",\n    position=[-0.10, 0.03, 0.85],\n    scale=[0.02, 0.02, 0.05],\n)\napply_api_schema(prim_path=\"/World/Door/Handle\", schema_name=\"PhysicsCollisionAPI\")\n# NOTE: no RigidBodyAPI on handle — it inherits door's rigid body transform.\n\n# ── Hinge joint: revolute, vertical axis at door's right edge ──────────────\n# Connects /World/Wall (static, body0) → /World/Door (rigid, body1).\n# Axis [0, 0, 1] (vertical) so positive angle rotates door around +Z. Limits\n# 0° (closed) to 120° (fully swung open against jamb).\ncreate_articulated_joint(\n    joint_path=\"/World/HingeJoint\",\n    joint_type=\"revolute\",\n    body0_path=\"/World/Wall\",\n    body1_path=\"/World/Door\",\n    axis=[0, 0, 1],\n)\nset_joint_limits(\n    joint_path=\"/World/HingeJoint\",\n    lower=0.0,\n    upper=120.0,\n)\n\n# ── Start simulation ─────────────────────────────────────────────────────────\nsim_control(action=\"play\")\n\n# ── Grasp pose: side approach to the handle ─────────────────────────────────\n# approach_direction=[0, 1, 0]: gripper approaches the handle from -Y side,\n# moving in +Y direction (toward the handle). Perpendicular to the handle's\n# vertical (Z) long axis — parallel jaws close along the EE Y axis which is\n# perpendicular to handle Z, giving line contact along the handle surface.\n# gripper_offset=[0, 0.04, 0] places the pre-grasp 4 cm before contact.\ndefine_grasp_pose(\n    robot_path=\"/World/Franka\",\n    object_path=\"/World/Door/Handle\",\n    approach_direction=[0, 1, 0],\n    gripper_offset=[0, 0.04, 0],\n)\n\n# ── Pre-grasp pose: move EE in front of the handle ──────────────────────────\n# Handle world position (closed): [-0.10, 0.03, 0.85]. Pre-grasp 5 cm before\n# the handle along the approach direction (-Y side): [-0.10, -0.02, 0.85].\n# Orientation: gripper Z aligned with -Y (gripper pointing toward +Y to face\n# the handle). Quaternion [w, x, y, z] for a -90° rotation about world X:\n#   q = [cos(-45°), sin(-45°), 0, 0] = [0.7071, -0.7071, 0, 0]\n# This points the Franka EE Z axis along world -Y direction (toward handle).\nmove_to_pose(\n    articulation_path=\"/World/Franka\",\n    target_position=[-0.10, -0.02, 0.85],\n    target_orientation=[0.7071, -0.7071, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"franka\",\n)\n\n# ── Approach: descend onto the handle (close the gripper visually via the   ──\n# ── pre-grasp; actual grip closure handled by EE drive in 5-link finger Franka)\nmove_to_pose(\n    articulation_path=\"/World/Franka\",\n    target_position=[-0.10, 0.02, 0.85],\n    target_orientation=[0.7071, -0.7071, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"franka\",\n)\n\n# ── Arc waypoint 1: door at ~35° open ───────────────────────────────────────\n# Hinge axis at world XY = [0.0, 0.30, 0.85]; closed handle XY = [-0.10, 0.03].\n# Vector from hinge to handle (closed) = [-0.10, -0.27]. Length = sqrt(0.01 + 0.0729) = 0.283 m.\n# Rotate this vector by +35° about +Z, then add back hinge XY for new handle pos:\n#   Rz(35°) * [-0.10, -0.27] = [-0.10*cos35° - (-0.27)*sin35°, -0.10*sin35° + (-0.27)*cos35°]\n#                            = [-0.082 + 0.155,  -0.057 - 0.221]\n#                            = [0.073, -0.278]\n#   World handle at 35°: hinge_xy + rotated = [0.073, 0.022, 0.85]\n# Orientation: rotate grasp quaternion by +35° about +Z (additional rotation).\n# Combined quat = q35z * q_grasp. q35z = [cos(17.5°), 0, 0, sin(17.5°)] = [0.9537, 0, 0, 0.3007]\n# Composition for grasp pull: target quat = [0.6730, -0.6730, -0.2126, 0.2126] (approximate)\n# For simplicity in this canonical we keep target_orientation aligned with the\n# door-perpendicular grasp by rotating the same approach quat by +35° about Z.\n_a1 = math.radians(35.0)\n_h1_x = math.cos(_a1) * (-0.10 - 0.0) - math.sin(_a1) * (0.03 - 0.30) + 0.0\n_h1_y = math.sin(_a1) * (-0.10 - 0.0) + math.cos(_a1) * (0.03 - 0.30) + 0.30\nmove_to_pose(\n    articulation_path=\"/World/Franka\",\n    target_position=[_h1_x, _h1_y, 0.85],\n    target_orientation=[0.6730, -0.6730, -0.2126, 0.2126],\n    planner=\"rmpflow\",\n    robot_type=\"franka\",\n)\n\n# ── Arc waypoint 2: door at ~70° open ───────────────────────────────────────\n_a2 = math.radians(70.0)\n_h2_x = math.cos(_a2) * (-0.10 - 0.0) - math.sin(_a2) * (0.03 - 0.30) + 0.0\n_h2_y = math.sin(_a2) * (-0.10 - 0.0) + math.cos(_a2) * (0.03 - 0.30) + 0.30\nmove_to_pose(\n    articulation_path=\"/World/Franka\",\n    target_position=[_h2_x, _h2_y, 0.85],\n    target_orientation=[0.5792, -0.5792, -0.4056, 0.4056],\n    planner=\"rmpflow\",\n    robot_type=\"franka\",\n)\n\n# ── Read final state: hinge joint angle + door transform ───────────────────\n# get_joint_positions on the Wall articulation returns the hinge DOF (single\n# revolute joint between wall and door). Convert from radians to degrees and\n# assert >= 60° (5° tolerance below the 70° trajectory target).\nfinal_joint_positions = get_joint_positions(articulation=\"/World/Wall\")\ndoor_angle_rad = (\n    final_joint_positions[0]\n    if isinstance(final_joint_positions, list) and len(final_joint_positions) > 0\n    else 0.0\n)\ndoor_angle_deg = math.degrees(door_angle_rad)\n\nfinal_door_pose = get_world_transform(prim_path=\"/World/Door\")\n\nSUCCESS_ANGLE_DEG = 60.0\nif door_angle_deg >= SUCCESS_ANGLE_DEG:\n    print(\n        f\"[CP-NEW-robohive-door-open] SUCCESS: door angle {door_angle_deg:.1f} deg >= \"\n        f\"{SUCCESS_ANGLE_DEG} deg (target was 70 deg). final_door_pose={final_door_pose}\"\n    )\nelse:\n    print(\n        f\"[CP-NEW-robohive-door-open] WARN: door angle {door_angle_deg:.1f} deg < \"\n        f\"{SUCCESS_ANGLE_DEG} deg — handle may have slipped or arc was violated.\"\n    )\n",
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Door/Handle",
+        "place_path": "/World/Door",
+        "robot_kind": "franka",
+        "articulation_root": "/World/Wall",
+        "hinge_joint_path": "/World/HingeJoint",
+        "success_angle_deg": 60.0,
+        "trajectory_target_angle_deg": 70.0
+      }
+    ],
+    "cube_paths": [
+      "/World/Door/Handle"
+    ],
+    "note": "Articulated-pull task: success criterion is hinge joint angle >= 60 deg, NOT cube-in-bin delivery. Stages records the robot + handle + door articulation for harness inspection."
+  },
+  "simulate_args": {
+    "target_path": "/World/Door",
+    "cube_path": "/World/Door/Handle",
+    "cube_paths": [
+      "/World/Door/Handle"
+    ],
+    "duration_s": 120,
+    "success_criterion": "joint_angle",
+    "joint_path": "/World/HingeJoint",
+    "articulation_root": "/World/Wall",
+    "joint_target_deg": 70.0,
+    "joint_success_deg": 60.0,
+    "joint_tolerance_deg": 10.0
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Table",
+      "/World/Wall"
+    ],
+    "robot_base": [-0.45, 0.0, 0.75],
+    "hinge_joint_path": "/World/HingeJoint",
+    "articulation_root": "/World/Wall",
+    "door_path": "/World/Door",
+    "handle_path": "/World/Door/Handle",
+    "hinge_axis": [0, 0, 1],
+    "hinge_world_xy": [0.0, 0.30, 0.85],
+    "handle_closed_world": [-0.10, 0.03, 0.85],
+    "arc_radius_m": 0.283,
+    "swing_arc_waypoint_angles_deg": [35.0, 70.0]
+  },
+  "verified_status": "drafted-2026-05-16-A100; form-gate-schema ⏳ (lint pending); function-gate ⏳ (requires Franka import from Isaac Sim 5.1 library — no Nucleus dep, no IsaacLab dep; primitive-built door + hinge revolute is novel articulated-pull pattern not yet function-gate-verified)",
+  "settle_state": {
+    "wall": {
+      "/World/Wall": {
+        "position": [0.0, 0.0, 0.85],
+        "scale": [0.025, 0.40, 0.40],
+        "articulation_root": true
+      }
+    },
+    "door_initial": {
+      "/World/Door": {
+        "position": [-0.025, 0.15, 0.85],
+        "scale": [0.02, 0.15, 0.40],
+        "mass_kg": 4.0,
+        "hinge_angle_deg": 0.0,
+        "hinge_joint_path": "/World/HingeJoint"
+      }
+    },
+    "door_final_expected": {
+      "/World/Door": {
+        "hinge_angle_deg": 70.0,
+        "hinge_angle_deg_success_threshold": 60.0,
+        "hinge_angle_deg_tolerance": 10.0
+      }
+    },
+    "handle": {
+      "/World/Door/Handle": {
+        "position_closed_world": [-0.10, 0.03, 0.85],
+        "scale": [0.02, 0.02, 0.05],
+        "rigidly_attached_to_door": true
+      }
+    },
+    "robot": {
+      "/World/Franka": "home_pose"
+    }
+  },
+  "failure_modes": [
+    "Handle slips during pull (grip force insufficient for door inertia) — Franka parallel-jaw grip force 70 N × rubber friction coefficient 0.6 = 42 N hold force. Door panel (4 kg, ~0.30 m moment arm from hinge to handle) under angular acceleration generates ~20-30 N tangential force at the handle when pulled at typical move_to_pose velocities. Hold force is sufficient in static case but spikes during rapid trajectory transitions (start of waypoint 1, transition to waypoint 2) can exceed 42 N briefly. Mitigation: lower the move_to_pose execution speed via robot_type's planner config, or apply_physics_material 'rubber' on both door and handle for higher mu (~0.7), or increase grip force via set_drive_gains on the Franka finger drives. Detection: get_joint_positions returning a hinge angle far below 60 deg after the trajectory finishes — together with get_world_transform on /World/Door/Handle showing the handle still at the closed XY (gripper moved through air, door didn't follow) — indicates slip.",
+    "Constant-radius constraint violation (move_to_pose travels straight, not along the arc) — the door's hinge constrains the handle to a circle of radius 0.283 m around the hinge axis. move_to_pose generates a Cartesian-space trajectory that, between two waypoints on the arc, may take a SECANT (straight chord) path rather than the arc. The intermediate point on the chord is INSIDE the arc, meaning the gripper either (a) pushes the door inward through the wall (collision-resolved by PhysX as a hard reflection — door may stick or bounce), or (b) drags the handle off its arc (handle is rigid-attached to door, so the gripper must release contact, i.e. slip). Mitigation: split the pull into MORE waypoints (4-6 instead of 2) to keep each chord segment short enough that the secant-to-arc deviation is < 5 mm; or use plan_trajectory with an explicit list of arc waypoints sampled every 10 deg of door angle. Detection: get_world_transform on /World/Door during the pull (mid-trajectory snapshot) shows door angle non-monotonic with time — angle increases, then decreases as gripper slips off.",
+    "Articulation joint limits hit (door cannot open past 90 deg physically) — set_joint_limits(lower=0, upper=120 deg) gives the door 30 deg of headroom past the 70 deg trajectory target. If the door has rotational momentum at the end of the pull (typical when EE pulls fast and releases at 70 deg), it may continue swinging past the joint upper limit and PhysX clamps it with a hard stop, producing a bounce that propagates back to the EE as a reaction torque. Usually harmless (success metric is reached) but logs a contact-spike warning. Mitigation: tighten upper limit to 80 deg (just past success threshold) so any overshoot bounces against the limit cleanly, or add joint damping via drive_type='force' + damping=0.5 to absorb kinetic energy as door opens.",
+    "Hinge axis misalignment causes door to lift off frame — create_articulated_joint with body0=/World/Wall and body1=/World/Door places the joint anchor at the world origin of the joint prim path (/World/HingeJoint, by default world [0,0,0]) unless an explicit local position is authored. If the joint anchor is not at the hinge axis world XY=[0.0, 0.30, 0.85], PhysX uses the JOINT prim's transform (world origin) as the rotation center, NOT [0.0, 0.30, 0.85]. The door then rotates about the wrong axis, producing visible lift/penetration. Mitigation: after create_articulated_joint, explicitly author the joint's xformOp:translate to [0.0, 0.30, 0.85] via set_attribute; OR (more robust) pre-position /World/HingeJoint as an Xform child of /World/Wall at the local position (0, 0.30, 0) relative to wall center [0, 0, 0.85] before create_articulated_joint resolves the joint frames. Detection: get_world_transform on /World/Door at 35 deg open shows door Z != 0.85 (vertical drift), or door X far from -arc_radius (lateral drift) — both signal misaligned hinge anchor.",
+    "Handle as visual-only child of door — handle is modeled as a Cube prim at /World/Door/Handle with PhysicsCollisionAPI but NO PhysicsRigidBodyAPI. The collision-only handle is supposed to inherit door's rigid body transform via USD parent-child hierarchy. Some Isaac Sim versions treat the child collision shape as a SEPARATE collider with its own pose (decoupled from door) when no rigid body bond is authored — in that case the handle stays in world space at its initial pose while the door swings away, and the gripper would catch only empty air. Mitigation: explicit fixed joint between handle and door: create_articulated_joint(joint_path='/World/Door/HandleAttachJoint', joint_type='fixed', body0_path='/World/Door', body1_path='/World/Door/Handle'); OR convert the handle to a non-rigid sub-mesh of the door's collision shape via a compound collider. Detection: get_world_transform on /World/Door/Handle after the pull shows handle still at [-0.10, 0.03, 0.85] (closed pose) while /World/Door shows the panel center swung to arc waypoint 2 (~70 deg open).",
+    "RoboHive ADROIT-substitution boundary — this canonical uses Franka parallel-jaw + primitive-built door, NOT the 24-DOF ADROIT dexterous hand + ADROIT door USD that the source benchmark requires (asset_dependencies: ADROIT_hand_USD + door_USD are Nucleus-only, blockers nucleus_only_asset + physx_instability tagged in canonical_backlog.yaml). The substitution preserves the hinge-revolute door-open signature but loses (a) the latch-unlock substep (dexterous fingers rotate the handle around its own revolute joint before pulling — modeled here as a fused door+handle rigid body, no latch DOF), (b) multi-finger contact stability against the handle curvature, (c) the actual ADROIT door-open policy comparison. structural_tags include both isaac:research.robohive (lineage) and isaac:robot.fixed_base.arm + isaac:articulation.door + isaac:articulation.hinge_revolute (actual implementation) — retrieval surfaces this template for 'door open' queries but the user should understand the simplification. A future CP-NEW-robohive-door-open-latched derived variant would add a second revolute joint (handle-to-door) for the latch-unlock substep before the pull."
+  ],
+  "extends": "research-robohive-door-open-001",
+  "extension_notes": "RoboHive ADROIT door-open Isaac parity (PRIMITIVE-BUILT). SUBSTITUTIONS: (1) Franka parallel-jaw replaces 24-DOF ADROIT dexterous hand (ADROIT_hand_USD Nucleus-only blocker); (2) primitive-built wall + door + hinge replaces ADROIT door USD (door_USD Nucleus-only blocker); (3) door+handle fused as single rigid body (no latch revolute DOF) — RoboHive's latch-unlock substep is FOLDED into the door open trajectory since latch dynamics on a parallel-jaw gripper are degenerate (no finger rotation). Preserves the hinge-revolute door-open signature + handle-grasp + arc-pull-trajectory shape. Distinct from A89 (CP-NEW-isaaclab-franka-cabinet) which is an IsaacLab built-in RL TRAINING task on a prismatic drawer with PPO baseline — A100 builds the scene from primitives (no env_id, no IsaacLab dep) and uses move_to_pose for a SCRIPTED single-shot open gesture (RoboHive eval/imitation context). Distinct from CP-NEW-turn-faucet which is in-place wrist rotation around a fixed axis — A100 swings an entire door panel through an arc via Cartesian EE waypoints. Future: when ADROIT_hand_USD + door_USD become available, derive a CP-NEW-robohive-door-open-adroit variant with the dexterous hand + bundled door asset. Also future: derive CP-NEW-robohive-door-open-latched adding a second revolute joint (handle→door) for the latch-unlock substep, and CP-NEW-robohive-door-open-rl adding launch_training + checkpoint_training for imitation-learning policy. MILESTONE: this is the 100th new canonical in the CP-NEW expansion track.",
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "routing_axis": null,
+      "uses_conveyor_transport": false,
+      "has_articulated_fixture": true,
+      "manipulation_mode": "arc_pull",
+      "has_orientation_check": false,
+      "requires_articulation_joint_angle": true,
+      "workpiece_attached_to_articulation": true
+    },
+    "structural_tags": [
+      "isaac:research.robohive",
+      "isaac:articulation.door",
+      "isaac:articulation.hinge_revolute",
+      "isaac:manipulation.handle_grasp",
+      "isaac:manipulation.arc_pull",
+      "isaac:fixture.articulated_revolute",
+      "isaac:robot.fixed_base.arm",
+      "isaac:robot.franka",
+      "isaac:topology.single_station",
+      "isaac:grasp.define_grasp_pose",
+      "isaac:scene.primitive_built",
+      "isaac:planner.rmpflow"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "franka_panda",
+        "franka",
+        "fixed_base_arm"
+      ],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "parallel_jaw_required"
+    },
+    "wall": {
+      "constraints": [
+        "static_anchor",
+        "articulation_root"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "door": {
+      "constraints": [
+        "rigid_panel",
+        "hinge_revolute_child",
+        "articulated"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "handle": {
+      "constraints": [
+        "graspable_protrusion",
+        "rigidly_attached_to_door"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "hinge_joint": {
+      "constraints": [
+        "revolute",
+        "vertical_axis"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "table": {
+      "constraints": [
+        "surface"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [-0.45, 0.0, 0.75],
+      "orientation": [1.0, 0.0, 0.0, 0.0]
+    },
+    "wall": {
+      "path": "/World/Wall",
+      "position": [0.0, 0.0, 0.85],
+      "scale": [0.025, 0.40, 0.40]
+    },
+    "door": {
+      "path": "/World/Door",
+      "closed_position": [-0.025, 0.15, 0.85],
+      "scale": [0.02, 0.15, 0.40],
+      "mass_kg": 4.0,
+      "material": "rubber"
+    },
+    "handle": {
+      "path": "/World/Door/Handle",
+      "closed_position": [-0.10, 0.03, 0.85],
+      "scale": [0.02, 0.02, 0.05]
+    },
+    "hinge_joint": {
+      "path": "/World/HingeJoint",
+      "joint_type": "revolute",
+      "axis": [0, 0, 1],
+      "hinge_world_xy": [0.0, 0.30, 0.85],
+      "lower_deg": 0.0,
+      "upper_deg": 120.0,
+      "target_deg": 70.0,
+      "success_deg": 60.0
+    },
+    "table": {
+      "path": "/World/Table",
+      "position": [0, 0, 0.375],
+      "scale": [0.45, 0.40, 0.375]
+    },
+    "arc_waypoint_angles_deg": [35.0, 70.0]
+  },
+  "code_template": "import math\n\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path={{table.path}}, prim_type=\"Cube\", position={{table.position}}, scale={{table.scale}})\napply_api_schema(prim_path={{table.path}}, schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_prim(prim_path={{wall.path}}, prim_type=\"Cube\", position={{wall.position}}, scale={{wall.scale}})\napply_api_schema(prim_path={{wall.path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{wall.path}}, schema_name=\"PhysicsArticulationRootAPI\")\n\ncreate_prim(prim_path={{door.path}}, prim_type=\"Cube\", position={{door.closed_position}}, scale={{door.scale}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{door.path}}, schema_name=api)\nset_attribute(prim_path={{door.path}}, attr_name=\"physics:mass\", value={{door.mass_kg}})\nset_attribute(prim_path={{door.path}}, attr_name=\"physxRigidBody:enableCCD\", value=True)\napply_physics_material(prim_path={{door.path}}, material_name={{door.material}})\n\ncreate_prim(prim_path={{handle.path}}, prim_type=\"Cube\", position={{handle.closed_position}}, scale={{handle.scale}})\napply_api_schema(prim_path={{handle.path}}, schema_name=\"PhysicsCollisionAPI\")\n\ncreate_articulated_joint(\n    joint_path={{hinge_joint.path}},\n    joint_type={{hinge_joint.joint_type}},\n    body0_path={{wall.path}},\n    body1_path={{door.path}},\n    axis={{hinge_joint.axis}},\n)\nset_joint_limits(joint_path={{hinge_joint.path}}, lower={{hinge_joint.lower_deg}}, upper={{hinge_joint.upper_deg}})\n\nsim_control(action=\"play\")\n\ndefine_grasp_pose(\n    robot_path={{primary_robot.path}},\n    object_path={{handle.path}},\n    approach_direction=[0, 1, 0],\n    gripper_offset=[0, 0.04, 0],\n)\n\nmove_to_pose(\n    articulation_path={{primary_robot.path}},\n    target_position=[-0.10, -0.02, 0.85],\n    target_orientation=[0.7071, -0.7071, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"franka\",\n)\n\nmove_to_pose(\n    articulation_path={{primary_robot.path}},\n    target_position=[-0.10, 0.02, 0.85],\n    target_orientation=[0.7071, -0.7071, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"franka\",\n)\n\n_hinge_xy = {{hinge_joint.hinge_world_xy}}\n_handle_closed = {{handle.closed_position}}\nfor _angle_deg in {{arc_waypoint_angles_deg}}:\n    _a = math.radians(_angle_deg)\n    _hx = math.cos(_a) * (_handle_closed[0] - _hinge_xy[0]) - math.sin(_a) * (_handle_closed[1] - _hinge_xy[1]) + _hinge_xy[0]\n    _hy = math.sin(_a) * (_handle_closed[0] - _hinge_xy[0]) + math.cos(_a) * (_handle_closed[1] - _hinge_xy[1]) + _hinge_xy[1]\n    _half = math.radians(_angle_deg / 2.0)\n    _qw = 0.7071 * math.cos(_half)\n    _qx = -0.7071 * math.cos(_half)\n    _qy = -0.7071 * math.sin(_half)\n    _qz = 0.7071 * math.sin(_half)\n    move_to_pose(\n        articulation_path={{primary_robot.path}},\n        target_position=[_hx, _hy, 0.85],\n        target_orientation=[_qw, _qx, _qy, _qz],\n        planner=\"rmpflow\",\n        robot_type=\"franka\",\n    )\n\nfinal_joint_positions = get_joint_positions(articulation={{wall.path}})\ndoor_angle_rad = final_joint_positions[0] if isinstance(final_joint_positions, list) and len(final_joint_positions) > 0 else 0.0\ndoor_angle_deg = math.degrees(door_angle_rad)\nfinal_door_pose = get_world_transform(prim_path={{door.path}})\nif door_angle_deg >= {{hinge_joint.success_deg}}:\n    print(f\"[CP-NEW-robohive-door-open] SUCCESS: door angle {door_angle_deg:.1f} deg >= {{hinge_joint.success_deg}} deg\")\n",
+  "motion_controllers": {
+    "verified": [],
+    "untested": [
+      "rmpflow",
+      "curobo",
+      "direct_joint"
+    ],
+    "failed": {}
+  }
+}
