@@ -372,6 +372,110 @@ def substitute_template_params(
 _ROLE_INDEXED_PAT = __import__("re").compile(r"\{\{(\w+)\[(\d+)\]\.(\w+)\}\}")
 _ROLE_DOTTED_PAT = __import__("re").compile(r"\{\{(\w+)\.(\w+)\}\}")
 
+# Matches {{#each role.listfield}} ... {{/each}} blocks.
+# Group 1 = role name, group 2 = field name (may be empty → role itself is the list).
+_EACH_OPEN_PAT = __import__("re").compile(r"\{\{#each (\w+)(?:\.(\w+))?\}\}")
+_EACH_CLOSE_PAT = __import__("re").compile(r"\{\{/each\}\}")
+# Inside a block, {{this}} → whole item, {{this.field}} → item[field].
+_THIS_FIELD_PAT = __import__("re").compile(r"\{\{this\.(\w+)\}\}")
+_THIS_PAT = __import__("re").compile(r"\{\{this\}\}")
+
+
+def _expand_each_blocks(template_str: str, role_defaults: Dict[str, Any]) -> str:
+    """Expand {{#each role.list}}...{{/each}} blocks in *template_str*.
+
+    Rules:
+    - ``{{#each role.field}}`` iterates over ``role_defaults[role][field]``
+      (must be a list).
+    - ``{{#each role}}`` (no dot) iterates over ``role_defaults[role]``
+      directly when it is a list.
+    - Inside the block, ``{{this.field}}`` accesses the current item's field.
+    - ``{{this}}`` formats the whole current item via _format_for_code.
+    - Leading indentation of the ``{{#each ...}}`` line is preserved on each
+      expanded line within the block.
+    - Empty list → produces empty string (block body dropped entirely).
+    - Nested ``{{#each}}`` blocks → raises ValueError (not supported).
+    - Mismatched open/close tags → raises ValueError with approximate position.
+
+    Returns the template string with all each-blocks expanded.
+    """
+    lines = template_str.split("\n")
+    out_lines: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        open_m = _EACH_OPEN_PAT.search(line)
+        if open_m is None:
+            out_lines.append(line)
+            i += 1
+            continue
+
+        # Found an opening tag — collect block lines until matching {{/each}}.
+        role = open_m.group(1)
+        field = open_m.group(2)  # may be None
+
+        # Indentation = text before the {{#each tag on its line
+        indent = line[: open_m.start()]
+
+        # Resolve the list value from role_defaults.
+        role_val = role_defaults.get(role)
+        if field:
+            if isinstance(role_val, dict):
+                items = role_val.get(field, [])
+            else:
+                items = []
+        else:
+            items = role_val if isinstance(role_val, list) else []
+
+        # Collect body lines (everything between open and close tags).
+        block_lines: list[str] = []
+        i += 1
+        depth = 0  # track nested {{#each}} for rejection
+        found_close = False
+        while i < len(lines):
+            inner = lines[i]
+            if _EACH_OPEN_PAT.search(inner):
+                depth += 1
+                if depth > 0:
+                    raise ValueError(
+                        f"Nested {{{{#each}}}} blocks are not supported "
+                        f"(found at line {i + 1})"
+                    )
+            if _EACH_CLOSE_PAT.search(inner):
+                if depth == 0:
+                    found_close = True
+                    i += 1
+                    break
+                depth -= 1
+            block_lines.append(inner)
+            i += 1
+
+        if not found_close:
+            raise ValueError(
+                f"Unmatched {{{{#each {role}{'.' + field if field else ''}}}}} "
+                f"— no matching {{{{/each}}}} found"
+            )
+
+        # Expand: for each item, substitute {{this.field}} and {{this}} in body.
+        for item in items:
+            for body_line in block_lines:
+                expanded = body_line
+                if isinstance(item, dict):
+                    def _sub_this_field(m: Any, _item: Any = item) -> str:
+                        f = m.group(1)
+                        if f not in _item:
+                            return m.group(0)
+                        return _format_for_code(_item[f])
+                    expanded = _THIS_FIELD_PAT.sub(_sub_this_field, expanded)
+                expanded = _THIS_PAT.sub(_format_for_code(item), expanded)
+                # Apply block indentation to non-empty lines
+                if expanded.strip():
+                    out_lines.append(indent + expanded)
+                else:
+                    out_lines.append(expanded)
+
+    return "\n".join(out_lines)
+
 
 def _format_for_code(v: Any) -> str:
     """Format a python value as a literal usable inside tool-call args.
@@ -423,11 +527,17 @@ def substitute_role_placeholders(
           ],
         }
 
+    Also expands {{#each role.list}}...{{/each}} blocks before applying
+    scalar substitutions.  See _expand_each_blocks for full semantics.
+
     Placeholders for which no value is found pass through unchanged so
     failure modes are visible in the captured tool-call args.
     """
     if not code_template or not role_defaults:
         return code_template
+
+    # Phase 1: expand loop blocks before scalar substitution.
+    code_template = _expand_each_blocks(code_template, role_defaults)
 
     def _indexed(m):
         """Substitute ``{{role[N].field}}`` placeholders from a list-typed role spec."""
