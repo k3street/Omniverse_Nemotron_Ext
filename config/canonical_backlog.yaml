@@ -1323,9 +1323,11 @@
   asset_dependencies: ["Franka"]
   blockers: []
   motion_controller_preference: direct_joint
-  pattern_hint: rl-train
+  pattern_hint: train
   estimated_agent_minutes: 240
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-actuator-net-training.json
+  drafted_date: "2026-05-16"
 
 - id: rl-curriculum-object-complexity-001
   source: retrieval-miss

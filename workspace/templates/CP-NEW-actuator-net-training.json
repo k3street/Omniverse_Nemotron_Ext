@@ -1,0 +1,91 @@
+{
+  "task_id": "CP-NEW-actuator-net-training",
+  "goal": "Train an IsaacLab ActuatorNet (LSTM) from recorded joint-torque trajectories on a Franka Panda, then inject the trained model back into simulation physics. robot_wizard loads the Franka. record_trajectory captures a diverse-motion excitation sequence (duration=120 s, rate_hz=200) and writes it to workspace/calibration/franka_excitation.npz. get_joint_torques reads the actuator torque columns from the running articulation to confirm the recording has non-trivial effort signal. train_actuator_net trains the LSTM actuator model on the recorded data (hidden_dim=32, num_layers=2, num_epochs=200) and returns the checkpoint path. checkpoint_training saves the training state mid-run as a manual tag. load_rl_policy loads the trained ActuatorNet checkpoint back onto the articulation so simulation physics uses the learned motor model. SUCCESS: train_actuator_net returns a non-null checkpoint path and load_rl_policy succeeds. Exercises the actuator-net training pipeline (record_trajectory, get_joint_torques, train_actuator_net, checkpoint_training, load_rl_policy). Realizes RL / sim-to-real engineer persona.",
+  "tools_used": [
+    "robot_wizard",
+    "record_trajectory",
+    "get_joint_torques",
+    "train_actuator_net",
+    "checkpoint_training",
+    "load_rl_policy"
+  ],
+  "thoughts": [
+    "Pattern is rl-train / actuator-net. No cube delivery criterion — success is a non-null checkpoint path returned by train_actuator_net plus a successful load_rl_policy injection. verify_args and simulate_args are null.",
+    "record_trajectory is run first to generate the training corpus. duration=120 s at rate_hz=200 yields 24000 samples — sufficient for LSTM training on a 7-DOF arm. Diverse motion (random joint-space sinusoids) is required to capture friction, backlash, and inertia nonlinearities.",
+    "get_joint_torques is called immediately after sim play to verify that the articulation is producing non-trivial effort signal (non-zero torques). Zero torques indicate the simulation is paused or the articulation has no drives configured — catching this early prevents silent empty-data training.",
+    "train_actuator_net takes real_data_path (the .npz from record_trajectory), articulation_path, hidden_dim=32, num_layers=2, num_epochs=200, output_dir. Default hidden_dim=32 is chosen for real-time inference on Jetson; increase to 64 only if residual error is > 0.5 N·m.",
+    "checkpoint_training is called after train_actuator_net to persist the optimizer state with tag='post_actuator_net' — useful for resuming if the injection step fails.",
+    "load_rl_policy injects the trained checkpoint back onto the articulation via policy_path and observation_keys=['joint_pos', 'joint_vel', 'joint_effort']. action_dim=7 for Franka Panda.",
+    "motion_controllers.untested contains direct_joint because the training workflow uses open-loop joint replay; no closed-loop planner is involved.",
+    "Distinct from CP-NEW-physics-calibrate-actuator (parametric Bayesian calibration of damping/friction), CP-NEW-rsi-from-demos (Reference State Initialization for RL reset), and CP-NEW-dr-curriculum-trainer (domain-randomization curriculum). This is the ONLY canonical that exercises train_actuator_net end-to-end."
+  ],
+  "code": "# ── Step 1: Load Franka articulation ─────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.0],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Step 2: Record diverse-motion excitation trajectory ───────────────────────\n# Play the timeline (e.g. random joint-space sinusoids) before calling record_trajectory.\n_traj_result = record_trajectory(\n    articulation=\"/World/Franka\",\n    duration=120.0,\n    output_path=\"workspace/calibration/franka_excitation.npz\",\n    rate_hz=200.0,\n)\n# Returns: {output_path: str, num_samples: int, joints: [str, ...]}\n# Verify: num_samples should be ~24000 (120 s × 200 Hz)\n\n# ── Step 3: Confirm non-trivial torque signal ─────────────────────────────────\n_torques = get_joint_torques(\n    articulation=\"/World/Franka\",\n)\n# Returns: {joint_name: applied_torque_Nm, ...} for all 7 joints\n# GATE: at least one |torque| > 0.01 N·m; if all zeros the articulation drives are off\n\n# ── Step 4: Train ActuatorNet LSTM ────────────────────────────────────────────\n_train_result = train_actuator_net(\n    real_data_path=\"workspace/calibration/franka_excitation.npz\",\n    articulation_path=\"/World/Franka\",\n    hidden_dim=32,\n    num_layers=2,\n    num_epochs=200,\n    output_dir=\"workspace/calibration/franka_actuator_net\",\n)\n# Returns: {checkpoint_path: str, final_loss: float, training_epochs: int,\n#           per_joint_rmse: {joint_name: float}}\n# SUCCESS criterion: checkpoint_path is non-null string\n\n# ── Step 5: Checkpoint optimizer state ────────────────────────────────────────\ncheckpoint_training(\n    tag=\"post_actuator_net\",\n)\n# Returns: {checkpoint_file: str, run_id: str, tag: str}\n\n# ── Step 6: Inject trained ActuatorNet into simulation physics ────────────────\nload_rl_policy(\n    robot_path=\"/World/Franka\",\n    policy_path=_train_result[\"checkpoint_path\"],\n    observation_keys=[\"joint_pos\", \"joint_vel\", \"joint_effort\"],\n    action_dim=7,\n)\n# Returns: {status: str, loaded_path: str, observation_keys: [str, ...], action_dim: int}\n# Simulation now uses the LSTM actuator model for Franka joint dynamics",
+  "verify_args": null,
+  "simulate_args": null,
+  "settle_state": null,
+  "diagnose_args": {
+    "expected_keys": [
+      "traj_result",
+      "torques",
+      "train_result",
+      "checkpoint_path",
+      "load_status"
+    ],
+    "success_criterion": "train_result.checkpoint_path is not null AND load_status.status == 'ok'",
+    "result_file": "/tmp/actuator_net_training_result.json"
+  },
+  "verified_status": "drafted-2026-05-16; form-gate ✓; function-gate BLOCKED (requires live Isaac Sim + Franka articulation + running physics simulation to record trajectories; train_actuator_net needs IsaacLab ML backend)",
+  "failure_modes": [
+    "record_trajectory num_samples=0: simulation timeline must be playing when record_trajectory is called; if the stage is paused the PhysX subscription fires zero times and the output .npz is empty — call sim_control(action='play') first",
+    "get_joint_torques all-zero: drives are either disabled (physics:jointEnabled=false) or stiffness/damping are zero; call get_drive_gains on panda_joint1 to verify Kp/Kd before recording",
+    "train_actuator_net real_data_path: the .npz must contain arrays named joint_positions, joint_velocities, and joint_torques_commanded at consistent length; record_trajectory writes this schema by default but custom replays may use different key names",
+    "train_actuator_net num_epochs=200 with hidden_dim=32: on CPU this takes ~8 min; ensure the call does not time out in the MCP session — pass output_dir so partial checkpoints are written every 50 epochs",
+    "checkpoint_training without run_id: targets the most-recent active launch_training run; if no training is running the handler returns an error — this is safe to ignore if train_actuator_net completed synchronously",
+    "load_rl_policy policy_path mismatch: the checkpoint written by train_actuator_net is a .pt file; if output_dir was changed from the default, substitute the returned checkpoint_path verbatim rather than constructing the path manually"
+  ],
+  "extends": "rl-training-category / actuator-net",
+  "extension_notes": "First canonical to exercise train_actuator_net. Distinct from all physics-calibration and DR canonicals — trains a learned LSTM motor model rather than identifying parametric physical constants. Pairs with CP-NEW-physics-calibrate-actuator (complementary approach: parametric vs. neural).",
+  "intent": {
+    "pattern_hint": "train",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false,
+      "uses_actuator_net": true,
+      "uses_trajectory_recording": true
+    },
+    "structural_tags": [
+      "isaac:training.actuator_net",
+      "isaac:training.record_trajectory",
+      "isaac:training.checkpoint",
+      "isaac:calibration.sim_to_real_gap",
+      "isaac:topology.single_station",
+      "isaac:robot.fixed_base.arm"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": ["direct_joint"]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "franka_panda",
+        "ur5e",
+        "kinova_gen3"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.0],
+      "orientation": [1, 0, 0, 0]
+    }
+  },
+  "code_template": "robot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\n_traj_result = record_trajectory(\n    articulation={{primary_robot.path}},\n    duration={{excitation_duration_s}},\n    output_path={{excitation_data_path}},\n    rate_hz={{record_rate_hz}},\n)\n\n_torques = get_joint_torques(\n    articulation={{primary_robot.path}},\n)\n\n_train_result = train_actuator_net(\n    real_data_path={{excitation_data_path}},\n    articulation_path={{primary_robot.path}},\n    hidden_dim={{hidden_dim}},\n    num_layers={{num_layers}},\n    num_epochs={{num_epochs}},\n    output_dir={{actuator_net_output_dir}},\n)\n\ncheckpoint_training(\n    tag={{checkpoint_tag}},\n)\n\nload_rl_policy(\n    robot_path={{primary_robot.path}},\n    policy_path=_train_result[\"checkpoint_path\"],\n    observation_keys=[\"joint_pos\", \"joint_vel\", \"joint_effort\"],\n    action_dim={{action_dim}},\n)"
+}
