@@ -1,0 +1,180 @@
+{
+  "task_id": "CP-NEW-barcode-scanner-divert",
+  "goal": "Build a barcode-scanner SKU-based lane divert station: items travel on a main conveyor, a barcode_reader_sensor reads the SKU label on each passing item, and the item is diverted by a Franka arm into one of three lane bins (LaneA, LaneB, LaneC) according to a SKU routing table. SKU_A → LaneA, SKU_B → LaneB; any unrecognised SKU falls through to LaneC (catch-all). Exercises barcode_reader_sensor, semantic-label routing, and 3-destination sort pattern without vision-classifier dependency. ONET-adjacent: postal/distribution-centre sorter variant.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "barcode_reader_sensor",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "create_material",
+    "assign_material",
+    "apply_physics_material",
+    "set_semantic_label",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Design rationale for CP-NEW-barcode-scanner-divert:\n\n1) Barcode sensor as routing oracle: barcode_reader_sensor scans each item as it passes under the sensor head and returns a SKU string. The handler maps SKU → destination via a color_routing-style dict (routing_axis='label'). Items with unrecognised SKU get no routing match and fall through to destination_path = LaneC — the same fall-through mechanism as CP-18 inspect-reject, but driven by a barcode sensor rather than semantic class pre-tagging. This is the canonical exemplar for sensor-driven sort (vs vision-driven sort in CP-34).\n\n2) Structural difference from existing sort templates: CP-34 uses camera + vision classifier (color → bin). CP-18 uses pre-tagged semantic class with fall-through. This template introduces barcode_reader_sensor as the detection modality — a distinct sensor API that returns a string label rather than a colour class. The sort criterion is a SKU code read from a physical label, which is the dominant routing mechanism in real distribution centres.\n\n3) Scene geometry: Franka Panda on 0.75m table at [0,0,0.75]. Conveyor at y=+0.40, top surface z=0.805. Items (0.05m cubes) have centre z=0.855. Barcode sensor head mounted at [0.10, 0.40, 0.92] pointing down — passes above items as they approach the pick zone. Proximity sensor at [0.40, 0.40, 0.855] triggers pick. Three lane bins at y=-0.40: LaneA at x=-0.35, LaneB at x=0.0, LaneC at x=+0.35. All within Franka 0.85m reach envelope.\n\n4) SKU distribution: 6 items total — 2× SKU_A (orange), 2× SKU_B (cyan), 2× SKU_C (yellow, unrecognised → catch-all LaneC). Items spaced 0.30m apart on belt at x = [-1.5, -1.2, -0.9, -0.6, -0.3, 0.0]. Belt velocity 0.15 m/s gives ~2s per item at pick zone. set_semantic_label assigns sku_a/sku_b/sku_c labels so the barcode sensor can read them deterministically in simulation.\n\n5) Physics: CPU dynamics (enable_gpu_dynamics=False, broadphase_type=MBP) for determinism. Rubber material on all items prevents sliding. sleepThreshold=0.0 ensures items remain active through settle. Item mass default 0.5 kg.\n\n6) Function-gate: verify that SKU_A items arrive in LaneA. simulate_args cube_path=/World/Item_1 (SKU_A), target_path=/World/LaneA, duration_s=200. The 200s budget accommodates 6 items at ~30s each (pick + travel + place cycle).",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# Robot base table\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU determinism ──────────────────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka Panda ──────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Main conveyor — 3m, 0.15 m/s ─────────────────────────────────────────────\n# belt top z = 0.78 + 0.025 = 0.805\ncreate_conveyor(\n    prim_path=\"/World/MainBelt\",\n    position=[0.0, 0.40, 0.78],\n    size=[3.0, 0.35, 0.05],\n    surface_velocity=[0.15, 0, 0],\n)\n\n# ── Materials for 3 SKU types ─────────────────────────────────────────────────\ncreate_material(material_path=\"/World/Materials/Orange\", shader_type=\"OmniPBR\",\n                diffuse_color=[1.0, 0.45, 0.0])\ncreate_material(material_path=\"/World/Materials/Cyan\",   shader_type=\"OmniPBR\",\n                diffuse_color=[0.0, 0.85, 0.85])\ncreate_material(material_path=\"/World/Materials/Yellow\", shader_type=\"OmniPBR\",\n                diffuse_color=[0.95, 0.90, 0.0])\n\n# ── 6 items: 2× SKU_A (orange), 2× SKU_B (cyan), 2× SKU_C/unrouted (yellow) ─\n# item centre z = belt_top(0.805) + item_size/2(0.025) = 0.855\n# spacing 0.30m; belt velocity 0.15 m/s → ~2s gap between items at pick zone\nitem_specs = [\n    (\"/World/Item_1\", -1.50, \"sku_a\", \"/World/Materials/Orange\"),\n    (\"/World/Item_2\", -1.20, \"sku_b\", \"/World/Materials/Cyan\"),\n    (\"/World/Item_3\", -0.90, \"sku_c\", \"/World/Materials/Yellow\"),\n    (\"/World/Item_4\", -0.60, \"sku_a\", \"/World/Materials/Orange\"),\n    (\"/World/Item_5\", -0.30, \"sku_b\", \"/World/Materials/Cyan\"),\n    (\"/World/Item_6\",  0.00, \"sku_c\", \"/World/Materials/Yellow\"),\n]\n\nitem_paths = [spec[0] for spec in item_specs]\n\nfor path, x, sku, mat in item_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\",\n                position=[x, 0.40, 0.855], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\",\n                \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    assign_material(prim_path=path, material_path=mat)\n    # Semantic label = the SKU string the barcode sensor will read\n    set_semantic_label(prim_path=path, class_name=sku, semantic_type=\"label\")\n\nbulk_set_attribute(\n    prim_paths=item_paths,\n    attr=\"physics:mass\",\n    value=0.5,\n)\nbulk_set_attribute(\n    prim_paths=item_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in item_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# ── 3 lane destination bins ───────────────────────────────────────────────────\n# Arranged at y=-0.40, spread in x so all within Franka 0.85m reach.\n# LaneA (SKU_A) left, LaneB (SKU_B) centre, LaneC (catch-all) right.\ncreate_bin(prim_path=\"/World/LaneA\", position=[-0.35, -0.40, 0.75],\n           size=[0.22, 0.22, 0.15])\ncreate_bin(prim_path=\"/World/LaneB\", position=[ 0.00, -0.40, 0.75],\n           size=[0.22, 0.22, 0.15])\ncreate_bin(prim_path=\"/World/LaneC\", position=[ 0.35, -0.40, 0.75],\n           size=[0.22, 0.22, 0.15])\n\n# Visual tint for lane bins\nassign_material(prim_path=\"/World/LaneA\", material_path=\"/World/Materials/Orange\")\nassign_material(prim_path=\"/World/LaneB\", material_path=\"/World/Materials/Cyan\")\nassign_material(prim_path=\"/World/LaneC\", material_path=\"/World/Materials/Yellow\")\n\n# ── Barcode reader sensor ─────────────────────────────────────────────────────\n# Mounted above belt, between infeed and pick zone — items pass under it.\n# Reads semantic_type='label' from each item as it crosses.\nbarcode_reader_sensor(\n    sensor_path=\"/World/BarcodeScanner\",\n    position=[0.10, 0.40, 0.92],\n    scan_volume=[0.10, 0.35, 0.12],\n    read_attribute=\"semantic_type:label\",\n)\n\n# ── Pick proximity sensor ─────────────────────────────────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/PickSensor\",\n    position=[0.40, 0.40, 0.855],\n    size=[0.07, 0.07, 0.07],\n)\n\n# ── Franka pick-place controller with SKU routing ─────────────────────────────\n# color_routing keys match the semantic label (sku_a, sku_b) read by barcode.\n# sku_c has no routing entry → falls through to destination_path = LaneC.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/MainBelt\",\n    source_paths=item_paths,\n    destination_path=\"/World/LaneC\",\n    color_routing={\n        \"sku_a\": \"/World/LaneA\",\n        \"sku_b\": \"/World/LaneB\",\n    },\n    drop_target=[ 0.35, -0.40, 0.92],\n    planning_obstacles=[\"/World/Table\", \"/World/MainBelt\",\n                        \"/World/LaneA\", \"/World/LaneB\", \"/World/LaneC\"],\n)",
+  "failure_modes": [
+    "Barcode sensor scan_volume too small — if item passes at edge of scan volume the sensor returns None, item loses its routing entry and falls through to LaneC incorrectly. Widen scan_volume y-extent to cover full belt width (0.35m here).",
+    "semantic_type mismatch — barcode_reader_sensor reads 'semantic_type:label' but set_semantic_label was called with semantic_type='class'. Ensure semantic_type='label' is passed consistently in both calls.",
+    "SKU_C items should reach LaneC via fall-through; if sku_c is accidentally added to color_routing it gets an explicit destination and the catch-all pattern is lost. Never add the catch-all SKU to the routing table.",
+    "Belt velocity + pick sensor timing conflict — at 0.15 m/s the barcode scanner at x=0.10 reads items ~2s before the pick sensor at x=0.40 fires. If belt is faster than 0.3 m/s the scan may fire after pick; keep belt at ≤0.20 m/s.",
+    "Franka reach to LaneA at x=-0.35 — horizontal distance from base ≈ sqrt(0.35^2+0.40^2) = 0.53m. Within 0.85m reach, but wrist orientation must avoid Table collision. Add '/World/Table' to planning_obstacles (already present)."
+  ],
+  "intent": {
+    "pattern_hint": "sort",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "n_bins_routed",
+      "uses_conveyor_transport": true,
+      "routing_axis": "label",
+      "has_stacking": false,
+      "has_fallthrough": true,
+      "n_sku_classes": 3
+    },
+    "structural_tags": [
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:routing.barcode_sku_divert",
+      "isaac:sensor.barcode_reader",
+      "isaac:transport.conveyor",
+      "isaac:routing.fallthrough_catchall"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true
+    },
+    "input_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "barcode_sensor": {
+      "constraints": ["barcode_reader_sensor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "sku_a_destination": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "sku_b_destination": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "catchall_destination": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 3,
+      "max": 12,
+      "unordered": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "input_conveyor": {
+      "path": "/World/MainBelt",
+      "position": [0.0, 0.40, 0.78],
+      "size": [3.0, 0.35, 0.05],
+      "surface_velocity": [0.15, 0, 0]
+    },
+    "barcode_sensor": {
+      "path": "/World/BarcodeScanner",
+      "position": [0.10, 0.40, 0.92],
+      "scan_volume": [0.10, 0.35, 0.12]
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [0.40, 0.40, 0.855],
+      "size": [0.07, 0.07, 0.07]
+    },
+    "sku_a_destination": {
+      "path": "/World/LaneA",
+      "position": [-0.35, -0.40, 0.75],
+      "size": [0.22, 0.22, 0.15],
+      "routing_key": "sku_a"
+    },
+    "sku_b_destination": {
+      "path": "/World/LaneB",
+      "position": [0.0, -0.40, 0.75],
+      "size": [0.22, 0.22, 0.15],
+      "routing_key": "sku_b"
+    },
+    "catchall_destination": {
+      "path": "/World/LaneC",
+      "position": [0.35, -0.40, 0.75],
+      "size": [0.22, 0.22, 0.15],
+      "routing_key": null
+    },
+    "workpieces": [
+      {"path": "/World/Item_1", "position": [-1.50, 0.40, 0.855], "sku": "sku_a"},
+      {"path": "/World/Item_2", "position": [-1.20, 0.40, 0.855], "sku": "sku_b"},
+      {"path": "/World/Item_3", "position": [-0.90, 0.40, 0.855], "sku": "sku_c"},
+      {"path": "/World/Item_4", "position": [-0.60, 0.40, 0.855], "sku": "sku_a"},
+      {"path": "/World/Item_5", "position": [-0.30, 0.40, 0.855], "sku": "sku_b"},
+      {"path": "/World/Item_6", "position": [ 0.00, 0.40, 0.855], "sku": "sku_c"}
+    ]
+  },
+  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\n# Materials, items, bins\ncreate_material(material_path=\"/World/Materials/Orange\", shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.45, 0.0])\ncreate_material(material_path=\"/World/Materials/Cyan\",   shader_type=\"OmniPBR\", diffuse_color=[0.0, 0.85, 0.85])\ncreate_material(material_path=\"/World/Materials/Yellow\", shader_type=\"OmniPBR\", diffuse_color=[0.95, 0.90, 0.0])\n\n# Workpieces (role-parameterised)\nfor item in {{workpieces}}:\n    create_prim(prim_path=item['path'], prim_type=\"Cube\", position=item['position'], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=item['path'], schema_name=api)\n    set_semantic_label(prim_path=item['path'], class_name=item['sku'], semantic_type=\"label\")\nbulk_set_attribute(prim_paths=[i['path'] for i in {{workpieces}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nfor item in {{workpieces}}:\n    apply_physics_material(prim_path=item['path'], material_name=\"rubber\")\n\ncreate_bin(prim_path={{sku_a_destination.path}}, position={{sku_a_destination.position}}, size={{sku_a_destination.size}})\ncreate_bin(prim_path={{sku_b_destination.path}}, position={{sku_b_destination.position}}, size={{sku_b_destination.size}})\ncreate_bin(prim_path={{catchall_destination.path}}, position={{catchall_destination.position}}, size={{catchall_destination.size}})\n\nbarcode_reader_sensor(\n    sensor_path={{barcode_sensor.path}},\n    position={{barcode_sensor.position}},\n    scan_volume={{barcode_sensor.scan_volume}},\n    read_attribute=\"semantic_type:label\",\n)\n\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=[i['path'] for i in {{workpieces}}],\n    destination_path={{catchall_destination.path}},\n    color_routing={\n        {{sku_a_destination.routing_key}}: {{sku_a_destination.path}},\n        {{sku_b_destination.routing_key}}: {{sku_b_destination.path}},\n    },\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}},\n                        {{sku_a_destination.path}}, {{sku_b_destination.path}}, {{catchall_destination.path}}],\n)",
+  "settle_state": {
+    "items": {
+      "/World/Item_1": [-1.50, 0.40, 0.855],
+      "/World/Item_2": [-1.20, 0.40, 0.855],
+      "/World/Item_3": [-0.90, 0.40, 0.855],
+      "/World/Item_4": [-0.60, 0.40, 0.855],
+      "/World/Item_5": [-0.30, 0.40, 0.855],
+      "/World/Item_6": [ 0.00, 0.40, 0.855]
+    },
+    "conveyors": {
+      "/World/MainBelt": [0.15, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/MainBelt",
+        "place_path": "/World/LaneA",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/Item_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Item_1",
+    "target_path": "/World/LaneA",
+    "duration_s": 200
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [0.0, 0.0, 0.75],
+    "drop_pose": [-0.35, -0.40, 0.75]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo", "rmpflow", "moveit2"]
+  },
+  "verified_status": "drafted-2026-05-16; form-gate ⏳; function-gate ⏳"
+}
