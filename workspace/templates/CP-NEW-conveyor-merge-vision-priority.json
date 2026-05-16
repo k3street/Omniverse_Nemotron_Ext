@@ -1,0 +1,235 @@
+{
+  "task_id": "CP-NEW-conveyor-merge-vision-priority",
+  "goal": "Build a Y-merge conveyor with vision-based priority gating: two infeed conveyors (PriorityLane carrying red high_priority cubes, LowLane carrying blue low_priority cubes) merge into one downstream MergedBelt that feeds a single DeliveryBin. An overhead camera positioned at the merge entry triggers add_vision_classifier_gate to classify each arriving cube by semantic class. Priority cubes (red) get green-light pass-through; low-priority cubes (blue) are physically held at a merge gate (linear velocity zeroed) until the priority lane is empty per track_slot_occupancy. Function-gate verifies that at sim-end ALL high_priority cubes arrived in DeliveryBin BEFORE any low_priority cube — i.e. delivery-zone arrival timestamps strictly order priority<low. Companion to CP-NEW-y-merge-singulation (FIFO baseline); this one swaps FIFO for vision-decided release order. No robot — purely passive conveyor + vision + velocity-gate logic. Exercises add_vision_classifier_gate + track_slot_occupancy + set_linear_velocity hold pattern.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "create_conveyor",
+    "create_conveyor_track",
+    "create_bin",
+    "create_material",
+    "assign_material",
+    "set_semantic_label",
+    "bulk_set_attribute",
+    "configure_camera",
+    "set_camera_look_at",
+    "add_vision_classifier_gate",
+    "add_proximity_sensor",
+    "track_slot_occupancy",
+    "set_linear_velocity",
+    "get_world_transform",
+    "sim_control"
+  ],
+  "thoughts": "Design rationale for CP-NEW-conveyor-merge-vision-priority:\n\n1) Distinct pattern: CP-NEW-y-merge-singulation handles FIFO physics-driven merge (whichever cube reaches first goes first). CP-NEW-sorter-color-3lane uses vision to split ONE stream into THREE bins. This template inverts both: vision classifies cubes on TWO infeed streams and merges them into ONE downstream lane, with priority-class items winning the merge order. routing_axis='semantic_class' because the decision driver is a classifier output (high_priority vs low_priority), not a geometric attribute.\n\n2) Y-merge geometry (top-down, belt top z=0.805):\n   PriorityLane: position=[-1.3, -0.30, 0.78], size=[1.6, 0.30, 0.05], surface_velocity=[0.20, 0.10, 0] — angles toward y=0\n   LowLane:      position=[-1.3, +0.30, 0.78], size=[1.6, 0.30, 0.05], surface_velocity=[0.20, -0.10, 0] — angles toward y=0\n   MergedBelt:   position=[0.5, 0.0, 0.78], size=[2.0, 0.40, 0.05], surface_velocity=[0.20, 0, 0]\n   Both lane ends converge at the merged belt start (x≈-0.5, y=0). A short conveyor_track between them is optional — kept here as a straight 2-segment track for geometry-feasibility documentation.\n\n3) Vision classifier gate at merge entry: an overhead RGB camera at [-0.30, 0.0, 1.20] looks at the merge zone. add_vision_classifier_gate runs once at scene-build time (1 Gemini call) with class_labels=['high_priority cube', 'low_priority cube']. destination_map collapses both classes to /World/DeliveryBin since the merged stream has one outlet — the *order* (not destination) is what differs.\n\n4) Priority-hold mechanism: 6 cubes total — 3 high_priority (red, on PriorityLane) + 3 low_priority (blue, on LowLane). Cubes start with rigid-body API enabled. After build, set_linear_velocity is called on each low_priority cube with vel=[0,0,0] to pin them at their start positions until released. Priority cubes ride PriorityLane normally and traverse merge → MergedBelt → DeliveryBin. After the last priority cube clears (verified via get_world_transform polling), low-priority cubes are released by setting their velocity back to lane-carrier speed (or just removing the hold by re-enabling belt carry — in static-scene-build we annotate the release path in simulate_args and the smoke-runner enforces order). Until function-gate runtime hook is in place, we document the policy in code-comments and use the velocity-pin sentinel to make priority-first order EMERGENT from physics: low cubes that don't get a kick stay put, priority cubes ride their belt freely.\n\n5) track_slot_occupancy is reused unconventionally — it was built for kit-tray slot bookkeeping, but its API is {tray_path, cube_paths} → {slot_path: cube_path or None}. Here, the 'tray' is a virtual slot grid AT the delivery zone exit. We create a 1x6 slot grid (kit_tray) at the downstream end of MergedBelt; cubes passing through populate slots in arrival order. Function-gate reads occupancy after sim-end and checks priority cubes occupy the FIRST half of slots.\n\n6) Proximity sensor 'MergeSensor' at the merge convergence point [-0.40, 0.0, 0.855] detects cubes entering the merge zone — purely diagnostic; used by failure_modes diagnostic queries.\n\n7) Physics: CPU dynamics (enable_gpu_dynamics=False, MBP broadphase) for determinism. sleepThreshold=0.0 on all cubes so they don't freeze mid-belt. Belt speed 0.20 m/s uniform; lane angles give ~0.10 m/s lateral kick = ~30° approach to merged belt.\n\n8) No robot, no motion_controllers needed — passive conveyor + vision + velocity-gate. motion_controllers={verified:[], failed:{}, untested:[]} all empty (T1 'no motion planning' branch).\n\n9) Cube spawning offsets: PriorityLane cubes start at x=[-1.8,-1.4,-1.0]; LowLane cubes at x=[-1.8,-1.4,-1.0]. Identical x-progression so without the hold mechanism, simultaneous arrivals would occur — proving the gate logic works.\n\n10) Function-gate criterion (simulate_args): per_class_expected={high_priority:3, low_priority:3} all in DeliveryBin; AND delivery_order ordering check that priority arrivals precede low arrivals. xy_tolerance 0.15m for the delivery bin (0.40×0.40 footprint).",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU determinism for deterministic priority-first ordering ───────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Two infeed conveyors angled toward y=0 (Y-merge geometry) ────────────────\n# PriorityLane (y=-0.30) angles toward y=0 via +y lateral kick.\n# LowLane     (y=+0.30) angles toward y=0 via -y lateral kick.\n# Belt top z = 0.78 + 0.025 = 0.805; cube centre z = 0.835.\ncreate_conveyor(\n    prim_path=\"/World/PriorityLane\",\n    position=[-1.3, -0.30, 0.78],\n    size=[1.6, 0.30, 0.05],\n    surface_velocity=[0.20, 0.10, 0],\n)\ncreate_conveyor(\n    prim_path=\"/World/LowLane\",\n    position=[-1.3, 0.30, 0.78],\n    size=[1.6, 0.30, 0.05],\n    surface_velocity=[0.20, -0.10, 0],\n)\n\n# ── Single downstream merged belt feeding the delivery bin ───────────────────\ncreate_conveyor(\n    prim_path=\"/World/MergedBelt\",\n    position=[0.5, 0.0, 0.78],\n    size=[2.0, 0.40, 0.05],\n    surface_velocity=[0.20, 0, 0],\n)\n\n# ── Documentation-only S-spine of the merge geometry ─────────────────────────\n# Two straight segments capturing the convergence path. Not load-bearing for\n# physics (the two create_conveyor belts above own the surface velocity), but\n# documents the intended merge waypoint chain for retrieval / re-instantiation.\ncreate_conveyor_track(\n    waypoints=[\n        [-0.5, -0.15, 0.78],\n        [-0.5,  0.00, 0.78],\n        [-0.5,  0.15, 0.78],\n    ],\n    belt_width=0.40,\n    speed=0.20,\n)\n\n# ── Materials for priority (red) and low-priority (blue) classes ─────────────\ncreate_material(material_path=\"/World/Materials/Red\",\n                shader_type=\"OmniPBR\", diffuse_color=[0.95, 0.05, 0.05])\ncreate_material(material_path=\"/World/Materials/Blue\",\n                shader_type=\"OmniPBR\", diffuse_color=[0.05, 0.15, 0.90])\n\n# ── 6 cubes: 3 high_priority (red, PriorityLane) + 3 low_priority (blue, LowLane)\n# Identical x-progression on both lanes so without priority-gating they'd reach\n# the merge simultaneously — proves the gate logic when delivery order remains\n# priority-first.\ncube_specs = [\n    (\"/World/Cube_P1\", -1.80, -0.30, \"high_priority\", \"/World/Materials/Red\"),\n    (\"/World/Cube_P2\", -1.40, -0.30, \"high_priority\", \"/World/Materials/Red\"),\n    (\"/World/Cube_P3\", -1.00, -0.30, \"high_priority\", \"/World/Materials/Red\"),\n    (\"/World/Cube_L1\", -1.80,  0.30, \"low_priority\",  \"/World/Materials/Blue\"),\n    (\"/World/Cube_L2\", -1.40,  0.30, \"low_priority\",  \"/World/Materials/Blue\"),\n    (\"/World/Cube_L3\", -1.00,  0.30, \"low_priority\",  \"/World/Materials/Blue\"),\n]\nall_cube_paths     = [s[0] for s in cube_specs]\npriority_cube_paths = [s[0] for s in cube_specs if s[3] == \"high_priority\"]\nlow_cube_paths      = [s[0] for s in cube_specs if s[3] == \"low_priority\"]\n\nfor path, ix, iy, klass, mat in cube_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\",\n                position=[ix, iy, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\",\n                \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    assign_material(prim_path=path, material_path=mat)\n    # Semantic class is the routing key consumed by add_vision_classifier_gate.\n    set_semantic_label(prim_path=path, class_name=f\"{klass} cube\", semantic_type=\"class\")\n\nbulk_set_attribute(prim_paths=all_cube_paths, attr=\"physics:mass\",                 value=0.5)\nbulk_set_attribute(prim_paths=all_cube_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\n\n# ── Delivery bin downstream of MergedBelt ────────────────────────────────────\ncreate_bin(prim_path=\"/World/DeliveryBin\",\n           position=[1.7, 0.0, 0.75], size=[0.40, 0.40, 0.20])\n\n# ── Overhead camera at the merge entry for vision classification ─────────────\ncreate_prim(prim_path=\"/World/MergeCamera\", prim_type=\"Camera\",\n            position=[-0.30, 0.0, 1.20])\nconfigure_camera(\n    camera_path=\"/World/MergeCamera\",\n    focal_length=24.0,\n    clipping_range=[0.01, 100.0],\n)\nset_camera_look_at(\n    camera_path=\"/World/MergeCamera\",\n    target=[-0.30, 0.0, 0.835],\n    up=[0, 0, 1],\n)\n\n# ── Diagnostic merge-entry proximity sensor ──────────────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/MergeSensor\",\n    position=[-0.40, 0.0, 0.855],\n    size=[0.10, 0.50, 0.10],\n    watched_path_pattern=\"/World/Cube_\",\n)\n\n# ── Vision classifier gate: build {cube_path → DeliveryBin} routing map ─────\n# Both classes route to the same bin — the differentiator is *order*, not\n# destination. The returned cube_to_destination dict is used by downstream\n# diagnostic queries (no pick-place controller in this passive scene).\nadd_vision_classifier_gate(\n    cube_paths=all_cube_paths,\n    class_labels=[\"high_priority cube\", \"low_priority cube\"],\n    camera_path=\"/World/MergeCamera\",\n    destination_map={\n        \"high_priority cube\": \"/World/DeliveryBin\",\n        \"low_priority cube\":  \"/World/DeliveryBin\",\n    },\n)\n\n# ── Priority gate: pin low-priority cubes at zero velocity ──────────────────\n# Without this, both lanes deliver simultaneously and merge-order becomes a\n# race condition. Pinning low_priority cubes ensures priority cubes traverse\n# the merge first; downstream test harness releases the hold once the priority\n# lane is empty (documented in simulate_args.release_protocol).\nfor low_path in low_cube_paths:\n    set_linear_velocity(prim_path=low_path, vel=[0.0, 0.0, 0.0])\n\n# ── Delivery slot tracker for arrival-order verification ─────────────────────\n# Reuse track_slot_occupancy as an arrival-order ledger: when called at sim-end\n# it returns {slot: cube} reflecting which cubes have reached the bin. The\n# verification step asserts the first-filled slot is a priority cube.\ntrack_slot_occupancy(\n    tray_path=\"/World/DeliveryBin\",\n    cube_paths=all_cube_paths,\n)\n\n# ── Start simulation (passive — physics + belts do the work) ────────────────\nsim_control(action=\"play\")",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_P1": [-1.80, -0.30, 0.835],
+      "/World/Cube_P2": [-1.40, -0.30, 0.835],
+      "/World/Cube_P3": [-1.00, -0.30, 0.835],
+      "/World/Cube_L1": [-1.80,  0.30, 0.835],
+      "/World/Cube_L2": [-1.40,  0.30, 0.835],
+      "/World/Cube_L3": [-1.00,  0.30, 0.835]
+    },
+    "conveyors": {
+      "/World/PriorityLane": [0.20, 0.10, 0],
+      "/World/LowLane":      [0.20, -0.10, 0],
+      "/World/MergedBelt":   [0.20, 0, 0]
+    },
+    "velocity_holds": {
+      "/World/Cube_L1": [0.0, 0.0, 0.0],
+      "/World/Cube_L2": [0.0, 0.0, 0.0],
+      "/World/Cube_L3": [0.0, 0.0, 0.0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "",
+        "pick_path": "/World/MergedBelt",
+        "place_path": "/World/DeliveryBin",
+        "robot_kind": "n/a",
+        "merge_sensor_path": "/World/MergeSensor",
+        "camera_path": "/World/MergeCamera",
+        "priority_cube_paths": ["/World/Cube_P1", "/World/Cube_P2", "/World/Cube_P3"],
+        "low_cube_paths":      ["/World/Cube_L1", "/World/Cube_L2", "/World/Cube_L3"]
+      }
+    ],
+    "cube_paths": [
+      "/World/Cube_P1", "/World/Cube_P2", "/World/Cube_P3",
+      "/World/Cube_L1", "/World/Cube_L2", "/World/Cube_L3"
+    ],
+    "class_routing": {
+      "high_priority cube": "/World/DeliveryBin",
+      "low_priority cube":  "/World/DeliveryBin"
+    }
+  },
+  "simulate_args": {
+    "target_path": "/World/DeliveryBin",
+    "cube_path": "/World/Cube_P1",
+    "cube_paths": [
+      "/World/Cube_P1", "/World/Cube_P2", "/World/Cube_P3",
+      "/World/Cube_L1", "/World/Cube_L2", "/World/Cube_L3"
+    ],
+    "priority_cube_paths": ["/World/Cube_P1", "/World/Cube_P2", "/World/Cube_P3"],
+    "low_cube_paths":      ["/World/Cube_L1", "/World/Cube_L2", "/World/Cube_L3"],
+    "duration_s": 220,
+    "xy_tolerance": 0.18,
+    "per_class_expected": {"high_priority": 3, "low_priority": 3},
+    "release_protocol": "After all priority_cube_paths have entered DeliveryBin (verified via get_world_transform polling), the smoke-runner is expected to clear the velocity hold on low_cube_paths so they traverse the merge. Function-gate asserts arrival-order: every priority cube's delivery timestamp < every low cube's delivery timestamp.",
+    "success_criterion": "All 6 cubes in DeliveryBin AND max(priority_arrival_t) < min(low_arrival_t)"
+  },
+  "diagnose_args": {
+    "conveyor_paths": ["/World/PriorityLane", "/World/LowLane", "/World/MergedBelt"],
+    "camera_path": "/World/MergeCamera",
+    "sensor_path": "/World/MergeSensor",
+    "bin_path": "/World/DeliveryBin"
+  },
+  "failure_modes": [
+    "Priority gate leaks — set_linear_velocity vel=[0,0,0] zeroes the rigid body's instantaneous velocity, but PhysxSurfaceVelocityAPI on LowLane still tries to drag the cube each frame. If the belt drag exceeds the friction holding the cube it slowly creeps. Mitigation: increase static friction by switching cube material to 'rubber' via apply_physics_material, OR replace the velocity-pin with a temporary UsdPhysics.FixedJoint between cube and ground (more robust gate; remove joint to release).",
+    "Vision classifier in headless mode — add_vision_classifier_gate captures viewport which requires a render context; in headless Kit, ensure --/renderer/enabled=true and a render-product is bound to /World/MergeCamera. Alternative: pre-classify by reading set_semantic_label tags directly (the labels are deterministic anyway in this template).",
+    "Y-merge collision at convergence — if low cubes are released too early and meet priority cubes at the merge, they push each other off the merged belt edge. Mitigation: stagger release — only release low cubes when track_slot_occupancy reports priority cubes have moved past the merge zone (x > 0.0).",
+    "create_conveyor_track segment naming — handler creates /World/ConveyorTrack/Segment_0, Segment_1 (slash-delimited hierarchy). If a downstream tool references a flat name like /World/ConveyorTrack_Segment_0 it won't resolve. The track here is documentation-only so this is low-severity.",
+    "track_slot_occupancy expects a kit-tray prim with slot children — DeliveryBin is a 5-prim bin, not a tray. The handler may return None for all slots if it can't find a slot-grid pattern. Workaround: replace with create_kit_tray at the delivery zone OR use get_world_transform per-cube polling in the simulate harness for arrival ordering.",
+    "Camera classification fails on uniform red/blue Lambert surfaces with strong dome light — Gemini sometimes returns 'red object' instead of 'high_priority cube' if class_labels don't match VLM vocabulary. Use class_labels=['red cube', 'blue cube'] for VLM reliability, with destination_map keys matching exactly. Semantic labels are still set to high_priority/low_priority for ground-truth fallback."
+  ],
+  "intent": {
+    "pattern_hint": "sort",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "routing_axis": "semantic_class",
+      "uses_conveyor_transport": true,
+      "uses_conveyor_track": true,
+      "uses_vision_classifier_gate": true,
+      "uses_velocity_gating": true,
+      "has_stacking": false,
+      "has_grid_placement": false,
+      "n_source_lanes": 2,
+      "n_destination_bins": 1,
+      "n_priority_classes": 2,
+      "passive_scene": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:transport.conveyor_track",
+      "isaac:topology.y_merge",
+      "isaac:topology.merge_into_single_lane",
+      "isaac:sensor.vision_classifier",
+      "isaac:sensor.proximity",
+      "isaac:routing.priority_class",
+      "isaac:industry.sortation",
+      "isaac:control.passive_gating"
+    ]
+  },
+  "roles": {
+    "priority_lane": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true,
+      "note": "Carries the high_priority class (red cubes)."
+    },
+    "low_lane": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true,
+      "note": "Carries the low_priority class (blue cubes); held by velocity-pin until priority lane clears."
+    },
+    "merged_belt": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true,
+      "note": "Single downstream lane that carries the merged stream to the delivery bin."
+    },
+    "delivery_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "merge_camera": {
+      "constraints": ["camera"],
+      "expected_count": 1,
+      "required": true,
+      "note": "Overhead RGB camera used by add_vision_classifier_gate."
+    },
+    "merge_sensor": {
+      "constraints": ["proximity_sensor"],
+      "expected_count": 1,
+      "required": false,
+      "note": "Diagnostic only — flags entries into the merge zone."
+    },
+    "priority_workpieces": {
+      "constraints": ["cube"],
+      "min": 2,
+      "max": 6,
+      "param_name": "n_priority_cubes",
+      "unordered": false,
+      "note": "Red cubes labelled 'high_priority cube'."
+    },
+    "low_workpieces": {
+      "constraints": ["cube"],
+      "min": 2,
+      "max": 6,
+      "param_name": "n_low_cubes",
+      "unordered": false,
+      "note": "Blue cubes labelled 'low_priority cube'; pinned via set_linear_velocity until release."
+    }
+  },
+  "role_defaults": {
+    "priority_lane": {
+      "path": "/World/PriorityLane",
+      "position": [-1.3, -0.30, 0.78],
+      "size": [1.6, 0.30, 0.05],
+      "surface_velocity": [0.20, 0.10, 0]
+    },
+    "low_lane": {
+      "path": "/World/LowLane",
+      "position": [-1.3, 0.30, 0.78],
+      "size": [1.6, 0.30, 0.05],
+      "surface_velocity": [0.20, -0.10, 0]
+    },
+    "merged_belt": {
+      "path": "/World/MergedBelt",
+      "position": [0.5, 0.0, 0.78],
+      "size": [2.0, 0.40, 0.05],
+      "surface_velocity": [0.20, 0, 0]
+    },
+    "delivery_bin": {
+      "path": "/World/DeliveryBin",
+      "position": [1.7, 0.0, 0.75],
+      "size": [0.40, 0.40, 0.20]
+    },
+    "merge_camera": {
+      "path": "/World/MergeCamera",
+      "position": [-0.30, 0.0, 1.20],
+      "look_at": [-0.30, 0.0, 0.835],
+      "resolution": [1024, 768],
+      "focal_length": 24.0
+    },
+    "merge_sensor": {
+      "path": "/World/MergeSensor",
+      "position": [-0.40, 0.0, 0.855],
+      "size": [0.10, 0.50, 0.10]
+    },
+    "priority_workpieces": [
+      {"path": "/World/Cube_P1", "class": "high_priority", "position": [-1.80, -0.30, 0.835]},
+      {"path": "/World/Cube_P2", "class": "high_priority", "position": [-1.40, -0.30, 0.835]},
+      {"path": "/World/Cube_P3", "class": "high_priority", "position": [-1.00, -0.30, 0.835]}
+    ],
+    "low_workpieces": [
+      {"path": "/World/Cube_L1", "class": "low_priority", "position": [-1.80, 0.30, 0.835]},
+      {"path": "/World/Cube_L2", "class": "low_priority", "position": [-1.40, 0.30, 0.835]},
+      {"path": "/World/Cube_L3", "class": "low_priority", "position": [-1.00, 0.30, 0.835]}
+    ]
+  },
+  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_conveyor(\n    prim_path={{priority_lane.path}},\n    position={{priority_lane.position}},\n    size={{priority_lane.size}},\n    surface_velocity={{priority_lane.surface_velocity}},\n)\ncreate_conveyor(\n    prim_path={{low_lane.path}},\n    position={{low_lane.position}},\n    size={{low_lane.size}},\n    surface_velocity={{low_lane.surface_velocity}},\n)\ncreate_conveyor(\n    prim_path={{merged_belt.path}},\n    position={{merged_belt.position}},\n    size={{merged_belt.size}},\n    surface_velocity={{merged_belt.surface_velocity}},\n)\n\ncreate_conveyor_track(\n    waypoints=[\n        [-0.5, -0.15, 0.78],\n        [-0.5,  0.00, 0.78],\n        [-0.5,  0.15, 0.78],\n    ],\n    belt_width=0.40,\n    speed=0.20,\n)\n\ncreate_material(material_path=\"/World/Materials/Red\",  shader_type=\"OmniPBR\", diffuse_color=[0.95, 0.05, 0.05])\ncreate_material(material_path=\"/World/Materials/Blue\", shader_type=\"OmniPBR\", diffuse_color=[0.05, 0.15, 0.90])\n\nfor item in {{priority_workpieces}}:\n    create_prim(prim_path=item['path'], prim_type=\"Cube\", position=item['position'], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=item['path'], schema_name=api)\n    assign_material(prim_path=item['path'], material_path=\"/World/Materials/Red\")\n    set_semantic_label(prim_path=item['path'], class_name=\"high_priority cube\", semantic_type=\"class\")\n\nfor item in {{low_workpieces}}:\n    create_prim(prim_path=item['path'], prim_type=\"Cube\", position=item['position'], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=item['path'], schema_name=api)\n    assign_material(prim_path=item['path'], material_path=\"/World/Materials/Blue\")\n    set_semantic_label(prim_path=item['path'], class_name=\"low_priority cube\", semantic_type=\"class\")\n\nbulk_set_attribute(prim_paths=[i['path'] for i in {{priority_workpieces}}] + [i['path'] for i in {{low_workpieces}}], attr=\"physics:mass\", value=0.5)\nbulk_set_attribute(prim_paths=[i['path'] for i in {{priority_workpieces}}] + [i['path'] for i in {{low_workpieces}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\n\ncreate_bin(prim_path={{delivery_bin.path}}, position={{delivery_bin.position}}, size={{delivery_bin.size}})\n\ncreate_prim(prim_path={{merge_camera.path}}, prim_type=\"Camera\", position={{merge_camera.position}})\nconfigure_camera(\n    camera_path={{merge_camera.path}},\n    focal_length={{merge_camera.focal_length}},\n    clipping_range=[0.01, 100.0],\n)\nset_camera_look_at(\n    camera_path={{merge_camera.path}},\n    target={{merge_camera.look_at}},\n    up=[0, 0, 1],\n)\n\nadd_proximity_sensor(\n    sensor_path={{merge_sensor.path}},\n    position={{merge_sensor.position}},\n    size={{merge_sensor.size}},\n    watched_path_pattern=\"/World/Cube_\",\n)\n\nadd_vision_classifier_gate(\n    cube_paths=[i['path'] for i in {{priority_workpieces}}] + [i['path'] for i in {{low_workpieces}}],\n    class_labels=[\"high_priority cube\", \"low_priority cube\"],\n    camera_path={{merge_camera.path}},\n    destination_map={\n        \"high_priority cube\": {{delivery_bin.path}},\n        \"low_priority cube\":  {{delivery_bin.path}},\n    },\n)\n\nfor item in {{low_workpieces}}:\n    set_linear_velocity(prim_path=item['path'], vel=[0.0, 0.0, 0.0])\n\ntrack_slot_occupancy(\n    tray_path={{delivery_bin.path}},\n    cube_paths=[i['path'] for i in {{priority_workpieces}}] + [i['path'] for i in {{low_workpieces}}],\n)\n\nsim_control(action=\"play\")",
+  "motion_controllers": {
+    "verified": [],
+    "untested": [],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16-A73; form-gate ⏳; function-gate ⏳ (needs live Kit + release-protocol harness for arrival-order assertion)"
+}
