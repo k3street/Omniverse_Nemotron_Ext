@@ -891,7 +891,11 @@
   motion_controller_preference: none
   pattern_hint: other
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-scene-sdg-full-pipeline.json
+  drafted_date: "2026-05-16"
+  drafted_by: A49
+  draft_notes: "A49; form-gate 0 ERROR 2 WARN (settle_state absent + configure_camera extra kwargs, both non-blocking); first use of export_dataset + benchmark_sdg as primary tools; function-gate BLOCKED (requires omni.replicator + live Kit GPU render)"
 
 - id: industrial-occupancy-map-nav-001
   source: industrial-asset
