@@ -1731,7 +1731,11 @@
   motion_controller_preference: none
   pattern_hint: other
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-modbus-plc-fixture-io.json
+  drafted_date: "2026-05-16"
+  drafted_by: A45
+  draft_notes: "A45; form-gate 0 ERROR 0 WARN; function-gate pending (requires pymodbus mock server on 127.0.0.1:5022)"
 
 - id: ros2-mqtt-sparkplug-001
   source: industrial-asset
