@@ -1,0 +1,101 @@
+{
+  "task_id": "CP-NEW-ros2-tf-tree-validation",
+  "goal": "Diagnose-and-report ROS2 TF-tree health for a Franka Panda arm published over the Isaac Sim bridge. Step 1: precheck_ros2_environment to confirm rclpy + rosbridge. Step 2: robot_wizard to load the Franka articulation. Step 3: configure_ros2_time(mode='sim_time') to publish /clock before bridge start. Step 4: setup_ros2_bridge profile='franka_moveit2' to wire joint_states + trajectory + TF + clock OmniGraph. Step 5: publish_robot_description to broadcast the URDF on /robot_description (latched, used by robot_state_publisher consumers). Step 6: ros2_list_topics to confirm /tf, /tf_static, /clock are published. Step 7: show_tf_tree(root_frame='panda_link0') to capture the current TF graph snapshot. Step 8: check_tf_health with expected_frames=[panda_link0..panda_link8, panda_hand], max_age_seconds=1.0 to detect disconnected sub-trees, stale transforms, and missing frames. Step 9: diagnose_ros2 for global QoS + DDS health. NO motion is commanded; this is a pure diagnostic canonical — the structured TF-health report is the deliverable, not a scene mutation.",
+  "tools_used": [
+    "precheck_ros2_environment",
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "robot_wizard",
+    "configure_ros2_time",
+    "setup_ros2_bridge",
+    "publish_robot_description",
+    "ros2_list_topics",
+    "show_tf_tree",
+    "check_tf_health",
+    "diagnose_ros2"
+  ],
+  "thoughts": "Design rationale for CP-NEW-ros2-tf-tree-validation:\n\n1) Pattern: 'other' / diagnostic — this canonical produces a structured report, not a scene change. No motion planner, no workpiece, no pick-place. Success = TF-health summary with no missing frames and tree contains the expected Franka link chain.\n\n2) Why distinct from CP-NEW-ros2-bridge-franka: That canonical validates topic plumbing (/joint_states, /joint_commands, /clock present + first JointState message has 7 joint names). This canonical validates the TF tree specifically — different failure surface (transform staleness, disconnected sub-trees, /tf_static not latched, missing frame names) that requires a different toolset (check_tf_health, show_tf_tree, publish_robot_description). Together they cover orthogonal ROS2 bridge-health axes.\n\n3) Tool chain order: precheck before bridge; configure_ros2_time before setup_ros2_bridge so /clock is live from t=0 (existing bridge templates' biggest footgun is reversed order); publish_robot_description after robot_wizard so the articulation exists; show_tf_tree + check_tf_health AFTER the bridge has been up long enough for /tf_static to latch.\n\n4) Expected TF frames for Franka: panda_link0 (root) → panda_link1 → panda_link2 → panda_link3 → panda_link4 → panda_link5 → panda_link6 → panda_link7 → panda_link8 (flange) → panda_hand. That is 10 frames; backlog success_criterion asks for >= 7, so the 10-frame Franka chain comfortably passes. max_age_seconds=1.0 catches stale transforms; root_frame anchors the tree-traversal at panda_link0.\n\n5) Failure-mode surface is intentionally wide: bridge-not-started → ros2_list_topics returns empty / no /tf; configure_ros2_time after setup_ros2_bridge → /tf_static carries timestamp=0; URDF not loaded → robot_state_publisher has no joints → /tf_static never latches; time-sync drift between sim clock and ROS clock → check_tf_health reports stale; frames missing → URDF parse error or articulation_path wrong.\n\n6) No simulate_args / verify_args.stages: this is a diagnostic canonical with no robot/workpiece/destination, so the T1 stage triple does not apply meaningfully. The verify path is the check_tf_health structured return value.\n\n7) Roles: single fixed-base arm; constrain to franka_panda since the expected_frames list is Franka-specific (substituting UR10 would require a different frame chain — leave that for a future variant).\n\n8) motion_controllers: all empty — this is a diagnostic canonical, no motion is commanded.",
+  "code": "# ── Preflight: ROS2 environment check ────────────────────────────────────────\nprecheck_ros2_environment(rosbridge_port=9090)\n\n# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Robot mount table\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics — diagnostic canonical does not need GPU physics ───\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka Panda arm ──────────────────────────────────────────────────────────\n# Articulation registration is required before publish_robot_description so\n# the URDF can be reconstructed from the live USD prim hierarchy.\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── ROS2 sim-clock (must precede bridge start so /clock is live from t=0) ────\nconfigure_ros2_time(mode=\"sim_time\")\n\n# ── ROS2 bridge: franka_moveit2 profile wires joint_states + TF + clock ──────\n# The profile binds the OmniGraph TF publisher node — without this, /tf and\n# /tf_static are never populated and check_tf_health will fail with empty tree.\nsetup_ros2_bridge(\n    profile=\"franka_moveit2\",\n    robot_path=\"/World/Franka\",\n    graph_path=\"/World/ROS2_TF_Bridge\",\n)\n\n# ── Publish URDF on /robot_description (latched) ─────────────────────────────\n# A standard robot_state_publisher consumer reads this topic at startup and\n# uses it to fill in static transforms not authored in /tf_static. Latched QoS\n# means late-joining subscribers still receive the description.\npublish_robot_description(\n    articulation_path=\"/World/Franka\",\n    topic=\"/robot_description\",\n)\n\n# ── Confirm /tf and /tf_static are published ─────────────────────────────────\nactive_topics = ros2_list_topics()\nrequired_tf_topics = {\"/tf\", \"/tf_static\", \"/clock\"}\nmissing_topics = required_tf_topics - set(active_topics)\nif missing_topics:\n    raise RuntimeError(f\"TF bridge validation failed: missing topics {missing_topics}\")\n\n# ── Capture the current TF graph snapshot (rooted at panda_link0) ────────────\n# show_tf_tree returns a structured dict describing parent→child edges. We do\n# not act on it here — the value is logged for offline inspection / regression.\ntf_snapshot = show_tf_tree(root_frame=\"panda_link0\")\nprint(f\"[TF] tree snapshot rooted at panda_link0: {tf_snapshot}\")\n\n# ── Diagnose TF health: stale transforms, missing frames, disconnected sub-trees ─\n# Franka URDF frames: panda_link0..panda_link8 + panda_hand (10 frames total;\n# backlog success_criterion only requires >= 7). max_age_seconds=1.0 flags any\n# transform older than 1s as stale (sim runs at 60 Hz so fresh ones arrive\n# every ~16 ms — 1s tolerance leaves ~60× headroom).\nexpected_franka_frames = [\n    \"panda_link0\", \"panda_link1\", \"panda_link2\", \"panda_link3\",\n    \"panda_link4\", \"panda_link5\", \"panda_link6\", \"panda_link7\",\n    \"panda_link8\", \"panda_hand\",\n]\ntf_report = check_tf_health(\n    expected_frames=expected_franka_frames,\n    max_age_seconds=1.0,\n    root_frame=\"panda_link0\",\n)\nprint(f\"[TF] health report: {tf_report}\")\n\n# Structured success gate — this is the deliverable of the diagnostic canonical.\nmissing_frames = tf_report.get(\"missing_frames\", [])\nstale_transforms = tf_report.get(\"stale_transforms\", [])\ndisconnected = tf_report.get(\"disconnected_subtrees\", [])\nif missing_frames or stale_transforms or disconnected:\n    raise RuntimeError(\n        f\"TF health check failed: missing={missing_frames} \"\n        f\"stale={stale_transforms} disconnected={disconnected}\"\n    )\n\n# ── Global ROS2 plumbing health (QoS + DDS domain) ───────────────────────────\ndiagnose_ros2()",
+  "settle_state": {
+    "bridge_topics": ["/tf", "/tf_static", "/clock", "/robot_description"],
+    "expected_frame_count_min": 7,
+    "expected_franka_frames": [
+      "panda_link0", "panda_link1", "panda_link2", "panda_link3",
+      "panda_link4", "panda_link5", "panda_link6", "panda_link7",
+      "panda_link8", "panda_hand"
+    ],
+    "tf_root_frame": "panda_link0",
+    "max_transform_age_s": 1.0
+  },
+  "verify_args": {
+    "stages": []
+  },
+  "simulate_args": null,
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "expected_topics": ["/tf", "/tf_static", "/clock", "/robot_description"],
+    "expected_frames": [
+      "panda_link0", "panda_link1", "panda_link2", "panda_link3",
+      "panda_link4", "panda_link5", "panda_link6", "panda_link7",
+      "panda_link8", "panda_hand"
+    ],
+    "max_age_seconds": 1.0,
+    "root_frame": "panda_link0"
+  },
+  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate pending",
+  "failure_modes": [
+    "ROS2 environment not sourced — precheck_ros2_environment returns ok=False; source /opt/ros/humble/setup.bash before launching Kit and re-run.",
+    "configure_ros2_time called AFTER setup_ros2_bridge — /tf_static is latched with timestamp=0 for the first publish, so check_tf_health then reports every static transform as stale; always call configure_ros2_time first.",
+    "publish_robot_description called before robot_wizard / robot not yet articulated — /robot_description publishes an empty URDF; downstream robot_state_publisher loads 0 joints; /tf_static never receives the URDF's fixed joints.",
+    "setup_ros2_bridge profile='franka_moveit2' not available in the running Isaac Sim version (pre-Phase-6) — fall back to manual configure_ros2_bridge with a TF publisher OmniGraph node; otherwise /tf is never populated.",
+    "Time-sync drift between sim clock and ROS clock — sim runs faster/slower than wall-clock; check_tf_health max_age_seconds uses ROS time, so stale-transform false positives are possible. Mitigation: ensure configure_ros2_time mode='sim_time' and that downstream consumers also set use_sim_time=True.",
+    "Robot mount table or any fixed-base scene prim shares a frame_id with a URDF link — TF graph forms a cycle; show_tf_tree returns a tree with the cycle broken arbitrarily and check_tf_health reports a disconnected sub-tree even though all transforms are fresh.",
+    "ros2_list_topics returns /tf and /tf_static immediately after setup_ros2_bridge but BEFORE the bridge has published any transforms — show_tf_tree returns an empty tree; the validation falsely passes the topic-presence gate then fails check_tf_health. Mitigation: a small wait or sim_control play before check_tf_health is recommended in live runs (not added here to keep the canonical mutation-free).",
+    "Expected_frames list is Franka-specific — substituting UR10/UR5e via the role default without updating expected_frames will report all UR frames missing. Variants for other arms must override expected_franka_frames."
+  ],
+  "extends": "phase10-ros2-bridge",
+  "extension_notes": "First TF-tree-validation canonical in the CP-NEW series. Pairs with CP-NEW-ros2-bridge-franka (topic plumbing) and CP-NEW-ros2-moveit2-franka (MoveIt2 YAML emission) to cover the three orthogonal ROS2 bridge-health axes: (1) topic existence + first-message shape, (2) MoveIt2 planning_pipeline integration, (3) TF tree completeness + freshness. Exercises check_tf_health, show_tf_tree, and publish_robot_description — none of which appear in any other canonical. Maps directly to backlog entry ros2-tf-tree-validation-001.",
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false,
+      "is_diagnostic_canonical": true,
+      "mutates_scene": false,
+      "ros2_profile": "franka_moveit2"
+    },
+    "structural_tags": [
+      "isaac:bridge.ros2",
+      "isaac:integration.tf_tree",
+      "isaac:integration.robot_description",
+      "isaac:diagnostic.tf_health",
+      "isaac:topology.single_station",
+      "isaac:topology.ros2_bridge_validation",
+      "isaac:robot.fixed_base.arm"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": []
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    }
+  },
+  "code_template": "precheck_ros2_environment(rosbridge_port=9090)\n\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\nconfigure_ros2_time(mode=\"sim_time\")\n\nsetup_ros2_bridge(\n    profile=\"franka_moveit2\",\n    robot_path={{primary_robot.path}},\n    graph_path=\"/World/ROS2_TF_Bridge\",\n)\n\npublish_robot_description(\n    articulation_path={{primary_robot.path}},\n    topic=\"/robot_description\",\n)\n\nactive_topics = ros2_list_topics()\nrequired_tf_topics = {\"/tf\", \"/tf_static\", \"/clock\"}\nmissing_topics = required_tf_topics - set(active_topics)\nif missing_topics:\n    raise RuntimeError(f\"TF bridge validation failed: missing topics {missing_topics}\")\n\ntf_snapshot = show_tf_tree(root_frame=\"panda_link0\")\nprint(f\"[TF] tree snapshot rooted at panda_link0: {tf_snapshot}\")\n\nexpected_franka_frames = [\n    \"panda_link0\", \"panda_link1\", \"panda_link2\", \"panda_link3\",\n    \"panda_link4\", \"panda_link5\", \"panda_link6\", \"panda_link7\",\n    \"panda_link8\", \"panda_hand\",\n]\ntf_report = check_tf_health(\n    expected_frames=expected_franka_frames,\n    max_age_seconds=1.0,\n    root_frame=\"panda_link0\",\n)\nprint(f\"[TF] health report: {tf_report}\")\n\nmissing_frames = tf_report.get(\"missing_frames\", [])\nstale_transforms = tf_report.get(\"stale_transforms\", [])\ndisconnected = tf_report.get(\"disconnected_subtrees\", [])\nif missing_frames or stale_transforms or disconnected:\n    raise RuntimeError(\n        f\"TF health check failed: missing={missing_frames} \"\n        f\"stale={stale_transforms} disconnected={disconnected}\"\n    )\n\ndiagnose_ros2()"
+}
