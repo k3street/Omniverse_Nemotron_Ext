@@ -1363,7 +1363,11 @@
   motion_controller_preference: direct_joint
   pattern_hint: rl-train
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-ood-detect-monitor.json
+  drafted_date: "2026-05-16"
+  drafted_by: A58
+  draft_notes: "A58; form-gate 1 OK 0 ERROR 0 WARN (--validate-tool-calls); first library use of detect_ood (Tier 1+2) + monitor_forgetting as primary tools; inference-time OOD safety-guard pattern; function-gate BLOCKED (requires GR00T weights + live Kit)"
 
 - id: rl-loco-manip-whole-body-001
   source: retrieval-miss
