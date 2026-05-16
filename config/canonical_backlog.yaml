@@ -76,7 +76,9 @@
   motion_controller_preference: curobo
   pattern_hint: sort
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-palletizer-mixed-sku.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-welder-mig-tack-001
   source: ONET

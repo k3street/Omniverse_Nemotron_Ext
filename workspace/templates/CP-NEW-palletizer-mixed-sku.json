@@ -1,0 +1,184 @@
+{
+  "task_id": "CP-NEW-palletizer-mixed-sku",
+  "goal": "Build a mixed-SKU sorted palletizer: a UR10 robot picks two box types (SKU-A: small 0.08m red cubes, SKU-B: large 0.12m blue cubes) arriving interleaved on an infeed conveyor, and places them into separate pallet zones (ZoneA left half, ZoneB right half) on a single 1.0×0.50m pallet. Semantic labels 'sku_a' and 'sku_b' are applied at scene creation; add_vision_classifier_gate classifies each box at the pick sensor; setup_pick_place_controller with color_routing dispatches to the correct zone. Each zone's 2×3 drop targets are pre-baked inline (zone geometry partitions the pallet at the x=0 midline). Exercises the n_bins_routed sort pattern on UR10 with two asymmetric pallet zones — the minimum distinguishing step beyond the uniform 2×3 single-zone layer-stack canonical.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "create_material",
+    "assign_material",
+    "set_semantic_label",
+    "add_proximity_sensor",
+    "add_vision_classifier_gate",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "set_camera_look_at",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Design rationale for CP-NEW-palletizer-mixed-sku:\n\n1) Distinguishing feature: this canonical extends the uniform-SKU layer-stack (CP-NEW-palletizer-layer-stack) by routing two box types to spatially separate pallet zones. The key new schema element is color_routing on setup_pick_place_controller — the same mechanism used in sorter-color-3lane but applied to pallet zones rather than discrete bins.\n\n2) Robot choice: UR10 (reach 1.3m), mounted on a 0.75m table. Pallet centre at y=-0.55, x=0.0; ZoneA centre at x=-0.25, ZoneB centre at x=+0.25. Maximum horizontal reach = sqrt(0.25^2 + 0.55^2) = 0.605m — well inside 1.3m. Conveyor at y=+0.45.\n\n3) Box geometry:\n   - SKU-A (red, 0.08m): lighter parts. Belt top 0.805; box centre z = 0.805 + 0.04 = 0.845.\n   - SKU-B (blue, 0.12m): larger parts. Box centre z = 0.805 + 0.06 = 0.865.\n   - Conveyor carries mixed order: A, B, A, B, A, B (3 of each = 6 total).\n   - All start at x=-1.6..-0.6, y=0.45, z=appropriate for their size.\n\n4) Pallet layout: 1.0m wide × 0.50m deep × 0.05m thick at [0, -0.55, 0.775].\n   Pallet top z = 0.775 + 0.025 = 0.800.\n   ZoneA (left, x<0): SKU-A 0.08m boxes. drop_z = 0.800 + 0.04 = 0.840.\n     Grid 1×3 at x=-0.25, y offsets = {-0.47, -0.55, -0.63}, col offsets = {-0.06, +0.06}.\n     Actually 2×3 in zone half: x in {-0.34, -0.16}, y in {-0.47, -0.55, -0.63}.\n   ZoneB (right, x>0): SKU-B 0.12m boxes. drop_z = 0.800 + 0.06 = 0.860.\n     2×3 at x in {+0.09, +0.41}, y in {-0.47, -0.55, -0.63}.\n   Spacing between zone edges: ZoneA rightmost x=+0.16+0.04=+0.20, ZoneB leftmost x=+0.09-0.06=+0.03. Tight but non-overlapping given asymmetric box sizes.\n   Simplified to 1 column per zone (3 drops each, 2 cols squeezed): use x={-0.30,-0.20} for A-zone and x={+0.20,+0.30} for B-zone.\n\n5) Semantic labels: 'sku_a' (red) and 'sku_b' (blue). color_routing keys must exactly match labels used in add_vision_classifier_gate destination_map.\n\n6) Classification camera overhead at [0, 0.45, 1.40], looking at pick sensor [0.35, 0.45, 0.855].\n\n7) color_routing keys 'sku_a'→'/World/PalletZoneA' and 'sku_b'→'/World/PalletZoneB'. ZoneA/ZoneB are thin invisible xform-platform prims acting as destination_path anchors; drop_targets dict overrides the actual per-box positions.\n\n8) Physics: CPU dynamics (MBP broadphase) for determinism. All boxes get sleepThreshold=0.0.\n\n9) EE_INITIAL_HEIGHT = max(box_on_belt, max_drop_z) + 0.20 = max(0.865, 0.860) + 0.20 = 1.065m. Consistent across both SKUs.\n\n10) pick_sensor at [0.35, 0.45, 0.855] — centroid between SKU-A (z=0.845) and SKU-B (z=0.865) boxes; detection window 0.14×0.14×0.14 captures both.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1200.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# ── Physics: CPU dynamics for determinism ────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Robot table ───────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── UR10 robot (reach 1.3m) ───────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"ur10\",\n    dest_path=\"/World/UR10\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Infeed conveyor ───────────────────────────────────────────────────────────\n# Belt top z = 0.78 + 0.025 = 0.805. Mixed A/B boxes carried at 0.12 m/s.\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.45, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.12, 0, 0],\n)\n\n# ── Materials ─────────────────────────────────────────────────────────────────\ncreate_material(material_path=\"/World/Looks/MatRed\",  shader_type=\"OmniPBR\", diffuse_color=[0.85, 0.10, 0.10])\ncreate_material(material_path=\"/World/Looks/MatBlue\", shader_type=\"OmniPBR\", diffuse_color=[0.10, 0.20, 0.85])\n\n# ── Mixed boxes: 3×SKU-A (0.08m, red) + 3×SKU-B (0.12m, blue), interleaved ──\n# SKU-A: centre z = 0.805 + 0.04 = 0.845\n# SKU-B: centre z = 0.805 + 0.06 = 0.865\n_sku_sequence = [\"a\", \"b\", \"a\", \"b\", \"a\", \"b\"]\n_sku_size = {\"a\": 0.08, \"b\": 0.12}\n_sku_z    = {\"a\": 0.845, \"b\": 0.865}\n_sku_mat  = {\"a\": \"/World/Looks/MatRed\", \"b\": \"/World/Looks/MatBlue\"}\n_sku_label = {\"a\": \"sku_a\", \"b\": \"sku_b\"}\n_x_positions = [-1.60, -1.35, -1.10, -0.85, -0.60, -0.35]\nbox_paths = []\n\nfor i, sku in enumerate(_sku_sequence):\n    path = f\"/World/Box_{i+1}\"\n    box_paths.append(path)\n    create_prim(\n        prim_path=path,\n        prim_type=\"Cube\",\n        position=[_x_positions[i], 0.45, _sku_z[sku]],\n        size=_sku_size[sku],\n    )\n    assign_material(prim_path=path, material_path=_sku_mat[sku])\n    set_semantic_label(prim_path=path, class_name=_sku_label[sku])\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=box_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in box_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# ── Pallet (1.0×0.50×0.05m) ──────────────────────────────────────────────────\n# scale half-extents: [0.50, 0.25, 0.025]. Pallet top z = 0.775+0.025 = 0.800.\ncreate_prim(\n    prim_path=\"/World/Pallet\",\n    prim_type=\"Cube\",\n    position=[0, -0.55, 0.775],\n    scale=[0.50, 0.25, 0.025],\n)\napply_api_schema(prim_path=\"/World/Pallet\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Zone anchor prims (invisible Xform) for color_routing dispatch ────────────\n# ZoneA: x<0 (left half), ZoneB: x>0 (right half). No collision needed.\ncreate_prim(prim_path=\"/World/PalletZoneA\", prim_type=\"Xform\", position=[-0.25, -0.55, 0.800])\ncreate_prim(prim_path=\"/World/PalletZoneB\", prim_type=\"Xform\", position=[ 0.25, -0.55, 0.800])\n\n# ── Classification camera ─────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/ClassifyCamera\", prim_type=\"Camera\", position=[0, 0.45, 1.40])\nset_camera_look_at(\n    camera_path=\"/World/ClassifyCamera\",\n    target=[0.35, 0.45, 0.855],\n    up=[0, 0, 1],\n)\n\n# ── Proximity sensor at pick station ─────────────────────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/PickSensor\",\n    position=[0.35, 0.45, 0.855],\n    size=[0.14, 0.14, 0.14],\n    watched_path_pattern=\"/World/Box_\",\n)\n\n# ── Vision classifier gate ────────────────────────────────────────────────────\nadd_vision_classifier_gate(\n    cube_paths=box_paths,\n    class_labels=[\"sku_a\", \"sku_b\"],\n    camera_path=\"/World/ClassifyCamera\",\n    destination_map={\n        \"sku_a\": \"/World/PalletZoneA\",\n        \"sku_b\": \"/World/PalletZoneB\",\n    },\n)\n\n# ── Pre-computed zone drop targets ────────────────────────────────────────────\n# ZoneA: SKU-A boxes (0.08m) → drop_z = 0.800 + 0.04 = 0.840\n#   2 cols × 3 rows: x in {-0.30, -0.20}, y in {-0.47, -0.55, -0.63}\n# ZoneB: SKU-B boxes (0.12m) → drop_z = 0.800 + 0.06 = 0.860\n#   2 cols × 3 rows: x in {+0.20, +0.30}, y in {-0.47, -0.55, -0.63}\ndrop_targets = {\n    \"/World/Box_1\": [-0.30, -0.47, 0.840],\n    \"/World/Box_2\": [ 0.20, -0.47, 0.860],\n    \"/World/Box_3\": [-0.20, -0.47, 0.840],\n    \"/World/Box_4\": [ 0.30, -0.47, 0.860],\n    \"/World/Box_5\": [-0.30, -0.55, 0.840],\n    \"/World/Box_6\": [ 0.20, -0.55, 0.860],\n}\n\n# ── cuRobo pick-place controller with 2-SKU color routing ────────────────────\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    target_source=\"curobo\",\n    robot_family=\"ur10\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=box_paths,\n    destination_path=\"/World/PalletZoneA\",\n    color_routing={\n        \"sku_a\": \"/World/PalletZoneA\",\n        \"sku_b\": \"/World/PalletZoneB\",\n    },\n    drop_targets=drop_targets,\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Pallet\"],\n    end_effector_initial_height=1.065,\n)",
+  "settle_state": {
+    "boxes": {
+      "/World/Box_1": [-1.60, 0.45, 0.845],
+      "/World/Box_2": [-1.35, 0.45, 0.865],
+      "/World/Box_3": [-1.10, 0.45, 0.845],
+      "/World/Box_4": [-0.85, 0.45, 0.865],
+      "/World/Box_5": [-0.60, 0.45, 0.845],
+      "/World/Box_6": [-0.35, 0.45, 0.865]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.12, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/UR10",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/Pallet",
+        "robot_kind": "ur10"
+      }
+    ],
+    "cube_path": "/World/Box_1"
+  },
+  "simulate_args": {
+    "target_path": "/World/Pallet",
+    "cube_paths": [
+      "/World/Box_1",
+      "/World/Box_2",
+      "/World/Box_3",
+      "/World/Box_4",
+      "/World/Box_5",
+      "/World/Box_6"
+    ],
+    "duration_s": 260,
+    "xy_tolerance": 0.10
+  },
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "obstacles": ["/World/Pallet", "/World/ConveyorBelt"],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "failure_modes": [
+    "color_routing key mismatch — class_name in set_semantic_label ('sku_a'/'sku_b') must EXACTLY match color_routing dict keys AND add_vision_classifier_gate class_labels. All three must be consistent; any capitalisation or spacing difference causes all boxes to fall back to destination_path.",
+    "Mixed drop_z values with shared pick sensor — SKU-A drop_z=0.840 and SKU-B drop_z=0.860 differ by 0.02m; end_effector_initial_height=1.065 clears both. If cuRobo fails for one SKU but not the other, check that EE height is not being auto-computed per-SKU incorrectly.",
+    "ZoneA/ZoneB Xform prims have no collision mesh — color_routing dispatches via prim path only; destination_path fallback '/World/PalletZoneA' will not obstruct EE. If planner reports no collision objects missing, this is expected.",
+    "UR10 robot_family not registered — if robot_family='ur10' raises KeyError in curobo handler, fall back to omitting the arg (handler auto-detects from robot_path USD asset name). Confirm ur10 is in ROBOT_FAMILY_CONFIGS.",
+    "Belt speed misaligned — at 0.12 m/s Box_6 (x=-0.35, 1.25m to sensor at x=0.35) arrives after ~10s; if the prior 5 cycles are slow, Box_6 may overshoot. Reduce belt to 0.08 m/s if the last box is missed."
+  ],
+  "intent": {
+    "pattern_hint": "sort",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "n_bins_routed",
+      "routing_axis": "semantic_class",
+      "uses_conveyor_transport": true,
+      "has_stacking": false,
+      "has_grid_placement": true,
+      "n_sku_types": 2
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:placement.grid_zoned",
+      "isaac:robot.ur10",
+      "isaac:industry.palletizing",
+      "isaac:routing.sku_sorted",
+      "isaac:routing.color_routing"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["ur10", "ur10e", "franka_panda"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "longer_reach_preferred"
+    },
+    "input_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "primary_destination": {
+      "constraints": ["platform", "pallet"],
+      "expected_count": 1,
+      "required": true
+    },
+    "zone_a": {
+      "constraints": ["xform", "zone"],
+      "expected_count": 1,
+      "required": true
+    },
+    "zone_b": {
+      "constraints": ["xform", "zone"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube", "box"],
+      "min": 2,
+      "max": 6,
+      "param_name": "n_boxes",
+      "unordered": false,
+      "note": "must have equal counts of each SKU type; odd-indexed are SKU-A, even-indexed are SKU-B"
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/UR10",
+      "class": "ur10",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [0.0, 0.45, 0.78],
+      "size": [3.0, 0.4, 0.05],
+      "surface_velocity": [0.12, 0, 0]
+    },
+    "primary_destination": {
+      "path": "/World/Pallet",
+      "position": [0, -0.55, 0.775],
+      "scale": [0.50, 0.25, 0.025]
+    },
+    "zone_a": {
+      "path": "/World/PalletZoneA",
+      "position": [-0.25, -0.55, 0.800]
+    },
+    "zone_b": {
+      "path": "/World/PalletZoneB",
+      "position": [0.25, -0.55, 0.800]
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [0.35, 0.45, 0.855],
+      "size": [0.14, 0.14, 0.14]
+    },
+    "classify_camera": {
+      "path": "/World/ClassifyCamera",
+      "position": [0, 0.45, 1.40],
+      "look_at": [0.35, 0.45, 0.855]
+    },
+    "workpieces": [
+      {"path": "/World/Box_1", "sku": "a", "position": [-1.60, 0.45, 0.845], "drop_target": [-0.30, -0.47, 0.840]},
+      {"path": "/World/Box_2", "sku": "b", "position": [-1.35, 0.45, 0.865], "drop_target": [ 0.20, -0.47, 0.860]},
+      {"path": "/World/Box_3", "sku": "a", "position": [-1.10, 0.45, 0.845], "drop_target": [-0.20, -0.47, 0.840]},
+      {"path": "/World/Box_4", "sku": "b", "position": [-0.85, 0.45, 0.865], "drop_target": [ 0.30, -0.47, 0.860]},
+      {"path": "/World/Box_5", "sku": "a", "position": [-0.60, 0.45, 0.845], "drop_target": [-0.30, -0.55, 0.840]},
+      {"path": "/World/Box_6", "sku": "b", "position": [-0.35, 0.45, 0.865], "drop_target": [ 0.20, -0.55, 0.860]}
+    ]
+  },
+  "code_template": "# template placeholder — see code field above for fully-worked implementation",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate pending"
+}
