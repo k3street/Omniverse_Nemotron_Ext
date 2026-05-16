@@ -1654,7 +1654,11 @@
   motion_controller_preference: direct_joint
   pattern_hint: finetune
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-rsi-from-demos.json
+  drafted_date: "2026-05-16"
+  drafted_by: A61
+  draft_notes: "A61; form-gate 1 OK 0 ERROR 0 WARN 0 INFO (--validate-tool-calls); first library canonical exercising setup_rsi_from_demos; suggest_finetune_config+setup_rsi_from_demos+finetune_stats+export_finetune_data pipeline; function-gate BLOCKED (requires demo HDF5 + GR00T advisor ext + live MCP)"
 
 - id: groot-attention-maps-visualize-001
   source: retrieval-miss
