@@ -159,7 +159,10 @@
   motion_controller_preference: impedance
   pattern_hint: compliance
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  canonical_template: CP-NEW-peg-bushing-impedance
+  drafted_by: A11
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-assembler-snap-fit-002
   source: ONET
