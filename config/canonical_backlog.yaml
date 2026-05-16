@@ -899,7 +899,11 @@
   motion_controller_preference: none
   pattern_hint: other
   estimated_agent_minutes: 30
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-convex-hull-collision-opt.json
+  drafted_date: "2026-05-16"
+  drafted_by: A29
+  draft_notes: "A29; form-gate 1 OK, 0 ERROR, 0 WARN, 0 INFO (--validate-tool-calls); first use of mesh-optimization pipeline in library; function-gate pending live Kit"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # RESEARCH BENCHMARKS (~15 entries)  — specific named tasks from open datasets

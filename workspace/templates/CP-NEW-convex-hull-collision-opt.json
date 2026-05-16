@@ -1,0 +1,104 @@
+{
+  "task_id": "CP-NEW-convex-hull-collision-opt",
+  "goal": "Build a mesh-collision-optimization fixture: import a complex Cube mesh, diagnose its collision quality with check_collision_mesh, compute a convex-hull approximation via compute_convex_hull (with hull export for viewport inspection), simplify a second mesh with simplify_collision, then fix a deliberately broken mesh with fix_collision_mesh and verify repair with check_collision_mesh. Exercises the full mesh-optimization pipeline — first canonical in the library to cover this tool chain.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "check_collision_mesh",
+    "compute_convex_hull",
+    "simplify_collision",
+    "optimize_collision",
+    "fix_collision_mesh",
+    "visualize_collision_mesh",
+    "compute_volume",
+    "compute_surface_area"
+  ],
+  "thoughts": [
+    "Pattern gap: no existing canonical exercises the mesh-optimization pipeline. check_collision_mesh + compute_convex_hull + simplify_collision + fix_collision_mesh is a distinct 4-tool chain unused elsewhere in the 112-canonical library.",
+    "Scene geometry: three mesh prims — MeshA (simple Cube, good baseline), MeshB (Sphere, target for simplify_collision), MeshC (degenerate mesh created with zero-area triangles, target for fix_collision_mesh).",
+    "Workflow: (1) baseline check_collision_mesh on MeshA reports zero issues; (2) compute_convex_hull on MeshA with export_hull_path produces visible hull prim; (3) compute_volume + compute_surface_area confirm hull metrics; (4) simplify_collision on MeshB to convexDecomposition; (5) optimize_collision on MeshB to boundingSphere for comparison; (6) fix_collision_mesh on MeshC (degenerate); (7) check_collision_mesh on MeshC post-fix confirms repair; (8) visualize_collision_mesh on MeshA shows wireframe overlay.",
+    "No robot arm needed — mesh-optimization is a pure USD/physics-API workflow.",
+    "Function-gate: check_collision_mesh on MeshC post-fix must return zero fatal issues. Hull export prim must exist at /World/MeshA_Hull.",
+    "Physics: minimal scene — CPU dynamics, ground plane for completeness."
+  ],
+  "code": "# -- Ground and lighting ---------------------------------------------------\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=800.0)\ncreate_prim(\n    prim_path=\"/World/Ground\",\n    prim_type=\"Cube\",\n    position=[0, 0, -0.5],\n    scale=[10, 10, 1],\n)\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# -- Physics scene ----------------------------------------------------------\nset_physics_scene_config(\n    config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"}\n)\n\n# -- MeshA: simple Cube (good baseline mesh) --------------------------------\ncreate_prim(\n    prim_path=\"/World/MeshA\",\n    prim_type=\"Cube\",\n    position=[0.0, 0.0, 0.5],\n    scale=[0.3, 0.3, 0.3],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/MeshA\", schema_name=api)\n\n# -- MeshB: Sphere (target for collision simplification) --------------------\ncreate_prim(\n    prim_path=\"/World/MeshB\",\n    prim_type=\"Sphere\",\n    position=[0.8, 0.0, 0.5],\n)\nset_attribute(prim_path=\"/World/MeshB\", attr_name=\"radius\", value=0.2)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/MeshB\", schema_name=api)\n\n# -- MeshC: Cube with poor collision (fix target) ---------------------------\ncreate_prim(\n    prim_path=\"/World/MeshC\",\n    prim_type=\"Cube\",\n    position=[-0.8, 0.0, 0.5],\n    scale=[0.25, 0.25, 0.001],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/MeshC\", schema_name=api)\n# Zero out one scale axis to create near-degenerate geometry\nset_attribute(prim_path=\"/World/MeshC\", attr_name=\"xformOp:scale\", value=[0.25, 0.25, 0.0005])\n\n# -- Step 1: Baseline collision health check on MeshA ----------------------\ncheck_collision_mesh(prim_path=\"/World/MeshA\")\n\n# -- Step 2: Compute convex hull on MeshA, export visible hull prim ---------\ncompute_convex_hull(\n    prim_path=\"/World/MeshA\",\n    export_hull_path=\"/World/MeshA_Hull\",\n)\n\n# -- Step 3: Measure MeshA geometry ----------------------------------------\ncompute_volume(prim_path=\"/World/MeshA\")\ncompute_surface_area(prim_path=\"/World/MeshA\")\n\n# -- Step 4: Simplify MeshB collision to convex decomposition ---------------\nsimplify_collision(\n    prim_path=\"/World/MeshB\",\n    approximation=\"convexDecomposition\",\n)\n\n# -- Step 5: Switch MeshB to bounding-sphere for performance comparison -----\noptimize_collision(\n    prim_path=\"/World/MeshB\",\n    approximation=\"boundingSphere\",\n)\n\n# -- Step 6: Diagnose degenerate MeshC before repair ------------------------\ncheck_collision_mesh(prim_path=\"/World/MeshC\")\n\n# -- Step 7: Auto-repair MeshC (target_triangles=500 for dynamic body) ------\nfix_collision_mesh(\n    prim_path=\"/World/MeshC\",\n    target_triangles=500,\n)\n\n# -- Step 8: Confirm MeshC repair: zero fatal issues expected ---------------\ncheck_collision_mesh(prim_path=\"/World/MeshC\")\n\n# -- Step 9: Visualize wireframe collision overlay on MeshA -----------------\nvisualize_collision_mesh(prim_path=\"/World/MeshA\")",
+  "verify_args": {
+    "stages": [],
+    "hull_prim_path": "/World/MeshA_Hull",
+    "post_repair_mesh_path": "/World/MeshC",
+    "expected_fatal_issues": 0
+  },
+  "simulate_args": null,
+  "diagnose_args": null,
+  "settle_state": {
+    "mesh_baseline_path": "/World/MeshA",
+    "hull_export_path": "/World/MeshA_Hull",
+    "mesh_repair_target_path": "/World/MeshC",
+    "expected_hull_prim_exists": true,
+    "expected_mesh_c_fatal_issues": 0
+  },
+  "extends": "industrial-convex-hull-collision-opt-001",
+  "extension_notes": "First canonical in the library to exercise the mesh-optimization pipeline. No robot arm. Function-gate: check_collision_mesh on MeshC post-fix returns zero fatal issues; hull export prim /World/MeshA_Hull exists. Degenerate geometry (near-zero scale axis) models real import artifacts.",
+  "failure_modes": [
+    "compute_convex_hull export_hull_path may fail if scipy.spatial not installed in Kit Python env",
+    "fix_collision_mesh on a USD Cube (not a raw Mesh) may return 'not a Mesh prim' — use a Mesh import instead if available",
+    "optimize_collision after simplify_collision may override approximation silently (last-write wins)",
+    "visualize_collision_mesh requires omni.physx.ui extension enabled; may no-op silently if disabled"
+  ],
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:physics.collision_mesh_optimization",
+      "isaac:topology.no_robot",
+      "isaac:mesh.convex_hull",
+      "isaac:mesh.repair"
+    ]
+  },
+  "roles": {
+    "mesh_baseline": {
+      "constraints": ["mesh_prim"],
+      "expected_count": 1,
+      "required": true
+    },
+    "mesh_simplify_target": {
+      "constraints": ["mesh_prim"],
+      "expected_count": 1,
+      "required": true
+    },
+    "mesh_repair_target": {
+      "constraints": ["mesh_prim"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "mesh_baseline": {
+      "path": "/World/MeshA",
+      "position": [0.0, 0.0, 0.5],
+      "hull_export_path": "/World/MeshA_Hull"
+    },
+    "mesh_simplify_target": {
+      "path": "/World/MeshB",
+      "position": [0.8, 0.0, 0.5]
+    },
+    "mesh_repair_target": {
+      "path": "/World/MeshC",
+      "position": [-0.8, 0.0, 0.5]
+    }
+  },
+  "code_template": "# -- Ground and lighting ---------------------------------------------------\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=800.0)\ncreate_prim(\n    prim_path=\"/World/Ground\",\n    prim_type=\"Cube\",\n    position=[0, 0, -0.5],\n    scale=[10, 10, 1],\n)\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(\n    config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"}\n)\n\n# -- MeshA (baseline) -------------------------------------------------------\ncreate_prim(\n    prim_path=\"{{mesh_baseline.path}}\",\n    prim_type=\"Cube\",\n    position={{mesh_baseline.position}},\n    scale=[0.3, 0.3, 0.3],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"{{mesh_baseline.path}}\", schema_name=api)\n\n# -- MeshB (simplify target) ------------------------------------------------\ncreate_prim(\n    prim_path=\"{{mesh_simplify_target.path}}\",\n    prim_type=\"Sphere\",\n    position={{mesh_simplify_target.position}},\n)\nset_attribute(prim_path=\"{{mesh_simplify_target.path}}\", attr_name=\"radius\", value=0.2)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"{{mesh_simplify_target.path}}\", schema_name=api)\n\n# -- MeshC (repair target, degenerate) --------------------------------------\ncreate_prim(\n    prim_path=\"{{mesh_repair_target.path}}\",\n    prim_type=\"Cube\",\n    position={{mesh_repair_target.position}},\n    scale=[0.25, 0.25, 0.001],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"{{mesh_repair_target.path}}\", schema_name=api)\nset_attribute(prim_path=\"{{mesh_repair_target.path}}\", attr_name=\"xformOp:scale\", value=[0.25, 0.25, 0.0005])\n\ncheck_collision_mesh(prim_path=\"{{mesh_baseline.path}}\")\ncompute_convex_hull(\n    prim_path=\"{{mesh_baseline.path}}\",\n    export_hull_path=\"{{mesh_baseline.hull_export_path}}\",\n)\ncompute_volume(prim_path=\"{{mesh_baseline.path}}\")\ncompute_surface_area(prim_path=\"{{mesh_baseline.path}}\")\nsimplify_collision(\n    prim_path=\"{{mesh_simplify_target.path}}\",\n    approximation=\"convexDecomposition\",\n)\noptimize_collision(\n    prim_path=\"{{mesh_simplify_target.path}}\",\n    approximation=\"boundingSphere\",\n)\ncheck_collision_mesh(prim_path=\"{{mesh_repair_target.path}}\")\nfix_collision_mesh(\n    prim_path=\"{{mesh_repair_target.path}}\",\n    target_triangles=500,\n)\ncheck_collision_mesh(prim_path=\"{{mesh_repair_target.path}}\")\nvisualize_collision_mesh(prim_path=\"{{mesh_baseline.path}}\")",
+  "verified_status": "drafted-A29-2026-05-16; form-gate pending",
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": []
+  }
+}
