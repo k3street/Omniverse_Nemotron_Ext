@@ -85,6 +85,9 @@ def _get_baseline_path() -> Optional[Path]:
 def _load_corpus(path: Path) -> List[Dict]:
     with open(path) as f:
         data = json.load(f)
+    # Corpus may be a plain list (v1.2+) or a dict with "prompts" key (v1.0/v1.1)
+    if isinstance(data, list):
+        return data
     return data["prompts"]
 
 
