@@ -1796,7 +1796,11 @@
   motion_controller_preference: none
   pattern_hint: other
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-mqtt-sparkplug-iot.json
+  drafted_date: "2026-05-16"
+  drafted_by: A60
+  draft_notes: "A60; form-gate 1 OK 0 ERROR 0 WARN (--validate-tool-calls); first MQTT Sparkplug-B canonical in library; attach→diagnose→list→detach lifecycle; function-gate pending (requires Mosquitto on 127.0.0.1:1883)"
 
 - id: ros2-multi-rate-setup-001
   source: retrieval-miss
