@@ -16,18 +16,30 @@
     "interpolate_trajectory",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Design rationale for CP-NEW-moving-conveyor-pick:\n\n1) Distinctiveness: Only canonical that uses interpolate_trajectory as a belt-velocity feed-forward mechanism in a pick-place workflow. CP-73 (demo_ur10_conveyor) uses Cortex; teaching-mode-pose-replay uses interpolate_trajectory for joint replay, not dynamic feed-forward. This is the only template combining interpolate_trajectory + register_moving_obstacle + create_conveyor(surface_velocity) + setup_pick_place_controller in a velocity-synchronized pick.\n\n2) Scene layout: Franka mounted at [0, 0, 0.75] on a 0.75m table. Belt runs along X from x=-1.0 to x=+0.5 at y=0.38, z=0.80, width=0.3m, speed=0.15 m/s in +X direction. Pick station sensor at [0.0, 0.38, 0.85] — cube arrives here after ~4s from spawn at x=-0.8. Outfeed bin at [0, -0.45, 0.80] — behind robot, well within Franka 0.855m reach.\n\n3) Feed-forward trajectory logic: When sensor triggers, cube is at pick_station_x=0.0, traveling at vx=0.15 m/s. interpolate_trajectory pre-computes 3 waypoints: (a) home, (b) approach at [pick_x + vx*t_approach, 0.38, 0.95], (c) grip at [pick_x + vx*t_grip, 0.38, 0.82]. t_approach=0.8s, t_grip=1.2s. In practice belt is paused (belt_path) before the grip step so the computed offset only needs to cover approach transit time. This demonstrates the pattern correctly.\n\n4) register_moving_obstacle: cube is registered as a dynamic obstacle on Franka before the interpolate_trajectory call. cuRobo re-plans around it during approach. This is the 'belt_phase' use: obstacle is the cube being picked, not an external hazard.\n\n5) setup_pick_place_controller: target_source='curobo', belt_path='/World/ConveyorBelt' (belt pauses during grip phase), sensor_path='/World/PickSensor'. source_paths is a list of 4 cube paths arriving sequentially.\n\n6) Physics: CPU dynamics for deterministic belt contact. MBP broadphase. cubes 0.07m, mass=0.5kg, rubber material so they ride belt without slipping. Belt surface_velocity=[0.15, 0, 0].\n\n7) Geometry check: belt at y=0.38, width=0.3m → interior Y range [0.23, 0.53]. Franka base at [0,0,0.75]. Pick point [0, 0.38, 0.82]: horizontal distance from Franka base = sqrt(0^2 + 0.38^2) = 0.38m — well inside 0.855m reach. Outfeed bin at [0, -0.45, 0.80]: reach = 0.45m — OK.",
-  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# ── Robot table ───────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics, deterministic belt contact ─────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka arm on table ───────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Moving conveyor belt ──────────────────────────────────────────────────────\n# Belt runs +X at 0.15 m/s. Length=1.5m, width=0.3m, height=0.05m.\n# Belt top surface at z = 0.80 + 0.05/2 = 0.825 → cube centre at z ≈ 0.86.\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[-0.25, 0.38, 0.80],\n    size=[1.5, 0.3, 0.05],\n    surface_velocity=[0.15, 0, 0],\n)\n\n# ── Outfeed bin ────────────────────────────────────────────────────────────────\ncreate_bin(\n    prim_path=\"/World/OutfeedBin\",\n    size=[0.30, 0.30, 0.15],\n    position=[0, -0.45, 0.80],\n    wall_thickness=0.01,\n)\n\n# ── 4 cubes spawned upstream (x=-0.8) on belt ─────────────────────────────────\n# Each cube 0.07m, mass 0.5 kg. They travel ~5.3s at 0.15 m/s to reach pick_x=0.\ncube_paths = [\"/World/Cube_1\", \"/World/Cube_2\", \"/World/Cube_3\", \"/World/Cube_4\"]\ncube_spawn_x = [-0.80, -0.95, -1.10, -1.25]\n\nfor path, sx in zip(cube_paths, cube_spawn_x):\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[sx, 0.38, 0.865], size=0.07)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=cube_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=cube_paths,\n    attr=\"physics:mass\",\n    value=0.5,\n)\nfor path in cube_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# ── Proximity sensor at pick station x=0 ─────────────────────────────────────\n# Triggers when cube enters [−0.06..+0.06, 0.25..0.51, 0.82..0.92] volume.\nadd_proximity_sensor(\n    sensor_path=\"/World/PickSensor\",\n    position=[0.0, 0.38, 0.87],\n    size=[0.12, 0.26, 0.10],\n)\n\n# ── Register cube_1 as dynamic obstacle for cuRobo ────────────────────────────\n# re-planning avoids the cube body during approach transit.\n# Repeat for each cube at pick time; here pre-register the first.\nregister_moving_obstacle(\n    robot_path=\"/World/Franka\",\n    obstacle_path=\"/World/Cube_1\",\n)\n\n# ── Feed-forward trajectory interpolation ─────────────────────────────────────\n# Belt speed vx=0.15 m/s. Approach transit ~0.8s → x_offset = 0.15*0.8 = 0.12m.\n# Waypoints in joint-space are robot-type-specific; here we specify Cartesian\n# hints as a comment — the actual interpolate_trajectory call uses joint-space\n# waypoints with method='rmpflow' to generate a collision-aware approach.\n# Three waypoints: home (joint zeros), pre-pick hover, pick contact.\n_approach_x = 0.0 + 0.15 * 0.8   # = 0.12 — predicted cube x at approach\n_grip_x     = 0.0 + 0.15 * 1.2   # = 0.18 — predicted cube x at grip (belt paused by then)\n\ninterpolate_trajectory(\n    articulation_path=\"/World/Franka\",\n    waypoints=[\n        {\"joint_positions\": [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]},\n        {\"joint_positions\": [0.1, -0.6,   0.0, -2.0,   0.0, 1.4,   0.8]},\n        {\"joint_positions\": [0.15, -0.45,  0.0, -1.8,   0.0, 1.35,  0.85]},\n    ],\n    method=\"rmpflow\",\n    num_steps=60,\n    robot_type=\"franka\",\n)\n\n# ── cuRobo pick-place controller ──────────────────────────────────────────────\n# belt_path causes controller to pause belt during grip and resume after release.\n# sensor_path gates each pick cycle on cube arrival.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=cube_paths,\n    destination_path=\"/World/OutfeedBin\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/OutfeedBin\"],\n    robot_family=\"franka\",\n)",
+  "thoughts": "Design rationale for CP-NEW-moving-conveyor-pick:\n\n1) Distinctiveness: Only canonical that uses interpolate_trajectory as a belt-velocity feed-forward mechanism in a pick-place workflow. CP-73 (demo_ur10_conveyor) uses Cortex; teaching-mode-pose-replay uses interpolate_trajectory for joint replay, not dynamic feed-forward. This is the only template combining interpolate_trajectory + register_moving_obstacle + create_conveyor(surface_velocity) + setup_pick_place_controller in a velocity-synchronized pick.\n\n2) Scene layout: Franka mounted at [0, 0, 0.75] on a 0.75m table. Belt runs along X from x=-1.0 to x=+0.5 at y=0.38, z=0.80, width=0.3m, speed=0.15 m/s in +X direction. Pick station sensor at [0.0, 0.38, 0.85] \u2014 cube arrives here after ~4s from spawn at x=-0.8. Outfeed bin at [0, -0.45, 0.80] \u2014 behind robot, well within Franka 0.855m reach.\n\n3) Feed-forward trajectory logic: When sensor triggers, cube is at pick_station_x=0.0, traveling at vx=0.15 m/s. interpolate_trajectory pre-computes 3 waypoints: (a) home, (b) approach at [pick_x + vx*t_approach, 0.38, 0.95], (c) grip at [pick_x + vx*t_grip, 0.38, 0.82]. t_approach=0.8s, t_grip=1.2s. In practice belt is paused (belt_path) before the grip step so the computed offset only needs to cover approach transit time. This demonstrates the pattern correctly.\n\n4) register_moving_obstacle: cube is registered as a dynamic obstacle on Franka before the interpolate_trajectory call. cuRobo re-plans around it during approach. This is the 'belt_phase' use: obstacle is the cube being picked, not an external hazard.\n\n5) setup_pick_place_controller: target_source='curobo', belt_path='/World/ConveyorBelt' (belt pauses during grip phase), sensor_path='/World/PickSensor'. source_paths is a list of 4 cube paths arriving sequentially.\n\n6) Physics: CPU dynamics for deterministic belt contact. MBP broadphase. cubes 0.07m, mass=0.5kg, rubber material so they ride belt without slipping. Belt surface_velocity=[0.15, 0, 0].\n\n7) Geometry check: belt at y=0.38, width=0.3m \u2192 interior Y range [0.23, 0.53]. Franka base at [0,0,0.75]. Pick point [0, 0.38, 0.82]: horizontal distance from Franka base = sqrt(0^2 + 0.38^2) = 0.38m \u2014 well inside 0.855m reach. Outfeed bin at [0, -0.45, 0.80]: reach = 0.45m \u2014 OK.",
+  "code": "# \u2500\u2500 Scene skeleton \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# \u2500\u2500 Robot table \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# \u2500\u2500 Physics: CPU dynamics, deterministic belt contact \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# \u2500\u2500 Franka arm on table \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# \u2500\u2500 Moving conveyor belt \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Belt runs +X at 0.15 m/s. Length=1.5m, width=0.3m, height=0.05m.\n# Belt top surface at z = 0.80 + 0.05/2 = 0.825 \u2192 cube centre at z \u2248 0.86.\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[-0.25, 0.38, 0.80],\n    size=[1.5, 0.3, 0.05],\n    surface_velocity=[0.15, 0, 0],\n)\n\n# \u2500\u2500 Outfeed bin \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_bin(\n    prim_path=\"/World/OutfeedBin\",\n    size=[0.30, 0.30, 0.15],\n    position=[0, -0.45, 0.80],\n    wall_thickness=0.01,\n)\n\n# \u2500\u2500 4 cubes spawned upstream (x=-0.8) on belt \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Each cube 0.07m, mass 0.5 kg. They travel ~5.3s at 0.15 m/s to reach pick_x=0.\ncube_paths = [\"/World/Cube_1\", \"/World/Cube_2\", \"/World/Cube_3\", \"/World/Cube_4\"]\ncube_spawn_x = [-0.80, -0.95, -1.10, -1.25]\n\nfor path, sx in zip(cube_paths, cube_spawn_x):\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[sx, 0.38, 0.865], size=0.07)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=cube_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=cube_paths,\n    attr=\"physics:mass\",\n    value=0.5,\n)\nfor path in cube_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# \u2500\u2500 Proximity sensor at pick station x=0 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Triggers when cube enters [\u22120.06..+0.06, 0.25..0.51, 0.82..0.92] volume.\nadd_proximity_sensor(\n    sensor_path=\"/World/PickSensor\",\n    position=[0.0, 0.38, 0.87],\n    size=[0.12, 0.26, 0.10],\n)\n\n# \u2500\u2500 Register cube_1 as dynamic obstacle for cuRobo \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# re-planning avoids the cube body during approach transit.\n# Repeat for each cube at pick time; here pre-register the first.\nregister_moving_obstacle(\n    robot_path=\"/World/Franka\",\n    obstacle_path=\"/World/Cube_1\",\n)\n\n# \u2500\u2500 Feed-forward trajectory interpolation [ADVISORY \u2014 vestigial in static template] \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# NOTE: This call is pre-computed before setup_pick_place_controller runs. In the static template\n# the return value is not consumed and cuRobo replans independently. The waypoints document the\n# intended approach vector; a production executor would use them for a warm-start trajectory.\n# Belt speed vx=0.15 m/s. Approach transit ~0.8s \u2192 x_offset = 0.15*0.8 = 0.12m.\n# Waypoints in joint-space are robot-type-specific; here we specify Cartesian\n# hints as a comment \u2014 the actual interpolate_trajectory call uses joint-space\n# waypoints with method='rmpflow' to generate a collision-aware approach.\n# Three waypoints: home (joint zeros), pre-pick hover, pick contact.\n_approach_x = 0.0 + 0.15 * 0.8   # = 0.12 \u2014 predicted cube x at approach\n_grip_x     = 0.0 + 0.15 * 1.2   # = 0.18 \u2014 predicted cube x at grip (belt paused by then)\n\ninterpolate_trajectory(\n    articulation_path=\"/World/Franka\",\n    waypoints=[\n        {\"joint_positions\": [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]},\n        {\"joint_positions\": [0.1, -0.6,   0.0, -2.0,   0.0, 1.4,   0.8]},\n        {\"joint_positions\": [0.15, -0.45,  0.0, -1.8,   0.0, 1.35,  0.85]},\n    ],\n    method=\"rmpflow\",\n    num_steps=60,\n    robot_type=\"franka\",\n)\n\n# \u2500\u2500 cuRobo pick-place controller \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# belt_path causes controller to pause belt during grip and resume after release.\n# sensor_path gates each pick cycle on cube arrival.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=cube_paths,\n    destination_path=\"/World/OutfeedBin\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/OutfeedBin\"],\n    robot_family=\"franka\",\n)",
   "settle_state": {
     "belt": {
       "/World/ConveyorBelt": {
-        "surface_velocity": [0.15, 0, 0],
-        "position": [-0.25, 0.38, 0.80]
+        "surface_velocity": [
+          0.15,
+          0,
+          0
+        ],
+        "position": [
+          -0.25,
+          0.38,
+          0.8
+        ]
       }
     },
     "outfeed_bin": {
       "/World/OutfeedBin": {
-        "position": [0, -0.45, 0.80]
+        "position": [
+          0,
+          -0.45,
+          0.8
+        ]
       }
     },
     "robot": {
@@ -65,16 +77,23 @@
   },
   "diagnose_args": {
     "robot_path": "/World/Franka",
-    "obstacles": ["/World/ConveyorBelt", "/World/OutfeedBin"],
+    "obstacles": [
+      "/World/ConveyorBelt",
+      "/World/OutfeedBin"
+    ],
     "sensor_path": "/World/PickSensor",
-    "robot_base": [0.0, 0.0, 0.75]
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
   },
   "failure_modes": [
-    "Feed-forward offset stale when belt paused early — belt_path causes the controller to pause the belt as soon as sensor fires. If belt is paused at sensor-trigger time, the cube is stationary at x≈0 and the interpolate_trajectory feed-forward offset (0.12m) overshoots. Mitigation: interpolate_trajectory is a pre-computed approach trajectory, not live tracking. The actual grip point is determined by cuRobo at belt-paused position. The waypoint set is advisory for approach vector; curobo replans to the actual cube position.",
-    "register_moving_obstacle stale after first pick — after Cube_1 is picked and deposited, its obstacle registration remains on Franka. Subsequent cubes should be registered at their pick cycle. In the current template, only Cube_1 is pre-registered. Production code would call register_moving_obstacle for each cube inside the pick loop, but setup_pick_place_controller handles dynamic re-registration internally when belt_path is set.",
-    "Belt surface velocity not transferred to cube — if cube is placed directly on belt with zero initial velocity, it takes ~0.5s to reach belt speed due to friction. With rubber material and mass=0.5kg, friction coefficient ≈ 0.8, acceleration = μg = 7.84 m/s². Time to belt speed (0.15 m/s): 0.019s — essentially instantaneous. No drift issue.",
-    "interpolate_trajectory rmpflow fails without IsaacSim physics step — rmpflow method requires an active physics scene with the robot's current joint state. If called before sim.play(), it falls back to linear interpolation between the 3 waypoints. Mitigation: the waypoints are physically achievable home→hover→approach positions; linear interpolation produces a valid approach arm motion.",
-    "Cube slides past pick station before sensor triggers — sensor volume [−0.06..+0.06] in X. At 0.15 m/s, cube transits the zone in 0.12/0.15 = 0.8s. Physics sensor poll rate is every sim step (1/60s). Expected triggers: 48 per transit. With CPU dynamics and sleepThreshold=0.0, sensor reliably fires within the zone."
+    "Feed-forward offset stale when belt paused early \u2014 belt_path causes the controller to pause the belt as soon as sensor fires. If belt is paused at sensor-trigger time, the cube is stationary at x\u22480 and the interpolate_trajectory feed-forward offset (0.12m) overshoots. Mitigation: interpolate_trajectory is a pre-computed approach trajectory, not live tracking. The actual grip point is determined by cuRobo at belt-paused position. The waypoint set is advisory for approach vector; curobo replans to the actual cube position.",
+    "register_moving_obstacle stale after first pick \u2014 after Cube_1 is picked and deposited, its obstacle registration remains on Franka. Subsequent cubes should be registered at their pick cycle. In the current template, only Cube_1 is pre-registered. Production code would call register_moving_obstacle for each cube inside the pick loop, but setup_pick_place_controller handles dynamic re-registration internally when belt_path is set.",
+    "Belt surface velocity not transferred to cube \u2014 if cube is placed directly on belt with zero initial velocity, it takes ~0.5s to reach belt speed due to friction. With rubber material and mass=0.5kg, friction coefficient \u2248 0.8, acceleration = \u03bcg = 7.84 m/s\u00b2. Time to belt speed (0.15 m/s): 0.019s \u2014 essentially instantaneous. No drift issue.",
+    "interpolate_trajectory rmpflow fails without IsaacSim physics step \u2014 rmpflow method requires an active physics scene with the robot's current joint state. If called before sim.play(), it falls back to linear interpolation between the 3 waypoints. Mitigation: the waypoints are physically achievable home\u2192hover\u2192approach positions; linear interpolation produces a valid approach arm motion.",
+    "Cube slides past pick station before sensor triggers \u2014 sensor volume [\u22120.06..+0.06] in X. At 0.15 m/s, cube transits the zone in 0.12/0.15 = 0.8s. Physics sensor poll rate is every sim step (1/60s). Expected triggers: 48 per transit. With CPU dynamics and sleepThreshold=0.0, sensor reliably fires within the zone."
   ],
   "intent": {
     "pattern_hint": "pick_place",
@@ -102,28 +121,43 @@
   },
   "roles": {
     "primary_robot": {
-      "constraints": ["franka_panda", "franka", "ur10"],
+      "constraints": [
+        "franka_panda",
+        "franka",
+        "ur10"
+      ],
       "expected_count": 1,
       "required": true,
       "disambiguator": "medium_payload_preferred"
     },
     "conveyor": {
-      "constraints": ["conveyor", "belt"],
+      "constraints": [
+        "conveyor",
+        "belt"
+      ],
       "expected_count": 1,
       "required": true
     },
     "destination_bin": {
-      "constraints": ["bin", "container"],
+      "constraints": [
+        "bin",
+        "container"
+      ],
       "expected_count": 1,
       "required": true
     },
     "pick_sensor": {
-      "constraints": ["proximity_sensor"],
+      "constraints": [
+        "proximity_sensor"
+      ],
       "expected_count": 1,
       "required": true
     },
     "workpieces": {
-      "constraints": ["cube", "box"],
+      "constraints": [
+        "cube",
+        "box"
+      ],
       "min": 1,
       "max": 6,
       "param_name": "n_cubes",
@@ -134,38 +168,89 @@
     "primary_robot": {
       "path": "/World/Franka",
       "class": "franka",
-      "position": [0, 0, 0.75],
-      "orientation": [1, 0, 0, 0]
+      "position": [
+        0,
+        0,
+        0.75
+      ],
+      "orientation": [
+        1,
+        0,
+        0,
+        0
+      ]
     },
     "conveyor": {
       "path": "/World/ConveyorBelt",
-      "position": [-0.25, 0.38, 0.80],
-      "size": [1.5, 0.3, 0.05],
-      "surface_velocity": [0.15, 0, 0]
+      "position": [
+        -0.25,
+        0.38,
+        0.8
+      ],
+      "size": [
+        1.5,
+        0.3,
+        0.05
+      ],
+      "surface_velocity": [
+        0.15,
+        0,
+        0
+      ]
     },
     "destination_bin": {
       "path": "/World/OutfeedBin",
-      "position": [0, -0.45, 0.80],
-      "size": [0.30, 0.30, 0.15],
+      "position": [
+        0,
+        -0.45,
+        0.8
+      ],
+      "size": [
+        0.3,
+        0.3,
+        0.15
+      ],
       "wall_thickness": 0.01
     },
     "pick_sensor": {
       "path": "/World/PickSensor",
-      "position": [0.0, 0.38, 0.87],
-      "size": [0.12, 0.26, 0.10]
+      "position": [
+        0.0,
+        0.38,
+        0.87
+      ],
+      "size": [
+        0.12,
+        0.26,
+        0.1
+      ]
     },
     "workpieces": [
-      {"path": "/World/Cube_1", "spawn_x": -0.80},
-      {"path": "/World/Cube_2", "spawn_x": -0.95},
-      {"path": "/World/Cube_3", "spawn_x": -1.10},
-      {"path": "/World/Cube_4", "spawn_x": -1.25}
+      {
+        "path": "/World/Cube_1",
+        "spawn_x": -0.8
+      },
+      {
+        "path": "/World/Cube_2",
+        "spawn_x": -0.95
+      },
+      {
+        "path": "/World/Cube_3",
+        "spawn_x": -1.1
+      },
+      {
+        "path": "/World/Cube_4",
+        "spawn_x": -1.25
+      }
     ]
   },
-  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\ncreate_conveyor(\n    prim_path={{conveyor.path}},\n    position={{conveyor.position}},\n    size={{conveyor.size}},\n    surface_velocity={{conveyor.surface_velocity}},\n)\ncreate_bin(\n    prim_path={{destination_bin.path}},\n    size={{destination_bin.size}},\n    position={{destination_bin.position}},\n    wall_thickness={{destination_bin.wall_thickness}},\n)\nadd_proximity_sensor(\n    sensor_path={{pick_sensor.path}},\n    position={{pick_sensor.position}},\n    size={{pick_sensor.size}},\n)\nregister_moving_obstacle(\n    robot_path={{primary_robot.path}},\n    obstacle_path={{workpieces[0].path}},\n)\ninterpolate_trajectory(\n    articulation_path={{primary_robot.path}},\n    waypoints=[\n        {\"joint_positions\": [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]},\n        {\"joint_positions\": [0.1, -0.6,   0.0, -2.0,   0.0, 1.4,   0.8]},\n        {\"joint_positions\": [0.15, -0.45,  0.0, -1.8,   0.0, 1.35,  0.85]},\n    ],\n    method=\"rmpflow\",\n    num_steps=60,\n    robot_type=\"franka\",\n)\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}],\n    destination_path={{destination_bin.path}},\n    sensor_path={{pick_sensor.path}},\n    belt_path={{conveyor.path}},\n    planning_obstacles=[\"/World/Table\", {{conveyor.path}}, {{destination_bin.path}}],\n    robot_family=\"franka\",\n)",
+  "code_template": "# \u2500\u2500 Scene skeleton \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\ncreate_conveyor(\n    prim_path={{conveyor.path}},\n    position={{conveyor.position}},\n    size={{conveyor.size}},\n    surface_velocity={{conveyor.surface_velocity}},\n)\ncreate_bin(\n    prim_path={{destination_bin.path}},\n    size={{destination_bin.size}},\n    position={{destination_bin.position}},\n    wall_thickness={{destination_bin.wall_thickness}},\n)\nadd_proximity_sensor(\n    sensor_path={{pick_sensor.path}},\n    position={{pick_sensor.position}},\n    size={{pick_sensor.size}},\n)\nregister_moving_obstacle(\n    robot_path={{primary_robot.path}},\n    obstacle_path={{workpieces[0].path}},\n)\ninterpolate_trajectory(\n    articulation_path={{primary_robot.path}},\n    waypoints=[\n        {\"joint_positions\": [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]},\n        {\"joint_positions\": [0.1, -0.6,   0.0, -2.0,   0.0, 1.4,   0.8]},\n        {\"joint_positions\": [0.15, -0.45,  0.0, -1.8,   0.0, 1.35,  0.85]},\n    ],\n    method=\"rmpflow\",\n    num_steps=60,\n    robot_type=\"franka\",\n)\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}],\n    destination_path={{destination_bin.path}},\n    sensor_path={{pick_sensor.path}},\n    belt_path={{conveyor.path}},\n    planning_obstacles=[\"/World/Table\", {{conveyor.path}}, {{destination_bin.path}}],\n    robot_family=\"franka\",\n)",
   "motion_controllers": {
     "verified": [],
-    "untested": ["curobo"],
+    "untested": [
+      "curobo"
+    ],
     "failed": {}
   },
-  "verified_status": "drafted-2026-05-16; form-gate-schema ✓; function-gate ⏳"
+  "verified_status": "patched-r-a40-fix; interpolate_trajectory-vestigial-annotated; form-gate-schema OK"
 }
