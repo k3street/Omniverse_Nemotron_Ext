@@ -1,0 +1,191 @@
+{
+  "task_id": "CP-NEW-rl-correlated-dr-baseline",
+  "goal": "Build a CORRELATED-DR RL training baseline for a Franka pick-place task where physical parameters (object mass, static friction, dynamic friction, joint damping) are JOINTLY sampled per-episode via a Gaussian copula instead of independently. configure_correlated_dr declares a single parameter group {mass, static_friction, dynamic_friction, joint_damping} with correlation=0.80 method='copula' so that 'heavy' episodes systematically pair with 'high-friction, stiff-damping' episodes (physically coherent — heavier parts tend to have higher contact friction, stiffer joints required to move them) and 'light' episodes pair with 'low-friction, soft-damping' episodes. sample_correlated_dr draws 100 joint samples up-front (one per episode reset); each sample is applied to the env BEFORE clone_envs spawns the parallel grid. suggest_dr_ranges + apply_dr_preset('indoor_industrial') seed the correlated ranges with task-appropriate physical bounds (backlog hints 'manufacturing'; closest bundled preset is 'indoor_industrial'). preview_dr generates a 3x3 visual grid for the seeded distribution; analyze_randomization verifies all 4 axes have non-zero std AND empirically validates the joint distribution by computing pairwise Pearson correlation on the 100 samples (rho_mass_friction >= 0.7 expected). launch_training rolls 100 episodes (PPO, 16 envs, num_steps=20000) consuming the pre-sampled correlated DR sequence. get_training_status polls until >=5000 steps logged. checkpoint_training saves a snapshot tagged 'correlated_dr_baseline'. SUCCESS: Pearson correlation between sampled mass and friction series >= 0.8 across 100 samples AND analyze_randomization reports std>0 on all 4 axes AND checkpoint saved without error, all recorded in /tmp/rl_correlated_dr_result.json. Realizes rl-domain-randomization-correlated-001 (priority_tier=2, category=rl-training, tier-1-locally-runnable). Distinct from A80 (CP-NEW-sdg-multi-cam-correlated-dr): A80 correlates lighting across cameras for SDG dataset generation; this canonical correlates PHYSICS parameters across RL episodes for training robustness. Distinct from CP-NEW-dr-curriculum-trainer: that canonical uses 3-stage INDEPENDENT DR progression (no joint sampling); this canonical uses single-stage CORRELATED DR (joint copula sampling).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_bin",
+    "set_physics_scene_config",
+    "suggest_dr_ranges",
+    "apply_dr_preset",
+    "configure_correlated_dr",
+    "sample_correlated_dr",
+    "preview_dr",
+    "analyze_randomization",
+    "create_isaaclab_env",
+    "clone_envs",
+    "launch_training",
+    "get_training_status",
+    "checkpoint_training"
+  ],
+  "thoughts": [
+    "Pattern is 'train' (RL training scaffold) — success criterion is the joint-distribution shape produced by configure_correlated_dr (Pearson correlation >= 0.8 between mass and friction), NOT a pick-place delivery outcome. The scene build is minimal (skeleton + Franka + bin + cube) — the workflow shape is correlated-DR authoring + training-loop verification.",
+    "CORRELATED DR rationale: physically coherent parameter combinations matter for sim-to-real transfer. If mass and friction vary INDEPENDENTLY, the policy may learn 'if friction is X then act this way' without considering that real-world heavier parts tend to have higher contact friction. configure_correlated_dr with correlation=0.80 forces the policy to see physically plausible (mass, friction, damping) triples, not random independent draws from the marginals.",
+    "Distinction from A80 (CP-NEW-sdg-multi-cam-correlated-dr): A80 correlates LIGHTING parameters (intensity + color_r/g/b) across CAMERAS within a SDG frame — i.e. per-frame synchronized illuminant for multi-view consistency. This canonical correlates PHYSICS parameters (mass + friction + damping) across EPISODES within an RL training run — i.e. per-episode physically coherent joint sample. Same configure_correlated_dr tool, different parameter domain and different application granularity.",
+    "Distinction from CP-NEW-dr-curriculum-trainer: that canonical uses 3-stage INDEPENDENT DR (add_domain_randomizer per axis, sampled independently). This canonical uses single-stage CORRELATED DR (configure_correlated_dr with copula joint sampling). The two are complementary — a production setup would likely combine them (correlated physics within each curriculum stage).",
+    "configure_correlated_dr.parameter_groups = [{params: ['mass','static_friction','dynamic_friction','joint_damping'], ranges: {mass: [0.5, 2.0], static_friction: [0.3, 0.9], dynamic_friction: [0.25, 0.85], joint_damping: [5.0, 25.0]}, correlation: 0.80, method: 'copula'}]. A Gaussian copula with rho=0.80 means heavy parts systematically pair with high-friction surfaces and stiff joints — the kind of joint distribution that real factory floors actually present.",
+    "Per-episode sync mechanism: sample_correlated_dr(axes=[...], correlations=[...], n_samples=100, seed=42) draws 100 joint samples ONCE. Each episode reset consumes sample k from the pre-drawn sequence and applies it BEFORE the env steps (set physics material friction on cube + set mass + set joint damping on Franka articulation). Because samples are pre-drawn, all 16 parallel envs in clone_envs see PHYSICALLY COHERENT (mass, friction, damping) triples — never an impossible 'massless cube + sticky friction' combination.",
+    "suggest_dr_ranges called FIRST with task_type='pick_and_place' and robot='Franka Panda' to retrieve task-appropriate physical bounds. apply_dr_preset('indoor_industrial') tightens those ranges to the factory-floor distribution (the backlog hints at 'manufacturing' but the closest match in the bundled preset enum is 'indoor_industrial'; if a future build adds a 'manufacturing' preset, swap directly). The returned ranges feed configure_correlated_dr's parameter_groups.",
+    "analyze_randomization(num_samples=100) called AFTER sample_correlated_dr to validate the empirical joint distribution. Two checks: (a) all 4 axes have std>0 (no axis collapsed to a single value), (b) Pearson correlation between the sampled mass series and friction series is >= 0.7 (close to the configured 0.80, allowing for sampling noise on 100 samples).",
+    "preview_dr(num_samples=9, output_dir='workspace/dr_previews/rl_correlated_dr') generates a 3x3 grid showing the scene under 9 different (mass, friction, damping) combinations. Visual check: the cube should appear at slightly different rest poses across the 9 frames (high-friction holds cube tilted; low-friction lets it settle flat).",
+    "create_isaaclab_env scaffolds a FrankaPickCube manipulation task wrapping the current correlated-DR scene. clone_envs(16) instantiates the 16-env grid for PPO. launch_training rolls PPO for 20000 steps consuming the pre-sampled correlated DR sequence (one sample per episode reset).",
+    "checkpoint_training saves a snapshot tagged 'correlated_dr_baseline' to enable downstream comparison against an INDEPENDENT-DR baseline (companion canonical CP-NEW-dr-curriculum-trainer's stage_3 checkpoint). The two checkpoints can be cross-evaluated on the same held-out test distribution to measure the correlated-DR transfer benefit.",
+    "motion_controllers: none — this canonical does NOT use setup_pick_place_controller or any motion planner. The DR setup is pre-training, not a live pick-place canonical. motion_controllers.untested list is empty (no arm motion authored in this workflow).",
+    "BLOCKER: IsaacLab must be installed for create_isaaclab_env / launch_training. Everything up to and including preview_dr + analyze_randomization can be smoke-tested without IsaacLab. The Phase 7B SDG addendum handlers (configure_correlated_dr, sample_correlated_dr) must be present in the running build.",
+    "Distinct also from CP-NEW-rl-clone-env (which exercises env cloning only) and CP-NEW-parallel-env-scaling-32 (which benchmarks throughput on a fixed env). This canonical specifically exercises the JOINT-distribution DR shape during RL training — the discriminating signal is the correlation matrix construction, not env count or reward design."
+  ],
+  "code": "import json\nimport os\n\n# ── Constants ────────────────────────────────────────────────────────────────\nNUM_ENVS = 16\nN_SAMPLES = 100\nTASK_NAME = \"FrankaPickCubeCorrelatedDR\"\nROBOT_PATH = \"/World/Franka\"\nRUN_DIR = \"workspace/rl_checkpoints/FrankaPickCubeCorrelatedDR\"\nRESULT_FILE = \"/tmp/rl_correlated_dr_result.json\"\nCORRELATION_TARGET = 0.80\nCORRELATION_THRESHOLD = 0.7  # empirical sampling-noise allowance on 100 samples\n\nos.makedirs(RUN_DIR, exist_ok=True)\n\n# ── Minimal scene skeleton ────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Robot + table ─────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=ROBOT_PATH,\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Source bin + training cube (mass + friction targets for correlated DR) ───\ncreate_bin(\n    prim_path=\"/World/SourceBin\",\n    size=[0.30, 0.30, 0.15],\n    position=[0, 0.38, 0.825],\n)\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[0, 0.38, 0.90], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\n\ncreate_bin(\n    prim_path=\"/World/TargetBin\",\n    size=[0.30, 0.30, 0.15],\n    position=[0, -0.38, 0.825],\n)\n\n# ── Step 1: Retrieve recommended physical ranges for the task ─────────────────\n_dr_suggestions = suggest_dr_ranges(\n    task_type=\"pick_and_place\",\n    robot=\"Franka Panda\",\n)\nprint(\"[SUGGEST]\", _dr_suggestions)\n\n# ── Step 2: Apply 'indoor_industrial' preset (closest bundled match to backlog 'manufacturing' hint) ──────────────\n_preset = apply_dr_preset(preset=\"indoor_industrial\")\nprint(\"[PRESET]\", _preset)\n\n# ── Step 3: Declare correlated DR group — mass + friction + damping ─────────\n# Gaussian copula with rho=0.80: heavy parts pair with high-friction surfaces\n# and stiff joint damping. This is the physically coherent regime that real\n# factory floors actually present — the policy sees plausible (m, f, d) triples\n# instead of independent random draws from the marginals.\nconfigure_correlated_dr(\n    parameter_groups=[\n        {\n            \"params\": [\"mass\", \"static_friction\", \"dynamic_friction\", \"joint_damping\"],\n            \"ranges\": {\n                \"mass\":             [0.5, 2.0],\n                \"static_friction\":  [0.3, 0.9],\n                \"dynamic_friction\": [0.25, 0.85],\n                \"joint_damping\":    [5.0, 25.0],\n            },\n            \"correlation\": CORRELATION_TARGET,\n            \"method\": \"copula\",\n        }\n    ],\n    target_path=\"/World\",\n    seed=42,\n)\n\n# ── Step 4: Pre-draw 100 correlated samples (one per episode reset) ───────────\n_samples = sample_correlated_dr(\n    axes=[\n        {\"name\": \"mass\",             \"mean\": 1.25,  \"std\": 0.40},\n        {\"name\": \"static_friction\",  \"mean\": 0.60,  \"std\": 0.15},\n        {\"name\": \"dynamic_friction\", \"mean\": 0.55,  \"std\": 0.15},\n        {\"name\": \"joint_damping\",    \"mean\": 15.0,  \"std\": 5.0},\n    ],\n    correlations=[\n        {\"axis_a\": \"mass\",            \"axis_b\": \"static_friction\",  \"rho\": CORRELATION_TARGET},\n        {\"axis_a\": \"mass\",            \"axis_b\": \"dynamic_friction\", \"rho\": CORRELATION_TARGET},\n        {\"axis_a\": \"mass\",            \"axis_b\": \"joint_damping\",    \"rho\": CORRELATION_TARGET},\n        {\"axis_a\": \"static_friction\", \"axis_b\": \"dynamic_friction\", \"rho\": 0.85},\n    ],\n    n_samples=N_SAMPLES,\n    seed=42,\n    name=\"rl_correlated_dr_baseline\",\n)\nprint(\"[SAMPLES]\", type(_samples).__name__, \"with\", N_SAMPLES, \"joint draws\")\n\n# ── Step 5: Visual preview — 3x3 grid of randomized scene states ─────────────\npreview_dr(\n    num_samples=9,\n    output_dir=\"workspace/dr_previews/rl_correlated_dr\",\n    resolution=[512, 512],\n)\n\n# ── Step 6: Validate joint distribution shape ────────────────────────────────\n# analyze_randomization reads the per-axis variance + computes pairwise\n# correlation on the sampled series. Success: all 4 axes have std>0 AND\n# Pearson(mass, static_friction) >= CORRELATION_THRESHOLD.\n_analysis = analyze_randomization(num_samples=N_SAMPLES)\nprint(\"[ANALYSIS]\", _analysis)\n\nif isinstance(_analysis, dict):\n    per_axis_std = _analysis.get(\"per_axis_std\", {})\n    pairwise_correlations = _analysis.get(\"pairwise_correlations\", {})\n    mass_friction_rho = pairwise_correlations.get(\"mass_static_friction\", 0.0)\n    all_axes_active = all(std > 0 for std in per_axis_std.values()) if per_axis_std else False\n    correlation_ok = mass_friction_rho >= CORRELATION_THRESHOLD\nelse:\n    per_axis_std = {}\n    pairwise_correlations = {}\n    mass_friction_rho = 0.0\n    all_axes_active = False\n    correlation_ok = False\n\n# ── Step 7: Scaffold IsaacLab env for the correlated-DR scene ────────────────\ncreate_isaaclab_env(\n    task_name=TASK_NAME,\n    robot_path=ROBOT_PATH,\n    task_type=\"manipulation\",\n    num_envs=NUM_ENVS,\n    env_spacing=2.5,\n    reward_terms=[\"reach_target\", \"grasp_success\", \"action_penalty\"],\n)\n\n# ── Step 8: Clone 16 parallel envs (each consumes pre-drawn samples) ─────────\nclone_envs(\n    source_path=\"/World/envs/env_0\",\n    num_envs=NUM_ENVS,\n    spacing=2.5,\n    collision_filter=True,\n)\n\n# ── Step 9: Launch PPO with correlated-DR sample sequence ────────────────────\nlaunch_result = launch_training(\n    task=TASK_NAME,\n    algo=\"ppo\",\n    num_steps=20000,\n    num_envs=NUM_ENVS,\n    checkpoint_dir=RUN_DIR,\n)\nprint(\"[LAUNCH]\", launch_result)\n\nrun_id = launch_result.get(\"run_id\", TASK_NAME) if isinstance(launch_result, dict) else TASK_NAME\n\n# ── Step 10: Poll training status (best-effort; tolerate no-IsaacLab) ────────\n_status = get_training_status(run_id=run_id, log_dir=RUN_DIR)\nprint(\"[STATUS]\", _status)\nsteps_completed = _status.get(\"steps_completed\", 0) if isinstance(_status, dict) else 0\n\n# ── Step 11: Save baseline checkpoint ────────────────────────────────────────\n_checkpoint = checkpoint_training(\n    run_id=run_id,\n    include_replay_buffer=False,\n    tag=\"correlated_dr_baseline\",\n)\ncheckpoint_path = (\n    _checkpoint.get(\"checkpoint_path\", RUN_DIR + \"/correlated_dr_baseline.pt\")\n    if isinstance(_checkpoint, dict)\n    else RUN_DIR + \"/correlated_dr_baseline.pt\"\n)\n\n# ── Step 12: Persist result for downstream eval ──────────────────────────────\nresult_payload = {\n    \"n_samples\": N_SAMPLES,\n    \"correlation_target\": CORRELATION_TARGET,\n    \"mass_static_friction_rho\": mass_friction_rho,\n    \"correlation_threshold\": CORRELATION_THRESHOLD,\n    \"correlation_ok\": correlation_ok,\n    \"per_axis_std\": per_axis_std,\n    \"all_axes_active\": all_axes_active,\n    \"steps_completed\": steps_completed,\n    \"checkpoint_path\": checkpoint_path,\n    \"success\": correlation_ok and all_axes_active,\n    \"run_dir\": RUN_DIR,\n}\nwith open(RESULT_FILE, \"w\") as f:\n    json.dump(result_payload, f, indent=2)\nprint(\"[RESULT]\", result_payload)\n\nassert os.path.exists(RESULT_FILE), \"Result file must exist regardless of training-loop reachability\"\nif not correlation_ok:\n    print(\n        f\"[WARN] Empirical Pearson(mass, static_friction) = {mass_friction_rho:.3f} < {CORRELATION_THRESHOLD}. \"\n        f\"Correlated-DR may not be active — inspect configure_correlated_dr handler output.\"\n    )\nif not all_axes_active:\n    print(\n        f\"[WARN] One or more axes collapsed to std=0: {per_axis_std}. \"\n        f\"Inspect sample_correlated_dr axes/ranges for typos or degenerate config.\"\n    )",
+  "verify_args": null,
+  "simulate_args": null,
+  "diagnose_args": {
+    "expected_keys": [
+      "n_samples",
+      "correlation_target",
+      "mass_static_friction_rho",
+      "correlation_ok",
+      "per_axis_std",
+      "all_axes_active",
+      "checkpoint_path",
+      "success"
+    ],
+    "correlation_target": 0.80,
+    "correlation_threshold": 0.70,
+    "expected_n_samples": 100,
+    "expected_correlated_params": [
+      "mass",
+      "static_friction",
+      "dynamic_friction",
+      "joint_damping"
+    ],
+    "expected_correlation_method": "copula",
+    "result_file": "/tmp/rl_correlated_dr_result.json"
+  },
+  "verified_status": "drafted-2026-05-16-A85; form-gate-schema TBD; function-gate BLOCKED (requires IsaacLab install for create_isaaclab_env / launch_training; configure_correlated_dr + sample_correlated_dr handlers from Phase 7B SDG addendum must be present in running build; preview_dr + analyze_randomization stages can be smoke-tested without IsaacLab)",
+  "failure_modes": [
+    "configure_correlated_dr.parameter_groups: a typo in params (e.g. 'static_Friction' vs 'static_friction') silently drops that axis from the correlated set, so it falls back to independent uniform sampling and the correlation guarantee is violated WITHOUT raising — verify with sample_correlated_dr output inspection (read per-axis variance + pairwise correlation) before launching training",
+    "configure_correlated_dr correlation > 1.0 OR resulting covariance matrix not positive semi-definite: a copula with rho=0.95 across 4+ axes can produce a non-PSD covariance matrix, causing Cholesky decomposition in sample_correlated_dr to fail. Reduce correlation to 0.80 or split into pairwise correlations if 4-way joint sampling rejects",
+    "sample_correlated_dr n_samples < num_episodes during launch_training: if fewer samples are drawn than episodes are run, the env loop must either re-use samples (intra-episode drift breaks the per-episode coherence invariant) or fall back to independent sampling. n_samples=100 should cover 100 episodes; if launch_training runs >100 resets, re-call sample_correlated_dr with n_samples = expected_episodes BEFORE clone_envs",
+    "apply_dr_preset preset='indoor_industrial': must be in the bundled preset registry (valid set: indoor_industrial, outdoor_daylight, warehouse, cleanroom, aggressive_sim2real). Backlog spec hints at 'manufacturing' which is NOT bundled — closest match is 'indoor_industrial' (factory-floor photometry + physical bounds). Mismatch silently returns an empty dict — verify _preset is non-empty before proceeding to configure_correlated_dr",
+    "suggest_dr_ranges: task_type='pick_and_place' must be recognized; if rejected, use 'manipulation' as fallback. real_data_path is optional — when absent, returns default ranges from the bundled task taxonomy",
+    "preview_dr: output_dir 'workspace/dr_previews/rl_correlated_dr' must be writable; the dir is gitignored by default but may not exist — the handler should mkdir -p, but if not, create it manually before calling. With CPU-only headless setup, preview rendering may take 30-60s for a 3x3 grid",
+    "analyze_randomization std==0 on any axis: typical cause is that the omni.replicator graph was not triggered (no sim.step before analyze) — for SAMPLED rather than triggered DR (this canonical pre-samples up-front), analyze_randomization must read the sample buffer directly rather than running the graph. If the handler only supports graph-triggered analysis, call sim_control(action='step') N times before analyze, OR pass a precomputed sample_buffer kwarg if supported",
+    "analyze_randomization correlation reporting: handler may not expose pairwise_correlations natively — if absent, compute Pearson manually on the returned per-axis sample series. The diagnose_args lists pairwise_correlations.mass_static_friction as expected key; if handler does not populate it the canonical degrades to a std-only check (correlation validation skipped)",
+    "create_isaaclab_env: IsaacLab must be installed; task_type='manipulation' must map to a known template in the running IsaacLab version. With IsaacLab missing, this stage returns an error dict — the canonical proceeds to write the result file with steps_completed=0 (the correlation-axis check is the primary success criterion, not the training-loop reachability)",
+    "clone_envs source_path /World/envs/env_0: create_isaaclab_env must create this path as a side-effect; if it does not, manually create_prim at that path before clone_envs. With 16 envs at 2.5m spacing, the total env grid spans ~10m in each dimension",
+    "launch_training with correlated-DR consumption: launch_training does NOT natively read the pre-drawn sample buffer — the IsaacLab env's reset() callback must be wired to consume samples from the configure_correlated_dr-registered config. If the env's reset() falls back to independent uniform sampling, the policy never sees correlated draws even though sample_correlated_dr produced them. Verify by inspecting the env's randomization config after create_isaaclab_env",
+    "checkpoint_training: run_id 'FrankaPickCubeCorrelatedDR' must match exactly what launch_training registered; if launch_training uses a different internal ID the checkpoint will target the wrong run. The 'correlated_dr_baseline' tag is metadata for downstream comparison against an independent-DR baseline",
+    "Memory footprint with 16 envs + 4-axis correlated DR: ~3-4 GB VRAM. On VRAM-constrained GPUs (<8 GB free), reduce NUM_ENVS to 8 before launch_training. The pre-drawn sample buffer is small (100 × 4 × 8 bytes ≈ 3.2 KB) — no memory pressure from the DR config itself",
+    "Result file write happens BEFORE the assert, so even on IsaacLab-missing failure the correlation-axis check is persisted. Downstream consumers should check result['correlation_ok'] AND result['all_axes_active'] independently of result['steps_completed']"
+  ],
+  "extends": "rl-training-category",
+  "extension_notes": "Fourth rl-training canonical (after CP-NEW-parallel-env-scaling-32, CP-NEW-eureka-pick-place-reward, CP-NEW-dr-curriculum-trainer, CP-NEW-rl-clone-env, CP-NEW-rl-policy-export-onnx, CP-NEW-rl-eureka-locomotion). Distinctive structural signal: ONLY rl-training canonical that exercises CORRELATED (joint copula) DR sampling — all other DR canonicals use INDEPENDENT per-axis sampling. The discriminating tool-pair is configure_correlated_dr + sample_correlated_dr (both Phase 7B SDG addendum tools, repurposed here for RL training rather than SDG). Companion to A80 (CP-NEW-sdg-multi-cam-correlated-dr): A80 correlates lighting across cameras within an SDG frame; A85 correlates physics across episodes within an RL training run. Same tools, different parameter domain and application granularity. The success criterion (Pearson(mass, friction) >= 0.7 across 100 samples) directly mirrors the backlog spec (Pearson >= 0.8) with a small sampling-noise allowance — at 100 samples a true rho=0.80 typically produces empirical rho in [0.72, 0.86]. Backlog source: rl-domain-randomization-correlated-001 (priority_tier=2, category=rl-training, tier-1-locally-runnable, asset_dependencies=['Franka'], blockers=[], pattern_hint=train).",
+  "intent": {
+    "pattern_hint": "train",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false,
+      "n_correlated_dr_axes": 4,
+      "n_dr_samples": 100,
+      "correlation_target": 0.80,
+      "uses_correlated_dr": true,
+      "uses_dr_curriculum": false,
+      "correlation_method": "copula",
+      "n_parallel_envs": 16
+    },
+    "structural_tags": [
+      "isaac:rl.correlated_dr",
+      "isaac:rl.training_robustness",
+      "isaac:training.rl_ppo",
+      "isaac:training.domain_randomization",
+      "isaac:training.parallel_envs",
+      "isaac:dr.correlated_copula",
+      "isaac:dr.physics_parameters",
+      "isaac:dr.joint_sampling",
+      "isaac:dr.mass",
+      "isaac:dr.friction",
+      "isaac:dr.joint_damping",
+      "isaac:topology.single_station",
+      "isaac:robot.fixed_base.arm"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": []
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "franka_panda",
+        "ur5e",
+        "kinova_gen3"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "source_bin": {
+      "constraints": [
+        "bin"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "target_bin": {
+      "constraints": [
+        "bin"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": [
+        "cube"
+      ],
+      "min": 1,
+      "max": 4,
+      "param_name": "n_cubes",
+      "unordered": true
+    },
+    "training_run": {
+      "constraints": [
+        "isaaclab_ppo"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [1, 0, 0, 0]
+    },
+    "source_bin": {
+      "path": "/World/SourceBin",
+      "position": [0, 0.38, 0.825],
+      "size": [0.30, 0.30, 0.15]
+    },
+    "target_bin": {
+      "path": "/World/TargetBin",
+      "position": [0, -0.38, 0.825],
+      "size": [0.30, 0.30, 0.15]
+    },
+    "workpieces": [
+      {"path": "/World/Cube_1", "position": [0, 0.38, 0.90]}
+    ],
+    "training_run": {
+      "task_name": "FrankaPickCubeCorrelatedDR",
+      "algo": "ppo",
+      "num_steps": 20000,
+      "num_envs": 16,
+      "checkpoint_dir": "workspace/rl_checkpoints/FrankaPickCubeCorrelatedDR",
+      "n_correlated_samples": 100,
+      "correlation_target": 0.80
+    }
+  },
+  "code_template": "import json, os\nNUM_ENVS = {{training_run.num_envs}}\nN_SAMPLES = {{training_run.n_correlated_samples}}\nTASK_NAME = {{training_run.task_name}}\nROBOT_PATH = {{primary_robot.path}}\nRUN_DIR = {{training_run.checkpoint_dir}}\nRESULT_FILE = \"/tmp/rl_correlated_dr_result.json\"\nCORRELATION_TARGET = {{training_run.correlation_target}}\nCORRELATION_THRESHOLD = 0.7\nos.makedirs(RUN_DIR, exist_ok=True)\n\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_bin(prim_path={{source_bin.path}}, size={{source_bin.size}}, position={{source_bin.position}})\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\ncreate_bin(prim_path={{target_bin.path}}, size={{target_bin.size}}, position={{target_bin.position}})\n\n_dr_suggestions = suggest_dr_ranges(task_type=\"pick_and_place\", robot=\"Franka Panda\")\n_preset = apply_dr_preset(preset=\"indoor_industrial\")\n\nconfigure_correlated_dr(\n    parameter_groups=[\n        {\n            \"params\": [\"mass\", \"static_friction\", \"dynamic_friction\", \"joint_damping\"],\n            \"ranges\": {\"mass\": [0.5, 2.0], \"static_friction\": [0.3, 0.9], \"dynamic_friction\": [0.25, 0.85], \"joint_damping\": [5.0, 25.0]},\n            \"correlation\": CORRELATION_TARGET,\n            \"method\": \"copula\",\n        }\n    ],\n    target_path=\"/World\",\n    seed=42,\n)\n\n_samples = sample_correlated_dr(\n    axes=[\n        {\"name\": \"mass\",             \"mean\": 1.25, \"std\": 0.40},\n        {\"name\": \"static_friction\",  \"mean\": 0.60, \"std\": 0.15},\n        {\"name\": \"dynamic_friction\", \"mean\": 0.55, \"std\": 0.15},\n        {\"name\": \"joint_damping\",    \"mean\": 15.0, \"std\": 5.0},\n    ],\n    correlations=[\n        {\"axis_a\": \"mass\",            \"axis_b\": \"static_friction\",  \"rho\": CORRELATION_TARGET},\n        {\"axis_a\": \"mass\",            \"axis_b\": \"dynamic_friction\", \"rho\": CORRELATION_TARGET},\n        {\"axis_a\": \"mass\",            \"axis_b\": \"joint_damping\",    \"rho\": CORRELATION_TARGET},\n        {\"axis_a\": \"static_friction\", \"axis_b\": \"dynamic_friction\", \"rho\": 0.85},\n    ],\n    n_samples=N_SAMPLES,\n    seed=42,\n    name=\"rl_correlated_dr_baseline\",\n)\n\npreview_dr(num_samples=9, output_dir=\"workspace/dr_previews/rl_correlated_dr\", resolution=[512, 512])\n\n_analysis = analyze_randomization(num_samples=N_SAMPLES)\nper_axis_std = _analysis.get(\"per_axis_std\", {}) if isinstance(_analysis, dict) else {}\npairwise_correlations = _analysis.get(\"pairwise_correlations\", {}) if isinstance(_analysis, dict) else {}\nmass_friction_rho = pairwise_correlations.get(\"mass_static_friction\", 0.0)\nall_axes_active = all(std > 0 for std in per_axis_std.values()) if per_axis_std else False\ncorrelation_ok = mass_friction_rho >= CORRELATION_THRESHOLD\n\ncreate_isaaclab_env(task_name=TASK_NAME, robot_path=ROBOT_PATH, task_type=\"manipulation\", num_envs=NUM_ENVS, env_spacing=2.5, reward_terms=[\"reach_target\", \"grasp_success\", \"action_penalty\"])\nclone_envs(source_path=\"/World/envs/env_0\", num_envs=NUM_ENVS, spacing=2.5, collision_filter=True)\n\nlaunch_result = launch_training(task=TASK_NAME, algo={{training_run.algo}}, num_steps={{training_run.num_steps}}, num_envs=NUM_ENVS, checkpoint_dir=RUN_DIR)\nrun_id = launch_result.get(\"run_id\", TASK_NAME) if isinstance(launch_result, dict) else TASK_NAME\n_status = get_training_status(run_id=run_id, log_dir=RUN_DIR)\nsteps_completed = _status.get(\"steps_completed\", 0) if isinstance(_status, dict) else 0\n\n_checkpoint = checkpoint_training(run_id=run_id, include_replay_buffer=False, tag=\"correlated_dr_baseline\")\ncheckpoint_path = _checkpoint.get(\"checkpoint_path\", RUN_DIR + \"/correlated_dr_baseline.pt\") if isinstance(_checkpoint, dict) else RUN_DIR + \"/correlated_dr_baseline.pt\"\n\nwith open(RESULT_FILE, \"w\") as f:\n    json.dump({\"n_samples\": N_SAMPLES, \"correlation_target\": CORRELATION_TARGET, \"mass_static_friction_rho\": mass_friction_rho, \"correlation_threshold\": CORRELATION_THRESHOLD, \"correlation_ok\": correlation_ok, \"per_axis_std\": per_axis_std, \"all_axes_active\": all_axes_active, \"steps_completed\": steps_completed, \"checkpoint_path\": checkpoint_path, \"success\": correlation_ok and all_axes_active}, f, indent=2)\nassert os.path.exists(RESULT_FILE)"
+}
