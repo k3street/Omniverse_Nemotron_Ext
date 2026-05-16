@@ -1211,7 +1211,11 @@
   motion_controller_preference: direct_joint
   pattern_hint: rl-train
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-parallel-env-scaling-32.json
+  drafted_date: "2026-05-16"
+  drafted_by: A13
+  draft_notes: "A13; form-gate 0 ERROR (1 WARN settle_state); function-gate BLOCKED (requires IsaacLab install + >= 6 GB free VRAM)"
 
 - id: rl-actuator-net-training-001
   source: retrieval-miss
