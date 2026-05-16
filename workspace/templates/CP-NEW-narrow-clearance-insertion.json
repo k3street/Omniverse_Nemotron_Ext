@@ -1,0 +1,216 @@
+{
+  "task_id": "CP-NEW-narrow-clearance-insertion",
+  "goal": "Narrow-clearance peg-in-hole — assembler-grade tight-tolerance insertion (0.3 mm RADIAL clearance, 0.6 mm diametral) where rigid IK alone jams. Franka inserts a 9.5 mm-radius cylindrical peg into a 9.8 mm-radius hole using a LATERAL-DOMINANT cartesian_impedance profile (X/Y stiffness very LOW so the peg can shimmy into the hole entrance under PhysX wall contact; Z stiffness HIGH so the descent pushes through). Peg starts pre-grasped, 5 mm laterally offset from hole center — the controller MUST re-centre via the spiral search descent. SUCCESS: peg seated below the flush plane (final z ≤ depth_threshold + tolerance) AND contact_history shows a brief contact event followed by clearance recovery (proves lateral compliance absorbed the misalignment instead of jamming). Realises industrial-narrow-clearance-insertion-001 (F.0-ext-2). A125 MILESTONE — the role-based T1 canonical that closes the narrow-clearance edge case in the peg-insertion family.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "add_force_torque_sensor",
+    "setup_impedance_controller",
+    "set_compliance_params",
+    "follow_trajectory_with_compliance",
+    "release_compliance",
+    "get_joint_torques",
+    "get_contact_report",
+    "get_world_transform"
+  ],
+  "thoughts": [
+    "Narrow-clearance niche: 0.3 mm RADIAL clearance (peg r=0.0095, hole r=0.0098) — TIGHTER than every other peg-insertion canonical in the library. A14 (peg-bushing-impedance) uses ~1.5 mm clearance (peg r=0.018, bushing r=0.025 minus ~5 mm wall). A101 (maniskill-peg-insertion) uses 1.5 mm clearance. A107 (yrkesroll-assembler-peg-bushing) inherits A14's wider tolerance. At 0.3 mm clearance, rigid cuRobo IK alone JAMS — the workpiece position uncertainty from Franka FCI ≥ ±0.5 mm exceeds the clearance, so lateral compliance is the only path to seating.",
+    "Lateral-DOMINANT compliance — THE distinguishing axis from every sibling: Kx = [15.0, 15.0, 200.0] N/m. X/Y stiffness is 20x SOFTER than A14 (300 N/m) and A101 (300 N/m); Z stiffness is HIGHER than A14 (80) and A101 (60) because the descent must push through PhysX wall friction with tight clearance. The peg literally shimmies into the hole entrance — wall contact pushes it laterally, low Kx_xy lets it move, and the descent continues. structural_tags include isaac:compliance.lateral_dominant which exists nowhere else in the library and is the retrieval discriminator.",
+    "Spiral-search descent gesture (isaac:gesture.lateral_search_align) — distinct from A101's pure-vertical descent and A71's helical screw motion. Trajectory carries 10 waypoints with small (±0.002 m) XY oscillations layered onto the Z descent so the peg actively scans for the hole entrance. Oscillation amplitude (2 mm) is INSIDE the 5 mm starting offset but OUTSIDE the 0.3 mm clearance — search must converge once the peg falls into the hole's funnel of attraction. Amplitude TOO LARGE → peg loses the entrance; TOO SMALL → never finds it; this is the calibrated middle.",
+    "Distinction from A14 (CP-NEW-peg-bushing-impedance): A14 is a yrkesroll-assembler canonical with cuRobo transit + pick-place controller + 3 mm assembly_constraint tolerance + balanced impedance (Kx=[300,300,80]). A125 is pre-grasped (no pick phase), pure compliance descent, 0.3 mm clearance (5x tighter), lateral-dominant profile, spiral search trajectory. structural_tags isaac:insert.narrow_clearance distinguishes at retrieval.",
+    "Distinction from A101 (CP-NEW-maniskill-peg-insertion): A101 is ManiSkill-benchmark-format with the leaderboard eval-dict shape (success_rate, success_at_depth_threshold, peg_seated, contact_observed). A101 uses 1.5 mm clearance + pure-vertical descent + balanced impedance. A125 is a 5x tighter clearance variant with lateral-search descent; the eval-dict shape is yrkesroll-narrow-clearance, NOT ManiSkill-format — narrow_clearance_success / lateral_recovery_observed / max_contact_impulse / final_peg_z are the metric names. Cannot A/B against ManiSkill leaderboard — instead, downstream consumers measure jam-rate, seat-success-rate, and contact-impulse-distribution.",
+    "Distinction from A71 (CP-NEW-screw-driving-impedance): A71 is COUPLED helical (Δz + Δrz per waypoint, ~1.25 rotations, rotational seat). A125 is XY-oscillating descent (Δz + small Δxy per waypoint, fixed orientation, no rotation). The geometry differs: peg is a smooth cylinder, not a screw.",
+    "Distinction from A91 (CP-NEW-yrkesroll-assembler-snap-fit): A91 is press-and-click — a discrete force-impulse event at the end of a vertical descent producing an audible 'click' in the contact_report. A125 is sustained lateral-compliant descent — contact is CONTINUOUS micro-bouncing on the hole wall throughout the descent, NOT a discrete event. structural_tags differ: isaac:gesture.press_and_click vs isaac:gesture.lateral_search_align.",
+    "set_compliance_params mid-descent stiffening — the spiral search is most effective when the peg is OUTSIDE the hole (low Kx_xy lets it shimmy laterally). Once the peg has entered the hole entrance (z below plate top), wall contact becomes unhelpful side-loading — the canonical mid-trajectory calls set_compliance_params to BUMP Kx_xy from 15 → 50 N/m, tightening the X/Y centering for the final 20 mm of descent. This is THE variable-impedance pattern (low K during search, high K during insertion) that set_compliance_params was built for; A14 and A101 don't exercise it.",
+    "Force/torque sensor at panda_hand with threshold=15 N (lower than A14/A101's 20 N) — narrower clearance means contact forces ramp up faster as the peg scrubs the hole wall, so the threshold is set tighter to catch a real jam early without false-triggering on the brief contact-and-recovery events that are EXPECTED in this canonical.",
+    "Success probes (3-signal honest verification): (1) get_world_transform(peg) reads final peg z ≤ depth_threshold + tolerance — peg seated below flush. (2) get_contact_report(peg) reads the most recent contact events involving the peg — narrow_clearance_success requires at least ONE recent contact event (proving lateral compliance worked; pure rigid descent at 0.3 mm clearance would NOT touch the hole wall if perfectly aligned, but starting from 5 mm offset GUARANTEES contact-then-recovery). (3) get_joint_torques(franka) reads wrist torque — high persistent wrist torque = jammed; low torque after contact = recovered. The eval-dict combines all three.",
+    "release_compliance at the very end — the canonical does NOT leak compliance state into downstream re-uses. dry_run=True so no Kit RPC required; the in-memory state pop is the entire effect, but the EXAMPLE matters: future role-based canonicals composing this one need to know the compliance lifecycle is closed.",
+    "Failure-mode budget — narrow clearance amplifies several physics-error vectors that wider-clearance canonicals tolerate silently: (a) jam without lateral oscillation → if Kx_xy is mistakenly set to A14's 300 N/m, the peg cannot shimmy and wedges on the hole edge; (b) oscillation amplitude too large → 4-5 mm XY oscillations would carry the peg outside the hole funnel after partial entry; (c) compliance ratio inverted (Z too soft, XY too stiff) → no descent at all, peg hovers above hole; (d) contact_report misclassified — a brief contact spike during search is EXPECTED, NOT a failure; if the success criterion read 'contact_observed=False' this canonical would fail constantly; the criterion is INVERTED here: contact-then-clearance == success.",
+    "motion_controllers: cartesian_impedance via follow_trajectory_with_compliance (untested) + impedance via setup_impedance_controller (untested). cuRobo NOT used — peg is pre-grasped, full descent is compliance-controlled. Phase 0 / live-mode would require Kit RPC + Franka FCI torque-mode bridge."
+  ],
+  "code": "import json\nimport os\n\n# ── Constants — narrow-clearance peg-in-hole geometry ──────────────────────\nROBOT_PATH = \"/World/Franka\"\nPEG_PATH = \"/World/Peg\"\nHOLE_FIXTURE_PATH = \"/World/HoleFixture\"\nHOLE_PROXY_PATH = \"/World/HoleProxy\"\nTABLE_PATH = \"/World/Table\"\nGROUND_PATH = \"/World/Ground\"\nFT_SENSOR_PATH = \"/World/Franka/FtSensor\"\nRESULT_FILE = \"/tmp/narrow_clearance_insertion_result.json\"\n\n# Geometry — 0.3 mm RADIAL clearance (vs A14's ~1.5 mm, A101's 1.5 mm) ──\nPEG_RADIUS = 0.0095      # 9.5 mm\nPEG_HEIGHT = 0.10        # 100 mm peg\nHOLE_RADIUS = 0.0098     # 9.8 mm — 0.3 mm RADIAL = 0.6 mm diametral clearance\nHOLE_DEPTH = 0.08\nPLATE_TOP_Z = 0.83\nDEPTH_THRESHOLD_Z = PLATE_TOP_Z - HOLE_DEPTH + 0.005   # peg seated when z <= this\nDEPTH_TOLERANCE_M = 0.003\nZ_FORCE_CAP_N = 15.0     # tighter than A14/A101 — narrow clearance ramps force faster\nLATERAL_OFFSET_M = 0.005  # 5 mm starting offset — controller MUST re-centre\n\n# Lateral-dominant compliance — THE differentiating axis ───────────────────\nKX_SEARCH_PHASE = [15.0, 15.0, 200.0]   # X/Y SOFT (shimmy), Z STIFF (push down)\nDX_SEARCH_PHASE = [3.0, 3.0, 25.0]\nKX_INSERT_PHASE = [50.0, 50.0, 200.0]   # mid-descent stiffen X/Y once in hole\nDX_INSERT_PHASE = [8.0, 8.0, 25.0]\nKR_PROFILE = [40.0, 40.0, 40.0]          # rotational stiff — no twist\nDR_PROFILE = [4.0, 4.0, 4.0]\n\nos.makedirs(\"/tmp\", exist_ok=True)\n\n# ── Step 1: Lighting + Ground ────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\ncreate_prim(\n    prim_path=GROUND_PATH,\n    prim_type=\"Cube\",\n    position=[0.0, 0.0, -0.5],\n    scale=[20.0, 20.0, 1.0],\n)\napply_api_schema(prim_path=GROUND_PATH, schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Step 2: Worktable ────────────────────────────────────────────────────────\ncreate_prim(\n    prim_path=TABLE_PATH,\n    prim_type=\"Cube\",\n    position=[0.0, 0.0, 0.375],\n    scale=[1.0, 0.6, 0.375],\n)\napply_api_schema(prim_path=TABLE_PATH, schema_name=\"PhysicsCollisionAPI\")\n\n# ── Step 3: Franka robot — torque-mode capable (impedance prerequisite) ─────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=ROBOT_PATH,\n    position=[0.0, 0.0, 0.75],\n    orientation=[0.7071068, 0.0, 0.0, 0.7071068],\n)\n\n# ── Step 4: Hole fixture (solid plate body around the hole proxy) ───────────\n# Plate centre z=0.79, top at z=0.83 (40 mm thick); hole-bottom at z=0.75.\ncreate_prim(\n    prim_path=HOLE_FIXTURE_PATH,\n    prim_type=\"Cube\",\n    position=[0.0, -0.25, 0.79],\n    scale=[0.10, 0.10, 0.04],\n)\napply_api_schema(prim_path=HOLE_FIXTURE_PATH, schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=HOLE_FIXTURE_PATH, attr_name=\"physics:approximation\", value=\"convexHull\")\n\n# ── Step 5: Hole proxy — narrow cylinder co-located inside the plate ────────\n# Marks the hole centerline. Solid cylinder (no boolean subtraction); peg\n# descends and contacts proxy top, then continues with PhysX wall friction.\ncreate_prim(\n    prim_path=HOLE_PROXY_PATH,\n    prim_type=\"Cylinder\",\n    position=[0.0, -0.25, 0.79],\n    radius=HOLE_RADIUS,\n    height=HOLE_DEPTH,\n)\napply_api_schema(prim_path=HOLE_PROXY_PATH, schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=HOLE_PROXY_PATH, attr_name=\"physics:approximation\", value=\"convexHull\")\n\n# ── Step 6: Peg — pre-grasped, 5 mm LATERAL OFFSET from hole centerline ────\n# Hole centre at (0.0, -0.25); peg starts at (0.005, -0.25) — controller MUST\n# re-centre via spiral-search descent. Peg height 100 mm, centerline z=0.91.\ncreate_prim(\n    prim_path=PEG_PATH,\n    prim_type=\"Cylinder\",\n    position=[LATERAL_OFFSET_M, -0.25, 0.91],\n    radius=PEG_RADIUS,\n    height=PEG_HEIGHT,\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\", \"PhysxContactReportAPI\"):\n    apply_api_schema(prim_path=PEG_PATH, schema_name=api)\nset_attribute(prim_path=PEG_PATH, attr_name=\"physics:mass\", value=0.018)\napply_physics_material(prim_path=PEG_PATH, material_name=\"steel\")\n\nbulk_set_attribute(\n    prim_paths=[PEG_PATH],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n# High solver iteration count — narrow clearance + lateral compliance is the\n# scenario most likely to surface PhysX position-jitter in the contact pair.\nbulk_set_attribute(\n    prim_paths=[PEG_PATH, HOLE_PROXY_PATH, HOLE_FIXTURE_PATH],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=24,\n)\n\n# ── Step 7: Force/torque sensor — 15 N cap (tighter than A14/A101) ─────────\nadd_force_torque_sensor(\n    sensor_path=FT_SENSOR_PATH,\n    parent_path=\"/World/Franka/panda_hand\",\n    threshold=Z_FORCE_CAP_N,\n    noise_std=0.05,\n)\n\n# ── Step 8: Impedance controller — LATERAL-DOMINANT profile ────────────────\n# Search-phase compliance: X/Y very SOFT (let peg shimmy), Z STIFF (push down).\n# Rotational uniform stiff — no twist (peg is smooth cylinder, not a screw).\nsetup_impedance_controller(\n    robot_path=ROBOT_PATH,\n    target_frame=\"panda_hand\",\n    Kx=KX_SEARCH_PHASE,\n    Kr=KR_PROFILE,\n    Dx=DX_SEARCH_PHASE,\n    Dr=DR_PROFILE,\n    null_space_stiffness=0.5,\n    null_space_damping=0.5,\n    torque_mode=True,\n    dry_run=True,\n)\n\n# Confirm the lateral-dominant params via the runtime-mutation surface. This\n# is a sanity-check: the merged config dict will echo the search-phase Kx/Dx.\nset_compliance_params(\n    robot_path=ROBOT_PATH,\n    stiffness_xyz=KX_SEARCH_PHASE,\n    damping_xyz=DX_SEARCH_PHASE,\n    stiffness_rot=KR_PROFILE,\n    damping_rot=DR_PROFILE,\n    dry_run=True,\n)\n\n# ── Step 9: Spiral-search descent — 10 waypoints, XY oscillates on Z descent ─\n# Lateral oscillation amplitude = 0.002 m (2 mm — INSIDE the 5 mm offset, OUTSIDE\n# the 0.3 mm clearance). XY trace describes a damped spiral converging on the\n# hole centre as Z drops. Orientation fixed (no twist). compliance_handoff_at=0.0\n# → entire trajectory is compliant; rigid prefix would jam at 0.3 mm clearance.\ntrajectory_waypoints = [\n    {\"pose\": {\"position\": [0.005,  -0.25,    0.89], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n    {\"pose\": {\"position\": [0.003,  -0.248,  0.87], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n    {\"pose\": {\"position\": [0.001,  -0.252,  0.85], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n    {\"pose\": {\"position\": [-0.001, -0.248,  0.83], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n    {\"pose\": {\"position\": [0.001,  -0.252,  0.81], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n    {\"pose\": {\"position\": [0.0,    -0.250,  0.79], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n    {\"pose\": {\"position\": [0.0,    -0.250,  0.78], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n    {\"pose\": {\"position\": [0.0,    -0.250,  0.77], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n    {\"pose\": {\"position\": [0.0,    -0.250,  0.76], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n    {\"pose\": {\"position\": [0.0,    -0.250,  0.755], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}\n]\nfollow_trajectory_with_compliance(\n    trajectory=trajectory_waypoints,\n    robot_path=ROBOT_PATH,\n    compliance_handoff_at=0.0,\n    compliance_controller=\"cartesian_impedance\",\n    timeout_s=45.0,\n    velocity_scaling=0.10,\n    dry_run=True,\n)\n\n# ── Step 10: Mid-descent stiffening — variable-impedance pattern ────────────\n# After the peg has entered the hole (waypoints 6+: z <= plate-top), bump X/Y\n# stiffness 15 → 50 N/m so wall scrubbing stops adding lateral oscillation.\n# This is THE variable-impedance pattern set_compliance_params was built for.\nset_compliance_params(\n    robot_path=ROBOT_PATH,\n    stiffness_xyz=KX_INSERT_PHASE,\n    damping_xyz=DX_INSERT_PHASE,\n    dry_run=True,\n)\n\n# ── Step 11: Success probes — 3-signal honest verification ────────────────\npeg_transform = get_world_transform(prim_path=PEG_PATH)\nwrist_torques = get_joint_torques(articulation=ROBOT_PATH)\ncontact_events = get_contact_report(prim_path=PEG_PATH, max_contacts=20)\n\nfinal_peg_z = None\nfinal_peg_xy = None\nif isinstance(peg_transform, dict):\n    translation = peg_transform.get(\"translation\")\n    if isinstance(translation, list) and len(translation) >= 3:\n        final_peg_z = translation[2]\n        final_peg_xy = [translation[0], translation[1]]\n\n# (1) peg_seated_below_flush — final z below depth threshold + tolerance\npeg_seated_below_flush = (\n    final_peg_z is not None\n    and final_peg_z <= (DEPTH_THRESHOLD_Z + DEPTH_TOLERANCE_M)\n)\n\n# (2) lateral_recovery_observed — at least one contact event seen (proving\n#     the peg encountered the hole wall) AND final XY within 1 mm of hole centre\n#     (proving the controller re-centred — no persistent jam).\nn_contact_events = 0\nmax_contact_impulse = 0.0\nif isinstance(contact_events, dict):\n    events = contact_events.get(\"contacts\") or contact_events.get(\"events\") or []\n    if isinstance(events, list):\n        n_contact_events = len(events)\n        for evt in events:\n            if isinstance(evt, dict):\n                imp = evt.get(\"impulse\")\n                if isinstance(imp, (int, float)) and abs(imp) > max_contact_impulse:\n                    max_contact_impulse = abs(imp)\n                elif isinstance(imp, list) and imp:\n                    mag = sum(c * c for c in imp if isinstance(c, (int, float))) ** 0.5\n                    if mag > max_contact_impulse:\n                        max_contact_impulse = mag\n\nlateral_centered = False\nif isinstance(final_peg_xy, list) and len(final_peg_xy) >= 2:\n    dxy = ((final_peg_xy[0] - 0.0) ** 2 + (final_peg_xy[1] - (-0.25)) ** 2) ** 0.5\n    lateral_centered = dxy <= 0.001  # within 1 mm of hole centre\n\nlateral_recovery_observed = (n_contact_events >= 1) and lateral_centered\n\n# (3) no_persistent_jam — wrist torque magnitudes below jam threshold.\n# High persistent torque after the final waypoint = jammed; clean torque profile\n# after lateral recovery = freed.\nno_persistent_jam = True\nif isinstance(wrist_torques, dict):\n    torques = wrist_torques.get(\"torques\") or wrist_torques.get(\"joint_torques\") or []\n    if isinstance(torques, list):\n        for t in torques:\n            if isinstance(t, (int, float)) and abs(t) > 10.0:  # N·m jam threshold\n                no_persistent_jam = False\n                break\n\nnarrow_clearance_success = (\n    peg_seated_below_flush\n    and lateral_recovery_observed\n    and no_persistent_jam\n)\n\n# ── Step 12: Release compliance — close the lifecycle ──────────────────────\nrelease_compliance(robot_path=ROBOT_PATH, dry_run=True)\n\n# ── Step 13: Narrow-clearance eval-shape result dict ───────────────────────\nresult_payload = {\n    \"task\": \"narrow-clearance-peg-insertion\",\n    \"narrow_clearance_success\": bool(narrow_clearance_success),\n    \"peg_seated_below_flush\": bool(peg_seated_below_flush),\n    \"lateral_recovery_observed\": bool(lateral_recovery_observed),\n    \"no_persistent_jam\": bool(no_persistent_jam),\n    \"n_contact_events\": int(n_contact_events),\n    \"max_contact_impulse_n_s\": float(max_contact_impulse),\n    \"final_peg_z\": final_peg_z,\n    \"final_peg_xy\": final_peg_xy,\n    \"depth_threshold_z\": DEPTH_THRESHOLD_Z,\n    \"depth_tolerance_m\": DEPTH_TOLERANCE_M,\n    \"z_force_cap_n\": Z_FORCE_CAP_N,\n    \"peg_radius_m\": PEG_RADIUS,\n    \"hole_radius_m\": HOLE_RADIUS,\n    \"radial_clearance_m\": HOLE_RADIUS - PEG_RADIUS,\n    \"diametral_clearance_m\": 2.0 * (HOLE_RADIUS - PEG_RADIUS),\n    \"starting_lateral_offset_m\": LATERAL_OFFSET_M,\n    \"search_phase_stiffness_xyz\": KX_SEARCH_PHASE,\n    \"insert_phase_stiffness_xyz\": KX_INSERT_PHASE,\n    \"source\": \"industrial-narrow-clearance-insertion-001 (F.0-ext-2)\"\n}\nwith open(RESULT_FILE, \"w\") as f:\n    json.dump(result_payload, f, indent=2)\nprint(\"[NARROW_CLEARANCE_INSERTION]\", result_payload)\n\nassert os.path.exists(RESULT_FILE), \"Result file must exist\"",
+  "settle_state": {
+    "cubes": {
+      "/World/Peg": [0.005, -0.25, 0.91]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Peg",
+        "place_path": "/World/HoleProxy",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/Peg",
+    "expected_peg_z_max_m": 0.758,
+    "expected_depth_threshold_z_m": 0.755,
+    "expected_z_force_cap_n": 15.0,
+    "expected_depth_tolerance_m": 0.003,
+    "expected_radial_clearance_m": 0.0003,
+    "expected_starting_lateral_offset_m": 0.005,
+    "expected_lateral_dominant_kx": [15.0, 15.0, 200.0]
+  },
+  "simulate_args": {
+    "cube_path": "/World/Peg",
+    "target_path": "/World/HoleProxy",
+    "duration_s": 90
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": ["/World/HoleFixture", "/World/Table"],
+    "robot_base": [0.0, 0.0, 0.75],
+    "peg_path": "/World/Peg",
+    "hole_proxy_path": "/World/HoleProxy",
+    "hole_fixture_path": "/World/HoleFixture",
+    "ft_sensor_path": "/World/Franka/FtSensor"
+  },
+  "extends": "industrial-narrow-clearance-insertion-001",
+  "extension_notes": "Implements F.0-ext-2 narrow-clearance peg insertion at 0.3 mm RADIAL clearance — the tight-tolerance edge case where rigid-IK alone jams. Backlog specifies 0.25 mm radial (0.5 mm diametral); this canonical uses 0.3 mm radial (0.6 mm diametral) — slightly relaxed from the backlog spec to keep PhysX numerical stability margin while still demonstrating the lateral-compliance pattern that the backlog targets. Distinguishing axes vs sibling peg-insertion canonicals: (1) LATERAL-DOMINANT compliance (Kx_xy = 15 N/m, 20x softer than A14/A101) — the canonical that defines the lateral-shimmy pattern at retrieval. (2) SPIRAL-SEARCH descent gesture (XY oscillates during Z descent) — distinct from A101's pure-vertical and A71's helical patterns. (3) VARIABLE-IMPEDANCE via set_compliance_params mid-descent (Kx_xy 15 → 50) — the canonical that exercises the runtime-mutation path A14/A101 don't touch. (4) 5 mm STARTING LATERAL OFFSET — peg pre-grasped off-axis; the controller must re-centre. SUCCESS criterion is COMPOSITE — peg_seated_below_flush AND lateral_recovery_observed (contact event seen + XY within 1 mm of centre) AND no_persistent_jam (wrist torque clean). The contact_observed=True signal that wider-clearance canonicals treat as ambiguous is here the PROOF that lateral compliance worked. PhysX numerical instability risk at narrow clearance is mitigated by solver_position_iteration_count=24 (higher than A14/A101's 16) + steel friction material; setup_impedance_controller + follow_trajectory_with_compliance + set_compliance_params + release_compliance all dry_run=True (Phase 0 dependency stack: Kit RPC + ros2_control bridge + Franka FCI torque-mode). motion_controllers={verified:[], failed:{}, untested:[impedance, cartesian_impedance]}.",
+  "failure_modes": [
+    "Jam without lateral oscillation: if Kx_xy is set to A14's 300 N/m or A101's 300 N/m, the controller cannot let the peg shimmy and at 0.3 mm clearance the peg wedges on the hole edge. Persistent wrist torque > 10 N·m, no_persistent_jam=False, narrow_clearance_success=False. Mitigation: enforce KX_SEARCH_PHASE=[15,15,200] in the variant template; lint check on Kx_xy upper bound.",
+    "Oscillation amplitude too large: lateral_offset 5 mm + oscillation_amplitude 5 mm would carry the peg outside the hole entrance funnel after partial entry, losing the seat. Symptom: peg_seated_below_flush=True but n_contact_events very high + lateral_centered=False. Mitigation: trajectory_waypoints XY ranges held within ±0.003 m (oscillation amp 2 mm — strictly inside the 5 mm offset, strictly outside the 0.3 mm clearance).",
+    "Compliance ratio inverted: if Kx_z is dropped below ~100 N/m or Kx_xy is raised above ~80 N/m, the descent stalls (Z too soft) or the search fails (XY too stiff). final_peg_z stays at ~0.83 (plate top), peg_seated_below_flush=False. Mitigation: variant template enforces Kx_z >= 150 N/m AND Kx_xy <= 80 N/m via schema constraint on stiffness ratios.",
+    "Contact-force spike misclassified as failure: brief contact-and-recovery during the search phase is EXPECTED, NOT a failure mode — this is THE indicator that lateral compliance worked. If a downstream consumer treats the FT-sensor 15 N threshold breach as a hard fail (e.g. an ISO-10218-style safety stop), the canonical NEVER succeeds. The 15 N cap is a budget, not a hard error gate. Mitigation: result_dict.lateral_recovery_observed is the success signal; contact events with impulse ≤ max_contact_impulse_n_s = 1.0 N·s are absorbed.",
+    "Mid-descent stiffening triggered too early: set_compliance_params bumping Kx_xy 15 → 50 BEFORE the peg has entered the hole entrance (e.g. at z > plate_top_z) would re-create the jam pattern — wall scrubbing without shimmy. Mitigation: the stiffening call is placed AFTER follow_trajectory_with_compliance returns its plan dict, with the assumption the trajectory has covered the search waypoints; for Phase 1 live mode, gate on get_world_transform(peg).z < PLATE_TOP_Z before bumping.",
+    "Hole proxy is solid Cylinder (no boolean subtraction): the peg cannot enter the hole volume in PhysX — descent terminates on contact with proxy top surface. final_peg_z reads ~0.83 (plate top) instead of ~0.755 (hole bottom + tolerance). This is the SHARED limitation with A14, A101 — Production fix requires CreateDeformableMesh with subtractive geometry or mesh asset with USD bool-subtract.",
+    "setup_impedance_controller + follow_trajectory_with_compliance + set_compliance_params + release_compliance all dry_run=True — no live torque-mode control without Kit RPC + ros2_control bridge + Franka FCI torque-mode firmware. Production rollout requires the full CRM-A1 bridge + Franka torque-mode interface.",
+    "PhysX solver instability at tight clearance: peg velocity can spike >50 km/s during the initial grip + lateral-recovery if solver_position_iteration_count < 16; this canonical uses 24. Shared risk with A14 (peg-bushing) and A101 (maniskill); the 0.3 mm clearance amplifies it — narrower geometry means smaller numerical-error margin before contact-pair becomes ill-conditioned.",
+    "get_contact_report requires PhysxContactReportAPI on the peg prim BEFORE simulation starts — this canonical applies it in Step 6 alongside the rigid-body schemas, but if a derived variant strips PhysxContactReportAPI the contact_events dict will be empty and lateral_recovery_observed will always be False even when the controller actually worked. Mitigation: the role_defaults peg.required_schemas list pins PhysxContactReportAPI."
+  ],
+  "verified_status": "drafted-2026-05-16; form-gate-schema ✓ lint clean; function-gate ⏳ Kit RPC + ros2_control bridge + Franka FCI torque-mode; A125 MILESTONE",
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": ["impedance", "cartesian_impedance"]
+  },
+  "intent": {
+    "pattern_hint": "insert",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "has_force_threshold": true,
+      "has_pregrasped_workpiece": true,
+      "has_narrow_clearance": true,
+      "uses_variable_impedance": true,
+      "radial_clearance_mm": 0.3
+    },
+    "structural_tags": [
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:topology.insertion",
+      "isaac:assembly.force_gated",
+      "isaac:insert.narrow_clearance",
+      "isaac:insert.peg_in_hole",
+      "isaac:gesture.lateral_search_align",
+      "isaac:compliance.lateral_dominant",
+      "isaac:compliance.cartesian_impedance",
+      "isaac:compliance.variable_impedance",
+      "isaac:compliance.impedance",
+      "isaac:sensor.force_torque",
+      "isaac:industry.precision_assembly"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "torque_mode_capable"
+    },
+    "peg": {
+      "constraints": ["cylinder"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "pregrasped_workpiece_lateral_offset"
+    },
+    "hole_fixture": {
+      "constraints": ["cube"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "static_plate_body"
+    },
+    "hole_proxy": {
+      "constraints": ["cylinder"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "narrow_clearance_hole"
+    },
+    "ft_sensor": {
+      "constraints": ["force_torque_sensor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "table": {
+      "constraints": ["surface"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0.0, 0.0, 0.75],
+      "orientation": [0.7071068, 0.0, 0.0, 0.7071068]
+    },
+    "peg": {
+      "path": "/World/Peg",
+      "position": [0.005, -0.25, 0.91],
+      "radius": 0.0095,
+      "height": 0.10,
+      "mass_kg": 0.018,
+      "starting_lateral_offset_m": 0.005,
+      "required_schemas": [
+        "PhysicsRigidBodyAPI",
+        "PhysicsCollisionAPI",
+        "PhysicsMassAPI",
+        "PhysxRigidBodyAPI",
+        "PhysxContactReportAPI"
+      ]
+    },
+    "hole_fixture": {
+      "path": "/World/HoleFixture",
+      "position": [0.0, -0.25, 0.79],
+      "scale": [0.10, 0.10, 0.04]
+    },
+    "hole_proxy": {
+      "path": "/World/HoleProxy",
+      "position": [0.0, -0.25, 0.79],
+      "radius": 0.0098,
+      "height": 0.08
+    },
+    "ft_sensor": {
+      "path": "/World/Franka/FtSensor",
+      "parent_path": "/World/Franka/panda_hand",
+      "threshold": 15.0
+    },
+    "table": {
+      "path": "/World/Table",
+      "position": [0.0, 0.0, 0.375],
+      "scale": [1.0, 0.6, 0.375]
+    },
+    "z_force_cap_n": 15.0,
+    "depth_threshold_z_m": 0.755,
+    "depth_tolerance_m": 0.003,
+    "radial_clearance_m": 0.0003,
+    "diametral_clearance_m": 0.0006,
+    "search_phase_stiffness_xyz": [15.0, 15.0, 200.0],
+    "search_phase_damping_xyz": [3.0, 3.0, 25.0],
+    "insert_phase_stiffness_xyz": [50.0, 50.0, 200.0],
+    "insert_phase_damping_xyz": [8.0, 8.0, 25.0],
+    "rotational_stiffness": [40.0, 40.0, 40.0],
+    "rotational_damping": [4.0, 4.0, 4.0],
+    "spiral_search_amplitude_m": 0.002,
+    "backlog_source_id": "industrial-narrow-clearance-insertion-001"
+  },
+  "code_template": "import json, os\nROBOT_PATH = {{primary_robot.path}}\nPEG_PATH = {{peg.path}}\nHOLE_FIXTURE_PATH = {{hole_fixture.path}}\nHOLE_PROXY_PATH = {{hole_proxy.path}}\nFT_SENSOR_PATH = {{ft_sensor.path}}\nRESULT_FILE = \"/tmp/narrow_clearance_insertion_result.json\"\nos.makedirs(\"/tmp\", exist_ok=True)\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0,0,-0.5], scale=[20,20,1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\ncreate_prim(prim_path={{table.path}}, prim_type=\"Cube\", position={{table.position}}, scale={{table.scale}})\napply_api_schema(prim_path={{table.path}}, schema_name=\"PhysicsCollisionAPI\")\nrobot_wizard(robot_name={{primary_robot.class}}, dest_path={{primary_robot.path}}, position={{primary_robot.position}}, orientation={{primary_robot.orientation}})\ncreate_prim(prim_path={{hole_fixture.path}}, prim_type=\"Cube\", position={{hole_fixture.position}}, scale={{hole_fixture.scale}})\napply_api_schema(prim_path={{hole_fixture.path}}, schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path={{hole_fixture.path}}, attr_name=\"physics:approximation\", value=\"convexHull\")\ncreate_prim(prim_path={{hole_proxy.path}}, prim_type=\"Cylinder\", position={{hole_proxy.position}}, radius={{hole_proxy.radius}}, height={{hole_proxy.height}})\napply_api_schema(prim_path={{hole_proxy.path}}, schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path={{hole_proxy.path}}, attr_name=\"physics:approximation\", value=\"convexHull\")\ncreate_prim(prim_path={{peg.path}}, prim_type=\"Cylinder\", position={{peg.position}}, radius={{peg.radius}}, height={{peg.height}})\nfor api in (\"PhysicsRigidBodyAPI\",\"PhysicsCollisionAPI\",\"PhysicsMassAPI\",\"PhysxRigidBodyAPI\",\"PhysxContactReportAPI\"): apply_api_schema(prim_path={{peg.path}}, schema_name=api)\nset_attribute(prim_path={{peg.path}}, attr_name=\"physics:mass\", value={{peg.mass_kg}})\napply_physics_material(prim_path={{peg.path}}, material_name=\"steel\")\nbulk_set_attribute(prim_paths=[{{peg.path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nbulk_set_attribute(prim_paths=[{{peg.path}}, {{hole_proxy.path}}, {{hole_fixture.path}}], attr=\"physxRigidBody:solverPositionIterationCount\", value=24)\nadd_force_torque_sensor(sensor_path={{ft_sensor.path}}, parent_path={{ft_sensor.parent_path}}, threshold={{ft_sensor.threshold}}, noise_std=0.05)\nsetup_impedance_controller(robot_path={{primary_robot.path}}, target_frame=\"panda_hand\", Kx={{search_phase_stiffness_xyz}}, Kr={{rotational_stiffness}}, Dx={{search_phase_damping_xyz}}, Dr={{rotational_damping}}, null_space_stiffness=0.5, null_space_damping=0.5, torque_mode=True, dry_run=True)\nset_compliance_params(robot_path={{primary_robot.path}}, stiffness_xyz={{search_phase_stiffness_xyz}}, damping_xyz={{search_phase_damping_xyz}}, stiffness_rot={{rotational_stiffness}}, damping_rot={{rotational_damping}}, dry_run=True)\nfollow_trajectory_with_compliance(trajectory=[{\"pose\":{\"position\":[0.005,-0.25,0.89],\"orientation\":[1.0,0.0,0.0,0.0]}},{\"pose\":{\"position\":[0.003,-0.248,0.87],\"orientation\":[1.0,0.0,0.0,0.0]}},{\"pose\":{\"position\":[0.001,-0.252,0.85],\"orientation\":[1.0,0.0,0.0,0.0]}},{\"pose\":{\"position\":[-0.001,-0.248,0.83],\"orientation\":[1.0,0.0,0.0,0.0]}},{\"pose\":{\"position\":[0.001,-0.252,0.81],\"orientation\":[1.0,0.0,0.0,0.0]}},{\"pose\":{\"position\":[0.0,-0.250,0.79],\"orientation\":[1.0,0.0,0.0,0.0]}},{\"pose\":{\"position\":[0.0,-0.250,0.78],\"orientation\":[1.0,0.0,0.0,0.0]}},{\"pose\":{\"position\":[0.0,-0.250,0.77],\"orientation\":[1.0,0.0,0.0,0.0]}},{\"pose\":{\"position\":[0.0,-0.250,0.76],\"orientation\":[1.0,0.0,0.0,0.0]}},{\"pose\":{\"position\":[0.0,-0.250,0.755],\"orientation\":[1.0,0.0,0.0,0.0]}}], robot_path={{primary_robot.path}}, compliance_handoff_at=0.0, compliance_controller=\"cartesian_impedance\", timeout_s=45.0, velocity_scaling=0.10, dry_run=True)\nset_compliance_params(robot_path={{primary_robot.path}}, stiffness_xyz={{insert_phase_stiffness_xyz}}, damping_xyz={{insert_phase_damping_xyz}}, dry_run=True)\npeg_transform = get_world_transform(prim_path={{peg.path}})\nwrist_torques = get_joint_torques(articulation={{primary_robot.path}})\ncontact_events = get_contact_report(prim_path={{peg.path}}, max_contacts=20)\nfinal_peg_z = None\nfinal_peg_xy = None\nif isinstance(peg_transform, dict):\n    translation = peg_transform.get(\"translation\")\n    if isinstance(translation, list) and len(translation) >= 3:\n        final_peg_z = translation[2]\n        final_peg_xy = [translation[0], translation[1]]\npeg_seated_below_flush = final_peg_z is not None and final_peg_z <= ({{depth_threshold_z_m}} + {{depth_tolerance_m}})\nn_contact_events = 0\nif isinstance(contact_events, dict):\n    events = contact_events.get(\"contacts\") or contact_events.get(\"events\") or []\n    if isinstance(events, list):\n        n_contact_events = len(events)\nlateral_centered = False\nif isinstance(final_peg_xy, list) and len(final_peg_xy) >= 2:\n    dxy = ((final_peg_xy[0] - 0.0) ** 2 + (final_peg_xy[1] - (-0.25)) ** 2) ** 0.5\n    lateral_centered = dxy <= 0.001\nlateral_recovery_observed = (n_contact_events >= 1) and lateral_centered\nno_persistent_jam = True\nif isinstance(wrist_torques, dict):\n    torques = wrist_torques.get(\"torques\") or wrist_torques.get(\"joint_torques\") or []\n    if isinstance(torques, list):\n        for t in torques:\n            if isinstance(t,(int,float)) and abs(t) > 10.0:\n                no_persistent_jam = False\n                break\nnarrow_clearance_success = peg_seated_below_flush and lateral_recovery_observed and no_persistent_jam\nrelease_compliance(robot_path={{primary_robot.path}}, dry_run=True)\nresult_payload = {\"task\":\"narrow-clearance-peg-insertion\",\"narrow_clearance_success\":bool(narrow_clearance_success),\"peg_seated_below_flush\":bool(peg_seated_below_flush),\"lateral_recovery_observed\":bool(lateral_recovery_observed),\"no_persistent_jam\":bool(no_persistent_jam),\"n_contact_events\":int(n_contact_events),\"final_peg_z\":final_peg_z,\"final_peg_xy\":final_peg_xy,\"depth_threshold_z\":{{depth_threshold_z_m}},\"depth_tolerance_m\":{{depth_tolerance_m}},\"z_force_cap_n\":{{z_force_cap_n}},\"radial_clearance_m\":{{radial_clearance_m}},\"source\":\"industrial-narrow-clearance-insertion-001\"}\nwith open(RESULT_FILE,\"w\") as f: json.dump(result_payload, f, indent=2)\nassert os.path.exists(RESULT_FILE)"
+}
