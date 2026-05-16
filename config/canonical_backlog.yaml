@@ -1404,7 +1404,9 @@
   motion_controller_preference: none
   pattern_hint: rl-train
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-reward-review-iterate.json
+  drafted_date: "2026-05-16"
 
 - id: rl-groot-eval-harness-001
   source: retrieval-miss
