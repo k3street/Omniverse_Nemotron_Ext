@@ -1020,7 +1020,11 @@
   motion_controller_preference: curobo
   pattern_hint: reorient
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-maniskill-stack-cube.json
+  drafted_date: "2026-05-16"
+  drafted_by: A31
+  draft_notes: "A31; form-gate 1 OK 0 ERROR 0 WARN (--validate-tool-calls); first standalone use of place_on_top_of spatial resolver in library; grasp_object top_down + place_on_top_of center pattern; function-gate pending live Kit"
 
 - id: research-maniskill-peg-insertion-001
   source: ManiSkill
