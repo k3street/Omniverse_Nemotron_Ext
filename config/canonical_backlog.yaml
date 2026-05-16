@@ -824,7 +824,11 @@
   motion_controller_preference: none
   pattern_hint: sort
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-nir-material-divert.json
+  drafted_date: "2026-05-16"
+  drafted_by: A37
+  draft_notes: "A37; form-gate 0 ERROR 0 WARN (--validate-tool-calls); first use of nir_material_sensor in library; function-gate pending live Kit"
 
 - id: industrial-forklift-handoff-arm-001
   source: industrial-asset
