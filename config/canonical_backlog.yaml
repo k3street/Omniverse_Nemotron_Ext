@@ -1452,7 +1452,11 @@
   motion_controller_preference: direct_joint
   pattern_hint: rl-train
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-physics-calibrate-actuator.json
+  drafted_date: "2026-05-16"
+  drafted_by: "A46"
+  draft_notes: "A46; form-gate 0 ERROR 1 WARN (settle_state absent — expected for non-delivery train canonical); function-gate BLOCKED (requires real HDF5 robot logs + IsaacSim physics backend)"
 
 - id: rl-checkpoint-resume-001
   source: retrieval-miss
