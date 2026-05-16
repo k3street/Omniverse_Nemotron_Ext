@@ -1,0 +1,199 @@
+{
+  "task_id": "CP-NEW-sbend-sortation",
+  "goal": "Build a high-speed S-bend sortation system: two infeed conveyors (LaneA and LaneB) merge at a Y-junction onto a shared main belt, which curves through an S-bend track and then diverges into two output bins (BinA for items from LaneA, BinB for items from LaneB). create_conveyor_track defines the multi-segment S-shaped spine; setup_zone_partition splits the merge segment into two arrival zones so each item retains its source-lane identity through the bend. A proximity sensor at the diverge point reads the lane tag and routes via conveyor gating. No robot arm required — purely conveyor-driven. First library use of create_conveyor_track.",
+  "tools_used": [
+    "create_prim",
+    "apply_api_schema",
+    "set_attribute",
+    "set_physics_scene_config",
+    "create_conveyor",
+    "create_conveyor_track",
+    "setup_zone_partition",
+    "add_proximity_sensor",
+    "create_bin",
+    "create_material",
+    "assign_material",
+    "set_semantic_label",
+    "bulk_set_attribute",
+    "sim_control"
+  ],
+  "thoughts": "Design rationale for CP-NEW-sbend-sortation:\n\n1) DISTINCT pattern: all existing conveyor templates use straight single-segment create_conveyor. This is the first template using create_conveyor_track with a multi-waypoint path to define an S-shaped spine. The S-bend geometry forces items to travel a curved path, exercising the track waypoint API in a way a straight belt cannot.\n\n2) S-bend geometry (top-down view, belt top z=0.805):\n   Waypoints (x, y) of S-spine: [-2.0, 0.0] → [0.0, 0.0] → [0.5, 0.5] → [2.0, 0.5]\n   Full z=0.805 for all. This creates two straight segments linked by a shallow S-curve,\n   simulating a conveyor that changes aisle alignment — common in distribution centres.\n\n3) Two infeed conveyors:\n   LaneA: straight belt at y=-0.20, x from -3.0 to -2.0, speed 0.30 m/s (items enter from left)\n   LaneB: straight belt at y=+0.20, x from -3.0 to -2.0, speed 0.30 m/s\n   Both dump onto the S-track start at x=-2.0.\n\n4) setup_zone_partition: splits the merge segment of S-track into 2 zones along Y.\n   Zone 0 (y < 0) → LaneA items; Zone 1 (y > 0) → LaneB items.\n   Robots list is a placeholder; here we use it to tag zones with lane identity strings\n   ['lane_a_zone', 'lane_b_zone'] rather than robot paths.\n\n5) Proximity sensor at diverge point (x=1.8, y=0.5) reads semantic_type='label'.\n   LaneA items labelled 'lane_a', LaneB items labelled 'lane_b'.\n   Two output bins beyond the sensor: BinA at [2.5, 0.2, 0.75], BinB at [2.5, 0.8, 0.75].\n   Divert is simulated by two short divert conveyors angled off the main track end.\n\n6) Items: 6 total — 3 orange (lane_a) + 3 cyan (lane_b). size=0.05m cubes.\n   LaneA items start at y=-0.20, x=-2.8/-2.5/-2.2.\n   LaneB items start at y=+0.20, x=-2.8/-2.5/-2.2.\n\n7) Physics: CPU dynamics (enable_gpu_dynamics=False, MBP broadphase) for determinism.\n   sleepThreshold=0.0 on all items. Belt speed uniform at 0.30 m/s on S-track segments.\n\n8) sim_control: play for 180s to let all items traverse the S-bend and reach output bins.\n   Verify item_1 (lane_a) reaches BinA; item_4 (lane_b) reaches BinB.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\",\n            position=[0, 0.25, -0.505], scale=[8.0, 3.0, 1.0])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU determinism ──────────────────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Two infeed conveyors (LaneA lower, LaneB upper) ───────────────────────────\n# Belt top z = 0.78 + 0.025 = 0.805; items centre z = 0.855\ncreate_conveyor(\n    prim_path=\"/World/LaneA_Belt\",\n    position=[-2.5, -0.20, 0.78],\n    size=[1.0, 0.25, 0.05],\n    surface_velocity=[0.30, 0, 0],\n)\ncreate_conveyor(\n    prim_path=\"/World/LaneB_Belt\",\n    position=[-2.5, 0.20, 0.78],\n    size=[1.0, 0.25, 0.05],\n    surface_velocity=[0.30, 0, 0],\n)\n\n# ── S-bend main track (multi-segment via create_conveyor_track) ───────────────\n# Waypoints trace an S-curve merging both lanes then diverging to output end.\n# Top-down path (z constant at 0.78 belt-base):\n#   Start at merge point [-2.0, 0.0], curve to mid [0.0, 0.0], inflect [0.5, 0.5],\n#   end at diverge point [2.0, 0.5].\ncreate_conveyor_track(\n    waypoints=[\n        [-2.0, 0.0, 0.78],\n        [ 0.0, 0.0, 0.78],\n        [ 0.5, 0.5, 0.78],\n        [ 2.0, 0.5, 0.78],\n    ],\n    belt_width=0.50,\n    speed=0.30,\n)\n\n# ── Zone partition: tag merge segment with source-lane identity ───────────────\n# Splits the S-track conveyor at the merge zone into 2 Y-bands.\n# Lane identity is preserved via semantic label on items, not zone membership;\n# zone_partition is used here for collision-avoidance bookkeeping.\nsetup_zone_partition(\n    conveyor_path=\"/World/ConveyorTrack_Segment_0\",\n    n_zones=2,\n    robots=[\"lane_a_zone\", \"lane_b_zone\"],\n)\n\n# ── Two divert conveyors at output (angled off S-track end) ──────────────────\n# DivertA angles toward BinA (y decreases), DivertB toward BinB (y increases).\ncreate_conveyor(\n    prim_path=\"/World/DivertA_Belt\",\n    position=[2.3, 0.2, 0.78],\n    size=[0.60, 0.22, 0.05],\n    surface_velocity=[0.20, -0.20, 0],\n)\ncreate_conveyor(\n    prim_path=\"/World/DivertB_Belt\",\n    position=[2.3, 0.8, 0.78],\n    size=[0.60, 0.22, 0.05],\n    surface_velocity=[0.20, 0.20, 0],\n)\n\n# ── Materials ─────────────────────────────────────────────────────────────────\ncreate_material(material_path=\"/World/Materials/Orange\",\n                shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.45, 0.0])\ncreate_material(material_path=\"/World/Materials/Cyan\",\n                shader_type=\"OmniPBR\", diffuse_color=[0.0, 0.80, 0.85])\n\n# ── Items: 3 LaneA (orange), 3 LaneB (cyan) ──────────────────────────────────\n# item centre z = 0.805 + 0.025 = 0.855\nitem_specs = [\n    (\"/World/Item_1\", -2.80, -0.20, \"lane_a\", \"/World/Materials/Orange\"),\n    (\"/World/Item_2\", -2.50, -0.20, \"lane_a\", \"/World/Materials/Orange\"),\n    (\"/World/Item_3\", -2.20, -0.20, \"lane_a\", \"/World/Materials/Orange\"),\n    (\"/World/Item_4\", -2.80,  0.20, \"lane_b\", \"/World/Materials/Cyan\"),\n    (\"/World/Item_5\", -2.50,  0.20, \"lane_b\", \"/World/Materials/Cyan\"),\n    (\"/World/Item_6\", -2.20,  0.20, \"lane_b\", \"/World/Materials/Cyan\"),\n]\nitem_paths = [s[0] for s in item_specs]\n\nfor path, ix, iy, label, mat in item_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\",\n                position=[ix, iy, 0.855], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\",\n                \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    assign_material(prim_path=path, material_path=mat)\n    set_semantic_label(prim_path=path, class_name=label, semantic_type=\"label\")\n\nbulk_set_attribute(prim_paths=item_paths, attr=\"physics:mass\",             value=0.5)\nbulk_set_attribute(prim_paths=item_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\n\n# ── Output bins ───────────────────────────────────────────────────────────────\ncreate_bin(prim_path=\"/World/BinA\", position=[2.7, 0.1, 0.75], size=[0.30, 0.25, 0.20])\ncreate_bin(prim_path=\"/World/BinB\", position=[2.7, 0.9, 0.75], size=[0.30, 0.25, 0.20])\nassign_material(prim_path=\"/World/BinA\", material_path=\"/World/Materials/Orange\")\nassign_material(prim_path=\"/World/BinB\", material_path=\"/World/Materials/Cyan\")\n\n# ── Proximity sensor at diverge decision point ────────────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/DivertSensor\",\n    position=[1.90, 0.50, 0.855],\n    size=[0.10, 0.55, 0.10],\n    watched_path_pattern=\"/World/Item_\",\n)\n\n# ── Run simulation ────────────────────────────────────────────────────────────\nsim_control(action=\"play\")",
+  "settle_state": {
+    "items": {
+      "/World/Item_1": [-2.80, -0.20, 0.855],
+      "/World/Item_2": [-2.50, -0.20, 0.855],
+      "/World/Item_3": [-2.20, -0.20, 0.855],
+      "/World/Item_4": [-2.80,  0.20, 0.855],
+      "/World/Item_5": [-2.50,  0.20, 0.855],
+      "/World/Item_6": [-2.20,  0.20, 0.855]
+    },
+    "conveyors": {
+      "/World/LaneA_Belt": [0.30, 0, 0],
+      "/World/LaneB_Belt": [0.30, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "",
+        "pick_path": "/World/LaneA_Belt",
+        "place_path": "/World/BinA",
+        "robot_kind": "n/a",
+        "sensor_path": "/World/DivertSensor",
+        "bin_a_path": "/World/BinA",
+        "bin_b_path": "/World/BinB",
+        "label_to_bin": {"lane_a": "/World/BinA", "lane_b": "/World/BinB"}
+      }
+    ],
+    "item_paths": [
+      "/World/Item_1", "/World/Item_2", "/World/Item_3",
+      "/World/Item_4", "/World/Item_5", "/World/Item_6"
+    ],
+    "lane_a_items": ["/World/Item_1", "/World/Item_2", "/World/Item_3"],
+    "lane_b_items": ["/World/Item_4", "/World/Item_5", "/World/Item_6"]
+  },
+  "simulate_args": {
+    "target_path": "/World/BinA",
+    "cube_path": "/World/Item_1",
+    "cube_paths": [
+      "/World/Item_1", "/World/Item_2", "/World/Item_3",
+      "/World/Item_4", "/World/Item_5", "/World/Item_6"
+    ],
+    "duration_s": 180,
+    "xy_tolerance": 0.20,
+    "per_bin_expected": {"lane_a": 3, "lane_b": 3}
+  },
+  "diagnose_args": {
+    "conveyor_paths": [
+      "/World/LaneA_Belt", "/World/LaneB_Belt",
+      "/World/DivertA_Belt", "/World/DivertB_Belt"
+    ],
+    "sensor_path": "/World/DivertSensor",
+    "bins": ["/World/BinA", "/World/BinB"]
+  },
+  "failure_modes": [
+    "create_conveyor_track segment naming — handler creates prims like /World/ConveyorTrack_Segment_0, /World/ConveyorTrack_Segment_1 etc.; setup_zone_partition conveyor_path must match the first segment. If segment naming differs, update zone_partition path accordingly.",
+    "Y-junction collision at merge point — two belts feed into a single track; if items arrive simultaneously from LaneA and LaneB they can collide at x=-2.0. Increase item spacing to 0.40m or stagger start times via x-offset to avoid simultaneous arrival.",
+    "S-curve belt friction loss — curved segments lose item velocity at bends; if items stall mid-bend increase belt speed from 0.30 to 0.40 m/s, or add a short booster conveyor at each waypoint joint.",
+    "Divert sensor too narrow — DivertSensor size y=0.55 must span full belt width (0.50m) plus margin. If items at edge of belt miss the sensor, increase y-extent to 0.65m.",
+    "Zone partition mismatch — setup_zone_partition uses 'robots' parameter for zone-label strings; if the handler validates that these are actual USD paths to articulations, replace with dummy prim paths like '/World/ZoneA_Marker' and '/World/ZoneB_Marker'."
+  ],
+  "intent": {
+    "pattern_hint": "sort",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "destination_kind": "n_bins_routed",
+      "uses_conveyor_transport": true,
+      "uses_conveyor_track": true,
+      "has_s_bend_geometry": true,
+      "has_stacking": false,
+      "n_source_lanes": 2,
+      "n_output_bins": 2,
+      "routing_axis": "label"
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:transport.conveyor_track",
+      "isaac:topology.merge_then_divert",
+      "isaac:routing.lane_id_divert",
+      "isaac:sensor.proximity",
+      "isaac:industry.sortation",
+      "isaac:geometry.s_bend"
+    ]
+  },
+  "roles": {
+    "infeed_lane_a": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "infeed_lane_b": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "s_track": {
+      "constraints": ["conveyor_track"],
+      "expected_count": 1,
+      "required": true,
+      "note": "Multi-segment curved main belt — first library use of create_conveyor_track"
+    },
+    "divert_sensor": {
+      "constraints": ["proximity_sensor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "bin_a": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "bin_b": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 2,
+      "max": 12,
+      "param_name": "n_items_per_lane",
+      "unordered": false,
+      "note": "Must be equal count per lane for balanced throughput test"
+    }
+  },
+  "role_defaults": {
+    "infeed_lane_a": {
+      "path": "/World/LaneA_Belt",
+      "position": [-2.5, -0.20, 0.78],
+      "size": [1.0, 0.25, 0.05],
+      "surface_velocity": [0.30, 0, 0]
+    },
+    "infeed_lane_b": {
+      "path": "/World/LaneB_Belt",
+      "position": [-2.5, 0.20, 0.78],
+      "size": [1.0, 0.25, 0.05],
+      "surface_velocity": [0.30, 0, 0]
+    },
+    "s_track_waypoints": [
+      [-2.0, 0.0, 0.78],
+      [ 0.0, 0.0, 0.78],
+      [ 0.5, 0.5, 0.78],
+      [ 2.0, 0.5, 0.78]
+    ],
+    "bin_a": {"path": "/World/BinA", "position": [2.7, 0.1, 0.75], "size": [0.30, 0.25, 0.20]},
+    "bin_b": {"path": "/World/BinB", "position": [2.7, 0.9, 0.75], "size": [0.30, 0.25, 0.20]},
+    "divert_sensor": {
+      "path": "/World/DivertSensor",
+      "position": [1.90, 0.50, 0.855],
+      "size": [0.10, 0.55, 0.10]
+    },
+    "s_track": {
+      "waypoints": [
+        [-2.0, 0.0, 0.78],
+        [ 0.0, 0.0, 0.78],
+        [ 0.5, 0.5, 0.78],
+        [ 2.0, 0.5, 0.78]
+      ],
+      "belt_width": 0.50,
+      "speed": 0.30
+    },
+    "workpieces": [
+      {"path": "/World/Item_1", "lane": "lane_a", "position": [-2.80, -0.20, 0.855]},
+      {"path": "/World/Item_2", "lane": "lane_a", "position": [-2.50, -0.20, 0.855]},
+      {"path": "/World/Item_3", "lane": "lane_a", "position": [-2.20, -0.20, 0.855]},
+      {"path": "/World/Item_4", "lane": "lane_b", "position": [-2.80,  0.20, 0.855]},
+      {"path": "/World/Item_5", "lane": "lane_b", "position": [-2.50,  0.20, 0.855]},
+      {"path": "/World/Item_6", "lane": "lane_b", "position": [-2.20,  0.20, 0.855]}
+    ]
+  },
+  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\",\n            position=[0, 0.25, -0.505], scale=[8.0, 3.0, 1.0])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_conveyor(\n    prim_path=\"/World/LaneA_Belt\",\n    position=[-2.5, -0.20, 0.78],\n    size=[1.0, 0.25, 0.05],\n    surface_velocity=[0.30, 0, 0],\n)\ncreate_conveyor(\n    prim_path=\"/World/LaneB_Belt\",\n    position=[-2.5, 0.20, 0.78],\n    size=[1.0, 0.25, 0.05],\n    surface_velocity=[0.30, 0, 0],\n)\n\ncreate_conveyor_track(\n    waypoints=[\n        [-2.0, 0.0, 0.78],\n        [ 0.0, 0.0, 0.78],\n        [ 0.5, 0.5, 0.78],\n        [ 2.0, 0.5, 0.78],\n    ],\n    belt_width=0.50,\n    speed=0.30,\n)\n\nsetup_zone_partition(\n    conveyor_path=\"/World/ConveyorTrack_Segment_0\",\n    n_zones=2,\n    robots=[\"lane_a_zone\", \"lane_b_zone\"],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/DivertA_Belt\",\n    position=[2.3, 0.2, 0.78],\n    size=[0.60, 0.22, 0.05],\n    surface_velocity=[0.20, -0.20, 0],\n)\ncreate_conveyor(\n    prim_path=\"/World/DivertB_Belt\",\n    position=[2.3, 0.8, 0.78],\n    size=[0.60, 0.22, 0.05],\n    surface_velocity=[0.20, 0.20, 0],\n)\n\ncreate_material(material_path=\"/World/Materials/Orange\",\n                shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.45, 0.0])\ncreate_material(material_path=\"/World/Materials/Cyan\",\n                shader_type=\"OmniPBR\", diffuse_color=[0.0, 0.80, 0.85])\n\nitem_specs = [\n    (\"/World/Item_1\", -2.80, -0.20, \"lane_a\", \"/World/Materials/Orange\"),\n    (\"/World/Item_2\", -2.50, -0.20, \"lane_a\", \"/World/Materials/Orange\"),\n    (\"/World/Item_3\", -2.20, -0.20, \"lane_a\", \"/World/Materials/Orange\"),\n    (\"/World/Item_4\", -2.80,  0.20, \"lane_b\", \"/World/Materials/Cyan\"),\n    (\"/World/Item_5\", -2.50,  0.20, \"lane_b\", \"/World/Materials/Cyan\"),\n    (\"/World/Item_6\", -2.20,  0.20, \"lane_b\", \"/World/Materials/Cyan\"),\n]\nitem_paths = [s[0] for s in item_specs]\n\nfor path, ix, iy, label, mat in item_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\",\n                position=[ix, iy, 0.855], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\",\n                \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    assign_material(prim_path=path, material_path=mat)\n    set_semantic_label(prim_path=path, class_name=label, semantic_type=\"label\")\n\nbulk_set_attribute(prim_paths=item_paths, attr=\"physics:mass\",             value=0.5)\nbulk_set_attribute(prim_paths=item_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\n\ncreate_bin(prim_path=\"/World/BinA\", position=[2.7, 0.1, 0.75], size=[0.30, 0.25, 0.20])\ncreate_bin(prim_path=\"/World/BinB\", position=[2.7, 0.9, 0.75], size=[0.30, 0.25, 0.20])\nassign_material(prim_path=\"/World/BinA\", material_path=\"/World/Materials/Orange\")\nassign_material(prim_path=\"/World/BinB\", material_path=\"/World/Materials/Cyan\")\n\nadd_proximity_sensor(\n    sensor_path=\"/World/DivertSensor\",\n    position=[1.90, 0.50, 0.855],\n    size=[0.10, 0.55, 0.10],\n    watched_path_pattern=\"/World/Item_\",\n)\n\nsim_control(action=\"play\")",
+  "motion_controllers": {
+    "verified": [],
+    "untested": [],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate pending live Kit"
+}

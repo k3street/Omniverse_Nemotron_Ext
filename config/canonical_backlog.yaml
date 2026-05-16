@@ -687,7 +687,11 @@
   motion_controller_preference: none
   pattern_hint: sort
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-sbend-sortation.json
+  drafted_date: "2026-05-16"
+  drafted_by: A54
+  draft_notes: "A54; form-gate 1 OK 0 ERROR 0 WARN (--validate-tool-calls); first library use of create_conveyor_track; S-bend multi-segment merge→divert pattern; no robot arm; function-gate pending live Kit"
 
 - id: industrial-plc-conveyor-io-001
   source: industrial-asset
