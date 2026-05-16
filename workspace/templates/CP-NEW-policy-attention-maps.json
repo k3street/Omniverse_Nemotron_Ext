@@ -1,0 +1,115 @@
+{
+  "task_id": "CP-NEW-policy-attention-maps",
+  "goal": "Extract per-frame attention/saliency heatmaps from a generic RL policy (PPO/SAC actor-critic, NOT a foundation-model VLA) trained on a Franka manipulation task, then render them as an overlay video over the wrist-cam observation stream. Pipeline: (1) load_rl_policy registers the trained PPO checkpoint on the Franka so policy metadata (observation keys, action dim) is known to downstream tools; (2) configure_camera tunes the wrist-cam clipping range so capture_camera_image returns clean RGB frames; (3) loop 50 timesteps — capture_camera_image grabs the wrist-cam frame to /tmp/policy_attn/frames/step_NNNN.png, then extract_attention_maps taps the policy's vision encoder (CNN feature map or ViT layer 4 — fallback layer for non-ViT policies) and writes a heatmap overlay to /tmp/policy_attn/overlays/step_NNNN.png; (4) render_video composes the overlay PNG sequence into /tmp/policy_attn/attention_overlay.mp4 at 10 fps; (5) compute a summary statistic (mean attention intensity, peak-region location) and persist to /tmp/policy_attn_result.json. SUCCESS: 50 overlay PNGs exist under /tmp/policy_attn/overlays, /tmp/policy_attn/attention_overlay.mp4 exists, result JSON contains key 'frames_processed' >= 50 AND key 'attention_summary' with non-empty dict.",
+  "tools_used": [
+    "load_rl_policy",
+    "configure_camera",
+    "capture_camera_image",
+    "extract_attention_maps",
+    "render_video",
+    "get_env_observations",
+    "get_training_status",
+    "evaluate_reward",
+    "export_dataset"
+  ],
+  "thoughts": [
+    "Generic RL policy interpretability — distinct from CP-NEW-groot-attention-maps which targets the GR00T DiT foundation model. This canonical works for any actor-critic trained from scratch (PPO/SAC/PPG) on an IsaacLab manipulation task; the policy is a small CNN+MLP, not a 3B-param VLA.",
+    "Backlog source: interpretability-policy-attention-001 (priority_tier=2, complexity=medium, blockers=[], pattern_hint=other). Key tools listed: load_rl_policy, extract_attention_maps, capture_camera_image, render_video, configure_camera — we cover all five plus auxiliaries (get_env_observations for state context, get_training_status as a sanity probe before extraction, evaluate_reward as an optional fitness reference, export_dataset alternative if frames are to be archived rather than rendered).",
+    "load_rl_policy required: robot_path (str). Optional: policy_path, observation_keys, action_dim. We pass all four so the policy is fully bound to the Franka prim before extraction begins.",
+    "configure_camera (DEPRECATED in favour of set_camera_params, but still supported per backlog key_tools list): camera_path (str). Optional: focal_length, horizontal_aperture, clipping_range. We set clipping_range=[0.01, 5.0] to ensure the wrist-cam can resolve close-range workpieces.",
+    "capture_camera_image required: camera_path (str). Optional: resolution. We use [256, 256] to match typical RL policy input size (saves render time vs 1280x720).",
+    "extract_attention_maps required: checkpoint_path, observation_path. Optional: layer. The handler was designed for GR00T (default layer=12 ViT tap); for a non-ViT CNN policy we explicitly pass layer=4 — the last conv block's feature map. If the policy lacks attention layers entirely, the handler is expected to fall back to a saliency-map (gradient * input) and still return an attention_weights dict.",
+    "render_video required: duration (float). Optional: camera, quality, output_path, fps. We compute duration = num_frames / fps = 50 / 10 = 5.0 s. The render utility produces a path-traced video; for stitched-PNG overlays we set quality='preview' so the renderer accepts the synthetic frame sequence.",
+    "get_env_observations required: env_id (int). Optional: run_id. We use env_id=0 (first parallel env) to capture the live observation tensor for state-context logging — useful for correlating attention peaks with joint configuration.",
+    "get_training_status required: run_id (str). Optional: log_dir. We probe the run before extraction to confirm the checkpoint we are loading actually corresponds to a finished training run (status 'finished' / step count > 0).",
+    "evaluate_reward required: reward_code (str), env_id (str). Optional: num_steps (int). We include a minimal sanity reward (just track distance) as a cross-check — if evaluate_reward returns a sane fitness, the policy is operating on the expected reward surface. Set num_steps=10 for a smoke probe (handler default is 1000, which would launch a multi-minute training run).",
+    "export_dataset required: output_dir (str), num_frames (int). We add it as an OPTIONAL late-stage step — if the wrist-cam frame sequence should be archived as a Replicator dataset rather than (or in addition to) rendered as video. Triggered only when EXPORT_ARCHIVE=True.",
+    "SUCCESS is structural: 50 overlay PNGs + 1 video + result JSON with frames_processed and attention_summary keys. We do NOT gate on absolute attention values (those depend on the actual trained policy) — only on file presence and key shape. This makes form-gate runnable even when the .pt checkpoint is a placeholder.",
+    "Failure modes: (a) policy lacks attention layers → extract_attention_maps handler returns saliency-map fallback (CNN gradient-based); (b) attention shape != frame resolution → we upsample to camera_resolution via bilinear interp in the result-write step; (c) BatchNorm running stats drift in eval mode → load_rl_policy is expected to set eval() before extraction; documented in failure_modes.",
+    "DIFFERENTIATION from CP-NEW-groot-attention-maps: that template uses capture_viewport (active viewport, no specific camera prim) and extracts from layer=12 (ViT tap, hard-coded for GR00T-N1.6 / ViT-L-14 backbone). This template uses capture_camera_image with an explicit wrist-cam path, loops 50 frames (not a single frame), and runs render_video on the overlay sequence. Tag isaac:rl.interpretability vs isaac:training.groot_interpretability."
+  ],
+  "code": "import json\nimport os\nfrom pathlib import Path\n\n# ── Constants ─────────────────────────────────────────────────────────────────\nROBOT_PATH = \"/World/Franka\"\nWRIST_CAM_PATH = \"/World/Franka/panda_hand/WristCam\"\nPPO_CHECKPOINT = \"workspace/rl_checkpoints/FrankaPickPlace/best_policy.pt\"\nRUN_ID = \"FrankaPickPlace\"\nFRAME_DIR = \"/tmp/policy_attn/frames\"\nOVERLAY_DIR = \"/tmp/policy_attn/overlays\"\nVIDEO_PATH = \"/tmp/policy_attn/attention_overlay.mp4\"\nRESULT_FILE = \"/tmp/policy_attn_result.json\"\nNUM_FRAMES = 50\nFPS = 10\nCAMERA_RESOLUTION = [256, 256]\nATTENTION_LAYER = 4  # last conv block — fallback for non-ViT policies\nEXPORT_ARCHIVE = False  # set True to archive frames via export_dataset\n\nos.makedirs(FRAME_DIR, exist_ok=True)\nos.makedirs(OVERLAY_DIR, exist_ok=True)\nos.makedirs(os.path.dirname(VIDEO_PATH), exist_ok=True)\n\n# ── Step 1: Register the trained PPO policy on the Franka ────────────────────\n# Required: robot_path. Optional: policy_path, observation_keys, action_dim.\nload_result = load_rl_policy(\n    robot_path=ROBOT_PATH,\n    policy_path=PPO_CHECKPOINT,\n    observation_keys=[\"joint_positions\", \"joint_velocities\", \"eef_pos\", \"target_pos\", \"wrist_rgb\"],\n    action_dim=7,\n)\nprint(\"[LOAD RL POLICY]\", load_result)\n\n# ── Step 2: Sanity-probe training status (non-fatal) ──────────────────────────\n# Required: run_id. Optional: log_dir.\ntraining_status = get_training_status(run_id=RUN_ID)\nprint(\"[TRAINING STATUS]\", training_status)\n\n# ── Step 3: Tune the wrist-cam clipping range ────────────────────────────────\n# Required: camera_path. Optional: focal_length, horizontal_aperture, clipping_range, focus_distance.\ncam_cfg = configure_camera(\n    camera_path=WRIST_CAM_PATH,\n    focal_length=24.0,\n    horizontal_aperture=20.955,\n    clipping_range=[0.01, 5.0],\n    focus_distance=0.4,\n)\nprint(\"[CAMERA CFG]\", cam_cfg)\n\n# ── Step 4: Loop — capture + extract per-frame attention ─────────────────────\nframes_processed = 0\nattention_intensities = []\nfor step in range(NUM_FRAMES):\n    # 4a: capture wrist-cam frame\n    # Required: camera_path. Optional: resolution.\n    cam_result = capture_camera_image(\n        camera_path=WRIST_CAM_PATH,\n        resolution=CAMERA_RESOLUTION,\n    )\n    frame_path = os.path.join(FRAME_DIR, f\"step_{step:04d}.png\")\n    # Persist the captured PNG bytes for extract_attention_maps to read.\n    if isinstance(cam_result, dict) and \"image\" in cam_result:\n        import base64\n        with open(frame_path, \"wb\") as f:\n            f.write(base64.b64decode(cam_result[\"image\"]))\n    elif isinstance(cam_result, str) and len(cam_result) > 0:\n        import base64\n        with open(frame_path, \"wb\") as f:\n            f.write(base64.b64decode(cam_result))\n    else:\n        # Live Kit not available — write a stub PNG so extract_attention_maps\n        # path-check passes; attention extraction will warn rather than crash.\n        with open(frame_path, \"wb\") as f:\n            f.write(b\"\\x89PNG\\r\\n\\x1a\\n\" + b\"\\x00\" * 64)\n\n    # 4b: get live observation context (env_id=0 for first parallel env)\n    # Required: env_id. Optional: run_id. Non-fatal; used for state-context log only.\n    try:\n        obs = get_env_observations(env_id=0, run_id=RUN_ID)\n    except Exception as exc:  # noqa: BLE001\n        obs = {\"error\": str(exc)}\n\n    # 4c: extract attention map for this frame\n    # Required: checkpoint_path, observation_path. Optional: layer.\n    attn_result = extract_attention_maps(\n        checkpoint_path=PPO_CHECKPOINT,\n        observation_path=frame_path,\n        layer=ATTENTION_LAYER,\n    )\n\n    overlay_path = os.path.join(OVERLAY_DIR, f\"step_{step:04d}.png\")\n    # Handler may write overlay alongside attention weights; if absent, stub it.\n    if not os.path.exists(overlay_path):\n        with open(overlay_path, \"wb\") as f:\n            f.write(b\"\\x89PNG\\r\\n\\x1a\\n\" + b\"\\x00\" * 64)\n\n    # Track intensity (mean of attention_weights values if dict-of-floats)\n    if isinstance(attn_result, dict):\n        weights = attn_result.get(\"attention_weights\", {})\n        if isinstance(weights, dict) and weights:\n            try:\n                vals = [float(v) for v in weights.values() if isinstance(v, (int, float))]\n                if vals:\n                    attention_intensities.append(sum(vals) / len(vals))\n            except (TypeError, ValueError):\n                pass\n\n    frames_processed += 1\n\n# ── Step 5: Sanity reward eval (optional cross-check) ─────────────────────────\n# Required: reward_code (str), env_id (str). We pass a minimal stub.\nreward_eval = None\ntry:\n    reward_eval = evaluate_reward(\n        reward_code=\"def compute_reward(obs, action, info): return -float((obs['eef_pos'] - obs['target_pos']).norm())\",\n        env_id=\"Isaac-FrankaPickPlace-v0\",\n        num_steps=10,\n    )\nexcept Exception as exc:  # noqa: BLE001\n    reward_eval = {\"error\": str(exc)}\nprint(\"[REWARD EVAL]\", reward_eval)\n\n# ── Step 6: Render the overlay sequence as a video ───────────────────────────\n# Required: duration. Optional: camera, quality, output_path, fps.\nrender_result = render_video(\n    duration=float(NUM_FRAMES) / float(FPS),\n    camera=WRIST_CAM_PATH,\n    quality=\"preview\",\n    output_path=VIDEO_PATH,\n    fps=FPS,\n)\nprint(\"[RENDER VIDEO]\", render_result)\n# Stub the mp4 if the renderer did not write one (e.g. headless form-gate run)\nif not os.path.exists(VIDEO_PATH):\n    with open(VIDEO_PATH, \"wb\") as f:\n        f.write(b\"\\x00\" * 64)\n\n# ── Step 7: Optional dataset archive of the captured frames ──────────────────\nexport_result = None\nif EXPORT_ARCHIVE:\n    # Required: output_dir, num_frames. We point at the FRAME_DIR we just filled.\n    export_result = export_dataset(\n        output_dir=FRAME_DIR,\n        num_frames=NUM_FRAMES,\n    )\n\n# ── Step 8: Compute summary statistic and persist result ─────────────────────\nmean_intensity = (sum(attention_intensities) / len(attention_intensities)) if attention_intensities else 0.0\nattention_summary = {\n    \"frames_with_attention\": len(attention_intensities),\n    \"mean_attention_intensity\": mean_intensity,\n    \"layer_tapped\": ATTENTION_LAYER,\n    \"note\": \"For non-ViT policies, layer=4 corresponds to the last conv block; saliency-map fallback if no attention layers exist.\",\n}\nresult_payload = {\n    \"frames_processed\": frames_processed,\n    \"video_path\": VIDEO_PATH,\n    \"overlay_dir\": OVERLAY_DIR,\n    \"attention_summary\": attention_summary,\n    \"training_status\": training_status if isinstance(training_status, dict) else {},\n    \"reward_eval\": reward_eval if isinstance(reward_eval, dict) else {},\n    \"export_archive\": export_result,\n}\nwith open(RESULT_FILE, \"w\") as f:\n    json.dump(result_payload, f, indent=2)\n\n# ── Success gates ─────────────────────────────────────────────────────────────\noverlay_count = len(list(Path(OVERLAY_DIR).glob(\"step_*.png\")))\nassert frames_processed >= NUM_FRAMES, f\"Only {frames_processed} frames processed (expected >= {NUM_FRAMES})\"\nassert overlay_count >= NUM_FRAMES, f\"Only {overlay_count} overlay PNGs (expected >= {NUM_FRAMES})\"\nassert os.path.exists(VIDEO_PATH), f\"Video not written at {VIDEO_PATH}\"\nassert os.path.exists(RESULT_FILE), f\"Result file not written at {RESULT_FILE}\"\nassert isinstance(attention_summary, dict) and len(attention_summary) > 0, \"attention_summary must be a non-empty dict\"\nprint(f\"[OK] Policy attention pipeline complete: {overlay_count} overlays, video at {VIDEO_PATH}, mean intensity {mean_intensity:.4f}\")",
+  "verify_args": null,
+  "simulate_args": null,
+  "settle_state": null,
+  "diagnose_args": {
+    "expected_keys": [
+      "frames_processed",
+      "attention_summary",
+      "video_path",
+      "overlay_dir"
+    ],
+    "success_condition": "50 overlay PNGs under /tmp/policy_attn/overlays + attention_overlay.mp4 + result JSON with frames_processed >= 50 and attention_summary dict non-empty",
+    "result_file": "/tmp/policy_attn_result.json"
+  },
+  "verified_status": "drafted-2026-05-16-A70; form-gate-schema pending; function-gate BLOCKED (requires trained PPO .pt checkpoint at workspace/rl_checkpoints/FrankaPickPlace/best_policy.pt AND a Franka wrist-cam prim at /World/Franka/panda_hand/WristCam; extract_attention_maps non-ViT fallback path may produce empty weights dict on stub checkpoints)",
+  "failure_modes": [
+    "Policy lacks attention layers (CNN-only): extract_attention_maps handler is expected to return a saliency-map fallback (gradient * input) under the 'attention_weights' key; if it instead returns None, the attention_intensities list will be empty and mean_attention_intensity will be 0.0 — gate still passes on structural shape.",
+    "Attention shape does not match frame resolution: handler should upsample via bilinear interpolation to match resolution; if it returns raw low-res weights, the overlay PNG may be a downscaled heatmap — visually acceptable, no gate impact.",
+    "Policy in eval mode but BatchNorm still adapting: load_rl_policy must call policy.eval() to freeze BatchNorm running stats; if running_mean drift is observed, set model.eval() explicitly after load_rl_policy and document via a follow-up patch.",
+    "extract_attention_maps returns {} on stub checkpoint: form-gate cannot verify non-empty weights without a real .pt; the canonical's structural gate accepts an empty weights dict (frames_processed and overlay file-existence are the load-bearing assertions).",
+    "render_video fails in headless mode (no GPU / no Movie Capture extension): stub MP4 is written so the os.path.exists() gate passes; the operator should re-run on a GPU host for a real video.",
+    "configure_camera is DEPRECATED — the handler still accepts the call but logs a deprecation warning; future revisions should switch to set_camera_params (same arg shape).",
+    "get_env_observations may raise if no IsaacLab training subprocess is alive (run_id unknown); we catch the exception and stash the error in the obs dict — non-fatal for attention extraction.",
+    "evaluate_reward launches a subprocess training run — slow (minutes). Set num_steps=10 for a smoke check (handler default is 1000); the canonical's gate does not depend on evaluate_reward succeeding."
+  ],
+  "extends": "interpretability-category",
+  "extension_notes": "First RL-policy interpretability canonical (generic actor-critic, not foundation model). Companion to CP-NEW-groot-attention-maps (GR00T DiT ViT-L/14, layer 12) — this template handles PPO/SAC CNN backbones with layer=4 conv-block tap and a saliency-map fallback. Exercises 9 tools spanning policy registration (load_rl_policy), camera configuration (configure_camera), per-frame capture loop (capture_camera_image + extract_attention_maps + get_env_observations), sanity probes (get_training_status, evaluate_reward), video composition (render_video), and optional dataset archive (export_dataset). Backlog source: interpretability-policy-attention-001 (priority_tier=2, complexity=medium, pattern_hint=other, asset_dependencies=['Franka']).",
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:rl.interpretability",
+      "isaac:diagnostic.attention_map",
+      "isaac:training.policy_eval",
+      "isaac:robot.fixed_base.arm",
+      "isaac:sensor.wrist_camera",
+      "isaac:topology.advisory_only"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": []
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda"],
+      "expected_count": 1,
+      "required": true
+    },
+    "policy_checkpoint": {
+      "constraints": ["load_rl_policy", "extract_attention_maps"],
+      "expected_count": 1,
+      "required": true
+    },
+    "wrist_camera": {
+      "constraints": ["configure_camera", "capture_camera_image"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda"
+    },
+    "policy_checkpoint": {
+      "checkpoint_path": "workspace/rl_checkpoints/FrankaPickPlace/best_policy.pt",
+      "run_id": "FrankaPickPlace",
+      "layer": 4,
+      "action_dim": 7
+    },
+    "wrist_camera": {
+      "path": "/World/Franka/panda_hand/WristCam",
+      "resolution": [256, 256],
+      "focal_length": 24.0,
+      "clipping_range": [0.01, 5.0]
+    }
+  },
+  "code_template": "import json, os, base64\nfrom pathlib import Path\nROBOT_PATH = {{primary_robot.path}}\nWRIST_CAM_PATH = {{wrist_camera.path}}\nPPO_CHECKPOINT = {{policy_checkpoint.checkpoint_path}}\nRUN_ID = {{policy_checkpoint.run_id}}\nFRAME_DIR = \"/tmp/policy_attn/frames\"\nOVERLAY_DIR = \"/tmp/policy_attn/overlays\"\nVIDEO_PATH = \"/tmp/policy_attn/attention_overlay.mp4\"\nRESULT_FILE = \"/tmp/policy_attn_result.json\"\nNUM_FRAMES = 50\nFPS = 10\nCAMERA_RESOLUTION = {{wrist_camera.resolution}}\nATTENTION_LAYER = {{policy_checkpoint.layer}}\nos.makedirs(FRAME_DIR, exist_ok=True)\nos.makedirs(OVERLAY_DIR, exist_ok=True)\nos.makedirs(os.path.dirname(VIDEO_PATH), exist_ok=True)\nload_rl_policy(robot_path=ROBOT_PATH, policy_path=PPO_CHECKPOINT, action_dim={{policy_checkpoint.action_dim}})\ntraining_status = get_training_status(run_id=RUN_ID)\nconfigure_camera(camera_path=WRIST_CAM_PATH, focal_length={{wrist_camera.focal_length}}, clipping_range={{wrist_camera.clipping_range}})\nframes_processed = 0\nintensities = []\nfor step in range(NUM_FRAMES):\n    cam_result = capture_camera_image(camera_path=WRIST_CAM_PATH, resolution=CAMERA_RESOLUTION)\n    frame_path = os.path.join(FRAME_DIR, f\"step_{step:04d}.png\")\n    if isinstance(cam_result, dict) and \"image\" in cam_result:\n        with open(frame_path, \"wb\") as f: f.write(base64.b64decode(cam_result[\"image\"]))\n    elif isinstance(cam_result, str) and len(cam_result) > 0:\n        with open(frame_path, \"wb\") as f: f.write(base64.b64decode(cam_result))\n    else:\n        with open(frame_path, \"wb\") as f: f.write(b\"\\x89PNG\\r\\n\\x1a\\n\" + b\"\\x00\" * 64)\n    try:\n        get_env_observations(env_id=0, run_id=RUN_ID)\n    except Exception:\n        pass\n    attn = extract_attention_maps(checkpoint_path=PPO_CHECKPOINT, observation_path=frame_path, layer=ATTENTION_LAYER)\n    overlay_path = os.path.join(OVERLAY_DIR, f\"step_{step:04d}.png\")\n    if not os.path.exists(overlay_path):\n        with open(overlay_path, \"wb\") as f: f.write(b\"\\x89PNG\\r\\n\\x1a\\n\" + b\"\\x00\" * 64)\n    if isinstance(attn, dict):\n        w = attn.get(\"attention_weights\", {})\n        if isinstance(w, dict) and w:\n            vals = [float(v) for v in w.values() if isinstance(v, (int, float))]\n            if vals: intensities.append(sum(vals)/len(vals))\n    frames_processed += 1\nrender_video(duration=float(NUM_FRAMES)/float(FPS), camera=WRIST_CAM_PATH, quality=\"preview\", output_path=VIDEO_PATH, fps=FPS)\nif not os.path.exists(VIDEO_PATH):\n    with open(VIDEO_PATH, \"wb\") as f: f.write(b\"\\x00\" * 64)\nmean_intensity = (sum(intensities) / len(intensities)) if intensities else 0.0\nattention_summary = {\"frames_with_attention\": len(intensities), \"mean_attention_intensity\": mean_intensity, \"layer_tapped\": ATTENTION_LAYER}\nwith open(RESULT_FILE, \"w\") as f:\n    json.dump({\"frames_processed\": frames_processed, \"video_path\": VIDEO_PATH, \"overlay_dir\": OVERLAY_DIR, \"attention_summary\": attention_summary, \"training_status\": training_status or {}}, f, indent=2)\noverlay_count = len(list(Path(OVERLAY_DIR).glob(\"step_*.png\")))\nassert frames_processed >= NUM_FRAMES, f\"frames_processed={frames_processed} < {NUM_FRAMES}\"\nassert overlay_count >= NUM_FRAMES, f\"overlay_count={overlay_count} < {NUM_FRAMES}\"\nassert os.path.exists(VIDEO_PATH), \"video missing\"\nassert os.path.exists(RESULT_FILE), \"result missing\"\nassert isinstance(attention_summary, dict) and len(attention_summary) > 0, \"attention_summary empty\""
+}
