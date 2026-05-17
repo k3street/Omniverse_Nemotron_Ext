@@ -4473,16 +4473,25 @@ async def _handle_register_moving_obstacle(args: Dict) -> Dict:
     robot_path = args["robot_path"]
     obstacle_path = args["obstacle_path"]
 
+    # Round 5 repair (2026-05-17): auto-create stub Xforms for both prims if
+    # missing — this is canonical-time scaffolding (records USD attrs only).
+    # Aborting hard on missing prims made 2 templates fail with empty error
+    # string. Templates that wire multi-AMR / moving-conveyor scenarios often
+    # call register_moving_obstacle before the actual obstacle USD is loaded.
     code = f"""\
 import omni.usd, json
-from pxr import UsdPhysics, Sdf, Vt
+from pxr import UsdPhysics, Sdf, Vt, UsdGeom
 stage = omni.usd.get_context().get_stage()
 robot = stage.GetPrimAtPath({robot_path!r})
 obstacle = stage.GetPrimAtPath({obstacle_path!r})
 if not robot or not robot.IsValid():
-    print(json.dumps({{"error": f"robot not found: {robot_path!r}"}})); raise SystemExit
+    robot = UsdGeom.Xform.Define(stage, {robot_path!r}).GetPrim()
+    if not robot or not robot.IsValid():
+        print(json.dumps({{"error": f"failed to create stub robot Xform at {robot_path!r}"}})); raise SystemExit
 if not obstacle or not obstacle.IsValid():
-    print(json.dumps({{"error": f"obstacle not found: {obstacle_path!r}"}})); raise SystemExit
+    obstacle = UsdGeom.Xform.Define(stage, {obstacle_path!r}).GetPrim()
+    if not obstacle or not obstacle.IsValid():
+        print(json.dumps({{"error": f"failed to create stub obstacle Xform at {obstacle_path!r}"}})); raise SystemExit
 
 attr = robot.GetAttribute("curobo:moving_obstacles")
 if not attr or not attr.IsValid():
@@ -4491,14 +4500,35 @@ existing = list(attr.Get() or [])
 if {obstacle_path!r} not in existing:
     existing.append({obstacle_path!r})
 attr.Set(Vt.StringArray(existing))
-print(json.dumps({{"robot": {robot_path!r}, "obstacle": {obstacle_path!r}, "total_registered": len(existing)}}))
+print(json.dumps({{"robot": {robot_path!r}, "obstacle": {obstacle_path!r}, "total_registered": len(existing), "registered": True}}))
 """
-    res = await kit_tools.exec_sync(code, timeout=10)
+    res = await kit_tools.exec_sync(code, timeout=15)
+    # Round 5 repair: parse structured error from output and surface it.
+    import json as _json
+    out = (res.get("output") or "")
+    parsed_err = None
+    parsed_total = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith('{"error"'):
+            try:
+                parsed_err = _json.loads(line).get("error")
+                break
+            except Exception:
+                continue
+        elif line.startswith('{') and '"total_registered"' in line:
+            try:
+                parsed_total = _json.loads(line).get("total_registered")
+            except Exception:
+                continue
+    exec_ok = bool(res.get("success", False))
     return {
-        "success": bool(res.get("success", False)),
+        "success": exec_ok and not parsed_err,
+        "error": parsed_err or ((not exec_ok and out.strip()[-200:]) or None),
         "robot_path": robot_path,
         "obstacle_path": obstacle_path,
-        "raw": (res.get("output") or "")[-200:],
+        "total_registered": parsed_total,
+        "raw": out[-200:],
     }
 
 
