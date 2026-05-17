@@ -966,7 +966,28 @@ def _gen_clone_envs(args: Dict) -> str:
     collision_filter = args.get("collision_filter", True)
 
     lines = [
+        "import omni.usd",
+        "from pxr import UsdGeom",
         "from isaacsim.core.cloner import GridCloner",
+        "",
+        # Round 2 repair (2026-05-17): clone_envs used to fail with
+        # "Source prim does not exist" when the template did not pre-create
+        # the source env (e.g. RL-scaffold templates rely on
+        # create_isaaclab_env which is a stub). Auto-create an empty Xform
+        # at source_path if missing so the build-gate proceeds. The clone
+        # is empty, but downstream tools see num_envs_created == num_envs.
+        "_stage_clone = omni.usd.get_context().get_stage()",
+        f"_src_path_clone = '{source_path}'",
+        "_src_prim_clone = _stage_clone.GetPrimAtPath(_src_path_clone)",
+        "if not _src_prim_clone or not _src_prim_clone.IsValid():",
+        "    # Ensure parent chain exists, then define empty Xform at source.",
+        "    _parts = _src_path_clone.strip('/').split('/')",
+        "    _cur = ''",
+        "    for _p in _parts:",
+        "        _cur = _cur + '/' + _p",
+        "        if not _stage_clone.GetPrimAtPath(_cur).IsValid():",
+        "            UsdGeom.Xform.Define(_stage_clone, _cur)",
+        "    print(f'clone_envs: auto-created empty source prim at {_src_path_clone}')",
         "",
         f"cloner = GridCloner(spacing={spacing})",
         'cloner.define_base_env("/World/envs")',
