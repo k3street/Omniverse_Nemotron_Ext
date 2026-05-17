@@ -372,6 +372,21 @@ def substitute_template_params(
 _ROLE_INDEXED_PAT = __import__("re").compile(r"\{\{(\w+)\[(\d+)\]\.(\w+)\}\}")
 _ROLE_DOTTED_PAT = __import__("re").compile(r"\{\{(\w+)\.(\w+)\}\}")
 
+# Repair Wave 2 (2026-05-17): support bare role refs and indexed refs
+# without `.field`. Templates that pre-build cube lists do
+# `for item in {{workpieces}}:` or `[{{handoff_trays[0]}}, ...]`. The two
+# new patterns below let those substitute to Python list/dict literals.
+_ROLE_BARE_PAT = __import__("re").compile(r"\{\{(\w+)\}\}")
+_ROLE_INDEXED_NOFIELD_PAT = __import__("re").compile(r"\{\{(\w+)\[(\d+)\]\}\}")
+# Nested dotted access — e.g. `{{box_assembly.bottom.path}}` walks two
+# levels into a nested dict-of-dicts spec. Required by CP-NEW-yrkesroll-
+# packer-box-seal and CP-NEW-rtx-sponge-bowl variants.
+_ROLE_NESTED_PAT = __import__("re").compile(r"\{\{(\w+)\.(\w+)\.(\w+)\}\}")
+# Field-then-index access — `{{destination_bin.position[0]}}` picks the
+# first element of the substituted list. Used by canonicals that need
+# only one axis of a position vector (e.g. CP-NEW-rtx-sponge-bowl).
+_ROLE_DOTTED_INDEX_PAT = __import__("re").compile(r"\{\{(\w+)\.(\w+)\[(\d+)\]\}\}")
+
 # Matches {{#each role.listfield}} ... {{/each}} blocks.
 # Group 1 = role name, group 2 = field name (may be empty → role itself is the list).
 _EACH_OPEN_PAT = __import__("re").compile(r"\{\{#each (\w+)(?:\.(\w+))?\}\}")
@@ -553,6 +568,45 @@ def substitute_role_placeholders(
             return m.group(0)
         return _format_for_code(entry[field])
 
+    def _indexed_nofield(m):
+        """Substitute ``{{role[N]}}`` placeholders (no .field) — formats
+        the whole list element as a Python literal."""
+        role, idx_str = m.group(1), m.group(2)
+        spec = role_defaults.get(role)
+        if not isinstance(spec, list):
+            return m.group(0)
+        idx = int(idx_str)
+        if idx < 0 or idx >= len(spec):
+            return m.group(0)
+        return _format_for_code(spec[idx])
+
+    def _nested(m):
+        """Substitute ``{{role.field.subfield}}`` for a dict-of-dicts spec."""
+        role, field, subfield = m.group(1), m.group(2), m.group(3)
+        spec = role_defaults.get(role)
+        if not isinstance(spec, dict):
+            return m.group(0)
+        inner = spec.get(field)
+        if not isinstance(inner, dict) or subfield not in inner:
+            return m.group(0)
+        return _format_for_code(inner[subfield])
+
+    def _dotted_index(m):
+        """Substitute ``{{role.field[N]}}`` — index into a list-typed
+        sub-field. E.g. ``{{destination_bin.position[0]}}`` returns the
+        x coordinate of the bin's position vector."""
+        role, field, idx_str = m.group(1), m.group(2), m.group(3)
+        spec = role_defaults.get(role)
+        if not isinstance(spec, dict):
+            return m.group(0)
+        inner = spec.get(field)
+        if not isinstance(inner, (list, tuple)):
+            return m.group(0)
+        idx = int(idx_str)
+        if idx < 0 or idx >= len(inner):
+            return m.group(0)
+        return _format_for_code(inner[idx])
+
     def _dotted(m):
         """Substitute ``{{role.field}}`` placeholders from a dict-typed role spec."""
         role, field = m.group(1), m.group(2)
@@ -561,8 +615,24 @@ def substitute_role_placeholders(
             return m.group(0)
         return _format_for_code(spec[field])
 
+    def _bare(m):
+        """Substitute ``{{role}}`` (no field) — formats the whole role
+        value as a Python literal. Used for `for x in {{workpieces}}:`
+        and similar list-consuming patterns."""
+        role = m.group(1)
+        if role not in role_defaults:
+            return m.group(0)
+        return _format_for_code(role_defaults[role])
+
+    # Apply substitutions in priority order: most-specific first so
+    # `{{role.field.subfield}}` is not consumed by the simpler dotted
+    # pattern (which would leave `.subfield` dangling).
     out = _ROLE_INDEXED_PAT.sub(_indexed, code_template)
+    out = _ROLE_NESTED_PAT.sub(_nested, out)
+    out = _ROLE_DOTTED_INDEX_PAT.sub(_dotted_index, out)
+    out = _ROLE_INDEXED_NOFIELD_PAT.sub(_indexed_nofield, out)
     out = _ROLE_DOTTED_PAT.sub(_dotted, out)
+    out = _ROLE_BARE_PAT.sub(_bare, out)
     return out
 
 
