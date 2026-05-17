@@ -633,14 +633,94 @@ async def execute_template_canonical(
 
     captured: List[tuple] = []  # list of (tool_name, kwargs)
 
+    # Repair Wave 3 (2026-05-17): templates that consume tool return values
+    # (e.g. `active_topics = ros2_list_topics(); set(active_topics) - ...`)
+    # crashed under the old capture loop because the no-op capturer returned
+    # `None`. To keep the capture pure (no real tool execution) while still
+    # letting the Python body of the template finish to completion, return a
+    # permissive sentinel that pretends to be an empty list / dict / set:
+    #   - iterable (for `for x in result`, `set(result)`, list comprehensions)
+    #   - dict-like (.get/.keys/.values/[key] all return another sentinel)
+    #   - supports `result - other_set` and `result | other_set`
+    #   - truthy=False so `if result:` short-circuits to skip side effects
+    class _SandboxResult:
+        """Permissive proxy returned by the no-op capturer so downstream code
+        in template bodies (`set(result) - expected`, `result.get("foo")`,
+        iteration, etc.) does not crash during the capture pass."""
+
+        __slots__ = ()
+
+        def __bool__(self):
+            return False
+
+        def __iter__(self):
+            return iter(())
+
+        def __len__(self):
+            return 0
+
+        def __contains__(self, _item):
+            return False
+
+        def __getitem__(self, _key):
+            return _SandboxResult()
+
+        def __getattr__(self, _name):
+            # Any attribute access returns another callable proxy so chained
+            # `result.foo.bar()` patterns also succeed.
+            return _SandboxResult()
+
+        def __call__(self, *args, **kwargs):
+            return _SandboxResult()
+
+        def __sub__(self, _other):
+            return set()
+
+        def __rsub__(self, other):
+            # E.g. `required_set - active_topics`: drop the sentinel side.
+            try:
+                return set(other)
+            except TypeError:
+                return set()
+
+        def __or__(self, other):
+            try:
+                return set(other)
+            except TypeError:
+                return set()
+
+        __ror__ = __or__
+
+        def __and__(self, _other):
+            return set()
+
+        __rand__ = __and__
+
+        def __eq__(self, other):
+            return isinstance(other, _SandboxResult)
+
+        def __hash__(self):
+            return 0
+
+        def __repr__(self):
+            return "<SandboxResult>"
+
     def _make_capturer(tool_name: str):
         """Return a no-op callable that records calls into ``captured`` instead of executing them."""
         def _capture(**kwargs):
             """Record a sandboxed tool call without executing it."""
             captured.append((tool_name, dict(kwargs)))
+            return _SandboxResult()
         return _capture
 
-    tool_names = set(DATA_HANDLERS.keys()) | set(CODE_GEN_HANDLERS.keys())
+    # Tool name set: include both registered handlers AND tool_executor's
+    # special-cased dispatch tools (`run_usd_script`) which are valid tools
+    # but live outside the DATA/CODE_GEN registries. Without `run_usd_script`
+    # here, canonical templates that embed raw USD scripts (e.g. e-stop
+    # callbacks, ISO10218 graded SSM, safety-clearance monitors) crash with
+    # `NameError: name 'run_usd_script' is not defined` during build-phase
+    # exec — caught by repair-wave-2 (2026-05-17).
+    tool_names = set(DATA_HANDLERS.keys()) | set(CODE_GEN_HANDLERS.keys()) | {"run_usd_script"}
     sandbox: Dict[str, Any] = {"__builtins__": dict(_SAFE_BUILTINS)}
     for name in tool_names:
         sandbox[name] = _make_capturer(name)
@@ -650,15 +730,38 @@ async def execute_template_canonical(
     # to discover the tool-call sequence. Sandbox restricts builtins to
     # _SAFE_BUILTINS and replaces every tool name with a capturer that records
     # rather than invokes. No untrusted user input reaches this exec.
+    #
+    # Repair Wave 3 (2026-05-17): templates that include in-flight validation
+    # logic (e.g. `if missing_topics: raise RuntimeError(...)`) used to abort
+    # the entire capture pass on the FIRST raise, dropping every subsequent
+    # tool call. We now split the module into top-level statements via ast
+    # and exec them one at a time. Errors in any single statement are
+    # logged but do not halt the capture — this is acceptable because the
+    # capture pass is *not* execution; the real semantics run in the
+    # downstream execute_tool_call loop.
+    import ast as _ast
+
     try:
-        exec(compile(code, f"<{task_id}>", "exec"), sandbox)  # noqa: audit-Q9
-    except Exception as e:
-        logger.warning(f"[CanonicalInst] {task_id} sandbox exec failed: {e}")
+        _module = _ast.parse(code, filename=f"<{task_id}>", mode="exec")
+    except SyntaxError as e:
+        logger.warning(f"[CanonicalInst] {task_id} sandbox parse failed: {e}")
         return {
             "task_id": task_id, "n_calls": 0, "executed": [],
-            "errors": [f"sandbox exec failed: {type(e).__name__}: {e}"],
+            "errors": [f"sandbox parse failed: {type(e).__name__}: {e}"],
             "instantiated": False,
         }
+
+    sandbox_errors: List[str] = []
+    for _stmt in _module.body:
+        _stmt_module = _ast.Module(body=[_stmt], type_ignores=[])
+        try:
+            exec(compile(_stmt_module, f"<{task_id}>", "exec"), sandbox)  # noqa: audit-Q9
+        except Exception as e:
+            # Permissive: keep capturing remaining statements. Record the
+            # first few errors so the caller knows the template body had
+            # validation-style raises tripped by sandbox sentinel values.
+            if len(sandbox_errors) < 3:
+                sandbox_errors.append(f"line {_stmt.lineno}: {type(e).__name__}: {e}")
 
     if not captured:
         return {
