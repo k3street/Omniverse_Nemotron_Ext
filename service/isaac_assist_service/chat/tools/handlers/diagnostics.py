@@ -711,12 +711,23 @@ from isaacsim.core.prims import SingleArticulation
 import json
 
 robot_name = '{art_path}'.split('/')[-1].lower()
+# Round 3 repair (2026-05-17): policy_map keys are capitalized
+# ("Franka", "UR10", etc) — translate friendly lowercase names back.
+_PM_NORM = {{
+    "franka": "Franka", "fr3": "FR3", "panda": "Franka", "franka_panda": "Franka",
+    "ur3": "UR3", "ur3e": "UR3e", "ur5": "UR5", "ur5e": "UR5e",
+    "ur10": "UR10", "ur10e": "UR10e", "ur16e": "UR16e",
+    "cobotta": "Cobotta_Pro_900", "cobotta_pro_900": "Cobotta_Pro_900",
+    "cobotta_pro_1300": "Cobotta_Pro_1300",
+    "rizon4": "Rizon4",
+}}
+robot_name_pm = _PM_NORM.get(robot_name, robot_name)
 target_pos = np.array({list(target_pos)})
 target_ori = {ori_code}
 
 # Load kinematics
 try:
-    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config(robot_name)
+    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config(robot_name_pm)
     kin = LulaKinematicsSolver(**kin_config)
 except Exception:
     print(json.dumps({{"status": "error", "message": "Robot not in supported list"}}))
@@ -818,16 +829,39 @@ else:
         'start_time': time.time(), 'duration': {duration},
     }}
 
+    # Round 4 repair (2026-05-17): cache stage handle + guard against stale
+    # subscriptions firing after the stage was reset. If the articulation
+    # disappears (new_stage()) the SingleArticulation construction raises;
+    # swallow the exception and self-unsubscribe via builtins flag so
+    # cross-template runs don't carry a leaked callback.
+    import builtins as _bi_mje
+    _MJE_LIVE_ATTR = '_monitor_joint_effort_live_{art_path}'.replace('/', '_').replace('-', '_')
+    setattr(_bi_mje, _MJE_LIVE_ATTR, True)
     def _monitor_step(dt):
-        from isaacsim.core.prims import SingleArticulation
-        art = SingleArticulation('{art_path}')
-        _monitor_data['positions'].append(art.get_joint_positions().tolist())
-        _monitor_data['velocities'].append(art.get_joint_velocities().tolist())
-        _monitor_data['efforts'].append(art.get_applied_joint_efforts().tolist())
+        if not getattr(_bi_mje, _MJE_LIVE_ATTR, False):
+            return
+        try:
+            from isaacsim.core.prims import SingleArticulation
+            art = SingleArticulation('{art_path}')
+            _monitor_data['positions'].append(art.get_joint_positions().tolist())
+            _monitor_data['velocities'].append(art.get_joint_velocities().tolist())
+            _monitor_data['efforts'].append(art.get_applied_joint_efforts().tolist())
+        except Exception:
+            # Stage was reset or articulation removed — self-unsubscribe.
+            setattr(_bi_mje, _MJE_LIVE_ATTR, False)
+            return
 
         elapsed = time.time() - _monitor_data['start_time']
         if elapsed >= _monitor_data['duration']:
-            omni.physx.get_physx_interface().get_simulation_event_stream().unsubscribe(_monitor_sub)
+            # Round 4 repair: unsubscribe via Carb event handle (Sub.unsubscribe
+            # if available, else drop the strong reference). The legacy
+            # get_simulation_event_stream().unsubscribe path doesn't exist on
+            # all builds.
+            setattr(_bi_mje, _MJE_LIVE_ATTR, False)
+            try:
+                _monitor_sub.unsubscribe()
+            except Exception:
+                pass
 
             # Compute stats
             efforts = np.array(_monitor_data['efforts'])
@@ -1635,8 +1669,17 @@ for op in obstacle_paths:
 
 # Load kinematics for FK
 robot_name = '{art_path}'.split('/')[-1].lower()
+# Round 3 repair (2026-05-17): policy_map keys are capitalized.
+_PM_NORM = {{
+    "franka": "Franka", "fr3": "FR3", "panda": "Franka", "franka_panda": "Franka",
+    "ur3": "UR3", "ur3e": "UR3e", "ur5": "UR5", "ur5e": "UR5e",
+    "ur10": "UR10", "ur10e": "UR10e", "ur16e": "UR16e",
+    "cobotta": "Cobotta_Pro_900", "cobotta_pro_900": "Cobotta_Pro_900",
+    "cobotta_pro_1300": "Cobotta_Pro_1300", "rizon4": "Rizon4",
+}}
+robot_name_pm = _PM_NORM.get(robot_name, robot_name)
 try:
-    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config(robot_name)
+    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config(robot_name_pm)
     kin = LulaKinematicsSolver(**kin_config)
     frame_names = kin.get_all_frame_names()
 except Exception as e:
@@ -2028,8 +2071,18 @@ for i, j in enumerate(joints):
 from isaacsim.robot_motion.motion_generation import LulaKinematicsSolver
 from isaacsim.robot_motion.motion_generation import interface_config_loader
 
+# Round 3 repair (2026-05-17): policy_map keys are capitalized.
+_PM_NORM = {{
+    "franka": "Franka", "fr3": "FR3", "panda": "Franka", "franka_panda": "Franka",
+    "ur3": "UR3", "ur3e": "UR3e", "ur5": "UR5", "ur5e": "UR5e",
+    "ur10": "UR10", "ur10e": "UR10e", "ur16e": "UR16e",
+    "cobotta": "Cobotta_Pro_900", "cobotta_pro_900": "Cobotta_Pro_900",
+    "cobotta_pro_1300": "Cobotta_Pro_1300", "rizon4": "Rizon4",
+}}
+_robot_key = '{art_path}'.split('/')[-1].lower()
+_robot_key_pm = _PM_NORM.get(_robot_key, _robot_key)
 try:
-    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config('{art_path}'.split('/')[-1].lower())
+    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config(_robot_key_pm)
     kin = LulaKinematicsSolver(**kin_config)
 except Exception:
     print('Robot not in pre-supported list — cannot compute FK')
@@ -2417,8 +2470,19 @@ def _on_contact_report(contact_headers, contact_data):
             elif sep < warning_threshold_m:
                 print(f'[CLEARANCE] WARNING: {{actor0}} within {{sep*1000:.1f}}mm of {{actor1}} (<{{warning_threshold_m*1000:.0f}}mm warning zone)')
 
-physx_iface = omni.physx.get_physx_interface()
-_clearance_sub = physx_iface.subscribe_contact_report_events(_on_contact_report)
+# Round 4 repair (2026-05-17): subscribe_contact_report_events lives on
+# get_physx_simulation_interface() in Kit 105+; the lower-level PhysX
+# interface from get_physx_interface() does NOT expose it. Use the
+# simulation interface and fall back to the older interface if it ever
+# exposes the method.
+import omni.physx as _omni_physx_cm
+try:
+    _sim_iface_cm = _omni_physx_cm.get_physx_simulation_interface()
+    _clearance_sub = _sim_iface_cm.subscribe_contact_report_events(_on_contact_report)
+except AttributeError:
+    # Older Kit fallback path
+    physx_iface = _omni_physx_cm.get_physx_interface()
+    _clearance_sub = physx_iface.subscribe_contact_report_events(_on_contact_report)
 
 print(f'Clearance monitor armed on {{len(link_paths)}} robot links of {art_path}')
 print(f'  warning zone: <{{warning_threshold_m*1000:.0f}}mm   stop zone: <{{stop_threshold_m*1000:.0f}}mm')
