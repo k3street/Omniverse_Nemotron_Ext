@@ -5,6 +5,7 @@ lint_canonical_templates.py — Conformance lint for workspace/templates/*.json
 Usage:
     python scripts/lint_canonical_templates.py [--strict] [--fix] [--json] [TEMPLATE_PATHS...]
     python scripts/lint_canonical_templates.py --validate-tool-calls [TEMPLATE_PATHS...]
+    python scripts/lint_canonical_templates.py --validate-sandbox [TEMPLATE_PATHS...]
 
 Options:
     --strict               Exit 1 if any ERROR is found (default: exit 0 unless parse failure)
@@ -15,6 +16,10 @@ Options:
                            kwargs against the corresponding Pydantic model in _models.py.
     --strict-tool-calls    Also validate 'code_template' (template vars replaced with string
                            placeholders before parse). Implies --validate-tool-calls.
+    --validate-sandbox     Opt-in: replicate canonical_instantiator's capture-phase sandbox
+                           and reject code that would crash there. Emits S1/S2/S3/S4 rule
+                           codes. Catches the failure modes that A-series mass-drafting
+                           (2026-05-16) introduced.
 
 Exit codes:
     0  No errors (WARNs and INFOs are OK)
@@ -384,6 +389,457 @@ def lint_tool_calls(
     return issues
 
 
+# ── Sandbox-safety validation (--validate-sandbox) ───────────────────────────
+#
+# These rules catch template code-body patterns that pass --validate-tool-calls
+# but fail in the Kit-side capture sandbox. The sandbox is defined in
+# service/isaac_assist_service/chat/canonical_instantiator.py:
+#
+#   _SAFE_BUILTINS — whitelisted Python builtins (no __import__, no open, ...)
+#   tool_names     — DATA_HANDLERS ∪ CODE_GEN_HANDLERS ∪ {"run_usd_script"};
+#                    each is bound to a no-op capturer that records the call
+#                    and returns a permissive `_SandboxResult` sentinel.
+#
+# Anything else (`import X`, `omni.usd.get_context()`, `os.path.join(...)`,
+# bare `np.array(...)` etc.) explodes at capture-phase exec time, dropping the
+# whole canonical to 0 captured calls → "no tool calls captured" failure.
+#
+# Mass-drafting on 2026-05-16 (the A-series wave) hit this: 113 templates
+# carried `import os`/`import math`/etc. at the top of `code`, the prior lint
+# happily passed them, and Kit-side pass-rate landed at 8.9%. Repair-1 and -2
+# patched the templates retroactively. This new gate would have caught the
+# same failures pre-merge.
+#
+# Rule codes emitted:
+#   S1_IMPORT_IN_CODE     ERROR  — `import X` or `from X import Y` in code body
+#   S2_FOREIGN_API_ACCESS ERROR  — `name.attr...` where `name` is not a tool,
+#                                   safe-builtin, or locally-assigned variable
+#   S3_DEREF_TOOL_RESULT  ERROR  — `tool_call(...)['k']` or `tool_call(...).a`
+#                                   (capturer returns _SandboxResult, but the
+#                                    sentinel pattern means literal data the
+#                                    caller authored as a dict can be safely
+#                                    indexed — only tool-call dereference is
+#                                    a sandbox-time anti-pattern)
+#   S4_SANDBOX_EXEC_FAIL  ERROR  — simulated capture-phase exec raised an
+#                                   exception (the catch-all big gate)
+
+# Built-in names + sandbox-safe names that the capture-phase exec accepts.
+# Mirrors _SAFE_BUILTINS in canonical_instantiator.py + adds typing-helpers
+# that may appear in template code via from-future-imports / annotations.
+_SANDBOX_SAFE_NAMES: frozenset[str] = frozenset({
+    # Built-in callables (must match canonical_instantiator._SAFE_BUILTINS)
+    "enumerate", "range", "len", "list", "dict", "tuple", "set", "frozenset",
+    "str", "int", "float", "bool", "bytes",
+    "min", "max", "sum", "abs", "round",
+    "sorted", "reversed", "zip", "map", "filter",
+    "True", "False", "None",
+    "print",
+    # Special sandbox identifier injected by canonical_instantiator
+    "run_usd_script",
+})
+
+# Names of stdlib / external modules whose presence as the BASE of an
+# Attribute access is unambiguously a sandbox-failure pattern.  This is a
+# safety net for cases where local-variable tracking somehow misses a top-
+# level binding (defensive overlap with rule S1 — if `import os` is present
+# the assignment-tracker should already have logged `os` as bound, so this
+# list pushes the diagnostic into ERROR-with-known-cause rather than
+# letting it slip through as a generic S2).
+_KNOWN_FOREIGN_MODULES: frozenset[str] = frozenset({
+    "omni", "pxr", "sys", "os", "io", "json", "math", "random", "time",
+    "pathlib", "base64", "statistics", "re", "subprocess", "shutil",
+    "tempfile", "datetime", "asyncio", "threading", "multiprocessing",
+    "np", "numpy", "torch", "scipy", "pandas",
+    "gym", "gymnasium", "rclpy", "ros2_topic", "moveit_msgs",
+    "isaacsim", "isaaclab", "isaacsim_core", "isaac_sim",
+    "warp", "kit", "carb", "cv2", "PIL", "matplotlib",
+})
+
+
+def _collect_assigned_names(tree: "ast.AST") -> "set[str]":
+    """
+    Walk ``tree`` and return the set of locally-bound names — i.e. names that
+    appear on the LHS of an assignment, as a for-loop variable, as a
+    function/class definition target, as an import alias, or as a function
+    parameter.  Used to suppress S2 false-positives when template code does
+    e.g. ``r = some_tool(...); r.foo`` — ``r`` is a local binding so
+    ``r.foo`` is permitted at static-analysis time (the runtime sentinel
+    proxies arbitrary attribute access).
+    """
+    bound: set[str] = set()
+
+    for node in ast.walk(tree):
+        # Plain assignment: a = ...
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                bound.update(_extract_target_names(target))
+        # Augmented (a += 1) and annotated (a: int = 1) assignments
+        elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+            bound.update(_extract_target_names(node.target))
+        # for x in ...:   /   for (x, y) in ...:
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            bound.update(_extract_target_names(node.target))
+        # with X as y:
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    bound.update(_extract_target_names(item.optional_vars))
+        # def f(...):  /  async def f(...):  /  class C:
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for arg in (
+                    list(node.args.args)
+                    + list(node.args.posonlyargs)
+                    + list(node.args.kwonlyargs)
+                ):
+                    bound.add(arg.arg)
+                if node.args.vararg is not None:
+                    bound.add(node.args.vararg.arg)
+                if node.args.kwarg is not None:
+                    bound.add(node.args.kwarg.arg)
+        # import X / import X as Y
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                bound.add(alias.asname or alias.name.split(".")[0])
+        # from X import Y / from X import Y as Z
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                bound.add(alias.asname or alias.name)
+        # Comprehension variables: [x for x in ...]
+        elif isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            for gen in node.generators:
+                bound.update(_extract_target_names(gen.target))
+        # lambda x: ...
+        elif isinstance(node, ast.Lambda):
+            for arg in (
+                list(node.args.args)
+                + list(node.args.posonlyargs)
+                + list(node.args.kwonlyargs)
+            ):
+                bound.add(arg.arg)
+            if node.args.vararg is not None:
+                bound.add(node.args.vararg.arg)
+            if node.args.kwarg is not None:
+                bound.add(node.args.kwarg.arg)
+        # except SomeError as e:
+        elif isinstance(node, ast.ExceptHandler):
+            if node.name is not None:
+                bound.add(node.name)
+        # walrus: (x := ...)
+        elif isinstance(node, ast.NamedExpr):
+            bound.update(_extract_target_names(node.target))
+
+    return bound
+
+
+def _extract_target_names(node: "ast.AST") -> "set[str]":
+    """Pull the bare Name identifiers out of an assignment-target AST node
+    (handles tuples, starred unpacks, subscripts, and nested targets).
+    Subscript/Attribute targets are NOT bindings — they mutate an existing
+    object — so they are skipped here.
+    """
+    names: set[str] = set()
+    if isinstance(node, ast.Name):
+        names.add(node.id)
+    elif isinstance(node, ast.Tuple) or isinstance(node, ast.List):
+        for elt in node.elts:
+            names.update(_extract_target_names(elt))
+    elif isinstance(node, ast.Starred):
+        names.update(_extract_target_names(node.value))
+    # ast.Attribute / ast.Subscript: not a NEW binding
+    return names
+
+
+def _attribute_base_name(node: "ast.Attribute") -> "str | None":
+    """Walk down an Attribute chain and return the bare Name at the bottom,
+    or None if the base is not a simple Name (e.g. it's a Call or Subscript).
+    """
+    cur: "ast.AST" = node
+    while isinstance(cur, ast.Attribute):
+        cur = cur.value
+    if isinstance(cur, ast.Name):
+        return cur.id
+    return None
+
+
+def _build_sandbox_namespace(tool_names: "set[str]") -> dict:
+    """Replicate the canonical_instantiator capture-phase namespace.
+
+    Returns a dict suitable for ``exec(..., namespace)``: safe builtins +
+    a no-op _SandboxResult-returning capturer for every known tool name.
+    Mirrors canonical_instantiator.execute_template_canonical (lines 794-812)
+    closely enough to surface the SAME failures that hit Kit-side exec.
+    """
+    # NB: print() is bound to a silent no-op for S4 so that template
+    # diagnostic prints don't pollute the lint's own stdout (which is
+    # consumed by --json downstream).  This is a lint-time-only deviation
+    # from canonical_instantiator._SAFE_BUILTINS, which uses the real
+    # `print`.  The semantic check (`print` is a recognised name) is
+    # preserved.
+    def _silent_print(*_args, **_kwargs):
+        return None
+
+    safe_builtins = {
+        "enumerate": enumerate, "range": range, "len": len, "list": list,
+        "dict": dict, "tuple": tuple, "set": set, "frozenset": frozenset,
+        "str": str, "int": int, "float": float, "bool": bool, "bytes": bytes,
+        "min": min, "max": max, "sum": sum, "abs": abs, "round": round,
+        "sorted": sorted, "reversed": reversed, "zip": zip, "map": map,
+        "filter": filter,
+        "True": True, "False": False, "None": None,
+        "print": _silent_print,
+    }
+
+    # Permissive proxy mirroring _SandboxResult from canonical_instantiator.
+    class _LintSandboxResult:
+        __slots__ = ()
+        def __bool__(self): return False
+        def __iter__(self): return iter(())
+        def __len__(self): return 0
+        def __contains__(self, _item): return False
+        def __getitem__(self, _key): return _LintSandboxResult()
+        def __getattr__(self, _name): return _LintSandboxResult()
+        def __call__(self, *args, **kwargs): return _LintSandboxResult()
+        def __sub__(self, _other): return set()
+        def __rsub__(self, other):
+            try: return set(other)
+            except TypeError: return set()
+        def __or__(self, other):
+            try: return set(other)
+            except TypeError: return set()
+        __ror__ = __or__
+        def __and__(self, _other): return set()
+        __rand__ = __and__
+        def __eq__(self, other): return isinstance(other, _LintSandboxResult)
+        def __hash__(self): return 0
+        def __repr__(self): return "<LintSandboxResult>"
+
+    def _make_capturer(_name: str):
+        def _capture(**_kwargs):
+            return _LintSandboxResult()
+        return _capture
+
+    ns: dict = {"__builtins__": dict(safe_builtins)}
+    for tname in tool_names:
+        ns[tname] = _make_capturer(tname)
+    return ns
+
+
+def lint_sandbox_safety(
+    path: Path,
+    data: dict,
+    include_code_template: bool = True,
+) -> "list[Issue]":
+    """
+    Validate that template ``code`` / ``code_template`` fields parse AND
+    exec successfully inside the canonical-instantiator capture sandbox.
+
+    Apart from S1/S2/S3 (which are static AST-walk heuristics), the BIG
+    gate is S4 — replicate ``execute_template_canonical``'s capture pass
+    minimally and surface any exception that would have nuked Kit-side
+    instantiation.
+
+    Rule codes:
+        S1_IMPORT_IN_CODE      ERROR
+        S2_FOREIGN_API_ACCESS  ERROR
+        S3_DEREF_TOOL_RESULT   ERROR
+        S4_SANDBOX_EXEC_FAIL   ERROR
+    """
+    issues: list[Issue] = []
+
+    def err(rule: str, msg: str) -> None:
+        issues.append(Issue("ERROR", rule, msg))
+
+    def warn(rule: str, msg: str) -> None:
+        issues.append(Issue("WARN", rule, msg))
+
+    # Resolve the tool-name set the sandbox will recognise.  Same source as
+    # --validate-tool-calls (Pydantic *Args model map) so the lint stays
+    # consistent.
+    tool_map = schema.get_tool_model_map()
+    if not tool_map:
+        warn(
+            "S0_MODEL_UNAVAILABLE",
+            "Tool model map empty (could not import _models.py); "
+            "sandbox validation skipped",
+        )
+        return issues
+    tool_names: set[str] = set(tool_map.keys())
+    # Match canonical_instantiator: include the special-case run_usd_script
+    # tool which is dispatched through tool_executor's str-script branch.
+    tool_names.add("run_usd_script")
+
+    fields_to_check: list[tuple[str, str]] = [("code", "code")]
+    if include_code_template:
+        fields_to_check.append(("code_template", "code_template"))
+
+    sandbox_ns = _build_sandbox_namespace(tool_names)
+
+    for field_name, display_name in fields_to_check:
+        raw_code = data.get(field_name)
+        if not raw_code or not isinstance(raw_code, str):
+            continue
+
+        is_template = field_name == "code_template"
+        code = _sanitize_template_vars(raw_code) if is_template else raw_code
+
+        # ── Parse ────────────────────────────────────────────────────────────
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as exc:
+            # Caller likely wants both signals; surface as the same WARN that
+            # --validate-tool-calls would emit so consumers can dedupe.
+            warn(
+                "TC_SYNTAX_ERROR",
+                f"{display_name}: SyntaxError at line {exc.lineno} — "
+                f"{exc.msg}; sandbox validation skipped for this field",
+            )
+            continue
+
+        # ── S1: top-level import statements ─────────────────────────────────
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names_list = ", ".join(a.name for a in node.names)
+                err(
+                    "S1_IMPORT_IN_CODE",
+                    f"{display_name}:line {node.lineno} — "
+                    f"`import {names_list}` is not permitted in template "
+                    "code (capture-phase sandbox blocks __import__)",
+                )
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or "."
+                imported = ", ".join(a.name for a in node.names)
+                err(
+                    "S1_IMPORT_IN_CODE",
+                    f"{display_name}:line {node.lineno} — "
+                    f"`from {module} import {imported}` is not permitted "
+                    "(capture-phase sandbox blocks __import__)",
+                )
+
+        # ── Local-binding inventory for S2 false-positive suppression ────────
+        locally_bound = _collect_assigned_names(tree)
+
+        # ── S2: dotted attribute access on a non-tool, non-builtin, non-local
+        # ── base name.  We dedupe per-base-name within a field to avoid spam
+        # ── (the message lists every line).
+        seen_s2: dict[str, list[tuple[int, str]]] = {}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Attribute):
+                continue
+            base = _attribute_base_name(node)
+            if base is None:
+                continue
+            if base in _SANDBOX_SAFE_NAMES:
+                continue
+            if base in tool_names:
+                continue
+            if base in locally_bound:
+                continue
+            # Surface known-foreign module bases as a fast-path ERROR.
+            # Unknown bases (e.g. typos of a local var) also ERROR since the
+            # sandbox NameError will raise too.
+            seen_s2.setdefault(base, []).append((node.lineno, ast.unparse(node)))
+
+        for base, occurrences in seen_s2.items():
+            kind = (
+                "known foreign module"
+                if base in _KNOWN_FOREIGN_MODULES
+                else "undefined name"
+            )
+            line0, expr0 = occurrences[0]
+            err(
+                "S2_FOREIGN_API_ACCESS",
+                f"{display_name}:line {line0} — `{expr0}` references "
+                f"{kind} `{base}` "
+                "(not in tool registry, not in sandbox safe-builtins, "
+                "not locally assigned). Capture-phase exec will NameError "
+                f"(seen {len(occurrences)}x in this field)",
+            )
+
+        # ── S3: dereference (Subscript or Attribute) on a Call whose target
+        # ── name is in tool_names.  In the capture sandbox the capturer
+        # ── returns _SandboxResult — Python WILL allow the deref, but the
+        # ── template author almost certainly thinks they're getting real
+        # ── tool output (which they are NOT during capture, only during
+        # ── the downstream execute_tool_call loop).  Flag it as a hazard.
+        seen_s3: set[tuple[int, str]] = set()
+        for node in ast.walk(tree):
+            inner_call = None
+            if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Call):
+                inner_call = node.value
+            elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Call):
+                inner_call = node.value
+            if inner_call is None:
+                continue
+            fn_name: "str | None" = None
+            if isinstance(inner_call.func, ast.Name):
+                fn_name = inner_call.func.id
+            elif isinstance(inner_call.func, ast.Attribute):
+                fn_name = inner_call.func.attr
+            if fn_name is None or fn_name not in tool_names:
+                continue
+            key = (node.lineno, fn_name)
+            if key in seen_s3:
+                continue
+            seen_s3.add(key)
+            err(
+                "S3_DEREF_TOOL_RESULT",
+                f"{display_name}:line {node.lineno} — "
+                f"`{fn_name}(...)` result is dereferenced inline "
+                "(subscript or attribute). In capture-phase the call returns "
+                "_SandboxResult, not real tool output; template authors "
+                "should assign data as literals at the top instead of "
+                "expecting tool returns mid-build",
+            )
+
+        # ── S4: actually exec the code body in the sandbox namespace ─────────
+        # Per canonical_instantiator the body is executed statement-by-
+        # statement (Repair Wave 3) so a single mid-body raise doesn't drop
+        # subsequent calls.  We mirror that here.
+        #
+        # S4 only runs on the `code` field.  `code_template` placeholders are
+        # replaced by a string sentinel (`"__TEMPLATE_VAR__"`) which mis-types
+        # role-spec dicts (e.g. `tray['path']` on a string sentinel raises
+        # TypeError) — those are NOT real sandbox failures, they're artifacts
+        # of static substitution.  The real role-based path is exercised in
+        # `instantiate_role_based_code()` at instantiation time, not here.
+        if is_template:
+            continue
+
+        local_ns = dict(sandbox_ns)  # fresh per-field copy
+        first_exc: "tuple[int, str] | None" = None
+        try:
+            module = ast.parse(code, filename=display_name, mode="exec")
+        except SyntaxError:
+            # Already reported above as TC_SYNTAX_ERROR; skip S4.
+            continue
+        for stmt in module.body:
+            stmt_module = ast.Module(body=[stmt], type_ignores=[])
+            try:
+                exec(  # noqa: S102 — intentional sandboxed exec
+                    compile(stmt_module, display_name, "exec"),
+                    local_ns,
+                )
+            except Exception as exc:
+                if first_exc is None:
+                    first_exc = (stmt.lineno, f"{type(exc).__name__}: {exc}")
+                # Continue running remaining statements so we collect a
+                # representative diagnostic, but only surface the FIRST
+                # error to keep noise low.
+
+        if first_exc is not None:
+            lineno, detail = first_exc
+            err(
+                "S4_SANDBOX_EXEC_FAIL",
+                f"{display_name}:line {lineno} — capture-phase exec raised "
+                f"{detail} (canonical_instantiator would drop this template "
+                "to 0 captured tool calls)",
+            )
+
+    return issues
+
+
 # ── Per-template lint logic ──────────────────────────────────────────────────
 
 def lint_one(path: Path, data: dict) -> list[Issue]:
@@ -725,6 +1181,20 @@ def main(argv=None):
             "replaced with string sentinels before parsing."
         ),
     )
+    parser.add_argument(
+        "--validate-sandbox",
+        action="store_true",
+        dest="validate_sandbox",
+        help=(
+            "Opt-in: AST-check + replicate the capture-phase sandbox from "
+            "canonical_instantiator.py to catch template code that fails "
+            "at Kit-side instantiation. Emits S1_IMPORT_IN_CODE, "
+            "S2_FOREIGN_API_ACCESS, S3_DEREF_TOOL_RESULT, S4_SANDBOX_EXEC_FAIL. "
+            "Checks 'code' AND 'code_template' fields. Opt-in only — not "
+            "yet wired into the default lint run (see memory: "
+            "verify-agent-claimed-counts; default-flip is a separate decision)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     # --strict-tool-calls implies --validate-tool-calls
@@ -781,6 +1251,15 @@ def main(argv=None):
                 include_code_template=args.strict_tool_calls,
             )
             issues.extend(tc_issues)
+
+        # Sandbox-safety validation (optional pass)
+        if args.validate_sandbox:
+            sb_issues = lint_sandbox_safety(
+                path,
+                data,
+                include_code_template=True,
+            )
+            issues.extend(sb_issues)
 
         # Fix (if requested)
         if args.fix:
