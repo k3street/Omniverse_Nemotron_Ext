@@ -1,6 +1,0 @@
-[ToolExecutor] ros-mcp not installed — ROS2 live tools disabled (pip install ros-mcp)
-{
-  "error": "no robots with ctrl:* attrs found",
-  "samples": [],
-  "summary": {}
-}
